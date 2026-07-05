@@ -1,0 +1,33 @@
+// Telemetry wire types (ADR-0011: best-effort by default, units and frames
+// fixed by the schema).
+syntax = "proto3";
+
+package pilotage.v1;
+
+import "pilotage/v1/common.proto";
+
+// A planar pose: position in meters and heading in radians, in the vehicle's
+// local reference frame unless otherwise documented by the adapter
+// capability (ADR-0008).
+message Pose2d {
+  float x_m = 1;
+  float y_m = 2;
+  float heading_rad = 3;
+}
+
+// Planar velocity: linear components in meters/second, angular in
+// radians/second.
+message Velocity2d {
+  float linear_x_mps = 1;
+  float linear_y_mps = 2;
+  float angular_rad_s = 3;
+}
+
+// A single best-effort telemetry sample for one vehicle.
+message TelemetrySample {
+  VehicleId vehicle = 1;
+  SimTick tick = 2;
+  MonoTimestamp observed_at = 3;
+  Pose2d pose = 4;
+  Velocity2d velocity = 5;
+}
