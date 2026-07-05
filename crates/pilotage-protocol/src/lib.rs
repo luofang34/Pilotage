@@ -7,6 +7,8 @@
 mod control;
 mod convert;
 mod ids;
+mod session;
+mod session_convert;
 pub mod wire;
 
 pub use control::{ButtonEdge, ControlPayload, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
@@ -16,3 +18,7 @@ pub use convert::{
     encode_envelope_length_delimited,
 };
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
+pub use session::{
+    ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRequest,
+    LeaseResponse, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
+};

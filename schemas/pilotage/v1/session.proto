@@ -1,0 +1,136 @@
+// Session-bootstrap wire vocabulary: client/server handshake, scope-lease
+// request/response, RTT probing, and frame-rejection notices (ADR-0005,
+// ADR-0006, ADR-0009, ADR-0010).
+syntax = "proto3";
+
+package pilotage.v1;
+
+import "pilotage/v1/capability.proto";
+import "pilotage/v1/common.proto";
+
+// The first message a client sends after the WebTransport session is
+// established, before any host state has been shared (ADR-0005: session
+// bootstrap uses plain HTTPS for admission, then this message begins the
+// in-session handshake).
+message ClientHello {
+  // Highest `pilotage.v1` schema version the client can interpret; the host
+  // may reject or downgrade based on this (ADR-0014).
+  uint32 protocol_version = 1;
+  // Human-readable client identification (application name/version), for
+  // diagnostics only; never used for authorization decisions.
+  string client_name = 2;
+  // Opaque join token proving prior admission (issued out-of-band by the
+  // HTTPS bootstrap flow of ADR-0005). The wire type treats this as opaque
+  // bytes; only the issuing admission service interprets its contents.
+  bytes join_token = 3;
+}
+
+// The host's reply to `ClientHello`, establishing the session identity and
+// publishing the state the client needs to render an initial UI.
+message ServerWelcome {
+  SessionId session = 1;
+  // Principal identity the host assigned to this connection for the
+  // lifetime of the session.
+  PrincipalId principal = 2;
+  HostCapabilities host_capabilities = 3;
+  // Every (vehicle, scope) pair the host currently tracks, with its present
+  // holder (if any) and fencing generation, so the client can render
+  // current ownership without waiting for the next authority event.
+  repeated ScopeHolderSnapshot scope_holders = 4;
+}
+
+// A single (vehicle, scope) pair's current holder and fencing generation,
+// as of the moment `ServerWelcome` was constructed (ADR-0006, ADR-0010).
+message ScopeHolderSnapshot {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  // Absent when the scope is currently unassigned.
+  PrincipalId holder = 3;
+  Generation generation = 4;
+}
+
+// A client's request to lease a control scope for a vehicle (ADR-0006).
+message LeaseRequest {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+}
+
+// Why a `LeaseRequest` was denied. Unset (`UNSPECIFIED`) only appears on a
+// malformed response; a well-formed denial always carries a concrete reason.
+enum LeaseDenialReason {
+  LEASE_DENIAL_REASON_UNSPECIFIED = 0;
+  // Another principal currently holds the scope and did not offer it.
+  LEASE_DENIAL_REASON_ALREADY_HELD = 1;
+  // The (vehicle, scope) pair is not published by the host's capabilities.
+  LEASE_DENIAL_REASON_UNKNOWN_SCOPE = 2;
+  // The requesting principal lacks the authority class required for this
+  // scope (ADR-0010).
+  LEASE_DENIAL_REASON_NOT_AUTHORIZED = 3;
+}
+
+// The host's reply to a `LeaseRequest`.
+message LeaseResponse {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  bool granted = 3;
+  // The new fencing generation on grant; the current (unchanged) generation
+  // on denial, so the client can still fence stale in-flight frames.
+  Generation generation = 4;
+  // Meaningful only when `granted` is false.
+  LeaseDenialReason reason = 5;
+}
+
+// An RTT/offset probe carrying the sender's local transport-time sample.
+// `nonce` correlates a `Ping` with its `Pong`; it carries no ordering or
+// uniqueness guarantee beyond what the sender chooses.
+//
+// The sender timestamp is a `transport_time` sample local to the sender
+// (ADR-0009) and MUST NOT be compared directly against a timestamp from a
+// different endpoint. It is only meaningful as input to
+// `pilotage-timing`'s RTT/offset estimator, which correlates it with the
+// receiver's own local clock readings at send and receive time.
+message Ping {
+  uint64 nonce = 1;
+  MonoTimestamp sender_sent_at = 2;
+}
+
+// The reply to a `Ping`, echoing its nonce and sender timestamp and adding
+// the responder's own local transport-time sample at the moment of reply.
+//
+// As with `Ping`, `responder_sent_at` is local to the responder and must
+// never be compared raw against `echoed_sender_sent_at`; both feed
+// `pilotage-timing`'s estimator, never a direct subtraction.
+message Pong {
+  uint64 nonce = 1;
+  MonoTimestamp echoed_sender_sent_at = 2;
+  MonoTimestamp responder_sent_at = 3;
+}
+
+// Why the host rejected an inbound `ControlFrame` without applying it
+// (ADR-0009 rejection rules).
+enum FrameRejectionReason {
+  FRAME_REJECTION_REASON_UNSPECIFIED = 0;
+  // The frame's `generation` is older than the scope's current generation.
+  FRAME_REJECTION_REASON_STALE_GENERATION = 1;
+  // The scope has no current holder, so no sender is authorized to command
+  // it.
+  FRAME_REJECTION_REASON_NO_HOLDER = 2;
+  // The (vehicle, scope) pair is not published by the host's capabilities.
+  FRAME_REJECTION_REASON_UNKNOWN_SCOPE = 3;
+  // The frame's sampled-at timestamp is older than the configured maximum
+  // control age.
+  FRAME_REJECTION_REASON_TOO_OLD = 4;
+}
+
+// Sent back to the frame's sender (never broadcast) when a `ControlFrame`
+// is well-formed but not honored, so the client can distinguish "dropped in
+// transit" from "explicitly rejected" (ADR-0009, ADR-0012).
+message FrameRejected {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  SequenceNum sequence = 3;
+  FrameRejectionReason reason = 4;
+  // The scope's fencing generation at the time of rejection, so the sender
+  // can decide whether to resynchronize before retrying.
+  Generation current_generation = 5;
+}

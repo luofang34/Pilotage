@@ -1,0 +1,30 @@
+[package]
+name = "loopback-probe"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "loopback-probe"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+hidapi = { workspace = true }
+pilotage-input = { workspace = true }
+pilotage-protocol = { workspace = true }
+pilotage-timing = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+# `dangerous-configuration` gates `with_no_cert_validation`, which
+# `--insecure-loopback` requires (see `transport::client_endpoint`); scoped
+# to this crate rather than the workspace default since no other crate
+# needs to skip certificate verification.
+wtransport = { workspace = true, features = ["dangerous-configuration"] }

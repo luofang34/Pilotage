@@ -3,12 +3,15 @@ resolver = "3"
 members = [
     "crates/pilotage-protocol",
     "crates/pilotage-authority",
+    "crates/pilotage-session",
     "crates/pilotage-input",
     "crates/pilotage-timing",
     "crates/pilotage-adapter-api",
     "crates/pilotage-conformance",
     "adapters/reference-headless",
     "tools/hid-probe",
+    "tools/loopback-probe",
+    "hosts/session-host",
 ]
 
 [workspace.package]
@@ -23,12 +26,17 @@ prost-build = "0.14.4"
 libm = "0.2.16"
 hidapi = "2.6.6"
 proptest = "1.11.0"
+tokio = "1.48.0"
+wtransport = "0.7.1"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
 pilotage-timing = { path = "crates/pilotage-timing" }
 pilotage-protocol = { path = "crates/pilotage-protocol" }
 pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
+pilotage-session = { path = "crates/pilotage-session" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
