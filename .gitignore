@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/*.rs.bk
+# Cargo.lock is committed: the workspace ships binaries (hosts, services, clients).
+
+# Web client / Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# WebAssembly build output
+pkg/
+wasm-pack.log
+
+# Generated protobuf code (generated at build time; schemas/ is the source of truth)
+**/src/generated/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Stray copies from interactive shell mishaps
+* 2.*
+*.bak
+*.orig
