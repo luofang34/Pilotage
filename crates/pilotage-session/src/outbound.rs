@@ -1,0 +1,32 @@
+//! Host-to-client message payloads carried by unicast and broadcast actions.
+//!
+//! These are the domain-typed (not wire-typed) messages the engine decides to
+//! send; the driver encodes each into a `pilotage.v1.Envelope` and writes it
+//! on the appropriate WebTransport channel (ADR-0005). Keeping them domain
+//! typed lets the engine remain sans-IO and lets the wire encoding live wholly
+//! in `pilotage-protocol` and `pilotage-authority`.
+
+use pilotage_authority::AuthorityEffect;
+use pilotage_protocol::{LeaseResponse, Pong, ServerWelcome};
+
+/// A message the engine directs at one client or at all clients.
+///
+/// The [`OutboundMessage::Authority`] arm carries the engine's own
+/// [`AuthorityEffect`] rather than a pre-built wire event: the authority crate
+/// owns the effect-to-`AuthorityEvent` conversion (its audit-trail
+/// serialization is total over the effect enum), so the driver calls
+/// `proto::AuthorityEvent::from(&effect)` at encode time. This keeps the
+/// authority wire mapping in one place.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutboundMessage {
+    /// The reply to a `ClientHello` (ADR-0005 handshake).
+    Welcome(ServerWelcome),
+    /// The reply to a `LeaseRequest` (ADR-0006).
+    LeaseResponse(LeaseResponse),
+    /// The reply to a `Ping` (ADR-0009 RTT probe).
+    Pong(Pong),
+    /// An authority event to be serialized and observed on the ordered
+    /// authority stream (ADR-0006, ADR-0012). Carried as the source
+    /// [`AuthorityEffect`] so the driver performs the canonical wire mapping.
+    Authority(AuthorityEffect),
+}

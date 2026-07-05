@@ -1,0 +1,13 @@
+[package]
+name = "pilotage-session"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+pilotage-protocol.workspace = true
+pilotage-authority.workspace = true
+pilotage-adapter-api.workspace = true
+pilotage-timing.workspace = true
+
+[lints]
+workspace = true
