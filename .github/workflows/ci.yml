@@ -56,17 +56,28 @@ jobs:
       - name: check-structure
         run: bash scripts/check-structure.sh
 
-      - name: buf lint and breaking
+      - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
         uses: bufbuild/buf-action@v1
         with:
-          input: schemas
-          lint: true
-          format: false
-          breaking: true
-          # Detect wire-schema breakage against the target of this PR (or the
-          # commit before a push), so field-number reuse and other incompatible
-          # edits fail CI (ADR-0014).
-          breaking_against: "https://github.com/${{ github.repository }}.git#branch=${{ github.event.pull_request.base.ref || github.event.repository.default_branch }},subdir=schemas"
-          push: false
-          pr_comment: false
+          setup_only: true
+
+      - name: buf lint
+        if: hashFiles('schemas/**/*.proto') != ''
+        run: buf lint schemas
+
+      - name: buf breaking
+        if: hashFiles('schemas/**/*.proto') != ''
+        # Detect wire-schema breakage against the target of this PR (or the
+        # default branch on push), so field-number reuse and other incompatible
+        # edits fail CI (ADR-0014). buf hard-fails when the base ref contains
+        # no .proto files at all (a module with zero protos is an error, not an
+        # empty baseline), so the comparison is skipped until schemas exist on
+        # the base ref.
+        run: |
+          base="${{ github.base_ref || github.event.repository.default_branch }}"
+          if git ls-tree -r "origin/${base}" --name-only | grep -q '^schemas/.*\.proto$'; then
+            buf breaking schemas --against ".git#ref=refs/remotes/origin/${base},subdir=schemas"
+          else
+            echo "origin/${base} has no .proto files yet; nothing to compare against."
+          fi
