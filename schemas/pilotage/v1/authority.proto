@@ -1,0 +1,169 @@
+// Authority-event wire types for lease, handover, and override state
+// transitions (ADR-0006, ADR-0010, ADR-0012).
+syntax = "proto3";
+
+package pilotage.v1;
+
+import "pilotage/v1/common.proto";
+
+// The class of authority a principal exercises for privileged operations
+// (ADR-0006, ADR-0010). Recorded for audit on overrides and revocations;
+// UNSPECIFIED on transitions that carry no class (grants and handovers).
+enum AuthorityClass {
+  AUTHORITY_CLASS_UNSPECIFIED = 0;
+  AUTHORITY_CLASS_OPERATOR = 1;
+  AUTHORITY_CLASS_SUPERVISOR = 2;
+  AUTHORITY_CLASS_ADMINISTRATOR = 3;
+  AUTHORITY_CLASS_AUTOMATION = 4;
+}
+
+// Reported liveness of a holder's control link (ADR-0010 link loss).
+enum LinkState {
+  LINK_STATE_UNSPECIFIED = 0;
+  LINK_STATE_NOMINAL = 1;
+  LINK_STATE_DEGRADED = 2;
+  LINK_STATE_LOST = 3;
+}
+
+// Machine-readable classification of a WarningRaised event (ADR-0012).
+enum WarningKind {
+  WARNING_KIND_UNSPECIFIED = 0;
+  // An "I have control" confirmation arrived from a principal that is not
+  // the effective holder (late, duplicate, or contradictory).
+  WARNING_KIND_UNEXPECTED_I_HAVE = 1;
+  // A "you have control" confirmation arrived from a principal that is not
+  // the effective holder (late, duplicate, or contradictory).
+  WARNING_KIND_UNEXPECTED_YOU_HAVE = 2;
+  // The effective holder's link was lost and the scope was released
+  // (ADR-0010 link-loss policy).
+  WARNING_KIND_HOLDER_LINK_LOST = 3;
+  // A well-formed command could not be honored and changed no state.
+  WARNING_KIND_COMMAND_REJECTED = 4;
+}
+
+// A (vehicle, scope) pair became known to the authority engine and is now
+// unassigned.
+message ScopeRegistered {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+}
+
+// A scope lease was granted to a principal.
+message ScopeLeaseGranted {
+  PrincipalId principal = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+  string reason = 5;
+  AuthorityClass authority_class = 6;
+}
+
+// A scope-lease holder offered to transfer the scope to another principal.
+message ScopeTransferOffered {
+  PrincipalId from_principal = 1;
+  PrincipalId to_principal = 2;
+  VehicleId vehicle = 3;
+  ScopeId scope = 4;
+  Generation generation = 5;
+  string reason = 6;
+  AuthorityClass authority_class = 7;
+}
+
+// The offered recipient accepted a scope transfer.
+message ScopeTransferAccepted {
+  PrincipalId from_principal = 1;
+  PrincipalId to_principal = 2;
+  VehicleId vehicle = 3;
+  ScopeId scope = 4;
+  Generation generation = 5;
+  string reason = 6;
+  AuthorityClass authority_class = 7;
+}
+
+// A scope transfer was committed: the new generation is now authoritative.
+message ScopeTransferCommitted {
+  PrincipalId from_principal = 1;
+  PrincipalId to_principal = 2;
+  VehicleId vehicle = 3;
+  ScopeId scope = 4;
+  Generation generation = 5;
+  string reason = 6;
+  AuthorityClass authority_class = 7;
+}
+
+// A pending transfer offer expired and the scope reverted to its offerer;
+// the generation is unchanged because no transfer occurred (ADR-0010 TTL).
+message ScopeTransferExpired {
+  PrincipalId holder = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+}
+
+// A scope lease was revoked from its current holder.
+message ScopeLeaseRevoked {
+  PrincipalId principal = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+  string reason = 5;
+  AuthorityClass authority_class = 6;
+}
+
+// An emergency override preempted the current scope holder.
+message EmergencyOverrideApplied {
+  PrincipalId principal = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+  string reason = 5;
+  AuthorityClass authority_class = 6;
+  // Holder displaced by the override; absent when the scope was unassigned.
+  PrincipalId previous_holder = 7;
+  // True when a repeat override by the standing override holder with the
+  // same class re-affirmed without advancing the generation (idempotent
+  // re-application, ADR-0010).
+  bool already_effective = 8;
+}
+
+// A principal's control-link liveness changed (ADR-0010, ADR-0012).
+message LinkStateChanged {
+  PrincipalId principal = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  LinkState state = 4;
+}
+
+// A non-fatal, audited warning: a late, duplicate, or contradictory command,
+// a rejected command, or loss of the effective holder's link (ADR-0012).
+message WarningRaised {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  WarningKind kind = 3;
+  // Principal the warning concerns (the confirming principal, the rejected
+  // actor, or the lost holder), when one is identified.
+  PrincipalId principal = 4;
+  // Effective holder at the time of the warning, when one existed.
+  PrincipalId current_holder = 5;
+  // Generation context (for example the current generation a stale command
+  // was fenced against), when meaningful.
+  Generation generation = 6;
+  // Human-readable description; machine consumers key on `kind`.
+  string detail = 7;
+}
+
+// The reliable, ordered, idempotent authority-event stream (ADR-0011).
+message AuthorityEvent {
+  oneof event {
+    ScopeLeaseGranted scope_lease_granted = 1;
+    ScopeTransferOffered scope_transfer_offered = 2;
+    ScopeTransferAccepted scope_transfer_accepted = 3;
+    ScopeTransferCommitted scope_transfer_committed = 4;
+    ScopeLeaseRevoked scope_lease_revoked = 5;
+    EmergencyOverrideApplied emergency_override_applied = 6;
+    ScopeRegistered scope_registered = 7;
+    ScopeTransferExpired scope_transfer_expired = 8;
+    LinkStateChanged link_state_changed = 9;
+    WarningRaised warning_raised = 10;
+  }
+}

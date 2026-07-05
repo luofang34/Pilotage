@@ -1,0 +1,24 @@
+// The outer envelope every cross-boundary message is wrapped in
+// (ADR-0014): one envelope per datagram, or length-delimited per stream.
+syntax = "proto3";
+
+package pilotage.v1;
+
+import "pilotage/v1/authority.proto";
+import "pilotage/v1/capability.proto";
+import "pilotage/v1/control.proto";
+import "pilotage/v1/telemetry.proto";
+
+// Wraps exactly one payload message with an explicit schema version so
+// receivers can negotiate or reject unknown versions rather than
+// misinterpreting bytes (ADR-0014).
+message Envelope {
+  uint32 schema_version = 1;
+
+  oneof payload {
+    ControlFrame control_frame = 2;
+    AuthorityEvent authority_event = 3;
+    TelemetrySample telemetry_sample = 4;
+    HostCapabilities host_capabilities = 5;
+  }
+}

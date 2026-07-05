@@ -1,0 +1,51 @@
+// Host and vehicle capability wire types (ADR-0006, ADR-0008).
+syntax = "proto3";
+
+package pilotage.v1;
+
+import "pilotage/v1/common.proto";
+
+// Bitwise-independent execution-mode flags a host may advertise or a
+// session may request. Modeled as an enum of named flags combined via
+// `repeated` rather than a bitmask, so new flags are additive.
+enum ExecutionMode {
+  EXECUTION_MODE_UNSPECIFIED = 0;
+  EXECUTION_MODE_REALTIME = 1;
+  EXECUTION_MODE_ACCELERATED = 2;
+  EXECUTION_MODE_STEPPED = 3;
+  EXECUTION_MODE_RECORD = 4;
+  EXECUTION_MODE_REPLAY = 5;
+}
+
+// What the host does to a vehicle's outstanding control when the link to
+// its current authority holder is lost.
+enum LinkLossAction {
+  LINK_LOSS_ACTION_UNSPECIFIED = 0;
+  LINK_LOSS_ACTION_HOLD_LAST = 1;
+  LINK_LOSS_ACTION_NEUTRAL = 2;
+  LINK_LOSS_ACTION_STOP = 3;
+  LINK_LOSS_ACTION_REVOKE_SCOPE = 4;
+}
+
+// A single independently assignable control scope published by a host for
+// a vehicle (ADR-0006).
+message ScopeDescriptor {
+  ScopeId scope = 1;
+  string display_name = 2;
+  LinkLossAction link_loss_action = 3;
+}
+
+// Describes one vehicle a host can offer for control.
+message VehicleDescriptor {
+  VehicleId vehicle = 1;
+  string display_name = 2;
+  repeated ScopeDescriptor scopes = 3;
+  repeated ExecutionMode supported_modes = 4;
+}
+
+// Describes what a session host can offer at session setup (ADR-0008).
+message HostCapabilities {
+  string host_version = 1;
+  repeated VehicleDescriptor vehicles = 2;
+  repeated ExecutionMode supported_modes = 3;
+}

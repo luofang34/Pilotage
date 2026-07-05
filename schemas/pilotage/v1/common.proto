@@ -1,0 +1,51 @@
+// Common wire types shared across Pilotage schemas (ADR-0014).
+syntax = "proto3";
+
+package pilotage.v1;
+
+// Identifies a session between a principal and a session host.
+message SessionId {
+  uint64 value = 1;
+}
+
+// Identifies an authenticated principal (a user or service identity).
+message PrincipalId {
+  uint64 value = 1;
+}
+
+// Identifies a vehicle under remote control.
+message VehicleId {
+  uint64 value = 1;
+}
+
+// Identifies an independently assignable control scope (e.g.
+// "vehicle.motion", "vehicle.camera"). Scopes are host-published vocabulary
+// (ADR-0006), not a fixed enum.
+message ScopeId {
+  string value = 1;
+}
+
+// A fencing generation for a control-scope lease (ADR-0006). Advances on
+// every handover, revocation, override, or reassignment.
+message Generation {
+  uint64 value = 1;
+}
+
+// A monotonically increasing sequence number for ordering control frames
+// within a scope (ADR-0009, ADR-0011).
+message SequenceNum {
+  uint32 value = 1;
+}
+
+// A monotonic instant expressed as nanoseconds since an endpoint-local
+// epoch (ADR-0009's `transport_time` / `host_time` domains). Never
+// meaningful to compare across endpoints without clock correlation.
+message MonoTimestamp {
+  uint64 nanos = 1;
+}
+
+// A simulation tick counter, distinct from wall-clock or transport time
+// (ADR-0009's `simulation_time` domain).
+message SimTick {
+  uint64 value = 1;
+}

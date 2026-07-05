@@ -1,0 +1,18 @@
+[package]
+name = "pilotage-conformance"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-protocol = { workspace = true }
+pilotage-timing = { workspace = true }
+pilotage-authority = { workspace = true }
+pilotage-input = { workspace = true }
+pilotage-adapter-api = { workspace = true }
+pilotage-adapter-reference = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }

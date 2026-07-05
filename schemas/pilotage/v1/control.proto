@@ -1,0 +1,50 @@
+// Control-frame wire types mirroring the domain `ScopedControlFrame`
+// (ADR-0007, ADR-0009, ADR-0011).
+syntax = "proto3";
+
+package pilotage.v1;
+
+import "pilotage/v1/common.proto";
+
+// A button state transition delivered as an explicit edge event rather than
+// a sampled level, per ADR-0009's one-shot consumption semantics.
+enum ButtonEdge {
+  BUTTON_EDGE_UNSPECIFIED = 0;
+  BUTTON_EDGE_PRESSED = 1;
+  BUTTON_EDGE_RELEASED = 2;
+}
+
+// Current value of a single logical axis in a control frame.
+message AxisSample {
+  uint32 axis_id = 1;
+  float value = 2;
+}
+
+// A single logical button edge event in a control frame.
+message ButtonEdgeSample {
+  uint32 button_id = 1;
+  ButtonEdge edge = 2;
+}
+
+// The logical input state carried by a single control frame. Axis values
+// follow the convention `[-1.0, 1.0]`, with `0.0` as the neutral (idle)
+// position. Continuous axes use latest-valid-value semantics; button edges
+// are explicit one-shot events.
+message ControlPayload {
+  repeated AxisSample axes = 1;
+  repeated ButtonEdgeSample edges = 2;
+}
+
+// A control frame scoped to a single session, vehicle, and control scope,
+// carrying the fencing metadata the session host uses to accept or reject
+// it (ADR-0006, ADR-0009).
+message ControlFrame {
+  SessionId session = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+  SequenceNum sequence = 5;
+  MonoTimestamp sampled_at = 6;
+  uint32 profile_revision = 7;
+  ControlPayload payload = 8;
+}

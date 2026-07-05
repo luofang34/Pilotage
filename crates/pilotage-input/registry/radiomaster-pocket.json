@@ -1,0 +1,102 @@
+{
+    "schema_version": 1,
+    "revision": 1,
+    "device": {
+        "vendor_id": 4617,
+        "product_id": 20308,
+        "product": "Radiomaster Pocket Joystick"
+    },
+    "description": "RadioMaster Pocket (EdgeTX joystick/HID firmware mode, USB VID 0x1209 / PID 0x4F54). Verified empirically with tools/hid-probe against the physical unit: the HID report descriptor declares 24 buttons (3 packed bytes) followed by 8 Generic Desktop axes (X, Y, Z, Rx, Ry, Rz, Slider, Dial), each a 16-bit field carrying an 11-bit logical range 0..2047, for a 19-byte input report. Axis order is assumed to follow EdgeTX's default AETR channel order (source_index 0=roll/aileron, 1=pitch/elevator, 2=throttle, 3=yaw/rudder, 4..7=aux1..aux4); this was not cross-checked against physical stick movement (sticks were unattended/idle during capture), only against the resting-value pattern. Resting raw values observed were [1024, 1024, 0, 1024, 0, 0, 0, 0]: source_index 0, 1, 3 sit at 1024 (the midpoint of 0..2047), consistent with self-centering roll/pitch/yaw sticks; source_index 2 (throttle) sits at 0, consistent with a non-centering throttle resting at idle; source_index 4..7 (aux) sit at 0 with no observed switch activity. Calibration below uses the full declared logical range on the positive side (max=2047) with center taken from the observed resting value per axis; roll/pitch/yaw use min=0 since their resting center (1024) sits strictly between the declared 0..2047 bounds. Throttle and aux1..aux4 rest at raw 0 with no negative deflection ever produced by the hardware: the true logical range is 0..2047 with idle at the 0 boundary, which is not a center in the schema's sense. Because `parse_profile_str` rejects `min == center` as a degenerate calibration, min is set to a negligible epsilon (-0.001, three orders of magnitude below one raw HID count) below center=0 purely to satisfy that strict ordering; it does not assert the hardware can produce a negative value, and the negative half of the normalized range for these axes is never reachable in practice. Deadzone and expo are conservative defaults pending a live-stick recalibration pass.",
+    "axes": [
+        {
+            "source_index": 0,
+            "logical": "roll",
+            "invert": false,
+            "deadzone": 0.05,
+            "expo": 0.0,
+            "calibration": { "min": 0.0, "center": 1024.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 1,
+            "logical": "pitch",
+            "invert": false,
+            "deadzone": 0.05,
+            "expo": 0.0,
+            "calibration": { "min": 0.0, "center": 1024.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 2,
+            "logical": "throttle",
+            "invert": false,
+            "deadzone": 0.0,
+            "expo": 0.0,
+            "calibration": { "min": -0.001, "center": 0.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 3,
+            "logical": "yaw",
+            "invert": false,
+            "deadzone": 0.05,
+            "expo": 0.0,
+            "calibration": { "min": 0.0, "center": 1024.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 4,
+            "logical": "aux1",
+            "invert": false,
+            "deadzone": 0.0,
+            "expo": 0.0,
+            "calibration": { "min": -0.001, "center": 0.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 5,
+            "logical": "aux2",
+            "invert": false,
+            "deadzone": 0.0,
+            "expo": 0.0,
+            "calibration": { "min": -0.001, "center": 0.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 6,
+            "logical": "aux3",
+            "invert": false,
+            "deadzone": 0.0,
+            "expo": 0.0,
+            "calibration": { "min": -0.001, "center": 0.0, "max": 2047.0 }
+        },
+        {
+            "source_index": 7,
+            "logical": "aux4",
+            "invert": false,
+            "deadzone": 0.0,
+            "expo": 0.0,
+            "calibration": { "min": -0.001, "center": 0.0, "max": 2047.0 }
+        }
+    ],
+    "buttons": [
+        { "source_index": 0, "logical": "button0" },
+        { "source_index": 1, "logical": "button1" },
+        { "source_index": 2, "logical": "button2" },
+        { "source_index": 3, "logical": "button3" },
+        { "source_index": 4, "logical": "button4" },
+        { "source_index": 5, "logical": "button5" },
+        { "source_index": 6, "logical": "button6" },
+        { "source_index": 7, "logical": "button7" },
+        { "source_index": 8, "logical": "button8" },
+        { "source_index": 9, "logical": "button9" },
+        { "source_index": 10, "logical": "button10" },
+        { "source_index": 11, "logical": "button11" },
+        { "source_index": 12, "logical": "button12" },
+        { "source_index": 13, "logical": "button13" },
+        { "source_index": 14, "logical": "button14" },
+        { "source_index": 15, "logical": "button15" },
+        { "source_index": 16, "logical": "button16" },
+        { "source_index": 17, "logical": "button17" },
+        { "source_index": 18, "logical": "button18" },
+        { "source_index": 19, "logical": "button19" },
+        { "source_index": 20, "logical": "button20" },
+        { "source_index": 21, "logical": "button21" },
+        { "source_index": 22, "logical": "button22" },
+        { "source_index": 23, "logical": "button23" }
+    ]
+}

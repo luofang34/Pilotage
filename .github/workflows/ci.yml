@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # buf breaking compares the working tree against the base ref, so the
+          # base commit must be present locally; a shallow clone would hide it.
+          fetch-depth: 0
+
+      - name: Install system dependencies (hidapi on Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --all-targets
+
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: "-D missing_docs -D rustdoc::broken_intra_doc_links"
+        run: cargo doc --no-deps
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: check-structure
+        run: bash scripts/check-structure.sh
+
+      - name: Setup buf
+        if: hashFiles('schemas/**/*.proto') != ''
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: buf lint
+        if: hashFiles('schemas/**/*.proto') != ''
+        run: buf lint schemas
+
+      - name: buf breaking
+        if: hashFiles('schemas/**/*.proto') != ''
+        # Detect wire-schema breakage against the target of this PR (or the
+        # default branch on push), so field-number reuse and other incompatible
+        # edits fail CI (ADR-0014). buf hard-fails when the base ref contains
+        # no .proto files at all (a module with zero protos is an error, not an
+        # empty baseline), so the comparison is skipped until schemas exist on
+        # the base ref.
+        run: |
+          base="${{ github.base_ref || github.event.repository.default_branch }}"
+          if git ls-tree -r "origin/${base}" --name-only | grep -q '^schemas/.*\.proto$'; then
+            buf breaking schemas --against ".git#ref=refs/remotes/origin/${base},subdir=schemas"
+          else
+            echo "origin/${base} has no .proto files yet; nothing to compare against."
+          fi
