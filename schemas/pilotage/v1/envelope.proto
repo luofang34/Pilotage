@@ -7,6 +7,7 @@ package pilotage.v1;
 import "pilotage/v1/authority.proto";
 import "pilotage/v1/capability.proto";
 import "pilotage/v1/control.proto";
+import "pilotage/v1/session.proto";
 import "pilotage/v1/telemetry.proto";
 
 // Wraps exactly one payload message with an explicit schema version so
@@ -20,5 +21,14 @@ message Envelope {
     AuthorityEvent authority_event = 3;
     TelemetrySample telemetry_sample = 4;
     HostCapabilities host_capabilities = 5;
+    // Session-bootstrap and handshake vocabulary (ADR-0005); additive arms
+    // starting at field 6 so earlier arms keep their wire numbers.
+    ClientHello client_hello = 6;
+    ServerWelcome server_welcome = 7;
+    LeaseRequest lease_request = 8;
+    LeaseResponse lease_response = 9;
+    Ping ping = 10;
+    Pong pong = 11;
+    FrameRejected frame_rejected = 12;
   }
 }
