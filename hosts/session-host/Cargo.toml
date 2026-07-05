@@ -1,0 +1,34 @@
+[package]
+name = "pilotage-session-host"
+version = "0.1.0"
+edition.workspace = true
+
+[lib]
+name = "pilotage_session_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pilotage-session-host"
+path = "src/main.rs"
+
+[dependencies]
+pilotage-session = { workspace = true }
+pilotage-protocol = { workspace = true }
+pilotage-authority = { workspace = true }
+pilotage-adapter-api = { workspace = true }
+pilotage-adapter-reference = { workspace = true }
+pilotage-timing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
+wtransport = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+prost.workspace = true
+
+[dev-dependencies]
+pilotage-adapter-reference.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+wtransport = { workspace = true, features = ["dangerous-configuration"] }
+
+[lints]
+workspace = true
