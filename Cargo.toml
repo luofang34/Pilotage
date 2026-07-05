@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/pilotage-protocol",
+    "crates/pilotage-authority",
+    "crates/pilotage-input",
+    "crates/pilotage-timing",
+    "crates/pilotage-adapter-api",
+    "crates/pilotage-conformance",
+    "adapters/reference-headless",
+    "tools/hid-probe",
+]
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+thiserror = "2.0.18"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+prost = "0.14.4"
+prost-build = "0.14.4"
+libm = "0.2.16"
+hidapi = "2.6.6"
+proptest = "1.11.0"
+pilotage-timing = { path = "crates/pilotage-timing" }
+pilotage-protocol = { path = "crates/pilotage-protocol" }
+pilotage-authority = { path = "crates/pilotage-authority" }
+pilotage-input = { path = "crates/pilotage-input" }
+pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
+pilotage-adapter-reference = { path = "adapters/reference-headless" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"
