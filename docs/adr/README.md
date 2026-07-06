@@ -22,6 +22,7 @@ One file per decision, numbered in acceptance order. See
 | [0013](0013-interactive-and-accelerated-sessions.md) | Single-vehicle operation and horizontally scalable accelerated training | Accepted |
 | [0014](0014-protobuf-wire-schema.md) | Protobuf as the wire-schema source of truth | Accepted |
 | [0015](0015-workspace-quality-gates.md) | Workspace-enforced quality gates | Accepted |
+| [0016](0016-codec-pluggable-media-plane.md) | Codec-pluggable media plane; the control core never sees the codec | Accepted |
 
 ## Provenance
 
