@@ -7,6 +7,7 @@
 
 mod cli;
 mod control_source;
+mod drive;
 mod error;
 mod hid_decode;
 mod metrics;
@@ -14,11 +15,13 @@ mod output;
 mod pipeline;
 mod receiver;
 mod run;
+mod save_frames;
 mod sender;
 mod summary;
 mod synthetic;
 mod telemetry;
 mod transport;
+mod video;
 mod wire_session;
 
 use std::process::ExitCode;

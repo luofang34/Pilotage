@@ -103,6 +103,17 @@ pub struct RunMetrics {
     pub frames_rejected: u64,
     /// Telemetry samples received.
     pub telemetry_received: u64,
+    /// The most recently observed telemetry pose (`x_m`, `y_m`,
+    /// `heading_rad`), so the end-of-run summary can report the vehicle's
+    /// final observed position.
+    pub last_pose: Option<(f32, f32, f32)>,
+    /// Events the receiver task dropped because the bounded channel to the
+    /// run loop was full (`receiver::forward_event`), rather than blocking
+    /// delivery of everything queued behind a slow consumer. Distinct from
+    /// `control_to_telemetry_backlog_dropped`: this counts events never
+    /// handed to the run loop at all, not matched-then-evicted latency
+    /// samples.
+    pub dropped_events: u64,
 }
 
 impl RunMetrics {
@@ -117,6 +128,8 @@ impl RunMetrics {
             frames_sent: 0,
             frames_rejected: 0,
             telemetry_received: 0,
+            last_pose: None,
+            dropped_events: 0,
         }
     }
 

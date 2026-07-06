@@ -5,11 +5,18 @@ use std::time::Duration;
 
 use crate::metrics::RunMetrics;
 use crate::output::print_line;
+use crate::video::VideoStats;
 
 /// Prints the full end-of-run summary: control-to-telemetry latency
-/// percentiles, Ping/Pong RTT, frame counters, telemetry received, and the
-/// outcome of the deliberate stale-generation fencing probe.
-pub fn print_summary(metrics: &RunMetrics, fencing_confirmed: bool) {
+/// percentiles, Ping/Pong RTT, frame counters, telemetry received, video
+/// downlink statistics, and the outcome of the deliberate stale-generation
+/// fencing probe.
+pub fn print_summary(
+    metrics: &RunMetrics,
+    video: &VideoStats,
+    elapsed: Duration,
+    fencing_confirmed: bool,
+) {
     print_line("=== loopback-probe summary ===");
     print_control_latency(metrics);
     print_rtt(metrics);
@@ -24,6 +31,12 @@ pub fn print_summary(metrics: &RunMetrics, fencing_confirmed: bool) {
         metrics.telemetry_received
     ));
     print_line(&format!(
+        "events dropped (channel full): {}",
+        metrics.dropped_events
+    ));
+    print_final_pose(metrics);
+    print_video(video, elapsed);
+    print_line(&format!(
         "end-to-end fencing:  {}",
         if fencing_confirmed {
             "CONFIRMED (stale-generation frame was rejected)"
@@ -31,6 +44,43 @@ pub fn print_summary(metrics: &RunMetrics, fencing_confirmed: bool) {
             "NOT CONFIRMED (no FrameRejected observed for the stale probe frame)"
         }
     ));
+}
+
+/// Prints the vehicle's final observed pose, or a placeholder if no
+/// telemetry arrived.
+fn print_final_pose(metrics: &RunMetrics) {
+    match metrics.last_pose {
+        Some((x, y, heading)) => print_line(&format!(
+            "final pose:          x={x:.3}m y={y:.3}m heading={heading:.3}rad"
+        )),
+        None => print_line("final pose:          no telemetry observed"),
+    }
+}
+
+/// Prints the video downlink section: frames received/decoded/failed,
+/// average fps, decoded dimensions, and inter-arrival latency percentiles.
+fn print_video(video: &VideoStats, elapsed: Duration) {
+    print_line(&format!(
+        "video frames received: {} (decoded {}, decode failed {})",
+        video.frames_received, video.frames_decoded, video.frames_decode_failed
+    ));
+    match video.avg_fps(elapsed) {
+        Some(fps) => print_line(&format!("video avg fps:       {fps:.2}")),
+        None => print_line("video avg fps:       no frames decoded"),
+    }
+    match video.last_dims {
+        Some((w, h)) => print_line(&format!("video dimensions:    {w}x{h}")),
+        None => print_line("video dimensions:    n/a"),
+    }
+    match video.inter_arrival.percentiles() {
+        Some((p50, p95, max)) => print_line(&format!(
+            "video inter-arrival: p50={} p95={} max={}",
+            fmt_duration(p50),
+            fmt_duration(p95),
+            fmt_duration(max)
+        )),
+        None => print_line("video inter-arrival: no samples observed"),
+    }
 }
 
 fn print_control_latency(metrics: &RunMetrics) {

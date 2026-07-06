@@ -143,13 +143,15 @@ pub async fn handshake(
 > {
     let (mut send, mut recv) = open_bidi(connection).await?;
 
+    let mut buf = Vec::new();
+
     let hello = ClientHello {
         protocol_version: CLIENT_PROTOCOL_VERSION,
         client_name: CLIENT_NAME.to_string(),
         join_token: Vec::new(),
     };
     write_frame(&mut send, &encode_client_hello(&hello)).await?;
-    let welcome = match read_message(&mut recv).await? {
+    let welcome = match read_message(&mut recv, &mut buf).await? {
         StreamMessage::ServerWelcome(welcome) => welcome,
         other => {
             return Err(ProbeError::Protocol {
@@ -161,7 +163,7 @@ pub async fn handshake(
     let scope = ScopeId::new("vehicle.motion");
     let request = LeaseRequest { vehicle, scope };
     write_frame(&mut send, &encode_lease_request(&request)).await?;
-    let lease = match read_message(&mut recv).await? {
+    let lease = match read_message(&mut recv, &mut buf).await? {
         StreamMessage::LeaseResponse(response) => response,
         other => {
             return Err(ProbeError::Protocol {
@@ -207,13 +209,20 @@ async fn write_frame(send: &mut wtransport::SendStream, frame: &[u8]) -> Result<
 /// Reads bytes from the bidi recv stream until one full envelope frame is
 /// available, decodes it, and returns the typed message.
 ///
-/// Handshake replies are small and this stream carries nothing else during
-/// the handshake, so a single `read` call is expected to return a complete
-/// frame; this loops only to tolerate a reply split across two reads.
-async fn read_message(recv: &mut wtransport::RecvStream) -> Result<StreamMessage, ProbeError> {
-    let mut buf = Vec::new();
+/// `buf` is the caller's persisted reassembly buffer, carried across calls:
+/// a `recv.read()` can return more than one envelope's worth of bytes (e.g.
+/// `ServerWelcome` and a following `LeaseResponse` arriving in the same
+/// read), and any bytes trailing the decoded envelope must survive for the
+/// next call rather than be dropped with a fresh empty buffer, or the
+/// trailing message would be silently lost (mirrors `receiver.rs`'s
+/// `stream_buf` reassembly).
+async fn read_message(
+    recv: &mut wtransport::RecvStream,
+    buf: &mut Vec<u8>,
+) -> Result<StreamMessage, ProbeError> {
     loop {
-        if let Ok((message, _consumed)) = decode_one(&buf) {
+        if let Ok((message, consumed)) = decode_one(buf) {
+            buf.drain(..consumed);
             return Ok(message);
         }
         let mut chunk = [0u8; STREAM_READ_BUF_LEN];

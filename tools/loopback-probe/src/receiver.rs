@@ -1,8 +1,28 @@
 //! Background task receiving inbound traffic concurrently with the send loop.
 //! Telemetry, `Pong`, and `FrameRejected` all arrive as datagrams (the host's
-//! control-fast/telemetry class mapping) and are routed by envelope arm; the
-//! bidi-stream branch remains only to observe a post-handshake stream close.
+//! control-fast/telemetry class mapping) and are routed by envelope arm.
+//!
+//! Host-initiated uni streams carry two kinds of traffic (ADR-0005): the
+//! dedicated authority-events stream, opened once per connection, and one
+//! fresh stream per video frame (media = one uni stream per frame). Every
+//! host-initiated uni stream leads with a 1-byte kind tag; this module accepts
+//! every such stream in a loop and dispatches each on that tag, spawning a
+//! short-lived reader task per video-frame stream so a slow video decode never
+//! blocks accepting the next stream.
+//!
+//! Every hand-off to the run loop's bounded event channel uses `try_send`,
+//! never the blocking `send().await`: the channel's consumer (`handle_event`)
+//! does inline JPEG decode, and a channel that blocks its producers on a slow
+//! consumer would stall delivery of everything behind the slow item —
+//! telemetry and `Pong` queued behind video frames would skew latency/RTT
+//! measurements instead of being counted as dropped (ADR-0015: a lagging
+//! consumer is a correctness signal, not silent). A full channel drops the
+//! new event and increments the shared `dropped_events` counter instead.
 
+mod uni_stream;
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use tokio::sync::mpsc;
@@ -36,12 +56,22 @@ pub enum ReceiverEvent {
     /// An authority/mode event read from the host's dedicated authority-events
     /// stream (ADR-0005). Counted only, to prove the stream is live.
     Authority,
+    /// One raw JPEG frame body read off a per-frame video uni stream
+    /// (ADR-0005 media = one uni stream per frame). Inter-arrival latency is
+    /// measured by the run loop's own wall clock at the point it receives
+    /// this event, not by a timestamp carried on the event itself.
+    VideoFrame {
+        /// The JPEG bytes (tag and length prefix already stripped).
+        jpeg: Vec<u8>,
+    },
 }
 
-/// Spawns the receiver task: one branch polls datagrams (telemetry, `Pong`,
-/// `FrameRejected`), the other reads the bootstrap bidi stream's `recv` half
-/// so a post-handshake stream close is observed. Named so an aborted-task
-/// audit can identify it (ADR-0015).
+/// Spawns the receiver task: branches poll datagrams (telemetry, `Pong`,
+/// `FrameRejected`), the bootstrap bidi stream's `recv` half (to observe a
+/// post-handshake stream close), and every host-initiated uni stream accepted
+/// over the connection's lifetime (the dedicated authority-events stream plus
+/// one fresh stream per video frame, ADR-0005). Named so an aborted-task audit
+/// can identify it (ADR-0015).
 ///
 /// Takes only `recv_stream`; the bidi stream's send half stays in the run
 /// loop, kept open but unwritten after the handshake.
@@ -51,46 +81,72 @@ pub enum ReceiverEvent {
 /// frame/ping send timestamps, or the send/receive difference the metrics take
 /// (with a zero clock offset) mixes two independent origins and skews every
 /// control-to-telemetry latency and RTT sample.
+///
+/// Returns the join handle plus a shared counter of events dropped because
+/// the bounded `events_tx` channel was full (see module doc); the caller
+/// folds it into `RunMetrics` once the run completes.
 pub fn spawn_receiver(
     connection: Connection,
     recv_stream: RecvStream,
-    authority_stream: RecvStream,
     run_start: Instant,
     events_tx: mpsc::Sender<ReceiverEvent>,
-) -> JoinHandle<()> {
-    tokio::spawn(
+) -> (JoinHandle<()>, Arc<AtomicU64>) {
+    let dropped_events = Arc::new(AtomicU64::new(0));
+    let handle = tokio::spawn(
         receiver_loop(
             connection,
             recv_stream,
-            authority_stream,
             run_start,
             events_tx,
+            Arc::clone(&dropped_events),
         )
         .instrument(tracing::info_span!("loopback_probe_receiver")),
-    )
+    );
+    (handle, dropped_events)
 }
 
-/// Runs the datagram, bidi-stream, and authority-stream receive branches
-/// until the connection closes or the event channel's receiver is dropped.
+/// Forwards one event to the run loop via `try_send`, incrementing
+/// `dropped_events` (and warning) if the bounded channel is full rather than
+/// awaiting free capacity (see module doc).
+fn forward_event(
+    events_tx: &mpsc::Sender<ReceiverEvent>,
+    dropped_events: &AtomicU64,
+    event: ReceiverEvent,
+) {
+    if let Err(source) = events_tx.try_send(event) {
+        dropped_events.fetch_add(1, Ordering::Relaxed);
+        match source {
+            mpsc::error::TrySendError::Full(_) => {
+                warn!("event channel full; dropping event instead of stalling delivery");
+            }
+            mpsc::error::TrySendError::Closed(_) => {
+                warn!("event channel closed while forwarding event");
+            }
+        }
+    }
+}
+
+/// Runs the datagram and bidi-stream receive branches, and accepts every
+/// host-initiated uni stream, until the connection closes or the event
+/// channel's receiver is dropped.
 async fn receiver_loop(
     connection: Connection,
     mut recv_stream: RecvStream,
-    mut authority_stream: RecvStream,
     start: Instant,
     events_tx: mpsc::Sender<ReceiverEvent>,
+    dropped_events: Arc<AtomicU64>,
 ) {
     let mut stream_buf = Vec::new();
-    let mut authority_buf = Vec::new();
     let mut read_chunk = [0u8; 4096];
-    let mut authority_chunk = [0u8; 4096];
+    let mut uni_streams = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             datagram = connection.receive_datagram() => {
                 match datagram {
-                    Ok(datagram) => handle_datagram(&datagram, start, &events_tx).await,
+                    Ok(datagram) => handle_datagram(&datagram, start, &events_tx, &dropped_events),
                     Err(source) => {
                         warn!(%source, "datagram receive failed; stopping receiver");
-                        return;
+                        break;
                     }
                 }
             }
@@ -98,36 +154,42 @@ async fn receiver_loop(
                 match read {
                     Ok(Some(count)) => {
                         stream_buf.extend_from_slice(&read_chunk[..count]);
-                        drain_stream_frames(&mut stream_buf, start, &events_tx).await;
+                        drain_stream_frames(&mut stream_buf, start, &events_tx, &dropped_events);
                     }
                     Ok(None) => {
                         warn!("bidi stream closed; stopping receiver");
-                        return;
+                        break;
                     }
                     Err(source) => {
                         warn!(%source, "bidi stream read failed; stopping receiver");
-                        return;
+                        break;
                     }
                 }
             }
-            read = authority_stream.read(&mut authority_chunk) => {
-                match read {
-                    Ok(Some(count)) => {
-                        authority_buf.extend_from_slice(&authority_chunk[..count]);
-                        drain_stream_frames(&mut authority_buf, start, &events_tx).await;
-                    }
-                    Ok(None) => {
-                        warn!("authority-events stream closed; stopping receiver");
-                        return;
+            accepted = connection.accept_uni() => {
+                match accepted {
+                    Ok(uni) => {
+                        uni_streams.spawn(uni_stream::read_one_uni_stream(
+                            uni,
+                            start,
+                            events_tx.clone(),
+                            Arc::clone(&dropped_events),
+                        ));
                     }
                     Err(source) => {
-                        warn!(%source, "authority-events stream read failed; stopping receiver");
-                        return;
+                        warn!(%source, "stopped accepting uni streams");
+                        break;
                     }
+                }
+            }
+            Some(joined) = uni_streams.join_next(), if !uni_streams.is_empty() => {
+                if let Err(error) = joined {
+                    warn!(%error, "uni-stream reader task panicked");
                 }
             }
         }
     }
+    uni_streams.shutdown().await;
 }
 
 /// Decodes one datagram and forwards it as the matching [`ReceiverEvent`],
@@ -139,18 +201,15 @@ async fn receiver_loop(
 /// the host's `to_connection_message`/`RejectFrame` handling), distinguished
 /// only by the envelope's payload arm — so this routes on that arm rather
 /// than assuming every datagram is telemetry.
-async fn handle_datagram(
+fn handle_datagram(
     datagram: &wtransport::datagram::Datagram,
     start: std::time::Instant,
     events_tx: &mpsc::Sender<ReceiverEvent>,
+    dropped_events: &AtomicU64,
 ) {
     let received_at = elapsed_to_timestamp(start.elapsed());
     match decode_datagram_event(&datagram.payload(), received_at) {
-        Ok(event) => {
-            if events_tx.send(event).await.is_err() {
-                warn!("event channel closed while forwarding datagram event");
-            }
-        }
+        Ok(event) => forward_event(events_tx, dropped_events, event),
         Err(source) => warn!(%source, "dropping undecodable datagram"),
     }
 }
@@ -198,16 +257,17 @@ fn decode_datagram_event(
 /// the bidi stream, forwarding `FrameRejected`/`Pong` and warning on
 /// anything else; leaves a trailing partial frame in `buf` for the next
 /// read.
-async fn drain_stream_frames(
+fn drain_stream_frames(
     buf: &mut Vec<u8>,
     start: std::time::Instant,
     events_tx: &mpsc::Sender<ReceiverEvent>,
+    dropped_events: &AtomicU64,
 ) {
     loop {
         match decode_one(buf) {
             Ok((message, consumed)) => {
                 buf.drain(..consumed);
-                forward_stream_message(message, start, events_tx).await;
+                forward_stream_message(message, start, events_tx, dropped_events);
             }
             Err(_) => return,
         }
@@ -217,10 +277,11 @@ async fn drain_stream_frames(
 /// Maps a decoded [`StreamMessage`] onto the [`ReceiverEvent`]s this probe
 /// forwards to the run loop, discarding (with a warning) message kinds it
 /// has no use for.
-async fn forward_stream_message(
+fn forward_stream_message(
     message: StreamMessage,
     start: std::time::Instant,
     events_tx: &mpsc::Sender<ReceiverEvent>,
+    dropped_events: &AtomicU64,
 ) {
     let event = match message {
         StreamMessage::FrameRejected(rejected) => ReceiverEvent::FrameRejected(rejected),
@@ -234,9 +295,7 @@ async fn forward_stream_message(
             return;
         }
     };
-    if events_tx.send(event).await.is_err() {
-        warn!("event channel closed while forwarding stream message");
-    }
+    forward_event(events_tx, dropped_events, event);
 }
 
 #[cfg(test)]

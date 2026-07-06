@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use pilotage_protocol::{ScopedControlFrame, SequenceNum, VehicleId};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use wtransport::{Connection, RecvStream};
+use wtransport::Connection;
 
 use crate::cli::Args;
 use crate::error::ProbeError;
@@ -15,6 +15,7 @@ use crate::receiver::{ReceiverEvent, spawn_receiver};
 use crate::sender::run_send_loop;
 use crate::summary::print_summary;
 use crate::transport::{client_endpoint, connect, handshake, validate_loopback_url};
+use crate::video::VideoStats;
 
 /// The vehicle this probe always targets; this tool has no per-run vehicle
 /// selection flag (out of scope per the task), so a fixed id keeps the
@@ -26,8 +27,10 @@ const PROBE_VEHICLE: VehicleId = VehicleId::new(1);
 const HISTOGRAM_CAPACITY: usize = 100_000;
 /// Bounded channel capacity between the receiver task and the run loop;
 /// sized so a burst of telemetry does not need unbounded buffering. A full
-/// channel drops the oldest-pending event and counts it (ADR-0015: a
-/// lagging consumer is a correctness signal, not silent).
+/// channel drops the newly arrived event via `try_send` and counts it
+/// (`receiver::forward_event`) rather than blocking delivery of everything
+/// queued behind a slow consumer (ADR-0015: a lagging consumer is a
+/// correctness signal, not silent).
 const EVENT_CHANNEL_CAPACITY: usize = 4096;
 
 /// Runs the full probe: connect, handshake, timed send/receive loop, the
@@ -54,11 +57,6 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
         "vehicle.motion lease granted"
     );
 
-    // The host opens a dedicated uni stream toward the client for reliable
-    // ordered authority events (ADR-0005); accept it so those events are read
-    // off their own stream rather than left unserviced.
-    let authority_stream = accept_authority_stream(&connection).await?;
-
     // The send loop and the receiver task must stamp send and receive
     // timestamps from the same monotonic origin (ADR-0009): the metrics
     // subtract them with a zero clock offset, so a second `Instant` origin in
@@ -67,15 +65,14 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
     let run_start = Instant::now();
 
     let (events_tx, mut events_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-    let receiver_handle = spawn_receiver(
-        connection.clone(),
-        recv_stream,
-        authority_stream,
-        run_start,
-        events_tx,
-    );
+    // The receiver task accepts every host-initiated uni stream itself (the
+    // dedicated authority-events stream plus one fresh stream per video
+    // frame, ADR-0005), so no uni stream is accepted here.
+    let (receiver_handle, dropped_events) =
+        spawn_receiver(connection.clone(), recv_stream, run_start, events_tx);
 
     let mut metrics = RunMetrics::new(HISTOGRAM_CAPACITY);
+    let mut video = VideoStats::new();
     let session = outcome.welcome.session;
     let generation = outcome.lease.generation;
     let run_budget = Duration::from_secs(args.seconds);
@@ -89,6 +86,7 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
         run_budget,
         &mut events_rx,
         &mut metrics,
+        &mut video,
     )
     .await?;
 
@@ -100,35 +98,26 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
         run_start,
         &mut events_rx,
         &mut metrics,
+        &mut video,
     )
     .await;
 
-    drain_pending_events(&mut events_rx, &mut metrics);
+    drain_pending_events(&mut events_rx, &mut metrics, &mut video);
     receiver_handle.abort();
+    metrics.dropped_events = dropped_events.load(std::sync::atomic::Ordering::Relaxed);
 
-    print_summary(&metrics, fencing_confirmed);
+    if let Some(dir) = &args.save_frames {
+        crate::save_frames::save_proof_frames(&video, dir).await;
+    }
+
+    print_summary(&metrics, &video, run_start.elapsed(), fencing_confirmed);
     Ok(())
-}
-
-/// Accepts the host's dedicated authority-events uni stream (ADR-0005).
-///
-/// # Errors
-///
-/// Returns [`ProbeError::BidiStream`] if the stream cannot be accepted; the
-/// host opens it immediately after the connection is established, so a failure
-/// here means the session did not come up as expected.
-async fn accept_authority_stream(connection: &Connection) -> Result<RecvStream, ProbeError> {
-    connection
-        .accept_uni()
-        .await
-        .map_err(|source| ProbeError::BidiStream {
-            message: format!("authority-events stream not accepted: {source}"),
-        })
 }
 
 /// Sends one control frame carrying a generation strictly older than the
 /// lease's granted generation, then waits briefly for the matching
 /// `FrameRejected` as end-to-end fencing proof.
+#[allow(clippy::too_many_arguments)]
 async fn send_stale_generation_probe(
     connection: &Connection,
     session: pilotage_protocol::SessionId,
@@ -137,6 +126,7 @@ async fn send_stale_generation_probe(
     run_start: Instant,
     events_rx: &mut mpsc::Receiver<ReceiverEvent>,
     metrics: &mut RunMetrics,
+    video: &mut VideoStats,
 ) -> bool {
     let stale_generation =
         pilotage_protocol::Generation::new(current_generation.as_u64().wrapping_sub(1));
@@ -158,19 +148,21 @@ async fn send_stale_generation_probe(
     }
     metrics.frames_sent = metrics.frames_sent.saturating_add(1);
 
-    wait_for_rejection(events_rx, stale_sequence, metrics).await
+    wait_for_rejection(events_rx, stale_sequence, metrics, video).await
 }
 
 /// Waits up to a short fixed deadline for a `FrameRejected` matching
 /// `sequence` to arrive on the receiver channel, folding it (and any other
-/// event observed while waiting) into `metrics`.
+/// event observed while waiting) into `metrics`/`video`.
 async fn wait_for_rejection(
     events_rx: &mut mpsc::Receiver<ReceiverEvent>,
     sequence: SequenceNum,
     metrics: &mut RunMetrics,
+    video: &mut VideoStats,
 ) -> bool {
     const FENCING_WAIT: Duration = Duration::from_millis(500);
     let deadline = Instant::now() + FENCING_WAIT;
+    let mut last_video_at: Option<Instant> = None;
     loop {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             return false;
@@ -182,8 +174,12 @@ async fn wait_for_rejection(
                     return true;
                 }
             }
-            Ok(Some(ReceiverEvent::Telemetry(_))) => {
+            Ok(Some(ReceiverEvent::Telemetry(observation))) => {
                 metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
+                metrics.last_pose = Some(observation.pose);
+            }
+            Ok(Some(ReceiverEvent::VideoFrame { jpeg, .. })) => {
+                fold_video_frame(&jpeg, video, &mut last_video_at);
             }
             Ok(Some(ReceiverEvent::Pong { .. } | ReceiverEvent::Authority)) | Err(_) => {}
             Ok(None) => return false,
@@ -192,18 +188,39 @@ async fn wait_for_rejection(
 }
 
 /// Drains any events still queued after the run loop and fencing probe
-/// finish, folding trailing telemetry/rejection counts into `metrics`
-/// rather than discarding them silently.
-fn drain_pending_events(events_rx: &mut mpsc::Receiver<ReceiverEvent>, metrics: &mut RunMetrics) {
+/// finish, folding trailing telemetry/rejection/video counts into
+/// `metrics`/`video` rather than discarding them silently.
+fn drain_pending_events(
+    events_rx: &mut mpsc::Receiver<ReceiverEvent>,
+    metrics: &mut RunMetrics,
+    video: &mut VideoStats,
+) {
+    let mut last_video_at: Option<Instant> = None;
     while let Ok(event) = events_rx.try_recv() {
         match event {
-            ReceiverEvent::Telemetry(_) => {
+            ReceiverEvent::Telemetry(observation) => {
                 metrics.telemetry_received = metrics.telemetry_received.wrapping_add(1);
+                metrics.last_pose = Some(observation.pose);
             }
             ReceiverEvent::FrameRejected(_) => {
                 metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
             }
+            ReceiverEvent::VideoFrame { jpeg, .. } => {
+                fold_video_frame(&jpeg, video, &mut last_video_at);
+            }
             ReceiverEvent::Pong { .. } | ReceiverEvent::Authority => {}
         }
     }
+}
+
+/// Folds one arrived video frame into `video`, recording the inter-arrival
+/// gap against `last_video_at` (this call's own local timing, independent of
+/// the frame's `received_at` field — both derive from the same wall clock, so
+/// either would do; this uses a plain `Instant` since the gap is all that
+/// matters here, not an absolute timestamp).
+fn fold_video_frame(jpeg: &[u8], video: &mut VideoStats, last_video_at: &mut Option<Instant>) {
+    let now = Instant::now();
+    let gap = last_video_at.map(|previous| now.duration_since(previous));
+    *last_video_at = Some(now);
+    video.record(jpeg, gap);
 }
