@@ -12,6 +12,7 @@ members = [
     "tools/hid-probe",
     "tools/loopback-probe",
     "hosts/session-host",
+    "adapters/gazebo",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
+pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-session = { path = "crates/pilotage-session" }
 
 [workspace.lints.rust]

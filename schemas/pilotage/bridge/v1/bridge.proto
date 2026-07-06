@@ -1,0 +1,48 @@
+// Internal host<->sidecar bridge wire types (ADR-0008). This package is
+// deliberately separate from `pilotage.v1`: it is the private protocol
+// between the Rust `pilotage-adapter-gazebo` host process and the C++
+// gz-transport sidecar bridge over a localhost TCP connection, and MUST
+// NOT be exposed to, or confused with, the public client protocol.
+syntax = "proto3";
+
+package pilotage.bridge.v1;
+
+// A control command from the host to the sidecar, mapped from canonical
+// control axes (throttle, yaw) to the vehicle's differential-drive
+// command frame.
+message BridgeControl {
+  double linear_x = 1;
+  double angular_z = 2;
+}
+
+// A single odometry sample from the sidecar to the host, already reduced
+// to the planar pose and scalar speed the host's canonical telemetry model
+// needs (ADR-0008): no raw gz.msgs.Odometry crosses this boundary.
+message BridgeOdometry {
+  double x = 1;
+  double y = 2;
+  double heading = 3;
+  double speed = 4;
+  uint64 sim_time_ns = 5;
+}
+
+// A single raw camera frame from the sidecar to the host, ahead of the
+// host's own MJPEG encode step (ADR-0005): no raw gz.msgs.Image crosses
+// this boundary.
+message BridgeFrame {
+  uint32 width = 1;
+  uint32 height = 2;
+  string pixel_format = 3;
+  uint64 sim_time_ns = 4;
+  bytes rgb = 5;
+}
+
+// Wraps exactly one bridge payload for length-delimited framing over the
+// host<->sidecar TCP connection.
+message BridgeEnvelope {
+  oneof payload {
+    BridgeControl control = 1;
+    BridgeOdometry odometry = 2;
+    BridgeFrame frame = 3;
+  }
+}

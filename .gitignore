@@ -16,6 +16,10 @@ wasm-pack.log
 # Generated protobuf code (generated at build time; schemas/ is the source of truth)
 **/src/generated/
 
+# CMake build output for the C++ gz-transport bridge (objects, binary, and
+# protobuf C++ generated from schemas/ at build time)
+adapters/**/bridge/build/
+
 # Environment and secrets
 .env
 .env.*
