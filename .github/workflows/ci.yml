@@ -56,6 +56,9 @@ jobs:
       - name: check-structure
         run: bash scripts/check-structure.sh
 
+      - name: web viewer wire conformance
+        run: node clients/web/wire.test.mjs
+
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
         uses: bufbuild/buf-action@v1

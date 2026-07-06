@@ -1,11 +1,24 @@
-//! Minimal argument parsing for the session-host binary: `--port <PORT>`,
-//! defaulting to `0` (ephemeral, loopback-only bind).
+//! Minimal argument parsing for the session-host binary: `--port <PORT>` and
+//! `--adapter reference|gazebo`, defaulting to port `0` (ephemeral,
+//! loopback-only bind) and the reference adapter.
+
+/// Which vehicle adapter the host embeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AdapterKind {
+    /// The deterministic headless reference adapter (default; 1a behavior).
+    #[default]
+    Reference,
+    /// The real Gazebo diff-drive adapter driven through the sidecar bridge.
+    Gazebo,
+}
 
 /// Parsed command-line configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CliArgs {
     /// Port to bind on `127.0.0.1`. `0` asks the OS for an ephemeral port.
     pub port: u16,
+    /// Which vehicle adapter to embed.
+    pub adapter: AdapterKind,
 }
 
 /// An error parsing command-line arguments.
@@ -23,6 +36,12 @@ pub enum CliError {
     /// `--port` was given with no following value.
     #[error("--port requires a value")]
     MissingPortValue,
+    /// `--adapter` was given with no following value.
+    #[error("--adapter requires a value")]
+    MissingAdapterValue,
+    /// `--adapter` was given a value other than `reference` or `gazebo`.
+    #[error("invalid --adapter value {0:?} (expected reference or gazebo)")]
+    InvalidAdapter(String),
     /// An argument was not recognized.
     #[error("unrecognized argument: {0}")]
     Unrecognized(String),
@@ -35,6 +54,7 @@ pub enum CliError {
 /// Returns [`CliError`] for a malformed or unrecognized `--port` argument.
 pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
     let mut port: u16 = 0;
+    let mut adapter = AdapterKind::default();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -45,21 +65,30 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                     source,
                 })?;
             }
+            "--adapter" => {
+                let value = iter.next().ok_or(CliError::MissingAdapterValue)?;
+                adapter = match value.as_str() {
+                    "reference" => AdapterKind::Reference,
+                    "gazebo" => AdapterKind::Gazebo,
+                    other => return Err(CliError::InvalidAdapter(other.to_owned())),
+                };
+            }
             other => return Err(CliError::Unrecognized(other.to_owned())),
         }
     }
-    Ok(CliArgs { port })
+    Ok(CliArgs { port, adapter })
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{CliError, parse_args};
+    use super::{AdapterKind, CliError, parse_args};
 
     #[test]
     fn no_args_defaults_to_ephemeral_port() {
         let parsed = parse_args(&[]).expect("empty args parse");
         assert_eq!(parsed.port, 0);
+        assert_eq!(parsed.adapter, AdapterKind::Reference);
     }
 
     #[test]
@@ -67,6 +96,35 @@ mod tests {
         let args = vec!["--port".to_owned(), "4433".to_owned()];
         let parsed = parse_args(&args).expect("valid port parses");
         assert_eq!(parsed.port, 4433);
+    }
+
+    #[test]
+    fn gazebo_adapter_parses() {
+        let args = vec!["--adapter".to_owned(), "gazebo".to_owned()];
+        let parsed = parse_args(&args).expect("gazebo adapter parses");
+        assert_eq!(parsed.adapter, AdapterKind::Gazebo);
+    }
+
+    #[test]
+    fn reference_adapter_parses() {
+        let args = vec!["--adapter".to_owned(), "reference".to_owned()];
+        let parsed = parse_args(&args).expect("reference adapter parses");
+        assert_eq!(parsed.adapter, AdapterKind::Reference);
+    }
+
+    #[test]
+    fn unknown_adapter_is_an_error() {
+        let args = vec!["--adapter".to_owned(), "unreal".to_owned()];
+        assert_eq!(
+            parse_args(&args),
+            Err(CliError::InvalidAdapter("unreal".to_owned()))
+        );
+    }
+
+    #[test]
+    fn missing_adapter_value_is_an_error() {
+        let args = vec!["--adapter".to_owned()];
+        assert_eq!(parse_args(&args), Err(CliError::MissingAdapterValue));
     }
 
     #[test]

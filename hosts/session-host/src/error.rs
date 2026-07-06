@@ -21,4 +21,7 @@ pub enum HostError {
     /// Constructing the tokio runtime failed.
     #[error("failed to build the tokio runtime: {0}")]
     Runtime(#[source] std::io::Error),
+    /// Spawning or connecting the Gazebo sidecar bridge failed.
+    #[error("failed to start the Gazebo adapter: {0}")]
+    GazeboAdapter(#[source] pilotage_adapter_gazebo::GazeboAdapterError),
 }

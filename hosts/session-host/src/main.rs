@@ -31,7 +31,7 @@ fn run(args: &[String]) -> Result<(), HostError> {
     let cli_args = cli::parse_args(args).map_err(HostError::Cli)?;
     let runtime = tokio::runtime::Runtime::new().map_err(HostError::Runtime)?;
     runtime.block_on(async move {
-        let host = runtime::start(cli_args.port)?;
+        let host = runtime::start(cli_args.port, cli_args.adapter).await?;
         if let Err(error) = tokio::signal::ctrl_c().await {
             tracing::error!(%error, "failed to listen for ctrl_c");
         }

@@ -1,24 +1,27 @@
 # Pilotage
 
-Rust-first, engine-independent platform for low-latency remote control, supervision,
-simulation, and training of maritime, aerial, and terrestrial vehicles.
+Engine-independent platform for low-latency remote control, supervision, simulation,
+and training of maritime, aerial, and terrestrial vehicles.
 
-**Status:** architecture phase. The decision records under [docs/adr](docs/adr/README.md)
-are the authoritative design; no implementation code has landed yet.
+**Status:** early implementation. The core protocol/authority/input crates, a
+WebTransport session host, and a Gazebo adapter are in place; a browser and a native
+client drive a real Gazebo vehicle end-to-end (video, telemetry, and control). The
+decision records under [docs/adr](docs/adr/README.md) are the authoritative design.
 
-## What v1 delivers
+## Working demo
 
-A browser client controlling a server-hosted Gazebo simulation: rendered video and
-telemetry stream down over WebTransport, sequenced control frames stream up, and channel-level
-control authority (vehicle helm, camera helm, payload helm) is enforced with scoped
-leases and fencing generations. The same binaries run over loopback or LAN for local
-demonstrations.
+A diff-drive vehicle in Gazebo, driven from a browser or native client: the onboard
+camera streams down as MJPEG over WebTransport, odometry streams down as telemetry,
+and keyboard/gamepad control streams up — with channel-level authority (scoped leases
+and fencing generations) enforced on every frame. A C++ gz-transport sidecar bridges
+Gazebo to the Rust adapter; a deterministic headless adapter stands in when Gazebo is
+not present. Runs over loopback or LAN.
 
 ## What the architecture protects
 
 - **Portable sans-IO core.** All protocol, authority, input, timing, and replay logic
-  lives in portable Rust crates shared by the browser (WebAssembly) and future native
-  clients. Platform code stays thin; domain logic is never duplicated.
+  lives in portable crates shared by the browser and native clients. Platform code
+  stays thin; domain logic is never duplicated.
 - **Engine independence.** Gazebo is the first adapter, not the platform boundary.
   Unreal, Unity, deterministic headless trainers, and real-vehicle gateways are peer
   implementations of the same adapter contract.
@@ -36,9 +39,11 @@ demonstrations.
 | `docs/` | Architecture overview and supporting design docs |
 | `schemas/` | Protobuf wire-schema sources — the protocol's source of truth |
 | `crates/` | Portable sans-IO core crates |
-| `hosts/` | Session-host binaries |
-| `adapters/` | Simulator and vehicle adapters (Gazebo first, reference-headless alongside) |
-| `clients/` | Browser (wasm) and future native front ends |
+| `hosts/` | Session-host binary |
+| `adapters/` | Vehicle adapters: Gazebo (with its C++ bridge) and the deterministic reference |
+| `sim/` | Gazebo demo worlds |
+| `clients/` | Browser demo viewer (native viewer lives under `tools/`) |
+| `tools/` | Native viewer/probe and the HID device probe |
 | `services/` | Identity, rendezvous/signaling, and other optional central services |
 
 Start with [docs/architecture.md](docs/architecture.md), then the

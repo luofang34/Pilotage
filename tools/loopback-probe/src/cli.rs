@@ -21,6 +21,14 @@ pub struct Args {
     pub seconds: u64,
     /// Control-frame send rate in Hz.
     pub rate: u64,
+    /// Whether to send the scripted forward-then-arc drive pattern instead of
+    /// the default synthetic sine-wave generator. Takes precedence over
+    /// `--hid` if both are somehow given, since `--drive` is this tool's
+    /// deliberate "move the real vehicle" demo mode.
+    pub drive: bool,
+    /// If set, save the first, a middle, and the last decoded video frame as
+    /// PNG files under this directory.
+    pub save_frames: Option<String>,
 }
 
 const DEFAULT_SECONDS: u64 = 3;
@@ -46,6 +54,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, ProbeError> {
         });
     }
     let hid = has_flag(args, "--hid");
+    let drive = has_flag(args, "--drive");
     let seconds = optional_u64(args, "--seconds")?.unwrap_or(DEFAULT_SECONDS);
     let rate = optional_u64(args, "--rate")?.unwrap_or(DEFAULT_RATE);
     if rate == 0 {
@@ -53,12 +62,15 @@ pub fn parse_args(args: &[String]) -> Result<Args, ProbeError> {
             message: "--rate must be greater than zero".to_string(),
         });
     }
+    let save_frames = optional_flag(args, "--save-frames")?;
     Ok(Args {
         url,
         insecure_loopback,
         hid,
         seconds,
         rate,
+        drive,
+        save_frames,
     })
 }
 
@@ -80,6 +92,18 @@ fn require_flag<'a>(args: &'a [String], name: &str) -> Result<&'a str, ProbeErro
         .ok_or_else(|| ProbeError::Usage {
             message: format!("{name} requires a value"),
         })
+}
+
+/// Finds `--name VALUE` in `args` and returns `VALUE` as an owned `String`,
+/// returning `None` if the flag was not supplied at all.
+fn optional_flag(args: &[String], name: &str) -> Result<Option<String>, ProbeError> {
+    let Some(position) = args.iter().position(|arg| arg == name) else {
+        return Ok(None);
+    };
+    let value = args.get(position + 1).ok_or_else(|| ProbeError::Usage {
+        message: format!("{name} requires a value"),
+    })?;
+    Ok(Some(value.clone()))
 }
 
 /// Finds `--name VALUE` in `args` and parses it as `u64`, returning `None`
@@ -122,6 +146,8 @@ mod tests {
                 hid: false,
                 seconds: 3,
                 rate: 100,
+                drive: false,
+                save_frames: None,
             }
         );
     }
@@ -133,15 +159,20 @@ mod tests {
             "https://127.0.0.1:4433",
             "--insecure-loopback",
             "--hid",
+            "--drive",
             "--seconds",
             "10",
             "--rate",
             "50",
+            "--save-frames",
+            "/tmp/frames",
         ]))
         .expect("parses");
         assert!(parsed.hid);
+        assert!(parsed.drive);
         assert_eq!(parsed.seconds, 10);
         assert_eq!(parsed.rate, 50);
+        assert_eq!(parsed.save_frames.as_deref(), Some("/tmp/frames"));
     }
 
     #[test]

@@ -18,11 +18,13 @@ use wtransport::Connection;
 
 use crate::cli::Args;
 use crate::control_source::{HidSource, elapsed_to_timestamp};
+use crate::drive;
 use crate::error::ProbeError;
 use crate::metrics::RunMetrics;
 use crate::pipeline::{Pipeline, load_radiomaster_pocket_profile};
 use crate::receiver::ReceiverEvent;
 use crate::synthetic;
+use crate::video::VideoStats;
 use crate::wire_session::encode_ping_datagram;
 
 /// Ping cadence: independent of the control-frame rate since RTT tracking
@@ -54,6 +56,12 @@ const PENDING_QUEUE_CAPACITY: usize = 1024;
 struct SendLoopState {
     hid_source: Option<HidSource>,
     pipeline: Option<Pipeline>,
+    /// Whether this run sends the `--drive` scripted forward-then-arc
+    /// pattern instead of HID input or the default synthetic sine wave.
+    drive: bool,
+    /// The run's total time budget, needed by the `--drive` script to decide
+    /// which half of the run it is in.
+    run_budget: Duration,
     sequence: SequenceNum,
     pending: VecDeque<PendingFrame>,
     last_pose: Option<(f32, f32, f32)>,
@@ -64,6 +72,9 @@ struct SendLoopState {
     /// matched (see `handle_event`).
     last_telemetry_at: Option<pilotage_timing::MonoTimestamp>,
     ping_nonce: u64,
+    /// Wall-clock instant of the most recent video-frame arrival, so
+    /// consecutive frames' inter-arrival gap is recorded into `VideoStats`.
+    last_video_at: Option<Instant>,
 }
 
 /// Runs the timed send loop for `args.seconds` at `args.rate` Hz, folding
@@ -84,19 +95,26 @@ pub async fn run_send_loop(
     run_budget: Duration,
     events_rx: &mut mpsc::Receiver<ReceiverEvent>,
     metrics: &mut RunMetrics,
+    video: &mut VideoStats,
 ) -> Result<SequenceNum, ProbeError> {
+    // `--drive` takes precedence over `--hid`: it is this tool's deliberate
+    // "move the real vehicle" demo mode, so a HID device (present or absent)
+    // never overrides it.
+    let hid_active = args.hid && !args.drive;
     let mut state = SendLoopState {
-        hid_source: args.hid.then(|| HidSource::open(run_start)).transpose()?,
-        pipeline: args
-            .hid
+        hid_source: hid_active.then(|| HidSource::open(run_start)).transpose()?,
+        pipeline: hid_active
             .then(load_radiomaster_pocket_profile)
             .transpose()?
             .map(Pipeline::new),
+        drive: args.drive,
+        run_budget,
         sequence: SequenceNum::new(0),
         pending: VecDeque::new(),
         last_pose: None,
         last_telemetry_at: None,
         ping_nonce: 0,
+        last_video_at: None,
     };
 
     let period = Duration::from_secs(1)
@@ -116,7 +134,7 @@ pub async fn run_send_loop(
                 send_ping(connection, run_start, &mut state);
             }
             Some(event) = events_rx.recv() => {
-                handle_event(event, &mut state, metrics);
+                handle_event(event, &mut state, metrics, video, run_start.elapsed());
             }
         }
     }
@@ -172,11 +190,16 @@ fn send_one_frame(
 const MOTION_SCOPE_AXES: [u16; 2] = [2, 3];
 
 /// Produces this tick's payload and profile revision from whichever source
-/// is active (`--hid` or the synthetic sine generator).
+/// is active: `--drive`'s scripted pattern, `--hid`, or the default synthetic
+/// sine generator, in that precedence order (see `run_send_loop`).
 fn build_payload(
     state: &mut SendLoopState,
     run_start: Instant,
 ) -> Result<(ControlPayload, u32), ProbeError> {
+    if state.drive {
+        let payload = drive::payload_at(run_start.elapsed(), state.run_budget)?;
+        return Ok((payload, 0));
+    }
     match (&mut state.hid_source, &mut state.pipeline) {
         (Some(source), Some(pipeline)) => {
             let sample = source.sample()?;
@@ -217,11 +240,17 @@ fn send_ping(connection: &Connection, run_start: Instant, state: &mut SendLoopSt
     }
 }
 
-/// Folds one receiver-task event into `metrics`. Telemetry pose changes are
-/// matched against the earliest frame sent *after* the previous telemetry
-/// sample; rejections and pongs are handled independently of the pending
-/// queue.
-fn handle_event(event: ReceiverEvent, state: &mut SendLoopState, metrics: &mut RunMetrics) {
+/// Folds one receiver-task event into `metrics`/`video`. Telemetry pose
+/// changes are matched against the earliest frame sent *after* the previous
+/// telemetry sample; rejections and pongs are handled independently of the
+/// pending queue; video frames are decoded and folded into `video`.
+fn handle_event(
+    event: ReceiverEvent,
+    state: &mut SendLoopState,
+    metrics: &mut RunMetrics,
+    video: &mut VideoStats,
+    elapsed: Duration,
+) {
     match event {
         ReceiverEvent::Telemetry(observation) => {
             metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
@@ -233,6 +262,14 @@ fn handle_event(event: ReceiverEvent, state: &mut SendLoopState, metrics: &mut R
         ReceiverEvent::Pong { pong, received_at } => {
             let rtt = estimated_age(received_at, pong.echoed_sender_sent_at, ZERO_OFFSET);
             metrics.rtt.record(rtt);
+        }
+        ReceiverEvent::VideoFrame { jpeg, .. } => {
+            let now = Instant::now();
+            let gap = state
+                .last_video_at
+                .map(|previous| now.duration_since(previous));
+            state.last_video_at = Some(now);
+            video.record_at(&jpeg, gap, Some((elapsed, state.run_budget)));
         }
         ReceiverEvent::Authority => {}
     }
@@ -267,6 +304,7 @@ fn fold_telemetry(
         }
     }
     let changed = state.last_pose.replace(observation.pose) != Some(observation.pose);
+    metrics.last_pose = Some(observation.pose);
     if changed && let Some(frame) = state.pending.pop_front() {
         let age = estimated_age(observation.received_at, frame.sent_at, ZERO_OFFSET);
         metrics.control_to_telemetry.record(age);
