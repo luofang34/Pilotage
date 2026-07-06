@@ -75,6 +75,12 @@
     font-family: monospace;
     font-size: 0.9rem;
   }
+  #gamepad {
+    margin-top: 0.35rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #9ac;
+  }
   #status {
     margin-top: 0.75rem;
     white-space: pre-wrap;
@@ -94,8 +100,10 @@
 
 <h1>Pilotage demo viewer</h1>
 <p class="hint">
-  Drive with arrow keys or WASD once connected. Video and telemetry arrive from the real
-  Gazebo vehicle through the session host.
+  Drive with a connected USB gamepad (e.g. RadioMaster Pocket) if present, otherwise the
+  arrow keys or WASD. Video and telemetry arrive from the real Gazebo vehicle through the
+  session host. A gamepad appears to the browser only after you move a stick or press a
+  button once.
 </p>
 
 <div class="bootstrap">
@@ -110,6 +118,7 @@
   <div id="overlay"></div>
 </div>
 <div id="telemetry">no telemetry yet</div>
+<div id="gamepad">gamepad: none (move a stick to detect)</div>
 <div id="status"></div>
 
 <script type="module" src="./main.js"></script>

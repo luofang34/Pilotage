@@ -39,6 +39,7 @@ const els = {
   status: document.getElementById("status"),
   overlay: document.getElementById("overlay"),
   telemetry: document.getElementById("telemetry"),
+  gamepad: document.getElementById("gamepad"),
   canvas: document.getElementById("video"),
 };
 const ctx = els.canvas.getContext("2d");
@@ -121,7 +122,7 @@ async function connect() {
   state.connected = true;
   acceptIncomingUniStreams(transport);
   readTelemetryDatagrams(transport);
-  startControlLoop(transport);
+  startControlLoop(transport).catch((error) => log(`control loop stopped: ${error}`));
 }
 
 /** Writes a length-delimited `ClientHello` envelope onto the bootstrap bidi stream. */
@@ -333,13 +334,127 @@ function axesFromKeys() {
   return [throttle, yaw];
 }
 
+// Per-controller FPV mapping profiles. EdgeTX radios (RadioMaster Pocket) output
+// the "Classic Joystick" report in AETR channel order over 8 HID axes, and
+// EdgeTX maps CH1->axis0, CH2->axis1, CH3->axis2, CH4->axis3, so:
+//   axis 0 = Aileron (roll), 1 = Elevator (pitch), 2 = Throttle, 3 = Rudder (yaw).
+// The FPV convention drives with throttle for speed and rudder for yaw (both the
+// left stick in Mode 2). Throttle does not self-center — it holds its position
+// like an aircraft throttle — so centering it stops the vehicle.
+// Field of a profile: forwardAxis/turnAxis (HID axis index), forwardSign/turnSign
+// (+1 or -1), deadzone. A `match(id)` picks the profile from the gamepad id.
+const CONTROLLER_PROFILES = [
+  {
+    name: "RadioMaster Pocket (EdgeTX, FPV AETR)",
+    match: (id) => /radiomaster|pocket|1209/i.test(id),
+    forwardAxis: 2, // throttle
+    forwardSign: 1, // stick up = forward, center = stop, down = reverse
+    turnAxis: 3, // rudder
+    turnSign: -1, // rudder right = turn right (negative yaw-rate in Gazebo)
+    deadzone: 0.06,
+  },
+];
+// Fallback for any other gamepad: drive from the left stick's self-centering
+// vertical/horizontal axes so the vehicle stops when the stick is released.
+const GENERIC_PROFILE = {
+  name: "generic gamepad",
+  forwardAxis: 1,
+  forwardSign: -1, // browsers report stick-up as negative
+  turnAxis: 0,
+  turnSign: 1,
+  deadzone: 0.1,
+};
+
+// User overrides for the active profile, taken from URL query params today; this
+// is the seam a future in-app remapping UI plugs into. Any of ?fwd= ?turn=
+// ?fwdsign= ?turnsign= ?deadzone= replaces the corresponding profile field.
+function overrideProfile(profile) {
+  const q = new URLSearchParams(window.location.search);
+  const intParam = (name, fallback) => {
+    const v = Number.parseInt(q.get(name) ?? "", 10);
+    return Number.isInteger(v) ? v : fallback;
+  };
+  const numParam = (name, fallback) => {
+    const v = Number.parseFloat(q.get(name) ?? "");
+    return Number.isFinite(v) ? v : fallback;
+  };
+  const signParam = (name, fallback) => (intParam(name, fallback) < 0 ? -1 : 1);
+  return {
+    name: q.has("fwd") || q.has("turn") ? `${profile.name} (overridden)` : profile.name,
+    forwardAxis: intParam("fwd", profile.forwardAxis),
+    forwardSign: signParam("fwdsign", profile.forwardSign),
+    turnAxis: intParam("turn", profile.turnAxis),
+    turnSign: signParam("turnsign", profile.turnSign),
+    deadzone: numParam("deadzone", profile.deadzone),
+  };
+}
+
+/** Returns the first connected gamepad that matches a known profile, else any
+ *  connected gamepad, else null. A gamepad is exposed to the page only after the
+ *  user moves a stick or presses a button once. */
+function activeGamepad() {
+  const pads = (navigator.getGamepads && navigator.getGamepads()) || [];
+  let firstConnected = null;
+  for (const pad of pads) {
+    if (!pad || !pad.connected) continue;
+    firstConnected = firstConnected || pad;
+    if (CONTROLLER_PROFILES.some((p) => p.match(pad.id))) return pad;
+  }
+  return firstConnected;
+}
+
+/** Picks the FPV profile for a gamepad id and applies user overrides. */
+function profileFor(id) {
+  const base = CONTROLLER_PROFILES.find((p) => p.match(id)) || GENERIC_PROFILE;
+  return overrideProfile(base);
+}
+
+/** Maps a gamepad's axes to [throttle, yaw] in [-1.0, 1.0] under `profile`. */
+function axesFromGamepad(pad, profile) {
+  const raw = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
+  const clamp = (v) => Math.max(-1, Math.min(1, v));
+  const deadzone = (v) => (Math.abs(v) < profile.deadzone ? 0 : v);
+  const throttle = clamp(deadzone(profile.forwardSign * raw(profile.forwardAxis)));
+  const yaw = clamp(deadzone(profile.turnSign * raw(profile.turnAxis)));
+  return [throttle, yaw];
+}
+
+/** Updates the gamepad readout so the active profile and axis-to-control mapping
+ *  are visible while driving (and easy to re-map with the ?fwd=/?turn= overrides). */
+function updateGamepadReadout(pad, profile, throttle, yaw) {
+  if (!pad) {
+    els.gamepad.textContent = "gamepad: none (move a stick to detect) — using keyboard";
+    return;
+  }
+  const axes = Array.from(pad.axes, (v) => v.toFixed(2)).join(", ");
+  els.gamepad.textContent =
+    `gamepad: ${pad.id} [${profile.name}] | axes[${axes}] | ` +
+    `throttle=${throttle.toFixed(2)} (axis ${profile.forwardAxis}) ` +
+    `yaw=${yaw.toFixed(2)} (axis ${profile.turnAxis})`;
+}
+
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
-function startControlLoop(transport) {
+async function startControlLoop(transport) {
   const writer = transport.datagrams.writable.getWriter();
   const intervalMs = 1000 / CONTROL_HZ;
-  setInterval(() => {
+  // Self-paced async loop rather than setInterval: it awaits the writer's
+  // backpressure signal (`ready`) before each send, so datagrams never queue up
+  // in the WritableStream and get flushed in a burst with stale `sampled_at`
+  // (which the host rejects as too old, ADR-0009). `sampled_at` is stamped right
+  // before the write, after `ready`, so it reflects the real send moment.
+  while (state.connected) {
+    try {
+      await writer.ready;
+    } catch {
+      return; // writer closed (session ended)
+    }
     if (!state.connected) return;
-    const [throttle, yaw] = axesFromKeys();
+    // A connected gamepad drives under its FPV profile; the keyboard is the
+    // fallback when none is present. The readout shows the live mapping either way.
+    const pad = activeGamepad();
+    const profile = pad ? profileFor(pad.id) : null;
+    const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
+    updateGamepadReadout(pad, profile, throttle, yaw);
     state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
     const envelope = encodeControlFrameEnvelope({
       sessionId: state.sessionId,
@@ -355,7 +470,8 @@ function startControlLoop(transport) {
       ],
     });
     writer.write(envelope).catch((error) => log(`control datagram send failed: ${error}`));
-  }, intervalMs);
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 applyUrlParams();
