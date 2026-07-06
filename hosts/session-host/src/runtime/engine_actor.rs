@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{StepBudget, VehicleAdapter};
-use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_protocol::wire;
 use pilotage_session::{ClientKey, DomainEnvelope, SessionAction, SessionEngine, SessionOutcome};
 use pilotage_timing::{BoundedLatencyLog, MonoTimestamp, Stage, StageLatency};
@@ -97,12 +96,17 @@ pub enum ToEngine {
     },
 }
 
-/// Owns the [`SessionEngine`], the embedded [`ReferenceAdapter`], the client
+/// Owns the [`SessionEngine`], the embedded vehicle adapter, the client
 /// registry, and the per-stage latency log; runs until its command channel
 /// closes.
-pub struct EngineActor {
+///
+/// Generic over the [`VehicleAdapter`] so the same actor drives either the
+/// deterministic reference adapter or the real Gazebo adapter for control,
+/// telemetry, and stepping. Video frames are not part of this trait and are
+/// wired separately (the media task, ADR-0005/0008).
+pub struct EngineActor<A: VehicleAdapter> {
     engine: SessionEngine,
-    adapter: ReferenceAdapter,
+    adapter: A,
     clients: ClientRegistry,
     latency: BoundedLatencyLog<LATENCY_LOG_CAPACITY>,
     drops: DropCounters,
@@ -113,7 +117,7 @@ pub struct EngineActor {
     start: Instant,
 }
 
-impl EngineActor {
+impl<A: VehicleAdapter> EngineActor<A> {
     /// Constructs an actor wrapping `engine` and `adapter`, with an empty
     /// client registry and latency log.
     ///
@@ -122,7 +126,7 @@ impl EngineActor {
     /// offer-expiry timestamp from it, and a second, independently-sampled
     /// origin would skew those comparisons against client-message stamps.
     #[must_use]
-    pub fn new(engine: SessionEngine, adapter: ReferenceAdapter, start: Instant) -> Self {
+    pub fn new(engine: SessionEngine, adapter: A, start: Instant) -> Self {
         Self {
             engine,
             adapter,

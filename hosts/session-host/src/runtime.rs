@@ -6,8 +6,11 @@
 
 mod connection;
 mod engine_actor;
+mod gazebo_launch;
+mod media;
 mod registry;
 mod shutdown;
+mod stream_tag;
 mod wire_codec;
 
 use std::net::SocketAddr;
@@ -24,10 +27,12 @@ use tokio::task::JoinSet;
 use tracing::{info, warn};
 use wtransport::{Endpoint, Identity, ServerConfig};
 
+use crate::cli::AdapterKind;
 use crate::error::HostError;
 use crate::output::print_line;
 use crate::tls_identity::build_dev_identity;
 use engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor, ToEngine};
+use media::MediaHandle;
 
 /// The vehicle the embedded reference adapter drives in this increment.
 const HOST_VEHICLE: VehicleId = VehicleId::new(1);
@@ -69,24 +74,35 @@ impl RunningHost {
 
 /// Builds the embedded [`SessionEngine`] and [`ReferenceAdapter`] pair this
 /// increment's host serves.
-fn build_engine_and_adapter() -> (SessionEngine, ReferenceAdapter) {
+fn build_reference() -> (SessionEngine, ReferenceAdapter) {
     let adapter = ReferenceAdapter::from_seed(HOST_VEHICLE, ADAPTER_SEED);
+    let engine = build_engine(&adapter);
+    (engine, adapter)
+}
+
+/// Builds the session engine from an adapter's advertised capabilities and
+/// this host's staleness/config policy, shared by every adapter path.
+fn build_engine<A: VehicleAdapter>(adapter: &A) -> SessionEngine {
     let capabilities = adapter.capabilities();
     let staleness = StalenessPolicy::new(MAX_CONTROL_AGE);
     let config = SessionConfig::new(pilotage_protocol::SCHEMA_VERSION, env!("CARGO_PKG_VERSION"));
-    let engine = SessionEngine::new(capabilities, staleness, config);
-    (engine, adapter)
+    SessionEngine::new(capabilities, staleness, config)
 }
 
 /// Starts the session host bound to `127.0.0.1:port` (`0` for an OS-assigned
 /// ephemeral port), prints the `LISTENING` line, and returns a handle for
 /// shutdown.
 ///
+/// `adapter` selects the embedded vehicle adapter: [`AdapterKind::Reference`]
+/// (default, 1a behavior, no video) or [`AdapterKind::Gazebo`] (real Gazebo
+/// diff-drive through the sidecar bridge, with an MJPEG video downlink).
+///
 /// # Errors
 ///
-/// Returns [`HostError`] if the TLS identity cannot be built or the
-/// WebTransport endpoint cannot bind.
-pub fn start(port: u16) -> Result<RunningHost, HostError> {
+/// Returns [`HostError`] if the TLS identity cannot be built, the
+/// WebTransport endpoint cannot bind, or the Gazebo sidecar bridge cannot be
+/// spawned and connected.
+pub async fn start(port: u16, adapter: AdapterKind) -> Result<RunningHost, HostError> {
     let dev_identity = build_dev_identity()?;
     let identity: Identity = dev_identity.identity;
     let cert_hash_hex = dev_identity.cert_hash_hex.clone();
@@ -105,18 +121,10 @@ pub fn start(port: u16) -> Result<RunningHost, HostError> {
         cert_hash_hex
     ));
 
-    let (engine, adapter) = build_engine_and_adapter();
     let (engine_tx, engine_rx) = mpsc::channel::<ToEngine>(ENGINE_QUEUE_CAPACITY);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    let join = tokio::spawn(run_until_shutdown(
-        endpoint,
-        engine,
-        adapter,
-        engine_tx,
-        engine_rx,
-        shutdown_rx,
-    ));
+    let join = spawn_host_runtime(adapter, endpoint, engine_tx, engine_rx, shutdown_rx).await?;
 
     Ok(RunningHost {
         local_addr,
@@ -126,17 +134,61 @@ pub fn start(port: u16) -> Result<RunningHost, HostError> {
     })
 }
 
-/// Runs the accept loop and engine actor until `shutdown_rx` fires, then
-/// tears down every spawned task (engine actor, accept loop, and every
-/// per-connection task) within the shutdown timeout.
-async fn run_until_shutdown(
+/// Builds the chosen adapter (and, for Gazebo, its media task) and spawns the
+/// per-adapter `run_until_shutdown` task.
+async fn spawn_host_runtime(
+    adapter: AdapterKind,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    engine: SessionEngine,
-    adapter: ReferenceAdapter,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
-) {
+) -> Result<tokio::task::JoinHandle<()>, HostError> {
+    match adapter {
+        AdapterKind::Reference => {
+            let (engine, adapter) = build_reference();
+            Ok(tokio::spawn(run_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                None,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+            )))
+        }
+        AdapterKind::Gazebo => {
+            let (engine, adapter, frames) =
+                gazebo_launch::build_gazebo(HOST_VEHICLE, MAX_CONTROL_AGE).await?;
+            let (media, media_task) = media::spawn_media_task(frames);
+            Ok(tokio::spawn(run_gazebo_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                media,
+                media_task,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+            )))
+        }
+    }
+}
+
+/// Runs the accept loop and engine actor until `shutdown_rx` fires, then
+/// tears down every spawned task (engine actor, accept loop, and every
+/// per-connection task) within the shutdown timeout. `media` is `Some` only
+/// for the Gazebo path, wiring each connection into the video downlink.
+async fn run_until_shutdown<A>(
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    engine: SessionEngine,
+    adapter: A,
+    media: Option<MediaHandle>,
+    engine_tx: mpsc::Sender<ToEngine>,
+    engine_rx: mpsc::Receiver<ToEngine>,
+    shutdown_rx: oneshot::Receiver<()>,
+) where
+    A: VehicleAdapter + Send + 'static,
+{
     // A single monotonic origin feeds every `host_time` comparison across
     // the host (ADR-0009): client-message receive stamps (via `accept_loop`
     // and each connection task) and the engine actor's tick/offer-expiry
@@ -151,7 +203,7 @@ async fn run_until_shutdown(
     ));
 
     tokio::select! {
-        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start) => {}
+        () = accept_loop(&endpoint, &engine_tx, &mut tasks, start, media.clone()) => {}
         result = shutdown_rx => {
             // A dropped sender (host caller gone without an explicit
             // shutdown) is treated the same as an explicit signal, so
@@ -167,6 +219,37 @@ async fn run_until_shutdown(
         b"session host shutting down",
     );
     shutdown::join_with_timeout(tasks).await;
+}
+
+/// The Gazebo variant of [`run_until_shutdown`]: identical lifecycle, plus it
+/// joins the media task on the way out so no video uni stream is abandoned
+/// mid-write. The media task ends once its frame source (the adapter) is
+/// dropped, which the engine-actor task does at teardown.
+#[allow(clippy::too_many_arguments)]
+async fn run_gazebo_until_shutdown(
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    engine: SessionEngine,
+    adapter: pilotage_adapter_gazebo::GazeboAdapter,
+    media: MediaHandle,
+    media_task: tokio::task::JoinHandle<()>,
+    engine_tx: mpsc::Sender<ToEngine>,
+    engine_rx: mpsc::Receiver<ToEngine>,
+    shutdown_rx: oneshot::Receiver<()>,
+) {
+    run_until_shutdown(
+        endpoint,
+        engine,
+        adapter,
+        Some(media),
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+    )
+    .await;
+    // The engine actor (owner of the adapter and its frame sender) has now
+    // been torn down, closing the media task's frame source; wait for it to
+    // drain and finish its writers.
+    media_task.await.ok();
 }
 
 /// Requests and logs the engine actor's per-stage latency summary
@@ -194,6 +277,7 @@ async fn accept_loop(
     engine_tx: &mpsc::Sender<ToEngine>,
     tasks: &mut JoinSet<()>,
     start: tokio::time::Instant,
+    media: Option<MediaHandle>,
 ) {
     let next_client = AtomicU64::new(0);
     loop {
@@ -214,7 +298,7 @@ async fn accept_loop(
         let client = ClientKey::new(next_client.fetch_add(1, Ordering::Relaxed));
         tasks.spawn(named_task(
             "connection",
-            accept_and_run(incoming, client, start, engine_tx),
+            accept_and_run(incoming, client, start, engine_tx, media.clone()),
         ));
     }
 }
@@ -227,6 +311,7 @@ async fn accept_and_run(
     client: ClientKey,
     start: tokio::time::Instant,
     engine_tx: mpsc::Sender<ToEngine>,
+    media: Option<MediaHandle>,
 ) {
     let session_request = match incoming.await {
         Ok(request) => request,
@@ -242,7 +327,7 @@ async fn accept_and_run(
             return;
         }
     };
-    connection::run_connection(connection, client, start, engine_tx).await;
+    connection::run_connection(connection, client, start, engine_tx, media).await;
 }
 
 /// Wraps a future so its exit is logged by name (ADR-0015: critical tasks

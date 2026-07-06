@@ -21,7 +21,9 @@ use wtransport::error::SendDatagramError;
 use wtransport::{Connection, RecvStream, SendStream};
 
 use crate::runtime::engine_actor::ToEngine;
+use crate::runtime::media::MediaHandle;
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
+use crate::runtime::stream_tag::AUTHORITY_EVENTS;
 use crate::runtime::wire_codec::{
     OversizedFrame, complete_frame_len, decode_bootstrap_message, decode_control_datagram,
     decode_ping_datagram,
@@ -84,6 +86,7 @@ pub async fn run_connection(
     client: ClientKey,
     start: Instant,
     to_engine: mpsc::Sender<ToEngine>,
+    media: Option<MediaHandle>,
 ) {
     let (send, recv) = match connection.accept_bi().await {
         Ok(streams) => streams,
@@ -92,7 +95,7 @@ pub async fn run_connection(
             return;
         }
     };
-    let authority_send = match connection.open_uni().await {
+    let mut authority_send = match connection.open_uni().await {
         Ok(opening) => match opening.await {
             Ok(stream) => stream,
             Err(error) => {
@@ -105,6 +108,20 @@ pub async fn run_connection(
             return;
         }
     };
+    // Every host-initiated uni stream leads with its kind tag so a reader can
+    // tell authority events from video frames (ADR-0005); the authority stream
+    // emits its tag once, before any envelope.
+    if authority_send.write_all(&[AUTHORITY_EVENTS]).await.is_err() {
+        warn!("authority-events stream closed before its kind tag was written");
+        return;
+    }
+
+    // Video is served only when a media task is running (the Gazebo adapter
+    // path); the reference path passes `None` and serves no video, unchanged
+    // from 1a.
+    if let Some(media) = &media {
+        media.register(client, connection.clone());
+    }
 
     let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
     if to_engine
@@ -115,6 +132,9 @@ pub async fn run_connection(
         .await
         .is_err()
     {
+        if let Some(media) = &media {
+            media.deregister(client);
+        }
         return;
     }
 
@@ -123,6 +143,9 @@ pub async fn run_connection(
         () = run_writer(&connection, send, authority_send, outbound_rx) => {}
     }
 
+    if let Some(media) = &media {
+        media.deregister(client);
+    }
     forward(&to_engine, client, DomainEnvelope::Disconnect, start).await;
 }
 

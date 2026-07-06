@@ -12,6 +12,7 @@
 use std::time::Duration;
 
 use pilotage_protocol::wire;
+use pilotage_session_host::cli::AdapterKind;
 use pilotage_session_host::runtime;
 use tokio::time::timeout;
 use wtransport::{ClientConfig, Connection, Endpoint};
@@ -83,7 +84,9 @@ async fn read_welcome(recv: &mut wtransport::RecvStream) -> wire::ServerWelcome 
 /// declared size, and must still welcome a subsequent honest client.
 #[tokio::test]
 async fn oversized_bootstrap_frame_is_rejected_and_host_survives() {
-    let host = runtime::start(0).expect("host starts on an ephemeral port");
+    let host = runtime::start(0, AdapterKind::Reference)
+        .await
+        .expect("host starts on an ephemeral port");
     let addr = host.local_addr;
 
     // Hostile connection: declare a frame far past the cap, then dribble body.

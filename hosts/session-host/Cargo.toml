@@ -17,6 +17,7 @@ pilotage-protocol = { workspace = true }
 pilotage-authority = { workspace = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-adapter-reference = { workspace = true }
+pilotage-adapter-gazebo = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
@@ -24,6 +25,7 @@ wtransport = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 prost.workspace = true
+jpeg-encoder = "0.7.0"
 
 [dev-dependencies]
 pilotage-adapter-reference.workspace = true

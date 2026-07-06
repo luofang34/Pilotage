@@ -12,6 +12,7 @@
 use std::time::Duration;
 
 use pilotage_protocol::wire;
+use pilotage_session_host::cli::AdapterKind;
 use pilotage_session_host::runtime;
 use prost::Message;
 use tokio::time::timeout;
@@ -75,6 +76,32 @@ async fn read_until_lease_response(
             return response;
         }
     }
+}
+
+/// Kind tag prefixing the host's authority-events uni stream (ADR-0005:
+/// every host-initiated uni stream leads with a 1-byte kind tag; `0x01`
+/// distinguishes authority events from `0x02` video frames).
+const AUTHORITY_EVENTS_TAG: u8 = 0x01;
+
+/// Reads the single leading kind-tag byte from a freshly accepted
+/// host-initiated uni stream, asserting it identifies the authority-events
+/// stream. Any bytes read past the tag are left in `pending` for the envelope
+/// parser.
+async fn read_authority_tag(recv: &mut wtransport::RecvStream, pending: &mut Vec<u8>) {
+    let mut buf = vec![0u8; 8192];
+    while pending.is_empty() {
+        let read = timeout(TEST_TIMEOUT, recv.read(&mut buf))
+            .await
+            .expect("stream read does not time out")
+            .expect("stream read succeeds")
+            .expect("authority stream is not closed before its kind tag arrives");
+        pending.extend_from_slice(&buf[..read]);
+    }
+    let tag = pending.remove(0);
+    assert_eq!(
+        tag, AUTHORITY_EVENTS_TAG,
+        "authority-events stream must lead with its kind tag"
+    );
 }
 
 /// Reads authority-events-stream envelopes until one is a
@@ -213,7 +240,9 @@ async fn await_frame_rejected(connection: &Connection) -> wire::FrameRejected {
 
 #[tokio::test]
 async fn hello_lease_frame_and_stale_generation_rejection() {
-    let host = runtime::start(0).expect("host starts on an ephemeral port");
+    let host = runtime::start(0, AdapterKind::Reference)
+        .await
+        .expect("host starts on an ephemeral port");
     let addr = host.local_addr;
 
     let connection = connect_client(addr).await;
@@ -230,6 +259,10 @@ async fn hello_lease_frame_and_stale_generation_rejection() {
 
     let mut pending = Vec::new();
     let mut authority_pending = Vec::new();
+
+    // The authority-events uni stream now leads with a 1-byte kind tag
+    // (ADR-0005); consume it before parsing length-delimited envelopes.
+    read_authority_tag(&mut authority_recv, &mut authority_pending).await;
 
     send_envelope(&mut send, &hello_envelope()).await;
     let welcome_envelope = read_one_envelope(&mut recv, &mut pending).await;
