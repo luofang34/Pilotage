@@ -1,0 +1,20 @@
+[package]
+name = "pilotage-adapter-gazebo"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-adapter-api = { workspace = true }
+pilotage-protocol = { workspace = true }
+pilotage-timing = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "sync", "io-util", "time", "process"] }
+prost = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+prost-build = { workspace = true }
