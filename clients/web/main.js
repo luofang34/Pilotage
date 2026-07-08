@@ -351,6 +351,20 @@ const CONTROLLER_PROFILES = [
     forwardSign: 1, // stick up = forward, center = stop, down = reverse
     turnAxis: 3, // rudder
     turnSign: -1, // rudder right = turn right (negative yaw-rate in Gazebo)
+  },
+  {
+    // PS4 (DualShock 4) / PS5 (DualSense) map to the browser "Standard Gamepad"
+    // layout: axis 0 = left stick X, 1 = left stick Y, 2 = right stick X,
+    // 3 = right stick Y, with stick-up reported as negative. Both sticks
+    // self-center, so releasing stops the vehicle. Drive from the left stick
+    // (throttle = vertical, yaw = horizontal), matching the FPV convention.
+    name: "PS4/PS5 pad (Standard Gamepad)",
+    match: (id) => /054c|dualshock|dualsense|wireless controller|standard gamepad/i.test(id),
+    forwardAxis: 1, // left stick vertical
+    forwardSign: -1, // stick up (negative) = forward
+    turnAxis: 0, // left stick horizontal
+    turnSign: -1, // stick right (positive) = turn right (negative yaw-rate)
+    deadzone: 0.12, // thumbsticks drift more than radio gimbals
     deadzone: 0.06,
   },
 ];
@@ -361,7 +375,7 @@ const GENERIC_PROFILE = {
   forwardAxis: 1,
   forwardSign: -1, // browsers report stick-up as negative
   turnAxis: 0,
-  turnSign: 1,
+  turnSign: -1, // stick right (positive) = turn right (negative yaw-rate in Gazebo)
   deadzone: 0.1,
 };
 
