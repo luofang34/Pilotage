@@ -61,7 +61,9 @@ pub enum ReceiverEvent {
     /// measured by the run loop's own wall clock at the point it receives
     /// this event, not by a timestamp carried on the event itself.
     VideoFrame {
-        /// The JPEG bytes (tag and length prefix already stripped).
+        /// Video source this frame came from: 0 = onboard FPV, 1 = chase.
+        source_id: u8,
+        /// The JPEG bytes (tag, source id, and length prefix already stripped).
         jpeg: Vec<u8>,
     },
 }

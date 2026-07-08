@@ -27,8 +27,14 @@ pub const MOTION_SCOPE: &str = "vehicle.motion";
 pub const THROTTLE_AXIS: u16 = 2;
 /// Canonical logical axis carrying yaw (`angular.z`) commands.
 pub const YAW_AXIS: u16 = 3;
-/// Identifier of the single onboard camera video source.
-pub const CAMERA_SOURCE_ID: &str = "onboard-camera";
+/// Identifier of the onboard FPV camera video source (source id 0).
+pub const FPV_SOURCE_ID: &str = "onboard-fpv";
+/// Identifier of the chase camera video source (source id 1).
+pub const CHASE_SOURCE_ID: &str = "chase";
+/// Wire source id of the onboard FPV camera.
+pub const FPV_CAMERA: u8 = 0;
+/// Wire source id of the chase camera.
+pub const CHASE_CAMERA: u8 = 1;
 
 /// A decoded raw camera frame from the sidecar bridge, paired with the
 /// simulation tick it was captured at.
@@ -39,6 +45,10 @@ pub const CAMERA_SOURCE_ID: &str = "onboard-camera";
 /// `sample_telemetry` shape (ADR-0008).
 #[derive(Debug, Clone)]
 pub struct RawVideoFrame {
+    /// Video source this frame came from: 0 = onboard FPV, 1 = chase. Carried
+    /// end to end so the host media pipeline and every reader can route each
+    /// frame to the right video source (the wire `source_id` byte).
+    pub source_id: u8,
     /// Frame width in pixels.
     pub width: u32,
     /// Frame height in pixels.
@@ -54,6 +64,11 @@ pub struct RawVideoFrame {
 impl From<BridgeFrame> for RawVideoFrame {
     fn from(frame: BridgeFrame) -> Self {
         Self {
+            // Bridge `camera_id` is a u32 for wire headroom, but only ids 0
+            // (FPV) / 1 (chase) are assigned; an out-of-range id saturates to
+            // u8::MAX so the reader routes it to no known source rather than
+            // aliasing onto a valid one.
+            source_id: u8::try_from(frame.camera_id).unwrap_or(u8::MAX),
             width: frame.width,
             height: frame.height,
             pixel_format: frame.pixel_format,
@@ -331,10 +346,16 @@ impl VehicleAdapter for GazeboAdapter {
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {
-        vec![VideoSource {
-            id: CAMERA_SOURCE_ID.to_owned(),
-            description: "onboard forward camera".to_owned(),
-        }]
+        vec![
+            VideoSource {
+                id: FPV_SOURCE_ID.to_owned(),
+                description: "onboard forward camera".to_owned(),
+            },
+            VideoSource {
+                id: CHASE_SOURCE_ID.to_owned(),
+                description: "chase camera".to_owned(),
+            },
+        ]
     }
 
     fn set_link_loss_policy(&mut self, vehicle: VehicleId, policy: Option<LinkLossPolicy>) {

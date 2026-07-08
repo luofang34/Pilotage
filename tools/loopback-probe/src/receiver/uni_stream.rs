@@ -5,8 +5,8 @@
 //! stream is read to completion by a short-lived task so a slow video decode
 //! never blocks accepting the next stream. The authority-events stream stays
 //! open for the connection's lifetime (repeated length-delimited envelopes); a
-//! video-frame stream carries exactly one `[fourcc][u32 LE len][jpeg]` body
-//! (ADR-0016) and closes.
+//! video-frame stream carries exactly one
+//! `[source_id][fourcc][u32 LE len][jpeg]` body (ADR-0016) and closes.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -103,8 +103,9 @@ async fn read_authority_stream(
 /// FourCC of the only video codec this viewer decodes: Motion JPEG (ADR-0016).
 const FOURCC_MJPEG: [u8; 4] = *b"MJPG";
 
-/// Reads one video-frame stream to completion (`[fourcc][u32 LE len][payload]`,
-/// ADR-0016), then forwards the JPEG bytes as a single
+/// Reads one video-frame stream to completion
+/// (`[source_id][fourcc][u32 LE len][payload]`, ADR-0016), then forwards the
+/// JPEG bytes (tagged with their `source_id`) as a single
 /// [`ReceiverEvent::VideoFrame`]. A frame whose FourCC is not [`FOURCC_MJPEG`]
 /// is skipped with a warning, never a hard failure, so a host streaming a
 /// codec this viewer lacks degrades gracefully.
@@ -116,7 +117,7 @@ async fn read_video_stream(
     dropped_events: Arc<AtomicU64>,
 ) {
     loop {
-        if let Some((fourcc, payload)) = try_take_video_payload(&mut buf) {
+        if let Some((source_id, fourcc, payload)) = try_take_video_payload(&mut buf) {
             if fourcc != FOURCC_MJPEG {
                 warn!(
                     codec = %String::from_utf8_lossy(&fourcc),
@@ -127,7 +128,10 @@ async fn read_video_stream(
             forward_event(
                 &events_tx,
                 &dropped_events,
-                ReceiverEvent::VideoFrame { jpeg: payload },
+                ReceiverEvent::VideoFrame {
+                    source_id,
+                    jpeg: payload,
+                },
             );
             return;
         }
@@ -145,25 +149,26 @@ async fn read_video_stream(
     }
 }
 
-/// Parses a `[fourcc: 4 bytes][u32 LE len][payload]` body (ADR-0016) once
-/// `buf` holds the declared length in full, returning the `(fourcc, payload)`
-/// pair and leaving `buf` empty. Returns `None` if fewer than the 8-byte
-/// fourcc+length header, or fewer than the declared payload length, have
-/// arrived yet.
-fn try_take_video_payload(buf: &mut Vec<u8>) -> Option<([u8; 4], Vec<u8>)> {
-    const HEADER: usize = 8;
+/// Parses a `[source_id: 1 byte][fourcc: 4 bytes][u32 LE len][payload]` body
+/// (ADR-0016) once `buf` holds the declared length in full, returning the
+/// `(source_id, fourcc, payload)` triple and leaving `buf` empty. Returns
+/// `None` if fewer than the 9-byte source-id+fourcc+length header, or fewer
+/// than the declared payload length, have arrived yet.
+fn try_take_video_payload(buf: &mut Vec<u8>) -> Option<(u8, [u8; 4], Vec<u8>)> {
+    const HEADER: usize = 9;
     if buf.len() < HEADER {
         return None;
     }
-    let fourcc = [buf[0], buf[1], buf[2], buf[3]];
-    let declared = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+    let source_id = buf[0];
+    let fourcc = [buf[1], buf[2], buf[3], buf[4]];
+    let declared = u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]);
     let declared = usize::try_from(declared).ok()?;
     if buf.len() < HEADER + declared {
         return None;
     }
     let payload = buf[HEADER..HEADER + declared].to_vec();
     buf.drain(..HEADER + declared);
-    Some((fourcc, payload))
+    Some((source_id, fourcc, payload))
 }
 
 #[cfg(test)]
@@ -173,15 +178,17 @@ mod tests {
 
     #[test]
     fn video_payload_waits_for_full_declared_length() {
-        // [MJPG][len=3][1,2] — one payload byte still missing.
-        let mut buf = vec![b'M', b'J', b'P', b'G', 3, 0, 0, 0, 1, 2];
+        // [src=1][MJPG][len=3][1,2] — one payload byte still missing.
+        let mut buf = vec![1, b'M', b'J', b'P', b'G', 3, 0, 0, 0, 1, 2];
         assert_eq!(
             try_take_video_payload(&mut buf),
             None,
             "only 2 of 3 payload bytes present"
         );
         buf.push(3);
-        let (codec, jpeg) = try_take_video_payload(&mut buf).expect("full frame present");
+        let (source_id, codec, jpeg) =
+            try_take_video_payload(&mut buf).expect("full frame present");
+        assert_eq!(source_id, 1, "reads the chase source id");
         assert_eq!(codec, FOURCC_MJPEG);
         assert_eq!(jpeg, vec![1, 2, 3]);
         assert!(buf.is_empty(), "consumed bytes are drained");
@@ -189,9 +196,10 @@ mod tests {
 
     #[test]
     fn video_payload_leaves_trailing_bytes_for_the_next_frame() {
-        // [MJPG][len=1][0xAB] then the start of a second frame.
-        let mut buf = vec![b'M', b'J', b'P', b'G', 1, 0, 0, 0, 0xAB, b'M', b'J'];
-        let (_, first) = try_take_video_payload(&mut buf).expect("first frame present");
+        // [src=0][MJPG][len=1][0xAB] then the start of a second frame.
+        let mut buf = vec![0, b'M', b'J', b'P', b'G', 1, 0, 0, 0, 0xAB, b'M', b'J'];
+        let (source_id, _, first) = try_take_video_payload(&mut buf).expect("first frame present");
+        assert_eq!(source_id, 0, "reads the FPV source id");
         assert_eq!(first, vec![0xAB]);
         assert_eq!(buf, vec![b'M', b'J']);
     }

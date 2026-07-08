@@ -64,6 +64,10 @@ fn print_video(video: &VideoStats, elapsed: Duration) {
         "video frames received: {} (decoded {}, decode failed {})",
         video.frames_received, video.frames_decoded, video.frames_decode_failed
     ));
+    print_line(&format!(
+        "video frames by source: fpv={} chase={}",
+        video.fpv_received, video.chase_received
+    ));
     match video.avg_fps(elapsed) {
         Some(fps) => print_line(&format!("video avg fps:       {fps:.2}")),
         None => print_line("video avg fps:       no frames decoded"),

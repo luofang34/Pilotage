@@ -178,8 +178,8 @@ async fn wait_for_rejection(
                 metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
                 metrics.last_pose = Some(observation.pose);
             }
-            Ok(Some(ReceiverEvent::VideoFrame { jpeg, .. })) => {
-                fold_video_frame(&jpeg, video, &mut last_video_at);
+            Ok(Some(ReceiverEvent::VideoFrame { source_id, jpeg })) => {
+                fold_video_frame(source_id, &jpeg, video, &mut last_video_at);
             }
             Ok(Some(ReceiverEvent::Pong { .. } | ReceiverEvent::Authority)) | Err(_) => {}
             Ok(None) => return false,
@@ -205,8 +205,8 @@ fn drain_pending_events(
             ReceiverEvent::FrameRejected(_) => {
                 metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
             }
-            ReceiverEvent::VideoFrame { jpeg, .. } => {
-                fold_video_frame(&jpeg, video, &mut last_video_at);
+            ReceiverEvent::VideoFrame { source_id, jpeg } => {
+                fold_video_frame(source_id, &jpeg, video, &mut last_video_at);
             }
             ReceiverEvent::Pong { .. } | ReceiverEvent::Authority => {}
         }
@@ -218,9 +218,14 @@ fn drain_pending_events(
 /// the frame's `received_at` field — both derive from the same wall clock, so
 /// either would do; this uses a plain `Instant` since the gap is all that
 /// matters here, not an absolute timestamp).
-fn fold_video_frame(jpeg: &[u8], video: &mut VideoStats, last_video_at: &mut Option<Instant>) {
+fn fold_video_frame(
+    source_id: u8,
+    jpeg: &[u8],
+    video: &mut VideoStats,
+    last_video_at: &mut Option<Instant>,
+) {
     let now = Instant::now();
     let gap = last_video_at.map(|previous| now.duration_since(previous));
     *last_video_at = Some(now);
-    video.record(jpeg, gap);
+    video.record(source_id, jpeg, gap);
 }

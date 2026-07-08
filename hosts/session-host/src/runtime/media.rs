@@ -3,10 +3,11 @@
 //!
 //! A single media task drains the Gazebo adapter's raw RGB frame receiver,
 //! encodes each frame to JPEG once, and fans the encoded frame out to every
-//! connected client. Each client has its own writer task and a
-//! capacity-1 handoff channel, so a client that drains video slower than
-//! frames arrive drops to the latest frame (the stale one is discarded and
-//! counted) rather than growing memory or delaying control/telemetry. Encode
+//! connected client. Frames carry a `source_id` (0 = onboard FPV, 1 = chase);
+//! each client gets a separate writer task and capacity-1 handoff channel
+//! *per source*, so a client that drains one source slower than frames arrive
+//! drops that source to its latest frame (the stale one is discarded and
+//! counted) without stalling the other source or control/telemetry. Encode
 //! happens once per frame regardless of client count; the JPEG is shared as an
 //! `Arc`.
 
@@ -91,18 +92,27 @@ pub fn spawn_media_task(
     )
 }
 
-/// Per-client outbound handoff of the latest encoded JPEG. Capacity 1 bounds
-/// in-flight frames to one per client: `try_send` on a full channel means the
-/// client's writer is still busy with the previous frame, so the new frame is
-/// dropped-to-latest and counted (ADR-0011 best-effort media).
+/// Per-(client, source) outbound handoff of the latest encoded JPEG. Capacity
+/// 1 bounds in-flight frames to one per source per client: `try_send` on a
+/// full channel means that source's writer is still busy with its previous
+/// frame, so the new frame is dropped-to-latest and counted (ADR-0011
+/// best-effort media).
 type FrameTx = mpsc::Sender<Arc<Vec<u8>>>;
 
-/// The media task's own view of a connected client: the handoff channel to its
-/// writer task, plus the running drop count for frames its writer could not
-/// keep up with.
+/// The media task's own view of one video source of a connected client: the
+/// handoff channel to that source's writer task, plus the running drop count
+/// for frames its writer could not keep up with.
 struct ClientSink {
     frames: FrameTx,
     dropped: u64,
+}
+
+/// The media task's view of a connected client: its connection (so per-source
+/// writer tasks can be spawned lazily on the first frame seen for each source)
+/// and the per-source sinks already opened.
+struct ClientEntry {
+    connection: Connection,
+    sources: std::collections::BTreeMap<u8, ClientSink>,
 }
 
 /// Drains raw frames, encodes each once, and fans the encoded frame out to
@@ -112,7 +122,7 @@ async fn media_loop(
     mut frames: mpsc::Receiver<RawVideoFrame>,
     mut commands: mpsc::Receiver<MediaCommand>,
 ) {
-    let mut sinks: std::collections::BTreeMap<ClientKey, ClientSink> =
+    let mut clients: std::collections::BTreeMap<ClientKey, ClientEntry> =
         std::collections::BTreeMap::new();
     let mut writers = JoinSet::new();
     loop {
@@ -131,73 +141,89 @@ async fn media_loop(
         tokio::select! {
             command = commands.recv() => {
                 match command {
-                    Some(command) => apply_command(command, &mut sinks, &mut writers),
+                    Some(command) => apply_command(command, &mut clients),
                     None => break,
                 }
             }
             frame = frames.recv() => {
                 match frame {
-                    Some(frame) => fan_out_frame(frame, &mut sinks),
+                    Some(frame) => fan_out_frame(frame, &mut clients, &mut writers),
                     None => break,
                 }
             }
         }
     }
-    // Dropping every sink closes each writer's handoff channel, so the writers
-    // finish their in-flight frame and exit; wait for them so no uni stream is
-    // abandoned mid-write on shutdown.
-    drop(sinks);
+    // Dropping every client (and its sinks) closes each writer's handoff
+    // channel, so the writers finish their in-flight frame and exit; wait for
+    // them so no uni stream is abandoned mid-write on shutdown.
+    drop(clients);
     while writers.join_next().await.is_some() {}
     debug!("media task exited");
 }
 
-/// Applies one register/deregister command, spawning or dropping the client's
-/// writer task.
+/// Applies one register/deregister command. Registration only records the
+/// client's connection; a per-source writer task is spawned lazily the first
+/// time a frame for that source is fanned out (see [`fan_out_frame`]), so a
+/// client is not charged a writer for a source that never streams.
 fn apply_command(
     command: MediaCommand,
-    sinks: &mut std::collections::BTreeMap<ClientKey, ClientSink>,
-    writers: &mut JoinSet<()>,
+    clients: &mut std::collections::BTreeMap<ClientKey, ClientEntry>,
 ) {
     match command {
         MediaCommand::Register(MediaClient { client, connection }) => {
-            let (frame_tx, frame_rx) = mpsc::channel::<Arc<Vec<u8>>>(1);
-            writers.spawn(client_writer(client, connection, frame_rx));
-            sinks.insert(
+            clients.insert(
                 client,
-                ClientSink {
-                    frames: frame_tx,
-                    dropped: 0,
+                ClientEntry {
+                    connection,
+                    sources: std::collections::BTreeMap::new(),
                 },
             );
         }
         MediaCommand::Deregister(client) => {
-            sinks.remove(&client);
+            clients.remove(&client);
         }
     }
 }
 
-/// Encodes `frame` to JPEG once and hands it to every client sink, counting a
-/// drop for any client whose in-flight slot is still full (slow consumer) and
-/// evicting any whose writer task has exited.
+/// Encodes `frame` to JPEG once and hands it to every client's writer for the
+/// frame's source, lazily spawning that per-source writer on first use,
+/// counting a drop for any source whose in-flight slot is still full (slow
+/// consumer), and evicting any client whose connection has gone away.
 fn fan_out_frame(
     frame: RawVideoFrame,
-    sinks: &mut std::collections::BTreeMap<ClientKey, ClientSink>,
+    clients: &mut std::collections::BTreeMap<ClientKey, ClientEntry>,
+    writers: &mut JoinSet<()>,
 ) {
-    if sinks.is_empty() {
+    if clients.is_empty() {
         return;
     }
+    let source_id = frame.source_id;
     let Some(jpeg) = encode_jpeg(&frame) else {
         return;
     };
     let jpeg = Arc::new(jpeg);
     let mut closed = Vec::new();
-    for (client, sink) in sinks.iter_mut() {
+    for (client, entry) in clients.iter_mut() {
+        let sink = entry.sources.entry(source_id).or_insert_with(|| {
+            let (frame_tx, frame_rx) = mpsc::channel::<Arc<Vec<u8>>>(1);
+            writers.spawn(client_writer(
+                *client,
+                source_id,
+                entry.connection.clone(),
+                frame_rx,
+            ));
+            ClientSink {
+                frames: frame_tx,
+                dropped: 0,
+            }
+        });
         match sink.frames.try_send(Arc::clone(&jpeg)) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 sink.dropped = sink.dropped.wrapping_add(1);
                 warn!(
                     client = client.as_u64(),
+                    source_id,
                     total_dropped = sink.dropped,
                     "video frame dropped: client writer still busy with the previous frame"
                 );
@@ -206,7 +232,7 @@ fn fan_out_frame(
         }
     }
     for client in closed {
-        sinks.remove(&client);
+        clients.remove(&client);
     }
 }
 
@@ -241,31 +267,39 @@ fn encode_jpeg(frame: &RawVideoFrame) -> Option<Vec<u8>> {
     Some(jpeg)
 }
 
-/// Per-client writer: receives the latest encoded JPEG and writes it as one
-/// host-initiated uni stream tagged [`VIDEO_FRAME`], one stream per frame
-/// (ADR-0005). Exits when the handoff channel closes (client deregistered or
-/// media task shutting down).
+/// Per-(client, source) writer: receives the latest encoded JPEG and writes it
+/// as one host-initiated uni stream tagged [`VIDEO_FRAME`], one stream per
+/// frame (ADR-0005), stamped with `source_id`. Exits when the handoff channel
+/// closes (client deregistered or media task shutting down).
 async fn client_writer(
     client: ClientKey,
+    source_id: u8,
     connection: Connection,
     mut frames: mpsc::Receiver<Arc<Vec<u8>>>,
 ) {
     while let Some(jpeg) = frames.recv().await {
-        if let Err(reason) = write_one_frame(&connection, &jpeg).await {
+        if let Err(reason) = write_one_frame(&connection, source_id, &jpeg).await {
             // A failed uni-stream open/write means the connection is going
             // away; stop writing video to it. The connection task's own
             // teardown deregisters this client.
-            debug!(client = client.as_u64(), reason, "video writer stopping");
+            debug!(
+                client = client.as_u64(),
+                source_id, reason, "video writer stopping"
+            );
             return;
         }
     }
 }
 
 /// Opens one host-initiated uni stream, writes the [`VIDEO_FRAME`] tag then
-/// the codec-tagged length-prefixed JPEG, and finishes the stream (ADR-0005
-/// media unit; ADR-0016 FourCC codec tag).
-async fn write_one_frame(connection: &Connection, jpeg: &[u8]) -> Result<(), &'static str> {
-    let Some(body) = frame_video_payload(FOURCC_MJPEG, jpeg) else {
+/// the source-tagged, codec-tagged, length-prefixed JPEG, and finishes the
+/// stream (ADR-0005 media unit; ADR-0016 FourCC codec tag).
+async fn write_one_frame(
+    connection: &Connection,
+    source_id: u8,
+    jpeg: &[u8],
+) -> Result<(), &'static str> {
+    let Some(body) = frame_video_payload(source_id, FOURCC_MJPEG, jpeg) else {
         // A frame larger than u32::MAX cannot be length-prefixed; skip it
         // without failing the writer (no real camera frame reaches this).
         error!("video frame exceeds u32 length prefix; skipping");
@@ -311,6 +345,7 @@ mod tests {
             }
         }
         RawVideoFrame {
+            source_id: 0,
             width,
             height,
             pixel_format: "RGB_INT8".to_owned(),
@@ -329,18 +364,23 @@ mod tests {
         assert_eq!(&jpeg[jpeg.len() - 2..], &[0xFF, 0xD9], "JPEG ends with EOI");
 
         // Frame the JPEG exactly as the media task writes it after the tag,
-        // then parse the codec-tagged length-prefixed body back (ADR-0016).
-        let body = frame_video_payload(FOURCC_MJPEG, &jpeg).expect("JPEG frames");
-        let (codec, parsed) = parse_video_payload(&body).expect("framed body parses back");
+        // then parse the source-tagged, codec-tagged length-prefixed body back
+        // (ADR-0016).
+        let body = frame_video_payload(1, FOURCC_MJPEG, &jpeg).expect("JPEG frames");
+        let (source_id, codec, parsed) =
+            parse_video_payload(&body).expect("framed body parses back");
+        assert_eq!(source_id, 1, "carries the chase source id");
         assert_eq!(codec, FOURCC_MJPEG, "carries the MJPG FourCC");
         assert_eq!(parsed, jpeg.as_slice(), "round-trips the exact JPEG bytes");
 
-        // The full on-wire unit is [tag][fourcc][u32 len][jpeg]; assemble and
-        // dissect it the way a client reader would.
+        // The full on-wire unit is [tag][source_id][fourcc][u32 len][jpeg];
+        // assemble and dissect it the way a client reader would.
         let mut wire = vec![VIDEO_FRAME];
         wire.extend_from_slice(&body);
         assert_eq!(wire[0], VIDEO_FRAME, "leads with the video kind tag");
-        let (codec, parsed) = parse_video_payload(&wire[1..]).expect("payload after tag parses");
+        let (source_id, codec, parsed) =
+            parse_video_payload(&wire[1..]).expect("payload after tag parses");
+        assert_eq!(source_id, 1);
         assert_eq!(codec, FOURCC_MJPEG);
         assert_eq!(parsed, jpeg.as_slice());
     }
