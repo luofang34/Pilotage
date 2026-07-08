@@ -35,6 +35,9 @@ message BridgeFrame {
   string pixel_format = 3;
   uint64 sim_time_ns = 4;
   bytes rgb = 5;
+  // Video source this frame came from: 0 = onboard FPV camera, 1 = chase
+  // camera. Additional sources may be assigned higher ids later.
+  uint32 camera_id = 6;
 }
 
 // Wraps exactly one bridge payload for length-delimited framing over the
