@@ -11,7 +11,8 @@ mod framing;
 pub mod wire;
 
 pub use adapter::{
-    CAMERA_SOURCE_ID, GazeboAdapter, MOTION_SCOPE, RawVideoFrame, THROTTLE_AXIS, YAW_AXIS,
+    CHASE_CAMERA, CHASE_SOURCE_ID, FPV_CAMERA, FPV_SOURCE_ID, GazeboAdapter, MOTION_SCOPE,
+    RawVideoFrame, THROTTLE_AXIS, YAW_AXIS,
 };
 pub use bridge_client::{BRIDGE_BIN_ENV, BridgeClient, BridgeConfig, LatestBridgeState};
 pub use error::GazeboAdapterError;

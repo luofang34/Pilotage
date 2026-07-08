@@ -206,16 +206,49 @@ async fn camera_frame_reaches_the_subscriber() {
                 pixel_format: "RGB_INT8".to_owned(),
                 sim_time_ns: 77,
                 rgb: vec![9_u8; 24],
+                camera_id: 0,
             })),
         },
     )
     .await;
 
     let frame = frames.recv().await.expect("a frame arrives");
+    assert_eq!(frame.source_id, 0, "camera_id 0 maps to the FPV source id");
     assert_eq!(frame.width, 4);
     assert_eq!(frame.height, 2);
     assert_eq!(frame.tick.as_u64(), 77);
     assert_eq!(frame.rgb.len(), 24);
+}
+
+#[tokio::test]
+async fn chase_camera_frame_carries_its_source_id() {
+    let vehicle = VehicleId::new(5);
+    let (host_side, mut bridge_side) = connected_pair().await;
+    let mut adapter =
+        GazeboAdapter::from_bridge(vehicle, BridgeClient::connect_stream_for_test(host_side));
+    let mut frames = adapter.subscribe_frames().expect("frame receiver present");
+
+    send_envelope(
+        &mut bridge_side,
+        &BridgeEnvelope {
+            payload: Some(bridge_envelope::Payload::Frame(BridgeFrame {
+                width: 2,
+                height: 2,
+                pixel_format: "RGB_INT8".to_owned(),
+                sim_time_ns: 88,
+                rgb: vec![7_u8; 12],
+                camera_id: 1,
+            })),
+        },
+    )
+    .await;
+
+    let frame = frames.recv().await.expect("a chase frame arrives");
+    assert_eq!(
+        frame.source_id, 1,
+        "camera_id 1 maps to the chase source id"
+    );
+    assert_eq!(frame.tick.as_u64(), 88);
 }
 
 #[tokio::test]
@@ -304,5 +337,8 @@ async fn capabilities_report_motion_scope_and_camera_source() {
     assert!(caps.execution.render_capable);
     assert_eq!(caps.vehicles.len(), 1);
     assert_eq!(caps.vehicles[0].scopes[0].scope.as_str(), MOTION_SCOPE);
-    assert_eq!(adapter.video_sources().len(), 1);
+    let sources = adapter.video_sources();
+    assert_eq!(sources.len(), 2, "FPV and chase are both advertised");
+    assert_eq!(sources[0].id, super::FPV_SOURCE_ID);
+    assert_eq!(sources[1].id, super::CHASE_SOURCE_ID);
 }

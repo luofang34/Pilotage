@@ -263,13 +263,13 @@ fn handle_event(
             let rtt = estimated_age(received_at, pong.echoed_sender_sent_at, ZERO_OFFSET);
             metrics.rtt.record(rtt);
         }
-        ReceiverEvent::VideoFrame { jpeg, .. } => {
+        ReceiverEvent::VideoFrame { source_id, jpeg } => {
             let now = Instant::now();
             let gap = state
                 .last_video_at
                 .map(|previous| now.duration_since(previous));
             state.last_video_at = Some(now);
-            video.record_at(&jpeg, gap, Some((elapsed, state.run_budget)));
+            video.record_at(source_id, &jpeg, gap, Some((elapsed, state.run_budget)));
         }
         ReceiverEvent::Authority => {}
     }

@@ -41,8 +41,10 @@ const els = {
   telemetry: document.getElementById("telemetry"),
   gamepad: document.getElementById("gamepad"),
   canvas: document.getElementById("video"),
+  chaseCanvas: document.getElementById("chaseVideo"),
 };
 const ctx = els.canvas.getContext("2d");
+const chaseCtx = els.chaseCanvas.getContext("2d");
 
 /** Session-scoped mutable state the connect flow and background loops share. */
 const state = {
@@ -53,6 +55,7 @@ const state = {
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   keys: new Set(),
   connected: false,
+  skippedVideoFrames: 0,
 };
 
 function log(line) {
@@ -253,31 +256,49 @@ function dispatchAuthorityStream(body) {
   }
 }
 
-// Video body is `[fourcc: 4 bytes][u32 LE len][payload]` after the kind tag
-// (ADR-0016; host stream_tag.rs `frame_video_payload`). An unknown FourCC is
-// skipped with a log line, never a hard failure, so a host streaming a codec
-// this viewer lacks degrades gracefully. Only "MJPG" is decoded here.
+// Video body is `[source_id: u8][fourcc: 4 bytes][u32 LE len][payload]` after
+// the kind tag (ADR-0016; host stream_tag.rs `frame_video_payload`). The
+// source_id (0 = onboard FPV, 1 = chase) routes the frame to its canvas. An
+// unknown source_id or unknown FourCC is counted and logged, never a hard
+// failure, so a host streaming a source or codec this viewer lacks degrades
+// gracefully. Only "MJPG" is decoded here.
 const FOURCC_MJPEG = "MJPG";
+const SOURCE_FPV = 0;
+const SOURCE_CHASE = 1;
+const VIDEO_TARGETS = {
+  [SOURCE_FPV]: { canvas: els.canvas, ctx },
+  [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
+};
+
 async function renderVideoFrame(body) {
-  if (body.length < 8) return;
-  const fourcc = String.fromCharCode(body[0], body[1], body[2], body[3]);
-  const view = new DataView(body.buffer, body.byteOffset + 4, 4);
+  if (body.length < 9) return;
+  const sourceId = body[0];
+  const fourcc = String.fromCharCode(body[1], body[2], body[3], body[4]);
+  const view = new DataView(body.buffer, body.byteOffset + 5, 4);
   const len = view.getUint32(0, true);
-  const payload = body.subarray(8, 8 + len);
+  const payload = body.subarray(9, 9 + len);
   if (payload.length !== len) {
     log(`video frame length mismatch: declared ${len}, got ${payload.length}`);
     return;
   }
+  const target = VIDEO_TARGETS[sourceId];
+  if (!target) {
+    state.skippedVideoFrames += 1;
+    log(`unknown video source_id ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
+    return;
+  }
   if (fourcc !== FOURCC_MJPEG) {
-    log(`unknown video codec FourCC "${fourcc}"; skipping frame`);
+    state.skippedVideoFrames += 1;
+    log(`unknown video codec FourCC "${fourcc}" for source ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
     return;
   }
   const bitmap = await createImageBitmap(new Blob([payload], { type: "image/jpeg" }));
-  if (els.canvas.width !== bitmap.width || els.canvas.height !== bitmap.height) {
-    els.canvas.width = bitmap.width;
-    els.canvas.height = bitmap.height;
+  const { canvas, ctx: targetCtx } = target;
+  if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
   }
-  ctx.drawImage(bitmap, 0, 0);
+  targetCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
 }
 

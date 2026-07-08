@@ -41,10 +41,11 @@ struct Args {
   std::uint16_t port = 0;
   std::string vehicle = "vehicle_blue";
   std::string camera_topic = "/camera";
+  std::string chase_camera_topic = "/chase_camera";
 };
 
-// Parses --port/--vehicle/--camera-topic. Returns nullopt and writes a usage
-// diagnostic on a missing or malformed argument.
+// Parses --port/--vehicle/--camera-topic/--chase-camera-topic. Returns
+// nullopt and writes a usage diagnostic on a missing or malformed argument.
 std::optional<Args> ParseArgs(int argc, char **argv) {
   Args args;
   bool have_port = false;
@@ -65,6 +66,8 @@ std::optional<Args> ParseArgs(int argc, char **argv) {
       args.vehicle = argv[++i];
     } else if (flag == "--camera-topic" && has_value) {
       args.camera_topic = argv[++i];
+    } else if (flag == "--chase-camera-topic" && has_value) {
+      args.chase_camera_topic = argv[++i];
     } else {
       std::cerr << "pilotage-gz-bridge: unexpected argument '" << flag << "'\n";
       return std::nullopt;
@@ -73,7 +76,7 @@ std::optional<Args> ParseArgs(int argc, char **argv) {
 
   if (!have_port) {
     std::cerr << "usage: pilotage-gz-bridge --port N [--vehicle NAME] "
-                 "[--camera-topic TOPIC]\n";
+                 "[--camera-topic TOPIC] [--chase-camera-topic TOPIC]\n";
     return std::nullopt;
   }
   return args;
@@ -111,7 +114,8 @@ int main(int argc, char **argv) {
   }
   g_connection.store(&(*connection), std::memory_order_relaxed);
 
-  pilotage::bridge::BridgeConfig config{args.vehicle, args.camera_topic};
+  pilotage::bridge::BridgeConfig config{args.vehicle, args.camera_topic,
+                                        args.chase_camera_topic};
   pilotage::bridge::BridgeNode bridge(config, &(*connection));
   if (!bridge.Start(error)) {
     std::cerr << "pilotage-gz-bridge: " << error << "\n";
@@ -120,7 +124,8 @@ int main(int argc, char **argv) {
 
   std::cerr << "pilotage-gz-bridge: connected to 127.0.0.1:" << args.port
             << ", vehicle=" << args.vehicle
-            << ", camera=" << args.camera_topic << "\n";
+            << ", camera=" << args.camera_topic
+            << ", chase_camera=" << args.chase_camera_topic << "\n";
 
   // Inbound control loop: block on the socket, publish each BridgeControl as a
   // Twist. A false read is EOF/error/shutdown -> exit so the parent detects

@@ -14,8 +14,9 @@
 //     host-initiated uni stream additionally leads with one raw kind-tag
 //     byte before the first length-delimited envelope
 //     (hosts/session-host/src/runtime/stream_tag.rs): 0x01 = authority-events
-//     stream, 0x02 = one video frame (`[fourcc: 4 bytes][u32 LE len][jpeg]`
-//     after the tag, ADR-0016, not an Envelope at all).
+//     stream, 0x02 = one video frame
+//     (`[source_id: u8][fourcc: 4 bytes][u32 LE len][jpeg]` after the tag,
+//     ADR-0016, not an Envelope at all). source_id 0 = onboard FPV, 1 = chase.
 
 export const STREAM_KIND_AUTHORITY = 0x01;
 export const STREAM_KIND_VIDEO = 0x02;

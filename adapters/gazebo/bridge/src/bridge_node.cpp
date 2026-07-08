@@ -69,8 +69,14 @@ bool BridgeNode::Start(std::string &error_out) {
     return false;
   }
 
-  if (!node_.Subscribe(config_.camera_topic, &BridgeNode::OnImage, this)) {
+  if (!node_.Subscribe(config_.camera_topic, &BridgeNode::OnFpvImage, this)) {
     error_out = "failed to subscribe " + config_.camera_topic;
+    return false;
+  }
+
+  if (!node_.Subscribe(config_.chase_camera_topic, &BridgeNode::OnChaseImage,
+                       this)) {
+    error_out = "failed to subscribe " + config_.chase_camera_topic;
     return false;
   }
 
@@ -97,7 +103,11 @@ void BridgeNode::OnOdometry(const gz::msgs::Odometry &msg) {
   connection_->WriteEnvelope(envelope, /*droppable=*/false);
 }
 
-void BridgeNode::OnImage(const gz::msgs::Image &msg) {
+void BridgeNode::OnFpvImage(const gz::msgs::Image &msg) { OnImage(msg, 0); }
+
+void BridgeNode::OnChaseImage(const gz::msgs::Image &msg) { OnImage(msg, 1); }
+
+void BridgeNode::OnImage(const gz::msgs::Image &msg, std::uint32_t camera_id) {
   pilotage::bridge::v1::BridgeEnvelope envelope;
   auto *frame = envelope.mutable_frame();
 
@@ -106,9 +116,13 @@ void BridgeNode::OnImage(const gz::msgs::Image &msg) {
   frame->set_pixel_format(PixelFormatName(msg.pixel_format_type()));
   frame->set_sim_time_ns(StampToNanos(msg.header()));
   frame->set_rgb(msg.data());
+  frame->set_camera_id(camera_id);
 
   // Camera frames are best-effort: a slow host drops frames rather than
-  // stalling the shared writer and starving odometry behind them.
+  // stalling the shared writer and starving odometry behind them. The write
+  // mutex inside WriteEnvelope only guards the queue hand-off, never the
+  // blocking socket send, so concurrent callbacks from both camera topics
+  // never stall each other or odometry.
   connection_->WriteEnvelope(envelope, /*droppable=*/true);
 }
 

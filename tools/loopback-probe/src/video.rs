@@ -52,6 +52,10 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<DecodedFrame> {
 pub struct VideoStats {
     /// JPEG byte buffers received (whether or not they decoded).
     pub frames_received: u64,
+    /// Frames received on the onboard FPV source (source id 0).
+    pub fpv_received: u64,
+    /// Frames received on the chase source (source id 1).
+    pub chase_received: u64,
     /// Frames that decoded successfully.
     pub frames_decoded: u64,
     /// Frames that failed to decode.
@@ -65,6 +69,12 @@ pub struct VideoStats {
     pub last_dims: Option<(u32, u32)>,
     /// The first successfully decoded frame, retained for `--save-frames`.
     pub first_frame: Option<DecodedFrame>,
+    /// First successfully decoded frame from the onboard FPV source (id 0),
+    /// retained so `--save-frames` can prove each source streamed separately.
+    pub fpv_first_frame: Option<DecodedFrame>,
+    /// First successfully decoded frame from the chase source (id 1), retained
+    /// so `--save-frames` can prove each source streamed separately.
+    pub chase_first_frame: Option<DecodedFrame>,
     /// The most recently decoded frame; at run end this is also the "last"
     /// frame for `--save-frames`.
     pub last_frame: Option<DecodedFrame>,
@@ -84,21 +94,26 @@ impl VideoStats {
     pub fn new() -> Self {
         Self {
             frames_received: 0,
+            fpv_received: 0,
+            chase_received: 0,
             frames_decoded: 0,
             frames_decode_failed: 0,
             inter_arrival: Histogram::new(VIDEO_HISTOGRAM_CAPACITY),
             last_dims: None,
             first_frame: None,
+            fpv_first_frame: None,
+            chase_first_frame: None,
             last_frame: None,
             middle_frame: None,
         }
     }
 
     /// Folds one arrived JPEG buffer into the stats: decodes it, records
-    /// inter-arrival latency against `since_last`, and updates the retained
-    /// first/last frames.
-    pub fn record(&mut self, jpeg: &[u8], since_last: Option<Duration>) {
-        self.record_at(jpeg, since_last, None);
+    /// inter-arrival latency against `since_last`, counts the frame against its
+    /// `source_id` (0 = FPV, 1 = chase), and updates the retained first/last
+    /// frames.
+    pub fn record(&mut self, source_id: u8, jpeg: &[u8], since_last: Option<Duration>) {
+        self.record_at(source_id, jpeg, since_last, None);
     }
 
     /// Like [`Self::record`], additionally capturing this frame as the
@@ -107,11 +122,17 @@ impl VideoStats {
     /// time. `run_progress` is `(elapsed, total_budget)`.
     pub fn record_at(
         &mut self,
+        source_id: u8,
         jpeg: &[u8],
         since_last: Option<Duration>,
         run_progress: Option<(Duration, Duration)>,
     ) {
         self.frames_received = self.frames_received.saturating_add(1);
+        match source_id {
+            0 => self.fpv_received = self.fpv_received.saturating_add(1),
+            1 => self.chase_received = self.chase_received.saturating_add(1),
+            _ => {}
+        }
         let Some(frame) = decode_jpeg(jpeg) else {
             self.frames_decode_failed = self.frames_decode_failed.saturating_add(1);
             return;
@@ -123,6 +144,15 @@ impl VideoStats {
         }
         if self.first_frame.is_none() {
             self.first_frame = Some(frame.clone());
+        }
+        match source_id {
+            0 if self.fpv_first_frame.is_none() => {
+                self.fpv_first_frame = Some(frame.clone());
+            }
+            1 if self.chase_first_frame.is_none() => {
+                self.chase_first_frame = Some(frame.clone());
+            }
+            _ => {}
         }
         if self.middle_frame.is_none()
             && let Some((elapsed, total)) = run_progress
@@ -220,9 +250,11 @@ mod tests {
     fn record_tracks_counts_and_dims() {
         let jpeg = synthetic_jpeg(8, 8);
         let mut stats = VideoStats::new();
-        stats.record(&jpeg, None);
-        stats.record(&jpeg, Some(Duration::from_millis(33)));
+        stats.record(0, &jpeg, None);
+        stats.record(1, &jpeg, Some(Duration::from_millis(33)));
         assert_eq!(stats.frames_received, 2);
+        assert_eq!(stats.fpv_received, 1, "one FPV frame counted");
+        assert_eq!(stats.chase_received, 1, "one chase frame counted");
         assert_eq!(stats.frames_decoded, 2);
         assert_eq!(stats.frames_decode_failed, 0);
         assert_eq!(stats.last_dims, Some((8, 8)));
@@ -232,7 +264,7 @@ mod tests {
     #[test]
     fn record_counts_decode_failures_without_touching_dims() {
         let mut stats = VideoStats::new();
-        stats.record(&[0xFF, 0x00], None);
+        stats.record(0, &[0xFF, 0x00], None);
         assert_eq!(stats.frames_received, 1);
         assert_eq!(stats.frames_decoded, 0);
         assert_eq!(stats.frames_decode_failed, 1);
@@ -243,7 +275,7 @@ mod tests {
     fn avg_fps_requires_decoded_frames_and_nonzero_elapsed() {
         let mut stats = VideoStats::new();
         assert_eq!(stats.avg_fps(Duration::from_secs(1)), None);
-        stats.record(&synthetic_jpeg(4, 4), None);
+        stats.record(0, &synthetic_jpeg(4, 4), None);
         assert_eq!(stats.avg_fps(Duration::ZERO), None);
         let fps = stats.avg_fps(Duration::from_secs(2)).expect("has fps");
         assert!((fps - 0.5).abs() < 1e-9);
@@ -252,8 +284,8 @@ mod tests {
     #[test]
     fn first_frame_is_retained_across_records() {
         let mut stats = VideoStats::new();
-        stats.record(&synthetic_jpeg(4, 4), None);
-        stats.record(&synthetic_jpeg(6, 6), None);
+        stats.record(0, &synthetic_jpeg(4, 4), None);
+        stats.record(0, &synthetic_jpeg(6, 6), None);
         let first = stats.first_frame.as_ref().expect("first frame retained");
         assert_eq!((first.width, first.height), (4, 4));
         let last = stats.last_frame.as_ref().expect("last frame retained");

@@ -1,6 +1,7 @@
 //! `--save-frames DIR`: writes the first, a middle, and the last decoded
-//! video frame as PNG files, giving visual proof the video downlink carried
-//! real, decodable camera frames.
+//! video frame as PNG files, plus one PNG per video source (`fpv.png`,
+//! `chase.png`), giving visual proof the video downlink carried real,
+//! decodable camera frames from each source.
 
 use tracing::warn;
 
@@ -21,6 +22,13 @@ pub async fn save_proof_frames(video: &VideoStats, dir: &str) {
     )
     .await;
     save_one(video.last_frame.as_ref(), &dir.join("last.png"), "last").await;
+    save_one(video.fpv_first_frame.as_ref(), &dir.join("fpv.png"), "fpv").await;
+    save_one(
+        video.chase_first_frame.as_ref(),
+        &dir.join("chase.png"),
+        "chase",
+    )
+    .await;
 }
 
 /// Saves one optional frame, logging a warning instead of failing the run if
