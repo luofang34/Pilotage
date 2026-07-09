@@ -23,6 +23,32 @@ message Velocity2d {
   float angular_rad_s = 3;
 }
 
+// Raw avionics state estimate for flight vehicles (ADR-0018): attitude
+// quaternion (body FRD → world NED), body rates, NED position/velocity,
+// and the source's validity/quality. Values are the estimator's output,
+// not display-ready numbers — display derivation (altitude, groundspeed,
+// Euler angles) happens in the instrument runtime (ADR-0017). Ground
+// vehicles never set this field.
+message AvionicsState {
+  float quat_w = 1;
+  float quat_x = 2;
+  float quat_y = 3;
+  float quat_z = 4;
+  float rate_p_rad_s = 5;
+  float rate_q_rad_s = 6;
+  float rate_r_rad_s = 7;
+  float pos_n_m = 8;
+  float pos_e_m = 9;
+  float pos_d_m = 10;
+  float vel_n_mps = 11;
+  float vel_e_mps = 12;
+  float vel_d_mps = 13;
+  // bit0 attitude, bit1 rates, bit2 position, bit3 velocity.
+  uint32 valid_flags = 14;
+  // 0 good, 1 degraded, 2 unusable.
+  uint32 quality = 15;
+}
+
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
   VehicleId vehicle = 1;
@@ -30,4 +56,5 @@ message TelemetrySample {
   MonoTimestamp observed_at = 3;
   Pose2d pose = 4;
   Velocity2d velocity = 5;
+  AvionicsState avionics = 6;
 }

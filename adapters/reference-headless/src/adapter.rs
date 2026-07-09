@@ -207,6 +207,7 @@ impl VehicleAdapter for ReferenceAdapter {
                     heading: self.skiff.heading,
                 },
                 speed: self.skiff.speed,
+                avionics: None,
             }],
         }
     }

@@ -255,6 +255,7 @@ fn telemetry_from_odometry(vehicle: VehicleId, odom: &BridgeOdometry) -> Telemet
             heading: odom.heading,
         },
         speed: odom.speed,
+        avionics: None,
     }
 }
 

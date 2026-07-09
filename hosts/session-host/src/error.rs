@@ -24,4 +24,7 @@ pub enum HostError {
     /// Spawning or connecting the Gazebo sidecar bridge failed.
     #[error("failed to start the Gazebo adapter: {0}")]
     GazeboAdapter(#[source] pilotage_adapter_gazebo::GazeboAdapterError),
+    /// Starting the Aviate MAVLink telemetry link failed.
+    #[error("failed to start the Aviate adapter: {0}")]
+    AviateAdapter(#[source] pilotage_adapter_aviate::AviateAdapterError),
 }

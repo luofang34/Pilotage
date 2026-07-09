@@ -171,6 +171,33 @@ async fn spawn_host_runtime(
                 shutdown_rx,
             )))
         }
+        AdapterKind::Aviate => {
+            // PILOTAGE_AVIATE_LINK selects the vehicle link (ADR-0019):
+            // "shm" (co-located SITL), "mavlink" (routed/remote), or the
+            // default "auto" (shm when present, else MAVLink).
+            let mode = match std::env::var("PILOTAGE_AVIATE_LINK").as_deref() {
+                Ok("shm") => pilotage_adapter_aviate::AviateLinkMode::Shm,
+                Ok("mavlink") => pilotage_adapter_aviate::AviateLinkMode::Mavlink,
+                _ => pilotage_adapter_aviate::AviateLinkMode::Auto,
+            };
+            let adapter = pilotage_adapter_aviate::AviateAdapter::start(
+                HOST_VEHICLE,
+                mode,
+                pilotage_adapter_aviate::LinkConfig::default(),
+            )
+            .await
+            .map_err(HostError::AviateAdapter)?;
+            let engine = build_engine(&adapter);
+            Ok(tokio::spawn(run_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                None,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+            )))
+        }
     }
 }
 

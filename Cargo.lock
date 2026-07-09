@@ -869,6 +869,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-aviate"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "pilotage-adapter-api",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pilotage-adapter-gazebo"
 version = "0.1.0"
 dependencies = [
@@ -930,6 +943,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-instrument-panels"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
+]
+
+[[package]]
+name = "pilotage-instrument-scene"
+version = "0.1.0"
+
+[[package]]
+name = "pilotage-instrument-state"
+version = "0.1.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "pilotage-instruments-web"
+version = "0.1.0"
+dependencies = [
+ "pilotage-instrument-panels",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
+]
+
+[[package]]
 name = "pilotage-protocol"
 version = "0.1.0"
 dependencies = [
@@ -956,6 +998,7 @@ version = "0.1.0"
 dependencies = [
  "jpeg-encoder",
  "pilotage-adapter-api",
+ "pilotage-adapter-aviate",
  "pilotage-adapter-gazebo",
  "pilotage-adapter-reference",
  "pilotage-authority",

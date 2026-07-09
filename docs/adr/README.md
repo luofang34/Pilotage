@@ -23,6 +23,9 @@ One file per decision, numbered in acceptance order. See
 | [0014](0014-protobuf-wire-schema.md) | Protobuf as the wire-schema source of truth | Accepted |
 | [0015](0015-workspace-quality-gates.md) | Workspace-enforced quality gates | Accepted |
 | [0016](0016-codec-pluggable-media-plane.md) | Codec-pluggable media plane; the control core never sees the codec | Accepted |
+| [0017](0017-instrument-display-runtime.md) | Instrument display runtime as a no_std sans-IO crate family emitting a versioned scene-command IR | Accepted |
+| [0018](0018-avionics-telemetry-and-aviate-adapter.md) | Avionics state rides telemetry additively; Aviate joins through a MAVLink adapter | Accepted |
+| [0019](0019-pluggable-vehicle-link-shm-first.md) | Vehicle links are pluggable below the adapter; co-located SITL binds shared memory | Accepted |
 
 ## Provenance
 

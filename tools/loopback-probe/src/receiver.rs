@@ -329,6 +329,7 @@ mod tests {
                     heading_rad: 0.0,
                 }),
                 velocity: None,
+                avionics: None,
             },
         ));
         let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(5)).expect("telemetry");

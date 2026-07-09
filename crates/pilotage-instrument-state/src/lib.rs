@@ -1,0 +1,37 @@
+//! Unified aircraft/navigation state and per-signal validity (ADR-0017).
+//!
+//! Every instrument — PFD, HSI, six-pack, engine page — is a display
+//! surface over the one state model defined here, never over its own
+//! private data. The model has two halves:
+//!
+//! - **Input state** ([`AircraftState`]): raw estimate groups (attitude,
+//!   kinematics, air data, nav) each stamped with its age, plus source
+//!   quality/validity, exactly as a feeder (telemetry bridge, local
+//!   sensors, test harness) wrote them.
+//! - **Resolved state** ([`PanelData`]): display-ready quantities, each a
+//!   [`Sig`] carrying a [`SignalStatus`] resolved from freshness and
+//!   source validity. Panels render status honestly — dashes for
+//!   `Missing`, flags for `Stale`, red-X for `Failed` — and never hold
+//!   last-good values silently.
+//!
+//! The crate is `no_std`, allocation-free, and sans-IO: time enters only
+//! as ages the caller supplies. [`abi`] defines the packed little-endian
+//! input layout shared with non-Rust feeders (the browser writes it into
+//! WASM linear memory).
+
+#![no_std]
+
+pub mod abi;
+mod aircraft;
+mod quat;
+mod resolve;
+mod signal;
+pub mod units;
+
+pub use aircraft::{
+    AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
+    Selections, Stamped, ValidFlags, Wind,
+};
+pub use quat::Quat;
+pub use resolve::{NavResolved, PanelData, resolve};
+pub use signal::{FreshnessPolicy, Sig, SignalStatus};

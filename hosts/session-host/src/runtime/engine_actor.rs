@@ -231,6 +231,23 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     linear_y_mps: 0.0,
                     angular_rad_s: 0.0,
                 }),
+                avionics: sample.avionics.map(|a| wire::AvionicsState {
+                    quat_w: a.quat_wxyz[0],
+                    quat_x: a.quat_wxyz[1],
+                    quat_y: a.quat_wxyz[2],
+                    quat_z: a.quat_wxyz[3],
+                    rate_p_rad_s: a.rates_rps[0],
+                    rate_q_rad_s: a.rates_rps[1],
+                    rate_r_rad_s: a.rates_rps[2],
+                    pos_n_m: a.pos_ned_m[0],
+                    pos_e_m: a.pos_ned_m[1],
+                    pos_d_m: a.pos_ned_m[2],
+                    vel_n_mps: a.vel_ned_mps[0],
+                    vel_e_mps: a.vel_ned_mps[1],
+                    vel_d_mps: a.vel_ned_mps[2],
+                    valid_flags: a.valid_flags,
+                    quality: a.quality,
+                }),
             };
             let bytes = encode_telemetry_datagram(wire_sample);
             self.broadcast_datagram(bytes);

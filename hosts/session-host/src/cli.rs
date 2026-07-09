@@ -1,5 +1,5 @@
 //! Minimal argument parsing for the session-host binary: `--port <PORT>` and
-//! `--adapter reference|gazebo`, defaulting to port `0` (ephemeral,
+//! `--adapter reference|gazebo|aviate`, defaulting to port `0` (ephemeral,
 //! loopback-only bind) and the reference adapter.
 
 /// Which vehicle adapter the host embeds.
@@ -10,6 +10,9 @@ pub enum AdapterKind {
     Reference,
     /// The real Gazebo diff-drive adapter driven through the sidecar bridge.
     Gazebo,
+    /// The telemetry-only Aviate flight-controller adapter over MAVLink
+    /// (ADR-0018).
+    Aviate,
 }
 
 /// Parsed command-line configuration.
@@ -39,8 +42,9 @@ pub enum CliError {
     /// `--adapter` was given with no following value.
     #[error("--adapter requires a value")]
     MissingAdapterValue,
-    /// `--adapter` was given a value other than `reference` or `gazebo`.
-    #[error("invalid --adapter value {0:?} (expected reference or gazebo)")]
+    /// `--adapter` was given a value other than `reference`, `gazebo`,
+    /// or `aviate`.
+    #[error("invalid --adapter value {0:?} (expected reference, gazebo, or aviate)")]
     InvalidAdapter(String),
     /// An argument was not recognized.
     #[error("unrecognized argument: {0}")]
@@ -70,6 +74,7 @@ pub fn parse_args(args: &[String]) -> Result<CliArgs, CliError> {
                 adapter = match value.as_str() {
                     "reference" => AdapterKind::Reference,
                     "gazebo" => AdapterKind::Gazebo,
+                    "aviate" => AdapterKind::Aviate,
                     other => return Err(CliError::InvalidAdapter(other.to_owned())),
                 };
             }
@@ -110,6 +115,13 @@ mod tests {
         let args = vec!["--adapter".to_owned(), "reference".to_owned()];
         let parsed = parse_args(&args).expect("reference adapter parses");
         assert_eq!(parsed.adapter, AdapterKind::Reference);
+    }
+
+    #[test]
+    fn aviate_adapter_parses() {
+        let args = vec!["--adapter".to_owned(), "aviate".to_owned()];
+        let parsed = parse_args(&args).expect("aviate adapter parses");
+        assert_eq!(parsed.adapter, AdapterKind::Aviate);
     }
 
     #[test]

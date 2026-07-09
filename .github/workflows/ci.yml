@@ -27,6 +27,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: thumbv7em-none-eabihf, wasm32-unknown-unknown
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
@@ -55,6 +56,19 @@ jobs:
 
       - name: check-structure
         run: bash scripts/check-structure.sh
+
+      - name: instrument crates are no_std (ADR-0017)
+        # Compiling the instrument family for a bare-metal target proves the
+        # no_std/no-alloc claim instead of trusting a comment.
+        run: >
+          cargo check
+          -p pilotage-instrument-state
+          -p pilotage-instrument-scene
+          -p pilotage-instrument-panels
+          --target thumbv7em-none-eabihf
+
+      - name: instrument wasm backend builds
+        run: cargo build -p pilotage-instruments-web --target wasm32-unknown-unknown --release
 
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs
