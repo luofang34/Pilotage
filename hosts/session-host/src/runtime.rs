@@ -160,7 +160,7 @@ async fn spawn_host_runtime(
             let (engine, adapter, frames) =
                 gazebo_launch::build_gazebo(HOST_VEHICLE, MAX_CONTROL_AGE).await?;
             let (media, media_task) = media::spawn_media_task(frames);
-            Ok(tokio::spawn(run_gazebo_until_shutdown(
+            Ok(tokio::spawn(run_with_media_until_shutdown(
                 endpoint,
                 engine,
                 adapter,
@@ -180,7 +180,7 @@ async fn spawn_host_runtime(
                 Ok("mavlink") => pilotage_adapter_aviate::AviateLinkMode::Mavlink,
                 _ => pilotage_adapter_aviate::AviateLinkMode::Auto,
             };
-            let adapter = pilotage_adapter_aviate::AviateAdapter::start(
+            let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
                 HOST_VEHICLE,
                 mode,
                 pilotage_adapter_aviate::LinkConfig::default(),
@@ -188,15 +188,30 @@ async fn spawn_host_runtime(
             .await
             .map_err(HostError::AviateAdapter)?;
             let engine = build_engine(&adapter);
-            Ok(tokio::spawn(run_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                None,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-            )))
+            match adapter.subscribe_frames() {
+                Some(frames) => {
+                    let (media, media_task) = media::spawn_media_task(frames);
+                    Ok(tokio::spawn(run_with_media_until_shutdown(
+                        endpoint,
+                        engine,
+                        adapter,
+                        media,
+                        media_task,
+                        engine_tx,
+                        engine_rx,
+                        shutdown_rx,
+                    )))
+                }
+                None => Ok(tokio::spawn(run_until_shutdown(
+                    endpoint,
+                    engine,
+                    adapter,
+                    None,
+                    engine_tx,
+                    engine_rx,
+                    shutdown_rx,
+                ))),
+            }
         }
     }
 }
@@ -248,21 +263,24 @@ async fn run_until_shutdown<A>(
     shutdown::join_with_timeout(tasks).await;
 }
 
-/// The Gazebo variant of [`run_until_shutdown`]: identical lifecycle, plus it
-/// joins the media task on the way out so no video uni stream is abandoned
-/// mid-write. The media task ends once its frame source (the adapter) is
-/// dropped, which the engine-actor task does at teardown.
+/// The camera-equipped variant of [`run_until_shutdown`]: identical
+/// lifecycle, plus it joins the media task on the way out so no video uni
+/// stream is abandoned mid-write. The media task ends once its frame
+/// source (the adapter) is dropped, which the engine-actor task does at
+/// teardown.
 #[allow(clippy::too_many_arguments)]
-async fn run_gazebo_until_shutdown(
+async fn run_with_media_until_shutdown<A>(
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine: SessionEngine,
-    adapter: pilotage_adapter_gazebo::GazeboAdapter,
+    adapter: A,
     media: MediaHandle,
     media_task: tokio::task::JoinHandle<()>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
-) {
+) where
+    A: VehicleAdapter + Send + 'static,
+{
     run_until_shutdown(
         endpoint,
         engine,

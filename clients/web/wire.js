@@ -212,11 +212,25 @@ function encodeAxisSample(axisId, value) {
   return bytes;
 }
 
-function encodeControlPayload(axes) {
+function encodeControlPayload(axes, edges) {
   const bytes = [];
   for (const [axisId, value] of axes) {
     fieldBytes(bytes, 1, encodeAxisSample(axisId, value));
   }
+  for (const [buttonId, edge] of edges ?? []) {
+    fieldBytes(bytes, 2, encodeButtonEdgeSample(buttonId, edge));
+  }
+  return bytes;
+}
+
+// control.proto ButtonEdgeSample: button_id=1, edge=2
+// (ButtonEdge enum: 1 = pressed, 2 = released).
+export const BUTTON_EDGE_PRESSED = 1;
+
+function encodeButtonEdgeSample(buttonId, edge) {
+  const bytes = [];
+  fieldVarint(bytes, 1, buttonId);
+  fieldVarint(bytes, 2, edge);
   return bytes;
 }
 
@@ -224,7 +238,9 @@ function encodeControlPayload(axes) {
  * Encodes one `ControlFrame` wrapped in an `Envelope`, ready to send as a
  * single control-fast datagram (bare envelope, no length prefix, ADR-0005).
  *
- * `axes` is an array of `[axisId, value]` pairs, value in [-1.0, 1.0].
+ * `axes` is an array of `[axisId, value]` pairs, value in [-1.0, 1.0];
+ * `edges` (optional) is an array of `[buttonId, edgeEnum]` one-shot
+ * button events.
  */
 export function encodeControlFrameEnvelope({
   sessionId,
@@ -235,6 +251,7 @@ export function encodeControlFrameEnvelope({
   sampledAtNanos,
   profileRevision,
   axes,
+  edges,
 }) {
   // These seven are required message-typed fields the host's wire->domain
   // conversion demands present, so emit each even when its inner scalar is 0
@@ -247,7 +264,7 @@ export function encodeControlFrameEnvelope({
   fieldMessage(frame, 5, encodeSequenceNum(sequence));
   fieldMessage(frame, 6, encodeMonoTimestamp(sampledAtNanos));
   fieldVarint(frame, 7, profileRevision);
-  fieldMessage(frame, 8, encodeControlPayload(axes));
+  fieldMessage(frame, 8, encodeControlPayload(axes, edges));
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.controlFrame, frame));
 }
 

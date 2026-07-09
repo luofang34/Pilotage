@@ -132,6 +132,13 @@
   <label>port <input id="port" placeholder="4433" /></label>
   <label>cert hash <input id="certHash" placeholder="hex from LISTENING line" /></label>
   <button id="connectBtn">Connect</button>
+  <label>controls
+    <select id="flightMode">
+      <option value="quad-pilot" selected>Quad — Pilot (Mode 2)</option>
+      <option value="quad-cruise">Quad — Cruise (game-native)</option>
+      <option value="rover">Rover (throttle/yaw)</option>
+    </select>
+  </label>
 </div>
 
 <div class="stage-row">

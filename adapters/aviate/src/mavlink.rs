@@ -57,6 +57,11 @@ pub struct ParseStats {
     pub garbage_bytes: u32,
 }
 
+/// COMMAND_LONG message id (uplink: arm/disarm).
+pub const COMMAND_LONG_ID: u32 = 76;
+/// SET_POSITION_TARGET_LOCAL_NED message id (uplink: velocity setpoints).
+pub const SET_POSITION_TARGET_ID: u32 = 84;
+
 /// CRC_EXTRA per message id, from the MAVLink XML definitions (matching
 /// `aviate-link`); `None` for ids this parser cannot verify.
 fn crc_extra(msg_id: u32) -> Option<u8> {
@@ -64,6 +69,8 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         HEARTBEAT_ID => Some(50),
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
+        COMMAND_LONG_ID => Some(152),
+        SET_POSITION_TARGET_ID => Some(143),
         _ => None,
     }
 }
@@ -187,27 +194,94 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(u8, AviateMessage)>) -> Parse
     stats
 }
 
+/// Writes a MAVLink 2.0 frame (GCS sysid 255, compid 190) around
+/// `payload` into `out`, returning the frame length. `out` must hold
+/// `10 + payload.len() + 2` bytes; a too-small buffer returns 0.
+fn encode_frame_v2(seq: u8, msg_id: u32, payload: &[u8], extra: u8, out: &mut [u8]) -> usize {
+    let total = 10 + payload.len() + 2;
+    if out.len() < total || payload.len() > 255 {
+        return 0;
+    }
+    out[0] = MAGIC_V2;
+    out[1] = payload.len() as u8;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = seq;
+    out[5] = 255;
+    out[6] = 190;
+    out[7] = (msg_id & 0xff) as u8;
+    out[8] = ((msg_id >> 8) & 0xff) as u8;
+    out[9] = ((msg_id >> 16) & 0xff) as u8;
+    out[10..10 + payload.len()].copy_from_slice(payload);
+    let crc = compute_crc(&out[1..10 + payload.len()], extra);
+    out[10 + payload.len()] = (crc & 0xff) as u8;
+    out[10 + payload.len() + 1] = (crc >> 8) as u8;
+    total
+}
+
 /// Serializes a GCS heartbeat frame, used to register this endpoint with
 /// a MAVLink router that only forwards to peers it has heard from.
 pub fn encode_gcs_heartbeat(seq: u8) -> [u8; 21] {
-    let mut frame = [0u8; 21];
-    frame[0] = MAGIC_V2;
-    frame[1] = 9; // payload length
-    // incompat/compat = 0; seq; sysid 255 (GCS convention); compid 190.
-    frame[4] = seq;
-    frame[5] = 255;
-    frame[6] = 190;
-    // msgid 0 (HEARTBEAT) is already zero.
     // Payload: custom_mode u32 (0), type MAV_TYPE_GCS=6, autopilot
     // MAV_AUTOPILOT_INVALID=8, base_mode 0, system_status MAV_STATE_ACTIVE=4,
     // mavlink_version 3.
-    frame[14] = 6;
-    frame[15] = 8;
-    frame[17] = 4;
-    frame[18] = 3;
-    let crc = compute_crc(&frame[1..19], 50);
-    frame[19] = (crc & 0xff) as u8;
-    frame[20] = (crc >> 8) as u8;
+    let mut payload = [0u8; 9];
+    payload[4] = 6;
+    payload[5] = 8;
+    payload[7] = 4;
+    payload[8] = 3;
+    let mut frame = [0u8; 21];
+    encode_frame_v2(seq, HEARTBEAT_ID, &payload, 50, &mut frame);
+    frame
+}
+
+/// Serializes a COMMAND_LONG arm/disarm frame (MAV_CMD 400) addressed to
+/// system 1 / component 1 (the Aviate FC's SITL identity).
+///
+/// Wire order (33 bytes): param1..7 f32 @0..28, command u16 @28,
+/// target_system @30, target_component @31, confirmation @32.
+pub fn encode_arm_command(seq: u8, arm: bool) -> [u8; 45] {
+    let mut payload = [0u8; 33];
+    let param1: f32 = if arm { 1.0 } else { 0.0 };
+    payload[0..4].copy_from_slice(&param1.to_le_bytes());
+    payload[28..30].copy_from_slice(&400u16.to_le_bytes());
+    payload[30] = 1;
+    payload[31] = 1;
+    let mut frame = [0u8; 45];
+    encode_frame_v2(seq, COMMAND_LONG_ID, &payload, 152, &mut frame);
+    frame
+}
+
+/// Serializes a SET_POSITION_TARGET_LOCAL_NED velocity setpoint: NED
+/// velocity plus absolute yaw, everything else masked out
+/// (`type_mask` ignores position, acceleration, and yaw rate — the
+/// combination Aviate's bridge maps to `ControlMode::VelocityControl`).
+///
+/// Wire order (53 bytes): time_boot_ms u32 @0, x/y/z @4..16,
+/// vx/vy/vz @16..28, afx/afy/afz @28..40, yaw @40, yaw_rate @44,
+/// type_mask u16 @48, target_system @50, target_component @51,
+/// coordinate_frame @52.
+pub fn encode_velocity_setpoint(
+    seq: u8,
+    time_boot_ms: u32,
+    vel_ned_mps: [f32; 3],
+    yaw_rad: f32,
+) -> [u8; 65] {
+    // Ignore position (1|2|4), acceleration (64|128|256), yaw rate (2048):
+    // velocity + absolute yaw remain.
+    const TYPE_MASK: u16 = 1 | 2 | 4 | 64 | 128 | 256 | 2048;
+    let mut payload = [0u8; 53];
+    payload[0..4].copy_from_slice(&time_boot_ms.to_le_bytes());
+    payload[16..20].copy_from_slice(&vel_ned_mps[0].to_le_bytes());
+    payload[20..24].copy_from_slice(&vel_ned_mps[1].to_le_bytes());
+    payload[24..28].copy_from_slice(&vel_ned_mps[2].to_le_bytes());
+    payload[40..44].copy_from_slice(&yaw_rad.to_le_bytes());
+    payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
+    payload[50] = 1; // target system
+    payload[51] = 1; // target component
+    payload[52] = 1; // MAV_FRAME_LOCAL_NED
+    let mut frame = [0u8; 65];
+    encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
     frame
 }
 

@@ -874,6 +874,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "pilotage-adapter-api",
+ "pilotage-adapter-gazebo",
  "pilotage-protocol",
  "pilotage-timing",
  "thiserror",
