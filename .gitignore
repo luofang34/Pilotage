@@ -12,6 +12,7 @@ dist/
 # WebAssembly build output
 pkg/
 wasm-pack.log
+clients/web/instruments.wasm
 
 # Generated protobuf code (generated at build time; schemas/ is the source of truth)
 **/src/generated/

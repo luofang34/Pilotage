@@ -1,0 +1,11 @@
+[package]
+name = "pilotage-instrument-scene"
+description = "Versioned draw-command IR for instrument panels (ADR-0017)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

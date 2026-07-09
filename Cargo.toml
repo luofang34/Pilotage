@@ -8,11 +8,15 @@ members = [
     "crates/pilotage-timing",
     "crates/pilotage-adapter-api",
     "crates/pilotage-conformance",
+    "crates/pilotage-instrument-scene",
+    "crates/pilotage-instrument-state",
+    "crates/pilotage-instrument-panels",
     "adapters/reference-headless",
     "tools/hid-probe",
     "tools/loopback-probe",
     "hosts/session-host",
     "adapters/gazebo",
+    "clients/web-instruments",
 ]
 
 [workspace.package]
@@ -36,6 +40,9 @@ pilotage-protocol = { path = "crates/pilotage-protocol" }
 pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
+pilotage-instrument-scene = { path = "crates/pilotage-instrument-scene" }
+pilotage-instrument-state = { path = "crates/pilotage-instrument-state" }
+pilotage-instrument-panels = { path = "crates/pilotage-instrument-panels" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-session = { path = "crates/pilotage-session" }

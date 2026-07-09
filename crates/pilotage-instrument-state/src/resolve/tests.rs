@@ -1,0 +1,111 @@
+#![allow(clippy::expect_used, clippy::panic)]
+
+use super::resolve;
+use crate::aircraft::{AirData, AircraftState, Attitude, EstimateQuality, Kinematics, Stamped};
+use crate::quat::Quat;
+use crate::signal::{FreshnessPolicy, SignalStatus};
+
+fn flying_state() -> AircraftState {
+    AircraftState {
+        attitude: Stamped {
+            data: Some(Attitude {
+                quat: Quat::IDENTITY,
+                rates_rps: [0.0, 0.0, 0.05],
+            }),
+            age_ms: Some(50.0),
+        },
+        kinematics: Stamped {
+            data: Some(Kinematics {
+                pos_ned_m: [100.0, 0.0, -304.8],
+                vel_ned_mps: [10.0, 10.0, -2.0],
+            }),
+            age_ms: Some(100.0),
+        },
+        air: Stamped {
+            data: Some(AirData {
+                ias_mps: None,
+                baro_setting_hpa: Some(1013.25),
+            }),
+            age_ms: Some(100.0),
+        },
+        ..AircraftState::default()
+    }
+}
+
+#[test]
+fn derives_display_units_from_si_ned() {
+    let p = resolve(&flying_state(), &FreshnessPolicy::default());
+    // 304.8 m up = 1000 ft.
+    assert!((p.alt_ft.value - 1000.0).abs() < 0.5);
+    // 2 m/s climb ≈ 394 fpm.
+    assert!((p.vsi_fpm.value - 393.7).abs() < 1.0);
+    // 10,10 m/s ≈ 27.5 kt at 045°.
+    assert!((p.gs_kt.value - 27.49).abs() < 0.1);
+    assert!((p.track_rad.value - core::f32::consts::FRAC_PI_4).abs() < 1e-4);
+    assert_eq!(p.roll_rad.status, SignalStatus::Valid);
+}
+
+#[test]
+fn absent_airspeed_is_missing_not_zero() {
+    let p = resolve(&flying_state(), &FreshnessPolicy::default());
+    assert_eq!(p.ias_kt.status, SignalStatus::Missing);
+    // Baro from the same group is still valid.
+    assert_eq!(p.baro_hpa.status, SignalStatus::Valid);
+}
+
+#[test]
+fn stale_attitude_is_flagged_stale() {
+    let mut s = flying_state();
+    s.attitude.age_ms = Some(1000.0);
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Stale);
+    assert!(p.roll_rad.status.shows_value());
+}
+
+#[test]
+fn dead_attitude_is_failed() {
+    let mut s = flying_state();
+    s.attitude.age_ms = Some(10_000.0);
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+    assert!(!p.roll_rad.status.shows_value());
+}
+
+#[test]
+fn source_invalidity_beats_freshness() {
+    let mut s = flying_state();
+    s.valid.attitude = false;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+    // Rates flag is independent of the attitude flag.
+    assert_eq!(p.turn_rate_rps.status, SignalStatus::Valid);
+}
+
+#[test]
+fn degraded_quality_taints_all_estimate_groups() {
+    let mut s = flying_state();
+    s.quality = EstimateQuality::Degraded;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
+    assert_eq!(p.alt_ft.status, SignalStatus::Degraded);
+}
+
+#[test]
+fn slow_track_is_meaningless_and_missing() {
+    let mut s = flying_state();
+    if let Some(kin) = s.kinematics.data.as_mut() {
+        kin.vel_ned_mps = [0.1, 0.1, 0.0];
+    }
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.track_rad.status, SignalStatus::Missing);
+}
+
+#[test]
+fn empty_state_resolves_all_missing() {
+    let p = resolve(&AircraftState::default(), &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Missing);
+    assert_eq!(p.alt_ft.status, SignalStatus::Missing);
+    assert_eq!(p.ias_kt.status, SignalStatus::Missing);
+    assert_eq!(p.nav.status, SignalStatus::Missing);
+    assert_eq!(p.wind.status, SignalStatus::Missing);
+}

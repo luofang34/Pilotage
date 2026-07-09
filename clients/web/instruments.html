@@ -1,0 +1,194 @@
+<!--
+  Instrument panel test harness (ADR-0017 stage A). Drives the WASM
+  PFD/HSI from sliders with no session host or simulator — the
+  pyG5ViewTester analog for this runtime.
+
+  Build the wasm first:
+    scripts/build-web-instruments.sh
+  then serve statically, no build step:
+    python3 -m http.server 8000
+  and open http://localhost:8000/clients/web/instruments.html
+-->
+<title>Pilotage instrument harness</title>
+<meta charset="utf-8" />
+<style>
+  body {
+    background: #111;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    margin: 0;
+    padding: 1rem;
+  }
+  h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+  .stage-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  canvas {
+    display: block;
+    background: #000;
+    border: 1px solid #333;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 0.25rem 1.25rem;
+    margin-top: 0.9rem;
+    max-width: 1000px;
+    font-size: 0.85rem;
+  }
+  .controls label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+  }
+  .controls input[type="range"] {
+    flex: 1;
+  }
+  .controls output {
+    width: 3.5rem;
+    text-align: right;
+    font-family: monospace;
+    color: #9ac;
+  }
+  fieldset {
+    border: 1px solid #333;
+    margin-top: 0.75rem;
+  }
+  legend {
+    color: #888;
+    font-size: 0.8rem;
+  }
+  select {
+    background: #222;
+    color: #eee;
+    border: 1px solid #444;
+  }
+  #note {
+    color: #888;
+    font-size: 0.8rem;
+    margin-top: 0.6rem;
+  }
+</style>
+
+<h1>Instrument harness — PFD / HSI from sliders</h1>
+
+<div class="stage-row">
+  <canvas id="pfd" width="480" height="360"></canvas>
+  <canvas id="hsi" width="480" height="360"></canvas>
+</div>
+
+<div class="controls" id="sliders"></div>
+
+<fieldset>
+  <legend>validity</legend>
+  <label>quality
+    <select id="quality">
+      <option value="0" selected>good</option>
+      <option value="1">degraded</option>
+      <option value="2">unusable</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="freezeAtt" /> freeze attitude (age grows → stale → failed)</label>
+  <label><input type="checkbox" id="noAir" checked /> no airspeed sensor (IAS missing)</label>
+  <label><input type="checkbox" id="navOn" checked /> GPS nav source</label>
+</fieldset>
+
+<div id="note">All drawing originates from no_std Rust compiled to WASM; this page only
+writes packed state and interprets abstract scene commands onto Canvas2D.</div>
+
+<script type="module">
+  import { loadInstruments, eulerToQuat, PANEL } from "./instruments.js";
+
+  const DEG = Math.PI / 180;
+  const defs = [
+    ["roll", "roll °", -80, 80, 12, 1],
+    ["pitch", "pitch °", -30, 30, 6, 0.5],
+    ["heading", "heading °", 0, 360, 9, 1],
+    ["alt", "altitude m", -50, 3000, 950, 1],
+    ["vsi", "climb m/s", -8, 8, 1.2, 0.1],
+    ["gs", "groundspeed m/s", 0, 80, 38, 0.5],
+    ["track", "track °", 0, 360, 15, 1],
+    ["yawRate", "yaw rate °/s", -12, 12, 2, 0.5],
+    ["hdgBug", "heading bug °", 0, 360, 20, 1],
+    ["altSel", "altitude sel m", 0, 3200, 1000, 10],
+    ["baro", "baro hPa", 950, 1050, 1013, 1],
+    ["crs", "course °", 0, 360, 20, 1],
+    ["cdi", "CDI dots", -2.5, 2.5, -0.6, 0.1],
+    ["vdev", "vdev dots", -3, 3, 0.4, 0.1],
+    ["dist", "dist NM", 0, 99, 40.3, 0.1],
+    ["windDir", "wind from °", 0, 360, 269, 1],
+    ["windSpd", "wind m/s", 0, 30, 7, 0.5],
+  ];
+  const inputs = {};
+  const slidersDiv = document.getElementById("sliders");
+  for (const [id, label, min, max, value, step] of defs) {
+    const wrap = document.createElement("label");
+    const out = document.createElement("output");
+    const input = document.createElement("input");
+    Object.assign(input, { type: "range", min, max, value, step });
+    input.addEventListener("input", () => (out.value = input.value));
+    out.value = String(value);
+    wrap.append(`${label}`, input, out);
+    slidersDiv.append(wrap);
+    inputs[id] = input;
+  }
+  const v = (id) => Number(inputs[id].value);
+
+  const pfd = document.getElementById("pfd").getContext("2d");
+  const hsi = document.getElementById("hsi").getContext("2d");
+  const mod = await loadInstruments("./instruments.wasm");
+  mod.setVSpeeds(40, 48, 85, 129, 163);
+
+  let freezeStart = null;
+  document.getElementById("freezeAtt").addEventListener("change", (e) => {
+    freezeStart = e.target.checked ? performance.now() : null;
+  });
+
+  function frame(now) {
+    const attAge = freezeStart === null ? 16 : now - freezeStart;
+    const trackRad = v("track") * DEG;
+    const gs = v("gs");
+    mod.writeState({
+      attitude: {
+        quat: eulerToQuat(v("roll") * DEG, v("pitch") * DEG, v("heading") * DEG),
+        rates: [0, 0, v("yawRate") * DEG],
+        ageMs: attAge,
+      },
+      kinematics: {
+        posNed: [0, 0, -v("alt")],
+        velNed: [gs * Math.cos(trackRad), gs * Math.sin(trackRad), -v("vsi")],
+        ageMs: attAge,
+      },
+      air: {
+        iasMps: document.getElementById("noAir").checked ? null : gs * 1.06,
+        baroHpa: v("baro"),
+        ageMs: 16,
+      },
+      nav: document.getElementById("navOn").checked
+        ? {
+            source: 1,
+            courseRad: v("crs") * DEG,
+            cdiDots: v("cdi"),
+            fromto: 1,
+            vdevDots: v("vdev"),
+            distNm: v("dist"),
+            ageMs: 16,
+          }
+        : null,
+      wind: { fromRad: v("windDir") * DEG, speedMps: v("windSpd"), ageMs: 16 },
+      selections: { headingBugRad: v("hdgBug") * DEG, altitudeSelM: v("altSel") },
+      quality: Number(document.getElementById("quality").value),
+    });
+    mod.renderTo(pfd, PANEL.PFD, 480, 360);
+    mod.renderTo(hsi, PANEL.HSI, 480, 360);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>

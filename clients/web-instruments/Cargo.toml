@@ -1,0 +1,32 @@
+[package]
+name = "pilotage-instruments-web"
+description = "WASM export of the instrument panels for the browser viewer (ADR-0017)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Not `workspace = true`: the workspace forbids unsafe_code outright, but
+# edition-2024 WASM exports require the `#[unsafe(no_mangle)]` attribute.
+# This crate denies unsafe_code and allows it per-export with a SAFETY
+# justification; everything else matches the workspace wall.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"
+
+[dependencies]
+pilotage-instrument-panels = { workspace = true }
+pilotage-instrument-scene = { workspace = true }
+pilotage-instrument-state = { workspace = true }
