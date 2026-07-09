@@ -18,7 +18,8 @@ mod adapter;
 mod error;
 mod link;
 pub mod mavlink;
+pub mod shm;
 
-pub use adapter::AviateAdapter;
+pub use adapter::{AviateAdapter, AviateLinkMode};
 pub use error::AviateAdapterError;
 pub use link::LinkConfig;

@@ -36,6 +36,11 @@ impl Default for LinkConfig {
 /// stale rather than freezing them).
 #[derive(Debug, Default)]
 pub struct LatestAviate {
+    /// The vehicle system id this link is locked onto. A routed link
+    /// carries several vehicles plus other GCS peers; the first system
+    /// id to deliver an estimate wins and everything else is ignored
+    /// (one adapter, one vehicle — ADR-0008).
+    pub locked_sysid: Option<u8>,
     /// Latest attitude estimate: quaternion (w,x,y,z), body rates,
     /// FC boot time, receive stamp.
     pub attitude: Option<AttitudeUpdate>,
@@ -174,7 +179,7 @@ async fn run_link(
 /// lock-scoped: the lock is never held across an await.
 fn apply_messages(
     state: &Arc<Mutex<LatestAviate>>,
-    messages: &[AviateMessage],
+    messages: &[(u8, AviateMessage)],
     crc_failures: u32,
     unknown_ids: u32,
 ) {
@@ -184,9 +189,18 @@ fn apply_messages(
     };
     latest.crc_failures = latest.crc_failures.wrapping_add(u64::from(crc_failures));
     latest.unknown_ids = latest.unknown_ids.wrapping_add(u64::from(unknown_ids));
-    for message in messages {
+    for &(sysid, message) in messages {
         latest.decoded = latest.decoded.wrapping_add(1);
-        match *message {
+        // Lock onto the first system id that delivers an estimate;
+        // heartbeats alone don't lock (other GCS peers heartbeat too).
+        let is_estimate = !matches!(message, AviateMessage::Heartbeat);
+        match latest.locked_sysid {
+            None if is_estimate => latest.locked_sysid = Some(sysid),
+            Some(locked) if locked != sysid => continue,
+            None => continue,
+            Some(_) => {}
+        }
+        match message {
             AviateMessage::Heartbeat => latest.last_heartbeat = Some(now),
             AviateMessage::AttitudeQuaternion {
                 time_boot_ms: _,
@@ -214,3 +228,6 @@ fn apply_messages(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

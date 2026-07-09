@@ -11,4 +11,13 @@ pub enum AviateAdapterError {
         #[source]
         source: std::io::Error,
     },
+    /// The shared-memory state block could not be opened or mapped
+    /// (usually: no Aviate SITL is running yet).
+    #[error("Aviate state shm {name} unavailable: {detail}")]
+    ShmUnavailable {
+        /// The POSIX shm object name.
+        name: String,
+        /// What failed.
+        detail: String,
+    },
 }

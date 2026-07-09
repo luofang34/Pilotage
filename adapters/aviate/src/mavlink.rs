@@ -134,10 +134,12 @@ fn decode_known(msg_id: u32, payload: &[u8]) -> Option<AviateMessage> {
 }
 
 /// Parses every MAVLink 2.0 frame in `bytes` (a UDP datagram may carry
-/// several), appending decoded messages to `out` and returning parse
-/// accounting. Unknown ids and CRC failures skip the frame; stray bytes
-/// before a frame start are discarded byte-by-byte.
-pub fn parse_datagram(bytes: &[u8], out: &mut Vec<AviateMessage>) -> ParseStats {
+/// several), appending `(sender system id, message)` pairs to `out` and
+/// returning parse accounting. The system id lets a consumer on a routed
+/// link (several vehicles, plus other GCS peers) lock onto one vehicle.
+/// Unknown ids and CRC failures skip the frame; stray bytes before a
+/// frame start are discarded byte-by-byte.
+pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(u8, AviateMessage)>) -> ParseStats {
     let mut stats = ParseStats::default();
     let mut at = 0usize;
     while at < bytes.len() {
@@ -160,6 +162,7 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<AviateMessage>) -> ParseStats 
             stats.garbage_bytes = stats.garbage_bytes.wrapping_add((bytes.len() - at) as u32);
             break;
         };
+        let sysid = frame[5];
         let msg_id = u32::from(frame[7]) | (u32::from(frame[8]) << 8) | (u32::from(frame[9]) << 16);
         let crc_at = 10 + payload_len;
         let wire_crc = u16::from(frame[crc_at]) | (u16::from(frame[crc_at + 1]) << 8);
@@ -168,7 +171,7 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<AviateMessage>) -> ParseStats 
                 let computed = compute_crc(&frame[1..crc_at], extra);
                 if computed == wire_crc {
                     if let Some(msg) = decode_known(msg_id, &frame[10..crc_at]) {
-                        out.push(msg);
+                        out.push((sysid, msg));
                         stats.decoded = stats.decoded.wrapping_add(1);
                     }
                 } else {
