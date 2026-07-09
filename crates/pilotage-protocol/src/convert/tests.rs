@@ -107,6 +107,23 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             linear_y_mps: 0.2,
             angular_rad_s: 0.3,
         }),
+        avionics: Some(wire::AvionicsState {
+            quat_w: 1.0,
+            quat_x: 0.0,
+            quat_y: 0.0,
+            quat_z: 0.0,
+            rate_p_rad_s: 0.01,
+            rate_q_rad_s: 0.02,
+            rate_r_rad_s: 0.03,
+            pos_n_m: 1.0,
+            pos_e_m: 2.0,
+            pos_d_m: -300.0,
+            vel_n_mps: 10.0,
+            vel_e_mps: 0.0,
+            vel_d_mps: -1.0,
+            valid_flags: 0b1111,
+            quality: 0,
+        }),
     };
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,

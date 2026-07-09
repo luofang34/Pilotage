@@ -15,6 +15,26 @@ pub struct Pose2d {
     pub heading: f64,
 }
 
+/// Raw avionics state estimate for flight vehicles (ADR-0018): the
+/// estimator's output, not display-ready numbers. Ground vehicles leave
+/// [`TelemetrySample::avionics`] as `None`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AvionicsSample {
+    /// Attitude quaternion (w, x, y, z), body FRD → world NED.
+    pub quat_wxyz: [f32; 4],
+    /// Body rates (p, q, r) in radians/second.
+    pub rates_rps: [f32; 3],
+    /// Position (north, east, down) in meters from the local origin.
+    pub pos_ned_m: [f32; 3],
+    /// Velocity (north, east, down) in meters/second.
+    pub vel_ned_mps: [f32; 3],
+    /// Validity bitmask: bit0 attitude, bit1 rates, bit2 position,
+    /// bit3 velocity.
+    pub valid_flags: u32,
+    /// Estimate quality: 0 good, 1 degraded, 2 unusable.
+    pub quality: u32,
+}
+
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
@@ -26,6 +46,9 @@ pub struct TelemetrySample {
     pub pose: Pose2d,
     /// Scalar speed at this tick, in the adapter's native units.
     pub speed: f64,
+    /// Raw avionics estimate for flight vehicles; `None` for ground
+    /// vehicles (ADR-0018).
+    pub avionics: Option<AvionicsSample>,
 }
 
 /// A batch of telemetry samples returned from a single `sample_telemetry`
@@ -70,6 +93,7 @@ mod tests {
                 heading: 0.5,
             },
             speed: 3.0,
+            avionics: None,
         };
         assert_eq!(sample.pose.x, 1.0);
         assert_eq!(sample.speed, 3.0);

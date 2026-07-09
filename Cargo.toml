@@ -12,6 +12,7 @@ members = [
     "crates/pilotage-instrument-state",
     "crates/pilotage-instrument-panels",
     "adapters/reference-headless",
+    "adapters/aviate",
     "tools/hid-probe",
     "tools/loopback-probe",
     "hosts/session-host",
@@ -45,6 +46,7 @@ pilotage-instrument-state = { path = "crates/pilotage-instrument-state" }
 pilotage-instrument-panels = { path = "crates/pilotage-instrument-panels" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
+pilotage-adapter-aviate = { path = "adapters/aviate" }
 pilotage-session = { path = "crates/pilotage-session" }
 
 [workspace.lints.rust]

@@ -14,5 +14,5 @@ mod vehicle_adapter;
 pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, VehicleDescriptor};
 pub use control::{ApplyOutcome, Disposition, LinkLossPolicy, RejectReason};
 pub use step::{StepBudget, StepOutcome};
-pub use telemetry::{Pose2d, TelemetryBatch, TelemetrySample, VideoSource};
+pub use telemetry::{AvionicsSample, Pose2d, TelemetryBatch, TelemetrySample, VideoSource};
 pub use vehicle_adapter::VehicleAdapter;

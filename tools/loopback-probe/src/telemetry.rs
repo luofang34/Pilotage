@@ -58,6 +58,7 @@ mod tests {
                 heading_rad: 0.25,
             }),
             velocity: None,
+            avionics: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(100));
         assert_eq!(observation.pose, (1.5, 2.5, 0.25));
@@ -72,6 +73,7 @@ mod tests {
             observed_at: None,
             pose: None,
             velocity: None,
+            avionics: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(0));
         assert_eq!(observation.pose, (0.0, 0.0, 0.0));

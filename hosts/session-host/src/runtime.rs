@@ -171,6 +171,24 @@ async fn spawn_host_runtime(
                 shutdown_rx,
             )))
         }
+        AdapterKind::Aviate => {
+            let adapter = pilotage_adapter_aviate::AviateAdapter::start(
+                HOST_VEHICLE,
+                pilotage_adapter_aviate::LinkConfig::default(),
+            )
+            .await
+            .map_err(HostError::AviateAdapter)?;
+            let engine = build_engine(&adapter);
+            Ok(tokio::spawn(run_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                None,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+            )))
+        }
     }
 }
 

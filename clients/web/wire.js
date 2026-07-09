@@ -418,7 +418,8 @@ function decodeLeaseResponse(bytes) {
   };
 }
 
-// telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4, velocity=5
+// telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,
+// velocity=5, avionics=6
 // Pose2d: x_m=1, y_m=2, heading_rad=3 (all float, wire type 5)
 function decodeTelemetrySample(bytes) {
   if (!bytes) return {};
@@ -433,6 +434,41 @@ function decodeTelemetrySample(bytes) {
     headingRad: decodeFloat32(firstBytes(pose, 3)),
     linearXMps: decodeFloat32(firstBytes(vel, 1)),
     angularRadS: decodeFloat32(firstBytes(vel, 3)),
+    avionics: decodeAvionicsState(firstBytes(fields, 6)),
+  };
+}
+
+// telemetry.proto AvionicsState (ADR-0018): quat_w..z=1..4,
+// rate_p/q/r_rad_s=5..7, pos_n/e/d_m=8..10, vel_n/e/d_mps=11..13 (float),
+// valid_flags=14, quality=15 (varint). Raw estimate; display derivation
+// happens in the instrument runtime (ADR-0017).
+function decodeAvionicsState(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  return {
+    quat: {
+      w: decodeFloat32(firstBytes(f, 1)),
+      x: decodeFloat32(firstBytes(f, 2)),
+      y: decodeFloat32(firstBytes(f, 3)),
+      z: decodeFloat32(firstBytes(f, 4)),
+    },
+    rates: [
+      decodeFloat32(firstBytes(f, 5)),
+      decodeFloat32(firstBytes(f, 6)),
+      decodeFloat32(firstBytes(f, 7)),
+    ],
+    posNed: [
+      decodeFloat32(firstBytes(f, 8)),
+      decodeFloat32(firstBytes(f, 9)),
+      decodeFloat32(firstBytes(f, 10)),
+    ],
+    velNed: [
+      decodeFloat32(firstBytes(f, 11)),
+      decodeFloat32(firstBytes(f, 12)),
+      decodeFloat32(firstBytes(f, 13)),
+    ],
+    validFlags: firstVarint(f, 14) ?? 0,
+    quality: firstVarint(f, 15) ?? 0,
   };
 }
 

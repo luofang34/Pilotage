@@ -9,7 +9,7 @@
 // rejects the datagram as unrecognized. These checks pin the invariant that the
 // required fields are emitted even when their ids are zero.
 
-import { encodeControlFrameEnvelope, SCHEMA_VERSION } from "./wire.js";
+import { encodeControlFrameEnvelope, decodeBareEnvelope, SCHEMA_VERSION } from "./wire.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -100,6 +100,68 @@ for (const [num, name] of [
 ]) {
   check(`control frame emits required field ${num} (${name}) even when zero`, frame.has(num));
 }
+
+// ---- telemetry avionics decode (ADR-0018) -----------------------------------
+// Builds a bare Envelope { schema_version, telemetry_sample { avionics } }
+// byte-by-byte and asserts the decoder surfaces the raw estimate, including
+// proto3's omitted zero-valued fields (quat_x/y/z absent -> 0).
+
+function varint(out, v) {
+  let n = v;
+  for (;;) {
+    const b = n & 0x7f;
+    n >>>= 7;
+    if (n === 0) {
+      out.push(b);
+      return;
+    }
+    out.push(b | 0x80);
+  }
+}
+function f32Field(out, fieldNumber, value) {
+  if (value === 0) return; // proto3 omits defaults
+  varint(out, (fieldNumber << 3) | 5);
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setFloat32(0, value, true);
+  out.push(...b);
+}
+function bytesField(out, fieldNumber, bytes) {
+  varint(out, (fieldNumber << 3) | 2);
+  varint(out, bytes.length);
+  out.push(...bytes);
+}
+
+const avionics = [];
+f32Field(avionics, 1, 0.9); // quat_w; x/y/z stay 0 and are omitted
+f32Field(avionics, 7, 0.05); // rate_r
+f32Field(avionics, 10, -304.8); // pos_d
+f32Field(avionics, 11, 10.0); // vel_n
+varint(avionics, (14 << 3) | 0);
+varint(avionics, 0b1111); // valid_flags
+
+const sample = [];
+bytesField(sample, 6, avionics);
+const bare = [];
+varint(bare, (1 << 3) | 0);
+varint(bare, SCHEMA_VERSION);
+bytesField(bare, 4, sample);
+
+const decoded = decodeBareEnvelope(new Uint8Array(bare));
+check("telemetry datagram decodes as TelemetrySample", decoded.kind === "TelemetrySample");
+const av = decoded.message.avionics;
+check("avionics arm is surfaced", !!av);
+check("avionics quat_w decodes", Math.abs(av.quat.w - 0.9) < 1e-6);
+check("omitted zero quat components decode as 0", av.quat.x === 0 && av.quat.y === 0 && av.quat.z === 0);
+check("avionics pos_d decodes", Math.abs(av.posNed[2] + 304.8) < 1e-3);
+check("avionics vel_n decodes", Math.abs(av.velNed[0] - 10.0) < 1e-6);
+check("avionics valid_flags decode", Number(av.validFlags) === 0b1111);
+check("a sample without avionics decodes to null", (() => {
+  const bareNoAv = [];
+  varint(bareNoAv, (1 << 3) | 0);
+  varint(bareNoAv, SCHEMA_VERSION);
+  bytesField(bareNoAv, 4, []);
+  return decodeBareEnvelope(new Uint8Array(bareNoAv)).message.avionics === null;
+})());
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

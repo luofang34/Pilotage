@@ -869,6 +869,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-aviate"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pilotage-adapter-gazebo"
 version = "0.1.0"
 dependencies = [
@@ -985,6 +997,7 @@ version = "0.1.0"
 dependencies = [
  "jpeg-encoder",
  "pilotage-adapter-api",
+ "pilotage-adapter-aviate",
  "pilotage-adapter-gazebo",
  "pilotage-adapter-reference",
  "pilotage-authority",

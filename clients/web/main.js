@@ -24,6 +24,7 @@ import {
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
 } from "./wire.js";
+import { loadInstruments, PANEL } from "./instruments.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const MOTION_SCOPE = "vehicle.motion";
@@ -42,9 +43,13 @@ const els = {
   gamepad: document.getElementById("gamepad"),
   canvas: document.getElementById("video"),
   chaseCanvas: document.getElementById("chaseVideo"),
+  pfd: document.getElementById("pfd"),
+  hsi: document.getElementById("hsi"),
 };
 const ctx = els.canvas.getContext("2d");
 const chaseCtx = els.chaseCanvas.getContext("2d");
+const pfdCtx = els.pfd.getContext("2d");
+const hsiCtx = els.hsi.getContext("2d");
 
 /** Session-scoped mutable state the connect flow and background loops share. */
 const state = {
@@ -55,7 +60,18 @@ const state = {
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   keys: new Set(),
   connected: false,
+  leaseGranted: false,
   skippedVideoFrames: 0,
+};
+
+// Instrument panel state (ADR-0017/0018): the latest raw avionics
+// estimate plus its receive stamp. Ingest only records; drawing happens
+// on the display's own requestAnimationFrame cadence, so telemetry rate
+// and frame rate stay decoupled.
+const instruments = {
+  mod: null,
+  latest: null,
+  receivedAtMs: null,
 };
 
 function log(line) {
@@ -125,7 +141,14 @@ async function connect() {
   state.connected = true;
   acceptIncomingUniStreams(transport);
   readTelemetryDatagrams(transport);
-  startControlLoop(transport).catch((error) => log(`control loop stopped: ${error}`));
+  if (state.leaseGranted) {
+    startControlLoop(transport).catch((error) => log(`control loop stopped: ${error}`));
+  } else {
+    // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
+    // advertises no controllable scopes; sending control frames anyway
+    // would only generate a 30 Hz stream of rejections.
+    log("no control lease granted; viewer is telemetry/video only");
+  }
 }
 
 /** Writes a length-delimited `ClientHello` envelope onto the bootstrap bidi stream. */
@@ -196,6 +219,7 @@ function handleBootstrapMessage(decoded) {
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
   } else if (decoded.kind === "LeaseResponse") {
     state.generation = BigInt(decoded.message.generation || 0);
+    state.leaseGranted = !!decoded.message.granted;
     log(`LeaseResponse: granted=${decoded.message.granted} generation=${decoded.message.generation}`);
     if (!decoded.message.granted) {
       els.overlay.textContent = `lease denied (reason ${decoded.message.reason})`;
@@ -314,6 +338,10 @@ async function readTelemetryDatagrams(transport) {
       els.telemetry.textContent =
         `pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
         ` | v=${t.linearXMps.toFixed(2)}m/s w=${t.angularRadS.toFixed(2)}rad/s`;
+      if (t.avionics) {
+        instruments.latest = t.avionics;
+        instruments.receivedAtMs = performance.now();
+      }
     } else if (decoded.kind === "Pong") {
       // RTT probing is out of scope for this demo viewer; ignored.
     } else if (decoded.kind === "FrameRejected") {
@@ -509,7 +537,52 @@ async function startControlLoop(transport) {
   }
 }
 
+// ---- instrument panels (ADR-0017) -------------------------------------------
+
+/** Maps the latest wire avionics estimate into the instrument state ABI
+ * and draws both panels; runs on the display's own rAF cadence. */
+function renderInstruments() {
+  const mod = instruments.mod;
+  if (!mod) return;
+  const a = instruments.latest;
+  const ageMs = a ? performance.now() - instruments.receivedAtMs : NaN;
+  mod.writeState({
+    attitude: a ? { quat: a.quat, rates: a.rates, ageMs } : null,
+    kinematics: a ? { posNed: a.posNed, velNed: a.velNed, ageMs } : null,
+    air: null, // no airspeed/baro sensor on Aviate's wire yet (ADR-0018): honest Missing.
+    nav: null,
+    wind: null,
+    selections: { headingBugRad: 0 },
+    quality: a ? a.quality : 0,
+    valid: a
+      ? {
+          attitude: !!(a.validFlags & 1),
+          rates: !!(a.validFlags & 2),
+          position: !!(a.validFlags & 4),
+          velocity: !!(a.validFlags & 8),
+        }
+      : {},
+  });
+  mod.renderTo(pfdCtx, PANEL.PFD, els.pfd.width, els.pfd.height);
+  mod.renderTo(hsiCtx, PANEL.HSI, els.hsi.width, els.hsi.height);
+}
+
+async function startInstruments() {
+  try {
+    instruments.mod = await loadInstruments("./instruments.wasm");
+    const loop = () => {
+      renderInstruments();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    log("instrument panels ready (wasm loaded)");
+  } catch (error) {
+    log(`instrument panels unavailable: ${error} (run scripts/build-web-instruments.sh)`);
+  }
+}
+
 applyUrlParams();
+startInstruments();
 els.connectBtn.addEventListener("click", () => {
   connect().catch((error) => log(`connect failed: ${error}`));
 });
