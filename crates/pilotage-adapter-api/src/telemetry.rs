@@ -33,6 +33,9 @@ pub struct AvionicsSample {
     pub valid_flags: u32,
     /// Estimate quality: 0 good, 1 degraded, 2 unusable.
     pub quality: u32,
+    /// Arm state as the vehicle reports it: 0 unknown, 1 disarmed,
+    /// 2 armed.
+    pub arm_state: u32,
 }
 
 /// A single vehicle's telemetry at one simulation tick.

@@ -247,6 +247,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     vel_d_mps: a.vel_ned_mps[2],
                     valid_flags: a.valid_flags,
                     quality: a.quality,
+                    arm_state: a.arm_state,
                 }),
             };
             let bytes = encode_telemetry_datagram(wire_sample);

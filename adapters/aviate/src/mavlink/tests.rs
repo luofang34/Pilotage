@@ -164,7 +164,7 @@ fn garbage_prefix_resyncs_to_the_next_frame() {
     let mut out: Vec<(u8, AviateMessage)> = Vec::new();
     let stats = parse_datagram(&datagram, &mut out);
     assert_eq!(stats.garbage_bytes, 3);
-    assert_eq!(out, vec![(1, AviateMessage::Heartbeat)]);
+    assert_eq!(out, vec![(1, AviateMessage::Heartbeat { armed: false })]);
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn gcs_heartbeat_parses_back_as_heartbeat() {
     let mut out: Vec<(u8, AviateMessage)> = Vec::new();
     let stats = parse_datagram(&frame, &mut out);
     assert_eq!(stats.decoded, 1, "stats: {stats:?}");
-    assert_eq!(out, vec![(255, AviateMessage::Heartbeat)]);
+    assert_eq!(out, vec![(255, AviateMessage::Heartbeat { armed: false })]);
 }
 
 #[test]

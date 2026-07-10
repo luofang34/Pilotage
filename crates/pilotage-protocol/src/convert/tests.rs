@@ -123,6 +123,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             vel_d_mps: -1.0,
             valid_flags: 0b1111,
             quality: 0,
+            arm_state: 2,
         }),
     };
     let envelope = wire::Envelope {

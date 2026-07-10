@@ -342,8 +342,9 @@ async function readTelemetryDatagrams(transport) {
     const decoded = decodeBareEnvelope(value);
     if (decoded.kind === "TelemetrySample") {
       const t = decoded.message;
+      const armText = { 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[t.avionics?.armState ?? 0];
       els.telemetry.textContent =
-        `pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
+        `${armText} | pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
         ` | v=${t.linearXMps.toFixed(2)}m/s w=${t.angularRadS.toFixed(2)}rad/s`;
       if (t.avionics) {
         instruments.latest = t.avionics;
@@ -376,33 +377,30 @@ const DRIVE_KEYS = new Set([
   "Backspace",
 ]);
 
+// Keys are stored raw (letters lower-cased) so rover and flight modes can
+// map WASD and the arrows independently.
+function canonicalKey(key) {
+  return key.length === 1 ? key.toLowerCase() : key;
+}
 window.addEventListener("keydown", (event) => {
   if (DRIVE_KEYS.has(event.key)) {
-    state.keys.add(normalizeKey(event.key));
+    state.keys.add(canonicalKey(event.key));
     event.preventDefault();
   }
 });
 window.addEventListener("keyup", (event) => {
   if (DRIVE_KEYS.has(event.key)) {
-    state.keys.delete(normalizeKey(event.key));
+    state.keys.delete(canonicalKey(event.key));
     event.preventDefault();
   }
 });
 
-function normalizeKey(key) {
-  const map = { w: "ArrowUp", s: "ArrowDown", a: "ArrowLeft", d: "ArrowRight" };
-  return map[key.toLowerCase()] || key;
-}
-
 /** Maps current key state to [throttle, yaw] axis values in [-1.0, 1.0]. */
 function axesFromKeys() {
-  let throttle = 0;
-  let yaw = 0;
-  if (state.keys.has("ArrowUp")) throttle += 1;
-  if (state.keys.has("ArrowDown")) throttle -= 1;
-  if (state.keys.has("ArrowLeft")) yaw -= 1;
-  if (state.keys.has("ArrowRight")) yaw += 1;
-  return [throttle, yaw];
+  const k = (key) => (state.keys.has(key) ? 1 : 0);
+  const throttle = k("ArrowUp") + k("w") - k("ArrowDown") - k("s");
+  const yaw = k("ArrowRight") + k("d") - k("ArrowLeft") - k("a");
+  return [Math.max(-1, Math.min(1, throttle)), Math.max(-1, Math.min(1, yaw))];
 }
 
 /** Keyboard fallback for flight modes: W/S = climb/descend, A/D = yaw,
@@ -412,8 +410,8 @@ function flightAxesFromKeys() {
   return {
     roll: k("ArrowRight") - k("ArrowLeft"),
     pitch: k("ArrowUp") - k("ArrowDown"),
-    throttle: k("w") + k("W") - k("s") - k("S"),
-    yaw: k("d") + k("D") - k("a") - k("A"),
+    throttle: k("w") - k("s"),
+    yaw: k("d") - k("a"),
   };
 }
 
@@ -489,7 +487,10 @@ function flightAxesFromGamepad(pad, profile, mode) {
   const rawAt = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
   const clamp = (v) => Math.max(-1, Math.min(1, v));
   const dz = profile.deadzone ?? 0.1;
-  const shaped = (v) => clamp(Math.abs(v) < dz ? 0 : v);
+  // Cubic expo (50%): fine authority near center, full range at the
+  // ends — half of the DJI feel; the uplink's slew limit is the other.
+  const expo = (v) => 0.5 * v * v * v + 0.5 * v;
+  const shaped = (v) => expo(clamp(Math.abs(v) < dz ? 0 : v));
   const raw = (i) => shaped(rawAt(i));
   if (profile.standard) {
     const scheme = FLIGHT_SCHEMES[mode] ?? FLIGHT_SCHEMES["quad-pilot"];

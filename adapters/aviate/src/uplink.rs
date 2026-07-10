@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use tracing::{info, warn};
 
-use crate::mavlink::{encode_arm_command, encode_velocity_setpoint};
+use crate::mavlink::{encode_arm_command, encode_position_setpoint, encode_velocity_setpoint};
 
 /// Full-stick horizontal velocity demand.
 const MAX_HORIZONTAL_MPS: f32 = 3.0;
@@ -48,12 +48,18 @@ pub struct FlightUplink {
     // thrust, which tips it over — real drones idle until the first
     // climb, so this does too.
     airborne: bool,
+    // Brake-then-hold state: the captured hold point while every stick
+    // is centered, and the slew-limited velocity command.
+    hold_pos_ned: Option<[f32; 3]>,
+    last_vel_ned: [f32; 3],
     started: Instant,
     send_failures: u64,
 }
 
 /// Climb-stick threshold that opens the motors-idle gate after arming.
 const TAKEOFF_STICK: f32 = 0.15;
+/// Acceleration limit shaping stick steps into velocity ramps.
+const MAX_ACCEL_MPS2: f32 = 2.5;
 
 impl FlightUplink {
     /// Binds an ephemeral socket toward the FC's command port
@@ -69,6 +75,7 @@ impl FlightUplink {
             .and_then(|s| s.parse().ok())
             .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 20000)));
         let socket = UdpSocket::bind("127.0.0.1:0")?;
+        socket.set_nonblocking(true)?;
         info!(%target, "Aviate flight uplink ready");
         Ok(Self {
             socket,
@@ -78,6 +85,8 @@ impl FlightUplink {
             last_frame: None,
             quiet_until: None,
             airborne: false,
+            hold_pos_ned: None,
+            last_vel_ned: [0.0; 3],
             started: Instant::now(),
             send_failures: 0,
         })
@@ -105,6 +114,8 @@ impl FlightUplink {
         self.last_frame = None;
         self.quiet_until = Some(Instant::now() + ARM_QUIET);
         self.airborne = false;
+        self.hold_pos_ned = None;
+        self.last_vel_ned = [0.0; 3];
         let frame = encode_arm_command(self.seq, arm);
         self.send(&frame);
         info!(arm, "sent arm command to FC");
@@ -114,6 +125,7 @@ impl FlightUplink {
     /// throttle/yaw, stick conventions: pitch + = forward, roll + =
     /// right, throttle + = climb, yaw + = clockwise) into a velocity
     /// setpoint and sends it.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_stick_frame(
         &mut self,
         roll: f32,
@@ -121,6 +133,7 @@ impl FlightUplink {
         throttle: f32,
         yaw: f32,
         current_yaw_rad: f32,
+        current_pos_ned_m: [f32; 3],
     ) {
         let now = Instant::now();
         if let Some(quiet) = self.quiet_until {
@@ -141,6 +154,26 @@ impl FlightUplink {
             .map_or(0.0, |t| now.duration_since(t).as_secs_f32())
             .clamp(0.0, MAX_DT_S);
         self.last_frame = Some(now);
+        let time_boot_ms = self.started.elapsed().as_millis() as u32;
+
+        // DJI brake-then-hold: with every stick centered, velocity mode
+        // would drift on vz-tracking bias — capture the current position
+        // once and stream a position-hold setpoint until any stick
+        // deflects again.
+        let sticks_active = roll
+            .abs()
+            .max(pitch.abs())
+            .max(throttle.abs())
+            .max(yaw.abs())
+            > 0.02;
+        if !sticks_active {
+            let hold = *self.hold_pos_ned.get_or_insert(current_pos_ned_m);
+            self.last_vel_ned = [0.0; 3];
+            let frame = encode_position_setpoint(self.seq, time_boot_ms, hold, self.heading_sp_rad);
+            self.send(&frame);
+            return;
+        }
+        self.hold_pos_ned = None;
 
         self.heading_sp_rad = wrap_pi(self.heading_sp_rad + yaw * MAX_YAW_RATE_RPS * dt);
 
@@ -150,13 +183,27 @@ impl FlightUplink {
         let fwd = pitch * MAX_HORIZONTAL_MPS;
         let lat = roll * MAX_HORIZONTAL_MPS;
         let (sin_y, cos_y) = current_yaw_rad.sin_cos();
-        let vel_ned = [
+        let target = [
             fwd * cos_y - lat * sin_y,
             fwd * sin_y + lat * cos_y,
             -throttle * MAX_VERTICAL_MPS,
         ];
-        let time_boot_ms = self.started.elapsed().as_millis() as u32;
-        let frame = encode_velocity_setpoint(self.seq, time_boot_ms, vel_ned, self.heading_sp_rad);
+        // Slew-rate limit the horizontal axes so stick steps become
+        // acceleration-limited ramps (part of the DJI feel). The
+        // vertical demand passes through instantly: ramping vz from
+        // near zero holds a grounded vehicle in the unstable
+        // near-hover-thrust regime the takeoff gate exists to avoid.
+        let dv_max = MAX_ACCEL_MPS2 * dt.max(1.0 / 60.0);
+        for (v, t) in self.last_vel_ned.iter_mut().zip(target).take(2) {
+            *v += (t - *v).clamp(-dv_max, dv_max);
+        }
+        self.last_vel_ned[2] = target[2];
+        let frame = encode_velocity_setpoint(
+            self.seq,
+            time_boot_ms,
+            self.last_vel_ned,
+            self.heading_sp_rad,
+        );
         self.send(&frame);
     }
 
@@ -167,6 +214,34 @@ impl FlightUplink {
         let time_boot_ms = self.started.elapsed().as_millis() as u32;
         let frame = encode_velocity_setpoint(self.seq, time_boot_ms, [0.0; 3], self.heading_sp_rad);
         self.send(&frame);
+    }
+
+    /// Drains FC replies off the uplink socket (COMMAND_ACK, heartbeats
+    /// the FC sends its learned commander), returning the latest
+    /// armed-state report if any heartbeat arrived. Non-blocking; call
+    /// from the sampling tick.
+    pub fn poll_fc(&mut self) -> Option<bool> {
+        let mut buf = [0u8; 512];
+        let mut messages: Vec<(u8, crate::mavlink::AviateMessage)> = Vec::new();
+        let mut armed: Option<bool> = None;
+        while let Ok((len, _)) = self.socket.recv_from(&mut buf) {
+            messages.clear();
+            crate::mavlink::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
+            for (_, message) in &messages {
+                match *message {
+                    crate::mavlink::AviateMessage::Heartbeat { armed: a } => armed = Some(a),
+                    crate::mavlink::AviateMessage::CommandAck { command, result } => {
+                        if result == 0 {
+                            info!(command, "FC accepted command");
+                        } else {
+                            warn!(command, result, "FC rejected command");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        armed
     }
 
     /// The socket's local address, for tests.

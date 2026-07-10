@@ -16,12 +16,25 @@ pub const HEARTBEAT_ID: u32 = 0;
 pub const ATTITUDE_QUATERNION_ID: u32 = 31;
 /// LOCAL_POSITION_NED message id.
 pub const LOCAL_POSITION_NED_ID: u32 = 32;
+/// COMMAND_ACK message id (arm/disarm feedback).
+pub const COMMAND_ACK_ID: u32 = 77;
 
 /// One decoded telemetry message from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AviateMessage {
-    /// Link liveness beacon (1 Hz).
-    Heartbeat,
+    /// Link liveness beacon (1 Hz); `armed` is base_mode's
+    /// MAV_MODE_FLAG_SAFETY_ARMED bit.
+    Heartbeat {
+        /// Whether the sender reports itself armed.
+        armed: bool,
+    },
+    /// Command acknowledgement (arm/disarm feedback).
+    CommandAck {
+        /// The acknowledged MAV_CMD id.
+        command: u16,
+        /// MAV_RESULT (0 = accepted).
+        result: u8,
+    },
     /// Attitude estimate (10 Hz): quaternion is body FRD → world NED,
     /// MAVLink order q1=w, q2=x, q3=y, q4=z.
     AttitudeQuaternion {
@@ -69,6 +82,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         HEARTBEAT_ID => Some(50),
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
+        COMMAND_ACK_ID => Some(143),
         COMMAND_LONG_ID => Some(152),
         SET_POSITION_TARGET_ID => Some(143),
         _ => None,
@@ -112,7 +126,16 @@ fn u32_at(payload: &[u8], off: usize) -> u32 {
 
 fn decode_known(msg_id: u32, payload: &[u8]) -> Option<AviateMessage> {
     match msg_id {
-        HEARTBEAT_ID => Some(AviateMessage::Heartbeat),
+        HEARTBEAT_ID => Some(AviateMessage::Heartbeat {
+            // Payload: custom_mode u32 @0, type @4, autopilot @5,
+            // base_mode @6 (bit 0x80 = SAFETY_ARMED).
+            armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
+        }),
+        COMMAND_ACK_ID => Some(AviateMessage::CommandAck {
+            command: u16::from(payload.first().copied().unwrap_or(0))
+                | (u16::from(payload.get(1).copied().unwrap_or(0)) << 8),
+            result: payload.get(2).copied().unwrap_or(0),
+        }),
         ATTITUDE_QUATERNION_ID => Some(AviateMessage::AttitudeQuaternion {
             time_boot_ms: u32_at(payload, 0),
             quat_wxyz: [
@@ -249,6 +272,40 @@ pub fn encode_arm_command(seq: u8, arm: bool) -> [u8; 45] {
     payload[31] = 1;
     let mut frame = [0u8; 45];
     encode_frame_v2(seq, COMMAND_LONG_ID, &payload, 152, &mut frame);
+    frame
+}
+
+/// Serializes a SET_POSITION_TARGET_LOCAL_NED velocity setpoint: NED
+/// velocity plus absolute yaw, everything else masked out
+/// (`type_mask` ignores position, acceleration, and yaw rate — the
+/// combination Aviate's bridge maps to `ControlMode::VelocityControl`).
+///
+/// Serializes a SET_POSITION_TARGET_LOCAL_NED **position-hold**
+/// setpoint: NED position plus absolute yaw, velocity/acceleration/yaw
+/// rate masked out (the combination Aviate's bridge maps to
+/// `ControlMode::PositionHold`) — DJI's brake-then-hold on centered
+/// sticks.
+pub fn encode_position_setpoint(
+    seq: u8,
+    time_boot_ms: u32,
+    pos_ned_m: [f32; 3],
+    yaw_rad: f32,
+) -> [u8; 65] {
+    // Ignore velocity (8|16|32), acceleration (64|128|256), yaw rate
+    // (2048): position + absolute yaw remain.
+    const TYPE_MASK: u16 = 8 | 16 | 32 | 64 | 128 | 256 | 2048;
+    let mut payload = [0u8; 53];
+    payload[0..4].copy_from_slice(&time_boot_ms.to_le_bytes());
+    payload[4..8].copy_from_slice(&pos_ned_m[0].to_le_bytes());
+    payload[8..12].copy_from_slice(&pos_ned_m[1].to_le_bytes());
+    payload[12..16].copy_from_slice(&pos_ned_m[2].to_le_bytes());
+    payload[40..44].copy_from_slice(&yaw_rad.to_le_bytes());
+    payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
+    payload[50] = 1;
+    payload[51] = 1;
+    payload[52] = 1; // MAV_FRAME_LOCAL_NED
+    let mut frame = [0u8; 65];
+    encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
     frame
 }
 

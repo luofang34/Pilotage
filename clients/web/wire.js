@@ -486,6 +486,8 @@ function decodeAvionicsState(bytes) {
     ],
     validFlags: firstVarint(f, 14) ?? 0,
     quality: firstVarint(f, 15) ?? 0,
+    // 0 unknown, 1 disarmed, 2 armed.
+    armState: firstVarint(f, 16) ?? 0,
   };
 }
 

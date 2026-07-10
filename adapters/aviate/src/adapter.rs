@@ -20,6 +20,10 @@ use crate::link::{AviateLink, LatestAviate, LinkConfig};
 use crate::shm::{GzStateShm, ShmFreshness};
 use crate::uplink::FlightUplink;
 
+mod camera;
+mod sampling;
+use sampling::{mavlink_batch, yaw_of};
+
 /// The control scope this adapter exposes (issue #12): four canonical
 /// flight axes as DJI-style velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
@@ -83,6 +87,8 @@ pub struct AviateAdapter {
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
     _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
+    // Latest armed report from FC heartbeats on the uplink socket.
+    armed: Option<bool>,
     link_loss_policy: Option<LinkLossPolicy>,
 }
 
@@ -122,7 +128,7 @@ impl AviateAdapter {
                 None
             }
         };
-        let (frames, camera_bridge, frame_forwarder) = Self::camera_bridge().await;
+        let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
         Ok(Self {
             vehicle,
             source,
@@ -130,49 +136,9 @@ impl AviateAdapter {
             frames,
             _camera_bridge: camera_bridge,
             _frame_forwarder: frame_forwarder,
+            armed: None,
             link_loss_policy: None,
         })
-    }
-
-    /// Spawns the gz camera sidecar for the flight world's `/camera` and
-    /// `/chase_camera` topics, degrading to no-video when it can't
-    /// (`PILOTAGE_AVIATE_CAMERA=off` disables the attempt).
-    #[allow(clippy::type_complexity)]
-    async fn camera_bridge() -> (
-        Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
-        Option<pilotage_adapter_gazebo::BridgeClient>,
-        Option<tokio::task::JoinHandle<()>>,
-    ) {
-        if std::env::var("PILOTAGE_AVIATE_CAMERA").as_deref() == Ok("off") {
-            return (None, None, None);
-        }
-        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
-        let bin = workspace_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge");
-        let config = pilotage_adapter_gazebo::BridgeConfig::new("x500", bin);
-        match pilotage_adapter_gazebo::BridgeClient::spawn_and_connect(config).await {
-            Ok(mut bridge) => {
-                let (tx, rx) = tokio::sync::mpsc::channel(4);
-                let forwarder = bridge.take_frame_rx().map(|mut bridge_rx| {
-                    tokio::spawn(async move {
-                        while let Some(frame) = bridge_rx.recv().await {
-                            let raw = pilotage_adapter_gazebo::RawVideoFrame::from(frame);
-                            if tx.send(raw).await.is_err() {
-                                return;
-                            }
-                        }
-                    })
-                });
-                tracing::info!("Aviate camera sidecar up (FPV + chase)");
-                (Some(rx), Some(bridge), forwarder)
-            }
-            Err(error) => {
-                tracing::warn!(%error, "camera sidecar unavailable; no video");
-                (None, None, None)
-            }
-        }
     }
 
     /// Takes the raw-frame receiver for the host media task, if cameras
@@ -209,6 +175,7 @@ impl AviateAdapter {
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,
+            armed: None,
             link_loss_policy: None,
         }
     }
@@ -220,16 +187,20 @@ impl AviateAdapter {
         self
     }
 
-    /// The vehicle's current measured yaw, radians clockwise from north
-    /// (zero before any telemetry).
-    fn current_yaw(&mut self) -> f32 {
+    /// The vehicle's current measured yaw (radians clockwise from
+    /// north) and NED position (zeros before any telemetry).
+    fn current_pose(&mut self) -> (f32, [f32; 3]) {
         match &self.source {
-            Source::Shm { shm, .. } => shm.read().map_or(0.0, |s| Self::yaw_of(s.quat_wxyz) as f32),
-            Source::Mavlink { state, .. } => state
-                .lock()
-                .ok()
-                .and_then(|latest| latest.attitude)
-                .map_or(0.0, |att| Self::yaw_of(att.quat_wxyz) as f32),
+            Source::Shm { shm, .. } => shm.read().map_or((0.0, [0.0; 3]), |s| {
+                (yaw_of(s.quat_wxyz) as f32, s.pos_ned_m)
+            }),
+            Source::Mavlink { state, .. } => state.lock().ok().map_or((0.0, [0.0; 3]), |latest| {
+                let yaw = latest
+                    .attitude
+                    .map_or(0.0, |att| yaw_of(att.quat_wxyz) as f32);
+                let pos = latest.kinematics.map_or([0.0; 3], |kin| kin.pos_ned_m);
+                (yaw, pos)
+            }),
         }
     }
 
@@ -252,18 +223,6 @@ impl AviateAdapter {
             }
         }
         Ok(())
-    }
-
-    /// Yaw extracted from the body→NED quaternion (heading, radians
-    /// clockwise from north).
-    fn yaw_of(q: [f32; 4]) -> f64 {
-        let (w, x, y, z) = (
-            f64::from(q[0]),
-            f64::from(q[1]),
-            f64::from(q[2]),
-            f64::from(q[3]),
-        );
-        (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
     }
 }
 
@@ -317,7 +276,7 @@ impl VehicleAdapter for AviateAdapter {
                 disposition: Disposition::Rejected(reason),
             };
         }
-        let current_yaw = self.current_yaw();
+        let (current_yaw, current_pos) = self.current_pose();
         let Some(uplink) = self.uplink.as_mut() else {
             // Checked above; unreachable in practice.
             return ApplyOutcome {
@@ -354,6 +313,7 @@ impl VehicleAdapter for AviateAdapter {
             sticks[usize::from(THROTTLE_AXIS)],
             sticks[usize::from(YAW_AXIS)],
             current_yaw,
+            current_pos,
         );
         ApplyOutcome {
             tick,
@@ -366,8 +326,18 @@ impl VehicleAdapter for AviateAdapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
+        if let Some(uplink) = self.uplink.as_mut()
+            && let Some(armed) = uplink.poll_fc()
+        {
+            self.armed = Some(armed);
+        }
+        let arm_state = match self.armed {
+            None => 0,
+            Some(false) => 1,
+            Some(true) => 2,
+        };
         match &mut self.source {
-            Source::Mavlink { state, .. } => mavlink_batch(self.vehicle, state),
+            Source::Mavlink { state, .. } => mavlink_batch(self.vehicle, state, arm_state),
             Source::Shm {
                 shm,
                 freshness,
@@ -391,7 +361,7 @@ impl VehicleAdapter for AviateAdapter {
                 let Some(sample) = shm.read() else {
                     return TelemetryBatch::default();
                 };
-                let heading = Self::yaw_of(sample.quat_wxyz);
+                let heading = yaw_of(sample.quat_wxyz);
                 let speed = f64::from(
                     (sample.vel_ned_mps[0] * sample.vel_ned_mps[0]
                         + sample.vel_ned_mps[1] * sample.vel_ned_mps[1])
@@ -417,6 +387,7 @@ impl VehicleAdapter for AviateAdapter {
                             // with real flags is the link RFC's v1.
                             valid_flags: 0b1111,
                             quality: 0,
+                            arm_state,
                         }),
                     }],
                 }
@@ -469,51 +440,6 @@ impl VehicleAdapter for AviateAdapter {
             advanced: 0,
             now: SimTick::new(tick),
         }
-    }
-}
-
-/// The MAVLink-path sampling, unchanged semantics from ADR-0018.
-fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LatestAviate>>) -> TelemetryBatch {
-    let Ok(latest) = state.lock() else {
-        return TelemetryBatch::default();
-    };
-    let Some(kin) = latest.kinematics else {
-        return TelemetryBatch::default();
-    };
-    if kin.received_at.elapsed() > WITHHOLD_AFTER {
-        return TelemetryBatch::default();
-    }
-    let attitude = latest
-        .attitude
-        .filter(|att| att.received_at.elapsed() <= WITHHOLD_AFTER);
-
-    let heading = attitude.map_or(0.0, |att| AviateAdapter::yaw_of(att.quat_wxyz));
-    let speed = f64::from(
-        (kin.vel_ned_mps[0] * kin.vel_ned_mps[0] + kin.vel_ned_mps[1] * kin.vel_ned_mps[1]).sqrt(),
-    );
-    let avionics = attitude.map(|att| AvionicsSample {
-        quat_wxyz: att.quat_wxyz,
-        rates_rps: att.rates_rps,
-        pos_ned_m: kin.pos_ned_m,
-        vel_ned_mps: kin.vel_ned_mps,
-        // Aviate's wire subset does not carry its StateValidFlags /
-        // EstimateQuality yet (ADR-0018 names the gap); freshness is
-        // the only validity dimension this link can honestly claim.
-        valid_flags: 0b1111,
-        quality: 0,
-    });
-    TelemetryBatch {
-        samples: vec![TelemetrySample {
-            vehicle,
-            tick: SimTick::new(u64::from(kin.time_boot_ms).wrapping_mul(1_000_000)),
-            pose: Pose2d {
-                x: f64::from(kin.pos_ned_m[0]),
-                y: f64::from(kin.pos_ned_m[1]),
-                heading,
-            },
-            speed,
-            avionics,
-        }],
     }
 }
 

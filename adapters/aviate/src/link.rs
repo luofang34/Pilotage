@@ -193,7 +193,10 @@ fn apply_messages(
         latest.decoded = latest.decoded.wrapping_add(1);
         // Lock onto the first system id that delivers an estimate;
         // heartbeats alone don't lock (other GCS peers heartbeat too).
-        let is_estimate = !matches!(message, AviateMessage::Heartbeat);
+        let is_estimate = !matches!(
+            message,
+            AviateMessage::Heartbeat { .. } | AviateMessage::CommandAck { .. }
+        );
         match latest.locked_sysid {
             None if is_estimate => latest.locked_sysid = Some(sysid),
             Some(locked) if locked != sysid => continue,
@@ -201,7 +204,8 @@ fn apply_messages(
             Some(_) => {}
         }
         match message {
-            AviateMessage::Heartbeat => latest.last_heartbeat = Some(now),
+            AviateMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
+            AviateMessage::CommandAck { .. } => {}
             AviateMessage::AttitudeQuaternion {
                 time_boot_ms: _,
                 quat_wxyz,

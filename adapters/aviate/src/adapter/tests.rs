@@ -132,34 +132,60 @@ fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
     );
     assert!(n >= 45);
 
-    // Past the post-arm quiet window: full forward stick + half climb.
+    // Past the post-arm quiet window: full forward stick + half climb,
+    // streamed like the 30 Hz control loop. The slew limiter ramps the
+    // command from zero, so assert the ramp rather than an instant step.
     std::thread::sleep(Duration::from_millis(200));
+    let f = |buf: &[u8; 128], off: usize| {
+        f32::from_le_bytes([buf[10 + off], buf[11 + off], buf[12 + off], buf[13 + off]])
+    };
+    let mut last_ve = 0.0f32;
+    for _ in 0..30 {
+        let outcome = adapter.apply_control(&flight_frame(
+            vec![
+                (LogicalAxisId::new(super::PITCH_AXIS), 1.0),
+                (LogicalAxisId::new(super::THROTTLE_AXIS), 0.5),
+            ],
+            vec![],
+        ));
+        assert_eq!(outcome.disposition, Disposition::Accepted);
+        fc.recv_from(&mut buf).expect("setpoint frame");
+        assert_eq!(buf[7], 84, "SET_POSITION_TARGET id");
+        let ve = f(&buf, 20);
+        assert!(
+            ve >= last_ve - 1e-4,
+            "ramp must not reverse: {ve} < {last_ve}"
+        );
+        last_ve = ve;
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Heading is east (yaw 90°), stick full-forward → velocity is +east:
+    // vn≈0, ve ramping toward 3.
+    let (vn, vz) = (f(&buf, 16), f(&buf, 24));
+    assert!(vn.abs() < 0.05, "vn {vn}");
+    assert!(last_ve > 1.0, "ramped east velocity, got {last_ve}");
+    assert!(vz < -0.2, "climb demand present, got {vz}");
+    let type_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
+    assert_eq!(type_mask, 2503);
+
+    // Centered sticks switch to position-hold (DJI brake-then-hold):
+    // the setpoint becomes position-valid (mask 2552) at the captured
+    // hold point.
     let outcome = adapter.apply_control(&flight_frame(
         vec![
-            (LogicalAxisId::new(super::PITCH_AXIS), 1.0),
-            (LogicalAxisId::new(super::THROTTLE_AXIS), 0.5),
+            (LogicalAxisId::new(super::PITCH_AXIS), 0.0),
+            (LogicalAxisId::new(super::THROTTLE_AXIS), 0.0),
         ],
         vec![],
     ));
     assert_eq!(outcome.disposition, Disposition::Accepted);
-
-    // Second: the velocity setpoint. Payload starts at 10; vx@16 within
-    // payload. Heading is east (yaw 90°), stick full-forward → velocity
-    // is +east: vn≈0, ve≈3.
-    fc.recv_from(&mut buf).expect("setpoint frame");
-    assert_eq!(buf[7], 84, "SET_POSITION_TARGET id");
-    let f = |off: usize| {
-        f32::from_le_bytes([buf[10 + off], buf[11 + off], buf[12 + off], buf[13 + off]])
-    };
-    let (vn, ve, vz) = (f(16), f(20), f(24));
-    assert!(vn.abs() < 0.01, "vn {vn}");
-    assert!((ve - 3.0).abs() < 0.01, "ve {ve}");
-    assert!(
-        (vz + 0.75).abs() < 0.01,
-        "vz {vz} (0.5 stick × 1.5 m/s climb)"
-    );
-    let type_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
-    assert_eq!(type_mask, 2503);
+    fc.recv_from(&mut buf).expect("hold frame");
+    let hold_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
+    assert_eq!(hold_mask, 2552, "position-hold mask");
+    // Hold point = the fake pose's NED position (10, 20, -30).
+    assert!((f(&buf, 4) - 10.0).abs() < 1e-3);
+    assert!((f(&buf, 8) - 20.0).abs() < 1e-3);
+    assert!((f(&buf, 12) + 30.0).abs() < 1e-3);
 }
 
 #[test]
