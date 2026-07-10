@@ -35,8 +35,12 @@ const HOLD_VMAX_MPS: f32 = 1.5;
 const MAX_HORIZONTAL_MPS: f32 = 3.0;
 /// Full-stick climb/descend rate demand.
 const MAX_VERTICAL_MPS: f32 = 1.5;
-/// Full-stick yaw rate demand (~86°/s).
-const MAX_YAW_RATE_RPS: f32 = 2.2;
+/// Full-stick yaw rate demand (~52°/s). Bounded by what the X500's
+/// rotor-drag yaw plant can *stop*: the FC brakes a spin at roughly
+/// 0.5 rad/s², so releasing the stick at this rate overshoots the
+/// captured heading by well under a half-turn. Higher demands coast
+/// through the target and re-chase it the long way around the wrap.
+const MAX_YAW_RATE_RPS: f32 = 0.9;
 /// Longest believable gap between control frames when integrating the
 /// yaw-rate stick; anything longer is a stall, not a dt.
 const MAX_DT_S: f32 = 0.1;
