@@ -36,6 +36,7 @@ const AXIS_THROTTLE = 2; // throttle = 2 (rover: forward speed; quad: climb rate
 const AXIS_YAW = 3; // yaw = 3 (yaw rate, + clockwise).
 const BUTTON_ARM = 0; // logical button 0: arm (adapter contract, issue #12).
 const BUTTON_DISARM = 1; // logical button 1: disarm.
+const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
 
 const els = {
   host: document.getElementById("host"),
@@ -66,6 +67,7 @@ const state = {
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   keys: new Set(),
   prevArmInputs: new Set(),
+  pendingReset: false,
   connected: false,
   leaseGranted: false,
   skippedVideoFrames: 0,
@@ -489,7 +491,7 @@ function flightAxesFromGamepad(pad, profile, mode) {
   const dz = profile.deadzone ?? 0.1;
   // Cubic expo (50%): fine authority near center, full range at the
   // ends — half of the DJI feel; the uplink's slew limit is the other.
-  const expo = (v) => 0.5 * v * v * v + 0.5 * v;
+  const expo = (v) => 0.35 * v * v * v + 0.65 * v;
   const shaped = (v) => expo(clamp(Math.abs(v) < dz ? 0 : v));
   const raw = (i) => shaped(rawAt(i));
   if (profile.standard) {
@@ -657,6 +659,11 @@ async function startControlLoop(transport) {
       const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
       updateFlightReadout(pad, f);
       edges = collectArmEdges(pad);
+      if (state.pendingReset) {
+        state.pendingReset = false;
+        edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
+        log("simulation reset requested");
+      }
       axes = [
         [AXIS_ROLL, f.roll],
         [AXIS_PITCH, f.pitch],
@@ -727,6 +734,9 @@ async function startInstruments() {
 
 applyUrlParams();
 startInstruments();
+document.getElementById("resetBtn").addEventListener("click", () => {
+  state.pendingReset = true;
+});
 els.connectBtn.addEventListener("click", () => {
   connect().catch((error) => log(`connect failed: ${error}`));
 });

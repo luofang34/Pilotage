@@ -181,11 +181,9 @@ fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
     assert_eq!(outcome.disposition, Disposition::Accepted);
     fc.recv_from(&mut buf).expect("hold frame");
     let hold_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
-    assert_eq!(hold_mask, 2552, "position-hold mask");
-    // Hold point = the fake pose's NED position (10, 20, -30).
-    assert!((f(&buf, 4) - 10.0).abs() < 1e-3);
-    assert!((f(&buf, 8) - 20.0).abs() < 1e-3);
-    assert!((f(&buf, 12) + 30.0).abs() < 1e-3);
+    assert_eq!(hold_mask, 2503, "ground-side hold streams velocity mode");
+    // On the hold point the correction is zero (fake pose is static).
+    assert!(f(&buf, 16).abs() < 1e-3 && f(&buf, 20).abs() < 1e-3 && f(&buf, 24).abs() < 1e-3);
 }
 
 #[test]
