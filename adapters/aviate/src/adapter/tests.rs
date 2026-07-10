@@ -169,8 +169,9 @@ fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
     assert_eq!(type_mask, 2503);
 
     // Centered sticks switch to position-hold (DJI brake-then-hold):
-    // the setpoint becomes position-valid (mask 2552) at the captured
-    // hold point.
+    // the hold loop runs on the FC, so the ground streams a
+    // position-valid setpoint (mask 2552) at the captured hold point
+    // — the fake pose's NED position — with no ground-side gains.
     let outcome = adapter.apply_control(&flight_frame(
         vec![
             (LogicalAxisId::new(super::PITCH_AXIS), 0.0),
@@ -181,9 +182,11 @@ fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
     assert_eq!(outcome.disposition, Disposition::Accepted);
     fc.recv_from(&mut buf).expect("hold frame");
     let hold_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
-    assert_eq!(hold_mask, 2503, "ground-side hold streams velocity mode");
-    // On the hold point the correction is zero (fake pose is static).
-    assert!(f(&buf, 16).abs() < 1e-3 && f(&buf, 20).abs() < 1e-3 && f(&buf, 24).abs() < 1e-3);
+    assert_eq!(hold_mask, 2552, "hold streams FC position mode");
+    // Position fields carry the captured point (fake pose 10, 20, -30).
+    assert!((f(&buf, 4) - 10.0).abs() < 1e-3, "hold north");
+    assert!((f(&buf, 8) - 20.0).abs() < 1e-3, "hold east");
+    assert!((f(&buf, 12) + 30.0).abs() < 1e-3, "hold down");
 }
 
 #[test]

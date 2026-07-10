@@ -16,20 +16,7 @@ use std::time::Instant;
 
 use tracing::{info, warn};
 
-use crate::mavlink::{encode_arm_command, encode_velocity_setpoint};
-
-/// Ground-side hold loop gain: velocity demand per meter of position
-/// error while sticks are centered. The FC's own PositionHold mode
-/// diverges on sustained holds (Aviate #110), so the hold runs here,
-/// through the velocity mode that demonstrably flies well.
-const HOLD_KP: f32 = 1.2;
-/// Hold-loop integral gain (cancels FC velocity-estimate bias; the
-/// SITL derives velocity by finite differences, which drifts).
-const HOLD_KI: f32 = 0.5;
-/// Hold-loop integrator clamp (m/s of correction authority).
-const HOLD_IMAX_MPS: f32 = 0.8;
-/// Hold-loop correction clamp.
-const HOLD_VMAX_MPS: f32 = 1.5;
+use crate::mavlink::{encode_arm_command, encode_position_setpoint, encode_velocity_setpoint};
 
 /// Full-stick horizontal velocity demand.
 const MAX_HORIZONTAL_MPS: f32 = 3.0;
@@ -68,7 +55,6 @@ pub struct FlightUplink {
     // Brake-then-hold state: the captured hold point while every stick
     // is centered, and the slew-limited velocity command.
     hold_pos_ned: Option<[f32; 3]>,
-    hold_int: [f32; 3],
     last_vel_ned: [f32; 3],
     started: Instant,
     send_failures: u64,
@@ -104,7 +90,6 @@ impl FlightUplink {
             quiet_until: None,
             airborne: false,
             hold_pos_ned: None,
-            hold_int: [0.0; 3],
             last_vel_ned: [0.0; 3],
             started: Instant::now(),
             send_failures: 0,
@@ -134,7 +119,6 @@ impl FlightUplink {
         self.quiet_until = Some(Instant::now() + ARM_QUIET);
         self.airborne = false;
         self.hold_pos_ned = None;
-        self.hold_int = [0.0; 3];
         self.last_vel_ned = [0.0; 3];
         let frame = encode_arm_command(self.seq, arm);
         self.send(&frame);
@@ -176,10 +160,11 @@ impl FlightUplink {
         self.last_frame = Some(now);
         let time_boot_ms = self.started.elapsed().as_millis() as u32;
 
-        // DJI brake-then-hold: with every stick centered, velocity mode
-        // would drift on vz-tracking bias — capture the current position
-        // once and stream a position-hold setpoint until any stick
-        // deflects again.
+        // DJI brake-then-hold: with every stick centered, capture the
+        // current position once and stream a position setpoint. The
+        // hold loop itself runs on the FC (PositionHold cascade) —
+        // ground code carries no control gains, only the captured
+        // point. Any stick deflection returns to velocity mode.
         let sticks_active = roll
             .abs()
             .max(pitch.abs())
@@ -188,20 +173,12 @@ impl FlightUplink {
             > 0.02;
         if !sticks_active {
             let hold = *self.hold_pos_ned.get_or_insert(current_pos_ned_m);
-            let mut vel = [0.0f32; 3];
-            for i in 0..3 {
-                let err = hold[i] - current_pos_ned_m[i];
-                self.hold_int[i] =
-                    (self.hold_int[i] + HOLD_KI * err * dt).clamp(-HOLD_IMAX_MPS, HOLD_IMAX_MPS);
-                vel[i] = (HOLD_KP * err + self.hold_int[i]).clamp(-HOLD_VMAX_MPS, HOLD_VMAX_MPS);
-            }
-            self.last_vel_ned = vel;
-            let frame = encode_velocity_setpoint(self.seq, time_boot_ms, vel, self.heading_sp_rad);
+            self.last_vel_ned = [0.0; 3];
+            let frame = encode_position_setpoint(self.seq, time_boot_ms, hold, self.heading_sp_rad);
             self.send(&frame);
             return;
         }
         self.hold_pos_ned = None;
-        self.hold_int = [0.0; 3];
 
         self.heading_sp_rad = wrap_pi(self.heading_sp_rad + yaw * MAX_YAW_RATE_RPS * dt);
 
