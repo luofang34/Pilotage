@@ -3,6 +3,33 @@
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
+/// The monotonic clock in which a measurement's acquisition timestamp is
+/// expressed. Timestamps from different domains are never subtracted without
+/// an explicit correlation supplied by the adapter boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasurementClock {
+    /// Monotonic time since the producing vehicle computer booted.
+    VehicleBoot,
+    /// Monotonic simulation time supplied by the simulator.
+    Simulation,
+}
+
+/// Identity and acquisition stamp for one independently advancing
+/// measurement group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeasurementStamp {
+    /// Adapter-defined source identifier, stable within one vehicle.
+    pub source_id: u64,
+    /// Source boot/attachment generation. A reset changes this value.
+    pub source_epoch: u32,
+    /// Wrapping group sequence, advanced only for a new measurement.
+    pub sequence: u32,
+    /// Acquisition time in nanoseconds in [`Self::clock`].
+    pub acquired_at_ns: u64,
+    /// Clock domain for [`Self::acquired_at_ns`].
+    pub clock: MeasurementClock,
+}
+
 /// A planar pose: position and heading, independent of any specific vehicle
 /// model's internal representation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -36,6 +63,12 @@ pub struct AvionicsSample {
     /// Arm state as the vehicle reports it: 0 unknown, 1 disarmed,
     /// 2 armed.
     pub arm_state: u32,
+    /// Identity of the attitude/rates measurement. `None` means that group
+    /// was not supplied in this publication.
+    pub attitude_stamp: Option<MeasurementStamp>,
+    /// Identity of the position/velocity measurement. `None` means that
+    /// group was not supplied in this publication.
+    pub kinematics_stamp: Option<MeasurementStamp>,
 }
 
 /// A single vehicle's telemetry at one simulation tick.

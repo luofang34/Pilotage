@@ -26,8 +26,27 @@ Two constraints from standing decisions: schema evolution must be additive
 the raw state estimate, not display-ready numbers: attitude quaternion
 (w, x, y, z), body angular rates, NED position, NED velocity, a validity
 bitmask and quality enum mirroring Aviate's `StateValidFlags` /
-`EstimateQuality`, and the estimate timestamp. Ground vehicles simply never
-set the field; nothing existing changes shape.
+`EstimateQuality`, plus independent attitude/rates and kinematics measurement
+stamps. Ground vehicles simply never set the field; nothing existing changes
+shape.
+
+Each group stamp carries a vehicle-scoped source identity, a source epoch, a
+wrapping group sequence, a monotonic acquisition timestamp, and its clock
+domain. Re-publishing a cached value preserves the complete stamp. The host's
+top-level `observed_at` remains publication/transport metadata and never
+relabels source acquisition time.
+
+The receiver accepts a group only when its epoch/sequence advances under
+wrap-safe serial arithmetic. Duplicates, reordering, older epochs, other
+vehicles, and unselected sources are counted and cannot replace display state
+or refresh its age. A newer epoch clears every group from the earlier epoch so
+one display generation cannot mix values across a source reset.
+
+Attitude and kinematics retain separate stamps. The ingress gate publishes an
+immutable display generation and an explicit coherence result derived only
+when source identity, epoch, and clock domain match and acquisition-time skew
+meets the selected display profile. Publication in one `AvionicsState` does not
+by itself imply coherent acquisition.
 
 The wire stays raw because derivation is display policy: barometric-style
 altitude (−z), vertical speed (−vz), groundspeed (√(vx²+vy²)), and
@@ -48,9 +67,12 @@ A new adapter crate owns the Aviate vehicle end to end:
   the frame math is unit-testable byte-for-byte.
 - **Mapping**: ATTITUDE_QUATERNION + LOCAL_POSITION_NED fold into the
   vehicle's `TelemetrySample` (planar pose from x/y + yaw for existing
-  consumers; full estimate into `AvionicsState`). HEARTBEAT drives link
-  liveness; loss of heartbeat marks the avionics groups stale rather than
-  freezing them.
+  consumers; full estimate into `AvionicsState`). MAVLink `time_boot_ms` is
+  retained for both groups. Independently advancing wrapping sequences reject
+  duplicate and reordered measurements before they enter the cache. A
+  confirmed boot-clock reset or clock wrap starts a new explicit source epoch.
+  Group receive time controls withholding, while display freshness advances
+  only with the source stamp, so cached publications age rather than freezing.
 - **Control**: the adapter is telemetry-only in this increment. Its
   capabilities advertise no controllable scopes; control frames are rejected
   at the boundary. Command uplink (arm/disarm via COMMAND_LONG through
@@ -77,7 +99,9 @@ one-way.
 
 - `buf breaking` passes by construction; old clients ignore the new field.
 - The browser wire decoder and the host fill site each grow one arm; the
-  instrument bridge (ADR-0017) is the only consumer that interprets it.
+  instrument bridge (ADR-0017) is the only consumer that interprets it. The
+  decoder preserves uint64 identities/timestamps without narrowing them to an
+  imprecise JavaScript number.
 - Aviate's current wire gap becomes visible instead of papered over: no
   airspeed or barometric sensor message exists yet, so IAS renders `Missing`
   on the PFD — the honest display is the feature, and the gap is Aviate's to

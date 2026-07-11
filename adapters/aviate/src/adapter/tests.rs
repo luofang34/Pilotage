@@ -3,7 +3,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
+use pilotage_adapter_api::{
+    Disposition, MeasurementClock, MeasurementStamp, RejectReason, VehicleAdapter,
+};
 use pilotage_protocol::VehicleId;
 
 use crate::link::{AttitudeUpdate, KinematicsUpdate, LatestAviate};
@@ -12,6 +14,17 @@ use super::AviateAdapter;
 
 fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LatestAviate>> {
     let now = Instant::now();
+    let attitude_stamp = MeasurementStamp {
+        source_id: 1,
+        source_epoch: 1,
+        sequence: 10,
+        acquired_at_ns: 5_000_000_000,
+        clock: MeasurementClock::VehicleBoot,
+    };
+    let kinematics_stamp = MeasurementStamp {
+        sequence: 5,
+        ..attitude_stamp
+    };
     let state = LatestAviate {
         attitude: Some(AttitudeUpdate {
             // 90° yaw: heading east.
@@ -22,12 +35,15 @@ fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LatestAviate>> 
                 core::f32::consts::FRAC_1_SQRT_2,
             ],
             rates_rps: [0.0, 0.0, 0.1],
+            time_boot_ms: 5000,
+            stamp: attitude_stamp,
             received_at: now.checked_sub(att_age).unwrap_or(now),
         }),
         kinematics: Some(KinematicsUpdate {
             pos_ned_m: [10.0, 20.0, -30.0],
             vel_ned_mps: [3.0, 4.0, -1.0],
             time_boot_ms: 5000,
+            stamp: kinematics_stamp,
             received_at: now.checked_sub(kin_age).unwrap_or(now),
         }),
         ..LatestAviate::default()
@@ -51,6 +67,14 @@ fn fresh_state_samples_pose_speed_and_avionics() {
     let avionics = sample.avionics.expect("avionics attached");
     assert_eq!(avionics.pos_ned_m, [10.0, 20.0, -30.0]);
     assert_eq!(avionics.valid_flags, 0b1111);
+    assert_eq!(
+        avionics.attitude_stamp.map(|stamp| stamp.sequence),
+        Some(10)
+    );
+    assert_eq!(
+        avionics.kinematics_stamp.map(|stamp| stamp.sequence),
+        Some(5)
+    );
 }
 
 #[test]
@@ -61,7 +85,13 @@ fn stale_attitude_is_withheld_but_kinematics_still_flow() {
     );
     let batch = adapter.sample_telemetry();
     assert_eq!(batch.samples.len(), 1);
-    assert!(batch.samples[0].avionics.is_none());
+    let avionics = batch.samples[0].avionics.expect("kinematics attached");
+    assert!(avionics.attitude_stamp.is_none());
+    assert_eq!(
+        avionics.kinematics_stamp.map(|stamp| stamp.sequence),
+        Some(5)
+    );
+    assert_eq!(avionics.valid_flags, 0b1100);
 }
 
 #[test]

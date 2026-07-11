@@ -30,7 +30,7 @@ pub mod units;
 
 pub use aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
-    Selections, Stamped, ValidFlags, Wind,
+    Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
 pub use quat::Quat;
 pub use resolve::{NavResolved, PanelData, resolve};

@@ -10,6 +10,8 @@ use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
+use pilotage_adapter_api::{MeasurementClock, MeasurementStamp};
+
 use crate::error::AviateAdapterError;
 use crate::mavlink::{AviateMessage, encode_gcs_heartbeat, parse_datagram};
 
@@ -55,6 +57,18 @@ pub struct LatestAviate {
     pub crc_failures: u64,
     /// Total structurally-valid frames with unknown ids.
     pub unknown_ids: u64,
+    /// Acquisition-clock generation for this FC connection.
+    pub source_epoch: u32,
+    /// Highest current-epoch FC boot timestamp observed across groups.
+    pub last_source_time_ms: Option<u32>,
+    /// Candidate low timestamps awaiting confirmation of an FC reboot.
+    pub(crate) pending_reset: Option<ResetCandidate>,
+    /// Duplicate group measurements rejected before entering the cache.
+    pub duplicate_measurements: u64,
+    /// Older group measurements rejected before entering the cache.
+    pub reordered_measurements: u64,
+    /// Confirmed reboot or acquisition-clock-wrap transitions.
+    pub source_resets: u64,
 }
 
 /// One attitude update with its receive stamp.
@@ -64,6 +78,10 @@ pub struct AttitudeUpdate {
     pub quat_wxyz: [f32; 4],
     /// Body rates (p, q, r) rad/s.
     pub rates_rps: [f32; 3],
+    /// Milliseconds since FC boot.
+    pub time_boot_ms: u32,
+    /// Identity and acquisition stamp for this group update.
+    pub stamp: MeasurementStamp,
     /// When this update was received.
     pub received_at: Instant,
 }
@@ -77,8 +95,41 @@ pub struct KinematicsUpdate {
     pub vel_ned_mps: [f32; 3],
     /// Milliseconds since FC boot.
     pub time_boot_ms: u32,
+    /// Identity and acquisition stamp for this group update.
+    pub stamp: MeasurementStamp,
     /// When this update was received.
     pub received_at: Instant,
+}
+
+const RESET_PREVIOUS_MIN_MS: u32 = 30_000;
+const RESET_CANDIDATE_MAX_MS: u32 = 5_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResetCandidate {
+    latest_time_ms: u32,
+    groups: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MeasurementGroup {
+    Attitude,
+    Kinematics,
+}
+
+impl MeasurementGroup {
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Attitude => 1,
+            Self::Kinematics => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimeObservation {
+    CurrentEpoch,
+    PendingReset,
+    NewEpoch,
 }
 
 /// A running MAVLink link: the receive task plus the shared latest-state
@@ -175,6 +226,139 @@ async fn run_link(
     }
 }
 
+fn serial_is_newer(candidate: u32, current: u32) -> bool {
+    let distance = candidate.wrapping_sub(current);
+    distance != 0 && distance < (1_u32 << 31)
+}
+
+fn begin_source_epoch(latest: &mut LatestAviate, time_boot_ms: u32) {
+    latest.source_epoch = latest.source_epoch.wrapping_add(1);
+    latest.last_source_time_ms = Some(time_boot_ms);
+    latest.pending_reset = None;
+    latest.attitude = None;
+    latest.kinematics = None;
+    latest.source_resets = latest.source_resets.wrapping_add(1);
+    warn!(
+        source_epoch = latest.source_epoch,
+        time_boot_ms, "MAVLink acquisition clock entered a new epoch"
+    );
+}
+
+fn observe_source_time(
+    latest: &mut LatestAviate,
+    group: MeasurementGroup,
+    time_boot_ms: u32,
+) -> TimeObservation {
+    let Some(current) = latest.last_source_time_ms else {
+        latest.last_source_time_ms = Some(time_boot_ms);
+        return TimeObservation::CurrentEpoch;
+    };
+    if serial_is_newer(time_boot_ms, current) {
+        if time_boot_ms < current {
+            begin_source_epoch(latest, time_boot_ms);
+            return TimeObservation::NewEpoch;
+        }
+        latest.last_source_time_ms = Some(time_boot_ms);
+        latest.pending_reset = None;
+        return TimeObservation::CurrentEpoch;
+    }
+    if time_boot_ms == current
+        || current < RESET_PREVIOUS_MIN_MS
+        || time_boot_ms > RESET_CANDIDATE_MAX_MS
+    {
+        latest.pending_reset = None;
+        return TimeObservation::CurrentEpoch;
+    }
+
+    let bit = group.bit();
+    match latest.pending_reset {
+        Some(candidate)
+            if serial_is_newer(time_boot_ms, candidate.latest_time_ms)
+                || candidate.groups & bit == 0 =>
+        {
+            begin_source_epoch(latest, time_boot_ms);
+            TimeObservation::NewEpoch
+        }
+        Some(_) => TimeObservation::PendingReset,
+        None => {
+            latest.pending_reset = Some(ResetCandidate {
+                latest_time_ms: time_boot_ms,
+                groups: bit,
+            });
+            TimeObservation::PendingReset
+        }
+    }
+}
+
+fn next_attitude_stamp(
+    latest: &mut LatestAviate,
+    sysid: u8,
+    time_boot_ms: u32,
+) -> Option<MeasurementStamp> {
+    if observe_source_time(latest, MeasurementGroup::Attitude, time_boot_ms)
+        == TimeObservation::PendingReset
+    {
+        return None;
+    }
+    next_group_stamp(
+        latest
+            .attitude
+            .map(|update| (update.time_boot_ms, update.stamp)),
+        latest,
+        sysid,
+        time_boot_ms,
+    )
+}
+
+fn next_kinematics_stamp(
+    latest: &mut LatestAviate,
+    sysid: u8,
+    time_boot_ms: u32,
+) -> Option<MeasurementStamp> {
+    if observe_source_time(latest, MeasurementGroup::Kinematics, time_boot_ms)
+        == TimeObservation::PendingReset
+    {
+        return None;
+    }
+    next_group_stamp(
+        latest
+            .kinematics
+            .map(|update| (update.time_boot_ms, update.stamp)),
+        latest,
+        sysid,
+        time_boot_ms,
+    )
+}
+
+fn next_group_stamp(
+    current: Option<(u32, MeasurementStamp)>,
+    latest: &mut LatestAviate,
+    sysid: u8,
+    time_boot_ms: u32,
+) -> Option<MeasurementStamp> {
+    let sequence = match current {
+        None => 0,
+        Some((current_time, _)) if current_time == time_boot_ms => {
+            latest.duplicate_measurements = latest.duplicate_measurements.wrapping_add(1);
+            return None;
+        }
+        Some((current_time, stamp)) if serial_is_newer(time_boot_ms, current_time) => {
+            stamp.sequence.wrapping_add(1)
+        }
+        Some(_) => {
+            latest.reordered_measurements = latest.reordered_measurements.wrapping_add(1);
+            return None;
+        }
+    };
+    Some(MeasurementStamp {
+        source_id: u64::from(sysid),
+        source_epoch: latest.source_epoch,
+        sequence,
+        acquired_at_ns: u64::from(time_boot_ms).wrapping_mul(1_000_000),
+        clock: MeasurementClock::VehicleBoot,
+    })
+}
+
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
 fn apply_messages(
@@ -198,7 +382,10 @@ fn apply_messages(
             AviateMessage::Heartbeat { .. } | AviateMessage::CommandAck { .. }
         );
         match latest.locked_sysid {
-            None if is_estimate => latest.locked_sysid = Some(sysid),
+            None if is_estimate => {
+                latest.locked_sysid = Some(sysid);
+                latest.source_epoch = 1;
+            }
             Some(locked) if locked != sysid => continue,
             None => continue,
             Some(_) => {}
@@ -207,27 +394,34 @@ fn apply_messages(
             AviateMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
             AviateMessage::CommandAck { .. } => {}
             AviateMessage::AttitudeQuaternion {
-                time_boot_ms: _,
+                time_boot_ms,
                 quat_wxyz,
                 rates_rps,
             } => {
-                latest.attitude = Some(AttitudeUpdate {
-                    quat_wxyz,
-                    rates_rps,
-                    received_at: now,
-                });
+                if let Some(stamp) = next_attitude_stamp(&mut latest, sysid, time_boot_ms) {
+                    latest.attitude = Some(AttitudeUpdate {
+                        quat_wxyz,
+                        rates_rps,
+                        time_boot_ms,
+                        stamp,
+                        received_at: now,
+                    });
+                }
             }
             AviateMessage::LocalPositionNed {
                 time_boot_ms,
                 pos_ned_m,
                 vel_ned_mps,
             } => {
-                latest.kinematics = Some(KinematicsUpdate {
-                    pos_ned_m,
-                    vel_ned_mps,
-                    time_boot_ms,
-                    received_at: now,
-                });
+                if let Some(stamp) = next_kinematics_stamp(&mut latest, sysid, time_boot_ms) {
+                    latest.kinematics = Some(KinematicsUpdate {
+                        pos_ned_m,
+                        vel_ned_mps,
+                        time_boot_ms,
+                        stamp,
+                        received_at: now,
+                    });
+                }
             }
         }
     }

@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{StepBudget, VehicleAdapter};
-use pilotage_protocol::wire;
 use pilotage_session::{ClientKey, DomainEnvelope, SessionAction, SessionEngine, SessionOutcome};
 use pilotage_timing::{BoundedLatencyLog, MonoTimestamp, Stage, StageLatency};
 use tokio::sync::mpsc::error::TrySendError;
@@ -19,6 +18,9 @@ use crate::runtime::registry::ClientRegistry;
 use crate::runtime::wire_codec::{
     encode_envelope_message, encode_pong_datagram, encode_telemetry_datagram,
 };
+
+mod telemetry;
+use telemetry::sample_to_wire;
 
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
@@ -211,45 +213,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
     fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
         let batch = self.adapter.sample_telemetry();
         for sample in batch.samples {
-            let wire_sample = wire::TelemetrySample {
-                vehicle: Some(wire::VehicleId {
-                    value: sample.vehicle.as_u64(),
-                }),
-                tick: Some(wire::SimTick {
-                    value: sample.tick.as_u64(),
-                }),
-                observed_at: Some(wire::MonoTimestamp {
-                    nanos: now.as_nanos(),
-                }),
-                pose: Some(wire::Pose2d {
-                    x_m: sample.pose.x as f32,
-                    y_m: sample.pose.y as f32,
-                    heading_rad: sample.pose.heading as f32,
-                }),
-                velocity: Some(wire::Velocity2d {
-                    linear_x_mps: sample.speed as f32,
-                    linear_y_mps: 0.0,
-                    angular_rad_s: 0.0,
-                }),
-                avionics: sample.avionics.map(|a| wire::AvionicsState {
-                    quat_w: a.quat_wxyz[0],
-                    quat_x: a.quat_wxyz[1],
-                    quat_y: a.quat_wxyz[2],
-                    quat_z: a.quat_wxyz[3],
-                    rate_p_rad_s: a.rates_rps[0],
-                    rate_q_rad_s: a.rates_rps[1],
-                    rate_r_rad_s: a.rates_rps[2],
-                    pos_n_m: a.pos_ned_m[0],
-                    pos_e_m: a.pos_ned_m[1],
-                    pos_d_m: a.pos_ned_m[2],
-                    vel_n_mps: a.vel_ned_mps[0],
-                    vel_e_mps: a.vel_ned_mps[1],
-                    vel_d_mps: a.vel_ned_mps[2],
-                    valid_flags: a.valid_flags,
-                    quality: a.quality,
-                    arm_state: a.arm_state,
-                }),
-            };
+            let wire_sample = sample_to_wire(sample, now);
             let bytes = encode_telemetry_datagram(wire_sample);
             self.broadcast_datagram(bytes);
         }

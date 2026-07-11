@@ -23,6 +23,28 @@ message Velocity2d {
   float angular_rad_s = 3;
 }
 
+// The monotonic clock domain used by a MeasurementStamp. Values in different
+// domains are not directly comparable without an explicit clock correlation.
+enum MeasurementClock {
+  MEASUREMENT_CLOCK_UNSPECIFIED = 0;
+  MEASUREMENT_CLOCK_VEHICLE_BOOT = 1;
+  MEASUREMENT_CLOCK_SIMULATION = 2;
+}
+
+// Identity and acquisition stamp for one independently advancing measurement
+// group. Re-publishing a cached group preserves every field unchanged.
+message MeasurementStamp {
+  // Adapter-defined source identity, stable within one vehicle.
+  uint64 source_id = 1;
+  // Source boot/attachment generation. A reset changes this value.
+  uint32 source_epoch = 2;
+  // Wrapping group sequence, advanced only for a new measurement.
+  uint32 sequence = 3;
+  // Monotonic acquisition time in the declared clock domain.
+  uint64 acquired_at_ns = 4;
+  MeasurementClock clock = 5;
+}
+
 // Raw avionics state estimate for flight vehicles (ADR-0018): attitude
 // quaternion (body FRD → world NED), body rates, NED position/velocity,
 // and the source's validity/quality. Values are the estimator's output,
@@ -49,12 +71,18 @@ message AvionicsState {
   uint32 quality = 15;
   // 0 unknown, 1 disarmed, 2 armed (from the vehicle's own report).
   uint32 arm_state = 16;
+  // Attitude/rates and position/velocity advance independently. Absence means
+  // that group was not supplied in this publication.
+  MeasurementStamp attitude_stamp = 17;
+  MeasurementStamp kinematics_stamp = 18;
 }
 
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
   VehicleId vehicle = 1;
   SimTick tick = 2;
+  // Host publication time. This is transport metadata, not source
+  // acquisition time; group acquisition stamps live in AvionicsState.
   MonoTimestamp observed_at = 3;
   Pose2d pose = 4;
   Velocity2d velocity = 5;

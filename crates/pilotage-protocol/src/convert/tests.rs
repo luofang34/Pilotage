@@ -124,6 +124,20 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             valid_flags: 0b1111,
             quality: 0,
             arm_state: 2,
+            attitude_stamp: Some(wire::MeasurementStamp {
+                source_id: 7,
+                source_epoch: 3,
+                sequence: 10,
+                acquired_at_ns: 1_000_000,
+                clock: wire::MeasurementClock::VehicleBoot as i32,
+            }),
+            kinematics_stamp: Some(wire::MeasurementStamp {
+                source_id: 7,
+                source_epoch: 3,
+                sequence: 5,
+                acquired_at_ns: 900_000,
+                clock: wire::MeasurementClock::VehicleBoot as i32,
+            }),
         }),
     };
     let envelope = wire::Envelope {

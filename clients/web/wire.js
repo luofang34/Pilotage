@@ -42,8 +42,8 @@ function writeVarint(bytes, value) {
   }
 }
 
-/** Reads an unsigned LEB128 varint starting at `view[offset]`; returns [value, nextOffset]. */
-function readVarint(view, offset) {
+/** Reads an unsigned LEB128 varint without losing uint64 precision. */
+function readVarintBigInt(view, offset) {
   let result = 0n;
   let shift = 0n;
   let pos = offset;
@@ -52,10 +52,19 @@ function readVarint(view, offset) {
     pos += 1;
     result |= BigInt(byte & 0x7f) << shift;
     if ((byte & 0x80) === 0) {
-      return [Number(result), pos];
+      return [result, pos];
     }
     shift += 7n;
   }
+}
+
+/** Reads a varint used as a protobuf tag or byte length. */
+function readVarint(view, offset) {
+  const [value, next] = readVarintBigInt(view, offset);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("protobuf tag/length exceeds the safe integer range");
+  }
+  return [Number(value), next];
 }
 
 /** Writes a protobuf field tag: (fieldNumber << 3) | wireType. */
@@ -299,8 +308,8 @@ function encodeMonoTimestamp(nanos) {
 // full descriptor-driven decoder.
 
 /** Parses a top-level protobuf message into a Map<fieldNumber, list-of-values>.
- * Each value is either a number (varint), a Uint8Array (length-delimited), or
- * a number (32/64-bit fixed, returned as a BigInt-safe Number when possible).
+ * Each value is either a bigint (varint) or a Uint8Array (length-delimited or
+ * fixed-width). Callers explicitly narrow protocol enums and u32 values.
  */
 function parseFields(bytes) {
   const fields = new Map();
@@ -312,7 +321,7 @@ function parseFields(bytes) {
     offset = afterTag;
     let value;
     if (wireType === WIRE_VARINT) {
-      const [v, next] = readVarint(bytes, offset);
+      const [v, next] = readVarintBigInt(bytes, offset);
       value = v;
       offset = next;
     } else if (wireType === WIRE_LEN) {
@@ -341,13 +350,18 @@ function firstBytes(fields, fieldNumber) {
 
 function firstVarint(fields, fieldNumber) {
   const values = fields.get(fieldNumber);
-  return values && values.length > 0 ? values[0] : 0;
+  return values && values.length > 0 ? Number(values[0]) : 0;
+}
+
+function firstBigVarint(fields, fieldNumber) {
+  const values = fields.get(fieldNumber);
+  return values && values.length > 0 ? values[0] : 0n;
 }
 
 function decodeUint64Message(bytes) {
-  if (!bytes) return 0;
+  if (!bytes) return 0n;
   const fields = parseFields(bytes);
-  return firstVarint(fields, 1);
+  return firstBigVarint(fields, 1);
 }
 
 function decodeStringMessage(bytes) {
@@ -446,6 +460,9 @@ function decodeTelemetrySample(bytes) {
   const pose = poseBytes ? parseFields(poseBytes) : new Map();
   const vel = velBytes ? parseFields(velBytes) : new Map();
   return {
+    vehicleId: decodeUint64Message(firstBytes(fields, 1)),
+    tick: decodeUint64Message(firstBytes(fields, 2)),
+    publishedAtNanos: decodeUint64Message(firstBytes(fields, 3)),
     xM: decodeFloat32(firstBytes(pose, 1)),
     yM: decodeFloat32(firstBytes(pose, 2)),
     headingRad: decodeFloat32(firstBytes(pose, 3)),
@@ -457,7 +474,8 @@ function decodeTelemetrySample(bytes) {
 
 // telemetry.proto AvionicsState (ADR-0018): quat_w..z=1..4,
 // rate_p/q/r_rad_s=5..7, pos_n/e/d_m=8..10, vel_n/e/d_mps=11..13 (float),
-// valid_flags=14, quality=15 (varint). Raw estimate; display derivation
+// valid_flags=14, quality=15, arm_state=16 (varint), group stamps=17/18.
+// Raw estimate; display derivation
 // happens in the instrument runtime (ADR-0017).
 function decodeAvionicsState(bytes) {
   if (!bytes) return null;
@@ -488,6 +506,20 @@ function decodeAvionicsState(bytes) {
     quality: firstVarint(f, 15) ?? 0,
     // 0 unknown, 1 disarmed, 2 armed.
     armState: firstVarint(f, 16) ?? 0,
+    attitudeStamp: decodeMeasurementStamp(firstBytes(f, 17)),
+    kinematicsStamp: decodeMeasurementStamp(firstBytes(f, 18)),
+  };
+}
+
+function decodeMeasurementStamp(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  return {
+    sourceId: firstBigVarint(f, 1),
+    sourceEpoch: firstVarint(f, 2) >>> 0,
+    sequence: firstVarint(f, 3) >>> 0,
+    acquiredAtNanos: firstBigVarint(f, 4),
+    clock: firstVarint(f, 5),
   };
 }
 

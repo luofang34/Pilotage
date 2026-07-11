@@ -10,6 +10,7 @@
 // required fields are emitted even when their ids are zero.
 
 import { encodeControlFrameEnvelope, decodeBareEnvelope, SCHEMA_VERSION } from "./wire.js";
+import "./telemetry-ingress.test.mjs";
 
 let failures = 0;
 function check(name, cond) {
@@ -131,6 +132,28 @@ function bytesField(out, fieldNumber, bytes) {
   out.push(...bytes);
 }
 
+function uint64Message(value) {
+  const out = [];
+  varint(out, (1 << 3) | 0);
+  varint(out, value);
+  return out;
+}
+
+function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock) {
+  const out = [];
+  for (const [field, value] of [
+    [1, sourceId],
+    [2, epoch],
+    [3, sequence],
+    [4, acquiredAtNanos],
+    [5, clock],
+  ]) {
+    varint(out, (field << 3) | 0);
+    varint(out, value);
+  }
+  return out;
+}
+
 const avionics = [];
 f32Field(avionics, 1, 0.9); // quat_w; x/y/z stay 0 and are omitted
 f32Field(avionics, 7, 0.05); // rate_r
@@ -138,8 +161,13 @@ f32Field(avionics, 10, -304.8); // pos_d
 f32Field(avionics, 11, 10.0); // vel_n
 varint(avionics, (14 << 3) | 0);
 varint(avionics, 0b1111); // valid_flags
+bytesField(avionics, 17, measurementStamp(7, 3, 10, 1_000_000, 1));
+bytesField(avionics, 18, measurementStamp(7, 3, 5, 900_000, 1));
 
 const sample = [];
+bytesField(sample, 1, uint64Message(1));
+bytesField(sample, 2, uint64Message(42));
+bytesField(sample, 3, uint64Message(2_000_000));
 bytesField(sample, 6, avionics);
 const bare = [];
 varint(bare, (1 << 3) | 0);
@@ -150,11 +178,18 @@ const decoded = decodeBareEnvelope(new Uint8Array(bare));
 check("telemetry datagram decodes as TelemetrySample", decoded.kind === "TelemetrySample");
 const av = decoded.message.avionics;
 check("avionics arm is surfaced", !!av);
+check("telemetry vehicle identity is preserved", decoded.message.vehicleId === 1n);
+check("telemetry source tick is preserved", decoded.message.tick === 42n);
+check("host publication time is preserved separately", decoded.message.publishedAtNanos === 2_000_000n);
 check("avionics quat_w decodes", Math.abs(av.quat.w - 0.9) < 1e-6);
 check("omitted zero quat components decode as 0", av.quat.x === 0 && av.quat.y === 0 && av.quat.z === 0);
 check("avionics pos_d decodes", Math.abs(av.posNed[2] + 304.8) < 1e-3);
 check("avionics vel_n decodes", Math.abs(av.velNed[0] - 10.0) < 1e-6);
 check("avionics valid_flags decode", Number(av.validFlags) === 0b1111);
+check("attitude measurement identity decodes", av.attitudeStamp.sourceId === 7n);
+check("attitude epoch and sequence decode", av.attitudeStamp.sourceEpoch === 3 && av.attitudeStamp.sequence === 10);
+check("attitude acquisition time and clock decode", av.attitudeStamp.acquiredAtNanos === 1_000_000n && av.attitudeStamp.clock === 1);
+check("kinematics sequence remains independent", av.kinematicsStamp.sequence === 5);
 check("a sample without avionics decodes to null", (() => {
   const bareNoAv = [];
   varint(bareNoAv, (1 << 3) | 0);

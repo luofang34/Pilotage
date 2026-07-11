@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, AvionicsSample, Disposition, ExecutionMode, LinkLossPolicy,
-    Pose2d, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    MeasurementClock, MeasurementStamp, Pose2d, RejectReason, ScopeDescriptor, StepBudget,
+    StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
@@ -76,6 +76,7 @@ enum Source {
         shm: GzStateShm,
         freshness: ShmFreshness,
         instance: u8,
+        epoch: u32,
     },
 }
 
@@ -167,6 +168,7 @@ impl AviateAdapter {
             shm: GzStateShm::open(instance)?,
             freshness: ShmFreshness::new(),
             instance,
+            epoch: 1,
         })
     }
 
@@ -378,6 +380,7 @@ impl VehicleAdapter for AviateAdapter {
                 shm,
                 freshness,
                 instance,
+                epoch,
             } => {
                 let frozen = match shm.read() {
                     Some(sample) => freshness.observe(sample.seq) > WITHHOLD_AFTER,
@@ -391,6 +394,7 @@ impl VehicleAdapter for AviateAdapter {
                     if let Ok(new_shm) = GzStateShm::open(*instance) {
                         *shm = new_shm;
                         *freshness = ShmFreshness::new();
+                        *epoch = epoch.wrapping_add(1);
                     }
                     return TelemetryBatch::default();
                 }
@@ -398,6 +402,13 @@ impl VehicleAdapter for AviateAdapter {
                     return TelemetryBatch::default();
                 };
                 let heading = yaw_of(sample.quat_wxyz);
+                let stamp = MeasurementStamp {
+                    source_id: u64::from(*instance).wrapping_add(1),
+                    source_epoch: *epoch,
+                    sequence: sample.seq,
+                    acquired_at_ns: sample.time_us.wrapping_mul(1_000),
+                    clock: MeasurementClock::Simulation,
+                };
                 let speed = f64::from(
                     (sample.vel_ned_mps[0] * sample.vel_ned_mps[0]
                         + sample.vel_ned_mps[1] * sample.vel_ned_mps[1])
@@ -424,6 +435,8 @@ impl VehicleAdapter for AviateAdapter {
                             valid_flags: 0b1111,
                             quality: 0,
                             arm_state,
+                            attitude_stamp: Some(stamp),
+                            kinematics_stamp: Some(stamp),
                         }),
                     }],
                 }

@@ -44,17 +44,19 @@ pub(crate) fn mavlink_batch(
     let speed = f64::from(
         (kin.vel_ned_mps[0] * kin.vel_ned_mps[0] + kin.vel_ned_mps[1] * kin.vel_ned_mps[1]).sqrt(),
     );
-    let avionics = attitude.map(|att| AvionicsSample {
-        quat_wxyz: att.quat_wxyz,
-        rates_rps: att.rates_rps,
+    let avionics = Some(AvionicsSample {
+        quat_wxyz: attitude.map_or([1.0, 0.0, 0.0, 0.0], |att| att.quat_wxyz),
+        rates_rps: attitude.map_or([0.0; 3], |att| att.rates_rps),
         pos_ned_m: kin.pos_ned_m,
         vel_ned_mps: kin.vel_ned_mps,
         // Aviate's wire subset does not carry its StateValidFlags /
         // EstimateQuality yet (ADR-0018 names the gap); freshness is
         // the only validity dimension this link can honestly claim.
-        valid_flags: 0b1111,
+        valid_flags: if attitude.is_some() { 0b1111 } else { 0b1100 },
         quality: 0,
         arm_state,
+        attitude_stamp: attitude.map(|att| att.stamp),
+        kinematics_stamp: Some(kin.stamp),
     });
     TelemetryBatch {
         samples: vec![TelemetrySample {
