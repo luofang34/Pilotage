@@ -1,5 +1,5 @@
 // Display-pipeline health: failure latch, recovery, liveness watchdog, and
-// the backend-owned failure page (DISP-01).
+// the backend-owned failure page.
 //
 // A renderer or display-pipeline failure must never leave a valid-looking
 // last successful image visible. Every failure carries a stable reason
@@ -26,6 +26,8 @@ export const REASON = Object.freeze({
   SCENE_BUFFER_FULL: 6,
   SCENE_COMMAND_LIMIT: 7,
   SCENE_STRUCTURE: 8,
+  SCENE_LAYER_CONTRACT: 9,
+  SCENE_CRITICAL_LAYERS_MISSING: 10,
   // Backend-observed.
   WASM_LOAD: 100,
   ABI_MISMATCH: 101,

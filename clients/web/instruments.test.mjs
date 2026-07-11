@@ -470,21 +470,27 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 }
 
 {
-  let created = 0;
-  const mod = new InstrumentModule(fakeExports({ status: REASON.SCENE_BUFFER_FULL }), {
-    createCanvas: () => {
-      created += 1;
-      return recordingCanvas();
-    },
-  });
-  const visible = new RecordingCtx();
-  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
-  check(
-    "wasm failure code passes through untouched",
-    !result.ok && result.reason === REASON.SCENE_BUFFER_FULL,
-  );
-  check("no back buffer touched on wasm failure", created === 0);
-  check("visible target untouched on wasm failure", visible.log.length === 0);
+  for (const reason of [
+    REASON.SCENE_BUFFER_FULL,
+    REASON.SCENE_LAYER_CONTRACT,
+    REASON.SCENE_CRITICAL_LAYERS_MISSING,
+  ]) {
+    let created = 0;
+    const mod = new InstrumentModule(fakeExports({ status: reason }), {
+      createCanvas: () => {
+        created += 1;
+        return recordingCanvas();
+      },
+    });
+    const visible = new RecordingCtx();
+    const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
+    check(
+      `wasm failure code ${reason} passes through untouched`,
+      !result.ok && result.reason === reason,
+    );
+    check(`failure ${reason} touches no back buffer`, created === 0);
+    check(`failure ${reason} leaves visible target untouched`, visible.log.length === 0);
+  }
 }
 
 {

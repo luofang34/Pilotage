@@ -113,11 +113,16 @@ enforce its required layer mask before visible commit:
 | Panel | Required layers | Optional layers |
 |---|---|---|
 | PFD | `Attitude`, `Tapes`, `Annunciation` | `Background`, `Guidance`, `Failure` |
-| HSI | `Background`, `Attitude`, `Tapes`, `Guidance`, `Annunciation` | `Failure` |
+| HSI | `Attitude`, `Tapes`, `Guidance`, `Annunciation` | `Background`, `Failure` |
 
 A well-framed prefix that ends at a layer boundary is a smaller structural
 scene, not proof of a complete panel frame. Missing a required layer is a
 display failure and must not advance the visible render generation.
+
+`Failure` does not substitute for a required panel layer. A non-success render
+status bypasses scene consumption and is covered by the backend-owned failure
+page, so the failed producer is not required to generate its own failure
+content.
 
 Frame generation, snapshot identity, transport integrity, and panel selection
 remain outside the scene bytes. A consumer combines those transport checks
