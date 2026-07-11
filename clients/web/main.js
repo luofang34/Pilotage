@@ -198,7 +198,7 @@ async function connect() {
 
   // A negotiated transport session is the lifecycle boundary that replaces
   // all ordering history from a prior host process. Cached datagrams cannot
-  // cross this boundary because the old transport has already closed.
+  // cross this boundary because the replaced transport is already closed.
   instruments.ingress = newSimulatorAvionicsIngress();
   state.connected = true;
   acceptIncomingUniStreams(transport);

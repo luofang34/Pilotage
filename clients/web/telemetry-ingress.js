@@ -1,4 +1,4 @@
-// Reorder-safe avionics ingestion for the simulator viewer (AV-01).
+// Reorder-safe avionics ingestion for the simulator viewer.
 // Publication/receipt time is transport metadata: freshness advances only
 // when a source group presents a new epoch/sequence.
 
