@@ -455,20 +455,40 @@ function decodeLeaseResponse(bytes) {
 function decodeTelemetrySample(bytes) {
   if (!bytes) return {};
   const fields = parseFields(bytes);
-  const poseBytes = firstBytes(fields, 4);
-  const velBytes = firstBytes(fields, 5);
-  const pose = poseBytes ? parseFields(poseBytes) : new Map();
-  const vel = velBytes ? parseFields(velBytes) : new Map();
+  const pose = decodePose2d(firstBytes(fields, 4));
+  const velocity = decodeVelocity2d(firstBytes(fields, 5));
   return {
     vehicleId: decodeUint64Message(firstBytes(fields, 1)),
     tick: decodeUint64Message(firstBytes(fields, 2)),
     publishedAtNanos: decodeUint64Message(firstBytes(fields, 3)),
-    xM: decodeFloat32(firstBytes(pose, 1)),
-    yM: decodeFloat32(firstBytes(pose, 2)),
-    headingRad: decodeFloat32(firstBytes(pose, 3)),
-    linearXMps: decodeFloat32(firstBytes(vel, 1)),
-    angularRadS: decodeFloat32(firstBytes(vel, 3)),
+    pose,
+    velocity,
+    xM: pose?.xM ?? null,
+    yM: pose?.yM ?? null,
+    headingRad: pose?.headingRad ?? null,
+    linearXMps: velocity?.linearXMps ?? null,
+    angularRadS: velocity?.angularRadS ?? null,
     avionics: decodeAvionicsState(firstBytes(fields, 6)),
+  };
+}
+
+function decodePose2d(bytes) {
+  if (!bytes) return null;
+  const fields = parseFields(bytes);
+  return {
+    xM: decodeFloat32(firstBytes(fields, 1)),
+    yM: decodeFloat32(firstBytes(fields, 2)),
+    headingRad: decodeFloat32(firstBytes(fields, 3)),
+  };
+}
+
+function decodeVelocity2d(bytes) {
+  if (!bytes) return null;
+  const fields = parseFields(bytes);
+  return {
+    linearXMps: decodeFloat32(firstBytes(fields, 1)),
+    linearYMps: decodeFloat32(firstBytes(fields, 2)),
+    angularRadS: decodeFloat32(firstBytes(fields, 3)),
   };
 }
 
@@ -480,7 +500,9 @@ function decodeTelemetrySample(bytes) {
 function decodeAvionicsState(bytes) {
   if (!bytes) return null;
   const f = parseFields(bytes);
-  return {
+  const attitudeStamp = decodeMeasurementStamp(firstBytes(f, 17));
+  const kinematicsStamp = decodeMeasurementStamp(firstBytes(f, 18));
+  const attitude = attitudeStamp === null ? null : {
     quat: {
       w: decodeFloat32(firstBytes(f, 1)),
       x: decodeFloat32(firstBytes(f, 2)),
@@ -492,6 +514,8 @@ function decodeAvionicsState(bytes) {
       decodeFloat32(firstBytes(f, 6)),
       decodeFloat32(firstBytes(f, 7)),
     ],
+  };
+  const kinematics = kinematicsStamp === null ? null : {
     posNed: [
       decodeFloat32(firstBytes(f, 8)),
       decodeFloat32(firstBytes(f, 9)),
@@ -502,12 +526,20 @@ function decodeAvionicsState(bytes) {
       decodeFloat32(firstBytes(f, 12)),
       decodeFloat32(firstBytes(f, 13)),
     ],
+  };
+  return {
+    attitude,
+    kinematics,
+    quat: attitude?.quat ?? null,
+    rates: attitude?.rates ?? null,
+    posNed: kinematics?.posNed ?? null,
+    velNed: kinematics?.velNed ?? null,
     validFlags: firstVarint(f, 14) ?? 0,
     quality: firstVarint(f, 15) ?? 0,
     // 0 unknown, 1 disarmed, 2 armed.
     armState: firstVarint(f, 16) ?? 0,
-    attitudeStamp: decodeMeasurementStamp(firstBytes(f, 17)),
-    kinematicsStamp: decodeMeasurementStamp(firstBytes(f, 18)),
+    attitudeStamp,
+    kinematicsStamp,
   };
 }
 

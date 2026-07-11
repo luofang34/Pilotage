@@ -26,6 +26,12 @@ fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
     }
 }
 
+fn measured_speed(adapter: &mut ReferenceAdapter) -> f64 {
+    adapter.sample_telemetry().samples[0]
+        .speed
+        .expect("reference adapter speed")
+}
+
 #[test]
 fn neutralize_zeroes_controls_and_speed_decays_via_drag() {
     let vehicle = VehicleId::new(1);
@@ -36,12 +42,12 @@ fn neutralize_zeroes_controls_and_speed_decays_via_drag() {
     for _ in 0..50u32 {
         adapter.step(StepBudget { ticks: 1 });
     }
-    let speed_before_loss = adapter.sample_telemetry().samples[0].speed;
+    let speed_before_loss = measured_speed(&mut adapter);
     assert!(speed_before_loss > 0.0);
 
     adapter.set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize));
     adapter.step(StepBudget { ticks: 1 });
-    let speed_after_one_tick = adapter.sample_telemetry().samples[0].speed;
+    let speed_after_one_tick = measured_speed(&mut adapter);
     assert!(speed_after_one_tick < speed_before_loss);
 
     // With controls neutralized, speed keeps decaying toward zero under drag
@@ -49,7 +55,7 @@ fn neutralize_zeroes_controls_and_speed_decays_via_drag() {
     for _ in 0..500u32 {
         adapter.step(StepBudget { ticks: 1 });
     }
-    let speed_far_after = adapter.sample_telemetry().samples[0].speed;
+    let speed_far_after = measured_speed(&mut adapter);
     assert!(speed_far_after < speed_after_one_tick);
     assert!(speed_far_after >= 0.0);
 }
@@ -62,7 +68,7 @@ fn clearing_link_loss_policy_restores_normal_control() {
 
     adapter.set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize));
     adapter.step(StepBudget { ticks: 1 });
-    let speed_while_neutralized = adapter.sample_telemetry().samples[0].speed;
+    let speed_while_neutralized = measured_speed(&mut adapter);
 
     // Link recovery: clearing the policy and re-applying full throttle must
     // resume acceleration rather than staying neutralized permanently.
@@ -71,7 +77,7 @@ fn clearing_link_loss_policy_restores_normal_control() {
     for _ in 0..50u32 {
         adapter.step(StepBudget { ticks: 1 });
     }
-    let speed_after_recovery = adapter.sample_telemetry().samples[0].speed;
+    let speed_after_recovery = measured_speed(&mut adapter);
     assert!(speed_after_recovery > speed_while_neutralized);
 }
 
@@ -92,17 +98,17 @@ fn hold_brief_holds_controls_then_neutralizes() {
         adapter.step(StepBudget { ticks: 1 });
         without_loss.step(StepBudget { ticks: 1 });
     }
-    let held_speed = adapter.sample_telemetry().samples[0].speed;
-    let unaffected_speed = without_loss.sample_telemetry().samples[0].speed;
+    let held_speed = measured_speed(&mut adapter);
+    let unaffected_speed = measured_speed(&mut without_loss);
     assert_eq!(held_speed, unaffected_speed);
 
     // After the hold window elapses, controls neutralize: further stepping
     // must decay speed rather than keep climbing under throttle.
     adapter.step(StepBudget { ticks: 1 });
-    let speed_after_neutralize_tick = adapter.sample_telemetry().samples[0].speed;
+    let speed_after_neutralize_tick = measured_speed(&mut adapter);
 
     without_loss.step(StepBudget { ticks: 1 });
-    let unaffected_speed_next = without_loss.sample_telemetry().samples[0].speed;
+    let unaffected_speed_next = measured_speed(&mut without_loss);
 
     assert!(speed_after_neutralize_tick < unaffected_speed_next);
 }
@@ -116,7 +122,7 @@ fn hold_brief_expiry_is_not_undone_by_a_later_apply_control() {
 
     // Run past the hold window so the policy has neutralized.
     adapter.step(StepBudget { ticks: 2 });
-    let speed_after_neutralize = adapter.sample_telemetry().samples[0].speed;
+    let speed_after_neutralize = measured_speed(&mut adapter);
 
     // A new control frame arrives without the link ever being recovered via
     // `set_link_loss_policy(vehicle, None)`. Per the `VehicleAdapter` trait's
@@ -124,7 +130,7 @@ fn hold_brief_expiry_is_not_undone_by_a_later_apply_control() {
     // so this frame must not un-neutralize the vehicle.
     adapter.apply_control(&full_throttle_frame(vehicle));
     adapter.step(StepBudget { ticks: 50 });
-    let speed_after_new_frame = adapter.sample_telemetry().samples[0].speed;
+    let speed_after_new_frame = measured_speed(&mut adapter);
 
     assert!(speed_after_new_frame <= speed_after_neutralize);
 }

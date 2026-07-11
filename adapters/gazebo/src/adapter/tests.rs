@@ -106,8 +106,8 @@ fn odometry_maps_to_canonical_telemetry() {
     );
     assert_eq!(sample.vehicle, VehicleId::new(3));
     assert_eq!(sample.tick.as_u64(), 900);
-    assert!((sample.pose.x - 1.0).abs() < 1e-6);
-    assert!((sample.speed - 4.0).abs() < 1e-6);
+    assert!((sample.pose.expect("pose").x - 1.0).abs() < 1e-6);
+    assert!((sample.speed.expect("speed") - 4.0).abs() < 1e-6);
 }
 
 #[tokio::test]
@@ -185,8 +185,8 @@ async fn cached_odometry_becomes_telemetry_sample() {
     }
     let sample = telemetry.samples.first().expect("telemetry sample present");
     assert_eq!(sample.tick.as_u64(), 1234);
-    assert!((sample.pose.x - 5.0).abs() < 1e-6);
-    assert!((sample.speed - 2.5).abs() < 1e-6);
+    assert!((sample.pose.expect("pose").x - 5.0).abs() < 1e-6);
+    assert!((sample.speed.expect("speed") - 2.5).abs() < 1e-6);
 }
 
 #[tokio::test]

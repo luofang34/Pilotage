@@ -15,7 +15,7 @@ pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, Vehicl
 pub use control::{ApplyOutcome, Disposition, LinkLossPolicy, RejectReason};
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
-    AvionicsSample, MeasurementClock, MeasurementStamp, Pose2d, SourceIncarnation, TelemetryBatch,
-    TelemetrySample, VideoSource,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, MeasurementClock,
+    MeasurementStamp, Pose2d, SourceIncarnation, TelemetryBatch, TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;

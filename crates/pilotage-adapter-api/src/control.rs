@@ -14,6 +14,8 @@ pub enum RejectReason {
     UnknownVehicle,
     /// The frame failed a fencing check (stale generation or sequence).
     Fenced,
+    /// A measurement required to apply the frame is unavailable.
+    MeasurementUnavailable,
     /// The adapter rejected the frame for a reason not covered above.
     Other(String),
 }

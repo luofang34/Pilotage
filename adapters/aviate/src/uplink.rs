@@ -1,5 +1,4 @@
-//! DJI-style flight uplink: stick positions become velocity setpoints
-//! (issue #12).
+//! DJI-style flight uplink: stick positions become velocity setpoints.
 //!
 //! The control law, not the stick map, is what makes a camera drone feel
 //! like one: sticks command **velocities**, centered sticks command
@@ -130,11 +129,18 @@ impl FlightUplink {
         self.seq = self.seq.wrapping_add(1);
     }
 
-    /// Sends arm/disarm and re-seeds the heading setpoint from the
-    /// vehicle's current yaw so the first yaw-stick input turns from
-    /// where the aircraft actually points.
-    pub fn send_arm(&mut self, arm: bool, current_yaw_rad: f32) {
+    /// Arms and re-seeds heading from the measured yaw.
+    pub fn send_arm(&mut self, current_yaw_rad: f32) {
         self.heading_sp_rad = current_yaw_rad;
+        self.send_arm_command(true);
+    }
+
+    /// Disarms without requiring a measurement that may have failed.
+    pub fn send_disarm(&mut self) {
+        self.send_arm_command(false);
+    }
+
+    fn send_arm_command(&mut self, arm: bool) {
         self.last_frame = None;
         self.quiet_until = Some(Instant::now() + ARM_QUIET);
         self.airborne = false;
@@ -151,9 +157,8 @@ impl FlightUplink {
     }
 
     /// Converts one canonical stick frame into an FPV attitude
-    /// setpoint: roll/pitch sticks command *angles* (rate-style FPV
-    /// acro is a follow-up), the yaw stick integrates a heading
-    /// setpoint exactly like camera mode, and throttle maps directly
+    /// setpoint: roll/pitch sticks command angles, the yaw stick integrates
+    /// a heading setpoint exactly like camera mode, and throttle maps directly
     /// to collective thrust around the hover point — altitude is the
     /// pilot's axis in FPV.
     pub fn send_fpv_frame(&mut self, roll: f32, pitch: f32, throttle: f32, yaw: f32) {

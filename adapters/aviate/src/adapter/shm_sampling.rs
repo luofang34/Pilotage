@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use pilotage_adapter_api::{
-    AvionicsSample, MeasurementClock, MeasurementStamp, Pose2d, SourceIncarnation, TelemetryBatch,
-    TelemetrySample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, MeasurementClock,
+    MeasurementStamp, Pose2d, SourceIncarnation, TelemetryBatch, TelemetrySample,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
@@ -40,10 +40,9 @@ impl ShmSource {
         })
     }
 
-    pub(super) fn current_pose(&self) -> (f32, [f32; 3]) {
-        self.shm.read().map_or((0.0, [0.0; 3]), |sample| {
-            (yaw_of(sample.quat_wxyz) as f32, sample.pos_ned_m)
-        })
+    pub(super) fn current_pose(&mut self) -> Option<(f32, [f32; 3])> {
+        self.usable_sample(Instant::now())
+            .map(|sample| (yaw_of(sample.quat_wxyz) as f32, sample.pos_ned_m))
     }
 
     pub(super) fn tick(&self) -> u64 {
@@ -146,22 +145,26 @@ fn batch_from_sample(
         samples: vec![TelemetrySample {
             vehicle,
             tick: SimTick::new(sample.time_us.wrapping_mul(1_000)),
-            pose: Pose2d {
+            pose: Some(Pose2d {
                 x: f64::from(sample.pos_ned_m[0]),
                 y: f64::from(sample.pos_ned_m[1]),
                 heading,
-            },
-            speed,
+            }),
+            speed: Some(speed),
             avionics: Some(AvionicsSample {
-                quat_wxyz: sample.quat_wxyz,
-                rates_rps: sample.rates_rps,
-                pos_ned_m: sample.pos_ned_m,
-                vel_ned_mps: sample.vel_ned_mps,
+                attitude: Some(AvionicsAttitudeSample {
+                    quat_wxyz: sample.quat_wxyz,
+                    rates_rps: sample.rates_rps,
+                    stamp,
+                }),
+                kinematics: Some(AvionicsKinematicsSample {
+                    pos_ned_m: sample.pos_ned_m,
+                    vel_ned_mps: sample.vel_ned_mps,
+                    stamp,
+                }),
                 valid_flags: 0b1111,
                 quality: 0,
                 arm_state,
-                attitude_stamp: Some(stamp),
-                kinematics_stamp: Some(stamp),
             }),
         }],
     }

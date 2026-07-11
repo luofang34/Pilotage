@@ -24,11 +24,11 @@ mod camera;
 mod control;
 mod sampling;
 mod shm_sampling;
-use sampling::{mavlink_batch, yaw_of};
+use sampling::{mavlink_batch, measurement_pair_is_coherent, yaw_of};
 use shm_sampling::ShmSource;
 
-/// The control scope this adapter exposes (issue #12): four canonical
-/// flight axes as DJI-style velocity demands.
+/// The control scope exposes four canonical flight axes as DJI-style
+/// velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
@@ -48,6 +48,34 @@ pub const RESET_BUTTON: u16 = 2;
 /// Logical button toggling between camera mode (velocity sticks,
 /// brake-to-hold) and FPV mode (attitude sticks, direct thrust).
 pub const FPV_TOGGLE_BUTTON: u16 = 3;
+
+fn flight_button_pressed(frame: &ScopedControlFrame, button: u16) -> bool {
+    frame.payload.edges.iter().any(|(candidate, edge)| {
+        *edge == ButtonEdge::Pressed && *candidate == LogicalButtonId::new(button)
+    })
+}
+
+fn rejected_control(tick: SimTick, reason: RejectReason) -> ApplyOutcome {
+    ApplyOutcome {
+        tick,
+        disposition: Disposition::Rejected(reason),
+    }
+}
+
+fn normalized_flight_sticks(frame: &ScopedControlFrame) -> ([f32; 4], bool) {
+    let mut sticks = [0.0_f32; 4];
+    let mut transformed = false;
+    for (axis, value) in &frame.payload.axes {
+        let clamped = if value.is_nan() {
+            0.0
+        } else {
+            value.clamp(-1.0, 1.0)
+        };
+        transformed |= clamped != *value;
+        sticks[usize::from(axis.as_u16().min(3))] = clamped;
+    }
+    (sticks, transformed)
+}
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -87,8 +115,8 @@ pub struct AviateAdapter {
     vehicle: VehicleId,
     source: Source,
     uplink: Option<FlightUplink>,
-    // Camera path (issue #12): Pilotage's own gz sidecar bridges the
-    // flight world's camera topics; absent when the sidecar can't spawn.
+    // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
+    // the adapter remains usable without video when the sidecar cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
     _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
@@ -226,17 +254,27 @@ impl AviateAdapter {
     }
 
     /// The vehicle's current measured yaw (radians clockwise from
-    /// north) and NED position (zeros before any telemetry).
-    fn current_pose(&mut self) -> (f32, [f32; 3]) {
-        match &self.source {
+    /// north) and NED position.
+    fn current_pose(&mut self) -> Option<(f32, [f32; 3])> {
+        match &mut self.source {
             Source::Shm(source) => source.current_pose(),
-            Source::Mavlink { state, .. } => state.lock().ok().map_or((0.0, [0.0; 3]), |latest| {
-                let yaw = latest
+            Source::Mavlink { state, .. } => {
+                let latest = state.lock().ok()?;
+                let attitude = latest
                     .attitude
-                    .map_or(0.0, |att| yaw_of(att.quat_wxyz) as f32);
-                let pos = latest.kinematics.map_or([0.0; 3], |kin| kin.pos_ned_m);
-                (yaw, pos)
-            }),
+                    .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
+                let kinematics = latest
+                    .kinematics
+                    .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
+                if !measurement_pair_is_coherent(
+                    attitude,
+                    kinematics,
+                    latest.maximum_inter_group_skew_ms,
+                ) {
+                    return None;
+                }
+                Some((yaw_of(attitude.quat_wxyz) as f32, kinematics.pos_ned_m))
+            }
         }
     }
 
@@ -270,9 +308,8 @@ impl VehicleAdapter for AviateAdapter {
                 render_capable: self._camera_bridge.is_some(),
                 ..ExecutionMode::default()
             },
-            // The flight scope (issue #12): DJI-style velocity control.
-            // Without a working uplink the adapter stays telemetry-only
-            // (ADR-0018's original shape).
+            // Without a working velocity-control uplink, the adapter stays
+            // telemetry-only as required by ADR-0018.
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: if self.uplink.is_some() {
@@ -301,33 +338,29 @@ impl VehicleAdapter for AviateAdapter {
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
         if self.uplink.is_none() {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(RejectReason::UnknownScope),
-            };
+            return rejected_control(tick, RejectReason::UnknownScope);
         }
         if let Err(reason) = self.validate_flight_frame(frame) {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(reason),
-            };
+            return rejected_control(tick, reason);
         }
-        // Reset is scanned before the uplink borrow (it needs &mut self).
-        if frame
-            .payload
-            .edges
-            .iter()
-            .any(|(b, e)| *e == ButtonEdge::Pressed && *b == LogicalButtonId::new(RESET_BUTTON))
-        {
+        if flight_button_pressed(frame, RESET_BUTTON) {
             self.spawn_reset();
         }
-        let (current_yaw, current_pos) = self.current_pose();
-        let Some(uplink) = self.uplink.as_mut() else {
-            // Checked above; unreachable in practice.
+        if flight_button_pressed(frame, DISARM_BUTTON) {
+            let Some(uplink) = self.uplink.as_mut() else {
+                return rejected_control(tick, RejectReason::UnknownScope);
+            };
+            uplink.send_disarm();
             return ApplyOutcome {
                 tick,
-                disposition: Disposition::Rejected(RejectReason::UnknownScope),
+                disposition: Disposition::Accepted,
             };
+        }
+        let Some((current_yaw, current_pos)) = self.current_pose() else {
+            return rejected_control(tick, RejectReason::MeasurementUnavailable);
+        };
+        let Some(uplink) = self.uplink.as_mut() else {
+            return rejected_control(tick, RejectReason::UnknownScope);
         };
 
         for (button, edge) in &frame.payload.edges {
@@ -335,26 +368,14 @@ impl VehicleAdapter for AviateAdapter {
                 continue;
             }
             if *button == LogicalButtonId::new(ARM_BUTTON) {
-                uplink.send_arm(true, current_yaw);
-            } else if *button == LogicalButtonId::new(DISARM_BUTTON) {
-                uplink.send_arm(false, current_yaw);
+                uplink.send_arm(current_yaw);
             } else if *button == LogicalButtonId::new(FPV_TOGGLE_BUTTON) {
                 self.fpv_mode = !self.fpv_mode;
                 tracing::info!(fpv = self.fpv_mode, "flight mode toggled");
             }
         }
 
-        let mut sticks = [0.0f32; 4];
-        let mut transformed = false;
-        for (axis, value) in &frame.payload.axes {
-            let clamped = if value.is_nan() {
-                0.0
-            } else {
-                value.clamp(-1.0, 1.0)
-            };
-            transformed |= clamped != *value;
-            sticks[usize::from(axis.as_u16().min(3))] = clamped;
-        }
+        let (sticks, transformed) = normalized_flight_sticks(frame);
         if self.fpv_mode {
             uplink.send_fpv_frame(
                 sticks[usize::from(ROLL_AXIS)],

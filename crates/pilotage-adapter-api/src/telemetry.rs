@@ -66,19 +66,37 @@ pub struct Pose2d {
     pub heading: f64,
 }
 
+/// One independently published attitude/rates measurement group.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AvionicsAttitudeSample {
+    /// Attitude quaternion (w, x, y, z), body FRD → world NED.
+    pub quat_wxyz: [f32; 4],
+    /// Body rates (p, q, r) in radians/second.
+    pub rates_rps: [f32; 3],
+    /// Identity and acquisition time of this group measurement.
+    pub stamp: MeasurementStamp,
+}
+
+/// One independently published position/velocity measurement group.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AvionicsKinematicsSample {
+    /// Position (north, east, down) in meters from the local origin.
+    pub pos_ned_m: [f32; 3],
+    /// Velocity (north, east, down) in meters/second.
+    pub vel_ned_mps: [f32; 3],
+    /// Identity and acquisition time of this group measurement.
+    pub stamp: MeasurementStamp,
+}
+
 /// Raw avionics state estimate for flight vehicles (ADR-0018): the
 /// estimator's output, not display-ready numbers. Ground vehicles leave
 /// [`TelemetrySample::avionics`] as `None`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AvionicsSample {
-    /// Attitude quaternion (w, x, y, z), body FRD → world NED.
-    pub quat_wxyz: [f32; 4],
-    /// Body rates (p, q, r) in radians/second.
-    pub rates_rps: [f32; 3],
-    /// Position (north, east, down) in meters from the local origin.
-    pub pos_ned_m: [f32; 3],
-    /// Velocity (north, east, down) in meters/second.
-    pub vel_ned_mps: [f32; 3],
+    /// Attitude/rates group, or `None` when it was not supplied.
+    pub attitude: Option<AvionicsAttitudeSample>,
+    /// Position/velocity group, or `None` when it was not supplied.
+    pub kinematics: Option<AvionicsKinematicsSample>,
     /// Validity bitmask: bit0 attitude, bit1 rates, bit2 position,
     /// bit3 velocity.
     pub valid_flags: u32,
@@ -87,12 +105,6 @@ pub struct AvionicsSample {
     /// Arm state as the vehicle reports it: 0 unknown, 1 disarmed,
     /// 2 armed.
     pub arm_state: u32,
-    /// Identity of the attitude/rates measurement. `None` means that group
-    /// was not supplied in this publication.
-    pub attitude_stamp: Option<MeasurementStamp>,
-    /// Identity of the position/velocity measurement. `None` means that
-    /// group was not supplied in this publication.
-    pub kinematics_stamp: Option<MeasurementStamp>,
 }
 
 /// A single vehicle's telemetry at one simulation tick.
@@ -102,10 +114,10 @@ pub struct TelemetrySample {
     pub vehicle: VehicleId,
     /// Simulation tick this sample was taken at.
     pub tick: SimTick,
-    /// Planar pose at this tick.
-    pub pose: Pose2d,
-    /// Scalar speed at this tick, in the adapter's native units.
-    pub speed: f64,
+    /// Planar pose at this tick, or `None` when its source groups are absent.
+    pub pose: Option<Pose2d>,
+    /// Scalar speed at this tick, or `None` when it is not measured.
+    pub speed: Option<f64>,
     /// Raw avionics estimate for flight vehicles; `None` for ground
     /// vehicles (ADR-0018).
     pub avionics: Option<AvionicsSample>,
@@ -147,16 +159,16 @@ mod tests {
         let sample = TelemetrySample {
             vehicle: VehicleId::new(1),
             tick: SimTick::new(2),
-            pose: Pose2d {
+            pose: Some(Pose2d {
                 x: 1.0,
                 y: 2.0,
                 heading: 0.5,
-            },
-            speed: 3.0,
+            }),
+            speed: Some(3.0),
             avionics: None,
         };
-        assert_eq!(sample.pose.x, 1.0);
-        assert_eq!(sample.speed, 3.0);
+        assert_eq!(sample.pose.expect("pose").x, 1.0);
+        assert_eq!(sample.speed, Some(3.0));
     }
 
     #[test]

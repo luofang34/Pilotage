@@ -201,12 +201,12 @@ impl VehicleAdapter for ReferenceAdapter {
             samples: vec![TelemetrySample {
                 vehicle: self.vehicle,
                 tick: self.tick,
-                pose: Pose2d {
+                pose: Some(Pose2d {
                     x: self.skiff.pos[0],
                     y: self.skiff.pos[1],
                     heading: self.skiff.heading,
-                },
-                speed: self.skiff.speed,
+                }),
+                speed: Some(self.skiff.speed),
                 avionics: None,
             }],
         }
@@ -305,7 +305,7 @@ mod tests {
         let step_outcome = adapter.step(StepBudget { ticks: 1 });
         assert_eq!(step_outcome.advanced, 1);
         let telemetry = adapter.sample_telemetry();
-        assert!(telemetry.samples[0].speed > 0.0);
+        assert!(telemetry.samples[0].speed.expect("speed") > 0.0);
     }
 
     #[test]
@@ -326,10 +326,11 @@ mod tests {
         adapter.step(StepBudget { ticks: 64 });
         let telemetry = adapter.sample_telemetry();
         let sample = &telemetry.samples[0];
-        assert!(sample.speed.is_finite());
-        assert!(sample.pose.x.is_finite());
-        assert!(sample.pose.y.is_finite());
-        assert!(sample.pose.heading.is_finite());
+        let pose = sample.pose.expect("pose");
+        assert!(sample.speed.expect("speed").is_finite());
+        assert!(pose.x.is_finite());
+        assert!(pose.y.is_finite());
+        assert!(pose.heading.is_finite());
     }
 
     #[test]
@@ -344,7 +345,7 @@ mod tests {
         assert_eq!(outcome.disposition, Disposition::Transformed);
         adapter.step(StepBudget { ticks: 4 });
         let telemetry = adapter.sample_telemetry();
-        assert!(telemetry.samples[0].speed.is_finite());
+        assert!(telemetry.samples[0].speed.expect("speed").is_finite());
         // A finite snapshot restores cleanly, preserving the replay contract.
         let json = adapter.snapshot().expect("snapshot encodes");
         let restored = ReferenceAdapter::restore(&json).expect("snapshot restores");

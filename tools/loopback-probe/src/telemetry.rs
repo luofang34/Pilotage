@@ -19,7 +19,7 @@ pub struct TelemetryObservation {
     /// Client-local monotonic timestamp at datagram receipt.
     pub received_at: MonoTimestamp,
     /// Reported planar pose, used to detect a change since the last sample.
-    pub pose: (f32, f32, f32),
+    pub pose: Option<(f32, f32, f32)>,
 }
 
 /// Extracts the pose fields this probe tracks from an already-decoded
@@ -32,10 +32,11 @@ pub fn observation_from_sample(
     sample: &wire::TelemetrySample,
     received_at: MonoTimestamp,
 ) -> TelemetryObservation {
-    let pose = sample.pose.unwrap_or_default();
     TelemetryObservation {
         received_at,
-        pose: (pose.x_m, pose.y_m, pose.heading_rad),
+        pose: sample
+            .pose
+            .map(|pose| (pose.x_m, pose.y_m, pose.heading_rad)),
     }
 }
 
@@ -61,12 +62,12 @@ mod tests {
             avionics: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(100));
-        assert_eq!(observation.pose, (1.5, 2.5, 0.25));
+        assert_eq!(observation.pose, Some((1.5, 2.5, 0.25)));
         assert_eq!(observation.received_at, MonoTimestamp::from_nanos(100));
     }
 
     #[test]
-    fn missing_pose_projects_to_origin() {
+    fn missing_pose_stays_missing() {
         let sample = wire::TelemetrySample {
             vehicle: None,
             tick: None,
@@ -76,6 +77,6 @@ mod tests {
             avionics: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(0));
-        assert_eq!(observation.pose, (0.0, 0.0, 0.0));
+        assert_eq!(observation.pose, None);
     }
 }

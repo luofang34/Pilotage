@@ -52,12 +52,7 @@ fn restore_then_step_matches_uninterrupted_run() {
     }
     let actual = restored.sample_telemetry();
 
-    assert_eq!(actual.samples[0].pose.x, expected.samples[0].pose.x);
-    assert_eq!(actual.samples[0].pose.y, expected.samples[0].pose.y);
-    assert_eq!(
-        actual.samples[0].pose.heading,
-        expected.samples[0].pose.heading
-    );
+    assert_eq!(actual.samples[0].pose, expected.samples[0].pose);
     assert_eq!(actual.samples[0].speed, expected.samples[0].speed);
     assert_eq!(actual.samples[0].tick, expected.samples[0].tick);
 }
@@ -81,5 +76,5 @@ fn snapshot_round_trip_preserves_link_loss_hold_countdown() {
     let expected = adapter.sample_telemetry();
     let actual = restored.sample_telemetry();
     assert_eq!(actual.samples[0].speed, expected.samples[0].speed);
-    assert_eq!(actual.samples[0].pose.x, expected.samples[0].pose.x);
+    assert_eq!(actual.samples[0].pose, expected.samples[0].pose);
 }

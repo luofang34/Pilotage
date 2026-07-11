@@ -56,6 +56,14 @@ when source identity, epoch, and clock domain match and acquisition-time skew
 meets the selected display profile. Publication in one `AvionicsState` does not
 by itself imply coherent acquisition.
 
+Group presence is structural throughout the adapter API. Missing attitude or
+kinematics is represented as `None`, never an identity quaternion, origin, or
+zero velocity. The planar `pose` and `velocity` messages are emitted only when
+both source groups share identity/clock and meet the selected skew bound; a
+single or incoherent group continues to flow independently through
+`AvionicsState`. Receivers treat absent message fields and group stamps as
+missing data.
+
 The wire stays raw because derivation is display policy: barometric-style
 altitude (−z), vertical speed (−vz), groundspeed (√(vx²+vy²)), and
 Euler attitude all derive in `pilotage-instrument-state`, where they are unit
@@ -76,9 +84,10 @@ A new adapter crate owns the Aviate vehicle end to end:
   first estimate. The parser is a plain `no_std`-style module with no I/O so
   the frame math is unit-testable byte-for-byte.
 - **Mapping**: ATTITUDE_QUATERNION + LOCAL_POSITION_NED fold into the
-  vehicle's `TelemetrySample` (planar pose from x/y + yaw for existing
-  consumers; full estimate into `AvionicsState`). MAVLink `time_boot_ms` is
-  retained for both groups. Independently advancing wrapping sequences reject
+  vehicle's `TelemetrySample` (a planar projection only when both groups are
+  available and coherent within the selected skew bound; each raw group
+  independently into `AvionicsState`). MAVLink `time_boot_ms` is retained for
+  both groups. Independently advancing wrapping sequences reject
   duplicate and reordered measurements before they enter the cache. A 32-bit
   boot-clock wrap starts a new explicit source epoch. Ordinary MAVLink has no
   trustworthy boot UUID, so the default policy never infers a reboot from a
@@ -100,6 +109,11 @@ A new adapter crate owns the Aviate vehicle end to end:
   flight-control scope and addresses setpoints to the same configured MAVLink
   system and component used by telemetry. An unavailable uplink degrades to
   telemetry-only capability rather than changing the measurement source.
+  Control requiring a current pose is rejected when either source group is
+  missing, stale, identity-incompatible, or outside the configured skew bound;
+  the adapter never seeds a setpoint with zero substitutes. Disarm is a
+  measurement-independent safety action and remains available when the
+  estimate is unavailable; a later arm still requires a coherent measured yaw.
 - **Video**: the Aviate SITL world is ordinary Gazebo, so camera frames reach
   the browser the same way the yard world's do — a camera sensor in the world
   SDF bridged by the existing gz sidecar. The adapter may spawn the sidecar

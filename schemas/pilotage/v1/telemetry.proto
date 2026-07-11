@@ -55,6 +55,8 @@ message MeasurementStamp {
 // Euler angles) happens in the instrument runtime (ADR-0017). Ground
 // vehicles never set this field.
 message AvionicsState {
+  // Fields 1–7 are meaningful only when attitude_stamp is present. Proto3
+  // scalar defaults are not measurements and must not be displayed as such.
   float quat_w = 1;
   float quat_x = 2;
   float quat_y = 3;
@@ -62,6 +64,7 @@ message AvionicsState {
   float rate_p_rad_s = 5;
   float rate_q_rad_s = 6;
   float rate_r_rad_s = 7;
+  // Fields 8–13 are meaningful only when kinematics_stamp is present.
   float pos_n_m = 8;
   float pos_e_m = 9;
   float pos_d_m = 10;
@@ -87,6 +90,8 @@ message TelemetrySample {
   // Host publication time. This is transport metadata, not source
   // acquisition time; group acquisition stamps live in AvionicsState.
   MonoTimestamp observed_at = 3;
+  // Absence means no coherent planar projection is available. Receivers must
+  // not substitute an origin pose or zero velocity.
   Pose2d pose = 4;
   Velocity2d velocity = 5;
   AvionicsState avionics = 6;

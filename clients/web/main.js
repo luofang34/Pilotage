@@ -36,7 +36,9 @@ import {
   startDisplayLoop,
   tickInstrumentSet,
 } from "./instrument-health.js";
+import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
+import { TransportSessionLifecycle } from "./transport-session.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -50,7 +52,7 @@ const AXIS_ROLL = 0; // pilotage-input logical axis table: roll = 0 (lateral vel
 const AXIS_PITCH = 1; // pitch = 1 (forward velocity, + forward).
 const AXIS_THROTTLE = 2; // throttle = 2 (rover: forward speed; quad: climb rate).
 const AXIS_YAW = 3; // yaw = 3 (yaw rate, + clockwise).
-const BUTTON_ARM = 0; // logical button 0: arm (adapter contract, issue #12).
+const BUTTON_ARM = 0; // logical button 0: arm (adapter contract).
 const BUTTON_DISARM = 1; // logical button 1: disarm.
 const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
 const BUTTON_FPV_TOGGLE = 3; // logical button 3: camera <-> FPV mode (adapter latches).
@@ -92,6 +94,7 @@ const state = {
   leaseGranted: false,
   skippedVideoFrames: 0,
 };
+const transportSessions = new TransportSessionLifecycle();
 
 // Ingestion accepts only source advancement for the selected vehicle. Drawing
 // remains on requestAnimationFrame, decoupled from telemetry publication.
@@ -107,6 +110,11 @@ function newSimulatorAvionicsIngress() {
     incarnationPolicy: INCARNATION_POLICY.SIM_ACCEPT_UNSEEN,
     maximumSkewNanos: SIM_COHERENCE_LIMIT_NS,
   });
+}
+
+function retireSessionPresentation(phase) {
+  instruments.ingress = newSimulatorAvionicsIngress();
+  setTelemetrySessionState(els, phase);
 }
 
 const instruments = {
@@ -170,65 +178,116 @@ async function connect() {
   const url = `https://${host}:${port}/pilotage`;
   const certHash = hexToBytes(certHashHex);
 
-  log(`connecting to ${url} pinned to cert hash ${certHashHex.slice(0, 16)}...`);
-  const transport = new WebTransport(url, {
-    serverCertificateHashes: [{ algorithm: "sha-256", value: certHash }],
-  });
-  state.transport = transport;
-
-  transport.closed
-    .then(() => {
-      state.connected = false;
-      log("WebTransport session closed");
-    })
-    .catch((error) => {
-      state.connected = false;
-      log(`WebTransport session errored: ${error}`);
+  let transport;
+  try {
+    transport = new WebTransport(url, {
+      serverCertificateHashes: [{ algorithm: "sha-256", value: certHash }],
     });
+  } catch (error) {
+    log(`WebTransport creation failed: ${error}`);
+    return;
+  }
+  const token = transportSessions.begin(transport);
+  transportSessions.runIfActive(token, () => {
+    state.transport = transport;
+    state.sessionId = 0;
+    state.generation = 0n;
+    state.sequence = 0;
+    state.prevArmInputs = new Set();
+    state.pendingReset = false;
+    state.pendingFpvToggle = false;
+    state.connected = false;
+    state.leaseGranted = false;
+    state.skippedVideoFrames = 0;
+    retireSessionPresentation("connecting");
+    log(`connecting to ${url} pinned to cert hash ${certHashHex.slice(0, 16)}...`);
+  });
 
-  await transport.ready;
-  log("WebTransport session ready");
+  transport.closed.then(
+    () => handleTransportClosed(token, null),
+    (error) => handleTransportClosed(token, error),
+  );
 
-  const bidi = await transport.createBidirectionalStream();
-  const writer = bidi.writable.getWriter();
-  const reader = bidi.readable.getReader();
+  try {
+    await transport.ready;
+    if (!transportSessions.isActive(token)) return;
+    log("WebTransport session ready");
 
-  await sendClientHello(writer);
-  await runBootstrapReader(reader, writer);
+    const bidi = await transport.createBidirectionalStream();
+    if (!transportSessions.isActive(token)) return;
+    const writer = bidi.writable.getWriter();
+    const reader = bidi.readable.getReader();
+    if (!transportSessions.trackWriter(token, writer)) return;
+    if (!transportSessions.trackReader(token, reader)) return;
 
-  // A negotiated transport session is the lifecycle boundary that replaces
-  // all ordering history from a prior host process. Cached datagrams cannot
-  // cross this boundary because the replaced transport is already closed.
-  instruments.ingress = newSimulatorAvionicsIngress();
-  state.connected = true;
-  acceptIncomingUniStreams(transport);
-  readTelemetryDatagrams(transport);
-  if (state.leaseGranted) {
-    startControlLoop(transport).catch((error) => log(`control loop stopped: ${error}`));
-  } else {
-    // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
-    // advertises no controllable scopes; sending control frames anyway
-    // would only generate a 30 Hz stream of rejections.
-    log("no control lease granted; viewer is telemetry/video only");
+    if (!(await sendClientHello(writer, token))) return;
+    const negotiated = await runBootstrapReader(reader, writer, token);
+    if (!transportSessions.isActive(token)) return;
+    if (!negotiated) throw new Error("bootstrap stream closed before LeaseResponse");
+
+    // Negotiation is the lifecycle boundary for measurement ordering. The
+    // token prevents readers from the replaced transport from reaching this
+    // newly empty ingress even if their promises settle later.
+    instruments.ingress = newSimulatorAvionicsIngress();
+    setTelemetrySessionState(els, "awaiting");
+    state.connected = true;
+    acceptIncomingUniStreams(transport, token).catch((error) => {
+      transportSessions.runIfActive(token, () => log(`uni stream accept failed: ${error}`));
+    });
+    readTelemetryDatagrams(transport, token).catch((error) => {
+      transportSessions.runIfActive(token, () => log(`telemetry reader stopped: ${error}`));
+    });
+    if (state.leaseGranted) {
+      startControlLoop(transport, token).catch((error) => {
+        transportSessions.runIfActive(token, () => log(`control loop stopped: ${error}`));
+      });
+    } else {
+      // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
+      // advertises no controllable scopes; sending control frames anyway
+      // would only generate a 30 Hz stream of rejections.
+      log("no control lease granted; viewer is telemetry/video only");
+    }
+  } catch (error) {
+    if (!transportSessions.isActive(token)) return;
+    state.connected = false;
+    state.transport = null;
+    retireSessionPresentation("failed");
+    log(`connect failed: ${error}`);
+    transportSessions.close(token);
   }
 }
 
+function handleTransportClosed(token, error) {
+  if (!transportSessions.isActive(token)) return;
+  state.connected = false;
+  state.transport = null;
+  retireSessionPresentation(error === null ? "disconnected" : "failed");
+  log(error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
+  transportSessions.retire(token);
+}
+
 /** Writes a length-delimited `ClientHello` envelope onto the bootstrap bidi stream. */
-async function sendClientHello(writer) {
+async function sendClientHello(writer, token) {
+  if (!transportSessions.isActive(token)) return false;
   const hello = encodeClientHelloEnvelope({
     protocolVersion: 1,
     clientName: "pilotage-web-viewer",
     joinToken: new Uint8Array(0),
   });
   await writer.write(lengthDelimit(hello));
+  if (!transportSessions.isActive(token)) return false;
   log("sent ClientHello");
+  return true;
 }
 
 /** Writes a length-delimited `LeaseRequest` for the motion scope. */
-async function sendLeaseRequest(writer) {
+async function sendLeaseRequest(writer, token) {
+  if (!transportSessions.isActive(token)) return false;
   const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: MOTION_SCOPE });
   await writer.write(lengthDelimit(request));
+  if (!transportSessions.isActive(token)) return false;
   log(`sent LeaseRequest for ${MOTION_SCOPE}`);
+  return true;
 }
 
 /** Prefixes an already-encoded `Envelope` with a protobuf varint byte-length, matching `encode_length_delimited` on the host. */
@@ -251,31 +310,33 @@ function lengthDelimit(envelopeBytes) {
   return out;
 }
 
-/** Reads bootstrap-stream frames until ServerWelcome and LeaseResponse are both seen, then keeps forwarding any later frames (Pong/FrameRejected) to the log. */
-async function runBootstrapReader(reader, writer) {
+/** Reads bootstrap frames until ServerWelcome and LeaseResponse establish the session. */
+async function runBootstrapReader(reader, writer, token) {
   let pending = new Uint8Array(0);
   let sentLease = false;
   for (;;) {
     const { value, done } = await reader.read();
-    if (done) return;
+    if (!transportSessions.isActive(token)) return false;
+    if (done) return false;
     pending = appendBytes(pending, value);
     for (;;) {
       const decoded = decodeLengthDelimitedEnvelope(pending);
       if (!decoded) break;
       pending = pending.subarray(decoded.consumed);
-      handleBootstrapMessage(decoded);
+      handleBootstrapMessage(decoded, token);
       if (decoded.kind === "ServerWelcome" && !sentLease) {
         sentLease = true;
-        await sendLeaseRequest(writer);
+        if (!(await sendLeaseRequest(writer, token))) return false;
       }
       if (decoded.kind === "LeaseResponse") {
-        return; // bootstrap complete; later frames are drained by a background reader.
+        return true;
       }
     }
   }
 }
 
-function handleBootstrapMessage(decoded) {
+function handleBootstrapMessage(decoded, token) {
+  if (!transportSessions.isActive(token)) return;
   if (decoded.kind === "ServerWelcome") {
     state.sessionId = decoded.message.sessionId;
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
@@ -297,39 +358,56 @@ function appendBytes(existing, incoming) {
 }
 
 /** Accepts every host-initiated uni stream and dispatches on its leading kind-tag byte. */
-async function acceptIncomingUniStreams(transport) {
+async function acceptIncomingUniStreams(transport, token) {
+  if (!transportSessions.isActive(token)) return;
   const uniStreams = transport.incomingUnidirectionalStreams;
   const streamReader = uniStreams.getReader();
-  for (;;) {
-    const { value: stream, done } = await streamReader.read();
-    if (done) return;
-    readOneUniStream(stream).catch((error) => log(`uni stream read failed: ${error}`));
+  if (!transportSessions.trackReader(token, streamReader)) return;
+  try {
+    for (;;) {
+      const { value: stream, done } = await streamReader.read();
+      if (!transportSessions.isActive(token)) return;
+      if (done) return;
+      readOneUniStream(stream, token).catch((error) => {
+        transportSessions.runIfActive(token, () => log(`uni stream read failed: ${error}`));
+      });
+    }
+  } finally {
+    transportSessions.untrackReader(token, streamReader);
   }
 }
 
 /** Drains one uni stream to completion, buffering bytes, reading the kind tag, then dispatching. */
-async function readOneUniStream(stream) {
+async function readOneUniStream(stream, token) {
+  if (!transportSessions.isActive(token)) return;
   const reader = stream.getReader();
+  if (!transportSessions.trackReader(token, reader)) return;
   let buf = new Uint8Array(0);
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (value) buf = appendBytes(buf, value);
-    if (done) break;
-  }
-  if (buf.length === 0) return;
-  const kind = buf[0];
-  const body = buf.subarray(1);
-  if (kind === STREAM_KIND_AUTHORITY) {
-    dispatchAuthorityStream(body);
-  } else if (kind === STREAM_KIND_VIDEO) {
-    await renderVideoFrame(body);
-  } else {
-    log(`unrecognized uni stream kind tag 0x${kind.toString(16)}`);
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (!transportSessions.isActive(token)) return;
+      if (value) buf = appendBytes(buf, value);
+      if (done) break;
+    }
+    if (buf.length === 0) return;
+    const kind = buf[0];
+    const body = buf.subarray(1);
+    if (kind === STREAM_KIND_AUTHORITY) {
+      dispatchAuthorityStream(body, token);
+    } else if (kind === STREAM_KIND_VIDEO) {
+      await renderVideoFrame(body, token);
+    } else {
+      log(`unrecognized uni stream kind tag 0x${kind.toString(16)}`);
+    }
+  } finally {
+    transportSessions.untrackReader(token, reader);
   }
 }
 
 /** The dedicated authority-events stream is opened once at connection start and may carry several length-delimited envelopes over the stream's lifetime; decode every complete one buffered. */
-function dispatchAuthorityStream(body) {
+function dispatchAuthorityStream(body, token) {
+  if (!transportSessions.isActive(token)) return;
   let pending = body;
   for (;;) {
     const decoded = decodeLengthDelimitedEnvelope(pending);
@@ -356,7 +434,8 @@ const VIDEO_TARGETS = {
   [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
 };
 
-async function renderVideoFrame(body) {
+async function renderVideoFrame(body, token) {
+  if (!transportSessions.isActive(token)) return;
   if (body.length < 9) return;
   const sourceId = body[0];
   const fourcc = String.fromCharCode(body[1], body[2], body[3], body[4]);
@@ -379,6 +458,10 @@ async function renderVideoFrame(body) {
     return;
   }
   const bitmap = await createImageBitmap(new Blob([payload], { type: "image/jpeg" }));
+  if (!transportSessions.isActive(token)) {
+    bitmap.close();
+    return;
+  }
   const { canvas, ctx: targetCtx } = target;
   if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
     canvas.width = bitmap.width;
@@ -389,27 +472,31 @@ async function renderVideoFrame(body) {
 }
 
 /** Reads telemetry-fast datagrams (bare Envelope, TelemetrySample arm) forever, updating the pose overlay. */
-async function readTelemetryDatagrams(transport) {
+async function readTelemetryDatagrams(transport, token) {
+  if (!transportSessions.isActive(token)) return;
   const reader = transport.datagrams.readable.getReader();
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) return;
-    const decoded = decodeBareEnvelope(value);
-    if (decoded.kind === "TelemetrySample") {
-      const t = decoded.message;
-      if (t.avionics) {
-        instruments.ingress.ingest(t, performance.now());
+  if (!transportSessions.trackReader(token, reader)) return;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (!transportSessions.isActive(token)) return;
+      if (done) return;
+      const decoded = decodeBareEnvelope(value);
+      if (decoded.kind === "TelemetrySample") {
+        const t = decoded.message;
+        if (t.avionics) {
+          instruments.ingress.ingest(t, performance.now());
+        }
+        if (t.vehicleId !== VEHICLE_ID) continue;
+        els.telemetry.textContent = formatTelemetrySummary(t);
+      } else if (decoded.kind === "Pong") {
+        // RTT probing is out of scope for this demo viewer; ignored.
+      } else if (decoded.kind === "FrameRejected") {
+        log(`control frame rejected (reason ${decoded.message.reason})`);
       }
-      if (t.vehicleId !== VEHICLE_ID) continue;
-      const armText = { 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[t.avionics?.armState ?? 0];
-      els.telemetry.textContent =
-        `${armText} | pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
-        ` | v=${t.linearXMps.toFixed(2)}m/s w=${t.angularRadS.toFixed(2)}rad/s`;
-    } else if (decoded.kind === "Pong") {
-      // RTT probing is out of scope for this demo viewer; ignored.
-    } else if (decoded.kind === "FrameRejected") {
-      log(`control frame rejected (reason ${decoded.message.reason})`);
     }
+  } finally {
+    transportSessions.untrackReader(token, reader);
   }
 }
 
@@ -505,7 +592,7 @@ const CONTROLLER_PROFILES = [
   },
 ];
 
-// Flight-mode stick schemes for Standard Gamepad pads (issue #12). Both
+// Flight-mode stick schemes for Standard Gamepad pads. Both
 // command the identical velocity control law — only stick assignment
 // differs. Browser reports stick-up as negative, hence the -1 signs.
 //   pilot  = RC Mode 2 (camera-drone default): left = climb+yaw,
@@ -687,71 +774,79 @@ function updateFlightReadout(pad, f) {
 }
 
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
-async function startControlLoop(transport) {
+async function startControlLoop(transport, token) {
+  if (!transportSessions.isActive(token)) return;
   const writer = transport.datagrams.writable.getWriter();
+  if (!transportSessions.trackWriter(token, writer)) return;
   const intervalMs = 1000 / CONTROL_HZ;
   // Self-paced async loop rather than setInterval: it awaits the writer's
   // backpressure signal (`ready`) before each send, so datagrams never queue up
   // in the WritableStream and get flushed in a burst with stale `sampled_at`
   // (which the host rejects as too old, ADR-0009). `sampled_at` is stamped right
   // before the write, after `ready`, so it reflects the real send moment.
-  while (state.connected) {
-    try {
-      await writer.ready;
-    } catch {
-      return; // writer closed (session ended)
-    }
-    if (!state.connected) return;
-    // A connected gamepad drives under its profile; the keyboard is the
-    // fallback when none is present. The readout shows the live mapping.
-    const mode = els.flightMode ? els.flightMode.value : "rover";
-    const pad = activeGamepad();
-    const profile = pad ? profileFor(pad.id) : null;
-    let axes;
-    let edges = [];
-    if (mode === "rover") {
-      // Ground vehicles (the Gazebo yard world) accept only the
-      // throttle/yaw pair; extra axes would be rejected as unknown.
-      const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
-      updateGamepadReadout(pad, profile, throttle, yaw);
-      axes = [
-        [AXIS_THROTTLE, throttle],
-        [AXIS_YAW, yaw],
-      ];
-    } else {
-      const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
-      updateFlightReadout(pad, f);
-      edges = collectArmEdges(pad);
-      if (state.pendingFpvToggle) {
-        state.pendingFpvToggle = false;
-        edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
+  try {
+    while (transportSessions.isActive(token) && state.connected) {
+      try {
+        await writer.ready;
+      } catch {
+        return; // writer closed (session ended)
       }
-      if (state.pendingReset) {
-        state.pendingReset = false;
-        edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
-        log("simulation reset requested");
+      if (!transportSessions.isActive(token) || !state.connected) return;
+      // A connected gamepad drives under its profile; the keyboard is the
+      // fallback when none is present. The readout shows the live mapping.
+      const mode = els.flightMode ? els.flightMode.value : "rover";
+      const pad = activeGamepad();
+      const profile = pad ? profileFor(pad.id) : null;
+      let axes;
+      let edges = [];
+      if (mode === "rover") {
+        // Ground vehicles (the Gazebo yard world) accept only the
+        // throttle/yaw pair; extra axes would be rejected as unknown.
+        const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
+        updateGamepadReadout(pad, profile, throttle, yaw);
+        axes = [
+          [AXIS_THROTTLE, throttle],
+          [AXIS_YAW, yaw],
+        ];
+      } else {
+        const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
+        updateFlightReadout(pad, f);
+        edges = collectArmEdges(pad);
+        if (state.pendingFpvToggle) {
+          state.pendingFpvToggle = false;
+          edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
+        }
+        if (state.pendingReset) {
+          state.pendingReset = false;
+          edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
+          log("simulation reset requested");
+        }
+        axes = [
+          [AXIS_ROLL, f.roll],
+          [AXIS_PITCH, f.pitch],
+          [AXIS_THROTTLE, f.throttle],
+          [AXIS_YAW, f.yaw],
+        ];
       }
-      axes = [
-        [AXIS_ROLL, f.roll],
-        [AXIS_PITCH, f.pitch],
-        [AXIS_THROTTLE, f.throttle],
-        [AXIS_YAW, f.yaw],
-      ];
+      state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
+      const envelope = encodeControlFrameEnvelope({
+        sessionId: state.sessionId,
+        vehicleId: VEHICLE_ID,
+        scope: MOTION_SCOPE,
+        generation: state.generation,
+        sequence: state.sequence,
+        sampledAtNanos: nowNanos(),
+        profileRevision: 1,
+        axes,
+        edges,
+      });
+      writer.write(envelope).catch((error) => {
+        transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
+      });
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
-    state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
-    const envelope = encodeControlFrameEnvelope({
-      sessionId: state.sessionId,
-      vehicleId: VEHICLE_ID,
-      scope: MOTION_SCOPE,
-      generation: state.generation,
-      sequence: state.sequence,
-      sampledAtNanos: nowNanos(),
-      profileRevision: 1,
-      axes,
-      edges,
-    });
-    writer.write(envelope).catch((error) => log(`control datagram send failed: ${error}`));
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  } finally {
+    transportSessions.untrackWriter(token, writer);
   }
 }
 
@@ -851,5 +946,5 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   state.pendingReset = true;
 });
 els.connectBtn.addEventListener("click", () => {
-  connect().catch((error) => log(`connect failed: ${error}`));
+  void connect();
 });
