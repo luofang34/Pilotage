@@ -23,14 +23,21 @@ import {
   decodeBareEnvelope,
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
+  BUTTON_EDGE_PRESSED,
 } from "./wire.js";
 import { loadInstruments, PANEL } from "./instruments.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const MOTION_SCOPE = "vehicle.motion";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
-const AXIS_THROTTLE = 2; // pilotage-input logical axis table: throttle = 2.
-const AXIS_YAW = 3; // pilotage-input logical axis table: yaw = 3.
+const AXIS_ROLL = 0; // pilotage-input logical axis table: roll = 0 (lateral velocity, + right).
+const AXIS_PITCH = 1; // pitch = 1 (forward velocity, + forward).
+const AXIS_THROTTLE = 2; // throttle = 2 (rover: forward speed; quad: climb rate).
+const AXIS_YAW = 3; // yaw = 3 (yaw rate, + clockwise).
+const BUTTON_ARM = 0; // logical button 0: arm (adapter contract, issue #12).
+const BUTTON_DISARM = 1; // logical button 1: disarm.
+const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
+const BUTTON_FPV_TOGGLE = 3; // logical button 3: camera <-> FPV mode (adapter latches).
 
 const els = {
   host: document.getElementById("host"),
@@ -45,6 +52,7 @@ const els = {
   chaseCanvas: document.getElementById("chaseVideo"),
   pfd: document.getElementById("pfd"),
   hsi: document.getElementById("hsi"),
+  flightMode: document.getElementById("flightMode"),
 };
 const ctx = els.canvas.getContext("2d");
 const chaseCtx = els.chaseCanvas.getContext("2d");
@@ -59,6 +67,9 @@ const state = {
   sequence: 0,
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   keys: new Set(),
+  prevArmInputs: new Set(),
+  pendingReset: false,
+  pendingFpvToggle: false,
   connected: false,
   leaseGranted: false,
   skippedVideoFrames: 0,
@@ -335,8 +346,9 @@ async function readTelemetryDatagrams(transport) {
     const decoded = decodeBareEnvelope(value);
     if (decoded.kind === "TelemetrySample") {
       const t = decoded.message;
+      const armText = { 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[t.avionics?.armState ?? 0];
       els.telemetry.textContent =
-        `pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
+        `${armText} | pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
         ` | v=${t.linearXMps.toFixed(2)}m/s w=${t.angularRadS.toFixed(2)}rad/s`;
       if (t.avionics) {
         instruments.latest = t.avionics;
@@ -352,35 +364,59 @@ async function readTelemetryDatagrams(transport) {
 
 // ---- keyboard -> control frame datagrams -----------------------------------
 
-const DRIVE_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", "W", "A", "S", "D"]);
+const DRIVE_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "w",
+  "a",
+  "s",
+  "d",
+  "W",
+  "A",
+  "S",
+  "D",
+  "Enter",
+  "Backspace",
+]);
 
+// Keys are stored raw (letters lower-cased) so rover and flight modes can
+// map WASD and the arrows independently.
+function canonicalKey(key) {
+  return key.length === 1 ? key.toLowerCase() : key;
+}
 window.addEventListener("keydown", (event) => {
   if (DRIVE_KEYS.has(event.key)) {
-    state.keys.add(normalizeKey(event.key));
+    state.keys.add(canonicalKey(event.key));
     event.preventDefault();
   }
 });
 window.addEventListener("keyup", (event) => {
   if (DRIVE_KEYS.has(event.key)) {
-    state.keys.delete(normalizeKey(event.key));
+    state.keys.delete(canonicalKey(event.key));
     event.preventDefault();
   }
 });
 
-function normalizeKey(key) {
-  const map = { w: "ArrowUp", s: "ArrowDown", a: "ArrowLeft", d: "ArrowRight" };
-  return map[key.toLowerCase()] || key;
-}
-
 /** Maps current key state to [throttle, yaw] axis values in [-1.0, 1.0]. */
 function axesFromKeys() {
-  let throttle = 0;
-  let yaw = 0;
-  if (state.keys.has("ArrowUp")) throttle += 1;
-  if (state.keys.has("ArrowDown")) throttle -= 1;
-  if (state.keys.has("ArrowLeft")) yaw -= 1;
-  if (state.keys.has("ArrowRight")) yaw += 1;
-  return [throttle, yaw];
+  const k = (key) => (state.keys.has(key) ? 1 : 0);
+  const throttle = k("ArrowUp") + k("w") - k("ArrowDown") - k("s");
+  const yaw = k("ArrowRight") + k("d") - k("ArrowLeft") - k("a");
+  return [Math.max(-1, Math.min(1, throttle)), Math.max(-1, Math.min(1, yaw))];
+}
+
+/** Keyboard fallback for flight modes: W/S = climb/descend, A/D = yaw,
+ *  arrows = forward/back + left/right translation. */
+function flightAxesFromKeys() {
+  const k = (key) => (state.keys.has(key) ? 1 : 0);
+  return {
+    roll: k("ArrowRight") - k("ArrowLeft"),
+    pitch: k("ArrowUp") - k("ArrowDown"),
+    throttle: k("w") - k("s"),
+    yaw: k("d") - k("a"),
+  };
 }
 
 // Per-controller FPV mapping profiles. EdgeTX radios (RadioMaster Pocket) output
@@ -413,10 +449,104 @@ const CONTROLLER_PROFILES = [
     forwardSign: -1, // stick up (negative) = forward
     turnAxis: 0, // left stick horizontal
     turnSign: -1, // stick right (positive) = turn right (negative yaw-rate)
-    deadzone: 0.12, // thumbsticks drift more than radio gimbals
     deadzone: 0.06,
+    standard: true, // W3C Standard Gamepad layout: flight schemes apply
   },
 ];
+
+// Flight-mode stick schemes for Standard Gamepad pads (issue #12). Both
+// command the identical velocity control law — only stick assignment
+// differs. Browser reports stick-up as negative, hence the -1 signs.
+//   pilot  = RC Mode 2 (camera-drone default): left = climb+yaw,
+//            right = translate.
+//   cruise = game-native: left = translate, right X = yaw,
+//            R2/L2 analog triggers = climb/descend.
+// DualSense standard mapping: axes 0/1 left X/Y, 2/3 right X/Y;
+// buttons 6/7 = L2/R2 analog, 8 = create/share, 9 = options.
+const FLIGHT_SCHEMES = {
+  "quad-pilot": (raw) => ({
+    throttle: -raw(1),
+    yaw: raw(0),
+    pitch: -raw(3),
+    roll: raw(2),
+    label: "PILOT (Mode 2): L=climb/yaw R=move",
+  }),
+  "quad-cruise": (raw, buttons) => ({
+    pitch: -raw(1),
+    roll: raw(0),
+    yaw: raw(2),
+    throttle: (buttons[7]?.value ?? 0) - (buttons[6]?.value ?? 0),
+    label: "CRUISE: L=move RX=yaw R2/L2=climb",
+  }),
+  // FPV: same Mode-2 stick geometry as PILOT, but the adapter is in
+  // attitude mode — right stick commands tilt ANGLES, throttle is
+  // direct collective around hover. Toggle with the FPV button.
+  fpv: (raw) => ({
+    throttle: -raw(1),
+    yaw: raw(0),
+    pitch: -raw(3),
+    roll: raw(2),
+    label: "FPV: R=tilt angle L=thrust/yaw",
+  }),
+};
+// Gamepad buttons that fire arm/disarm edges: options (9) arms,
+// create/share (8) disarms — deliberately away from the face buttons.
+const PAD_ARM_BUTTON = 9;
+const PAD_DISARM_BUTTON = 8;
+
+/** Maps a Standard-Gamepad pad to flight axes under the given scheme;
+ *  non-standard pads (EdgeTX radios) use their AETR axes directly, which
+ *  is true RC Mode 2 on a real radio. */
+function flightAxesFromGamepad(pad, profile, mode) {
+  const rawAt = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
+  const clamp = (v) => Math.max(-1, Math.min(1, v));
+  const dz = profile.deadzone ?? 0.1;
+  // Cubic expo (50%): fine authority near center, full range at the
+  // ends — half of the DJI feel; the uplink's slew limit is the other.
+  const expo = (v) => 0.35 * v * v * v + 0.65 * v;
+  const shaped = (v) => expo(clamp(Math.abs(v) < dz ? 0 : v));
+  const raw = (i) => shaped(rawAt(i));
+  if (profile.standard) {
+    const scheme = FLIGHT_SCHEMES[mode] ?? FLIGHT_SCHEMES["quad-pilot"];
+    const a = scheme(raw, pad.buttons ?? []);
+    return {
+      roll: clamp(a.roll),
+      pitch: clamp(a.pitch),
+      throttle: clamp(a.throttle),
+      yaw: clamp(a.yaw),
+      label: a.label,
+    };
+  }
+  // EdgeTX AETR HID order: 0 roll, 1 pitch, 2 throttle, 3 yaw.
+  return {
+    roll: raw(0),
+    pitch: -raw(1),
+    throttle: raw(2),
+    yaw: -raw(3),
+    label: "radio AETR (Mode 2)",
+  };
+}
+
+/** One-shot arm/disarm edges from gamepad buttons and keys: Enter arms,
+ *  Backspace disarms; pad options (9) arms, create (8) disarms. */
+function collectArmEdges(pad) {
+  const pressedNow = new Set();
+  if (pad?.buttons?.[PAD_ARM_BUTTON]?.pressed) pressedNow.add("pad-arm");
+  if (pad?.buttons?.[PAD_DISARM_BUTTON]?.pressed) pressedNow.add("pad-disarm");
+  if (state.keys.has("Enter")) pressedNow.add("key-arm");
+  if (state.keys.has("Backspace")) pressedNow.add("key-disarm");
+  const edges = [];
+  for (const which of pressedNow) {
+    if (!state.prevArmInputs.has(which)) {
+      const arm = which.endsWith("-arm");
+      edges.push([arm ? BUTTON_ARM : BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
+      els.overlay.textContent = arm ? "ARM sent" : "DISARM sent";
+      log(arm ? "arm command sent" : "disarm command sent");
+    }
+  }
+  state.prevArmInputs = pressedNow;
+  return edges;
+}
 // Fallback for any other gamepad: drive from the left stick's self-centering
 // vertical/horizontal axes so the vehicle stops when the stick is released.
 const GENERIC_PROFILE = {
@@ -449,6 +579,7 @@ function overrideProfile(profile) {
     turnAxis: intParam("turn", profile.turnAxis),
     turnSign: signParam("turnsign", profile.turnSign),
     deadzone: numParam("deadzone", profile.deadzone),
+    standard: profile.standard === true,
   };
 }
 
@@ -496,6 +627,14 @@ function updateGamepadReadout(pad, profile, throttle, yaw) {
     `yaw=${yaw.toFixed(2)} (axis ${profile.turnAxis})`;
 }
 
+/** Shows the live 4-axis flight mapping and stick values. */
+function updateFlightReadout(pad, f) {
+  const src = pad ? `${pad.id.slice(0, 24)} [${f.label}]` : "keyboard (WS=climb AD=yaw arrows=move)";
+  els.gamepad.textContent =
+    `flight: ${src} | roll=${f.roll.toFixed(2)} pitch=${f.pitch.toFixed(2)} ` +
+    `climb=${f.throttle.toFixed(2)} yaw=${f.yaw.toFixed(2)} | arm: Options/Enter, disarm: Create/Backspace`;
+}
+
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
 async function startControlLoop(transport) {
   const writer = transport.datagrams.writable.getWriter();
@@ -512,12 +651,42 @@ async function startControlLoop(transport) {
       return; // writer closed (session ended)
     }
     if (!state.connected) return;
-    // A connected gamepad drives under its FPV profile; the keyboard is the
-    // fallback when none is present. The readout shows the live mapping either way.
+    // A connected gamepad drives under its profile; the keyboard is the
+    // fallback when none is present. The readout shows the live mapping.
+    const mode = els.flightMode ? els.flightMode.value : "rover";
     const pad = activeGamepad();
     const profile = pad ? profileFor(pad.id) : null;
-    const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
-    updateGamepadReadout(pad, profile, throttle, yaw);
+    let axes;
+    let edges = [];
+    if (mode === "rover") {
+      // Ground vehicles (the Gazebo yard world) accept only the
+      // throttle/yaw pair; extra axes would be rejected as unknown.
+      const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
+      updateGamepadReadout(pad, profile, throttle, yaw);
+      axes = [
+        [AXIS_THROTTLE, throttle],
+        [AXIS_YAW, yaw],
+      ];
+    } else {
+      const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
+      updateFlightReadout(pad, f);
+      edges = collectArmEdges(pad);
+      if (state.pendingFpvToggle) {
+        state.pendingFpvToggle = false;
+        edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
+      }
+      if (state.pendingReset) {
+        state.pendingReset = false;
+        edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
+        log("simulation reset requested");
+      }
+      axes = [
+        [AXIS_ROLL, f.roll],
+        [AXIS_PITCH, f.pitch],
+        [AXIS_THROTTLE, f.throttle],
+        [AXIS_YAW, f.yaw],
+      ];
+    }
     state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
     const envelope = encodeControlFrameEnvelope({
       sessionId: state.sessionId,
@@ -527,10 +696,8 @@ async function startControlLoop(transport) {
       sequence: state.sequence,
       sampledAtNanos: nowNanos(),
       profileRevision: 1,
-      axes: [
-        [AXIS_THROTTLE, throttle],
-        [AXIS_YAW, yaw],
-      ],
+      axes,
+      edges,
     });
     writer.write(envelope).catch((error) => log(`control datagram send failed: ${error}`));
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -583,6 +750,12 @@ async function startInstruments() {
 
 applyUrlParams();
 startInstruments();
+document.getElementById("fpvBtn").addEventListener("click", () => {
+  state.pendingFpvToggle = true;
+});
+document.getElementById("resetBtn").addEventListener("click", () => {
+  state.pendingReset = true;
+});
 els.connectBtn.addEventListener("click", () => {
   connect().catch((error) => log(`connect failed: ${error}`));
 });

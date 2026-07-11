@@ -19,7 +19,12 @@ mod error;
 mod link;
 pub mod mavlink;
 pub mod shm;
+mod uplink;
 
-pub use adapter::{AviateAdapter, AviateLinkMode};
+pub use adapter::{
+    ARM_BUTTON, AviateAdapter, AviateLinkMode, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
+    THROTTLE_AXIS, YAW_AXIS,
+};
 pub use error::AviateAdapterError;
 pub use link::LinkConfig;
+pub use uplink::FlightUplink;

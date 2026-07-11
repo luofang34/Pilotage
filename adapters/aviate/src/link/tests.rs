@@ -21,7 +21,12 @@ fn attitude(sysid: u8, qw: f32) -> (u8, AviateMessage) {
 fn locks_onto_the_first_vehicle_and_ignores_the_rest() {
     let state = Arc::new(Mutex::new(LatestAviate::default()));
     // A GCS peer heartbeat must not lock the link.
-    apply_messages(&state, &[(255, AviateMessage::Heartbeat)], 0, 0);
+    apply_messages(
+        &state,
+        &[(255, AviateMessage::Heartbeat { armed: false })],
+        0,
+        0,
+    );
     assert!(state.lock().expect("lock").locked_sysid.is_none());
 
     // First estimate locks; a second vehicle's estimate is ignored.

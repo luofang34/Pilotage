@@ -27,6 +27,7 @@ disallowed_macros = "deny"
 [dependencies]
 libc = { workspace = true }
 pilotage-adapter-api = { workspace = true }
+pilotage-adapter-gazebo = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }

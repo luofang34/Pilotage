@@ -47,6 +47,8 @@ message AvionicsState {
   uint32 valid_flags = 14;
   // 0 good, 1 degraded, 2 unusable.
   uint32 quality = 15;
+  // 0 unknown, 1 disarmed, 2 armed (from the vehicle's own report).
+  uint32 arm_state = 16;
 }
 
 // A single best-effort telemetry sample for one vehicle.
