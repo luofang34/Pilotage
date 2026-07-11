@@ -16,13 +16,21 @@ const SELECTED: FrameSource = FrameSource {
 };
 
 fn state(policy: ResetPolicy) -> Arc<Mutex<LatestAviate>> {
+    let maximum_inter_group_skew_ms = if policy == ResetPolicy::SimulatorHeuristic {
+        300
+    } else {
+        0
+    };
+    state_with_skew(policy, maximum_inter_group_skew_ms)
+}
+
+fn state_with_skew(
+    policy: ResetPolicy,
+    maximum_inter_group_skew_ms: u32,
+) -> Arc<Mutex<LatestAviate>> {
     Arc::new(Mutex::new(LatestAviate {
         reset_policy: policy,
-        maximum_inter_group_skew_ms: if policy == ResetPolicy::SimulatorHeuristic {
-            300
-        } else {
-            0
-        },
+        maximum_inter_group_skew_ms,
         source_incarnation: SourceIncarnation::new([0xA5; 16]),
         ..LatestAviate::default()
     }))
@@ -102,7 +110,7 @@ fn duplicate_and_reordered_group_updates_do_not_replace_the_cache() {
 
 #[test]
 fn advancing_groups_keep_independent_sequences() {
-    let state = state(ResetPolicy::Conservative);
+    let state = state_with_skew(ResetPolicy::Conservative, 20);
     let now = Instant::now();
     apply_at(
         &state,
