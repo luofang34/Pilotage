@@ -741,7 +741,7 @@ async function startControlLoop(transport) {
 /** Maps the latest wire avionics estimate into the instrument state ABI
  * and draws both panels; runs on the display's own rAF cadence. Every
  * render result is honored: a validated frame is blitted, anything else
- * is covered by the failure page (DISP-01 — no ignored results, no stale
+ * is covered by the failure page (no ignored results and no stale
  * imagery). */
 function renderInstruments() {
   const mod = instruments.mod;

@@ -1,4 +1,4 @@
-// Deterministic checks for the fail-visible display pipeline (DISP-01).
+// Deterministic checks for the fail-visible display pipeline.
 //
 // Run: node clients/web/instruments.test.mjs
 // (build clients/web/instruments.wasm first: scripts/build-web-instruments.sh)

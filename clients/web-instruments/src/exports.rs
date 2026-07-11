@@ -1,6 +1,6 @@
 //! The `extern "C"` surface and its process-global context.
 //!
-//! Failure semantics (DISP-01): [`render_status`] never reports success
+//! Failure semantics: [`render_status`] never reports success
 //! without a complete, structurally validated scene. The scene buffer's
 //! contents after a failed attempt are unspecified — consumers must read
 //! scene bytes only after a `0` status, and only [`scene_len`] bytes.

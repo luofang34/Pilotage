@@ -11,7 +11,7 @@
 //!    self-validated: JS reads [`scene_len()`] bytes from the scene
 //!    buffer and paints them. Any other status is a stable
 //!    [`RenderStatus`] reason code and the scene buffer must not be
-//!    painted (DISP-01: failures are visible, never a stale frame).
+//!    painted (failures are visible, never a stale frame).
 //!
 //! Buffers are allocated once and never grow, so the pointers stay valid
 //! for the life of the instance. [`render_generation()`] advances only

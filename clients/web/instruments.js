@@ -217,7 +217,7 @@ export class InstrumentModule {
   // after the validated frame covers the whole visible target, or
   //   { ok: false, reason }
   // with a stable REASON code. The caller must cover failures with the
-  // backend-owned failure page, never leave the old frame.
+  // backend-owned failure page, never leave the last visible frame.
   renderPanel(panel, ctx, width, height) {
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
       return { ok: false, reason: REASON.PAINT_FAILED };
