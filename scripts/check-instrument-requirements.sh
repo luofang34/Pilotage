@@ -45,6 +45,26 @@ if [ -n "$duplicates" ]; then
     status=1
 fi
 
+# A requirement token with the wrong digit count would otherwise be
+# invisible: too short matches nothing, one digit too many mis-parses as
+# a different id plus a stray character. Catch both before extraction.
+malformed="$tmp_dir/malformed"
+: > "$malformed"
+while IFS= read -r file; do
+    grep -nEo 'AIR-[A-Z0-9]+-[0-9]+' "$file" \
+        | grep -Ev '^[0-9]+:AIR-[A-Z0-9]+-[0-9]{3}$' \
+        | sed "s|^|$file:|" >> "$malformed" || true
+done < <(find "$document_dir" -type f -name '*.md' -print | LC_ALL=C sort)
+grep -nE '^### AIR-' "$catalog" \
+    | grep -Ev '^[0-9]+:### AIR-[A-Z0-9]+-[0-9]{3} — ' \
+    | sed "s|^|$catalog:|" >> "$malformed" || true
+if [ -s "$malformed" ]; then
+    while IFS= read -r hit; do
+        echo "MALFORMED REQUIREMENT ID: $hit" >&2
+    done < "$malformed"
+    status=1
+fi
+
 while IFS= read -r file; do
     grep -Eo 'AIR-[A-Z0-9]+-[0-9]{3}' "$file" || true
 done < <(find "$document_dir" -type f -name '*.md' -print | LC_ALL=C sort) \
@@ -78,6 +98,54 @@ while IFS= read -r file; do
         END { exit bad }
     ' "$file" || status=1
 done < <(find "$document_dir" -type f -name '*.md' -print | LC_ALL=C sort)
+
+# Every definition must be reachable from at least one reference, so a
+# requirement cannot silently drop out of the documentation set. A
+# reference is an occurrence outside the definition header/anchor, or
+# membership in a documented "A through B" span (ranges may wrap lines).
+referenced="$tmp_dir/referenced"
+{
+    while IFS= read -r file; do
+        if [ "$file" = "$catalog" ]; then
+            # Definition headers and anchors are not references; catalog
+            # prose can cross-reference, but "A through B" spans are only
+            # trusted from the narrative documents (a requirement body
+            # using the word "through" must not fabricate a span).
+            grep -Ev '^### AIR-|^<a id=' "$file" | grep -Eo 'AIR-[A-Z0-9]+-[0-9]{3}' || true
+            continue
+        fi
+        grep -Eo 'AIR-[A-Z0-9]+-[0-9]{3}' "$file" || true
+        tr '\n' ' ' < "$file" | awk '
+            {
+                rest = $0
+                n = 0
+                while (match(rest, /AIR-[A-Z0-9]+-[0-9][0-9][0-9]/)) {
+                    n += 1
+                    ids[n] = substr(rest, RSTART, RLENGTH)
+                    rest = substr(rest, RSTART + RLENGTH)
+                    gaps[n] = rest
+                }
+                for (i = 1; i < n; i++) {
+                    split(ids[i], a, "-")
+                    split(ids[i + 1], b, "-")
+                    between = substr(gaps[i], 1, length(gaps[i]) - length(gaps[i + 1]) - length(ids[i + 1]))
+                    if (a[2] == b[2] && a[3] + 0 < b[3] + 0 && between ~ /[[:space:]]through[[:space:]]/) {
+                        for (k = a[3] + 0; k <= b[3] + 0; k++) {
+                            printf "AIR-%s-%03d\n", a[2], k
+                        }
+                    }
+                }
+            }
+        '
+    done < <(find "$document_dir" -type f -name '*.md' -print | LC_ALL=C sort)
+} | LC_ALL=C sort -u > "$referenced"
+
+while IFS= read -r id; do
+    if ! grep -Fqx "$id" "$referenced"; then
+        echo "UNREFERENCED REQUIREMENT: $id" >&2
+        status=1
+    fi
+done < <(cut -f1 "$definitions")
 
 if [ "$status" -ne 0 ]; then
     echo "instrument-requirements: FAILED" >&2

@@ -24,14 +24,16 @@ not make the output primary flight information or authorize operational credit.
 ## Change control
 
 Every new or changed display feature must cite at least one requirement from
-[the registry](requirements.md) in its issue and pull request. If no applicable
+[the registry](requirements.md) in its issue and pull request
+([`AIR-BAS-005`](requirements.md#air-bas-005)). If no applicable
 requirement exists, the intended-function baseline is changed and reviewed
 before the feature is accepted. Requirement identifiers are permanent: changed
 meaning receives a new identifier, while retired requirements remain in the
 registry with their disposition.
 
 `scripts/check-instrument-requirements.sh` rejects duplicate identifiers,
-undefined references, and mismatched requirement links.
+malformed identifiers, undefined references, unreferenced requirements, and
+mismatched requirement links.
 
 ## Design inputs
 
