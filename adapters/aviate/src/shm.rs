@@ -17,6 +17,12 @@ use std::time::Instant;
 
 use crate::error::AviateAdapterError;
 
+// libc::dev_t differs in signedness and width across supported Unix targets.
+#[allow(clippy::unnecessary_cast)]
+const fn device_identity(device: libc::dev_t) -> u64 {
+    device as u64
+}
+
 /// Byte size of `AviateSharedState` (natural C alignment, all fields
 /// 8-byte aligned or packed tail).
 const SHM_SIZE: usize = 216;
@@ -151,7 +157,7 @@ impl GzStateShm {
             (
                 ptr.cast::<u8>().cast_const(),
                 ShmIdentity {
-                    device: metadata.st_dev as u64,
+                    device: device_identity(metadata.st_dev),
                     inode: metadata.st_ino,
                     size,
                 },
