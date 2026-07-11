@@ -150,7 +150,7 @@ fn empty_state_still_renders_a_scene() {
     assert_eq!(save_restore_balance(&scene), 0);
 }
 
-// ---- REN-01 layer contract ---------------------------------------------------
+// ---- layer contract ----------------------------------------------------------
 
 use pilotage_instrument_scene::{LayerId, validate_layers};
 use pilotage_instrument_state::SignalStatus;

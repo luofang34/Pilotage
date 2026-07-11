@@ -1,4 +1,4 @@
-//! The frozen scene-layer and safety-compositor contract (REN-01).
+//! The frozen scene-layer and safety-compositor contract.
 //!
 //! A *layered scene* partitions its commands into bounded, named,
 //! z-ordered criticality bands so a compositor can guarantee that
@@ -119,7 +119,7 @@ pub enum LayerError {
         /// The layer opened again.
         layer: LayerId,
     },
-    /// A layer was opened at or below the previously opened layer's
+    /// A layer was opened at or below the most recently opened layer's
     /// z-order.
     #[error("layer {layer:?} is not in strictly ascending order")]
     OutOfOrder {

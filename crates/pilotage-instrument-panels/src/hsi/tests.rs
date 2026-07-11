@@ -147,7 +147,7 @@ fn failed_heading_renders_red_x() {
     );
 }
 
-// ---- REN-01 layer contract ---------------------------------------------------
+// ---- layer contract ----------------------------------------------------------
 
 use pilotage_instrument_scene::{LayerId, validate_layers};
 

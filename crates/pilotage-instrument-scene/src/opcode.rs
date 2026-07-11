@@ -1,7 +1,7 @@
 //! Wire opcodes shared by the encoder and decoder.
 //!
 //! Opcode space is append-only: values are never reused or redefined
-//! (ADR-0017). 0x50–0x51 are the layer markers (REN-01); 0x52–0x5F stay
+//! (ADR-0017). 0x50–0x51 are the layer markers; 0x52–0x5F stay
 //! reserved for the layer vocabulary.
 
 pub(crate) const SAVE: u8 = 0x01;

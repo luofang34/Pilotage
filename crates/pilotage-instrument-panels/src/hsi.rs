@@ -19,7 +19,7 @@ pub(crate) const CY: f32 = 190.0;
 /// Compass rose radius.
 pub(crate) const ROSE_R: f32 = 160.0;
 
-/// Draws the HSI from resolved state, in the REN-01 layer bands: the
+/// Draws the HSI from resolved state in the scene-layer bands: the
 /// black backdrop, the rotating orientation symbology, the readout
 /// boxes, course guidance, and — above everything it annunciates — the
 /// heading failure flag.

@@ -51,7 +51,7 @@ pub struct PfdConfig {
     pub v_speeds: Option<VSpeeds>,
 }
 
-/// Draws the PFD from resolved state, in the REN-01 layer bands:
+/// Draws the PFD from resolved state in the scene-layer bands:
 /// optional background, then attitude symbology, tapes, and
 /// annunciations, in ascending z-order. The layers above `Background`
 /// never depend on the background mode, so the critical overlay stays

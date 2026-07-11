@@ -192,7 +192,7 @@ fn decode_payload(op: u8, payload: &[u8]) -> Result<Cmd<'_>, DecodeError> {
         }),
         // An unknown layer *id* is a hard error, unlike an unknown
         // opcode: content whose criticality cannot be placed must not
-        // be painted (REN-01). New layer ids require a version bump.
+        // be painted. New layer ids require a version bump.
         opcode::BEGIN_LAYER => Ok(Cmd::BeginLayer {
             layer: layer_id(op, payload)?,
         }),

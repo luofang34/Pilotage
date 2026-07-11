@@ -1,4 +1,4 @@
-//! Stable render-status reason codes shared with the JS backend (DISP-01).
+//! Stable render-status reason codes shared with the JS backend.
 
 /// Stable status field carried by the packed WASM render result.
 ///
