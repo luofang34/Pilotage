@@ -228,3 +228,26 @@ fn malformed_scene_never_advances_or_commits_length() {
     );
     assert_eq!(runtime.generation, [7, 11]);
 }
+
+#[test]
+fn every_encode_error_maps_to_its_own_status() {
+    use pilotage_instrument_scene::SceneError;
+
+    use crate::exports::scene_error_status;
+    use crate::render_status::RenderStatus;
+
+    // Buffer exhaustion and per-command limits are different operator
+    // diagnoses (capacity budget vs panel defect) and must not collapse.
+    assert_eq!(
+        scene_error_status(SceneError::BufferFull),
+        RenderStatus::SceneBufferFull
+    );
+    assert_eq!(
+        scene_error_status(SceneError::TooManyPoints),
+        RenderStatus::SceneCommandLimit
+    );
+    assert_eq!(
+        scene_error_status(SceneError::TextTooLong),
+        RenderStatus::SceneCommandLimit
+    );
+}

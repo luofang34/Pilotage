@@ -66,7 +66,7 @@ impl RenderAttempt {
     }
 }
 
-fn scene_error_status(error: SceneError) -> RenderStatus {
+pub(crate) fn scene_error_status(error: SceneError) -> RenderStatus {
     match error {
         SceneError::BufferFull => RenderStatus::SceneBufferFull,
         SceneError::TooManyPoints | SceneError::TextTooLong => RenderStatus::SceneCommandLimit,
