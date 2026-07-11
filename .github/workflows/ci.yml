@@ -75,7 +75,7 @@ jobs:
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs
 
-      - name: instrument display fail-visible contract (DISP-01)
+      - name: instrument display fail-visible contract
         run: node clients/web/instruments.test.mjs
 
       - name: Setup buf
