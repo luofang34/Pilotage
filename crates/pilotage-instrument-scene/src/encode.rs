@@ -239,17 +239,31 @@ impl<'a> SceneWriter<'a> {
         self.cmd_f32(opcode::CLIP_RECT, &[], &[x, y, w, h])
     }
 
-    /// Opens layer `layer` (REN-01). Layered scenes emit each layer at
-    /// most once, in ascending order, unnested, with every drawing
-    /// command inside a layer — [`crate::validate_layers`] enforces the
-    /// contract.
+    /// Opens layer `layer` and saves the complete graphics state.
+    ///
+    /// The save is part of the wire contract, so a backend that skips the
+    /// layer marker as an unknown opcode still isolates transforms, clips,
+    /// and paint state. [`crate::validate_layers`] requires the matching
+    /// outer restore before [`Self::end_layer`].
     pub fn begin_layer(&mut self, layer: crate::layer::LayerId) -> Result<(), SceneError> {
-        self.cmd(opcode::BEGIN_LAYER, &[&[layer.to_u8()]])
+        let rollback = self.len;
+        self.cmd(opcode::BEGIN_LAYER, &[&[layer.to_u8()]])?;
+        if let Err(error) = self.save() {
+            self.len = rollback;
+            return Err(error);
+        }
+        Ok(())
     }
 
-    /// Closes layer `layer`; must match the open layer.
+    /// Restores the layer-entry graphics state and closes `layer`.
     pub fn end_layer(&mut self, layer: crate::layer::LayerId) -> Result<(), SceneError> {
-        self.cmd(opcode::END_LAYER, &[&[layer.to_u8()]])
+        let rollback = self.len;
+        self.restore()?;
+        if let Err(error) = self.cmd(opcode::END_LAYER, &[&[layer.to_u8()]]) {
+            self.len = rollback;
+            return Err(error);
+        }
+        Ok(())
     }
 }
 

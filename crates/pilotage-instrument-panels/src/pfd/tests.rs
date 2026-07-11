@@ -59,6 +59,22 @@ fn texts(scene: &[u8]) -> Vec<String> {
         .collect()
 }
 
+fn layer_texts(scene: &[u8], wanted: LayerId) -> Vec<(String, [f32; 3])> {
+    let mut inside = false;
+    let mut found = Vec::new();
+    for command in SceneCmds::new(scene).expect("valid scene") {
+        match command.expect("valid command") {
+            Cmd::BeginLayer { layer } => inside = layer == wanted,
+            Cmd::EndLayer { layer } if layer == wanted => inside = false,
+            Cmd::Text {
+                x, y, size, text, ..
+            } if inside => found.push((String::from(text), [x, y, size])),
+            _ => {}
+        }
+    }
+    found
+}
+
 fn save_restore_balance(scene: &[u8]) -> i32 {
     SceneCmds::new(scene)
         .expect("valid scene")
@@ -90,6 +106,11 @@ fn missing_attitude_renders_red_x_not_horizon() {
     let scene = render(&data, &PfdConfig::default());
     let labels = texts(&scene);
     assert!(labels.iter().any(|t| t == "ATT"), "ATT flag: {labels:?}");
+    assert!(
+        layer_texts(&scene, LayerId::Annunciation)
+            .contains(&(String::from("ATT"), [240.0, 170.0, 20.0])),
+        "ATT failure must be an annunciation"
+    );
     assert_eq!(save_restore_balance(&scene), 0);
 }
 
@@ -161,7 +182,13 @@ fn scenes_are_layered_for_every_attitude_status() {
 
 #[test]
 fn critical_overlay_is_byte_identical_without_background() {
-    for status in [SignalStatus::Valid, SignalStatus::Failed] {
+    for status in [
+        SignalStatus::Valid,
+        SignalStatus::Degraded,
+        SignalStatus::Stale,
+        SignalStatus::Missing,
+        SignalStatus::Failed,
+    ] {
         let mut data = flying();
         data.roll_rad.status = status;
         data.pitch_rad.status = status;
@@ -185,5 +212,44 @@ fn critical_overlay_is_byte_identical_without_background() {
                 "{status:?} layer {layer:?} content changed with the background"
             );
         }
+        if status.shows_value() {
+            let attitude_text = layer_texts(&without, LayerId::Attitude);
+            assert!(
+                attitude_text.iter().any(|(text, _)| text == "10"),
+                "{status:?} background-free PFD lost its pitch ladder"
+            );
+            assert!(
+                !layer_texts(&with_horizon, LayerId::Background)
+                    .iter()
+                    .any(|(text, _)| text == "10"),
+                "{status:?} pitch ladder must not belong to Background"
+            );
+        }
+    }
+}
+
+#[test]
+fn air_data_failure_cues_are_annunciations() {
+    let mut data = flying();
+    data.ias_kt =
+        pilotage_instrument_state::Sig::with_status(data.ias_kt.value, SignalStatus::Failed);
+    data.alt_ft =
+        pilotage_instrument_state::Sig::with_status(data.alt_ft.value, SignalStatus::Failed);
+    let scene = render(&data, &PfdConfig::default());
+    let annunciations = layer_texts(&scene, LayerId::Annunciation);
+    let tapes = layer_texts(&scene, LayerId::Tapes);
+    for expected in [("IAS", [45.0, 160.0, 20.0]), ("ALT", [435.0, 160.0, 20.0])] {
+        assert!(
+            annunciations
+                .iter()
+                .any(|(text, geometry)| text == expected.0 && *geometry == expected.1),
+            "missing annunciation {expected:?}: {annunciations:?}"
+        );
+        assert!(
+            !tapes
+                .iter()
+                .any(|(text, geometry)| text == expected.0 && *geometry == expected.1),
+            "failure cue leaked into tapes: {tapes:?}"
+        );
     }
 }

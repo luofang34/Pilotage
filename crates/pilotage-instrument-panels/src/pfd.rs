@@ -29,13 +29,10 @@ pub struct VSpeeds {
 
 /// What fills the attitude background.
 ///
-/// `Horizon` is the phase-1 2D sky/ground ball. `None` emits no
+/// `Horizon` is the 2D sky/ground fill. `None` emits no
 /// background layer at all: the safety compositor owns that band (a
-/// future SVS raster composes strictly below the critical overlay,
-/// REN-01), and the layers above it are byte-identical either way. A
-/// synthetic-vision *scene* background would slot in as a further
-/// variant carrying its viewport and quality tier (reserved, ADR-0017)
-/// without touching the ladder, tapes, or symbology layers.
+/// hypothetical SVS raster composes strictly below the critical overlay),
+/// and the layers above it are byte-identical either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackgroundMode {
     /// Flat-shaded sky-over-ground attitude ball.
@@ -72,7 +69,7 @@ pub fn draw_pfd(
             scene.fill_color(palette::BLACK)?;
             scene.rect(PaintMode::Fill, 0.0, 0.0, PANEL_W, PANEL_H)?;
             if att_status.shows_value() {
-                horizon::draw_ball(scene, data.roll_rad.value, data.pitch_rad.value)?;
+                horizon::draw_background(scene, data.roll_rad.value, data.pitch_rad.value)?;
             }
             scene.end_layer(LayerId::Background)?;
         }
@@ -81,6 +78,7 @@ pub fn draw_pfd(
 
     scene.begin_layer(LayerId::Attitude)?;
     if att_status.shows_value() {
+        horizon::draw_horizon_cues(scene, data.roll_rad.value, data.pitch_rad.value)?;
         horizon::draw_roll_scale(scene, data.roll_rad.value)?;
         horizon::draw_aircraft_symbol(scene)?;
     }
@@ -100,6 +98,12 @@ pub fn draw_pfd(
         }
     } else {
         status_paint::draw_red_x(scene, 110.0, 50.0, 260.0, 240.0, "ATT")?;
+    }
+    if data.ias_kt.status == SignalStatus::Failed {
+        status_paint::draw_red_x(scene, 8.0, 60.0, 74.0, 200.0, "IAS")?;
+    }
+    if data.alt_ft.status == SignalStatus::Failed {
+        status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
     scene.end_layer(LayerId::Annunciation)?;
     Ok(())

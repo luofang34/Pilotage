@@ -7,16 +7,19 @@ use crate::layer::LayerId;
 use crate::opcode;
 
 /// Why decoding stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeError {
     /// The scene does not start with a version this decoder reads.
+    #[error("unsupported scene format version {found}")]
     BadVersion {
         /// The version byte found.
         found: u8,
     },
     /// The bytes end mid-command.
+    #[error("scene ends in a partial command")]
     Truncated,
     /// A command payload is malformed for its opcode.
+    #[error("opcode 0x{opcode:02x} has a malformed payload")]
     BadPayload {
         /// The opcode whose payload was malformed.
         opcode: u8,
@@ -96,6 +99,13 @@ fn f32_at(payload: &[u8], i: usize) -> Option<f32> {
 fn u32_at(payload: &[u8], byte_at: usize) -> Option<u32> {
     let b = payload.get(byte_at..byte_at.checked_add(4)?)?;
     Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+fn layer_id(opcode: u8, payload: &[u8]) -> Result<LayerId, DecodeError> {
+    let [value] = payload else {
+        return Err(DecodeError::BadPayload { opcode });
+    };
+    LayerId::from_u8(*value).ok_or(DecodeError::BadPayload { opcode })
 }
 
 fn decode_payload(op: u8, payload: &[u8]) -> Result<Cmd<'_>, DecodeError> {
@@ -184,10 +194,10 @@ fn decode_payload(op: u8, payload: &[u8]) -> Result<Cmd<'_>, DecodeError> {
         // opcode: content whose criticality cannot be placed must not
         // be painted (REN-01). New layer ids require a version bump.
         opcode::BEGIN_LAYER => Ok(Cmd::BeginLayer {
-            layer: LayerId::from_u8(*payload.first().ok_or(bad)?).ok_or(bad)?,
+            layer: layer_id(op, payload)?,
         }),
         opcode::END_LAYER => Ok(Cmd::EndLayer {
-            layer: LayerId::from_u8(*payload.first().ok_or(bad)?).ok_or(bad)?,
+            layer: layer_id(op, payload)?,
         }),
         other => Ok(Cmd::Unknown { opcode: other }),
     }

@@ -7,7 +7,8 @@ use crate::cmd::PaintMode;
 use crate::decode::DecodeError;
 use crate::encode::SceneWriter;
 use crate::layer::{
-    LAYER_COUNT, LayerError, LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, validate_layers,
+    LAYER_COUNT, LayerError, LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, MAX_STACK_DEPTH,
+    validate_layers,
 };
 
 const ALL: [LayerId; LAYER_COUNT] = [
@@ -34,6 +35,25 @@ fn simple_layer(w: &mut SceneWriter<'_>, layer: LayerId) {
     w.end_layer(layer).expect("end");
 }
 
+fn layer_without_entry_save(build: impl FnOnce(&mut SceneWriter<'_>)) -> Vec<u8> {
+    let mut bytes = scene(|writer| {
+        writer.begin_layer(LayerId::Background).expect("begin");
+        build(writer);
+        writer.end_layer(LayerId::Background).expect("end");
+    });
+    assert_eq!(&bytes[5..8], &[0x01, 0, 0], "mandatory entry save");
+    bytes.drain(5..8);
+    bytes
+}
+
+fn single_raw_command(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let payload_len = u16::try_from(payload.len()).expect("test payload fits");
+    let mut bytes = std::vec![crate::SCENE_FORMAT_VERSION, opcode];
+    bytes.extend_from_slice(&payload_len.to_le_bytes());
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
 #[test]
 fn every_ascending_subset_is_legal() {
     for mask in 0u8..(1 << LAYER_COUNT) {
@@ -49,7 +69,7 @@ fn every_ascending_subset_is_legal() {
         for layer in ALL {
             assert_eq!(report.contains(layer), mask & (1 << layer.to_u8()) != 0);
             if report.contains(layer) {
-                assert_eq!(report.commands[layer.to_u8() as usize], 1);
+                assert_eq!(report.commands[layer.to_u8() as usize], 3);
             }
         }
     }
@@ -93,9 +113,7 @@ fn structural_violations_fail_the_frame() {
         })
     );
 
-    let stray_end = scene(|w| {
-        w.end_layer(LayerId::Tapes).expect("end");
-    });
+    let stray_end = single_raw_command(0x51, &[LayerId::Tapes.to_u8()]);
     assert_eq!(
         validate_layers(&stray_end),
         Err(LayerError::EndWithoutBegin {
@@ -174,6 +192,20 @@ fn state_leaks_across_layers_fail_the_frame() {
         w.end_layer(LayerId::Background).expect("end");
     });
     assert!(validate_layers(&balanced).is_ok());
+
+    let base_state_leaks = [
+        layer_without_entry_save(|w| w.translate(10.0, 20.0).expect("translate")),
+        layer_without_entry_save(|w| w.clip_rect(0.0, 0.0, 1.0, 1.0).expect("clip")),
+        layer_without_entry_save(|w| w.fill_color(crate::Rgba8::rgb(1, 2, 3)).expect("fill")),
+    ];
+    for bytes in base_state_leaks {
+        assert_eq!(
+            validate_layers(&bytes),
+            Err(LayerError::UnisolatedState {
+                layer: LayerId::Background
+            })
+        );
+    }
 }
 
 #[test]
@@ -184,11 +216,11 @@ fn unknown_opcodes_skip_inside_layers_but_unknown_layer_ids_fail() {
         w.begin_layer(LayerId::Background).expect("begin");
         w.end_layer(LayerId::Background).expect("end");
     });
-    // Splice an unknown 0x7f command (empty payload) between the markers.
-    inside.splice(5..5, [0x7f, 0, 0]);
+    // Splice an unknown 0x7f command inside the state-isolation envelope.
+    inside.splice(8..8, [0x7f, 0, 0]);
     let report = validate_layers(&inside).expect("skips unknown opcode");
     assert_eq!(report.unknown, 1);
-    assert_eq!(report.commands[0], 1);
+    assert_eq!(report.commands[0], 3);
 
     // The same unknown opcode outside any layer cannot be placed.
     let outside = {
@@ -211,6 +243,18 @@ fn unknown_opcodes_skip_inside_layers_but_unknown_layer_ids_fail() {
         validate_layers(&bad_id),
         Err(LayerError::Decode(DecodeError::BadPayload { opcode: 0x50 }))
     );
+
+    for (opcode, payload) in [
+        (0x50, &[][..]),
+        (0x50, &[0, 0][..]),
+        (0x51, &[][..]),
+        (0x51, &[0, 0][..]),
+    ] {
+        assert_eq!(
+            validate_layers(&single_raw_command(opcode, payload)),
+            Err(LayerError::Decode(DecodeError::BadPayload { opcode }))
+        );
+    }
 }
 
 #[test]
@@ -241,7 +285,7 @@ fn budgets_are_enforced() {
     // Exactly at the per-layer command budget: legal.
     let at_budget = scene(|w| {
         w.begin_layer(LayerId::Background).expect("begin");
-        for _ in 0..MAX_LAYER_COMMANDS / 2 {
+        for _ in 0..(MAX_LAYER_COMMANDS - 2) / 2 {
             w.save().expect("save");
             w.restore().expect("restore");
         }
@@ -253,7 +297,7 @@ fn budgets_are_enforced() {
     // One command past the budget: the frame fails.
     let over_budget = scene(|w| {
         w.begin_layer(LayerId::Background).expect("begin");
-        for _ in 0..MAX_LAYER_COMMANDS / 2 {
+        for _ in 0..(MAX_LAYER_COMMANDS - 2) / 2 {
             w.save().expect("save");
             w.restore().expect("restore");
         }
@@ -277,6 +321,70 @@ fn budgets_are_enforced() {
 }
 
 #[test]
+fn graphics_state_stack_budget_is_enforced() {
+    let at_budget = scene(|w| {
+        w.begin_layer(LayerId::Background).expect("begin");
+        for _ in 1..MAX_STACK_DEPTH {
+            w.save().expect("save");
+        }
+        for _ in 1..MAX_STACK_DEPTH {
+            w.restore().expect("restore");
+        }
+        w.end_layer(LayerId::Background).expect("end");
+    });
+    assert!(validate_layers(&at_budget).is_ok());
+
+    let over_budget = scene(|w| {
+        w.begin_layer(LayerId::Background).expect("begin");
+        for _ in 0..MAX_STACK_DEPTH {
+            w.save().expect("save");
+        }
+    });
+    assert_eq!(
+        validate_layers(&over_budget),
+        Err(LayerError::StackOverCapacity {
+            layer: LayerId::Background,
+            depth: MAX_STACK_DEPTH + 1,
+        })
+    );
+}
+
+#[test]
+fn layer_marker_corpus_pins_wire_and_legacy_state_isolation() {
+    let bytes = scene(|w| {
+        w.begin_layer(LayerId::Background).expect("begin");
+        w.end_layer(LayerId::Background).expect("end");
+    });
+    assert_eq!(
+        bytes,
+        std::vec![
+            crate::SCENE_FORMAT_VERSION,
+            0x50,
+            1,
+            0,
+            0,
+            0x01,
+            0,
+            0,
+            0x02,
+            0,
+            0,
+            0x51,
+            1,
+            0,
+            0,
+        ]
+    );
+    assert!(validate_layers(&bytes).is_ok());
+}
+
+#[test]
+fn layer_decode_error_preserves_its_source() {
+    let error = LayerError::from(DecodeError::Truncated);
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
 fn ranges_slice_out_exact_layer_content() {
     let bytes = scene(|w| {
         w.begin_layer(LayerId::Background).expect("begin");
@@ -288,10 +396,11 @@ fn ranges_slice_out_exact_layer_content() {
     });
     let report = validate_layers(&bytes).expect("validates");
 
-    // The attitude range must contain exactly the bytes the same command
-    // encodes in isolation.
+    // The attitude range includes the mandatory compatibility envelope.
     let isolated = scene(|w| {
+        w.save().expect("save");
         w.line(0.0, 0.0, 1.0, 1.0).expect("line");
+        w.restore().expect("restore");
     });
     let (start, end) = report.ranges[LayerId::Attitude.to_u8() as usize].expect("range");
     assert_eq!(&bytes[start..end], &isolated[1..], "content bytes match");

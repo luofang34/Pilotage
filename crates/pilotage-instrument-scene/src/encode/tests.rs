@@ -5,6 +5,7 @@ use crate::cmd::{Anchor, Cmd, PaintMode};
 use crate::color::Rgba8;
 use crate::decode::SceneCmds;
 use crate::encode::{SceneError, SceneWriter};
+use crate::layer::LayerId;
 
 fn decode_all(scene: &[u8]) -> alloc_free_vec::CmdVec<'_> {
     let cmds = SceneCmds::new(scene).expect("valid scene header");
@@ -123,6 +124,27 @@ fn overflowing_command_rolls_back_whole() {
     // The failed command must leave no partial bytes behind.
     assert_eq!(w.len(), 1);
     w.save().expect("small command still fits after rollback");
+}
+
+#[test]
+fn layer_state_envelope_rolls_back_as_one_unit() {
+    let mut begin_buf = [0u8; 7];
+    let mut begin = SceneWriter::new(&mut begin_buf).expect("version fits");
+    assert_eq!(
+        begin.begin_layer(LayerId::Background),
+        Err(SceneError::BufferFull)
+    );
+    assert_eq!(begin.len(), 1, "orphan begin marker must roll back");
+
+    let mut end_buf = [0u8; 11];
+    let mut end = SceneWriter::new(&mut end_buf).expect("version fits");
+    end.begin_layer(LayerId::Background)
+        .expect("begin envelope fits");
+    assert_eq!(
+        end.end_layer(LayerId::Background),
+        Err(SceneError::BufferFull)
+    );
+    assert_eq!(end.len(), 8, "orphan restore must roll back");
 }
 
 #[test]

@@ -30,7 +30,7 @@ pub use decode::{DecodeError, SceneCmds};
 pub use encode::{SceneError, SceneWriter};
 pub use layer::{
     LAYER_COUNT, LayerError, LayerId, LayerReport, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES,
-    validate_layers,
+    MAX_STACK_DEPTH, validate_layers,
 };
 
 /// Format version written as the first byte of every encoded scene.

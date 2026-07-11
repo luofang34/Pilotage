@@ -2,7 +2,7 @@
 //! dots, and TO/FROM triangle.
 
 use pilotage_instrument_scene::{PaintMode, Rgba8, SceneError, SceneWriter};
-use pilotage_instrument_state::{NavFromTo, NavResolved, NavSource, SignalStatus};
+use pilotage_instrument_state::{NavFromTo, NavResolved, NavSource};
 
 use crate::palette;
 
@@ -62,16 +62,5 @@ pub fn draw_cdi(
         NavFromTo::Off => {}
     }
     scene.restore()?;
-
-    if nav.status != SignalStatus::Valid {
-        scene.fill_color(palette::AMBER)?;
-        scene.text(
-            super::CX,
-            super::CY + 60.0,
-            12.0,
-            pilotage_instrument_scene::Anchor::CENTER,
-            "NAV",
-        )?;
-    }
     Ok(())
 }

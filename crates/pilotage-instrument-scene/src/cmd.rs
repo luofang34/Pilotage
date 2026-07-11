@@ -255,15 +255,14 @@ pub enum Cmd<'a> {
         /// Height.
         h: f32,
     },
-    /// Opens a z-ordered criticality layer (REN-01). Layered scenes obey
-    /// the contract [`crate::validate_layers`] enforces: ascending,
-    /// non-nested, non-repeating, every drawing command inside exactly
-    /// one layer.
+    /// Opens a z-ordered criticality layer. The next command must be the
+    /// outer [`Cmd::Save`] of its state-isolation envelope.
     BeginLayer {
         /// The layer being opened.
         layer: LayerId,
     },
-    /// Closes the open layer; must name the layer that is open.
+    /// Closes the open layer after its outer [`Cmd::Restore`]; must name
+    /// the layer that is open.
     EndLayer {
         /// The layer being closed.
         layer: LayerId,

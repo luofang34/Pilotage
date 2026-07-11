@@ -2,7 +2,7 @@
 //! bug, ground-track diamond, course deviation indicator, and data boxes.
 
 use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
-use pilotage_instrument_state::{NavSource, PanelData};
+use pilotage_instrument_state::{NavSource, PanelData, SignalStatus};
 
 use crate::palette;
 use crate::status_paint;
@@ -59,6 +59,12 @@ pub fn draw_hsi(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), Sce
     scene.end_layer(LayerId::Guidance)?;
 
     scene.begin_layer(LayerId::Annunciation)?;
+    if data.nav.data.source != NavSource::None
+        && data.nav.status.shows_value()
+        && data.nav.status != SignalStatus::Valid
+    {
+        status_paint::draw_flag(scene, CX, CY + 60.0, "NAV")?;
+    }
     if !hdg.status.shows_value() {
         status_paint::draw_red_x(scene, CX - 140.0, CY - 140.0, 280.0, 280.0, "HDG")?;
     }
