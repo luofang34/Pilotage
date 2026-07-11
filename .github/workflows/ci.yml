@@ -60,6 +60,9 @@ jobs:
       - name: check-structure
         run: bash scripts/check-structure.sh
 
+      - name: instrument requirement references
+        run: bash scripts/check-instrument-requirements.sh
+
       - name: instrument crates are no_std (ADR-0017)
         # Compiling the instrument family for a bare-metal target proves the
         # no_std/no-alloc claim instead of trusting a comment.
