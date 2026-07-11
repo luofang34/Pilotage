@@ -1,6 +1,6 @@
 //! Stable render-status reason codes shared with the JS backend (DISP-01).
 
-/// Result of one render attempt, crossing the WASM boundary as a `u32`.
+/// Stable status field carried by the packed WASM render result.
 ///
 /// Codes are append-only ABI: values are never reused or renumbered. The
 /// JS mirror in `clients/web/instrument-health.js` maps each code to the
@@ -14,7 +14,9 @@ pub enum RenderStatus {
     Ok = 0,
     /// `init` has not succeeded; there is no context to render into.
     NotInitialized = 1,
-    /// The context lock is poisoned; only reinitialization recovers.
+    /// The runtime boundary could not provide exclusive access. The explicit
+    /// wasm-bindgen resource does not emit this during ordinary calls; the
+    /// code remains reserved for ABI stability and alternate hosts.
     ContextUnavailable = 2,
     /// The state block is shorter than the ABI requires.
     StateTruncated = 3,

@@ -1,30 +1,29 @@
 //! WASM export of the instrument panels (ADR-0017's first backend).
 //!
-//! The ABI is deliberately primitive — no wasm-bindgen, no glue codegen:
+//! wasm-bindgen exposes an explicit [`InstrumentRuntime`] resource so each JS
+//! owner has independent buffers, configuration, and generations without
+//! module-level mutable state:
 //!
-//! 1. JS calls [`init`] once, then [`state_ptr`]/[`scene_ptr`] for the
-//!    fixed buffer locations in linear memory.
+//! 1. JS constructs [`InstrumentRuntime`], calls [`InstrumentRuntime::init`],
+//!    then queries its fixed state and scene buffer offsets.
 //! 2. Each frame, JS writes a packed
 //!    [`pilotage_instrument_state::abi`] state block into the state
-//!    buffer and calls [`render_status()`] with a panel id.
-//! 3. A `0` status means the scene was drawn and structurally
-//!    self-validated: JS reads [`scene_len()`] bytes from the scene
-//!    buffer and paints them. Any other status is a stable
-//!    [`RenderStatus`] reason code and the scene buffer must not be
-//!    painted (failures are visible, never a stale frame).
+//!    buffer and calls [`InstrumentRuntime::render_result`] with a panel id.
+//! 3. The returned `u64` carries status in bits 0..7, scene length in
+//!    bits 8..31, and generation in bits 32..63. Status zero means the scene
+//!    was drawn and structurally self-validated; any failure carries a zero
+//!    length and the scene buffer must not be painted.
 //!
 //! Buffers are allocated once and never grow, so the pointers stay valid
-//! for the life of the instance. [`render_generation()`] advances only
-//! on success, giving consumers a liveness signal that cannot be faked
-//! by failed attempts.
+//! until explicit reinitialization. The packed generation advances only on
+//! success, giving consumers a liveness signal that cannot be faked by failed
+//! attempts. Successful scene bytes remain valid until the next render attempt
+//! or reinitialization and must be consumed within that interval.
 
 mod exports;
 mod render_status;
 
-pub use exports::{
-    abi_version, init, render_generation, render_status, scene_len, scene_ptr, set_v_speeds,
-    state_len, state_ptr,
-};
+pub use exports::{InstrumentRuntime, abi_version};
 pub use render_status::RenderStatus;
 
 #[cfg(test)]

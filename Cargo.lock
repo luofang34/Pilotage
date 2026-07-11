@@ -970,6 +970,7 @@ dependencies = [
  "pilotage-instrument-panels",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
+ "wasm-bindgen",
 ]
 
 [[package]]

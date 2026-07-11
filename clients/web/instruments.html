@@ -243,7 +243,7 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
 
   async function start() {
     try {
-      const loaded = await loadInstruments("./instruments.wasm");
+      const loaded = await loadInstruments("./instrument-runtime_bg.wasm");
       const configured = loaded.setVSpeeds(40, 48, 85, 129, 163);
       if (!configured.ok) {
         moduleFault = configured.reason;
@@ -267,5 +267,6 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
   setInterval(() => {
     if (mod) tickInstrumentSet(health, targets(), performance.now());
   }, 250);
+  window.addEventListener("pagehide", () => mod?.dispose(), { once: true });
   start();
 </script>

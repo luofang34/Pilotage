@@ -29,60 +29,69 @@ export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 8;
 
-// A module missing any required render export is incompatible and must fail
-// as an ABI mismatch rather than as a TypeError mid-frame.
-const REQUIRED_EXPORTS = [
-  "abi_version",
+// A resource missing any required method is incompatible and must fail as an
+// ABI mismatch rather than as a TypeError mid-frame.
+const REQUIRED_RUNTIME_METHODS = [
+  "free",
   "init",
   "state_ptr",
   "state_len",
   "scene_ptr",
-  "scene_len",
-  "render_status",
-  "render_generation",
+  "render_result",
   "set_v_speeds",
-  "memory",
 ];
 
 export async function loadInstruments(wasmUrl, options = {}) {
-  const fetchWasm = options.fetch ?? fetch;
-  const instantiateStreaming = options.instantiateStreaming ?? WebAssembly.instantiateStreaming;
-  const instantiate = options.instantiate ?? WebAssembly.instantiate;
-  let exports;
+  let bindings;
   try {
-    const response = await fetchWasm(wasmUrl);
-    let instance;
-    try {
-      ({ instance } = await instantiateStreaming(response, {}));
-    } catch {
-      // Static servers without the wasm MIME type fall back to ArrayBuffer.
-      const bytes = await (await fetchWasm(wasmUrl)).arrayBuffer();
-      ({ instance } = await instantiate(bytes, {}));
-    }
-    exports = instance.exports;
+    bindings = await (options.loadBindings ?? (() => import("./instrument-runtime.js")))();
+  } catch (error) {
+    throw new InstrumentFault(REASON.WASM_LOAD, `instrument binding load failed: ${error}`);
+  }
+  const initializeBindings = options.initializeBindings ?? bindings.default;
+  const createRuntime = options.createRuntime ?? (() => new bindings.InstrumentRuntime());
+  const queryAbiVersion = options.queryAbiVersion ?? bindings.abi_version;
+  if (
+    typeof initializeBindings !== "function" ||
+    typeof createRuntime !== "function" ||
+    typeof queryAbiVersion !== "function"
+  ) {
+    throw new InstrumentFault(REASON.ABI_MISMATCH, "instrument binding surface is incomplete");
+  }
+  let wasm;
+  try {
+    wasm = await initializeBindings({ module_or_path: wasmUrl });
   } catch (error) {
     throw new InstrumentFault(REASON.WASM_LOAD, `instrument wasm load failed: ${error}`);
   }
-  for (const name of REQUIRED_EXPORTS) {
-    const value = exports[name];
-    const validMemory =
-      name === "memory" &&
-      value !== null &&
-      typeof value === "object" &&
-      (value.buffer instanceof ArrayBuffer ||
-        (typeof SharedArrayBuffer !== "undefined" && value.buffer instanceof SharedArrayBuffer));
-    const validFunction = name !== "memory" && typeof value === "function";
-    if (!(name in exports) || (!validMemory && !validFunction)) {
-      throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument wasm has invalid export ${name}`);
+  const memoryBuffer = wasm?.memory?.buffer;
+  const validMemory =
+    memoryBuffer instanceof ArrayBuffer ||
+    (typeof SharedArrayBuffer !== "undefined" && memoryBuffer instanceof SharedArrayBuffer);
+  if (!validMemory) {
+    throw new InstrumentFault(REASON.ABI_MISMATCH, "instrument binding has invalid memory");
+  }
+  let runtime;
+  try {
+    runtime = createRuntime();
+  } catch (error) {
+    throw new InstrumentFault(REASON.INIT_FAILED, `instrument runtime construction failed: ${error}`);
+  }
+  for (const name of REQUIRED_RUNTIME_METHODS) {
+    if (typeof runtime?.[name] !== "function") {
+      releaseRuntime(runtime);
+      throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument runtime has invalid method ${name}`);
     }
   }
   let abiVersion;
   try {
-    abiVersion = exports.abi_version();
+    abiVersion = queryAbiVersion();
   } catch (error) {
+    releaseRuntime(runtime);
     throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument ABI query failed: ${error}`);
   }
   if (abiVersion !== STATE_ABI_VERSION) {
+    releaseRuntime(runtime);
     throw new InstrumentFault(
       REASON.ABI_MISMATCH,
       `instrument ABI mismatch: wasm=${abiVersion} js=${STATE_ABI_VERSION}`,
@@ -90,26 +99,65 @@ export async function loadInstruments(wasmUrl, options = {}) {
   }
   let initialized;
   try {
-    initialized = exports.init();
+    initialized = runtime.init();
   } catch (error) {
+    releaseRuntime(runtime);
     throw new InstrumentFault(REASON.INIT_FAILED, `instrument wasm init trapped: ${error}`);
   }
   if (initialized !== 1) {
+    releaseRuntime(runtime);
     throw new InstrumentFault(REASON.INIT_FAILED, `instrument wasm init returned ${initialized}`);
   }
   let stateLen;
   try {
-    stateLen = exports.state_len();
+    stateLen = runtime.state_len();
   } catch (error) {
+    releaseRuntime(runtime);
     throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument state length query failed: ${error}`);
   }
   if (stateLen !== STATE_ABI_SIZE) {
+    releaseRuntime(runtime);
     throw new InstrumentFault(
       REASON.ABI_MISMATCH,
       `instrument state size mismatch: wasm=${stateLen} js=${STATE_ABI_SIZE}`,
     );
   }
-  return new InstrumentModule(exports, options);
+  let statePtr;
+  let scenePtr;
+  try {
+    statePtr = runtime.state_ptr();
+    scenePtr = runtime.scene_ptr();
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument buffer query failed: ${error}`);
+  }
+  const activeMemoryBuffer = wasm.memory.buffer;
+  const memoryLen = activeMemoryBuffer.byteLength;
+  const stateFits =
+    Number.isInteger(statePtr) && statePtr > 0 && statePtr + STATE_ABI_SIZE <= memoryLen;
+  const sceneStartsInMemory =
+    Number.isInteger(scenePtr) && scenePtr > 0 && scenePtr < memoryLen;
+  if (!stateFits || !sceneStartsInMemory) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(
+      REASON.ABI_MISMATCH,
+      `instrument buffer layout invalid: state=${statePtr} scene=${scenePtr} memory=${memoryLen}`,
+    );
+  }
+  return new InstrumentModule(runtime, {
+    ...options,
+    memory: wasm.memory,
+    statePtr,
+    scenePtr,
+  });
+}
+
+function releaseRuntime(runtime) {
+  try {
+    runtime?.free?.();
+  } catch {
+    // The resource is already unusable; its initialization fault remains primary.
+  }
 }
 
 // Structural validation of an encoded scene: version byte plus exact
@@ -128,10 +176,20 @@ export function validateSceneStructure(view) {
 }
 
 export class InstrumentModule {
+  #runtime;
+  #memory;
+  #statePtr;
+  #scenePtr;
+  #disposed;
+
   // options.createCanvas injects the back-buffer factory (tests pass a
   // recording double; the browser default is a plain offscreen element).
-  constructor(exports, { createCanvas } = {}) {
-    this.exports = exports;
+  constructor(runtime, { createCanvas, memory, statePtr, scenePtr } = {}) {
+    this.#runtime = runtime;
+    this.#memory = memory ?? runtime.memory;
+    this.#statePtr = statePtr ?? runtime.state_ptr();
+    this.#scenePtr = scenePtr ?? runtime.scene_ptr();
+    this.#disposed = false;
     this.unknownOpcodes = 0;
     this.createCanvas =
       createCanvas ??
@@ -144,10 +202,26 @@ export class InstrumentModule {
     this.back = new Map();
   }
 
+  dispose() {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    const runtime = this.#runtime;
+    this.#runtime = null;
+    this.#memory = null;
+    this.#statePtr = 0;
+    this.#scenePtr = 0;
+    this.back.clear();
+    runtime.free();
+  }
+
   setVSpeeds(vs0, vs, vfe, vno, vne) {
+    if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
     try {
-      this.exports.set_v_speeds(vs0, vs, vfe, vno, vne);
-      return { ok: true };
+      const status = this.#runtime.set_v_speeds(vs0, vs, vfe, vno, vne);
+      if (!Number.isInteger(status) || status < 0 || status > MAX_WASM_RENDER_STATUS) {
+        return { ok: false, reason: REASON.RENDER_TRAP };
+      }
+      return status === 0 ? { ok: true } : { ok: false, reason: status };
     } catch {
       return { ok: false, reason: REASON.RENDER_TRAP };
     }
@@ -156,11 +230,9 @@ export class InstrumentModule {
   // state: see writeState field handling below; absent groups may be
   // omitted entirely.
   writeState(state) {
+    if (this.#disposed) return { ok: false, reason: REASON.STATE_WRITE_FAILED };
     try {
-      const ptr = this.exports.state_ptr();
-      const len = this.exports.state_len();
-      if (len !== STATE_ABI_SIZE) return { ok: false, reason: REASON.ABI_MISMATCH };
-      const view = new DataView(this.exports.memory.buffer, ptr, len);
+      const view = new DataView(this.#memory.buffer, this.#statePtr, STATE_ABI_SIZE);
       const f = (off, v) => view.setFloat32(off, v ?? NaN, true);
       const b = (off, v) => view.setUint8(off, v);
 
@@ -219,30 +291,32 @@ export class InstrumentModule {
   // with a stable REASON code. The caller must cover failures with the
   // backend-owned failure page, never leave the last visible frame.
   renderPanel(panel, ctx, width, height) {
+    if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
       return { ok: false, reason: REASON.PAINT_FAILED };
     }
-    let status;
+    let result;
     try {
-      status = this.exports.render_status(panel);
+      result = decodeRenderResult(this.#runtime.render_result(panel));
     } catch {
       return { ok: false, reason: REASON.RENDER_TRAP };
     }
+    if (result === null) return { ok: false, reason: REASON.RENDER_TRAP };
+    const { status, sceneLen: len, generation } = result;
     if (!Number.isInteger(status) || status < 0 || status > MAX_WASM_RENDER_STATUS) {
       return { ok: false, reason: REASON.RENDER_TRAP };
     }
-    if (status !== 0) return { ok: false, reason: status };
+    if (status !== 0) {
+      return len === 0
+        ? { ok: false, reason: status }
+        : { ok: false, reason: REASON.RENDER_TRAP };
+    }
     let view;
-    let generation;
     try {
-      const len = this.exports.scene_len();
-      const ptr = this.exports.scene_ptr();
-      view = new DataView(this.exports.memory.buffer, ptr, len);
-      generation = this.exports.render_generation(panel);
+      view = new DataView(this.#memory.buffer, this.#scenePtr, len);
     } catch {
       return { ok: false, reason: REASON.RENDER_TRAP };
     }
-    if (!Number.isInteger(generation)) return { ok: false, reason: REASON.RENDER_TRAP };
     let structurallyValid;
     try {
       structurallyValid = validateSceneStructure(view);
@@ -280,8 +354,21 @@ export class InstrumentModule {
     } catch {
       return { ok: false, reason: REASON.PAINT_FAILED };
     }
-    return { ok: true, generation: generation >>> 0 };
+    return { ok: true, generation, sceneLen: len };
   }
+}
+
+// The single i64 result is one frame's immutable boundary metadata:
+// status[7:0], scene length[31:8], generation[63:32]. WebAssembly i64
+// values surface as signed BigInt, so decode the same bits as unsigned.
+export function decodeRenderResult(packed) {
+  if (typeof packed !== "bigint") return null;
+  const value = BigInt.asUintN(64, packed);
+  return {
+    status: Number(value & 0xffn),
+    sceneLen: Number((value >> 8n) & 0xffffffn),
+    generation: Number((value >> 32n) & 0xffffffffn),
+  };
 }
 
 function color(view, at) {

@@ -88,12 +88,15 @@ whole panels at fixed cadence anyway, so retained-tree diffing buys nothing.
   the backend chooses the font. Instrument layouts must therefore not depend
   on precise glyph metrics.
 
-The first backend is the browser: the panels crate compiled to
-`wasm32-unknown-unknown` as a plain `extern "C"` cdylib (no wasm-bindgen —
-the ABI is "write packed state into linear memory, call render, read back an
-encoded scene"), interpreted onto Canvas2D by a small JS module in
-`clients/web`. wgpu, software raster, and embedded framebuffer backends
-consume the identical encoding later.
+The first backend is the browser: the panels crate compiles to
+`wasm32-unknown-unknown`, and wasm-bindgen exposes an explicit
+`InstrumentRuntime` resource owned by its JavaScript caller. Each resource
+owns fixed state/scene buffers, configuration, and wrapping generations; the
+Rust boundary has no module-level mutable state. The caller writes packed
+state into the resource's linear-memory range, calls one `render_result`, and
+receives status, scene length, and generation in one packed value before a
+small JS module interprets the scene onto Canvas2D. wgpu, software raster,
+and embedded framebuffer backends consume the identical encoding later.
 
 ### Validity is first-class state, not an afterthought
 

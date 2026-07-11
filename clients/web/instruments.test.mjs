@@ -1,7 +1,7 @@
 // Deterministic checks for the fail-visible display pipeline.
 //
 // Run: node clients/web/instruments.test.mjs
-// (build clients/web/instruments.wasm first: scripts/build-web-instruments.sh)
+// (build the generated WASM resource first: scripts/build-web-instruments.sh)
 //
 // Uses an injected clock and a command-recording canvas double — no sleeps,
 // no real timers, no DOM. Covers: the failure latch and its recovery rules,
@@ -18,6 +18,7 @@ import {
   STATE_ABI_SIZE,
   STATE_ABI_SIZE_BY_VERSION,
   STATE_ABI_VERSION,
+  decodeRenderResult,
   loadInstruments,
   validateSceneStructure,
 } from "./instruments.js";
@@ -115,6 +116,14 @@ function recordingPresenter() {
   };
 }
 
+function packRenderResult(status, sceneLen, generation) {
+  return (
+    (BigInt(generation >>> 0) << 32n) |
+    (BigInt(sceneLen & 0xffffff) << 8n) |
+    BigInt(status & 0xff)
+  );
+}
+
 // A fake WASM export surface with programmable behavior.
 function fakeExports({
   status = 0,
@@ -124,16 +133,22 @@ function fakeExports({
 } = {}) {
   const buffer = new ArrayBuffer(65536);
   new Uint8Array(buffer).set(sceneBytes, 1024);
+  const renderStatus = typeof status === "function" ? status : () => status;
+  const renderGeneration =
+    typeof generation === "function" ? generation : () => generation;
   const exports = {
     abi_version: () => STATE_ABI_VERSION,
+    free: () => {},
     init: () => 1,
-    state_ptr: () => 0,
+    state_ptr: () => 256,
     state_len: () => STATE_ABI_SIZE,
     scene_ptr: () => 1024,
-    scene_len: () => sceneBytes.length,
-    render_status: typeof status === "function" ? status : () => status,
-    render_generation: typeof generation === "function" ? generation : () => generation,
-    set_v_speeds: () => {},
+    render_result: (panel) => {
+      const resultStatus = renderStatus(panel);
+      const resultLen = resultStatus === 0 ? sceneBytes.length : 0;
+      return packRenderResult(resultStatus, resultLen, renderGeneration(panel));
+    },
+    set_v_speeds: () => 0,
     memory: { buffer },
   };
   return Object.assign(exports, overrides);
@@ -141,9 +156,10 @@ function fakeExports({
 
 function injectedLoader(exports) {
   return {
-    fetch: async () => ({}),
-    instantiateStreaming: async () => ({ instance: { exports } }),
-    instantiate: async () => ({ instance: { exports } }),
+    loadBindings: async () => ({}),
+    initializeBindings: async () => ({ memory: exports.memory }),
+    createRuntime: () => exports,
+    queryAbiVersion: () => exports.abi_version(),
     createCanvas: recordingCanvas,
   };
 }
@@ -217,9 +233,18 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "state ABI versions have exact independent sizes",
     STATE_ABI_SIZE_BY_VERSION[1] === 120 && STATE_ABI_SIZE_BY_VERSION[2] === 128,
   );
+  const wrappedResult = decodeRenderResult(
+    BigInt.asIntN(64, packRenderResult(REASON.OK, 65535, 0xffffffff)),
+  );
+  check(
+    "packed render metadata survives signed i64 and generation wrap",
+    wrappedResult?.status === REASON.OK &&
+      wrappedResult?.sceneLen === 65535 &&
+      wrappedResult?.generation === 0xffffffff,
+  );
   check(
     "load rejects a non-function export as ABI_MISMATCH",
-    (await loadFailureReason(fakeExports({ overrides: { render_status: 7 } }))) ===
+    (await loadFailureReason(fakeExports({ overrides: { render_result: 7 } }))) ===
       REASON.ABI_MISMATCH,
   );
   check(
@@ -281,21 +306,112 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       REASON.ABI_MISMATCH,
   );
   check(
+    "buffer pointer trap is ABI_MISMATCH",
+    (await loadFailureReason(
+      fakeExports({
+        overrides: {
+          scene_ptr: () => {
+            throw new Error("scene pointer trap");
+          },
+        },
+      }),
+    )) === REASON.ABI_MISMATCH,
+  );
+  check(
+    "out-of-bounds state buffer is ABI_MISMATCH",
+    (await loadFailureReason(
+      fakeExports({ overrides: { state_ptr: () => 65536 - STATE_ABI_SIZE + 1 } }),
+    )) === REASON.ABI_MISMATCH,
+  );
+  check(
+    "zero state pointer after init is ABI_MISMATCH",
+    (await loadFailureReason(fakeExports({ overrides: { state_ptr: () => 0 } }))) ===
+      REASON.ABI_MISMATCH,
+  );
+  check(
+    "zero scene pointer after init is ABI_MISMATCH",
+    (await loadFailureReason(fakeExports({ overrides: { scene_ptr: () => 0 } }))) ===
+      REASON.ABI_MISMATCH,
+  );
+  check(
     `load accepts the exact ABI v${STATE_ABI_VERSION} export surface`,
     (await loadInstruments("injected.wasm", injectedLoader(fakeExports()))) instanceof
       InstrumentModule,
   );
+  let rejectedReleases = 0;
+  const rejectedRuntime = fakeExports({
+    overrides: {
+      free: () => {
+        rejectedReleases += 1;
+      },
+      state_len: () => STATE_ABI_SIZE - 1,
+    },
+  });
+  await loadFailureReason(rejectedRuntime);
+  check("rejected resource is released exactly once", rejectedReleases === 1);
   let fetchReason = null;
   try {
     await loadInstruments("missing.wasm", {
-      fetch: async () => {
-        throw new Error("fetch failed");
+      ...injectedLoader(fakeExports()),
+      initializeBindings: async () => {
+        throw new Error("wasm load failed");
       },
     });
   } catch (error) {
     fetchReason = error?.reason ?? null;
   }
-  check("fetch failure is typed WASM_LOAD", fetchReason === REASON.WASM_LOAD);
+  check("generated-binding WASM failure is typed WASM_LOAD", fetchReason === REASON.WASM_LOAD);
+}
+
+{
+  let releases = 0;
+  const mod = new InstrumentModule(
+    fakeExports({ overrides: { free: () => { releases += 1; } } }),
+    { createCanvas: recordingCanvas },
+  );
+  mod.dispose();
+  mod.dispose();
+  check("explicit resource disposal is idempotent", releases === 1);
+}
+
+{
+  const memory = { buffer: new ArrayBuffer(65536) };
+  const statePtr = 256;
+  const stale = new InstrumentModule(fakeExports({ overrides: { memory } }), {
+    createCanvas: recordingCanvas,
+    memory,
+    statePtr,
+    scenePtr: 1024,
+  });
+  stale.dispose();
+  const replacement = new InstrumentModule(fakeExports({ overrides: { memory } }), {
+    createCanvas: recordingCanvas,
+    memory,
+    statePtr,
+    scenePtr: 1024,
+  });
+  const replacementState = new Uint8Array(memory.buffer, statePtr, STATE_ABI_SIZE);
+  const replacementWrite = replacement.writeState({ quality: 2 });
+  const beforeStaleWrite = replacementState.slice();
+
+  const write = stale.writeState({});
+  const speeds = stale.setVSpeeds(40, 50, 80, 120, 160);
+  const render = stale.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+  check(
+    "disposed wrapper cannot write into a replacement resource allocation",
+    replacementWrite.ok &&
+      !write.ok &&
+      write.reason === REASON.STATE_WRITE_FAILED &&
+      replacementState.every((byte, index) => byte === beforeStaleWrite[index]),
+  );
+  check(
+    "all disposed resource entry points fail closed",
+    !speeds.ok &&
+      speeds.reason === REASON.RENDER_TRAP &&
+      !render.ok &&
+      render.reason === REASON.RENDER_TRAP,
+  );
+  replacement.dispose();
 }
 
 {
@@ -390,27 +506,24 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 
 {
   const { bytes } = buildScene();
-  for (const [name, overrides] of [
+  for (const [name, renderResult] of [
     [
-      "scene_len trap",
-      {
-        scene_len: () => {
-          throw new Error("scene length trap");
-        },
+      "render result trap",
+      () => {
+        throw new Error("render result trap");
       },
     ],
+    ["non-BigInt render result", () => 0],
     [
-      "render_generation trap",
-      {
-        render_generation: () => {
-          throw new Error("generation trap");
-        },
-      },
+      "failure carrying a scene length",
+      () => packRenderResult(REASON.SCENE_BUFFER_FULL, 1, 0),
     ],
   ]) {
-    const mod = new InstrumentModule(fakeExports({ sceneBytes: bytes, overrides }), {
+    const runtime = fakeExports({ sceneBytes: bytes });
+    const mod = new InstrumentModule(runtime, {
       createCanvas: recordingCanvas,
     });
+    runtime.render_result = renderResult;
     const result = mod.renderPanel(0, new RecordingCtx(), 480, 360);
     check(`${name} is a typed RENDER_TRAP`, !result.ok && result.reason === REASON.RENDER_TRAP);
   }
@@ -420,8 +533,10 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   const mod = new InstrumentModule(
     fakeExports({
       overrides: {
-        state_len: () => {
-          throw new Error("runtime state length trap");
+        memory: {
+          get buffer() {
+            throw new Error("runtime memory trap");
+          },
         },
       },
     }),
@@ -431,6 +546,33 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check(
     "runtime state write trap is typed",
     !result.ok && result.reason === REASON.STATE_WRITE_FAILED,
+  );
+}
+
+{
+  const unavailable = new InstrumentModule(
+    fakeExports({ overrides: { set_v_speeds: () => REASON.NOT_INITIALIZED } }),
+    { createCanvas: recordingCanvas },
+  );
+  const failed = unavailable.setVSpeeds(40, 50, 80, 120, 160);
+  check(
+    "V-speed configuration returns its typed WASM failure",
+    !failed.ok && failed.reason === REASON.NOT_INITIALIZED,
+  );
+
+  const trapping = new InstrumentModule(
+    fakeExports({
+      overrides: {
+        set_v_speeds: () => {
+          throw new Error("V-speed trap");
+        },
+      },
+    }),
+    { createCanvas: recordingCanvas },
+  );
+  check(
+    "V-speed configuration trap is contained",
+    trapping.setVSpeeds(40, 50, 80, 120, 160).reason === REASON.RENDER_TRAP,
   );
 }
 
@@ -719,27 +861,23 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 // ---- the real WASM module, end to end ----------------------------------------
 
 {
-  const wasmUrl = new URL("./instruments.wasm", import.meta.url);
-  let exports = null;
+  const wasmUrl = new URL("./instrument-runtime_bg.wasm", import.meta.url);
   let mod = null;
   try {
-    const { instance } = await WebAssembly.instantiate(readFileSync(wasmUrl), {});
-    exports = instance.exports;
-    mod = await loadInstruments("real.wasm", injectedLoader(exports));
+    mod = await loadInstruments(readFileSync(wasmUrl), { createCanvas: recordingCanvas });
   } catch (error) {
-    check(`instruments.wasm loads (build it: scripts/build-web-instruments.sh) — ${error}`, false);
+    check(`instrument runtime loads (build it: scripts/build-web-instruments.sh) — ${error}`, false);
   }
-  if (exports && mod) {
-    for (const name of ["render_status", "render_generation", "scene_len"]) {
-      check(`wasm exports ${name}`, typeof exports[name] === "function");
-    }
+  if (mod) {
     check("real wasm passes load, ABI, init, and exact-size validation", mod instanceof InstrumentModule);
+    check("raw WASM resource is encapsulated by the validated module", !("runtime" in mod));
 
     // The zeroed state block is a version-0 decode failure — a typed
     // code, not a silent zero-length scene.
-    check("zeroed state is STATE_BAD_VERSION", exports.render_status(0) === REASON.STATE_BAD_VERSION);
-    check("failed attempt does not advance the generation", exports.render_generation(0) === 0);
-    check("unknown panel is INVALID_PANEL", exports.render_status(99) === REASON.INVALID_PANEL);
+    const failed = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+    check("zeroed state is STATE_BAD_VERSION", failed.reason === REASON.STATE_BAD_VERSION);
+    const invalidPanel = mod.renderPanel(99, new RecordingCtx(), 480, 360);
+    check("unknown panel is INVALID_PANEL", invalidPanel.reason === REASON.INVALID_PANEL);
 
     const writeResult = mod.writeState({
       attitude: { quat: { w: 1, x: 0, y: 0, z: 0 }, rates: [0, 0, 0], ageMs: 16 },
@@ -752,18 +890,20 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       valid: { attitude: true, rates: true, position: true, velocity: true },
     });
     check("real wasm state write succeeds", writeResult.ok === true);
+    let lastResult = null;
     for (const panel of [PANEL.PFD, PANEL.HSI]) {
       const result = mod.renderPanel(panel, new RecordingCtx(), 480, 360);
       check(`panel ${panel} renders and validates end to end`, result.ok === true);
-      check(`panel ${panel} generation advanced`, exports.render_generation(panel) === 1);
+      check(
+        `panel ${panel} result carries its first generation after failed attempts`,
+        result.generation === 1,
+      );
+      lastResult = result;
     }
-    check("scene bytes are non-trivial", exports.scene_len() > 1);
-    const sceneView = new DataView(
-      exports.memory.buffer,
-      exports.scene_ptr(),
-      exports.scene_len(),
-    );
-    check("real scene passes framing validation", validateSceneStructure(sceneView));
+    const lastSceneLen = lastResult?.sceneLen ?? 0;
+    check("atomic result carries a non-trivial scene length", lastSceneLen > 1);
+    check("real scene passed framing before visible commit", lastResult?.ok === true);
+    mod.dispose();
   }
 }
 
