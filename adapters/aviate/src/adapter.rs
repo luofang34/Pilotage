@@ -21,6 +21,7 @@ use crate::shm::{GzStateShm, ShmFreshness};
 use crate::uplink::FlightUplink;
 
 mod camera;
+mod control;
 mod sampling;
 use sampling::{mavlink_batch, yaw_of};
 
@@ -159,36 +160,6 @@ impl AviateAdapter {
         &mut self,
     ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>> {
         self.frames.take()
-    }
-
-    /// Runs the SITL reset script (debounced to one per 5 s): world
-    /// reset + FC restart, fire-and-forget. `PILOTAGE_RESET_CMD`
-    /// overrides the script path.
-    fn spawn_reset(&mut self) {
-        let now = std::time::Instant::now();
-        if self
-            .last_reset
-            .is_some_and(|t| now.duration_since(t) < Duration::from_secs(5))
-        {
-            return;
-        }
-        self.last_reset = Some(now);
-        self.armed = None;
-        let script = std::env::var("PILOTAGE_RESET_CMD").unwrap_or_else(|_| {
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .and_then(std::path::Path::parent)
-                .map_or_else(|| ".".to_owned(), |p| p.display().to_string())
-                + "/scripts/reset-flight-sim.sh"
-        });
-        tracing::info!(%script, "simulation reset requested from the viewer");
-        match std::process::Command::new(&script)
-            .arg("aviate_sitl")
-            .spawn()
-        {
-            Ok(_) => {}
-            Err(error) => tracing::warn!(%error, %script, "reset script failed to spawn"),
-        }
     }
 
     fn shm_source(instance: u8) -> Result<Source, AviateAdapterError> {
