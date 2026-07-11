@@ -122,12 +122,60 @@ so SVS and embedded degradation never require re-architecture:
   symbology without touching tapes or ladder. SVS fidelity is a
   backend-class decision (survey lesson: every vendor scales SVS to the
   processor), so the slot carries a quality tier, not a renderer.
-- **Overlay layers**: scene output is ordered in named layers (background,
-  attitude, tapes, symbology, annunciation) so terrain, obstacle, runway,
-  and conformal overlays insert at a defined z-order.
+- **Overlay layers**: implemented — see "The scene-layer and safety
+  compositor contract" below.
 - **Data-source abstraction**: instrument state is fed by writers, never by
   transports; local-sensor, bus, and network sources all converge on the same
   state struct (the thin-display vs. smart-display axis stays open).
+
+### The scene-layer and safety compositor contract
+
+Scene commands partition into six bounded, named, z-ordered criticality
+bands, delimited by begin/end layer markers in the reserved 0x50 opcode
+space: `Background` (0), `Attitude` (1), `Tapes` (2), `Guidance` (3),
+`Annunciation` (4), `Failure` (5). The contract exists so optional
+background imagery can never cover, suppress, or prevent primary flight
+information, warnings, or failure indications (AC 25-11B's
+mixed-criticality display concern, as a design input — not a compliance
+claim). The byte-level contract is specified in the
+[scene-layer protocol](../instruments/scene-layer-protocol.md).
+
+- Encoding order **is** z-order: layers appear at most once each, in
+  strictly ascending id order, unnested, with every drawing command
+  inside exactly one layer. A validated scene therefore cannot paint
+  background over a critical band, on any conforming backend.
+- Every layer carries a mandatory outer Save/Restore envelope immediately
+  inside its markers. No command may sit outside that envelope. It isolates
+  transform, clip, and paint state even on an older backend that skips the
+  markers themselves.
+- Frames are bounded: per-layer command count, graphics-state stack depth,
+  and scene byte budgets are compile-time constants in
+  `pilotage-instrument-scene::layer`. `validate_layers` enforces these with
+  the duplicate, ordering, nesting, state-isolation, and framing rules.
+- Version policy: unknown *opcodes* inside a layer remain counted skips;
+  an unknown *layer id* fails the whole frame, because content whose
+  criticality cannot be placed must not be painted. Layer marker payloads
+  are exactly one byte. Growing the layer vocabulary or marker shape
+  therefore requires a scene format version bump.
+- The SVS/raster boundary: backend-owned raster or depth imagery (a
+  hypothetical SVS terrain layer) composes strictly below `Attitude`, in the
+  band `Background` occupies. The PFD renders with `BackgroundMode::None`
+  to cede that band. Horizon line, pitch ladder, roll scale, aircraft
+  reference, tapes, and annunciations remain in the critical overlay and
+  are byte-identical with the background present or absent.
+- One frame is one encoded scene; frame generation and identity ride the
+  transport (the WASM render generation), not the encoding. Each layer
+  is owned by exactly one producer per frame — the duplicate rule makes
+  split ownership structurally impossible.
+- The layer validator accepts any legal ascending subset because different
+  panel types use different bands. Before visible commit, the panel host
+  must additionally require the critical-layer mask for the selected panel.
+
+Backends that predate the layer markers skip them as unknown opcodes and
+paint in encoded order. They still execute the ordinary Save/Restore
+envelope, preserving state isolation and z-order, but they do not enforce
+layer structure or resource budgets and are therefore not conforming
+high-assurance consumers.
 
 ## Consequences
 
