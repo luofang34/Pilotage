@@ -27,7 +27,7 @@ const SCENE_FORMAT_VERSION = 1;
 export const STATE_ABI_VERSION = 1;
 export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
-const MAX_WASM_RENDER_STATUS = 8;
+const MAX_WASM_RENDER_STATUS = 10;
 
 // A resource missing any required method is incompatible and must fail as an
 // ABI mismatch rather than as a TypeError mid-frame.
