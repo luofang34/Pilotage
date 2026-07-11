@@ -26,6 +26,7 @@ import {
   BUTTON_EDGE_PRESSED,
 } from "./wire.js";
 import { loadInstruments, PANEL } from "./instruments.js";
+import { PanelHealth, drawFailurePage, REASON } from "./instrument-health.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const MOTION_SCOPE = "vehicle.motion";
@@ -79,11 +80,31 @@ const state = {
 // estimate plus its receive stamp. Ingest only records; drawing happens
 // on the display's own requestAnimationFrame cadence, so telemetry rate
 // and frame rate stay decoupled.
+// Each panel latches display failures independently (DISP-01); a fault in
+// the shared wasm backend (load/ABI/init) fails both.
 const instruments = {
   mod: null,
+  moduleFault: null,
   latest: null,
   receivedAtMs: null,
+  health: {
+    [PANEL.PFD]: new PanelHealth(),
+    [PANEL.HSI]: new PanelHealth(),
+  },
 };
+
+// Browser watchdog cadence (simulator-only): a scheduling domain separate
+// from requestAnimationFrame, so a stalled render loop still trips the
+// liveness deadline and covers the stale frame.
+const WATCHDOG_INTERVAL_MS = 250;
+
+/** The two instrument paint targets: [panel, 2d-context, canvas element]. */
+function instrumentTargets() {
+  return [
+    [PANEL.PFD, pfdCtx, els.pfd],
+    [PANEL.HSI, hsiCtx, els.hsi],
+  ];
+}
 
 function log(line) {
   const time = new Date().toISOString().split("T")[1].replace("Z", "");
@@ -707,10 +728,23 @@ async function startControlLoop(transport) {
 // ---- instrument panels (ADR-0017) -------------------------------------------
 
 /** Maps the latest wire avionics estimate into the instrument state ABI
- * and draws both panels; runs on the display's own rAF cadence. */
+ * and draws both panels; runs on the display's own rAF cadence. Every
+ * render result is honored: a validated frame is blitted, anything else
+ * is covered by the failure page (DISP-01 — no ignored results, no stale
+ * imagery). */
 function renderInstruments() {
   const mod = instruments.mod;
-  if (!mod) return;
+  if (!mod) {
+    // Load/ABI/init faults are shared-backend failures: both panels show
+    // the failure page. While still loading there is no prior imagery to
+    // cover, so the canvases stay blank.
+    if (instruments.moduleFault !== null) {
+      for (const [, ctx2d, canvas] of instrumentTargets()) {
+        drawFailurePage(ctx2d, canvas.width, canvas.height, instruments.moduleFault);
+      }
+    }
+    return;
+  }
   const a = instruments.latest;
   const ageMs = a ? performance.now() - instruments.receivedAtMs : NaN;
   mod.writeState({
@@ -730,21 +764,51 @@ function renderInstruments() {
         }
       : {},
   });
-  mod.renderTo(pfdCtx, PANEL.PFD, els.pfd.width, els.pfd.height);
-  mod.renderTo(hsiCtx, PANEL.HSI, els.hsi.width, els.hsi.height);
+  const nowMs = performance.now();
+  for (const [panel, ctx2d, canvas] of instrumentTargets()) {
+    const health = instruments.health[panel];
+    const result = mod.renderPanel(panel);
+    const display = result.ok
+      ? health.reportSuccess(nowMs, result.generation)
+      : health.reportFailure(nowMs, result.reason);
+    if (display.showFailure) {
+      drawFailurePage(ctx2d, canvas.width, canvas.height, display.reason);
+    } else {
+      result.blit(ctx2d, canvas.width, canvas.height);
+    }
+  }
+}
+
+/** Liveness check on its own timer so a stalled render loop still gets
+ * its stale frame covered; skipped while the module is absent (a load
+ * fault already shows its own page, and before load there is no imagery
+ * to cover). */
+function watchdogTick() {
+  if (!instruments.mod) return;
+  const nowMs = performance.now();
+  for (const [panel, ctx2d, canvas] of instrumentTargets()) {
+    const display = instruments.health[panel].tick(nowMs);
+    if (display.showFailure) {
+      drawFailurePage(ctx2d, canvas.width, canvas.height, display.reason);
+    }
+  }
 }
 
 async function startInstruments() {
+  const loop = () => {
+    renderInstruments();
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
   try {
     instruments.mod = await loadInstruments("./instruments.wasm");
-    const loop = () => {
-      renderInstruments();
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
+    const nowMs = performance.now();
+    for (const health of Object.values(instruments.health)) health.reset(nowMs);
+    setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
     log("instrument panels ready (wasm loaded)");
   } catch (error) {
-    log(`instrument panels unavailable: ${error} (run scripts/build-web-instruments.sh)`);
+    instruments.moduleFault = error?.reason ?? REASON.WASM_LOAD;
+    log(`instrument panels unavailable (D-${instruments.moduleFault}): ${error} (run scripts/build-web-instruments.sh)`);
   }
 }
 

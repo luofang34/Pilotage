@@ -139,6 +139,35 @@ pub extern "C" fn scene_ptr() -> u32 {
     ctx.as_ref().map_or(0, |c| c.scene.as_ptr() as u32)
 }
 
+/// Byte length of the most recent successfully rendered scene; `0` when
+/// no render has succeeded since [`init`].
+#[allow(unsafe_code)] // SAFETY: as above — export attribute only, no unsafe operations.
+#[unsafe(no_mangle)]
+pub extern "C" fn scene_len() -> u32 {
+    let Ok(ctx) = CTX.lock() else {
+        return 0;
+    };
+    ctx.as_ref().map_or(0, |c| c.scene_len as u32)
+}
+
+/// Wrapping count of successful renders for `panel` (0 = PFD, 1 = HSI);
+/// `0` for unknown panels. Failed attempts never advance it, so a
+/// consumer watchdog can distinguish "rendering but failing" from
+/// "renderer stalled".
+#[allow(unsafe_code)] // SAFETY: as above — export attribute only, no unsafe operations.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_generation(panel: u32) -> u32 {
+    let Ok(ctx) = CTX.lock() else {
+        return 0;
+    };
+    ctx.as_ref().map_or(0, |c| {
+        usize::try_from(panel)
+            .ok()
+            .and_then(|idx| c.generation.get(idx).copied())
+            .unwrap_or(0)
+    })
+}
+
 /// Configures speed-tape bands (knots); pass all zeros to clear.
 #[allow(unsafe_code)] // SAFETY: as above — export attribute only, no unsafe operations.
 #[unsafe(no_mangle)]

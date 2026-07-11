@@ -68,10 +68,15 @@ jobs:
           --target thumbv7em-none-eabihf
 
       - name: instrument wasm backend builds
-        run: cargo build -p pilotage-instruments-web --target wasm32-unknown-unknown --release
+        # The build script also copies the module beside the web client so
+        # the fail-visible contract test below drives the real wasm.
+        run: bash scripts/build-web-instruments.sh
 
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs
+
+      - name: instrument display fail-visible contract (DISP-01)
+        run: node clients/web/instruments.test.mjs
 
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
