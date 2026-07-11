@@ -37,6 +37,7 @@ const AXIS_YAW = 3; // yaw = 3 (yaw rate, + clockwise).
 const BUTTON_ARM = 0; // logical button 0: arm (adapter contract, issue #12).
 const BUTTON_DISARM = 1; // logical button 1: disarm.
 const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
+const BUTTON_FPV_TOGGLE = 3; // logical button 3: camera <-> FPV mode (adapter latches).
 
 const els = {
   host: document.getElementById("host"),
@@ -68,6 +69,7 @@ const state = {
   keys: new Set(),
   prevArmInputs: new Set(),
   pendingReset: false,
+  pendingFpvToggle: false,
   connected: false,
   leaseGranted: false,
   skippedVideoFrames: 0,
@@ -476,6 +478,16 @@ const FLIGHT_SCHEMES = {
     throttle: (buttons[7]?.value ?? 0) - (buttons[6]?.value ?? 0),
     label: "CRUISE: L=move RX=yaw R2/L2=climb",
   }),
+  // FPV: same Mode-2 stick geometry as PILOT, but the adapter is in
+  // attitude mode — right stick commands tilt ANGLES, throttle is
+  // direct collective around hover. Toggle with the FPV button.
+  fpv: (raw) => ({
+    throttle: -raw(1),
+    yaw: raw(0),
+    pitch: -raw(3),
+    roll: raw(2),
+    label: "FPV: R=tilt angle L=thrust/yaw",
+  }),
 };
 // Gamepad buttons that fire arm/disarm edges: options (9) arms,
 // create/share (8) disarms — deliberately away from the face buttons.
@@ -659,6 +671,10 @@ async function startControlLoop(transport) {
       const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
       updateFlightReadout(pad, f);
       edges = collectArmEdges(pad);
+      if (state.pendingFpvToggle) {
+        state.pendingFpvToggle = false;
+        edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
+      }
       if (state.pendingReset) {
         state.pendingReset = false;
         edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
@@ -734,6 +750,9 @@ async function startInstruments() {
 
 applyUrlParams();
 startInstruments();
+document.getElementById("fpvBtn").addEventListener("click", () => {
+  state.pendingFpvToggle = true;
+});
 document.getElementById("resetBtn").addEventListener("click", () => {
   state.pendingReset = true;
 });

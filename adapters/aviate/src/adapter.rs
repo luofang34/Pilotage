@@ -42,6 +42,9 @@ pub const DISARM_BUTTON: u16 = 1;
 /// Logical button whose press resets the simulation (runs the reset
 /// script; SITL-only convenience).
 pub const RESET_BUTTON: u16 = 2;
+/// Logical button toggling between camera mode (velocity sticks,
+/// brake-to-hold) and FPV mode (attitude sticks, direct thrust).
+pub const FPV_TOGGLE_BUTTON: u16 = 3;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -94,6 +97,9 @@ pub struct AviateAdapter {
     armed: Option<bool>,
     last_reset: Option<std::time::Instant>,
     link_loss_policy: Option<LinkLossPolicy>,
+    // FPV mode latch (FPV_TOGGLE_BUTTON): attitude sticks + direct
+    // thrust instead of velocity sticks + brake-to-hold.
+    fpv_mode: bool,
 }
 
 impl AviateAdapter {
@@ -142,6 +148,7 @@ impl AviateAdapter {
             _frame_forwarder: frame_forwarder,
             armed: None,
             last_reset: None,
+            fpv_mode: false,
             link_loss_policy: None,
         })
     }
@@ -212,6 +219,7 @@ impl AviateAdapter {
             _frame_forwarder: None,
             armed: None,
             last_reset: None,
+            fpv_mode: false,
             link_loss_policy: None,
         }
     }
@@ -338,6 +346,9 @@ impl VehicleAdapter for AviateAdapter {
                 uplink.send_arm(true, current_yaw);
             } else if *button == LogicalButtonId::new(DISARM_BUTTON) {
                 uplink.send_arm(false, current_yaw);
+            } else if *button == LogicalButtonId::new(FPV_TOGGLE_BUTTON) {
+                self.fpv_mode = !self.fpv_mode;
+                tracing::info!(fpv = self.fpv_mode, "flight mode toggled");
             }
         }
 
@@ -352,14 +363,23 @@ impl VehicleAdapter for AviateAdapter {
             transformed |= clamped != *value;
             sticks[usize::from(axis.as_u16().min(3))] = clamped;
         }
-        uplink.send_stick_frame(
-            sticks[usize::from(ROLL_AXIS)],
-            sticks[usize::from(PITCH_AXIS)],
-            sticks[usize::from(THROTTLE_AXIS)],
-            sticks[usize::from(YAW_AXIS)],
-            current_yaw,
-            current_pos,
-        );
+        if self.fpv_mode {
+            uplink.send_fpv_frame(
+                sticks[usize::from(ROLL_AXIS)],
+                sticks[usize::from(PITCH_AXIS)],
+                sticks[usize::from(THROTTLE_AXIS)],
+                sticks[usize::from(YAW_AXIS)],
+            );
+        } else {
+            uplink.send_stick_frame(
+                sticks[usize::from(ROLL_AXIS)],
+                sticks[usize::from(PITCH_AXIS)],
+                sticks[usize::from(THROTTLE_AXIS)],
+                sticks[usize::from(YAW_AXIS)],
+                current_yaw,
+                current_pos,
+            );
+        }
         ApplyOutcome {
             tick,
             disposition: if transformed {

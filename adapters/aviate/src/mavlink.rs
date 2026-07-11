@@ -342,5 +342,43 @@ pub fn encode_velocity_setpoint(
     frame
 }
 
+/// Encodes SET_ATTITUDE_TARGET (msg 82) commanding an absolute
+/// attitude (roll/pitch/yaw euler, radians, NED/ZYX) plus normalized
+/// collective thrust — the FPV mode uplink. Body-rate fields are
+/// masked out (type_mask 0b111): the FC's attitude loop derives its
+/// own rate commands.
+pub fn encode_attitude_setpoint(
+    seq: u8,
+    time_boot_ms: u32,
+    roll_rad: f32,
+    pitch_rad: f32,
+    yaw_rad: f32,
+    thrust: f32,
+) -> [u8; 51] {
+    const SET_ATTITUDE_TARGET_ID: u32 = 82;
+    let (sr, cr) = (roll_rad * 0.5).sin_cos();
+    let (sp, cp) = (pitch_rad * 0.5).sin_cos();
+    let (sy, cy) = (yaw_rad * 0.5).sin_cos();
+    let q = [
+        cr * cp * cy + sr * sp * sy,
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+    ];
+    let mut payload = [0u8; 39];
+    payload[0..4].copy_from_slice(&time_boot_ms.to_le_bytes());
+    for (i, w) in q.iter().enumerate() {
+        payload[4 + i * 4..8 + i * 4].copy_from_slice(&w.to_le_bytes());
+    }
+    // body rates [20..32) stay zero (masked); thrust at [32..36).
+    payload[32..36].copy_from_slice(&thrust.clamp(0.0, 1.0).to_le_bytes());
+    payload[36] = 1; // target system
+    payload[37] = 1; // target component
+    payload[38] = 0b0000_0111; // ignore body roll/pitch/yaw rate
+    let mut frame = [0u8; 51];
+    encode_frame_v2(seq, SET_ATTITUDE_TARGET_ID, &payload, 49, &mut frame);
+    frame
+}
+
 #[cfg(test)]
 mod tests;

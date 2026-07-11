@@ -16,10 +16,20 @@ use std::time::Instant;
 
 use tracing::{info, warn};
 
-use crate::mavlink::{encode_arm_command, encode_position_setpoint, encode_velocity_setpoint};
+use crate::mavlink::{
+    encode_arm_command, encode_attitude_setpoint, encode_position_setpoint,
+    encode_velocity_setpoint,
+};
 
 /// Full-stick horizontal velocity demand.
 const MAX_HORIZONTAL_MPS: f32 = 3.0;
+/// FPV mode: full-stick roll/pitch attitude demand (~35°).
+const FPV_MAX_TILT_RAD: f32 = 0.6;
+/// FPV mode: thrust at centered throttle stick. Full up commands 1.0,
+/// full down 0.30 (enough authority to descend briskly while keeping
+/// the props spinning well clear of the mixer floor).
+const FPV_HOVER_THRUST: f32 = 0.72;
+const FPV_MIN_THRUST: f32 = 0.30;
 /// Full-stick climb/descend rate demand.
 const MAX_VERTICAL_MPS: f32 = 1.5;
 /// Full-stick yaw rate demand (~52°/s). Bounded by what the X500's
@@ -123,6 +133,50 @@ impl FlightUplink {
         let frame = encode_arm_command(self.seq, arm);
         self.send(&frame);
         info!(arm, "sent arm command to FC");
+    }
+
+    /// Converts one canonical stick frame into an FPV attitude
+    /// setpoint: roll/pitch sticks command *angles* (rate-style FPV
+    /// acro is a follow-up), the yaw stick integrates a heading
+    /// setpoint exactly like camera mode, and throttle maps directly
+    /// to collective thrust around the hover point — altitude is the
+    /// pilot's axis in FPV.
+    pub fn send_fpv_frame(&mut self, roll: f32, pitch: f32, throttle: f32, yaw: f32) {
+        let now = Instant::now();
+        if let Some(quiet) = self.quiet_until {
+            if now < quiet {
+                return;
+            }
+            self.quiet_until = None;
+        }
+        if !self.airborne {
+            if throttle <= TAKEOFF_STICK {
+                return; // motors idle until the first climb input
+            }
+            self.airborne = true;
+            info!("takeoff (FPV): climb input opens the setpoint stream");
+        }
+        let dt = self
+            .last_frame
+            .map_or(0.0, |t| now.duration_since(t).as_secs_f32())
+            .clamp(0.0, MAX_DT_S);
+        self.last_frame = Some(now);
+        self.hold_pos_ned = None;
+        self.heading_sp_rad = wrap_pi(self.heading_sp_rad + yaw * MAX_YAW_RATE_RPS * dt);
+        let thrust = if throttle >= 0.0 {
+            FPV_HOVER_THRUST + throttle * (1.0 - FPV_HOVER_THRUST)
+        } else {
+            FPV_HOVER_THRUST + throttle * (FPV_HOVER_THRUST - FPV_MIN_THRUST)
+        };
+        let frame = encode_attitude_setpoint(
+            self.seq,
+            self.started.elapsed().as_millis() as u32,
+            roll * FPV_MAX_TILT_RAD,
+            pitch * FPV_MAX_TILT_RAD,
+            self.heading_sp_rad,
+            thrust,
+        );
+        self.send(&frame);
     }
 
     /// Converts one canonical stick frame (`[-1, 1]` roll/pitch/
