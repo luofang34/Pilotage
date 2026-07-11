@@ -29,6 +29,21 @@
     align-items: flex-start;
     flex-wrap: wrap;
   }
+  .stage {
+    position: relative;
+  }
+  .sim-label {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid #ffbf00;
+    color: #ffdf70;
+    padding: 0.2rem 0.4rem;
+    font: 700 0.65rem monospace;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+  }
   canvas {
     display: block;
     background: #000;
@@ -80,8 +95,14 @@
 <h1>Instrument harness — PFD / HSI from sliders</h1>
 
 <div class="stage-row">
-  <canvas id="pfd" width="480" height="360"></canvas>
-  <canvas id="hsi" width="480" height="360"></canvas>
+  <div class="stage">
+    <canvas id="pfd" width="480" height="360"></canvas>
+    <div class="sim-label">SIM / NOT FOR FLIGHT</div>
+  </div>
+  <div class="stage">
+    <canvas id="hsi" width="480" height="360"></canvas>
+    <div class="sim-label">SIM / NOT FOR FLIGHT</div>
+  </div>
 </div>
 
 <div class="controls" id="sliders"></div>
@@ -105,7 +126,16 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
 
 <script type="module">
   import { loadInstruments, eulerToQuat, PANEL } from "./instruments.js";
-  import { drawFailurePage } from "./instrument-health.js";
+  import {
+    coverInstrumentFailures,
+    createDomFaultPresenter,
+    failInstrumentSet,
+    PanelHealth,
+    REASON,
+    renderInstrumentSet,
+    startDisplayLoop,
+    tickInstrumentSet,
+  } from "./instrument-health.js";
 
   const DEG = Math.PI / 180;
   const defs = [
@@ -142,10 +172,22 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
   }
   const v = (id) => Number(inputs[id].value);
 
-  const pfd = document.getElementById("pfd").getContext("2d");
-  const hsi = document.getElementById("hsi").getContext("2d");
-  const mod = await loadInstruments("./instruments.wasm");
-  mod.setVSpeeds(40, 48, 85, 129, 163);
+  const pfdCanvas = document.getElementById("pfd");
+  const hsiCanvas = document.getElementById("hsi");
+  const pfd = pfdCanvas.getContext("2d");
+  const hsi = hsiCanvas.getContext("2d");
+  const pfdFaultPresenter = createDomFaultPresenter(pfdCanvas);
+  const hsiFaultPresenter = createDomFaultPresenter(hsiCanvas);
+  const health = {
+    [PANEL.PFD]: new PanelHealth(),
+    [PANEL.HSI]: new PanelHealth(),
+  };
+  const targets = () => [
+    [PANEL.PFD, pfd, pfdCanvas, pfdFaultPresenter],
+    [PANEL.HSI, hsi, hsiCanvas, hsiFaultPresenter],
+  ];
+  let mod = null;
+  let moduleFault = null;
 
   let freezeStart = null;
   document.getElementById("freezeAtt").addEventListener("change", (e) => {
@@ -153,51 +195,77 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
   });
 
   function frame(now) {
+    if (!mod) {
+      if (moduleFault !== null) coverInstrumentFailures(health, targets());
+      return;
+    }
     const attAge = freezeStart === null ? 16 : now - freezeStart;
     const trackRad = v("track") * DEG;
     const gs = v("gs");
-    mod.writeState({
-      attitude: {
-        quat: eulerToQuat(v("roll") * DEG, v("pitch") * DEG, v("heading") * DEG),
-        rates: [0, 0, v("yawRate") * DEG],
-        ageMs: attAge,
+    renderInstrumentSet(
+      mod,
+      health,
+      targets(),
+      {
+        attitude: {
+          quat: eulerToQuat(v("roll") * DEG, v("pitch") * DEG, v("heading") * DEG),
+          rates: [0, 0, v("yawRate") * DEG],
+          ageMs: attAge,
+        },
+        kinematics: {
+          posNed: [0, 0, -v("alt")],
+          velNed: [gs * Math.cos(trackRad), gs * Math.sin(trackRad), -v("vsi")],
+          ageMs: attAge,
+        },
+        air: {
+          iasMps: document.getElementById("noAir").checked ? null : gs * 1.06,
+          baroHpa: v("baro"),
+          ageMs: 16,
+        },
+        nav: document.getElementById("navOn").checked
+          ? {
+              source: 1,
+              courseRad: v("crs") * DEG,
+              cdiDots: v("cdi"),
+              fromto: 1,
+              vdevDots: v("vdev"),
+              distNm: v("dist"),
+              ageMs: 16,
+            }
+          : null,
+        wind: { fromRad: v("windDir") * DEG, speedMps: v("windSpd"), ageMs: 16 },
+        selections: { headingBugRad: v("hdgBug") * DEG, altitudeSelM: v("altSel") },
+        quality: Number(document.getElementById("quality").value),
       },
-      kinematics: {
-        posNed: [0, 0, -v("alt")],
-        velNed: [gs * Math.cos(trackRad), gs * Math.sin(trackRad), -v("vsi")],
-        ageMs: attAge,
-      },
-      air: {
-        iasMps: document.getElementById("noAir").checked ? null : gs * 1.06,
-        baroHpa: v("baro"),
-        ageMs: 16,
-      },
-      nav: document.getElementById("navOn").checked
-        ? {
-            source: 1,
-            courseRad: v("crs") * DEG,
-            cdiDots: v("cdi"),
-            fromto: 1,
-            vdevDots: v("vdev"),
-            distNm: v("dist"),
-            ageMs: 16,
-          }
-        : null,
-      wind: { fromRad: v("windDir") * DEG, speedMps: v("windSpd"), ageMs: 16 },
-      selections: { headingBugRad: v("hdgBug") * DEG, altitudeSelM: v("altSel") },
-      quality: Number(document.getElementById("quality").value),
-    });
-    // Every render result is honored (DISP-01): a failure covers the
-    // panel with the failure page instead of leaving the last frame.
-    for (const [ctx2d, panel] of [
-      [pfd, PANEL.PFD],
-      [hsi, PANEL.HSI],
-    ]) {
-      const result = mod.renderPanel(panel);
-      if (result.ok) result.blit(ctx2d, 480, 360);
-      else drawFailurePage(ctx2d, 480, 360, result.reason);
-    }
-    requestAnimationFrame(frame);
+      now,
+    );
   }
-  requestAnimationFrame(frame);
+
+  async function start() {
+    try {
+      const loaded = await loadInstruments("./instruments.wasm");
+      const configured = loaded.setVSpeeds(40, 48, 85, 129, 163);
+      if (!configured.ok) {
+        moduleFault = configured.reason;
+        failInstrumentSet(health, targets(), performance.now(), moduleFault);
+        return;
+      }
+      mod = loaded;
+      const now = performance.now();
+      for (const panelHealth of Object.values(health)) panelHealth.reset(now);
+    } catch (error) {
+      moduleFault = error?.reason ?? REASON.WASM_LOAD;
+      failInstrumentSet(health, targets(), performance.now(), moduleFault);
+    }
+  }
+
+  startDisplayLoop(
+    (callback) => requestAnimationFrame(callback),
+    frame,
+    (now) => failInstrumentSet(health, targets(), now, REASON.RENDER_TRAP),
+  );
+  setInterval(() => {
+    if (mod) tickInstrumentSet(health, targets(), performance.now());
+  }, 250);
+  start();
 </script>

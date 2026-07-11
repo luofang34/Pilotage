@@ -26,7 +26,16 @@ import {
   BUTTON_EDGE_PRESSED,
 } from "./wire.js";
 import { loadInstruments, PANEL } from "./instruments.js";
-import { PanelHealth, drawFailurePage, REASON } from "./instrument-health.js";
+import {
+  coverInstrumentFailures,
+  createDomFaultPresenter,
+  failInstrumentSet,
+  PanelHealth,
+  REASON,
+  renderInstrumentSet,
+  startDisplayLoop,
+  tickInstrumentSet,
+} from "./instrument-health.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const MOTION_SCOPE = "vehicle.motion";
@@ -59,6 +68,8 @@ const ctx = els.canvas.getContext("2d");
 const chaseCtx = els.chaseCanvas.getContext("2d");
 const pfdCtx = els.pfd.getContext("2d");
 const hsiCtx = els.hsi.getContext("2d");
+const pfdFaultPresenter = createDomFaultPresenter(els.pfd);
+const hsiFaultPresenter = createDomFaultPresenter(els.hsi);
 
 /** Session-scoped mutable state the connect flow and background loops share. */
 const state = {
@@ -98,11 +109,11 @@ const instruments = {
 // liveness deadline and covers the stale frame.
 const WATCHDOG_INTERVAL_MS = 250;
 
-/** The two instrument paint targets: [panel, 2d-context, canvas element]. */
+/** The two instrument paint targets and their independent fault surfaces. */
 function instrumentTargets() {
   return [
-    [PANEL.PFD, pfdCtx, els.pfd],
-    [PANEL.HSI, hsiCtx, els.hsi],
+    [PANEL.PFD, pfdCtx, els.pfd, pfdFaultPresenter],
+    [PANEL.HSI, hsiCtx, els.hsi, hsiFaultPresenter],
   ];
 }
 
@@ -739,15 +750,13 @@ function renderInstruments() {
     // the failure page. While still loading there is no prior imagery to
     // cover, so the canvases stay blank.
     if (instruments.moduleFault !== null) {
-      for (const [, ctx2d, canvas] of instrumentTargets()) {
-        drawFailurePage(ctx2d, canvas.width, canvas.height, instruments.moduleFault);
-      }
+      coverInstrumentFailures(instruments.health, instrumentTargets());
     }
     return;
   }
   const a = instruments.latest;
   const ageMs = a ? performance.now() - instruments.receivedAtMs : NaN;
-  mod.writeState({
+  const panelState = {
     attitude: a ? { quat: a.quat, rates: a.rates, ageMs } : null,
     kinematics: a ? { posNed: a.posNed, velNed: a.velNed, ageMs } : null,
     air: null, // no airspeed/baro sensor on Aviate's wire yet (ADR-0018): honest Missing.
@@ -763,20 +772,9 @@ function renderInstruments() {
           velocity: !!(a.validFlags & 8),
         }
       : {},
-  });
+  };
   const nowMs = performance.now();
-  for (const [panel, ctx2d, canvas] of instrumentTargets()) {
-    const health = instruments.health[panel];
-    const result = mod.renderPanel(panel);
-    const display = result.ok
-      ? health.reportSuccess(nowMs, result.generation)
-      : health.reportFailure(nowMs, result.reason);
-    if (display.showFailure) {
-      drawFailurePage(ctx2d, canvas.width, canvas.height, display.reason);
-    } else {
-      result.blit(ctx2d, canvas.width, canvas.height);
-    }
-  }
+  renderInstrumentSet(mod, instruments.health, instrumentTargets(), panelState, nowMs);
 }
 
 /** Liveness check on its own timer so a stalled render loop still gets
@@ -785,21 +783,21 @@ function renderInstruments() {
  * to cover). */
 function watchdogTick() {
   if (!instruments.mod) return;
-  const nowMs = performance.now();
-  for (const [panel, ctx2d, canvas] of instrumentTargets()) {
-    const display = instruments.health[panel].tick(nowMs);
-    if (display.showFailure) {
-      drawFailurePage(ctx2d, canvas.width, canvas.height, display.reason);
-    }
-  }
+  tickInstrumentSet(instruments.health, instrumentTargets(), performance.now());
 }
 
 async function startInstruments() {
-  const loop = () => {
-    renderInstruments();
-    requestAnimationFrame(loop);
-  };
-  requestAnimationFrame(loop);
+  startDisplayLoop(
+    (callback) => requestAnimationFrame(callback),
+    () => renderInstruments(),
+    () =>
+      failInstrumentSet(
+        instruments.health,
+        instrumentTargets(),
+        performance.now(),
+        REASON.RENDER_TRAP,
+      ),
+  );
   try {
     instruments.mod = await loadInstruments("./instruments.wasm");
     const nowMs = performance.now();
@@ -808,6 +806,12 @@ async function startInstruments() {
     log("instrument panels ready (wasm loaded)");
   } catch (error) {
     instruments.moduleFault = error?.reason ?? REASON.WASM_LOAD;
+    failInstrumentSet(
+      instruments.health,
+      instrumentTargets(),
+      performance.now(),
+      instruments.moduleFault,
+    );
     log(`instrument panels unavailable (D-${instruments.moduleFault}): ${error} (run scripts/build-web-instruments.sh)`);
   }
 }

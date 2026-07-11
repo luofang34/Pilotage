@@ -3,8 +3,8 @@
 //
 // A renderer or display-pipeline failure must never leave a valid-looking
 // last successful image visible. Every failure carries a stable reason
-// code; the failure page depends on nothing but raw Canvas2D calls, so it
-// stays paintable when scene generation itself is broken.
+// code; an independent DOM surface contains Canvas2D failures while the
+// canvas failure page remains available when scene generation is broken.
 //
 // SIM / NOT FOR FLIGHT: this watchdog runs in the browser's own scheduling
 // domains (requestAnimationFrame + setInterval) and is simulator-only. The
@@ -34,6 +34,7 @@ export const REASON = Object.freeze({
   SCENE_FRAMING: 104,
   PAINT_FAILED: 105,
   LIVENESS: 106,
+  STATE_WRITE_FAILED: 107,
 });
 
 // A typed module-level fault raised by loadInstruments so callers can show
@@ -44,6 +45,42 @@ export class InstrumentFault extends Error {
     this.name = "InstrumentFault";
     this.reason = reason;
   }
+}
+
+export function createDomFaultPresenter(canvas) {
+  const parent = canvas.parentElement;
+  if (!parent) throw new Error("instrument canvas has no fault-presenter parent");
+  const element = document.createElement("div");
+  element.setAttribute("role", "alert");
+  element.setAttribute("aria-live", "assertive");
+  element.setAttribute("aria-hidden", "true");
+  Object.assign(element.style, {
+    position: "absolute",
+    inset: "0",
+    zIndex: "10",
+    display: "none",
+    placeContent: "center",
+    boxSizing: "border-box",
+    border: "4px solid #f00",
+    background: "#000",
+    color: "#f00",
+    font: "bold 24px system-ui, sans-serif",
+    textAlign: "center",
+    whiteSpace: "pre-line",
+    pointerEvents: "none",
+  });
+  parent.insertBefore(element, canvas.nextSibling);
+  return {
+    show(reason) {
+      element.textContent = `DISPLAY FAIL\nD-${reason}\nSIM / NOT FOR FLIGHT`;
+      element.style.display = "grid";
+      element.setAttribute("aria-hidden", "false");
+    },
+    hide() {
+      element.style.display = "none";
+      element.setAttribute("aria-hidden", "true");
+    },
+  };
 }
 
 // Per-panel display health: latches on any failure, recovers only after a
@@ -139,10 +176,9 @@ export class PanelHealth {
   }
 }
 
-// Paints the backend-owned failure page: covers ALL previous imagery (the
-// full target, letterbox included) and shows an unmistakable DISPLAY FAIL
-// with the stable diagnostic code. Uses only direct canvas calls — no
-// scene generation, no WASM — so it works when those are the failure.
+// Paints the canvas failure page without scene generation or WASM. An
+// independent fault presenter remains necessary because the Canvas2D
+// backend itself can be the failed component.
 // Distinct from invalid aircraft data, which renders as in-scene red-X /
 // flags through the normal pipeline.
 export function drawFailurePage(ctx, width, height, reason) {
@@ -159,4 +195,136 @@ export function drawFailurePage(ctx, width, height, reason) {
   ctx.fillText("DISPLAY FAIL", width / 2, height / 2 - 14);
   ctx.font = "bold 16px system-ui, sans-serif";
   ctx.fillText(`D-${reason}`, width / 2, height / 2 + 16);
+}
+
+function showIndependentFailure(presenter, reason) {
+  try {
+    presenter?.show(reason);
+    return presenter != null;
+  } catch {
+    return false;
+  }
+}
+
+function hideIndependentFailure(presenter) {
+  try {
+    presenter?.hide();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function coverFailure(ctx, width, height, presenter, reason) {
+  const independentlyCovered = showIndependentFailure(presenter, reason);
+  let canvasCovered = false;
+  try {
+    drawFailurePage(ctx, width, height, reason);
+    canvasCovered = true;
+  } catch {
+    // The independent presenter is the containment path for Canvas failure.
+  }
+  return independentlyCovered || canvasCovered;
+}
+
+function failTarget(health, target, nowMs, reason) {
+  const [panel, ctx, canvas, presenter] = target;
+  const display = health[panel].reportFailure(nowMs, reason);
+  return {
+    panel,
+    ok: false,
+    reason,
+    covered: coverFailure(ctx, canvas.width, canvas.height, presenter, display.reason),
+  };
+}
+
+export function failInstrumentSet(health, targets, nowMs, reason) {
+  return targets.map((target) => failTarget(health, target, nowMs, reason));
+}
+
+export function coverInstrumentFailures(health, targets) {
+  return targets.map(([panel, ctx, canvas, presenter]) => {
+    const display = health[panel].display();
+    return {
+      panel,
+      showFailure: display.showFailure,
+      covered:
+        display.showFailure &&
+        coverFailure(ctx, canvas.width, canvas.height, presenter, display.reason),
+    };
+  });
+}
+
+export function renderInstrumentSet(module, health, targets, state, nowMs) {
+  let stateResult;
+  try {
+    stateResult = module.writeState(state);
+  } catch {
+    stateResult = { ok: false, reason: REASON.STATE_WRITE_FAILED };
+  }
+  if (stateResult?.ok !== true) {
+    return failInstrumentSet(
+      health,
+      targets,
+      nowMs,
+      stateResult?.reason ?? REASON.STATE_WRITE_FAILED,
+    );
+  }
+
+  const outcomes = [];
+  for (const target of targets) {
+    const [panel, ctx, canvas, presenter] = target;
+    let result;
+    try {
+      result = module.renderPanel(panel, ctx, canvas.width, canvas.height);
+    } catch {
+      result = { ok: false, reason: REASON.RENDER_TRAP };
+    }
+    if (result?.ok !== true) {
+      outcomes.push(failTarget(health, target, nowMs, result?.reason ?? REASON.RENDER_TRAP));
+      continue;
+    }
+    const display = health[panel].reportSuccess(nowMs, result.generation);
+    outcomes.push({
+      panel,
+      ok: true,
+      generation: result.generation,
+      showFailure: display.showFailure,
+      covered:
+        display.showFailure &&
+        coverFailure(ctx, canvas.width, canvas.height, presenter, display.reason),
+      faultCleared: !display.showFailure && hideIndependentFailure(presenter),
+    });
+  }
+  return outcomes;
+}
+
+export function tickInstrumentSet(health, targets, nowMs) {
+  return targets.map(([panel, ctx, canvas, presenter]) => {
+    const display = health[panel].tick(nowMs);
+    return {
+      panel,
+      showFailure: display.showFailure,
+      covered:
+        display.showFailure &&
+        coverFailure(ctx, canvas.width, canvas.height, presenter, display.reason),
+    };
+  });
+}
+
+export function startDisplayLoop(requestFrame, renderFrame, reportFailure) {
+  const loop = (nowMs) => {
+    try {
+      renderFrame(nowMs);
+    } catch {
+      try {
+        reportFailure(nowMs);
+      } catch {
+        // Frame scheduling must survive failure-reporting faults.
+      }
+    } finally {
+      requestFrame(loop);
+    }
+  };
+  requestFrame(loop);
 }

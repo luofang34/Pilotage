@@ -15,9 +15,20 @@ import {
   LOGICAL_H,
   LOGICAL_W,
   PANEL,
+  STATE_ABI_SIZE,
+  STATE_ABI_SIZE_BY_VERSION,
+  STATE_ABI_VERSION,
+  loadInstruments,
   validateSceneStructure,
 } from "./instruments.js";
-import { PanelHealth, REASON, drawFailurePage } from "./instrument-health.js";
+import {
+  PanelHealth,
+  REASON,
+  createDomFaultPresenter,
+  drawFailurePage,
+  renderInstrumentSet,
+  startDisplayLoop,
+} from "./instrument-health.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -65,20 +76,59 @@ class RecordingCtx {
   }
 }
 
-function recordingCanvas() {
+function recordingCanvas(width = 0, height = 0) {
   const ctx = new RecordingCtx();
-  return { width: 0, height: 0, getContext: () => ctx, ctx };
+  return { width, height, getContext: () => ctx, ctx };
+}
+
+function deadCtx() {
+  return new Proxy(
+    {},
+    {
+      get() {
+        return () => {
+          throw new Error("visible canvas failed");
+        };
+      },
+      set() {
+        throw new Error("visible canvas failed");
+      },
+    },
+  );
+}
+
+function recordingPresenter() {
+  return {
+    active: false,
+    reason: null,
+    shows: 0,
+    hides: 0,
+    show(reason) {
+      this.active = true;
+      this.reason = reason;
+      this.shows += 1;
+    },
+    hide() {
+      this.active = false;
+      this.hides += 1;
+    },
+  };
 }
 
 // A fake WASM export surface with programmable behavior.
-function fakeExports({ status = 0, sceneBytes = new Uint8Array([1]), generation = () => 1 } = {}) {
+function fakeExports({
+  status = 0,
+  sceneBytes = new Uint8Array([1]),
+  generation = () => 1,
+  overrides = {},
+} = {}) {
   const buffer = new ArrayBuffer(65536);
   new Uint8Array(buffer).set(sceneBytes, 1024);
-  return {
-    abi_version: () => 2,
+  const exports = {
+    abi_version: () => STATE_ABI_VERSION,
     init: () => 1,
     state_ptr: () => 0,
-    state_len: () => 128,
+    state_len: () => STATE_ABI_SIZE,
     scene_ptr: () => 1024,
     scene_len: () => sceneBytes.length,
     render_status: typeof status === "function" ? status : () => status,
@@ -86,6 +136,25 @@ function fakeExports({ status = 0, sceneBytes = new Uint8Array([1]), generation 
     set_v_speeds: () => {},
     memory: { buffer },
   };
+  return Object.assign(exports, overrides);
+}
+
+function injectedLoader(exports) {
+  return {
+    fetch: async () => ({}),
+    instantiateStreaming: async () => ({ instance: { exports } }),
+    instantiate: async () => ({ instance: { exports } }),
+    createCanvas: recordingCanvas,
+  };
+}
+
+async function loadFailureReason(exports) {
+  try {
+    await loadInstruments("injected.wasm", injectedLoader(exports));
+    return null;
+  } catch (error) {
+    return error?.reason ?? null;
+  }
 }
 
 // ---- scene byte builders ---------------------------------------------------
@@ -144,6 +213,92 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 // ---- transactional renderPanel ---------------------------------------------
 
 {
+  check(
+    "state ABI versions have exact independent sizes",
+    STATE_ABI_SIZE_BY_VERSION[1] === 120 && STATE_ABI_SIZE_BY_VERSION[2] === 128,
+  );
+  check(
+    "load rejects a non-function export as ABI_MISMATCH",
+    (await loadFailureReason(fakeExports({ overrides: { render_status: 7 } }))) ===
+      REASON.ABI_MISMATCH,
+  );
+  check(
+    "load rejects an invalid memory export as ABI_MISMATCH",
+    (await loadFailureReason(fakeExports({ overrides: { memory: null } }))) ===
+      REASON.ABI_MISMATCH,
+  );
+  check(
+    "load rejects an invalid ABI version",
+    (await loadFailureReason(fakeExports({ overrides: { abi_version: () => 99 } }))) ===
+      REASON.ABI_MISMATCH,
+  );
+  check(
+    "ABI query trap has a stable reason",
+    (await loadFailureReason(
+      fakeExports({
+        overrides: {
+          abi_version: () => {
+            throw new Error("ABI trap");
+          },
+        },
+      }),
+    )) === REASON.ABI_MISMATCH,
+  );
+  check(
+    "init trap has a stable reason",
+    (await loadFailureReason(
+      fakeExports({
+        overrides: {
+          init: () => {
+            throw new Error("init trap");
+          },
+        },
+      }),
+    )) === REASON.INIT_FAILED,
+  );
+  check(
+    "init rejection has a stable reason",
+    (await loadFailureReason(fakeExports({ overrides: { init: () => 0 } }))) ===
+      REASON.INIT_FAILED,
+  );
+  check(
+    "state length trap is ABI_MISMATCH",
+    (await loadFailureReason(
+      fakeExports({
+        overrides: {
+          state_len: () => {
+            throw new Error("state length trap");
+          },
+        },
+      }),
+    )) === REASON.ABI_MISMATCH,
+  );
+  check(
+    `ABI v${STATE_ABI_VERSION} requires exactly ${STATE_ABI_SIZE} state bytes`,
+    (await loadFailureReason(
+      fakeExports({ overrides: { state_len: () => (STATE_ABI_SIZE === 120 ? 128 : 120) } }),
+    )) ===
+      REASON.ABI_MISMATCH,
+  );
+  check(
+    `load accepts the exact ABI v${STATE_ABI_VERSION} export surface`,
+    (await loadInstruments("injected.wasm", injectedLoader(fakeExports()))) instanceof
+      InstrumentModule,
+  );
+  let fetchReason = null;
+  try {
+    await loadInstruments("missing.wasm", {
+      fetch: async () => {
+        throw new Error("fetch failed");
+      },
+    });
+  } catch (error) {
+    fetchReason = error?.reason ?? null;
+  }
+  check("fetch failure is typed WASM_LOAD", fetchReason === REASON.WASM_LOAD);
+}
+
+{
   const { bytes } = buildScene();
   const backs = [];
   const mod = new InstrumentModule(fakeExports({ sceneBytes: bytes, generation: () => 7 }), {
@@ -153,7 +308,8 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       return c;
     },
   });
-  const result = mod.renderPanel(PANEL.PFD);
+  const visible = new RecordingCtx();
+  const result = mod.renderPanel(PANEL.PFD, visible, 960, 720);
   check("valid frame renders ok with the wasm generation", result.ok && result.generation === 7);
   check("frame painted to the back buffer, not a visible target", backs.length === 1);
   const backOps = backs[0].ctx.calls("fillRect");
@@ -161,10 +317,8 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "back buffer cleared to full logical size before painting",
     backOps.length >= 2 && backOps[0].args.join(",") === `0,0,${LOGICAL_W},${LOGICAL_H}`,
   );
-  const visible = new RecordingCtx();
-  result.blit(visible, 960, 720);
   check(
-    "blit covers the whole visible target before the frame",
+    "visible commit covers the whole target before the frame",
     visible.log[0].op === "setTransform" &&
       visible.calls("fillRect")[0].args.join(",") === "0,0,960,720" &&
       visible.calls("drawImage").length === 1,
@@ -179,12 +333,14 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       return recordingCanvas();
     },
   });
-  const result = mod.renderPanel(PANEL.PFD);
+  const visible = new RecordingCtx();
+  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
   check(
     "wasm failure code passes through untouched",
     !result.ok && result.reason === REASON.SCENE_BUFFER_FULL,
   );
   check("no back buffer touched on wasm failure", created === 0);
+  check("visible target untouched on wasm failure", visible.log.length === 0);
 }
 
 {
@@ -196,7 +352,10 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     }),
     { createCanvas: recordingCanvas },
   );
-  check("a trapping render call is RENDER_TRAP", mod.renderPanel(0).reason === REASON.RENDER_TRAP);
+  check(
+    "a trapping render call is RENDER_TRAP",
+    mod.renderPanel(0, new RecordingCtx(), 480, 360).reason === REASON.RENDER_TRAP,
+  );
 }
 
 {
@@ -209,7 +368,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       return recordingCanvas();
     },
   });
-  const result = mod.renderPanel(0);
+  const result = mod.renderPanel(0, new RecordingCtx(), 480, 360);
   check("malformed scene is SCENE_FRAMING", !result.ok && result.reason === REASON.SCENE_FRAMING);
   check("malformed scene never reaches a canvas", created === 0);
 }
@@ -225,8 +384,208 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   const mod = new InstrumentModule(fakeExports({ sceneBytes: bytes }), {
     createCanvas: () => throwing,
   });
-  const result = mod.renderPanel(0);
+  const result = mod.renderPanel(0, new RecordingCtx(), 480, 360);
   check("backend paint fault is PAINT_FAILED", !result.ok && result.reason === REASON.PAINT_FAILED);
+}
+
+{
+  const { bytes } = buildScene();
+  for (const [name, overrides] of [
+    [
+      "scene_len trap",
+      {
+        scene_len: () => {
+          throw new Error("scene length trap");
+        },
+      },
+    ],
+    [
+      "render_generation trap",
+      {
+        render_generation: () => {
+          throw new Error("generation trap");
+        },
+      },
+    ],
+  ]) {
+    const mod = new InstrumentModule(fakeExports({ sceneBytes: bytes, overrides }), {
+      createCanvas: recordingCanvas,
+    });
+    const result = mod.renderPanel(0, new RecordingCtx(), 480, 360);
+    check(`${name} is a typed RENDER_TRAP`, !result.ok && result.reason === REASON.RENDER_TRAP);
+  }
+}
+
+{
+  const mod = new InstrumentModule(
+    fakeExports({
+      overrides: {
+        state_len: () => {
+          throw new Error("runtime state length trap");
+        },
+      },
+    }),
+    { createCanvas: recordingCanvas },
+  );
+  const result = mod.writeState({});
+  check(
+    "runtime state write trap is typed",
+    !result.ok && result.reason === REASON.STATE_WRITE_FAILED,
+  );
+}
+
+{
+  const { bytes } = buildScene();
+  let generation = 0;
+  const mod = new InstrumentModule(
+    fakeExports({
+      sceneBytes: bytes,
+      generation: () => {
+        generation += 1;
+        return generation;
+      },
+    }),
+    { createCanvas: recordingCanvas },
+  );
+  const canvas = recordingCanvas(480, 360);
+  const presenter = recordingPresenter();
+  const health = { [PANEL.PFD]: new PanelHealth({}, 0) };
+  const target = [PANEL.PFD, canvas.ctx, canvas, presenter];
+  renderInstrumentSet(mod, health, [target], {}, 1);
+  const hadFlightImage = canvas.ctx.calls("drawImage").length === 1;
+  canvas.ctx.setTransform = () => {
+    throw new Error("visible backend lost");
+  };
+  const [failure] = renderInstrumentSet(mod, health, [target], {}, 2);
+  check(
+    "a pre-existing flight image is covered when the visible backend fails",
+    hadFlightImage &&
+      failure.reason === REASON.PAINT_FAILED &&
+      failure.covered &&
+      presenter.active,
+  );
+}
+
+{
+  const { bytes } = buildScene();
+  const mod = new InstrumentModule(
+    fakeExports({ sceneBytes: bytes, generation: (panel) => panel + 1 }),
+    { createCanvas: recordingCanvas },
+  );
+  const deadCanvas = { width: 480, height: 360 };
+  const liveCanvas = recordingCanvas(480, 360);
+  liveCanvas.ctx.log.push({ op: "existingFlightImage", args: [] });
+  const deadPresenter = recordingPresenter();
+  const livePresenter = recordingPresenter();
+  const health = {
+    [PANEL.PFD]: new PanelHealth({}, 0),
+    [PANEL.HSI]: new PanelHealth({}, 0),
+  };
+  const outcomes = renderInstrumentSet(
+    mod,
+    health,
+    [
+      [PANEL.PFD, deadCtx(), deadCanvas, deadPresenter],
+      [PANEL.HSI, liveCanvas.ctx, liveCanvas, livePresenter],
+    ],
+    {},
+    10,
+  );
+  check(
+    "dead visible Canvas activates the independent fault surface",
+    outcomes[0].reason === REASON.PAINT_FAILED && outcomes[0].covered && deadPresenter.active,
+  );
+  check(
+    "visible commit failure cannot receive health success",
+    health[PANEL.PFD].snapshot().latched && health[PANEL.PFD].snapshot().lastGeneration === null,
+  );
+  check(
+    "one panel Canvas failure does not block its peer",
+    outcomes[1].ok &&
+      liveCanvas.ctx.calls("drawImage").length === 1 &&
+      health[PANEL.HSI].display().showFailure === false,
+  );
+}
+
+{
+  let renderCalls = 0;
+  const brokenWriter = {
+    writeState() {
+      throw new Error("shared state write failed");
+    },
+    renderPanel() {
+      renderCalls += 1;
+      return { ok: true, generation: 1 };
+    },
+  };
+  const canvases = [recordingCanvas(480, 360), recordingCanvas(480, 360)];
+  const presenters = [recordingPresenter(), recordingPresenter()];
+  const health = {
+    [PANEL.PFD]: new PanelHealth({}, 0),
+    [PANEL.HSI]: new PanelHealth({}, 0),
+  };
+  const outcomes = renderInstrumentSet(
+    brokenWriter,
+    health,
+    [
+      [PANEL.PFD, canvases[0].ctx, canvases[0], presenters[0]],
+      [PANEL.HSI, canvases[1].ctx, canvases[1], presenters[1]],
+    ],
+    {},
+    10,
+  );
+  check(
+    "shared write fault latches and covers both panels",
+    outcomes.every((outcome) => outcome.reason === REASON.STATE_WRITE_FAILED && outcome.covered) &&
+      presenters.every((presenter) => presenter.active),
+  );
+  check("shared write fault suppresses panel rendering", renderCalls === 0);
+}
+
+{
+  let generation = 0;
+  const mod = new InstrumentModule(
+    fakeExports({
+      generation: () => {
+        generation += 1;
+        return generation;
+      },
+    }),
+    { createCanvas: recordingCanvas },
+  );
+  const canvas = recordingCanvas(480, 360);
+  const presenter = recordingPresenter();
+  const health = { [PANEL.PFD]: new PanelHealth({ recoveryFrames: 2 }, 0) };
+  health[PANEL.PFD].reportFailure(1, REASON.PAINT_FAILED);
+  const target = [PANEL.PFD, canvas.ctx, canvas, presenter];
+  renderInstrumentSet(mod, health, [target], {}, 2);
+  check("one committed frame leaves the recovery overlay latched", presenter.active);
+  renderInstrumentSet(mod, health, [target], {}, 3);
+  check(
+    "the independent overlay clears after sustained committed frames",
+    !presenter.active && health[PANEL.PFD].display().showFailure === false,
+  );
+}
+
+{
+  const queued = [];
+  let reports = 0;
+  startDisplayLoop(
+    (callback) => queued.push(callback),
+    () => {
+      throw new Error("render loop fault");
+    },
+    () => {
+      reports += 1;
+      throw new Error("fault presenter fault");
+    },
+  );
+  const firstFrame = queued.shift();
+  firstFrame(10);
+  check(
+    "rAF is rescheduled after render and fault-reporting exceptions",
+    reports === 1 && queued.length === 1,
+  );
 }
 
 // ---- failure latch, recovery, liveness (injected clock) ---------------------
@@ -299,6 +658,50 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 // ---- failure page ------------------------------------------------------------
 
 {
+  const attributes = new Map();
+  const element = {
+    style: {},
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+    textContent: "",
+  };
+  let inserted = null;
+  const canvas = {
+    nextSibling: null,
+    parentElement: {
+      insertBefore(value) {
+        inserted = value;
+      },
+    },
+  };
+  const originalDocument = globalThis.document;
+  globalThis.document = { createElement: () => element };
+  try {
+    const presenter = createDomFaultPresenter(canvas);
+    presenter.show(REASON.PAINT_FAILED);
+    check(
+      "DOM fault presenter is an independent full-cover surface",
+      inserted === element &&
+        element.style.position === "absolute" &&
+        element.style.inset === "0" &&
+        element.style.display === "grid" &&
+        element.textContent.includes("DISPLAY FAIL") &&
+        element.textContent.includes("SIM / NOT FOR FLIGHT") &&
+        attributes.get("aria-hidden") === "false",
+    );
+    presenter.hide();
+    check(
+      "DOM fault presenter hides only on explicit recovery",
+      element.style.display === "none" && attributes.get("aria-hidden") === "true",
+    );
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+}
+
+{
   const ctx = new RecordingCtx();
   drawFailurePage(ctx, 480, 360, REASON.LIVENESS);
   check(
@@ -318,17 +721,19 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 {
   const wasmUrl = new URL("./instruments.wasm", import.meta.url);
   let exports = null;
+  let mod = null;
   try {
     const { instance } = await WebAssembly.instantiate(readFileSync(wasmUrl), {});
     exports = instance.exports;
+    mod = await loadInstruments("real.wasm", injectedLoader(exports));
   } catch (error) {
     check(`instruments.wasm loads (build it: scripts/build-web-instruments.sh) — ${error}`, false);
   }
-  if (exports) {
+  if (exports && mod) {
     for (const name of ["render_status", "render_generation", "scene_len"]) {
       check(`wasm exports ${name}`, typeof exports[name] === "function");
     }
-    check("wasm init succeeds", exports.init() === 1);
+    check("real wasm passes load, ABI, init, and exact-size validation", mod instanceof InstrumentModule);
 
     // The zeroed state block is a version-0 decode failure — a typed
     // code, not a silent zero-length scene.
@@ -336,8 +741,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     check("failed attempt does not advance the generation", exports.render_generation(0) === 0);
     check("unknown panel is INVALID_PANEL", exports.render_status(99) === REASON.INVALID_PANEL);
 
-    const mod = new InstrumentModule(exports, { createCanvas: recordingCanvas });
-    mod.writeState({
+    const writeResult = mod.writeState({
       attitude: { quat: { w: 1, x: 0, y: 0, z: 0 }, rates: [0, 0, 0], ageMs: 16 },
       kinematics: { posNed: [0, 0, -100], velNed: [10, 0, 0], ageMs: 16 },
       air: null,
@@ -347,8 +751,9 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       quality: 0,
       valid: { attitude: true, rates: true, position: true, velocity: true },
     });
+    check("real wasm state write succeeds", writeResult.ok === true);
     for (const panel of [PANEL.PFD, PANEL.HSI]) {
-      const result = mod.renderPanel(panel);
+      const result = mod.renderPanel(panel, new RecordingCtx(), 480, 360);
       check(`panel ${panel} renders and validates end to end`, result.ok === true);
       check(`panel ${panel} generation advanced`, exports.render_generation(panel) === 1);
     }
