@@ -475,6 +475,14 @@ export function interpretScene(view, ctx) {
         ctx.rect(f(0), f(1), f(2), f(3));
         ctx.clip();
         break;
+      case 0x50:
+      case 0x51:
+        // Layer markers: part of the known vocabulary, painted as
+        // no-ops. Z-order and layer structure are enforced by the
+        // renderer before commit, and the embedded save/restore
+        // envelope carries the state isolation. Counting them as
+        // unknown would permanently poison the version-skew diagnostic.
+        break;
       default:
         unknown += 1;
         break;

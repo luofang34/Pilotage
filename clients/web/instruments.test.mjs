@@ -19,6 +19,7 @@ import {
   STATE_ABI_SIZE_BY_VERSION,
   STATE_ABI_VERSION,
   decodeRenderResult,
+  interpretScene,
   loadInstruments,
   validateSceneStructure,
 } from "./instruments.js";
@@ -203,6 +204,33 @@ function buildScene() {
 }
 
 const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+// ---- layer markers are known vocabulary ------------------------------------
+
+{
+  const layered = Uint8Array.from([
+    1,
+    ...cmd(0x50, [0]),
+    ...cmd(0x01, []),
+    ...cmd(0x23, [1, ...f32(0), ...f32(0), ...f32(4), ...f32(4)]),
+    ...cmd(0x02, []),
+    ...cmd(0x51, [0]),
+  ]);
+  const ctx = new RecordingCtx();
+  check(
+    "layer markers paint as known no-ops, not unknown opcodes",
+    interpretScene(view(layered), ctx) === 0,
+  );
+  check(
+    "marker envelope still paints its commands",
+    ctx.calls("fillRect").length === 1,
+  );
+  const trulyUnknown = Uint8Array.from([1, ...cmd(0x7f, [])]);
+  check(
+    "a genuinely unknown opcode still counts",
+    interpretScene(view(trulyUnknown), new RecordingCtx()) === 1,
+  );
+}
 
 // ---- scene framing validation ----------------------------------------------
 
