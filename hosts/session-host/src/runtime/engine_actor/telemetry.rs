@@ -43,6 +43,7 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
         sequence: stamp.sequence,
         acquired_at_ns: stamp.acquired_at_ns,
         clock: clock as i32,
+        source_incarnation: stamp.source_incarnation.into_bytes().to_vec(),
     }
 }
 

@@ -36,7 +36,7 @@ import {
   startDisplayLoop,
   tickInstrumentSet,
 } from "./instrument-health.js";
-import { AvionicsIngress } from "./telemetry-ingress.js";
+import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -95,16 +95,24 @@ const state = {
 
 // Ingestion accepts only source advancement for the selected vehicle. Drawing
 // remains on requestAnimationFrame, decoupled from telemetry publication.
-// Each panel latches display failures independently (DISP-01); a fault in
-// the shared wasm backend (load/ABI/init) fails both.
+// Each panel latches display failures independently; a fault in the shared
+// wasm backend (load/ABI/init) fails both.
+function newSimulatorAvionicsIngress() {
+  return new AvionicsIngress({
+    vehicleId: VEHICLE_ID,
+    sourceId: INSTRUMENT_SOURCE_ID,
+    // SIM-only policy permits a bounded number of unseen attachment tokens.
+    // Aircraft profiles pin a source-issued incarnation at authenticated
+    // bootstrap and do not infer transitions from telemetry.
+    incarnationPolicy: INCARNATION_POLICY.SIM_ACCEPT_UNSEEN,
+    maximumSkewNanos: SIM_COHERENCE_LIMIT_NS,
+  });
+}
+
 const instruments = {
   mod: null,
   moduleFault: null,
-  ingress: new AvionicsIngress({
-    vehicleId: VEHICLE_ID,
-    sourceId: INSTRUMENT_SOURCE_ID,
-    maximumSkewNanos: SIM_COHERENCE_LIMIT_NS,
-  }),
+  ingress: newSimulatorAvionicsIngress(),
   health: {
     [PANEL.PFD]: new PanelHealth(),
     [PANEL.HSI]: new PanelHealth(),
@@ -188,6 +196,10 @@ async function connect() {
   await sendClientHello(writer);
   await runBootstrapReader(reader, writer);
 
+  // A negotiated transport session is the lifecycle boundary that replaces
+  // all ordering history from a prior host process. Cached datagrams cannot
+  // cross this boundary because the old transport has already closed.
+  instruments.ingress = newSimulatorAvionicsIngress();
   state.connected = true;
   acceptIncomingUniStreams(transport);
   readTelemetryDatagrams(transport);

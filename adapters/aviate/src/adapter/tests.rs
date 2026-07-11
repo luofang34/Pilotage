@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pilotage_adapter_api::{
-    Disposition, MeasurementClock, MeasurementStamp, RejectReason, VehicleAdapter,
+    Disposition, MeasurementClock, MeasurementStamp, RejectReason, SourceIncarnation,
+    VehicleAdapter,
 };
 use pilotage_protocol::VehicleId;
 
@@ -16,6 +17,7 @@ fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LatestAviate>> 
     let now = Instant::now();
     let attitude_stamp = MeasurementStamp {
         source_id: 1,
+        source_incarnation: SourceIncarnation::new([1; 16]),
         source_epoch: 1,
         sequence: 10,
         acquired_at_ns: 5_000_000_000,
@@ -92,6 +94,23 @@ fn stale_attitude_is_withheld_but_kinematics_still_flow() {
         Some(5)
     );
     assert_eq!(avionics.valid_flags, 0b1100);
+}
+
+#[test]
+fn stale_kinematics_is_withheld_but_attitude_still_flows() {
+    let mut adapter = AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with(Duration::ZERO, Duration::from_secs(10)),
+    );
+    let batch = adapter.sample_telemetry();
+    assert_eq!(batch.samples.len(), 1);
+    let avionics = batch.samples[0].avionics.expect("attitude attached");
+    assert_eq!(
+        avionics.attitude_stamp.map(|stamp| stamp.sequence),
+        Some(10)
+    );
+    assert!(avionics.kinematics_stamp.is_none());
+    assert_eq!(avionics.valid_flags, 0b0011);
 }
 
 #[test]

@@ -1,13 +1,27 @@
 import assert from "node:assert/strict";
 
-import { AvionicsIngress, COHERENCE, serialIsNewer } from "./telemetry-ingress.js";
+import {
+  AvionicsIngress,
+  COHERENCE,
+  INCARNATION_POLICY,
+  serialIsNewer,
+} from "./telemetry-ingress.js";
 
 const VEHICLE = 1n;
 const SOURCE = 7n;
 const CLOCK = 1;
+const INCARNATION_A = "a5".repeat(16);
+const INCARNATION_B = "5a".repeat(16);
+const INCARNATION_C = "3c".repeat(16);
 
-function stamp(sequence, acquiredAtNanos, sourceEpoch = 1, sourceId = SOURCE) {
-  return { sourceId, sourceEpoch, sequence, acquiredAtNanos, clock: CLOCK };
+function stamp(
+  sequence,
+  acquiredAtNanos,
+  sourceEpoch = 1,
+  sourceId = SOURCE,
+  sourceIncarnation = INCARNATION_A,
+) {
+  return { sourceId, sourceIncarnation, sourceEpoch, sequence, acquiredAtNanos, clock: CLOCK };
 }
 
 function avionics(attitudeStamp, kinematicsStamp, value = 1) {
@@ -73,6 +87,12 @@ function testSequenceAndEpochWrap() {
   assert.equal(gate.diagnostics().sourceResets, 1);
   assert.equal(gate.ingest(packet(stamp(1, 30n, 1), null, 4), 3), false);
   assert.equal(gate.diagnostics().oldEpoch, 1);
+
+  const epochGate = ingress();
+  epochGate.ingest(packet(stamp(0, 10n, 0xffff_ffff), null), 0);
+  assert.equal(epochGate.ingest(packet(stamp(0, 20n, 0), null, 5), 1), true);
+  assert.equal(epochGate.snapshot(1).sourceEpoch, 0);
+  assert.equal(epochGate.diagnostics().sourceResets, 1);
 }
 
 function testVehicleAndSourceIsolation() {
@@ -83,6 +103,54 @@ function testVehicleAndSourceIsolation() {
   assert.equal(gate.snapshot(2).attitude.quat.w, 1);
   assert.equal(gate.diagnostics().wrongVehicle, 1);
   assert.equal(gate.diagnostics().wrongSource, 1);
+}
+
+function testDefaultPolicyPinsFirstIncarnation() {
+  const gate = ingress();
+  assert.equal(gate.ingest(packet(stamp(1, 10n), null), 0), true);
+  assert.equal(
+    gate.ingest(packet(stamp(0, 1n, 1, SOURCE, INCARNATION_B), null, 2), 1),
+    false,
+  );
+  assert.equal(gate.snapshot(1).attitude.quat.w, 1);
+  assert.equal(gate.diagnostics().wrongIncarnation, 1);
+}
+
+function testSimulatorPolicyAcceptsUnseenAndRejectsSeenIncarnations() {
+  const gate = new AvionicsIngress({
+    vehicleId: VEHICLE,
+    maximumSkewNanos: 100n,
+    incarnationPolicy: INCARNATION_POLICY.SIM_ACCEPT_UNSEEN,
+    maximumSeenIncarnations: 2,
+  });
+  gate.ingest(packet(stamp(1, 10n), null), 0);
+  assert.equal(
+    gate.ingest(packet(stamp(0, 1n, 1, SOURCE, INCARNATION_B), null, 2), 1),
+    true,
+  );
+  assert.equal(gate.snapshot(1).sourceIncarnation, INCARNATION_B);
+  assert.equal(gate.diagnostics().incarnationTransitions, 1);
+  assert.equal(gate.ingest(packet(stamp(2, 20n), null, 3), 2), false);
+  assert.equal(gate.diagnostics().oldIncarnation, 1);
+  assert.equal(
+    gate.ingest(packet(stamp(0, 1n, 1, SOURCE, INCARNATION_C), null, 4), 3),
+    false,
+  );
+  assert.equal(gate.diagnostics().incarnationCapacity, 1);
+}
+
+function testAcquisitionTimeRegressionDoesNotRefreshAge() {
+  const gate = ingress();
+  gate.ingest(packet(stamp(10, 1_000n), null), 100);
+  assert.equal(gate.ingest(packet(stamp(11, 900n), null, 2), 500), false);
+  const snapshot = gate.snapshot(850);
+  assert.equal(snapshot.attitude.quat.w, 1);
+  assert.equal(snapshot.attitude.ageMs, 750);
+  assert.equal(gate.diagnostics().timeRegressions, 1);
+
+  assert.equal(gate.ingest(packet(stamp(12, 1_000n), null, 3), 900), false);
+  assert.equal(gate.snapshot(1_100).attitude.ageMs, 1_000);
+  assert.equal(gate.diagnostics().timeRegressions, 2);
 }
 
 function testIndependentGroupsAndCoherenceBoundary() {
@@ -129,6 +197,12 @@ function testInvalidStampIsRejected() {
   assert.equal(gate.ingest(packet(invalid, null), 0), false);
   assert.equal(gate.snapshot(0).attitude, null);
   assert.equal(gate.diagnostics().invalidStamps, 1);
+  assert.equal(gate.ingest(packet({ ...stamp(1, 10n), sourceEpoch: -1 }, null), 1), false);
+  assert.equal(
+    gate.ingest(packet({ ...stamp(1, 10n), sequence: 0x1_0000_0000 }, null), 2),
+    false,
+  );
+  assert.equal(gate.diagnostics().invalidStamps, 3);
 }
 
 function testCountersAndGenerationWrap() {
@@ -147,6 +221,9 @@ for (const test of [
   testReorderAndGapHandling,
   testSequenceAndEpochWrap,
   testVehicleAndSourceIsolation,
+  testDefaultPolicyPinsFirstIncarnation,
+  testSimulatorPolicyAcceptsUnseenAndRejectsSeenIncarnations,
+  testAcquisitionTimeRegressionDoesNotRefreshAge,
   testIndependentGroupsAndCoherenceBoundary,
   testSnapshotsAreAtomicAndImmutable,
   testInvalidStampIsRejected,

@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_adapter_api::{
-    AvionicsSample, MeasurementClock, MeasurementStamp, Pose2d, TelemetrySample,
+    AvionicsSample, MeasurementClock, MeasurementStamp, Pose2d, SourceIncarnation, TelemetrySample,
 };
 use pilotage_protocol::{VehicleId, wire};
 use pilotage_timing::{MonoTimestamp, SimTick};
@@ -12,6 +12,7 @@ use super::sample_to_wire;
 fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let attitude = MeasurementStamp {
         source_id: 7,
+        source_incarnation: SourceIncarnation::new([0xA5; 16]),
         source_epoch: 3,
         sequence: u32::MAX,
         acquired_at_ns: 1_234_567,
@@ -53,6 +54,10 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let avionics = wire_sample.avionics.expect("avionics");
     let attitude_wire = avionics.attitude_stamp.expect("attitude stamp");
     assert_eq!(attitude_wire.source_id, attitude.source_id);
+    assert_eq!(
+        attitude_wire.source_incarnation,
+        attitude.source_incarnation.into_bytes()
+    );
     assert_eq!(attitude_wire.source_epoch, attitude.source_epoch);
     assert_eq!(attitude_wire.sequence, attitude.sequence);
     assert_eq!(attitude_wire.acquired_at_ns, attitude.acquired_at_ns);
@@ -87,6 +92,7 @@ fn absent_group_stamp_stays_absent() {
             attitude_stamp: None,
             kinematics_stamp: Some(MeasurementStamp {
                 source_id: 1,
+                source_incarnation: SourceIncarnation::new([0x5A; 16]),
                 source_epoch: 1,
                 sequence: 0,
                 acquired_at_ns: 42,

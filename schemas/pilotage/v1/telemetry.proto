@@ -43,6 +43,9 @@ message MeasurementStamp {
   // Monotonic acquisition time in the declared clock domain.
   uint64 acquired_at_ns = 4;
   MeasurementClock clock = 5;
+  // Opaque 128-bit attachment/boot identity. Receivers compare this for
+  // equality and accept changes only at an authorized lifecycle boundary.
+  bytes source_incarnation = 6;
 }
 
 // Raw avionics state estimate for flight vehicles (ADR-0018): attitude

@@ -52,6 +52,26 @@ pub struct GzStateSample {
 #[derive(Debug)]
 pub struct GzStateShm {
     base: *const u8,
+    identity: ShmIdentity,
+}
+
+/// Stable operating-system identity of one POSIX shared-memory object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShmIdentity {
+    device: u64,
+    inode: u64,
+    size: u64,
+}
+
+/// Progress classification for one coherent SHM observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShmObservation {
+    /// Sequence and acquisition time advanced in the same incarnation.
+    Advancing,
+    /// The same coherent sample remains mapped, with its frozen duration.
+    Unchanged(std::time::Duration),
+    /// Sequence or acquisition time rolled back on the same SHM object.
+    Quarantined,
 }
 
 // SAFETY: the mapping is process-private, read-only, and lives for the
@@ -66,30 +86,50 @@ impl GzStateShm {
     ///
     /// # Errors
     ///
-    /// Returns [`AviateAdapterError::ShmUnavailable`] when the region
-    /// does not exist (no SITL running) or cannot be mapped.
+    /// Returns a typed [`AviateAdapterError`] when the region does not
+    /// exist, its ABI size differs, or it cannot be mapped.
     pub fn open(instance: u8) -> Result<Self, AviateAdapterError> {
         let name = if instance == 0 {
             "/aviate_gz_bridge".to_owned()
         } else {
             format!("/aviate_gz_bridge_{instance}")
         };
-        let c_name =
-            CString::new(name.clone()).map_err(|_| AviateAdapterError::ShmUnavailable {
-                name: name.clone(),
-                detail: "name contains a NUL byte".to_owned(),
-            })?;
+        let c_name = CString::new(name.clone()).map_err(|source| AviateAdapterError::ShmName {
+            name: name.clone(),
+            source,
+        })?;
         // SAFETY: shm_open/mmap with a valid, NUL-terminated name;
         // read-only PROT_READ/O_RDONLY so no writer state can be
         // corrupted; fd is closed after mapping (POSIX keeps the mapping
         // alive); MAP_FAILED and negative fds are checked before use.
         #[allow(unsafe_code)]
-        let base = unsafe {
+        let (base, identity) = unsafe {
             let fd = libc::shm_open(c_name.as_ptr(), libc::O_RDONLY, 0);
             if fd < 0 {
-                return Err(AviateAdapterError::ShmUnavailable {
+                return Err(AviateAdapterError::ShmIo {
                     name,
-                    detail: std::io::Error::last_os_error().to_string(),
+                    operation: "shm_open",
+                    source: std::io::Error::last_os_error(),
+                });
+            }
+            let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+            if libc::fstat(fd, metadata.as_mut_ptr()) != 0 {
+                let source = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(AviateAdapterError::ShmIo {
+                    name,
+                    operation: "fstat",
+                    source,
+                });
+            }
+            let metadata = metadata.assume_init();
+            let size = u64::try_from(metadata.st_size).unwrap_or(u64::MAX);
+            if size != SHM_SIZE as u64 {
+                libc::close(fd);
+                return Err(AviateAdapterError::ShmSizeMismatch {
+                    name,
+                    expected: SHM_SIZE,
+                    actual: size,
                 });
             }
             let ptr = libc::mmap(
@@ -102,14 +142,28 @@ impl GzStateShm {
             );
             libc::close(fd);
             if ptr == libc::MAP_FAILED {
-                return Err(AviateAdapterError::ShmUnavailable {
+                return Err(AviateAdapterError::ShmIo {
                     name,
-                    detail: std::io::Error::last_os_error().to_string(),
+                    operation: "mmap",
+                    source: std::io::Error::last_os_error(),
                 });
             }
-            ptr.cast::<u8>().cast_const()
+            (
+                ptr.cast::<u8>().cast_const(),
+                ShmIdentity {
+                    device: metadata.st_dev as u64,
+                    inode: metadata.st_ino,
+                    size,
+                },
+            )
         };
-        Ok(Self { base })
+        Ok(Self { base, identity })
+    }
+
+    /// Returns the POSIX object identity captured before the mapping opened.
+    #[must_use]
+    pub const fn identity(&self) -> ShmIdentity {
+        self.identity
     }
 
     /// Copies the block byte-by-byte (volatile: the plugin writes
@@ -233,26 +287,62 @@ fn enu_quat_to_ned(q: [f64; 4]) -> [f32; 4] {
 #[derive(Debug)]
 pub struct ShmFreshness {
     last_seq: Option<u32>,
+    last_time_us: Option<u64>,
     last_progress: Instant,
+    quarantined: bool,
 }
 
 impl ShmFreshness {
     /// Starts tracking.
     pub fn new() -> Self {
+        Self::new_at(Instant::now())
+    }
+
+    pub(crate) fn new_at(now: Instant) -> Self {
         Self {
             last_seq: None,
-            last_progress: Instant::now(),
+            last_time_us: None,
+            last_progress: now,
+            quarantined: false,
         }
     }
 
     /// Feeds the latest observed `seq`; returns how long the block has
     /// been frozen (zero while it keeps advancing).
-    pub fn observe(&mut self, seq: u32) -> std::time::Duration {
-        if self.last_seq != Some(seq) {
-            self.last_seq = Some(seq);
-            self.last_progress = Instant::now();
+    pub fn observe(&mut self, seq: u32, time_us: u64) -> ShmObservation {
+        self.observe_at(seq, time_us, Instant::now())
+    }
+
+    pub(crate) fn observe_at(&mut self, seq: u32, time_us: u64, now: Instant) -> ShmObservation {
+        if self.quarantined {
+            return ShmObservation::Quarantined;
         }
-        self.last_progress.elapsed()
+        let observation = match (self.last_seq, self.last_time_us) {
+            (Some(previous_seq), Some(previous_time))
+                if seq == previous_seq && time_us == previous_time =>
+            {
+                ShmObservation::Unchanged(
+                    now.checked_duration_since(self.last_progress)
+                        .unwrap_or_default(),
+                )
+            }
+            (Some(previous_seq), Some(previous_time))
+                if serial_is_newer(seq, previous_seq) && time_us > previous_time =>
+            {
+                ShmObservation::Advancing
+            }
+            (None, None) => ShmObservation::Advancing,
+            _ => {
+                self.quarantined = true;
+                ShmObservation::Quarantined
+            }
+        };
+        if observation == ShmObservation::Advancing {
+            self.last_seq = Some(seq);
+            self.last_time_us = Some(time_us);
+            self.last_progress = now;
+        }
+        observation
     }
 
     /// Marks an unreadable/invalid block; returns how long since the
@@ -260,6 +350,16 @@ impl ShmFreshness {
     pub fn observe_absent(&mut self) -> std::time::Duration {
         self.last_progress.elapsed()
     }
+
+    pub(crate) fn observe_absent_at(&self, now: Instant) -> std::time::Duration {
+        now.checked_duration_since(self.last_progress)
+            .unwrap_or_default()
+    }
+}
+
+fn serial_is_newer(candidate: u32, current: u32) -> bool {
+    let distance = candidate.wrapping_sub(current);
+    distance != 0 && distance < (1_u32 << 31)
 }
 
 impl Default for ShmFreshness {

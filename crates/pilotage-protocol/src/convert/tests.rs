@@ -126,6 +126,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             arm_state: 2,
             attitude_stamp: Some(wire::MeasurementStamp {
                 source_id: 7,
+                source_incarnation: vec![0xA5; 16],
                 source_epoch: 3,
                 sequence: 10,
                 acquired_at_ns: 1_000_000,
@@ -133,6 +134,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             }),
             kinematics_stamp: Some(wire::MeasurementStamp {
                 source_id: 7,
+                source_incarnation: vec![0xA5; 16],
                 source_epoch: 3,
                 sequence: 5,
                 acquired_at_ns: 900_000,
@@ -142,7 +144,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
     };
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
-        payload: Some(wire::envelope::Payload::TelemetrySample(sample)),
+        payload: Some(wire::envelope::Payload::TelemetrySample(sample.clone())),
     };
     let bytes = envelope.encode_to_vec();
     let decoded = wire::Envelope::decode(bytes.as_slice()).expect("valid envelope");

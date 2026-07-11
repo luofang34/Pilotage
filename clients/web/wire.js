@@ -516,11 +516,17 @@ function decodeMeasurementStamp(bytes) {
   const f = parseFields(bytes);
   return {
     sourceId: firstBigVarint(f, 1),
+    sourceIncarnation: decodeIncarnation(firstBytes(f, 6)),
     sourceEpoch: firstVarint(f, 2) >>> 0,
     sequence: firstVarint(f, 3) >>> 0,
     acquiredAtNanos: firstBigVarint(f, 4),
     clock: firstVarint(f, 5),
   };
+}
+
+function decodeIncarnation(bytes) {
+  if (!bytes || bytes.length !== 16) return null;
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 // authority.proto AuthorityEvent: a oneof; we only care which arm fired and a

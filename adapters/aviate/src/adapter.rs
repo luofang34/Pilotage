@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, AvionicsSample, Disposition, ExecutionMode, LinkLossPolicy,
-    MeasurementClock, MeasurementStamp, Pose2d, RejectReason, ScopeDescriptor, StepBudget,
-    StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, RejectReason,
+    ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
+    VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
@@ -16,14 +16,16 @@ use pilotage_protocol::{
 use pilotage_timing::SimTick;
 
 use crate::error::AviateAdapterError;
+use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 use crate::link::{AviateLink, LatestAviate, LinkConfig};
-use crate::shm::{GzStateShm, ShmFreshness};
 use crate::uplink::FlightUplink;
 
 mod camera;
 mod control;
 mod sampling;
+mod shm_sampling;
 use sampling::{mavlink_batch, yaw_of};
+use shm_sampling::ShmSource;
 
 /// The control scope this adapter exposes (issue #12): four canonical
 /// flight axes as DJI-style velocity demands.
@@ -72,12 +74,7 @@ enum Source {
         // Kept alive for its receive task; dropped with the adapter.
         _link: Option<AviateLink>,
     },
-    Shm {
-        shm: GzStateShm,
-        freshness: ShmFreshness,
-        instance: u8,
-        epoch: u32,
-    },
+    Shm(ShmSource),
 }
 
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
@@ -116,17 +113,37 @@ impl AviateAdapter {
         mode: AviateLinkMode,
         config: LinkConfig,
     ) -> Result<Self, AviateAdapterError> {
+        let mut provider = OsIncarnationProvider;
+        Self::start_with_incarnation_provider(vehicle, mode, config, &mut provider).await
+    }
+
+    /// Binds the vehicle link using a caller-owned attachment identity source.
+    ///
+    /// Aircraft integrations use this entry point to supply a persistent boot
+    /// counter or source-issued UUID instead of the simulator CSPRNG provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AviateAdapterError`] when identity creation or the selected
+    /// vehicle link fails.
+    pub async fn start_with_incarnation_provider<P: IncarnationProvider>(
+        vehicle: VehicleId,
+        mode: AviateLinkMode,
+        config: LinkConfig,
+        provider: &mut P,
+    ) -> Result<Self, AviateAdapterError> {
+        let incarnation = provider.next_incarnation_blocking()?;
         let source = match mode {
-            AviateLinkMode::Shm => Self::shm_source(0)?,
-            AviateLinkMode::Mavlink => Self::mavlink_source(config).await?,
-            AviateLinkMode::Auto => match Self::shm_source(0) {
+            AviateLinkMode::Shm => Self::shm_source(0, incarnation)?,
+            AviateLinkMode::Mavlink => Self::mavlink_source(config, incarnation).await?,
+            AviateLinkMode::Auto => match Self::shm_source(0, incarnation) {
                 Ok(source) => {
                     tracing::info!("Aviate link: shared-memory state block");
                     source
                 }
                 Err(error) => {
                     tracing::info!(%error, "Aviate shm not available; using MAVLink/UDP");
-                    Self::mavlink_source(config).await?
+                    Self::mavlink_source(config, incarnation).await?
                 }
             },
         };
@@ -134,7 +151,10 @@ impl AviateAdapter {
         // failing the adapter: displaying a flight you cannot command
         // beats displaying nothing.
         let uplink = match FlightUplink::new() {
-            Ok(uplink) => Some(uplink),
+            Ok(mut uplink) => {
+                uplink.set_expected_source(config.system_id, config.component_id);
+                Some(uplink)
+            }
             Err(error) => {
                 tracing::warn!(%error, "flight uplink unavailable; telemetry-only");
                 None
@@ -163,17 +183,18 @@ impl AviateAdapter {
         self.frames.take()
     }
 
-    fn shm_source(instance: u8) -> Result<Source, AviateAdapterError> {
-        Ok(Source::Shm {
-            shm: GzStateShm::open(instance)?,
-            freshness: ShmFreshness::new(),
-            instance,
-            epoch: 1,
-        })
+    fn shm_source(
+        instance: u8,
+        incarnation: SourceIncarnation,
+    ) -> Result<Source, AviateAdapterError> {
+        Ok(Source::Shm(ShmSource::open(instance, incarnation)?))
     }
 
-    async fn mavlink_source(config: LinkConfig) -> Result<Source, AviateAdapterError> {
-        let link = AviateLink::start(config).await?;
+    async fn mavlink_source(
+        config: LinkConfig,
+        incarnation: SourceIncarnation,
+    ) -> Result<Source, AviateAdapterError> {
+        let link = AviateLink::start(config, incarnation).await?;
         Ok(Source::Mavlink {
             state: link.state(),
             _link: Some(link),
@@ -208,9 +229,7 @@ impl AviateAdapter {
     /// north) and NED position (zeros before any telemetry).
     fn current_pose(&mut self) -> (f32, [f32; 3]) {
         match &self.source {
-            Source::Shm { shm, .. } => shm.read().map_or((0.0, [0.0; 3]), |s| {
-                (yaw_of(s.quat_wxyz) as f32, s.pos_ned_m)
-            }),
+            Source::Shm(source) => source.current_pose(),
             Source::Mavlink { state, .. } => state.lock().ok().map_or((0.0, [0.0; 3]), |latest| {
                 let yaw = latest
                     .attitude
@@ -376,71 +395,7 @@ impl VehicleAdapter for AviateAdapter {
         };
         match &mut self.source {
             Source::Mavlink { state, .. } => mavlink_batch(self.vehicle, state, arm_state),
-            Source::Shm {
-                shm,
-                freshness,
-                instance,
-                epoch,
-            } => {
-                let frozen = match shm.read() {
-                    Some(sample) => freshness.observe(sample.seq) > WITHHOLD_AFTER,
-                    None => freshness.observe_absent() > WITHHOLD_AFTER,
-                };
-                if frozen {
-                    // A frozen or vanished block usually means the
-                    // simulator restarted and re-created the shm object;
-                    // an old mapping keeps pointing at the orphaned one,
-                    // so reattach by name.
-                    if let Ok(new_shm) = GzStateShm::open(*instance) {
-                        *shm = new_shm;
-                        *freshness = ShmFreshness::new();
-                        *epoch = epoch.wrapping_add(1);
-                    }
-                    return TelemetryBatch::default();
-                }
-                let Some(sample) = shm.read() else {
-                    return TelemetryBatch::default();
-                };
-                let heading = yaw_of(sample.quat_wxyz);
-                let stamp = MeasurementStamp {
-                    source_id: u64::from(*instance).wrapping_add(1),
-                    source_epoch: *epoch,
-                    sequence: sample.seq,
-                    acquired_at_ns: sample.time_us.wrapping_mul(1_000),
-                    clock: MeasurementClock::Simulation,
-                };
-                let speed = f64::from(
-                    (sample.vel_ned_mps[0] * sample.vel_ned_mps[0]
-                        + sample.vel_ned_mps[1] * sample.vel_ned_mps[1])
-                        .sqrt(),
-                );
-                TelemetryBatch {
-                    samples: vec![TelemetrySample {
-                        vehicle: self.vehicle,
-                        tick: SimTick::new(sample.time_us.wrapping_mul(1_000)),
-                        pose: Pose2d {
-                            x: f64::from(sample.pos_ned_m[0]),
-                            y: f64::from(sample.pos_ned_m[1]),
-                            heading,
-                        },
-                        speed,
-                        avionics: Some(AvionicsSample {
-                            quat_wxyz: sample.quat_wxyz,
-                            rates_rps: sample.rates_rps,
-                            pos_ned_m: sample.pos_ned_m,
-                            vel_ned_mps: sample.vel_ned_mps,
-                            // Simulator ground truth (ADR-0019 v0): fully
-                            // valid by construction; the FC-estimate block
-                            // with real flags is the link RFC's v1.
-                            valid_flags: 0b1111,
-                            quality: 0,
-                            arm_state,
-                            attitude_stamp: Some(stamp),
-                            kinematics_stamp: Some(stamp),
-                        }),
-                    }],
-                }
-            }
+            Source::Shm(source) => source.sample(self.vehicle, arm_state),
         }
     }
 
@@ -483,7 +438,7 @@ impl VehicleAdapter for AviateAdapter {
                 .ok()
                 .and_then(|latest| latest.kinematics)
                 .map_or(0, |kin| u64::from(kin.time_boot_ms).wrapping_mul(1_000_000)),
-            Source::Shm { shm, .. } => shm.read().map_or(0, |s| s.time_us.wrapping_mul(1_000)),
+            Source::Shm(source) => source.tick(),
         };
         StepOutcome {
             advanced: 0,

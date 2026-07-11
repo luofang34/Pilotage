@@ -108,11 +108,11 @@ for (const [num, name] of [
 // proto3's omitted zero-valued fields (quat_x/y/z absent -> 0).
 
 function varint(out, v) {
-  let n = v;
+  let n = BigInt(v);
   for (;;) {
-    const b = n & 0x7f;
-    n >>>= 7;
-    if (n === 0) {
+    const b = Number(n & 0x7fn);
+    n >>= 7n;
+    if (n === 0n) {
       out.push(b);
       return;
     }
@@ -139,7 +139,7 @@ function uint64Message(value) {
   return out;
 }
 
-function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock) {
+function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock, incarnationByte) {
   const out = [];
   for (const [field, value] of [
     [1, sourceId],
@@ -151,6 +151,7 @@ function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock) {
     varint(out, (field << 3) | 0);
     varint(out, value);
   }
+  bytesField(out, 6, new Uint8Array(16).fill(incarnationByte));
   return out;
 }
 
@@ -161,8 +162,10 @@ f32Field(avionics, 10, -304.8); // pos_d
 f32Field(avionics, 11, 10.0); // vel_n
 varint(avionics, (14 << 3) | 0);
 varint(avionics, 0b1111); // valid_flags
-bytesField(avionics, 17, measurementStamp(7, 3, 10, 1_000_000, 1));
-bytesField(avionics, 18, measurementStamp(7, 3, 5, 900_000, 1));
+const sourceId = 0xfedc_ba98_7654_3210n;
+const acquiredAt = 0xffff_ffff_ffff_fffen;
+bytesField(avionics, 17, measurementStamp(sourceId, 3, 10, acquiredAt, 1, 0xa5));
+bytesField(avionics, 18, measurementStamp(sourceId, 3, 5, acquiredAt - 100_000n, 1, 0xa5));
 
 const sample = [];
 bytesField(sample, 1, uint64Message(1));
@@ -186,9 +189,10 @@ check("omitted zero quat components decode as 0", av.quat.x === 0 && av.quat.y =
 check("avionics pos_d decodes", Math.abs(av.posNed[2] + 304.8) < 1e-3);
 check("avionics vel_n decodes", Math.abs(av.velNed[0] - 10.0) < 1e-6);
 check("avionics valid_flags decode", Number(av.validFlags) === 0b1111);
-check("attitude measurement identity decodes", av.attitudeStamp.sourceId === 7n);
+check("attitude uint64 identity decodes without precision loss", av.attitudeStamp.sourceId === sourceId);
+check("attitude incarnation decodes exactly", av.attitudeStamp.sourceIncarnation === "a5".repeat(16));
 check("attitude epoch and sequence decode", av.attitudeStamp.sourceEpoch === 3 && av.attitudeStamp.sequence === 10);
-check("attitude acquisition time and clock decode", av.attitudeStamp.acquiredAtNanos === 1_000_000n && av.attitudeStamp.clock === 1);
+check("attitude uint64 acquisition time and clock decode", av.attitudeStamp.acquiredAtNanos === acquiredAt && av.attitudeStamp.clock === 1);
 check("kinematics sequence remains independent", av.kinematicsStamp.sequence === 5);
 check("a sample without avionics decodes to null", (() => {
   const bareNoAv = [];

@@ -32,15 +32,19 @@ the open one.
   selected by `PILOTAGE_AVIATE_LINK` with an `auto` default that prefers
   shared memory when present.
 - **Co-located SITL binds shared memory.** Aviate's gz-sim plugin
-  already publishes a versioned, seq-numbered latest-state block
+  publishes a seq-numbered latest-state block
   (`AviateSharedState` in its standalone-C `shared_state.h`) into POSIX
   shm every physics tick. The adapter attaches **read-only** as a second
   consumer, double-reads the sequence counter to reject torn snapshots,
   converts ENU/FLU → NED/FRD with math mirrored from Aviate's own
   conversion functions, and ages the block out (withholds telemetry)
-  when the counter stops advancing. No ports, no peering, no
-  single-consumer contention; both sides are Rust and no C++ bridge is
-  involved.
+  when the counter stops advancing. The reader requires the exact 216-byte
+  layout and records `(device, inode, size)` before mapping. Reopening the
+  same frozen object cannot reset freshness; a different object plus a
+  coherent first sample advances the attachment epoch. Sequence or simulation
+  time rollback within one object is quarantined. No ports, no peering, no
+  single-consumer contention; the Pilotage reader remains Rust and adds no
+  intermediary bridge process.
 - **The RF-link protocol decision is deferred**, deliberately: it
   belongs to the vehicle's communication component (which owns the radio
   and may speak MAVLink, CCSDS, or a native framing), and designing it
@@ -73,3 +77,8 @@ the open one.
 - A frozen simulator ages into flagged instruments rather than replaying
   stale state as live (the same withholding discipline as the Gazebo
   adapter's dead-reader path).
+- The 216-byte SHM contract has no magic, version, size, writer incarnation,
+  or clock epoch fields. POSIX object identity is sufficient only for the
+  simulator boundary. Any producer seeking operational credit must expose an
+  additive, source-issued incarnation and explicit clock epoch rather than
+  infer either from shared-memory metadata.

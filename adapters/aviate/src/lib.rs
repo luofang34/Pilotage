@@ -16,6 +16,7 @@
 
 mod adapter;
 mod error;
+mod incarnation;
 mod link;
 pub mod mavlink;
 pub mod shm;
@@ -26,5 +27,6 @@ pub use adapter::{
     THROTTLE_AXIS, YAW_AXIS,
 };
 pub use error::AviateAdapterError;
-pub use link::LinkConfig;
+pub use incarnation::{IncarnationProvider, OsIncarnationProvider};
+pub use link::{LinkConfig, ResetPolicy};
 pub use uplink::FlightUplink;

@@ -14,12 +14,36 @@ pub enum MeasurementClock {
     Simulation,
 }
 
+/// Opaque identity of one source attachment or boot instance.
+///
+/// Unlike [`MeasurementStamp::source_epoch`], this value is compared only for
+/// equality. A new incarnation cannot be ordered relative to an earlier one;
+/// the receiver must authorize that transition at a lifecycle boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SourceIncarnation([u8; 16]);
+
+impl SourceIncarnation {
+    /// Constructs an incarnation from its complete 128-bit representation.
+    #[must_use]
+    pub const fn new(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the complete opaque representation.
+    #[must_use]
+    pub const fn into_bytes(self) -> [u8; 16] {
+        self.0
+    }
+}
+
 /// Identity and acquisition stamp for one independently advancing
 /// measurement group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeasurementStamp {
     /// Adapter-defined source identifier, stable within one vehicle.
     pub source_id: u64,
+    /// Opaque attachment/boot identity for the producing source.
+    pub source_incarnation: SourceIncarnation,
     /// Source boot/attachment generation. A reset changes this value.
     pub source_epoch: u32,
     /// Wrapping group sequence, advanced only for a new measurement.

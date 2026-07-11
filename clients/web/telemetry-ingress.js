@@ -8,6 +8,11 @@ export const COHERENCE = Object.freeze({
   EXCESSIVE_SKEW: "excessive-skew",
 });
 
+export const INCARNATION_POLICY = Object.freeze({
+  PIN_FIRST: "pin-first",
+  SIM_ACCEPT_UNSEEN: "sim-accept-unseen",
+});
+
 const SERIAL_HALF_RANGE = 0x80000000;
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
@@ -30,8 +35,14 @@ function isStampValid(stamp) {
     stamp !== null &&
     typeof stamp === "object" &&
     typeof stamp.sourceId === "bigint" &&
+    typeof stamp.sourceIncarnation === "string" &&
+    /^[0-9a-f]{32}$/.test(stamp.sourceIncarnation) &&
     Number.isInteger(stamp.sourceEpoch) &&
+    stamp.sourceEpoch >= 0 &&
+    stamp.sourceEpoch <= 0xffff_ffff &&
     Number.isInteger(stamp.sequence) &&
+    stamp.sequence >= 0 &&
+    stamp.sequence <= 0xffff_ffff &&
     typeof stamp.acquiredAtNanos === "bigint" &&
     stamp.acquiredAtNanos >= 0n &&
     (stamp.clock === CLOCK_VEHICLE_BOOT || stamp.clock === CLOCK_SIMULATION)
@@ -79,6 +90,7 @@ function coherenceOf(attitude, kinematics, maximumSkewNanos) {
   const k = kinematics.stamp;
   if (
     a.sourceId !== k.sourceId ||
+    a.sourceIncarnation !== k.sourceIncarnation ||
     a.sourceEpoch !== k.sourceEpoch ||
     a.clock !== k.clock
   ) {
@@ -94,16 +106,37 @@ function coherenceOf(attitude, kinematics, maximumSkewNanos) {
 }
 
 export class AvionicsIngress {
-  constructor({ vehicleId, sourceId = null, maximumSkewNanos }) {
+  constructor({
+    vehicleId,
+    sourceId = null,
+    sourceIncarnation = null,
+    incarnationPolicy = INCARNATION_POLICY.PIN_FIRST,
+    maximumSeenIncarnations = 8,
+    maximumSkewNanos,
+  }) {
     if (typeof vehicleId !== "bigint") throw new TypeError("vehicleId must be a bigint");
     if (sourceId !== null && typeof sourceId !== "bigint") {
       throw new TypeError("sourceId must be null or a bigint");
+    }
+    if (sourceIncarnation !== null && !/^[0-9a-f]{32}$/.test(sourceIncarnation)) {
+      throw new TypeError("sourceIncarnation must be null or 32 lowercase hex characters");
+    }
+    if (!Object.values(INCARNATION_POLICY).includes(incarnationPolicy)) {
+      throw new TypeError("unknown incarnationPolicy");
+    }
+    if (!Number.isInteger(maximumSeenIncarnations) || maximumSeenIncarnations < 1) {
+      throw new TypeError("maximumSeenIncarnations must be a positive integer");
     }
     if (typeof maximumSkewNanos !== "bigint" || maximumSkewNanos < 0n) {
       throw new TypeError("maximumSkewNanos must be a non-negative bigint");
     }
     this.vehicleId = vehicleId;
     this.sourceId = sourceId;
+    this.sourceIncarnation = sourceIncarnation;
+    this.incarnationPolicy = incarnationPolicy;
+    this.maximumSeenIncarnations = maximumSeenIncarnations;
+    this.seenIncarnations = new Set();
+    if (sourceIncarnation !== null) this.seenIncarnations.add(sourceIncarnation);
     this.maximumSkewNanos = maximumSkewNanos;
     this.sourceEpoch = null;
     this.attitude = null;
@@ -115,11 +148,17 @@ export class AvionicsIngress {
       reordered: 0,
       wrongVehicle: 0,
       wrongSource: 0,
+      wrongIncarnation: 0,
+      oldIncarnation: 0,
+      incarnationTransitions: 0,
+      incarnationCapacity: 0,
       oldEpoch: 0,
       sourceResets: 0,
       invalidStamps: 0,
       sequenceGaps: 0,
       excessiveSkew: 0,
+      timeRegressions: 0,
+      clockChanges: 0,
     };
   }
 
@@ -156,6 +195,7 @@ export class AvionicsIngress {
       return false;
     }
     if (!this.acceptSource(stamp.sourceId)) return false;
+    if (!this.acceptIncarnation(stamp.sourceIncarnation)) return false;
     if (!this.acceptEpoch(stamp.sourceEpoch)) return false;
 
     const current = this[name];
@@ -165,6 +205,14 @@ export class AvionicsIngress {
     }
     if (current && !serialIsNewer(stamp.sequence, current.stamp.sequence)) {
       this.bump("reordered");
+      return false;
+    }
+    if (current && stamp.clock !== current.stamp.clock) {
+      this.bump("clockChanges");
+      return false;
+    }
+    if (current && stamp.acquiredAtNanos <= current.stamp.acquiredAtNanos) {
+      this.bump("timeRegressions");
       return false;
     }
     if (current) {
@@ -187,6 +235,35 @@ export class AvionicsIngress {
     if (candidate === this.sourceId) return true;
     this.bump("wrongSource");
     return false;
+  }
+
+  acceptIncarnation(candidate) {
+    if (this.sourceIncarnation === null) {
+      this.sourceIncarnation = candidate;
+      this.seenIncarnations.add(candidate);
+      return true;
+    }
+    if (candidate === this.sourceIncarnation) return true;
+    if (this.seenIncarnations.has(candidate)) {
+      this.bump("oldIncarnation");
+      return false;
+    }
+    if (this.incarnationPolicy !== INCARNATION_POLICY.SIM_ACCEPT_UNSEEN) {
+      this.bump("wrongIncarnation");
+      return false;
+    }
+    if (this.seenIncarnations.size >= this.maximumSeenIncarnations) {
+      this.bump("incarnationCapacity");
+      return false;
+    }
+    this.seenIncarnations.add(candidate);
+    this.sourceIncarnation = candidate;
+    this.sourceEpoch = null;
+    this.attitude = null;
+    this.kinematics = null;
+    this.lastCoherence = COHERENCE.INSUFFICIENT;
+    this.bump("incarnationTransitions");
+    return true;
   }
 
   acceptEpoch(candidate) {
@@ -224,6 +301,7 @@ export class AvionicsIngress {
     return Object.freeze({
       generation: this.generation,
       sourceId: this.sourceId,
+      sourceIncarnation: this.sourceIncarnation,
       sourceEpoch: this.sourceEpoch,
       attitude,
       kinematics,
