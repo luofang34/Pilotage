@@ -78,6 +78,15 @@ jobs:
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs
 
+      - name: telemetry ingress gate contract
+        run: node clients/web/telemetry-ingress.test.mjs
+
+      - name: telemetry display retirement contract
+        run: node clients/web/telemetry-display.test.mjs
+
+      - name: transport session identity contract
+        run: node clients/web/transport-session.test.mjs
+
       - name: instrument display fail-visible contract
         run: node clients/web/instruments.test.mjs
 
