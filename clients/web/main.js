@@ -36,8 +36,14 @@ import {
   startDisplayLoop,
   tickInstrumentSet,
 } from "./instrument-health.js";
+import { AvionicsIngress } from "./telemetry-ingress.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
+const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
+// Aviate publishes attitude at 10 Hz and kinematics at 4 Hz. This simulator
+// profile admits one kinematics period plus transport jitter; an aircraft
+// profile must derive its own limit from the intended function.
+const SIM_COHERENCE_LIMIT_NS = 300_000_000n;
 const MOTION_SCOPE = "vehicle.motion";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
 const AXIS_ROLL = 0; // pilotage-input logical axis table: roll = 0 (lateral velocity, + right).
@@ -87,17 +93,18 @@ const state = {
   skippedVideoFrames: 0,
 };
 
-// Instrument panel state (ADR-0017/0018): the latest raw avionics
-// estimate plus its receive stamp. Ingest only records; drawing happens
-// on the display's own requestAnimationFrame cadence, so telemetry rate
-// and frame rate stay decoupled.
+// Ingestion accepts only source advancement for the selected vehicle. Drawing
+// remains on requestAnimationFrame, decoupled from telemetry publication.
 // Each panel latches display failures independently (DISP-01); a fault in
 // the shared wasm backend (load/ABI/init) fails both.
 const instruments = {
   mod: null,
   moduleFault: null,
-  latest: null,
-  receivedAtMs: null,
+  ingress: new AvionicsIngress({
+    vehicleId: VEHICLE_ID,
+    sourceId: INSTRUMENT_SOURCE_ID,
+    maximumSkewNanos: SIM_COHERENCE_LIMIT_NS,
+  }),
   health: {
     [PANEL.PFD]: new PanelHealth(),
     [PANEL.HSI]: new PanelHealth(),
@@ -378,14 +385,14 @@ async function readTelemetryDatagrams(transport) {
     const decoded = decodeBareEnvelope(value);
     if (decoded.kind === "TelemetrySample") {
       const t = decoded.message;
+      if (t.avionics) {
+        instruments.ingress.ingest(t, performance.now());
+      }
+      if (t.vehicleId !== VEHICLE_ID) continue;
       const armText = { 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[t.avionics?.armState ?? 0];
       els.telemetry.textContent =
         `${armText} | pose x=${t.xM.toFixed(2)}m y=${t.yM.toFixed(2)}m heading=${t.headingRad.toFixed(2)}rad` +
         ` | v=${t.linearXMps.toFixed(2)}m/s w=${t.angularRadS.toFixed(2)}rad/s`;
-      if (t.avionics) {
-        instruments.latest = t.avionics;
-        instruments.receivedAtMs = performance.now();
-      }
     } else if (decoded.kind === "Pong") {
       // RTT probing is out of scope for this demo viewer; ignored.
     } else if (decoded.kind === "FrameRejected") {
@@ -754,24 +761,30 @@ function renderInstruments() {
     }
     return;
   }
-  const a = instruments.latest;
-  const ageMs = a ? performance.now() - instruments.receivedAtMs : NaN;
+  const snapshot = instruments.ingress.snapshot(performance.now());
+  const attitude = snapshot.attitude;
+  const kinematics = snapshot.kinematics;
+  const quality = Math.max(attitude?.quality ?? 0, kinematics?.quality ?? 0);
+  const coherence = {
+    insufficient: 0,
+    coherent: 1,
+    "excessive-skew": 2,
+  }[snapshot.coherence.status];
   const panelState = {
-    attitude: a ? { quat: a.quat, rates: a.rates, ageMs } : null,
-    kinematics: a ? { posNed: a.posNed, velNed: a.velNed, ageMs } : null,
+    attitude,
+    kinematics,
     air: null, // no airspeed/baro sensor on Aviate's wire yet (ADR-0018): honest Missing.
     nav: null,
     wind: null,
     selections: { headingBugRad: 0 },
-    quality: a ? a.quality : 0,
-    valid: a
-      ? {
-          attitude: !!(a.validFlags & 1),
-          rates: !!(a.validFlags & 2),
-          position: !!(a.validFlags & 4),
-          velocity: !!(a.validFlags & 8),
-        }
-      : {},
+    quality,
+    valid: {
+      attitude: !!(attitude?.validFlags & 1),
+      rates: !!(attitude?.validFlags & 2),
+      position: !!(kinematics?.validFlags & 4),
+      velocity: !!(kinematics?.validFlags & 8),
+    },
+    snapshot: { generation: snapshot.generation, coherence },
   };
   const nowMs = performance.now();
   renderInstrumentSet(mod, instruments.health, instrumentTargets(), panelState, nowMs);
