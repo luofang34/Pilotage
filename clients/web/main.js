@@ -799,7 +799,7 @@ async function startInstruments() {
       ),
   );
   try {
-    instruments.mod = await loadInstruments("./instruments.wasm");
+    instruments.mod = await loadInstruments("./instrument-runtime_bg.wasm");
     const nowMs = performance.now();
     for (const health of Object.values(instruments.health)) health.reset(nowMs);
     setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
@@ -816,6 +816,7 @@ async function startInstruments() {
   }
 }
 
+window.addEventListener("pagehide", () => instruments.mod?.dispose(), { once: true });
 applyUrlParams();
 startInstruments();
 document.getElementById("fpvBtn").addEventListener("click", () => {
