@@ -2,7 +2,9 @@
 
 use libm::{atan2f, sqrtf};
 
-use crate::aircraft::{AircraftState, EstimateQuality, NavData, Selections, Wind};
+use crate::aircraft::{
+    AircraftState, EstimateQuality, NavData, Selections, SnapshotCoherence, Wind,
+};
 use crate::signal::{FreshnessPolicy, Sig, SignalStatus};
 use crate::units::{M_TO_FT, MPS_TO_FPM, MPS_TO_KT};
 
@@ -66,14 +68,28 @@ fn flag_status(valid: bool) -> SignalStatus {
     }
 }
 
+/// Attitude and kinematics are stamped independently; when the ingress
+/// gate reports their acquisition times exceed the skew budget, each
+/// value is individually usable but the pair must not present as one
+/// coherent aircraft state, so both groups degrade (amber, value shown).
+/// `Insufficient` means too few stamped groups to judge — the ordinary
+/// missing/freshness handling already covers that case.
+fn coherence_status(coherence: SnapshotCoherence) -> SignalStatus {
+    match coherence {
+        SnapshotCoherence::ExcessiveSkew => SignalStatus::Degraded,
+        SnapshotCoherence::Insufficient | SnapshotCoherence::Coherent => SignalStatus::Valid,
+    }
+}
+
 /// Resolves raw input state into display-ready signals.
 ///
 /// Each signal's status is the worst of: its group's freshness under
-/// `policy`, the source quality, and the source's validity flag for that
-/// group. Values behind `Missing`/`Failed` are quiet zeros a panel never
-/// paints.
+/// `policy`, the source quality, the snapshot's group-coherence result,
+/// and the source's validity flag for that group. Values behind
+/// `Missing`/`Failed` are quiet zeros a panel never paints.
 pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
     let quality = quality_status(state.quality);
+    let coherence = coherence_status(state.snapshot.coherence);
 
     let att_fresh = if state.attitude.data.is_none() {
         SignalStatus::Missing
@@ -82,9 +98,11 @@ pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
     };
     let att_status = att_fresh
         .worst(quality)
+        .worst(coherence)
         .worst(flag_status(state.valid.attitude));
     let rate_status = att_fresh
         .worst(quality)
+        .worst(coherence)
         .worst(flag_status(state.valid.rates));
     let (roll, pitch, yaw, turn_rate) = match state.attitude.data {
         Some(att) => {
@@ -101,9 +119,11 @@ pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
     };
     let pos_status = kin_fresh
         .worst(quality)
+        .worst(coherence)
         .worst(flag_status(state.valid.position));
     let vel_status = kin_fresh
         .worst(quality)
+        .worst(coherence)
         .worst(flag_status(state.valid.velocity));
     let (alt_ft, vsi_fpm, gs_kt, track_rad, gs_mps) = match state.kinematics.data {
         Some(kin) => {

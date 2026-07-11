@@ -227,6 +227,10 @@ fn next_group_stamp(
         Some((current_time, stamp)) if serial_is_newer(time_boot_ms, current_time) => {
             stamp.sequence.wrapping_add(1)
         }
+        // observe_source_time admits only equal or serially newer times
+        // for a group that already has a measurement, so this arm is the
+        // exhaustiveness fail-safe: an older time that ever slipped
+        // through would still reject rather than regress the sequence.
         Some(_) => return reject_group(latest),
     };
     update_high_water(latest, time_boot_ms);

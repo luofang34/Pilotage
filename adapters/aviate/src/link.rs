@@ -47,6 +47,14 @@ pub struct LinkConfig {
     pub reset_policy: ResetPolicy,
     /// Largest source-clock lag admitted when a second measurement group
     /// first joins or advances behind the epoch high-water mark.
+    ///
+    /// Zero (the fail-safe default) admits no inter-group lag at all: on
+    /// an interleaved multi-rate stream the slower group is rejected as
+    /// reordered every time the faster group advances the high-water
+    /// mark. Every real deployment must set a budget derived from its
+    /// source's publication rates — [`LinkConfig::simulator`] shows the
+    /// Aviate-derived example — and the link warns at startup when the
+    /// budget is zero so the rejection is loud, never silent.
     pub maximum_inter_group_skew_ms: u32,
 }
 
@@ -218,6 +226,13 @@ impl AviateLink {
         config: LinkConfig,
         source_incarnation: SourceIncarnation,
     ) -> Result<Self, AviateAdapterError> {
+        if config.maximum_inter_group_skew_ms == 0 {
+            warn!(
+                "inter-group skew budget is zero: the slower of any \
+                 interleaved measurement groups will be rejected as \
+                 reordered until a rate-derived budget is configured"
+            );
+        }
         let (socket, router_mode) = match UdpSocket::bind(config.endpoint).await {
             Ok(socket) => (socket, false),
             Err(direct_err) => {
