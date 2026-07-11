@@ -2,7 +2,7 @@
 //! and turn-rate cue, composed in fixed layers (background → attitude →
 //! tapes → symbology → annunciation, ADR-0017).
 
-use pilotage_instrument_scene::{PaintMode, SceneError, SceneWriter};
+use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::{PanelData, SignalStatus};
 
 use crate::palette;
@@ -29,15 +29,20 @@ pub struct VSpeeds {
 
 /// What fills the attitude background.
 ///
-/// `Horizon` is the phase-1 2D sky/ground ball. A synthetic-vision
-/// background slots in here as a further variant carrying its viewport
-/// and quality tier (reserved, ADR-0017) without touching the ladder,
-/// tapes, or symbology layers.
+/// `Horizon` is the phase-1 2D sky/ground ball. `None` emits no
+/// background layer at all: the safety compositor owns that band (a
+/// future SVS raster composes strictly below the critical overlay,
+/// REN-01), and the layers above it are byte-identical either way. A
+/// synthetic-vision *scene* background would slot in as a further
+/// variant carrying its viewport and quality tier (reserved, ADR-0017)
+/// without touching the ladder, tapes, or symbology layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackgroundMode {
     /// Flat-shaded sky-over-ground attitude ball.
     #[default]
     Horizon,
+    /// No background layer; the compositor supplies that band.
+    None,
 }
 
 /// PFD panel configuration.
@@ -49,35 +54,54 @@ pub struct PfdConfig {
     pub v_speeds: Option<VSpeeds>,
 }
 
-/// Draws the PFD from resolved state.
+/// Draws the PFD from resolved state, in the REN-01 layer bands:
+/// optional background, then attitude symbology, tapes, and
+/// annunciations, in ascending z-order. The layers above `Background`
+/// never depend on the background mode, so the critical overlay stays
+/// complete — byte-identical — when the background is absent.
 pub fn draw_pfd(
     data: &PanelData,
     cfg: &PfdConfig,
     scene: &mut SceneWriter<'_>,
 ) -> Result<(), SceneError> {
-    scene.fill_color(palette::BLACK)?;
-    scene.rect(PaintMode::Fill, 0.0, 0.0, PANEL_W, PANEL_H)?;
-
     let att_status = data.roll_rad.status.worst(data.pitch_rad.status);
-    if att_status.shows_value() {
-        match cfg.background {
-            BackgroundMode::Horizon => {
+
+    match cfg.background {
+        BackgroundMode::Horizon => {
+            scene.begin_layer(LayerId::Background)?;
+            scene.fill_color(palette::BLACK)?;
+            scene.rect(PaintMode::Fill, 0.0, 0.0, PANEL_W, PANEL_H)?;
+            if att_status.shows_value() {
                 horizon::draw_ball(scene, data.roll_rad.value, data.pitch_rad.value)?;
             }
+            scene.end_layer(LayerId::Background)?;
         }
+        BackgroundMode::None => {}
+    }
+
+    scene.begin_layer(LayerId::Attitude)?;
+    if att_status.shows_value() {
         horizon::draw_roll_scale(scene, data.roll_rad.value)?;
         horizon::draw_aircraft_symbol(scene)?;
+    }
+    scene.end_layer(LayerId::Attitude)?;
+
+    scene.begin_layer(LayerId::Tapes)?;
+    tapes::speed_tape(scene, data, cfg.v_speeds.as_ref())?;
+    tapes::altitude_tape(scene, data)?;
+    tapes::vsi(scene, data)?;
+    draw_turn_rate(scene, data)?;
+    scene.end_layer(LayerId::Tapes)?;
+
+    scene.begin_layer(LayerId::Annunciation)?;
+    if att_status.shows_value() {
         if att_status != SignalStatus::Valid {
             status_paint::draw_flag(scene, 240.0, 60.0, "ATT")?;
         }
     } else {
         status_paint::draw_red_x(scene, 110.0, 50.0, 260.0, 240.0, "ATT")?;
     }
-
-    tapes::speed_tape(scene, data, cfg.v_speeds.as_ref())?;
-    tapes::altitude_tape(scene, data)?;
-    tapes::vsi(scene, data)?;
-    draw_turn_rate(scene, data)?;
+    scene.end_layer(LayerId::Annunciation)?;
     Ok(())
 }
 

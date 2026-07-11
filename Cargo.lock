@@ -955,6 +955,9 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-scene"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "pilotage-instrument-state"

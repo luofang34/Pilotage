@@ -1,6 +1,7 @@
 //! The decoded command vocabulary.
 
 use crate::color::Rgba8;
+use crate::layer::LayerId;
 
 /// Longest text payload a single [`Cmd::Text`] may carry, in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 250;
@@ -253,6 +254,19 @@ pub enum Cmd<'a> {
         w: f32,
         /// Height.
         h: f32,
+    },
+    /// Opens a z-ordered criticality layer (REN-01). Layered scenes obey
+    /// the contract [`crate::validate_layers`] enforces: ascending,
+    /// non-nested, non-repeating, every drawing command inside exactly
+    /// one layer.
+    BeginLayer {
+        /// The layer being opened.
+        layer: LayerId,
+    },
+    /// Closes the open layer; must name the layer that is open.
+    EndLayer {
+        /// The layer being closed.
+        layer: LayerId,
     },
     /// A command from a newer format revision this decoder does not know;
     /// its payload was skipped. Consumers should count these, not fail.

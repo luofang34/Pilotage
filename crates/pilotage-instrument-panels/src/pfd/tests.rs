@@ -128,3 +128,62 @@ fn empty_state_still_renders_a_scene() {
     assert!(labels.iter().any(|t| t == "ATT"));
     assert_eq!(save_restore_balance(&scene), 0);
 }
+
+// ---- REN-01 layer contract ---------------------------------------------------
+
+use pilotage_instrument_scene::{LayerId, validate_layers};
+use pilotage_instrument_state::SignalStatus;
+
+use super::BackgroundMode;
+
+const PFD_CRITICAL: [LayerId; 3] = [LayerId::Attitude, LayerId::Tapes, LayerId::Annunciation];
+
+#[test]
+fn scenes_are_layered_for_every_attitude_status() {
+    for status in [
+        SignalStatus::Valid,
+        SignalStatus::Degraded,
+        SignalStatus::Stale,
+        SignalStatus::Missing,
+        SignalStatus::Failed,
+    ] {
+        let mut data = flying();
+        data.roll_rad.status = status;
+        data.pitch_rad.status = status;
+        let scene = render(&data, &PfdConfig::default());
+        let report = validate_layers(&scene).expect("layered scene validates");
+        assert!(report.contains(LayerId::Background), "{status:?}");
+        for layer in PFD_CRITICAL {
+            assert!(report.contains(layer), "{status:?} missing {layer:?}");
+        }
+    }
+}
+
+#[test]
+fn critical_overlay_is_byte_identical_without_background() {
+    for status in [SignalStatus::Valid, SignalStatus::Failed] {
+        let mut data = flying();
+        data.roll_rad.status = status;
+        data.pitch_rad.status = status;
+        let with_horizon = render(&data, &PfdConfig::default());
+        let without = render(
+            &data,
+            &PfdConfig {
+                background: BackgroundMode::None,
+                ..PfdConfig::default()
+            },
+        );
+        let horizon_report = validate_layers(&with_horizon).expect("validates");
+        let bare_report = validate_layers(&without).expect("validates");
+        assert!(!bare_report.contains(LayerId::Background));
+        for layer in PFD_CRITICAL {
+            let (hs, he) = horizon_report.ranges[layer.to_u8() as usize].expect("range");
+            let (bs, be) = bare_report.ranges[layer.to_u8() as usize].expect("range");
+            assert_eq!(
+                &with_horizon[hs..he],
+                &without[bs..be],
+                "{status:?} layer {layer:?} content changed with the background"
+            );
+        }
+    }
+}

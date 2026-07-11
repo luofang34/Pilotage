@@ -3,6 +3,7 @@
 use crate::SCENE_FORMAT_VERSION;
 use crate::cmd::{Anchor, Cmd, PaintMode, PointsRef};
 use crate::color::Rgba8;
+use crate::layer::LayerId;
 use crate::opcode;
 
 /// Why decoding stopped.
@@ -44,6 +45,13 @@ impl<'a> SceneCmds<'a> {
             Some((&v, _)) => Err(DecodeError::BadVersion { found: v }),
             None => Err(DecodeError::Truncated),
         }
+    }
+
+    /// Bytes not yet consumed. `scene.len() - remaining()` is the offset
+    /// of the next command, which is how [`crate::validate_layers`]
+    /// reports per-layer byte ranges without allocating.
+    pub fn remaining(&self) -> usize {
+        self.rest.len()
     }
 
     fn take_cmd(&mut self) -> Result<Cmd<'a>, DecodeError> {
@@ -171,6 +179,15 @@ fn decode_payload(op: u8, payload: &[u8]) -> Result<Cmd<'_>, DecodeError> {
             y: f32_at(payload, 1).ok_or(bad)?,
             w: f32_at(payload, 2).ok_or(bad)?,
             h: f32_at(payload, 3).ok_or(bad)?,
+        }),
+        // An unknown layer *id* is a hard error, unlike an unknown
+        // opcode: content whose criticality cannot be placed must not
+        // be painted (REN-01). New layer ids require a version bump.
+        opcode::BEGIN_LAYER => Ok(Cmd::BeginLayer {
+            layer: LayerId::from_u8(*payload.first().ok_or(bad)?).ok_or(bad)?,
+        }),
+        opcode::END_LAYER => Ok(Cmd::EndLayer {
+            layer: LayerId::from_u8(*payload.first().ok_or(bad)?).ok_or(bad)?,
         }),
         other => Ok(Cmd::Unknown { opcode: other }),
     }

@@ -238,6 +238,19 @@ impl<'a> SceneWriter<'a> {
     pub fn clip_rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> Result<(), SceneError> {
         self.cmd_f32(opcode::CLIP_RECT, &[], &[x, y, w, h])
     }
+
+    /// Opens layer `layer` (REN-01). Layered scenes emit each layer at
+    /// most once, in ascending order, unnested, with every drawing
+    /// command inside a layer — [`crate::validate_layers`] enforces the
+    /// contract.
+    pub fn begin_layer(&mut self, layer: crate::layer::LayerId) -> Result<(), SceneError> {
+        self.cmd(opcode::BEGIN_LAYER, &[&[layer.to_u8()]])
+    }
+
+    /// Closes layer `layer`; must match the open layer.
+    pub fn end_layer(&mut self, layer: crate::layer::LayerId) -> Result<(), SceneError> {
+        self.cmd(opcode::END_LAYER, &[&[layer.to_u8()]])
+    }
 }
 
 #[cfg(test)]

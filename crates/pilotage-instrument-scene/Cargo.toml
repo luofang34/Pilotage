@@ -9,3 +9,6 @@ publish = false
 workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+proptest = { workspace = true }

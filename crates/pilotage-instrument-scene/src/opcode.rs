@@ -1,7 +1,8 @@
 //! Wire opcodes shared by the encoder and decoder.
 //!
 //! Opcode space is append-only: values are never reused or redefined
-//! (ADR-0017). 0x50–0x5F is reserved for future layer markers.
+//! (ADR-0017). 0x50–0x51 are the layer markers (REN-01); 0x52–0x5F stay
+//! reserved for the layer vocabulary.
 
 pub(crate) const SAVE: u8 = 0x01;
 pub(crate) const RESTORE: u8 = 0x02;
@@ -17,3 +18,5 @@ pub(crate) const CIRCLE: u8 = 0x24;
 pub(crate) const ARC: u8 = 0x25;
 pub(crate) const TEXT: u8 = 0x30;
 pub(crate) const CLIP_RECT: u8 = 0x40;
+pub(crate) const BEGIN_LAYER: u8 = 0x50;
+pub(crate) const END_LAYER: u8 = 0x51;

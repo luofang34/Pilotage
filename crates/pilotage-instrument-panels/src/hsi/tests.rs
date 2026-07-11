@@ -125,3 +125,32 @@ fn failed_heading_renders_red_x() {
         "readout dashes: {labels:?}"
     );
 }
+
+// ---- REN-01 layer contract ---------------------------------------------------
+
+use pilotage_instrument_scene::{LayerId, validate_layers};
+
+#[test]
+fn scenes_are_layered_for_every_heading_status() {
+    for status in [
+        SignalStatus::Valid,
+        SignalStatus::Degraded,
+        SignalStatus::Stale,
+        SignalStatus::Missing,
+        SignalStatus::Failed,
+    ] {
+        let mut data = heading_only(0.0);
+        data.heading_rad = Sig::with_status(0.0, status);
+        let scene = render(&data);
+        let report = validate_layers(&scene).expect("layered scene validates");
+        for layer in [
+            LayerId::Background,
+            LayerId::Attitude,
+            LayerId::Tapes,
+            LayerId::Guidance,
+            LayerId::Annunciation,
+        ] {
+            assert!(report.contains(layer), "{status:?} missing {layer:?}");
+        }
+    }
+}
