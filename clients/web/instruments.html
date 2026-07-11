@@ -105,6 +105,7 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
 
 <script type="module">
   import { loadInstruments, eulerToQuat, PANEL } from "./instruments.js";
+  import { drawFailurePage } from "./instrument-health.js";
 
   const DEG = Math.PI / 180;
   const defs = [
@@ -186,8 +187,16 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
       selections: { headingBugRad: v("hdgBug") * DEG, altitudeSelM: v("altSel") },
       quality: Number(document.getElementById("quality").value),
     });
-    mod.renderTo(pfd, PANEL.PFD, 480, 360);
-    mod.renderTo(hsi, PANEL.HSI, 480, 360);
+    // Every render result is honored (DISP-01): a failure covers the
+    // panel with the failure page instead of leaving the last frame.
+    for (const [ctx2d, panel] of [
+      [pfd, PANEL.PFD],
+      [hsi, PANEL.HSI],
+    ]) {
+      const result = mod.renderPanel(panel);
+      if (result.ok) result.blit(ctx2d, 480, 360);
+      else drawFailurePage(ctx2d, 480, 360, result.reason);
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
