@@ -448,3 +448,118 @@ and jitter, including worst-case load and failure/recovery behavior.
 Every unavailable condition shall define a bounded detection, annunciation, and
 reversion time derived from its safety assessment; a browser demonstration
 threshold shall not be treated as an aircraft allocation.
+
+## Hazard-derived safety requirements
+
+These requirements are derived by the preliminary functional hazard assessment
+and preliminary system safety assessment ([FHA](fha.md), [PSSA](pssa.md)). Each
+is additive to the intended-function baseline and is referenced from the failure
+conditions and allocation tables that derive it.
+
+<a id="air-haz-001"></a>
+### AIR-HAZ-001 — Conditional failure-condition classification
+
+No failure condition identified by the instrument hazard assessment shall be
+assigned an unconditional severity, development assurance level, integrity level,
+or quantitative probability objective; every classification shall remain
+explicitly conditional on the selected vehicle, operation, installation, credited
+function, and certification basis, none of which this baseline selects.
+
+<a id="air-haz-002"></a>
+### AIR-HAZ-002 — Misleading-information detection means
+
+Each credited display quantity shall carry a detection means — range, coherence,
+source-time, cross-source comparison, integrity, or annunciation — sufficient to
+reveal an incorrect value; a quantity that cannot be shown correct for its
+intended use shall be presented as unavailable rather than displayed silently.
+
+<a id="air-haz-003"></a>
+### AIR-HAZ-003 — Monitor independence
+
+A monitor credited with detecting a renderer, output-path, or data fault shall
+not depend on the same computation, timebase, power, or resource whose failure it
+must detect, to the extent required by the failure condition it mitigates; a
+monitor that shares those resources shall claim no independence credit until an
+installation provides the required separation.
+
+<a id="air-haz-004"></a>
+### AIR-HAZ-004 — Compositor fail-safe priority
+
+A compositor, window-manager, or layer-composition fault — corrupt layer state,
+priority-table error, or resource exhaustion — shall resolve toward exposing
+higher-criticality bands and toward an explicit display-failure presentation, and
+shall never resolve toward suppressing primary symbology, warnings, or failure
+indications or toward promoting background content above them.
+
+<a id="air-haz-005"></a>
+### AIR-HAZ-005 — Fail-safe self-annunciating reversion
+
+A reversion or degraded-mode transition shall never select, restore, or upgrade
+an unvalidated, stale, or failed source; failure of the reversion mechanism
+itself shall drive an explicit display-failure presentation within the allocated
+monitor time and shall remain crew-visible, and no transition shall hide its
+cause or resulting source.
+
+<a id="air-haz-006"></a>
+### AIR-HAZ-006 — Frame, epoch, and time-scale coherence fail closed
+
+Every presented pose, attitude, position, velocity, angular rate, or derived
+reference shall carry an explicit frame identity, epoch, clock domain, and
+time-scale identity; composition or presentation across a mismatched or unknown
+frame, epoch, clock domain, or time-scale shall fail closed to a declared
+unavailable condition and shall never silently reproject, assume a default frame,
+or blend across time scales.
+
+<a id="air-haz-007"></a>
+### AIR-HAZ-007 — Explicit reference and local-vertical basis
+
+Any horizon, up/down, local-vertical, attitude datum, altitude datum, or heading
+reference shall be presented only against an explicitly selected reference basis;
+the display shall not assume a local vertical, gravity direction, or horizon where
+the selected frame defines none, and shall present attitude unambiguously or
+unavailable rather than fabricate a horizon.
+
+<a id="air-haz-008"></a>
+### AIR-HAZ-008 — Reference-frame confusion barrier
+
+Distinct reference projections — inertial, local-navigation, local-vertical or
+orbital, and target-relative — shall be labelled and visually distinguishable so a
+value expressed in one basis cannot be read as another; a change of reference
+basis shall be an explicit, annunciated display state and never an implicit
+substitution.
+
+<a id="air-haz-009"></a>
+### AIR-HAZ-009 — Common-cause boundary declaration
+
+Each independence or redundancy claim shall be accompanied by a documented
+common-cause analysis spanning shared sources, buses, timebase, source selection,
+databases, renderer, compositor, display hardware, power, and monitoring; drawing
+an additional instrument, panel, or surface from the same validated state copy
+shall establish no independence.
+
+<a id="air-haz-010"></a>
+### AIR-HAZ-010 — Latent-failure exposure bound
+
+Every credited monitor, comparator, reversion path, and fail-safe default shall
+have a defined detection means and a bounded exposure interval — power-up test,
+continuous monitor, or periodic self-test — established from the applicable safety
+assessment before any availability or independence credit is taken for it.
+
+<a id="air-haz-011"></a>
+### AIR-HAZ-011 — Frozen and stale detection at source time
+
+Staleness and frozen-image detection shall derive from original source or capture
+time together with independent renderer-progress evidence, so that a repeated,
+replayed, cached, or last-good value cannot present as current; forwarding,
+retransmission, re-rendering, or compositor recomposition shall not reset age or
+liveness.
+
+<a id="air-haz-012"></a>
+### AIR-HAZ-012 — Polarity and ordering integrity
+
+Signed and ordered quantities — vertical speed, deviations, turn and slip/skid
+direction, unusual-attitude recovery direction, tape and ladder motion, and
+sequence — shall preserve correct polarity and monotonic ordering through the full
+orientation domain, reversion, wrap, and representation-singularity transitions; a
+sign, wrap, or reordering fault shall flag the affected quantity rather than
+present a plausible incorrect value.
