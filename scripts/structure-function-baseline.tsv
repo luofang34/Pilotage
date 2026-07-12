@@ -3,7 +3,6 @@
 ./crates/pilotage-instrument-scene/src/decode.rs	decode_payload	94
 ./crates/pilotage-instrument-glyphs/src/sha256.rs	sha256	90
 ./crates/pilotage-conformance/src/fixture.rs	increment_zero_script	89
-./crates/pilotage-instrument-state/src/resolve.rs	resolve	153
 ./crates/pilotage-instrument-state/src/abi.rs	decode_state	134
 ./crates/pilotage-instrument-state/src/abi.rs	encode_state	108
 ./crates/pilotage-authority/src/wire.rs	from	88

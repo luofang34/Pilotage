@@ -3,7 +3,7 @@
 //! tapes → symbology → annunciation, ADR-0017).
 
 use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
-use pilotage_instrument_state::{PanelData, SignalStatus};
+use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
 
 use crate::palette;
 use crate::status_paint;
@@ -56,12 +56,21 @@ pub struct PfdConfig {
 /// annunciations, in ascending z-order. The layers above `Background`
 /// never depend on the background mode, so the critical overlay stays
 /// complete — byte-identical — when the background is absent.
+/// The one declutter priority table (ATT-01): entering the unusual tier
+/// removes exactly these elements. Primary attitude, the airspeed and
+/// altitude tapes, VSI, and every failure flag/annunciation are never on
+/// this list — declutter can only ever *add* attention to the horizon.
+///
+/// - minor (2.5° and 5°) pitch-ladder rows — major 10° bars remain
+/// - speed-tape color bands
+/// - the turn-rate cue
 pub fn draw_pfd(
     data: &PanelData,
     cfg: &PfdConfig,
     scene: &mut SceneWriter<'_>,
 ) -> Result<(), SceneError> {
     let att_status = data.roll_rad.status.worst(data.pitch_rad.status);
+    let declutter = att_status.shows_value() && data.presentation.unusual;
 
     match cfg.background {
         BackgroundMode::Horizon => {
@@ -78,17 +87,30 @@ pub fn draw_pfd(
 
     scene.begin_layer(LayerId::Attitude)?;
     if att_status.shows_value() {
-        horizon::draw_horizon_cues(scene, data.roll_rad.value, data.pitch_rad.value)?;
+        horizon::draw_horizon_cues(scene, data.roll_rad.value, data.pitch_rad.value, declutter)?;
         horizon::draw_roll_scale(scene, data.roll_rad.value)?;
         horizon::draw_aircraft_symbol(scene)?;
+        if let Some(sense) = data.presentation.chevrons {
+            draw_recovery_chevrons(scene, data.roll_rad.value, sense)?;
+        }
     }
     scene.end_layer(LayerId::Attitude)?;
 
     scene.begin_layer(LayerId::Tapes)?;
-    tapes::speed_tape(scene, data, cfg.v_speeds.as_ref())?;
+    tapes::speed_tape(
+        scene,
+        data,
+        if declutter {
+            None
+        } else {
+            cfg.v_speeds.as_ref()
+        },
+    )?;
     tapes::altitude_tape(scene, data)?;
     tapes::vsi(scene, data)?;
-    draw_turn_rate(scene, data)?;
+    if !declutter {
+        draw_turn_rate(scene, data)?;
+    }
     scene.end_layer(LayerId::Tapes)?;
 
     scene.begin_layer(LayerId::Annunciation)?;
@@ -106,6 +128,32 @@ pub fn draw_pfd(
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
     scene.end_layer(LayerId::Annunciation)?;
+    Ok(())
+}
+
+/// Recovery chevrons in the roll-rotated attitude frame, pointing toward
+/// the horizon (an orientation cue, never a flight-director command).
+/// Nose high puts the horizon below the aircraft symbol, so the chevrons
+/// sit above center with their apexes downward; nose low mirrors it.
+fn draw_recovery_chevrons(
+    scene: &mut SceneWriter<'_>,
+    roll_rad: f32,
+    sense: ChevronSense,
+) -> Result<(), SceneError> {
+    scene.save()?;
+    scene.translate(240.0, 180.0)?;
+    scene.rotate(-roll_rad)?;
+    scene.stroke(palette::RED, 6.0)?;
+    let toward: f32 = match sense {
+        ChevronSense::HorizonBelow => 1.0,
+        ChevronSense::HorizonAbove => -1.0,
+    };
+    for offset in [56.0f32, 84.0] {
+        let base_y = -toward * offset;
+        let apex_y = base_y + toward * 22.0;
+        scene.polyline(&[[-42.0, base_y], [0.0, apex_y], [42.0, base_y]])?;
+    }
+    scene.restore()?;
     Ok(())
 }
 

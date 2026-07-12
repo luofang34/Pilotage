@@ -6,8 +6,8 @@
 
 use pilotage_instrument_panels::{PfdConfig, VSpeeds, draw_hsi, draw_pfd};
 use pilotage_instrument_scene::{LayerError, LayerId, SceneError, SceneWriter, validate_layers};
+use pilotage_instrument_state::FreshnessPolicy;
 use pilotage_instrument_state::abi::{AbiError, STATE_ABI_SIZE, STATE_ABI_VERSION, decode_state};
-use pilotage_instrument_state::{FreshnessPolicy, resolve};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::render_status::RenderStatus;
@@ -34,6 +34,14 @@ pub(crate) struct Runtime {
     pub(crate) scene: Vec<u8>,
     pub(crate) generation: [u32; PANEL_COUNT],
     pub(crate) pfd_cfg: PfdConfig,
+    /// Unusual-attitude hysteresis latches, carried across frames so
+    /// tier entry/exit cannot chatter (ATT-01). Stepping twice per frame
+    /// (PFD then HSI) is idempotent: the latches depend on the input
+    /// magnitudes, not on step count.
+    pub(crate) unusual: pilotage_instrument_state::UnusualAttitudeState,
+    /// Display thresholds; the simulator profile's numbers are benchmark
+    /// data, not an aircraft approval.
+    pub(crate) profile: pilotage_instrument_state::AirframeDisplayProfile,
 }
 
 impl Runtime {
@@ -43,6 +51,8 @@ impl Runtime {
             scene: vec![0u8; SCENE_CAPACITY],
             generation: [0; PANEL_COUNT],
             pfd_cfg: PfdConfig::default(),
+            unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+            profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         }
     }
 }
@@ -146,7 +156,12 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
             return RenderAttempt::failure(RenderStatus::StateBadVersion, generation);
         }
     };
-    let data = resolve(&state, &FreshnessPolicy::default());
+    let data = pilotage_instrument_state::resolve_stateful(
+        &state,
+        &FreshnessPolicy::default(),
+        &runtime.profile,
+        &mut runtime.unusual,
+    );
     let mut writer = match SceneWriter::new(&mut runtime.scene) {
         Ok(writer) => writer,
         Err(error) => return RenderAttempt::failure(scene_error_status(error), generation),

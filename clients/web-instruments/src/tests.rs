@@ -96,6 +96,8 @@ fn scene_runtime(scene: &[u8]) -> Runtime {
         scene: buffer,
         generation: [7, 11],
         pfd_cfg: PfdConfig::default(),
+        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
     }
 }
 
@@ -227,6 +229,8 @@ fn render_into_reports_buffer_and_truncation_failures() {
         scene: vec![0u8; 4],
         generation: [0; 2],
         pfd_cfg: PfdConfig::default(),
+        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
     };
     assert_attempt(
         render_into(&mut tiny, 0),
@@ -241,6 +245,8 @@ fn render_into_reports_buffer_and_truncation_failures() {
         scene: vec![0u8; SCENE_CAPACITY],
         generation: [4, 8],
         pfd_cfg: PfdConfig::default(),
+        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
     };
     assert_attempt(
         render_into(&mut truncated, 0),
@@ -254,6 +260,8 @@ fn render_into_reports_buffer_and_truncation_failures() {
         scene: vec![0u8; SCENE_CAPACITY],
         generation: [0; 2],
         pfd_cfg: PfdConfig::default(),
+        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
     };
     assert_attempt(render_into(&mut valid, 2), RenderStatus::InvalidPanel, 0, 0);
     let rendered = render_into(&mut valid, 0);
@@ -270,6 +278,8 @@ fn malformed_scene_never_advances_or_commits_length() {
         scene: vec![1, 0],
         generation: [7, 11],
         pfd_cfg: PfdConfig::default(),
+        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
     };
     assert_attempt(
         validate_and_commit_scene(&mut runtime, 0, 2),
