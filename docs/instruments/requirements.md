@@ -448,4 +448,3 @@ and jitter, including worst-case load and failure/recovery behavior.
 Every unavailable condition shall define a bounded detection, annunciation, and
 reversion time derived from its safety assessment; a browser demonstration
 threshold shall not be treated as an aircraft allocation.
-

@@ -50,4 +50,3 @@ selected certification authority identifies an accepted revision:
 - [FAA AC 25.1309-1B, System Design and Analysis](https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1043037)
 - [FAA AC 20-185A, Synthetic Vision Guidance Systems](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-185A.pdf)
 - [SAE ARP4754B, Development of Civil Aircraft and Systems](https://saemobilus.sae.org/standards/arp4754b-guidelines-development-civil-aircraft-systems)
-

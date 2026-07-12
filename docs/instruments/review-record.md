@@ -64,4 +64,3 @@ subsequent aircraft-specific validation.
 - Tracking issue may close: NO
 - Decision revision/commit: PENDING
 - Decision owner and date: PENDING
-

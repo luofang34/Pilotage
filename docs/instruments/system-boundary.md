@@ -127,4 +127,3 @@ failure conditions, independence, common causes, crew procedures, dispatch
 configuration, and certification basis must be selected before assurance is
 allocated. Closure requires the independent review record specified by
 [`AIR-BAS-006`](requirements.md#air-bas-006).
-
