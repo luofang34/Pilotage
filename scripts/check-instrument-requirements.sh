@@ -5,8 +5,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root_dir"
 
-catalog="docs/instruments/requirements.md"
-document_dir="docs/instruments"
+document_dir="${PILOTAGE_INSTRUMENT_DOCUMENT_DIR:-docs/instruments}"
+catalog="$document_dir/requirements.md"
 status=0
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -129,7 +129,10 @@ referenced="$tmp_dir/referenced"
                     split(ids[i], a, "-")
                     split(ids[i + 1], b, "-")
                     between = substr(gaps[i], 1, length(gaps[i]) - length(gaps[i + 1]) - length(ids[i + 1]))
-                    if (a[2] == b[2] && a[3] + 0 < b[3] + 0 && between ~ /[[:space:]]through[[:space:]]/) {
+                    normalized = between
+                    gsub(/[[:space:]]+/, " ", normalized)
+                    expected = "`](requirements.md#" tolower(ids[i]) ") through [`"
+                    if (a[2] == b[2] && a[3] + 0 < b[3] + 0 && normalized == expected) {
                         for (k = a[3] + 0; k <= b[3] + 0; k++) {
                             printf "AIR-%s-%03d\n", a[2], k
                         }
@@ -146,6 +149,10 @@ while IFS= read -r id; do
         status=1
     fi
 done < <(cut -f1 "$definitions")
+
+if [ "${PILOTAGE_INSTRUMENT_SELFTEST_CHILD:-0}" != "1" ]; then
+    "$root_dir/scripts/test-instrument-requirements.sh" || status=1
+fi
 
 if [ "$status" -ne 0 ]; then
     echo "instrument-requirements: FAILED" >&2
