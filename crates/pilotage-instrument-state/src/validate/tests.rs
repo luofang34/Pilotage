@@ -5,7 +5,7 @@ use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, Wind,
 };
-use crate::quat::Quat;
+use pilotage_frames::Quat;
 
 const BAD: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
 

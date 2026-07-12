@@ -2,8 +2,8 @@
 
 use super::resolve;
 use crate::aircraft::{AirData, AircraftState, Attitude, EstimateQuality, Kinematics, Stamped};
-use crate::quat::Quat;
 use crate::signal::{FreshnessPolicy, SignalStatus};
+use pilotage_frames::Quat;
 
 fn flying_state() -> AircraftState {
     AircraftState {

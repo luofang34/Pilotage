@@ -1,6 +1,6 @@
 //! The raw input state a feeder writes.
 
-use crate::quat::Quat;
+use pilotage_frames::Quat;
 
 /// Attitude estimate: orientation and body rotation rates.
 #[derive(Debug, Clone, Copy, PartialEq)]
