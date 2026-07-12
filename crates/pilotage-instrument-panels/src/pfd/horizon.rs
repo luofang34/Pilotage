@@ -45,6 +45,7 @@ pub fn draw_horizon_cues(
     scene: &mut SceneWriter<'_>,
     roll_rad: f32,
     pitch_rad: f32,
+    declutter: bool,
 ) -> Result<(), SceneError> {
     let horizon_y = pitch_rad * RAD_TO_DEG * PX_PER_DEG_PITCH;
     scene.save()?;
@@ -52,18 +53,27 @@ pub fn draw_horizon_cues(
     scene.rotate(-roll_rad)?;
     scene.stroke(palette::WHITE, 2.0)?;
     scene.line(-600.0, horizon_y, 600.0, horizon_y)?;
-    draw_pitch_ladder(scene, horizon_y)?;
+    draw_pitch_ladder(scene, horizon_y, declutter)?;
     scene.restore()?;
     Ok(())
 }
 
 /// Ladder marks every 2.5°, wide labeled bars every 10° (pyG5's
 /// half-width cycle 10/20/10/30).
-fn draw_pitch_ladder(scene: &mut SceneWriter<'_>, horizon_y: f32) -> Result<(), SceneError> {
+fn draw_pitch_ladder(
+    scene: &mut SceneWriter<'_>,
+    horizon_y: f32,
+    declutter: bool,
+) -> Result<(), SceneError> {
     scene.stroke(palette::WHITE, 2.0)?;
     scene.fill_color(palette::WHITE)?;
     for i in -36..=36i32 {
         if i == 0 {
+            continue;
+        }
+        // Declutter keeps only the labeled 10° bars: fewer, larger cues
+        // when orientation is the problem being solved.
+        if declutter && i.rem_euclid(4) != 0 {
             continue;
         }
         let deg = i as f32 * 2.5;

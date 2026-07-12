@@ -5,6 +5,7 @@ use libm::{atan2f, sqrtf};
 use crate::aircraft::{
     AircraftState, EstimateQuality, NavData, NavSource, Selections, SnapshotCoherence, Wind,
 };
+use crate::presentation::{AirframeDisplayProfile, AttitudePresentation, UnusualAttitudeState};
 use crate::signal::{FreshnessPolicy, Sig, SignalStatus};
 use crate::units::{M_TO_FT, MPS_TO_FPM, MPS_TO_KT};
 use crate::validate::{StateIntegrity, validate_quat, validate_state};
@@ -55,6 +56,10 @@ pub struct PanelData {
     /// Per-group typed fault reasons behind any validation-driven
     /// status downgrade, for annunciation and diagnostics.
     pub integrity: StateIntegrity,
+    /// SO(3)-safe attitude presentation (tier, chevrons, declutter,
+    /// continuous bank). Meaningful only while the attitude signals'
+    /// status shows a value; an invalid attitude resets it to default.
+    pub presentation: AttitudePresentation,
 }
 
 fn quality_status(q: EstimateQuality) -> SignalStatus {
@@ -127,75 +132,137 @@ fn sanitized_selections(selections: Selections) -> Selections {
 /// `Missing`. Values behind `Missing`/`Failed` are quiet zeros a panel
 /// never paints, and every showable value is finite.
 pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
-    let integrity = validate_state(state);
-    let quality = quality_status(state.quality).worst(fault_status(integrity.quality));
-    let coherence = coherence_status(state.snapshot.coherence);
+    let mut fresh = UnusualAttitudeState::default();
+    resolve_stateful(
+        state,
+        policy,
+        &AirframeDisplayProfile::simulator(),
+        &mut fresh,
+    )
+}
 
-    let att_fresh = if state.attitude.data.is_none() {
+/// [`resolve`] with a caller-held unusual-attitude latch state, so tier
+/// entry/exit hysteresis works across frames. [`resolve`] itself uses a
+/// fresh state per call (entry thresholds only), which is sufficient for
+/// single-frame consumers and tests.
+pub fn resolve_stateful(
+    state: &AircraftState,
+    policy: &FreshnessPolicy,
+    profile: &AirframeDisplayProfile,
+    unusual: &mut UnusualAttitudeState,
+) -> PanelData {
+    let integrity = validate_state(state);
+    let trust = Trust {
+        quality: quality_status(state.quality).worst(fault_status(integrity.quality)),
+        coherence: coherence_status(state.snapshot.coherence),
+    };
+
+    let (presentation, yaw, turn_rate) = attitude_geometry(state, profile, unusual);
+    let has_att = state.attitude.data.is_some();
+    let att_fresh = group_freshness(policy, has_att, state.attitude.age_ms);
+    let att_status = trust.fold(has_att, att_fresh, integrity.attitude, state.valid.attitude);
+    let rate_status = trust.fold(has_att, att_fresh, integrity.rates, state.valid.rates);
+
+    let has_kin = state.kinematics.data.is_some();
+    let kin_fresh = group_freshness(policy, has_kin, state.kinematics.age_ms);
+    let pos_status = trust.fold(has_kin, kin_fresh, integrity.position, state.valid.position);
+    let vel_status = trust.fold(has_kin, kin_fresh, integrity.velocity, state.valid.velocity);
+    let (alt_ft, vsi_fpm, gs_kt, track_rad, gs_mps) = kinematics_geometry(state);
+    let track_status = if !(gs_mps.is_finite() && gs_mps >= TRACK_MIN_GS_MPS) {
         SignalStatus::Missing
     } else {
-        policy.status_for_age(state.attitude.age_ms)
+        vel_status
     };
-    // Trust metadata (quality, coherence, flags, validation) applies
-    // only to groups that have data: absence stays Missing — dashes,
-    // not a red X — because nothing was received to distrust.
-    let has_attitude = state.attitude.data.is_some();
-    let att_status = if has_attitude {
-        att_fresh
-            .worst(quality)
-            .worst(coherence)
-            .worst(fault_status(integrity.attitude))
-            .worst(flag_status(state.valid.attitude))
+
+    let (ias, baro) = air_signals(state, policy, trust.quality, &integrity);
+
+    PanelData {
+        roll_rad: finite(Sig::with_status(presentation.bank_rad, att_status)),
+        pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
+        heading_rad: finite(Sig::with_status(yaw, att_status)),
+        turn_rate_rps: finite(Sig::with_status(turn_rate, rate_status)),
+        ias_kt: finite(ias),
+        gs_kt: finite(Sig::with_status(gs_kt, vel_status)),
+        alt_ft: finite(Sig::with_status(alt_ft, pos_status)),
+        vsi_fpm: finite(Sig::with_status(vsi_fpm, vel_status)),
+        track_rad: finite(Sig::with_status(track_rad, track_status)),
+        baro_hpa: finite(baro),
+        wind: wind_signal(state, policy, &integrity),
+        nav: nav_resolved(state, policy, &integrity),
+        selections: sanitized_selections(state.selections),
+        integrity,
+        presentation,
+    }
+}
+
+/// Source-level trust shared by every estimate group this frame.
+#[derive(Clone, Copy)]
+struct Trust {
+    quality: SignalStatus,
+    coherence: SignalStatus,
+}
+
+impl Trust {
+    /// The deterministic worst-of for one group. Trust metadata applies
+    /// only to groups that have data: absence stays Missing — dashes,
+    /// not a red X — because nothing was received to distrust. A group
+    /// *with* data still folds even when its freshness reads Missing
+    /// (a bogus age), so declared distrust cannot be masked.
+    fn fold(
+        &self,
+        has_data: bool,
+        freshness: SignalStatus,
+        fault: Option<crate::validate::GroupFault>,
+        declared_valid: bool,
+    ) -> SignalStatus {
+        if !has_data {
+            return SignalStatus::Missing;
+        }
+        freshness
+            .worst(self.quality)
+            .worst(self.coherence)
+            .worst(fault_status(fault))
+            .worst(flag_status(declared_valid))
+    }
+}
+
+fn group_freshness(policy: &FreshnessPolicy, has_data: bool, age_ms: Option<f32>) -> SignalStatus {
+    if has_data {
+        policy.status_for_age(age_ms)
     } else {
         SignalStatus::Missing
-    };
-    let rate_status = if has_attitude {
-        att_fresh
-            .worst(quality)
-            .worst(coherence)
-            .worst(fault_status(integrity.rates))
-            .worst(flag_status(state.valid.rates))
-    } else {
-        SignalStatus::Missing
-    };
-    let (roll, pitch, yaw, turn_rate) = match state.attitude.data {
-        // Geometry only ever sees a validated, renormalized quaternion;
-        // a rejected one leaves quiet zeros behind a Failed status.
+    }
+}
+
+/// Geometry only ever sees a validated, renormalized quaternion; a
+/// rejected one resets the tier latches and leaves quiet zeros behind a
+/// Failed status — never a plausible horizon.
+fn attitude_geometry(
+    state: &AircraftState,
+    profile: &AirframeDisplayProfile,
+    unusual: &mut UnusualAttitudeState,
+) -> (AttitudePresentation, f32, f32) {
+    match state.attitude.data {
         Some(att) => match validate_quat(att.quat) {
             Ok(quat) => {
-                let (r, p, y) = quat.to_euler();
-                (r, p, y, att.rates_rps[2])
+                let presentation = unusual.step(quat, profile);
+                let (_, _, yaw) = quat.to_euler();
+                (presentation, yaw, att.rates_rps[2])
             }
-            Err(_) => (0.0, 0.0, 0.0, att.rates_rps[2]),
+            Err(_) => {
+                unusual.reset();
+                (AttitudePresentation::default(), 0.0, att.rates_rps[2])
+            }
         },
-        None => (0.0, 0.0, 0.0, 0.0),
-    };
+        None => {
+            unusual.reset();
+            (AttitudePresentation::default(), 0.0, 0.0)
+        }
+    }
+}
 
-    let kin_fresh = if state.kinematics.data.is_none() {
-        SignalStatus::Missing
-    } else {
-        policy.status_for_age(state.kinematics.age_ms)
-    };
-    let has_kinematics = state.kinematics.data.is_some();
-    let pos_status = if has_kinematics {
-        kin_fresh
-            .worst(quality)
-            .worst(coherence)
-            .worst(fault_status(integrity.position))
-            .worst(flag_status(state.valid.position))
-    } else {
-        SignalStatus::Missing
-    };
-    let vel_status = if has_kinematics {
-        kin_fresh
-            .worst(quality)
-            .worst(coherence)
-            .worst(fault_status(integrity.velocity))
-            .worst(flag_status(state.valid.velocity))
-    } else {
-        SignalStatus::Missing
-    };
-    let (alt_ft, vsi_fpm, gs_kt, track_rad, gs_mps) = match state.kinematics.data {
+fn kinematics_geometry(state: &AircraftState) -> (f32, f32, f32, f32, f32) {
+    match state.kinematics.data {
         Some(kin) => {
             let alt = -kin.pos_ned_m[2] * M_TO_FT;
             let vsi = -kin.vel_ned_mps[2] * MPS_TO_FPM;
@@ -206,13 +273,15 @@ pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
             (alt, vsi, gs_mps * MPS_TO_KT, track, gs_mps)
         }
         None => (0.0, 0.0, 0.0, 0.0, 0.0),
-    };
-    let track_status = if !(gs_mps.is_finite() && gs_mps >= TRACK_MIN_GS_MPS) {
-        SignalStatus::Missing
-    } else {
-        vel_status
-    };
+    }
+}
 
+fn air_signals(
+    state: &AircraftState,
+    policy: &FreshnessPolicy,
+    quality: SignalStatus,
+    integrity: &StateIntegrity,
+) -> (Sig<f32>, Sig<f32>) {
     let air_fresh = policy.status_for_age(state.air.age_ms);
     let air_fault = fault_status(integrity.air);
     let air = state.air.data.unwrap_or_default();
@@ -224,9 +293,16 @@ pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
         Some(v) => Sig::with_status(v, air_fresh.worst(air_fault)),
         None => Sig::missing(),
     };
+    (ias, baro)
+}
 
+fn nav_resolved(
+    state: &AircraftState,
+    policy: &FreshnessPolicy,
+    integrity: &StateIntegrity,
+) -> NavResolved {
     let nav_fresh = policy.status_for_age(state.nav.age_ms);
-    let nav = match state.nav.data {
+    match state.nav.data {
         Some(data) => {
             let status = nav_fresh.worst(fault_status(integrity.nav));
             // Guidance from an unidentifiable source must not draw a
@@ -242,12 +318,18 @@ pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
             NavResolved { data, status }
         }
         None => NavResolved::default(),
-    };
+    }
+}
 
+fn wind_signal(
+    state: &AircraftState,
+    policy: &FreshnessPolicy,
+    integrity: &StateIntegrity,
+) -> Sig<Wind> {
     let wind_status = policy
         .status_for_age(state.wind.age_ms)
         .worst(fault_status(integrity.wind));
-    let wind = match (state.wind.data, wind_status) {
+    match (state.wind.data, wind_status) {
         (Some(w), s) if s.shows_value() => Sig::with_status(w, s),
         _ => Sig::with_status(
             Wind {
@@ -260,23 +342,6 @@ pub fn resolve(state: &AircraftState, policy: &FreshnessPolicy) -> PanelData {
                 SignalStatus::Missing
             },
         ),
-    };
-
-    PanelData {
-        roll_rad: finite(Sig::with_status(roll, att_status)),
-        pitch_rad: finite(Sig::with_status(pitch, att_status)),
-        heading_rad: finite(Sig::with_status(yaw, att_status)),
-        turn_rate_rps: finite(Sig::with_status(turn_rate, rate_status)),
-        ias_kt: finite(ias),
-        gs_kt: finite(Sig::with_status(gs_kt, vel_status)),
-        alt_ft: finite(Sig::with_status(alt_ft, pos_status)),
-        vsi_fpm: finite(Sig::with_status(vsi_fpm, vel_status)),
-        track_rad: finite(Sig::with_status(track_rad, track_status)),
-        baro_hpa: finite(baro),
-        wind,
-        nav,
-        selections: sanitized_selections(state.selections),
-        integrity,
     }
 }
 
