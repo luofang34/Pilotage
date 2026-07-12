@@ -6,7 +6,7 @@ use super::{
     AirframeDisplayProfile, ChevronSense, Hysteresis, ProfileError, ProfileLimits,
     UnusualAttitudeState, down_in_body,
 };
-use crate::quat::Quat;
+use pilotage_frames::Quat;
 
 const DEG: f32 = PI / 180.0;
 

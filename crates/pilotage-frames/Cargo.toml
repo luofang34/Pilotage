@@ -1,0 +1,12 @@
+[package]
+name = "pilotage-frames"
+description = "Typed reference frames and six-DoF vehicle state (FRAME-01)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+libm = { workspace = true }

@@ -10,7 +10,7 @@ use libm::sqrtf;
 use crate::aircraft::{
     AircraftState, EstimateQuality, NavFromTo, NavSource, Selections, SnapshotCoherence,
 };
-use crate::quat::Quat;
+use pilotage_frames::Quat;
 
 /// Largest relative quaternion norm error normalized instead of failed.
 ///

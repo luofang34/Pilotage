@@ -179,4 +179,6 @@ fn draw_turn_rate(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
 }
 
 #[cfg(test)]
+mod attitude_tests;
+#[cfg(test)]
 mod tests;

@@ -982,6 +982,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-frames"
+version = "0.1.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "pilotage-input"
 version = "0.1.0"
 dependencies = [
@@ -1004,6 +1011,7 @@ name = "pilotage-instrument-panels"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "pilotage-frames",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
 ]
@@ -1034,6 +1042,7 @@ name = "pilotage-instrument-state"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "pilotage-frames",
 ]
 
 [[package]]

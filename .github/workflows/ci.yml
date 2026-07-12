@@ -68,6 +68,7 @@ jobs:
         # no_std/no-alloc claim instead of trusting a comment.
         run: >
           cargo check
+          -p pilotage-frames
           -p pilotage-instrument-state
           -p pilotage-instrument-scene
           -p pilotage-instrument-glyphs

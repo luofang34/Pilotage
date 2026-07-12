@@ -18,7 +18,7 @@
 
 use libm::{asinf, atan2f};
 
-use crate::quat::Quat;
+use pilotage_frames::Quat;
 
 /// Why an airframe display profile could not be constructed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -26,7 +26,6 @@
 pub mod abi;
 mod aircraft;
 mod presentation;
-mod quat;
 mod resolve;
 mod signal;
 pub mod units;
@@ -36,11 +35,11 @@ pub use aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
+pub use pilotage_frames::Quat;
 pub use presentation::{
     AirframeDisplayProfile, AttitudePresentation, ChevronSense, Hysteresis, ProfileError,
     ProfileLimits, UnusualAttitudeState, down_in_body,
 };
-pub use quat::Quat;
 pub use resolve::{NavResolved, PanelData, resolve, resolve_stateful};
 pub use signal::{FreshnessPolicy, PolicyError, Sig, SignalStatus};
 pub use validate::{

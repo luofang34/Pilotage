@@ -39,7 +39,7 @@ use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
-use crate::quat::Quat;
+use pilotage_frames::Quat;
 
 /// Version stamped in the block's first four bytes.
 pub const STATE_ABI_VERSION: u32 = 2;
