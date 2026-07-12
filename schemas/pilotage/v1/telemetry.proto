@@ -50,10 +50,10 @@ message MeasurementStamp {
 
 // Raw avionics state estimate for flight vehicles (ADR-0018): attitude
 // quaternion (body FRD → world NED), body rates, NED position/velocity,
-// and the source's validity/quality. Values are the estimator's output,
-// not display-ready numbers — display derivation (altitude, groundspeed,
-// Euler angles) happens in the instrument runtime (ADR-0017). Ground
-// vehicles never set this field.
+// and the adapter's effective latched validity/quality authorization. Numeric
+// values are the estimator's output, not display-ready numbers — display
+// derivation (altitude, groundspeed, Euler angles) happens in the instrument
+// runtime (ADR-0017). Ground vehicles never set this field.
 message AvionicsState {
   // Fields 1–7 are meaningful only when attitude_stamp is present. Proto3
   // scalar defaults are not measurements and must not be displayed as such.
@@ -71,9 +71,14 @@ message AvionicsState {
   float vel_n_mps = 11;
   float vel_e_mps = 12;
   float vel_d_mps = 13;
-  // bit0 attitude, bit1 rates, bit2 position, bit3 velocity.
+  // Effective latched authorization: bit0 attitude, bit1 rates, bit2 position,
+  // bit3 velocity. It can include fail-closed downgrades relative to the raw
+  // status observation and is meaningful only when estimator_status_stamp is
+  // present.
   uint32 valid_flags = 14;
-  // 0 good, 1 degraded, 2 unusable.
+  // Effective latched quality: 0 good, 1 degraded, 2 unusable. It can include
+  // fail-closed downgrades relative to the raw status observation and is
+  // meaningful only when estimator_status_stamp is present.
   uint32 quality = 15;
   // 0 unknown, 1 disarmed, 2 armed (from the vehicle's own report).
   uint32 arm_state = 16;
@@ -81,6 +86,10 @@ message AvionicsState {
   // that group was not supplied in this publication.
   MeasurementStamp attitude_stamp = 17;
   MeasurementStamp kinematics_stamp = 18;
+  // Acquisition identity of the status observation backing valid_flags and
+  // quality. Absence means no explicit estimator authorization was supplied
+  // and consumers fail closed.
+  MeasurementStamp estimator_status_stamp = 19;
 }
 
 // A single best-effort telemetry sample for one vehicle.

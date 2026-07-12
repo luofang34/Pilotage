@@ -494,7 +494,8 @@ function decodeVelocity2d(bytes) {
 
 // telemetry.proto AvionicsState (ADR-0018): quat_w..z=1..4,
 // rate_p/q/r_rad_s=5..7, pos_n/e/d_m=8..10, vel_n/e/d_mps=11..13 (float),
-// valid_flags=14, quality=15, arm_state=16 (varint), group stamps=17/18.
+// valid_flags=14, quality=15, arm_state=16 (varint), attitude and kinematics
+// stamps=17/18, estimator authorization stamp=19.
 // Raw estimate; display derivation
 // happens in the instrument runtime (ADR-0017).
 function decodeAvionicsState(bytes) {
@@ -502,6 +503,7 @@ function decodeAvionicsState(bytes) {
   const f = parseFields(bytes);
   const attitudeStamp = decodeMeasurementStamp(firstBytes(f, 17));
   const kinematicsStamp = decodeMeasurementStamp(firstBytes(f, 18));
+  const estimatorStatusStamp = decodeMeasurementStamp(firstBytes(f, 19));
   const attitude = attitudeStamp === null ? null : {
     quat: {
       w: decodeFloat32(firstBytes(f, 1)),
@@ -540,6 +542,7 @@ function decodeAvionicsState(bytes) {
     armState: firstVarint(f, 16) ?? 0,
     attitudeStamp,
     kinematicsStamp,
+    estimatorStatusStamp,
   };
 }
 

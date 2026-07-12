@@ -871,7 +871,7 @@ function renderInstruments() {
   const snapshot = instruments.ingress.snapshot(performance.now());
   const attitude = snapshot.attitude;
   const kinematics = snapshot.kinematics;
-  const quality = Math.max(attitude?.quality ?? 0, kinematics?.quality ?? 0);
+  const validFlags = snapshot.validFlags;
   const coherence = {
     insufficient: 0,
     coherent: 1,
@@ -884,12 +884,12 @@ function renderInstruments() {
     nav: null,
     wind: null,
     selections: { headingBugRad: 0 },
-    quality,
+    quality: snapshot.quality,
     valid: {
-      attitude: !!(attitude?.validFlags & 1),
-      rates: !!(attitude?.validFlags & 2),
-      position: !!(kinematics?.validFlags & 4),
-      velocity: !!(kinematics?.validFlags & 8),
+      attitude: !!(validFlags & 1),
+      rates: !!(validFlags & 2),
+      position: !!(validFlags & 4),
+      velocity: !!(validFlags & 8),
     },
     snapshot: { generation: snapshot.generation, coherence },
   };

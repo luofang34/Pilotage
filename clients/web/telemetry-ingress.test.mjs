@@ -35,11 +35,43 @@ function avionics(attitudeStamp, kinematicsStamp, value = 1) {
     armState: 2,
     attitudeStamp,
     kinematicsStamp,
+    estimatorStatusStamp: null,
   };
 }
 
 function packet(attitudeStamp, kinematicsStamp, value = 1, vehicleId = VEHICLE) {
   return { vehicleId, avionics: avionics(attitudeStamp, kinematicsStamp, value) };
+}
+
+function statusPacket(statusStamp, validFlags, quality, vehicleId = VEHICLE) {
+  return {
+    vehicleId,
+    avionics: {
+      ...avionics(null, null),
+      validFlags,
+      quality,
+      estimatorStatusStamp: statusStamp,
+    },
+  };
+}
+
+function pairedPacket(
+  attitudeStamp,
+  kinematicsStamp,
+  statusStamp,
+  value,
+  validFlags,
+  quality,
+) {
+  return {
+    vehicleId: VEHICLE,
+    avionics: {
+      ...avionics(attitudeStamp, kinematicsStamp, value),
+      validFlags,
+      quality,
+      estimatorStatusStamp: statusStamp,
+    },
+  };
 }
 
 function ingress(maximumSkewNanos = 100n) {
@@ -174,21 +206,224 @@ function testIndependentGroupsAndCoherenceBoundary() {
   assert.equal(snapshot.kinematics.posNed[0], 3);
 }
 
+function testStatusOnlyRevocationDoesNotRefreshMeasurements() {
+  const gate = ingress();
+  const initialStatus = stamp(10, 1_000n);
+  gate.ingest(statusPacket(initialStatus, 0b1111, 0), 10);
+  let snapshot = gate.snapshot(10);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), initialStatus, 1, 0b1111, 0),
+    15,
+  );
+  snapshot = gate.snapshot(20);
+  assert.equal(snapshot.generation, 2);
+  assert.equal(snapshot.validFlags, 0b1111);
+  assert.equal(snapshot.quality, 0);
+  assert.equal(snapshot.attitude.ageMs, 5);
+  assert.equal(snapshot.estimatorStatus.ageMs, 10);
+
+  assert.equal(gate.ingest(statusPacket(stamp(11, 1_100n), 0, 2), 30), true);
+  snapshot = gate.snapshot(40);
+  assert.equal(snapshot.generation, 3);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+  assert.equal(snapshot.attitude.ageMs, 25);
+  assert.equal(snapshot.kinematics.ageMs, 25);
+  assert.equal(snapshot.estimatorStatus.ageMs, 10);
+}
+
+function testStatusPayloadAloneControlsAuthorization() {
+  const gate = ingress();
+  const unusableStatus = stamp(10, 1_000n);
+  gate.ingest(statusPacket(unusableStatus, 0, 2), 0);
+  gate.ingest(pairedPacket(stamp(1, 1_000n), null, unusableStatus, 1, 0, 2), 1);
+
+  const goodStatus = stamp(11, 1_100n);
+  gate.ingest(statusPacket(goodStatus, 0b1111, 0), 2);
+  let snapshot = gate.snapshot(2);
+  assert.equal(snapshot.quality, 2);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal("quality" in snapshot.estimatorStatus, false);
+  assert.equal("validFlags" in snapshot.estimatorStatus, false);
+
+  gate.ingest(pairedPacket(stamp(2, 1_050n), null, goodStatus, 2, 0b0011, 0), 3);
+  snapshot = gate.snapshot(3);
+  assert.equal(snapshot.quality, 2);
+  assert.equal(snapshot.validFlags, 0);
+
+  gate.ingest(pairedPacket(stamp(3, 1_100n), null, goodStatus, 3, 0b0011, 0), 4);
+  snapshot = gate.snapshot(4);
+  assert.equal(snapshot.quality, 0);
+  assert.equal(snapshot.validFlags, 0b0011);
+
+  gate.ingest(statusPacket(stamp(12, 1_300n), 0b0001, 1), 5);
+  gate.ingest(statusPacket(stamp(13, 1_400n), 0b1111, 0), 6);
+  snapshot = gate.snapshot(6);
+  assert.equal(snapshot.quality, 1);
+  assert.equal(snapshot.validFlags, 0b0001);
+}
+
+function testMismatchedGroupCannotRegainThroughOtherNumeric() {
+  const gate = ingress();
+  const firstStatus = stamp(10, 1_000n);
+  gate.ingest(statusPacket(firstStatus, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), firstStatus, 1, 0b1111, 0),
+    1,
+  );
+
+  const nextStatus = stamp(11, 1_200n);
+  gate.ingest(statusPacket(nextStatus, 0b1111, 0), 2);
+  gate.ingest(pairedPacket(stamp(2, 1_100n), null, nextStatus, 2, 0b1111, 0), 3);
+  assert.equal(gate.snapshot(3).validFlags, 0b1100);
+
+  gate.ingest(pairedPacket(null, stamp(2, 1_200n), nextStatus, 3, 0b1111, 0), 4);
+  assert.equal(gate.snapshot(4).validFlags, 0b1100);
+
+  gate.ingest(pairedPacket(stamp(3, 1_200n), null, nextStatus, 4, 0b1111, 0), 5);
+  assert.equal(gate.snapshot(5).validFlags, 0b1111);
+}
+
+function testStatusGoodReauthorizesOnlyExactNumericGroup() {
+  const gate = ingress();
+  const firstStatus = stamp(10, 1_000n);
+  gate.ingest(statusPacket(firstStatus, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), firstStatus, 1, 0b1111, 0),
+    1,
+  );
+
+  gate.ingest(statusPacket(stamp(11, 1_100n), 0, 2), 2);
+  const goodStatus = stamp(12, 1_200n);
+  gate.ingest(statusPacket(goodStatus, 0b1111, 0), 3);
+  let snapshot = gate.snapshot(3);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+
+  gate.ingest(pairedPacket(null, stamp(2, 1_200n), goodStatus, 2, 0b1111, 0), 4);
+  snapshot = gate.snapshot(4);
+  assert.equal(snapshot.validFlags, 0b1100);
+  assert.equal(snapshot.quality, 0);
+
+  gate.ingest(pairedPacket(stamp(2, 1_200n), null, goodStatus, 3, 0b1111, 0), 5);
+  assert.equal(gate.snapshot(5).validFlags, 0b1111);
+}
+
+function testCombinedStatusRevokesBeforeOneNumericGroupRecovers() {
+  const gate = ingress();
+  const firstStatus = stamp(10, 1_000n);
+  gate.ingest(statusPacket(firstStatus, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), firstStatus, 1, 0b1111, 0),
+    1,
+  );
+
+  const nextStatus = stamp(11, 1_200n);
+  gate.ingest(
+    pairedPacket(stamp(2, 1_200n), stamp(1, 1_000n), nextStatus, 2, 0b0011, 0),
+    2,
+  );
+  let snapshot = gate.snapshot(2);
+  assert.equal(snapshot.validFlags, 0b0011);
+  assert.equal(snapshot.quality, 0);
+
+  const unusableStatus = stamp(12, 1_300n);
+  gate.ingest(
+    pairedPacket(stamp(3, 1_250n), stamp(1, 1_000n), unusableStatus, 3, 0, 2),
+    3,
+  );
+  snapshot = gate.snapshot(3);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+}
+
+function testDuplicateStatusStampCanOnlyPublishALocalDowngrade() {
+  const gate = ingress();
+  const status = stamp(10, 1_000n);
+  const good = pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), status, 1, 0b1111, 0);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(good, 1);
+  const generation = gate.snapshot(1).generation;
+
+  const revoked = pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), status, 1, 0, 2);
+  assert.equal(gate.ingest(revoked, 10), true);
+  let snapshot = gate.snapshot(11);
+  assert.equal(snapshot.generation, (generation + 1) >>> 0);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+  assert.equal(snapshot.attitude.ageMs, 10);
+  assert.equal(snapshot.estimatorStatus.ageMs, 11);
+
+  assert.equal(gate.ingest(good, 20), false);
+  snapshot = gate.snapshot(21);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+  assert.equal(snapshot.attitude.ageMs, 20);
+}
+
+function testStatusOrderingIsIndependent() {
+  const gate = ingress();
+  gate.ingest(statusPacket(stamp(10, 1_000n), 0, 2), 0);
+  assert.equal(gate.ingest(statusPacket(stamp(10, 1_000n), 0b1111, 0), 1), false);
+  assert.equal(gate.ingest(statusPacket(stamp(9, 900n), 0b1111, 0), 2), false);
+  assert.equal(gate.ingest(packet(stamp(1, 1_100n), null, 5), 3), true);
+
+  const snapshot = gate.snapshot(3);
+  assert.equal(snapshot.attitude.quat.w, 5);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+  assert.equal(gate.diagnostics().duplicates, 1);
+  assert.equal(gate.diagnostics().reordered, 1);
+}
+
+function testStatusResetsWithSourceIdentity() {
+  const gate = new AvionicsIngress({
+    vehicleId: VEHICLE,
+    maximumSkewNanos: 100n,
+    incarnationPolicy: INCARNATION_POLICY.SIM_ACCEPT_UNSEEN,
+  });
+  gate.ingest(statusPacket(stamp(1, 1_000n), 0b1111, 0), 0);
+  gate.ingest(packet(stamp(0, 1n, 2), null, 2), 1);
+  let snapshot = gate.snapshot(1);
+  assert.equal(snapshot.estimatorStatus, null);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+
+  gate.ingest(statusPacket(stamp(0, 2n, 2), 0b1111, 0), 2);
+  gate.ingest(packet(stamp(0, 1n, 2, SOURCE, INCARNATION_B), null, 3), 3);
+  snapshot = gate.snapshot(3);
+  assert.equal(snapshot.sourceIncarnation, INCARNATION_B);
+  assert.equal(snapshot.estimatorStatus, null);
+  assert.equal(snapshot.validFlags, 0);
+  assert.equal(snapshot.quality, 2);
+}
+
 function testSnapshotsAreAtomicAndImmutable() {
   const gate = ingress();
-  gate.ingest(packet(stamp(1, 10n), stamp(1, 10n), 1), 0);
+  const firstStatus = stamp(10, 10n);
+  gate.ingest(statusPacket(firstStatus, 0b1111, 0), 0);
+  gate.ingest(pairedPacket(stamp(1, 10n), stamp(1, 10n), firstStatus, 1, 0b1111, 0), 0);
   const before = gate.snapshot(0);
-  gate.ingest(packet(stamp(2, 20n), stamp(2, 20n), 2), 1);
+  gate.ingest(
+    pairedPacket(stamp(2, 20n), stamp(2, 20n), stamp(11, 20n), 2, 0, 2),
+    1,
+  );
   const after = gate.snapshot(1);
 
-  assert.equal(before.generation, 1);
+  assert.equal(before.generation, 2);
   assert.equal(before.attitude.quat.w, 1);
   assert.equal(before.kinematics.posNed[0], 1);
-  assert.equal(after.generation, 2);
+  assert.equal(after.generation, 3);
   assert.equal(after.attitude.quat.w, 2);
   assert.equal(after.kinematics.posNed[0], 2);
   assert.equal(Object.isFrozen(before), true);
   assert.equal(Object.isFrozen(before.attitude.quat), true);
+  assert.equal(Object.isFrozen(before.estimatorStatus), true);
+  assert.equal(before.validFlags, 0b1111);
+  assert.equal(after.validFlags, 0);
 }
 
 function testInvalidStampIsRejected() {
@@ -225,6 +460,14 @@ for (const test of [
   testSimulatorPolicyAcceptsUnseenAndRejectsSeenIncarnations,
   testAcquisitionTimeRegressionDoesNotRefreshAge,
   testIndependentGroupsAndCoherenceBoundary,
+  testStatusOnlyRevocationDoesNotRefreshMeasurements,
+  testStatusPayloadAloneControlsAuthorization,
+  testMismatchedGroupCannotRegainThroughOtherNumeric,
+  testStatusGoodReauthorizesOnlyExactNumericGroup,
+  testCombinedStatusRevokesBeforeOneNumericGroupRecovers,
+  testDuplicateStatusStampCanOnlyPublishALocalDowngrade,
+  testStatusOrderingIsIndependent,
+  testStatusResetsWithSourceIdentity,
   testSnapshotsAreAtomicAndImmutable,
   testInvalidStampIsRejected,
   testCountersAndGenerationWrap,

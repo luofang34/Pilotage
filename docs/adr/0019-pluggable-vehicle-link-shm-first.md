@@ -50,9 +50,9 @@ the open one.
   and may speak MAVLink, CCSDS, or a native framing), and designing it
   before that component exists would be speculation. What this ADR fixes
   now is the *seam* those protocols plug into. The MAVLink binding
-  remains for ecosystem interop; a native Aviate link (subscribe/fan-out
-  semantics, validity flags on the wire, HMAC) is the expected v1 and
-  gets its own RFC with the Aviate side.
+  remains for ecosystem interop and carries Aviate's estimator authorization;
+  a native Aviate link (subscribe/fan-out semantics, source incarnation,
+  authenticated framing) still gets its own RFC with the Aviate side.
 - **Unsafe containment.** Mapping shared memory requires `shm_open`/
   `mmap`. The adapter crate drops the workspace-level
   `unsafe_code = "forbid"` to `deny` with per-site `allow` and SAFETY
@@ -65,10 +65,11 @@ the open one.
 - The instrument runtime and everything above the adapter never learns
   which link produced a sample — the thin-display/thick-display axis
   from the ADR-0017 survey stays open all the way down.
-- v0 reads the simulator ground-truth block, so `valid_flags`/`quality`
-  are trivially perfect; honest per-signal validity from the FC's own
-  estimator arrives with the v1 estimate block. The wire schema
-  (ADR-0018) already carries those fields either way.
+- Shared memory reads simulator ground truth, so the adapter explicitly marks
+  each atomic block Good with all represented signals valid. This authorization
+  is simulator-only. The MAVLink binding instead consumes the FC estimator's
+  lossless per-signal status and exact acquisition timestamp under ADR-0018's
+  fail-closed join rules.
 - Latency for co-located SITL drops to a memory read (the block is
   written at the 1 kHz physics rate), and the port-ownership races
   disappear — which, more than raw latency, is what shared memory buys;

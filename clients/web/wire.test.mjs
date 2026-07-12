@@ -177,6 +177,7 @@ const sourceId = 0xfedc_ba98_7654_3210n;
 const acquiredAt = 0xffff_ffff_ffff_fffen;
 bytesField(avionics, 17, measurementStamp(sourceId, 3, 10, acquiredAt, 1, 0xa5));
 bytesField(avionics, 18, measurementStamp(sourceId, 3, 5, acquiredAt - 100_000n, 1, 0xa5));
+bytesField(avionics, 19, measurementStamp(sourceId, 3, 12, acquiredAt, 1, 0xa5));
 
 const sample = [];
 bytesField(sample, 1, uint64Message(1));
@@ -197,7 +198,7 @@ check("telemetry source tick is preserved", decoded.message.tick === 42n);
 check("host publication time is preserved separately", decoded.message.publishedAtNanos === 2_000_000n);
 check("absent top-level pose remains null", decoded.message.pose === null && decoded.message.xM === null);
 check("absent top-level velocity remains null", decoded.message.velocity === null && decoded.message.linearXMps === null);
-check("both stamped avionics groups are present", av.attitude !== null && av.kinematics !== null);
+check("both stamped numeric groups are present", av.attitude !== null && av.kinematics !== null);
 check("avionics quat_w decodes", Math.abs(av.quat.w - 0.9) < 1e-6);
 check("omitted zero quat components decode as 0", av.quat.x === 0 && av.quat.y === 0 && av.quat.z === 0);
 check("avionics pos_d decodes", Math.abs(av.posNed[2] + 304.8) < 1e-3);
@@ -208,6 +209,7 @@ check("attitude incarnation decodes exactly", av.attitudeStamp.sourceIncarnation
 check("attitude epoch and sequence decode", av.attitudeStamp.sourceEpoch === 3 && av.attitudeStamp.sequence === 10);
 check("attitude uint64 acquisition time and clock decode", av.attitudeStamp.acquiredAtNanos === acquiredAt && av.attitudeStamp.clock === 1);
 check("kinematics sequence remains independent", av.kinematicsStamp.sequence === 5);
+check("estimator status stamp decodes independently", av.estimatorStatusStamp.sequence === 12);
 
 const attitudeOnly = [];
 f32Field(attitudeOnly, 1, 0.7);
@@ -223,6 +225,7 @@ check(
   "attitude-only publication preserves only the attitude group",
   decodedAttitudeOnly.avionics.attitude !== null
     && decodedAttitudeOnly.avionics.kinematics === null
+    && decodedAttitudeOnly.avionics.estimatorStatusStamp === null
     && decodedAttitudeOnly.avionics.quat !== null
     && decodedAttitudeOnly.avionics.posNed === null,
 );
@@ -241,8 +244,23 @@ check(
   "kinematics-only publication preserves only the kinematics group",
   decodedKinematicsOnly.avionics.attitude === null
     && decodedKinematicsOnly.avionics.kinematics !== null
+    && decodedKinematicsOnly.avionics.estimatorStatusStamp === null
     && decodedKinematicsOnly.avionics.quat === null
     && decodedKinematicsOnly.avionics.posNed[0] === 12,
+);
+
+const statusOnly = [];
+varint(statusOnly, (15 << 3) | 0);
+varint(statusOnly, 2); // canonical Unusable; valid_flags remains omitted/zero
+bytesField(statusOnly, 19, measurementStamp(sourceId, 3, 13, acquiredAt + 1n, 1, 0xa5));
+const decodedStatusOnly = decodeAvionicsOnly(statusOnly).avionics;
+check(
+  "status-only publication preserves authorization without numeric groups",
+  decodedStatusOnly.attitude === null
+    && decodedStatusOnly.kinematics === null
+    && decodedStatusOnly.validFlags === 0
+    && decodedStatusOnly.quality === 2
+    && decodedStatusOnly.estimatorStatusStamp.sequence === 13,
 );
 check("a sample without avionics decodes to null", (() => {
   const bareNoAv = [];

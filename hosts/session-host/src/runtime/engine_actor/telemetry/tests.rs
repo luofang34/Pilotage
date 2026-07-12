@@ -7,7 +7,7 @@ use pilotage_adapter_api::{
 use pilotage_protocol::{VehicleId, wire};
 use pilotage_timing::{MonoTimestamp, SimTick};
 
-use super::sample_to_wire;
+use super::{avionics_to_wire, sample_to_wire};
 
 #[test]
 fn publication_time_and_source_acquisition_stamps_stay_distinct() {
@@ -22,6 +22,11 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let kinematics = MeasurementStamp {
         sequence: 19,
         acquired_at_ns: 1_200_000,
+        ..attitude
+    };
+    let estimator_status = MeasurementStamp {
+        sequence: 20,
+        acquired_at_ns: 1_234_567,
         ..attitude
     };
     let sample = TelemetrySample {
@@ -44,6 +49,7 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
                 vel_ned_mps: [0.0; 3],
                 stamp: kinematics,
             }),
+            estimator_status_stamp: Some(estimator_status),
             valid_flags: 0b1111,
             quality: 0,
             arm_state: 2,
@@ -57,6 +63,8 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
         9_000_000
     );
     let avionics = wire_sample.avionics.expect("avionics");
+    assert_eq!(avionics.valid_flags, 0b1111);
+    assert_eq!(avionics.quality, 0);
     let attitude_wire = avionics.attitude_stamp.expect("attitude stamp");
     assert_eq!(attitude_wire.source_id, attitude.source_id);
     assert_eq!(
@@ -73,6 +81,11 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let kinematics_wire = avionics.kinematics_stamp.expect("kinematics stamp");
     assert_eq!(kinematics_wire.sequence, kinematics.sequence);
     assert_eq!(kinematics_wire.acquired_at_ns, kinematics.acquired_at_ns);
+    let status_wire = avionics
+        .estimator_status_stamp
+        .expect("estimator status stamp");
+    assert_eq!(status_wire.sequence, estimator_status.sequence);
+    assert_eq!(status_wire.acquired_at_ns, estimator_status.acquired_at_ns);
 }
 
 fn simulation_stamp(sequence: u32) -> MeasurementStamp {
@@ -84,6 +97,21 @@ fn simulation_stamp(sequence: u32) -> MeasurementStamp {
         acquired_at_ns: 42,
         clock: MeasurementClock::Simulation,
     }
+}
+
+#[test]
+fn estimator_authorization_is_normalized_at_wire_boundary() {
+    let avionics = avionics_to_wire(AvionicsSample {
+        attitude: None,
+        kinematics: None,
+        estimator_status_stamp: Some(simulation_stamp(1)),
+        valid_flags: u32::MAX,
+        quality: u32::MAX,
+        arm_state: 0,
+    });
+
+    assert_eq!(avionics.valid_flags, 0x0f);
+    assert_eq!(avionics.quality, 2);
 }
 
 #[test]
@@ -100,6 +128,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
                 vel_ned_mps: [5.0, 2.0, -1.0],
                 stamp: simulation_stamp(8),
             }),
+            estimator_status_stamp: None,
             valid_flags: 0b1100,
             quality: 0,
             arm_state: 0,
@@ -111,6 +140,9 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
     assert!(wire_sample.velocity.is_none());
     let avionics = wire_sample.avionics.expect("avionics");
     assert!(avionics.attitude_stamp.is_none());
+    assert!(avionics.estimator_status_stamp.is_none());
+    assert_eq!(avionics.valid_flags, 0);
+    assert_eq!(avionics.quality, 2);
     assert_eq!(avionics.pos_n_m, 12.0);
     assert_eq!(avionics.vel_n_mps, 5.0);
     assert_eq!(
@@ -133,6 +165,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
                 stamp: simulation_stamp(9),
             }),
             kinematics: None,
+            estimator_status_stamp: None,
             valid_flags: 0b0011,
             quality: 0,
             arm_state: 2,

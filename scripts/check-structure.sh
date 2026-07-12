@@ -19,6 +19,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root_dir"
 
 status=0
+function_baseline="scripts/structure-function-baseline.tsv"
 
 is_excluded_path() {
     case "$1" in
@@ -73,17 +74,45 @@ check_function_length() {
     local file
     while IFS= read -r file; do
         is_excluded_path "$file" && continue
-        awk -v fname="$file" '
-            function report(len, start) {
-                if (len > 80) {
+        awk -v fname="$file" -v baseline="$function_baseline" '
+            function report(name, len, start, key, limit) {
+                key = fname SUBSEP name
+                seen[key] = 1
+                if (key in allowed) {
+                    limit = allowed[key]
+                    if (len != limit) {
+                        printf "FORBIDDEN: %s:%d function %s has %d lines; baseline requires exactly %d\n", fname, start, name, len, limit > "/dev/stderr"
+                        bad = 1
+                    }
+                } else if (len > 80) {
                     printf "FORBIDDEN: %s:%d function body has %d lines (limit 80)\n", fname, start, len > "/dev/stderr"
                     bad = 1
                 }
             }
-            BEGIN { depth = 0; in_fn = 0; fn_depth = 0; fn_start = 0; body_lines = 0; bad = 0 }
+            BEGIN {
+                while ((getline entry < baseline) > 0) {
+                    if (entry ~ /^[ \t]*#/ || entry ~ /^[ \t]*$/) {
+                        continue
+                    }
+                    split(entry, fields, "\t")
+                    key = fields[1] SUBSEP fields[2]
+                    allowed[key] = fields[3] + 0
+                    allowed_file[key] = fields[1]
+                }
+                close(baseline)
+                depth = 0
+                in_fn = 0
+                fn_depth = 0
+                fn_start = 0
+                body_lines = 0
+                bad = 0
+            }
             {
                 line = $0
-                if (!in_fn && line ~ /\bfn[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*(<[^>]*>)?[ \t]*\(/) {
+                if (!in_fn && line ~ /(^|[^[:alnum:]_])fn[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*(<[^>]*>)?[ \t]*\(/) {
+                    match(line, /fn[ \t]+[A-Za-z_][A-Za-z0-9_]*/)
+                    fn_name = substr(line, RSTART, RLENGTH)
+                    sub(/^fn[ \t]+/, "", fn_name)
                     in_fn = 1
                     fn_depth = depth
                     fn_start = NR
@@ -101,11 +130,20 @@ check_function_length() {
                 }
                 depth -= n_close
                 if (in_fn && has_opened && depth <= fn_depth) {
-                    report(body_lines, fn_start)
+                    report(fn_name, body_lines, fn_start)
                     in_fn = 0
                 }
             }
-            END { exit bad }
+            END {
+                for (key in allowed) {
+                    if (allowed_file[key] == fname && !(key in seen)) {
+                        split(key, parts, SUBSEP)
+                        printf "FORBIDDEN: baseline function %s in %s was not found\n", parts[2], fname > "/dev/stderr"
+                        bad = 1
+                    }
+                }
+                exit bad
+            }
         ' "$file" || status=1
     done < <(collect_rs_files)
 }

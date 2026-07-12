@@ -10,6 +10,7 @@ use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
 use super::WITHHOLD_AFTER;
+use crate::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
 use crate::link::{AttitudeUpdate, KinematicsUpdate, LatestAviate};
 
 /// Yaw extracted from the body→NED quaternion (heading, radians
@@ -41,6 +42,76 @@ pub(super) fn measurement_pair_is_coherent(
             <= u64::from(maximum_skew_ms) * 1_000_000
 }
 
+pub(super) fn measurement_pair_supports_pose(
+    attitude: AttitudeUpdate,
+    kinematics: KinematicsUpdate,
+) -> bool {
+    attitude.quality <= QUALITY_DEGRADED
+        && kinematics.quality <= QUALITY_DEGRADED
+        && attitude.valid_flags & 0b0001 != 0
+        && kinematics.valid_flags & 0b0100 != 0
+}
+
+fn planar_projection(
+    attitude: Option<AttitudeUpdate>,
+    kinematics: Option<KinematicsUpdate>,
+    maximum_skew_ms: u32,
+    has_authorization: bool,
+) -> (Option<Pose2d>, Option<f64>) {
+    let coherent_pair = attitude.zip(kinematics).filter(|(att, kin)| {
+        has_authorization && measurement_pair_is_coherent(*att, *kin, maximum_skew_ms)
+    });
+    let pose = coherent_pair
+        .filter(|(att, kin)| measurement_pair_supports_pose(*att, *kin))
+        .map(|(att, kin)| Pose2d {
+            x: f64::from(kin.pos_ned_m[0]),
+            y: f64::from(kin.pos_ned_m[1]),
+            heading: yaw_of(att.quat_wxyz),
+        });
+    let speed = coherent_pair
+        .filter(|(att, kin)| {
+            att.quality <= QUALITY_DEGRADED
+                && kin.quality <= QUALITY_DEGRADED
+                && kin.valid_flags & 0b1000 != 0
+        })
+        .map(|(_, kin)| {
+            f64::from(
+                (kin.vel_ned_mps[0] * kin.vel_ned_mps[0] + kin.vel_ned_mps[1] * kin.vel_ned_mps[1])
+                    .sqrt(),
+            )
+        });
+    (pose, speed)
+}
+
+fn effective_authorization(
+    attitude: Option<AttitudeUpdate>,
+    kinematics: Option<KinematicsUpdate>,
+    has_authorization: bool,
+) -> (u32, u32) {
+    if !has_authorization {
+        return (0, QUALITY_UNUSABLE);
+    }
+    let attitude_flags = attitude
+        .filter(|att| att.quality <= QUALITY_DEGRADED)
+        .map_or(0, |att| att.valid_flags & 0b0011);
+    let kinematics_flags = kinematics
+        .filter(|kin| kin.quality <= QUALITY_DEGRADED)
+        .map_or(0, |kin| kin.valid_flags & 0b1100);
+    let flags = attitude_flags | kinematics_flags;
+    let quality = attitude
+        .filter(|_| attitude_flags != 0)
+        .map(|att| att.quality)
+        .into_iter()
+        .chain(
+            kinematics
+                .filter(|_| kinematics_flags != 0)
+                .map(|kin| kin.quality),
+        )
+        .max()
+        .unwrap_or(QUALITY_UNUSABLE);
+    (flags, quality)
+}
+
 pub(crate) fn mavlink_batch(
     vehicle: VehicleId,
     state: &Arc<Mutex<LatestAviate>>,
@@ -59,25 +130,15 @@ pub(crate) fn mavlink_batch(
         return TelemetryBatch::default();
     }
 
-    let planar = attitude
-        .zip(kinematics)
-        .filter(|(att, kin)| {
-            measurement_pair_is_coherent(*att, *kin, latest.maximum_inter_group_skew_ms)
-        })
-        .map(|(att, kin)| {
-            let speed = f64::from(
-                (kin.vel_ned_mps[0] * kin.vel_ned_mps[0] + kin.vel_ned_mps[1] * kin.vel_ned_mps[1])
-                    .sqrt(),
-            );
-            (
-                Pose2d {
-                    x: f64::from(kin.pos_ned_m[0]),
-                    y: f64::from(kin.pos_ned_m[1]),
-                    heading: yaw_of(att.quat_wxyz),
-                },
-                speed,
-            )
-        });
+    let estimator_status_stamp = latest.estimator_status_stamp();
+    let has_authorization = estimator_status_stamp.is_some();
+    let (planar_pose, planar_speed) = planar_projection(
+        attitude,
+        kinematics,
+        latest.maximum_inter_group_skew_ms,
+        has_authorization,
+    );
+    let (valid_flags, quality) = effective_authorization(attitude, kinematics, has_authorization);
     let avionics = Some(AvionicsSample {
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
@@ -89,11 +150,9 @@ pub(crate) fn mavlink_batch(
             vel_ned_mps: kin.vel_ned_mps,
             stamp: kin.stamp,
         }),
-        // The source messages do not carry estimator validity or quality;
-        // freshness is the only validity dimension this link can claim.
-        valid_flags: (u32::from(attitude.is_some()) * 0b0011)
-            | (u32::from(kinematics.is_some()) * 0b1100),
-        quality: 0,
+        estimator_status_stamp,
+        valid_flags,
+        quality,
         arm_state,
     });
     let source_time_ms = kinematics
@@ -104,8 +163,8 @@ pub(crate) fn mavlink_batch(
         samples: vec![TelemetrySample {
             vehicle,
             tick: SimTick::new(u64::from(source_time_ms).wrapping_mul(1_000_000)),
-            pose: planar.map(|(pose, _)| pose),
-            speed: planar.map(|(_, speed)| speed),
+            pose: planar_pose,
+            speed: planar_speed,
             avionics,
         }],
     }

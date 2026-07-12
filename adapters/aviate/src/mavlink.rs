@@ -2,11 +2,15 @@
 //! (ADR-0018): pure byte functions, no I/O, no allocation on the parse
 //! path beyond the caller's message vector.
 //!
-//! Only the three message ids Aviate emits are decoded; anything else is
-//! counted and skipped. CRC is the MAVLink X.25 accumulator seeded with
+//! The decoded telemetry set includes liveness, estimator values, and both
+//! standard and Aviate-specific estimator status. Anything else is counted
+//! and skipped. CRC is the MAVLink X.25 accumulator seeded with
 //! each message's CRC_EXTRA (values cross-checked against Aviate's
 //! `aviate-link` implementation, the peer this parser must interoperate
 //! with byte-for-byte).
+
+mod decoding;
+use decoding::decode_known;
 
 /// MAVLink 2.0 start-of-frame marker.
 pub const MAGIC_V2: u8 = 0xFD;
@@ -18,10 +22,17 @@ pub const ATTITUDE_QUATERNION_ID: u32 = 31;
 pub const LOCAL_POSITION_NED_ID: u32 = 32;
 /// COMMAND_ACK message id (arm/disarm feedback).
 pub const COMMAND_ACK_ID: u32 = 77;
+/// Standard ESTIMATOR_STATUS message id.
+pub const ESTIMATOR_STATUS_ID: u32 = 230;
+/// Aviate's lossless estimator authorization message id.
+pub const AVIATE_ESTIMATOR_STATUS_ID: u32 = 20_000;
 
-/// One decoded telemetry message from the Aviate subset.
+/// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AviateMessage {
+    /// A private estimator-status frame whose integrity or framing could not
+    /// be validated. This event can only revoke authorization.
+    InvalidAviateEstimatorStatus,
     /// Link liveness beacon (1 Hz); `armed` is base_mode's
     /// MAV_MODE_FLAG_SAFETY_ARMED bit.
     Heartbeat {
@@ -54,6 +65,23 @@ pub enum AviateMessage {
         /// Velocity (north, east, down) in meters/second.
         vel_ned_mps: [f32; 3],
     },
+    /// Standard estimator health projection. This message is diagnostic and
+    /// never authorizes Pilotage consumers to use an estimate.
+    EstimatorStatus {
+        /// Microseconds since FC boot.
+        time_usec: u64,
+        /// MAVLink ESTIMATOR_STATUS flags.
+        flags: u16,
+    },
+    /// Aviate's lossless estimator validity and quality report.
+    AviateEstimatorStatus {
+        /// Microseconds since FC boot.
+        time_usec: u64,
+        /// Source validity bits.
+        valid_flags: u8,
+        /// Source quality enum: 0 unusable, 1 degraded, 2 good.
+        quality: u8,
+    },
 }
 
 /// Datagram parse accounting, for link diagnostics.
@@ -63,6 +91,10 @@ pub struct ParseStats {
     pub decoded: u32,
     /// Frames with a valid layout but a CRC mismatch.
     pub crc_failures: u32,
+    /// Private estimator-status frames whose integrity, compatibility, or
+    /// declared frame extent could not be validated. Consumers use this as an
+    /// immediate revocation signal; it never authorizes numeric telemetry.
+    pub invalid_estimator_status_frames: u32,
     /// Structurally valid frames carrying a message id this parser does
     /// not know (skipped whole).
     pub unknown_ids: u32,
@@ -94,6 +126,8 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
         COMMAND_ACK_ID => Some(143),
+        ESTIMATOR_STATUS_ID => Some(163),
+        AVIATE_ESTIMATOR_STATUS_ID => Some(171),
         COMMAND_LONG_ID => Some(152),
         SET_POSITION_TARGET_ID => Some(143),
         _ => None,
@@ -116,61 +150,31 @@ fn compute_crc(data: &[u8], extra: u8) -> u16 {
     crc_accumulate(extra, crc)
 }
 
-/// Reads an `f32` at `off`, zero-extending past the payload end
-/// (MAVLink 2 truncates trailing zero bytes on the wire).
-fn f32_at(payload: &[u8], off: usize) -> f32 {
-    let mut b = [0u8; 4];
-    for (i, slot) in b.iter_mut().enumerate() {
-        *slot = payload.get(off + i).copied().unwrap_or(0);
-    }
-    f32::from_le_bytes(b)
+fn frame_header(bytes: &[u8], at: usize) -> Option<(FrameSource, u32)> {
+    let header = bytes.get(at..at + 10)?;
+    let source = FrameSource {
+        frame_sequence: header[4],
+        system_id: header[5],
+        component_id: header[6],
+    };
+    let message_id =
+        u32::from(header[7]) | (u32::from(header[8]) << 8) | (u32::from(header[9]) << 16);
+    Some((source, message_id))
 }
 
-/// Reads a `u32` at `off` with the same zero extension.
-fn u32_at(payload: &[u8], off: usize) -> u32 {
-    let mut b = [0u8; 4];
-    for (i, slot) in b.iter_mut().enumerate() {
-        *slot = payload.get(off + i).copied().unwrap_or(0);
-    }
-    u32::from_le_bytes(b)
-}
-
-fn decode_known(msg_id: u32, payload: &[u8]) -> Option<AviateMessage> {
-    match msg_id {
-        HEARTBEAT_ID => Some(AviateMessage::Heartbeat {
-            // Payload: custom_mode u32 @0, type @4, autopilot @5,
-            // base_mode @6 (bit 0x80 = SAFETY_ARMED).
-            armed: payload.get(6).is_some_and(|b| b & 0x80 != 0),
-        }),
-        COMMAND_ACK_ID => Some(AviateMessage::CommandAck {
-            command: u16::from(payload.first().copied().unwrap_or(0))
-                | (u16::from(payload.get(1).copied().unwrap_or(0)) << 8),
-            result: payload.get(2).copied().unwrap_or(0),
-        }),
-        ATTITUDE_QUATERNION_ID => Some(AviateMessage::AttitudeQuaternion {
-            time_boot_ms: u32_at(payload, 0),
-            quat_wxyz: [
-                f32_at(payload, 4),
-                f32_at(payload, 8),
-                f32_at(payload, 12),
-                f32_at(payload, 16),
-            ],
-            rates_rps: [
-                f32_at(payload, 20),
-                f32_at(payload, 24),
-                f32_at(payload, 28),
-            ],
-        }),
-        LOCAL_POSITION_NED_ID => Some(AviateMessage::LocalPositionNed {
-            time_boot_ms: u32_at(payload, 0),
-            pos_ned_m: [f32_at(payload, 4), f32_at(payload, 8), f32_at(payload, 12)],
-            vel_ned_mps: [
-                f32_at(payload, 16),
-                f32_at(payload, 20),
-                f32_at(payload, 24),
-            ],
-        }),
-        _ => None,
+fn record_invalid_private_status(
+    bytes: &[u8],
+    at: usize,
+    stats: &mut ParseStats,
+    out: &mut Vec<(FrameSource, AviateMessage)>,
+) {
+    let Some((source, message_id)) = frame_header(bytes, at) else {
+        return;
+    };
+    if message_id == AVIATE_ESTIMATOR_STATUS_ID {
+        stats.invalid_estimator_status_frames =
+            stats.invalid_estimator_status_frames.wrapping_add(1);
+        out.push((source, AviateMessage::InvalidAviateEstimatorStatus));
     }
 }
 
@@ -178,8 +182,9 @@ fn decode_known(msg_id: u32, payload: &[u8]) -> Option<AviateMessage> {
 /// several), appending `(sender identity, message)` pairs to `out` and
 /// returning parse accounting. Consumers match both system and component ids;
 /// first-packet source selection is not an identity policy.
-/// Unknown ids and CRC failures skip the frame; stray bytes before a
-/// frame start are discarded byte-by-byte.
+/// Unknown ids and ordinary CRC failures skip the frame. A private-status
+/// integrity failure appends a source-tagged revocation event. Stray bytes
+/// before a frame start are discarded byte-by-byte.
 pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, AviateMessage)>) -> ParseStats {
     let mut stats = ParseStats::default();
     let mut at = 0usize;
@@ -194,12 +199,20 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, AviateMessage)>)
         let Some(&incompat) = bytes.get(at + 2) else {
             break;
         };
+        if incompat & !0x01 != 0 {
+            record_invalid_private_status(bytes, at, &mut stats, out);
+            // Unknown incompatibility bits may change the frame layout, so
+            // no later byte boundary in this datagram is trustworthy.
+            stats.garbage_bytes = stats.garbage_bytes.wrapping_add((bytes.len() - at) as u32);
+            break;
+        }
         let payload_len = usize::from(len);
         let signed = incompat & 0x01 != 0;
         let sig_len = if signed { 13 } else { 0 };
         let frame_len = 10 + payload_len + 2 + sig_len;
         let Some(frame) = bytes.get(at..at + frame_len) else {
             // Truncated tail; nothing after it can parse either.
+            record_invalid_private_status(bytes, at, &mut stats, out);
             stats.garbage_bytes = stats.garbage_bytes.wrapping_add((bytes.len() - at) as u32);
             break;
         };
@@ -221,6 +234,11 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, AviateMessage)>)
                     }
                 } else {
                     stats.crc_failures = stats.crc_failures.wrapping_add(1);
+                    if msg_id == AVIATE_ESTIMATOR_STATUS_ID {
+                        stats.invalid_estimator_status_frames =
+                            stats.invalid_estimator_status_frames.wrapping_add(1);
+                        out.push((source, AviateMessage::InvalidAviateEstimatorStatus));
+                    }
                 }
             }
             None => {

@@ -4,6 +4,9 @@ use pilotage_adapter_api::{AvionicsSample, MeasurementClock, MeasurementStamp, T
 use pilotage_protocol::wire;
 use pilotage_timing::MonoTimestamp;
 
+const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x0f;
+const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
+
 pub(super) fn sample_to_wire(
     sample: TelemetrySample,
     published_at: MonoTimestamp,
@@ -50,6 +53,14 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
 fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
     let attitude = sample.attitude;
     let kinematics = sample.kinematics;
+    let (valid_flags, quality) = if sample.estimator_status_stamp.is_some() {
+        (
+            sample.valid_flags & ESTIMATOR_VALID_FLAGS_MASK,
+            sample.quality.min(ESTIMATOR_QUALITY_UNUSABLE),
+        )
+    } else {
+        (0, ESTIMATOR_QUALITY_UNUSABLE)
+    };
     wire::AvionicsState {
         quat_w: attitude.map_or(0.0, |group| group.quat_wxyz[0]),
         quat_x: attitude.map_or(0.0, |group| group.quat_wxyz[1]),
@@ -64,11 +75,12 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         vel_n_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[0]),
         vel_e_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[1]),
         vel_d_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[2]),
-        valid_flags: sample.valid_flags,
-        quality: sample.quality,
+        valid_flags,
+        quality,
         arm_state: sample.arm_state,
         attitude_stamp: attitude.map(|group| measurement_stamp_to_wire(group.stamp)),
         kinematics_stamp: kinematics.map(|group| measurement_stamp_to_wire(group.stamp)),
+        estimator_status_stamp: sample.estimator_status_stamp.map(measurement_stamp_to_wire),
     }
 }
 
