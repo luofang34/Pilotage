@@ -29,9 +29,9 @@ fn panel_scenes() -> Vec<(&'static str, Vec<u8>)> {
     std::vec![
         (
             "PFD",
-            encode(|w| draw_pfd(&data, &PfdConfig::default(), w).expect("pfd")),
+            encode(|w| draw_pfd(&data, &PfdConfig::default(), None, w).expect("pfd")),
         ),
-        ("HSI", encode(|w| draw_hsi(&data, w).expect("hsi"))),
+        ("HSI", encode(|w| draw_hsi(&data, None, w).expect("hsi"))),
     ]
 }
 

@@ -50,6 +50,7 @@ const REQUIRED_RUNTIME_METHODS = [
   "scene_ptr",
   "render_result",
   "set_v_speeds",
+  "step_alerts",
   "glyph_manifest",
   "glyph_recorded_hash",
 ];
@@ -311,6 +312,35 @@ export class InstrumentModule {
         return { ok: false, reason: REASON.RENDER_TRAP };
       }
       return status === 0 ? { ok: true } : { ok: false, reason: status };
+    } catch {
+      return { ok: false, reason: REASON.RENDER_TRAP };
+    }
+  }
+
+  // Steps the alert manager once for this frame; every panel rendered
+  // afterward consumes the one cached output, so the panels can never
+  // disagree on the semantic alert state. pathHealthy carries the
+  // independent display-watchdog verdict into the manager (false marks
+  // the output untrusted without suppressing it).
+  stepAlerts(nowMs, pathHealthy) {
+    if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
+    try {
+      const packed = this.#runtime.step_alerts(
+        BigInt(Math.max(0, Math.round(nowMs))),
+        pathHealthy ? 1 : 0,
+      );
+      if (typeof packed !== "bigint") return { ok: false, reason: REASON.RENDER_TRAP };
+      const status = Number(packed & 0xffn);
+      if (status < 0 || status > MAX_WASM_RENDER_STATUS) {
+        return { ok: false, reason: REASON.RENDER_TRAP };
+      }
+      if (status !== 0) return { ok: false, reason: status };
+      return {
+        ok: true,
+        active: Number((packed >> 8n) & 0xffn),
+        faulted: ((packed >> 16n) & 1n) === 1n,
+        overflow: ((packed >> 17n) & 1n) === 1n,
+      };
     } catch {
       return { ok: false, reason: REASON.RENDER_TRAP };
     }

@@ -152,6 +152,7 @@ function fakeExports({
       return packRenderResult(resultStatus, resultLen, renderGeneration(panel));
     },
     set_v_speeds: () => 0,
+    step_alerts: () => 0n,
     glyph_manifest: () => new Uint8Array(0),
     glyph_recorded_hash: () => new Uint8Array(0),
     memory: { buffer },
@@ -700,6 +701,70 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   );
 }
 
+// ---- ALR-01: one alert step per frame, fail-visible on step failure ----
+
+{
+  const { bytes } = buildScene();
+  let steps = 0;
+  let stepArgs = null;
+  const mod = new InstrumentModule(
+    fakeExports({
+      sceneBytes: bytes,
+      generation: (panel) => panel + 1,
+      overrides: {
+        step_alerts: (nowMs, healthy) => {
+          steps += 1;
+          stepArgs = [nowMs, healthy];
+          return 0n;
+        },
+      },
+    }),
+    { createCanvas: recordingCanvas },
+  );
+  const pfd = recordingCanvas(480, 360);
+  const hsi = recordingCanvas(480, 360);
+  const health = {
+    [PANEL.PFD]: new PanelHealth({}, 0),
+    [PANEL.HSI]: new PanelHealth({}, 0),
+  };
+  renderInstrumentSet(
+    mod,
+    health,
+    [
+      [PANEL.PFD, pfd.ctx, pfd, recordingPresenter()],
+      [PANEL.HSI, hsi.ctx, hsi, recordingPresenter()],
+    ],
+    {},
+    5,
+  );
+  check(
+    "alerts step exactly once per frame for the whole panel set",
+    steps === 1 && stepArgs[0] === 5n && stepArgs[1] === 1,
+  );
+
+  const failing = new InstrumentModule(
+    fakeExports({
+      sceneBytes: bytes,
+      overrides: { step_alerts: () => { throw new Error("trap"); } },
+    }),
+    { createCanvas: recordingCanvas },
+  );
+  const canvas2 = recordingCanvas(480, 360);
+  const presenter2 = recordingPresenter();
+  const health2 = { [PANEL.PFD]: new PanelHealth({}, 0) };
+  const [failed] = renderInstrumentSet(
+    failing,
+    health2,
+    [[PANEL.PFD, canvas2.ctx, canvas2, presenter2]],
+    {},
+    6,
+  );
+  check(
+    "an alert-step trap fails the frame set fail-visibly",
+    failed.ok === false && failed.reason === REASON.RENDER_TRAP && failed.covered,
+  );
+}
+
 {
   const { bytes } = buildScene();
   let generation = 0;
@@ -1112,6 +1177,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
         scene_ptr: () => rt.scene_ptr(),
         render_result: (panel) => rt.render_result(panel),
         set_v_speeds: (...a) => rt.set_v_speeds(...a),
+        step_alerts: (...a) => rt.step_alerts(...a),
         glyph_manifest: () => rt.glyph_manifest(),
         glyph_recorded_hash: () => rt.glyph_recorded_hash(),
         ...over,

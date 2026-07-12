@@ -1018,7 +1018,9 @@ name = "pilotage-instrument-panels"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "pilotage-alerts",
  "pilotage-frames",
+ "pilotage-instrument-glyphs",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
 ]
@@ -1056,6 +1058,7 @@ dependencies = [
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
+ "pilotage-alerts",
  "pilotage-instrument-glyphs",
  "pilotage-instrument-panels",
  "pilotage-instrument-scene",

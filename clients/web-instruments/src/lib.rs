@@ -27,4 +27,6 @@ pub use exports::{InstrumentRuntime, abi_version};
 pub use render_status::RenderStatus;
 
 #[cfg(test)]
+mod alert_tests;
+#[cfg(test)]
 mod tests;

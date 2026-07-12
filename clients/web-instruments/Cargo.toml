@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 workspace = true
 
 [dependencies]
+pilotage-alerts = { workspace = true }
 pilotage-instrument-glyphs = { workspace = true }
 pilotage-instrument-panels = { workspace = true }
 pilotage-instrument-scene = { workspace = true }

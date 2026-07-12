@@ -274,6 +274,22 @@ export function renderInstrumentSet(module, health, targets, state, nowMs) {
     );
   }
 
+  // One alert step per frame, before any panel renders: every panel in
+  // this set then draws from the same manager output. The independent
+  // watchdog verdict (any panel currently latched failed) feeds the
+  // manager's path-health input. A step failure fails the whole set —
+  // a wasm anomaly here is as disqualifying as a state-write failure.
+  let alertResult;
+  try {
+    const pathHealthy = targets.every(([panel]) => !health[panel].display().showFailure);
+    alertResult = module.stepAlerts(nowMs, pathHealthy);
+  } catch {
+    alertResult = { ok: false, reason: REASON.RENDER_TRAP };
+  }
+  if (alertResult?.ok !== true) {
+    return failInstrumentSet(health, targets, nowMs, alertResult?.reason ?? REASON.RENDER_TRAP);
+  }
+
   const outcomes = [];
   for (const target of targets) {
     const [panel, ctx, canvas, presenter] = target;

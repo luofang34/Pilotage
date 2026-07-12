@@ -47,7 +47,7 @@ fn quat_yaw(yaw: f32) -> pilotage_instrument_state::Quat {
 fn render(data: &PanelData) -> Vec<u8> {
     let mut buf = std::vec![0u8; 32 * 1024];
     let mut w = SceneWriter::new(&mut buf).expect("fits");
-    draw_hsi(data, &mut w).expect("panel fits buffer");
+    draw_hsi(data, None, &mut w).expect("panel fits buffer");
     let len = w.finish();
     buf.truncate(len);
     buf
