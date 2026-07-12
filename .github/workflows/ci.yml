@@ -105,6 +105,9 @@ jobs:
       - name: instrument display fail-visible contract
         run: node clients/web/instruments.test.mjs
 
+      - name: renderer backend conformance corpus
+        run: node clients/web/scene-conformance.test.mjs
+
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
         uses: bufbuild/buf-action@v1
