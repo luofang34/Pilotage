@@ -70,6 +70,7 @@ jobs:
           cargo check
           -p pilotage-instrument-state
           -p pilotage-instrument-scene
+          -p pilotage-instrument-glyphs
           -p pilotage-instrument-panels
           --target thumbv7em-none-eabihf
 
@@ -77,6 +78,11 @@ jobs:
         # Generating the resource binding here makes the fail-visible test
         # exercise the exact WASM artifact served by the browser client.
         run: bash scripts/build-web-instruments.sh
+
+      - name: glyph pack integrity (REN-02)
+        # Mandatory-vocabulary completeness, byte-identical reproducibility,
+        # and fail-closed corruption detection for the controlled glyph pack.
+        run: cargo test -p pilotage-instrument-glyphs
 
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs

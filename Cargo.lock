@@ -945,6 +945,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-instrument-glyphs"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-instrument-panels"
 version = "0.1.0"
 dependencies = [

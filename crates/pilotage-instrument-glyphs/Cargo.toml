@@ -1,0 +1,12 @@
+[package]
+name = "pilotage-instrument-glyphs"
+description = "Controlled, reproducible project-authored glyph pack for instrument symbology (ADR-0017)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
