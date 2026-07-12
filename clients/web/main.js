@@ -98,10 +98,6 @@ const state = {
   leaseGranted: false,
   skippedVideoFrames: 0,
   droppedIdentityFrames: 0,
-  // Latest conformal-overlay verdict per source. Defaults unavailable: a
-  // conformal overlay is only admissible once a source presents a bounded
-  // clock mapping (ADR-0020). Conformal drawing itself does not exist yet.
-  conformalReady: false,
 };
 const transportSessions = new TransportSessionLifecycle();
 // Capture-identity guard for the video downlink: drops duplicate/reordered/
@@ -504,8 +500,12 @@ async function renderVideoFrame(body, token) {
 // (ADR-0020). The capture identity gates the frame through `videoIdentity`: a
 // duplicate, reordered, stale-epoch, or wrong-camera frame is dropped and never
 // blitted, so a replayed frame cannot displace a newer one or refresh its age.
-// The clock-mapping verdict decides whether a conformal overlay is admissible;
-// it defaults unavailable and conformal drawing does not exist yet.
+// Conformal readiness is deliberately NOT evaluated here: the gate must judge a
+// frame against the specific aircraft snapshot it is associated with, and that
+// association (picking the snapshot for a frame at render time) is deferred
+// (#36). Evaluating conformalReady against the latest snapshot would reintroduce
+// the receipt-time conflation this whole change exists to remove, so the render
+// path only enforces capture-identity ordering.
 async function renderVideoFrameV2(body, token) {
   if (!transportSessions.isActive(token)) return;
   const parsed = parseVideoFrameV2(body);
@@ -518,7 +518,6 @@ async function renderVideoFrameV2(body, token) {
   const target = videoTargetFor(meta.sourceId, fourcc);
   if (!target) return;
   const verdict = videoIdentity.admit(meta);
-  state.conformalReady = verdict.gate.conformalReady;
   if (!verdict.accepted) {
     state.droppedIdentityFrames += 1;
     log(
@@ -528,7 +527,7 @@ async function renderVideoFrameV2(body, token) {
     return;
   }
   if (verdict.discontinuity) {
-    log(`video source ${meta.sourceId} capture discontinuity: fresh epoch/incarnation`);
+    log(`video source ${meta.sourceId} capture discontinuity: fresh epoch/incarnation/calibration`);
   }
   await paintJpeg(payload, target, token);
 }

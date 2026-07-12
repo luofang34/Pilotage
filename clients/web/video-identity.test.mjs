@@ -3,7 +3,12 @@
 //
 // Run: node clients/web/video-identity.test.mjs
 
-import { VideoIdentityTracker, conformalGate, ADMIT } from "./video-identity.js";
+import {
+  VideoIdentityTracker,
+  conformalGate,
+  ADMIT,
+  DEFAULT_MAX_CLOCK_ERROR_NANOS,
+} from "./video-identity.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -163,24 +168,131 @@ function meta(overrides = {}) {
   check("malformed reason is reported", bad.reason === ADMIT.MALFORMED);
 }
 
-// The conformal gate defaults unavailable and only opens for a bounded mapping.
+// A calibration-ID change re-bases the camera model, so it must be an explicit
+// discontinuity rather than silently continuing the conformal timeline.
 {
   const t = new VideoIdentityTracker();
-  const available = t.admit(meta({ mappingAvailable: true, clockErrorBoundNanos: 250n }));
-  check("available mapping yields a valid gate", available.gate.mappingValid === true);
-  check("available mapping is conformal-ready", available.gate.conformalReady === true);
-  check("available mapping carries its error bound", available.gate.clockErrorBoundNanos === 250n);
-
-  const t2 = new VideoIdentityTracker();
-  const unavailable = t2.admit(meta({ mappingAvailable: false }));
-  check("unavailable mapping gate is invalid", unavailable.gate.mappingValid === false);
-  check("unavailable mapping is not conformal-ready", unavailable.gate.conformalReady === false);
-  check("unavailable mapping has no error bound", unavailable.gate.clockErrorBoundNanos === null);
+  t.admit(meta({ calibrationId: 5, sequence: 9 }));
+  const recal = t.admit(meta({ calibrationId: 6, sequence: 0 }));
+  check("calibration change is accepted", recal.accepted === true);
+  check("calibration change marks a discontinuity", recal.discontinuity === true);
+  check("calibration reset is counted", t.diagnostics().calibrationResets === 1);
+  check("calibration change re-bases the tracked calibration", t.lastAccepted(0).calibrationId === 6);
 }
 
-// The standalone gate defaults closed for absent metadata.
-check("gate on null meta is closed", conformalGate(null).conformalReady === false);
-check("gate on null meta is not valid", conformalGate(null).mappingValid === false);
+// ---- conformal gate --------------------------------------------------------
+// The gate consumes BOTH the frame metadata and the candidate aircraft snapshot
+// identity (an AV-01 MeasurementStamp; only its clock is read here). It fails
+// closed and demands: available mapping, a target clock matching the snapshot,
+// error within budget, an overflow-free mapped time, and a published/recognized
+// calibration.
+const snap = (clock) => Object.freeze({ clock });
+const RECOGNIZED = { recognizedCalibrations: new Set([7]) };
+const CLOCK_SIMULATION = 2;
+const CLOCK_VEHICLE_BOOT = 1;
+
+// A calibration ID of zero (unpublished / CalibrationId::NONE) keeps the gate
+// closed even when the clock side is fully valid.
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_SIMULATION, calibrationId: 0 }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("calibration id zero: clock side is valid", g.mappingValid === true);
+  check("calibration id zero keeps the gate closed", g.conformalReady === false);
+}
+
+// A published but unrecognized (wrong/stale) calibration keeps the gate closed.
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_SIMULATION, calibrationId: 99 }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("unrecognized calibration keeps the gate closed", g.conformalReady === false);
+}
+
+// A mapping targeting a clock other than the candidate snapshot's is not usable.
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_VEHICLE_BOOT, calibrationId: 7 }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("target-clock mismatch keeps the gate closed", g.conformalReady === false);
+  check("target-clock mismatch is not mapping-valid", g.mappingValid === false);
+}
+
+// An available mapping whose quantified error exceeds the budget keeps the gate
+// closed: "bounded" alone is not sufficient.
+{
+  const overBudget = DEFAULT_MAX_CLOCK_ERROR_NANOS + 1n;
+  const g = conformalGate(
+    meta({
+      mappingAvailable: true,
+      mappingTargetClock: CLOCK_SIMULATION,
+      calibrationId: 7,
+      clockErrorBoundNanos: overBudget,
+    }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("excessive error bound keeps the gate closed", g.conformalReady === false);
+  check("excessive error bound is not mapping-valid", g.mappingValid === false);
+}
+
+// A mapping whose signed offset would carry the capture time outside the u64
+// range refuses rather than wrapping into a plausible time.
+{
+  const g = conformalGate(
+    meta({
+      mappingAvailable: true,
+      mappingTargetClock: CLOCK_SIMULATION,
+      calibrationId: 7,
+      captureTimeNanos: 5n,
+      mappingOffsetNanos: -6n,
+    }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("mapped-time underflow refuses", g.conformalReady === false && g.reason === "mapped-time-overflow");
+}
+
+// Only a fully compatible snapshot / calibration / mapping combination is ready.
+{
+  const g = conformalGate(
+    meta({
+      mappingAvailable: true,
+      mappingTargetClock: CLOCK_SIMULATION,
+      calibrationId: 7,
+      captureTimeNanos: 1000n,
+      mappingOffsetNanos: 50n,
+      clockErrorBoundNanos: 250n,
+    }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("compatible combination is conformal-ready", g.conformalReady === true);
+  check("ready verdict is mapping-valid", g.mappingValid === true);
+  check("ready verdict carries the error bound", g.clockErrorBoundNanos === 250n);
+  check("ready verdict exposes the mapped capture time", g.mappedCaptureTimeNanos === 1050n);
+}
+
+// An unavailable mapping is not mapping-valid regardless of the snapshot.
+{
+  const g = conformalGate(meta({ mappingAvailable: false }), snap(CLOCK_SIMULATION), RECOGNIZED);
+  check("unavailable mapping is not mapping-valid", g.mappingValid === false);
+  check("unavailable mapping is not conformal-ready", g.conformalReady === false);
+  check("unavailable mapping has no error bound", g.clockErrorBoundNanos === null);
+}
+
+// The gate fails closed for absent metadata or an absent candidate snapshot.
+check("gate on null meta is closed", conformalGate(null, snap(CLOCK_SIMULATION)).conformalReady === false);
+check(
+  "gate with no candidate snapshot is closed",
+  conformalGate(meta({ mappingAvailable: true, calibrationId: 7 }), null, RECOGNIZED).conformalReady === false,
+);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

@@ -67,14 +67,35 @@ property of the integration, not something a consumer may assume.
   comparison: freshness advances only on a strictly newer epoch/sequence. A
   duplicate, reordered, stale-epoch, or wrong-camera frame is dropped and leaves
   the accepted state untouched, so a replayed frame can neither displace a newer
-  frame nor refresh its age. An epoch reset or a new incarnation is accepted as
-  an explicit discontinuity.
+  frame nor refresh its age. An epoch reset, a new incarnation, or a
+  **calibration-ID change** is accepted as an explicit discontinuity — the
+  conformal timeline never silently continues across a change of camera model.
 
-- The browser exposes a **conformal gate** (`mappingValid` / `conformalReady` /
-  `clockErrorBoundNanos`) that defaults closed. Conformal drawing does not exist
-  yet; the gate states only whether an overlay would be admissible, and an absent
-  or unavailable mapping keeps it closed. This is a SIM prerequisite for a
-  HUD-SIM overlay, NOT an airborne HUD capability, and is NOT FOR FLIGHT.
+- The browser exposes a **conformal gate**, `conformalGate(meta,
+  candidateSnapshotIdentity)`, that **fails closed** and consumes BOTH the frame
+  metadata AND the candidate aircraft snapshot's identity (an AV-01
+  `MeasurementStamp`; its `clock` is read here). "Bounded" is not sufficient. A
+  frame is conformal-ready only when all hold:
+  - the clock mapping is available, and its **target clock matches** the clock
+    the candidate snapshot is expressed in;
+  - the mapping's quantified error is within a **configured budget**
+    (`DEFAULT_MAX_CLOCK_ERROR_NANOS`, a named constant with a stated rationale);
+  - applying the mapping's signed offset to the capture time does **not overflow
+    or underflow** the `u64` nanosecond range (it refuses rather than wrapping);
+  - the frame's **calibration ID is published and recognized**
+    (`CalibrationId::NONE` / zero, or an unrecognized id, keeps the gate closed).
+
+  The gate reports `mappingValid` (the clock side) separately from
+  `conformalReady` (which additionally requires calibration). This is a SIM
+  prerequisite for a HUD-SIM overlay, NOT an airborne HUD capability, and is NOT
+  FOR FLIGHT.
+
+- **Deferred:** actual capture-to-snapshot *association* — selecting, at render
+  time, the specific aircraft snapshot a given frame corresponds to — is not
+  implemented in this change. The gate is the mechanism that association will
+  use; the browser deliberately does not evaluate conformal readiness against
+  the latest snapshot, which would reintroduce the receipt-time conflation this
+  ADR exists to remove.
 
 ## Consequences
 

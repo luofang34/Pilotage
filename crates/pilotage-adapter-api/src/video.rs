@@ -101,6 +101,37 @@ impl CaptureClockMapping {
             Self::Unavailable => None,
         }
     }
+
+    /// The target flight-state clock a bounded mapping expresses times in, or
+    /// `None` when no mapping is available.
+    #[must_use]
+    pub const fn target_clock(self) -> Option<MeasurementClock> {
+        match self {
+            Self::Bounded { target, .. } => Some(target),
+            Self::Unavailable => None,
+        }
+    }
+
+    /// Applies the mapping to a capture time, returning that instant expressed
+    /// in the target clock.
+    ///
+    /// Returns `None` when the mapping is unavailable, or when the signed offset
+    /// would carry the result outside the `u64` nanosecond range: a mapping
+    /// that would overflow or underflow refuses rather than wrapping into a
+    /// plausible-looking but wrong time.
+    #[must_use]
+    pub const fn map_capture_ns(self, capture_ns: u64) -> Option<u64> {
+        match self {
+            Self::Unavailable => None,
+            Self::Bounded { offset_ns, .. } => {
+                if offset_ns >= 0 {
+                    capture_ns.checked_add(offset_ns.unsigned_abs())
+                } else {
+                    capture_ns.checked_sub(offset_ns.unsigned_abs())
+                }
+            }
+        }
+    }
 }
 
 /// Everything needed to trace one captured video frame back to the aircraft
@@ -175,6 +206,44 @@ mod tests {
         };
         assert!(mapping.is_available());
         assert_eq!(mapping.error_bound_ns(), Some(5_000));
+        assert_eq!(mapping.target_clock(), Some(MeasurementClock::VehicleBoot));
+    }
+
+    #[test]
+    fn map_capture_ns_applies_the_signed_offset() {
+        let forward = CaptureClockMapping::Bounded {
+            target: MeasurementClock::VehicleBoot,
+            offset_ns: 100,
+            error_bound_ns: 0,
+        };
+        assert_eq!(forward.map_capture_ns(1_000), Some(1_100));
+        let backward = CaptureClockMapping::Bounded {
+            target: MeasurementClock::VehicleBoot,
+            offset_ns: -100,
+            error_bound_ns: 0,
+        };
+        assert_eq!(backward.map_capture_ns(1_000), Some(900));
+        assert_eq!(
+            CaptureClockMapping::identity(MeasurementClock::Simulation).map_capture_ns(42),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn map_capture_ns_refuses_to_wrap_at_the_u64_edges() {
+        let overflow = CaptureClockMapping::Bounded {
+            target: MeasurementClock::VehicleBoot,
+            offset_ns: 1,
+            error_bound_ns: 0,
+        };
+        assert_eq!(overflow.map_capture_ns(u64::MAX), None, "overflow refuses");
+        let underflow = CaptureClockMapping::Bounded {
+            target: MeasurementClock::VehicleBoot,
+            offset_ns: -1,
+            error_bound_ns: 0,
+        };
+        assert_eq!(underflow.map_capture_ns(0), None, "underflow refuses");
+        assert_eq!(CaptureClockMapping::Unavailable.map_capture_ns(1_000), None);
     }
 
     #[test]
