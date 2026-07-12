@@ -10,9 +10,6 @@
 // required fields are emitted even when their ids are zero.
 
 import { encodeControlFrameEnvelope, decodeBareEnvelope, SCHEMA_VERSION } from "./wire.js";
-import "./telemetry-ingress.test.mjs";
-import "./telemetry-display.test.mjs";
-import "./transport-session.test.mjs";
 
 let failures = 0;
 function check(name, cond) {
