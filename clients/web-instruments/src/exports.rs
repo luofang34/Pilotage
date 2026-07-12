@@ -4,10 +4,15 @@
 //! resource owns its buffers, configuration, and generations; this module has
 //! no process-global or thread-local mutable state.
 
+use pilotage_alerts::{
+    AlertCondition, AlertContext, AlertEvent, AlertManager, AlertOutput, AlertProfile, AltFault,
+    DynFault, ManagerHealth, NavFault,
+};
 use pilotage_instrument_panels::{PfdConfig, VSpeeds, draw_hsi, draw_pfd};
 use pilotage_instrument_scene::{LayerError, LayerId, SceneError, SceneWriter, validate_layers};
 use pilotage_instrument_state::FreshnessPolicy;
 use pilotage_instrument_state::abi::{AbiError, STATE_ABI_SIZE, STATE_ABI_VERSION, decode_state};
+use pilotage_instrument_state::{NavSource, SignalStatus};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::render_status::RenderStatus;
@@ -42,6 +47,17 @@ pub(crate) struct Runtime {
     /// Display thresholds; the simulator profile's numbers are benchmark
     /// data, not an aircraft approval.
     pub(crate) profile: pilotage_instrument_state::AirframeDisplayProfile,
+    /// The single alert state machine (ALR-01). Stepped once per
+    /// [`InstrumentRuntime::step_alerts`] call; every panel render then
+    /// consumes the one cached [`AlertOutput`], so the PFD and HSI can
+    /// never disagree on the semantic alert state within a frame.
+    pub(crate) alerts: AlertManager,
+    /// Alerting profile; simulator benchmark data, not an approval.
+    pub(crate) alert_profile: AlertProfile,
+    /// The last stepped output. `None` until the backend steps alerts —
+    /// panels then draw no alert stack, while primary-data flags render
+    /// unconditionally from resolved state.
+    pub(crate) alert_output: Option<AlertOutput>,
 }
 
 impl Runtime {
@@ -53,6 +69,9 @@ impl Runtime {
             pfd_cfg: PfdConfig::default(),
             unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
             profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+            alerts: AlertManager::new(),
+            alert_profile: AlertProfile::simulator(),
+            alert_output: None,
         }
     }
 }
@@ -166,16 +185,48 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
         Ok(writer) => writer,
         Err(error) => return RenderAttempt::failure(scene_error_status(error), generation),
     };
+    let alerts = runtime.alert_output.as_ref();
     let drawn = if panel == PANEL_PFD {
-        draw_pfd(&data, &runtime.pfd_cfg, &mut writer)
+        draw_pfd(&data, &runtime.pfd_cfg, alerts, &mut writer)
     } else {
-        draw_hsi(&data, &mut writer)
+        draw_hsi(&data, alerts, &mut writer)
     };
     let len = match drawn {
         Ok(()) => writer.finish(),
         Err(error) => return RenderAttempt::failure(scene_error_status(error), generation),
     };
     validate_and_commit_scene(runtime, panel_idx, len)
+}
+
+/// Maps resolved panel signals to the typed alert conditions this
+/// runtime can honestly assert today: altitude, navigation, and
+/// turn-rate source loss. Attitude and airspeed loss stay primary-data
+/// flags only (red X), deliberately outside the alerting path, so the
+/// display of a lost primary never depends on the manager. Every
+/// condition is asserted or cleared each step; both operations are
+/// idempotent in the manager.
+fn derive_alert_events(data: &pilotage_instrument_state::PanelData) -> [AlertEvent; 3] {
+    let cond = |active: bool, c: AlertCondition| {
+        if active {
+            AlertEvent::Assert(c)
+        } else {
+            AlertEvent::Clear(c)
+        }
+    };
+    [
+        cond(
+            data.alt_ft.status == SignalStatus::Failed,
+            AlertCondition::Altitude(AltFault::Unavailable),
+        ),
+        cond(
+            data.nav.data.source != NavSource::None && data.nav.status == SignalStatus::Failed,
+            AlertCondition::Heading(NavFault::Unavailable),
+        ),
+        cond(
+            data.turn_rate_rps.status == SignalStatus::Failed,
+            AlertCondition::TurnSlip(DynFault::TurnRateInvalid),
+        ),
+    ]
 }
 
 /// The state-block ABI version this module was built against.
@@ -259,6 +310,50 @@ impl InstrumentRuntime {
             || RenderAttempt::failure(RenderStatus::NotInitialized, 0).packed(),
             |runtime| render_into(runtime, panel).packed(),
         )
+    }
+
+    /// Steps the alert manager once against the current state block and
+    /// caches the output every subsequent panel render consumes, so all
+    /// panels in a frame share one semantic alert state. `now_ms` is the
+    /// caller's monotonic clock (the manager never reads an interior
+    /// clock); `path_healthy == 0` marks the independent display/alerting
+    /// path monitor faulted, which flags the output untrusted without
+    /// suppressing it.
+    ///
+    /// Returns status in bits 0..7, active-alert count in bits 8..15,
+    /// faulted health in bit 16, overflow in bit 17, and the manager
+    /// generation in bits 32..63.
+    pub fn step_alerts(&mut self, now_ms: u64, path_healthy: u32) -> u64 {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return RenderStatus::NotInitialized as u64;
+        };
+        let state = match decode_state(&runtime.state) {
+            Ok(state) => state,
+            Err(AbiError::Truncated) => return RenderStatus::StateTruncated as u64,
+            Err(AbiError::BadVersion { .. }) => return RenderStatus::StateBadVersion as u64,
+        };
+        let data = pilotage_instrument_state::resolve_stateful(
+            &state,
+            &FreshnessPolicy::default(),
+            &runtime.profile,
+            &mut runtime.unusual,
+        );
+        let events = derive_alert_events(&data);
+        let ctx = AlertContext {
+            declutter: data.presentation.unusual,
+            alerting_path_healthy: path_healthy != 0,
+            ..AlertContext::default()
+        };
+        let out = runtime
+            .alerts
+            .step(&runtime.alert_profile, &events, ctx, now_ms);
+        let summary = (RenderStatus::Ok as u64)
+            | ((out.active().len() as u64 & 0xff) << 8)
+            | (u64::from(out.health() == ManagerHealth::Faulted) << 16)
+            | (u64::from(out.overflow()) << 17)
+            | ((out.generation() as u64) << 32);
+        runtime.alert_output = Some(out);
+        summary
     }
 
     /// The controlled glyph pack's canonical serialization (REN-02), for

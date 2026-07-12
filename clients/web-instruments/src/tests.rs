@@ -13,13 +13,13 @@ use crate::exports::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PackedResult {
-    status: u32,
-    scene_len: u32,
-    generation: u32,
+pub(crate) struct PackedResult {
+    pub(crate) status: u32,
+    pub(crate) scene_len: u32,
+    pub(crate) generation: u32,
 }
 
-fn unpack(result: u64) -> PackedResult {
+pub(crate) fn unpack(result: u64) -> PackedResult {
     PackedResult {
         status: (result & 0xff) as u32,
         scene_len: ((result >> 8) & 0x00ff_ffff) as u32,
@@ -33,7 +33,7 @@ fn write_state(runtime: &mut Runtime, state: &AircraftState) {
     runtime.state.copy_from_slice(&block);
 }
 
-fn attitude_state() -> AircraftState {
+pub(crate) fn attitude_state() -> AircraftState {
     AircraftState {
         attitude: Stamped {
             data: Some(Attitude {
@@ -53,7 +53,7 @@ fn attitude_state() -> AircraftState {
     }
 }
 
-fn encoded_state_block(state: &AircraftState) -> Vec<u8> {
+pub(crate) fn encoded_state_block(state: &AircraftState) -> Vec<u8> {
     let mut block = vec![0u8; STATE_ABI_SIZE];
     encode_state(state, &mut block).expect("encodes");
     block
@@ -98,6 +98,9 @@ fn scene_runtime(scene: &[u8]) -> Runtime {
         pfd_cfg: PfdConfig::default(),
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: pilotage_alerts::AlertManager::new(),
+        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        alert_output: None,
     }
 }
 
@@ -231,6 +234,9 @@ fn render_into_reports_buffer_and_truncation_failures() {
         pfd_cfg: PfdConfig::default(),
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: pilotage_alerts::AlertManager::new(),
+        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        alert_output: None,
     };
     assert_attempt(
         render_into(&mut tiny, 0),
@@ -247,6 +253,9 @@ fn render_into_reports_buffer_and_truncation_failures() {
         pfd_cfg: PfdConfig::default(),
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: pilotage_alerts::AlertManager::new(),
+        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        alert_output: None,
     };
     assert_attempt(
         render_into(&mut truncated, 0),
@@ -262,6 +271,9 @@ fn render_into_reports_buffer_and_truncation_failures() {
         pfd_cfg: PfdConfig::default(),
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: pilotage_alerts::AlertManager::new(),
+        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        alert_output: None,
     };
     assert_attempt(render_into(&mut valid, 2), RenderStatus::InvalidPanel, 0, 0);
     let rendered = render_into(&mut valid, 0);
@@ -280,6 +292,9 @@ fn malformed_scene_never_advances_or_commits_length() {
         pfd_cfg: PfdConfig::default(),
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: pilotage_alerts::AlertManager::new(),
+        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        alert_output: None,
     };
     assert_attempt(
         validate_and_commit_scene(&mut runtime, 0, 2),

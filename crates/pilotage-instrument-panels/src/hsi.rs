@@ -1,6 +1,7 @@
 //! The Horizontal Situation Indicator: rotating compass rose, heading
 //! bug, ground-track diamond, course deviation indicator, and data boxes.
 
+use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::{NavSource, PanelData, SignalStatus};
 
@@ -23,7 +24,11 @@ pub(crate) const ROSE_R: f32 = 160.0;
 /// black backdrop, the rotating orientation symbology, the readout
 /// boxes, course guidance, and — above everything it annunciates — the
 /// heading failure flag.
-pub fn draw_hsi(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), SceneError> {
+pub fn draw_hsi(
+    data: &PanelData,
+    alerts: Option<&AlertOutput>,
+    scene: &mut SceneWriter<'_>,
+) -> Result<(), SceneError> {
     scene.begin_layer(LayerId::Background)?;
     scene.fill_color(palette::BLACK)?;
     scene.rect(PaintMode::Fill, 0.0, 0.0, PANEL_W, PANEL_H)?;
@@ -67,6 +72,9 @@ pub fn draw_hsi(data: &PanelData, scene: &mut SceneWriter<'_>) -> Result<(), Sce
     }
     if !hdg.status.shows_value() {
         status_paint::draw_red_x(scene, CX - 140.0, CY - 140.0, 280.0, 280.0, "HDG")?;
+    }
+    if let Some(alerts) = alerts {
+        crate::annunciation::draw_alert_stack(scene, alerts)?;
     }
     scene.end_layer(LayerId::Annunciation)?;
     Ok(())

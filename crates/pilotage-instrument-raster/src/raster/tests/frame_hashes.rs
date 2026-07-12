@@ -124,7 +124,7 @@ fn sha_hex(bytes: &[u8]) -> std::string::String {
 #[test]
 fn pfd_frame_hash_is_reproducible_and_pinned() {
     let data = resolve(&demo_state(), &FreshnessPolicy::default());
-    let scene = encode(|w| draw_pfd(&data, &PfdConfig::default(), w).expect("pfd"));
+    let scene = encode(|w| draw_pfd(&data, &PfdConfig::default(), None, w).expect("pfd"));
     let first = frame(&scene);
     let second = frame(&scene);
     assert_eq!(
@@ -137,7 +137,7 @@ fn pfd_frame_hash_is_reproducible_and_pinned() {
 #[test]
 fn hsi_frame_hash_is_reproducible_and_pinned() {
     let data = resolve(&demo_state(), &FreshnessPolicy::default());
-    let scene = encode(|w| draw_hsi(&data, w).expect("hsi"));
+    let scene = encode(|w| draw_hsi(&data, None, w).expect("hsi"));
     let first = frame(&scene);
     let second = frame(&scene);
     assert_eq!(

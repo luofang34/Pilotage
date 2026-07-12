@@ -2,6 +2,7 @@
 //! and turn-rate cue, composed in fixed layers (background → attitude →
 //! tapes → symbology → annunciation, ADR-0017).
 
+use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
 
@@ -67,6 +68,7 @@ pub struct PfdConfig {
 pub fn draw_pfd(
     data: &PanelData,
     cfg: &PfdConfig,
+    alerts: Option<&AlertOutput>,
     scene: &mut SceneWriter<'_>,
 ) -> Result<(), SceneError> {
     let att_status = data.roll_rad.status.worst(data.pitch_rad.status);
@@ -127,6 +129,9 @@ pub fn draw_pfd(
     if data.alt_ft.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
+    if let Some(alerts) = alerts {
+        crate::annunciation::draw_alert_stack(scene, alerts)?;
+    }
     scene.end_layer(LayerId::Annunciation)?;
     Ok(())
 }
@@ -181,4 +186,4 @@ fn draw_turn_rate(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
 #[cfg(test)]
 mod attitude_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

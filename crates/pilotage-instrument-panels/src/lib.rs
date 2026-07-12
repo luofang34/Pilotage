@@ -17,6 +17,7 @@
 #[cfg(test)]
 extern crate std;
 
+mod annunciation;
 mod fixed_str;
 mod hsi;
 mod palette;
