@@ -2,7 +2,8 @@
 //! bug, ground-track diamond, course deviation indicator, and data boxes.
 
 use pilotage_alerts::AlertOutput;
-use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
+use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
+use pilotage_instrument_state::HeadingReference;
 use pilotage_instrument_state::{NavSource, PanelData, SignalStatus};
 
 use crate::palette;
@@ -34,7 +35,7 @@ pub fn draw_hsi(
     scene.rect(PaintMode::Fill, 0.0, 0.0, PANEL_W, PANEL_H)?;
     scene.end_layer(LayerId::Background)?;
 
-    let hdg = data.heading_rad;
+    let hdg = data.heading.value_rad;
     scene.begin_layer(LayerId::Attitude)?;
     if hdg.status.shows_value() {
         rose::draw_rose(scene, hdg.value)?;
@@ -70,7 +71,19 @@ pub fn draw_hsi(
     {
         status_paint::draw_flag(scene, CX, CY + 60.0, "NAV")?;
     }
-    if !hdg.status.shows_value() {
+    if hdg.status.shows_value() {
+        scene.fill_color(match data.heading.reference {
+            HeadingReference::SimLocalTrue => palette::AMBER,
+            _ => palette::WHITE,
+        })?;
+        scene.text(
+            CX,
+            CY - 118.0,
+            12.0,
+            Anchor::CENTER,
+            data.heading.reference.label(),
+        )?;
+    } else {
         status_paint::draw_red_x(scene, CX - 140.0, CY - 140.0, 280.0, 280.0, "HDG")?;
     }
     if let Some(alerts) = alerts {

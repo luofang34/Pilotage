@@ -5,7 +5,7 @@ use crate::aircraft::{AirData, AircraftState, Attitude, EstimateQuality, Kinemat
 use crate::signal::{FreshnessPolicy, SignalStatus};
 use pilotage_frames::Quat;
 
-fn flying_state() -> AircraftState {
+pub(crate) fn flying_state() -> AircraftState {
     AircraftState {
         attitude: Stamped {
             data: Some(Attitude {
@@ -34,6 +34,7 @@ fn flying_state() -> AircraftState {
             rates: true,
             position: true,
             velocity: true,
+            ..Default::default()
         },
         ..AircraftState::default()
     }
@@ -251,7 +252,7 @@ fn every_showable_output_is_finite_under_hostile_input() {
         for (name, sig) in [
             ("roll", p.roll_rad),
             ("pitch", p.pitch_rad),
-            ("heading", p.heading_rad),
+            ("heading", p.heading.value_rad),
             ("turn", p.turn_rate_rps),
             ("ias", p.ias_kt),
             ("gs", p.gs_kt),

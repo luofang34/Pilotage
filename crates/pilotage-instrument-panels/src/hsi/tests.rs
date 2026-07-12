@@ -10,6 +10,9 @@ use pilotage_instrument_state::{
 
 use super::draw_hsi;
 
+/// Heading comes from the explicit SIM-declared independent sample —
+/// the attitude quaternion still describes the same yaw, but nothing
+/// derives heading from it (NAV-01).
 fn heading_only(heading_rad: f32) -> PanelData {
     let state = pilotage_instrument_state::AircraftState {
         attitude: pilotage_instrument_state::Stamped {
@@ -19,12 +22,21 @@ fn heading_only(heading_rad: f32) -> PanelData {
             }),
             age_ms: Some(10.0),
         },
+        heading: pilotage_instrument_state::Stamped {
+            data: Some(pilotage_instrument_state::HeadingSample {
+                heading_rad,
+                reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
+            }),
+            age_ms: Some(10.0),
+        },
         quality: pilotage_instrument_state::EstimateQuality::Good,
         valid: pilotage_instrument_state::ValidFlags {
             attitude: true,
             rates: true,
             position: true,
             velocity: true,
+            heading: true,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -139,7 +151,7 @@ fn no_nav_source_shows_dashes_and_no_cdi() {
 #[test]
 fn failed_heading_renders_red_x() {
     let mut data = heading_only(0.0);
-    data.heading_rad = Sig::with_status(0.0, SignalStatus::Failed);
+    data.heading.value_rad = Sig::with_status(0.0, SignalStatus::Failed);
     let scene = render(&data);
     let labels = texts(&scene);
     assert!(labels.iter().any(|t| t == "HDG"), "HDG flag: {labels:?}");
@@ -168,7 +180,7 @@ fn scenes_are_layered_for_every_heading_status() {
         SignalStatus::Failed,
     ] {
         let mut data = heading_only(0.0);
-        data.heading_rad = Sig::with_status(0.0, status);
+        data.heading.value_rad = Sig::with_status(0.0, status);
         let scene = render(&data);
         let report = validate_layers(&scene).expect("layered scene validates");
         for layer in [
@@ -207,4 +219,39 @@ fn degraded_navigation_cue_is_an_annunciation() {
         !layer_texts(&scene, LayerId::Guidance).contains(&expected),
         "NAV cue must not share the guidance band"
     );
+}
+
+// ---- NAV-01: reference labelling and no fabricated rose -----------------
+
+#[test]
+fn sim_declared_heading_is_labelled_sim() {
+    let labels = texts(&render(&heading_only(0.0)));
+    assert!(labels.iter().any(|t| t == "SIM"), "{labels:?}");
+}
+
+#[test]
+fn magnetic_heading_is_labelled_mag() {
+    let mut data = heading_only(0.0);
+    data.heading.reference = pilotage_instrument_state::HeadingReference::Magnetic;
+    let labels = texts(&render(&data));
+    assert!(labels.iter().any(|t| t == "MAG"), "{labels:?}");
+}
+
+#[test]
+fn missing_heading_leaves_no_plausible_rose() {
+    let mut data = heading_only(0.0);
+    data.heading.value_rad =
+        Sig::with_status(0.0, pilotage_instrument_state::SignalStatus::Missing);
+    let labels = texts(&render(&data));
+    assert!(
+        labels.iter().any(|t| t == "HDG"),
+        "missing heading must flag, not freeze: {labels:?}"
+    );
+    for cardinal in ["N", "E", "S", "W"] {
+        assert!(
+            !labels.iter().any(|t| t == cardinal),
+            "{cardinal} must not paint on a dead rose: {labels:?}"
+        );
+    }
+    assert!(!labels.iter().any(|t| t == "SIM"), "{labels:?}");
 }

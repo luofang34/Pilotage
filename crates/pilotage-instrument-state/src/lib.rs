@@ -26,6 +26,7 @@
 pub mod abi;
 mod aircraft;
 mod altitude;
+mod heading;
 mod presentation;
 mod resolve;
 mod signal;
@@ -37,13 +38,18 @@ pub use aircraft::{
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
 pub use altitude::{AltitudeClass, AltitudeDeclaration, AltitudeReference, GeoidModelId, OriginId};
+pub use heading::{
+    ConversionFault, HeadingReference, HeadingSample, MagneticVariation, VariationSourceId,
+    convert_heading, shortest_angle_rad, wrap_2pi,
+};
 pub use pilotage_frames::Quat;
 pub use presentation::{
     AirframeDisplayProfile, AttitudePresentation, ChevronSense, Hysteresis, ProfileError,
     ProfileLimits, UnusualAttitudeState, down_in_body,
 };
 pub use resolve::{
-    BARO_SETTING_TOLERANCE_HPA, NavResolved, PanelData, ResolvedAltitude, resolve, resolve_stateful,
+    BARO_SETTING_TOLERANCE_HPA, NavResolved, PanelData, ResolvedAltitude, ResolvedHeading, resolve,
+    resolve_stateful,
 };
 pub use signal::{FreshnessPolicy, PolicyError, Sig, SignalStatus};
 pub use validate::{

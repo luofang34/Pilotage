@@ -65,6 +65,10 @@ pub struct StateIntegrity {
     /// Datum-qualified altitude fault: unknown reference class, missing
     /// required source, undeclared model, or non-finite sample.
     pub altitude: Option<GroupFault>,
+    /// Heading-sample fault: non-finite value or unknown reference.
+    pub heading: Option<GroupFault>,
+    /// Magnetic-variation fault: non-finite value or undeclared source.
+    pub variation: Option<GroupFault>,
 }
 
 fn all_finite(values: &[f32]) -> bool {
@@ -156,6 +160,20 @@ pub fn validate_state(state: &AircraftState) -> StateIntegrity {
         integrity.coherence = Some(GroupFault::UnknownEnum);
     }
     integrity.altitude = altitude_fault(state);
+    if let Some(heading) = &state.heading.data {
+        if heading.reference == crate::heading::HeadingReference::Unknown {
+            integrity.heading = Some(GroupFault::UnknownEnum);
+        } else if !heading.heading_rad.is_finite() {
+            integrity.heading = Some(GroupFault::NonFinite);
+        }
+    }
+    if let Some(variation) = &state.variation.data {
+        if !variation.east_positive_rad.is_finite() {
+            integrity.variation = Some(GroupFault::NonFinite);
+        } else if variation.source == crate::heading::VariationSourceId::UNDECLARED {
+            integrity.variation = Some(GroupFault::SourceAbsent);
+        }
+    }
     integrity
 }
 

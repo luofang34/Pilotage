@@ -22,7 +22,7 @@ pub fn wind_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), Sce
         scene.text(58.0, 26.0, 14.0, Anchor::CENTER, "WIND ---")?;
         return Ok(());
     }
-    let hdg = data.heading_rad.value;
+    let hdg = data.heading.value_rad.value;
     // Arrow points where the wind blows toward, in the aircraft's frame.
     scene.save()?;
     scene.translate(28.0, 26.0)?;

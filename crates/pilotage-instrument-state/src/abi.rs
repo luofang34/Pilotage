@@ -11,7 +11,7 @@
 //!
 //! | off | type | field |
 //! |----:|------|-------|
-//! | 0   | u32  | version (=3) |
+//! | 0   | u32  | version (=4) |
 //! | 4   | f32×4| attitude quaternion w, x, y, z |
 //! | 20  | f32×3| body rates p, q, r (rad/s) |
 //! | 32  | f32×3| position NED n, e, d (m) |
@@ -39,20 +39,29 @@
 //! | 128 | f32  | altitude sample (m, NaN absent; classes 1-4) |
 //! | 132 | f32  | pilot-selected baro setting (hPa, NaN absent) |
 //! | 136 | u32  | local-origin identity |
-//! | 140 | u8×4 | reserved, zero |
+//! | 140 | u8   | heading reference (0 magnetic, 1 true, 2 sim-local-true; other = unknown, fails) |
+//! | 141 | u8   | variation source id (0 = undeclared; conversion refuses) |
+//! | 142 | u8×2 | reserved, zero |
+//! | 144 | f32  | heading (rad from the declared north, NaN absent) |
+//! | 148 | f32  | heading age ms (NaN never) |
+//! | 152 | f32  | magnetic variation (rad, east positive, NaN absent) |
+//! | 156 | f32  | variation age ms (NaN never) |
+//! | 160 | u8   | valid flags 2 (bit0 heading, bit1 variation) |
+//! | 161 | u8×7 | reserved, zero |
 
 use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
 use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
+use crate::heading::{HeadingReference, HeadingSample, MagneticVariation, VariationSourceId};
 use pilotage_frames::Quat;
 
 /// Version stamped in the block's first four bytes.
-pub const STATE_ABI_VERSION: u32 = 3;
+pub const STATE_ABI_VERSION: u32 = 4;
 
 /// Size of the packed block in bytes.
-pub const STATE_ABI_SIZE: usize = 144;
+pub const STATE_ABI_SIZE: usize = 168;
 
 /// Why a state block failed to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,13 +191,7 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         2 => EstimateQuality::Unusable,
         _ => EstimateQuality::Unknown,
     };
-    let flags = u8_at(buf, 85)?;
-    let valid = ValidFlags {
-        attitude: flags & 0b0001 != 0,
-        rates: flags & 0b0010 != 0,
-        position: flags & 0b0100 != 0,
-        velocity: flags & 0b1000 != 0,
-    };
+    let valid = decode_valid_flags(buf)?;
     let coherence = match u8_at(buf, 124)? {
         0 => SnapshotCoherence::Insufficient,
         1 => SnapshotCoherence::Coherent,
@@ -210,6 +213,49 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
             coherence,
         },
         altitude: decode_altitude(buf)?,
+        heading: decode_heading(buf)?,
+        variation: decode_variation(buf)?,
+    })
+}
+
+fn decode_heading(buf: &[u8]) -> Result<Stamped<HeadingSample>, AbiError> {
+    let age = opt(f32_at(buf, 148)?);
+    Ok(Stamped {
+        data: match (age, opt(f32_at(buf, 144)?)) {
+            (Some(_), Some(heading_rad)) => Some(HeadingSample {
+                heading_rad,
+                reference: HeadingReference::from_u8(u8_at(buf, 140)?),
+            }),
+            _ => None,
+        },
+        age_ms: age,
+    })
+}
+
+fn decode_variation(buf: &[u8]) -> Result<Stamped<MagneticVariation>, AbiError> {
+    let age = opt(f32_at(buf, 156)?);
+    Ok(Stamped {
+        data: match (age, opt(f32_at(buf, 152)?)) {
+            (Some(_), Some(east_positive_rad)) => Some(MagneticVariation {
+                east_positive_rad,
+                source: VariationSourceId(u8_at(buf, 141)?),
+            }),
+            _ => None,
+        },
+        age_ms: age,
+    })
+}
+
+fn decode_valid_flags(buf: &[u8]) -> Result<ValidFlags, AbiError> {
+    let flags = u8_at(buf, 85)?;
+    let flags2 = u8_at(buf, 160)?;
+    Ok(ValidFlags {
+        attitude: flags & 0b0001 != 0,
+        rates: flags & 0b0010 != 0,
+        position: flags & 0b0100 != 0,
+        velocity: flags & 0b1000 != 0,
+        heading: flags2 & 0b0001 != 0,
+        variation: flags2 & 0b0010 != 0,
     })
 }
 
@@ -299,16 +345,7 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
     put_f32(buf, 76, or_nan(state.nav.age_ms))?;
     put_f32(buf, 80, or_nan(state.wind.age_ms))?;
 
-    put_u8(
-        buf,
-        84,
-        match state.quality {
-            EstimateQuality::Good => 0,
-            EstimateQuality::Degraded => 1,
-            EstimateQuality::Unusable => 2,
-            EstimateQuality::Unknown => 255,
-        },
-    )?;
+    encode_quality(state, buf)?;
     let flags = u8::from(state.valid.attitude)
         | (u8::from(state.valid.rates) << 1)
         | (u8::from(state.valid.position) << 2)
@@ -362,7 +399,48 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
             SnapshotCoherence::Unknown => 255,
         },
     )?;
-    encode_altitude(state, buf)
+    encode_altitude(state, buf)?;
+    encode_heading(state, buf)
+}
+
+fn encode_heading(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError> {
+    let heading = state.heading.data;
+    put_u8(
+        buf,
+        140,
+        heading.map_or(255, |sample| sample.reference.to_u8()),
+    )?;
+    let variation = state.variation.data;
+    put_u8(buf, 141, variation.map_or(0, |sample| sample.source.0))?;
+    put_u8(buf, 142, 0)?;
+    put_u8(buf, 143, 0)?;
+    put_f32(buf, 144, or_nan(heading.map(|sample| sample.heading_rad)))?;
+    put_f32(buf, 148, or_nan(state.heading.age_ms))?;
+    put_f32(
+        buf,
+        152,
+        or_nan(variation.map(|sample| sample.east_positive_rad)),
+    )?;
+    put_f32(buf, 156, or_nan(state.variation.age_ms))?;
+    let flags2 = u8::from(state.valid.heading) | (u8::from(state.valid.variation) << 1);
+    put_u8(buf, 160, flags2)?;
+    for offset in 161..168 {
+        put_u8(buf, offset, 0)?;
+    }
+    Ok(())
+}
+
+fn encode_quality(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError> {
+    put_u8(
+        buf,
+        84,
+        match state.quality {
+            EstimateQuality::Good => 0,
+            EstimateQuality::Degraded => 1,
+            EstimateQuality::Unusable => 2,
+            EstimateQuality::Unknown => 255,
+        },
+    )
 }
 
 fn encode_altitude(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError> {
@@ -372,9 +450,6 @@ fn encode_altitude(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError
     put_f32(buf, 128, or_nan(state.altitude.sample_m))?;
     put_f32(buf, 132, or_nan(state.selections.baro_sel_hpa))?;
     put_u32(buf, 136, state.altitude.origin.0)?;
-    for offset in 140..144 {
-        put_u8(buf, offset, 0)?;
-    }
     Ok(())
 }
 

@@ -35,8 +35,8 @@ export const EXPECTED_GLYPH_SHA256 =
 const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
-export const STATE_ABI_VERSION = 3;
-export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 144 });
+export const STATE_ABI_VERSION = 4;
+export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 144, 4: 168 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 10;
 
@@ -411,10 +411,24 @@ export class InstrumentModule {
       f(128, state.altitude?.sampleM ?? NaN);
       f(132, state.selections?.baroSelHpa ?? NaN);
       view.setUint32(136, state.altitude?.originId ?? 0, true);
-      b(140, 0);
-      b(141, 0);
+      // NAV-01 independent heading (abi.rs parity): operational heading
+      // is never derived implicitly from the attitude quaternion. The
+      // fail-safe default is no sample at all — the rose flags HDG
+      // rather than freezing on a fabricated heading.
+      b(140, state.heading?.reference ?? 255);
+      b(141, state.variation?.sourceId ?? 0);
       b(142, 0);
       b(143, 0);
+      f(144, state.heading?.rad ?? NaN);
+      f(148, state.heading ? state.heading.ageMs : NaN);
+      f(152, state.variation?.eastRad ?? NaN);
+      f(156, state.variation ? state.variation.ageMs : NaN);
+      b(
+        160,
+        (state.valid?.heading ?? false ? 1 : 0) |
+          (state.valid?.variation ?? false ? 2 : 0),
+      );
+      for (let off = 161; off < 168; off += 1) b(off, 0);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

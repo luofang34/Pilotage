@@ -1108,6 +1108,35 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       Math.abs(view.getFloat32(132, true) - 1020.5) < 1e-3 &&
       view.getUint32(136, true) === 7,
   );
+
+  // NAV-01: no heading declared means NO sample — reference byte 255,
+  // NaN value/age, no validity bit. A fabricated default heading of
+  // zero would be a plausible frozen rose.
+  const bare = mod.writeState({ selections: { headingBugRad: 0 } });
+  check("headingless state write succeeds", bare.ok === true);
+  check(
+    "undeclared heading writes an absent, fail-closed sample",
+    view.getUint8(140) === 255 &&
+      Number.isNaN(view.getFloat32(144, true)) &&
+      Number.isNaN(view.getFloat32(148, true)) &&
+      view.getUint8(160) === 0,
+  );
+  const headed = mod.writeState({
+    selections: { headingBugRad: 0 },
+    heading: { rad: 1.25, reference: 2, ageMs: 12 },
+    variation: { eastRad: 0.03, sourceId: 3, ageMs: 40 },
+    valid: { heading: true, variation: true },
+  });
+  check("declared heading write succeeds", headed.ok === true);
+  check(
+    "declared heading and variation encode exactly (abi.rs parity)",
+    view.getUint8(140) === 2 &&
+      Math.abs(view.getFloat32(144, true) - 1.25) < 1e-6 &&
+      Math.abs(view.getFloat32(148, true) - 12) < 1e-6 &&
+      view.getUint8(141) === 3 &&
+      Math.abs(view.getFloat32(152, true) - 0.03) < 1e-6 &&
+      view.getUint8(160) === 0b11,
+  );
 }
 
 // ---- glyph text painting (REN-02 consumption) ---------------------------------

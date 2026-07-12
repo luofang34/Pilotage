@@ -57,6 +57,7 @@ fn trusted_full_state() -> AircraftState {
             rates: true,
             position: true,
             velocity: true,
+            ..Default::default()
         },
         ..AircraftState::default()
     }

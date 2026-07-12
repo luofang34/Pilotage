@@ -1,6 +1,7 @@
 //! The raw input state a feeder writes.
 
 use crate::altitude::{AltitudeClass, AltitudeDeclaration};
+use crate::heading::{HeadingSample, MagneticVariation};
 use pilotage_frames::Quat;
 
 /// Attitude estimate: orientation and body rotation rates.
@@ -143,6 +144,10 @@ pub struct ValidFlags {
     pub position: bool,
     /// NED velocity is valid.
     pub velocity: bool,
+    /// The heading sample is declared valid.
+    pub heading: bool,
+    /// The variation sample is declared valid.
+    pub variation: bool,
 }
 
 /// One estimate group with the age a feeder stamped it with.
@@ -210,6 +215,12 @@ pub struct AircraftState {
     pub snapshot: SnapshotMeta,
     /// Datum declaration for the primary altitude (ALT-01).
     pub altitude: AltitudeDeclaration,
+    /// Independent heading sample with an explicit reference (NAV-01).
+    /// Operational heading never derives implicitly from attitude yaw.
+    pub heading: Stamped<HeadingSample>,
+    /// Magnetic-variation sample for the single sanctioned
+    /// magnetic/true conversion path.
+    pub variation: Stamped<MagneticVariation>,
 }
 
 impl Default for Selections {

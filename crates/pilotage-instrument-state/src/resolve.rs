@@ -54,8 +54,8 @@ pub struct PanelData {
     pub roll_rad: Sig<f32>,
     /// Pitch angle, radians, positive nose-up.
     pub pitch_rad: Sig<f32>,
-    /// Heading, radians clockwise from north.
-    pub heading_rad: Sig<f32>,
+    /// Independent, reference-typed heading.
+    pub heading: ResolvedHeading,
     /// Body yaw rate, radians/second (turn-rate proxy).
     pub turn_rate_rps: Sig<f32>,
     /// Indicated airspeed, knots.
@@ -127,7 +127,7 @@ fn coherence_status(coherence: SnapshotCoherence) -> SignalStatus {
 /// A signal that would show a non-finite value fails instead: no
 /// non-finite number may reach scene generation, and no value is
 /// silently repaired.
-fn finite(sig: Sig<f32>) -> Sig<f32> {
+pub(crate) fn finite(sig: Sig<f32>) -> Sig<f32> {
     if sig.status.shows_value() && !sig.value.is_finite() {
         Sig::with_status(0.0, SignalStatus::Failed)
     } else {
@@ -183,7 +183,7 @@ pub fn resolve_stateful(
         coherence: coherence_status(state.snapshot.coherence),
     };
 
-    let (presentation, yaw, turn_rate) = attitude_geometry(state, profile, unusual);
+    let (presentation, turn_rate) = attitude_geometry(state, profile, unusual);
     let has_att = state.attitude.data.is_some();
     let att_fresh = group_freshness(policy, has_att, state.attitude.age_ms);
     let att_status = trust.fold(has_att, att_fresh, integrity.attitude, state.valid.attitude);
@@ -201,19 +201,30 @@ pub fn resolve_stateful(
     };
 
     let (ias, baro) = air_signals(state, policy, trust.quality, &integrity);
+    let heading = heading_resolved(state, policy, &trust, &integrity);
+    let track = presented_true(
+        Sig::with_status(track_rad, track_status),
+        heading.reference,
+        state,
+    );
+    let wind = presented_wind(
+        wind_signal(state, policy, &integrity),
+        heading.reference,
+        state,
+    );
 
     PanelData {
         roll_rad: finite(Sig::with_status(presentation.bank_rad, att_status)),
         pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
-        heading_rad: finite(Sig::with_status(yaw, att_status)),
+        heading,
         turn_rate_rps: finite(Sig::with_status(turn_rate, rate_status)),
         ias_kt: finite(ias),
         gs_kt: finite(Sig::with_status(gs_kt, vel_status)),
         altitude: altitude_resolved(state, policy, &trust, &integrity, pos_status, rel_alt_ft),
         vsi_fpm: finite(Sig::with_status(vsi_fpm, vel_status)),
-        track_rad: finite(Sig::with_status(track_rad, track_status)),
+        track_rad: finite(track),
         baro_hpa: finite(baro),
-        wind: wind_signal(state, policy, &integrity),
+        wind,
         nav: nav_resolved(state, policy, &integrity),
         selections: sanitized_selections(state.selections),
         integrity,
@@ -223,9 +234,9 @@ pub fn resolve_stateful(
 
 /// Source-level trust shared by every estimate group this frame.
 #[derive(Clone, Copy)]
-struct Trust {
-    quality: SignalStatus,
-    coherence: SignalStatus,
+pub(crate) struct Trust {
+    pub(crate) quality: SignalStatus,
+    pub(crate) coherence: SignalStatus,
 }
 
 impl Trust {
@@ -234,7 +245,7 @@ impl Trust {
     /// not a red X — because nothing was received to distrust. A group
     /// *with* data still folds even when its freshness reads Missing
     /// (a bogus age), so declared distrust cannot be masked.
-    fn fold(
+    pub(crate) fn fold(
         &self,
         has_data: bool,
         freshness: SignalStatus,
@@ -252,7 +263,11 @@ impl Trust {
     }
 }
 
-fn group_freshness(policy: &FreshnessPolicy, has_data: bool, age_ms: Option<f32>) -> SignalStatus {
+pub(crate) fn group_freshness(
+    policy: &FreshnessPolicy,
+    has_data: bool,
+    age_ms: Option<f32>,
+) -> SignalStatus {
     if has_data {
         policy.status_for_age(age_ms)
     } else {
@@ -267,22 +282,21 @@ fn attitude_geometry(
     state: &AircraftState,
     profile: &AirframeDisplayProfile,
     unusual: &mut UnusualAttitudeState,
-) -> (AttitudePresentation, f32, f32) {
+) -> (AttitudePresentation, f32) {
     match state.attitude.data {
         Some(att) => match validate_quat(att.quat) {
             Ok(quat) => {
                 let presentation = unusual.step(quat, profile);
-                let (_, _, yaw) = quat.to_euler();
-                (presentation, yaw, att.rates_rps[2])
+                (presentation, att.rates_rps[2])
             }
             Err(_) => {
                 unusual.reset();
-                (AttitudePresentation::default(), 0.0, att.rates_rps[2])
+                (AttitudePresentation::default(), att.rates_rps[2])
             }
         },
         None => {
             unusual.reset();
-            (AttitudePresentation::default(), 0.0, 0.0)
+            (AttitudePresentation::default(), 0.0)
         }
     }
 }
@@ -421,5 +435,11 @@ fn wind_signal(
     }
 }
 
+mod heading_signal;
+pub use heading_signal::ResolvedHeading;
+use heading_signal::{heading_resolved, presented_true, presented_wind};
+
+#[cfg(test)]
+mod heading_tests;
 #[cfg(test)]
 mod tests;
