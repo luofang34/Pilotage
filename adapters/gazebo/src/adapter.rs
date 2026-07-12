@@ -8,9 +8,10 @@
 //! because streaming video does not fit the pull-based `sample_telemetry` shape.
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, Pose2d,
-    RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    AdapterCapabilities, ApplyOutcome, CaptureClockMapping, Disposition, ExecutionMode,
+    LinkLossPolicy, MeasurementClock, Pose2d, RejectReason, ScopeDescriptor, SourceIncarnation,
+    StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter, VehicleDescriptor,
+    VideoCaptureStamp, VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
@@ -19,6 +20,7 @@ use tokio::task::JoinHandle;
 
 use crate::bridge_client::{BridgeClient, BridgeConfig};
 use crate::error::GazeboAdapterError;
+use crate::video::FrameStamper;
 use crate::wire::{BridgeControl, BridgeFrame, BridgeOdometry};
 
 /// The control scope this adapter exposes for the diff-drive vehicle.
@@ -36,13 +38,15 @@ pub const FPV_CAMERA: u8 = 0;
 /// Wire source id of the chase camera.
 pub const CHASE_CAMERA: u8 = 1;
 
-/// A decoded raw camera frame from the sidecar bridge, paired with the
-/// simulation tick it was captured at.
+/// A decoded raw camera frame from the sidecar bridge, carrying the capture
+/// identity and clock mapping needed to trace it back to the aircraft state
+/// (ADR-0020).
 ///
 /// Exposed via [`GazeboAdapter::subscribe_frames`] alongside the
 /// `VehicleAdapter` trait rather than through it: frame delivery is a
 /// streaming, backpressure-sensitive concern that does not fit the pull-based
-/// `sample_telemetry` shape (ADR-0008).
+/// `sample_telemetry` shape (ADR-0008). A frame is only ever built by a
+/// [`FrameStamper`], so its [`capture`](Self::capture) is always fully formed.
 #[derive(Debug, Clone)]
 pub struct RawVideoFrame {
     /// Video source this frame came from: 0 = onboard FPV, 1 = chase. Carried
@@ -55,27 +59,13 @@ pub struct RawVideoFrame {
     pub height: u32,
     /// Sidecar-reported pixel format (e.g. `"RGB_INT8"`).
     pub pixel_format: String,
-    /// Simulation tick this frame was captured at (sidecar sim time, ns).
+    /// Simulation tick this frame was captured at (sidecar sim time, ns). Also
+    /// carried in [`Self::capture`] as the capture stamp's acquisition time.
     pub tick: SimTick,
     /// Raw pixel bytes, row-major, no padding.
     pub rgb: Vec<u8>,
-}
-
-impl From<BridgeFrame> for RawVideoFrame {
-    fn from(frame: BridgeFrame) -> Self {
-        Self {
-            // Bridge `camera_id` is a u32 for wire headroom, but only ids 0
-            // (FPV) / 1 (chase) are assigned; an out-of-range id saturates to
-            // u8::MAX so the reader routes it to no known source rather than
-            // aliasing onto a valid one.
-            source_id: u8::try_from(frame.camera_id).unwrap_or(u8::MAX),
-            width: frame.width,
-            height: frame.height,
-            pixel_format: frame.pixel_format,
-            tick: SimTick::new(frame.sim_time_ns),
-            rgb: frame.rgb,
-        }
-    }
+    /// Capture identity and clock mapping for this frame (ADR-0020).
+    pub capture: VideoCaptureStamp,
 }
 
 /// `VehicleAdapter` implementation that drives a real Gazebo diff-drive
@@ -110,9 +100,10 @@ impl GazeboAdapter {
         let mut bridge = BridgeClient::spawn_and_connect(config).await?;
 
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(depth);
+        let stamper = FrameStamper::new(new_incarnation()?, sim_capture_mapping());
         let frame_forwarder = bridge
             .take_frame_rx()
-            .map(|bridge_rx| tokio::spawn(forward_frames(bridge_rx, raw_tx)));
+            .map(|bridge_rx| tokio::spawn(forward_frames(bridge_rx, raw_tx, stamper)));
 
         Ok(Self {
             vehicle,
@@ -128,9 +119,10 @@ impl GazeboAdapter {
     #[cfg(test)]
     fn from_bridge(vehicle: VehicleId, mut bridge: BridgeClient) -> Self {
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(4);
+        let stamper = FrameStamper::new(SourceIncarnation::new([0; 16]), sim_capture_mapping());
         let frame_forwarder = bridge
             .take_frame_rx()
-            .map(|bridge_rx| tokio::spawn(forward_frames(bridge_rx, raw_tx)));
+            .map(|bridge_rx| tokio::spawn(forward_frames(bridge_rx, raw_tx, stamper)));
         Self {
             vehicle,
             bridge,
@@ -259,14 +251,36 @@ fn telemetry_from_odometry(vehicle: VehicleId, odom: &BridgeOdometry) -> Telemet
     }
 }
 
-/// Forwards `BridgeFrame`s to the adapter's `RawVideoFrame` channel until
-/// either end closes.
+/// Draws an opaque 128-bit attachment incarnation for this adapter's camera
+/// capture identity from the operating-system CSPRNG.
+///
+/// # Errors
+///
+/// Returns [`GazeboAdapterError::IncarnationUnavailable`] if the OS entropy
+/// source is unavailable.
+fn new_incarnation() -> Result<SourceIncarnation, GazeboAdapterError> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes)
+        .map_err(|source| GazeboAdapterError::IncarnationUnavailable { source })?;
+    Ok(SourceIncarnation::new(bytes))
+}
+
+/// The capture-clock mapping for the Gazebo sidecar: the sim clock that stamps
+/// the frames is the same clock that stamps this adapter's telemetry, so the
+/// mapping is the identity with zero residual error (ADR-0020).
+fn sim_capture_mapping() -> CaptureClockMapping {
+    CaptureClockMapping::identity(MeasurementClock::Simulation)
+}
+
+/// Forwards `BridgeFrame`s to the adapter's `RawVideoFrame` channel, stamping
+/// each with capture identity via `stamper`, until either end closes.
 async fn forward_frames(
     mut bridge_rx: mpsc::Receiver<BridgeFrame>,
     raw_tx: mpsc::Sender<RawVideoFrame>,
+    mut stamper: FrameStamper,
 ) {
     while let Some(frame) = bridge_rx.recv().await {
-        if raw_tx.send(RawVideoFrame::from(frame)).await.is_err() {
+        if raw_tx.send(stamper.stamp(frame)).await.is_err() {
             return;
         }
     }

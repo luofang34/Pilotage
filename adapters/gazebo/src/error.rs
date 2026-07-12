@@ -76,4 +76,12 @@ pub enum GazeboAdapterError {
         /// Human-readable description of why the task ended.
         reason: String,
     },
+    /// Drawing an opaque attachment incarnation for the camera capture
+    /// identity from the operating-system CSPRNG failed.
+    #[error("failed to obtain a capture incarnation from the OS CSPRNG: {source}")]
+    IncarnationUnavailable {
+        /// Underlying `getrandom` error.
+        #[source]
+        source: getrandom::Error,
+    },
 }

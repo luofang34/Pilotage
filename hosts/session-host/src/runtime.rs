@@ -143,6 +143,11 @@ async fn spawn_host_runtime(
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
 ) -> Result<tokio::task::JoinHandle<()>, HostError> {
+    // A single monotonic origin feeds every `host_time` stamp across the host
+    // (ADR-0009): the engine actor, each connection task, and — so a video
+    // frame's receive/publication stamps stay comparable with them — the media
+    // task all derive from this `Instant`.
+    let start = tokio::time::Instant::now();
     match adapter {
         AdapterKind::Reference => {
             let (engine, adapter) = build_reference();
@@ -154,12 +159,13 @@ async fn spawn_host_runtime(
                 engine_tx,
                 engine_rx,
                 shutdown_rx,
+                start,
             )))
         }
         AdapterKind::Gazebo => {
             let (engine, adapter, frames) =
                 gazebo_launch::build_gazebo(HOST_VEHICLE, MAX_CONTROL_AGE).await?;
-            let (media, media_task) = media::spawn_media_task(frames);
+            let (media, media_task) = media::spawn_media_task(frames, start);
             Ok(tokio::spawn(run_with_media_until_shutdown(
                 endpoint,
                 engine,
@@ -169,50 +175,65 @@ async fn spawn_host_runtime(
                 engine_tx,
                 engine_rx,
                 shutdown_rx,
+                start,
             )))
         }
         AdapterKind::Aviate => {
-            // PILOTAGE_AVIATE_LINK selects the vehicle link (ADR-0019):
-            // "shm" (co-located SITL), "mavlink" (routed/remote), or the
-            // default "auto" (shm when present, else MAVLink).
-            let mode = match std::env::var("PILOTAGE_AVIATE_LINK").as_deref() {
-                Ok("shm") => pilotage_adapter_aviate::AviateLinkMode::Shm,
-                Ok("mavlink") => pilotage_adapter_aviate::AviateLinkMode::Mavlink,
-                _ => pilotage_adapter_aviate::AviateLinkMode::Auto,
-            };
-            let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
-                HOST_VEHICLE,
-                mode,
-                pilotage_adapter_aviate::LinkConfig::simulator(),
-            )
-            .await
-            .map_err(HostError::AviateAdapter)?;
-            let engine = build_engine(&adapter);
-            match adapter.subscribe_frames() {
-                Some(frames) => {
-                    let (media, media_task) = media::spawn_media_task(frames);
-                    Ok(tokio::spawn(run_with_media_until_shutdown(
-                        endpoint,
-                        engine,
-                        adapter,
-                        media,
-                        media_task,
-                        engine_tx,
-                        engine_rx,
-                        shutdown_rx,
-                    )))
-                }
-                None => Ok(tokio::spawn(run_until_shutdown(
-                    endpoint,
-                    engine,
-                    adapter,
-                    None,
-                    engine_tx,
-                    engine_rx,
-                    shutdown_rx,
-                ))),
-            }
+            spawn_aviate_runtime(endpoint, engine_tx, engine_rx, shutdown_rx, start).await
         }
+    }
+}
+
+/// Builds the Aviate adapter and spawns its runtime, wiring the media task only
+/// when the adapter exposes a video frame source.
+async fn spawn_aviate_runtime(
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    engine_tx: mpsc::Sender<ToEngine>,
+    engine_rx: mpsc::Receiver<ToEngine>,
+    shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
+) -> Result<tokio::task::JoinHandle<()>, HostError> {
+    // PILOTAGE_AVIATE_LINK selects the vehicle link (ADR-0019): "shm"
+    // (co-located SITL), "mavlink" (routed/remote), or the default "auto" (shm
+    // when present, else MAVLink).
+    let mode = match std::env::var("PILOTAGE_AVIATE_LINK").as_deref() {
+        Ok("shm") => pilotage_adapter_aviate::AviateLinkMode::Shm,
+        Ok("mavlink") => pilotage_adapter_aviate::AviateLinkMode::Mavlink,
+        _ => pilotage_adapter_aviate::AviateLinkMode::Auto,
+    };
+    let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
+        HOST_VEHICLE,
+        mode,
+        pilotage_adapter_aviate::LinkConfig::simulator(),
+    )
+    .await
+    .map_err(HostError::AviateAdapter)?;
+    let engine = build_engine(&adapter);
+    match adapter.subscribe_frames() {
+        Some(frames) => {
+            let (media, media_task) = media::spawn_media_task(frames, start);
+            Ok(tokio::spawn(run_with_media_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                media,
+                media_task,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+                start,
+            )))
+        }
+        None => Ok(tokio::spawn(run_until_shutdown(
+            endpoint,
+            engine,
+            adapter,
+            None,
+            engine_tx,
+            engine_rx,
+            shutdown_rx,
+            start,
+        ))),
     }
 }
 
@@ -220,6 +241,7 @@ async fn spawn_host_runtime(
 /// tears down every spawned task (engine actor, accept loop, and every
 /// per-connection task) within the shutdown timeout. `media` is `Some` only
 /// for the Gazebo path, wiring each connection into the video downlink.
+#[allow(clippy::too_many_arguments)]
 async fn run_until_shutdown<A>(
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine: SessionEngine,
@@ -228,15 +250,15 @@ async fn run_until_shutdown<A>(
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
-    // A single monotonic origin feeds every `host_time` comparison across
-    // the host (ADR-0009): client-message receive stamps (via `accept_loop`
-    // and each connection task) and the engine actor's tick/offer-expiry
-    // stamps must derive from the same `Instant`, or the two streams of
-    // timestamps drift apart and skew staleness/expiry comparisons.
-    let start = tokio::time::Instant::now();
+    // `start` is the single monotonic origin every `host_time` stamp across
+    // the host derives from (ADR-0009): client-message receive stamps (via
+    // `accept_loop` and each connection task), the engine actor's
+    // tick/offer-expiry stamps, and the media task's frame stamps. Sharing one
+    // origin keeps those timestamp streams comparable rather than drifting.
 
     let mut tasks = JoinSet::new();
     tasks.spawn(named_task(
@@ -278,6 +300,7 @@ async fn run_with_media_until_shutdown<A>(
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
 ) where
     A: VehicleAdapter + Send + 'static,
 {
@@ -289,6 +312,7 @@ async fn run_with_media_until_shutdown<A>(
         engine_tx,
         engine_rx,
         shutdown_rx,
+        start,
     )
     .await;
     // The engine actor (owner of the adapter and its frame sender) has now

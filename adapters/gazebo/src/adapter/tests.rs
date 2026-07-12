@@ -218,6 +218,17 @@ async fn camera_frame_reaches_the_subscriber() {
     assert_eq!(frame.height, 2);
     assert_eq!(frame.tick.as_u64(), 77);
     assert_eq!(frame.rgb.len(), 24);
+    // The adapter stamps a capture identity: the sidecar sim time becomes the
+    // capture acquisition time, and the sim clock maps to itself (ADR-0020).
+    assert_eq!(frame.capture.stamp.acquired_at_ns, 77);
+    assert_eq!(
+        frame.capture.stamp.sequence, 0,
+        "first FPV frame is sequence 0"
+    );
+    assert!(
+        frame.capture.mapping.is_available(),
+        "sim capture clock maps to sim telemetry clock"
+    );
 }
 
 #[tokio::test]

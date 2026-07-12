@@ -10,6 +10,7 @@ mod control;
 mod step;
 mod telemetry;
 mod vehicle_adapter;
+mod video;
 
 pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, VehicleDescriptor};
 pub use control::{ApplyOutcome, Disposition, LinkLossPolicy, RejectReason};
@@ -19,3 +20,4 @@ pub use telemetry::{
     MeasurementStamp, Pose2d, SourceIncarnation, TelemetryBatch, TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
+pub use video::{CalibrationId, CameraId, CaptureClockMapping, VideoCaptureStamp};

@@ -14,15 +14,17 @@
 use std::sync::Arc;
 
 use jpeg_encoder::{ColorType, Encoder};
+use pilotage_adapter_api::VideoCaptureStamp;
 use pilotage_adapter_gazebo::RawVideoFrame;
 use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tracing::{debug, error, warn};
 use wtransport::Connection;
 
-use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME, frame_video_payload};
+use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
 
 /// JPEG quality (1-100) for encoded camera frames. 75 balances size against
 /// visible quality for a teleop preview (ADR-0005: owned, tunable pipeline).
@@ -81,9 +83,10 @@ const COMMAND_QUEUE_CAPACITY: usize = 256;
 /// exits after its per-client writers finish.
 pub fn spawn_media_task(
     frames: mpsc::Receiver<RawVideoFrame>,
+    start: Instant,
 ) -> (MediaHandle, tokio::task::JoinHandle<()>) {
     let (commands_tx, commands_rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
-    let handle = tokio::spawn(media_loop(frames, commands_rx));
+    let handle = tokio::spawn(media_loop(frames, commands_rx, start));
     (
         MediaHandle {
             commands: commands_tx,
@@ -92,12 +95,30 @@ pub fn spawn_media_task(
     )
 }
 
-/// Per-(client, source) outbound handoff of the latest encoded JPEG. Capacity
+/// Host monotonic nanoseconds since `start`, saturating rather than
+/// overflowing, in the same `host_time` domain the engine and connection tasks
+/// stamp with (ADR-0009). Used for the receive/publication stamps that a
+/// consumer must never confuse with a frame's capture time.
+fn now_ns(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
+
+/// One encoded frame handed to a client's writer: the shared JPEG, the capture
+/// identity to serialize alongside it, and the host receive time stamped when
+/// the media task dequeued the raw frame (kept distinct from the capture time).
+#[derive(Clone)]
+struct EncodedFrame {
+    jpeg: Arc<Vec<u8>>,
+    capture: VideoCaptureStamp,
+    received_at_ns: u64,
+}
+
+/// Per-(client, source) outbound handoff of the latest encoded frame. Capacity
 /// 1 bounds in-flight frames to one per source per client: `try_send` on a
 /// full channel means that source's writer is still busy with its previous
 /// frame, so the new frame is dropped-to-latest and counted (ADR-0011
 /// best-effort media).
-type FrameTx = mpsc::Sender<Arc<Vec<u8>>>;
+type FrameTx = mpsc::Sender<EncodedFrame>;
 
 /// The media task's own view of one video source of a connected client: the
 /// handoff channel to that source's writer task, plus the running drop count
@@ -121,6 +142,7 @@ struct ClientEntry {
 async fn media_loop(
     mut frames: mpsc::Receiver<RawVideoFrame>,
     mut commands: mpsc::Receiver<MediaCommand>,
+    start: Instant,
 ) {
     let mut clients: std::collections::BTreeMap<ClientKey, ClientEntry> =
         std::collections::BTreeMap::new();
@@ -147,7 +169,10 @@ async fn media_loop(
             }
             frame = frames.recv() => {
                 match frame {
-                    Some(frame) => fan_out_frame(frame, &mut clients, &mut writers),
+                    // Stamp host receipt the moment the frame leaves the adapter
+                    // channel, before the encode cost, so the receive time
+                    // reflects arrival rather than processing.
+                    Some(frame) => fan_out_frame(frame, now_ns(start), &mut clients, &mut writers, start),
                     None => break,
                 }
             }
@@ -191,33 +216,41 @@ fn apply_command(
 /// consumer), and evicting any client whose connection has gone away.
 fn fan_out_frame(
     frame: RawVideoFrame,
+    received_at_ns: u64,
     clients: &mut std::collections::BTreeMap<ClientKey, ClientEntry>,
     writers: &mut JoinSet<()>,
+    start: Instant,
 ) {
     if clients.is_empty() {
         return;
     }
     let source_id = frame.source_id;
+    let capture = frame.capture;
     let Some(jpeg) = encode_jpeg(&frame) else {
         return;
     };
-    let jpeg = Arc::new(jpeg);
+    let encoded = EncodedFrame {
+        jpeg: Arc::new(jpeg),
+        capture,
+        received_at_ns,
+    };
     let mut closed = Vec::new();
     for (client, entry) in clients.iter_mut() {
         let sink = entry.sources.entry(source_id).or_insert_with(|| {
-            let (frame_tx, frame_rx) = mpsc::channel::<Arc<Vec<u8>>>(1);
+            let (frame_tx, frame_rx) = mpsc::channel::<EncodedFrame>(1);
             writers.spawn(client_writer(
                 *client,
                 source_id,
                 entry.connection.clone(),
                 frame_rx,
+                start,
             ));
             ClientSink {
                 frames: frame_tx,
                 dropped: 0,
             }
         });
-        match sink.frames.try_send(Arc::clone(&jpeg)) {
+        match sink.frames.try_send(encoded.clone()) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 sink.dropped = sink.dropped.wrapping_add(1);
@@ -267,18 +300,25 @@ fn encode_jpeg(frame: &RawVideoFrame) -> Option<Vec<u8>> {
     Some(jpeg)
 }
 
-/// Per-(client, source) writer: receives the latest encoded JPEG and writes it
-/// as one host-initiated uni stream tagged [`VIDEO_FRAME`], one stream per
-/// frame (ADR-0005), stamped with `source_id`. Exits when the handoff channel
-/// closes (client deregistered or media task shutting down).
+/// Per-(client, source) writer: receives the latest encoded frame and writes
+/// it as one host-initiated uni stream tagged [`VIDEO_FRAME_V2`], one stream
+/// per frame (ADR-0005, ADR-0020), leading with the frame's capture identity.
+/// Exits when the handoff channel closes (client deregistered or media task
+/// shutting down).
 async fn client_writer(
     client: ClientKey,
     source_id: u8,
     connection: Connection,
-    mut frames: mpsc::Receiver<Arc<Vec<u8>>>,
+    mut frames: mpsc::Receiver<EncodedFrame>,
+    start: Instant,
 ) {
-    while let Some(jpeg) = frames.recv().await {
-        if let Err(reason) = write_one_frame(&connection, source_id, &jpeg).await {
+    while let Some(frame) = frames.recv().await {
+        // Stamp publication at the moment of write, distinct from the receive
+        // stamp taken at dequeue, so a consumer can separate host queueing
+        // latency from the capture-to-receipt gap.
+        let published_at_ns = now_ns(start);
+        if let Err(reason) = write_one_frame(&connection, source_id, &frame, published_at_ns).await
+        {
             // A failed uni-stream open/write means the connection is going
             // away; stop writing video to it. The connection task's own
             // teardown deregisters this client.
@@ -291,15 +331,24 @@ async fn client_writer(
     }
 }
 
-/// Opens one host-initiated uni stream, writes the [`VIDEO_FRAME`] tag then
-/// the source-tagged, codec-tagged, length-prefixed JPEG, and finishes the
-/// stream (ADR-0005 media unit; ADR-0016 FourCC codec tag).
+/// Opens one host-initiated uni stream, writes the [`VIDEO_FRAME_V2`] tag then
+/// the capture-identity header and codec-tagged, length-prefixed JPEG, and
+/// finishes the stream (ADR-0005 media unit; ADR-0016 FourCC codec tag;
+/// ADR-0020 capture identity).
 async fn write_one_frame(
     connection: &Connection,
     source_id: u8,
-    jpeg: &[u8],
+    frame: &EncodedFrame,
+    published_at_ns: u64,
 ) -> Result<(), &'static str> {
-    let Some(body) = frame_video_payload(source_id, FOURCC_MJPEG, jpeg) else {
+    let Some(body) = frame_video_payload_v2(
+        source_id,
+        &frame.capture,
+        frame.received_at_ns,
+        published_at_ns,
+        FOURCC_MJPEG,
+        &frame.jpeg,
+    ) else {
         // A frame larger than u32::MAX cannot be length-prefixed; skip it
         // without failing the writer (no real camera frame reaches this).
         error!("video frame exceeds u32 length prefix; skipping");
@@ -312,7 +361,7 @@ async fn write_one_frame(
         .await
         .map_err(|_| "uni stream failed to open")?;
     stream
-        .write_all(&[VIDEO_FRAME])
+        .write_all(&[VIDEO_FRAME_V2])
         .await
         .map_err(|_| "tag write failed")?;
     stream
@@ -327,11 +376,29 @@ async fn write_one_frame(
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::encode_jpeg;
-    use crate::runtime::stream_tag::{
-        FOURCC_MJPEG, VIDEO_FRAME, frame_video_payload, parse_video_payload,
+    use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
+    use pilotage_adapter_api::{
+        CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
+        SourceIncarnation, VideoCaptureStamp,
     };
     use pilotage_adapter_gazebo::RawVideoFrame;
     use pilotage_timing::SimTick;
+
+    fn capture_stamp() -> VideoCaptureStamp {
+        VideoCaptureStamp {
+            stamp: MeasurementStamp {
+                source_id: 1,
+                source_incarnation: SourceIncarnation::new([5; 16]),
+                source_epoch: 0,
+                sequence: 3,
+                acquired_at_ns: 999,
+                clock: MeasurementClock::Simulation,
+            },
+            camera_id: CameraId(1),
+            calibration_id: CalibrationId::NONE,
+            mapping: CaptureClockMapping::identity(MeasurementClock::Simulation),
+        }
+    }
 
     /// Builds a synthetic RGB frame with a simple gradient so the encoder has
     /// real (non-constant) pixel data to work with.
@@ -351,11 +418,12 @@ mod tests {
             pixel_format: "RGB_INT8".to_owned(),
             tick: SimTick::new(0),
             rgb,
+            capture: capture_stamp(),
         }
     }
 
     #[test]
-    fn encodes_frames_and_wire_frames_round_trip() {
+    fn encodes_frame_and_v2_body_carries_the_jpeg() {
         let frame = synthetic_rgb(16, 12);
         let jpeg = encode_jpeg(&frame).expect("synthetic RGB frame encodes to JPEG");
         // A JPEG stream begins with the SOI marker 0xFFD8 and ends with EOI
@@ -363,26 +431,21 @@ mod tests {
         assert_eq!(&jpeg[..2], &[0xFF, 0xD8], "JPEG starts with SOI");
         assert_eq!(&jpeg[jpeg.len() - 2..], &[0xFF, 0xD9], "JPEG ends with EOI");
 
-        // Frame the JPEG exactly as the media task writes it after the tag,
-        // then parse the source-tagged, codec-tagged length-prefixed body back
-        // (ADR-0016).
-        let body = frame_video_payload(1, FOURCC_MJPEG, &jpeg).expect("JPEG frames");
-        let (source_id, codec, parsed) =
-            parse_video_payload(&body).expect("framed body parses back");
-        assert_eq!(source_id, 1, "carries the chase source id");
-        assert_eq!(codec, FOURCC_MJPEG, "carries the MJPG FourCC");
-        assert_eq!(parsed, jpeg.as_slice(), "round-trips the exact JPEG bytes");
+        // Frame the JPEG exactly as the media task writes it after the tag: a
+        // v2 capture-identity body (ADR-0020). The full on-wire unit leads with
+        // the v2 kind tag, then the header, codec, length prefix, and payload.
+        let body = frame_video_payload_v2(1, &frame.capture, 10, 20, FOURCC_MJPEG, &jpeg)
+            .expect("JPEG frames into a v2 body");
+        assert_eq!(body[0], 1, "leads with the chase source id");
+        assert_eq!(
+            &body[body.len() - jpeg.len()..],
+            jpeg.as_slice(),
+            "JPEG trails intact"
+        );
 
-        // The full on-wire unit is [tag][source_id][fourcc][u32 len][jpeg];
-        // assemble and dissect it the way a client reader would.
-        let mut wire = vec![VIDEO_FRAME];
+        let mut wire = vec![VIDEO_FRAME_V2];
         wire.extend_from_slice(&body);
-        assert_eq!(wire[0], VIDEO_FRAME, "leads with the video kind tag");
-        let (source_id, codec, parsed) =
-            parse_video_payload(&wire[1..]).expect("payload after tag parses");
-        assert_eq!(source_id, 1);
-        assert_eq!(codec, FOURCC_MJPEG);
-        assert_eq!(parsed, jpeg.as_slice());
+        assert_eq!(wire[0], VIDEO_FRAME_V2, "leads with the v2 video kind tag");
     }
 
     #[test]

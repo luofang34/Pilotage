@@ -8,6 +8,7 @@ mod adapter;
 mod bridge_client;
 mod error;
 mod framing;
+mod video;
 pub mod wire;
 
 pub use adapter::{
@@ -16,3 +17,4 @@ pub use adapter::{
 };
 pub use bridge_client::{BRIDGE_BIN_ENV, BridgeClient, BridgeConfig, LatestBridgeState};
 pub use error::GazeboAdapterError;
+pub use video::FrameStamper;
