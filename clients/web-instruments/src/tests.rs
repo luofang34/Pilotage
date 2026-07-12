@@ -396,3 +396,24 @@ fn malformed_scene_framing_gates_visible_commit() {
     });
     assert_scene_rejected(0, &outside_layer, RenderStatus::SceneLayerContract);
 }
+
+#[test]
+fn glyph_exports_surface_the_verified_pack() {
+    use pilotage_instrument_glyphs::PANEL_GLYPHS;
+
+    use crate::exports::InstrumentRuntime;
+
+    assert!(PANEL_GLYPHS.verify().is_ok(), "shipped pack verifies");
+    let runtime = InstrumentRuntime::new();
+    let canonical = runtime.glyph_manifest();
+    assert_eq!(canonical.len(), PANEL_GLYPHS.canonical_len());
+    let mut expected = vec![0u8; PANEL_GLYPHS.canonical_len()];
+    let len = PANEL_GLYPHS
+        .write_canonical(&mut expected)
+        .expect("canonical fits");
+    assert_eq!(canonical, expected[..len]);
+    assert_eq!(
+        runtime.glyph_recorded_hash(),
+        PANEL_GLYPHS.recorded_hash().to_vec()
+    );
+}

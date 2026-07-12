@@ -37,6 +37,7 @@ export const REASON = Object.freeze({
   PAINT_FAILED: 105,
   LIVENESS: 106,
   STATE_WRITE_FAILED: 107,
+  GLYPH_ASSET: 108,
 });
 
 // A typed module-level fault raised by loadInstruments so callers can show
