@@ -26,7 +26,7 @@ const HSI_SHA256: &str = "6edcbc92d936a690a68f0632d2ec20b158d54e59cc9fde6640feef
 /// (defaults must not be relied on), and the quaternion's squared
 /// component sum is exactly 1.0 in f32, so a validating resolver's
 /// renormalization divides by exactly 1.0 and changes nothing.
-fn demo_state() -> AircraftState {
+pub(super) fn demo_state() -> AircraftState {
     AircraftState {
         attitude: Stamped {
             data: Some(Attitude {
@@ -87,7 +87,7 @@ fn demo_state() -> AircraftState {
     }
 }
 
-fn encode(build: impl FnOnce(&mut SceneWriter<'_>)) -> Vec<u8> {
+pub(super) fn encode(build: impl FnOnce(&mut SceneWriter<'_>)) -> Vec<u8> {
     let mut buf = std::vec![0u8; MAX_SCENE_BYTES];
     let mut w = SceneWriter::new(&mut buf).expect("writer");
     build(&mut w);

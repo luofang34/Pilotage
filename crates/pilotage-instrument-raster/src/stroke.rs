@@ -38,6 +38,7 @@ pub(crate) fn stroke_path(
     for py in region.top..region.bottom {
         let cy = py as f32 + 0.5;
         for px in region.left..region.right {
+            surface.count_sample();
             let cx = px as f32 + 0.5;
             if covered(verts, seg_count, cx, cy, hw) {
                 surface.composite(px, py, color);

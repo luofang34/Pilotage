@@ -82,6 +82,7 @@ fn paint(
     for py in region.top..region.bottom {
         let dy = (py as f32 + 0.5) - disc.cy;
         for px in region.left..region.right {
+            surface.count_sample();
             let dx = (px as f32 + 0.5) - disc.cx;
             let dist = libm::sqrtf(dx * dx + dy * dy);
             if covered(dist, dx, dy) {

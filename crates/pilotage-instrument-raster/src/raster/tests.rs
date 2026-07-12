@@ -8,6 +8,7 @@ use crate::{FrameId, FramebufferDims, RasterError, RenderReport, RenderStatus, r
 
 mod conformance;
 mod frame_hashes;
+mod work_budget;
 
 const BLACK: Rgba8 = Rgba8::rgb(0, 0, 0);
 const WHITE: Rgba8 = Rgba8::rgb(255, 255, 255);

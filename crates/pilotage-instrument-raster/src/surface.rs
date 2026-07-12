@@ -46,6 +46,12 @@ pub(crate) struct Surface<'a> {
     width: i32,
     height: i32,
     stride: usize,
+    /// Coverage evaluations performed (one per pixel-center test in a
+    /// primitive's bounded region loop). A pure function of scene and
+    /// dimensions, so it doubles as the target-independent work metric.
+    coverage_samples: u64,
+    /// Source-over composites actually applied.
+    composites: u64,
 }
 
 impl<'a> Surface<'a> {
@@ -82,6 +88,8 @@ impl<'a> Surface<'a> {
             width: dims.width as i32,
             height: dims.height as i32,
             stride,
+            coverage_samples: 0,
+            composites: 0,
         })
     }
 
@@ -114,8 +122,22 @@ impl<'a> Surface<'a> {
         }
     }
 
+    /// Counts one pixel-center coverage evaluation.
+    pub(crate) fn count_sample(&mut self) {
+        self.coverage_samples = self.coverage_samples.wrapping_add(1);
+    }
+
+    /// The work performed so far: coverage evaluations and composites.
+    pub(crate) fn work(&self) -> crate::report::RenderWork {
+        crate::report::RenderWork {
+            coverage_samples: self.coverage_samples,
+            composites: self.composites,
+        }
+    }
+
     /// Composites one straight-alpha sRGB pixel with source-over.
     pub(crate) fn composite(&mut self, x: i32, y: i32, color: [u8; 4]) {
+        self.composites = self.composites.wrapping_add(1);
         let sa = color[3] as u32;
         if sa == 0 {
             return;
