@@ -42,6 +42,7 @@ pub fn render(
             frame,
             unknown_opcodes,
             layers_present,
+            work: surface.work(),
         }),
         Err(error) => {
             surface.spoil();

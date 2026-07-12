@@ -83,7 +83,7 @@ mod transform;
 
 pub use error::RasterError;
 pub use raster::render;
-pub use report::{FrameId, FramebufferDims, RenderReport, RenderStatus};
+pub use report::{FrameId, FramebufferDims, RenderReport, RenderStatus, RenderWork};
 
 /// Largest framebuffer dimension accepted per axis, in pixels.
 pub const MAX_DIMENSION: u32 = 4096;

@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 1,
-  "corpusVersion": 1,
+  "schemaVersion": 2,
+  "corpusVersion": 2,
   "generatedBy": "pilotage-instrument-raster REN-04 conformance reference",
   "simOnly": "Canvas/browser backend is SIM / NOT FOR FLIGHT",
   "canonicalization": "trace args are Q8.8 floor(v*256); non-finite as nan/inf/-inf",
   "review": {
-    "reason": "Initial REN-04 backend-conformance corpus.",
+    "reason": "Add interpreterRejects: the browser interpreter now enforces raw-argument guards (finite floats, |coordinate| <= coordLimitPx, path vertex budget) and the golden pins where it must throw; new paint-fault cases cover the rotate/translate/arc/stroke-width guard paths.",
     "approvedBy": "REN-04 owner; regenerated goldens require human review and are never rewritten by CI."
   },
   "budgets": {
@@ -16,9 +16,10 @@
     "maxTextBytes": 250,
     "maxDimension": 4096,
     "maxPolygonVertices": 512,
+    "coordLimitPx": 32767,
     "worstCaseFrameBytes": 67108864
   },
-  "corpusSha256": "b96d3bd30cfe27ac40e1bbea5a3750da8b7d5c1f6105fa4590f5af86a5143621",
+  "corpusSha256": "52d0c09cec4c8b73aea1bda4d9adbb6597a86fe184881e75d777520af4b576f3",
   "entries": [
     {
       "name": "empty-background-canonical",
@@ -30,6 +31,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 1, "layerCommands": [2, 0, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:0", "01", "02", "51:0"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "restore"],
       "framingBoundaries": null
     },
@@ -43,6 +45,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 17, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "23:F,512,512,5120,5120", "11:200,0,0,255,512", "20:0,0,7680,7680", "21:1280,10240,3840,15360,6400,10240", "22:FS:10240,10240,15360,10240,12800,15360", "24:F,17920,7680,2560", "24:S,17920,17920,2560", "25:7680,20480,3072,0,768", "01", "03:20480,20480", "04:128", "40:0,0,3840,3840", "23:F,0,0,7680,7680", "02", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "fillRect:512,512,5120,5120", "beginPath", "moveTo:0,0", "lineTo:7680,7680", "stroke", "beginPath", "moveTo:1280,10240", "lineTo:3840,15360", "lineTo:6400,10240", "stroke", "beginPath", "moveTo:10240,10240", "lineTo:15360,10240", "lineTo:12800,15360", "closePath", "fill", "stroke", "beginPath", "arc:17920,7680,2560,0,1608", "fill", "beginPath", "arc:17920,17920,2560,0,1608", "stroke", "beginPath", "arc:7680,20480,3072,0,768,0", "stroke", "save", "translate:20480,20480", "rotate:128", "beginPath", "rect:0,0,3840,3840", "clip", "fillRect:0,0,7680,7680", "restore", "restore"],
       "framingBoundaries": null
     },
@@ -56,6 +59,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 22, "layerCommands": [0, 4, 4, 0, 4, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "11:255,255,255,255,512", "20:0,46080,122880,46080", "02", "51:1", "50:2", "01", "10:255,255,255,255", "23:S,5120,30720,10240,30720", "02", "51:2", "50:4", "01", "10:255,176,0,255", "23:F,53760,5120,15360,5120", "02", "51:4"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "beginPath", "moveTo:0,46080", "lineTo:122880,46080", "stroke", "restore", "save", "strokeRect:5120,30720,10240,30720", "restore", "save", "fillRect:53760,5120,15360,5120", "restore"],
       "framingBoundaries": null
     },
@@ -69,6 +73,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 7, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "01", "03:30720,23040", "04:128", "20:-10240,0,10240,0", "02", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "save", "translate:30720,23040", "rotate:128", "beginPath", "moveTo:-10240,0", "lineTo:10240,0", "stroke", "restore", "restore"],
       "framingBoundaries": null
     },
@@ -82,6 +87,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 5, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "40:0,0,7680,7680", "10:255,255,255,255", "23:F,0,0,15360,15360", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "beginPath", "rect:0,0,7680,7680", "clip", "fillRect:0,0,15360,15360", "restore"],
       "framingBoundaries": null
     },
@@ -95,6 +101,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 7, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "01", "03:61440,46080", "04:716", "20:-153600,0,153600,0", "02", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "save", "translate:61440,46080", "rotate:716", "beginPath", "moveTo:-153600,0", "lineTo:153600,0", "stroke", "restore", "restore"],
       "framingBoundaries": null
     },
@@ -108,6 +115,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "23:F,7680000,0,2560,2560", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "fillRect:7680000,0,2560,2560", "restore"],
       "framingBoundaries": null
     },
@@ -121,6 +129,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 1, "layerCommands": [6, 0, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:0", "01", "10:20,40,60,255", "23:F,0,0,122880,46080", "10:60,40,20,255", "22:F:0,46080,122880,46080,122880,92160,0,92160", "02", "51:0"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "fillRect:0,0,122880,46080", "beginPath", "moveTo:0,46080", "lineTo:122880,46080", "lineTo:122880,92160", "lineTo:0,92160", "closePath", "fill", "restore"],
       "framingBoundaries": null
     },
@@ -134,6 +143,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 8, "layerCommands": [0, 0, 0, 5, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:3", "01", "11:255,255,255,255,512", "20:61440,15360,61440,76800", "20:51200,46080,71680,46080", "02", "51:3"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "beginPath", "moveTo:61440,15360", "lineTo:61440,76800", "stroke", "beginPath", "moveTo:51200,46080", "lineTo:71680,46080", "stroke", "restore"],
       "framingBoundaries": null
     },
@@ -147,6 +157,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 32, "layerCommands": [0, 0, 0, 0, 0, 4] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:5", "01", "10:200,0,0,255", "23:F,0,0,122880,92160", "02", "51:5"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "fillRect:0,0,122880,92160", "restore"],
       "framingBoundaries": null
     },
@@ -160,6 +171,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 1, "layersPresent": 2, "layerCommands": [0, 3, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "unknown:127", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": ["save", "restore"],
       "framingBoundaries": null
     },
@@ -173,6 +185,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "30:3584,0,10240,10240,31", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -186,45 +199,105 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": false, "error": "Glyph" },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "30:3584,0,10240,10240,23", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
     {
       "name": "paint-non-finite",
       "category": "paint-fault",
-      "notes": "Gate accepts; the software rasterizer spoils on a non-finite coordinate while Canvas2D would paint it (SIM/NOT FOR FLIGHT).",
+      "notes": "Gate accepts; the software rasterizer spoils on a non-finite coordinate and the browser interpreter's raw-argument guard throws before Canvas2D sees it.",
       "bytesHex": "0150010001010000100400ffffffff231100010000c07f00000000000020410000204102000051010001",
       "framingValid": true,
       "decode": { "ok": true, "error": null },
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": false, "error": "NonFinite" },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "23:F,nan,0,2560,2560", "02", "51:1"],
-      "canvasMethods": ["save", "fillRect:nan,0,2560,2560", "restore"],
+      "interpreterRejects": "coordinate",
+      "canvasMethods": null,
       "framingBoundaries": null
     },
     {
       "name": "paint-out-of-range",
       "category": "paint-fault",
-      "notes": "Gate accepts; the software rasterizer spoils on an out-of-range device coordinate while Canvas2D would paint it.",
+      "notes": "Gate accepts; the software rasterizer spoils on an out-of-range device coordinate and the interpreter's raw-argument guard rejects the same value.",
       "bytesHex": "0150010001010000100400ffffffff2311000100401c4700000000000020410000204102000051010001",
       "framingValid": true,
       "decode": { "ok": true, "error": null },
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": false, "error": "CoordinateOutOfRange" },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "23:F,10240000,0,2560,2560", "02", "51:1"],
-      "canvasMethods": ["save", "fillRect:10240000,0,2560,2560", "restore"],
+      "interpreterRejects": "coordinate",
+      "canvasMethods": null,
       "framingBoundaries": null
     },
     {
       "name": "paint-too-many-vertices",
       "category": "paint-fault",
-      "notes": "Gate accepts; the software rasterizer enforces its per-shape vertex budget while Canvas2D has none.",
+      "notes": "Gate accepts; both backends enforce the shared per-shape vertex budget — the rasterizer via its fixed buffer, the interpreter via its path guard.",
       "bytesHex": "0150010001010000110800ffffffff0000803f21081000000000000000000000803f0000803f0000004000000040000040400000404000008040000080400000a0400000a0400000c0400000c0400000e04000000000000000410000803f000010410000004000002041000040400000304100008040000040410000a040000050410000c0400000604100000000000070410000803f000080410000004000008841000040400000904100008040000098410000a0400000a0410000c0400000a841000000000000b0410000803f0000b841000000400000c041000040400000c841000080400000d0410000a0400000d8410000c0400000e041000000000000e8410000803f0000f041000000400000f841000040400000004200008040000004420000a040000008420000c04000000c4200000000000010420000803f0000144200000040000018420000404000001c4200008040000020420000a040000024420000c040000028420000000000002c420000803f00003042000000400000344200004040000038420000804000003c420000a040000040420000c0400000444200000000000048420000803f00004c420000004000005042000040400000544200008040000058420000a04000005c420000c0400000604200000000000064420000803f000068420000004000006c42000040400000704200008040000074420000a040000078420000c04000007c4200000000000080420000803f000082420000004000008442000040400000864200008040000088420000a04000008a420000c04000008c420000000000008e420000803f000090420000004000009242000040400000944200008040000096420000a040000098420000c04000009a420000000000009c420000803f00009e42000000400000a042000040400000a242000080400000a4420000a0400000a6420000c0400000a842000000000000aa420000803f0000ac42000000400000ae42000040400000b042000080400000b2420000a0400000b4420000c0400000b642000000000000b8420000803f0000ba42000000400000bc42000040400000be42000080400000c0420000a0400000c2420000c0400000c442000000000000c6420000803f0000c842000000400000ca42000040400000cc42000080400000ce420000a0400000d0420000c0400000d242000000000000d4420000803f0000d642000000400000d842000040400000da42000080400000dc420000a0400000de420000c0400000e042000000000000e2420000803f0000e442000000400000e642000040400000e842000080400000ea420000a0400000ec420000c0400000ee42000000000000f0420000803f0000f242000000400000f442000040400000f642000080400000f8420000a0400000fa420000c0400000fc42000000000000fe420000803f000000430000004000000143000040400000024300008040000003430000a040000004430000c0400000054300000000000006430000803f00000743000000400000084300004040000009430000804000000a430000a04000000b430000c04000000c430000000000000d430000803f00000e430000004000000f43000040400000104300008040000011430000a040000012430000c0400000134300000000000014430000803f000015430000004000001643000040400000174300008040000018430000a040000019430000c04000001a430000000000001b430000803f00001c430000004000001d430000404000001e430000804000001f430000a040000020430000c0400000214300000000000022430000803f000023430000004000002443000040400000254300008040000026430000a040000027430000c0400000284300000000000029430000803f00002a430000004000002b430000404000002c430000804000002d430000a04000002e430000c04000002f4300000000000030430000803f000031430000004000003243000040400000334300008040000034430000a040000035430000c0400000364300000000000037430000803f0000384300000040000039430000404000003a430000804000003b430000a04000003c430000c04000003d430000000000003e430000803f00003f430000004000004043000040400000414300008040000042430000a040000043430000c0400000444300000000000045430000803f000046430000004000004743000040400000484300008040000049430000a04000004a430000c04000004b430000000000004c430000803f00004d430000004000004e430000404000004f4300008040000050430000a040000051430000c0400000524300000000000053430000803f000054430000004000005543000040400000564300008040000057430000a040000058430000c040000059430000000000005a430000803f00005b430000004000005c430000404000005d430000804000005e430000a04000005f430000c0400000604300000000000061430000803f000062430000004000006343000040400000644300008040000065430000a040000066430000c0400000674300000000000068430000803f000069430000004000006a430000404000006b430000804000006c430000a04000006d430000c04000006e430000000000006f430000803f000070430000004000007143000040400000724300008040000073430000a040000074430000c0400000754300000000000076430000803f00007743000000400000784300004040000079430000804000007a430000a04000007b430000c04000007c430000000000007d430000803f00007e430000004000007f43000040400000804300008040008080430000a040000081430000c0400080814300000000000082430000803f008082430000004000008343000040400080834300008040000084430000a040008084430000c0400000854300000000008085430000803f000086430000004000808643000040400000874300008040008087430000a040000088430000c0400080884300000000000089430000803f008089430000004000008a430000404000808a430000804000008b430000a04000808b430000c04000008c430000000000808c430000803f00008d430000004000808d430000404000008e430000804000808e430000a04000008f430000c04000808f4300000000000090430000803f008090430000004000009143000040400080914300008040000092430000a040008092430000c0400000934300000000008093430000803f000094430000004000809443000040400000954300008040008095430000a040000096430000c0400080964300000000000097430000803f008097430000004000009843000040400080984300008040000099430000a040008099430000c04000009a430000000000809a430000803f00009b430000004000809b430000404000009c430000804000809c430000a04000009d430000c04000809d430000000000009e430000803f00809e430000004000009f430000404000809f43000080400000a0430000a0400080a0430000c0400000a143000000000080a1430000803f0000a243000000400080a243000040400000a343000080400080a3430000a0400000a4430000c0400080a443000000000000a5430000803f0080a543000000400000a643000040400080a643000080400000a7430000a0400080a7430000c0400000a843000000000080a8430000803f0000a943000000400080a943000040400000aa43000080400080aa430000a0400000ab430000c0400080ab43000000000000ac430000803f0080ac43000000400000ad43000040400080ad43000080400000ae430000a0400080ae430000c0400000af43000000000080af430000803f0000b043000000400080b043000040400000b143000080400080b1430000a0400000b2430000c0400080b243000000000000b3430000803f0080b343000000400000b443000040400080b443000080400000b5430000a0400080b5430000c0400000b643000000000080b6430000803f0000b743000000400080b743000040400000b843000080400080b8430000a0400000b9430000c0400080b943000000000000ba430000803f0080ba43000000400000bb43000040400080bb43000080400000bc430000a0400080bc430000c0400000bd43000000000080bd430000803f0000be43000000400080be43000040400000bf43000080400080bf430000a0400000c0430000c0400080c043000000000000c1430000803f0080c143000000400000c243000040400080c243000080400000c3430000a0400080c3430000c0400000c443000000000080c4430000803f0000c543000000400080c543000040400000c643000080400080c6430000a0400000c7430000c0400080c743000000000000c8430000803f0080c843000000400000c943000040400080c943000080400000ca430000a0400080ca430000c0400000cb43000000000080cb430000803f0000cc43000000400080cc43000040400000cd43000080400080cd430000a0400000ce430000c0400080ce43000000000000cf430000803f0080cf43000000400000d043000040400080d043000080400000d1430000a0400080d1430000c0400000d243000000000080d2430000803f0000d343000000400080d343000040400000d443000080400080d4430000a0400000d5430000c0400080d543000000000000d6430000803f0080d643000000400000d743000040400080d743000080400000d8430000a0400080d8430000c0400000d943000000000080d9430000803f0000da43000000400080da43000040400000db43000080400080db430000a0400000dc430000c0400080dc43000000000000dd430000803f0080dd43000000400000de43000040400080de43000080400000df430000a0400080df430000c0400000e043000000000080e0430000803f0000e143000000400080e143000040400000e243000080400080e2430000a0400000e3430000c0400080e343000000000000e4430000803f0080e443000000400000e543000040400080e543000080400000e6430000a0400080e6430000c0400000e743000000000080e7430000803f0000e843000000400080e843000040400000e943000080400080e9430000a0400000ea430000c0400080ea43000000000000eb430000803f0080eb43000000400000ec43000040400080ec43000080400000ed430000a0400080ed430000c0400000ee43000000000080ee430000803f0000ef43000000400080ef43000040400000f043000080400080f0430000a0400000f1430000c0400080f143000000000000f2430000803f0080f243000000400000f343000040400080f343000080400000f4430000a0400080f4430000c0400000f543000000000080f5430000803f0000f643000000400080f643000040400000f743000080400080f7430000a0400000f8430000c0400080f843000000000000f9430000803f0080f943000000400000fa43000040400080fa43000080400000fb430000a0400080fb430000c0400000fc43000000000080fc430000803f0000fd43000000400080fd43000040400000fe43000080400080fe430000a0400000ff430000c0400080ff4300000000000000440000803f02000051010001",
       "framingValid": true,
       "decode": { "ok": true, "error": null },
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": false, "error": "TooManyVertices" },
       "commandTrace": null,
+      "interpreterRejects": "vertex-count",
+      "canvasMethods": null,
+      "framingBoundaries": null
+    },
+    {
+      "name": "paint-non-finite-rotate",
+      "category": "paint-fault",
+      "notes": "A NaN rotation poisons the transform: the rasterizer spoils on the first mapped point, the interpreter's angle guard throws at the rotate itself.",
+      "bytesHex": "01500100010100000404000000c07f100400ffffffff2311000100002041000020410000a0400000a04002000051010001",
+      "framingValid": true,
+      "decode": { "ok": true, "error": null },
+      "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 5, 0, 0, 0, 0] },
+      "render": { "ok": false, "error": "NonFinite" },
+      "commandTrace": ["50:1", "01", "04:nan", "10:255,255,255,255", "23:F,2560,2560,1280,1280", "02", "51:1"],
+      "interpreterRejects": "angle",
+      "canvasMethods": null,
+      "framingBoundaries": null
+    },
+    {
+      "name": "paint-out-of-range-translate",
+      "category": "paint-fault",
+      "notes": "An out-of-range translation: the rasterizer rejects in device space, the interpreter rejects the raw argument.",
+      "bytesHex": "015001000101000003080000401c4700000000100400ffffffff2311000100000000000000000000a0400000a04002000051010001",
+      "framingValid": true,
+      "decode": { "ok": true, "error": null },
+      "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 5, 0, 0, 0, 0] },
+      "render": { "ok": false, "error": "CoordinateOutOfRange" },
+      "commandTrace": ["50:1", "01", "03:10240000,0", "10:255,255,255,255", "23:F,0,0,1280,1280", "02", "51:1"],
+      "interpreterRejects": "coordinate",
+      "canvasMethods": null,
+      "framingBoundaries": null
+    },
+    {
+      "name": "paint-non-finite-arc-angle",
+      "category": "paint-fault",
+      "notes": "A non-finite arc start angle: the rasterizer spoils computing the sweep, the interpreter's angle guard throws.",
+      "bytesHex": "0150010001010000110800ffffffff0000803f2514000000f0410000f041000020410000c07f0000803f02000051010001",
+      "framingValid": true,
+      "decode": { "ok": true, "error": null },
+      "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
+      "render": { "ok": false, "error": "NonFinite" },
+      "commandTrace": ["50:1", "01", "11:255,255,255,255,256", "25:7680,7680,2560,nan,256", "02", "51:1"],
+      "interpreterRejects": "angle",
+      "canvasMethods": null,
+      "framingBoundaries": null
+    },
+    {
+      "name": "paint-out-of-range-stroke-width",
+      "category": "paint-fault",
+      "notes": "A stroke width beyond the coordinate limit: the interpreter rejects the raw argument; the reference outcome pins whatever the rasterizer does with it.",
+      "bytesHex": "0150010001010000110800ffffffff00401c4720100000002041000020410000a0410000a04102000051010001",
+      "framingValid": true,
+      "decode": { "ok": true, "error": null },
+      "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
+      "render": { "ok": true, "error": null },
+      "commandTrace": ["50:1", "01", "11:255,255,255,255,10240000", "20:2560,2560,5120,5120", "02", "51:1"],
+      "interpreterRejects": "coordinate",
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -238,6 +311,7 @@
       "gate": { "verdict": "reject", "error": "Decode:BadVersion", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:Decode:BadVersion" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -251,6 +325,7 @@
       "gate": { "verdict": "reject", "error": "Decode:Truncated", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:Decode:Truncated" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -264,6 +339,7 @@
       "gate": { "verdict": "reject", "error": "Decode:BadPayload", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:Decode:BadPayload" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -277,6 +353,7 @@
       "gate": { "verdict": "reject", "error": "Decode:BadPayload", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:Decode:BadPayload" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -290,6 +367,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 5, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": [1, 5, 8, 15, 35, 54, 57, 61]
     },
@@ -303,6 +381,7 @@
       "gate": { "verdict": "reject", "error": "DuplicateLayer", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:DuplicateLayer" },
       "commandTrace": ["50:1", "01", "02", "51:1", "50:1", "01", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -316,6 +395,7 @@
       "gate": { "verdict": "reject", "error": "OutOfOrder", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:OutOfOrder" },
       "commandTrace": ["50:2", "01", "02", "51:2", "50:1", "01", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -329,6 +409,7 @@
       "gate": { "verdict": "reject", "error": "NestedLayer", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:NestedLayer" },
       "commandTrace": ["50:1", "01", "50:2", "01", "02", "51:2", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -342,6 +423,7 @@
       "gate": { "verdict": "reject", "error": "EndWithoutBegin", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:EndWithoutBegin" },
       "commandTrace": ["51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -355,6 +437,7 @@
       "gate": { "verdict": "reject", "error": "EndMismatch", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:EndMismatch" },
       "commandTrace": ["50:1", "01", "02", "51:2"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -368,6 +451,7 @@
       "gate": { "verdict": "reject", "error": "UnclosedLayer", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:UnclosedLayer" },
       "commandTrace": ["50:1", "01", "02"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -381,6 +465,7 @@
       "gate": { "verdict": "reject", "error": "UnisolatedState", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:UnisolatedState" },
       "commandTrace": ["50:1", "23:F,0,0,1024,1024", "01", "02", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -394,6 +479,7 @@
       "gate": { "verdict": "reject", "error": "UnbalancedState", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:UnbalancedState" },
       "commandTrace": ["50:1", "01", "51:1"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -407,6 +493,7 @@
       "gate": { "verdict": "reject", "error": "CommandOutsideLayer", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:CommandOutsideLayer" },
       "commandTrace": ["23:F,0,0,1024,1024"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -420,6 +507,7 @@
       "gate": { "verdict": "reject", "error": "CommandOutsideLayer", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:CommandOutsideLayer" },
       "commandTrace": ["unknown:127"],
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -433,6 +521,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 65, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -446,6 +535,7 @@
       "gate": { "verdict": "reject", "error": "StackOverCapacity", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:StackOverCapacity" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -459,6 +549,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 4094, "layersPresent": 2, "layerCommands": [0, 4096, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -472,6 +563,7 @@
       "gate": { "verdict": "reject", "error": "OverCapacity", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:OverCapacity" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -485,6 +577,7 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 1, "layersPresent": 2, "layerCommands": [0, 3, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     },
@@ -498,6 +591,7 @@
       "gate": { "verdict": "reject", "error": "SceneTooLarge", "unknownOpcodes": null, "layersPresent": null, "layerCommands": null },
       "render": { "ok": false, "error": "Layer:SceneTooLarge" },
       "commandTrace": null,
+      "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
     }

@@ -508,6 +508,31 @@ export function drawGlyphRun(ctx, glyphs, text, x, y, size, anchorByte) {
   }
 }
 
+// Fail-closed argument envelope mirroring the reference rasterizer's
+// limits (Q8.8 representable range, shared path-vertex buffer). The
+// rasterizer range-checks coordinates in device space after applying
+// the transform; Canvas2D has no such boundary, so the interpreter
+// rejects at the raw-argument level instead — a different (raw, not
+// device-space) rule with the same fail-closed outcome for the scenes
+// the encoder can produce, which never rely on a transform to bring an
+// out-of-range raw coordinate back in range. A violation throws;
+// renderPanel converts the throw to PAINT_FAILED and the back buffer
+// is discarded, so nothing partial reaches the visible frame.
+export const COORD_LIMIT_PX = 32767;
+export const MAX_PATH_VERTICES = 512;
+
+function coordGuard(v) {
+  if (!Number.isFinite(v) || Math.abs(v) > COORD_LIMIT_PX) {
+    throw new Error(`scene coordinate rejected: ${v}`);
+  }
+  return v;
+}
+
+function finiteGuard(v) {
+  if (!Number.isFinite(v)) throw new Error(`scene angle rejected: ${v}`);
+  return v;
+}
+
 // Interprets one encoded scene onto a Canvas2D context; returns the
 // number of skipped unknown opcodes. Text paints exclusively from the
 // verified glyph atlas — a scene with text and no atlas throws (the
@@ -531,22 +556,22 @@ export function interpretScene(view, ctx, glyphs = null) {
         ctx.restore();
         break;
       case 0x03:
-        ctx.translate(f(0), f(1));
+        ctx.translate(coordGuard(f(0)), coordGuard(f(1)));
         break;
       case 0x04:
-        ctx.rotate(f(0));
+        ctx.rotate(finiteGuard(f(0)));
         break;
       case 0x10:
         ctx.fillStyle = color(view, p);
         break;
       case 0x11:
         ctx.strokeStyle = color(view, p);
-        ctx.lineWidth = view.getFloat32(p + 4, true);
+        ctx.lineWidth = coordGuard(view.getFloat32(p + 4, true));
         break;
       case 0x20:
         ctx.beginPath();
-        ctx.moveTo(f(0), f(1));
-        ctx.lineTo(f(2), f(3));
+        ctx.moveTo(coordGuard(f(0)), coordGuard(f(1)));
+        ctx.lineTo(coordGuard(f(2)), coordGuard(f(3)));
         ctx.stroke();
         break;
       case 0x21:
@@ -564,15 +589,15 @@ export function interpretScene(view, ctx, glyphs = null) {
       case 0x23: {
         const mode = view.getUint8(p);
         const g = (i) => view.getFloat32(p + 1 + i * 4, true);
-        if (mode & 1) ctx.fillRect(g(0), g(1), g(2), g(3));
-        if (mode & 2) ctx.strokeRect(g(0), g(1), g(2), g(3));
+        if (mode & 1) ctx.fillRect(coordGuard(g(0)), coordGuard(g(1)), coordGuard(g(2)), coordGuard(g(3)));
+        if (mode & 2) ctx.strokeRect(coordGuard(g(0)), coordGuard(g(1)), coordGuard(g(2)), coordGuard(g(3)));
         break;
       }
       case 0x24: {
         const mode = view.getUint8(p);
         const g = (i) => view.getFloat32(p + 1 + i * 4, true);
         ctx.beginPath();
-        ctx.arc(g(0), g(1), g(2), 0, Math.PI * 2);
+        ctx.arc(coordGuard(g(0)), coordGuard(g(1)), coordGuard(g(2)), 0, Math.PI * 2);
         if (mode & 1) ctx.fill();
         if (mode & 2) ctx.stroke();
         break;
@@ -581,7 +606,7 @@ export function interpretScene(view, ctx, glyphs = null) {
         // Scene arc angles match Canvas2D: 0 at +x, positive clockwise
         // in y-down space.
         ctx.beginPath();
-        ctx.arc(f(0), f(1), f(2), f(3), f(3) + f(4), f(4) < 0);
+        ctx.arc(coordGuard(f(0)), coordGuard(f(1)), coordGuard(f(2)), finiteGuard(f(3)), finiteGuard(f(3) + f(4)), f(4) < 0);
         ctx.stroke();
         break;
       case 0x30: {
@@ -592,12 +617,12 @@ export function interpretScene(view, ctx, glyphs = null) {
         const text = new TextDecoder().decode(
           new Uint8Array(view.buffer, view.byteOffset + p + 13, plen - 13),
         );
-        drawGlyphRun(ctx, glyphs, text, x, y, size, anchor);
+        drawGlyphRun(ctx, glyphs, text, coordGuard(x), coordGuard(y), coordGuard(size), anchor);
         break;
       }
       case 0x40:
         ctx.beginPath();
-        ctx.rect(f(0), f(1), f(2), f(3));
+        ctx.rect(coordGuard(f(0)), coordGuard(f(1)), coordGuard(f(2)), coordGuard(f(3)));
         ctx.clip();
         break;
       case 0x50:
@@ -620,9 +645,12 @@ export function interpretScene(view, ctx, glyphs = null) {
 function pointsPath(view, p, plen, headBytes, ctx) {
   ctx.beginPath();
   const n = (plen - headBytes) / 8;
+  if (n > MAX_PATH_VERTICES) {
+    throw new Error(`scene path rejected: ${n} vertices exceeds ${MAX_PATH_VERTICES}`);
+  }
   for (let i = 0; i < n; i++) {
-    const x = view.getFloat32(p + headBytes + i * 8, true);
-    const y = view.getFloat32(p + headBytes + i * 8 + 4, true);
+    const x = coordGuard(view.getFloat32(p + headBytes + i * 8, true));
+    const y = coordGuard(view.getFloat32(p + headBytes + i * 8 + 4, true));
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }

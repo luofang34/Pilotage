@@ -17,6 +17,7 @@ use pilotage_instrument_scene::{
 };
 
 use super::corpus::CorpusEntry;
+use super::guards::interpreter_rejects;
 use crate::{FrameId, FramebufferDims, RasterError, render};
 
 pub(super) struct Outcome {
@@ -31,6 +32,7 @@ pub(super) struct Outcome {
     pub(super) layer_commands: Option<[u16; 6]>,
     pub(super) render_ok: bool,
     pub(super) render_error: Option<String>,
+    pub(super) interpreter_rejects: Option<String>,
     pub(super) canvas_methods: Option<Vec<String>>,
     pub(super) framing_boundaries: Option<Vec<usize>>,
 }
@@ -49,7 +51,16 @@ pub(super) fn outcome_of(entry: &CorpusEntry) -> Outcome {
     let (decode_ok, decode_error, full_trace) = decode(bytes);
     let g = gate(bytes);
     let (render_ok, render_error) = render_outcome(bytes);
-    let canvas = entry.trace && g.verdict == "accept" && decode_ok && entry.category != "text";
+    let rejects = if g.verdict == "accept" && decode_ok && entry.category != "text" {
+        interpreter_rejects(bytes)
+    } else {
+        None
+    };
+    let canvas = entry.trace
+        && g.verdict == "accept"
+        && decode_ok
+        && entry.category != "text"
+        && rejects.is_none();
     Outcome {
         framing_valid: framing_valid(bytes),
         decode_ok,
@@ -67,6 +78,7 @@ pub(super) fn outcome_of(entry: &CorpusEntry) -> Outcome {
         } else {
             None
         },
+        interpreter_rejects: rejects,
         framing_boundaries: if entry.sweep {
             Some(boundaries(bytes))
         } else {

@@ -27,6 +27,7 @@ pub(crate) fn fill_polygon(
     for py in region.top..region.bottom {
         let cy = Fx::pixel_center(py).raw();
         for px in region.left..region.right {
+            surface.count_sample();
             let cx = Fx::pixel_center(px).raw();
             if winding_nonzero(verts, cx, cy) {
                 surface.composite(px, py, color);

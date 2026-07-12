@@ -19,6 +19,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 mod corpus;
+mod guards;
 mod manifest;
 mod outcomes;
 

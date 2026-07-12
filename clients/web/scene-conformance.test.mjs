@@ -25,7 +25,9 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import {
+  COORD_LIMIT_PX,
   InstrumentModule,
+  MAX_PATH_VERTICES,
   PANEL,
   STATE_ABI_SIZE,
   STATE_ABI_VERSION,
@@ -286,17 +288,25 @@ function conform(entry, bytes) {
     const d = traceDivergence("CommandTrace", entry.name, entry.commandTrace, decoded.trace ?? []);
     if (d) out.push(d);
   }
-  if (entry.canvasMethods) conformCanvas(entry, v, out);
+  if (entry.canvasMethods || entry.interpreterRejects) conformCanvas(entry, v, out);
   return out;
 }
 
+// When the golden predicts a raw-argument rejection (interpreterRejects), the
+// interpreter MUST throw before completing the scene — a clean pass means the
+// browser-side guard is missing and malformed geometry would reach Canvas.
 function conformCanvas(entry, v, out) {
   const ctx = new RecordingCtx();
   let unknown;
   try {
     unknown = interpretScene(v, ctx, null);
   } catch (error) {
+    if (entry.interpreterRejects) return;
     out.push(DIVERGENCE("InterpretThrew", entry.name, String(error)));
+    return;
+  }
+  if (entry.interpreterRejects) {
+    out.push(DIVERGENCE("GuardMissing", entry.name, `expected ${entry.interpreterRejects} rejection, scene painted`));
     return;
   }
   if (unknown !== entry.gate.unknownOpcodes) {
@@ -311,7 +321,7 @@ function conformCanvas(entry, v, out) {
 const golden = JSON.parse(
   readFileSync(new URL("./scene-conformance-corpus.json", import.meta.url), "utf8"),
 );
-check("golden schema version is understood", golden.schemaVersion === 1);
+check("golden schema version is understood", golden.schemaVersion === 2);
 check("browser backend is declared SIM / NOT FOR FLIGHT", /SIM \/ NOT FOR FLIGHT/.test(golden.simOnly));
 check(
   "budgets are the pinned resource bounds",
@@ -319,7 +329,9 @@ check(
     golden.budgets.maxLayerCommands === 4096 &&
     golden.budgets.maxStackDepth === 32 &&
     golden.budgets.maxPolygonVertices === 512 &&
-    golden.budgets.maxDimension === 4096,
+    golden.budgets.maxDimension === 4096 &&
+    golden.budgets.maxPolygonVertices === MAX_PATH_VERTICES &&
+    golden.budgets.coordLimitPx === COORD_LIMIT_PX,
 );
 
 const entries = golden.entries.map((e) => ({ entry: e, bytes: entryBytes(e) }));
