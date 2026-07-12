@@ -63,6 +63,16 @@ jobs:
       - name: instrument requirement references
         run: bash scripts/check-instrument-requirements.sh
 
+      - name: certification-claim guard (AIR-03)
+        # Fail on any tracked doc/UI artifact that asserts a certification,
+        # compliance, approval, or airworthiness claim about this SIM project.
+        run: bash scripts/check-certification-claims.sh
+
+      - name: instrument trace inventory (AIR-03)
+        # Emit a requirement/test/review/configuration inventory to the log.
+        # This is an inventory, not a compliance trace, and fabricates nothing.
+        run: bash scripts/trace-report.sh
+
       - name: instrument crates are no_std (ADR-0017)
         # Compiling the instrument family for a bare-metal target proves the
         # no_std/no-alloc claim instead of trusting a comment.

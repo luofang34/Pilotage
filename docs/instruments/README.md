@@ -36,6 +36,31 @@ All browser, WebAssembly, Canvas, WebTransport, Gazebo, and test-harness output
 is **SIM / NOT FOR FLIGHT**. A visual resemblance to an aircraft display does
 not make the output primary flight information or authorize operational credit.
 
+## Standards and lifecycle evidence planning
+
+Seeded from the intended-function and safety baselines, the standards-applicability
+matrix and lifecycle-evidence plan record which industry standards and authority
+guidance a future certification effort would draw on, and which repository
+artifacts are engineering input versus lifecycle evidence still to be established.
+Both are **SIM / NOT FOR FLIGHT** engineering planning inputs. They make no
+compliance finding and confer no certification credit, and they depend on the
+AIR-01 (#24) and AIR-02 (#27) baselines, which remain preliminary and pending
+independent review.
+
+- [Standards applicability matrix](standards-applicability.md) classifies each
+  standard as authority-accepted, latest engineering baseline, requiring authority
+  agreement, or not applicable, with rationale, gaps, and issue-paper needs.
+- [Lifecycle evidence plan](evidence-plan.md) indexes today's requirement, design,
+  code, test, review, and configuration baselines, and states which prototype
+  artifacts may be reused as engineering input versus which DO-178C lifecycle
+  evidence must be established anew. Structural-coverage objectives are deferred
+  until AIR-02 allocates assurance.
+
+`scripts/check-certification-claims.sh` fails CI on any artifact that asserts a
+certification, compliance, approval, or airworthiness claim about this project;
+`scripts/trace-report.sh` emits a requirement/test/review/configuration inventory
+to the CI log (an inventory, not a compliance trace).
+
 ## Change control
 
 Every new or changed display feature must cite at least one requirement from
