@@ -215,7 +215,7 @@ fn derive_alert_events(data: &pilotage_instrument_state::PanelData) -> [AlertEve
     };
     [
         cond(
-            data.alt_ft.status == SignalStatus::Failed,
+            data.altitude.value_ft.status == SignalStatus::Failed,
             AlertCondition::Altitude(AltFault::Unavailable),
         ),
         cond(

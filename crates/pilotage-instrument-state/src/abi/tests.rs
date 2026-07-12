@@ -5,6 +5,7 @@ use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, Wind,
 };
+use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
 use pilotage_frames::Quat;
 
 fn full_state() -> AircraftState {
@@ -56,6 +57,8 @@ fn full_state() -> AircraftState {
         selections: Selections {
             heading_bug_rad: 0.16,
             altitude_sel_m: Some(3048.0),
+            altitude_sel_class: AltitudeClass::LocalRelative,
+            baro_sel_hpa: Some(1012.0),
         },
         quality: EstimateQuality::Degraded,
         valid: crate::aircraft::ValidFlags {
@@ -67,6 +70,12 @@ fn full_state() -> AircraftState {
         snapshot: SnapshotMeta {
             generation: u32::MAX,
             coherence: SnapshotCoherence::Coherent,
+        },
+        altitude: AltitudeDeclaration {
+            reference_class: AltitudeClass::BaroIndicated,
+            sample_m: Some(1200.5),
+            geoid_model: GeoidModelId(1),
+            origin: OriginId(42),
         },
     }
 }
@@ -135,6 +144,34 @@ fn unknown_wire_values_decode_fail_safe_not_benign() {
         NavFromTo::Unknown
     );
     assert_eq!(state.snapshot.coherence, SnapshotCoherence::Unknown);
+}
+
+#[test]
+fn unknown_altitude_reference_bytes_decode_fail_closed() {
+    let mut block = [0u8; STATE_ABI_SIZE];
+    encode_state(&full_state(), &mut block).expect("encodes");
+    block[125] = 9; // altitude reference class
+    block[126] = 9; // selected-altitude reference class
+    let state = decode_state(&block).expect("decodes");
+    assert_eq!(state.altitude.reference_class, AltitudeClass::Unknown);
+    assert_eq!(state.selections.altitude_sel_class, AltitudeClass::Unknown);
+}
+
+#[test]
+fn altitude_declaration_round_trips_exactly() {
+    let mut block = [0u8; STATE_ABI_SIZE];
+    let state = full_state();
+    encode_state(&state, &mut block).expect("encodes");
+    let decoded = decode_state(&block).expect("decodes");
+    assert_eq!(decoded.altitude, state.altitude);
+    assert_eq!(
+        decoded.selections.altitude_sel_class,
+        state.selections.altitude_sel_class
+    );
+    assert_eq!(
+        decoded.selections.baro_sel_hpa,
+        state.selections.baro_sel_hpa
+    );
 }
 
 #[test]

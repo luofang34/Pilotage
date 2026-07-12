@@ -1,5 +1,6 @@
 //! The raw input state a feeder writes.
 
+use crate::altitude::{AltitudeClass, AltitudeDeclaration};
 use pilotage_frames::Quat;
 
 /// Attitude estimate: orientation and body rotation rates.
@@ -82,12 +83,20 @@ pub struct NavData {
 
 /// Pilot selections and bugs. These are local UI state, not sensed data,
 /// so they carry no freshness.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Selections {
     /// Heading bug in radians.
     pub heading_bug_rad: f32,
     /// Selected altitude in meters, when set.
     pub altitude_sel_m: Option<f32>,
+    /// Reference class the selected altitude is expressed in. The bug
+    /// and selection readout render only against a compatible displayed
+    /// reference — numeric equality across references means nothing.
+    pub altitude_sel_class: AltitudeClass,
+    /// Pilot-selected altimeter setting in hectopascals. Selection is
+    /// UI state; the sensed/applied setting lives in [`AirData`], and a
+    /// disagreement between the two is flagged, never averaged.
+    pub baro_sel_hpa: Option<f32>,
 }
 
 /// Wind estimate.
@@ -199,4 +208,17 @@ pub struct AircraftState {
     pub valid: ValidFlags,
     /// Ingress generation and group-coherence result.
     pub snapshot: SnapshotMeta,
+    /// Datum declaration for the primary altitude (ALT-01).
+    pub altitude: AltitudeDeclaration,
+}
+
+impl Default for Selections {
+    fn default() -> Self {
+        Self {
+            heading_bug_rad: 0.0,
+            altitude_sel_m: None,
+            altitude_sel_class: AltitudeClass::LocalRelative,
+            baro_sel_hpa: None,
+        }
+    }
 }

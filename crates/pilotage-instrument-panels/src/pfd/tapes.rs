@@ -5,6 +5,7 @@
 //! scale.
 
 use pilotage_instrument_scene::{Anchor, PaintMode, Rgba8, SceneError, SceneWriter};
+use pilotage_instrument_state::AltitudeClass;
 use pilotage_instrument_state::{PanelData, Sig};
 
 use crate::fixed_str::fmt_label;
@@ -139,8 +140,12 @@ fn pointed_box_right(
 }
 
 /// Right-edge altitude tape with selected-altitude bug and baro box.
+/// The tape carries its reference label (REL amber, BARO/STD/MSL/AGL
+/// white, RED for an unknown reference) so a local-relative height can
+/// never read as barometric altitude; the bug and selection readout
+/// render only when the selection's reference class matches.
 pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneError> {
-    let alt = data.alt_ft;
+    let alt = data.altitude.value_ft;
     scene.fill_color(palette::TAPE_BG)?;
     scene.rect(PaintMode::Fill, 390.0, 0.0, 90.0, 335.0)?;
 
@@ -160,7 +165,8 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
                 scene.text(408.0, y, 18.0, Anchor::MIDDLE_LEFT, label.as_str())?;
             }
         }
-        if let Some(sel_m) = data.selections.altitude_sel_m {
+        if let (true, Some(sel_m)) = (data.altitude.bug_compatible, data.selections.altitude_sel_m)
+        {
             let sel_ft = sel_m * pilotage_instrument_state::units::M_TO_FT;
             let y = (CENTER_Y - (sel_ft - alt.value) * PX_PER_FT).clamp(4.0, 331.0);
             scene.fill_color(palette::CYAN)?;
@@ -185,7 +191,22 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
 
     let text = fmt_label!(12, "{}", libm::roundf(alt.value / 10.0) as i64 * 10);
     pointed_box_left(scene, alt, text.as_str())?;
+    reference_label(scene, data)?;
     baro_and_sel_boxes(scene, data)?;
+    Ok(())
+}
+
+/// The altitude reference label under the value box. REL is amber —
+/// simulator-relative height demands attention — and an unknown wire
+/// reference is red beside its failed tape.
+fn reference_label(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneError> {
+    let class = data.altitude.class;
+    scene.fill_color(match class {
+        AltitudeClass::LocalRelative => palette::AMBER,
+        AltitudeClass::Unknown => palette::RED,
+        _ => palette::WHITE,
+    })?;
+    scene.text(442.0, 222.0, 12.0, Anchor::CENTER, class.label())?;
     Ok(())
 }
 
@@ -223,28 +244,49 @@ fn pointed_box_left(
     Ok(())
 }
 
+/// Setting and selection boxes. The setting readout states whether the
+/// shown setting is applied: a barometric tape shows the applied value
+/// in cyan, a pressure tape shows STD, and every other reference shows
+/// the setting prefixed SET in grey — visibly not applied to the tape.
+/// A selected/applied disagreement adds the amber BARO SEL flag.
 fn baro_and_sel_boxes(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneError> {
     let baro = data.baro_hpa;
-    let baro_text = fmt_label!(12, "{:.0}", baro.value);
+    let (text, color) = match data.altitude.class {
+        AltitudeClass::BaroIndicated => (fmt_label!(12, "{:.0}", baro.value), palette::CYAN),
+        AltitudeClass::Pressure => (fmt_label!(12, "STD"), palette::CYAN),
+        _ => (fmt_label!(12, "SET {:.0}", baro.value), palette::GREY),
+    };
     status_paint::readout_box(
         scene,
         390.0,
         335.0,
         90.0,
         25.0,
-        baro_text.as_str(),
-        palette::CYAN,
+        text.as_str(),
+        color,
         16.0,
         baro.status,
     )?;
-    if let Some(sel_m) = data.selections.altitude_sel_m {
-        let sel_ft = sel_m * pilotage_instrument_state::units::M_TO_FT;
-        let text = fmt_label!(12, "{}", libm::roundf(sel_ft) as i64);
-        scene.fill_color(palette::BOX_BG)?;
-        scene.stroke(palette::GREY, 1.5)?;
-        scene.rect(PaintMode::FillStroke, 390.0, 0.0, 90.0, 24.0)?;
-        scene.fill_color(palette::CYAN)?;
-        scene.text(435.0, 12.0, 18.0, Anchor::CENTER, text.as_str())?;
+    if data.altitude.setting_mismatch {
+        status_paint::draw_flag(scene, 435.0, 330.0, "BARO SEL")?;
+    }
+    match (data.altitude.bug_compatible, data.selections.altitude_sel_m) {
+        (true, Some(sel_m)) => {
+            let sel_ft = sel_m * pilotage_instrument_state::units::M_TO_FT;
+            let text = fmt_label!(12, "{}", libm::roundf(sel_ft) as i64);
+            scene.fill_color(palette::BOX_BG)?;
+            scene.stroke(palette::GREY, 1.5)?;
+            scene.rect(PaintMode::FillStroke, 390.0, 0.0, 90.0, 24.0)?;
+            scene.fill_color(palette::CYAN)?;
+            scene.text(435.0, 12.0, 18.0, Anchor::CENTER, text.as_str())?;
+        }
+        (false, Some(_)) => {
+            // A selection in an incompatible reference never renders as
+            // a plausible number; the amber marker says why it is gone.
+            scene.fill_color(palette::AMBER)?;
+            scene.text(435.0, 12.0, 14.0, Anchor::CENTER, "SEL REF")?;
+        }
+        (_, None) => {}
     }
     Ok(())
 }

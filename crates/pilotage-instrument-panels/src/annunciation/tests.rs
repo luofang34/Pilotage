@@ -74,7 +74,7 @@ fn failed_primaries() -> PanelData {
     let mut data = flying();
     data.roll_rad.status = SignalStatus::Failed;
     data.pitch_rad.status = SignalStatus::Failed;
-    data.alt_ft.status = SignalStatus::Failed;
+    data.altitude.value_ft.status = SignalStatus::Failed;
     data
 }
 

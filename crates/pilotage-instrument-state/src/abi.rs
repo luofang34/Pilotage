@@ -11,7 +11,7 @@
 //!
 //! | off | type | field |
 //! |----:|------|-------|
-//! | 0   | u32  | version (=2) |
+//! | 0   | u32  | version (=3) |
 //! | 4   | f32×4| attitude quaternion w, x, y, z |
 //! | 20  | f32×3| body rates p, q, r (rad/s) |
 //! | 32  | f32×3| position NED n, e, d (m) |
@@ -33,19 +33,26 @@
 //! | 116 | f32  | wind speed (m/s) |
 //! | 120 | u32  | snapshot generation (wrapping) |
 //! | 124 | u8   | coherence (0 insufficient, 1 coherent, 2 excessive skew; other = unknown, degrades) |
-//! | 125 | u8×3 | reserved, zero |
+//! | 125 | u8   | altitude reference class (0 rel, 1 baro, 2 std, 3 msl, 4 agl; other = unknown, fails) |
+//! | 126 | u8   | selected-altitude reference class (same coding) |
+//! | 127 | u8   | geoid model id (0 = undeclared; required for class 3) |
+//! | 128 | f32  | altitude sample (m, NaN absent; classes 1-4) |
+//! | 132 | f32  | pilot-selected baro setting (hPa, NaN absent) |
+//! | 136 | u32  | local-origin identity |
+//! | 140 | u8×4 | reserved, zero |
 
 use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
+use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
 use pilotage_frames::Quat;
 
 /// Version stamped in the block's first four bytes.
-pub const STATE_ABI_VERSION: u32 = 2;
+pub const STATE_ABI_VERSION: u32 = 3;
 
 /// Size of the packed block in bytes.
-pub const STATE_ABI_SIZE: usize = 128;
+pub const STATE_ABI_SIZE: usize = 144;
 
 /// Why a state block failed to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,16 +202,32 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         air,
         nav,
         wind,
-        selections: Selections {
-            heading_bug_rad: f32_at(buf, 104)?,
-            altitude_sel_m: opt(f32_at(buf, 108)?),
-        },
+        selections: decode_selections(buf)?,
         quality,
         valid,
         snapshot: SnapshotMeta {
             generation: u32_at(buf, 120)?,
             coherence,
         },
+        altitude: decode_altitude(buf)?,
+    })
+}
+
+fn decode_selections(buf: &[u8]) -> Result<Selections, AbiError> {
+    Ok(Selections {
+        heading_bug_rad: f32_at(buf, 104)?,
+        altitude_sel_m: opt(f32_at(buf, 108)?),
+        altitude_sel_class: AltitudeClass::from_u8(u8_at(buf, 126)?),
+        baro_sel_hpa: opt(f32_at(buf, 132)?),
+    })
+}
+
+fn decode_altitude(buf: &[u8]) -> Result<AltitudeDeclaration, AbiError> {
+    Ok(AltitudeDeclaration {
+        reference_class: AltitudeClass::from_u8(u8_at(buf, 125)?),
+        sample_m: opt(f32_at(buf, 128)?),
+        geoid_model: GeoidModelId(u8_at(buf, 127)?),
+        origin: OriginId(u32_at(buf, 136)?),
     })
 }
 
@@ -339,7 +362,17 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
             SnapshotCoherence::Unknown => 255,
         },
     )?;
-    for offset in 125..128 {
+    encode_altitude(state, buf)
+}
+
+fn encode_altitude(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError> {
+    put_u8(buf, 125, state.altitude.reference_class.to_u8())?;
+    put_u8(buf, 126, state.selections.altitude_sel_class.to_u8())?;
+    put_u8(buf, 127, state.altitude.geoid_model.0)?;
+    put_f32(buf, 128, or_nan(state.altitude.sample_m))?;
+    put_f32(buf, 132, or_nan(state.selections.baro_sel_hpa))?;
+    put_u32(buf, 136, state.altitude.origin.0)?;
+    for offset in 140..144 {
         put_u8(buf, offset, 0)?;
     }
     Ok(())
