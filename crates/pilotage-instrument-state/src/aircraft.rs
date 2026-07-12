@@ -1,6 +1,6 @@
 //! The raw input state a feeder writes.
 
-use crate::altitude::{AltitudeClass, AltitudeDeclaration};
+use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
 use pilotage_frames::Quat;
 
 /// Attitude estimate: orientation and body rotation rates.
@@ -91,8 +91,16 @@ pub struct Selections {
     pub altitude_sel_m: Option<f32>,
     /// Reference class the selected altitude is expressed in. The bug
     /// and selection readout render only against a compatible displayed
-    /// reference — numeric equality across references means nothing.
+    /// reference — numeric equality across references means nothing,
+    /// and class equality alone is not identity: the class-specific
+    /// identity below must match too.
     pub altitude_sel_class: AltitudeClass,
+    /// Origin identity of a local-relative selection. A selection made
+    /// against origin A is not a selection against origin B.
+    pub altitude_sel_origin: OriginId,
+    /// Geoid-model identity of a geometric-MSL selection; undeclared is
+    /// an incomplete identity and never compatible.
+    pub altitude_sel_model: GeoidModelId,
     /// Pilot-selected altimeter setting in hectopascals. Selection is
     /// UI state; the sensed/applied setting lives in [`AirData`], and a
     /// disagreement between the two is flagged, never averaged.
@@ -218,6 +226,8 @@ impl Default for Selections {
             heading_bug_rad: 0.0,
             altitude_sel_m: None,
             altitude_sel_class: AltitudeClass::LocalRelative,
+            altitude_sel_origin: OriginId(0),
+            altitude_sel_model: GeoidModelId::UNDECLARED,
             baro_sel_hpa: None,
         }
     }

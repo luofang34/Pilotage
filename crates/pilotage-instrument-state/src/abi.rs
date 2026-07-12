@@ -39,7 +39,10 @@
 //! | 128 | f32  | altitude sample (m, NaN absent; classes 1-4) |
 //! | 132 | f32  | pilot-selected baro setting (hPa, NaN absent) |
 //! | 136 | u32  | local-origin identity |
-//! | 140 | u8×4 | reserved, zero |
+//! | 140 | u8   | selected-altitude geoid model id (0 = undeclared) |
+//! | 141 | u8×3 | reserved, zero |
+//! | 144 | u32  | selected-altitude origin identity |
+//! | 148 | u8×4 | reserved, zero |
 
 use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
@@ -52,7 +55,7 @@ use pilotage_frames::Quat;
 pub const STATE_ABI_VERSION: u32 = 3;
 
 /// Size of the packed block in bytes.
-pub const STATE_ABI_SIZE: usize = 144;
+pub const STATE_ABI_SIZE: usize = 152;
 
 /// Why a state block failed to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +221,8 @@ fn decode_selections(buf: &[u8]) -> Result<Selections, AbiError> {
         heading_bug_rad: f32_at(buf, 104)?,
         altitude_sel_m: opt(f32_at(buf, 108)?),
         altitude_sel_class: AltitudeClass::from_u8(u8_at(buf, 126)?),
+        altitude_sel_origin: OriginId(u32_at(buf, 144)?),
+        altitude_sel_model: GeoidModelId(u8_at(buf, 140)?),
         baro_sel_hpa: opt(f32_at(buf, 132)?),
     })
 }
@@ -372,7 +377,12 @@ fn encode_altitude(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError
     put_f32(buf, 128, or_nan(state.altitude.sample_m))?;
     put_f32(buf, 132, or_nan(state.selections.baro_sel_hpa))?;
     put_u32(buf, 136, state.altitude.origin.0)?;
-    for offset in 140..144 {
+    put_u8(buf, 140, state.selections.altitude_sel_model.0)?;
+    put_u8(buf, 141, 0)?;
+    put_u8(buf, 142, 0)?;
+    put_u8(buf, 143, 0)?;
+    put_u32(buf, 144, state.selections.altitude_sel_origin.0)?;
+    for offset in 148..152 {
         put_u8(buf, offset, 0)?;
     }
     Ok(())

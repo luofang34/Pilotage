@@ -58,6 +58,8 @@ fn full_state() -> AircraftState {
             heading_bug_rad: 0.16,
             altitude_sel_m: Some(3048.0),
             altitude_sel_class: AltitudeClass::LocalRelative,
+            altitude_sel_origin: OriginId(42),
+            altitude_sel_model: GeoidModelId(1),
             baro_sel_hpa: Some(1012.0),
         },
         quality: EstimateQuality::Degraded,
@@ -155,6 +157,22 @@ fn unknown_altitude_reference_bytes_decode_fail_closed() {
     let state = decode_state(&block).expect("decodes");
     assert_eq!(state.altitude.reference_class, AltitudeClass::Unknown);
     assert_eq!(state.selections.altitude_sel_class, AltitudeClass::Unknown);
+}
+
+#[test]
+fn selection_identity_round_trips_exactly() {
+    let mut block = [0u8; STATE_ABI_SIZE];
+    let state = full_state();
+    encode_state(&state, &mut block).expect("encodes");
+    let decoded = decode_state(&block).expect("decodes");
+    assert_eq!(
+        decoded.selections.altitude_sel_origin,
+        state.selections.altitude_sel_origin
+    );
+    assert_eq!(
+        decoded.selections.altitude_sel_model,
+        state.selections.altitude_sel_model
+    );
 }
 
 #[test]

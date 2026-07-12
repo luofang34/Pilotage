@@ -36,7 +36,7 @@ const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
 export const STATE_ABI_VERSION = 3;
-export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 144 });
+export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 10;
 
@@ -411,10 +411,18 @@ export class InstrumentModule {
       f(128, state.altitude?.sampleM ?? NaN);
       f(132, state.selections?.baroSelHpa ?? NaN);
       view.setUint32(136, state.altitude?.originId ?? 0, true);
-      b(140, 0);
+      // The selection's COMPLETE datum identity (abi.rs parity): class
+      // equality alone never renders a bug — origin and model must
+      // match the displayed datum too.
+      b(140, state.selections?.altitudeSelModel ?? 0);
       b(141, 0);
       b(142, 0);
       b(143, 0);
+      view.setUint32(144, state.selections?.altitudeSelOriginId ?? 0, true);
+      b(148, 0);
+      b(149, 0);
+      b(150, 0);
+      b(151, 0);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

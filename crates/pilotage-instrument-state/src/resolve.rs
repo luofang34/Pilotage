@@ -144,6 +144,8 @@ fn sanitized_selections(selections: Selections) -> Selections {
         },
         altitude_sel_m: selections.altitude_sel_m.filter(|value| value.is_finite()),
         altitude_sel_class: selections.altitude_sel_class,
+        altitude_sel_origin: selections.altitude_sel_origin,
+        altitude_sel_model: selections.altitude_sel_model,
         baro_sel_hpa: selections.baro_sel_hpa.filter(|value| value.is_finite()),
     }
 }
@@ -325,15 +327,45 @@ fn altitude_resolved(
             (applied, state.selections.baro_sel_hpa),
             (Some(a), Some(s)) if (a - s).abs() > BARO_SETTING_TOLERANCE_HPA
         );
-    let bug_compatible = state.selections.altitude_sel_m.is_some()
-        && state.selections.altitude_sel_class == class
-        && class != AltitudeClass::Unknown;
+    let bug_compatible = selection_compatible(state, class, setting_mismatch);
     ResolvedAltitude {
         value_ft: finite(value),
         class,
         origin: decl.origin,
         setting_mismatch,
         bug_compatible,
+    }
+}
+
+/// Whether the pilot's altitude selection shares the displayed datum's
+/// COMPLETE reference identity — class equality alone is never
+/// compatibility. Local-relative selections must name the same origin;
+/// geometric-MSL selections must name the same declared model; a
+/// barometric selection's datum is the applied setting, so a disputed
+/// setting suppresses the bug; pressure altitude's datum is fully
+/// identified by its class (standard atmosphere); AGL carries no source
+/// identity in this ABI revision, so class equality is its complete
+/// identity today. Anything unknown or incomplete fails closed.
+fn selection_compatible(
+    state: &AircraftState,
+    displayed: AltitudeClass,
+    setting_mismatch: bool,
+) -> bool {
+    if state.selections.altitude_sel_m.is_none() || state.selections.altitude_sel_class != displayed
+    {
+        return false;
+    }
+    let decl = state.altitude;
+    let selections = state.selections;
+    match displayed {
+        AltitudeClass::LocalRelative => selections.altitude_sel_origin == decl.origin,
+        AltitudeClass::GeometricMsl => {
+            selections.altitude_sel_model == decl.geoid_model
+                && selections.altitude_sel_model != crate::altitude::GeoidModelId::UNDECLARED
+        }
+        AltitudeClass::BaroIndicated => !setting_mismatch,
+        AltitudeClass::Pressure | AltitudeClass::Agl => true,
+        AltitudeClass::Unknown => false,
     }
 }
 
@@ -421,5 +453,7 @@ fn wind_signal(
     }
 }
 
+#[cfg(test)]
+mod altitude_tests;
 #[cfg(test)]
 mod tests;
