@@ -958,6 +958,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-alerts"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-authority"
 version = "0.1.0"
 dependencies = [

@@ -25,4 +25,3 @@ thiserror = { version = "2.0.18", default-features = false }
 # Standalone workspace so the crate builds via `--manifest-path` before the
 # root workspace registers it as a member. Central registration removes this
 # table (and the generated Cargo.lock) and switches to `[lints] workspace`.
-[workspace]
