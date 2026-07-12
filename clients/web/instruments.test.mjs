@@ -15,6 +15,8 @@ import {
   LOGICAL_H,
   LOGICAL_W,
   PANEL,
+  COORD_LIMIT_PX,
+  MAX_PATH_VERTICES,
   STATE_ABI_SIZE,
   STATE_ABI_SIZE_BY_VERSION,
   STATE_ABI_VERSION,
@@ -248,6 +250,47 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check(
     "a genuinely unknown opcode still counts",
     interpretScene(view(trulyUnknown), new RecordingCtx()) === 1,
+  );
+}
+
+// ---- raw-argument guards (REN-04: fail-closed parity with the rasterizer) ---
+
+{
+  const throws = (bytes) => {
+    try {
+      interpretScene(view(Uint8Array.from(bytes)), new RecordingCtx());
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const rect = (x) => [1, ...cmd(0x23, [1, ...f32(x), ...f32(0), ...f32(4), ...f32(4)])];
+  check("a non-finite coordinate throws before Canvas sees it", throws(rect(NaN)));
+  check(
+    "a coordinate beyond COORD_LIMIT_PX throws",
+    throws(rect(COORD_LIMIT_PX + 1)) && !throws(rect(COORD_LIMIT_PX)),
+  );
+  check("a non-finite rotation angle throws", throws([1, ...cmd(0x04, f32(NaN))]));
+  check(
+    "an out-of-range translation throws",
+    throws([1, ...cmd(0x03, [...f32(40000), ...f32(0)])]),
+  );
+  check(
+    "an out-of-range stroke width throws",
+    throws([1, ...cmd(0x11, [255, 255, 255, 255, ...f32(40000)])]),
+  );
+  check(
+    "a non-finite arc angle throws",
+    throws([1, ...cmd(0x25, [...f32(10), ...f32(10), ...f32(5), ...f32(NaN), ...f32(1)])]),
+  );
+  const path = (n) => {
+    const pts = [];
+    for (let i = 0; i < n; i += 1) pts.push(...f32(i % 100), ...f32(i % 7));
+    return [1, ...cmd(0x21, pts)];
+  };
+  check(
+    "a path beyond the vertex budget throws, one at the budget paints",
+    throws(path(MAX_PATH_VERTICES + 1)) && !throws(path(MAX_PATH_VERTICES)),
   );
 }
 

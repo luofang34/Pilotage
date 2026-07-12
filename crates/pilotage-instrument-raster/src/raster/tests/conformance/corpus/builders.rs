@@ -217,7 +217,7 @@ pub(super) fn paint_fault_entries(out: &mut Vec<CorpusEntry>) {
     out.push(raw(
         "paint-non-finite",
         "paint-fault",
-        Some("Gate accepts; the software rasterizer spoils on a non-finite coordinate while Canvas2D would paint it (SIM/NOT FOR FLIGHT)."),
+        Some("Gate accepts; the software rasterizer spoils on a non-finite coordinate and the browser interpreter's raw-argument guard throws before Canvas2D sees it."),
         in_layer(LayerId::Attitude, |w| {
             w.fill_color(WHITE).expect("fill");
             w.rect(PaintMode::Fill, f32::NAN, 0.0, 10.0, 10.0).expect("rect");
@@ -227,7 +227,7 @@ pub(super) fn paint_fault_entries(out: &mut Vec<CorpusEntry>) {
     out.push(raw(
         "paint-out-of-range",
         "paint-fault",
-        Some("Gate accepts; the software rasterizer spoils on an out-of-range device coordinate while Canvas2D would paint it."),
+        Some("Gate accepts; the software rasterizer spoils on an out-of-range device coordinate and the interpreter's raw-argument guard rejects the same value."),
         in_layer(LayerId::Attitude, |w| {
             w.fill_color(WHITE).expect("fill");
             w.rect(PaintMode::Fill, 40000.0, 0.0, 10.0, 10.0).expect("rect");
@@ -237,13 +237,55 @@ pub(super) fn paint_fault_entries(out: &mut Vec<CorpusEntry>) {
     out.push(raw(
         "paint-too-many-vertices",
         "paint-fault",
-        Some("Gate accepts; the software rasterizer enforces its per-shape vertex budget while Canvas2D has none."),
+        Some("Gate accepts; both backends enforce the shared per-shape vertex budget — the rasterizer via its fixed buffer, the interpreter via its path guard."),
         in_layer(LayerId::Attitude, |w| {
             w.stroke(WHITE, 1.0).expect("stroke");
             let pts: Vec<[f32; 2]> = (0..513).map(|i| [i as f32, (i % 7) as f32]).collect();
             w.polyline(&pts).expect("polyline");
         }),
         false,
+    ));
+    out.push(raw(
+        "paint-non-finite-rotate",
+        "paint-fault",
+        Some("A NaN rotation poisons the transform: the rasterizer spoils on the first mapped point, the interpreter's angle guard throws at the rotate itself."),
+        in_layer(LayerId::Attitude, |w| {
+            w.rotate(f32::NAN).expect("rotate");
+            w.fill_color(WHITE).expect("fill");
+            w.rect(PaintMode::Fill, 10.0, 10.0, 5.0, 5.0).expect("rect");
+        }),
+        true,
+    ));
+    out.push(raw(
+        "paint-out-of-range-translate",
+        "paint-fault",
+        Some("An out-of-range translation: the rasterizer rejects in device space, the interpreter rejects the raw argument."),
+        in_layer(LayerId::Attitude, |w| {
+            w.translate(40000.0, 0.0).expect("translate");
+            w.fill_color(WHITE).expect("fill");
+            w.rect(PaintMode::Fill, 0.0, 0.0, 5.0, 5.0).expect("rect");
+        }),
+        true,
+    ));
+    out.push(raw(
+        "paint-non-finite-arc-angle",
+        "paint-fault",
+        Some("A non-finite arc start angle: the rasterizer spoils computing the sweep, the interpreter's angle guard throws."),
+        in_layer(LayerId::Attitude, |w| {
+            w.stroke(WHITE, 1.0).expect("stroke");
+            w.arc(30.0, 30.0, 10.0, f32::NAN, 1.0).expect("arc");
+        }),
+        true,
+    ));
+    out.push(raw(
+        "paint-out-of-range-stroke-width",
+        "paint-fault",
+        Some("A stroke width beyond the coordinate limit: the interpreter rejects the raw argument; the reference outcome pins whatever the rasterizer does with it."),
+        in_layer(LayerId::Attitude, |w| {
+            w.stroke(WHITE, 40000.0).expect("stroke");
+            w.line(10.0, 10.0, 20.0, 20.0).expect("line");
+        }),
+        true,
     ));
 }
 

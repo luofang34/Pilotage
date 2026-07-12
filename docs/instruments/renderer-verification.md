@@ -39,7 +39,10 @@ the whole frame before anything becomes visible.
 | UTF-8 bytes per text run | 250 | `MAX_TEXT_BYTES` |
 | Framebuffer dimension (per axis) | 4096 px | `MAX_DIMENSION` |
 | Vertices per polyline/polygon command | 512 | `MAX_POLYGON_VERTICES` |
+| Representable coordinate magnitude | 32767 px | `COORD_LIMIT_PX` (Rust + JS) |
 | Worst-case frame size | 67108864 bytes | `WORST_CASE_FRAME_BYTES` |
+| Coverage samples per frame | 1100000 | `RenderWork::BUDGET` |
+| Composites per frame | 900000 | `RenderWork::BUDGET` |
 
 The corpus exercises the scene-byte, per-layer-command, and stack-depth budgets
 at and one past their limits (`resource_budgets_flip_verdict_at_their_limits`),
@@ -55,19 +58,32 @@ constant.
 
 The reference rasterizer is straight-line over the scene and framebuffer with no
 I/O and only documented-bounded loops (see the crate docs on
-`pilotage-instrument-raster::render`), so a target-independent worst-case
-execution time is a sum of bounded step counts:
+`pilotage-instrument-raster::render`), so its work is a pure function of scene
+bytes and framebuffer dimensions. That work is now *counted*, not just bounded:
+every `RenderReport` carries a `RenderWork` record with
 
-- command dispatches: at most `MAX_LAYER_COMMANDS` times the layer count;
-- per-pixel coverage tests: at most framebuffer pixels times a shape's edges.
+- `coverage_samples` — pixel-center coverage evaluations across all primitives
+  (each bounded region loop counts one evaluation per pixel it visits);
+- `composites` — source-over composites actually applied.
 
-A step-counting harness can wrap the coverage predicate and command dispatch
-without changing output. The WCET for a specific target is that step-count sum
-multiplied by the selected target's per-step cycle bound; measured cycle costs
-and the final WCET wait for hardware selection and are out of scope here. Frame
-time is one of the gated budgets: a target that cannot meet its frame deadline
-fails, and the browser watchdog (`PanelHealth`, simulator-only) latches a stalled
-panel as `LIVENESS` past its deadline.
+Because the counters are deterministic and platform-independent, an engineering
+work budget gates them in CI today, before any display hardware exists to time.
+`RenderWork::BUDGET` (1.1M coverage samples, 900k composites per frame) is
+pinned at 2x the worst measured panel fixture — the fully populated PFD demo
+scene measures ~547k samples / ~434k composites on the 480x360 panel, about 3.2
+samples per output pixel — so scenes can grow denser without churning the
+constant while per-frame work stays bounded at ~6.4 samples per pixel. The gate
+is `panel_fixtures_fit_within_work_budget` (with
+`work_counters_are_deterministic_and_nonzero` pinning purity), and exceeding the
+budget is a hard CI failure with instructions to investigate the scene or the
+region loops before raising the constant.
+
+The WCET for a specific target is the counted work multiplied by the selected
+target's per-operation cycle bound; measured cycle costs and the final WCET wait
+for hardware selection and are out of scope here. Frame time is one of the gated
+budgets: a target that cannot meet its frame deadline fails, and the browser
+watchdog (`PanelHealth`, simulator-only) latches a stalled panel as `LIVENESS`
+past its deadline.
 
 ## The conformance corpus
 
@@ -90,7 +106,7 @@ drift on both sides.
 | Malformed / truncated | bad version, truncated tail, malformed known payload, unknown layer id, full truncation sweep |
 | Layer structure | duplicate, out-of-order, nested, end-without-begin, end-mismatch, unclosed, command-outside-layer, unisolated state, unbalanced state |
 | Resource exhaustion | scene bytes, per-layer commands, and stack depth — each at and one past the limit |
-| Paint fail-safe | non-finite coordinate, out-of-range coordinate, over-vertex-budget shape |
+| Paint fail-safe | non-finite coordinate, out-of-range coordinate, over-vertex-budget shape, non-finite rotation, out-of-range translation, non-finite arc angle, out-of-range stroke width |
 
 Budget-boundary streams that would be megabytes of hex are carried as a compact
 `generator` descriptor (`fill_bytes`, `repeat_unknown`, `nest_saves`) that both
@@ -111,9 +127,13 @@ only runs on wasm-generated scenes. So the golden pins, per case:
   per-layer command counts) — the reference layer-gate result, cross-checked on
   the Rust side and used as the reference verdict;
 - `render` (ok + typed error class) — the reference rasterizer outcome;
+- `interpreterRejects` — where the browser interpreter's raw-argument guards
+  must throw (`coordinate`, `angle`, or `vertex-count`), predicted by the
+  reference generator with the same rule and evaluation order;
 - `canvasMethods` — the sequence of Canvas draw calls the interpreter must issue,
   captured from a command-recording canvas and compared as opcode + quantized
-  args.
+  args (omitted when `interpreterRejects` is set: the interpreter never reaches
+  those calls).
 
 Canonicalization is Q8.8: `floor(v * 256)`, with `nan`/`inf`/`-inf` sentinels.
 Comparisons are exact — never tolerance-fudged.
@@ -124,23 +144,42 @@ Differences surface as typed conformance failures, never numeric tolerances:
 `FramingMismatch`, `DecodeVerdictMismatch`, `DecodeClassMismatch`,
 `CommandTraceDivergence{index}`, `CommandTraceLengthMismatch`,
 `UnknownOpcodeCountMismatch`, `CanvasDivergence{index}`, `CanvasLengthMismatch`,
-`InterpretThrew`. Any divergence fails the browser test with the case name and
-the differing index.
+`InterpretThrew`, `GuardMissing`. Any divergence fails the browser test with the
+case name and the differing index. `GuardMissing` is the fail-closed direction:
+a case the golden marks `interpreterRejects` that the interpreter paints anyway
+means a browser-side guard has been weakened or removed.
 
-### Documented intentional divergences
+### Fail-closed geometry guards on both backends
 
-Where the two backends legitimately differ, the golden records both outcomes and
-each side checks its own — these are not bugs:
+Canvas2D itself has no fail-safe for non-finite or absurd geometry — it will
+happily accept a NaN rectangle or a ten-million-pixel translation. The browser
+interpreter therefore does not let such arguments reach Canvas: `interpretScene`
+guards every float that would become Canvas geometry (finite, and
+`|v| <= COORD_LIMIT_PX` = 32767 for coordinates, sizes, radii, and stroke
+widths; finite for rotation and arc angles) and every path against the shared
+vertex budget (`MAX_PATH_VERTICES` = 512, the rasterizer's
+`MAX_POLYGON_VERTICES`). A violation throws; `renderPanel` converts the throw to
+`PAINT_FAILED` and discards the back buffer, so nothing partial reaches the
+visible frame — the same commit-or-spoil outcome as the rasterizer.
 
-- **Non-finite and out-of-range coordinates**, and **shapes past the vertex
-  budget**: the software rasterizer spoils the frame (typed `NonFinite`,
-  `CoordinateOutOfRange`, `TooManyVertices`); Canvas2D has no equivalent
-  fail-safe and paints them. The browser is SIM / NOT FOR FLIGHT; a flight-class
-  backend must add these guards.
+One asymmetry remains, and it is a *rule* difference, not a missing guard: the
+software rasterizer range-checks coordinates in **device space after the
+transform** (that is where Q8.8 quantization happens), while the interpreter
+rejects at the **raw-argument level** before Canvas applies the transform. The
+raw rule cannot be transform-exact without reimplementing the rasterizer's
+transform pipeline. For every scene the project encoder can produce this makes
+no difference — panel geometry never relies on a transform to bring an
+out-of-range raw coordinate back into range — and the corpus generator predicts
+`interpreterRejects` with exactly the raw rule, so the golden pins the
+interpreter's actual behavior, not an aspiration. A scene that deliberately
+paired out-of-range raw arguments with a compensating transform would be
+rejected by the interpreter and painted by the rasterizer; the conformance claim
+for the browser backend is accordingly scoped to encoder-producible scenes, and
+the browser remains SIM / NOT FOR FLIGHT.
 
 No unexpected divergence was found between the backends at the levels they can be
-compared: framing, decode, unknown-opcode counting, and the interpreter's
-opcode-to-Canvas mapping all agree across the corpus.
+compared: framing, decode, unknown-opcode counting, guard placement, and the
+interpreter's opcode-to-Canvas mapping all agree across the corpus.
 
 ### Golden review policy
 

@@ -21,9 +21,11 @@ use super::corpus::CorpusEntry;
 use super::outcomes::{Outcome, outcome_of};
 use crate::{MAX_DIMENSION, MAX_POLYGON_VERTICES, WORST_CASE_FRAME_BYTES};
 
-const SCHEMA_VERSION: u32 = 1;
-const CORPUS_VERSION: u32 = 1;
-const REVIEW_REASON: &str = "Initial REN-04 backend-conformance corpus.";
+const SCHEMA_VERSION: u32 = 2;
+const CORPUS_VERSION: u32 = 2;
+const REVIEW_REASON: &str = "Add interpreterRejects: the browser interpreter now enforces raw-argument \
+guards (finite floats, |coordinate| <= coordLimitPx, path vertex budget) and the golden pins where it \
+must throw; new paint-fault cases cover the rotate/translate/arc/stroke-width guard paths.";
 const REVIEW_APPROVED_BY: &str =
     "REN-04 owner; regenerated goldens require human review and are never rewritten by CI.";
 
@@ -94,6 +96,10 @@ fn budget_lines(lines: &mut Vec<String>) {
         "    \"maxPolygonVertices\": {MAX_POLYGON_VERTICES},"
     ));
     lines.push(std::format!(
+        "    \"coordLimitPx\": {},",
+        crate::fixed::COORD_LIMIT_PX as i64
+    ));
+    lines.push(std::format!(
         "    \"worstCaseFrameBytes\": {WORST_CASE_FRAME_BYTES}"
     ));
     lines.push("  },".to_string());
@@ -124,6 +130,10 @@ fn entry_block(entry: &CorpusEntry, o: &Outcome) -> String {
     lines.push(std::format!(
         "      \"commandTrace\": {},",
         opt_str_array(&o.command_trace)
+    ));
+    lines.push(std::format!(
+        "      \"interpreterRejects\": {},",
+        opt_owned(&o.interpreter_rejects)
     ));
     lines.push(std::format!(
         "      \"canvasMethods\": {},",
