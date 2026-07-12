@@ -242,6 +242,16 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       wrappedResult?.sceneLen === 65535 &&
       wrappedResult?.generation === 0xffffffff,
   );
+  const fieldMax = decodeRenderResult(packRenderResult(REASON.OK, 0xffffff, 1));
+  check(
+    "scene length decodes at the 24-bit field maximum",
+    fieldMax?.sceneLen === 0xffffff && fieldMax?.status === REASON.OK,
+  );
+  const capacity = decodeRenderResult(packRenderResult(REASON.OK, 65536, 1));
+  check(
+    "scene length decodes at the real buffer capacity (bit 16 set)",
+    capacity?.sceneLen === 65536 && capacity?.generation === 1,
+  );
   check(
     "load rejects a non-function export as ABI_MISMATCH",
     (await loadFailureReason(fakeExports({ overrides: { render_result: 7 } }))) ===
@@ -439,6 +449,24 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       visible.calls("fillRect")[0].args.join(",") === "0,0,960,720" &&
       visible.calls("drawImage").length === 1,
   );
+}
+
+{
+  let created = 0;
+  const mod = new InstrumentModule(fakeExports({ status: REASON.SCENE_COMMAND_LIMIT }), {
+    createCanvas: () => {
+      created += 1;
+      return recordingCanvas();
+    },
+  });
+  const visible = new RecordingCtx();
+  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
+  check(
+    "command-limit failure code passes through untouched",
+    !result.ok && result.reason === REASON.SCENE_COMMAND_LIMIT,
+  );
+  check("command-limit failure touches no back buffer", created === 0);
+  check("command-limit failure leaves visible target untouched", visible.log.length === 0);
 }
 
 {
@@ -863,8 +891,17 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 {
   const wasmUrl = new URL("./instrument-runtime_bg.wasm", import.meta.url);
   let mod = null;
+  let capturedWasm = null;
   try {
-    mod = await loadInstruments(readFileSync(wasmUrl), { createCanvas: recordingCanvas });
+    const bindings = await import("./instrument-runtime.js");
+    mod = await loadInstruments(readFileSync(wasmUrl), {
+      createCanvas: recordingCanvas,
+      loadBindings: async () => bindings,
+      initializeBindings: async (args) => {
+        capturedWasm = await bindings.default(args);
+        return capturedWasm;
+      },
+    });
   } catch (error) {
     check(`instrument runtime loads (build it: scripts/build-web-instruments.sh) — ${error}`, false);
   }
@@ -903,6 +940,34 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     const lastSceneLen = lastResult?.sceneLen ?? 0;
     check("atomic result carries a non-trivial scene length", lastSceneLen > 1);
     check("real scene passed framing before visible commit", lastResult?.ok === true);
+    // Linear-memory growth detaches every previously created view; the
+    // module must re-derive views per frame, never cache one.
+    capturedWasm.memory.grow(1);
+    const grown = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+    check(
+      "memory growth between frames does not stale the pipeline",
+      grown.ok === true && grown.generation === 2,
+    );
+
+    // Invalid aircraft data is not a display failure: the frame renders
+    // (in-scene red-X/flags), the pipeline reports success, and nothing
+    // covers the panel with the failure page.
+    const invalidWrite = mod.writeState({
+      attitude: { quat: { w: 1, x: 0, y: 0, z: 0 }, rates: [0, 0, 0], ageMs: 16 },
+      kinematics: { posNed: [0, 0, -100], velNed: [10, 0, 0], ageMs: 16 },
+      air: null,
+      nav: null,
+      wind: null,
+      selections: { headingBugRad: 0 },
+      quality: 0,
+      valid: { attitude: false, rates: false, position: true, velocity: true },
+    });
+    check("invalid-data state write succeeds", invalidWrite.ok === true);
+    const invalidData = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+    check(
+      "invalid aircraft data renders as a successful flagged frame, not DISPLAY FAIL",
+      invalidData.ok === true && invalidData.generation === 3,
+    );
     mod.dispose();
   }
 }
