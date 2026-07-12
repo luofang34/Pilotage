@@ -1013,6 +1013,7 @@ name = "pilotage-instrument-raster"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "pilotage-instrument-glyphs",
  "pilotage-instrument-panels",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",

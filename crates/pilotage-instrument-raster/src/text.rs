@@ -1,82 +1,87 @@
-//! The pre-glyph-pack text contract: a deterministic placeholder box.
+//! Text through the controlled glyph pack (REN-02's contract).
 //!
-//! Until REN-02's glyph pack lands, a [`Cmd::Text`](pilotage_instrument_scene::Cmd::Text)
-//! run renders as a stroked bounding box whose extent is a pure function of
-//! the run's `size`, `anchor`, and UTF-8 byte length — never of any platform
-//! font metrics — so frame hashes stay stable and swap cleanly for real
-//! glyphs later. The box is stroked in the current fill color (text paints
-//! with the fill color) at a fixed width; an empty run or a non-positive
-//! size paints nothing.
+//! Each character renders from the verified bitmap manifest in
+//! `pilotage-instrument-glyphs`: every set cell pixel becomes a logical
+//! quad scaled by the run size and transformed like any other geometry,
+//! so text obeys the same quantization boundary, clipping, and
+//! compositing rules as primitives, with no platform font API anywhere.
+//! A character without a glyph is a typed failure — nothing substitutes.
+//! An empty run or a non-positive size paints nothing.
+//!
+//! Metrics are the manifest's: the run `size` maps to the cell height,
+//! the pen advances by the manifest advance, and the bitmap sits
+//! entirely above its baseline (descent zero), so `Bottom` anchors
+//! coincide with `Baseline`.
 
+use pilotage_instrument_glyphs::{ADVANCE, CELL_H, CELL_W, PANEL_GLYPHS};
 use pilotage_instrument_scene::{Anchor, HAlign, VAlign};
 
 use crate::error::RasterError;
-use crate::stroke::stroke_path;
+use crate::paint::fill_polygon;
 use crate::surface::{PixelRect, Surface};
 use crate::transform::Affine;
 
-/// Logical advance width per UTF-8 byte, as a fraction of the run size.
-const ADVANCE_RATIO: f32 = 0.6;
-
-/// Logical box height above the anchored baseline, as a fraction of size.
-const ASCENT_RATIO: f32 = 0.75;
-
-/// Logical box height below the baseline, as a fraction of size.
-const DESCENT_RATIO: f32 = 0.25;
-
-/// Stroke width of the placeholder box, in device pixels.
-const BOX_STROKE: f32 = 1.0;
-
-/// Renders the placeholder box for a text run using the current fill color.
-pub(crate) fn draw_placeholder(
+/// Renders a text run from the glyph pack using the current fill color.
+pub(crate) fn draw_run(
     surface: &mut Surface<'_>,
     clip: PixelRect,
     ctm: &Affine,
-    run: Run,
+    run: Run<'_>,
     color: [u8; 4],
 ) -> Result<(), RasterError> {
-    if run.byte_len == 0 || run.size <= 0.0 {
+    if run.text.is_empty() || run.size <= 0.0 {
         return Ok(());
     }
-    let w = run.byte_len as f32 * ADVANCE_RATIO * run.size;
+    let scale = run.size / CELL_H as f32;
+    let advance = f32::from(ADVANCE) * scale;
+    let width = run.text.chars().count() as f32 * advance;
     let left = match run.anchor.h {
         HAlign::Left => run.x,
-        HAlign::Center => run.x - w / 2.0,
-        HAlign::Right => run.x - w,
+        HAlign::Center => run.x - width / 2.0,
+        HAlign::Right => run.x - width,
     };
-    let (top, bottom) = match run.anchor.v {
-        VAlign::Baseline => (
-            run.y - ASCENT_RATIO * run.size,
-            run.y + DESCENT_RATIO * run.size,
-        ),
-        VAlign::Top => (run.y, run.y + run.size),
-        VAlign::Bottom => (run.y - run.size, run.y),
-        VAlign::Middle => (run.y - run.size / 2.0, run.y + run.size / 2.0),
+    let top = match run.anchor.v {
+        VAlign::Baseline | VAlign::Bottom => run.y - run.size,
+        VAlign::Top => run.y,
+        VAlign::Middle => run.y - run.size / 2.0,
     };
-    let right = left + w;
-    let corners = [
-        ctm.map(left, top)?,
-        ctm.map(right, top)?,
-        ctm.map(right, bottom)?,
-        ctm.map(left, bottom)?,
-    ];
-    stroke_path(surface, clip, &corners, true, BOX_STROKE, color);
+    let mut pen = left;
+    for ch in run.text.chars() {
+        let glyph = PANEL_GLYPHS.glyph(ch)?.glyph;
+        for row in 0..CELL_H {
+            for col in 0..CELL_W {
+                if !glyph.pixel(col, row) {
+                    continue;
+                }
+                let x0 = pen + col as f32 * scale;
+                let y0 = top + row as f32 * scale;
+                let quad = [
+                    ctm.map(x0, y0)?,
+                    ctm.map(x0 + scale, y0)?,
+                    ctm.map(x0 + scale, y0 + scale)?,
+                    ctm.map(x0, y0 + scale)?,
+                ];
+                fill_polygon(surface, clip, &quad, color);
+            }
+        }
+        pen += advance;
+    }
     Ok(())
 }
 
-/// A text run's placeholder-relevant fields.
+/// A text run.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Run {
+pub(crate) struct Run<'a> {
     /// Anchor point x in logical units.
     pub(crate) x: f32,
     /// Anchor point y in logical units.
     pub(crate) y: f32,
-    /// Run size in logical units.
+    /// Run size in logical units (maps to the glyph cell height).
     pub(crate) size: f32,
     /// Text positioning.
     pub(crate) anchor: Anchor,
-    /// UTF-8 byte length of the run.
-    pub(crate) byte_len: usize,
+    /// The UTF-8 text.
+    pub(crate) text: &'a str,
 }
 
 #[cfg(test)]

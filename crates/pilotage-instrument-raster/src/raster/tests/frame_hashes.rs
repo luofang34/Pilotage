@@ -16,8 +16,8 @@ use crate::{FrameId, FramebufferDims, RenderStatus, render};
 // rasterizer. `libm` plus IEEE-754 f32 make these identical across the
 // supported CI architectures; a mismatch is a determinism regression, not a
 // value to re-pin casually.
-const PFD_SHA256: &str = "2e54b6332dd9799c71dc550079b8e7b444629d3f6dc45f88533801350a07f0a2";
-const HSI_SHA256: &str = "9fc035d4ae8d7a5467d991bf6ed322ad38a6b0171f5853c05803fbca03db7896";
+const PFD_SHA256: &str = "26ba92ba4250c6573fed08b5f42c22becbe8ec8fa521ab0dde7e8167c0349598";
+const HSI_SHA256: &str = "6edcbc92d936a690a68f0632d2ec20b158d54e59cc9fde6640feefa077b258e3";
 
 /// A fixed, richly populated state so every panel band paints content.
 ///

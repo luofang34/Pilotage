@@ -54,6 +54,10 @@ pub fn render(
 /// present-layer bitset for the report.
 fn paint(scene: &[u8], surface: &mut Surface<'_>) -> Result<(u32, u8), RasterError> {
     let report = validate_layers(scene)?;
+    // The controlled glyph pack is part of the display's integrity
+    // envelope: a corrupt pack fails the frame before any text could
+    // paint from it (REN-02's no-fallback rule).
+    pilotage_instrument_glyphs::PANEL_GLYPHS.verify()?;
     surface.clear();
     let mut state = RenderState::new(surface.bounds());
     let mut unknown: u32 = 0;
@@ -98,7 +102,7 @@ fn run(
             size,
             anchor,
             text: run_text,
-        } => draw_text(state, surface, [*x, *y, *size], *anchor, run_text.len()),
+        } => draw_text(state, surface, [*x, *y, *size], *anchor, run_text),
         Cmd::BeginLayer { .. } | Cmd::EndLayer { .. } => Ok(()),
         Cmd::Unknown { .. } => {
             *unknown = unknown.wrapping_add(1);
@@ -272,7 +276,7 @@ fn draw_text(
     surface: &mut Surface<'_>,
     v: [f32; 3],
     anchor: Anchor,
-    byte_len: usize,
+    run_text: &str,
 ) -> Result<(), RasterError> {
     let gs = state.current();
     let run = Run {
@@ -280,9 +284,9 @@ fn draw_text(
         y: v[1],
         size: finite(v[2])?,
         anchor,
-        byte_len,
+        text: run_text,
     };
-    text::draw_placeholder(surface, gs.clip, &gs.ctm, run, gs.fill)
+    text::draw_run(surface, gs.clip, &gs.ctm, run, gs.fill)
 }
 
 /// Transforms the four corners of a logical rectangle to snapped device

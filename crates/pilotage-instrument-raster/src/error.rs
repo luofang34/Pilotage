@@ -7,11 +7,16 @@
 //! spoils the whole frame (see [`crate::render`]) so no plausible old frame
 //! survives a failure.
 
+use pilotage_instrument_glyphs::GlyphError;
 use pilotage_instrument_scene::{DecodeError, LayerError};
 
 /// Why a render did not produce a valid frame.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq)]
 pub enum RasterError {
+    /// The controlled glyph pack failed verification, or a text run used
+    /// a character the pack does not cover; nothing substitutes.
+    #[error(transparent)]
+    Glyph(#[from] GlyphError),
     /// The framebuffer has a zero width or height.
     #[error("framebuffer width and height must be non-zero")]
     ZeroFramebuffer,
