@@ -19,6 +19,13 @@ fn heading_only(heading_rad: f32) -> PanelData {
             }),
             age_ms: Some(10.0),
         },
+        quality: pilotage_instrument_state::EstimateQuality::Good,
+        valid: pilotage_instrument_state::ValidFlags {
+            attitude: true,
+            rates: true,
+            position: true,
+            velocity: true,
+        },
         ..Default::default()
     };
     pilotage_instrument_state::resolve(

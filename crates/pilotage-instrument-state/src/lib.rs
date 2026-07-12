@@ -17,7 +17,9 @@
 //! The crate is `no_std`, allocation-free, and sans-IO: time enters only
 //! as ages the caller supplies. [`abi`] defines the packed little-endian
 //! input layout shared with non-Rust feeders (the browser writes it into
-//! WASM linear memory).
+//! WASM linear memory). Decoding and resolution are fail-safe (VAL-01):
+//! trust must be declared, unknown wire values fail rather than mapping
+//! to benign ones, and no non-finite value can reach scene generation.
 
 #![no_std]
 
@@ -27,6 +29,7 @@ mod quat;
 mod resolve;
 mod signal;
 pub mod units;
+mod validate;
 
 pub use aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
@@ -34,4 +37,7 @@ pub use aircraft::{
 };
 pub use quat::Quat;
 pub use resolve::{NavResolved, PanelData, resolve};
-pub use signal::{FreshnessPolicy, Sig, SignalStatus};
+pub use signal::{FreshnessPolicy, PolicyError, Sig, SignalStatus};
+pub use validate::{
+    GroupFault, QUAT_NORM_TOLERANCE, StateIntegrity, validate_quat, validate_state,
+};

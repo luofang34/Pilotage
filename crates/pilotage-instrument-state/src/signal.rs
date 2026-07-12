@@ -65,14 +65,25 @@ impl Sig<f32> {
     }
 }
 
+/// Why a freshness policy could not be constructed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyError {
+    /// A threshold is NaN, infinite, or not positive.
+    NonPositiveThreshold,
+    /// The stale threshold does not come before the fail threshold, so
+    /// no age could ever resolve `Stale`.
+    StaleNotBeforeFail,
+}
+
 /// Freshness thresholds resolving an age into a status (ADR-0009's
 /// staleness discipline applied to display data).
+///
+/// Only [`FreshnessPolicy::new`] and `Default` construct one, so an
+/// inverted, non-finite, or non-positive threshold pair cannot exist.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FreshnessPolicy {
-    /// Age at which data is flagged stale, in milliseconds.
-    pub stale_after_ms: f32,
-    /// Age at which data is no longer shown, in milliseconds.
-    pub fail_after_ms: f32,
+    stale_after_ms: f32,
+    fail_after_ms: f32,
 }
 
 impl Default for FreshnessPolicy {
@@ -85,6 +96,38 @@ impl Default for FreshnessPolicy {
 }
 
 impl FreshnessPolicy {
+    /// Builds a policy after validating both thresholds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError`] when a threshold is non-finite or not
+    /// positive, or when `stale_after_ms >= fail_after_ms`.
+    pub fn new(stale_after_ms: f32, fail_after_ms: f32) -> Result<Self, PolicyError> {
+        if !(stale_after_ms.is_finite() && fail_after_ms.is_finite())
+            || stale_after_ms <= 0.0
+            || fail_after_ms <= 0.0
+        {
+            return Err(PolicyError::NonPositiveThreshold);
+        }
+        if stale_after_ms >= fail_after_ms {
+            return Err(PolicyError::StaleNotBeforeFail);
+        }
+        Ok(Self {
+            stale_after_ms,
+            fail_after_ms,
+        })
+    }
+
+    /// Age at which data is flagged stale, in milliseconds.
+    pub fn stale_after_ms(&self) -> f32 {
+        self.stale_after_ms
+    }
+
+    /// Age at which data is no longer shown, in milliseconds.
+    pub fn fail_after_ms(&self) -> f32 {
+        self.fail_after_ms
+    }
+
     /// Status from a group's age; `None` means never received.
     pub fn status_for_age(&self, age_ms: Option<f32>) -> SignalStatus {
         match age_ms {

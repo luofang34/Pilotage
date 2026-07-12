@@ -259,14 +259,17 @@ export class InstrumentModule {
       f(72, state.air ? state.air.ageMs : NaN);
       f(76, state.nav ? state.nav.ageMs : NaN);
       f(80, state.wind ? state.wind.ageMs : NaN);
-      b(84, state.quality ?? 0);
+      // Fail-safe defaults mirror abi.rs exactly (VAL-01): undeclared
+      // quality is unknown (255, resolves Failed), and validity is
+      // never assumed — unset flags mean "not declared valid".
+      b(84, state.quality ?? 255);
       const valid = state.valid ?? {};
       b(
         85,
-        (valid.attitude ?? true ? 1 : 0) |
-          (valid.rates ?? true ? 2 : 0) |
-          (valid.position ?? true ? 4 : 0) |
-          (valid.velocity ?? true ? 8 : 0),
+        (valid.attitude ?? false ? 1 : 0) |
+          (valid.rates ?? false ? 2 : 0) |
+          (valid.position ?? false ? 4 : 0) |
+          (valid.velocity ?? false ? 8 : 0),
       );
       b(86, state.nav?.source ?? 0);
       b(87, state.nav?.fromto ?? 0);

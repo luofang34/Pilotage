@@ -59,7 +59,10 @@ pub fn draw_cdi(
         NavFromTo::From => {
             scene.polygon(PaintMode::Fill, &[[0.0, 34.0], [-8.0, 18.0], [8.0, 18.0]])?;
         }
-        NavFromTo::Off => {}
+        // Unknown resolution never reaches here (the nav group fails
+        // before drawing); the arm is the exhaustiveness fail-safe and
+        // draws no flag rather than inventing one.
+        NavFromTo::Off | NavFromTo::Unknown => {}
     }
     scene.restore()?;
     Ok(())
