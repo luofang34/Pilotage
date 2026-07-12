@@ -20,10 +20,82 @@
 
 export const STREAM_KIND_AUTHORITY = 0x01;
 export const STREAM_KIND_VIDEO = 0x02;
+// 0x03 = one video frame that leads with a capture-identity header before the
+// codec-tagged, length-prefixed payload (ADR-0020;
+// hosts/session-host/src/runtime/stream_tag.rs `frame_video_payload_v2`).
+export const STREAM_KIND_VIDEO_V2 = 0x03;
 
 // The `pilotage.v1` schema version this build produces and accepts
 // (pilotage_protocol::convert::SCHEMA_VERSION mirrors this constant).
 export const SCHEMA_VERSION = 1;
+
+// Byte offsets of the fixed v2 capture-identity header (little-endian), a
+// by-hand mirror of `frame_video_payload_v2` in
+// hosts/session-host/src/runtime/stream_tag.rs. `PAYLOAD` is also the header
+// length (source_id .. calibration_id) plus the 4-byte FourCC and 4-byte u32
+// length prefix.
+const V2_OFFSET = Object.freeze({
+  sourceId: 0,
+  sourceEpoch: 1,
+  sourceIncarnation: 5,
+  sequence: 21,
+  captureTime: 25,
+  captureClock: 33,
+  mappingAvailable: 34,
+  mappingTargetClock: 35,
+  mappingOffset: 36,
+  clockErrorBound: 44,
+  receiveTime: 52,
+  publicationTime: 60,
+  cameraId: 68,
+  calibrationId: 72,
+  fourcc: 76,
+  length: 80,
+  payload: 84,
+});
+
+/**
+ * Parses a v2 video-frame body: the bytes after the `STREAM_KIND_VIDEO_V2`
+ * (0x03) kind tag. Returns `{ meta, fourcc, payload }`, where `meta` is the
+ * capture identity and clock mapping (source identity/epoch/incarnation,
+ * wrapping sequence, sim capture time and clock, the mapping to the
+ * flight-state clock with its quantified error bound, host receive/publication
+ * times, and camera/calibration identities), `fourcc` is the 4-char codec tag,
+ * and `payload` is the encoded frame. Returns `null` if the body is shorter
+ * than the fixed header or the declared payload length does not match.
+ */
+export function parseVideoFrameV2(body) {
+  if (body.length < V2_OFFSET.payload) return null;
+  const view = new DataView(body.buffer, body.byteOffset, body.length);
+  const len = view.getUint32(V2_OFFSET.length, true);
+  const payload = body.subarray(V2_OFFSET.payload, V2_OFFSET.payload + len);
+  if (payload.length !== len) return null;
+  const fourcc = String.fromCharCode(
+    body[V2_OFFSET.fourcc],
+    body[V2_OFFSET.fourcc + 1],
+    body[V2_OFFSET.fourcc + 2],
+    body[V2_OFFSET.fourcc + 3],
+  );
+  const meta = {
+    sourceId: body[V2_OFFSET.sourceId],
+    sourceEpoch: view.getUint32(V2_OFFSET.sourceEpoch, true),
+    sourceIncarnation: decodeIncarnation(
+      body.subarray(V2_OFFSET.sourceIncarnation, V2_OFFSET.sourceIncarnation + 16),
+    ),
+    sequence: view.getUint32(V2_OFFSET.sequence, true),
+    captureTimeNanos: view.getBigUint64(V2_OFFSET.captureTime, true),
+    captureClock: body[V2_OFFSET.captureClock],
+    mappingAvailable: body[V2_OFFSET.mappingAvailable] === 1,
+    mappingTargetClock: body[V2_OFFSET.mappingTargetClock],
+    mappingOffsetNanos: view.getBigInt64(V2_OFFSET.mappingOffset, true),
+    clockErrorBoundNanos: view.getBigUint64(V2_OFFSET.clockErrorBound, true),
+    receiveTimeNanos: view.getBigUint64(V2_OFFSET.receiveTime, true),
+    publicationTimeNanos: view.getBigUint64(V2_OFFSET.publicationTime, true),
+    cameraId: view.getUint32(V2_OFFSET.cameraId, true),
+    calibrationId: view.getUint32(V2_OFFSET.calibrationId, true),
+  };
+  return { meta, fourcc, payload };
+}
 
 // ---- varint + protobuf tag primitives -------------------------------------
 

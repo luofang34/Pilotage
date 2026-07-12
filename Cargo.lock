@@ -935,6 +935,7 @@ dependencies = [
 name = "pilotage-adapter-gazebo"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "pilotage-adapter-api",
  "pilotage-protocol",
  "pilotage-timing",

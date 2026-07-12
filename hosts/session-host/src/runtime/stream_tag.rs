@@ -7,6 +7,8 @@
 //! begins with a single kind-tag byte before its payload; the reader consumes
 //! that byte first and routes on it.
 
+use pilotage_adapter_api::{CaptureClockMapping, MeasurementClock, VideoCaptureStamp};
+
 /// Tag prefixing the dedicated authority-events stream: the reliable, ordered
 /// stream of lease/handover/override events (ADR-0005) carries
 /// length-delimited envelopes after this byte.
@@ -17,7 +19,103 @@ pub const AUTHORITY_EVENTS: u8 = 0x01;
 /// this byte (ADR-0005 media = one uni stream per frame; ADR-0016 codec tag).
 /// `source_id` names the video source (0 = onboard FPV, 1 = chase) so a client
 /// with several sources routes each frame to the right one.
+///
+/// This framing carries no capture identity; [`VIDEO_FRAME_V2`] supersedes it
+/// as the emitted format. The tag and its builder are kept only to pin the
+/// stable meaning of `0x02` in the compat tests.
+#[cfg(test)]
 pub const VIDEO_FRAME: u8 = 0x02;
+
+/// Tag prefixing a per-frame video stream that leads with a capture-identity
+/// header before the codec-tagged, length-prefixed payload (ADR-0020).
+///
+/// A reader that does not recognize this tag skips the stream, exactly as it
+/// would an unknown FourCC, so a host emitting v2 frames degrades gracefully
+/// against an older client. The body layout is built by
+/// [`frame_video_payload_v2`].
+pub const VIDEO_FRAME_V2: u8 = 0x03;
+
+/// Byte length of the fixed capture-identity header a [`VIDEO_FRAME_V2`] body
+/// carries before its FourCC, `u32` length prefix, and payload. Keep this in
+/// sync with [`frame_video_payload_v2`] and the browser parser in
+/// `clients/web/wire.js`.
+const V2_META_LEN: usize = 1  // source_id
+    + 4   // source_epoch
+    + 16  // source_incarnation
+    + 4   // sequence
+    + 8   // capture_time_ns
+    + 1   // capture_clock
+    + 1   // mapping_available
+    + 1   // mapping_target_clock
+    + 8   // mapping_offset_ns
+    + 8   // clock_error_bound_ns
+    + 8   // receive_time_ns
+    + 8   // publication_time_ns
+    + 4   // camera_id
+    + 4; // calibration_id
+
+/// Wire code for a [`MeasurementClock`], matching the `pilotage.v1`
+/// `MeasurementClock` enum the browser already decodes: 1 vehicle-boot, 2
+/// simulation. `0` (unspecified) is reserved for an absent target clock.
+fn measurement_clock_code(clock: MeasurementClock) -> u8 {
+    match clock {
+        MeasurementClock::VehicleBoot => 1,
+        MeasurementClock::Simulation => 2,
+    }
+}
+
+/// Serializes one encoded frame as the on-wire body that follows the
+/// [`VIDEO_FRAME_V2`] tag: the fixed capture-identity header (source identity,
+/// attachment epoch and incarnation, wrapping sequence, sim capture time and
+/// clock, the clock mapping to the flight-state clock, host receive and
+/// publication times, and camera/calibration identities), then the codec
+/// FourCC, a little-endian `u32` length prefix, and the encoded bytes.
+///
+/// `source_id` is the routing byte (0 = onboard FPV, 1 = chase) and is the
+/// same identity carried in `capture.stamp.source_id`. `receive_time_ns` and
+/// `publication_time_ns` are host monotonic stamps, kept distinct from the
+/// capture time so a consumer never conflates host receipt with acquisition.
+///
+/// Returns the framed bytes, or `None` if `payload` is larger than `u32::MAX`.
+#[must_use]
+pub fn frame_video_payload_v2(
+    source_id: u8,
+    capture: &VideoCaptureStamp,
+    receive_time_ns: u64,
+    publication_time_ns: u64,
+    codec: [u8; 4],
+    payload: &[u8],
+) -> Option<Vec<u8>> {
+    let len = u32::try_from(payload.len()).ok()?;
+    let (available, target, offset_ns, error_bound_ns) = match capture.mapping {
+        CaptureClockMapping::Unavailable => (0_u8, 0_u8, 0_i64, 0_u64),
+        CaptureClockMapping::Bounded {
+            target,
+            offset_ns,
+            error_bound_ns,
+        } => (1, measurement_clock_code(target), offset_ns, error_bound_ns),
+    };
+    let stamp = &capture.stamp;
+    let mut out = Vec::with_capacity(V2_META_LEN + 4 + payload.len());
+    out.push(source_id);
+    out.extend_from_slice(&stamp.source_epoch.to_le_bytes());
+    out.extend_from_slice(&stamp.source_incarnation.into_bytes());
+    out.extend_from_slice(&stamp.sequence.to_le_bytes());
+    out.extend_from_slice(&stamp.acquired_at_ns.to_le_bytes());
+    out.push(measurement_clock_code(stamp.clock));
+    out.push(available);
+    out.push(target);
+    out.extend_from_slice(&offset_ns.to_le_bytes());
+    out.extend_from_slice(&error_bound_ns.to_le_bytes());
+    out.extend_from_slice(&receive_time_ns.to_le_bytes());
+    out.extend_from_slice(&publication_time_ns.to_le_bytes());
+    out.extend_from_slice(&capture.camera_id.0.to_le_bytes());
+    out.extend_from_slice(&capture.calibration_id.0.to_le_bytes());
+    out.extend_from_slice(&codec);
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(payload);
+    Some(out)
+}
 
 /// FourCC codec tag for Motion JPEG frames (ADR-0016).
 ///
@@ -39,6 +137,7 @@ pub const FOURCC_MJPEG: [u8; 4] = *b"MJPG";
 /// Returns the framed bytes, or `None` if `payload` is larger than `u32::MAX`
 /// (far beyond any real camera frame; a length that cannot be expressed in
 /// the 4-byte prefix must not be silently truncated).
+#[cfg(test)]
 #[must_use]
 pub fn frame_video_payload(source_id: u8, codec: [u8; 4], payload: &[u8]) -> Option<Vec<u8>> {
     let len = u32::try_from(payload.len()).ok()?;
@@ -74,7 +173,19 @@ pub fn parse_video_payload(body: &[u8]) -> Option<(u8, [u8; 4], &[u8])> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{FOURCC_MJPEG, frame_video_payload, parse_video_payload};
+    use super::{
+        FOURCC_MJPEG, VIDEO_FRAME, VIDEO_FRAME_V2, frame_video_payload, parse_video_payload,
+    };
+
+    #[test]
+    fn v1_and_v2_kind_tags_are_distinct_and_stable() {
+        assert_eq!(VIDEO_FRAME, 0x02, "v1 video kind byte keeps its meaning");
+        assert_eq!(VIDEO_FRAME_V2, 0x03, "v2 video kind byte");
+        assert_ne!(
+            VIDEO_FRAME, VIDEO_FRAME_V2,
+            "a reader can tell v1 and v2 apart"
+        );
+    }
 
     #[test]
     fn framing_round_trips() {
@@ -110,5 +221,91 @@ mod tests {
         // Declares 5 bytes but only 2 follow.
         let body = vec![0, b'M', b'J', b'P', b'G', 5, 0, 0, 0, 1, 2];
         assert_eq!(parse_video_payload(&body), None);
+    }
+
+    use super::{V2_META_LEN, VideoCaptureStamp, frame_video_payload_v2};
+    use pilotage_adapter_api::{
+        CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
+        SourceIncarnation,
+    };
+
+    fn le_u32(bytes: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+    }
+
+    fn le_u64(bytes: &[u8], at: usize) -> u64 {
+        let mut buf = [0_u8; 8];
+        buf.copy_from_slice(&bytes[at..at + 8]);
+        u64::from_le_bytes(buf)
+    }
+
+    fn le_i64(bytes: &[u8], at: usize) -> i64 {
+        let mut buf = [0_u8; 8];
+        buf.copy_from_slice(&bytes[at..at + 8]);
+        i64::from_le_bytes(buf)
+    }
+
+    fn sample_capture(mapping: CaptureClockMapping) -> VideoCaptureStamp {
+        VideoCaptureStamp {
+            stamp: MeasurementStamp {
+                source_id: 1,
+                source_incarnation: SourceIncarnation::new([0xAB; 16]),
+                source_epoch: 7,
+                sequence: 42,
+                acquired_at_ns: 123_456,
+                clock: MeasurementClock::Simulation,
+            },
+            camera_id: CameraId(9),
+            calibration_id: CalibrationId(3),
+            mapping,
+        }
+    }
+
+    #[test]
+    fn v2_header_places_every_field_at_its_offset() {
+        let capture = sample_capture(CaptureClockMapping::Bounded {
+            target: MeasurementClock::VehicleBoot,
+            offset_ns: -1_000,
+            error_bound_ns: 250,
+        });
+        let jpeg = vec![0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9];
+        let body =
+            frame_video_payload_v2(1, &capture, 5_000, 6_000, FOURCC_MJPEG, &jpeg).expect("frames");
+
+        assert_eq!(body[0], 1, "source_id routing byte");
+        assert_eq!(le_u32(&body, 1), 7, "source_epoch");
+        assert_eq!(&body[5..21], &[0xAB; 16], "source_incarnation");
+        assert_eq!(le_u32(&body, 21), 42, "sequence");
+        assert_eq!(le_u64(&body, 25), 123_456, "capture_time_ns");
+        assert_eq!(body[33], 2, "capture clock = simulation");
+        assert_eq!(body[34], 1, "mapping available");
+        assert_eq!(body[35], 1, "mapping target = vehicle boot");
+        assert_eq!(le_i64(&body, 36), -1_000, "mapping offset");
+        assert_eq!(le_u64(&body, 44), 250, "clock error bound");
+        assert_eq!(le_u64(&body, 52), 5_000, "receive time");
+        assert_eq!(le_u64(&body, 60), 6_000, "publication time");
+        assert_eq!(le_u32(&body, 68), 9, "camera id");
+        assert_eq!(le_u32(&body, 72), 3, "calibration id");
+        assert_eq!(&body[76..80], b"MJPG", "codec fourcc after the header");
+        assert_eq!(le_u32(&body, 80), jpeg.len() as u32, "length prefix");
+        // Header (V2_META_LEN) + 4-byte FourCC + 4-byte length prefix.
+        assert_eq!(
+            &body[V2_META_LEN + 8..],
+            jpeg.as_slice(),
+            "payload trails intact"
+        );
+    }
+
+    #[test]
+    fn v2_unavailable_mapping_zeroes_the_mapping_fields() {
+        let capture = sample_capture(CaptureClockMapping::Unavailable);
+        let body =
+            frame_video_payload_v2(0, &capture, 1, 2, FOURCC_MJPEG, &[9, 9]).expect("frames");
+        assert_eq!(body[34], 0, "mapping unavailable flag");
+        assert_eq!(body[35], 0, "no target clock");
+        assert_eq!(le_i64(&body, 36), 0, "no offset");
+        assert_eq!(le_u64(&body, 44), 0, "no error bound");
+        // The capture stamp itself is still preserved.
+        assert_eq!(le_u64(&body, 25), 123_456, "capture time survives");
     }
 }
