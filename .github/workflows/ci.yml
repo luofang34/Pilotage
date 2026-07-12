@@ -69,6 +69,7 @@ jobs:
         run: >
           cargo check
           -p pilotage-frames
+          -p pilotage-alerts
           -p pilotage-instrument-state
           -p pilotage-instrument-scene
           -p pilotage-instrument-glyphs

@@ -9,6 +9,7 @@ members = [
     "crates/pilotage-adapter-api",
     "crates/pilotage-conformance",
     "crates/pilotage-frames",
+    "crates/pilotage-alerts",
     "crates/pilotage-instrument-scene",
     "crates/pilotage-instrument-state",
     "crates/pilotage-instrument-glyphs",
@@ -47,6 +48,7 @@ pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-frames = { path = "crates/pilotage-frames" }
+pilotage-alerts = { path = "crates/pilotage-alerts" }
 pilotage-instrument-scene = { path = "crates/pilotage-instrument-scene" }
 pilotage-instrument-state = { path = "crates/pilotage-instrument-state" }
 pilotage-instrument-glyphs = { path = "crates/pilotage-instrument-glyphs" }

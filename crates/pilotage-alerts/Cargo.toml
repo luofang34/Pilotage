@@ -1,0 +1,27 @@
+[package]
+name = "pilotage-alerts"
+description = "Deterministic central flightcrew alert manager and aural contract (ALR-01)"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+await_holding_lock = "deny"
+disallowed_types = "deny"
+disallowed_macros = "deny"
+
+[dependencies]
+thiserror = { version = "2.0.18", default-features = false }
+
+# Standalone workspace so the crate builds via `--manifest-path` before the
+# root workspace registers it as a member. Central registration removes this
+# table (and the generated Cargo.lock) and switches to `[lints] workspace`.
