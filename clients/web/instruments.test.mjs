@@ -974,6 +974,10 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     const lastSceneLen = lastResult?.sceneLen ?? 0;
     check("atomic result carries a non-trivial scene length", lastSceneLen > 1);
     check("real scene passed framing before visible commit", lastResult?.ok === true);
+    check(
+      "a real layered frame leaves the unknown-opcode diagnostic clean",
+      mod.unknownOpcodes === 0,
+    );
     // Linear-memory growth detaches every previously created view; the
     // module must re-derive views per frame, never cache one.
     capturedWasm.memory.grow(1);
