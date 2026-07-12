@@ -116,9 +116,11 @@ certified lifecycle data. Nothing here is marked satisfied.
 | EVP-14 | Complex hardware (DO-254) | none | not applicable (no custom complex AEH in scope) |
 | EVP-15 | Environmental qualification (DO-160G) | none | not applicable (no airborne equipment); DO-160H excluded |
 | EVP-16 | Aeronautical data (DO-200B / ED-76) | none (simulator/reference data only) | not applicable yet (no operational data chain) |
-| EVP-17 | Security (DO-326A / ED-202A family; issue "DO-407/ED-326") | [`system-boundary.md`](system-boundary.md) trust analysis | engineering input; not a security certification artifact — see [standards matrix](standards-applicability.md) STD-050..STD-053 |
+| EVP-17 | Security (DO-326A / ED-202A airworthiness-security family) | [`system-boundary.md`](system-boundary.md) trust analysis | engineering input; not a security certification artifact — see [standards matrix](standards-applicability.md) STD-050..STD-052 |
 | EVP-18 | Display / alerting guidance (AC 25-11B; alert model) | PFD/HSI intended functions, `pilotage-alerts` crate | engineering input; no display submitted for approval |
 | EVP-19 | Installation and flight-test evidence | none | not applicable (no installation; [`AIR-OUT-008`](requirements.md#air-out-008)) |
+| EVP-20 | Synthetic-vision performance (DO-407 / ED-326 and earlier DO-315 / ED-179; AC 20-167A / AC 20-185) | SVS is supplemental only ([`AIR-OUT-005`](requirements.md#air-out-005)); no operational-credit artifact | engineering input; DO-407 / ED-326 released MASPS with authority acceptance unresolved — see [standards matrix](standards-applicability.md) STD-066 |
+| EVP-21 | Source equipment — attitude/heading (AC 20-181, AHRS / TSO-C201) | attitude and heading inputs ([`AIR-IN-001`](requirements.md#air-in-001), [`AIR-IN-005`](requirements.md#air-in-005)) | not applicable yet (no airborne AHRS source selected) — see [standards matrix](standards-applicability.md) STD-065 |
 
 ## Reuse as engineering input versus evidence established anew
 
@@ -187,9 +189,13 @@ of standards families. Each is addressed above:
 - DO-254 — EVP-14 (not applicable, current scope).
 - DO-160 — EVP-15 (not applicable; DO-160G recorded, DO-160H excluded).
 - Aeronautical data — EVP-16.
-- Security, including the issue's "DO-407/ED-326" reference — EVP-17 and
-  [standards matrix](standards-applicability.md) STD-050..STD-053.
-- Display / alerting guidance — EVP-18.
+- Security (DO-326A / ED-202A airworthiness-security family) — EVP-17 and
+  [standards matrix](standards-applicability.md) STD-050..STD-052.
+- Synthetic-vision performance, including DO-407 / ED-326 (the SVS/SVGS/CVS MASPS,
+  not a security standard) — EVP-20 and [standards matrix](standards-applicability.md)
+  STD-066.
+- Display / alerting guidance — EVP-18; attitude/heading source equipment
+  (AC 20-181, AHRS) — EVP-21 and STD-065.
 - Installation qualification — EVP-19.
 
 ## Re-verification clause

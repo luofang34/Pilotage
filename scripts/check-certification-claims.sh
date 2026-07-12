@@ -80,6 +80,44 @@ while IFS= read -r file; do
     fi
 done < <(collect_scanned_files | LC_ALL=C sort -u)
 
+# An open question must never quietly satisfy a coverage row: any matrix row
+# left unverified/to-verify/to-confirm/TBD must be reconciled by a matching
+# STD-keyed entry in the matrix's "Open verification actions" section.
+check_open_verification_actions() {
+    local matrix="docs/instruments/standards-applicability.md"
+    [ -f "$matrix" ] || return 0
+    awk '
+        # First pass: collect STD ids listed under "Open verification actions".
+        FNR == NR {
+            if ($0 ~ /^#+[ \t]+Open verification actions[ \t]*$/) { in_actions = 1; next }
+            if (in_actions && $0 ~ /^#+[ \t]/) { in_actions = 0 }
+            if (in_actions) {
+                s = $0
+                while (match(s, /STD-[0-9]+/)) {
+                    actions[substr(s, RSTART, RLENGTH)] = 1
+                    s = substr(s, RSTART + RLENGTH)
+                }
+            }
+            next
+        }
+        # Second pass: every matrix row carrying an unresolved marker must be keyed.
+        /^\|/ && /STD-[0-9]+/ {
+            low = tolower($0)
+            if (low ~ /to-verify|to verify|unverified|to be verified|to be determined|to[ -]confirm|(^|[^a-z])tbd([^a-z]|$)/) {
+                match($0, /STD-[0-9]+/)
+                id = substr($0, RSTART, RLENGTH)
+                if (!(id in actions)) {
+                    printf "UNRESOLVED VERIFICATION: %s:%d %s is marked unverified/to-verify/to-confirm/TBD without a matching entry in the \"Open verification actions\" section\n", FILENAME, FNR, id > "/dev/stderr"
+                    bad = 1
+                }
+            }
+        }
+        END { exit bad }
+    ' "$matrix" "$matrix" || status=1
+}
+
+check_open_verification_actions
+
 if [ "$status" -ne 0 ]; then
     echo "check-certification-claims: FAILED" >&2
     exit 1

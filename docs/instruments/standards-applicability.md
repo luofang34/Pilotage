@@ -28,6 +28,12 @@ certification basis.
   change over time; every row **must be re-verified with the selected
   certification authority at the point of authority engagement**. The matrix is a
   planning input, not a standing statement of current recognition.
+- **Standard identities were verified against publisher listings on 2026-07-12**
+  (RTCA, EUROCAE, and FAA advisory-circular listings; per-row source links in the
+  matrix). That verification fixes each document's identity, title, and released
+  status as of that date. It does **not** establish authority acceptance:
+  authority-acceptance status is recorded separately per row and must be
+  re-verified with the selected authority at authority engagement.
 - No target aircraft, operating rule, certification authority, certification
   basis, or installed equipment has been selected. Applicability that depends on
   those selections is recorded as conditional, not resolved.
@@ -102,18 +108,34 @@ not the newest document available.
 | STD-050 | Airworthiness security process (DO-326A / ED-202A) | DO-326A / ED-202A | `not applicable` (current scope) as certification obligation | The airworthiness security process applies to airborne/ground systems within a certification program. The SIM-only program has no airborne system and no certification basis, so it carries no airworthiness-security obligation. The process may be adopted **selectively as engineering practice** for the simulator's trust boundaries. | Threat conditions and security assurance levels are undetermined absent a selected system and basis; the untrusted-interface analysis in [system boundary](system-boundary.md) is engineering input, not a security certification artifact. | Determined at system and basis selection. |
 | STD-051 | Airworthiness security methods (DO-356A / ED-203A) | DO-356A / ED-203A | `not applicable` (current scope) | Methods standard supporting DO-326A; inherits STD-050's applicability. | As STD-050. | Determined with STD-050. |
 | STD-052 | Continuing airworthiness security (DO-355 / ED-204) | DO-355 / ED-204 | `not applicable` (current scope) | Continuing-airworthiness security applies to fielded certified systems; none exists. | As STD-050. | Determined with STD-050. |
-| STD-053 | "DO-407 / ED-326" (as named in issue #28 acceptance criteria) | Not verified in this plan | `requires authority agreement` (identity to confirm) | Issue #28 acceptance criteria name "DO-407/ED-326" in the security context. This plan records that reference **verbatim** but does **not** assert it as a released standard in the recognized DO-326A/ED-202A security family: its identity and status were not independently confirmed here, and the tasking instructed against a web refresh. It is carried as a to-verify item rather than represented as an applicable standard. | The document number could not be reconciled to a confirmed released standard within this plan. | Confirm the correct document identity and status with the selected authority before citing it as a basis. |
 
-### Display, vision, and human factors
+The security family here is the DO-326A / ED-202A airworthiness-security set.
+DO-407 / ED-326 is **not** a security standard; it is the synthetic-vision MASPS
+and is classified under [SVS / SVGS / CVS vision systems](#svs--svgs--cvs-vision-systems),
+STD-066.
+
+### Display and human factors
 
 | ID | Standard / reference | Selected revision | Authority status | Rationale | Known gaps | Issue paper / authority agreement |
 | --- | --- | --- | --- | --- | --- | --- |
 | STD-060 | FAA AC 25-11B — electronic flight deck displays | AC 25-11B (guidance) | `authority-accepted` (guidance) | Recognized FAA guidance for electronic flight deck displays; used as the human-factors and display-integrity design reference for the PFD/HSI functions ([`AIR-OUT-001`](requirements.md#air-out-001)). | Applied as engineering input; no display is submitted for approval. Compliance is not asserted. | Regulatory paragraph mapping follows aircraft class selection. |
-| STD-061 | FAA AC 20-167A — airworthiness approval of EVS/SVS/CVS/EFVS equipment | AC 20-167A (guidance) | `latest engineering baseline` / applicable when SVS credit sought | Recognized FAA guidance for synthetic/enhanced vision approval. SVS here is **supplemental** situation awareness only ([`AIR-OUT-005`](requirements.md#air-out-005)); no operational vision credit is sought, so it is an engineering input. | Operational SVS credit would require the full guidance set, a performance standard, and a safety case not in current scope. | Required if operational SVS/EFVS credit is ever pursued. |
-| STD-062 | FAA AC 20-185 — airworthiness approval of synthetic vision systems | AC 20-185 (guidance) | `latest engineering baseline` / applicable when SVS credit sought | Companion synthetic-vision guidance; same conditional applicability as STD-061. | As STD-061. | Required if operational SVS credit is pursued. |
-| STD-063 | RTCA DO-315 / EUROCAE ED-179 — MASPS for EVS/SVS/CVS/EFVS | DO-315 / ED-179 family | `latest engineering baseline` / applicable when SVS credit sought | Minimum aviation system performance standards for vision systems; an engineering reference for SVS content only while SVS remains supplemental. | No performance credit claimed; the applicable member of the family depends on the SVS function selected. | Required if operational SVS/EFVS performance credit is pursued. |
-| STD-064 | SVGS / low-visibility operational credit guidance | Not selected | `not applicable` (current scope) | The baseline supplies **no** Synthetic Vision Guidance System function or low-visibility operational credit ([`AIR-OUT-009`](requirements.md#air-out-009)); the governing SVGS guidance is therefore not applicable. | Adding SVGS requires a distinct intended function, safety assessment, performance standard, and approval basis. | Required only if an SVGS function is introduced. |
-| STD-065 | FAA AC 20-181 (cited by AIR-03 tasking) | As cited by tasking | `requires authority agreement` (identity to confirm) | Listed in the AIR-03 tasking for display human factors. Its title and current applicability were **not independently verified** in this plan (no web refresh per tasking), so it is carried as a to-verify reference rather than asserted with a title. | Reference identity to confirm. | Confirm identity and applicability at authority engagement. |
+| STD-065 | [FAA AC 20-181](https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1023886) — airworthiness approval of Attitude Heading Reference System (AHRS) equipment | AC 20-181 (issued 2014-04-07; active) | `authority-accepted` (active FAA guidance) | Active FAA advisory circular supplementing airworthiness approval of AHRS articles approved under TSO-C201. This is **source-equipment** guidance, not general display human factors: the instrument functions consume AHRS-class attitude and heading data ([`AIR-IN-001`](requirements.md#air-in-001), [`AIR-IN-005`](requirements.md#air-in-005)), so AC 20-181 governs the eventual attitude/heading source rather than the display itself. | The SIM program supplies no airborne AHRS; applicability attaches to the attitude/heading source of a selected installation, not to browser demonstrations. | None to adopt; applies to the selected AHRS source equipment and its TSO. |
+
+### SVS / SVGS / CVS vision systems
+
+Synthetic-vision content here is **supplemental** situation awareness only
+([`AIR-OUT-005`](requirements.md#air-out-005)); no operational vision credit is
+sought. These rows carry an explicit **Authority acceptance** column because a
+released MASPS and an authority-recognized means of compliance are not the same
+thing, and the two diverge most sharply for the vision standards.
+
+| ID | Standard / reference | Selected revision | Authority status | Authority acceptance (2026-07-12) | Rationale | Known gaps | Issue paper / authority agreement |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| STD-061 | FAA AC 20-167A — airworthiness approval of EVS/SVS/CVS/EFVS equipment | AC 20-167A (guidance) | `authority-accepted` (guidance) | Accepted (active FAA AC) | Recognized FAA approval guidance for synthetic/enhanced vision; an engineering input while SVS is supplemental. | Operational SVS credit would need the full guidance set, a performance standard, and a safety case not in current scope. | Required if operational SVS/EFVS credit is ever pursued. |
+| STD-062 | FAA AC 20-185 — airworthiness approval of synthetic vision systems | AC 20-185 (guidance) | `authority-accepted` (guidance) | Accepted (active FAA AC) | Companion synthetic-vision approval guidance; same conditional applicability as STD-061. | As STD-061. | Required if operational SVS credit is pursued. |
+| STD-063 | RTCA DO-315 / EUROCAE ED-179 — earlier MASPS for EVS/SVS/CVS/EFVS | DO-315 / ED-179 family | `latest engineering baseline` (earlier MASPS) | Not an FAA-named means of compliance; earlier engineering baseline, refined by STD-066 | Earlier vision-systems MASPS, retained as engineering reference; the current harmonized MASPS is DO-407 / ED-326 (STD-066). | No performance credit claimed; the applicable member of the family depends on the SVS function selected. | Required if operational SVS/EFVS performance credit is pursued. |
+| STD-066 | [RTCA DO-407](https://www.rtca.org/news/new-rtca-technical-products-address-global-aviation-functions-and-performance/) / [EUROCAE ED-326](https://www.eurocae.net/product/ed-326-masps-for-svs-svgs-cvs/) — MASPS for SVS, SVGS, and CVS | DO-407 (RTCA-approved 2024-12-12) / ED-326 (published 2025-01) | `latest engineering baseline` (released MASPS) | Not accepted — no recognizing FAA AC identified as of 2026-07-12; recognition **to confirm** at authority engagement (STD-066 open action) | Current harmonized RTCA SC-213 / EUROCAE WG-79 MASPS refining SVS, ASA-SVS, SVGS, and CVS performance for head-down and head-up displays; an engineering reference while SVS remains supplemental. Released engineering standard, distinct from the DO-326A / ED-202A security family. | No operational SVS/SVGS/CVS credit is sought; the applicable performance section depends on the function selected. | Required if operational SVS/SVGS/CVS credit is pursued; authority recognition of DO-407 / ED-326 must be confirmed first. |
+| STD-064 | SVGS / low-visibility operational credit guidance | Not selected | `not applicable` (current scope) | n/a — no SVGS function present | The baseline supplies **no** Synthetic Vision Guidance System function or low-visibility operational credit ([`AIR-OUT-009`](requirements.md#air-out-009)); the governing SVGS guidance is therefore not applicable. | Adding SVGS requires a distinct intended function, safety assessment, performance standard, and approval basis. | Required only if an SVGS function is introduced. |
 
 ### Development-process areas
 
@@ -147,15 +169,42 @@ not the newest document available.
   but AC 20-153B recognizes the revision it names; the anchor is therefore the
   recognized revision, with the newer one tracked as `requires authority
   agreement`.
-- **Security for a SIM-only program.** The DO-326A / ED-202A family is classified
-  `not applicable` as a *certification obligation* because there is no airborne
-  system or certification basis — not because security is unimportant. It may be
-  adopted selectively as engineering practice. The issue's "DO-407 / ED-326"
-  reference is recorded verbatim as a to-verify item (STD-053) rather than
-  asserted as a released standard, because its identity was not confirmed here.
+- **Security for a SIM-only program.** The DO-326A / ED-202A family (STD-050..
+  STD-052) is classified `not applicable` as a *certification obligation* because
+  there is no airborne system or certification basis — not because security is
+  unimportant. It may be adopted selectively as engineering practice.
+- **DO-407 / ED-326 are synthetic-vision MASPS, not security.** DO-407 (RTCA,
+  approved 2024-12-12 by SC-213) and ED-326 (EUROCAE, published 2025-01 by WG-79)
+  are the current harmonized Minimum Aviation System Performance Standards for SVS,
+  SVGS, and CVS. They are classified under vision systems (STD-066) as a released
+  engineering standard. Their **authority acceptance is recorded separately**: no
+  recognizing FAA AC was identified as of 2026-07-12, so acceptance is *not
+  established* and is tracked as an open verification action.
+- **AC 20-181 is AHRS-equipment guidance.** FAA AC 20-181 (issued 2014-04-07,
+  active) governs airworthiness approval of AHRS equipment under TSO-C201. It is
+  reclassified (STD-065) as active source-equipment guidance for the attitude and
+  heading sources the display consumes ([`AIR-IN-001`](requirements.md#air-in-001),
+  [`AIR-IN-005`](requirements.md#air-in-005)), not as a general display
+  human-factors reference.
 - **DO-254, environmental, installation, SVGS.** These are `not applicable` under
   the current SIM-only scope and are retained so their exclusion is explicit and
   revisited when scope changes, rather than silently dropped.
+
+## Open verification actions
+
+Any matrix row whose status is left unverified, to-verify, or to-confirm must
+have a corresponding entry here, keyed by its STD identifier, with the concrete
+unresolved action. `scripts/check-certification-claims.sh` fails CI if a row is
+marked unverified/to-verify/to-confirm/TBD without a matching entry in this
+section, so an open question can never quietly satisfy a coverage row.
+
+- **STD-066 (DO-407 / ED-326 authority acceptance).** The document identities and
+  released status are verified (RTCA DO-407 approved 2024-12-12; EUROCAE ED-326
+  published 2025-01). What is unresolved is **authority acceptance**: no FAA
+  advisory circular recognizing DO-407 / ED-326 as a means of compliance was
+  identified as of 2026-07-12. Action: at authority engagement, confirm with the
+  selected authority whether DO-407 / ED-326 (or a later revision) is recognized
+  before it is cited as a certification basis for any SVS/SVGS/CVS credit.
 
 ## Re-verification clause
 
