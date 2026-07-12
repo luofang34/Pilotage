@@ -19,6 +19,7 @@ import {
   STATE_ABI_SIZE_BY_VERSION,
   STATE_ABI_VERSION,
   decodeRenderResult,
+  interpretScene,
   loadInstruments,
   validateSceneStructure,
 } from "./instruments.js";
@@ -203,6 +204,33 @@ function buildScene() {
 }
 
 const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+// ---- layer markers are known vocabulary ------------------------------------
+
+{
+  const layered = Uint8Array.from([
+    1,
+    ...cmd(0x50, [0]),
+    ...cmd(0x01, []),
+    ...cmd(0x23, [1, ...f32(0), ...f32(0), ...f32(4), ...f32(4)]),
+    ...cmd(0x02, []),
+    ...cmd(0x51, [0]),
+  ]);
+  const ctx = new RecordingCtx();
+  check(
+    "layer markers paint as known no-ops, not unknown opcodes",
+    interpretScene(view(layered), ctx) === 0,
+  );
+  check(
+    "marker envelope still paints its commands",
+    ctx.calls("fillRect").length === 1,
+  );
+  const trulyUnknown = Uint8Array.from([1, ...cmd(0x7f, [])]);
+  check(
+    "a genuinely unknown opcode still counts",
+    interpretScene(view(trulyUnknown), new RecordingCtx()) === 1,
+  );
+}
 
 // ---- scene framing validation ----------------------------------------------
 
@@ -470,21 +498,27 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 }
 
 {
-  let created = 0;
-  const mod = new InstrumentModule(fakeExports({ status: REASON.SCENE_BUFFER_FULL }), {
-    createCanvas: () => {
-      created += 1;
-      return recordingCanvas();
-    },
-  });
-  const visible = new RecordingCtx();
-  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
-  check(
-    "wasm failure code passes through untouched",
-    !result.ok && result.reason === REASON.SCENE_BUFFER_FULL,
-  );
-  check("no back buffer touched on wasm failure", created === 0);
-  check("visible target untouched on wasm failure", visible.log.length === 0);
+  for (const reason of [
+    REASON.SCENE_BUFFER_FULL,
+    REASON.SCENE_LAYER_CONTRACT,
+    REASON.SCENE_CRITICAL_LAYERS_MISSING,
+  ]) {
+    let created = 0;
+    const mod = new InstrumentModule(fakeExports({ status: reason }), {
+      createCanvas: () => {
+        created += 1;
+        return recordingCanvas();
+      },
+    });
+    const visible = new RecordingCtx();
+    const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
+    check(
+      `wasm failure code ${reason} passes through untouched`,
+      !result.ok && result.reason === reason,
+    );
+    check(`failure ${reason} touches no back buffer`, created === 0);
+    check(`failure ${reason} leaves visible target untouched`, visible.log.length === 0);
+  }
 }
 
 {
@@ -940,6 +974,10 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     const lastSceneLen = lastResult?.sceneLen ?? 0;
     check("atomic result carries a non-trivial scene length", lastSceneLen > 1);
     check("real scene passed framing before visible commit", lastResult?.ok === true);
+    check(
+      "a real layered frame leaves the unknown-opcode diagnostic clean",
+      mod.unknownOpcodes === 0,
+    );
     // Linear-memory growth detaches every previously created view; the
     // module must re-derive views per frame, never cache one.
     capturedWasm.memory.grow(1);

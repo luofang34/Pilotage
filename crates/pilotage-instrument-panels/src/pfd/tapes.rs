@@ -47,10 +47,7 @@ pub fn speed_tape(
             }
         }
         scene.restore()?;
-    } else if ias.status == pilotage_instrument_state::SignalStatus::Failed {
-        status_paint::draw_red_x(scene, 8.0, 60.0, 74.0, 200.0, "IAS")?;
     } else {
-        // Unequipped (`Missing`) is a blank tape, not a failure X.
         scene.fill_color(palette::GREY)?;
         scene.text(45.0, 130.0, 16.0, Anchor::CENTER, "IAS")?;
     }
@@ -181,8 +178,6 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
             )?;
         }
         scene.restore()?;
-    } else if alt.status == pilotage_instrument_state::SignalStatus::Failed {
-        status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     } else {
         scene.fill_color(palette::GREY)?;
         scene.text(435.0, 130.0, 16.0, Anchor::CENTER, "ALT")?;

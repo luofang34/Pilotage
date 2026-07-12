@@ -238,6 +238,33 @@ impl<'a> SceneWriter<'a> {
     pub fn clip_rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> Result<(), SceneError> {
         self.cmd_f32(opcode::CLIP_RECT, &[], &[x, y, w, h])
     }
+
+    /// Opens layer `layer` and saves the complete graphics state.
+    ///
+    /// The save is part of the wire contract, so a backend that skips the
+    /// layer marker as an unknown opcode still isolates transforms, clips,
+    /// and paint state. [`crate::validate_layers`] requires the matching
+    /// outer restore before [`Self::end_layer`].
+    pub fn begin_layer(&mut self, layer: crate::layer::LayerId) -> Result<(), SceneError> {
+        let rollback = self.len;
+        self.cmd(opcode::BEGIN_LAYER, &[&[layer.to_u8()]])?;
+        if let Err(error) = self.save() {
+            self.len = rollback;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Restores the layer-entry graphics state and closes `layer`.
+    pub fn end_layer(&mut self, layer: crate::layer::LayerId) -> Result<(), SceneError> {
+        let rollback = self.len;
+        self.restore()?;
+        if let Err(error) = self.cmd(opcode::END_LAYER, &[&[layer.to_u8()]]) {
+            self.len = rollback;
+            return Err(error);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -57,6 +57,22 @@ fn texts(scene: &[u8]) -> Vec<String> {
         .collect()
 }
 
+fn layer_texts(scene: &[u8], wanted: LayerId) -> Vec<(String, [f32; 3])> {
+    let mut inside = false;
+    let mut found = Vec::new();
+    for command in SceneCmds::new(scene).expect("valid scene") {
+        match command.expect("valid command") {
+            Cmd::BeginLayer { layer } => inside = layer == wanted,
+            Cmd::EndLayer { layer } if layer == wanted => inside = false,
+            Cmd::Text {
+                x, y, size, text, ..
+            } if inside => found.push((String::from(text), [x, y, size])),
+            _ => {}
+        }
+    }
+    found
+}
+
 #[test]
 fn north_heading_reads_360() {
     let scene = render(&heading_only(0.0));
@@ -121,7 +137,67 @@ fn failed_heading_renders_red_x() {
     let labels = texts(&scene);
     assert!(labels.iter().any(|t| t == "HDG"), "HDG flag: {labels:?}");
     assert!(
+        layer_texts(&scene, LayerId::Annunciation)
+            .contains(&(String::from("HDG"), [240.0, 190.0, 20.0])),
+        "HDG failure must be an annunciation"
+    );
+    assert!(
         labels.iter().any(|t| t == "---"),
         "readout dashes: {labels:?}"
+    );
+}
+
+// ---- layer contract ----------------------------------------------------------
+
+use pilotage_instrument_scene::{LayerId, validate_layers};
+
+#[test]
+fn scenes_are_layered_for_every_heading_status() {
+    for status in [
+        SignalStatus::Valid,
+        SignalStatus::Degraded,
+        SignalStatus::Stale,
+        SignalStatus::Missing,
+        SignalStatus::Failed,
+    ] {
+        let mut data = heading_only(0.0);
+        data.heading_rad = Sig::with_status(0.0, status);
+        let scene = render(&data);
+        let report = validate_layers(&scene).expect("layered scene validates");
+        for layer in [
+            LayerId::Background,
+            LayerId::Attitude,
+            LayerId::Tapes,
+            LayerId::Guidance,
+            LayerId::Annunciation,
+        ] {
+            assert!(report.contains(layer), "{status:?} missing {layer:?}");
+        }
+    }
+}
+
+#[test]
+fn degraded_navigation_cue_is_an_annunciation() {
+    let mut data = heading_only(0.0);
+    data.nav = NavResolved {
+        data: NavData {
+            source: NavSource::Gps,
+            course_rad: 0.35,
+            cdi_dots: -1.2,
+            fromto: NavFromTo::To,
+            vdev_dots: Some(0.4),
+            dist_nm: Some(40.3),
+        },
+        status: SignalStatus::Degraded,
+    };
+    let scene = render(&data);
+    let expected = (String::from("NAV"), [240.0, 250.0, 11.0]);
+    assert!(
+        layer_texts(&scene, LayerId::Annunciation).contains(&expected),
+        "NAV cue must be above guidance"
+    );
+    assert!(
+        !layer_texts(&scene, LayerId::Guidance).contains(&expected),
+        "NAV cue must not share the guidance band"
     );
 }

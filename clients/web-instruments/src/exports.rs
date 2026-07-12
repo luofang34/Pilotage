@@ -5,7 +5,7 @@
 //! no process-global or thread-local mutable state.
 
 use pilotage_instrument_panels::{PfdConfig, VSpeeds, draw_hsi, draw_pfd};
-use pilotage_instrument_scene::{SceneCmds, SceneError, SceneWriter};
+use pilotage_instrument_scene::{LayerError, LayerId, SceneError, SceneWriter, validate_layers};
 use pilotage_instrument_state::abi::{AbiError, STATE_ABI_SIZE, STATE_ABI_VERSION, decode_state};
 use pilotage_instrument_state::{FreshnessPolicy, resolve};
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -17,6 +17,17 @@ const PACKED_SCENE_LEN_MAX: usize = 0x00ff_ffff;
 const PANEL_PFD: u32 = 0;
 const PANEL_HSI: u32 = 1;
 const PANEL_COUNT: usize = 2;
+
+const fn layer_bit(layer: LayerId) -> u8 {
+    1u8 << layer.to_u8()
+}
+
+const PFD_CRITICAL_LAYERS: u8 =
+    layer_bit(LayerId::Attitude) | layer_bit(LayerId::Tapes) | layer_bit(LayerId::Annunciation);
+const HSI_CRITICAL_LAYERS: u8 = layer_bit(LayerId::Attitude)
+    | layer_bit(LayerId::Tapes)
+    | layer_bit(LayerId::Guidance)
+    | layer_bit(LayerId::Annunciation);
 
 pub(crate) struct Runtime {
     pub(crate) state: Vec<u8>,
@@ -77,17 +88,25 @@ fn panel_generation(runtime: &Runtime, panel_idx: usize) -> u32 {
     runtime.generation.get(panel_idx).copied().unwrap_or(0)
 }
 
-/// Whether every command in `scene` decodes cleanly; a partially paintable
-/// but structurally broken scene must never reach a backend.
-fn scene_is_structurally_valid(scene: &[u8]) -> bool {
-    match SceneCmds::new(scene) {
-        Ok(mut cmds) => cmds.all(|cmd| cmd.is_ok()),
-        Err(_) => false,
+fn validate_panel_scene(panel_idx: usize, scene: &[u8]) -> RenderStatus {
+    let required = match panel_idx {
+        0 => PFD_CRITICAL_LAYERS,
+        1 => HSI_CRITICAL_LAYERS,
+        _ => return RenderStatus::InvalidPanel,
+    };
+    let report = match validate_layers(scene) {
+        Ok(report) => report,
+        Err(LayerError::Decode(_)) => return RenderStatus::SceneStructure,
+        Err(_) => return RenderStatus::SceneLayerContract,
+    };
+    if report.present & required != required {
+        return RenderStatus::SceneCriticalLayersMissing;
     }
+    RenderStatus::Ok
 }
 
-/// Commits a generated scene only after its structure validates. Buffer bytes
-/// are scratch until this returns success.
+/// Commits a generated scene only after the complete panel-layer contract has
+/// validated. Buffer bytes are scratch until this returns success.
 pub(crate) fn validate_and_commit_scene(
     runtime: &mut Runtime,
     panel_idx: usize,
@@ -100,8 +119,9 @@ pub(crate) fn validate_and_commit_scene(
     let Some(scene) = runtime.scene.get(..len) else {
         return RenderAttempt::failure(RenderStatus::SceneStructure, generation);
     };
-    if !scene_is_structurally_valid(scene) {
-        return RenderAttempt::failure(RenderStatus::SceneStructure, generation);
+    let status = validate_panel_scene(panel_idx, scene);
+    if status != RenderStatus::Ok {
+        return RenderAttempt::failure(status, generation);
     }
     let Some(next_generation) = runtime.generation.get_mut(panel_idx) else {
         return RenderAttempt::failure(RenderStatus::InvalidPanel, 0);

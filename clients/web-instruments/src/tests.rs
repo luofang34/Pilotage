@@ -1,7 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_instrument_panels::PfdConfig;
-use pilotage_instrument_scene::SceneCmds;
+use pilotage_instrument_scene::{
+    LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
+};
 use pilotage_instrument_state::abi::{STATE_ABI_SIZE, STATE_ABI_VERSION, encode_state};
 use pilotage_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
@@ -56,6 +58,48 @@ fn assert_attempt(attempt: RenderAttempt, status: RenderStatus, scene_len: usize
     assert_eq!(attempt.generation, generation);
 }
 
+fn encoded_scene(build: impl FnOnce(&mut SceneWriter<'_>)) -> Vec<u8> {
+    let mut scene = vec![0u8; MAX_SCENE_BYTES];
+    let mut writer = SceneWriter::new(&mut scene).expect("writer");
+    build(&mut writer);
+    let len = writer.finish();
+    scene.truncate(len);
+    scene
+}
+
+fn simple_layer(writer: &mut SceneWriter<'_>, layer: LayerId) {
+    writer.begin_layer(layer).expect("begin layer");
+    writer.line(0.0, 0.0, 1.0, 1.0).expect("line");
+    writer.end_layer(layer).expect("end layer");
+}
+
+fn panel_scene(layers: &[LayerId]) -> Vec<u8> {
+    encoded_scene(|writer| {
+        for layer in layers {
+            simple_layer(writer, *layer);
+        }
+    })
+}
+
+fn scene_runtime(scene: &[u8]) -> Runtime {
+    let mut buffer = vec![0u8; scene.len().max(MAX_SCENE_BYTES)];
+    buffer[..scene.len()].copy_from_slice(scene);
+    Runtime {
+        state: encoded_state_block(&attitude_state()),
+        scene: buffer,
+        generation: [7, 11],
+        pfd_cfg: PfdConfig::default(),
+    }
+}
+
+fn assert_scene_rejected(panel_idx: usize, scene: &[u8], expected: RenderStatus) {
+    let mut runtime = scene_runtime(scene);
+    let generations = runtime.generation;
+    let expected_generation = runtime.generation.get(panel_idx).copied().unwrap_or(0);
+    let attempt = validate_and_commit_scene(&mut runtime, panel_idx, scene.len());
+    assert_attempt(attempt, expected, 0, expected_generation);
+    assert_eq!(runtime.generation, generations, "failure must not advance");
+}
 #[test]
 fn exported_surface_packs_one_atomic_render_result() {
     assert_eq!(abi_version(), STATE_ABI_VERSION);
@@ -250,4 +294,98 @@ fn every_encode_error_maps_to_its_own_status() {
         scene_error_status(SceneError::TextTooLong),
         RenderStatus::SceneCommandLimit
     );
+}
+
+#[test]
+fn critical_layer_masks_gate_visible_commit() {
+    let pfd = panel_scene(&[LayerId::Attitude, LayerId::Tapes, LayerId::Annunciation]);
+    let hsi = panel_scene(&[
+        LayerId::Attitude,
+        LayerId::Tapes,
+        LayerId::Guidance,
+        LayerId::Annunciation,
+    ]);
+    for (panel_idx, scene, expected_generation) in [(0, pfd, [8, 11]), (1, hsi, [7, 12])] {
+        let mut runtime = scene_runtime(&scene);
+        let attempt = validate_and_commit_scene(&mut runtime, panel_idx, scene.len());
+        assert_attempt(
+            attempt,
+            RenderStatus::Ok,
+            scene.len(),
+            expected_generation[panel_idx],
+        );
+        assert_eq!(runtime.generation, expected_generation);
+    }
+
+    let background_only = panel_scene(&[LayerId::Background]);
+    let failure_only = panel_scene(&[LayerId::Failure]);
+    assert_scene_rejected(
+        0,
+        &background_only,
+        RenderStatus::SceneCriticalLayersMissing,
+    );
+    assert_scene_rejected(1, &failure_only, RenderStatus::SceneCriticalLayersMissing);
+
+    let pfd_missing_annunciation = panel_scene(&[LayerId::Attitude, LayerId::Tapes]);
+    let hsi_missing_guidance =
+        panel_scene(&[LayerId::Attitude, LayerId::Tapes, LayerId::Annunciation]);
+    assert_scene_rejected(
+        0,
+        &pfd_missing_annunciation,
+        RenderStatus::SceneCriticalLayersMissing,
+    );
+    assert_scene_rejected(
+        1,
+        &hsi_missing_guidance,
+        RenderStatus::SceneCriticalLayersMissing,
+    );
+}
+
+#[test]
+fn layer_order_ownership_and_nesting_gate_visible_commit() {
+    let duplicate = panel_scene(&[LayerId::Attitude, LayerId::Attitude]);
+    let out_of_order = panel_scene(&[LayerId::Tapes, LayerId::Attitude]);
+    let nested = encoded_scene(|writer| {
+        writer.begin_layer(LayerId::Attitude).expect("outer layer");
+        writer.begin_layer(LayerId::Tapes).expect("nested layer");
+    });
+    for scene in [duplicate, out_of_order, nested] {
+        assert_scene_rejected(0, &scene, RenderStatus::SceneLayerContract);
+    }
+}
+
+#[test]
+fn layer_state_and_budgets_gate_visible_commit() {
+    let unbalanced = encoded_scene(|writer| {
+        writer.begin_layer(LayerId::Attitude).expect("begin layer");
+        writer.save().expect("nested state");
+        writer.end_layer(LayerId::Attitude).expect("end layer");
+    });
+    assert_scene_rejected(0, &unbalanced, RenderStatus::SceneLayerContract);
+
+    let over_budget = encoded_scene(|writer| {
+        writer.begin_layer(LayerId::Attitude).expect("begin layer");
+        for _ in 0..(MAX_LAYER_COMMANDS - 2) / 2 {
+            writer.save().expect("save");
+            writer.restore().expect("restore");
+        }
+        writer.rotate(0.1).expect("over-budget command");
+        writer.end_layer(LayerId::Attitude).expect("end layer");
+    });
+    assert_scene_rejected(0, &over_budget, RenderStatus::SceneLayerContract);
+
+    let oversized = vec![0u8; MAX_SCENE_BYTES + 1];
+    assert_scene_rejected(0, &oversized, RenderStatus::SceneLayerContract);
+}
+
+#[test]
+fn malformed_scene_framing_gates_visible_commit() {
+    let mut truncated = panel_scene(&[LayerId::Attitude, LayerId::Tapes, LayerId::Annunciation]);
+    truncated.pop();
+    assert_scene_rejected(0, &truncated, RenderStatus::SceneStructure);
+
+    let outside_layer = encoded_scene(|writer| {
+        writer.line(0.0, 0.0, 1.0, 1.0).expect("line");
+    });
+    assert_scene_rejected(0, &outside_layer, RenderStatus::SceneLayerContract);
 }

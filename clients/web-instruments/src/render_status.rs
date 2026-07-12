@@ -1,4 +1,4 @@
-//! Stable render-status reason codes shared with the JS backend (DISP-01).
+//! Stable render-status reason codes shared with the JS backend.
 
 /// Stable status field carried by the packed WASM render result.
 ///
@@ -30,4 +30,8 @@ pub enum RenderStatus {
     SceneCommandLimit = 7,
     /// The encoded scene failed structural self-validation.
     SceneStructure = 8,
+    /// The scene violated layer ordering, ownership, state isolation, or bounds.
+    SceneLayerContract = 9,
+    /// The scene omitted a critical layer required by the selected panel.
+    SceneCriticalLayersMissing = 10,
 }

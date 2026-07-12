@@ -1,4 +1,4 @@
-//! Attitude ball: sky/ground, pitch ladder, roll scale, aircraft symbol.
+//! Optional sky/ground fill and critical attitude symbology.
 //!
 //! Geometry follows the G5 proportions: 7.2 px per degree of pitch
 //! (±25° across the 360-px panel height), roll arc radius 144 px
@@ -18,8 +18,8 @@ const ROLL_ARC_R: f32 = 144.0;
 /// the roll arc (the pyG5 clip).
 const LADDER_MAX_Y: f32 = 104.0;
 
-/// Sky, ground, horizon line, and pitch ladder, in the roll-rotated frame.
-pub fn draw_ball(
+/// Optional sky/ground fill in the roll-rotated attitude frame.
+pub fn draw_background(
     scene: &mut SceneWriter<'_>,
     roll_rad: f32,
     pitch_rad: f32,
@@ -36,21 +36,30 @@ pub fn draw_ball(
     scene.rect(PaintMode::Fill, -600.0, -600.0, 1200.0, 600.0 + horizon_y)?;
     scene.fill_color(palette::GROUND)?;
     scene.rect(PaintMode::Fill, -600.0, horizon_y, 1200.0, 1200.0)?;
+    scene.restore()?;
+    Ok(())
+}
+
+/// Critical horizon line and pitch ladder in the attitude frame.
+pub fn draw_horizon_cues(
+    scene: &mut SceneWriter<'_>,
+    roll_rad: f32,
+    pitch_rad: f32,
+) -> Result<(), SceneError> {
+    let horizon_y = pitch_rad * RAD_TO_DEG * PX_PER_DEG_PITCH;
+    scene.save()?;
+    scene.translate(240.0, 180.0)?;
+    scene.rotate(-roll_rad)?;
     scene.stroke(palette::WHITE, 2.0)?;
     scene.line(-600.0, horizon_y, 600.0, horizon_y)?;
-
-    draw_pitch_ladder(scene, pitch_deg, horizon_y)?;
+    draw_pitch_ladder(scene, horizon_y)?;
     scene.restore()?;
     Ok(())
 }
 
 /// Ladder marks every 2.5°, wide labeled bars every 10° (pyG5's
 /// half-width cycle 10/20/10/30).
-fn draw_pitch_ladder(
-    scene: &mut SceneWriter<'_>,
-    _pitch_deg: f32,
-    horizon_y: f32,
-) -> Result<(), SceneError> {
+fn draw_pitch_ladder(scene: &mut SceneWriter<'_>, horizon_y: f32) -> Result<(), SceneError> {
     scene.stroke(palette::WHITE, 2.0)?;
     scene.fill_color(palette::WHITE)?;
     for i in -36..=36i32 {

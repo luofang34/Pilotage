@@ -14,16 +14,24 @@
 
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 mod cmd;
 mod color;
 mod decode;
 mod encode;
+mod layer;
 mod opcode;
 
 pub use cmd::{Anchor, Cmd, HAlign, MAX_TEXT_BYTES, PaintMode, PointsRef, VAlign};
 pub use color::Rgba8;
 pub use decode::{DecodeError, SceneCmds};
 pub use encode::{SceneError, SceneWriter};
+pub use layer::{
+    LAYER_COUNT, LayerError, LayerId, LayerReport, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES,
+    MAX_STACK_DEPTH, validate_layers,
+};
 
 /// Format version written as the first byte of every encoded scene.
 pub const SCENE_FORMAT_VERSION: u8 = 1;
