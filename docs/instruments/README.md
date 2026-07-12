@@ -17,6 +17,21 @@ The baseline is split into four controlled artifacts:
 - [Review record](review-record.md) records the approvals required before the
   baseline can be treated as reviewed.
 
+## Preliminary safety assessment
+
+Seeded from the intended-function baseline, the preliminary functional hazard
+assessment and system safety assessment analyse the display functions for loss,
+misleading, frozen, stale, wrong-reference, and failed-reversion conditions,
+derive safety requirements, and allocate assurance by function and architecture.
+They are preliminary and not closable: classifications stay conditional on a
+selected vehicle, operation, installation, and certification basis, and closure
+requires a qualified independent safety review.
+
+- [Functional hazard assessment](fha.md) is the failure-condition hazard log with
+  conditional severities and derived requirements.
+- [System safety assessment](pssa.md) is the common-cause and independence
+  analysis, assurance allocation, traceability, and AIR-02 review record.
+
 All browser, WebAssembly, Canvas, WebTransport, Gazebo, and test-harness output
 is **SIM / NOT FOR FLIGHT**. A visual resemblance to an aircraft display does
 not make the output primary flight information or authorize operational credit.
