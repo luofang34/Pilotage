@@ -245,4 +245,28 @@ impl InstrumentRuntime {
             |runtime| render_into(runtime, panel).packed(),
         )
     }
+
+    /// The controlled glyph pack's canonical serialization (REN-02), for
+    /// the backend's independent hash verification and atlas
+    /// construction. A serialization failure returns an empty buffer,
+    /// which no verifier accepts.
+    pub fn glyph_manifest(&self) -> Vec<u8> {
+        let manifest = pilotage_instrument_glyphs::PANEL_GLYPHS;
+        let mut out = vec![0u8; manifest.canonical_len()];
+        match manifest.write_canonical(&mut out) {
+            Ok(len) => {
+                out.truncate(len);
+                out
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// The compile-time-recorded glyph content hash the backend must
+    /// match against both the canonical bytes and its own pinned value.
+    pub fn glyph_recorded_hash(&self) -> Vec<u8> {
+        pilotage_instrument_glyphs::PANEL_GLYPHS
+            .recorded_hash()
+            .to_vec()
+    }
 }

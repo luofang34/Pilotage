@@ -1040,6 +1040,7 @@ dependencies = [
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
+ "pilotage-instrument-glyphs",
  "pilotage-instrument-panels",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",

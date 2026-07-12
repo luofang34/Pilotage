@@ -150,9 +150,27 @@ function fakeExports({
       return packRenderResult(resultStatus, resultLen, renderGeneration(panel));
     },
     set_v_speeds: () => 0,
+    glyph_manifest: () => new Uint8Array(0),
+    glyph_recorded_hash: () => new Uint8Array(0),
     memory: { buffer },
   };
   return Object.assign(exports, overrides);
+}
+
+// A minimal verified-shape atlas for unit paths that are not exercising
+// the real verification chain (the real-wasm section runs it in full).
+function fakeAtlas() {
+  return {
+    version: 1,
+    cellW: 5,
+    cellH: 7,
+    advance: 6,
+    baseline: 7,
+    map: new Map([
+      ["1".codePointAt(0), { advance: 6, rows: [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110] }],
+      ["8".codePointAt(0), { advance: 6, rows: [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110] }],
+    ]),
+  };
 }
 
 function injectedLoader(exports) {
@@ -162,6 +180,7 @@ function injectedLoader(exports) {
     createRuntime: () => exports,
     queryAbiVersion: () => exports.abi_version(),
     createCanvas: recordingCanvas,
+    glyphAtlas: fakeAtlas(),
   };
 }
 
@@ -957,14 +976,73 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   );
 }
 
+// ---- glyph text painting (REN-02 consumption) ---------------------------------
+
+{
+  const textScene = Uint8Array.from([
+    1,
+    ...cmd(0x50, [1]),
+    ...cmd(0x30, [...f32(14), 0, ...f32(8), ...f32(40), 0x31]),
+    ...cmd(0x51, [1]),
+  ]);
+  const ctx = new RecordingCtx();
+  const unknown = interpretScene(view(textScene), ctx, fakeAtlas());
+  check("text paints from the atlas as fillRect quads", ctx.calls("fillRect").length > 0);
+  check("text never calls fillText", ctx.calls("fillText").length === 0);
+  check("layer markers and glyph text are known vocabulary", unknown === 0);
+
+  let threw = null;
+  try {
+    interpretScene(view(textScene), new RecordingCtx(), null);
+  } catch (error) {
+    threw = error;
+  }
+  check("text without a verified atlas throws instead of falling back", threw !== null);
+
+  const uncovered = Uint8Array.from([
+    1,
+    ...cmd(0x30, [...f32(14), 0, ...f32(8), ...f32(40), 0x7a]),
+  ]);
+  let missing = null;
+  try {
+    interpretScene(view(uncovered), new RecordingCtx(), fakeAtlas());
+  } catch (error) {
+    missing = error;
+  }
+  check("an uncovered character throws, never substitutes", missing !== null);
+}
+
+{
+  // A text-bearing scene through renderPanel: an atlas miss surfaces as
+  // PAINT_FAILED and leaves the visible target untouched.
+  const textScene = Uint8Array.from([
+    1,
+    ...cmd(0x50, [1]),
+    ...cmd(0x30, [...f32(14), 0, ...f32(8), ...f32(40), 0x7a]),
+    ...cmd(0x51, [1]),
+  ]);
+  const mod = new InstrumentModule(fakeExports({ sceneBytes: textScene }), {
+    createCanvas: recordingCanvas,
+    glyphs: fakeAtlas(),
+  });
+  const visible = new RecordingCtx();
+  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
+  check(
+    "atlas miss is PAINT_FAILED through the pipeline",
+    !result.ok && result.reason === REASON.PAINT_FAILED,
+  );
+  check("atlas miss leaves the visible target untouched", visible.log.length === 0);
+}
+
 // ---- the real WASM module, end to end ----------------------------------------
 
 {
   const wasmUrl = new URL("./instrument-runtime_bg.wasm", import.meta.url);
   let mod = null;
   let capturedWasm = null;
+  let bindings = null;
   try {
-    const bindings = await import("./instrument-runtime.js");
+    bindings = await import("./instrument-runtime.js");
     mod = await loadInstruments(readFileSync(wasmUrl), {
       createCanvas: recordingCanvas,
       loadBindings: async () => bindings,
@@ -978,6 +1056,68 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   }
   if (mod) {
     check("real wasm passes load, ABI, init, and exact-size validation", mod instanceof InstrumentModule);
+
+    // The verification chain fails closed on a corrupt, truncated, or
+    // wrong-hash glyph asset — the backend never becomes ready over one.
+    const wrapRuntime = (over) => {
+      const rt = new bindings.InstrumentRuntime();
+      return {
+        free: () => rt.free(),
+        init: () => rt.init(),
+        state_ptr: () => rt.state_ptr(),
+        state_len: () => rt.state_len(),
+        scene_ptr: () => rt.scene_ptr(),
+        render_result: (panel) => rt.render_result(panel),
+        set_v_speeds: (...a) => rt.set_v_speeds(...a),
+        glyph_manifest: () => rt.glyph_manifest(),
+        glyph_recorded_hash: () => rt.glyph_recorded_hash(),
+        ...over,
+      };
+    };
+    const assetFailure = async (over) => {
+      try {
+        await loadInstruments(readFileSync(wasmUrl), {
+          createCanvas: recordingCanvas,
+          loadBindings: async () => bindings,
+          initializeBindings: async () => capturedWasm,
+          createRuntime: () => wrapRuntime(over),
+        });
+        return null;
+      } catch (error) {
+        return error?.reason ?? null;
+      }
+    };
+    check(
+      "corrupt glyph canonical fails load as GLYPH_ASSET",
+      (await assetFailure({
+        glyph_manifest: () => {
+          const rt = new bindings.InstrumentRuntime();
+          const c = rt.glyph_manifest();
+          c[10] ^= 1;
+          return c;
+        },
+      })) === REASON.GLYPH_ASSET,
+    );
+    check(
+      "truncated glyph canonical fails load as GLYPH_ASSET",
+      (await assetFailure({
+        glyph_manifest: () => {
+          const rt = new bindings.InstrumentRuntime();
+          return rt.glyph_manifest().subarray(0, 40);
+        },
+      })) === REASON.GLYPH_ASSET,
+    );
+    check(
+      "wrong recorded glyph hash fails load as GLYPH_ASSET",
+      (await assetFailure({
+        glyph_recorded_hash: () => {
+          const rt = new bindings.InstrumentRuntime();
+          const h = rt.glyph_recorded_hash();
+          h[0] ^= 1;
+          return h;
+        },
+      })) === REASON.GLYPH_ASSET,
+    );
     check("raw WASM resource is encapsulated by the validated module", !("runtime" in mod));
 
     // The zeroed state block is a version-0 decode failure — a typed

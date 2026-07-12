@@ -24,6 +24,17 @@ export const LOGICAL_W = 480;
 export const LOGICAL_H = 360;
 
 const SCENE_FORMAT_VERSION = 1;
+
+// The controlled glyph pack's recorded content hash (REN-02). The backend
+// verifies the wasm-exported canonical bytes against BOTH the wasm's
+// recorded hash and this pinned value before declaring ready, so a stale
+// or corrupt asset — on either side — fails visibly instead of falling
+// back to a system font.
+export const EXPECTED_GLYPH_SHA256 =
+  "281eef6229feee417c7090d8c8ea79489c017cd1c02fc7234876b2a64a532158";
+const GLYPH_HEADER_LEN = 8;
+const GLYPH_RECORD_LEN = 12;
+const GLYPH_ROWS = 7;
 export const STATE_ABI_VERSION = 2;
 export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
@@ -39,6 +50,8 @@ const REQUIRED_RUNTIME_METHODS = [
   "scene_ptr",
   "render_result",
   "set_v_speeds",
+  "glyph_manifest",
+  "glyph_recorded_hash",
 ];
 
 export async function loadInstruments(wasmUrl, options = {}) {
@@ -144,12 +157,85 @@ export async function loadInstruments(wasmUrl, options = {}) {
       `instrument buffer layout invalid: state=${statePtr} scene=${scenePtr} memory=${memoryLen}`,
     );
   }
+  let glyphs;
+  try {
+    glyphs = options.glyphAtlas ?? (await loadVerifiedGlyphAtlas(runtime));
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw error;
+  }
   return new InstrumentModule(runtime, {
     ...options,
     memory: wasm.memory,
     statePtr,
     scenePtr,
+    glyphs,
   });
+}
+
+/// Loads the wasm-exported glyph canonical bytes, verifies them against
+/// both the wasm-recorded hash and the pinned EXPECTED_GLYPH_SHA256, and
+/// parses the atlas. Any shortfall is a typed GLYPH_ASSET fault: the
+/// backend never becomes ready over a missing, corrupt, or wrong-hash
+/// asset, and never substitutes a system font.
+async function loadVerifiedGlyphAtlas(runtime) {
+  let canonical;
+  let recorded;
+  try {
+    canonical = runtime.glyph_manifest();
+    recorded = runtime.glyph_recorded_hash();
+  } catch (error) {
+    throw new InstrumentFault(REASON.GLYPH_ASSET, `glyph asset query failed: ${error}`);
+  }
+  if (!(canonical instanceof Uint8Array) || !(recorded instanceof Uint8Array)) {
+    throw new InstrumentFault(REASON.GLYPH_ASSET, "glyph asset export shape invalid");
+  }
+  const recordedHex = [...recorded].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (recordedHex !== EXPECTED_GLYPH_SHA256) {
+    throw new InstrumentFault(
+      REASON.GLYPH_ASSET,
+      `glyph recorded hash ${recordedHex} does not match the pinned pack`,
+    );
+  }
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", canonical));
+  const digestHex = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (digestHex !== EXPECTED_GLYPH_SHA256) {
+    throw new InstrumentFault(
+      REASON.GLYPH_ASSET,
+      `glyph canonical bytes hash ${digestHex}, expected the pinned pack`,
+    );
+  }
+  return parseGlyphAtlas(canonical);
+}
+
+/// Parses the canonical glyph serialization (verified by hash above):
+/// 8-byte header (version u16 LE, cell w/h u8, advance u8, baseline u8,
+/// count u16 LE) then 12 bytes per glyph (char u32 LE, advance u8, seven
+/// row bitmaps, leftmost column = highest used bit).
+export function parseGlyphAtlas(canonical) {
+  if (canonical.length < GLYPH_HEADER_LEN) {
+    throw new InstrumentFault(REASON.GLYPH_ASSET, "glyph canonical too short");
+  }
+  const view = new DataView(canonical.buffer, canonical.byteOffset, canonical.byteLength);
+  const count = view.getUint16(6, true);
+  if (canonical.length !== GLYPH_HEADER_LEN + count * GLYPH_RECORD_LEN) {
+    throw new InstrumentFault(REASON.GLYPH_ASSET, "glyph canonical length mismatch");
+  }
+  const map = new Map();
+  for (let i = 0; i < count; i += 1) {
+    const at = GLYPH_HEADER_LEN + i * GLYPH_RECORD_LEN;
+    const rows = [];
+    for (let r = 0; r < GLYPH_ROWS; r += 1) rows.push(canonical[at + 5 + r]);
+    map.set(view.getUint32(at, true), { advance: canonical[at + 4], rows });
+  }
+  return {
+    version: view.getUint16(0, true),
+    cellW: canonical[2],
+    cellH: canonical[3],
+    advance: canonical[4],
+    baseline: canonical[5],
+    map,
+  };
 }
 
 function releaseRuntime(runtime) {
@@ -184,7 +270,10 @@ export class InstrumentModule {
 
   // options.createCanvas injects the back-buffer factory (tests pass a
   // recording double; the browser default is a plain offscreen element).
-  constructor(runtime, { createCanvas, memory, statePtr, scenePtr } = {}) {
+  #glyphs;
+
+  constructor(runtime, { createCanvas, memory, statePtr, scenePtr, glyphs } = {}) {
+    this.#glyphs = glyphs ?? null;
     this.#runtime = runtime;
     this.#memory = memory ?? runtime.memory;
     this.#statePtr = statePtr ?? runtime.state_ptr();
@@ -347,7 +436,7 @@ export class InstrumentModule {
       const bctx = back.getContext("2d");
       bctx.fillStyle = "#000";
       bctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-      this.unknownOpcodes += interpretScene(view, bctx);
+      this.unknownOpcodes += interpretScene(view, bctx, this.#glyphs);
     } catch {
       return { ok: false, reason: REASON.PAINT_FAILED };
     }
@@ -387,12 +476,43 @@ function color(view, at) {
   return `rgba(${r},${g},${b},${a / 255})`;
 }
 
-const H_ALIGN = ["left", "center", "right"];
-const V_ALIGN = ["alphabetic", "middle", "top", "bottom"];
+// Paints one text run from the glyph atlas with the reference
+// rasterizer's metrics: run size maps to the cell height, the pen
+// advances by the manifest advance, the bitmap sits entirely above the
+// baseline, and the leftmost column is the highest used row bit. An
+// uncovered character throws — nothing substitutes.
+export function drawGlyphRun(ctx, glyphs, text, x, y, size, anchorByte) {
+  if (text.length === 0 || !(size > 0)) return;
+  if (!glyphs) throw new Error("text requires the verified glyph atlas");
+  const scale = size / glyphs.cellH;
+  const advance = glyphs.advance * scale;
+  const chars = [...text];
+  const width = chars.length * advance;
+  const h = anchorByte & 3;
+  const v = (anchorByte >> 2) & 3;
+  const left = h === 1 ? x - width / 2 : h === 2 ? x - width : x;
+  // v: 0 baseline, 1 middle, 2 top, 3 bottom (descent is zero).
+  const top = v === 2 ? y : v === 1 ? y - size / 2 : y - size;
+  let pen = left;
+  for (const ch of chars) {
+    const glyph = glyphs.map.get(ch.codePointAt(0));
+    if (!glyph) throw new Error(`no glyph for character ${JSON.stringify(ch)}`);
+    for (let row = 0; row < glyph.rows.length; row += 1) {
+      for (let col = 0; col < glyphs.cellW; col += 1) {
+        if ((glyph.rows[row] >> (glyphs.cellW - 1 - col)) & 1) {
+          ctx.fillRect(pen + col * scale, top + row * scale, scale, scale);
+        }
+      }
+    }
+    pen += advance;
+  }
+}
 
 // Interprets one encoded scene onto a Canvas2D context; returns the
-// number of skipped unknown opcodes.
-export function interpretScene(view, ctx) {
+// number of skipped unknown opcodes. Text paints exclusively from the
+// verified glyph atlas — a scene with text and no atlas throws (the
+// renderer surfaces it as PAINT_FAILED), never a system-font fallback.
+export function interpretScene(view, ctx, glyphs = null) {
   if (view.getUint8(0) !== SCENE_FORMAT_VERSION) return 0;
   let at = 1;
   let unknown = 0;
@@ -472,10 +592,7 @@ export function interpretScene(view, ctx) {
         const text = new TextDecoder().decode(
           new Uint8Array(view.buffer, view.byteOffset + p + 13, plen - 13),
         );
-        ctx.font = `bold ${size}px system-ui, sans-serif`;
-        ctx.textAlign = H_ALIGN[anchor & 3] ?? "left";
-        ctx.textBaseline = V_ALIGN[(anchor >> 2) & 3] ?? "alphabetic";
-        ctx.fillText(text, x, y);
+        drawGlyphRun(ctx, glyphs, text, x, y, size, anchor);
         break;
       }
       case 0x40:
