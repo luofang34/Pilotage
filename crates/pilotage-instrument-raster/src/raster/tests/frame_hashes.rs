@@ -15,8 +15,10 @@ use crate::{FrameId, FramebufferDims, RenderStatus, render};
 // Frame hashes pinned from a byte-reproducible render on the reference
 // rasterizer. `libm` plus IEEE-754 f32 make these identical across the
 // supported CI architectures; a mismatch is a determinism regression, not a
-// value to re-pin casually.
-const PFD_SHA256: &str = "433e22df2c535b3792af5458b54e632db14ee1b61dea99d6b66f9dba427cb63d";
+// value to re-pin casually. The PFD hash covers the datum-qualified
+// altitude tape: the fixture's local-relative reference paints the amber
+// REL label and the not-applied SET setting box (ALT-01).
+const PFD_SHA256: &str = "3148b8e9d5c3d9cc5c1ac812c3f5674615649c65d4966ad3f1a85d1ce1f1d952";
 const HSI_SHA256: &str = "6edcbc92d936a690a68f0632d2ec20b158d54e59cc9fde6640feefa077b258e3";
 
 /// A fixed, richly populated state so every panel band paints content.
@@ -75,6 +77,7 @@ pub(super) fn demo_state() -> AircraftState {
         selections: Selections {
             heading_bug_rad: 0.5,
             altitude_sel_m: Some(915.0),
+            ..Selections::default()
         },
         quality: EstimateQuality::Good,
         valid: ValidFlags {
@@ -84,6 +87,7 @@ pub(super) fn demo_state() -> AircraftState {
             velocity: true,
         },
         snapshot: SnapshotMeta::default(),
+        altitude: pilotage_instrument_state::AltitudeDeclaration::default(),
     }
 }
 

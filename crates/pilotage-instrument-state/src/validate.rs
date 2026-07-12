@@ -30,6 +30,10 @@ pub enum GroupFault {
     UnknownQuality,
     /// An enum field carried a value this build does not know.
     UnknownEnum,
+    /// A reference class requires a source sample, applied setting, or
+    /// model identity that was not provided. The group fails; nothing
+    /// substitutes.
+    SourceAbsent,
 }
 
 /// Per-group validation results; `None` means the group's received data
@@ -58,6 +62,9 @@ pub struct StateIntegrity {
     pub quality: Option<GroupFault>,
     /// Snapshot coherence carried an unknown wire value.
     pub coherence: Option<GroupFault>,
+    /// Datum-qualified altitude fault: unknown reference class, missing
+    /// required source, undeclared model, or non-finite sample.
+    pub altitude: Option<GroupFault>,
 }
 
 fn all_finite(values: &[f32]) -> bool {
@@ -88,7 +95,9 @@ pub fn validate_quat(quat: Quat) -> Result<Quat, GroupFault> {
 }
 
 fn selections_fault(selections: &Selections) -> Option<GroupFault> {
-    let finite = selections.heading_bug_rad.is_finite() && opt_finite(selections.altitude_sel_m);
+    let finite = selections.heading_bug_rad.is_finite()
+        && opt_finite(selections.altitude_sel_m)
+        && opt_finite(selections.baro_sel_hpa);
     if finite {
         None
     } else {
@@ -146,7 +155,48 @@ pub fn validate_state(state: &AircraftState) -> StateIntegrity {
     if state.snapshot.coherence == SnapshotCoherence::Unknown {
         integrity.coherence = Some(GroupFault::UnknownEnum);
     }
+    integrity.altitude = altitude_fault(state);
     integrity
+}
+
+/// Typed reason a datum-qualified altitude cannot display. Class rules:
+/// local-relative needs no sample; barometric indicated needs the sample
+/// and the source-applied setting; pressure, geometric MSL, and AGL need
+/// the sample; geometric MSL also needs a declared model. An unknown
+/// class or a non-finite sample fails outright — no reference is ever
+/// guessed and no fallback is ever taken.
+fn altitude_fault(state: &AircraftState) -> Option<GroupFault> {
+    use crate::altitude::{AltitudeClass, GeoidModelId};
+    let decl = &state.altitude;
+    if !opt_finite(decl.sample_m) {
+        return Some(GroupFault::NonFinite);
+    }
+    let applied = state.air.data.and_then(|air| air.baro_setting_hpa);
+    match decl.reference_class {
+        AltitudeClass::LocalRelative => None,
+        AltitudeClass::BaroIndicated => {
+            if decl.sample_m.is_none() || applied.is_none() {
+                Some(GroupFault::SourceAbsent)
+            } else {
+                None
+            }
+        }
+        AltitudeClass::Pressure | AltitudeClass::Agl => {
+            if decl.sample_m.is_none() {
+                Some(GroupFault::SourceAbsent)
+            } else {
+                None
+            }
+        }
+        AltitudeClass::GeometricMsl => {
+            if decl.sample_m.is_none() || decl.geoid_model == GeoidModelId::UNDECLARED {
+                Some(GroupFault::SourceAbsent)
+            } else {
+                None
+            }
+        }
+        AltitudeClass::Unknown => Some(GroupFault::UnknownEnum),
+    }
 }
 
 #[cfg(test)]

@@ -1082,6 +1082,42 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "undeclared flags stay unset within a partial declaration",
     view.getUint8(85) === 0b1001,
   );
+
+  // ALT-01: the default altitude declaration is local-relative with no
+  // sample; declared classes and identities encode exactly.
+  check(
+    "undeclared altitude datum writes local-relative with no sample",
+    view.getUint8(125) === 0 &&
+      view.getUint8(126) === 0 &&
+      view.getUint8(127) === 0 &&
+      Number.isNaN(view.getFloat32(128, true)) &&
+      Number.isNaN(view.getFloat32(132, true)) &&
+      view.getUint32(136, true) === 0,
+  );
+  const withDatum = mod.writeState({
+    selections: {
+      headingBugRad: 0,
+      altitudeSelClass: 1,
+      altitudeSelOriginId: 9,
+      altitudeSelModel: 4,
+      baroSelHpa: 1020.5,
+    },
+    altitude: { referenceClass: 1, geoidModel: 2, sampleM: 457.2, originId: 7 },
+  });
+  check("datum-qualified state write succeeds", withDatum.ok === true);
+  check(
+    "declared altitude datum encodes exactly (abi.rs parity)",
+    view.getUint8(125) === 1 &&
+      view.getUint8(126) === 1 &&
+      view.getUint8(127) === 2 &&
+      Math.abs(view.getFloat32(128, true) - 457.2) < 1e-3 &&
+      Math.abs(view.getFloat32(132, true) - 1020.5) < 1e-3 &&
+      view.getUint32(136, true) === 7,
+  );
+  check(
+    "selection datum identity encodes exactly (abi.rs parity)",
+    view.getUint8(140) === 4 && view.getUint32(144, true) === 9,
+  );
 }
 
 // ---- glyph text painting (REN-02 consumption) ---------------------------------

@@ -5,7 +5,7 @@ use crate::aircraft::{AirData, AircraftState, Attitude, EstimateQuality, Kinemat
 use crate::signal::{FreshnessPolicy, SignalStatus};
 use pilotage_frames::Quat;
 
-fn flying_state() -> AircraftState {
+pub(crate) fn flying_state() -> AircraftState {
     AircraftState {
         attitude: Stamped {
             data: Some(Attitude {
@@ -43,7 +43,7 @@ fn flying_state() -> AircraftState {
 fn derives_display_units_from_si_ned() {
     let p = resolve(&flying_state(), &FreshnessPolicy::default());
     // 304.8 m up = 1000 ft.
-    assert!((p.alt_ft.value - 1000.0).abs() < 0.5);
+    assert!((p.altitude.value_ft.value - 1000.0).abs() < 0.5);
     // 2 m/s climb ≈ 394 fpm.
     assert!((p.vsi_fpm.value - 393.7).abs() < 1.0);
     // 10,10 m/s ≈ 27.5 kt at 045°.
@@ -94,7 +94,7 @@ fn degraded_quality_taints_all_estimate_groups() {
     s.quality = EstimateQuality::Degraded;
     let p = resolve(&s, &FreshnessPolicy::default());
     assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
-    assert_eq!(p.alt_ft.status, SignalStatus::Degraded);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Degraded);
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn slow_track_is_meaningless_and_missing() {
 fn empty_state_resolves_all_missing() {
     let p = resolve(&AircraftState::default(), &FreshnessPolicy::default());
     assert_eq!(p.roll_rad.status, SignalStatus::Missing);
-    assert_eq!(p.alt_ft.status, SignalStatus::Missing);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Missing);
     assert_eq!(p.ias_kt.status, SignalStatus::Missing);
     assert_eq!(p.nav.status, SignalStatus::Missing);
     assert_eq!(p.wind.status, SignalStatus::Missing);
@@ -130,7 +130,7 @@ fn excessive_skew_degrades_both_stamped_groups() {
     // must not present as one coherent aircraft state.
     assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
     assert_eq!(p.turn_rate_rps.status, SignalStatus::Degraded);
-    assert_eq!(p.alt_ft.status, SignalStatus::Degraded);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Degraded);
     assert_eq!(p.vsi_fpm.status, SignalStatus::Degraded);
     // Groups outside the stamped attitude/kinematics pair are untouched.
     assert_eq!(p.baro_hpa.status, SignalStatus::Valid);
@@ -147,7 +147,11 @@ fn coherent_and_insufficient_snapshots_do_not_degrade() {
         };
         let p = resolve(&s, &FreshnessPolicy::default());
         assert_eq!(p.roll_rad.status, SignalStatus::Valid, "{coherence:?}");
-        assert_eq!(p.alt_ft.status, SignalStatus::Valid, "{coherence:?}");
+        assert_eq!(
+            p.altitude.value_ft.status,
+            SignalStatus::Valid,
+            "{coherence:?}"
+        );
     }
 }
 
@@ -177,7 +181,7 @@ fn undeclared_trust_never_resolves_valid() {
     };
     let p = resolve(&s, &FreshnessPolicy::default());
     assert_eq!(p.roll_rad.status, SignalStatus::Failed);
-    assert_eq!(p.alt_ft.status, SignalStatus::Failed);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Failed);
 }
 
 #[test]
@@ -197,7 +201,7 @@ fn invalid_quaternion_never_reaches_attitude_geometry() {
     assert!(p.pitch_rad.value.is_finite());
     // Isolation: kinematics-derived signals are untouched by the
     // attitude fault.
-    assert_eq!(p.alt_ft.status, SignalStatus::Valid);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Valid);
 }
 
 #[test]
@@ -224,8 +228,8 @@ fn derived_overflow_fails_instead_of_showing_infinity() {
         kin.pos_ned_m[2] = -f32::MAX;
     }
     let p = resolve(&s, &FreshnessPolicy::default());
-    assert_eq!(p.alt_ft.status, SignalStatus::Failed);
-    assert_eq!(p.alt_ft.value, 0.0);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Failed);
+    assert_eq!(p.altitude.value_ft.value, 0.0);
 }
 
 #[test]
@@ -251,7 +255,7 @@ fn every_showable_output_is_finite_under_hostile_input() {
             ("turn", p.turn_rate_rps),
             ("ias", p.ias_kt),
             ("gs", p.gs_kt),
-            ("alt", p.alt_ft),
+            ("alt", p.altitude.value_ft),
             ("vsi", p.vsi_fpm),
             ("track", p.track_rad),
             ("baro", p.baro_hpa),
@@ -320,7 +324,7 @@ fn unknown_coherence_degrades_stamped_groups() {
     };
     let p = resolve(&s, &FreshnessPolicy::default());
     assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
-    assert_eq!(p.alt_ft.status, SignalStatus::Degraded);
+    assert_eq!(p.altitude.value_ft.status, SignalStatus::Degraded);
 }
 
 #[test]

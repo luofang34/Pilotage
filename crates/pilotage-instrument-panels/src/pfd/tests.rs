@@ -9,7 +9,8 @@ use pilotage_instrument_state::{
     resolve,
 };
 
-use super::{PfdConfig, VSpeeds, draw_pfd};
+pub(crate) use super::PfdConfig;
+use super::{VSpeeds, draw_pfd};
 
 pub(crate) fn flying() -> PanelData {
     let state = AircraftState {
@@ -240,8 +241,10 @@ fn air_data_failure_cues_are_annunciations() {
     let mut data = flying();
     data.ias_kt =
         pilotage_instrument_state::Sig::with_status(data.ias_kt.value, SignalStatus::Failed);
-    data.alt_ft =
-        pilotage_instrument_state::Sig::with_status(data.alt_ft.value, SignalStatus::Failed);
+    data.altitude.value_ft = pilotage_instrument_state::Sig::with_status(
+        data.altitude.value_ft.value,
+        SignalStatus::Failed,
+    );
     let scene = render(&data, &PfdConfig::default());
     let annunciations = layer_texts(&scene, LayerId::Annunciation);
     let tapes = layer_texts(&scene, LayerId::Tapes);

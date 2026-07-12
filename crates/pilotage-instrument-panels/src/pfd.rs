@@ -126,7 +126,7 @@ pub fn draw_pfd(
     if data.ias_kt.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 8.0, 60.0, 74.0, 200.0, "IAS")?;
     }
-    if data.alt_ft.status == SignalStatus::Failed {
+    if data.altitude.value_ft.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
     if let Some(alerts) = alerts {
@@ -185,5 +185,7 @@ fn draw_turn_rate(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
 
 #[cfg(test)]
 mod attitude_tests;
+#[cfg(test)]
+mod datum_tests;
 #[cfg(test)]
 pub(crate) mod tests;

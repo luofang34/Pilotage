@@ -35,8 +35,8 @@ export const EXPECTED_GLYPH_SHA256 =
 const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
-export const STATE_ABI_VERSION = 2;
-export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128 });
+export const STATE_ABI_VERSION = 3;
+export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 10;
 
@@ -402,9 +402,27 @@ export class InstrumentModule {
       f(116, state.wind?.speedMps ?? 0);
       view.setUint32(120, state.snapshot?.generation ?? 0, true);
       b(124, state.snapshot?.coherence ?? 0);
-      b(125, 0);
-      b(126, 0);
-      b(127, 0);
+      // ALT-01 datum declaration (abi.rs parity): the default is the
+      // simulator's local-relative reference with no sample — a tape
+      // that reads REL, never an unlabelled barometric altitude.
+      b(125, state.altitude?.referenceClass ?? 0);
+      b(126, state.selections?.altitudeSelClass ?? 0);
+      b(127, state.altitude?.geoidModel ?? 0);
+      f(128, state.altitude?.sampleM ?? NaN);
+      f(132, state.selections?.baroSelHpa ?? NaN);
+      view.setUint32(136, state.altitude?.originId ?? 0, true);
+      // The selection's COMPLETE datum identity (abi.rs parity): class
+      // equality alone never renders a bug — origin and model must
+      // match the displayed datum too.
+      b(140, state.selections?.altitudeSelModel ?? 0);
+      b(141, 0);
+      b(142, 0);
+      b(143, 0);
+      view.setUint32(144, state.selections?.altitudeSelOriginId ?? 0, true);
+      b(148, 0);
+      b(149, 0);
+      b(150, 0);
+      b(151, 0);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

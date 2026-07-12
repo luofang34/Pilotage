@@ -5,6 +5,7 @@ use libm::{atan2f, sqrtf};
 use crate::aircraft::{
     AircraftState, EstimateQuality, NavData, NavSource, Selections, SnapshotCoherence, Wind,
 };
+use crate::altitude::{AltitudeClass, OriginId};
 use crate::presentation::{AirframeDisplayProfile, AttitudePresentation, UnusualAttitudeState};
 use crate::signal::{FreshnessPolicy, Sig, SignalStatus};
 use crate::units::{M_TO_FT, MPS_TO_FPM, MPS_TO_KT};
@@ -23,6 +24,29 @@ pub struct NavResolved {
     pub status: SignalStatus,
 }
 
+/// The pilot-selected and source-applied altimeter settings disagree
+/// beyond this tolerance (hectopascals).
+pub const BARO_SETTING_TOLERANCE_HPA: f32 = 0.5;
+
+/// Datum-qualified altitude resolved for display (ALT-01): the value
+/// never changes reference silently, a barometric class fails without
+/// its source instead of falling back to local NED, and selection
+/// compatibility is decided by class, never by numeric coincidence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedAltitude {
+    /// Displayed altitude in feet; quiet zero behind a hidden status.
+    pub value_ft: Sig<f32>,
+    /// Reference class, for the tape label and compatibility checks.
+    pub class: AltitudeClass,
+    /// Origin identity when the class is local-relative.
+    pub origin: OriginId,
+    /// Pilot-selected setting disagrees with the source-applied one.
+    pub setting_mismatch: bool,
+    /// The selected altitude shares the displayed reference class, so
+    /// the bug and selection readout may render.
+    pub bug_compatible: bool,
+}
+
 /// Display-ready state consumed by every panel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanelData {
@@ -38,8 +62,8 @@ pub struct PanelData {
     pub ias_kt: Sig<f32>,
     /// Groundspeed, knots.
     pub gs_kt: Sig<f32>,
-    /// Altitude above the local origin, feet.
-    pub alt_ft: Sig<f32>,
+    /// Datum-qualified altitude.
+    pub altitude: ResolvedAltitude,
     /// Vertical speed, feet/minute, positive climbing.
     pub vsi_fpm: Sig<f32>,
     /// Ground track, radians clockwise from north.
@@ -119,6 +143,10 @@ fn sanitized_selections(selections: Selections) -> Selections {
             0.0
         },
         altitude_sel_m: selections.altitude_sel_m.filter(|value| value.is_finite()),
+        altitude_sel_class: selections.altitude_sel_class,
+        altitude_sel_origin: selections.altitude_sel_origin,
+        altitude_sel_model: selections.altitude_sel_model,
+        baro_sel_hpa: selections.baro_sel_hpa.filter(|value| value.is_finite()),
     }
 }
 
@@ -167,7 +195,7 @@ pub fn resolve_stateful(
     let kin_fresh = group_freshness(policy, has_kin, state.kinematics.age_ms);
     let pos_status = trust.fold(has_kin, kin_fresh, integrity.position, state.valid.position);
     let vel_status = trust.fold(has_kin, kin_fresh, integrity.velocity, state.valid.velocity);
-    let (alt_ft, vsi_fpm, gs_kt, track_rad, gs_mps) = kinematics_geometry(state);
+    let (rel_alt_ft, vsi_fpm, gs_kt, track_rad, gs_mps) = kinematics_geometry(state);
     let track_status = if !(gs_mps.is_finite() && gs_mps >= TRACK_MIN_GS_MPS) {
         SignalStatus::Missing
     } else {
@@ -183,7 +211,7 @@ pub fn resolve_stateful(
         turn_rate_rps: finite(Sig::with_status(turn_rate, rate_status)),
         ias_kt: finite(ias),
         gs_kt: finite(Sig::with_status(gs_kt, vel_status)),
-        alt_ft: finite(Sig::with_status(alt_ft, pos_status)),
+        altitude: altitude_resolved(state, policy, &trust, &integrity, pos_status, rel_alt_ft),
         vsi_fpm: finite(Sig::with_status(vsi_fpm, vel_status)),
         track_rad: finite(Sig::with_status(track_rad, track_status)),
         baro_hpa: finite(baro),
@@ -258,6 +286,86 @@ fn attitude_geometry(
             unusual.reset();
             (AttitudePresentation::default(), 0.0, 0.0)
         }
+    }
+}
+
+/// Resolves the datum-qualified altitude for the declared class. The
+/// non-local classes ride the air-data group's stamp in ABI v3 (they
+/// arrive beside it); a dedicated source group would bring its own
+/// stamp. A required source that is absent fails the altitude — the
+/// value is a quiet zero and nothing substitutes.
+fn altitude_resolved(
+    state: &AircraftState,
+    policy: &FreshnessPolicy,
+    trust: &Trust,
+    integrity: &StateIntegrity,
+    pos_status: SignalStatus,
+    rel_alt_ft: f32,
+) -> ResolvedAltitude {
+    let decl = state.altitude;
+    let class = decl.reference_class;
+    let fault = fault_status(integrity.altitude);
+    let sample_ft = decl.sample_m.map(|m| m * M_TO_FT);
+    let sample_status = group_freshness(policy, state.air.data.is_some(), state.air.age_ms)
+        .worst(trust.quality)
+        .worst(trust.coherence)
+        .worst(fault);
+    let value = match class {
+        AltitudeClass::LocalRelative => Sig::with_status(rel_alt_ft, pos_status.worst(fault)),
+        AltitudeClass::BaroIndicated
+        | AltitudeClass::Pressure
+        | AltitudeClass::GeometricMsl
+        | AltitudeClass::Agl => match (sample_ft, integrity.altitude) {
+            (Some(v), None) => Sig::with_status(v, sample_status),
+            _ => Sig::with_status(0.0, SignalStatus::Failed),
+        },
+        AltitudeClass::Unknown => Sig::with_status(0.0, SignalStatus::Failed),
+    };
+    let applied = state.air.data.and_then(|air| air.baro_setting_hpa);
+    let setting_mismatch = class == AltitudeClass::BaroIndicated
+        && matches!(
+            (applied, state.selections.baro_sel_hpa),
+            (Some(a), Some(s)) if (a - s).abs() > BARO_SETTING_TOLERANCE_HPA
+        );
+    let bug_compatible = selection_compatible(state, class, setting_mismatch);
+    ResolvedAltitude {
+        value_ft: finite(value),
+        class,
+        origin: decl.origin,
+        setting_mismatch,
+        bug_compatible,
+    }
+}
+
+/// Whether the pilot's altitude selection shares the displayed datum's
+/// COMPLETE reference identity — class equality alone is never
+/// compatibility. Local-relative selections must name the same origin;
+/// geometric-MSL selections must name the same declared model; a
+/// barometric selection's datum is the applied setting, so a disputed
+/// setting suppresses the bug; pressure altitude's datum is fully
+/// identified by its class (standard atmosphere); AGL carries no source
+/// identity in this ABI revision, so class equality is its complete
+/// identity today. Anything unknown or incomplete fails closed.
+fn selection_compatible(
+    state: &AircraftState,
+    displayed: AltitudeClass,
+    setting_mismatch: bool,
+) -> bool {
+    if state.selections.altitude_sel_m.is_none() || state.selections.altitude_sel_class != displayed
+    {
+        return false;
+    }
+    let decl = state.altitude;
+    let selections = state.selections;
+    match displayed {
+        AltitudeClass::LocalRelative => selections.altitude_sel_origin == decl.origin,
+        AltitudeClass::GeometricMsl => {
+            selections.altitude_sel_model == decl.geoid_model
+                && selections.altitude_sel_model != crate::altitude::GeoidModelId::UNDECLARED
+        }
+        AltitudeClass::BaroIndicated => !setting_mismatch,
+        AltitudeClass::Pressure | AltitudeClass::Agl => true,
+        AltitudeClass::Unknown => false,
     }
 }
 
@@ -345,5 +453,7 @@ fn wind_signal(
     }
 }
 
+#[cfg(test)]
+mod altitude_tests;
 #[cfg(test)]
 mod tests;
