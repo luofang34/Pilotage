@@ -1,6 +1,7 @@
 //! The raw input state a feeder writes.
 
 use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
+use crate::heading::{HeadingReference, HeadingSample, MagneticVariation};
 use pilotage_frames::Quat;
 
 /// Attitude estimate: orientation and body rotation rates.
@@ -69,8 +70,11 @@ pub enum NavFromTo {
 pub struct NavData {
     /// Which source drives the deviation bar.
     pub source: NavSource,
-    /// Selected course in radians.
+    /// Selected course in radians from ITS OWN declared north.
     pub course_rad: f32,
+    /// The north the course is expressed against. The CDI and course
+    /// box render only after conversion into the rose reference.
+    pub course_reference: HeadingReference,
     /// Lateral deviation in dots (full scale ±2).
     pub cdi_dots: f32,
     /// TO/FROM flag.
@@ -85,8 +89,11 @@ pub struct NavData {
 /// so they carry no freshness.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Selections {
-    /// Heading bug in radians.
+    /// Heading bug in radians from ITS OWN declared north.
     pub heading_bug_rad: f32,
+    /// The north the heading bug is expressed against. The bug renders
+    /// only after conversion into the rose reference; unknown fails.
+    pub heading_bug_reference: HeadingReference,
     /// Selected altitude in meters, when set.
     pub altitude_sel_m: Option<f32>,
     /// Reference class the selected altitude is expressed in. The bug
@@ -151,6 +158,10 @@ pub struct ValidFlags {
     pub position: bool,
     /// NED velocity is valid.
     pub velocity: bool,
+    /// The heading sample is declared valid.
+    pub heading: bool,
+    /// The variation sample is declared valid.
+    pub variation: bool,
 }
 
 /// One estimate group with the age a feeder stamped it with.
@@ -218,12 +229,19 @@ pub struct AircraftState {
     pub snapshot: SnapshotMeta,
     /// Datum declaration for the primary altitude (ALT-01).
     pub altitude: AltitudeDeclaration,
+    /// Independent heading sample with an explicit reference (NAV-01).
+    /// Operational heading never derives implicitly from attitude yaw.
+    pub heading: Stamped<HeadingSample>,
+    /// Magnetic-variation sample for the single sanctioned
+    /// magnetic/true conversion path.
+    pub variation: Stamped<MagneticVariation>,
 }
 
 impl Default for Selections {
     fn default() -> Self {
         Self {
             heading_bug_rad: 0.0,
+            heading_bug_reference: HeadingReference::Unknown,
             altitude_sel_m: None,
             altitude_sel_class: AltitudeClass::LocalRelative,
             altitude_sel_origin: OriginId(0),

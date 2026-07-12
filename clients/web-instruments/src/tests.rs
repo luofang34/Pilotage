@@ -48,6 +48,7 @@ pub(crate) fn attitude_state() -> AircraftState {
             rates: true,
             position: true,
             velocity: true,
+            ..Default::default()
         },
         ..AircraftState::default()
     }

@@ -5,6 +5,7 @@ use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, Wind,
 };
+use crate::heading::HeadingReference;
 use pilotage_frames::Quat;
 
 const BAD: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
@@ -46,6 +47,7 @@ fn trusted_full_state() -> AircraftState {
             fromto: NavFromTo::To,
             vdev_dots: Some(0.2),
             dist_nm: Some(12.5),
+            course_reference: HeadingReference::SimLocalTrue,
         }),
         wind: stamped(Wind {
             from_rad: 1.0,
@@ -57,6 +59,7 @@ fn trusted_full_state() -> AircraftState {
             rates: true,
             position: true,
             velocity: true,
+            ..Default::default()
         },
         ..AircraftState::default()
     }

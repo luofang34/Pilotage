@@ -16,12 +16,16 @@ use crate::validate::{StateIntegrity, validate_quat, validate_state};
 const TRACK_MIN_GS_MPS: f32 = 0.5;
 
 /// Resolved navigation guidance for the HSI.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NavResolved {
     /// Guidance data as provided; `source == None` removes the CDI.
     pub data: NavData,
     /// Status of the guidance group as a whole.
     pub status: SignalStatus,
+    /// Selected course presented in the rose reference; `Failed` when
+    /// the course's own reference is unknown or cannot convert. The CDI
+    /// and course box render only from this, never from the raw angle.
+    pub course_rose_rad: Sig<f32>,
 }
 
 /// The pilot-selected and source-applied altimeter settings disagree
@@ -54,8 +58,11 @@ pub struct PanelData {
     pub roll_rad: Sig<f32>,
     /// Pitch angle, radians, positive nose-up.
     pub pitch_rad: Sig<f32>,
-    /// Heading, radians clockwise from north.
-    pub heading_rad: Sig<f32>,
+    /// Independent, reference-typed heading.
+    pub heading: ResolvedHeading,
+    /// Heading bug presented in the rose reference; `Failed` when the
+    /// bug's own reference is unknown or cannot convert.
+    pub heading_bug_rose_rad: Sig<f32>,
     /// Body yaw rate, radians/second (turn-rate proxy).
     pub turn_rate_rps: Sig<f32>,
     /// Indicated airspeed, knots.
@@ -102,7 +109,7 @@ fn flag_status(valid: bool) -> SignalStatus {
     }
 }
 
-fn fault_status<T>(fault: Option<T>) -> SignalStatus {
+pub(crate) fn fault_status<T>(fault: Option<T>) -> SignalStatus {
     if fault.is_some() {
         SignalStatus::Failed
     } else {
@@ -127,7 +134,7 @@ fn coherence_status(coherence: SnapshotCoherence) -> SignalStatus {
 /// A signal that would show a non-finite value fails instead: no
 /// non-finite number may reach scene generation, and no value is
 /// silently repaired.
-fn finite(sig: Sig<f32>) -> Sig<f32> {
+pub(crate) fn finite(sig: Sig<f32>) -> Sig<f32> {
     if sig.status.shows_value() && !sig.value.is_finite() {
         Sig::with_status(0.0, SignalStatus::Failed)
     } else {
@@ -142,6 +149,7 @@ fn sanitized_selections(selections: Selections) -> Selections {
         } else {
             0.0
         },
+        heading_bug_reference: selections.heading_bug_reference,
         altitude_sel_m: selections.altitude_sel_m.filter(|value| value.is_finite()),
         altitude_sel_class: selections.altitude_sel_class,
         altitude_sel_origin: selections.altitude_sel_origin,
@@ -185,7 +193,7 @@ pub fn resolve_stateful(
         coherence: coherence_status(state.snapshot.coherence),
     };
 
-    let (presentation, yaw, turn_rate) = attitude_geometry(state, profile, unusual);
+    let (presentation, turn_rate) = attitude_geometry(state, profile, unusual);
     let has_att = state.attitude.data.is_some();
     let att_fresh = group_freshness(policy, has_att, state.attitude.age_ms);
     let att_status = trust.fold(has_att, att_fresh, integrity.attitude, state.valid.attitude);
@@ -203,31 +211,52 @@ pub fn resolve_stateful(
     };
 
     let (ias, baro) = air_signals(state, policy, trust.quality, &integrity);
+    let heading = heading_resolved(state, policy, &trust, &integrity);
+    let rose = heading.reference;
+    let track = presented_true(Sig::with_status(track_rad, track_status), rose, state);
+    let wind = presented_wind(wind_signal(state, policy, &integrity), rose, state);
+    let bug = presented_angle(
+        Sig::with_status(state.selections.heading_bug_rad, SignalStatus::Valid),
+        state.selections.heading_bug_reference,
+        rose,
+        state,
+    );
 
     PanelData {
         roll_rad: finite(Sig::with_status(presentation.bank_rad, att_status)),
         pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
-        heading_rad: finite(Sig::with_status(yaw, att_status)),
+        heading,
+        heading_bug_rose_rad: finite(bug),
         turn_rate_rps: finite(Sig::with_status(turn_rate, rate_status)),
         ias_kt: finite(ias),
         gs_kt: finite(Sig::with_status(gs_kt, vel_status)),
         altitude: altitude_resolved(state, policy, &trust, &integrity, pos_status, rel_alt_ft),
         vsi_fpm: finite(Sig::with_status(vsi_fpm, vel_status)),
-        track_rad: finite(Sig::with_status(track_rad, track_status)),
+        track_rad: finite(track),
         baro_hpa: finite(baro),
-        wind: wind_signal(state, policy, &integrity),
-        nav: nav_resolved(state, policy, &integrity),
+        wind,
+        nav: nav_resolved(state, policy, &integrity, rose),
         selections: sanitized_selections(state.selections),
         integrity,
         presentation,
     }
 }
 
+impl Default for NavResolved {
+    fn default() -> Self {
+        Self {
+            data: NavData::default(),
+            status: SignalStatus::default(),
+            course_rose_rad: Sig::with_status(0.0, SignalStatus::Missing),
+        }
+    }
+}
+
 /// Source-level trust shared by every estimate group this frame.
 #[derive(Clone, Copy)]
-struct Trust {
-    quality: SignalStatus,
-    coherence: SignalStatus,
+pub(crate) struct Trust {
+    pub(crate) quality: SignalStatus,
+    pub(crate) coherence: SignalStatus,
 }
 
 impl Trust {
@@ -236,7 +265,7 @@ impl Trust {
     /// not a red X — because nothing was received to distrust. A group
     /// *with* data still folds even when its freshness reads Missing
     /// (a bogus age), so declared distrust cannot be masked.
-    fn fold(
+    pub(crate) fn fold(
         &self,
         has_data: bool,
         freshness: SignalStatus,
@@ -254,7 +283,11 @@ impl Trust {
     }
 }
 
-fn group_freshness(policy: &FreshnessPolicy, has_data: bool, age_ms: Option<f32>) -> SignalStatus {
+pub(crate) fn group_freshness(
+    policy: &FreshnessPolicy,
+    has_data: bool,
+    age_ms: Option<f32>,
+) -> SignalStatus {
     if has_data {
         policy.status_for_age(age_ms)
     } else {
@@ -269,103 +302,19 @@ fn attitude_geometry(
     state: &AircraftState,
     profile: &AirframeDisplayProfile,
     unusual: &mut UnusualAttitudeState,
-) -> (AttitudePresentation, f32, f32) {
+) -> (AttitudePresentation, f32) {
     match state.attitude.data {
         Some(att) => match validate_quat(att.quat) {
-            Ok(quat) => {
-                let presentation = unusual.step(quat, profile);
-                let (_, _, yaw) = quat.to_euler();
-                (presentation, yaw, att.rates_rps[2])
-            }
+            Ok(quat) => (unusual.step(quat, profile), att.rates_rps[2]),
             Err(_) => {
                 unusual.reset();
-                (AttitudePresentation::default(), 0.0, att.rates_rps[2])
+                (AttitudePresentation::default(), att.rates_rps[2])
             }
         },
         None => {
             unusual.reset();
-            (AttitudePresentation::default(), 0.0, 0.0)
+            (AttitudePresentation::default(), 0.0)
         }
-    }
-}
-
-/// Resolves the datum-qualified altitude for the declared class. The
-/// non-local classes ride the air-data group's stamp in ABI v3 (they
-/// arrive beside it); a dedicated source group would bring its own
-/// stamp. A required source that is absent fails the altitude — the
-/// value is a quiet zero and nothing substitutes.
-fn altitude_resolved(
-    state: &AircraftState,
-    policy: &FreshnessPolicy,
-    trust: &Trust,
-    integrity: &StateIntegrity,
-    pos_status: SignalStatus,
-    rel_alt_ft: f32,
-) -> ResolvedAltitude {
-    let decl = state.altitude;
-    let class = decl.reference_class;
-    let fault = fault_status(integrity.altitude);
-    let sample_ft = decl.sample_m.map(|m| m * M_TO_FT);
-    let sample_status = group_freshness(policy, state.air.data.is_some(), state.air.age_ms)
-        .worst(trust.quality)
-        .worst(trust.coherence)
-        .worst(fault);
-    let value = match class {
-        AltitudeClass::LocalRelative => Sig::with_status(rel_alt_ft, pos_status.worst(fault)),
-        AltitudeClass::BaroIndicated
-        | AltitudeClass::Pressure
-        | AltitudeClass::GeometricMsl
-        | AltitudeClass::Agl => match (sample_ft, integrity.altitude) {
-            (Some(v), None) => Sig::with_status(v, sample_status),
-            _ => Sig::with_status(0.0, SignalStatus::Failed),
-        },
-        AltitudeClass::Unknown => Sig::with_status(0.0, SignalStatus::Failed),
-    };
-    let applied = state.air.data.and_then(|air| air.baro_setting_hpa);
-    let setting_mismatch = class == AltitudeClass::BaroIndicated
-        && matches!(
-            (applied, state.selections.baro_sel_hpa),
-            (Some(a), Some(s)) if (a - s).abs() > BARO_SETTING_TOLERANCE_HPA
-        );
-    let bug_compatible = selection_compatible(state, class, setting_mismatch);
-    ResolvedAltitude {
-        value_ft: finite(value),
-        class,
-        origin: decl.origin,
-        setting_mismatch,
-        bug_compatible,
-    }
-}
-
-/// Whether the pilot's altitude selection shares the displayed datum's
-/// COMPLETE reference identity — class equality alone is never
-/// compatibility. Local-relative selections must name the same origin;
-/// geometric-MSL selections must name the same declared model; a
-/// barometric selection's datum is the applied setting, so a disputed
-/// setting suppresses the bug; pressure altitude's datum is fully
-/// identified by its class (standard atmosphere); AGL carries no source
-/// identity in this ABI revision, so class equality is its complete
-/// identity today. Anything unknown or incomplete fails closed.
-fn selection_compatible(
-    state: &AircraftState,
-    displayed: AltitudeClass,
-    setting_mismatch: bool,
-) -> bool {
-    if state.selections.altitude_sel_m.is_none() || state.selections.altitude_sel_class != displayed
-    {
-        return false;
-    }
-    let decl = state.altitude;
-    let selections = state.selections;
-    match displayed {
-        AltitudeClass::LocalRelative => selections.altitude_sel_origin == decl.origin,
-        AltitudeClass::GeometricMsl => {
-            selections.altitude_sel_model == decl.geoid_model
-                && selections.altitude_sel_model != crate::altitude::GeoidModelId::UNDECLARED
-        }
-        AltitudeClass::BaroIndicated => !setting_mismatch,
-        AltitudeClass::Pressure | AltitudeClass::Agl => true,
-        AltitudeClass::Unknown => false,
     }
 }
 
@@ -408,6 +357,7 @@ fn nav_resolved(
     state: &AircraftState,
     policy: &FreshnessPolicy,
     integrity: &StateIntegrity,
+    rose: crate::heading::HeadingReference,
 ) -> NavResolved {
     let nav_fresh = policy.status_for_age(state.nav.age_ms);
     match state.nav.data {
@@ -423,7 +373,20 @@ fn nav_resolved(
             } else {
                 data
             };
-            NavResolved { data, status }
+            // The course renders only in the rose reference; an
+            // unknown course reference or an impossible conversion
+            // fails this one quantity, not the whole nav group.
+            let course = presented_angle(
+                Sig::with_status(data.course_rad, status),
+                data.course_reference,
+                rose,
+                state,
+            );
+            NavResolved {
+                data,
+                status,
+                course_rose_rad: finite(course),
+            }
         }
         None => NavResolved::default(),
     }
@@ -453,7 +416,15 @@ fn wind_signal(
     }
 }
 
+mod altitude_signal;
+use altitude_signal::altitude_resolved;
+mod heading_signal;
+pub use heading_signal::ResolvedHeading;
+use heading_signal::{heading_resolved, presented_angle, presented_true, presented_wind};
+
 #[cfg(test)]
 mod altitude_tests;
+#[cfg(test)]
+mod heading_tests;
 #[cfg(test)]
 mod tests;
