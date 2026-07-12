@@ -3,7 +3,7 @@
 use super::{AbiError, STATE_ABI_SIZE, decode_state, encode_state};
 use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
-    Selections, Stamped, Wind,
+    Selections, SnapshotCoherence, SnapshotMeta, Stamped, Wind,
 };
 use crate::quat::Quat;
 
@@ -63,6 +63,10 @@ fn full_state() -> AircraftState {
             rates: false,
             position: true,
             velocity: true,
+        },
+        snapshot: SnapshotMeta {
+            generation: u32::MAX,
+            coherence: SnapshotCoherence::Coherent,
         },
     }
 }

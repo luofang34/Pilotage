@@ -1,5 +1,4 @@
-//! DJI-style flight uplink: stick positions become velocity setpoints
-//! (issue #12).
+//! DJI-style flight uplink: stick positions become velocity setpoints.
 //!
 //! The control law, not the stick map, is what makes a camera drone feel
 //! like one: sticks command **velocities**, centered sticks command
@@ -68,6 +67,8 @@ pub struct FlightUplink {
     last_vel_ned: [f32; 3],
     started: Instant,
     send_failures: u64,
+    expected_system_id: u8,
+    expected_component_id: u8,
 }
 
 /// Climb-stick threshold that opens the motors-idle gate after arming.
@@ -103,7 +104,15 @@ impl FlightUplink {
             last_vel_ned: [0.0; 3],
             started: Instant::now(),
             send_failures: 0,
+            expected_system_id: 1,
+            expected_component_id: 1,
         })
+    }
+
+    /// Selects the MAVLink system/component whose replies may affect state.
+    pub fn set_expected_source(&mut self, system_id: u8, component_id: u8) {
+        self.expected_system_id = system_id;
+        self.expected_component_id = component_id;
     }
 
     fn send(&mut self, frame: &[u8]) {
@@ -120,25 +129,36 @@ impl FlightUplink {
         self.seq = self.seq.wrapping_add(1);
     }
 
-    /// Sends arm/disarm and re-seeds the heading setpoint from the
-    /// vehicle's current yaw so the first yaw-stick input turns from
-    /// where the aircraft actually points.
-    pub fn send_arm(&mut self, arm: bool, current_yaw_rad: f32) {
+    /// Arms and re-seeds heading from the measured yaw.
+    pub fn send_arm(&mut self, current_yaw_rad: f32) {
         self.heading_sp_rad = current_yaw_rad;
+        self.send_arm_command(true);
+    }
+
+    /// Disarms without requiring a measurement that may have failed.
+    pub fn send_disarm(&mut self) {
+        self.send_arm_command(false);
+    }
+
+    fn send_arm_command(&mut self, arm: bool) {
         self.last_frame = None;
         self.quiet_until = Some(Instant::now() + ARM_QUIET);
         self.airborne = false;
         self.hold_pos_ned = None;
         self.last_vel_ned = [0.0; 3];
-        let frame = encode_arm_command(self.seq, arm);
+        let frame = encode_arm_command(
+            self.seq,
+            arm,
+            self.expected_system_id,
+            self.expected_component_id,
+        );
         self.send(&frame);
         info!(arm, "sent arm command to FC");
     }
 
     /// Converts one canonical stick frame into an FPV attitude
-    /// setpoint: roll/pitch sticks command *angles* (rate-style FPV
-    /// acro is a follow-up), the yaw stick integrates a heading
-    /// setpoint exactly like camera mode, and throttle maps directly
+    /// setpoint: roll/pitch sticks command angles, the yaw stick integrates
+    /// a heading setpoint exactly like camera mode, and throttle maps directly
     /// to collective thrust around the hover point — altitude is the
     /// pilot's axis in FPV.
     pub fn send_fpv_frame(&mut self, roll: f32, pitch: f32, throttle: f32, yaw: f32) {
@@ -171,10 +191,14 @@ impl FlightUplink {
         let frame = encode_attitude_setpoint(
             self.seq,
             self.started.elapsed().as_millis() as u32,
-            roll * FPV_MAX_TILT_RAD,
-            pitch * FPV_MAX_TILT_RAD,
-            self.heading_sp_rad,
-            thrust,
+            crate::mavlink::AttitudeTarget {
+                roll_rad: roll * FPV_MAX_TILT_RAD,
+                pitch_rad: pitch * FPV_MAX_TILT_RAD,
+                yaw_rad: self.heading_sp_rad,
+                thrust,
+                system_id: self.expected_system_id,
+                component_id: self.expected_component_id,
+            },
         );
         self.send(&frame);
     }
@@ -228,7 +252,14 @@ impl FlightUplink {
         if !sticks_active {
             let hold = *self.hold_pos_ned.get_or_insert(current_pos_ned_m);
             self.last_vel_ned = [0.0; 3];
-            let frame = encode_position_setpoint(self.seq, time_boot_ms, hold, self.heading_sp_rad);
+            let frame = encode_position_setpoint(
+                self.seq,
+                time_boot_ms,
+                hold,
+                self.heading_sp_rad,
+                self.expected_system_id,
+                self.expected_component_id,
+            );
             self.send(&frame);
             return;
         }
@@ -262,6 +293,8 @@ impl FlightUplink {
             time_boot_ms,
             self.last_vel_ned,
             self.heading_sp_rad,
+            self.expected_system_id,
+            self.expected_component_id,
         );
         self.send(&frame);
     }
@@ -271,7 +304,14 @@ impl FlightUplink {
     /// hover on zero demand).
     pub fn send_neutral(&mut self) {
         let time_boot_ms = self.started.elapsed().as_millis() as u32;
-        let frame = encode_velocity_setpoint(self.seq, time_boot_ms, [0.0; 3], self.heading_sp_rad);
+        let frame = encode_velocity_setpoint(
+            self.seq,
+            time_boot_ms,
+            [0.0; 3],
+            self.heading_sp_rad,
+            self.expected_system_id,
+            self.expected_component_id,
+        );
         self.send(&frame);
     }
 
@@ -281,12 +321,18 @@ impl FlightUplink {
     /// from the sampling tick.
     pub fn poll_fc(&mut self) -> Option<bool> {
         let mut buf = [0u8; 512];
-        let mut messages: Vec<(u8, crate::mavlink::AviateMessage)> = Vec::new();
+        let mut messages: Vec<(crate::mavlink::FrameSource, crate::mavlink::AviateMessage)> =
+            Vec::new();
         let mut armed: Option<bool> = None;
         while let Ok((len, _)) = self.socket.recv_from(&mut buf) {
             messages.clear();
             crate::mavlink::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
-            for (_, message) in &messages {
+            for (source, message) in &messages {
+                if source.system_id != self.expected_system_id
+                    || source.component_id != self.expected_component_id
+                {
+                    continue;
+                }
                 match *message {
                     crate::mavlink::AviateMessage::Heartbeat { armed: a } => armed = Some(a),
                     crate::mavlink::AviateMessage::CommandAck { command, result } => {

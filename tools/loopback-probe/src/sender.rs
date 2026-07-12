@@ -291,6 +291,9 @@ fn fold_telemetry(
     state: &mut SendLoopState,
     metrics: &mut RunMetrics,
 ) {
+    let Some(pose) = observation.pose else {
+        return;
+    };
     if let Some(watermark) = state.last_telemetry_at {
         while state
             .pending
@@ -303,8 +306,8 @@ fn fold_telemetry(
                 .saturating_add(1);
         }
     }
-    let changed = state.last_pose.replace(observation.pose) != Some(observation.pose);
-    metrics.last_pose = Some(observation.pose);
+    let changed = state.last_pose.replace(pose) != Some(pose);
+    metrics.last_pose = Some(pose);
     if changed && let Some(frame) = state.pending.pop_front() {
         let age = estimated_age(observation.received_at, frame.sent_at, ZERO_OFFSET);
         metrics.control_to_telemetry.record(age);

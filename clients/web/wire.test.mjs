@@ -107,11 +107,11 @@ for (const [num, name] of [
 // proto3's omitted zero-valued fields (quat_x/y/z absent -> 0).
 
 function varint(out, v) {
-  let n = v;
+  let n = BigInt(v);
   for (;;) {
-    const b = n & 0x7f;
-    n >>>= 7;
-    if (n === 0) {
+    const b = Number(n & 0x7fn);
+    n >>= 7n;
+    if (n === 0n) {
       out.push(b);
       return;
     }
@@ -131,6 +131,41 @@ function bytesField(out, fieldNumber, bytes) {
   out.push(...bytes);
 }
 
+function uint64Message(value) {
+  const out = [];
+  varint(out, (1 << 3) | 0);
+  varint(out, value);
+  return out;
+}
+
+function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock, incarnationByte) {
+  const out = [];
+  for (const [field, value] of [
+    [1, sourceId],
+    [2, epoch],
+    [3, sequence],
+    [4, acquiredAtNanos],
+    [5, clock],
+  ]) {
+    varint(out, (field << 3) | 0);
+    varint(out, value);
+  }
+  bytesField(out, 6, new Uint8Array(16).fill(incarnationByte));
+  return out;
+}
+
+function decodeAvionicsOnly(avionicsBytes) {
+  const telemetry = [];
+  bytesField(telemetry, 1, uint64Message(1));
+  bytesField(telemetry, 2, uint64Message(42));
+  bytesField(telemetry, 6, avionicsBytes);
+  const envelopeBytes = [];
+  varint(envelopeBytes, (1 << 3) | 0);
+  varint(envelopeBytes, SCHEMA_VERSION);
+  bytesField(envelopeBytes, 4, telemetry);
+  return decodeBareEnvelope(new Uint8Array(envelopeBytes)).message;
+}
+
 const avionics = [];
 f32Field(avionics, 1, 0.9); // quat_w; x/y/z stay 0 and are omitted
 f32Field(avionics, 7, 0.05); // rate_r
@@ -138,8 +173,15 @@ f32Field(avionics, 10, -304.8); // pos_d
 f32Field(avionics, 11, 10.0); // vel_n
 varint(avionics, (14 << 3) | 0);
 varint(avionics, 0b1111); // valid_flags
+const sourceId = 0xfedc_ba98_7654_3210n;
+const acquiredAt = 0xffff_ffff_ffff_fffen;
+bytesField(avionics, 17, measurementStamp(sourceId, 3, 10, acquiredAt, 1, 0xa5));
+bytesField(avionics, 18, measurementStamp(sourceId, 3, 5, acquiredAt - 100_000n, 1, 0xa5));
 
 const sample = [];
+bytesField(sample, 1, uint64Message(1));
+bytesField(sample, 2, uint64Message(42));
+bytesField(sample, 3, uint64Message(2_000_000));
 bytesField(sample, 6, avionics);
 const bare = [];
 varint(bare, (1 << 3) | 0);
@@ -150,11 +192,58 @@ const decoded = decodeBareEnvelope(new Uint8Array(bare));
 check("telemetry datagram decodes as TelemetrySample", decoded.kind === "TelemetrySample");
 const av = decoded.message.avionics;
 check("avionics arm is surfaced", !!av);
+check("telemetry vehicle identity is preserved", decoded.message.vehicleId === 1n);
+check("telemetry source tick is preserved", decoded.message.tick === 42n);
+check("host publication time is preserved separately", decoded.message.publishedAtNanos === 2_000_000n);
+check("absent top-level pose remains null", decoded.message.pose === null && decoded.message.xM === null);
+check("absent top-level velocity remains null", decoded.message.velocity === null && decoded.message.linearXMps === null);
+check("both stamped avionics groups are present", av.attitude !== null && av.kinematics !== null);
 check("avionics quat_w decodes", Math.abs(av.quat.w - 0.9) < 1e-6);
 check("omitted zero quat components decode as 0", av.quat.x === 0 && av.quat.y === 0 && av.quat.z === 0);
 check("avionics pos_d decodes", Math.abs(av.posNed[2] + 304.8) < 1e-3);
 check("avionics vel_n decodes", Math.abs(av.velNed[0] - 10.0) < 1e-6);
 check("avionics valid_flags decode", Number(av.validFlags) === 0b1111);
+check("attitude uint64 identity decodes without precision loss", av.attitudeStamp.sourceId === sourceId);
+check("attitude incarnation decodes exactly", av.attitudeStamp.sourceIncarnation === "a5".repeat(16));
+check("attitude epoch and sequence decode", av.attitudeStamp.sourceEpoch === 3 && av.attitudeStamp.sequence === 10);
+check("attitude uint64 acquisition time and clock decode", av.attitudeStamp.acquiredAtNanos === acquiredAt && av.attitudeStamp.clock === 1);
+check("kinematics sequence remains independent", av.kinematicsStamp.sequence === 5);
+
+const attitudeOnly = [];
+f32Field(attitudeOnly, 1, 0.7);
+f32Field(attitudeOnly, 7, 0.2);
+f32Field(attitudeOnly, 8, 99.0); // ignored without a kinematics stamp
+bytesField(attitudeOnly, 17, measurementStamp(sourceId, 3, 11, acquiredAt, 1, 0xa5));
+const decodedAttitudeOnly = decodeAvionicsOnly(attitudeOnly);
+check(
+  "attitude-only publication omits top-level pose and velocity",
+  decodedAttitudeOnly.pose === null && decodedAttitudeOnly.velocity === null,
+);
+check(
+  "attitude-only publication preserves only the attitude group",
+  decodedAttitudeOnly.avionics.attitude !== null
+    && decodedAttitudeOnly.avionics.kinematics === null
+    && decodedAttitudeOnly.avionics.quat !== null
+    && decodedAttitudeOnly.avionics.posNed === null,
+);
+
+const kinematicsOnly = [];
+f32Field(kinematicsOnly, 1, 0.9); // ignored without an attitude stamp
+f32Field(kinematicsOnly, 8, 12.0);
+f32Field(kinematicsOnly, 11, 5.0);
+bytesField(kinematicsOnly, 18, measurementStamp(sourceId, 3, 6, acquiredAt, 1, 0xa5));
+const decodedKinematicsOnly = decodeAvionicsOnly(kinematicsOnly);
+check(
+  "kinematics-only publication omits top-level pose and velocity",
+  decodedKinematicsOnly.pose === null && decodedKinematicsOnly.velocity === null,
+);
+check(
+  "kinematics-only publication preserves only the kinematics group",
+  decodedKinematicsOnly.avionics.attitude === null
+    && decodedKinematicsOnly.avionics.kinematics !== null
+    && decodedKinematicsOnly.avionics.quat === null
+    && decodedKinematicsOnly.avionics.posNed[0] === 12,
+);
 check("a sample without avionics decodes to null", (() => {
   const bareNoAv = [];
   varint(bareNoAv, (1 << 3) | 0);

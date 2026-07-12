@@ -183,7 +183,7 @@ async fn spawn_host_runtime(
             let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
                 HOST_VEHICLE,
                 mode,
-                pilotage_adapter_aviate::LinkConfig::default(),
+                pilotage_adapter_aviate::LinkConfig::simulator(),
             )
             .await
             .map_err(HostError::AviateAdapter)?;

@@ -11,7 +11,7 @@
 //!
 //! | off | type | field |
 //! |----:|------|-------|
-//! | 0   | u32  | version (=1) |
+//! | 0   | u32  | version (=2) |
 //! | 4   | f32×4| attitude quaternion w, x, y, z |
 //! | 20  | f32×3| body rates p, q, r (rad/s) |
 //! | 32  | f32×3| position NED n, e, d (m) |
@@ -31,18 +31,21 @@
 //! | 108 | f32  | selected altitude (m, NaN none) |
 //! | 112 | f32  | wind from (rad) |
 //! | 116 | f32  | wind speed (m/s) |
+//! | 120 | u32  | snapshot generation (wrapping) |
+//! | 124 | u8   | coherence (0 insufficient, 1 coherent, 2 excessive skew) |
+//! | 125 | u8×3 | reserved, zero |
 
 use crate::aircraft::{
     AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
-    Selections, Stamped, ValidFlags, Wind,
+    Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
 use crate::quat::Quat;
 
 /// Version stamped in the block's first four bytes.
-pub const STATE_ABI_VERSION: u32 = 1;
+pub const STATE_ABI_VERSION: u32 = 2;
 
 /// Size of the packed block in bytes.
-pub const STATE_ABI_SIZE: usize = 120;
+pub const STATE_ABI_SIZE: usize = 128;
 
 /// Why a state block failed to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +176,11 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         position: flags & 0b0100 != 0,
         velocity: flags & 0b1000 != 0,
     };
+    let coherence = match u8_at(buf, 124)? {
+        1 => SnapshotCoherence::Coherent,
+        2 => SnapshotCoherence::ExcessiveSkew,
+        _ => SnapshotCoherence::Insufficient,
+    };
 
     Ok(AircraftState {
         attitude,
@@ -186,7 +194,16 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         },
         quality,
         valid,
+        snapshot: SnapshotMeta {
+            generation: u32_at(buf, 120)?,
+            coherence,
+        },
     })
+}
+
+fn u32_at(buf: &[u8], off: usize) -> Result<u32, AbiError> {
+    let b = buf.get(off..off + 4).ok_or(AbiError::Truncated)?;
+    Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 fn put_f32(buf: &mut [u8], off: usize, v: f32) -> Result<(), AbiError> {
@@ -197,6 +214,12 @@ fn put_f32(buf: &mut [u8], off: usize, v: f32) -> Result<(), AbiError> {
 
 fn put_u8(buf: &mut [u8], off: usize, v: u8) -> Result<(), AbiError> {
     *buf.get_mut(off).ok_or(AbiError::Truncated)? = v;
+    Ok(())
+}
+
+fn put_u32(buf: &mut [u8], off: usize, v: u32) -> Result<(), AbiError> {
+    let b = buf.get_mut(off..off + 4).ok_or(AbiError::Truncated)?;
+    b.copy_from_slice(&v.to_le_bytes());
     Ok(())
 }
 
@@ -295,6 +318,19 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
     });
     put_f32(buf, 112, wind.from_rad)?;
     put_f32(buf, 116, wind.speed_mps)?;
+    put_u32(buf, 120, state.snapshot.generation)?;
+    put_u8(
+        buf,
+        124,
+        match state.snapshot.coherence {
+            SnapshotCoherence::Insufficient => 0,
+            SnapshotCoherence::Coherent => 1,
+            SnapshotCoherence::ExcessiveSkew => 2,
+        },
+    )?;
+    for offset in 125..128 {
+        put_u8(buf, offset, 0)?;
+    }
     Ok(())
 }
 

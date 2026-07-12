@@ -1,6 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{SHM_SIZE, decode_sample, enu_quat_to_ned, enu_to_ned};
+use std::time::{Duration, Instant};
+
+use super::{SHM_SIZE, ShmFreshness, ShmObservation, decode_sample, enu_quat_to_ned, enu_to_ned};
 
 fn put_f64(buf: &mut [u8; SHM_SIZE], off: usize, v: f64) {
     buf[off..off + 8].copy_from_slice(&v.to_ne_bytes());
@@ -50,4 +52,57 @@ fn block_decodes_positions_velocities_and_time() {
     assert_eq!(s.vel_ned_mps, [0.0, 0.5, 1.0]);
     assert_eq!(s.time_us, 42_000_000);
     assert_eq!(s.seq, 7);
+}
+
+#[test]
+fn frozen_sample_never_revives_without_a_new_identity() {
+    let start = Instant::now();
+    let mut freshness = ShmFreshness::new_at(start);
+    assert_eq!(
+        freshness.observe_at(7, 42_000, start),
+        ShmObservation::Advancing
+    );
+    assert_eq!(
+        freshness.observe_at(7, 42_000, start + Duration::from_secs(4)),
+        ShmObservation::Unchanged(Duration::from_secs(4))
+    );
+    assert_eq!(
+        freshness.observe_at(7, 42_000, start + Duration::from_secs(8)),
+        ShmObservation::Unchanged(Duration::from_secs(8))
+    );
+}
+
+#[test]
+fn same_object_rollback_is_quarantined_but_sequence_wrap_is_valid() {
+    let start = Instant::now();
+    let mut wrapped = ShmFreshness::new_at(start);
+    assert_eq!(
+        wrapped.observe_at(u32::MAX, 100, start),
+        ShmObservation::Advancing
+    );
+    assert_eq!(
+        wrapped.observe_at(0, 101, start + Duration::from_millis(1)),
+        ShmObservation::Advancing
+    );
+
+    let mut reset = ShmFreshness::new_at(start);
+    assert_eq!(reset.observe_at(100, 100, start), ShmObservation::Advancing);
+    assert_eq!(
+        reset.observe_at(1, 1, start + Duration::from_millis(1)),
+        ShmObservation::Quarantined
+    );
+    assert_eq!(
+        reset.observe_at(101, 101, start + Duration::from_secs(1)),
+        ShmObservation::Quarantined
+    );
+
+    let mut unchanged_clock = ShmFreshness::new_at(start);
+    assert_eq!(
+        unchanged_clock.observe_at(10, 500, start),
+        ShmObservation::Advancing
+    );
+    assert_eq!(
+        unchanged_clock.observe_at(11, 500, start + Duration::from_millis(1)),
+        ShmObservation::Quarantined
+    );
 }

@@ -109,3 +109,50 @@ fn empty_state_resolves_all_missing() {
     assert_eq!(p.nav.status, SignalStatus::Missing);
     assert_eq!(p.wind.status, SignalStatus::Missing);
 }
+
+#[test]
+fn excessive_skew_degrades_both_stamped_groups() {
+    use crate::aircraft::{SnapshotCoherence, SnapshotMeta};
+    let mut s = flying_state();
+    s.snapshot = SnapshotMeta {
+        generation: 7,
+        coherence: SnapshotCoherence::ExcessiveSkew,
+    };
+    let p = resolve(&s, &FreshnessPolicy::default());
+    // Each value stays individually usable (amber, shown) but the pair
+    // must not present as one coherent aircraft state.
+    assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
+    assert_eq!(p.turn_rate_rps.status, SignalStatus::Degraded);
+    assert_eq!(p.alt_ft.status, SignalStatus::Degraded);
+    assert_eq!(p.vsi_fpm.status, SignalStatus::Degraded);
+    // Groups outside the stamped attitude/kinematics pair are untouched.
+    assert_eq!(p.baro_hpa.status, SignalStatus::Valid);
+}
+
+#[test]
+fn coherent_and_insufficient_snapshots_do_not_degrade() {
+    use crate::aircraft::{SnapshotCoherence, SnapshotMeta};
+    for coherence in [SnapshotCoherence::Coherent, SnapshotCoherence::Insufficient] {
+        let mut s = flying_state();
+        s.snapshot = SnapshotMeta {
+            generation: 1,
+            coherence,
+        };
+        let p = resolve(&s, &FreshnessPolicy::default());
+        assert_eq!(p.roll_rad.status, SignalStatus::Valid, "{coherence:?}");
+        assert_eq!(p.alt_ft.status, SignalStatus::Valid, "{coherence:?}");
+    }
+}
+
+#[test]
+fn skew_degradation_never_upgrades_a_worse_status() {
+    use crate::aircraft::{SnapshotCoherence, SnapshotMeta};
+    let mut s = flying_state();
+    s.valid.attitude = false;
+    s.snapshot = SnapshotMeta {
+        generation: 1,
+        coherence: SnapshotCoherence::ExcessiveSkew,
+    };
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+}

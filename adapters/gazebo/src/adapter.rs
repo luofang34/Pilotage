@@ -249,12 +249,12 @@ fn telemetry_from_odometry(vehicle: VehicleId, odom: &BridgeOdometry) -> Telemet
     TelemetrySample {
         vehicle,
         tick: SimTick::new(odom.sim_time_ns),
-        pose: Pose2d {
+        pose: Some(Pose2d {
             x: odom.x,
             y: odom.y,
             heading: odom.heading,
-        },
-        speed: odom.speed,
+        }),
+        speed: Some(odom.speed),
         avionics: None,
     }
 }

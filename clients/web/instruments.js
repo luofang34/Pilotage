@@ -24,7 +24,7 @@ export const LOGICAL_W = 480;
 export const LOGICAL_H = 360;
 
 const SCENE_FORMAT_VERSION = 1;
-export const STATE_ABI_VERSION = 1;
+export const STATE_ABI_VERSION = 2;
 export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 10;
@@ -278,6 +278,11 @@ export class InstrumentModule {
       f(108, state.selections?.altitudeSelM ?? NaN);
       f(112, state.wind?.fromRad ?? 0);
       f(116, state.wind?.speedMps ?? 0);
+      view.setUint32(120, state.snapshot?.generation ?? 0, true);
+      b(124, state.snapshot?.coherence ?? 0);
+      b(125, 0);
+      b(126, 0);
+      b(127, 0);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

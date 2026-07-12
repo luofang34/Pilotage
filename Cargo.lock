@@ -872,6 +872,7 @@ dependencies = [
 name = "pilotage-adapter-aviate"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "libc",
  "pilotage-adapter-api",
  "pilotage-adapter-gazebo",

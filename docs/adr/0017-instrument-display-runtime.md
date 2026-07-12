@@ -112,6 +112,13 @@ comparators, Stratux invalid sentinels) treats validity as data, and the
 reference hobby implementations that skip it (pyG5's lone avionics-on flag)
 cannot express "this one tape is lying to you."
 
+The packed state ABI also carries a wrapping ingress generation and an
+explicit attitude/kinematics coherence result. The transport-facing ingress
+gate owns vehicle/source routing, epoch and sequence ordering, and acquisition
+clock comparison (ADR-0018); the leaf crates receive one immutable state copy
+plus already-derived group ages. A duplicate publication cannot advance the
+generation or reset an age.
+
 ### Reserved, unbuilt extension points
 
 Phase 1 implements 2D PFD, HSI, and six-pack only. Three seams are reserved

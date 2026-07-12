@@ -3,15 +3,42 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
-use pilotage_protocol::VehicleId;
+use pilotage_adapter_api::{
+    Disposition, MeasurementClock, MeasurementStamp, RejectReason, SourceIncarnation,
+    VehicleAdapter,
+};
+use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
 
 use crate::link::{AttitudeUpdate, KinematicsUpdate, LatestAviate};
 
-use super::AviateAdapter;
+use super::{AviateAdapter, sampling::measurement_pair_is_coherent};
 
 fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LatestAviate>> {
+    state_with_acquisition_skew(att_age, kin_age, 0)
+}
+
+fn state_with_acquisition_skew(
+    att_age: Duration,
+    kin_age: Duration,
+    acquisition_skew_ns: u64,
+) -> Arc<Mutex<LatestAviate>> {
     let now = Instant::now();
+    let attitude_stamp = MeasurementStamp {
+        source_id: 1,
+        source_incarnation: SourceIncarnation::new([1; 16]),
+        source_epoch: 1,
+        sequence: 10,
+        acquired_at_ns: 5_000_000_000,
+        clock: MeasurementClock::VehicleBoot,
+    };
+    let kinematics_stamp = MeasurementStamp {
+        sequence: 5,
+        acquired_at_ns: attitude_stamp
+            .acquired_at_ns
+            .saturating_sub(acquisition_skew_ns),
+        ..attitude_stamp
+    };
+    let skew_ms = u32::try_from(acquisition_skew_ns / 1_000_000).unwrap_or(u32::MAX);
     let state = LatestAviate {
         attitude: Some(AttitudeUpdate {
             // 90° yaw: heading east.
@@ -22,17 +49,62 @@ fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LatestAviate>> 
                 core::f32::consts::FRAC_1_SQRT_2,
             ],
             rates_rps: [0.0, 0.0, 0.1],
+            time_boot_ms: 5000,
+            stamp: attitude_stamp,
             received_at: now.checked_sub(att_age).unwrap_or(now),
         }),
         kinematics: Some(KinematicsUpdate {
             pos_ned_m: [10.0, 20.0, -30.0],
             vel_ned_mps: [3.0, 4.0, -1.0],
-            time_boot_ms: 5000,
+            time_boot_ms: 5000_u32.saturating_sub(skew_ms),
+            stamp: kinematics_stamp,
             received_at: now.checked_sub(kin_age).unwrap_or(now),
         }),
+        maximum_inter_group_skew_ms: 300,
         ..LatestAviate::default()
     };
     Arc::new(Mutex::new(state))
+}
+
+#[test]
+fn measurement_pair_requires_full_identity_clock_and_bounded_skew() {
+    let state = state_with_acquisition_skew(Duration::ZERO, Duration::ZERO, 300_000_000);
+    let latest = state.lock().expect("lock");
+    let attitude = latest.attitude.expect("attitude");
+    let kinematics = latest.kinematics.expect("kinematics");
+    assert!(measurement_pair_is_coherent(
+        attitude,
+        kinematics,
+        latest.maximum_inter_group_skew_ms
+    ));
+
+    for stamp in [
+        MeasurementStamp {
+            source_id: 2,
+            ..kinematics.stamp
+        },
+        MeasurementStamp {
+            source_incarnation: SourceIncarnation::new([2; 16]),
+            ..kinematics.stamp
+        },
+        MeasurementStamp {
+            source_epoch: 2,
+            ..kinematics.stamp
+        },
+        MeasurementStamp {
+            clock: MeasurementClock::Simulation,
+            ..kinematics.stamp
+        },
+    ] {
+        assert!(!measurement_pair_is_coherent(
+            attitude,
+            KinematicsUpdate {
+                stamp,
+                ..kinematics
+            },
+            latest.maximum_inter_group_skew_ms
+        ));
+    }
 }
 
 #[test]
@@ -44,13 +116,40 @@ fn fresh_state_samples_pose_speed_and_avionics() {
     let batch = adapter.sample_telemetry();
     assert_eq!(batch.samples.len(), 1);
     let sample = &batch.samples[0];
-    assert_eq!(sample.pose.x, 10.0);
-    assert_eq!(sample.pose.y, 20.0);
-    assert!((sample.pose.heading - core::f64::consts::FRAC_PI_2).abs() < 1e-3);
-    assert!((sample.speed - 5.0).abs() < 1e-6);
+    let pose = sample.pose.expect("coherent planar pose");
+    assert_eq!(pose.x, 10.0);
+    assert_eq!(pose.y, 20.0);
+    assert!((pose.heading - core::f64::consts::FRAC_PI_2).abs() < 1e-3);
+    assert!((sample.speed.expect("coherent speed") - 5.0).abs() < 1e-6);
     let avionics = sample.avionics.expect("avionics attached");
-    assert_eq!(avionics.pos_ned_m, [10.0, 20.0, -30.0]);
+    assert_eq!(
+        avionics.kinematics.expect("kinematics").pos_ned_m,
+        [10.0, 20.0, -30.0]
+    );
     assert_eq!(avionics.valid_flags, 0b1111);
+    assert_eq!(
+        avionics.attitude.map(|group| group.stamp.sequence),
+        Some(10)
+    );
+    assert_eq!(
+        avionics.kinematics.map(|group| group.stamp.sequence),
+        Some(5)
+    );
+}
+
+#[test]
+fn over_skew_groups_flow_without_a_planar_projection() {
+    let mut adapter = AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with_acquisition_skew(Duration::ZERO, Duration::ZERO, 301_000_000),
+    );
+    let batch = adapter.sample_telemetry();
+    let sample = batch.samples.first().expect("sample");
+    assert!(sample.pose.is_none());
+    assert!(sample.speed.is_none());
+    let avionics = sample.avionics.expect("avionics");
+    assert!(avionics.attitude.is_some());
+    assert!(avionics.kinematics.is_some());
 }
 
 #[test]
@@ -61,7 +160,44 @@ fn stale_attitude_is_withheld_but_kinematics_still_flow() {
     );
     let batch = adapter.sample_telemetry();
     assert_eq!(batch.samples.len(), 1);
-    assert!(batch.samples[0].avionics.is_none());
+    let sample = &batch.samples[0];
+    assert!(sample.pose.is_none());
+    assert!(sample.speed.is_none());
+    let avionics = sample.avionics.expect("kinematics attached");
+    assert!(avionics.attitude.is_none());
+    assert_eq!(
+        avionics.kinematics.map(|group| group.stamp.sequence),
+        Some(5)
+    );
+    assert_eq!(
+        avionics.kinematics.expect("kinematics").vel_ned_mps,
+        [3.0, 4.0, -1.0]
+    );
+    assert_eq!(avionics.valid_flags, 0b1100);
+}
+
+#[test]
+fn stale_kinematics_is_withheld_but_attitude_still_flows() {
+    let mut adapter = AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with(Duration::ZERO, Duration::from_secs(10)),
+    );
+    let batch = adapter.sample_telemetry();
+    assert_eq!(batch.samples.len(), 1);
+    let sample = &batch.samples[0];
+    assert!(sample.pose.is_none());
+    assert!(sample.speed.is_none());
+    let avionics = sample.avionics.expect("attitude attached");
+    assert_eq!(
+        avionics.attitude.map(|group| group.stamp.sequence),
+        Some(10)
+    );
+    assert_eq!(
+        avionics.attitude.expect("attitude").rates_rps,
+        [0.0, 0.0, 0.1]
+    );
+    assert!(avionics.kinematics.is_none());
+    assert_eq!(avionics.valid_flags, 0b0011);
 }
 
 #[test]
@@ -71,6 +207,70 @@ fn dead_link_withholds_the_whole_sample() {
         state_with(Duration::from_secs(10), Duration::from_secs(10)),
     );
     assert!(adapter.sample_telemetry().samples.is_empty());
+}
+
+#[test]
+fn incomplete_measurement_pair_cannot_seed_a_control_setpoint() {
+    for (attitude_age, kinematics_age) in [
+        (Duration::from_secs(10), Duration::ZERO),
+        (Duration::ZERO, Duration::from_secs(10)),
+    ] {
+        let uplink = crate::uplink::FlightUplink::new().expect("uplink");
+        let mut adapter =
+            AviateAdapter::from_state(VehicleId::new(1), state_with(attitude_age, kinematics_age))
+                .with_uplink(uplink);
+        let outcome = adapter.apply_control(&flight_frame(vec![], vec![]));
+        assert_eq!(
+            outcome.disposition,
+            Disposition::Rejected(RejectReason::MeasurementUnavailable)
+        );
+    }
+}
+
+#[test]
+fn over_skew_measurement_pair_cannot_seed_a_control_setpoint() {
+    let uplink = crate::uplink::FlightUplink::new().expect("uplink");
+    let mut adapter = AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with_acquisition_skew(Duration::ZERO, Duration::ZERO, 301_000_000),
+    )
+    .with_uplink(uplink);
+    let outcome = adapter.apply_control(&flight_frame(vec![], vec![]));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::MeasurementUnavailable)
+    );
+}
+
+#[test]
+fn disarm_does_not_require_a_current_measurement_pair() {
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
+    fc.set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("timeout");
+    let mut uplink = crate::uplink::FlightUplink::new().expect("uplink");
+    uplink.set_target(fc.local_addr().expect("addr"));
+    let mut adapter = AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with(Duration::from_secs(10), Duration::from_secs(10)),
+    )
+    .with_uplink(uplink);
+
+    let outcome = adapter.apply_control(&flight_frame(
+        vec![],
+        vec![(
+            LogicalButtonId::new(super::DISARM_BUTTON),
+            ButtonEdge::Pressed,
+        )],
+    ));
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    let mut buf = [0_u8; 128];
+    let len = fc.recv(&mut buf).expect("receive disarm");
+    assert!(len >= 45);
+    assert_eq!(buf[7], crate::mavlink::COMMAND_LONG_ID as u8);
+    assert_eq!(
+        f32::from_le_bytes(buf[10..14].try_into().expect("param1")),
+        0.0
+    );
 }
 
 fn flight_frame(
@@ -94,8 +294,6 @@ fn flight_frame(
 
 #[test]
 fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
-    use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId};
-
     // A fake FC: any UDP socket we can read the uplink's frames from.
     let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))

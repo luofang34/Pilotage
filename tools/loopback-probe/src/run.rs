@@ -176,7 +176,9 @@ async fn wait_for_rejection(
             }
             Ok(Some(ReceiverEvent::Telemetry(observation))) => {
                 metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
-                metrics.last_pose = Some(observation.pose);
+                if observation.pose.is_some() {
+                    metrics.last_pose = observation.pose;
+                }
             }
             Ok(Some(ReceiverEvent::VideoFrame { source_id, jpeg })) => {
                 fold_video_frame(source_id, &jpeg, video, &mut last_video_at);
@@ -200,7 +202,9 @@ fn drain_pending_events(
         match event {
             ReceiverEvent::Telemetry(observation) => {
                 metrics.telemetry_received = metrics.telemetry_received.wrapping_add(1);
-                metrics.last_pose = Some(observation.pose);
+                if observation.pose.is_some() {
+                    metrics.last_pose = observation.pose;
+                }
             }
             ReceiverEvent::FrameRejected(_) => {
                 metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);

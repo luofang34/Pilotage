@@ -190,7 +190,10 @@ fn captured_checkpoints() -> Vec<TrajectoryCheckpoint> {
         if matches!(step, ScriptStep::Step(_)) {
             let label = label_iter.next().expect("one label per stepped phase");
             let mut adapter = session.adapter().clone();
-            captured.push(TrajectoryCheckpoint::capture(label, &mut adapter));
+            captured.push(
+                TrajectoryCheckpoint::capture(label, &mut adapter)
+                    .expect("reference telemetry is complete"),
+            );
         }
     }
     captured
@@ -379,5 +382,10 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
     let outcomes = frame_outcomes(&events);
     assert_eq!(outcomes.len(), 1);
     assert_eq!(outcomes[0].verdict, FrameVerdict::Accepted);
-    assert!(adapter.sample_telemetry().samples[0].speed > 0.0);
+    assert!(
+        adapter.sample_telemetry().samples[0]
+            .speed
+            .expect("reference speed")
+            > 0.0
+    );
 }

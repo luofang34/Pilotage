@@ -147,6 +147,27 @@ impl<T> Default for Stamped<T> {
     }
 }
 
+/// Whether independently acquired groups form one coherent display snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SnapshotCoherence {
+    /// Too few stamped groups are present to establish coherence.
+    #[default]
+    Insufficient,
+    /// Required groups share a source epoch/clock and meet the skew budget.
+    Coherent,
+    /// Required groups exceed the configured acquisition-time skew budget.
+    ExcessiveSkew,
+}
+
+/// Metadata assigned by the ingress gate to one immutable state generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SnapshotMeta {
+    /// Wrapping generation advanced only when a source group advances.
+    pub generation: u32,
+    /// Coherence result for the independently stamped input groups.
+    pub coherence: SnapshotCoherence,
+}
+
 /// The unified input state every instrument reads (ADR-0017).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct AircraftState {
@@ -166,4 +187,6 @@ pub struct AircraftState {
     pub quality: EstimateQuality,
     /// Source validity flags.
     pub valid: ValidFlags,
+    /// Ingress generation and group-coherence result.
+    pub snapshot: SnapshotMeta,
 }

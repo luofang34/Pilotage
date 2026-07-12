@@ -41,27 +41,32 @@ impl TrajectoryCheckpoint {
     /// pose/speed field bit-for-bit.
     #[must_use]
     pub fn matches(&self, sample: &TelemetrySample) -> bool {
+        let (Some(pose), Some(speed)) = (sample.pose, sample.speed) else {
+            return false;
+        };
         sample.tick == SimTick::new(self.tick)
-            && sample.pose.x.to_bits() == self.x_bits
-            && sample.pose.y.to_bits() == self.y_bits
-            && sample.pose.heading.to_bits() == self.heading_bits
-            && sample.speed.to_bits() == self.speed_bits
+            && pose.x.to_bits() == self.x_bits
+            && pose.y.to_bits() == self.y_bits
+            && pose.heading.to_bits() == self.heading_bits
+            && speed.to_bits() == self.speed_bits
     }
 
     /// Captures a checkpoint from the adapter's current telemetry, for
     /// regenerating golden values or asserting against a live run.
     #[must_use]
-    pub fn capture(label: &'static str, adapter: &mut ReferenceAdapter) -> Self {
+    pub fn capture(label: &'static str, adapter: &mut ReferenceAdapter) -> Option<Self> {
         let batch = adapter.sample_telemetry();
-        let sample = &batch.samples[0];
-        Self {
+        let sample = batch.samples.first()?;
+        let pose = sample.pose?;
+        let speed = sample.speed?;
+        Some(Self {
             label,
             tick: sample.tick.as_u64(),
-            x_bits: sample.pose.x.to_bits(),
-            y_bits: sample.pose.y.to_bits(),
-            heading_bits: sample.pose.heading.to_bits(),
-            speed_bits: sample.speed.to_bits(),
-        }
+            x_bits: pose.x.to_bits(),
+            y_bits: pose.y.to_bits(),
+            heading_bits: pose.heading.to_bits(),
+            speed_bits: speed.to_bits(),
+        })
     }
 }
 

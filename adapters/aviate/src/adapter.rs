@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, AvionicsSample, Disposition, ExecutionMode, LinkLossPolicy,
-    Pose2d, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, RejectReason,
+    ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
+    VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
@@ -16,17 +16,19 @@ use pilotage_protocol::{
 use pilotage_timing::SimTick;
 
 use crate::error::AviateAdapterError;
+use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 use crate::link::{AviateLink, LatestAviate, LinkConfig};
-use crate::shm::{GzStateShm, ShmFreshness};
 use crate::uplink::FlightUplink;
 
 mod camera;
 mod control;
 mod sampling;
-use sampling::{mavlink_batch, yaw_of};
+mod shm_sampling;
+use sampling::{mavlink_batch, measurement_pair_is_coherent, yaw_of};
+use shm_sampling::ShmSource;
 
-/// The control scope this adapter exposes (issue #12): four canonical
-/// flight axes as DJI-style velocity demands.
+/// The control scope exposes four canonical flight axes as DJI-style
+/// velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
@@ -46,6 +48,34 @@ pub const RESET_BUTTON: u16 = 2;
 /// Logical button toggling between camera mode (velocity sticks,
 /// brake-to-hold) and FPV mode (attitude sticks, direct thrust).
 pub const FPV_TOGGLE_BUTTON: u16 = 3;
+
+fn flight_button_pressed(frame: &ScopedControlFrame, button: u16) -> bool {
+    frame.payload.edges.iter().any(|(candidate, edge)| {
+        *edge == ButtonEdge::Pressed && *candidate == LogicalButtonId::new(button)
+    })
+}
+
+fn rejected_control(tick: SimTick, reason: RejectReason) -> ApplyOutcome {
+    ApplyOutcome {
+        tick,
+        disposition: Disposition::Rejected(reason),
+    }
+}
+
+fn normalized_flight_sticks(frame: &ScopedControlFrame) -> ([f32; 4], bool) {
+    let mut sticks = [0.0_f32; 4];
+    let mut transformed = false;
+    for (axis, value) in &frame.payload.axes {
+        let clamped = if value.is_nan() {
+            0.0
+        } else {
+            value.clamp(-1.0, 1.0)
+        };
+        transformed |= clamped != *value;
+        sticks[usize::from(axis.as_u16().min(3))] = clamped;
+    }
+    (sticks, transformed)
+}
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -72,11 +102,7 @@ enum Source {
         // Kept alive for its receive task; dropped with the adapter.
         _link: Option<AviateLink>,
     },
-    Shm {
-        shm: GzStateShm,
-        freshness: ShmFreshness,
-        instance: u8,
-    },
+    Shm(ShmSource),
 }
 
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
@@ -89,8 +115,8 @@ pub struct AviateAdapter {
     vehicle: VehicleId,
     source: Source,
     uplink: Option<FlightUplink>,
-    // Camera path (issue #12): Pilotage's own gz sidecar bridges the
-    // flight world's camera topics; absent when the sidecar can't spawn.
+    // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
+    // the adapter remains usable without video when the sidecar cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
     _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
@@ -115,17 +141,37 @@ impl AviateAdapter {
         mode: AviateLinkMode,
         config: LinkConfig,
     ) -> Result<Self, AviateAdapterError> {
+        let mut provider = OsIncarnationProvider;
+        Self::start_with_incarnation_provider(vehicle, mode, config, &mut provider).await
+    }
+
+    /// Binds the vehicle link using a caller-owned attachment identity source.
+    ///
+    /// Aircraft integrations use this entry point to supply a persistent boot
+    /// counter or source-issued UUID instead of the simulator CSPRNG provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AviateAdapterError`] when identity creation or the selected
+    /// vehicle link fails.
+    pub async fn start_with_incarnation_provider<P: IncarnationProvider>(
+        vehicle: VehicleId,
+        mode: AviateLinkMode,
+        config: LinkConfig,
+        provider: &mut P,
+    ) -> Result<Self, AviateAdapterError> {
+        let incarnation = provider.next_incarnation_blocking()?;
         let source = match mode {
-            AviateLinkMode::Shm => Self::shm_source(0)?,
-            AviateLinkMode::Mavlink => Self::mavlink_source(config).await?,
-            AviateLinkMode::Auto => match Self::shm_source(0) {
+            AviateLinkMode::Shm => Self::shm_source(0, incarnation)?,
+            AviateLinkMode::Mavlink => Self::mavlink_source(config, incarnation).await?,
+            AviateLinkMode::Auto => match Self::shm_source(0, incarnation) {
                 Ok(source) => {
                     tracing::info!("Aviate link: shared-memory state block");
                     source
                 }
                 Err(error) => {
                     tracing::info!(%error, "Aviate shm not available; using MAVLink/UDP");
-                    Self::mavlink_source(config).await?
+                    Self::mavlink_source(config, incarnation).await?
                 }
             },
         };
@@ -133,7 +179,10 @@ impl AviateAdapter {
         // failing the adapter: displaying a flight you cannot command
         // beats displaying nothing.
         let uplink = match FlightUplink::new() {
-            Ok(uplink) => Some(uplink),
+            Ok(mut uplink) => {
+                uplink.set_expected_source(config.system_id, config.component_id);
+                Some(uplink)
+            }
             Err(error) => {
                 tracing::warn!(%error, "flight uplink unavailable; telemetry-only");
                 None
@@ -162,16 +211,18 @@ impl AviateAdapter {
         self.frames.take()
     }
 
-    fn shm_source(instance: u8) -> Result<Source, AviateAdapterError> {
-        Ok(Source::Shm {
-            shm: GzStateShm::open(instance)?,
-            freshness: ShmFreshness::new(),
-            instance,
-        })
+    fn shm_source(
+        instance: u8,
+        incarnation: SourceIncarnation,
+    ) -> Result<Source, AviateAdapterError> {
+        Ok(Source::Shm(ShmSource::open(instance, incarnation)?))
     }
 
-    async fn mavlink_source(config: LinkConfig) -> Result<Source, AviateAdapterError> {
-        let link = AviateLink::start(config).await?;
+    async fn mavlink_source(
+        config: LinkConfig,
+        incarnation: SourceIncarnation,
+    ) -> Result<Source, AviateAdapterError> {
+        let link = AviateLink::start(config, incarnation).await?;
         Ok(Source::Mavlink {
             state: link.state(),
             _link: Some(link),
@@ -203,19 +254,27 @@ impl AviateAdapter {
     }
 
     /// The vehicle's current measured yaw (radians clockwise from
-    /// north) and NED position (zeros before any telemetry).
-    fn current_pose(&mut self) -> (f32, [f32; 3]) {
-        match &self.source {
-            Source::Shm { shm, .. } => shm.read().map_or((0.0, [0.0; 3]), |s| {
-                (yaw_of(s.quat_wxyz) as f32, s.pos_ned_m)
-            }),
-            Source::Mavlink { state, .. } => state.lock().ok().map_or((0.0, [0.0; 3]), |latest| {
-                let yaw = latest
+    /// north) and NED position.
+    fn current_pose(&mut self) -> Option<(f32, [f32; 3])> {
+        match &mut self.source {
+            Source::Shm(source) => source.current_pose(),
+            Source::Mavlink { state, .. } => {
+                let latest = state.lock().ok()?;
+                let attitude = latest
                     .attitude
-                    .map_or(0.0, |att| yaw_of(att.quat_wxyz) as f32);
-                let pos = latest.kinematics.map_or([0.0; 3], |kin| kin.pos_ned_m);
-                (yaw, pos)
-            }),
+                    .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
+                let kinematics = latest
+                    .kinematics
+                    .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
+                if !measurement_pair_is_coherent(
+                    attitude,
+                    kinematics,
+                    latest.maximum_inter_group_skew_ms,
+                ) {
+                    return None;
+                }
+                Some((yaw_of(attitude.quat_wxyz) as f32, kinematics.pos_ned_m))
+            }
         }
     }
 
@@ -249,9 +308,8 @@ impl VehicleAdapter for AviateAdapter {
                 render_capable: self._camera_bridge.is_some(),
                 ..ExecutionMode::default()
             },
-            // The flight scope (issue #12): DJI-style velocity control.
-            // Without a working uplink the adapter stays telemetry-only
-            // (ADR-0018's original shape).
+            // Without a working velocity-control uplink, the adapter stays
+            // telemetry-only as required by ADR-0018.
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: if self.uplink.is_some() {
@@ -280,33 +338,29 @@ impl VehicleAdapter for AviateAdapter {
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
         if self.uplink.is_none() {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(RejectReason::UnknownScope),
-            };
+            return rejected_control(tick, RejectReason::UnknownScope);
         }
         if let Err(reason) = self.validate_flight_frame(frame) {
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Rejected(reason),
-            };
+            return rejected_control(tick, reason);
         }
-        // Reset is scanned before the uplink borrow (it needs &mut self).
-        if frame
-            .payload
-            .edges
-            .iter()
-            .any(|(b, e)| *e == ButtonEdge::Pressed && *b == LogicalButtonId::new(RESET_BUTTON))
-        {
+        if flight_button_pressed(frame, RESET_BUTTON) {
             self.spawn_reset();
         }
-        let (current_yaw, current_pos) = self.current_pose();
-        let Some(uplink) = self.uplink.as_mut() else {
-            // Checked above; unreachable in practice.
+        if flight_button_pressed(frame, DISARM_BUTTON) {
+            let Some(uplink) = self.uplink.as_mut() else {
+                return rejected_control(tick, RejectReason::UnknownScope);
+            };
+            uplink.send_disarm();
             return ApplyOutcome {
                 tick,
-                disposition: Disposition::Rejected(RejectReason::UnknownScope),
+                disposition: Disposition::Accepted,
             };
+        }
+        let Some((current_yaw, current_pos)) = self.current_pose() else {
+            return rejected_control(tick, RejectReason::MeasurementUnavailable);
+        };
+        let Some(uplink) = self.uplink.as_mut() else {
+            return rejected_control(tick, RejectReason::UnknownScope);
         };
 
         for (button, edge) in &frame.payload.edges {
@@ -314,26 +368,14 @@ impl VehicleAdapter for AviateAdapter {
                 continue;
             }
             if *button == LogicalButtonId::new(ARM_BUTTON) {
-                uplink.send_arm(true, current_yaw);
-            } else if *button == LogicalButtonId::new(DISARM_BUTTON) {
-                uplink.send_arm(false, current_yaw);
+                uplink.send_arm(current_yaw);
             } else if *button == LogicalButtonId::new(FPV_TOGGLE_BUTTON) {
                 self.fpv_mode = !self.fpv_mode;
                 tracing::info!(fpv = self.fpv_mode, "flight mode toggled");
             }
         }
 
-        let mut sticks = [0.0f32; 4];
-        let mut transformed = false;
-        for (axis, value) in &frame.payload.axes {
-            let clamped = if value.is_nan() {
-                0.0
-            } else {
-                value.clamp(-1.0, 1.0)
-            };
-            transformed |= clamped != *value;
-            sticks[usize::from(axis.as_u16().min(3))] = clamped;
-        }
+        let (sticks, transformed) = normalized_flight_sticks(frame);
         if self.fpv_mode {
             uplink.send_fpv_frame(
                 sticks[usize::from(ROLL_AXIS)],
@@ -374,60 +416,7 @@ impl VehicleAdapter for AviateAdapter {
         };
         match &mut self.source {
             Source::Mavlink { state, .. } => mavlink_batch(self.vehicle, state, arm_state),
-            Source::Shm {
-                shm,
-                freshness,
-                instance,
-            } => {
-                let frozen = match shm.read() {
-                    Some(sample) => freshness.observe(sample.seq) > WITHHOLD_AFTER,
-                    None => freshness.observe_absent() > WITHHOLD_AFTER,
-                };
-                if frozen {
-                    // A frozen or vanished block usually means the
-                    // simulator restarted and re-created the shm object;
-                    // an old mapping keeps pointing at the orphaned one,
-                    // so reattach by name.
-                    if let Ok(new_shm) = GzStateShm::open(*instance) {
-                        *shm = new_shm;
-                        *freshness = ShmFreshness::new();
-                    }
-                    return TelemetryBatch::default();
-                }
-                let Some(sample) = shm.read() else {
-                    return TelemetryBatch::default();
-                };
-                let heading = yaw_of(sample.quat_wxyz);
-                let speed = f64::from(
-                    (sample.vel_ned_mps[0] * sample.vel_ned_mps[0]
-                        + sample.vel_ned_mps[1] * sample.vel_ned_mps[1])
-                        .sqrt(),
-                );
-                TelemetryBatch {
-                    samples: vec![TelemetrySample {
-                        vehicle: self.vehicle,
-                        tick: SimTick::new(sample.time_us.wrapping_mul(1_000)),
-                        pose: Pose2d {
-                            x: f64::from(sample.pos_ned_m[0]),
-                            y: f64::from(sample.pos_ned_m[1]),
-                            heading,
-                        },
-                        speed,
-                        avionics: Some(AvionicsSample {
-                            quat_wxyz: sample.quat_wxyz,
-                            rates_rps: sample.rates_rps,
-                            pos_ned_m: sample.pos_ned_m,
-                            vel_ned_mps: sample.vel_ned_mps,
-                            // Simulator ground truth (ADR-0019 v0): fully
-                            // valid by construction; the FC-estimate block
-                            // with real flags is the link RFC's v1.
-                            valid_flags: 0b1111,
-                            quality: 0,
-                            arm_state,
-                        }),
-                    }],
-                }
-            }
+            Source::Shm(source) => source.sample(self.vehicle, arm_state),
         }
     }
 
@@ -470,7 +459,7 @@ impl VehicleAdapter for AviateAdapter {
                 .ok()
                 .and_then(|latest| latest.kinematics)
                 .map_or(0, |kin| u64::from(kin.time_boot_ms).wrapping_mul(1_000_000)),
-            Source::Shm { shm, .. } => shm.read().map_or(0, |s| s.time_us.wrapping_mul(1_000)),
+            Source::Shm(source) => source.tick(),
         };
         StepOutcome {
             advanced: 0,

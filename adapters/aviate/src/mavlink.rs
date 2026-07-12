@@ -70,6 +70,17 @@ pub struct ParseStats {
     pub garbage_bytes: u32,
 }
 
+/// Sender identity retained from one MAVLink frame header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameSource {
+    /// MAVLink system identifier.
+    pub system_id: u8,
+    /// MAVLink component identifier within the system.
+    pub component_id: u8,
+    /// Sender's wrapping frame sequence, retained for diagnostics.
+    pub frame_sequence: u8,
+}
+
 /// COMMAND_LONG message id (uplink: arm/disarm).
 pub const COMMAND_LONG_ID: u32 = 76;
 /// SET_POSITION_TARGET_LOCAL_NED message id (uplink: velocity setpoints).
@@ -164,12 +175,12 @@ fn decode_known(msg_id: u32, payload: &[u8]) -> Option<AviateMessage> {
 }
 
 /// Parses every MAVLink 2.0 frame in `bytes` (a UDP datagram may carry
-/// several), appending `(sender system id, message)` pairs to `out` and
-/// returning parse accounting. The system id lets a consumer on a routed
-/// link (several vehicles, plus other GCS peers) lock onto one vehicle.
+/// several), appending `(sender identity, message)` pairs to `out` and
+/// returning parse accounting. Consumers match both system and component ids;
+/// first-packet source selection is not an identity policy.
 /// Unknown ids and CRC failures skip the frame; stray bytes before a
 /// frame start are discarded byte-by-byte.
-pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(u8, AviateMessage)>) -> ParseStats {
+pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, AviateMessage)>) -> ParseStats {
     let mut stats = ParseStats::default();
     let mut at = 0usize;
     while at < bytes.len() {
@@ -192,7 +203,11 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(u8, AviateMessage)>) -> Parse
             stats.garbage_bytes = stats.garbage_bytes.wrapping_add((bytes.len() - at) as u32);
             break;
         };
-        let sysid = frame[5];
+        let source = FrameSource {
+            frame_sequence: frame[4],
+            system_id: frame[5],
+            component_id: frame[6],
+        };
         let msg_id = u32::from(frame[7]) | (u32::from(frame[8]) << 8) | (u32::from(frame[9]) << 16);
         let crc_at = 10 + payload_len;
         let wire_crc = u16::from(frame[crc_at]) | (u16::from(frame[crc_at + 1]) << 8);
@@ -201,7 +216,7 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(u8, AviateMessage)>) -> Parse
                 let computed = compute_crc(&frame[1..crc_at], extra);
                 if computed == wire_crc {
                     if let Some(msg) = decode_known(msg_id, &frame[10..crc_at]) {
-                        out.push((sysid, msg));
+                        out.push((source, msg));
                         stats.decoded = stats.decoded.wrapping_add(1);
                     }
                 } else {
@@ -258,18 +273,18 @@ pub fn encode_gcs_heartbeat(seq: u8) -> [u8; 21] {
     frame
 }
 
-/// Serializes a COMMAND_LONG arm/disarm frame (MAV_CMD 400) addressed to
-/// system 1 / component 1 (the Aviate FC's SITL identity).
+/// Serializes a COMMAND_LONG arm/disarm frame (MAV_CMD 400) for the selected
+/// MAVLink system and component.
 ///
 /// Wire order (33 bytes): param1..7 f32 @0..28, command u16 @28,
 /// target_system @30, target_component @31, confirmation @32.
-pub fn encode_arm_command(seq: u8, arm: bool) -> [u8; 45] {
+pub fn encode_arm_command(seq: u8, arm: bool, target_system: u8, target_component: u8) -> [u8; 45] {
     let mut payload = [0u8; 33];
     let param1: f32 = if arm { 1.0 } else { 0.0 };
     payload[0..4].copy_from_slice(&param1.to_le_bytes());
     payload[28..30].copy_from_slice(&400u16.to_le_bytes());
-    payload[30] = 1;
-    payload[31] = 1;
+    payload[30] = target_system;
+    payload[31] = target_component;
     let mut frame = [0u8; 45];
     encode_frame_v2(seq, COMMAND_LONG_ID, &payload, 152, &mut frame);
     frame
@@ -290,6 +305,8 @@ pub fn encode_position_setpoint(
     time_boot_ms: u32,
     pos_ned_m: [f32; 3],
     yaw_rad: f32,
+    target_system: u8,
+    target_component: u8,
 ) -> [u8; 65] {
     // Ignore velocity (8|16|32), acceleration (64|128|256), yaw rate
     // (2048): position + absolute yaw remain.
@@ -301,8 +318,8 @@ pub fn encode_position_setpoint(
     payload[12..16].copy_from_slice(&pos_ned_m[2].to_le_bytes());
     payload[40..44].copy_from_slice(&yaw_rad.to_le_bytes());
     payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
-    payload[50] = 1;
-    payload[51] = 1;
+    payload[50] = target_system;
+    payload[51] = target_component;
     payload[52] = 1; // MAV_FRAME_LOCAL_NED
     let mut frame = [0u8; 65];
     encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
@@ -323,6 +340,8 @@ pub fn encode_velocity_setpoint(
     time_boot_ms: u32,
     vel_ned_mps: [f32; 3],
     yaw_rad: f32,
+    target_system: u8,
+    target_component: u8,
 ) -> [u8; 65] {
     // Ignore position (1|2|4), acceleration (64|128|256), yaw rate (2048):
     // velocity + absolute yaw remain.
@@ -334,31 +353,44 @@ pub fn encode_velocity_setpoint(
     payload[24..28].copy_from_slice(&vel_ned_mps[2].to_le_bytes());
     payload[40..44].copy_from_slice(&yaw_rad.to_le_bytes());
     payload[48..50].copy_from_slice(&TYPE_MASK.to_le_bytes());
-    payload[50] = 1; // target system
-    payload[51] = 1; // target component
+    payload[50] = target_system;
+    payload[51] = target_component;
     payload[52] = 1; // MAV_FRAME_LOCAL_NED
     let mut frame = [0u8; 65];
     encode_frame_v2(seq, SET_POSITION_TARGET_ID, &payload, 143, &mut frame);
     frame
 }
 
-/// Encodes SET_ATTITUDE_TARGET (msg 82) commanding an absolute
-/// attitude (roll/pitch/yaw euler, radians, NED/ZYX) plus normalized
-/// collective thrust — the FPV mode uplink. Body-rate fields are
-/// masked out (type_mask 0b111): the FC's attitude loop derives its
-/// own rate commands.
-pub fn encode_attitude_setpoint(
+/// Absolute FPV attitude demand and the component selected to receive it.
+///
+/// Body-rate demand is intentionally absent because the FC attitude loop
+/// derives rate commands from this target.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AttitudeTarget {
+    /// Roll demand in radians.
+    pub roll_rad: f32,
+    /// Pitch demand in radians.
+    pub pitch_rad: f32,
+    /// Yaw demand in radians.
+    pub yaw_rad: f32,
+    /// Normalized collective thrust.
+    pub thrust: f32,
+    /// Selected MAVLink system id.
+    pub system_id: u8,
+    /// Selected MAVLink component id.
+    pub component_id: u8,
+}
+
+/// Encodes one absolute attitude target for the selected component.
+pub(crate) fn encode_attitude_setpoint(
     seq: u8,
     time_boot_ms: u32,
-    roll_rad: f32,
-    pitch_rad: f32,
-    yaw_rad: f32,
-    thrust: f32,
+    target: AttitudeTarget,
 ) -> [u8; 51] {
     const SET_ATTITUDE_TARGET_ID: u32 = 82;
-    let (sr, cr) = (roll_rad * 0.5).sin_cos();
-    let (sp, cp) = (pitch_rad * 0.5).sin_cos();
-    let (sy, cy) = (yaw_rad * 0.5).sin_cos();
+    let (sr, cr) = (target.roll_rad * 0.5).sin_cos();
+    let (sp, cp) = (target.pitch_rad * 0.5).sin_cos();
+    let (sy, cy) = (target.yaw_rad * 0.5).sin_cos();
     let q = [
         cr * cp * cy + sr * sp * sy,
         sr * cp * cy - cr * sp * sy,
@@ -371,9 +403,9 @@ pub fn encode_attitude_setpoint(
         payload[4 + i * 4..8 + i * 4].copy_from_slice(&w.to_le_bytes());
     }
     // body rates [20..32) stay zero (masked); thrust at [32..36).
-    payload[32..36].copy_from_slice(&thrust.clamp(0.0, 1.0).to_le_bytes());
-    payload[36] = 1; // target system
-    payload[37] = 1; // target component
+    payload[32..36].copy_from_slice(&target.thrust.clamp(0.0, 1.0).to_le_bytes());
+    payload[36] = target.system_id;
+    payload[37] = target.component_id;
     payload[38] = 0b0000_0111; // ignore body roll/pitch/yaw rate
     let mut frame = [0u8; 51];
     encode_frame_v2(seq, SET_ATTITUDE_TARGET_ID, &payload, 49, &mut frame);
