@@ -1118,6 +1118,37 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "selection datum identity encodes exactly (abi.rs parity)",
     view.getUint8(140) === 4 && view.getUint32(144, true) === 9,
   );
+
+  // NAV-01: undeclared heading/bug/course write Unknown references and
+  // no sample — a zero-default heading would be a plausible frozen rose.
+  const bare2 = mod.writeState({ selections: { headingBugRad: 0 } });
+  check("headingless state write succeeds", bare2.ok === true);
+  check(
+    "undeclared heading and angle references fail closed on the wire",
+    view.getUint8(152) === 255 &&
+      view.getUint8(154) === 255 &&
+      view.getUint8(155) === 255 &&
+      Number.isNaN(view.getFloat32(156, true)) &&
+      view.getUint8(172) === 0,
+  );
+  const headed = mod.writeState({
+    selections: { headingBugRad: 0.5, headingBugReference: 2 },
+    heading: { rad: 1.25, reference: 2, ageMs: 12 },
+    variation: { eastRad: 0.03, sourceId: 3, ageMs: 40 },
+    nav: { source: 1, courseRad: 0.3, courseReference: 2 },
+    valid: { heading: true, variation: true },
+  });
+  check("declared heading write succeeds", headed.ok === true);
+  check(
+    "declared heading, bug, course, and variation encode exactly",
+    view.getUint8(152) === 2 &&
+      view.getUint8(153) === 3 &&
+      view.getUint8(154) === 2 &&
+      view.getUint8(155) === 2 &&
+      Math.abs(view.getFloat32(156, true) - 1.25) < 1e-6 &&
+      Math.abs(view.getFloat32(164, true) - 0.03) < 1e-6 &&
+      view.getUint8(172) === 0b11,
+  );
 }
 
 // ---- glyph text painting (REN-02 consumption) ---------------------------------

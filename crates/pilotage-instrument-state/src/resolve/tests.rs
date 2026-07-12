@@ -34,6 +34,7 @@ pub(crate) fn flying_state() -> AircraftState {
             rates: true,
             position: true,
             velocity: true,
+            ..Default::default()
         },
         ..AircraftState::default()
     }
@@ -251,7 +252,7 @@ fn every_showable_output_is_finite_under_hostile_input() {
         for (name, sig) in [
             ("roll", p.roll_rad),
             ("pitch", p.pitch_rad),
-            ("heading", p.heading_rad),
+            ("heading", p.heading.value_rad),
             ("turn", p.turn_rate_rps),
             ("ias", p.ias_kt),
             ("gs", p.gs_kt),
@@ -291,6 +292,7 @@ fn pilotage_state_navdata_unknown() -> crate::aircraft::NavData {
         fromto: crate::aircraft::NavFromTo::To,
         vdev_dots: None,
         dist_nm: None,
+        course_reference: crate::heading::HeadingReference::SimLocalTrue,
     }
 }
 

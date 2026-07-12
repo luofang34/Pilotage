@@ -35,8 +35,8 @@ export const EXPECTED_GLYPH_SHA256 =
 const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
-export const STATE_ABI_VERSION = 3;
-export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152 });
+export const STATE_ABI_VERSION = 4;
+export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152, 4: 176 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 10;
 
@@ -423,6 +423,26 @@ export class InstrumentModule {
       b(149, 0);
       b(150, 0);
       b(151, 0);
+      // NAV-01 typed angles (abi.rs parity): operational heading is an
+      // independent declared sample — the fail-safe default is NO
+      // sample and Unknown references, so nothing renders on a north
+      // nobody declared.
+      b(152, state.heading?.reference ?? 255);
+      b(153, state.variation?.sourceId ?? 0);
+      b(154, state.selections?.headingBugReference ?? 255);
+      b(155, state.nav?.courseReference ?? 255);
+      f(156, state.heading?.rad ?? NaN);
+      f(160, state.heading ? state.heading.ageMs : NaN);
+      f(164, state.variation?.eastRad ?? NaN);
+      f(168, state.variation ? state.variation.ageMs : NaN);
+      b(
+        172,
+        (state.valid?.heading ?? false ? 1 : 0) |
+          (state.valid?.variation ?? false ? 2 : 0),
+      );
+      b(173, 0);
+      b(174, 0);
+      b(175, 0);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

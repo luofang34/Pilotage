@@ -913,6 +913,16 @@ async function startControlLoop(transport, token) {
 
 // ---- instrument panels (ADR-0017) -------------------------------------------
 
+/** The explicit SIM heading declaration: local-NED yaw from the
+ * published attitude quaternion, declared sim-local-true. Returns null
+ * when no attitude estimate exists — no sample, never a zero heading. */
+function declaredSimHeading(attitude) {
+  const q = attitude?.quat;
+  if (!q || ![q.w, q.x, q.y, q.z].every(Number.isFinite)) return null;
+  const yaw = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+  return { rad: yaw, reference: 2, ageMs: attitude.ageMs };
+}
+
 /** Maps the latest wire avionics estimate into the instrument state ABI
  * and draws both panels; runs on the display's own rAF cadence. Every
  * render result is honored: a validated frame is blitted, anything else
@@ -938,19 +948,28 @@ function renderInstruments() {
     coherent: 1,
     "excessive-skew": 2,
   }[snapshot.coherence.status];
+  // NAV-01: the feeder — not the display — declares the simulator's
+  // heading explicitly. Local-NED yaw is computed HERE from the same
+  // estimate the vehicle published and declared as sim-local-true
+  // (reference 2); the display never derives heading from attitude on
+  // its own, so removing this declaration flags HDG instead of
+  // freezing a fabricated rose.
+  const heading = declaredSimHeading(attitude);
   const panelState = {
     attitude,
     kinematics,
     air: null, // no airspeed/baro sensor on Aviate's wire yet (ADR-0018): honest Missing.
     nav: null,
     wind: null,
-    selections: { headingBugRad: 0 },
+    selections: { headingBugRad: 0, headingBugReference: 2 },
+    heading,
     quality: snapshot.quality,
     valid: {
       attitude: !!(validFlags & 1),
       rates: !!(validFlags & 2),
       position: !!(validFlags & 4),
       velocity: !!(validFlags & 8),
+      heading: heading !== null && !!(validFlags & 1),
     },
     snapshot: { generation: snapshot.generation, coherence },
   };

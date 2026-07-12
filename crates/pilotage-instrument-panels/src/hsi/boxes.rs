@@ -22,7 +22,7 @@ pub fn wind_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), Sce
         scene.text(58.0, 26.0, 14.0, Anchor::CENTER, "WIND ---")?;
         return Ok(());
     }
-    let hdg = data.heading_rad.value;
+    let hdg = data.heading.value_rad.value;
     // Arrow points where the wind blows toward, in the aircraft's frame.
     scene.save()?;
     scene.translate(28.0, 26.0)?;
@@ -70,12 +70,18 @@ pub fn course_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
     scene.rect(PaintMode::FillStroke, 2.0, 322.0, 112.0, 36.0)?;
     scene.fill_color(palette::WHITE)?;
     scene.text(30.0, 340.0, 15.0, Anchor::CENTER, "CRS")?;
-    if data.nav.data.source == NavSource::None || !data.nav.status.shows_value() {
+    if data.nav.data.source == NavSource::None
+        || !data.nav.status.shows_value()
+        || !data.nav.course_rose_rad.status.shows_value()
+    {
+        // A course whose reference is unknown or cannot convert into
+        // the rose reference is suppressed here exactly like an absent
+        // source — dashes, never a number on the wrong north.
         scene.fill_color(palette::GREY)?;
         scene.text(78.0, 340.0, 18.0, Anchor::CENTER, "---°")?;
         return Ok(());
     }
-    let deg = libm::roundf(wrap_deg_360(data.nav.data.course_rad * RAD_TO_DEG)) as i32;
+    let deg = libm::roundf(wrap_deg_360(data.nav.course_rose_rad.value * RAD_TO_DEG)) as i32;
     let shown = if deg == 0 { 360 } else { deg };
     let text = fmt_label!(8, "{shown:03}°");
     scene.fill_color(source_color(data.nav.data.source))?;
@@ -88,7 +94,12 @@ pub fn heading_sel_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<
     scene.fill_color(palette::BOX_BG)?;
     scene.stroke(palette::GREY, 1.5)?;
     scene.rect(PaintMode::FillStroke, 366.0, 322.0, 112.0, 36.0)?;
-    let deg = libm::roundf(wrap_deg_360(data.selections.heading_bug_rad * RAD_TO_DEG)) as i32;
+    if !data.heading_bug_rose_rad.status.shows_value() {
+        scene.fill_color(palette::AMBER)?;
+        scene.text(422.0, 340.0, 15.0, Anchor::CENTER, "HDG REF")?;
+        return Ok(());
+    }
+    let deg = libm::roundf(wrap_deg_360(data.heading_bug_rose_rad.value * RAD_TO_DEG)) as i32;
     let shown = if deg == 0 { 360 } else { deg };
     let text = fmt_label!(8, "{shown:03}°");
     scene.fill_color(palette::CYAN)?;

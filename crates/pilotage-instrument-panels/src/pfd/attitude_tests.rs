@@ -43,6 +43,7 @@ fn oriented(roll_deg: f32, pitch_deg: f32) -> PanelData {
         rates: true,
         position: true,
         velocity: true,
+        ..Default::default()
     };
     state.kinematics = flying_state_kinematics();
     state.air = flying_state_air();
@@ -244,6 +245,7 @@ fn ned_adapter_output_is_byte_identical_to_the_direct_path() {
         rates: true,
         position: true,
         velocity: true,
+        ..Default::default()
     };
     via_adapter_state.kinematics = flying_state_kinematics();
     via_adapter_state.air = flying_state_air();

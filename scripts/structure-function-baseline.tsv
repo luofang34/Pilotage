@@ -3,8 +3,8 @@
 ./crates/pilotage-instrument-scene/src/decode.rs	decode_payload	94
 ./crates/pilotage-instrument-glyphs/src/sha256.rs	sha256	90
 ./crates/pilotage-conformance/src/fixture.rs	increment_zero_script	89
-./crates/pilotage-instrument-state/src/abi.rs	decode_state	132
-./crates/pilotage-instrument-state/src/abi.rs	encode_state	105
+./crates/pilotage-instrument-state/src/abi.rs	decode_state	129
+./crates/pilotage-instrument-state/src/abi.rs	encode_state	97
 ./crates/pilotage-authority/src/wire.rs	from	88
 ./adapters/aviate/src/adapter/tests.rs	stick_frame_reaches_the_fc_as_a_velocity_setpoint	93
 ./adapters/aviate/src/uplink.rs	send_stick_frame	90

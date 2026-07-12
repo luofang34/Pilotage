@@ -41,6 +41,7 @@ pub(crate) fn flying() -> PanelData {
             rates: true,
             position: true,
             velocity: true,
+            ..Default::default()
         },
         ..AircraftState::default()
     };

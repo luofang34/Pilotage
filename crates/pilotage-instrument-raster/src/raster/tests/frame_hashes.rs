@@ -17,9 +17,12 @@ use crate::{FrameId, FramebufferDims, RenderStatus, render};
 // supported CI architectures; a mismatch is a determinism regression, not a
 // value to re-pin casually. The PFD hash covers the datum-qualified
 // altitude tape: the fixture's local-relative reference paints the amber
-// REL label and the not-applied SET setting box (ALT-01).
+// REL label and the not-applied SET setting box (ALT-01). The HSI hash
+// covers the reference-typed heading: the rose turns with the fixture's
+// explicit SIM-declared independent sample — never quaternion yaw — and
+// paints the amber SIM reference label (NAV-01).
 const PFD_SHA256: &str = "3148b8e9d5c3d9cc5c1ac812c3f5674615649c65d4966ad3f1a85d1ce1f1d952";
-const HSI_SHA256: &str = "6edcbc92d936a690a68f0632d2ec20b158d54e59cc9fde6640feefa077b258e3";
+const HSI_SHA256: &str = "66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c";
 
 /// A fixed, richly populated state so every panel band paints content.
 ///
@@ -64,6 +67,7 @@ pub(super) fn demo_state() -> AircraftState {
                 fromto: NavFromTo::To,
                 vdev_dots: Some(-0.4),
                 dist_nm: Some(12.4),
+                course_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
             }),
             age_ms: Some(80.0),
         },
@@ -76,6 +80,7 @@ pub(super) fn demo_state() -> AircraftState {
         },
         selections: Selections {
             heading_bug_rad: 0.5,
+            heading_bug_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
             altitude_sel_m: Some(915.0),
             ..Selections::default()
         },
@@ -85,9 +90,19 @@ pub(super) fn demo_state() -> AircraftState {
             rates: true,
             position: true,
             velocity: true,
+            heading: true,
+            ..ValidFlags::default()
         },
         snapshot: SnapshotMeta::default(),
         altitude: pilotage_instrument_state::AltitudeDeclaration::default(),
+        heading: Stamped {
+            data: Some(pilotage_instrument_state::HeadingSample {
+                heading_rad: 0.6,
+                reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
+            }),
+            age_ms: Some(80.0),
+        },
+        variation: Stamped::default(),
     }
 }
 

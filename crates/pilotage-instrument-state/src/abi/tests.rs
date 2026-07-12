@@ -6,7 +6,28 @@ use crate::aircraft::{
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, Wind,
 };
 use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
+use crate::heading::{HeadingReference, HeadingSample, MagneticVariation, VariationSourceId};
 use pilotage_frames::Quat;
+
+fn full_heading() -> Stamped<HeadingSample> {
+    Stamped {
+        data: Some(HeadingSample {
+            heading_rad: 1.25,
+            reference: HeadingReference::SimLocalTrue,
+        }),
+        age_ms: Some(9.0),
+    }
+}
+
+fn full_variation() -> Stamped<MagneticVariation> {
+    Stamped {
+        data: Some(MagneticVariation {
+            east_positive_rad: 0.04,
+            source: VariationSourceId(3),
+        }),
+        age_ms: Some(30.0),
+    }
+}
 
 fn full_state() -> AircraftState {
     AircraftState {
@@ -44,6 +65,7 @@ fn full_state() -> AircraftState {
                 fromto: NavFromTo::To,
                 vdev_dots: Some(0.4),
                 dist_nm: Some(40.3),
+                course_reference: HeadingReference::SimLocalTrue,
             }),
             age_ms: Some(9.0),
         },
@@ -56,6 +78,7 @@ fn full_state() -> AircraftState {
         },
         selections: Selections {
             heading_bug_rad: 0.16,
+            heading_bug_reference: HeadingReference::SimLocalTrue,
             altitude_sel_m: Some(3048.0),
             altitude_sel_class: AltitudeClass::LocalRelative,
             altitude_sel_origin: OriginId(42),
@@ -68,6 +91,8 @@ fn full_state() -> AircraftState {
             rates: false,
             position: true,
             velocity: true,
+            heading: true,
+            variation: true,
         },
         snapshot: SnapshotMeta {
             generation: u32::MAX,
@@ -79,6 +104,8 @@ fn full_state() -> AircraftState {
             geoid_model: GeoidModelId(1),
             origin: OriginId(42),
         },
+        heading: full_heading(),
+        variation: full_variation(),
     }
 }
 
@@ -172,6 +199,43 @@ fn selection_identity_round_trips_exactly() {
     assert_eq!(
         decoded.selections.altitude_sel_model,
         state.selections.altitude_sel_model
+    );
+}
+
+#[test]
+fn unknown_heading_and_angle_reference_bytes_decode_fail_closed() {
+    let mut block = [0u8; STATE_ABI_SIZE];
+    encode_state(&full_state(), &mut block).expect("encodes");
+    block[152] = 9; // heading reference
+    block[154] = 9; // bug reference
+    block[155] = 9; // course reference
+    let state = decode_state(&block).expect("decodes");
+    assert_eq!(
+        state.heading.data.expect("heading present").reference,
+        HeadingReference::Unknown
+    );
+    assert_eq!(
+        state.selections.heading_bug_reference,
+        HeadingReference::Unknown
+    );
+    assert_eq!(
+        state.nav.data.expect("nav present").course_reference,
+        HeadingReference::Unknown
+    );
+}
+
+#[test]
+fn heading_and_variation_round_trip_exactly() {
+    let mut block = [0u8; STATE_ABI_SIZE];
+    let state = full_state();
+    encode_state(&state, &mut block).expect("encodes");
+    let decoded = decode_state(&block).expect("decodes");
+    assert_eq!(decoded.heading, state.heading);
+    assert_eq!(decoded.variation, state.variation);
+    assert!(decoded.valid.heading && decoded.valid.variation);
+    assert_eq!(
+        decoded.selections.heading_bug_reference,
+        state.selections.heading_bug_reference
     );
 }
 

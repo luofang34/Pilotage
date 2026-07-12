@@ -25,7 +25,7 @@ pub fn draw_cdi(
     let color = source_color(nav.data.source);
     scene.save()?;
     scene.translate(super::CX, super::CY)?;
-    scene.rotate(nav.data.course_rad - heading_rad)?;
+    scene.rotate(nav.course_rose_rad.value - heading_rad)?;
 
     // Course arrow: head, fore shaft, aft shaft.
     scene.fill_color(color)?;
