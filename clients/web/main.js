@@ -26,6 +26,16 @@ import {
   BUTTON_EDGE_PRESSED,
 } from "./wire.js";
 import { loadInstruments, PANEL } from "./instruments.js";
+import {
+  coverInstrumentFailures,
+  createDomFaultPresenter,
+  failInstrumentSet,
+  PanelHealth,
+  REASON,
+  renderInstrumentSet,
+  startDisplayLoop,
+  tickInstrumentSet,
+} from "./instrument-health.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const MOTION_SCOPE = "vehicle.motion";
@@ -58,6 +68,8 @@ const ctx = els.canvas.getContext("2d");
 const chaseCtx = els.chaseCanvas.getContext("2d");
 const pfdCtx = els.pfd.getContext("2d");
 const hsiCtx = els.hsi.getContext("2d");
+const pfdFaultPresenter = createDomFaultPresenter(els.pfd);
+const hsiFaultPresenter = createDomFaultPresenter(els.hsi);
 
 /** Session-scoped mutable state the connect flow and background loops share. */
 const state = {
@@ -79,11 +91,31 @@ const state = {
 // estimate plus its receive stamp. Ingest only records; drawing happens
 // on the display's own requestAnimationFrame cadence, so telemetry rate
 // and frame rate stay decoupled.
+// Each panel latches display failures independently (DISP-01); a fault in
+// the shared wasm backend (load/ABI/init) fails both.
 const instruments = {
   mod: null,
+  moduleFault: null,
   latest: null,
   receivedAtMs: null,
+  health: {
+    [PANEL.PFD]: new PanelHealth(),
+    [PANEL.HSI]: new PanelHealth(),
+  },
 };
+
+// Browser watchdog cadence (simulator-only): a scheduling domain separate
+// from requestAnimationFrame, so a stalled render loop still trips the
+// liveness deadline and covers the stale frame.
+const WATCHDOG_INTERVAL_MS = 250;
+
+/** The two instrument paint targets and their independent fault surfaces. */
+function instrumentTargets() {
+  return [
+    [PANEL.PFD, pfdCtx, els.pfd, pfdFaultPresenter],
+    [PANEL.HSI, hsiCtx, els.hsi, hsiFaultPresenter],
+  ];
+}
 
 function log(line) {
   const time = new Date().toISOString().split("T")[1].replace("Z", "");
@@ -707,13 +739,24 @@ async function startControlLoop(transport) {
 // ---- instrument panels (ADR-0017) -------------------------------------------
 
 /** Maps the latest wire avionics estimate into the instrument state ABI
- * and draws both panels; runs on the display's own rAF cadence. */
+ * and draws both panels; runs on the display's own rAF cadence. Every
+ * render result is honored: a validated frame is blitted, anything else
+ * is covered by the failure page (no ignored results and no stale
+ * imagery). */
 function renderInstruments() {
   const mod = instruments.mod;
-  if (!mod) return;
+  if (!mod) {
+    // Load/ABI/init faults are shared-backend failures: both panels show
+    // the failure page. While still loading there is no prior imagery to
+    // cover, so the canvases stay blank.
+    if (instruments.moduleFault !== null) {
+      coverInstrumentFailures(instruments.health, instrumentTargets());
+    }
+    return;
+  }
   const a = instruments.latest;
   const ageMs = a ? performance.now() - instruments.receivedAtMs : NaN;
-  mod.writeState({
+  const panelState = {
     attitude: a ? { quat: a.quat, rates: a.rates, ageMs } : null,
     kinematics: a ? { posNed: a.posNed, velNed: a.velNed, ageMs } : null,
     air: null, // no airspeed/baro sensor on Aviate's wire yet (ADR-0018): honest Missing.
@@ -729,25 +772,51 @@ function renderInstruments() {
           velocity: !!(a.validFlags & 8),
         }
       : {},
-  });
-  mod.renderTo(pfdCtx, PANEL.PFD, els.pfd.width, els.pfd.height);
-  mod.renderTo(hsiCtx, PANEL.HSI, els.hsi.width, els.hsi.height);
+  };
+  const nowMs = performance.now();
+  renderInstrumentSet(mod, instruments.health, instrumentTargets(), panelState, nowMs);
+}
+
+/** Liveness check on its own timer so a stalled render loop still gets
+ * its stale frame covered; skipped while the module is absent (a load
+ * fault already shows its own page, and before load there is no imagery
+ * to cover). */
+function watchdogTick() {
+  if (!instruments.mod) return;
+  tickInstrumentSet(instruments.health, instrumentTargets(), performance.now());
 }
 
 async function startInstruments() {
+  startDisplayLoop(
+    (callback) => requestAnimationFrame(callback),
+    () => renderInstruments(),
+    () =>
+      failInstrumentSet(
+        instruments.health,
+        instrumentTargets(),
+        performance.now(),
+        REASON.RENDER_TRAP,
+      ),
+  );
   try {
-    instruments.mod = await loadInstruments("./instruments.wasm");
-    const loop = () => {
-      renderInstruments();
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
+    instruments.mod = await loadInstruments("./instrument-runtime_bg.wasm");
+    const nowMs = performance.now();
+    for (const health of Object.values(instruments.health)) health.reset(nowMs);
+    setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
     log("instrument panels ready (wasm loaded)");
   } catch (error) {
-    log(`instrument panels unavailable: ${error} (run scripts/build-web-instruments.sh)`);
+    instruments.moduleFault = error?.reason ?? REASON.WASM_LOAD;
+    failInstrumentSet(
+      instruments.health,
+      instrumentTargets(),
+      performance.now(),
+      instruments.moduleFault,
+    );
+    log(`instrument panels unavailable (D-${instruments.moduleFault}): ${error} (run scripts/build-web-instruments.sh)`);
   }
 }
 
+window.addEventListener("pagehide", () => instruments.mod?.dispose(), { once: true });
 applyUrlParams();
 startInstruments();
 document.getElementById("fpvBtn").addEventListener("click", () => {

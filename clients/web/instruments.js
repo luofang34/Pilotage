@@ -5,110 +5,370 @@
 // linear memory (mirroring pilotage-instrument-state/src/abi.rs exactly),
 // and interprets the returned scene-command bytes onto a Canvas2D.
 //
+// Rendering is transactional: a frame reaches the visible canvas
+// only after the WASM reports success, the scene bytes pass structural
+// validation, and the full frame painted onto an offscreen back buffer.
+// Every failure returns a stable reason code; no path silently keeps the
+// previous image.
+//
 // The interpreter is one backend of the versioned scene IR; unknown
 // opcodes are skipped and counted, never fatal (ADR-0017).
 
+import { InstrumentFault, REASON } from "./instrument-health.js";
+
 export const PANEL = { PFD: 0, HSI: 1 };
 
-const SCENE_FORMAT_VERSION = 1;
-const STATE_ABI_VERSION = 1;
+// Logical drawing space every panel targets (pilotage-instrument-panels
+// PANEL_W/PANEL_H); backends scale it to their viewport.
+export const LOGICAL_W = 480;
+export const LOGICAL_H = 360;
 
-export async function loadInstruments(wasmUrl) {
-  const response = await fetch(wasmUrl);
-  let instance;
+const SCENE_FORMAT_VERSION = 1;
+export const STATE_ABI_VERSION = 1;
+export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128 });
+export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
+const MAX_WASM_RENDER_STATUS = 8;
+
+// A resource missing any required method is incompatible and must fail as an
+// ABI mismatch rather than as a TypeError mid-frame.
+const REQUIRED_RUNTIME_METHODS = [
+  "free",
+  "init",
+  "state_ptr",
+  "state_len",
+  "scene_ptr",
+  "render_result",
+  "set_v_speeds",
+];
+
+export async function loadInstruments(wasmUrl, options = {}) {
+  let bindings;
   try {
-    ({ instance } = await WebAssembly.instantiateStreaming(response, {}));
+    bindings = await (options.loadBindings ?? (() => import("./instrument-runtime.js")))();
+  } catch (error) {
+    throw new InstrumentFault(REASON.WASM_LOAD, `instrument binding load failed: ${error}`);
+  }
+  const initializeBindings = options.initializeBindings ?? bindings.default;
+  const createRuntime = options.createRuntime ?? (() => new bindings.InstrumentRuntime());
+  const queryAbiVersion = options.queryAbiVersion ?? bindings.abi_version;
+  if (
+    typeof initializeBindings !== "function" ||
+    typeof createRuntime !== "function" ||
+    typeof queryAbiVersion !== "function"
+  ) {
+    throw new InstrumentFault(REASON.ABI_MISMATCH, "instrument binding surface is incomplete");
+  }
+  let wasm;
+  try {
+    wasm = await initializeBindings({ module_or_path: wasmUrl });
+  } catch (error) {
+    throw new InstrumentFault(REASON.WASM_LOAD, `instrument wasm load failed: ${error}`);
+  }
+  const memoryBuffer = wasm?.memory?.buffer;
+  const validMemory =
+    memoryBuffer instanceof ArrayBuffer ||
+    (typeof SharedArrayBuffer !== "undefined" && memoryBuffer instanceof SharedArrayBuffer);
+  if (!validMemory) {
+    throw new InstrumentFault(REASON.ABI_MISMATCH, "instrument binding has invalid memory");
+  }
+  let runtime;
+  try {
+    runtime = createRuntime();
+  } catch (error) {
+    throw new InstrumentFault(REASON.INIT_FAILED, `instrument runtime construction failed: ${error}`);
+  }
+  for (const name of REQUIRED_RUNTIME_METHODS) {
+    if (typeof runtime?.[name] !== "function") {
+      releaseRuntime(runtime);
+      throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument runtime has invalid method ${name}`);
+    }
+  }
+  let abiVersion;
+  try {
+    abiVersion = queryAbiVersion();
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument ABI query failed: ${error}`);
+  }
+  if (abiVersion !== STATE_ABI_VERSION) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(
+      REASON.ABI_MISMATCH,
+      `instrument ABI mismatch: wasm=${abiVersion} js=${STATE_ABI_VERSION}`,
+    );
+  }
+  let initialized;
+  try {
+    initialized = runtime.init();
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.INIT_FAILED, `instrument wasm init trapped: ${error}`);
+  }
+  if (initialized !== 1) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.INIT_FAILED, `instrument wasm init returned ${initialized}`);
+  }
+  let stateLen;
+  try {
+    stateLen = runtime.state_len();
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument state length query failed: ${error}`);
+  }
+  if (stateLen !== STATE_ABI_SIZE) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(
+      REASON.ABI_MISMATCH,
+      `instrument state size mismatch: wasm=${stateLen} js=${STATE_ABI_SIZE}`,
+    );
+  }
+  let statePtr;
+  let scenePtr;
+  try {
+    statePtr = runtime.state_ptr();
+    scenePtr = runtime.scene_ptr();
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument buffer query failed: ${error}`);
+  }
+  const activeMemoryBuffer = wasm.memory.buffer;
+  const memoryLen = activeMemoryBuffer.byteLength;
+  const stateFits =
+    Number.isInteger(statePtr) && statePtr > 0 && statePtr + STATE_ABI_SIZE <= memoryLen;
+  const sceneStartsInMemory =
+    Number.isInteger(scenePtr) && scenePtr > 0 && scenePtr < memoryLen;
+  if (!stateFits || !sceneStartsInMemory) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(
+      REASON.ABI_MISMATCH,
+      `instrument buffer layout invalid: state=${statePtr} scene=${scenePtr} memory=${memoryLen}`,
+    );
+  }
+  return new InstrumentModule(runtime, {
+    ...options,
+    memory: wasm.memory,
+    statePtr,
+    scenePtr,
+  });
+}
+
+function releaseRuntime(runtime) {
+  try {
+    runtime?.free?.();
   } catch {
-    // Static servers without the wasm MIME type fall back to ArrayBuffer.
-    const bytes = await (await fetch(wasmUrl)).arrayBuffer();
-    ({ instance } = await WebAssembly.instantiate(bytes, {}));
+    // The resource is already unusable; its initialization fault remains primary.
   }
-  const exports = instance.exports;
-  if (exports.abi_version() !== STATE_ABI_VERSION) {
-    throw new Error(`instrument ABI mismatch: wasm=${exports.abi_version()} js=${STATE_ABI_VERSION}`);
+}
+
+// Structural validation of an encoded scene: version byte plus exact
+// command framing ([opcode u8][payload_len u16 LE][payload]) covering the
+// buffer with no trailing partial command. Runs BEFORE any painting so a
+// malformed scene can never become partially visible. Unknown opcodes are
+// a version-policy concern, not a structural one — they pass here and are
+// counted by the interpreter.
+export function validateSceneStructure(view) {
+  if (view.byteLength < 1 || view.getUint8(0) !== SCENE_FORMAT_VERSION) return false;
+  let at = 1;
+  while (at + 3 <= view.byteLength) {
+    at += 3 + view.getUint16(at + 1, true);
   }
-  if (exports.init() !== 1) {
-    throw new Error("instrument wasm init failed");
-  }
-  return new InstrumentModule(exports);
+  return at === view.byteLength;
 }
 
 export class InstrumentModule {
-  constructor(exports) {
-    this.exports = exports;
+  #runtime;
+  #memory;
+  #statePtr;
+  #scenePtr;
+  #disposed;
+
+  // options.createCanvas injects the back-buffer factory (tests pass a
+  // recording double; the browser default is a plain offscreen element).
+  constructor(runtime, { createCanvas, memory, statePtr, scenePtr } = {}) {
+    this.#runtime = runtime;
+    this.#memory = memory ?? runtime.memory;
+    this.#statePtr = statePtr ?? runtime.state_ptr();
+    this.#scenePtr = scenePtr ?? runtime.scene_ptr();
+    this.#disposed = false;
     this.unknownOpcodes = 0;
+    this.createCanvas =
+      createCanvas ??
+      ((w, h) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        return canvas;
+      });
+    this.back = new Map();
+  }
+
+  dispose() {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    const runtime = this.#runtime;
+    this.#runtime = null;
+    this.#memory = null;
+    this.#statePtr = 0;
+    this.#scenePtr = 0;
+    this.back.clear();
+    runtime.free();
   }
 
   setVSpeeds(vs0, vs, vfe, vno, vne) {
-    this.exports.set_v_speeds(vs0, vs, vfe, vno, vne);
+    if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
+    try {
+      const status = this.#runtime.set_v_speeds(vs0, vs, vfe, vno, vne);
+      if (!Number.isInteger(status) || status < 0 || status > MAX_WASM_RENDER_STATUS) {
+        return { ok: false, reason: REASON.RENDER_TRAP };
+      }
+      return status === 0 ? { ok: true } : { ok: false, reason: status };
+    } catch {
+      return { ok: false, reason: REASON.RENDER_TRAP };
+    }
   }
 
   // state: see writeState field handling below; absent groups may be
   // omitted entirely.
   writeState(state) {
-    const ptr = this.exports.state_ptr();
-    const len = this.exports.state_len();
-    const view = new DataView(this.exports.memory.buffer, ptr, len);
-    const f = (off, v) => view.setFloat32(off, v ?? NaN, true);
-    const b = (off, v) => view.setUint8(off, v);
+    if (this.#disposed) return { ok: false, reason: REASON.STATE_WRITE_FAILED };
+    try {
+      const view = new DataView(this.#memory.buffer, this.#statePtr, STATE_ABI_SIZE);
+      const f = (off, v) => view.setFloat32(off, v ?? NaN, true);
+      const b = (off, v) => view.setUint8(off, v);
 
-    view.setUint32(0, STATE_ABI_VERSION, true);
-    const att = state.attitude;
-    f(4, att?.quat?.w ?? 1);
-    f(8, att?.quat?.x ?? 0);
-    f(12, att?.quat?.y ?? 0);
-    f(16, att?.quat?.z ?? 0);
-    f(20, att?.rates?.[0] ?? 0);
-    f(24, att?.rates?.[1] ?? 0);
-    f(28, att?.rates?.[2] ?? 0);
-    const kin = state.kinematics;
-    f(32, kin?.posNed?.[0] ?? 0);
-    f(36, kin?.posNed?.[1] ?? 0);
-    f(40, kin?.posNed?.[2] ?? 0);
-    f(44, kin?.velNed?.[0] ?? 0);
-    f(48, kin?.velNed?.[1] ?? 0);
-    f(52, kin?.velNed?.[2] ?? 0);
-    f(56, state.air?.iasMps ?? NaN);
-    f(60, state.air?.baroHpa ?? NaN);
-    f(64, att ? att.ageMs : NaN);
-    f(68, kin ? kin.ageMs : NaN);
-    f(72, state.air ? state.air.ageMs : NaN);
-    f(76, state.nav ? state.nav.ageMs : NaN);
-    f(80, state.wind ? state.wind.ageMs : NaN);
-    b(84, state.quality ?? 0);
-    const valid = state.valid ?? {};
-    b(
-      85,
-      (valid.attitude ?? true ? 1 : 0) |
-        (valid.rates ?? true ? 2 : 0) |
-        (valid.position ?? true ? 4 : 0) |
-        (valid.velocity ?? true ? 8 : 0),
-    );
-    b(86, state.nav?.source ?? 0);
-    b(87, state.nav?.fromto ?? 0);
-    f(88, state.nav?.courseRad ?? 0);
-    f(92, state.nav?.cdiDots ?? 0);
-    f(96, state.nav?.vdevDots ?? NaN);
-    f(100, state.nav?.distNm ?? NaN);
-    f(104, state.selections?.headingBugRad ?? 0);
-    f(108, state.selections?.altitudeSelM ?? NaN);
-    f(112, state.wind?.fromRad ?? 0);
-    f(116, state.wind?.speedMps ?? 0);
+      view.setUint32(0, STATE_ABI_VERSION, true);
+      const att = state.attitude;
+      f(4, att?.quat?.w ?? 1);
+      f(8, att?.quat?.x ?? 0);
+      f(12, att?.quat?.y ?? 0);
+      f(16, att?.quat?.z ?? 0);
+      f(20, att?.rates?.[0] ?? 0);
+      f(24, att?.rates?.[1] ?? 0);
+      f(28, att?.rates?.[2] ?? 0);
+      const kin = state.kinematics;
+      f(32, kin?.posNed?.[0] ?? 0);
+      f(36, kin?.posNed?.[1] ?? 0);
+      f(40, kin?.posNed?.[2] ?? 0);
+      f(44, kin?.velNed?.[0] ?? 0);
+      f(48, kin?.velNed?.[1] ?? 0);
+      f(52, kin?.velNed?.[2] ?? 0);
+      f(56, state.air?.iasMps ?? NaN);
+      f(60, state.air?.baroHpa ?? NaN);
+      f(64, att ? att.ageMs : NaN);
+      f(68, kin ? kin.ageMs : NaN);
+      f(72, state.air ? state.air.ageMs : NaN);
+      f(76, state.nav ? state.nav.ageMs : NaN);
+      f(80, state.wind ? state.wind.ageMs : NaN);
+      b(84, state.quality ?? 0);
+      const valid = state.valid ?? {};
+      b(
+        85,
+        (valid.attitude ?? true ? 1 : 0) |
+          (valid.rates ?? true ? 2 : 0) |
+          (valid.position ?? true ? 4 : 0) |
+          (valid.velocity ?? true ? 8 : 0),
+      );
+      b(86, state.nav?.source ?? 0);
+      b(87, state.nav?.fromto ?? 0);
+      f(88, state.nav?.courseRad ?? 0);
+      f(92, state.nav?.cdiDots ?? 0);
+      f(96, state.nav?.vdevDots ?? NaN);
+      f(100, state.nav?.distNm ?? NaN);
+      f(104, state.selections?.headingBugRad ?? 0);
+      f(108, state.selections?.altitudeSelM ?? NaN);
+      f(112, state.wind?.fromRad ?? 0);
+      f(116, state.wind?.speedMps ?? 0);
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: REASON.STATE_WRITE_FAILED };
+    }
   }
 
-  // Renders `panel` and paints it onto ctx2d, scaling the 480x360
-  // logical space to fit (letterboxed).
-  renderTo(ctx, panel, width, height) {
-    const len = this.exports.render(panel);
-    if (len === 0) return false;
-    const bytes = new DataView(this.exports.memory.buffer, this.exports.scene_ptr(), len);
-    const scale = Math.min(width / 480, height / 360);
-    ctx.save();
-    ctx.setTransform(scale, 0, 0, scale, (width - 480 * scale) / 2, (height - 360 * scale) / 2);
-    this.unknownOpcodes += interpretScene(bytes, ctx);
-    ctx.restore();
-    return true;
+  // Renders `panel` transactionally. Returns either
+  //   { ok: true, generation }
+  // after the validated frame covers the whole visible target, or
+  //   { ok: false, reason }
+  // with a stable REASON code. The caller must cover failures with the
+  // backend-owned failure page, never leave the last visible frame.
+  renderPanel(panel, ctx, width, height) {
+    if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
+    if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+      return { ok: false, reason: REASON.PAINT_FAILED };
+    }
+    let result;
+    try {
+      result = decodeRenderResult(this.#runtime.render_result(panel));
+    } catch {
+      return { ok: false, reason: REASON.RENDER_TRAP };
+    }
+    if (result === null) return { ok: false, reason: REASON.RENDER_TRAP };
+    const { status, sceneLen: len, generation } = result;
+    if (!Number.isInteger(status) || status < 0 || status > MAX_WASM_RENDER_STATUS) {
+      return { ok: false, reason: REASON.RENDER_TRAP };
+    }
+    if (status !== 0) {
+      return len === 0
+        ? { ok: false, reason: status }
+        : { ok: false, reason: REASON.RENDER_TRAP };
+    }
+    let view;
+    try {
+      view = new DataView(this.#memory.buffer, this.#scenePtr, len);
+    } catch {
+      return { ok: false, reason: REASON.RENDER_TRAP };
+    }
+    let structurallyValid;
+    try {
+      structurallyValid = validateSceneStructure(view);
+    } catch {
+      return { ok: false, reason: REASON.RENDER_TRAP };
+    }
+    if (!structurallyValid) return { ok: false, reason: REASON.SCENE_FRAMING };
+    let back;
+    try {
+      back = this.back.get(panel);
+      if (!back) {
+        back = this.createCanvas(LOGICAL_W, LOGICAL_H);
+        this.back.set(panel, back);
+      }
+      // Re-assigning width resets the back context wholesale (state
+      // stack, transform, clip), so an unbalanced save/clip in one frame
+      // cannot leak into the next.
+      back.width = LOGICAL_W;
+      back.height = LOGICAL_H;
+      const bctx = back.getContext("2d");
+      bctx.fillStyle = "#000";
+      bctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+      this.unknownOpcodes += interpretScene(view, bctx);
+    } catch {
+      return { ok: false, reason: REASON.PAINT_FAILED };
+    }
+    try {
+      const scale = Math.min(width / LOGICAL_W, height / LOGICAL_H);
+      const dw = LOGICAL_W * scale;
+      const dh = LOGICAL_H * scale;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(back, (width - dw) / 2, (height - dh) / 2, dw, dh);
+    } catch {
+      return { ok: false, reason: REASON.PAINT_FAILED };
+    }
+    return { ok: true, generation, sceneLen: len };
   }
+}
+
+// The single i64 result is one frame's immutable boundary metadata:
+// status[7:0], scene length[31:8], generation[63:32]. WebAssembly i64
+// values surface as signed BigInt, so decode the same bits as unsigned.
+export function decodeRenderResult(packed) {
+  if (typeof packed !== "bigint") return null;
+  const value = BigInt.asUintN(64, packed);
+  return {
+    status: Number(value & 0xffn),
+    sceneLen: Number((value >> 8n) & 0xffffffn),
+    generation: Number((value >> 32n) & 0xffffffffn),
+  };
 }
 
 function color(view, at) {

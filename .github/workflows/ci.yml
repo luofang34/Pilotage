@@ -37,6 +37,9 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 
@@ -68,10 +71,15 @@ jobs:
           --target thumbv7em-none-eabihf
 
       - name: instrument wasm backend builds
-        run: cargo build -p pilotage-instruments-web --target wasm32-unknown-unknown --release
+        # Generating the resource binding here makes the fail-visible test
+        # exercise the exact WASM artifact served by the browser client.
+        run: bash scripts/build-web-instruments.sh
 
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs
+
+      - name: instrument display fail-visible contract
+        run: node clients/web/instruments.test.mjs
 
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
