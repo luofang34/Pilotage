@@ -9,6 +9,11 @@ import {
   ADMIT,
   DEFAULT_MAX_CLOCK_ERROR_NANOS,
 } from "./video-identity.js";
+import {
+  SnapshotAssociator,
+  associateIfAccepted,
+  ASSOCIATION,
+} from "./snapshot-association.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -293,6 +298,30 @@ check(
   "gate with no candidate snapshot is closed",
   conformalGate(meta({ mappingAvailable: true, calibrationId: 7 }), null, RECOGNIZED).conformalReady === false,
 );
+
+// The tracker verdict gates association: a frame the tracker rejects (here a
+// stale epoch) never reaches the associator, so it cannot associate fresh.
+{
+  const tracker = new VideoIdentityTracker();
+  const associator = new SnapshotAssociator();
+  associator.observe({
+    sourceId: 10n,
+    sourceIncarnation: "aa".repeat(16),
+    sourceEpoch: 0,
+    sequence: 0,
+    acquiredAtNanos: 1000n,
+    clock: CLOCK_SIMULATION,
+  });
+  tracker.admit(meta({ sourceEpoch: 5, sequence: 0 }));
+  const stale = associateIfAccepted(
+    tracker,
+    associator,
+    meta({ sourceEpoch: 4, sequence: 9, mappingTargetClock: CLOCK_SIMULATION }),
+    RECOGNIZED,
+  );
+  check("tracker-rejected frame is not admitted", stale.accepted === false);
+  check("tracker-rejected frame does not associate", stale.association.reason === ASSOCIATION.NOT_ADMITTED);
+}
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

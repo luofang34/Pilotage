@@ -1,0 +1,206 @@
+// Capture-to-aircraft-snapshot association for the viewer (ADR-0020).
+//
+// Given a v2 video frame with a valid clock mapping, this finds the aircraft
+// snapshot that corresponds to the frame's CAPTURE time — never browser receipt
+// time — with a traceable identity and a quantified total error. It OBSERVES
+// the aircraft snapshots main.js has already accepted (it does not gate them;
+// AV-01's ingestion contract in telemetry-ingress.js owns that) and keeps a
+// bounded history ring. Association maps the capture time through the frame's
+// CaptureClockMapping into the snapshot clock domain and selects the nearest
+// snapshot by acquisition time.
+//
+// Everything fails closed: an empty history, a clock-domain mismatch, a nearest
+// snapshot that crosses a source-incarnation discontinuity, or a total error
+// (mapping error bound + association delta) over budget all yield "not ready".
+// The result is finally passed through conformalGate, so the #62 checks
+// (mapping validity, target-clock match, published/recognized calibration,
+// overflow-safe mapped time, error budget) can never be bypassed.
+
+import { conformalGate, mapCaptureTime, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
+
+const CLOCK_VEHICLE_BOOT = 1;
+const CLOCK_SIMULATION = 2;
+const INCARNATION_HEX = /^[0-9a-f]{32}$/;
+
+// History ring size. The mapped capture time of a displayed frame is at most a
+// glass-to-glass latency old (transport + host queue + decode, well under a
+// second in this demo), so a few seconds of snapshots is ample slack. At the
+// simulator's telemetry rate (tens of hertz) 256 entries covers several
+// seconds; overflow drops the oldest (counted), never silently. A power of two
+// keeps the intent obvious rather than implying a tuned value.
+export const DEFAULT_HISTORY_CAPACITY = 256;
+
+/** Reason an association was or was not produced, for logging and diagnostics. */
+export const ASSOCIATION = Object.freeze({
+  READY: "ready",
+  MAPPING_UNAVAILABLE: "mapping-unavailable",
+  MAPPED_TIME_OVERFLOW: "mapped-time-overflow",
+  EMPTY_HISTORY: "empty-history",
+  CLOCK_MISMATCH: "clock-mismatch",
+  INCARNATION_DISCONTINUITY: "incarnation-discontinuity",
+  TOTAL_ERROR_EXCEEDS_BUDGET: "total-error-exceeds-budget",
+  NOT_ADMITTED: "not-admitted",
+});
+
+function isSnapshotIdentityValid(id) {
+  return (
+    id !== null &&
+    typeof id === "object" &&
+    typeof id.sourceIncarnation === "string" &&
+    INCARNATION_HEX.test(id.sourceIncarnation) &&
+    Number.isInteger(id.sourceEpoch) &&
+    Number.isInteger(id.sequence) &&
+    typeof id.acquiredAtNanos === "bigint" &&
+    id.acquiredAtNanos >= 0n &&
+    (id.clock === CLOCK_VEHICLE_BOOT || id.clock === CLOCK_SIMULATION)
+  );
+}
+
+function identityOf(id) {
+  return Object.freeze({
+    sourceId: id.sourceId,
+    sourceIncarnation: id.sourceIncarnation,
+    sourceEpoch: id.sourceEpoch,
+    sequence: id.sequence,
+    acquiredAtNanos: id.acquiredAtNanos,
+    clock: id.clock,
+  });
+}
+
+function sameIdentity(a, b) {
+  return (
+    a.sourceIncarnation === b.sourceIncarnation &&
+    a.sourceEpoch === b.sourceEpoch &&
+    a.sequence === b.sequence &&
+    a.acquiredAtNanos === b.acquiredAtNanos &&
+    a.clock === b.clock
+  );
+}
+
+function absDiff(a, b) {
+  return a >= b ? a - b : b - a;
+}
+
+function closed(reason) {
+  return Object.freeze({
+    ready: false,
+    snapshotIdentity: null,
+    mappedCaptureNanos: null,
+    totalErrorNanos: null,
+    reason,
+  });
+}
+
+/**
+ * Bounded history of accepted aircraft snapshots and the association logic over
+ * it. `observe` records one accepted snapshot's AV-01 identity; `associate`
+ * finds the snapshot corresponding to a frame's capture time.
+ */
+export class SnapshotAssociator {
+  constructor({ capacity = DEFAULT_HISTORY_CAPACITY } = {}) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new TypeError("capacity must be a positive integer");
+    }
+    this.capacity = capacity;
+    this.entries = [];
+    this.currentIncarnation = null;
+    this.counters = { observed: 0, deduped: 0, dropped: 0, invalid: 0 };
+  }
+
+  /** Records one accepted snapshot identity, oldest-first. Consecutive
+   *  duplicates are ignored (main.js re-reads the accepted snapshot each
+   *  telemetry frame); overflow drops the oldest entry and is counted. */
+  observe(identity) {
+    if (!isSnapshotIdentityValid(identity)) {
+      this.bump("invalid");
+      return false;
+    }
+    const entry = identityOf(identity);
+    const newest = this.entries[this.entries.length - 1];
+    if (newest && sameIdentity(newest, entry)) {
+      this.bump("deduped");
+      return false;
+    }
+    this.entries.push(entry);
+    this.currentIncarnation = entry.sourceIncarnation;
+    this.bump("observed");
+    if (this.entries.length > this.capacity) {
+      this.entries.shift();
+      this.bump("dropped");
+    }
+    return true;
+  }
+
+  /**
+   * Associates a frame's capture time with the nearest accepted snapshot.
+   * Returns a verdict `{ ready, snapshotIdentity, mappedCaptureNanos,
+   * totalErrorNanos, reason }`. Fails closed; the `reason` is one of
+   * [`ASSOCIATION`]. The budget boundary is inclusive: a total error exactly
+   * equal to the budget is within budget.
+   */
+  associate(meta, options = {}) {
+    const budget = options.maxClockErrorNanos ?? DEFAULT_MAX_CLOCK_ERROR_NANOS;
+    if (!meta || meta.mappingAvailable !== true) return closed(ASSOCIATION.MAPPING_UNAVAILABLE);
+    const mapped = mapCaptureTime(meta.captureTimeNanos, meta.mappingOffsetNanos);
+    if (mapped === null) return closed(ASSOCIATION.MAPPED_TIME_OVERFLOW);
+    if (this.entries.length === 0) return closed(ASSOCIATION.EMPTY_HISTORY);
+    const candidates = this.entries.filter((e) => e.clock === meta.mappingTargetClock);
+    if (candidates.length === 0) return closed(ASSOCIATION.CLOCK_MISMATCH);
+
+    let nearest = null;
+    let bestDelta = null;
+    for (const entry of candidates) {
+      const delta = absDiff(entry.acquiredAtNanos, mapped);
+      if (bestDelta === null || delta < bestDelta) {
+        bestDelta = delta;
+        nearest = entry;
+      }
+    }
+    // A snapshot from a superseded source incarnation cannot anchor a conformal
+    // association: the estimator restarted between that snapshot and now.
+    if (nearest.sourceIncarnation !== this.currentIncarnation) {
+      return closed(ASSOCIATION.INCARNATION_DISCONTINUITY);
+    }
+
+    const totalError = meta.clockErrorBoundNanos + bestDelta;
+    const snapshotIdentity = identityOf(nearest);
+    if (totalError > budget) {
+      return this.verdict(false, snapshotIdentity, mapped, totalError, ASSOCIATION.TOTAL_ERROR_EXCEEDS_BUDGET);
+    }
+    // The #62 gate is the final authority: it re-checks mapping validity, the
+    // target-clock match against the associated snapshot, the calibration, and
+    // the mapping's own error bound. Association never bypasses it.
+    const gate = conformalGate(meta, snapshotIdentity, options);
+    if (!gate.conformalReady) {
+      return this.verdict(false, snapshotIdentity, mapped, totalError, `gate-closed:${gate.reason}`);
+    }
+    return this.verdict(true, snapshotIdentity, mapped, totalError, ASSOCIATION.READY);
+  }
+
+  verdict(ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason) {
+    return Object.freeze({ ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason });
+  }
+
+  diagnostics() {
+    return Object.freeze({ ...this.counters, size: this.entries.length });
+  }
+
+  bump(name, amount = 1) {
+    this.counters[name] = (this.counters[name] + amount) >>> 0;
+  }
+}
+
+/**
+ * The single admission-then-association path. Association runs ONLY on a frame
+ * the identity tracker accepted, so a duplicate, reordered, or stale-epoch frame
+ * (which the tracker rejects) can never produce a fresh association. Returns
+ * `{ accepted, admit, association }`; `association` is `null` when the frame was
+ * not admitted, else the associator's verdict.
+ */
+export function associateIfAccepted(tracker, associator, meta, options = {}) {
+  const admit = tracker.admit(meta);
+  if (!admit.accepted) {
+    return Object.freeze({ accepted: false, admit, association: closed(ASSOCIATION.NOT_ADMITTED) });
+  }
+  return Object.freeze({ accepted: true, admit, association: associator.associate(meta, options) });
+}

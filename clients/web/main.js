@@ -43,6 +43,7 @@ import {
 import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
+import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -98,12 +99,18 @@ const state = {
   leaseGranted: false,
   skippedVideoFrames: 0,
   droppedIdentityFrames: 0,
+  // Latest capture-to-snapshot association verdict for an accepted frame
+  // (ADR-0020), a diagnostic surface only — no conformal overlay is drawn yet.
+  lastAssociation: null,
 };
 const transportSessions = new TransportSessionLifecycle();
 // Capture-identity guard for the video downlink: drops duplicate/reordered/
 // stale frames so a replayed frame never displaces a newer one or refreshes
 // its age (ADR-0020).
 const videoIdentity = new VideoIdentityTracker();
+// Bounded history of accepted aircraft snapshots, fed from the telemetry path,
+// against which an accepted video frame's capture time is associated (ADR-0020).
+const snapshotHistory = new SnapshotAssociator();
 
 // Ingestion accepts only source advancement for the selected vehicle. Drawing
 // remains on requestAnimationFrame, decoupled from telemetry publication.
@@ -500,12 +507,13 @@ async function renderVideoFrame(body, token) {
 // (ADR-0020). The capture identity gates the frame through `videoIdentity`: a
 // duplicate, reordered, stale-epoch, or wrong-camera frame is dropped and never
 // blitted, so a replayed frame cannot displace a newer one or refresh its age.
-// Conformal readiness is deliberately NOT evaluated here: the gate must judge a
-// frame against the specific aircraft snapshot it is associated with, and that
-// association (picking the snapshot for a frame at render time) is deferred
-// (#36). Evaluating conformalReady against the latest snapshot would reintroduce
-// the receipt-time conflation this whole change exists to remove, so the render
-// path only enforces capture-identity ordering.
+// Association runs ONLY on a frame the tracker accepted (via
+// `associateIfAccepted`), so a replay can never associate fresh. It finds the
+// aircraft snapshot corresponding to the frame's CAPTURE time; the verdict is a
+// diagnostic surface only, since no conformal overlay is drawn yet. Live, the
+// simulator publishes no recognized calibration and its adapters never pair an
+// available video mapping with an in-domain avionics snapshot, so the verdict
+// stays not-ready — honestly.
 async function renderVideoFrameV2(body, token) {
   if (!transportSessions.isActive(token)) return;
   const parsed = parseVideoFrameV2(body);
@@ -517,17 +525,21 @@ async function renderVideoFrameV2(body, token) {
   const { meta, fourcc, payload } = parsed;
   const target = videoTargetFor(meta.sourceId, fourcc);
   if (!target) return;
-  const verdict = videoIdentity.admit(meta);
-  if (!verdict.accepted) {
+  const { admit, association } = associateIfAccepted(videoIdentity, snapshotHistory, meta);
+  if (!admit.accepted) {
     state.droppedIdentityFrames += 1;
     log(
-      `video frame not admitted (${verdict.reason}) for source ${meta.sourceId} ` +
+      `video frame not admitted (${admit.reason}) for source ${meta.sourceId} ` +
         `seq ${meta.sequence}; dropped (${state.droppedIdentityFrames} identity drops total)`,
     );
     return;
   }
-  if (verdict.discontinuity) {
+  if (admit.discontinuity) {
     log(`video source ${meta.sourceId} capture discontinuity: fresh epoch/incarnation/calibration`);
+  }
+  state.lastAssociation = association;
+  if (!association.ready) {
+    log(`video source ${meta.sourceId} not conformal-ready: ${association.reason}`);
   }
   await paintJpeg(payload, target, token);
 }
@@ -547,6 +559,15 @@ async function readTelemetryDatagrams(transport, token) {
         const t = decoded.message;
         if (t.avionics) {
           instruments.ingress.ingest(t, performance.now());
+          // Feed the association ring from the ACCEPTED snapshot the ingress
+          // exposes (not the raw wire sample), anchored on the kinematics group:
+          // position is what registers world features for a conformal overlay.
+          // A snapshot without kinematics supplies no spatial anchor and is not
+          // observed, so association stays fail-closed for it.
+          const accepted = instruments.ingress.snapshot(performance.now());
+          if (accepted.kinematics) {
+            snapshotHistory.observe(accepted.kinematics.stamp);
+          }
         }
         if (t.vehicleId !== VEHICLE_ID) continue;
         els.telemetry.textContent = formatTelemetrySummary(t);
