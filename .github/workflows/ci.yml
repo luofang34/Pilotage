@@ -72,7 +72,13 @@ jobs:
           -p pilotage-instrument-scene
           -p pilotage-instrument-glyphs
           -p pilotage-instrument-panels
+          -p pilotage-instrument-raster
           --target thumbv7em-none-eabihf
+
+      - name: reference rasterizer frame hashes (REN-03)
+        # Re-render the PFD and HSI panels and assert their pinned SHA-256
+        # frame hashes, proving the software rasterizer is bit-reproducible.
+        run: cargo test -p pilotage-instrument-raster
 
       - name: instrument wasm backend builds
         # Generating the resource binding here makes the fail-visible test
