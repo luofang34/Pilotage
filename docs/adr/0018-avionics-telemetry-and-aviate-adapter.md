@@ -10,9 +10,10 @@ The telemetry plane today carries planar ground-vehicle state: `Pose2d`
 attitude, altitude, and vertical state, and the first vehicle that produces
 them for real is the Aviate flight controller: its Gazebo SITL flies an X500
 quadrotor and emits a deliberate MAVLink 2.0 subset — HEARTBEAT,
-ATTITUDE_QUATERNION, LOCAL_POSITION_NED — over UDP in SITL and USB CDC on
-hardware. Aviate's stated boundary is that it never does UI or GCS work, so
-the display side of that contract has to live here.
+ESTIMATOR_STATUS, AVIATE_ESTIMATOR_STATUS, ATTITUDE_QUATERNION, and
+LOCAL_POSITION_NED — over UDP in SITL and USB CDC on hardware. Aviate's stated
+boundary is that it never does UI or GCS work, so the display side of that
+contract has to live here.
 
 Two constraints from standing decisions: schema evolution must be additive
 (ADR-0014, enforced by `buf breaking`), and vehicles enter through the
@@ -27,8 +28,8 @@ the raw state estimate, not display-ready numbers: attitude quaternion
 (w, x, y, z), body angular rates, NED position, NED velocity, a validity
 bitmask and quality enum mirroring Aviate's `StateValidFlags` /
 `EstimateQuality`, plus independent attitude/rates and kinematics measurement
-stamps. Ground vehicles simply never set the field; nothing existing changes
-shape.
+stamps and an independent estimator-status stamp. Ground vehicles simply never
+set the field; nothing existing changes shape.
 
 Each group stamp carries a vehicle-scoped logical source identity, an opaque
 128-bit source incarnation, a source epoch, a wrapping group sequence, a
@@ -40,7 +41,7 @@ metadata and never relabels source acquisition time.
 
 The receiver accepts a group only when its incarnation is authorized and its
 epoch/sequence advances under wrap-safe serial arithmetic. Duplicates,
-reordering, previously seen incarnations, older epochs, acquisition-time
+reordering, already-seen incarnations, older epochs, acquisition-time
 regressions, other vehicles, and unselected sources are counted and cannot
 replace display state or refresh its age. A new incarnation or epoch clears
 every group from the earlier identity so one display generation cannot mix
@@ -50,11 +51,34 @@ accept a bounded number of unseen incarnations and resets all ingress history
 after each newly negotiated WebTransport session; that policy is explicitly
 ineligible for operational credit.
 
-Attitude and kinematics retain separate stamps. The ingress gate publishes an
-immutable display generation and an explicit coherence result derived only
-when source identity, epoch, and clock domain match and acquisition-time skew
-meets the selected display profile. Publication in one `AvionicsState` does not
-by itself imply coherent acquisition.
+Attitude, kinematics, and estimator status retain separate stamps. The ingress
+gate publishes an immutable display generation and an explicit coherence result
+derived only when source identity, epoch, and clock domain match and
+acquisition-time skew meets the selected display profile. Publication in one
+`AvionicsState` does not by itself imply coherent acquisition.
+
+`AVIATE_ESTIMATOR_STATUS` is the lossless authorization source. Its validity
+bits and quality authorize a numeric group only when the FC acquisition
+timestamps match exactly. Missing, malformed, reordered, timestamp-mismatched,
+or unknown authorization fails closed. Each accepted status can only retain or
+downgrade the authorization latched onto an already cached numeric group; a
+later Good status cannot restore data from another timestamp. A new exact-paired
+numeric group establishes a new authorization baseline. Aviate emits the
+status pair immediately before every numeric snapshot and also permits
+status-only cycles, so revocation never waits for another numeric message. The common
+`ESTIMATOR_STATUS` projection is decoded for diagnostics but never grants
+authorization because it cannot represent Aviate's per-signal contract without
+loss.
+
+A private-status CRC or structural parse failure immediately downgrades every
+cached numeric group to Unusable. Because an invalid frame cannot supply a
+trustworthy source acquisition time, this local downgrade retains the last
+valid status stamp. The parser preserves the failed frame's header source and
+position as a revoke-only event, so source selection still applies and a later
+failure in a multi-frame datagram wins. Receivers admit a duplicate-stamped
+effective authorization only when it monotonically removes validity or worsens
+quality; it advances the display generation without refreshing any source-group
+age. Duplicate-stamped authorization can never restore data.
 
 Group presence is structural throughout the adapter API. Missing attitude or
 kinematics is represented as `None`, never an identity quaternion, origin, or
@@ -77,17 +101,19 @@ A new adapter crate owns the Aviate vehicle end to end:
 - **Telemetry**: binds the MAVLink GCS UDP port (default 14550) and parses
   MAVLink v2 frames with a minimal hand-rolled parser — magic `0xFD`, header,
   24-bit message id, CRC-16/MCRF4XX seeded with each message's CRC_EXTRA,
-  and v2 payload-truncation zero-extension — for exactly the three message
-  ids Aviate emits. Frames that fail CRC or carry unknown ids are counted
-  and skipped. Every accepted frame must match the configured MAVLink system
-  and component; the logical source is configured rather than selected by the
-  first estimate. The parser is a plain `no_std`-style module with no I/O so
-  the frame math is unit-testable byte-for-byte.
-- **Mapping**: ATTITUDE_QUATERNION + LOCAL_POSITION_NED fold into the
+  and v2 payload-truncation zero-extension — for the focused Aviate message
+  contract. Frames that fail CRC or carry unknown ids are counted and skipped.
+  Every accepted frame must match the configured MAVLink system and component;
+  the logical source is configured rather than selected by the first estimate.
+  The parser is a plain `no_std`-style module with no I/O so the frame math is
+  unit-testable byte-for-byte against producer-owned golden vectors.
+- **Mapping**: AVIATE_ESTIMATOR_STATUS authorizes ATTITUDE_QUATERNION and
+  LOCAL_POSITION_NED only through the exact timestamp and monotonic-latching
+  rules above. The numeric messages fold into the
   vehicle's `TelemetrySample` (a planar projection only when both groups are
   available and coherent within the selected skew bound; each raw group
-  independently into `AvionicsState`). MAVLink `time_boot_ms` is retained for
-  both groups. Independently advancing wrapping sequences reject
+  independently into `AvionicsState`). MAVLink boot time is retained for all
+  three acquisition groups. Independently advancing wrapping sequences reject
   duplicate and reordered measurements before they enter the cache. A 32-bit
   boot-clock wrap starts a new explicit source epoch. Ordinary MAVLink has no
   trustworthy boot UUID, so the default policy never infers a reboot from a
@@ -120,11 +146,11 @@ A new adapter crate owns the Aviate vehicle end to end:
   for its cameras exactly as the Gazebo adapter does; no new media path.
 
 **Why not the `rust-mavlink` crate:** it generates the entire MAVLink common
-dialect (hundreds of messages) to use three, and its message structs would
-become a second vocabulary fighting the schema. The subset parser is a few
-hundred lines with exhaustive tests, matches Aviate's own
-minimal-subset ethos, and keeps the dependency wall around the telemetry
-plane. If the message set ever grows past a handful, revisit.
+dialect while Aviate also carries a small private status message, and its
+message structs would become a second vocabulary fighting the schema. The
+focused parser has exhaustive producer-vector tests, matches Aviate's own
+minimal-subset ethos, and keeps the dependency wall around the telemetry plane.
+If the message contract grows substantially, revisit.
 
 **Why not teach Aviate the Pilotage protocol:** MAVLink is Aviate's public
 contract and its hardware transport (USB CDC) already speaks it; coupling the
@@ -142,9 +168,13 @@ one-way.
   airspeed or barometric sensor message exists yet, so IAS renders `Missing`
   on the PFD — the honest display is the feature, and the gap is Aviate's to
   fill (its `TelemetryCycleFormatter` is the extension point).
-- The same adapter binds any MAVLink v2 source that emits the same three
-  messages (PX4 SITL does), which is a free conformance check against a
-  second producer, but Aviate remains the contract we track.
+- Numeric messages from another MAVLink source remain observable but fail
+  closed unless an explicit adapter mapping supplies equally lossless
+  authorization. A common ESTIMATOR_STATUS projection alone is insufficient.
+- AVIATE_ESTIMATOR_STATUS belongs to a private dialect whose producer contract
+  is not yet declared stable. Producer-owned golden vectors make any layout or
+  CRC drift fail tests, but an operational integration also requires a declared
+  stable dialect and an assigned message-id range.
 - On hardware, the same parser reads the same bytes over USB CDC; only the
   transport binding differs. A hardware binding must inject its source-issued
   incarnation rather than use the simulator operating-system entropy provider.

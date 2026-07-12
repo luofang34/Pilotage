@@ -97,10 +97,19 @@ pub struct AvionicsSample {
     pub attitude: Option<AvionicsAttitudeSample>,
     /// Position/velocity group, or `None` when it was not supplied.
     pub kinematics: Option<AvionicsKinematicsSample>,
-    /// Validity bitmask: bit0 attitude, bit1 rates, bit2 position,
-    /// bit3 velocity.
+    /// Identity and acquisition time of the estimator status observation
+    /// backing the effective authorization, or `None` when no explicit
+    /// authorization was supplied.
+    pub estimator_status_stamp: Option<MeasurementStamp>,
+    /// Effective latched authorization bitmask: bit0 attitude, bit1 rates,
+    /// bit2 position, bit3 velocity. This can include fail-closed downgrades
+    /// relative to the raw status observation and is meaningful only when
+    /// [`Self::estimator_status_stamp`] is present.
     pub valid_flags: u32,
-    /// Estimate quality: 0 good, 1 degraded, 2 unusable.
+    /// Effective latched estimate quality: 0 good, 1 degraded, 2 unusable.
+    /// This can include fail-closed downgrades relative to the raw status
+    /// observation and is meaningful only when
+    /// [`Self::estimator_status_stamp`] is present.
     pub quality: u32,
     /// Arm state as the vehicle reports it: 0 unknown, 1 disarmed,
     /// 2 armed.

@@ -16,6 +16,10 @@ export const INCARNATION_POLICY = Object.freeze({
 const SERIAL_HALF_RANGE = 0x80000000;
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
+const QUALITY_UNUSABLE = 2;
+const ATTITUDE_VALID_FLAGS = 0b0011;
+const KINEMATICS_VALID_FLAGS = 0b1100;
+const KNOWN_VALID_FLAGS = ATTITUDE_VALID_FLAGS | KINEMATICS_VALID_FLAGS;
 
 function increment(value, amount = 1) {
   return (value + amount) >>> 0;
@@ -53,8 +57,6 @@ function copyAttitude(avionics) {
   return Object.freeze({
     quat: Object.freeze({ ...avionics.quat }),
     rates: Object.freeze([...avionics.rates]),
-    validFlags: avionics.validFlags >>> 0,
-    quality: avionics.quality >>> 0,
     armState: avionics.armState >>> 0,
   });
 }
@@ -63,14 +65,45 @@ function copyKinematics(avionics) {
   return Object.freeze({
     posNed: Object.freeze([...avionics.posNed]),
     velNed: Object.freeze([...avionics.velNed]),
-    validFlags: avionics.validFlags >>> 0,
-    quality: avionics.quality >>> 0,
     armState: avionics.armState >>> 0,
   });
 }
 
+function copyEstimatorStatus() {
+  return Object.freeze({});
+}
+
 function stampCopy(stamp) {
   return Object.freeze({ ...stamp });
+}
+
+function stampsEqual(left, right) {
+  return (
+    left !== null &&
+    left !== undefined &&
+    right !== null &&
+    right !== undefined &&
+    left.sourceId === right.sourceId &&
+    left.sourceIncarnation === right.sourceIncarnation &&
+    left.sourceEpoch === right.sourceEpoch &&
+    left.sequence === right.sequence &&
+    left.acquiredAtNanos === right.acquiredAtNanos &&
+    left.clock === right.clock
+  );
+}
+
+function sameAcquisition(left, right) {
+  return (
+    left !== null &&
+    left !== undefined &&
+    right !== null &&
+    right !== undefined &&
+    left.sourceId === right.sourceId &&
+    left.sourceIncarnation === right.sourceIncarnation &&
+    left.sourceEpoch === right.sourceEpoch &&
+    left.acquiredAtNanos === right.acquiredAtNanos &&
+    left.clock === right.clock
+  );
 }
 
 function groupSnapshot(group, nowMs) {
@@ -141,6 +174,11 @@ export class AvionicsIngress {
     this.sourceEpoch = null;
     this.attitude = null;
     this.kinematics = null;
+    this.estimatorStatus = null;
+    this.attitudeAuthorizationPaired = false;
+    this.kinematicsAuthorizationPaired = false;
+    this.validFlags = 0;
+    this.quality = QUALITY_UNUSABLE;
     this.generation = 0;
     this.lastCoherence = COHERENCE.INSUFFICIENT;
     this.counters = {
@@ -171,16 +209,34 @@ export class AvionicsIngress {
     const avionics = message.avionics;
     if (!avionics) return false;
 
-    let changed = false;
-    changed = this.acceptGroup("attitude", avionics.attitudeStamp, copyAttitude, avionics, nowMs)
-      || changed;
-    changed = this.acceptGroup(
+    const acceptedStatus = this.acceptGroup(
+      "estimatorStatus",
+      avionics.estimatorStatusStamp,
+      copyEstimatorStatus,
+      avionics,
+      nowMs,
+    );
+    const acceptedAttitude = this.acceptGroup(
+      "attitude",
+      avionics.attitudeStamp,
+      copyAttitude,
+      avionics,
+      nowMs,
+    );
+    const acceptedKinematics = this.acceptGroup(
       "kinematics",
       avionics.kinematicsStamp,
       copyKinematics,
       avionics,
       nowMs,
-    ) || changed;
+    );
+    const acceptedNumeric = acceptedAttitude || acceptedKinematics;
+    const previousValidFlags = this.validFlags;
+    const previousQuality = this.quality;
+    this.updateAuthorization(avionics, acceptedAttitude, acceptedKinematics);
+    const authorizationChanged =
+      this.validFlags !== previousValidFlags || this.quality !== previousQuality;
+    const changed = acceptedNumeric || acceptedStatus || authorizationChanged;
     if (changed) {
       this.generation = increment(this.generation);
       this.recordCoherenceTransition();
@@ -188,8 +244,78 @@ export class AvionicsIngress {
     return changed;
   }
 
+  updateAuthorization(avionics, acceptedAttitude, acceptedKinematics) {
+    // A transport validation fault cannot mint a source acquisition time, so
+    // a publication backed by the current stamp may change trust only in the
+    // fail-closed direction and never refreshes that stamp's age.
+    if (stampsEqual(avionics.estimatorStatusStamp, this.estimatorStatus?.stamp)) {
+      this.applyStatusDowngrade(avionics);
+    }
+    if (acceptedAttitude || acceptedKinematics) {
+      this.updateAuthorizationFromNumeric(avionics, acceptedAttitude, acceptedKinematics);
+    }
+  }
+
+  applyStatusDowngrade(avionics) {
+    if (!this.hasEstablishedAuthorization()) {
+      this.failClosedAuthorization();
+      return;
+    }
+    this.validFlags = (this.validFlags & (avionics.validFlags >>> 0)) >>> 0;
+    this.quality = Math.max(this.quality, avionics.quality >>> 0);
+  }
+
+  updateAuthorizationFromNumeric(avionics, acceptedAttitude, acceptedKinematics) {
+    const currentStatusStamp = this.estimatorStatus?.stamp;
+    const statusMatches = stampsEqual(avionics.estimatorStatusStamp, currentStatusStamp);
+    const incomingValidFlags = avionics.validFlags >>> 0;
+    let acceptedExactPair = false;
+    if (acceptedAttitude) {
+      this.attitudeAuthorizationPaired =
+        statusMatches && sameAcquisition(avionics.attitudeStamp, currentStatusStamp);
+      const attitudeFlags = this.attitudeAuthorizationPaired
+        ? incomingValidFlags & ATTITUDE_VALID_FLAGS
+        : 0;
+      this.validFlags = (
+        (this.validFlags & ~ATTITUDE_VALID_FLAGS) | attitudeFlags
+      ) >>> 0;
+      acceptedExactPair = this.attitudeAuthorizationPaired;
+    }
+    if (acceptedKinematics) {
+      this.kinematicsAuthorizationPaired =
+        statusMatches && sameAcquisition(avionics.kinematicsStamp, currentStatusStamp);
+      const kinematicsFlags = this.kinematicsAuthorizationPaired
+        ? incomingValidFlags & KINEMATICS_VALID_FLAGS
+        : 0;
+      this.validFlags = (
+        (this.validFlags & ~KINEMATICS_VALID_FLAGS) | kinematicsFlags
+      ) >>> 0;
+      acceptedExactPair = acceptedExactPair || this.kinematicsAuthorizationPaired;
+    }
+
+    if ((this.validFlags & KNOWN_VALID_FLAGS) === 0) {
+      this.quality = QUALITY_UNUSABLE;
+      return;
+    }
+    if (acceptedExactPair) this.quality = avionics.quality >>> 0;
+  }
+
+  hasEstablishedAuthorization() {
+    return (
+      (this.attitude !== null && this.attitudeAuthorizationPaired) ||
+      (this.kinematics !== null && this.kinematicsAuthorizationPaired)
+    );
+  }
+
+  failClosedAuthorization() {
+    this.attitudeAuthorizationPaired = false;
+    this.kinematicsAuthorizationPaired = false;
+    this.validFlags = 0;
+    this.quality = QUALITY_UNUSABLE;
+  }
+
   acceptGroup(name, stamp, copyData, avionics, nowMs) {
-    if (stamp === null) return false;
+    if (stamp === null || stamp === undefined) return false;
     if (!isStampValid(stamp)) {
       this.bump("invalidStamps");
       return false;
@@ -261,6 +387,8 @@ export class AvionicsIngress {
     this.sourceEpoch = null;
     this.attitude = null;
     this.kinematics = null;
+    this.estimatorStatus = null;
+    this.failClosedAuthorization();
     this.lastCoherence = COHERENCE.INSUFFICIENT;
     this.bump("incarnationTransitions");
     return true;
@@ -279,6 +407,8 @@ export class AvionicsIngress {
     this.sourceEpoch = candidate;
     this.attitude = null;
     this.kinematics = null;
+    this.estimatorStatus = null;
+    this.failClosedAuthorization();
     this.bump("sourceResets");
     return true;
   }
@@ -298,6 +428,7 @@ export class AvionicsIngress {
     if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
     const attitude = groupSnapshot(this.attitude, nowMs);
     const kinematics = groupSnapshot(this.kinematics, nowMs);
+    const estimatorStatus = groupSnapshot(this.estimatorStatus, nowMs);
     return Object.freeze({
       generation: this.generation,
       sourceId: this.sourceId,
@@ -305,6 +436,9 @@ export class AvionicsIngress {
       sourceEpoch: this.sourceEpoch,
       attitude,
       kinematics,
+      estimatorStatus,
+      validFlags: this.validFlags,
+      quality: this.quality,
       coherence: coherenceOf(this.attitude, this.kinematics, this.maximumSkewNanos),
     });
   }

@@ -24,7 +24,9 @@ mod camera;
 mod control;
 mod sampling;
 mod shm_sampling;
-use sampling::{mavlink_batch, measurement_pair_is_coherent, yaw_of};
+use sampling::{
+    mavlink_batch, measurement_pair_is_coherent, measurement_pair_supports_pose, yaw_of,
+};
 use shm_sampling::ShmSource;
 
 /// The control scope exposes four canonical flight axes as DJI-style
@@ -260,6 +262,7 @@ impl AviateAdapter {
             Source::Shm(source) => source.current_pose(),
             Source::Mavlink { state, .. } => {
                 let latest = state.lock().ok()?;
+                latest.estimator_status_stamp()?;
                 let attitude = latest
                     .attitude
                     .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
@@ -270,7 +273,8 @@ impl AviateAdapter {
                     attitude,
                     kinematics,
                     latest.maximum_inter_group_skew_ms,
-                ) {
+                ) || !measurement_pair_supports_pose(attitude, kinematics)
+                {
                     return None;
                 }
                 Some((yaw_of(attitude.quat_wxyz) as f32, kinematics.pos_ned_m))

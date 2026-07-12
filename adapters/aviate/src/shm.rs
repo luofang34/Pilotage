@@ -9,8 +9,9 @@
 //! converts to the NED/FRD convention the telemetry plane carries,
 //! mirroring Aviate's own conversion math exactly.
 //!
-//! v0 reads the simulator ground-truth block; the FC-estimate block with
-//! real validity flags is the deferred vehicle-link RFC's v1.
+//! The shared block is coherent simulator ground truth. Its sampler publishes
+//! an explicit synthetic authorization stamp so consumers can distinguish
+//! this source from FC estimator telemetry.
 
 use std::ffi::CString;
 use std::time::Instant;

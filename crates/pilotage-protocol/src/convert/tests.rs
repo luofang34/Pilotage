@@ -140,6 +140,14 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
                 acquired_at_ns: 900_000,
                 clock: wire::MeasurementClock::VehicleBoot as i32,
             }),
+            estimator_status_stamp: Some(wire::MeasurementStamp {
+                source_id: 7,
+                source_incarnation: vec![0xA5; 16],
+                source_epoch: 3,
+                sequence: 11,
+                acquired_at_ns: 1_000_000,
+                clock: wire::MeasurementClock::VehicleBoot as i32,
+            }),
         }),
     };
     let envelope = wire::Envelope {

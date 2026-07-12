@@ -16,6 +16,7 @@ pub(super) const RESET_SOURCE_DWELL_MS: u32 = 250;
 pub(super) enum MeasurementGroup {
     Attitude,
     Kinematics,
+    EstimatorStatus,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,6 +47,7 @@ fn begin_source_epoch(latest: &mut LatestAviate, time_boot_ms: u32) {
     latest.pending_reset = None;
     latest.attitude = None;
     latest.kinematics = None;
+    latest.estimator_status = None;
     latest.source_resets = latest.source_resets.wrapping_add(1);
     warn!(
         source_epoch = latest.source_epoch,
@@ -194,6 +196,23 @@ pub(super) fn next_kinematics_stamp(
         current,
         latest,
         MeasurementGroup::Kinematics,
+        time_boot_ms,
+        now,
+    )
+}
+
+pub(super) fn next_estimator_status_stamp(
+    latest: &mut LatestAviate,
+    time_boot_ms: u32,
+    now: Instant,
+) -> Option<MeasurementStamp> {
+    let current = latest
+        .estimator_status
+        .map(|update| (update.time_boot_ms, update.stamp));
+    next_group_stamp(
+        current,
+        latest,
+        MeasurementGroup::EstimatorStatus,
         time_boot_ms,
         now,
     )

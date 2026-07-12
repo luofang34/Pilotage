@@ -58,6 +58,17 @@ fn kinematics_at(time_boot_ms: u32, north: f32) -> (FrameSource, AviateMessage) 
     )
 }
 
+fn status_at(time_boot_ms: u32, valid_flags: u8, quality: u8) -> (FrameSource, AviateMessage) {
+    (
+        SELECTED,
+        AviateMessage::AviateEstimatorStatus {
+            time_usec: u64::from(time_boot_ms).saturating_mul(1_000),
+            valid_flags,
+            quality,
+        },
+    )
+}
+
 fn apply_at(
     state: &Arc<Mutex<LatestAviate>>,
     messages: &[(FrameSource, AviateMessage)],
@@ -127,6 +138,141 @@ fn advancing_groups_keep_independent_sequences() {
     assert_eq!(latest.attitude.expect("attitude").stamp.sequence, 1);
     assert_eq!(latest.kinematics.expect("kinematics").stamp.sequence, 1);
     assert_eq!(latest.last_source_time_ms, Some(110));
+}
+
+#[test]
+fn invalid_status_frame_revokes_without_fabricating_source_time() {
+    let state = state(ResetPolicy::Conservative);
+    let now = Instant::now();
+    apply_at(
+        &state,
+        &[
+            status_at(100, 0x0f, 2),
+            attitude_at(100, 0.5),
+            kinematics_at(100, 1.0),
+        ],
+        now,
+    );
+    let status_before = state
+        .lock()
+        .expect("lock")
+        .estimator_status_stamp()
+        .expect("status");
+    apply_messages_at(
+        &state,
+        &[(SELECTED, AviateMessage::InvalidAviateEstimatorStatus)],
+        1,
+        0,
+        now,
+    );
+
+    let latest = state.lock().expect("lock");
+    assert_eq!(latest.estimator_status_stamp(), Some(status_before));
+    assert_eq!(latest.attitude.expect("attitude").quality, 2);
+    assert_eq!(latest.kinematics.expect("kinematics").quality, 2);
+    assert_eq!(latest.invalid_estimator_statuses, 1);
+}
+
+#[test]
+fn invalid_status_poisons_authorization_for_delayed_exact_numeric() {
+    let state = state(ResetPolicy::Conservative);
+    let now = Instant::now();
+    apply_at(&state, &[status_at(100, 0x0f, 2)], now);
+    apply_at(
+        &state,
+        &[(SELECTED, AviateMessage::InvalidAviateEstimatorStatus)],
+        now,
+    );
+    apply_at(&state, &[kinematics_at(100, 1.0)], now);
+
+    let latest = state.lock().expect("lock");
+    let kinematics = latest.kinematics.expect("kinematics");
+    assert_eq!((kinematics.valid_flags, kinematics.quality), (0, 2));
+}
+
+#[test]
+fn trailing_invalid_status_wins_within_a_multi_frame_datagram() {
+    let state = state(ResetPolicy::Conservative);
+    let now = Instant::now();
+    apply_at(
+        &state,
+        &[
+            status_at(100, 0x0f, 2),
+            attitude_at(100, 0.5),
+            kinematics_at(100, 1.0),
+            (SELECTED, AviateMessage::InvalidAviateEstimatorStatus),
+        ],
+        now,
+    );
+
+    let latest = state.lock().expect("lock");
+    assert_eq!(latest.attitude.expect("attitude").quality, 2);
+    assert_eq!(latest.kinematics.expect("kinematics").quality, 2);
+    assert_eq!(
+        latest
+            .estimator_status
+            .expect("status")
+            .authorization
+            .quality,
+        2
+    );
+}
+
+#[test]
+fn wrong_source_invalid_status_cannot_revoke_selected_source() {
+    let state = state(ResetPolicy::Conservative);
+    let now = Instant::now();
+    apply_at(
+        &state,
+        &[status_at(100, 0x0f, 2), attitude_at(100, 0.5)],
+        now,
+    );
+    let mut wrong = SELECTED;
+    wrong.system_id = 2;
+    apply_at(
+        &state,
+        &[(wrong, AviateMessage::InvalidAviateEstimatorStatus)],
+        now,
+    );
+
+    let latest = state.lock().expect("lock");
+    assert_eq!(latest.attitude.expect("attitude").quality, 0);
+    assert_eq!(latest.invalid_estimator_statuses, 0);
+    assert_eq!(latest.wrong_sources, 1);
+}
+
+#[test]
+fn out_of_range_status_revokes_without_fabricating_source_time() {
+    let state = state(ResetPolicy::Conservative);
+    let now = Instant::now();
+    apply_at(
+        &state,
+        &[
+            status_at(100, 0x0f, 2),
+            attitude_at(100, 0.5),
+            kinematics_at(100, 1.0),
+        ],
+        now,
+    );
+    let status_before = state.lock().expect("lock").estimator_status_stamp();
+    apply_at(
+        &state,
+        &[(
+            SELECTED,
+            AviateMessage::AviateEstimatorStatus {
+                time_usec: (u64::from(u32::MAX) + 1).saturating_mul(1_000),
+                valid_flags: 0x0f,
+                quality: 2,
+            },
+        )],
+        now,
+    );
+
+    let latest = state.lock().expect("lock");
+    assert_eq!(latest.estimator_status_stamp(), status_before);
+    assert_eq!(latest.attitude.expect("attitude").quality, 2);
+    assert_eq!(latest.kinematics.expect("kinematics").quality, 2);
+    assert_eq!(latest.invalid_estimator_statuses, 1);
 }
 
 #[test]

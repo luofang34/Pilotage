@@ -8,14 +8,18 @@ use std::time::{Duration, Instant};
 
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use pilotage_adapter_api::{MeasurementStamp, SourceIncarnation};
 
 use crate::error::AviateAdapterError;
 use crate::mavlink::{AviateMessage, FrameSource, encode_gcs_heartbeat, parse_datagram};
 
+pub(crate) mod estimator;
 mod measurement;
+use estimator::{
+    EstimatorStatusUpdate, accept_status, authorization_at, invalidate_cached_authorization,
+};
 use measurement::{next_attitude_stamp, next_kinematics_stamp};
 
 /// Whether an unstamped MAVLink boot-clock regression may use the simulator
@@ -106,6 +110,8 @@ pub struct LatestAviate {
     /// Latest NED kinematics: position, velocity, FC boot time, receive
     /// stamp.
     pub kinematics: Option<KinematicsUpdate>,
+    /// Latest accepted lossless estimator authorization report.
+    pub(crate) estimator_status: Option<EstimatorStatusUpdate>,
     /// Receive stamp of the last FC heartbeat.
     pub last_heartbeat: Option<Instant>,
     /// Total decoded frames.
@@ -126,6 +132,9 @@ pub struct LatestAviate {
     pub duplicate_measurements: u64,
     /// Older group measurements rejected before entering the cache.
     pub reordered_measurements: u64,
+    /// Malformed or unparseable private estimator-status reports that forced
+    /// cached authorization closed.
+    pub invalid_estimator_statuses: u64,
     /// Confirmed reboot or acquisition-clock-wrap transitions.
     pub source_resets: u64,
     /// Low-clock reset candidates quarantined for confirmation.
@@ -145,6 +154,7 @@ impl Default for LatestAviate {
             maximum_inter_group_skew_ms: 0,
             attitude: None,
             kinematics: None,
+            estimator_status: None,
             last_heartbeat: None,
             decoded: 0,
             crc_failures: 0,
@@ -155,6 +165,7 @@ impl Default for LatestAviate {
             pending_reset: None,
             duplicate_measurements: 0,
             reordered_measurements: 0,
+            invalid_estimator_statuses: 0,
             source_resets: 0,
             suspected_resets: 0,
             wrong_sources: 0,
@@ -175,6 +186,10 @@ impl LatestAviate {
             ..Self::default()
         }
     }
+
+    pub(crate) fn estimator_status_stamp(&self) -> Option<MeasurementStamp> {
+        self.estimator_status.map(|status| status.stamp)
+    }
 }
 
 /// One attitude update with its receive stamp.
@@ -188,6 +203,10 @@ pub struct AttitudeUpdate {
     pub time_boot_ms: u32,
     /// Identity and acquisition stamp for this group update.
     pub stamp: MeasurementStamp,
+    /// Authorization bits retained for this numeric acquisition.
+    pub valid_flags: u32,
+    /// Canonical quality retained for this numeric acquisition.
+    pub quality: u32,
     /// When this update was received.
     pub received_at: Instant,
 }
@@ -203,6 +222,10 @@ pub struct KinematicsUpdate {
     pub time_boot_ms: u32,
     /// Identity and acquisition stamp for this group update.
     pub stamp: MeasurementStamp,
+    /// Authorization bits retained for this numeric acquisition.
+    pub valid_flags: u32,
+    /// Canonical quality retained for this numeric acquisition.
+    pub quality: u32,
     /// When this update was received.
     pub received_at: Instant,
 }
@@ -299,9 +322,20 @@ async fn run_link(
                     Ok((len, _from)) => {
                         messages.clear();
                         let stats = parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
-                        apply_messages(&state, &messages, stats.crc_failures, stats.unknown_ids);
+                        apply_messages(
+                            &state,
+                            &messages,
+                            stats.crc_failures,
+                            stats.unknown_ids,
+                        );
                         if stats.crc_failures > 0 {
                             warn!(crc_failures = stats.crc_failures, "MAVLink CRC failures in datagram");
+                        }
+                        if stats.invalid_estimator_status_frames > 0 {
+                            error!(
+                                invalid_frames = stats.invalid_estimator_status_frames,
+                                "private estimator status frame failed validation"
+                            );
                         }
                     }
                     Err(error) => {
@@ -338,25 +372,40 @@ fn apply_messages_at(
     latest.crc_failures = latest.crc_failures.wrapping_add(u64::from(crc_failures));
     latest.unknown_ids = latest.unknown_ids.wrapping_add(u64::from(unknown_ids));
     for &(source, message) in messages {
-        latest.decoded = latest.decoded.wrapping_add(1);
         if source.system_id != latest.system_id || source.component_id != latest.component_id {
             latest.wrong_sources = latest.wrong_sources.wrapping_add(1);
             continue;
         }
+        if message == AviateMessage::InvalidAviateEstimatorStatus {
+            latest.invalid_estimator_statuses = latest.invalid_estimator_statuses.wrapping_add(1);
+            invalidate_cached_authorization(&mut latest);
+            continue;
+        }
+        latest.decoded = latest.decoded.wrapping_add(1);
         match message {
+            AviateMessage::InvalidAviateEstimatorStatus => {}
             AviateMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
             AviateMessage::CommandAck { .. } => {}
+            AviateMessage::EstimatorStatus { .. } => {}
+            AviateMessage::AviateEstimatorStatus {
+                time_usec,
+                valid_flags,
+                quality,
+            } => accept_status(&mut latest, time_usec, valid_flags, quality, now),
             AviateMessage::AttitudeQuaternion {
                 time_boot_ms,
                 quat_wxyz,
                 rates_rps,
             } => {
                 if let Some(stamp) = next_attitude_stamp(&mut latest, time_boot_ms, now) {
+                    let authorization = authorization_at(&latest, time_boot_ms);
                     latest.attitude = Some(AttitudeUpdate {
                         quat_wxyz,
                         rates_rps,
                         time_boot_ms,
                         stamp,
+                        valid_flags: authorization.valid_flags,
+                        quality: authorization.quality,
                         received_at: now,
                     });
                 }
@@ -367,11 +416,14 @@ fn apply_messages_at(
                 vel_ned_mps,
             } => {
                 if let Some(stamp) = next_kinematics_stamp(&mut latest, time_boot_ms, now) {
+                    let authorization = authorization_at(&latest, time_boot_ms);
                     latest.kinematics = Some(KinematicsUpdate {
                         pos_ned_m,
                         vel_ned_mps,
                         time_boot_ms,
                         stamp,
+                        valid_flags: authorization.valid_flags,
+                        quality: authorization.quality,
                         received_at: now,
                     });
                 }

@@ -1,8 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    ATTITUDE_QUATERNION_ID, AviateMessage, FrameSource, LOCAL_POSITION_NED_ID, MAGIC_V2,
-    encode_gcs_heartbeat, parse_datagram,
+    ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, AviateMessage, ESTIMATOR_STATUS_ID,
+    FrameSource, LOCAL_POSITION_NED_ID, MAGIC_V2, encode_gcs_heartbeat, parse_datagram,
 };
 
 const SOURCE: FrameSource = FrameSource {
@@ -38,6 +38,8 @@ fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u8> {
         0 => 50,
         31 => 246,
         32 => 185,
+        230 => 163,
+        20_000 => 171,
         other => (other & 0xff) as u8,
     };
     let crc = super::compute_crc(&frame[1..], extra);
@@ -135,6 +137,88 @@ fn v2_truncated_payload_zero_extends() {
 }
 
 #[test]
+fn decodes_aviate_estimator_status_golden_vectors() {
+    let cases = [
+        (
+            vec![
+                253, 10, 0, 0, 7, 1, 1, 32, 78, 0, 184, 130, 1, 0, 0, 0, 0, 0, 15, 2, 238, 73,
+            ],
+            AviateMessage::AviateEstimatorStatus {
+                time_usec: 99_000,
+                valid_flags: 0x0f,
+                quality: 2,
+            },
+            7,
+        ),
+        (
+            vec![
+                253, 10, 0, 0, 4, 1, 1, 32, 78, 0, 144, 208, 3, 0, 0, 0, 0, 0, 3, 1, 137, 232,
+            ],
+            AviateMessage::AviateEstimatorStatus {
+                time_usec: 250_000,
+                valid_flags: 0x03,
+                quality: 1,
+            },
+            4,
+        ),
+        (
+            vec![253, 2, 0, 0, 7, 1, 1, 32, 78, 0, 104, 66, 104, 226],
+            AviateMessage::AviateEstimatorStatus {
+                time_usec: 17_000,
+                valid_flags: 0,
+                quality: 0,
+            },
+            7,
+        ),
+    ];
+
+    for (frame, expected, frame_sequence) in cases {
+        let mut out = Vec::new();
+        let stats = parse_datagram(&frame, &mut out);
+        assert_eq!(stats.decoded, 1, "stats: {stats:?}");
+        assert_eq!(
+            out,
+            vec![(
+                FrameSource {
+                    frame_sequence,
+                    ..SOURCE
+                },
+                expected
+            )]
+        );
+    }
+}
+
+#[test]
+fn standard_estimator_status_is_known_but_distinct() {
+    let frame = [253, 2, 0, 0, 7, 1, 1, 230, 0, 0, 104, 66, 51, 209];
+    let mut out = Vec::new();
+    let stats = parse_datagram(&frame, &mut out);
+    assert_eq!(stats.decoded, 1, "stats: {stats:?}");
+    assert_eq!(
+        out,
+        vec![(
+            SOURCE,
+            AviateMessage::EstimatorStatus {
+                time_usec: 17_000,
+                flags: 0,
+            }
+        )]
+    );
+}
+
+#[test]
+fn status_test_serializer_uses_the_canonical_crc_extras() {
+    let private = encode_frame(AVIATE_ESTIMATOR_STATUS_ID, &[0; 10], false);
+    let standard = encode_frame(ESTIMATOR_STATUS_ID, &[0; 42], false);
+    let mut out = Vec::new();
+    let stats = parse_datagram(&private, &mut out);
+    assert_eq!(stats.decoded, 1);
+    let stats = parse_datagram(&standard, &mut out);
+    assert_eq!(stats.decoded, 1);
+}
+
+#[test]
 fn corrupted_frame_fails_crc_and_is_skipped() {
     let mut frame = encode_frame(
         LOCAL_POSITION_NED_ID,
@@ -145,7 +229,68 @@ fn corrupted_frame_fails_crc_and_is_skipped() {
     let mut out: Vec<(FrameSource, AviateMessage)> = Vec::new();
     let stats = parse_datagram(&frame, &mut out);
     assert_eq!(stats.crc_failures, 1);
+    assert_eq!(stats.invalid_estimator_status_frames, 0);
     assert!(out.is_empty());
+}
+
+#[test]
+fn corrupted_private_status_is_an_explicit_revocation_signal() {
+    let mut frame = encode_frame(AVIATE_ESTIMATOR_STATUS_ID, &[0; 10], false);
+    frame[10] ^= 0xff;
+    let mut out = Vec::new();
+    let stats = parse_datagram(&frame, &mut out);
+    assert_eq!(stats.crc_failures, 1);
+    assert_eq!(stats.invalid_estimator_status_frames, 1);
+    assert_eq!(
+        out,
+        vec![(SOURCE, AviateMessage::InvalidAviateEstimatorStatus)]
+    );
+}
+
+#[test]
+fn truncated_private_status_is_an_explicit_revocation_signal() {
+    let frame = encode_frame(AVIATE_ESTIMATOR_STATUS_ID, &[0; 10], false);
+    let mut out = Vec::new();
+    let stats = parse_datagram(&frame[..frame.len() - 1], &mut out);
+    assert_eq!(stats.invalid_estimator_status_frames, 1);
+    assert!(stats.garbage_bytes > 0);
+    assert_eq!(
+        out,
+        vec![(SOURCE, AviateMessage::InvalidAviateEstimatorStatus)]
+    );
+}
+
+#[test]
+fn unsupported_incompatibility_flags_never_authorize_private_status() {
+    let mut frame = encode_frame(AVIATE_ESTIMATOR_STATUS_ID, &[0; 10], false);
+    frame[2] = 0x02;
+    let mut out = Vec::new();
+    let stats = parse_datagram(&frame, &mut out);
+    assert_eq!(stats.invalid_estimator_status_frames, 1);
+    assert!(stats.garbage_bytes > 0);
+    assert_eq!(
+        out,
+        vec![(SOURCE, AviateMessage::InvalidAviateEstimatorStatus)]
+    );
+}
+
+#[test]
+fn invalid_private_status_event_preserves_datagram_order() {
+    let mut datagram = encode_frame(AVIATE_ESTIMATOR_STATUS_ID, &[0; 10], false);
+    let mut invalid = encode_frame(AVIATE_ESTIMATOR_STATUS_ID, &[0; 10], false);
+    invalid[10] ^= 0xff;
+    datagram.extend_from_slice(&invalid);
+    let mut out = Vec::new();
+    let stats = parse_datagram(&datagram, &mut out);
+    assert_eq!(stats.decoded, 1);
+    assert_eq!(stats.invalid_estimator_status_frames, 1);
+    assert!(matches!(
+        out.as_slice(),
+        [
+            (_, AviateMessage::AviateEstimatorStatus { .. }),
+            (_, AviateMessage::InvalidAviateEstimatorStatus)
+        ]
+    ));
 }
 
 #[test]

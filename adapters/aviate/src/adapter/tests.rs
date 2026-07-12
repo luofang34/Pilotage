@@ -9,6 +9,7 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
 
+use crate::link::estimator::{EstimatorAuthorization, EstimatorStatusUpdate};
 use crate::link::{AttitudeUpdate, KinematicsUpdate, LatestAviate};
 
 use super::{AviateAdapter, sampling::measurement_pair_is_coherent};
@@ -39,6 +40,18 @@ fn state_with_acquisition_skew(
         ..attitude_stamp
     };
     let skew_ms = u32::try_from(acquisition_skew_ns / 1_000_000).unwrap_or(u32::MAX);
+    let estimator_status = EstimatorStatusUpdate {
+        time_usec: 5_000_000,
+        time_boot_ms: 5_000,
+        authorization: EstimatorAuthorization {
+            valid_flags: 0b1111,
+            quality: 0,
+        },
+        stamp: MeasurementStamp {
+            sequence: 7,
+            ..attitude_stamp
+        },
+    };
     let state = LatestAviate {
         attitude: Some(AttitudeUpdate {
             // 90° yaw: heading east.
@@ -51,6 +64,8 @@ fn state_with_acquisition_skew(
             rates_rps: [0.0, 0.0, 0.1],
             time_boot_ms: 5000,
             stamp: attitude_stamp,
+            valid_flags: 0b1111,
+            quality: 0,
             received_at: now.checked_sub(att_age).unwrap_or(now),
         }),
         kinematics: Some(KinematicsUpdate {
@@ -58,8 +73,11 @@ fn state_with_acquisition_skew(
             vel_ned_mps: [3.0, 4.0, -1.0],
             time_boot_ms: 5000_u32.saturating_sub(skew_ms),
             stamp: kinematics_stamp,
+            valid_flags: 0b1111,
+            quality: 0,
             received_at: now.checked_sub(kin_age).unwrap_or(now),
         }),
+        estimator_status: Some(estimator_status),
         maximum_inter_group_skew_ms: 300,
         ..LatestAviate::default()
     };
@@ -128,6 +146,10 @@ fn fresh_state_samples_pose_speed_and_avionics() {
     );
     assert_eq!(avionics.valid_flags, 0b1111);
     assert_eq!(
+        avionics.estimator_status_stamp.map(|stamp| stamp.sequence),
+        Some(7)
+    );
+    assert_eq!(
         avionics.attitude.map(|group| group.stamp.sequence),
         Some(10)
     );
@@ -135,6 +157,40 @@ fn fresh_state_samples_pose_speed_and_avionics() {
         avionics.kinematics.map(|group| group.stamp.sequence),
         Some(5)
     );
+}
+
+#[test]
+fn missing_status_normalizes_hand_built_numeric_groups_fail_closed() {
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    state.lock().expect("lock").estimator_status = None;
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    let batch = adapter.sample_telemetry();
+    let sample = &batch.samples[0];
+    let avionics = sample.avionics.expect("avionics");
+    assert_eq!((avionics.valid_flags, avionics.quality), (0, 2));
+    assert!(avionics.estimator_status_stamp.is_none());
+    assert!(sample.pose.is_none());
+    assert!(sample.speed.is_none());
+}
+
+#[test]
+fn unusable_group_with_diagnostic_flags_does_not_taint_an_authorized_group() {
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        let attitude = latest.attitude.as_mut().expect("attitude");
+        attitude.valid_flags = 0b0011;
+        attitude.quality = 2;
+        let kinematics = latest.kinematics.as_mut().expect("kinematics");
+        kinematics.valid_flags = 0b1100;
+        kinematics.quality = 0;
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    let sample = adapter.sample_telemetry().samples.remove(0);
+    let avionics = sample.avionics.expect("avionics");
+    assert_eq!((avionics.valid_flags, avionics.quality), (0b1100, 0));
+    assert!(sample.pose.is_none());
+    assert!(sample.speed.is_none());
 }
 
 #[test]
@@ -235,6 +291,23 @@ fn over_skew_measurement_pair_cannot_seed_a_control_setpoint() {
         state_with_acquisition_skew(Duration::ZERO, Duration::ZERO, 301_000_000),
     )
     .with_uplink(uplink);
+    let outcome = adapter.apply_control(&flight_frame(vec![], vec![]));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::MeasurementUnavailable)
+    );
+}
+
+#[test]
+fn estimator_revocation_cannot_seed_a_control_setpoint() {
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.attitude.as_mut().expect("attitude").quality = 2;
+        latest.kinematics.as_mut().expect("kinematics").quality = 2;
+    }
+    let uplink = crate::uplink::FlightUplink::new().expect("uplink");
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state).with_uplink(uplink);
     let outcome = adapter.apply_control(&flight_frame(vec![], vec![]));
     assert_eq!(
         outcome.disposition,

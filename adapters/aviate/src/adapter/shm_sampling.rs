@@ -162,6 +162,9 @@ fn batch_from_sample(
                     vel_ned_mps: sample.vel_ned_mps,
                     stamp,
                 }),
+                // The coherent simulator block is its own explicit
+                // ground-truth authorization source.
+                estimator_status_stamp: Some(stamp),
                 valid_flags: 0b1111,
                 quality: 0,
                 arm_state,
@@ -169,3 +172,6 @@ fn batch_from_sample(
         }],
     }
 }
+
+#[cfg(test)]
+mod tests;
