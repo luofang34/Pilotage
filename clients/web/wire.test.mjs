@@ -9,7 +9,12 @@
 // rejects the datagram as unrecognized. These checks pin the invariant that the
 // required fields are emitted even when their ids are zero.
 
-import { encodeControlFrameEnvelope, decodeBareEnvelope, SCHEMA_VERSION } from "./wire.js";
+import {
+  encodeControlFrameEnvelope,
+  decodeBareEnvelope,
+  parseVideoFrameV2,
+  SCHEMA_VERSION,
+} from "./wire.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -269,6 +274,104 @@ check("a sample without avionics decodes to null", (() => {
   bytesField(bareNoAv, 4, []);
   return decodeBareEnvelope(new Uint8Array(bareNoAv)).message.avionics === null;
 })());
+
+// ---- v2 video capture-identity frame parsing (ADR-0020) --------------------
+// Builds a v2 body exactly as hosts/session-host stream_tag.rs
+// `frame_video_payload_v2` does, so parseVideoFrameV2 is checked against the
+// real byte layout, not against itself.
+function buildV2Body(fields, fourcc, payload) {
+  const header = new Uint8Array(76);
+  const view = new DataView(header.buffer);
+  header[0] = fields.sourceId;
+  view.setUint32(1, fields.sourceEpoch, true);
+  header.set(fields.incarnation, 5);
+  view.setUint32(21, fields.sequence, true);
+  view.setBigUint64(25, fields.captureTimeNanos, true);
+  header[33] = fields.captureClock;
+  header[34] = fields.mappingAvailable;
+  header[35] = fields.mappingTargetClock;
+  view.setBigInt64(36, fields.mappingOffsetNanos, true);
+  view.setBigUint64(44, fields.clockErrorBoundNanos, true);
+  view.setBigUint64(52, fields.receiveTimeNanos, true);
+  view.setBigUint64(60, fields.publicationTimeNanos, true);
+  view.setUint32(68, fields.cameraId, true);
+  view.setUint32(72, fields.calibrationId, true);
+  const tail = new Uint8Array(8 + payload.length);
+  const tailView = new DataView(tail.buffer);
+  for (let i = 0; i < 4; i += 1) tail[i] = fourcc.charCodeAt(i);
+  tailView.setUint32(4, payload.length, true);
+  tail.set(payload, 8);
+  const body = new Uint8Array(header.length + tail.length);
+  body.set(header, 0);
+  body.set(tail, header.length);
+  return body;
+}
+
+const v2Fields = {
+  sourceId: 1,
+  sourceEpoch: 7,
+  incarnation: new Uint8Array(16).fill(0xab),
+  sequence: 42,
+  captureTimeNanos: 123456n,
+  captureClock: 2,
+  mappingAvailable: 1,
+  mappingTargetClock: 1,
+  mappingOffsetNanos: -1000n,
+  clockErrorBoundNanos: 250n,
+  receiveTimeNanos: 5000n,
+  publicationTimeNanos: 6000n,
+  cameraId: 9,
+  calibrationId: 3,
+};
+
+const v2Payload = new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
+const v2Body = buildV2Body(v2Fields, "MJPG", v2Payload);
+const v2Parsed = parseVideoFrameV2(v2Body);
+check("v2 frame parses to a full capture identity", (() => {
+  if (!v2Parsed) return false;
+  const m = v2Parsed.meta;
+  return (
+    m.sourceId === 1 &&
+    m.sourceEpoch === 7 &&
+    m.sourceIncarnation === "ab".repeat(16) &&
+    m.sequence === 42 &&
+    m.captureTimeNanos === 123456n &&
+    m.captureClock === 2 &&
+    m.mappingAvailable === true &&
+    m.mappingTargetClock === 1 &&
+    m.mappingOffsetNanos === -1000n &&
+    m.clockErrorBoundNanos === 250n &&
+    m.receiveTimeNanos === 5000n &&
+    m.publicationTimeNanos === 6000n &&
+    m.cameraId === 9 &&
+    m.calibrationId === 3 &&
+    v2Parsed.fourcc === "MJPG"
+  );
+})());
+check(
+  "v2 frame preserves the exact payload bytes",
+  v2Parsed !== null &&
+    v2Parsed.payload.length === v2Payload.length &&
+    v2Parsed.payload.every((b, i) => b === v2Payload[i]),
+);
+check(
+  "v2 unavailable mapping parses with a false flag",
+  (() => {
+    const body = buildV2Body({ ...v2Fields, mappingAvailable: 0 }, "MJPG", v2Payload);
+    const parsed = parseVideoFrameV2(body);
+    return parsed !== null && parsed.meta.mappingAvailable === false;
+  })(),
+);
+check("v2 body shorter than the header is rejected", parseVideoFrameV2(new Uint8Array(80)) === null);
+check(
+  "v2 declared length mismatch is rejected",
+  (() => {
+    const body = buildV2Body(v2Fields, "MJPG", v2Payload);
+    // Corrupt the u32 length prefix (offset 80) to over-declare the payload.
+    new DataView(body.buffer).setUint32(80, 999, true);
+    return parseVideoFrameV2(body) === null;
+  })(),
+);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

@@ -11,9 +11,10 @@
 // host's dev cert hash, open a bidi stream, send ClientHello, read
 // ServerWelcome, send a LeaseRequest for vehicle.motion, read LeaseResponse.
 // Then: accept host-initiated uni streams and dispatch on their leading
-// kind-tag byte (0x01 authority-events, 0x02 one video frame); read
-// telemetry-fast datagrams for live pose; send control-fast datagrams
-// (bare Envelope, ControlFrame arm) from arrow/WASD key state.
+// kind-tag byte (0x01 authority-events, 0x03 one video frame with a capture
+// identity header, 0x02 the legacy video frame); read telemetry-fast datagrams
+// for live pose; send control-fast datagrams (bare Envelope, ControlFrame arm)
+// from arrow/WASD key state.
 
 import {
   encodeClientHelloEnvelope,
@@ -21,10 +22,13 @@ import {
   encodeControlFrameEnvelope,
   decodeLengthDelimitedEnvelope,
   decodeBareEnvelope,
+  parseVideoFrameV2,
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
+  STREAM_KIND_VIDEO_V2,
   BUTTON_EDGE_PRESSED,
 } from "./wire.js";
+import { VideoIdentityTracker } from "./video-identity.js";
 import { loadInstruments, PANEL } from "./instruments.js";
 import {
   coverInstrumentFailures,
@@ -93,8 +97,17 @@ const state = {
   connected: false,
   leaseGranted: false,
   skippedVideoFrames: 0,
+  droppedIdentityFrames: 0,
+  // Latest conformal-overlay verdict per source. Defaults unavailable: a
+  // conformal overlay is only admissible once a source presents a bounded
+  // clock mapping (ADR-0020). Conformal drawing itself does not exist yet.
+  conformalReady: false,
 };
 const transportSessions = new TransportSessionLifecycle();
+// Capture-identity guard for the video downlink: drops duplicate/reordered/
+// stale frames so a replayed frame never displaces a newer one or refreshes
+// its age (ADR-0020).
+const videoIdentity = new VideoIdentityTracker();
 
 // Ingestion accepts only source advancement for the selected vehicle. Drawing
 // remains on requestAnimationFrame, decoupled from telemetry publication.
@@ -395,6 +408,8 @@ async function readOneUniStream(stream, token) {
     const body = buf.subarray(1);
     if (kind === STREAM_KIND_AUTHORITY) {
       dispatchAuthorityStream(body, token);
+    } else if (kind === STREAM_KIND_VIDEO_V2) {
+      await renderVideoFrameV2(body, token);
     } else if (kind === STREAM_KIND_VIDEO) {
       await renderVideoFrame(body, token);
     } else {
@@ -420,9 +435,7 @@ function dispatchAuthorityStream(body, token) {
   }
 }
 
-// Video body is `[source_id: u8][fourcc: 4 bytes][u32 LE len][payload]` after
-// the kind tag (ADR-0016; host stream_tag.rs `frame_video_payload`). The
-// source_id (0 = onboard FPV, 1 = chase) routes the frame to its canvas. An
+// The source_id (0 = onboard FPV, 1 = chase) routes a frame to its canvas. An
 // unknown source_id or unknown FourCC is counted and logged, never a hard
 // failure, so a host streaming a source or codec this viewer lacks degrades
 // gracefully. Only "MJPG" is decoded here.
@@ -434,29 +447,10 @@ const VIDEO_TARGETS = {
   [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
 };
 
-async function renderVideoFrame(body, token) {
-  if (!transportSessions.isActive(token)) return;
-  if (body.length < 9) return;
-  const sourceId = body[0];
-  const fourcc = String.fromCharCode(body[1], body[2], body[3], body[4]);
-  const view = new DataView(body.buffer, body.byteOffset + 5, 4);
-  const len = view.getUint32(0, true);
-  const payload = body.subarray(9, 9 + len);
-  if (payload.length !== len) {
-    log(`video frame length mismatch: declared ${len}, got ${payload.length}`);
-    return;
-  }
-  const target = VIDEO_TARGETS[sourceId];
-  if (!target) {
-    state.skippedVideoFrames += 1;
-    log(`unknown video source_id ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
-    return;
-  }
-  if (fourcc !== FOURCC_MJPEG) {
-    state.skippedVideoFrames += 1;
-    log(`unknown video codec FourCC "${fourcc}" for source ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
-    return;
-  }
+/** Decodes one MJPEG payload and blits it to `target`, resizing its canvas to
+ *  the frame. Session-token checked around the async decode so a frame decoded
+ *  after teardown is dropped. */
+async function paintJpeg(payload, target, token) {
   const bitmap = await createImageBitmap(new Blob([payload], { type: "image/jpeg" }));
   if (!transportSessions.isActive(token)) {
     bitmap.close();
@@ -469,6 +463,74 @@ async function renderVideoFrame(body, token) {
   }
   targetCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
+}
+
+/** Resolves a frame's routing target and codec, counting/logging a skip for an
+ *  unknown source or FourCC. Returns the target, or `null` to skip. */
+function videoTargetFor(sourceId, fourcc) {
+  const target = VIDEO_TARGETS[sourceId];
+  if (!target) {
+    state.skippedVideoFrames += 1;
+    log(`unknown video source_id ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
+    return null;
+  }
+  if (fourcc !== FOURCC_MJPEG) {
+    state.skippedVideoFrames += 1;
+    log(`unknown video codec FourCC "${fourcc}" for source ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
+    return null;
+  }
+  return target;
+}
+
+// v1 video body `[source_id][fourcc][u32 LE len][payload]` (ADR-0016), retained
+// so a host that has not adopted the v2 capture-identity framing still renders.
+async function renderVideoFrame(body, token) {
+  if (!transportSessions.isActive(token)) return;
+  if (body.length < 9) return;
+  const sourceId = body[0];
+  const fourcc = String.fromCharCode(body[1], body[2], body[3], body[4]);
+  const view = new DataView(body.buffer, body.byteOffset + 5, 4);
+  const len = view.getUint32(0, true);
+  const payload = body.subarray(9, 9 + len);
+  if (payload.length !== len) {
+    log(`video frame length mismatch: declared ${len}, got ${payload.length}`);
+    return;
+  }
+  const target = videoTargetFor(sourceId, fourcc);
+  if (target) await paintJpeg(payload, target, token);
+}
+
+// v2 video body: a capture-identity header, then `[fourcc][u32 LE len][payload]`
+// (ADR-0020). The capture identity gates the frame through `videoIdentity`: a
+// duplicate, reordered, stale-epoch, or wrong-camera frame is dropped and never
+// blitted, so a replayed frame cannot displace a newer one or refresh its age.
+// The clock-mapping verdict decides whether a conformal overlay is admissible;
+// it defaults unavailable and conformal drawing does not exist yet.
+async function renderVideoFrameV2(body, token) {
+  if (!transportSessions.isActive(token)) return;
+  const parsed = parseVideoFrameV2(body);
+  if (!parsed) {
+    state.skippedVideoFrames += 1;
+    log(`malformed v2 video frame; skipping (${state.skippedVideoFrames} skipped total)`);
+    return;
+  }
+  const { meta, fourcc, payload } = parsed;
+  const target = videoTargetFor(meta.sourceId, fourcc);
+  if (!target) return;
+  const verdict = videoIdentity.admit(meta);
+  state.conformalReady = verdict.gate.conformalReady;
+  if (!verdict.accepted) {
+    state.droppedIdentityFrames += 1;
+    log(
+      `video frame not admitted (${verdict.reason}) for source ${meta.sourceId} ` +
+        `seq ${meta.sequence}; dropped (${state.droppedIdentityFrames} identity drops total)`,
+    );
+    return;
+  }
+  if (verdict.discontinuity) {
+    log(`video source ${meta.sourceId} capture discontinuity: fresh epoch/incarnation`);
+  }
+  await paintJpeg(payload, target, token);
 }
 
 /** Reads telemetry-fast datagrams (bare Envelope, TelemetrySample arm) forever, updating the pose overlay. */
