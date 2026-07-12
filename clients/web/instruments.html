@@ -236,6 +236,7 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
         wind: { fromRad: v("windDir") * DEG, speedMps: v("windSpd"), ageMs: 16 },
         selections: { headingBugRad: v("hdgBug") * DEG, altitudeSelM: v("altSel") },
         quality: Number(document.getElementById("quality").value),
+        valid: { attitude: true, rates: true, position: true, velocity: true },
       },
       now,
     );

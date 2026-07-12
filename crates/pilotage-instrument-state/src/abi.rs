@@ -19,10 +19,10 @@
 //! | 56  | f32  | IAS (m/s, NaN absent) |
 //! | 60  | f32  | baro setting (hPa, NaN absent) |
 //! | 64  | f32×5| ages ms: attitude, kinematics, air, nav, wind (NaN never) |
-//! | 84  | u8   | quality (0 good, 1 degraded, 2 unusable) |
-//! | 85  | u8   | valid flags (bit0 att, 1 rates, 2 pos, 3 vel) |
-//! | 86  | u8   | nav source (0 none, 1 gps, 2 nav1, 3 nav2) |
-//! | 87  | u8   | nav from/to (0 off, 1 to, 2 from) |
+//! | 84  | u8   | quality (0 good, 1 degraded, 2 unusable; other = unknown, fails) |
+//! | 85  | u8   | valid flags (bit0 att, 1 rates, 2 pos, 3 vel; unset = not declared valid) |
+//! | 86  | u8   | nav source (0 none, 1 gps, 2 nav1, 3 nav2; other = unknown, fails) |
+//! | 87  | u8   | nav from/to (0 off, 1 to, 2 from; other = unknown, fails) |
 //! | 88  | f32  | nav course (rad) |
 //! | 92  | f32  | nav lateral deviation (dots) |
 //! | 96  | f32  | nav vertical deviation (dots, NaN absent) |
@@ -32,7 +32,7 @@
 //! | 112 | f32  | wind from (rad) |
 //! | 116 | f32  | wind speed (m/s) |
 //! | 120 | u32  | snapshot generation (wrapping) |
-//! | 124 | u8   | coherence (0 insufficient, 1 coherent, 2 excessive skew) |
+//! | 124 | u8   | coherence (0 insufficient, 1 coherent, 2 excessive skew; other = unknown, degrades) |
 //! | 125 | u8×3 | reserved, zero |
 
 use crate::aircraft::{
@@ -127,16 +127,21 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         age_ms: air_age,
     };
 
+    // Unknown wire values are preserved as Unknown, never mapped to a
+    // benign known value: guidance from an unidentifiable source must
+    // fail, not masquerade as no-source (VAL-01 fail-safe decoding).
     let source = match u8_at(buf, 86)? {
+        0 => NavSource::None,
         1 => NavSource::Gps,
         2 => NavSource::Nav1,
         3 => NavSource::Nav2,
-        _ => NavSource::None,
+        _ => NavSource::Unknown,
     };
     let fromto = match u8_at(buf, 87)? {
+        0 => NavFromTo::Off,
         1 => NavFromTo::To,
         2 => NavFromTo::From,
-        _ => NavFromTo::Off,
+        _ => NavFromTo::Unknown,
     };
     let nav = Stamped {
         data: match nav_age {
@@ -165,9 +170,10 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
     };
 
     let quality = match u8_at(buf, 84)? {
+        0 => EstimateQuality::Good,
         1 => EstimateQuality::Degraded,
         2 => EstimateQuality::Unusable,
-        _ => EstimateQuality::Good,
+        _ => EstimateQuality::Unknown,
     };
     let flags = u8_at(buf, 85)?;
     let valid = ValidFlags {
@@ -177,9 +183,10 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         velocity: flags & 0b1000 != 0,
     };
     let coherence = match u8_at(buf, 124)? {
+        0 => SnapshotCoherence::Insufficient,
         1 => SnapshotCoherence::Coherent,
         2 => SnapshotCoherence::ExcessiveSkew,
-        _ => SnapshotCoherence::Insufficient,
+        _ => SnapshotCoherence::Unknown,
     };
 
     Ok(AircraftState {
@@ -276,6 +283,7 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
             EstimateQuality::Good => 0,
             EstimateQuality::Degraded => 1,
             EstimateQuality::Unusable => 2,
+            EstimateQuality::Unknown => 255,
         },
     )?;
     let flags = u8::from(state.valid.attitude)
@@ -293,6 +301,7 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
             NavSource::Gps => 1,
             NavSource::Nav1 => 2,
             NavSource::Nav2 => 3,
+            NavSource::Unknown => 255,
         },
     )?;
     put_u8(
@@ -302,6 +311,7 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
             NavFromTo::Off => 0,
             NavFromTo::To => 1,
             NavFromTo::From => 2,
+            NavFromTo::Unknown => 255,
         },
     )?;
     put_f32(buf, 88, nav.course_rad)?;
@@ -326,6 +336,7 @@ pub fn encode_state(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiErro
             SnapshotCoherence::Insufficient => 0,
             SnapshotCoherence::Coherent => 1,
             SnapshotCoherence::ExcessiveSkew => 2,
+            SnapshotCoherence::Unknown => 255,
         },
     )?;
     for offset in 125..128 {

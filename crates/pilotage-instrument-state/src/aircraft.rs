@@ -42,6 +42,10 @@ pub enum NavSource {
     Nav1,
     /// NAV radio 2 (green).
     Nav2,
+    /// The wire carried a source this build does not know. Guidance from
+    /// an unidentifiable source must not display; the nav group fails
+    /// rather than quietly pretending no source is selected.
+    Unknown,
 }
 
 /// TO/FROM resolution of the selected course.
@@ -54,6 +58,9 @@ pub enum NavFromTo {
     To,
     /// Flying away from the station/waypoint.
     From,
+    /// The wire carried a resolution this build does not know; the nav
+    /// group fails rather than defaulting to a benign flag state.
+    Unknown,
 }
 
 /// Lateral/vertical course guidance from the selected source.
@@ -93,20 +100,31 @@ pub struct Wind {
 }
 
 /// Source-reported estimate quality (mirrors Aviate's `EstimateQuality`).
+///
+/// Trust must be declared, never assumed: the default is [`Self::Unknown`],
+/// and a wire value outside the known set decodes to `Unknown` rather than
+/// to a benign level. Unknown quality resolves `Failed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EstimateQuality {
     /// Full confidence.
-    #[default]
     Good,
     /// Reduced confidence; signals show `Degraded`.
     Degraded,
     /// The source says do not trust; signals show `Failed`.
     Unusable,
+    /// No quality was declared, or the declared value is not one this
+    /// build knows; signals show `Failed`.
+    #[default]
+    Unknown,
 }
 
 /// Which estimate groups the source declares valid (mirrors Aviate's
 /// `StateValidFlags`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The default declares nothing valid: a feeder that never sets the flags
+/// gets `Failed` groups, not silently trusted ones. Flags apply only to
+/// groups that have data — a group never received stays `Missing`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ValidFlags {
     /// Attitude quaternion is valid.
     pub attitude: bool,
@@ -116,17 +134,6 @@ pub struct ValidFlags {
     pub position: bool,
     /// NED velocity is valid.
     pub velocity: bool,
-}
-
-impl Default for ValidFlags {
-    fn default() -> Self {
-        Self {
-            attitude: true,
-            rates: true,
-            position: true,
-            velocity: true,
-        }
-    }
 }
 
 /// One estimate group with the age a feeder stamped it with.
@@ -157,6 +164,9 @@ pub enum SnapshotCoherence {
     Coherent,
     /// Required groups exceed the configured acquisition-time skew budget.
     ExcessiveSkew,
+    /// The wire carried a coherence value this build does not know; the
+    /// pairing cannot be trusted, so stamped groups degrade.
+    Unknown,
 }
 
 /// Metadata assigned by the ingress gate to one immutable state generation.

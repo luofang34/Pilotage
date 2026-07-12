@@ -920,6 +920,43 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   );
 }
 
+// ---- VAL-01: fail-safe write defaults mirror abi.rs ---------------------------
+
+{
+  const exportsFake = fakeExports({});
+  const mod = new InstrumentModule(exportsFake, { createCanvas: recordingCanvas });
+  const minimal = mod.writeState({ selections: { headingBugRad: 0 } });
+  check("minimal state write succeeds", minimal.ok === true);
+  const view = new DataView(exportsFake.memory.buffer, exportsFake.state_ptr(), STATE_ABI_SIZE);
+  check(
+    "undeclared quality writes the unknown code (abi.rs parity), never Good",
+    view.getUint8(84) === 255,
+  );
+  check("undeclared validity writes no flags (nothing declared valid)", view.getUint8(85) === 0);
+
+  const declared = mod.writeState({
+    selections: { headingBugRad: 0 },
+    quality: 1,
+    valid: { attitude: true, rates: true, position: true, velocity: true },
+  });
+  check("declared trust write succeeds", declared.ok === true);
+  check(
+    "declared quality and flags encode exactly",
+    view.getUint8(84) === 1 && view.getUint8(85) === 0b1111,
+  );
+
+  const partial = mod.writeState({
+    selections: { headingBugRad: 0 },
+    quality: 0,
+    valid: { attitude: true, velocity: true },
+  });
+  check("partial validity write succeeds", partial.ok === true);
+  check(
+    "undeclared flags stay unset within a partial declaration",
+    view.getUint8(85) === 0b1001,
+  );
+}
+
 // ---- the real WASM module, end to end ----------------------------------------
 
 {

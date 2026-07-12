@@ -42,3 +42,36 @@ fn only_showable_statuses_show_values() {
     assert!(!SignalStatus::Missing.shows_value());
     assert!(!SignalStatus::Failed.shows_value());
 }
+
+// ---- VAL-01 policy construction -----------------------------------------------
+
+#[test]
+fn invalid_policy_construction_is_rejected() {
+    use super::PolicyError;
+    for (stale, fail) in [
+        (f32::NAN, 100.0),
+        (100.0, f32::NAN),
+        (f32::INFINITY, 200.0),
+        (100.0, f32::INFINITY),
+        (0.0, 100.0),
+        (-1.0, 100.0),
+        (100.0, 0.0),
+    ] {
+        assert_eq!(
+            super::FreshnessPolicy::new(stale, fail),
+            Err(PolicyError::NonPositiveThreshold),
+            "{stale}/{fail}"
+        );
+    }
+    assert_eq!(
+        super::FreshnessPolicy::new(100.0, 100.0),
+        Err(PolicyError::StaleNotBeforeFail)
+    );
+    assert_eq!(
+        super::FreshnessPolicy::new(200.0, 100.0),
+        Err(PolicyError::StaleNotBeforeFail)
+    );
+    let policy = super::FreshnessPolicy::new(100.0, 200.0).expect("valid thresholds");
+    assert_eq!(policy.stale_after_ms(), 100.0);
+    assert_eq!(policy.fail_after_ms(), 200.0);
+}

@@ -42,6 +42,13 @@ fn attitude_state() -> AircraftState {
             }),
             age_ms: Some(10.0),
         },
+        quality: pilotage_instrument_state::EstimateQuality::Good,
+        valid: pilotage_instrument_state::ValidFlags {
+            attitude: true,
+            rates: true,
+            position: true,
+            velocity: true,
+        },
         ..AircraftState::default()
     }
 }

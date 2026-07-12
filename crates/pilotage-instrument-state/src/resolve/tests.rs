@@ -28,6 +28,13 @@ fn flying_state() -> AircraftState {
             }),
             age_ms: Some(100.0),
         },
+        quality: EstimateQuality::Good,
+        valid: crate::aircraft::ValidFlags {
+            attitude: true,
+            rates: true,
+            position: true,
+            velocity: true,
+        },
         ..AircraftState::default()
     }
 }
@@ -155,4 +162,176 @@ fn skew_degradation_never_upgrades_a_worse_status() {
     };
     let p = resolve(&s, &FreshnessPolicy::default());
     assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+}
+
+// ---- VAL-01 fail-safe resolution ---------------------------------------------
+
+#[test]
+fn undeclared_trust_never_resolves_valid() {
+    // Data present but neither quality nor validity declared: the
+    // fail-safe defaults resolve Failed, not Valid.
+    let s = AircraftState {
+        attitude: flying_state().attitude,
+        kinematics: flying_state().kinematics,
+        ..AircraftState::default()
+    };
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+    assert_eq!(p.alt_ft.status, SignalStatus::Failed);
+}
+
+#[test]
+fn invalid_quaternion_never_reaches_attitude_geometry() {
+    let mut s = flying_state();
+    if let Some(att) = s.attitude.data.as_mut() {
+        att.quat = Quat {
+            w: f32::NAN,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+    }
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+    assert_eq!(p.roll_rad.value, 0.0, "quiet zero, not quaternion output");
+    assert!(p.pitch_rad.value.is_finite());
+    // Isolation: kinematics-derived signals are untouched by the
+    // attitude fault.
+    assert_eq!(p.alt_ft.status, SignalStatus::Valid);
+}
+
+#[test]
+fn denormalized_quaternion_within_tolerance_still_displays() {
+    let mut s = flying_state();
+    if let Some(att) = s.attitude.data.as_mut() {
+        att.quat = Quat {
+            w: 1.01,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+    }
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Valid);
+    assert!(p.roll_rad.value.abs() < 1e-6);
+}
+
+#[test]
+fn derived_overflow_fails_instead_of_showing_infinity() {
+    let mut s = flying_state();
+    if let Some(kin) = s.kinematics.data.as_mut() {
+        // Finite input whose unit conversion overflows f32.
+        kin.pos_ned_m[2] = -f32::MAX;
+    }
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.alt_ft.status, SignalStatus::Failed);
+    assert_eq!(p.alt_ft.value, 0.0);
+}
+
+#[test]
+fn every_showable_output_is_finite_under_hostile_input() {
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut s = flying_state();
+        if let Some(att) = s.attitude.data.as_mut() {
+            att.rates_rps = [bad; 3];
+        }
+        if let Some(kin) = s.kinematics.data.as_mut() {
+            kin.vel_ned_mps = [bad; 3];
+        }
+        if let Some(air) = s.air.data.as_mut() {
+            air.baro_setting_hpa = Some(bad);
+        }
+        s.selections.heading_bug_rad = bad;
+        s.selections.altitude_sel_m = Some(bad);
+        let p = resolve(&s, &FreshnessPolicy::default());
+        for (name, sig) in [
+            ("roll", p.roll_rad),
+            ("pitch", p.pitch_rad),
+            ("heading", p.heading_rad),
+            ("turn", p.turn_rate_rps),
+            ("ias", p.ias_kt),
+            ("gs", p.gs_kt),
+            ("alt", p.alt_ft),
+            ("vsi", p.vsi_fpm),
+            ("track", p.track_rad),
+            ("baro", p.baro_hpa),
+        ] {
+            assert!(
+                !sig.status.shows_value() || sig.value.is_finite(),
+                "{name} shows non-finite {} for {bad}",
+                sig.value
+            );
+        }
+        assert!(p.selections.heading_bug_rad.is_finite());
+        assert_eq!(p.selections.altitude_sel_m, None);
+    }
+}
+
+#[test]
+fn unknown_nav_source_fails_the_group_and_clears_guidance() {
+    let mut s = flying_state();
+    s.nav = Stamped {
+        data: Some(pilotage_state_navdata_unknown()),
+        age_ms: Some(10.0),
+    };
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.nav.status, SignalStatus::Failed);
+    assert_eq!(p.nav.data.cdi_dots, 0.0, "guidance values cleared");
+}
+
+fn pilotage_state_navdata_unknown() -> crate::aircraft::NavData {
+    crate::aircraft::NavData {
+        source: crate::aircraft::NavSource::Unknown,
+        course_rad: 1.0,
+        cdi_dots: 1.5,
+        fromto: crate::aircraft::NavFromTo::To,
+        vdev_dots: None,
+        dist_nm: None,
+    }
+}
+
+#[test]
+fn multi_fault_priority_resolves_the_worst() {
+    // Degraded quality + excessive skew + a validity flag off: Failed
+    // (the flag) must win over both Degraded causes.
+    use crate::aircraft::{SnapshotCoherence, SnapshotMeta};
+    let mut s = flying_state();
+    s.quality = EstimateQuality::Degraded;
+    s.snapshot = SnapshotMeta {
+        generation: 1,
+        coherence: SnapshotCoherence::ExcessiveSkew,
+    };
+    s.valid.attitude = false;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Failed);
+    // Without the flag the two Degraded causes stay Degraded.
+    s.valid.attitude = true;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
+}
+
+#[test]
+fn unknown_coherence_degrades_stamped_groups() {
+    use crate::aircraft::{SnapshotCoherence, SnapshotMeta};
+    let mut s = flying_state();
+    s.snapshot = SnapshotMeta {
+        generation: 1,
+        coherence: SnapshotCoherence::Unknown,
+    };
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
+    assert_eq!(p.alt_ft.status, SignalStatus::Degraded);
+}
+
+#[test]
+fn faults_are_reported_for_diagnostics() {
+    let mut s = flying_state();
+    if let Some(att) = s.attitude.data.as_mut() {
+        att.quat.w = f32::NAN;
+    }
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(
+        p.integrity.attitude,
+        Some(crate::validate::GroupFault::NonFinite)
+    );
 }
