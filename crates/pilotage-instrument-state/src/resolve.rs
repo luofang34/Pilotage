@@ -213,13 +213,19 @@ pub fn resolve_stateful(
     let (ias, baro) = air_signals(state, policy, trust.quality, &integrity);
     let heading = heading_resolved(state, policy, &trust, &integrity);
     let rose = heading.reference;
-    let track = presented_true(Sig::with_status(track_rad, track_status), rose, state);
-    let wind = presented_wind(wind_signal(state, policy, &integrity), rose, state);
+    let track = presented_true(
+        Sig::with_status(track_rad, track_status),
+        rose,
+        state,
+        policy,
+    );
+    let wind = presented_wind(wind_signal(state, policy, &integrity), rose, state, policy);
     let bug = presented_angle(
         Sig::with_status(state.selections.heading_bug_rad, SignalStatus::Valid),
         state.selections.heading_bug_reference,
         rose,
         state,
+        policy,
     );
 
     PanelData {
@@ -381,6 +387,7 @@ fn nav_resolved(
                 data.course_reference,
                 rose,
                 state,
+                policy,
             );
             NavResolved {
                 data,
