@@ -1,6 +1,7 @@
 // Exact unsigned wire-range predicates and typed rejection reasons for
-// browser-side identity validators (GEO-68). Every identity field decoded from
-// the wire has one exact unsigned type; these enforce that type and its range,
+// browser-side identity validators (GEO-68). Every field decoded from the wire
+// has one exact numeric type (unsigned for identities and times, signed i64 for
+// a clock-mapping offset); these enforce that type and its range,
 // fail-closed, with no clamping. A value that is negative, fractional, out of
 // range, or of the wrong numeric kind (a Number where a BigInt is required, or
 // a BigInt where a Number is required) is rejected — never coerced. `firstFault`
@@ -13,6 +14,10 @@ export const U8_MAX = 0xff;
 export const U32_MAX = 0xffff_ffff;
 /** Largest u64 wire value. */
 export const U64_MAX = 0xffff_ffff_ffff_ffffn;
+/** Most negative i64 wire value. */
+export const I64_MIN = -(1n << 63n);
+/** Largest i64 wire value. */
+export const I64_MAX = (1n << 63n) - 1n;
 
 /** Canonical 128-bit incarnation spelling: exactly 32 lowercase hex digits. */
 export const INCARNATION_HEX = /^[0-9a-f]{32}$/;
@@ -59,6 +64,15 @@ export function isU64(value) {
   return isBigUintInRange(value, U64_MAX);
 }
 
+/**
+ * A signed BigInt-typed i64 wire field (e.g. a clock-mapping offset, which may
+ * be negative). Rejects a Number (a truncating kind for a 64-bit field) and any
+ * BigInt outside `[I64_MIN, I64_MAX]`.
+ */
+export function isI64(value) {
+  return typeof value === "bigint" && value >= I64_MIN && value <= I64_MAX;
+}
+
 /** A 128-bit incarnation field: a string of exactly 32 lowercase hex digits. */
 export function isIncarnation(value) {
   return typeof value === "string" && INCARNATION_HEX.test(value);
@@ -79,6 +93,10 @@ export function fieldFault(kind, value) {
       if (typeof value !== "bigint") return RULE.WRONG_KIND;
       if (value < 0n) return RULE.NEGATIVE;
       return value > U64_MAX ? RULE.OUT_OF_RANGE : null;
+    }
+    case "i64": {
+      if (typeof value !== "bigint") return RULE.WRONG_KIND;
+      return value < I64_MIN || value > I64_MAX ? RULE.OUT_OF_RANGE : null;
     }
     case "incarnation":
       return isIncarnation(value) ? null : RULE.MALFORMED;

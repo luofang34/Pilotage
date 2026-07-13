@@ -350,6 +350,39 @@ check(
   }
 }
 
+// ---- GEO-68: admit() surfaces the typed { field, rule } reason --------------
+// The rejection is not merely "malformed": the verdict and the tracker's
+// diagnostics both name which wire field failed and why, across the identity
+// tuple, the signed mapping offset, and the u64 error/receive/publication times.
+{
+  const cases = [
+    [{ sourceId: 256 }, "sourceId", "out-of-range"],
+    [{ calibrationId: 7n }, "calibrationId", "wrong-numeric-kind"],
+    [{ captureTimeNanos: 1000 }, "captureTimeNanos", "wrong-numeric-kind"],
+    [{ clockErrorBoundNanos: -1n }, "clockErrorBoundNanos", "negative"],
+    [{ mappingOffsetNanos: 1n << 63n }, "mappingOffsetNanos", "out-of-range"],
+    [{ receiveTimeNanos: 5 }, "receiveTimeNanos", "wrong-numeric-kind"],
+    [{ sourceIncarnation: "nope" }, "sourceIncarnation", "malformed"],
+  ];
+  for (const [override, field, rule] of cases) {
+    const t = new VideoIdentityTracker();
+    const verdict = t.admit(meta(override));
+    check(
+      `admit reports the typed fault ${field}/${rule}`,
+      verdict.accepted === false &&
+        verdict.fault !== null &&
+        verdict.fault.field === field &&
+        verdict.fault.rule === rule,
+    );
+    check(
+      `diagnostics exposes the last malformed reason ${field}/${rule}`,
+      t.diagnostics().lastMalformedReason !== null &&
+        t.diagnostics().lastMalformedReason.field === field &&
+        t.diagnostics().lastMalformedReason.rule === rule,
+    );
+  }
+}
+
 // ---- GEO-68: a malformed meta identity can never be conformal-ready ---------
 
 {
@@ -359,8 +392,8 @@ check(
     RECOGNIZED,
   );
   check(
-    "a malformed meta (u8 sourceId=256) is refused by the gate, never ready",
-    g.conformalReady === false && g.reason === "malformed-meta",
+    "a malformed meta (u8 sourceId=256) is refused by the gate, never ready, with a typed reason",
+    g.conformalReady === false && g.reason === "malformed-meta:sourceId:out-of-range",
   );
 }
 {
@@ -370,8 +403,8 @@ check(
     RECOGNIZED,
   );
   check(
-    "a bigint calibrationId (u32 must be Number) is refused by the gate",
-    g.conformalReady === false && g.reason === "malformed-meta",
+    "a bigint calibrationId (u32 must be Number) is refused by the gate with a typed reason",
+    g.conformalReady === false && g.reason === "malformed-meta:calibrationId:wrong-numeric-kind",
   );
 }
 

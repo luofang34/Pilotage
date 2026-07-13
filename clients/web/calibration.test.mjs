@@ -43,6 +43,8 @@ function fpvFrameMeta(overrides = {}) {
     mappingTargetClock: CLOCK_VEHICLE_BOOT,
     mappingOffsetNanos: 0n,
     clockErrorBoundNanos: 0n,
+    receiveTimeNanos: 0n,
+    publicationTimeNanos: 0n,
     ...overrides,
   };
 }

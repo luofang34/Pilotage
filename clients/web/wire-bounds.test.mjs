@@ -7,9 +7,12 @@ import {
   RULE,
   fieldFault,
   firstFault,
+  I64_MAX,
+  I64_MIN,
   U32_MAX,
   U64_MAX,
   U8_MAX,
+  isI64,
   isIncarnation,
   isU32,
   isU64,
@@ -54,6 +57,18 @@ check(
   !isU64(1000) && !isU64(0) && !isU64(Number.MAX_SAFE_INTEGER),
 );
 check("u64 rejects a fractional Number too", !isU64(1.5));
+
+// ---- i64 (signed clock-mapping offset) --------------------------------------
+
+check("i64 accepts 0n, its min, and its max", isI64(0n) && isI64(I64_MIN) && isI64(I64_MAX));
+check("i64 accepts a negative in range", isI64(-1n));
+check("i64 rejects one past the max", !isI64(I64_MAX + 1n));
+check("i64 rejects one below the min", !isI64(I64_MIN - 1n));
+check("i64 rejects a Number (would truncate past 2^53)", !isI64(0) && !isI64(-1) && !isI64(1000));
+check("fieldFault: a valid i64 (including negative) has no fault", fieldFault("i64", -5n) === null);
+check("fieldFault: a Number for i64 is wrong-kind", fieldFault("i64", -5) === RULE.WRONG_KIND);
+check("fieldFault: an i64 past the max is out-of-range", fieldFault("i64", I64_MAX + 1n) === RULE.OUT_OF_RANGE);
+check("fieldFault: an i64 below the min is out-of-range", fieldFault("i64", I64_MIN - 1n) === RULE.OUT_OF_RANGE);
 
 // ---- incarnation ------------------------------------------------------------
 

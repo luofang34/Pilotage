@@ -23,7 +23,7 @@
 // match, published/recognized calibration, overflow-safe mapped time, error
 // budget) can never be bypassed.
 
-import { conformalGate, mapCaptureTime, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
+import { conformalGate, mapCaptureTime, metaFault, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
 import { firstFault } from "./wire-bounds.js";
 
 const CLOCK_VEHICLE_BOOT = 1;
@@ -47,6 +47,7 @@ export const ASSOCIATION = Object.freeze({
   STREAM_DISCONTINUITY: "stream-discontinuity",
   TOTAL_ERROR_EXCEEDS_BUDGET: "total-error-exceeds-budget",
   NOT_ADMITTED: "not-admitted",
+  MALFORMED_META: "malformed-meta",
 });
 
 // The first field of an AV-01 snapshot identity to violate its exact wire type
@@ -118,13 +119,14 @@ function absDiff(a, b) {
   return a >= b ? a - b : b - a;
 }
 
-function closed(reason) {
+function closed(reason, fault = null) {
   return Object.freeze({
     ready: false,
     snapshotIdentity: null,
     mappedCaptureNanos: null,
     totalErrorNanos: null,
     reason,
+    fault,
   });
 }
 
@@ -189,7 +191,14 @@ export class SnapshotAssociator {
    */
   associate(meta, options = {}) {
     const budget = options.maxClockErrorNanos ?? DEFAULT_MAX_CLOCK_ERROR_NANOS;
-    if (!meta || meta.mappingAvailable !== true) return closed(ASSOCIATION.MAPPING_UNAVAILABLE);
+    // Validate every wire field this path maps, sums, or compares BEFORE any
+    // BigInt arithmetic. A field of the wrong numeric kind (e.g. a Number
+    // clockErrorBoundNanos later added to a BigInt delta) would otherwise throw
+    // a TypeError mid-association instead of failing closed. Never throw; always
+    // return a closed verdict carrying the typed reason.
+    const fault = metaFault(meta);
+    if (fault !== null) return closed(ASSOCIATION.MALFORMED_META, fault);
+    if (meta.mappingAvailable !== true) return closed(ASSOCIATION.MAPPING_UNAVAILABLE);
     const mapped = mapCaptureTime(meta.captureTimeNanos, meta.mappingOffsetNanos);
     if (mapped === null) return closed(ASSOCIATION.MAPPED_TIME_OVERFLOW);
     if (this.entries.length === 0) return closed(ASSOCIATION.EMPTY_HISTORY);
@@ -229,7 +238,7 @@ export class SnapshotAssociator {
   }
 
   verdict(ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason) {
-    return Object.freeze({ ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason });
+    return Object.freeze({ ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason, fault: null });
   }
 
   diagnostics() {
