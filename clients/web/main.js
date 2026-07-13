@@ -45,6 +45,7 @@ import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-di
 import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
+import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -112,6 +113,20 @@ const videoIdentity = new VideoIdentityTracker();
 // Bounded history of accepted aircraft snapshots, fed from the telemetry path,
 // against which an accepted video frame's capture time is associated (ADR-0020).
 const snapshotHistory = new SnapshotAssociator();
+
+// The published, hash-verified camera calibrations that feed the conformal
+// gate's recognized set (ADR-0021). Starts empty and fail-closed; the async
+// load replaces it once the artifact is fetched and verified, and a fetch or
+// verification failure simply leaves it empty (no recognized calibration).
+const CALIBRATION_ARTIFACT_URL = "./sim-fpv-calibration.json";
+let calibrationRegistry = new CalibrationRegistry();
+loadCalibrationRegistry(CALIBRATION_ARTIFACT_URL)
+  .then((registry) => {
+    calibrationRegistry = registry;
+  })
+  .catch(() => {
+    // Fail closed: keep the empty registry, conformal output stays off.
+  });
 
 // Ingestion accepts only source advancement for the selected vehicle. Drawing
 // remains on requestAnimationFrame, decoupled from telemetry publication.
@@ -514,11 +529,13 @@ async function renderVideoFrame(body, token) {
 // blitted, so a replayed frame cannot displace a newer one or refresh its age.
 // Association runs ONLY on a frame the tracker accepted (via
 // `associateIfAccepted`), so a replay can never associate fresh. It finds the
-// aircraft snapshot corresponding to the frame's CAPTURE time; the verdict is a
-// diagnostic surface only, since no conformal overlay is drawn yet. Live, the
-// simulator publishes no recognized calibration and its adapters never pair an
-// available video mapping with an in-domain avionics snapshot, so the verdict
-// stays not-ready — honestly.
+// aircraft snapshot corresponding to the frame's CAPTURE time and passes the
+// recognized calibrations for the frame's camera (from the hash-verified
+// artifact, ADR-0021) to the gate. The verdict is a diagnostic surface only;
+// no conformal overlay is drawn. Live, the FPV calibration now resolves, but
+// the verdict still stays not-ready because the Gazebo rover publishes planar
+// pose rather than an avionics snapshot to associate against, and Aviate's
+// video clock mapping is unavailable — honestly.
 async function renderVideoFrameV2(body, token) {
   if (!transportSessions.isActive(token)) return;
   const parsed = parseVideoFrameV2(body);
@@ -530,7 +547,13 @@ async function renderVideoFrameV2(body, token) {
   const { meta, fourcc, payload } = parsed;
   const target = videoTargetFor(meta.sourceId, fourcc);
   if (!target) return;
-  const { admit, association } = associateIfAccepted(videoIdentity, snapshotHistory, meta);
+  // The calibration effective-window check is genuine wall-clock (a calibration
+  // is valid for a real-time period), unlike the capture-time association.
+  const nowUnixNs = BigInt(Date.now()) * 1_000_000n;
+  const recognizedCalibrations = calibrationRegistry.recognizedFor(meta.cameraId, nowUnixNs);
+  const { admit, association } = associateIfAccepted(videoIdentity, snapshotHistory, meta, {
+    recognizedCalibrations,
+  });
   if (!admit.accepted) {
     state.droppedIdentityFrames += 1;
     log(
