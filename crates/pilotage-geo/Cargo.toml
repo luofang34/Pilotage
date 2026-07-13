@@ -10,5 +10,9 @@ workspace = true
 [dependencies]
 pilotage-frames = { workspace = true }
 pilotage-calibration-id = { workspace = true }
+# HUD-03 (#38): the conformal projector consumes the unforgeable VerifiedCameraModel
+# minted only by CAL-01's verified path. Acyclic: camera-calibration does not
+# depend on geo. Both stay no_std.
+pilotage-camera-calibration = { workspace = true }
 libm = { workspace = true }
 thiserror = { workspace = true }

@@ -42,6 +42,7 @@ extern crate std;
 
 mod abi;
 mod availability;
+mod conformal;
 mod datum;
 mod error;
 mod identity;
@@ -54,6 +55,12 @@ pub use abi::{
 pub use availability::{
     AvailabilityProfile, AvailabilityProfileId, AvailabilityReason, ExternalHealth, InputHealth,
     SIMULATOR_PROFILE_ID, SvsAvailability, SvsInputs, derive_inputs, health_from_integrity,
+};
+pub use conformal::{
+    AlignmentErrorBound, Bracket, CaptureContext, ConformalCues, ConformalError, ConformalFix,
+    ConformalPolicy, ConformalPolicyId, ConformalReason, ConformalState, FixIdentity, HorizonLine,
+    KinematicSample, MAX_PATH_CUES, SIMULATOR_CONFORMAL_POLICY_ID, ScreenMark, ViewGeometry,
+    assess_conformal, down_in_camera, project_flight_path, project_horizon, project_path_cue,
 };
 pub use datum::{
     BaroSettingId, DatumRealizationId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum,
