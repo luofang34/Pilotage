@@ -323,6 +323,91 @@ check(
   check("tracker-rejected frame does not associate", stale.association.reason === ASSOCIATION.NOT_ADMITTED);
 }
 
+
+// ---- GEO-68: hostile wire-range meta is refused as malformed ----------------
+
+{
+  const hostile = [
+    ["negative sourceId (u8)", { sourceId: -1 }],
+    ["overflowing sourceId (u8)", { sourceId: 256 }],
+    ["bigint sourceId (u8 must be Number)", { sourceId: 0n }],
+    ["overflowing sourceEpoch", { sourceEpoch: 0x1_0000_0000 }],
+    ["fractional sequence", { sequence: 2.5 }],
+    ["Number captureTimeNanos (u64 must be BigInt)", { captureTimeNanos: 1000 }],
+    ["overflowing captureTimeNanos", { captureTimeNanos: (1n << 64n) }],
+    ["negative cameraId", { cameraId: -1 }],
+    ["overflowing calibrationId", { calibrationId: 0x1_0000_0000 }],
+    ["bigint calibrationId (u32 must be Number)", { calibrationId: 7n }],
+    ["malformed incarnation", { sourceIncarnation: "nope" }],
+  ];
+  for (const [name, override] of hostile) {
+    const t = new VideoIdentityTracker();
+    const verdict = t.admit(meta(override));
+    check(
+      `hostile meta refused as malformed: ${name}`,
+      verdict.accepted === false && verdict.reason === ADMIT.MALFORMED,
+    );
+  }
+}
+
+// ---- GEO-68: admit() surfaces the typed { field, rule } reason --------------
+// The rejection is not merely "malformed": the verdict and the tracker's
+// diagnostics both name which wire field failed and why, across the identity
+// tuple, the signed mapping offset, and the u64 error/receive/publication times.
+{
+  const cases = [
+    [{ sourceId: 256 }, "sourceId", "out-of-range"],
+    [{ calibrationId: 7n }, "calibrationId", "wrong-numeric-kind"],
+    [{ captureTimeNanos: 1000 }, "captureTimeNanos", "wrong-numeric-kind"],
+    [{ clockErrorBoundNanos: -1n }, "clockErrorBoundNanos", "negative"],
+    [{ mappingOffsetNanos: 1n << 63n }, "mappingOffsetNanos", "out-of-range"],
+    [{ receiveTimeNanos: 5 }, "receiveTimeNanos", "wrong-numeric-kind"],
+    [{ sourceIncarnation: "nope" }, "sourceIncarnation", "malformed"],
+  ];
+  for (const [override, field, rule] of cases) {
+    const t = new VideoIdentityTracker();
+    const verdict = t.admit(meta(override));
+    check(
+      `admit reports the typed fault ${field}/${rule}`,
+      verdict.accepted === false &&
+        verdict.fault !== null &&
+        verdict.fault.field === field &&
+        verdict.fault.rule === rule,
+    );
+    check(
+      `diagnostics exposes the last malformed reason ${field}/${rule}`,
+      t.diagnostics().lastMalformedReason !== null &&
+        t.diagnostics().lastMalformedReason.field === field &&
+        t.diagnostics().lastMalformedReason.rule === rule,
+    );
+  }
+}
+
+// ---- GEO-68: a malformed meta identity can never be conformal-ready ---------
+
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_SIMULATION, sourceId: 256, calibrationId: 7 }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check(
+    "a malformed meta (u8 sourceId=256) is refused by the gate, never ready, with a typed reason",
+    g.conformalReady === false && g.reason === "malformed-meta:sourceId:out-of-range",
+  );
+}
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_SIMULATION, calibrationId: 7n }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check(
+    "a bigint calibrationId (u32 must be Number) is refused by the gate with a typed reason",
+    g.conformalReady === false && g.reason === "malformed-meta:calibrationId:wrong-numeric-kind",
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

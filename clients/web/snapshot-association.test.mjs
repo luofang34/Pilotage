@@ -58,6 +58,8 @@ function frameMeta(overrides = {}) {
     mappingTargetClock: CLOCK_VEHICLE_BOOT,
     mappingOffsetNanos: 0n,
     clockErrorBoundNanos: 0n,
+    receiveTimeNanos: 0n,
+    publicationTimeNanos: 0n,
     ...overrides,
   };
 }
@@ -264,6 +266,90 @@ function frameMeta(overrides = {}) {
 }
 
 check("default history capacity is documented and positive", Number.isInteger(DEFAULT_HISTORY_CAPACITY) && DEFAULT_HISTORY_CAPACITY > 0);
+
+
+// ---- GEO-68: hostile wire-range identities are refused, never observed ------
+
+{
+  const hostile = [
+    ["negative sourceEpoch", { sourceEpoch: -1 }],
+    ["overflowing sourceEpoch", { sourceEpoch: 0x1_0000_0000 }],
+    ["fractional sequence", { sequence: 1.5 }],
+    ["Number sourceId (u64 must be BigInt)", { sourceId: 10 }],
+    ["negative sourceId bigint", { sourceId: -1n }],
+    ["overflowing sourceId bigint", { sourceId: (1n << 64n) }],
+    ["negative acquiredAtNanos", { acquiredAtNanos: -1n }],
+    ["overflowing acquiredAtNanos", { acquiredAtNanos: (1n << 64n) }],
+    ["Number acquiredAtNanos", { acquiredAtNanos: 1000 }],
+    ["malformed incarnation", { sourceIncarnation: "xyz" }],
+  ];
+  for (const [name, override] of hostile) {
+    const a = new SnapshotAssociator();
+    a.observe(snapId(override));
+    const d = a.diagnostics();
+    check(`hostile identity refused, never observed: ${name}`, d.invalid === 1 && d.size === 0);
+  }
+  // The nominal identity is still accepted.
+  const ok = new SnapshotAssociator();
+  ok.observe(snapId());
+  check("a well-formed identity is observed", ok.diagnostics().size === 1);
+}
+
+// ---- GEO-68: the refusal records a typed { field, rule } reason -------------
+
+function assertReason(reason, field, rule) {
+  check(
+    `typed reason names the field and rule: ${field}/${rule}`,
+    reason !== null && reason.field === field && reason.rule === rule,
+  );
+}
+
+{
+  const a = new SnapshotAssociator();
+  a.observe(snapId({ sourceEpoch: 0x1_0000_0000 }));
+  assertReason(a.diagnostics().lastInvalidReason, "sourceEpoch", "out-of-range");
+  a.observe(snapId({ sourceId: 10 }));
+  assertReason(a.diagnostics().lastInvalidReason, "sourceId", "wrong-numeric-kind");
+  a.observe(snapId({ sourceIncarnation: "xyz" }));
+  assertReason(a.diagnostics().lastInvalidReason, "sourceIncarnation", "malformed");
+}
+
+// ---- GEO-68: associate() fails closed on a hostile meta and never throws ----
+// The associator maps, sums, and compares BigInt times. A wire field of the
+// wrong numeric kind reaching that arithmetic throws a TypeError ("Cannot mix
+// BigInt and other types") instead of failing closed — the exact defect this
+// guards. Each hostile frame, set up so it would otherwise reach the
+// `clockErrorBoundNanos + bestDelta` sum, must yield a closed MALFORMED_META
+// verdict carrying a typed fault, and must never throw.
+{
+  const hostileMeta = [
+    ["Number clockErrorBoundNanos", { clockErrorBoundNanos: 100 }],
+    ["Number captureTimeNanos", { captureTimeNanos: 1000 }],
+    ["Number mappingOffsetNanos", { mappingOffsetNanos: 0 }],
+    ["negative clockErrorBoundNanos", { clockErrorBoundNanos: -1n }],
+    ["over-u64 clockErrorBoundNanos", { clockErrorBoundNanos: 1n << 64n }],
+    ["over-i64 mappingOffsetNanos", { mappingOffsetNanos: 1n << 63n }],
+    ["over-u8 sourceId", { sourceId: 256 }],
+    ["bigint sourceId (u8 must be Number)", { sourceId: 0n }],
+  ];
+  for (const [name, override] of hostileMeta) {
+    const a = new SnapshotAssociator();
+    a.observe(snapId({ sequence: 1, acquiredAtNanos: 1000n }));
+    let verdict = null;
+    let threw = null;
+    try {
+      verdict = a.associate(frameMeta({ captureTimeNanos: 1000n, ...override }), RECOGNIZED);
+    } catch (e) {
+      threw = e;
+    }
+    check(`associate never throws on ${name}`, threw === null);
+    check(
+      `associate fails closed on ${name}`,
+      verdict !== null && verdict.ready === false && verdict.reason === ASSOCIATION.MALFORMED_META,
+    );
+    check(`associate reports a typed fault on ${name}`, verdict !== null && verdict.fault !== null);
+  }
+}
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

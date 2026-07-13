@@ -23,11 +23,11 @@
 // match, published/recognized calibration, overflow-safe mapped time, error
 // budget) can never be bypassed.
 
-import { conformalGate, mapCaptureTime, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
+import { conformalGate, mapCaptureTime, metaFault, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
+import { firstFault } from "./wire-bounds.js";
 
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
-const INCARNATION_HEX = /^[0-9a-f]{32}$/;
 
 // History ring size. The mapped capture time of a displayed frame is at most a
 // glass-to-glass latency old (transport + host queue + decode, well under a
@@ -47,21 +47,29 @@ export const ASSOCIATION = Object.freeze({
   STREAM_DISCONTINUITY: "stream-discontinuity",
   TOTAL_ERROR_EXCEEDS_BUDGET: "total-error-exceeds-budget",
   NOT_ADMITTED: "not-admitted",
+  MALFORMED_META: "malformed-meta",
 });
 
-function isSnapshotIdentityValid(id) {
-  return (
-    id !== null &&
-    typeof id === "object" &&
-    (typeof id.sourceId === "bigint" || Number.isInteger(id.sourceId)) &&
-    typeof id.sourceIncarnation === "string" &&
-    INCARNATION_HEX.test(id.sourceIncarnation) &&
-    Number.isInteger(id.sourceEpoch) &&
-    Number.isInteger(id.sequence) &&
-    typeof id.acquiredAtNanos === "bigint" &&
-    id.acquiredAtNanos >= 0n &&
-    (id.clock === CLOCK_VEHICLE_BOOT || id.clock === CLOCK_SIMULATION)
-  );
+// The first field of an AV-01 snapshot identity to violate its exact wire type
+// and range, as a typed `{ field, rule }` reason, or `null` when it is valid:
+// source id is a u64 (a BigInt, never a truncating Number), epoch and sequence
+// are u32, and the acquisition time is a u64. Out-of-range, negative,
+// fractional, or wrong-numeric-kind values are refused fail-closed, never
+// clamped.
+function snapshotIdentityFault(id) {
+  if (id === null || typeof id !== "object") return { field: "identity", rule: "malformed" };
+  const fault = firstFault([
+    ["sourceId", "u64", id.sourceId],
+    ["sourceIncarnation", "incarnation", id.sourceIncarnation],
+    ["sourceEpoch", "u32", id.sourceEpoch],
+    ["sequence", "u32", id.sequence],
+    ["acquiredAtNanos", "u64", id.acquiredAtNanos],
+  ]);
+  if (fault) return fault;
+  if (id.clock !== CLOCK_VEHICLE_BOOT && id.clock !== CLOCK_SIMULATION) {
+    return { field: "clock", rule: "malformed" };
+  }
+  return null;
 }
 
 function identityOf(id) {
@@ -111,13 +119,14 @@ function absDiff(a, b) {
   return a >= b ? a - b : b - a;
 }
 
-function closed(reason) {
+function closed(reason, fault = null) {
   return Object.freeze({
     ready: false,
     snapshotIdentity: null,
     mappedCaptureNanos: null,
     totalErrorNanos: null,
     reason,
+    fault,
   });
 }
 
@@ -135,6 +144,7 @@ export class SnapshotAssociator {
     this.entries = [];
     this.currentStream = null;
     this.counters = { observed: 0, deduped: 0, dropped: 0, invalid: 0 };
+    this.lastInvalidReason = null;
   }
 
   /** Records one accepted snapshot identity, oldest-first, and adopts its
@@ -142,8 +152,10 @@ export class SnapshotAssociator {
    *  re-reads the accepted snapshot each telemetry frame); overflow drops the
    *  oldest entry and is counted. */
   observe(identity) {
-    if (!isSnapshotIdentityValid(identity)) {
+    const fault = snapshotIdentityFault(identity);
+    if (fault !== null) {
       this.bump("invalid");
+      this.lastInvalidReason = fault;
       return false;
     }
     const entry = identityOf(identity);
@@ -179,7 +191,14 @@ export class SnapshotAssociator {
    */
   associate(meta, options = {}) {
     const budget = options.maxClockErrorNanos ?? DEFAULT_MAX_CLOCK_ERROR_NANOS;
-    if (!meta || meta.mappingAvailable !== true) return closed(ASSOCIATION.MAPPING_UNAVAILABLE);
+    // Validate every wire field this path maps, sums, or compares BEFORE any
+    // BigInt arithmetic. A field of the wrong numeric kind (e.g. a Number
+    // clockErrorBoundNanos later added to a BigInt delta) would otherwise throw
+    // a TypeError mid-association instead of failing closed. Never throw; always
+    // return a closed verdict carrying the typed reason.
+    const fault = metaFault(meta);
+    if (fault !== null) return closed(ASSOCIATION.MALFORMED_META, fault);
+    if (meta.mappingAvailable !== true) return closed(ASSOCIATION.MAPPING_UNAVAILABLE);
     const mapped = mapCaptureTime(meta.captureTimeNanos, meta.mappingOffsetNanos);
     if (mapped === null) return closed(ASSOCIATION.MAPPED_TIME_OVERFLOW);
     if (this.entries.length === 0) return closed(ASSOCIATION.EMPTY_HISTORY);
@@ -219,11 +238,11 @@ export class SnapshotAssociator {
   }
 
   verdict(ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason) {
-    return Object.freeze({ ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason });
+    return Object.freeze({ ready, snapshotIdentity, mappedCaptureNanos, totalErrorNanos, reason, fault: null });
   }
 
   diagnostics() {
-    return Object.freeze({ ...this.counters, size: this.entries.length });
+    return Object.freeze({ ...this.counters, size: this.entries.length, lastInvalidReason: this.lastInvalidReason });
   }
 
   bump(name, amount = 1) {

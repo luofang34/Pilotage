@@ -138,6 +138,9 @@ jobs:
       - name: browser turn-derivation tests (DYN-01)
         run: node clients/web/turn-derivation.test.mjs
 
+      - name: browser wire-range identity bounds (GEO-68)
+        run: node clients/web/wire-bounds.test.mjs
+
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
         uses: bufbuild/buf-action@v1

@@ -9,10 +9,10 @@
 // than reimplemented, so both paths share one definition of "newer".
 
 import { serialIsNewer } from "./telemetry-ingress.js";
+import { RULE, firstFault, isIncarnation, isU32 } from "./wire-bounds.js";
 
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
-const INCARNATION_HEX = /^[0-9a-f]{32}$/;
 const U64_MAX = (1n << 64n) - 1n;
 
 // Maximum clock-mapping error a conformal overlay tolerates. A bounded mapping
@@ -77,7 +77,15 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
       mappedCaptureTimeNanos: null,
       reason,
     });
-  if (!meta || meta.mappingAvailable !== true) return closed("mapping-unavailable");
+  // The gate is the final authority: any malformed wire field (out-of-range,
+  // wrong numeric kind) can never produce a ready verdict, even when the mapping
+  // and calibration are otherwise valid. Validate before reading mappingAvailable
+  // or any mapped/BigInt field, so a wrong-numeric-kind value fails closed with a
+  // typed reason rather than throwing. This also closes the direct associate()
+  // path, which does not run admit()'s validator.
+  const fault = metaFault(meta);
+  if (fault !== null) return closed(`malformed-meta:${fault.field}:${fault.rule}`);
+  if (meta.mappingAvailable !== true) return closed("mapping-unavailable");
   if (!snapshotIdentity || snapshotIdentity.clock !== meta.mappingTargetClock) {
     return closed("clock-mismatch");
   }
@@ -91,7 +99,7 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
   // budget, and maps without overflow. Conformal readiness additionally demands
   // a published, recognized calibration.
   const calibrationReady =
-    Number.isInteger(meta.calibrationId) &&
+    isU32(meta.calibrationId) &&
     meta.calibrationId !== 0 &&
     recognized.has(meta.calibrationId);
   return Object.freeze({
@@ -103,32 +111,46 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
   });
 }
 
-function isMetaValid(meta) {
-  return (
-    meta !== null &&
-    typeof meta === "object" &&
-    Number.isInteger(meta.sourceId) &&
-    typeof meta.sourceIncarnation === "string" &&
-    INCARNATION_HEX.test(meta.sourceIncarnation) &&
-    Number.isInteger(meta.sourceEpoch) &&
-    meta.sourceEpoch >= 0 &&
-    meta.sourceEpoch <= 0xffff_ffff &&
-    Number.isInteger(meta.sequence) &&
-    meta.sequence >= 0 &&
-    meta.sequence <= 0xffff_ffff &&
-    typeof meta.captureTimeNanos === "bigint" &&
-    meta.captureTimeNanos >= 0n &&
-    Number.isInteger(meta.cameraId) &&
-    Number.isInteger(meta.calibrationId) &&
-    (meta.captureClock === CLOCK_VEHICLE_BOOT || meta.captureClock === CLOCK_SIMULATION)
-  );
+const KNOWN_CLOCKS = new Set([CLOCK_VEHICLE_BOOT, CLOCK_SIMULATION]);
+
+/**
+ * The first frame-metadata field to violate its exact wire type and range, as a
+ * typed `{ field, rule }` reason, or `null` when every field is valid. Covers
+ * EVERY wire field the video path reads, stores, or maps — not only the identity
+ * tuple but the clock-mapping offset (a signed i64) and the error-bound, receive,
+ * and publication times (u64). Callers must run this before any BigInt
+ * arithmetic on those fields, so a wrong-numeric-kind value fails closed with a
+ * reason instead of throwing a `TypeError` when mixed with a BigInt. Negative,
+ * fractional, over-range, or wrong-numeric-kind values are refused, never
+ * clamped.
+ */
+export function metaFault(meta) {
+  if (meta === null || typeof meta !== "object") return { field: "meta", rule: RULE.MALFORMED };
+  const fault = firstFault([
+    ["sourceId", "u8", meta.sourceId],
+    ["sourceEpoch", "u32", meta.sourceEpoch],
+    ["sequence", "u32", meta.sequence],
+    ["cameraId", "u32", meta.cameraId],
+    ["calibrationId", "u32", meta.calibrationId],
+    ["captureTimeNanos", "u64", meta.captureTimeNanos],
+    ["mappingOffsetNanos", "i64", meta.mappingOffsetNanos],
+    ["clockErrorBoundNanos", "u64", meta.clockErrorBoundNanos],
+    ["receiveTimeNanos", "u64", meta.receiveTimeNanos],
+    ["publicationTimeNanos", "u64", meta.publicationTimeNanos],
+  ]);
+  if (fault !== null) return fault;
+  if (!isIncarnation(meta.sourceIncarnation)) return { field: "sourceIncarnation", rule: RULE.MALFORMED };
+  if (!KNOWN_CLOCKS.has(meta.captureClock)) return { field: "captureClock", rule: RULE.MALFORMED };
+  if (!KNOWN_CLOCKS.has(meta.mappingTargetClock)) return { field: "mappingTargetClock", rule: RULE.MALFORMED };
+  return null;
 }
 
-function result(reason, discontinuity) {
+function result(reason, discontinuity, fault = null) {
   return Object.freeze({
     accepted: reason === ADMIT.ACCEPTED,
     reason,
     discontinuity,
+    fault,
   });
 }
 
@@ -152,12 +174,18 @@ export class VideoIdentityTracker {
       incarnationResets: 0,
       calibrationResets: 0,
     };
+    // The `{ field, rule }` of the most recent malformed frame, so diagnostics
+    // can report which wire field failed and why — not merely that a frame was
+    // malformed.
+    this.lastMalformedReason = null;
   }
 
   admit(meta) {
-    if (!isMetaValid(meta)) {
+    const fault = metaFault(meta);
+    if (fault !== null) {
       this.bump("malformed");
-      return result(ADMIT.MALFORMED, false);
+      this.lastMalformedReason = fault;
+      return result(ADMIT.MALFORMED, false, fault);
     }
     const state = this.sources.get(meta.sourceId);
     if (!state) {
@@ -245,7 +273,7 @@ export class VideoIdentityTracker {
   }
 
   diagnostics() {
-    return Object.freeze({ ...this.counters });
+    return Object.freeze({ ...this.counters, lastMalformedReason: this.lastMalformedReason });
   }
 
   bump(name, amount = 1) {
