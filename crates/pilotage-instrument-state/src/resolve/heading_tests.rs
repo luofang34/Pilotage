@@ -288,3 +288,116 @@ fn every_displayed_angle_agrees_on_the_rose_reference() {
         );
     }
 }
+
+// ---- NAV-02 (#65): one freshness policy for every converted quantity ----
+
+/// The magnetic-rose fixture with every group freshly stamped (5 ms) so
+/// a strict policy isolates the VARIATION threshold: no other group's
+/// age can trip first and mask the quantity under test.
+fn magnetic_everything_fresh() -> AircraftState {
+    let mut state = with_variation(
+        with_course(
+            with_bug(
+                with_heading(HeadingReference::Magnetic, 1.0),
+                90.0,
+                HeadingReference::True,
+            ),
+            180.0,
+            HeadingReference::True,
+        ),
+        2.0,
+    );
+    if let Some(kin) = state.kinematics.data.as_mut() {
+        kin.vel_ned_mps = [0.0, 20.0, 0.0];
+    }
+    state.attitude.age_ms = Some(5.0);
+    state.kinematics.age_ms = Some(5.0);
+    state.air.age_ms = Some(5.0);
+    state.nav.age_ms = Some(5.0);
+    state.heading.age_ms = Some(5.0);
+    state.wind = Stamped {
+        data: Some(crate::aircraft::Wind {
+            from_rad: 0.5,
+            speed_mps: 4.0,
+        }),
+        age_ms: Some(5.0),
+    };
+    state
+}
+
+fn converted_statuses(p: &crate::resolve::PanelData) -> [(&'static str, SignalStatus); 4] {
+    [
+        ("track", p.track_rad.status),
+        ("bug", p.heading_bug_rose_rad.status),
+        ("course", p.nav.course_rose_rad.status),
+        ("wind", p.wind.status),
+    ]
+}
+
+#[test]
+fn conversion_freshness_follows_the_resolver_policy_not_the_default() {
+    let mut state = magnetic_everything_fresh();
+    state.variation.age_ms = Some(50.0);
+    // Default policy: a 50 ms variation is fresh — everything converts.
+    let p = resolve(&state, &FreshnessPolicy::default());
+    for (name, status) in converted_statuses(&p) {
+        assert_eq!(status, SignalStatus::Valid, "{name}");
+    }
+    // Strict policy: the SAME variation is failed — every quantity
+    // needing magnetic/true conversion fails with it. A conversion path
+    // still judging by the default thresholds would keep painting here.
+    let strict = FreshnessPolicy::new(10.0, 40.0).expect("valid policy");
+    let p = resolve(&state, &strict);
+    for (name, status) in converted_statuses(&p) {
+        assert_eq!(status, SignalStatus::Failed, "{name}");
+    }
+    assert_eq!(
+        p.heading.value_rad.status,
+        SignalStatus::Valid,
+        "the 5 ms heading sample is fresh under the same strict policy"
+    );
+}
+
+#[test]
+fn heading_and_converted_quantities_share_one_freshness_verdict() {
+    // Under a policy strict enough to fail the 5 ms heading sample,
+    // the heading and every converted quantity fail together — one
+    // policy judges them all, never configuration for one and default
+    // for the others.
+    let state = magnetic_everything_fresh();
+    let p = resolve(&state, &FreshnessPolicy::default());
+    assert_eq!(p.heading.value_rad.status, SignalStatus::Valid);
+    let harsher = FreshnessPolicy::new(1.0, 4.0).expect("valid policy");
+    let p = resolve(&state, &harsher);
+    assert_eq!(p.heading.value_rad.status, SignalStatus::Failed);
+    for (name, status) in converted_statuses(&p) {
+        assert_eq!(status, SignalStatus::Failed, "{name}");
+    }
+}
+
+#[test]
+fn variation_astride_the_threshold_fails_every_converted_quantity_together() {
+    let policy = FreshnessPolicy::new(10.0, 40.0).expect("valid policy");
+    let mut state = magnetic_everything_fresh();
+
+    // One millisecond inside the fail threshold: stale variation still
+    // shows, so every quantity converts.
+    state.variation.age_ms = Some(39.0);
+    let p = resolve(&state, &policy);
+    for (name, status) in converted_statuses(&p) {
+        assert!(status.shows_value(), "{name}: {status:?}");
+    }
+
+    // One millisecond past it: every converted quantity fails at once —
+    // partial continued display across the same threshold is forbidden.
+    state.variation.age_ms = Some(41.0);
+    let p = resolve(&state, &policy);
+    for (name, status) in converted_statuses(&p) {
+        assert_eq!(status, SignalStatus::Failed, "{name}");
+    }
+    assert_eq!(
+        p.heading.value_rad.status,
+        SignalStatus::Valid,
+        "only conversion-dependent quantities follow the variation"
+    );
+}

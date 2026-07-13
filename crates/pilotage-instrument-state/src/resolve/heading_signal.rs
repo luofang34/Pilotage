@@ -67,17 +67,21 @@ fn usable_variation(
 /// rose (display) reference through the single conversion path. An
 /// unknown reference on either side, or a magnetic/true crossing with
 /// no usable variation, fails this one quantity — it is never drawn
-/// raw on a rose it does not match.
+/// raw on a rose it does not match. Variation freshness is judged by
+/// the RESOLVER'S policy — the same one that judges the heading sample
+/// — so every quantity on the rose agrees on whether the variation is
+/// usable (NAV-02).
 pub(super) fn presented_angle(
     sig: Sig<f32>,
     own: HeadingReference,
     display: HeadingReference,
     state: &AircraftState,
+    policy: &FreshnessPolicy,
 ) -> Sig<f32> {
     if !sig.status.shows_value() {
         return sig;
     }
-    let variation = usable_variation(state, &FreshnessPolicy::default());
+    let variation = usable_variation(state, policy);
     match convert_heading(sig.value, own, display, variation.as_ref()) {
         Ok(value) => Sig::with_status(value, sig.status),
         Err(_) => Sig::with_status(0.0, SignalStatus::Failed),
@@ -91,17 +95,19 @@ pub(super) fn presented_true(
     sig: Sig<f32>,
     display: HeadingReference,
     state: &AircraftState,
+    policy: &FreshnessPolicy,
 ) -> Sig<f32> {
     if !sig.status.shows_value() || display == HeadingReference::Unknown {
         return sig;
     }
-    presented_angle(sig, HeadingReference::True, display, state)
+    presented_angle(sig, HeadingReference::True, display, state, policy)
 }
 
 pub(super) fn presented_wind(
     wind: Sig<Wind>,
     display: HeadingReference,
     state: &AircraftState,
+    policy: &FreshnessPolicy,
 ) -> Sig<Wind> {
     if !wind.status.shows_value() || display == HeadingReference::Unknown {
         return wind;
@@ -110,6 +116,7 @@ pub(super) fn presented_wind(
         Sig::with_status(wind.value.from_rad, wind.status),
         display,
         state,
+        policy,
     );
     if converted.status.shows_value() {
         Sig::with_status(
