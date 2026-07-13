@@ -4,23 +4,45 @@
 
 use pilotage_geo::AvailabilityReason;
 
-use super::PackageStore;
+use super::{ActivePackage, PackageStore};
 use crate::error::DbUnavailable;
 use crate::fixtures;
-use crate::identity::{DatasetId, PackageVersion};
+use crate::identity::{DatasetId, DayNumber, PackageVersion};
+use crate::tile::CandidatePackage;
 use crate::verify::{UsePolicy, verify_package};
 
-fn v1() -> crate::tile::CandidatePackage {
+/// Uniform tile-payload tag for version 1, so v1 and v2 content is disjoint.
+const TAG_V1: u8 = 0x11;
+/// Uniform tile-payload tag for version 2.
+const TAG_V2: u8 = 0x22;
+
+fn v1() -> CandidatePackage {
     fixtures::candidate_with(DatasetId(1), PackageVersion::new(1, 0, 0), true)
 }
 
-fn v2() -> crate::tile::CandidatePackage {
+fn v2() -> CandidatePackage {
     fixtures::candidate_with(DatasetId(1), PackageVersion::new(2, 0, 0), true)
 }
 
-fn tampered(mut candidate: crate::tile::CandidatePackage) -> crate::tile::CandidatePackage {
+fn v1_tagged() -> CandidatePackage {
+    fixtures::candidate_tagged(DatasetId(1), PackageVersion::new(1, 0, 0), TAG_V1)
+}
+
+fn v2_tagged() -> CandidatePackage {
+    fixtures::candidate_tagged(DatasetId(1), PackageVersion::new(2, 0, 0), TAG_V2)
+}
+
+fn tampered(mut candidate: CandidatePackage) -> CandidatePackage {
     candidate.tiles[0].bytes[0] ^= 0x01;
     candidate
+}
+
+fn all_tiles_have_tag(active: &ActivePackage, tag: u8) -> bool {
+    !active.tiles().is_empty()
+        && active
+            .tiles()
+            .iter()
+            .all(|t| t.bytes.iter().all(|&b| b == tag))
 }
 
 /// Acceptance: an interrupted update yields the complete prior package or no
@@ -121,7 +143,7 @@ fn a_position_inside_coverage_returns_the_active_id() {
         )
         .expect("v1 activates");
     let inside = fixtures::position(40.5, -74.5);
-    assert_eq!(store.availability_for_position(&inside), Ok(id));
+    assert_eq!(store.availability(fixtures::NOW, &inside), Ok(id));
 }
 
 #[test]
@@ -137,7 +159,7 @@ fn a_position_outside_coverage_is_a_coverage_exit() {
         .expect("v1 activates");
     let outside = fixtures::position(0.0, 0.0);
     let reason = store
-        .availability_for_position(&outside)
+        .availability(fixtures::NOW, &outside)
         .expect_err("outside coverage");
     assert_eq!(reason, DbUnavailable::Coverage);
     assert_eq!(
@@ -150,12 +172,107 @@ fn a_position_outside_coverage_is_a_coverage_exit() {
 fn no_active_package_is_a_database_fault() {
     let store = PackageStore::new();
     let reason = store
-        .availability_for_position(&fixtures::position(40.5, -74.5))
+        .availability(fixtures::NOW, &fixtures::position(40.5, -74.5))
         .expect_err("no package");
     assert_eq!(reason, DbUnavailable::NoPackage);
     assert_eq!(
         reason.to_availability_reason(),
         AvailabilityReason::Database
+    );
+}
+
+/// Acceptance (data level): a torn/interrupted update yields the complete prior
+/// tile content or the complete new tile content, never a mix. v1 and v2 carry
+/// disjoint tile payloads, so any residual bytes from the other version would be
+/// visible.
+#[test]
+fn interrupted_update_preserves_complete_content_never_a_mix() {
+    let trust = fixtures::trust_root();
+    let mut store = PackageStore::new();
+    store
+        .stage_and_activate(
+            &v1_tagged(),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("v1 activates");
+    assert!(all_tiles_have_tag(store.active().expect("active"), TAG_V1));
+
+    // A torn update (tampered v2) fails; the complete v1 content stays, with no
+    // v2 bytes bleeding in.
+    store
+        .stage_and_activate(
+            &tampered(v2_tagged()),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect_err("tampered v2 fails");
+    let active = store.active().expect("active");
+    assert!(all_tiles_have_tag(active, TAG_V1), "prior content intact");
+    assert!(
+        !active.tiles().iter().any(|t| t.bytes.contains(&TAG_V2)),
+        "no torn v2 content mixed in"
+    );
+
+    // A verified token held but not yet installed leaves the complete v1 content
+    // in place; the swap then installs the complete v2 content with no v1 bytes.
+    let token = verify_package(
+        &v2_tagged(),
+        &trust,
+        fixtures::NOW,
+        store.active_id(),
+        UsePolicy::SimulatorPermitted,
+    )
+    .expect("v2 verifies");
+    assert!(
+        all_tiles_have_tag(store.active().expect("active"), TAG_V1),
+        "still complete v1 before the swap"
+    );
+    store.activate(token);
+    let active = store.active().expect("active");
+    assert!(
+        all_tiles_have_tag(active, TAG_V2),
+        "complete v2 content after swap"
+    );
+    assert!(
+        !active.tiles().iter().any(|t| t.bytes.contains(&TAG_V1)),
+        "no residual v1 content"
+    );
+}
+
+/// Acceptance: currency is re-checked at use time. A package current at
+/// activation fails closed once the query time is outside its effectivity/expiry
+/// window, rather than being served indefinitely.
+#[test]
+fn currency_is_rechecked_at_use_time() {
+    let mut store = PackageStore::new();
+    let id = store
+        .stage_and_activate(
+            &v1(),
+            &fixtures::trust_root(),
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("v1 activates");
+    let inside = fixtures::position(40.5, -74.5);
+
+    assert_eq!(store.availability(fixtures::NOW, &inside), Ok(id));
+
+    let expired = store
+        .availability(DayNumber(250), &inside)
+        .expect_err("expired at use time");
+    assert_eq!(expired, DbUnavailable::Currency);
+    assert_eq!(
+        expired.to_availability_reason(),
+        AvailabilityReason::Database
+    );
+
+    assert_eq!(
+        store.availability(DayNumber(50), &inside),
+        Err(DbUnavailable::Currency),
+        "not yet effective also fails closed"
     );
 }
 

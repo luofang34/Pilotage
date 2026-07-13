@@ -58,6 +58,14 @@ impl UseRestrictions {
         self.0 & other.0 == other.0
     }
 
+    /// Whether these restrictions forbid operational use. Both
+    /// [`Self::NO_OPERATIONAL_USE`] and [`Self::TRAINING_ONLY`] confine a
+    /// package to non-operational use.
+    #[must_use]
+    pub const fn forbids_operational(self) -> bool {
+        self.contains(Self::NO_OPERATIONAL_USE) || self.contains(Self::TRAINING_ONLY)
+    }
+
     /// The raw bits, for the canonical serialization.
     #[must_use]
     pub const fn bits(self) -> u32 {

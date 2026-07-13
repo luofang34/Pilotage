@@ -27,12 +27,16 @@ pub enum UsePolicy {
     OperationalRequired,
 }
 
-/// A package that passed every verification check. The inner manifest is
-/// private and there is no public constructor, so a value of this type is proof
-/// that [`verify_package`] accepted the package it describes.
+/// A package that passed every verification check, carrying both the verified
+/// manifest and the verified tile content. The fields are private and there is
+/// no public constructor, so a value of this type is proof that
+/// [`verify_package`] accepted exactly the manifest **and** tiles it holds —
+/// activation installs the two together, so content can never mix across
+/// versions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedPackage {
     manifest: PackageManifest,
+    tiles: Vec<Tile>,
 }
 
 impl VerifiedPackage {
@@ -42,16 +46,23 @@ impl VerifiedPackage {
         &self.manifest
     }
 
+    /// The verified tile content.
+    #[must_use]
+    pub fn tiles(&self) -> &[Tile] {
+        &self.tiles
+    }
+
     /// The active-database id this package would install.
     #[must_use]
     pub fn active_id(&self) -> ActiveDbId {
         self.manifest.active_id()
     }
 
-    /// Consumes the token, yielding the verified manifest.
+    /// Consumes the token, yielding the verified manifest and tiles as one unit
+    /// so activation swaps them together.
     #[must_use]
-    pub(crate) fn into_manifest(self) -> PackageManifest {
-        self.manifest
+    pub(crate) fn into_parts(self) -> (PackageManifest, Vec<Tile>) {
+        (self.manifest, self.tiles)
     }
 }
 
@@ -76,10 +87,11 @@ pub fn verify_package(
     verify_tiles(candidate)?;
     let signed_bytes = manifest_canonical_bytes(manifest);
     verify_signature(trust, &manifest.signature, &signed_bytes)?;
-    check_use_policy(manifest.simulation_only, policy)?;
+    check_use_policy(manifest, policy)?;
     check_rollback(manifest, active)?;
     Ok(VerifiedPackage {
         manifest: manifest.clone(),
+        tiles: candidate.tiles.clone(),
     })
 }
 
@@ -144,10 +156,21 @@ fn tile_leaves_sorted(tiles: &[Tile]) -> Result<Vec<[u8; 32]>, DbError> {
     Ok(entries.into_iter().map(|(_, leaf)| leaf).collect())
 }
 
-/// Enforces the simulator-use policy.
-fn check_use_policy(simulation_only: bool, policy: UsePolicy) -> Result<(), DbError> {
-    if simulation_only && policy == UsePolicy::OperationalRequired {
+/// Enforces the use policy against every signed use marker: under an
+/// operational policy a `simulation_only` package is refused, and so is any
+/// package whose signed use restrictions forbid operational use. A simulator
+/// policy accepts both, still carrying the markers downstream.
+fn check_use_policy(manifest: &PackageManifest, policy: UsePolicy) -> Result<(), DbError> {
+    if policy != UsePolicy::OperationalRequired {
+        return Ok(());
+    }
+    if manifest.simulation_only {
         return Err(DbError::SimulationOnlyForbidden);
+    }
+    if manifest.provenance.restrictions.forbids_operational() {
+        return Err(DbError::OperationalUseRestricted {
+            restrictions: manifest.provenance.restrictions.bits(),
+        });
     }
     Ok(())
 }

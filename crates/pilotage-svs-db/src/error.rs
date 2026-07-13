@@ -115,6 +115,13 @@ pub enum DbError {
     /// use was required.
     #[error("package is simulation_only and cannot be accepted as operational")]
     SimulationOnlyForbidden,
+    /// The manifest's signed use restrictions forbid operational use, and
+    /// operational use was required.
+    #[error("signed use restrictions {restrictions:#x} forbid operational use")]
+    OperationalUseRestricted {
+        /// The restriction bits that forbade operational use.
+        restrictions: u32,
+    },
 }
 
 impl DbError {
@@ -135,6 +142,7 @@ impl DbError {
             | Self::UndeclaredGeoid => DbUnavailable::Datum,
             Self::RollbackBlocked { .. } => DbUnavailable::Rollback,
             Self::SimulationOnlyForbidden => DbUnavailable::SimulationOnly,
+            Self::OperationalUseRestricted { .. } => DbUnavailable::Restricted,
             Self::EmptyFeatureSet | Self::InvalidCoverage { .. } | Self::BadEffectivity => {
                 DbUnavailable::Malformed
             }
@@ -175,10 +183,15 @@ pub enum DbUnavailable {
     Rollback,
     /// The package is a simulator fixture and cannot be used operationally.
     SimulationOnly,
+    /// The manifest's signed use restrictions forbid the requested use.
+    Restricted,
     /// The manifest is structurally malformed (empty, degenerate, misordered).
     Malformed,
     /// The query position lies outside the package's covered region.
     Coverage,
+    /// An emitted output was stamped against a database that is no longer the
+    /// active one, so its provenance cannot be trusted.
+    ProvenanceMismatch,
 }
 
 impl DbUnavailable {

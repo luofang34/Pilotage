@@ -165,7 +165,7 @@ fn assert_coverage_exit_is_coverage_reason() {
         )
         .expect("valid package activates");
     let reason = store
-        .availability_for_position(&fixtures::position(0.0, 0.0))
+        .availability(fixtures::NOW, &fixtures::position(0.0, 0.0))
         .expect_err("position is outside coverage");
     assert_eq!(
         reason.to_availability_reason(),
@@ -201,11 +201,58 @@ fn simulation_only_never_accepted_as_operational() {
     .expect("simulator package is usable in the simulator");
     assert!(verified.active_id().simulation_only);
 
-    // A non-simulator package passes the operational policy.
-    let operational = fixtures::candidate_with(DatasetId(1), PackageVersion::new(1, 0, 0), false);
+    // A genuinely operational package (not simulation_only, no restrictions)
+    // passes the operational policy.
+    let operational = fixtures::operational_candidate();
     assert!(
         verify_package(
             &operational,
+            &trusted(),
+            fixtures::NOW,
+            None,
+            UsePolicy::OperationalRequired,
+        )
+        .is_ok()
+    );
+}
+
+/// Acceptance: the manifest's signed use restrictions are enforced. A package
+/// that is not `simulation_only` but carries `NO_OPERATIONAL_USE` is still
+/// refused for operational use; only a package with no operational restriction
+/// is accepted.
+#[test]
+fn signed_use_restrictions_refuse_operational_use() {
+    let restricted = fixtures::restricted_candidate();
+    assert!(!restricted.manifest.simulation_only);
+    assert_eq!(
+        verify_package(
+            &restricted,
+            &trusted(),
+            fixtures::NOW,
+            None,
+            UsePolicy::OperationalRequired,
+        ),
+        Err(DbError::OperationalUseRestricted {
+            restrictions: restricted.manifest.provenance.restrictions.bits(),
+        })
+    );
+
+    // Under the simulator policy the same restricted package is usable.
+    assert!(
+        verify_package(
+            &restricted,
+            &trusted(),
+            fixtures::NOW,
+            None,
+            UsePolicy::SimulatorPermitted,
+        )
+        .is_ok()
+    );
+
+    // A package with no operational restriction is accepted operationally.
+    assert!(
+        verify_package(
+            &fixtures::operational_candidate(),
             &trusted(),
             fixtures::NOW,
             None,

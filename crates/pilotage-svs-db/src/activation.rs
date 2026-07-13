@@ -19,16 +19,18 @@ use crate::error::{DbError, DbUnavailable};
 use crate::identity::ActiveDbId;
 use crate::identity::DayNumber;
 use crate::manifest::PackageManifest;
-use crate::tile::CandidatePackage;
+use crate::tile::{CandidatePackage, Tile};
 use crate::trust::TrustRoot;
 use crate::verify::{UsePolicy, VerifiedPackage, verify_package};
 
-/// The currently active, fully verified package. Minted only from a
-/// [`VerifiedPackage`] token, so an active package is always one that passed
-/// verification.
+/// The currently active, fully verified package: its manifest and its verified
+/// tiles as one unit. Minted only from a [`VerifiedPackage`] token, so an active
+/// package is always one that passed verification and whose tiles are exactly
+/// the verified ones — never a mix across versions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActivePackage {
     manifest: PackageManifest,
+    tiles: Vec<Tile>,
 }
 
 impl ActivePackage {
@@ -38,20 +40,41 @@ impl ActivePackage {
         &self.manifest
     }
 
+    /// The active tile content.
+    #[must_use]
+    pub fn tiles(&self) -> &[Tile] {
+        &self.tiles
+    }
+
     /// The active-database id, for output and diagnostics.
     #[must_use]
     pub fn id(&self) -> ActiveDbId {
         self.manifest.active_id()
     }
 
-    /// Whether the active package covers a position, mapping a coverage exit to
-    /// the typed reason a consumer surfaces.
+    /// Whether the package is within its effectivity/expiry window at `now`.
+    #[must_use]
+    pub fn is_current(&self, now: DayNumber) -> bool {
+        !self.manifest.effectivity.is_before_effective(now)
+            && !self.manifest.effectivity.is_after_expiry(now)
+    }
+
+    /// The availability of this package at a time and a position, failing closed
+    /// on a currency lapse (not yet effective, or expired) **before** any
+    /// coverage check, then on a coverage exit.
     ///
     /// # Errors
     ///
-    /// [`DbUnavailable::Coverage`] when the position lies outside the covered
-    /// region.
-    pub fn availability_for_position(&self, pos: &GeodeticPosition) -> Result<(), DbUnavailable> {
+    /// [`DbUnavailable::Currency`] when outside the effectivity/expiry window,
+    /// or [`DbUnavailable::Coverage`] when the position is outside coverage.
+    pub fn availability(
+        &self,
+        now: DayNumber,
+        pos: &GeodeticPosition,
+    ) -> Result<(), DbUnavailable> {
+        if !self.is_current(now) {
+            return Err(DbUnavailable::Currency);
+        }
         if self.manifest.coverage.region.contains(pos) {
             Ok(())
         } else {
@@ -96,12 +119,14 @@ impl PackageStore {
         }
     }
 
-    /// Installs an already-verified package, replacing any prior one with a
-    /// single assignment (the atomic swap). Returns the new active id.
+    /// Installs an already-verified package — its manifest and verified tiles
+    /// together — replacing any prior one with a single assignment (the atomic
+    /// swap). The manifest and tiles move as one unit, so a torn update can only
+    /// ever leave the complete prior package or the complete new one. Returns
+    /// the new active id.
     pub fn activate(&mut self, verified: VerifiedPackage) -> ActiveDbId {
-        let active = ActivePackage {
-            manifest: verified.into_manifest(),
-        };
+        let (manifest, tiles) = verified.into_parts();
+        let active = ActivePackage { manifest, tiles };
         let id = active.id();
         self.active = Some(active);
         id
@@ -126,21 +151,26 @@ impl PackageStore {
         Ok(self.activate(verified))
     }
 
-    /// The availability of the active database at a position: the active id on
-    /// success, or the typed reason a consumer maps onto
-    /// [`pilotage_geo::AvailabilityReason`] (no package, or a coverage exit).
+    /// The availability of the active database at the current day and a
+    /// position: the active id on success, or the typed reason a consumer maps
+    /// onto [`pilotage_geo::AvailabilityReason`]. Currency is re-checked here at
+    /// use time, so a package that was current at activation but has since
+    /// expired fails closed rather than being served indefinitely.
     ///
     /// # Errors
     ///
-    /// [`DbUnavailable::NoPackage`] when nothing is active, or
-    /// [`DbUnavailable::Coverage`] when the position is outside coverage.
-    pub fn availability_for_position(
+    /// [`DbUnavailable::NoPackage`] when nothing is active,
+    /// [`DbUnavailable::Currency`] when the active package is outside its
+    /// effectivity/expiry window, or [`DbUnavailable::Coverage`] when the
+    /// position is outside coverage.
+    pub fn availability(
         &self,
+        now: DayNumber,
         pos: &GeodeticPosition,
     ) -> Result<ActiveDbId, DbUnavailable> {
         match &self.active {
             None => Err(DbUnavailable::NoPackage),
-            Some(active) => active.availability_for_position(pos).map(|()| active.id()),
+            Some(active) => active.availability(now, pos).map(|()| active.id()),
         }
     }
 }

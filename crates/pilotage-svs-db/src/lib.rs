@@ -36,6 +36,7 @@ mod feature;
 mod identity;
 mod manifest;
 mod merkle;
+mod output;
 mod tile;
 mod trust;
 mod verify;
@@ -54,6 +55,7 @@ pub use manifest::{
     UseRestrictions, schema_is_compatible,
 };
 pub use merkle::{TileRoot, merkle_root, tile_leaf_hash};
+pub use output::RenderStamp;
 pub use tile::{CandidatePackage, Tile, TileKey};
 pub use trust::{PackageSignature, TrustAnchor, TrustKeyId, TrustRoot, verify_signature};
 pub use verify::{UsePolicy, VerifiedPackage, verify_package};

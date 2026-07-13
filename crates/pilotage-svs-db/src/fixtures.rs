@@ -93,6 +93,24 @@ pub(crate) fn tiles() -> Vec<Tile> {
         .collect()
 }
 
+/// Three terrain tiles whose payloads are uniformly `tag`, so two versions built
+/// with different tags have completely disjoint content and any mix is visible.
+pub(crate) fn tiles_tagged(tag: u8) -> Vec<Tile> {
+    (0..3)
+        .map(|i| Tile {
+            key: TileKey {
+                class: FeatureClass::Terrain,
+                level: 0,
+                tile: GeoTile {
+                    lat_index: i,
+                    lon_index: 0,
+                },
+            },
+            bytes: vec![tag; 16],
+        })
+        .collect()
+}
+
 /// The tile-root over `tiles`, computed the same way verification recomputes it.
 pub(crate) fn tile_root(tiles: &[Tile]) -> TileRoot {
     let mut entries: Vec<(TileKey, [u8; 32])> = tiles
@@ -111,6 +129,7 @@ pub(crate) fn base_manifest(
     dataset: DatasetId,
     version: PackageVersion,
     simulation_only: bool,
+    restrictions: UseRestrictions,
 ) -> PackageManifest {
     PackageManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
@@ -122,7 +141,7 @@ pub(crate) fn base_manifest(
                 code: 1,
                 tool_id: 42,
             }]),
-            restrictions: UseRestrictions::NO_OPERATIONAL_USE,
+            restrictions,
         },
         effectivity: Effectivity {
             release: DayNumber(100),
@@ -170,20 +189,70 @@ pub(crate) fn sign(manifest: &mut PackageManifest) {
 }
 
 /// A default valid, signed candidate package: dataset `1`, version `1.0.0`,
-/// three terrain tiles, `simulation_only = true`.
+/// three terrain tiles, `simulation_only = true`, `NO_OPERATIONAL_USE`.
 pub(crate) fn candidate() -> CandidatePackage {
     candidate_with(DatasetId(1), PackageVersion::new(1, 0, 0), true)
 }
 
 /// A valid, signed candidate package with the given dataset, version, and
-/// simulation flag.
+/// simulation flag, carrying the `NO_OPERATIONAL_USE` restriction (the SIM
+/// default).
 pub(crate) fn candidate_with(
     dataset: DatasetId,
     version: PackageVersion,
     simulation_only: bool,
 ) -> CandidatePackage {
     let tiles = tiles();
-    let mut manifest = base_manifest(&tiles, dataset, version, simulation_only);
+    let mut manifest = base_manifest(
+        &tiles,
+        dataset,
+        version,
+        simulation_only,
+        UseRestrictions::NO_OPERATIONAL_USE,
+    );
+    sign(&mut manifest);
+    CandidatePackage { manifest, tiles }
+}
+
+/// A valid, signed candidate package with `tag`-uniform tiles, so distinct tags
+/// give content-disjoint versions for the no-mixing test.
+pub(crate) fn candidate_tagged(
+    dataset: DatasetId,
+    version: PackageVersion,
+    tag: u8,
+) -> CandidatePackage {
+    let tiles = tiles_tagged(tag);
+    let mut manifest = base_manifest(&tiles, dataset, version, false, UseRestrictions::NONE);
+    sign(&mut manifest);
+    CandidatePackage { manifest, tiles }
+}
+
+/// A signed package that is genuinely operational: not `simulation_only` and
+/// with no use restrictions.
+pub(crate) fn operational_candidate() -> CandidatePackage {
+    let tiles = tiles();
+    let mut manifest = base_manifest(
+        &tiles,
+        DatasetId(1),
+        PackageVersion::new(1, 0, 0),
+        false,
+        UseRestrictions::NONE,
+    );
+    sign(&mut manifest);
+    CandidatePackage { manifest, tiles }
+}
+
+/// A signed package that is not `simulation_only` but carries the
+/// `NO_OPERATIONAL_USE` restriction, so operational use must still be refused.
+pub(crate) fn restricted_candidate() -> CandidatePackage {
+    let tiles = tiles();
+    let mut manifest = base_manifest(
+        &tiles,
+        DatasetId(1),
+        PackageVersion::new(1, 0, 0),
+        false,
+        UseRestrictions::NO_OPERATIONAL_USE,
+    );
     sign(&mut manifest);
     CandidatePackage { manifest, tiles }
 }
