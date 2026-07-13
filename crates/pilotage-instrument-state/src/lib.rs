@@ -31,6 +31,7 @@ mod heading;
 mod presentation;
 mod resolve;
 mod signal;
+mod source_compare;
 pub mod units;
 mod validate;
 
@@ -53,6 +54,12 @@ pub use resolve::{
     BARO_SETTING_TOLERANCE_HPA, NavResolved, PanelData, ResolvedAltitude, resolve, resolve_stateful,
 };
 pub use signal::{FreshnessPolicy, PolicyError, Sig, SignalStatus};
+pub use source_compare::{
+    AirframeSourcePolicy, AttitudeMeasure, Candidate, Comparable, ComparisonState, FrameTag,
+    HeadingMeasure, IntegrityLevel, MAX_SOURCES, ScalarMeasure, ScalarUnit, SourceAltitude,
+    SourceComparator, SourceComparison, SourceEpoch, SourceId, SourceList, SourcePolicyError,
+    SourcePolicyLimits, VectorMeasure,
+};
 pub use validate::{
     GroupFault, QUAT_NORM_TOLERANCE, StateIntegrity, validate_quat, validate_state,
 };
