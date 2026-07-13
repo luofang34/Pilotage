@@ -999,6 +999,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-geo"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "pilotage-frames",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-input"
 version = "0.1.0"
 dependencies = [

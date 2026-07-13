@@ -79,6 +79,7 @@ jobs:
         run: >
           cargo check
           -p pilotage-frames
+          -p pilotage-geo
           -p pilotage-alerts
           -p pilotage-instrument-state
           -p pilotage-instrument-scene
@@ -86,6 +87,11 @@ jobs:
           -p pilotage-instrument-panels
           -p pilotage-instrument-raster
           --target thumbv7em-none-eabihf
+
+      - name: geospatial contract (SVS-01)
+        # Datum discipline, coherence, view/projection, availability, and the
+        # fail-closed versioned ABI for synthetic vision and conformal HUD.
+        run: cargo test -p pilotage-geo
 
       - name: reference rasterizer frame hashes (REN-03)
         # Re-render the PFD and HSI panels and assert their pinned SHA-256
