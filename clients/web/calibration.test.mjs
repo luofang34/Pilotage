@@ -133,15 +133,17 @@ async function mutated(apply) {
 const semanticCases = [
   ["non-finite focal", (v) => v.setFloat64(53, NaN, true), "invalid:non-finite"],
   ["zero viewport", (v) => v.setUint32(45, 0, true), "invalid:invalid-viewport"],
-  ["out-of-range FOV", (v) => v.setFloat64(133, 4.0, true), "invalid:invalid-fov"],
   ["non-positive focal", (v) => v.setFloat64(53, -1.0, true), "invalid:non-positive-focal"],
   ["principal point out of bounds", (v) => v.setFloat64(69, 1e4, true), "invalid:principal-point-out-of-bounds"],
   ["wrong extrinsic frame", (v) => v.setUint8(43, 2), "invalid:frame-mismatch"],
-  ["non-unit quaternion", (v) => v.setFloat64(173, 2.0, true), "invalid:non-unit-quaternion"],
-  ["non-unit boresight", (v) => v.setFloat64(229, 2.0, true), "invalid:non-unit-boresight"],
+  ["non-unit quaternion", (v) => v.setFloat64(157, 2.0, true), "invalid:non-unit-quaternion"],
+  ["non-unit boresight", (v) => v.setFloat64(213, 2.0, true), "invalid:non-unit-boresight"],
   ["inverted effective period", (v) => v.setBigUint64(28, v.getBigUint64(20, true), true), "invalid:invalid-effective-period"],
-  ["negative residuals", (v) => v.setFloat64(253, -1.0, true), "invalid:invalid-residuals"],
-  ["inconsistent alignment budget", (v) => v.setFloat64(325, 999.0, true), "invalid:invalid-budget"],
+  ["negative residuals", (v) => v.setFloat64(237, -1.0, true), "invalid:invalid-residuals"],
+  // Cross-field: a declared allowance zeroed, and the intrinsic budget dropped
+  // below the measured residual (offset 245 = residual max).
+  ["non-positive allowance", (v) => v.setFloat64(261, 0.0, true), "invalid:non-positive-allowance"],
+  ["intrinsic residual below measured", (v) => v.setFloat64(253, 0.0, true), "invalid:intrinsic-residual-below-measured"],
 ];
 for (const [name, apply, reason] of semanticCases) {
   const loaded = await loadCalibrationArtifact(await mutated(apply));
@@ -150,7 +152,7 @@ for (const [name, apply, reason] of semanticCases) {
   check(`semantic reject keeps the gate closed: ${name}`, gateWith(recognized).conformalReady === false);
 }
 
-// ---- alignment error budget surfaced through admission ---------------------
+// ---- derived alignment error budget surfaced through admission -------------
 {
   const registry = new CalibrationRegistry().add(await loadCalibrationArtifact(artifact));
   const bound = registry.alignmentBoundFor(FPV_CALIBRATION_ID);
@@ -160,6 +162,12 @@ for (const [name, apply, reason] of semanticCases) {
     bound.recordedHashHex === artifact.recordedHashHex,
   );
   check("alignment bound is conservative (< 0.05 rad for the sim FPV)", bound.angularBoundRad < 0.05);
+  // The DERIVED angular bound must match the Rust-derived value bit-close,
+  // proving the browser derivation agrees with the reference validator.
+  check(
+    "derived alignment bound matches the Rust value",
+    Math.abs(bound.angularBoundRad - 0.011722782) < 1e-9,
+  );
 }
 
 // ---- registry conflict: same id, different content, NEITHER admitted -------

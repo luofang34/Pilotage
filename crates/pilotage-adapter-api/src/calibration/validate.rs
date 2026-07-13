@@ -12,15 +12,13 @@
 use pilotage_frames::FrameId;
 
 use super::CameraCalibration;
-use super::budget::AlignmentErrorBudget;
+use super::budget::AlignmentAllowances;
 use super::error::CalibrationError;
 use super::geometry::CameraGeometry;
-use super::identity::CalibrationIdentity;
+use super::identity::{CalibrationIdentity, Residuals};
 
 /// Tolerance on a unit-norm check for the rotation quaternion and boresight.
 const UNIT_NORM_TOLERANCE: f64 = 1e-6;
-/// Tolerance on the alignment-budget internal-consistency check.
-const BUDGET_CONSISTENCY_TOLERANCE: f64 = 1e-9;
 
 fn require_finite(field: &'static str, value: f64) -> Result<(), CalibrationError> {
     if value.is_finite() {
@@ -69,25 +67,6 @@ fn validate_intrinsics_viewport(geometry: &CameraGeometry) -> Result<(), Calibra
             principal_y_px: i.principal_y_px,
             width_px: v.width_px,
             height_px: v.height_px,
-        });
-    }
-    Ok(())
-}
-
-fn validate_fov(geometry: &CameraGeometry) -> Result<(), CalibrationError> {
-    let f = &geometry.fov;
-    require_all_finite(&[
-        ("fov_horizontal_rad", f.horizontal_rad),
-        ("fov_vertical_rad", f.vertical_rad),
-    ])?;
-    if f.horizontal_rad <= 0.0
-        || f.horizontal_rad >= core::f64::consts::PI
-        || f.vertical_rad <= 0.0
-        || f.vertical_rad >= core::f64::consts::PI
-    {
-        return Err(CalibrationError::InvalidFieldOfView {
-            horizontal_rad: f.horizontal_rad,
-            vertical_rad: f.vertical_rad,
         });
     }
     Ok(())
@@ -173,53 +152,64 @@ fn validate_lifecycle(identity: &CalibrationIdentity) -> Result<(), CalibrationE
     Ok(())
 }
 
-fn validate_budget(budget: &AlignmentErrorBudget) -> Result<(), CalibrationError> {
-    let invalid = |reason| CalibrationError::InvalidAlignmentBudget { reason };
-    let values = [
-        budget.intrinsic_residual_px,
-        budget.distortion_model_allowance_px,
-        budget.extrinsics_rotation_allowance_rad,
-        budget.boresight_allowance_rad,
-        budget.design_eye_allowance_rad,
-        budget.radians_per_pixel,
-        budget.total_pixel_bound_px,
-        budget.total_angular_bound_rad,
-    ];
-    if values.iter().any(|v| !v.is_finite() || *v < 0.0) {
-        return Err(invalid("non-finite or negative bound"));
+fn validate_allowances(
+    allowances: &AlignmentAllowances,
+    residuals: &Residuals,
+) -> Result<(), CalibrationError> {
+    require_all_finite(&[
+        ("intrinsic_residual_px", allowances.intrinsic_residual_px),
+        (
+            "distortion_model_allowance_px",
+            allowances.distortion_model_allowance_px,
+        ),
+        (
+            "extrinsics_rotation_allowance_rad",
+            allowances.extrinsics_rotation_allowance_rad,
+        ),
+        (
+            "boresight_allowance_rad",
+            allowances.boresight_allowance_rad,
+        ),
+        (
+            "design_eye_allowance_rad",
+            allowances.design_eye_allowance_rad,
+        ),
+    ])?;
+    // Every declared allowance must be strictly positive — "declared exactly"
+    // is still an assumption to bound, never zero.
+    for (which, value) in [
+        ("distortion", allowances.distortion_model_allowance_px),
+        ("extrinsics", allowances.extrinsics_rotation_allowance_rad),
+        ("boresight", allowances.boresight_allowance_rad),
+        ("design_eye", allowances.design_eye_allowance_rad),
+    ] {
+        if value <= 0.0 {
+            return Err(CalibrationError::NonPositiveAllowance { which });
+        }
     }
-    if budget.radians_per_pixel <= 0.0 {
-        return Err(invalid("non-positive radians-per-pixel"));
-    }
-    let pixel = budget.intrinsic_residual_px + budget.distortion_model_allowance_px;
-    if (budget.total_pixel_bound_px - pixel).abs() > BUDGET_CONSISTENCY_TOLERANCE {
-        return Err(invalid(
-            "total pixel bound is not the sum of its components",
-        ));
-    }
-    let angular = budget.total_pixel_bound_px * budget.radians_per_pixel
-        + budget.extrinsics_rotation_allowance_rad
-        + budget.boresight_allowance_rad
-        + budget.design_eye_allowance_rad;
-    if (budget.total_angular_bound_rad - angular).abs() > BUDGET_CONSISTENCY_TOLERANCE {
-        return Err(invalid(
-            "total angular bound is not the sum of its components",
-        ));
+    // The intrinsic budget must cover (not merely equal) the measured recovery
+    // residual, so a calibration cannot understate its own fit error.
+    if allowances.intrinsic_residual_px < residuals.max_px {
+        return Err(CalibrationError::IntrinsicResidualBelowMeasured {
+            intrinsic_residual_px: allowances.intrinsic_residual_px,
+            measured_max_px: residuals.max_px,
+        });
     }
     Ok(())
 }
 
-/// Validates every geometry, lifecycle, and budget invariant, failing closed
-/// with the first violation.
+/// Validates every geometry, lifecycle, and allowance invariant, failing closed
+/// with the first violation. The field of view and the budget totals are not
+/// validated here because they are derived, not stored — a derived value cannot
+/// disagree with the data it follows.
 ///
 /// # Errors
 ///
 /// A distinct [`CalibrationError`] per invariant class.
 pub fn validate(cal: &CameraCalibration) -> Result<(), CalibrationError> {
     validate_intrinsics_viewport(&cal.geometry)?;
-    validate_fov(&cal.geometry)?;
     validate_extrinsics_boresight(&cal.geometry)?;
     validate_lifecycle(&cal.identity)?;
-    validate_budget(&cal.budget)?;
+    validate_allowances(&cal.allowances, &cal.identity.residuals)?;
     Ok(())
 }

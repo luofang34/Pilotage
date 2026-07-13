@@ -20,7 +20,7 @@
   },
   "withinTolerance": true,
   "alignmentErrorBudget": {
-    "description": "The calibration's conservative contribution to the downstream conformal alignment error budget. Recovered quantities are measured; declared-not-recovered quantities carry an engineering allowance with a rationale, never zero. Total is a worst-case linear sum. Published (hashed) in the calibration artifact and surfaced through browser admission.",
+    "description": "The calibration's conservative contribution to the downstream conformal alignment error budget. Only the allowance COMPONENTS are stored (and hashed) in the artifact; radiansPerPixel and the totals below are DERIVED (schema v2), never stored, so they cannot understate the components. Recovered quantities are measured; declared-not-recovered quantities carry an engineering allowance with a rationale, never zero (validated). Total is a worst-case linear sum, surfaced through browser admission.",
     "intrinsicResidualPx": 0.362637,
     "distortionModelAllowancePx": 0.5,
     "extrinsicsRotationAllowanceRad": 0.005,

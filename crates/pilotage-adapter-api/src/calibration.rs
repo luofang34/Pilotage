@@ -33,7 +33,7 @@ mod recovery;
 mod sim;
 mod validate;
 
-pub use budget::{AlignmentErrorBudget, derive_budget};
+pub use budget::{AlignmentAllowances, AlignmentErrorBudget, derive_budget, radians_per_pixel};
 pub use canonical::{
     CALIBRATION_SCHEMA_VERSION, content_hash, to_canonical, verify, verify_camera,
 };
@@ -53,16 +53,21 @@ pub use sim::{
 pub use validate::validate;
 
 /// A complete calibration artifact: a simulated camera's geometry, its identity
-/// and lifecycle metadata, and its contribution to the alignment error budget.
+/// and lifecycle metadata, and the stored alignment-error allowances.
+///
+/// Derivable quantities are not stored: the field of view follows from
+/// [`CameraGeometry::field_of_view`], and the alignment budget totals follow
+/// from [`Self::budget`]. Only the irreducible inputs live in the artifact.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraCalibration {
-    /// Camera geometry (intrinsics, distortion, viewport, FOV, extrinsics,
-    /// design eye, boresight).
+    /// Camera geometry (intrinsics, distortion, viewport, extrinsics, design
+    /// eye, boresight). The field of view is derived, not stored.
     pub geometry: CameraGeometry,
     /// Identity, lifecycle, provenance, and residuals.
     pub identity: CalibrationIdentity,
-    /// This calibration's contribution to the conformal alignment error budget.
-    pub budget: AlignmentErrorBudget,
+    /// The stored alignment-error allowances; the full budget is derived by
+    /// [`Self::budget`].
+    pub allowances: AlignmentAllowances,
 }
 
 impl CameraCalibration {
@@ -70,6 +75,13 @@ impl CameraCalibration {
     #[must_use]
     pub fn content_hash(&self) -> [u8; 32] {
         content_hash(self)
+    }
+
+    /// The alignment error budget, derived from the stored allowances and the
+    /// camera's focal lengths.
+    #[must_use]
+    pub fn budget(&self) -> AlignmentErrorBudget {
+        derive_budget(&self.geometry.intrinsics, &self.allowances)
     }
 
     /// Verifies the artifact for use at `now_unix_ns` against its

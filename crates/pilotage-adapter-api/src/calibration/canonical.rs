@@ -17,8 +17,9 @@ use super::identity::ValidityStatus;
 use crate::calibration::error::CalibrationError;
 
 /// The calibration schema version. Bumped when the canonical layout changes;
-/// mirrored by `CALIBRATION_SCHEMA_VERSION` in the browser verifier.
-pub const CALIBRATION_SCHEMA_VERSION: u16 = 1;
+/// mirrored by `CALIBRATION_SCHEMA_VERSION` in the browser verifier. Version 2
+/// dropped the stored field of view and the derived budget totals.
+pub const CALIBRATION_SCHEMA_VERSION: u16 = 2;
 
 /// Units marker: `0` means lengths in meters, angles in radians, image
 /// coordinates in pixels. Serialized explicitly so a future unit change is a
@@ -80,7 +81,8 @@ fn write_geometry(out: &mut Vec<u8>, cal: &CameraCalibration) {
             d.tangential_p2,
         ],
     );
-    push_f64s(out, &[g.fov.horizontal_rad, g.fov.vertical_rad]);
+    // The field of view is derived from the viewport and focal lengths, so it
+    // is not stored here.
     push_f64s(out, &g.extrinsics.translation_body_m);
     push_f64s(out, &g.extrinsics.rotation_quat_wxyz);
     push_f64s(out, &g.design_eye.position_installation_m);
@@ -91,19 +93,19 @@ fn write_geometry(out: &mut Vec<u8>, cal: &CameraCalibration) {
     );
 }
 
-fn write_budget(out: &mut Vec<u8>, cal: &CameraCalibration) {
-    let b = &cal.budget;
+fn write_allowances(out: &mut Vec<u8>, cal: &CameraCalibration) {
+    // Only the irreducible allowance components are stored; the pixel→angle
+    // factor and the totals are derived (see `budget::derive_budget`), never
+    // serialized, so they cannot be made to disagree with these components.
+    let a = &cal.allowances;
     push_f64s(
         out,
         &[
-            b.intrinsic_residual_px,
-            b.distortion_model_allowance_px,
-            b.extrinsics_rotation_allowance_rad,
-            b.boresight_allowance_rad,
-            b.design_eye_allowance_rad,
-            b.radians_per_pixel,
-            b.total_pixel_bound_px,
-            b.total_angular_bound_rad,
+            a.intrinsic_residual_px,
+            a.distortion_model_allowance_px,
+            a.extrinsics_rotation_allowance_rad,
+            a.boresight_allowance_rad,
+            a.design_eye_allowance_rad,
         ],
     );
 }
@@ -114,7 +116,7 @@ pub fn to_canonical(cal: &CameraCalibration) -> Vec<u8> {
     let mut out = Vec::new();
     write_header(&mut out, cal);
     write_geometry(&mut out, cal);
-    write_budget(&mut out, cal);
+    write_allowances(&mut out, cal);
     out
 }
 

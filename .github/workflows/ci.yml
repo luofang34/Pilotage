@@ -126,6 +126,9 @@ jobs:
       - name: browser snapshot-association tests (HUD-01)
         run: node clients/web/snapshot-association.test.mjs
 
+      - name: browser camera calibration contract (HUD-02)
+        run: node clients/web/calibration.test.mjs
+
       - name: browser turn-derivation tests (DYN-01)
         run: node clients/web/turn-derivation.test.mjs
 

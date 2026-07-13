@@ -10,7 +10,7 @@
 use super::CameraCalibration;
 use super::geometry::{
     BodyToCameraExtrinsics, Boresight, BrownConradyDistortion, CameraGeometry, DesignEye,
-    FieldOfView, OpticalConvention, PinholeIntrinsics, Viewport,
+    OpticalConvention, PinholeIntrinsics, Viewport,
 };
 use super::identity::{
     CalibrationId, CalibrationIdentity, CalibrationVersion, EffectivePeriod, ProvenanceSource,
@@ -56,7 +56,6 @@ fn fpv_intrinsics() -> PinholeIntrinsics {
 
 fn fpv_geometry() -> CameraGeometry {
     let intrinsics = fpv_intrinsics();
-    let vertical_rad = 2.0 * (f64::from(FPV_HEIGHT_PX) / 2.0 / intrinsics.focal_y_px).atan();
     CameraGeometry {
         intrinsics,
         distortion: BrownConradyDistortion::NONE,
@@ -64,10 +63,8 @@ fn fpv_geometry() -> CameraGeometry {
             width_px: FPV_WIDTH_PX,
             height_px: FPV_HEIGHT_PX,
         },
-        fov: FieldOfView {
-            horizontal_rad: FPV_HFOV_RAD,
-            vertical_rad,
-        },
+        // The field of view is derived from the viewport and focal lengths
+        // (CameraGeometry::field_of_view), not stored.
         extrinsics: BodyToCameraExtrinsics {
             translation_body_m: [1.1, 0.0, 0.3],
             // Body FRD (x forward, y right, z down) -> camera optical OpenCV
@@ -94,7 +91,8 @@ fn fpv_geometry() -> CameraGeometry {
 pub fn sim_fpv_calibration() -> CameraCalibration {
     let geometry = fpv_geometry();
     let report = recovery_report(&geometry.intrinsics);
-    let budget = super::budget::derive_budget(&geometry, report.residual_max_px);
+    // The intrinsic budget is the measured recovery residual (it covers itself).
+    let allowances = super::budget::AlignmentAllowances::sim_defaults(report.residual_max_px);
     CameraCalibration {
         geometry,
         identity: CalibrationIdentity {
@@ -117,7 +115,7 @@ pub fn sim_fpv_calibration() -> CameraCalibration {
             },
             status: ValidityStatus::Valid,
         },
-        budget,
+        allowances,
     }
 }
 
@@ -125,6 +123,6 @@ pub fn sim_fpv_calibration() -> CameraCalibration {
 /// build itself (see the `sim_fpv_hash_is_recorded` test, which recomputes it).
 /// The browser artifact carries the same hash in hex.
 pub const SIM_FPV_CALIBRATION_HASH: [u8; 32] = [
-    0xa0, 0x6d, 0x80, 0x37, 0x88, 0x38, 0x11, 0xfc, 0xb7, 0xfc, 0xae, 0xe6, 0x18, 0x0d, 0xf1, 0xb6,
-    0xed, 0x38, 0x72, 0xbc, 0x54, 0x2f, 0x25, 0xff, 0xe8, 0xe8, 0xd3, 0x27, 0xd1, 0xfa, 0xe4, 0x1c,
+    0xa6, 0x79, 0x74, 0x1d, 0xa8, 0x1a, 0xc2, 0x45, 0x01, 0x4d, 0xf3, 0x0b, 0xba, 0xb3, 0x9e, 0x20,
+    0xaf, 0xd4, 0x1c, 0x5a, 0x06, 0xc8, 0x4e, 0xa2, 0x2f, 0xa4, 0x9b, 0x23, 0xd3, 0x92, 0x6a, 0x1c,
 ];

@@ -58,14 +58,6 @@ pub enum CalibrationError {
         /// Viewport height, pixels.
         height_px: u32,
     },
-    /// A field of view is not strictly within `(0, π)` radians.
-    #[error("calibration field of view (h={horizontal_rad}, v={vertical_rad} rad) is invalid")]
-    InvalidFieldOfView {
-        /// Horizontal FOV, radians.
-        horizontal_rad: f64,
-        /// Vertical FOV, radians.
-        vertical_rad: f64,
-    },
     /// A focal length is not strictly positive.
     #[error("calibration focal lengths ({focal_x_px}, {focal_y_px} px) are not positive")]
     NonPositiveFocal {
@@ -125,11 +117,23 @@ pub enum CalibrationError {
         /// Max residual, pixels.
         max_px: f64,
     },
-    /// A published alignment-budget bound is negative, non-finite, or
-    /// inconsistent with its declared components.
-    #[error("calibration alignment budget is invalid: {reason}")]
-    InvalidAlignmentBudget {
-        /// What made the budget invalid.
-        reason: &'static str,
+    /// A declared alignment allowance is not strictly positive. Named so the
+    /// zeroed allowance is identifiable.
+    #[error("calibration alignment allowance {which} is not strictly positive")]
+    NonPositiveAllowance {
+        /// Which allowance was non-positive.
+        which: &'static str,
+    },
+    /// The intrinsic residual budget does not cover the measured recovery
+    /// residual — the calibration would understate its own fit error.
+    #[error(
+        "calibration intrinsic residual budget {intrinsic_residual_px} px does not cover \
+         the measured residual {measured_max_px} px"
+    )]
+    IntrinsicResidualBelowMeasured {
+        /// The declared intrinsic residual budget, pixels.
+        intrinsic_residual_px: f64,
+        /// The measured maximum recovery residual, pixels.
+        measured_max_px: f64,
     },
 }

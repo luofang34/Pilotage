@@ -49,29 +49,44 @@ would be a safety-relevant category error.
   IEEE-754 bytes, so the hash is bit-exact across the Rust producer and the
   browser verifier.
 
+- **Derivable quantities are not stored (schema v2).** A value that can be
+  computed from other stored fields is never serialized, because a stored copy
+  can be made to disagree with the fields it should follow. The **field of view**
+  is derived from the viewport and focal lengths
+  (`CameraGeometry::field_of_view`); the alignment budget's **pixel→angle factor
+  and totals** are derived from the stored allowances and the focal lengths
+  (`derive_budget`). Only irreducible inputs live in the canonical bytes. This
+  removes an entire class of "consistent hash, inconsistent geometry" lie a
+  validator would otherwise have to chase.
+
 - **Hash integrity is not semantic validity.** A hash-consistent artifact can
-  still carry a NaN focal length, a zero viewport, an out-of-range FOV, a
-  non-positive focal, a principal point outside the image, extrinsics naming the
-  wrong frames, a non-unit rotation or boresight, an inverted effective window,
-  or negative residuals. `calibration::validate` checks every such invariant and
-  fails closed with a distinct typed reason, never clamping or repairing, and
-  `verify` runs it after the hash check. The browser admission path
-  (`clients/web/calibration.js`) parses the full canonical geometry and
-  **independently** re-validates the same invariants, so a malformed artifact is
-  rejected on both sides. Each invariant class has a fault-injection test where
-  the bytes and their recorded hash agree yet the geometry is invalid.
+  still carry a NaN focal length, a zero viewport, a non-positive focal, a
+  principal point outside the image, extrinsics naming the wrong frames, a
+  non-unit rotation or boresight, an inverted effective window, negative
+  residuals, a **non-positive declared allowance**, or an **intrinsic budget
+  that fails to cover the measured recovery residual**. `calibration::validate`
+  checks every such invariant and fails closed with a distinct typed reason,
+  never clamping or repairing, and `verify` runs it after the hash check. The
+  browser admission path (`clients/web/calibration.js`) parses the base fields
+  and **independently** re-validates the same invariants and re-derives the few
+  numbers it surfaces; Rust is the reference validator and the browser is a
+  deliberately thin, subordinate check. Each invariant class has a
+  fault-injection test where the bytes and their recorded hash agree yet the
+  data is invalid.
 
 - **The calibration publishes its contribution to the conformal alignment error
-  budget** (`AlignmentErrorBudget`), hashed with the rest and surfaced through
-  the browser admission as one angular bound with provenance. It is a
+  budget**, hashed as its stored **allowance components** and surfaced through
+  the browser admission as one **derived** angular bound with provenance. It is a
   conservative worst-case (linear, not root-sum-square) sum of: the *recovered*
-  intrinsic residual converted to an angle via a pixel→angle factor
-  (`1 / min(focal_x, focal_y)`), plus *declared, not recovered* engineering
-  allowances for the distortion/model assumption, the extrinsics rotation, the
-  boresight, and the design-eye parallax at a reference range. Each declared
-  allowance carries a stated rationale and is **never zero** — "declared exactly"
-  in the sim world is still an assumption a real integration would bound. The
-  next HUD increment composes this single number into its total budget.
+  intrinsic residual budget converted to an angle via the derived pixel→angle
+  factor (`1 / min(focal_x, focal_y)`), plus *declared, not recovered*
+  engineering allowances for the distortion/model assumption, the extrinsics
+  rotation, the boresight, and the design-eye parallax at a reference range. Each
+  declared allowance carries a stated rationale, is validated **strictly
+  positive** (never zero — "declared exactly" is still an assumption to bound),
+  and the intrinsic budget is validated to **cover** the measured recovery
+  residual so the calibration cannot understate its own fit error. The next HUD
+  increment composes the single derived number into its total budget.
 
 - **Registry conflicts fail closed.** When two calibrations share an id but
   differ in content (a different hash — e.g. a bumped version), the browser

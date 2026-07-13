@@ -111,16 +111,6 @@ fn zero_viewport_is_rejected() {
 }
 
 #[test]
-fn out_of_range_fov_is_rejected() {
-    let mut cal = sim_fpv_calibration();
-    cal.geometry.fov.horizontal_rad = 4.0; // > PI
-    assert!(matches!(
-        verify_hash_consistent(&cal),
-        CalibrationError::InvalidFieldOfView { .. }
-    ));
-}
-
-#[test]
 fn non_positive_focal_is_rejected() {
     let mut cal = sim_fpv_calibration();
     cal.geometry.intrinsics.focal_x_px = -1.0;
@@ -191,11 +181,45 @@ fn negative_residuals_are_rejected() {
 }
 
 #[test]
-fn inconsistent_alignment_budget_is_rejected() {
+fn non_positive_allowance_is_rejected() {
     let mut cal = sim_fpv_calibration();
-    cal.budget.total_angular_bound_rad = 999.0;
+    cal.allowances.distortion_model_allowance_px = 0.0;
     assert!(matches!(
         verify_hash_consistent(&cal),
-        CalibrationError::InvalidAlignmentBudget { .. }
+        CalibrationError::NonPositiveAllowance { .. }
     ));
+}
+
+#[test]
+fn intrinsic_residual_below_measured_is_rejected() {
+    let mut cal = sim_fpv_calibration();
+    assert!(cal.identity.residuals.max_px > 0.0);
+    // Understate the intrinsic budget below the measured recovery residual.
+    cal.allowances.intrinsic_residual_px = 0.0;
+    assert!(matches!(
+        verify_hash_consistent(&cal),
+        CalibrationError::IntrinsicResidualBelowMeasured { .. }
+    ));
+}
+
+// ---- derived values match expected (nothing derivable is stored) -----------
+
+#[test]
+fn derived_field_of_view_matches_the_sim_camera() {
+    let cal = sim_fpv_calibration();
+    let fov = cal.geometry.field_of_view();
+    assert!(
+        (fov.horizontal_rad - 1.396).abs() < 1e-9,
+        "the derived horizontal FOV round-trips the sim camera's 1.396 rad"
+    );
+    let expected_v = 2.0 * (120.0_f64 / cal.geometry.intrinsics.focal_y_px).atan();
+    assert!((fov.vertical_rad - expected_v).abs() < 1e-12);
+}
+
+#[test]
+fn derived_alignment_bound_is_positive_and_conservative() {
+    let budget = sim_fpv_calibration().budget();
+    assert!(budget.total_angular_bound_rad > 0.0);
+    // Sim FPV: ~0.0117 rad; a loose upper sanity bound, not a knife-edge.
+    assert!(budget.total_angular_bound_rad < 0.05);
 }

@@ -1,30 +1,34 @@
 // Published simulator camera calibration: load, hash-verify, semantically
 // validate, and expose the calibration ids recognized for a given frame plus
-// the calibration's alignment error contribution (ADR-0021).
+// the calibration's alignment error contribution (ADR-0021, schema v2).
 //
 // SIM / NOT FOR FLIGHT. The artifact describes a SIMULATED pinhole camera and a
 // synthetic design eye; it is never real HUD optics and must not be read as
-// optical qualification. The published artifact carries the exact canonical
-// bytes the recorded SHA-256 was taken over (mirroring
-// pilotage_adapter_api::calibration::canonical). This module recomputes the
-// hash over those bytes, then independently validates every geometry, lifecycle,
-// and budget invariant the Rust `validate` checks — hash integrity is not
-// semantic validity. A missing, mismatched, corrupt, semantically invalid,
-// expired, wrong-camera, or conflicting calibration yields no recognized id, so
-// the HUD-01 conformal gate stays closed.
+// optical qualification.
+//
+// Rust (pilotage_adapter_api::calibration) is the REFERENCE validator and the
+// source of truth for derivation; this module holds the minimum a fail-closed
+// browser admission needs and is deliberately subordinate (a candidate for
+// removal once the artifact is validated host-side and its result is trusted).
+// It recomputes the SHA-256 over the exact canonical bytes, DERIVES the
+// quantities the artifact no longer stores (field of view, pixel-to-angle
+// factor, budget totals) from the base fields, re-checks the geometry/lifecycle/
+// allowance invariants, and surfaces one angular alignment bound. A missing,
+// mismatched, corrupt, semantically invalid, expired, wrong-camera, or
+// conflicting calibration yields no recognized id, so the conformal gate stays
+// closed.
 
 // Mirrors CALIBRATION_SCHEMA_VERSION in the Rust canonical module.
-export const CALIBRATION_SCHEMA_VERSION = 1;
+export const CALIBRATION_SCHEMA_VERSION = 2;
 // ValidityStatus::Valid.
 const STATUS_VALID = 1;
 // FrameId::Body / FrameId::Installation.
 const FRAME_BODY = 0;
 const FRAME_INSTALLATION = 1;
-// Tolerances mirroring the Rust validator.
+// Unit-norm tolerance mirroring the Rust validator.
 const UNIT_NORM_TOLERANCE = 1e-6;
-const BUDGET_CONSISTENCY_TOLERANCE = 1e-9;
-// Total canonical length (header + geometry + budget); the fixed layout.
-const CALIBRATION_TOTAL_LEN = 333;
+// Total canonical length (header + geometry + allowances); the fixed v2 layout.
+const CALIBRATION_TOTAL_LEN = 293;
 
 // Canonical byte offsets (little-endian), mirroring the Rust serialization.
 const OFF = Object.freeze({
@@ -45,22 +49,17 @@ const OFF = Object.freeze({
   principalY: 77,
   skew: 85,
   distortion: 93, // 5 x f64
-  fovH: 133,
-  fovV: 141,
-  translation: 149, // 3 x f64
-  quat: 173, // 4 x f64
-  designEye: 205, // 3 x f64
-  boresight: 229, // 3 x f64
-  residualRms: 253,
-  residualMax: 261,
-  budgetIntrinsicResidual: 269,
-  budgetDistortionAllowance: 277,
-  budgetExtrinsicsAllowance: 285,
-  budgetBoresightAllowance: 293,
-  budgetDesignEyeAllowance: 301,
-  budgetRadiansPerPixel: 309,
-  budgetTotalPixel: 317,
-  budgetTotalAngular: 325,
+  translation: 133, // 3 x f64
+  quat: 157, // 4 x f64
+  designEye: 189, // 3 x f64
+  boresight: 213, // 3 x f64
+  residualRms: 237,
+  residualMax: 245,
+  allowanceIntrinsic: 253,
+  allowanceDistortion: 261,
+  allowanceExtrinsics: 269,
+  allowanceBoresight: 277,
+  allowanceDesignEye: 285,
 });
 
 function base64ToBytes(b64) {
@@ -94,7 +93,7 @@ function norm(values) {
 }
 
 // Mirrors the Rust `validate` geometry checks: returns null when valid, else a
-// typed reason.
+// typed reason. The field of view is derived, so it is not validated here.
 function validateGeometry(view) {
   const width = view.getUint32(OFF.viewportWidth, true);
   const height = view.getUint32(OFF.viewportHeight, true);
@@ -105,10 +104,6 @@ function validateGeometry(view) {
   const intrinsics = [focalX, focalY, principalX, principalY, view.getFloat64(OFF.skew, true)];
   if (!allFinite(intrinsics) || !allFinite(f64s(view, OFF.distortion, 5))) return "non-finite";
   if (width === 0 || height === 0) return "invalid-viewport";
-  const fovH = view.getFloat64(OFF.fovH, true);
-  const fovV = view.getFloat64(OFF.fovV, true);
-  if (!allFinite([fovH, fovV])) return "non-finite";
-  if (fovH <= 0 || fovH >= Math.PI || fovV <= 0 || fovV >= Math.PI) return "invalid-fov";
   if (focalX <= 0 || focalY <= 0) return "non-positive-focal";
   if (principalX < 0 || principalX > width || principalY < 0 || principalY > height) {
     return "principal-point-out-of-bounds";
@@ -134,40 +129,48 @@ function validateGeometry(view) {
   return null;
 }
 
-// Mirrors the Rust `validate` lifecycle and budget checks.
-function validateLifecycleAndBudget(view) {
+// Mirrors the Rust `validate` lifecycle and allowance checks.
+function validateLifecycleAndAllowances(view) {
   if (view.getBigUint64(OFF.effectiveStart, true) >= view.getBigUint64(OFF.effectiveEnd, true)) {
     return "invalid-effective-period";
   }
   const rms = view.getFloat64(OFF.residualRms, true);
   const max = view.getFloat64(OFF.residualMax, true);
   if (!allFinite([rms, max]) || rms < 0 || max < 0 || rms > max) return "invalid-residuals";
-  const intrinsicResidual = view.getFloat64(OFF.budgetIntrinsicResidual, true);
-  const distortionAllowance = view.getFloat64(OFF.budgetDistortionAllowance, true);
-  const extrinsicsAllowance = view.getFloat64(OFF.budgetExtrinsicsAllowance, true);
-  const boresightAllowance = view.getFloat64(OFF.budgetBoresightAllowance, true);
-  const designEyeAllowance = view.getFloat64(OFF.budgetDesignEyeAllowance, true);
-  const radiansPerPixel = view.getFloat64(OFF.budgetRadiansPerPixel, true);
-  const totalPixel = view.getFloat64(OFF.budgetTotalPixel, true);
-  const totalAngular = view.getFloat64(OFF.budgetTotalAngular, true);
-  const budget = [
-    intrinsicResidual, distortionAllowance, extrinsicsAllowance, boresightAllowance,
-    designEyeAllowance, radiansPerPixel, totalPixel, totalAngular,
+  const intrinsic = view.getFloat64(OFF.allowanceIntrinsic, true);
+  const declared = [
+    view.getFloat64(OFF.allowanceDistortion, true),
+    view.getFloat64(OFF.allowanceExtrinsics, true),
+    view.getFloat64(OFF.allowanceBoresight, true),
+    view.getFloat64(OFF.allowanceDesignEye, true),
   ];
-  if (!allFinite(budget) || budget.some((v) => v < 0) || radiansPerPixel <= 0) return "invalid-budget";
-  if (Math.abs(totalPixel - (intrinsicResidual + distortionAllowance)) > BUDGET_CONSISTENCY_TOLERANCE) {
-    return "invalid-budget";
-  }
-  const expectedAngular =
-    totalPixel * radiansPerPixel + extrinsicsAllowance + boresightAllowance + designEyeAllowance;
-  if (Math.abs(totalAngular - expectedAngular) > BUDGET_CONSISTENCY_TOLERANCE) return "invalid-budget";
+  if (!allFinite([intrinsic, ...declared])) return "non-finite";
+  // Every declared allowance must be strictly positive (never zero).
+  if (declared.some((v) => v <= 0)) return "non-positive-allowance";
+  // The intrinsic budget must cover the measured recovery residual.
+  if (intrinsic < max) return "intrinsic-residual-below-measured";
   return null;
+}
+
+// Derives the alignment angular bound from the base fields (nothing stored).
+function derivedAngularBound(view) {
+  const focalX = view.getFloat64(OFF.focalX, true);
+  const focalY = view.getFloat64(OFF.focalY, true);
+  const radiansPerPixel = 1 / Math.min(focalX, focalY);
+  const totalPixel =
+    view.getFloat64(OFF.allowanceIntrinsic, true) + view.getFloat64(OFF.allowanceDistortion, true);
+  return (
+    totalPixel * radiansPerPixel +
+    view.getFloat64(OFF.allowanceExtrinsics, true) +
+    view.getFloat64(OFF.allowanceBoresight, true) +
+    view.getFloat64(OFF.allowanceDesignEye, true)
+  );
 }
 
 /**
  * Loads, hash-verifies, and semantically validates one published calibration
  * artifact `{ canonicalBase64, recordedHashHex }`. Returns `{ ok: true, ... }`
- * with the parsed header fields and the alignment angular bound, or
+ * with the parsed header fields and the DERIVED alignment angular bound, or
  * `{ ok: false, reason }` for a missing, corrupt, hash-mismatched, wrong-schema,
  * or semantically invalid artifact. Fails closed throughout.
  */
@@ -194,7 +197,7 @@ export async function loadCalibrationArtifact(artifact) {
   }
   const geometryReason = validateGeometry(view);
   if (geometryReason) return { ok: false, reason: `invalid:${geometryReason}` };
-  const lifecycleReason = validateLifecycleAndBudget(view);
+  const lifecycleReason = validateLifecycleAndAllowances(view);
   if (lifecycleReason) return { ok: false, reason: `invalid:${lifecycleReason}` };
   return {
     ok: true,
@@ -204,7 +207,7 @@ export async function loadCalibrationArtifact(artifact) {
     effectiveStartNs: view.getBigUint64(OFF.effectiveStart, true),
     effectiveEndNs: view.getBigUint64(OFF.effectiveEnd, true),
     status: view.getUint8(OFF.status),
-    totalAngularBoundRad: view.getFloat64(OFF.budgetTotalAngular, true),
+    totalAngularBoundRad: derivedAngularBound(view),
     recordedHashHex: artifact.recordedHashHex,
   };
 }
@@ -245,9 +248,9 @@ export class CalibrationRegistry {
     return recognized;
   }
 
-  /** The calibration's alignment-budget angular bound (radians) with its
-   *  provenance, or `null` if the id is unknown or conflicting. One number a
-   *  downstream budget composes. */
+  /** The calibration's derived alignment-budget angular bound (radians) with
+   *  its provenance, or `null` if the id is unknown or conflicting. One number
+   *  a downstream budget composes. */
   alignmentBoundFor(calibrationId) {
     if (this.conflicted.has(calibrationId)) return null;
     const cal = this.byId.get(calibrationId);

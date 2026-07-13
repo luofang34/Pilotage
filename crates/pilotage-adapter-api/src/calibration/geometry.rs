@@ -124,7 +124,12 @@ pub struct Boresight {
 }
 
 /// The complete geometry of one simulated camera: intrinsics, distortion,
-/// viewport, field of view, extrinsics, design eye, and boresight.
+/// viewport, extrinsics, design eye, and boresight.
+///
+/// The field of view is **not** stored: it is fully determined by the viewport
+/// and the focal lengths, so it is derived by [`Self::field_of_view`]. A value
+/// that cannot be stored cannot be made to disagree with the geometry it should
+/// follow.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraGeometry {
     /// Pinhole intrinsics.
@@ -133,14 +138,28 @@ pub struct CameraGeometry {
     pub distortion: BrownConradyDistortion,
     /// Image viewport.
     pub viewport: Viewport,
-    /// Angular field of view.
-    pub fov: FieldOfView,
     /// Body-to-camera extrinsics.
     pub extrinsics: BodyToCameraExtrinsics,
     /// Simulated design-eye reference.
     pub design_eye: DesignEye,
     /// Boresight direction.
     pub boresight: Boresight,
+}
+
+impl CameraGeometry {
+    /// Derives the angular field of view from the viewport and focal lengths:
+    /// `fov = 2·atan((size/2) / focal)` per axis. With a positive focal and a
+    /// non-zero viewport this is always in `(0, π)`, so it needs no separate
+    /// range validation.
+    #[must_use]
+    pub fn field_of_view(&self) -> FieldOfView {
+        let half_w = f64::from(self.viewport.width_px) / 2.0;
+        let half_h = f64::from(self.viewport.height_px) / 2.0;
+        FieldOfView {
+            horizontal_rad: 2.0 * (half_w / self.intrinsics.focal_x_px).atan(),
+            vertical_rad: 2.0 * (half_h / self.intrinsics.focal_y_px).atan(),
+        }
+    }
 }
 
 #[cfg(test)]
