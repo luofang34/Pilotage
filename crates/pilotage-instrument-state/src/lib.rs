@@ -26,6 +26,7 @@
 pub mod abi;
 mod aircraft;
 mod altitude;
+mod dynamics;
 mod heading;
 mod presentation;
 mod resolve;
@@ -38,6 +39,7 @@ pub use aircraft::{
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, ValidFlags, Wind,
 };
 pub use altitude::{AltitudeClass, AltitudeDeclaration, AltitudeReference, GeoidModelId, OriginId};
+pub use dynamics::{DynSample, TurnBasis, TurnSample};
 pub use heading::{
     ConversionFault, HeadingReference, HeadingSample, MagneticVariation, VariationSourceId,
     convert_heading, shortest_angle_rad, wrap_2pi,

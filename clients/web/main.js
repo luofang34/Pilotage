@@ -40,6 +40,7 @@ import {
   startDisplayLoop,
   tickInstrumentSet,
 } from "./instrument-health.js";
+import { TurnDerivation } from "./turn-derivation.js";
 import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
@@ -133,6 +134,7 @@ function retireSessionPresentation(phase) {
   // Drop the previous session's snapshot history so a new session can never
   // associate a video frame against a stale snapshot from the old one.
   snapshotHistory.reset();
+  turnDerivation.reset();
   setTelemetrySessionState(els, phase);
 }
 
@@ -937,6 +939,13 @@ async function startControlLoop(transport, token) {
 
 // ---- instrument panels (ADR-0017) -------------------------------------------
 
+// DYN-01: turn-rate derivation is measurement-coherent — it advances
+// only on a NEW accepted heading measurement identity and differences
+// over the acquisition clock (see turn-derivation.js). Rendering
+// cadence cannot inflate or zero the rate, and session retirement
+// resets it below.
+const turnDerivation = new TurnDerivation();
+
 /** The explicit SIM heading declaration: local-NED yaw from the
  * published attitude quaternion, declared sim-local-true. Returns null
  * when no attitude estimate exists — no sample, never a zero heading. */
@@ -946,6 +955,7 @@ function declaredSimHeading(attitude) {
   const yaw = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
   return { rad: yaw, reference: 2, ageMs: attitude.ageMs };
 }
+
 
 /** Maps the latest wire avionics estimate into the instrument state ABI
  * and draws both panels; runs on the display's own rAF cadence. Every
@@ -979,6 +989,11 @@ function renderInstruments() {
   // its own, so removing this declaration flags HDG instead of
   // freezing a fabricated rose.
   const heading = declaredSimHeading(attitude);
+  const dynamics = turnDerivation.update(
+    heading === null ? NaN : heading.rad,
+    heading === null ? NaN : heading.ageMs,
+    attitude?.stamp ?? null,
+  );
   const panelState = {
     attitude,
     kinematics,
@@ -987,6 +1002,7 @@ function renderInstruments() {
     wind: null,
     selections: { headingBugRad: 0, headingBugReference: 2 },
     heading,
+    dynamics,
     quality: snapshot.quality,
     valid: {
       attitude: !!(validFlags & 1),
@@ -994,6 +1010,7 @@ function renderInstruments() {
       position: !!(validFlags & 4),
       velocity: !!(validFlags & 8),
       heading: heading !== null && !!(validFlags & 1),
+      turn: dynamics !== null && !!(validFlags & 1),
     },
     snapshot: { generation: snapshot.generation, coherence },
   };

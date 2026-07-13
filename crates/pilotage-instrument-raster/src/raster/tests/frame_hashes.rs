@@ -95,14 +95,32 @@ pub(super) fn demo_state() -> AircraftState {
         },
         snapshot: SnapshotMeta::default(),
         altitude: pilotage_instrument_state::AltitudeDeclaration::default(),
-        heading: Stamped {
-            data: Some(pilotage_instrument_state::HeadingSample {
-                heading_rad: 0.6,
-                reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
-            }),
-            age_ms: Some(80.0),
-        },
+        heading: demo_heading(),
         variation: Stamped::default(),
+        dynamics: demo_dynamics(),
+    }
+}
+
+fn demo_heading() -> Stamped<pilotage_instrument_state::HeadingSample> {
+    Stamped {
+        data: Some(pilotage_instrument_state::HeadingSample {
+            heading_rad: 0.6,
+            reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
+        }),
+        age_ms: Some(80.0),
+    }
+}
+
+fn demo_dynamics() -> Stamped<pilotage_instrument_state::DynSample> {
+    Stamped {
+        data: Some(pilotage_instrument_state::DynSample {
+            turn: Some(pilotage_instrument_state::TurnSample {
+                rate_rps: 0.05,
+                basis: pilotage_instrument_state::TurnBasis::HeadingRate,
+            }),
+            lateral_mps2: Some(-0.6),
+        }),
+        age_ms: Some(80.0),
     }
 }
 

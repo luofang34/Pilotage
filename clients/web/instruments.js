@@ -35,8 +35,8 @@ export const EXPECTED_GLYPH_SHA256 =
 const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
-export const STATE_ABI_VERSION = 4;
-export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152, 4: 176 });
+export const STATE_ABI_VERSION = 5;
+export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152, 4: 176, 5: 192 });
 export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
 const MAX_WASM_RENDER_STATUS = 10;
 
@@ -438,11 +438,23 @@ export class InstrumentModule {
       b(
         172,
         (state.valid?.heading ?? false ? 1 : 0) |
-          (state.valid?.variation ?? false ? 2 : 0),
+          (state.valid?.variation ?? false ? 2 : 0) |
+          (state.valid?.turn ?? false ? 4 : 0) |
+          (state.valid?.slip ?? false ? 8 : 0),
       );
-      b(173, 0);
+      // DYN-01 typed dynamics (abi.rs parity): the fail-safe default is
+      // no sample and an unknown basis — body yaw rate has no encoding
+      // to fall back to.
+      b(173, state.dynamics?.turnBasis ?? 255);
       b(174, 0);
       b(175, 0);
+      f(176, state.dynamics?.turnRps ?? NaN);
+      f(180, state.dynamics?.lateralMps2 ?? NaN);
+      f(184, state.dynamics ? state.dynamics.ageMs : NaN);
+      b(188, 0);
+      b(189, 0);
+      b(190, 0);
+      b(191, 0);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

@@ -6,6 +6,7 @@ use crate::aircraft::{
     Selections, SnapshotCoherence, SnapshotMeta, Stamped, Wind,
 };
 use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
+use crate::dynamics::{DynSample, TurnBasis, TurnSample};
 use crate::heading::{HeadingReference, HeadingSample, MagneticVariation, VariationSourceId};
 use pilotage_frames::Quat;
 
@@ -26,6 +27,34 @@ fn full_variation() -> Stamped<MagneticVariation> {
             source: VariationSourceId(3),
         }),
         age_ms: Some(30.0),
+    }
+}
+
+fn full_dynamics() -> Stamped<DynSample> {
+    Stamped {
+        data: Some(DynSample {
+            turn: Some(TurnSample {
+                rate_rps: 0.05,
+                basis: TurnBasis::HeadingRate,
+            }),
+            lateral_mps2: Some(-0.8),
+        }),
+        age_ms: Some(15.0),
+    }
+}
+
+fn full_nav() -> Stamped<NavData> {
+    Stamped {
+        data: Some(NavData {
+            source: NavSource::Gps,
+            course_rad: 0.35,
+            cdi_dots: -1.2,
+            fromto: NavFromTo::To,
+            vdev_dots: Some(0.4),
+            dist_nm: Some(40.3),
+            course_reference: HeadingReference::SimLocalTrue,
+        }),
+        age_ms: Some(9.0),
     }
 }
 
@@ -57,18 +86,7 @@ fn full_state() -> AircraftState {
             }),
             age_ms: Some(7.0),
         },
-        nav: Stamped {
-            data: Some(NavData {
-                source: NavSource::Gps,
-                course_rad: 0.35,
-                cdi_dots: -1.2,
-                fromto: NavFromTo::To,
-                vdev_dots: Some(0.4),
-                dist_nm: Some(40.3),
-                course_reference: HeadingReference::SimLocalTrue,
-            }),
-            age_ms: Some(9.0),
-        },
+        nav: full_nav(),
         wind: Stamped {
             data: Some(Wind {
                 from_rad: 4.7,
@@ -93,6 +111,8 @@ fn full_state() -> AircraftState {
             velocity: true,
             heading: true,
             variation: true,
+            turn: true,
+            slip: true,
         },
         snapshot: SnapshotMeta {
             generation: u32::MAX,
@@ -106,6 +126,7 @@ fn full_state() -> AircraftState {
         },
         heading: full_heading(),
         variation: full_variation(),
+        dynamics: full_dynamics(),
     }
 }
 
@@ -236,6 +257,29 @@ fn heading_and_variation_round_trip_exactly() {
     assert_eq!(
         decoded.selections.heading_bug_reference,
         state.selections.heading_bug_reference
+    );
+}
+
+#[test]
+fn dynamics_round_trip_and_unknown_basis_fails_closed() {
+    let mut block = [0u8; STATE_ABI_SIZE];
+    let state = full_state();
+    encode_state(&state, &mut block).expect("encodes");
+    let decoded = decode_state(&block).expect("decodes");
+    assert_eq!(decoded.dynamics, state.dynamics);
+    assert!(decoded.valid.turn && decoded.valid.slip);
+
+    block[173] = 9; // turn basis
+    let decoded = decode_state(&block).expect("decodes");
+    assert_eq!(
+        decoded
+            .dynamics
+            .data
+            .expect("dynamics present")
+            .turn
+            .expect("turn present")
+            .basis,
+        TurnBasis::Unknown
     );
 }
 

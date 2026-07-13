@@ -223,7 +223,7 @@ fn derive_alert_events(data: &pilotage_instrument_state::PanelData) -> [AlertEve
             AlertCondition::Heading(NavFault::Unavailable),
         ),
         cond(
-            data.turn_rate_rps.status == SignalStatus::Failed,
+            data.turn.rate_rps.status == SignalStatus::Failed,
             AlertCondition::TurnSlip(DynFault::TurnRateInvalid),
         ),
     ]

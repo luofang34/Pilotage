@@ -3,7 +3,7 @@
 //! tapes → symbology → annunciation, ADR-0017).
 
 use pilotage_alerts::AlertOutput;
-use pilotage_instrument_scene::{LayerId, PaintMode, SceneError, SceneWriter};
+use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
 
 use crate::palette;
@@ -163,16 +163,24 @@ fn draw_recovery_chevrons(
 }
 
 /// Standard-rate turn is 3°/s, drawn at the ±62 px reference ticks.
+/// Only the POINTER saturates at the scale edge (±73 px); the resolved
+/// value stays unclamped for monitoring. The cue labels its basis, and
+/// a required-but-unusable turn indication flags TRN instead of
+/// quietly disappearing.
 fn draw_turn_rate(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneError> {
     let y = 340.0;
     scene.stroke(palette::WHITE, 2.0)?;
     scene.line(178.0, y - 6.0, 178.0, y + 6.0)?;
     scene.line(302.0, y - 6.0, 302.0, y + 6.0)?;
     scene.line(240.0, y - 4.0, 240.0, y + 4.0)?;
-    if !data.turn_rate_rps.status.shows_value() {
-        return Ok(());
+    let turn = &data.turn;
+    if !turn.rate_rps.status.shows_value() {
+        if data.require_dynamics_cue {
+            status_paint::draw_flag(scene, 240.0, y - 12.0, "TRN")?;
+        }
+        return draw_slip_ball(scene, data, y);
     }
-    let dps = data.turn_rate_rps.value * pilotage_instrument_state::units::RAD_TO_DEG;
+    let dps = turn.rate_rps.value * pilotage_instrument_state::units::RAD_TO_DEG;
     let len = (dps / 3.0 * 62.0).clamp(-73.0, 73.0);
     scene.fill_color(palette::MAGENTA)?;
     if len >= 0.0 {
@@ -180,6 +188,38 @@ fn draw_turn_rate(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
     } else {
         scene.rect(PaintMode::Fill, 240.0 + len, y - 3.0, -len, 6.0)?;
     }
+    scene.fill_color(palette::WHITE)?;
+    scene.text(
+        310.0,
+        y + 4.0,
+        10.0,
+        Anchor::BASELINE_LEFT,
+        turn.basis.label(),
+    )?;
+    draw_slip_ball(scene, data, y)
+}
+
+/// Slip/skid ball under the turn cue. The ball displaces OPPOSITE the
+/// lateral specific force (body +Y right ⇒ ball left), one bracket
+/// width per 2 m/s²; the pointer clamps at ±1.5 widths while the
+/// resolved value stays unclamped. A missing input draws brackets and
+/// NO ball — a centered ball is a coordination claim nobody made — and
+/// flags SLIP when the profile requires the cue.
+fn draw_slip_ball(scene: &mut SceneWriter<'_>, data: &PanelData, y: f32) -> Result<(), SceneError> {
+    let by = y + 14.0;
+    scene.stroke(palette::WHITE, 1.5)?;
+    scene.line(233.0, by - 5.0, 233.0, by + 5.0)?;
+    scene.line(247.0, by - 5.0, 247.0, by + 5.0)?;
+    let slip = data.slip_lat_mps2;
+    if !slip.status.shows_value() {
+        if data.require_dynamics_cue {
+            status_paint::draw_flag(scene, 270.0, by, "SLIP")?;
+        }
+        return Ok(());
+    }
+    let dx = (-slip.value / 2.0 * 14.0).clamp(-21.0, 21.0);
+    scene.fill_color(palette::WHITE)?;
+    scene.circle(PaintMode::Fill, 240.0 + dx, by, 4.0)?;
     Ok(())
 }
 
@@ -187,5 +227,7 @@ fn draw_turn_rate(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
 mod attitude_tests;
 #[cfg(test)]
 mod datum_tests;
+#[cfg(test)]
+mod dyn_tests;
 #[cfg(test)]
 pub(crate) mod tests;

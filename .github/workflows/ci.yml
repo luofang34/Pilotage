@@ -120,6 +120,15 @@ jobs:
       - name: renderer backend conformance corpus
         run: node clients/web/scene-conformance.test.mjs
 
+      - name: browser video capture-identity tests (HUD-01)
+        run: node clients/web/video-identity.test.mjs
+
+      - name: browser snapshot-association tests (HUD-01)
+        run: node clients/web/snapshot-association.test.mjs
+
+      - name: browser turn-derivation tests (DYN-01)
+        run: node clients/web/turn-derivation.test.mjs
+
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
         uses: bufbuild/buf-action@v1
