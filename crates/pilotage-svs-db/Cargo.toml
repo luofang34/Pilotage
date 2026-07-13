@@ -1,0 +1,15 @@
+[package]
+name = "pilotage-svs-db"
+description = "Signed, provenance-preserving, atomically activated aeronautical database packages for synthetic vision (SVS-02, SIM / NOT FOR FLIGHT)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-geo = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
