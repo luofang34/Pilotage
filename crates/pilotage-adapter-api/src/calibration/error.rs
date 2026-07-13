@@ -5,7 +5,7 @@ use super::identity::ValidityStatus;
 /// Why a calibration cannot be used. Every variant carries the context its
 /// message needs; none has a benign fallback — a calibration that fails any
 /// check disables conformal output rather than degrading to a guess.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CalibrationError {
     /// The recomputed content hash did not match the recorded one: the
     /// artifact was altered without re-recording its hash, or is corrupt.
@@ -42,5 +42,94 @@ pub enum CalibrationError {
         expected: u32,
         /// Camera id the frame came from.
         actual: u32,
+    },
+    /// A field that must be finite is NaN or infinite. Named so the offending
+    /// quantity is identifiable without repairing it.
+    #[error("calibration field {field} is not finite")]
+    NonFinite {
+        /// The non-finite field.
+        field: &'static str,
+    },
+    /// The viewport has a zero (or otherwise invalid) dimension.
+    #[error("calibration viewport {width_px}x{height_px} is degenerate")]
+    InvalidViewport {
+        /// Viewport width, pixels.
+        width_px: u32,
+        /// Viewport height, pixels.
+        height_px: u32,
+    },
+    /// A field of view is not strictly within `(0, π)` radians.
+    #[error("calibration field of view (h={horizontal_rad}, v={vertical_rad} rad) is invalid")]
+    InvalidFieldOfView {
+        /// Horizontal FOV, radians.
+        horizontal_rad: f64,
+        /// Vertical FOV, radians.
+        vertical_rad: f64,
+    },
+    /// A focal length is not strictly positive.
+    #[error("calibration focal lengths ({focal_x_px}, {focal_y_px} px) are not positive")]
+    NonPositiveFocal {
+        /// Focal length x, pixels.
+        focal_x_px: f64,
+        /// Focal length y, pixels.
+        focal_y_px: f64,
+    },
+    /// The principal point lies outside the viewport.
+    #[error(
+        "calibration principal point ({principal_x_px}, {principal_y_px}) is outside \
+         the {width_px}x{height_px} viewport"
+    )]
+    PrincipalPointOutOfBounds {
+        /// Principal point x, pixels.
+        principal_x_px: f64,
+        /// Principal point y, pixels.
+        principal_y_px: f64,
+        /// Viewport width, pixels.
+        width_px: u32,
+        /// Viewport height, pixels.
+        height_px: u32,
+    },
+    /// The extrinsics name frames other than body → installation.
+    #[error("calibration extrinsics frames {from_code}->{to_code} are not body->installation")]
+    FrameMismatch {
+        /// The declared source frame code.
+        from_code: u8,
+        /// The declared target frame code.
+        to_code: u8,
+    },
+    /// The extrinsic rotation quaternion is not unit-norm.
+    #[error("calibration extrinsic quaternion norm {norm} is not 1")]
+    NonUnitQuaternion {
+        /// The quaternion's norm.
+        norm: f64,
+    },
+    /// The boresight direction is not a unit vector.
+    #[error("calibration boresight norm {norm} is not 1")]
+    NonUnitBoresight {
+        /// The boresight's norm.
+        norm: f64,
+    },
+    /// The effective window is empty or inverted (`end <= start`).
+    #[error("calibration effective window [{start_unix_ns}, {end_unix_ns}) is invalid")]
+    InvalidEffectivePeriod {
+        /// Window start, Unix nanoseconds.
+        start_unix_ns: u64,
+        /// Window end, Unix nanoseconds.
+        end_unix_ns: u64,
+    },
+    /// The residuals are negative, non-finite, or the RMS exceeds the maximum.
+    #[error("calibration residuals (rms={rms_px}, max={max_px} px) are invalid")]
+    InvalidResiduals {
+        /// RMS residual, pixels.
+        rms_px: f64,
+        /// Max residual, pixels.
+        max_px: f64,
+    },
+    /// A published alignment-budget bound is negative, non-finite, or
+    /// inconsistent with its declared components.
+    #[error("calibration alignment budget is invalid: {reason}")]
+    InvalidAlignmentBudget {
+        /// What made the budget invalid.
+        reason: &'static str,
     },
 }

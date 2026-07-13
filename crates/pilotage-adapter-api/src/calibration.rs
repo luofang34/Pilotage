@@ -15,20 +15,25 @@
 //!
 //! A [`CameraCalibration`] pairs the camera [`geometry`] (every unit and frame
 //! explicit) with the [`identity`] and lifecycle (id, version, tool version,
-//! effective window, provenance, residuals, validity status). Each artifact is
-//! hashed over a fixed [`canonical`] byte form; [`verify`] recomputes and
-//! compares, so a mutated value fails closed. The single published simulator
-//! artifact lives in [`sim`], and [`recovery`] is the deterministic tool that
-//! demonstrates the fit recovers known parameters from synthetic targets
-//! within a documented tolerance.
+//! effective window, provenance, residuals, validity status) and its
+//! [`budget`] contribution to the conformal alignment error. Each artifact is
+//! hashed over a fixed [`canonical`] byte form; [`verify`] recomputes the hash
+//! **and** runs [`validate`] over every geometry, lifecycle, and budget
+//! invariant, so a hash-consistent but semantically invalid artifact still
+//! fails closed. The single published simulator artifact lives in [`sim`], and
+//! [`recovery`] is the deterministic tool that demonstrates the fit recovers
+//! known parameters from synthetic targets within a documented tolerance.
 
+mod budget;
 mod canonical;
 mod error;
 mod geometry;
 mod identity;
 mod recovery;
 mod sim;
+mod validate;
 
+pub use budget::{AlignmentErrorBudget, derive_budget};
 pub use canonical::{
     CALIBRATION_SCHEMA_VERSION, content_hash, to_canonical, verify, verify_camera,
 };
@@ -45,9 +50,10 @@ pub use recovery::{RecoveryReport, SyntheticTarget, recover_intrinsics, verify_s
 pub use sim::{
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, sim_fpv_calibration,
 };
+pub use validate::validate;
 
-/// A complete calibration artifact: a simulated camera's geometry plus its
-/// identity and lifecycle metadata.
+/// A complete calibration artifact: a simulated camera's geometry, its identity
+/// and lifecycle metadata, and its contribution to the alignment error budget.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraCalibration {
     /// Camera geometry (intrinsics, distortion, viewport, FOV, extrinsics,
@@ -55,6 +61,8 @@ pub struct CameraCalibration {
     pub geometry: CameraGeometry,
     /// Identity, lifecycle, provenance, and residuals.
     pub identity: CalibrationIdentity,
+    /// This calibration's contribution to the conformal alignment error budget.
+    pub budget: AlignmentErrorBudget,
 }
 
 impl CameraCalibration {
@@ -65,7 +73,8 @@ impl CameraCalibration {
     }
 
     /// Verifies the artifact for use at `now_unix_ns` against its
-    /// `recorded_hash` (hash match, status, effective window).
+    /// `recorded_hash`: hash match, semantic validity, status, and effective
+    /// window.
     ///
     /// # Errors
     ///
@@ -76,6 +85,16 @@ impl CameraCalibration {
         now_unix_ns: u64,
     ) -> Result<(), CalibrationError> {
         verify(self, recorded_hash, now_unix_ns)
+    }
+
+    /// Validates every geometry, lifecycle, and budget invariant, independent of
+    /// the hash.
+    ///
+    /// # Errors
+    ///
+    /// The first failing [`CalibrationError`].
+    pub fn validate(&self) -> Result<(), CalibrationError> {
+        validate(self)
     }
 
     /// Verifies this calibration applies to a frame from `frame_camera_id`.

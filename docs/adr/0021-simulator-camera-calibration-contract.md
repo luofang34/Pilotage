@@ -49,6 +49,36 @@ would be a safety-relevant category error.
   IEEE-754 bytes, so the hash is bit-exact across the Rust producer and the
   browser verifier.
 
+- **Hash integrity is not semantic validity.** A hash-consistent artifact can
+  still carry a NaN focal length, a zero viewport, an out-of-range FOV, a
+  non-positive focal, a principal point outside the image, extrinsics naming the
+  wrong frames, a non-unit rotation or boresight, an inverted effective window,
+  or negative residuals. `calibration::validate` checks every such invariant and
+  fails closed with a distinct typed reason, never clamping or repairing, and
+  `verify` runs it after the hash check. The browser admission path
+  (`clients/web/calibration.js`) parses the full canonical geometry and
+  **independently** re-validates the same invariants, so a malformed artifact is
+  rejected on both sides. Each invariant class has a fault-injection test where
+  the bytes and their recorded hash agree yet the geometry is invalid.
+
+- **The calibration publishes its contribution to the conformal alignment error
+  budget** (`AlignmentErrorBudget`), hashed with the rest and surfaced through
+  the browser admission as one angular bound with provenance. It is a
+  conservative worst-case (linear, not root-sum-square) sum of: the *recovered*
+  intrinsic residual converted to an angle via a pixel→angle factor
+  (`1 / min(focal_x, focal_y)`), plus *declared, not recovered* engineering
+  allowances for the distortion/model assumption, the extrinsics rotation, the
+  boresight, and the design-eye parallax at a reference range. Each declared
+  allowance carries a stated rationale and is **never zero** — "declared exactly"
+  in the sim world is still an assumption a real integration would bound. The
+  next HUD increment composes this single number into its total budget.
+
+- **Registry conflicts fail closed.** When two calibrations share an id but
+  differ in content (a different hash — e.g. a bumped version), the browser
+  registry admits **neither**: the id is marked conflicting and never resolves,
+  so a consumer never picks an arbitrary winner. Exact duplicates (same id, same
+  hash) are deduped, not conflicts.
+
 - **One deterministic simulator tool** (`calibration::recovery`) generates a
   fixed grid of synthetic targets, projects them through a known pinhole model,
   quantizes to whole pixels (the only error, so the run is deterministic with no

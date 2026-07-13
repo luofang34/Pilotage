@@ -18,5 +18,22 @@
     "principalErrorPxMax": 1.0,
     "residualRmsPxMax": 0.5
   },
-  "withinTolerance": true
+  "withinTolerance": true,
+  "alignmentErrorBudget": {
+    "description": "The calibration's conservative contribution to the downstream conformal alignment error budget. Recovered quantities are measured; declared-not-recovered quantities carry an engineering allowance with a rationale, never zero. Total is a worst-case linear sum. Published (hashed) in the calibration artifact and surfaced through browser admission.",
+    "intrinsicResidualPx": 0.362637,
+    "distortionModelAllowancePx": 0.5,
+    "extrinsicsRotationAllowanceRad": 0.005,
+    "boresightAllowanceRad": 0.002,
+    "designEyeAllowanceRad": 0.0002,
+    "radiansPerPixel": 0.005258,
+    "totalPixelBoundPx": 0.862637,
+    "totalAngularBoundRad": 0.011722782,
+    "rationale": {
+      "distortionModelAllowancePx": "ideal-pinhole model; sub-pixel allowance for residual model mismatch",
+      "extrinsicsRotationAllowanceRad": "mount rotation declared from the sim pose, not recovered; few-mrad engineering allowance",
+      "boresightAllowanceRad": "boresight declared as the optical axis, not measured",
+      "designEyeAllowanceRad": "1 cm design-eye positional allowance at a 50 m reference range"
+    }
+  }
 }

@@ -91,12 +91,30 @@ fn write_geometry(out: &mut Vec<u8>, cal: &CameraCalibration) {
     );
 }
 
+fn write_budget(out: &mut Vec<u8>, cal: &CameraCalibration) {
+    let b = &cal.budget;
+    push_f64s(
+        out,
+        &[
+            b.intrinsic_residual_px,
+            b.distortion_model_allowance_px,
+            b.extrinsics_rotation_allowance_rad,
+            b.boresight_allowance_rad,
+            b.design_eye_allowance_rad,
+            b.radians_per_pixel,
+            b.total_pixel_bound_px,
+            b.total_angular_bound_rad,
+        ],
+    );
+}
+
 /// Serializes a calibration into its canonical byte form.
 #[must_use]
 pub fn to_canonical(cal: &CameraCalibration) -> Vec<u8> {
     let mut out = Vec::new();
     write_header(&mut out, cal);
     write_geometry(&mut out, cal);
+    write_budget(&mut out, cal);
     out
 }
 
@@ -111,9 +129,11 @@ pub fn content_hash(cal: &CameraCalibration) -> [u8; 32] {
 /// Verifies a calibration for use at `now_unix_ns`, failing closed.
 ///
 /// The checks, in order: the recomputed content hash matches `recorded_hash`;
-/// the status is [`ValidityStatus::Valid`]; and `now_unix_ns` is within the
-/// effective window. A wrong-camera check is separate ([`verify_camera`]),
-/// since it depends on the frame being displayed.
+/// every geometry, lifecycle, and budget invariant is semantically valid (so a
+/// hash-consistent but malformed artifact is still rejected); the status is
+/// [`ValidityStatus::Valid`]; and `now_unix_ns` is within the effective window.
+/// A wrong-camera check is separate ([`verify_camera`]), since it depends on the
+/// frame being displayed.
 ///
 /// # Errors
 ///
@@ -130,6 +150,7 @@ pub fn verify(
             computed,
         });
     }
+    super::validate::validate(cal)?;
     if cal.identity.status != ValidityStatus::Valid {
         return Err(CalibrationError::NotValid {
             status: cal.identity.status,
