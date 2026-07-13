@@ -16,30 +16,28 @@
 
 use crate::telemetry::{MeasurementClock, MeasurementStamp};
 
+/// The one canonical calibration identity, owned by the dependency-free `no_std`
+/// `pilotage-calibration-id` leaf and re-exported here. A published camera
+/// calibration and a synthetic-vision projection reference name the *same* type,
+/// so there is no second `CalibrationId` and no lossy `u32` bridge between them.
+/// `0` (its `NONE` sentinel, `!is_referenced()`) means no calibration identity
+/// was published; a conformal consumer must treat that as "calibration
+/// unavailable" and never assume a default. This crate depends only on the leaf,
+/// not the whole geospatial contract, to name the id.
+pub use pilotage_calibration_id::CalibrationId;
+
+/// Compile-time proof that this crate's public `CalibrationId` *is* the leaf's,
+/// not a second definition or a lossy `u32` mirror: a leaf value must be usable
+/// as ours with no conversion. If anyone re-mints a local `CalibrationId`, this
+/// identity coercion stops type-checking and the build fails here.
+const _: fn(CalibrationId) -> pilotage_calibration_id::CalibrationId = |id| id;
+
 /// Stable identity of the physical camera a frame came from, distinct from the
 /// routing `source_id`: two attachments can reuse a routing slot over a
 /// session's life, but a conformal overlay needs the camera whose intrinsics
 /// and mounting produced this image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CameraId(pub u32);
-
-/// Identity of the calibration (intrinsics/extrinsics) that applies to a
-/// frame's camera. `0` means no calibration identity was published; a
-/// conformal consumer must treat that as "calibration unavailable" and never
-/// assume a default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CalibrationId(pub u32);
-
-impl CalibrationId {
-    /// The sentinel meaning no calibration identity was published.
-    pub const NONE: Self = Self(0);
-
-    /// Whether a calibration identity was actually published for this frame.
-    #[must_use]
-    pub const fn is_published(self) -> bool {
-        self.0 != 0
-    }
-}
 
 /// Whether a frame's capture clock can be related to the flight-state clock,
 /// and with what error.
@@ -247,9 +245,9 @@ mod tests {
     }
 
     #[test]
-    fn calibration_none_is_unpublished() {
-        assert!(!CalibrationId::NONE.is_published());
-        assert!(CalibrationId(1).is_published());
+    fn calibration_none_is_not_referenced() {
+        assert!(!CalibrationId::NONE.is_referenced());
+        assert!(CalibrationId(1).is_referenced());
     }
 
     #[test]
@@ -261,7 +259,7 @@ mod tests {
             mapping: CaptureClockMapping::Unavailable,
         };
         assert_eq!(capture.camera_id, CameraId(1));
-        assert!(!capture.calibration_id.is_published());
+        assert!(!capture.calibration_id.is_referenced());
         assert!(!capture.mapping.is_available());
     }
 }

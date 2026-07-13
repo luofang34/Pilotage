@@ -19,7 +19,9 @@
 
 use pilotage_frames::Epoch;
 
-use crate::availability::{ExternalHealth, SvsAvailability, SvsInputs, derive_inputs};
+use crate::availability::{
+    AvailabilityProfile, ExternalHealth, SvsAvailability, SvsInputs, derive_inputs,
+};
 use crate::error::{AbiError, GeoError};
 use crate::identity::{StatedAttitude, StatedPosition};
 use crate::view::ProjectionView;
@@ -66,15 +68,20 @@ pub struct RawSvsFrame {
 }
 
 impl RawSvsFrame {
-    /// Validates the raw inputs and derives availability, failing closed on any
-    /// structural violation: a non-finite or out-of-range position, an
-    /// incomplete datum identity, a non-unit aircraft attitude, or an invalid
-    /// view. Availability (including time/coherence) is *derived*, never stated.
+    /// Validates the raw inputs and derives availability against `profile`,
+    /// failing closed on any structural violation: a non-finite or out-of-range
+    /// position, an incomplete datum identity, a non-unit aircraft attitude, or
+    /// an invalid view. Availability (including time/coherence) is *derived*,
+    /// never stated; the caller supplies the profile whose freshness and accuracy
+    /// limits the derivation is judged against, and its identity is bound into the
+    /// result. The wire carries no profile — it is receiver-side evaluation
+    /// context, so the same bytes can be judged under different intended
+    /// functions.
     ///
     /// # Errors
     ///
     /// A [`GeoError`] describing the first structural violation.
-    pub fn validate(&self) -> Result<ValidatedSvsFrame, GeoError> {
+    pub fn validate(&self, profile: &AvailabilityProfile) -> Result<ValidatedSvsFrame, GeoError> {
         self.position.position.validate()?;
         if self
             .attitude
@@ -91,6 +98,7 @@ impl RawSvsFrame {
             self.view,
             self.external,
             self.reference_time,
+            profile,
         ))
     }
 }
@@ -99,7 +107,9 @@ impl RawSvsFrame {
 /// are computed from the inputs and cannot be set independently: the fields are
 /// private and the only ways to obtain one are [`RawSvsFrame::validate`] and
 /// [`decode_frame`]. There is no path by which an untrusted input yields an
-/// [`SvsAvailability::Available`] frame.
+/// [`SvsAvailability::Available`] frame. The evaluation [`AvailabilityProfile`]
+/// the verdict was judged against is bound in, so a verdict is traceable to the
+/// exact freshness and accuracy limits that produced it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ValidatedSvsFrame {
     position: StatedPosition,
@@ -107,21 +117,24 @@ pub struct ValidatedSvsFrame {
     view: ProjectionView,
     external: ExternalHealth,
     reference_time: Epoch,
+    profile: AvailabilityProfile,
     inputs: SvsInputs,
     availability: SvsAvailability,
 }
 
 impl ValidatedSvsFrame {
-    /// Derives the input health and availability and assembles the frame. The
-    /// caller must have already validated the structural invariants.
+    /// Derives the input health and availability against `profile` and assembles
+    /// the frame. The caller must have already validated the structural
+    /// invariants.
     fn assemble(
         position: StatedPosition,
         attitude: StatedAttitude,
         view: ProjectionView,
         external: ExternalHealth,
         reference_time: Epoch,
+        profile: &AvailabilityProfile,
     ) -> Self {
-        let inputs = derive_inputs(&position, &attitude, &external, reference_time);
+        let inputs = derive_inputs(&position, &attitude, &external, reference_time, profile);
         let availability = SvsAvailability::assess(&inputs);
         Self {
             position,
@@ -129,6 +142,7 @@ impl ValidatedSvsFrame {
             view,
             external,
             reference_time,
+            profile: *profile,
             inputs,
             availability,
         }
@@ -169,6 +183,12 @@ impl ValidatedSvsFrame {
     pub fn availability(&self) -> SvsAvailability {
         self.availability
     }
+    /// The evaluation profile the availability verdict was judged against, so the
+    /// verdict is traceable to its freshness and accuracy limits.
+    #[must_use]
+    pub fn profile(&self) -> AvailabilityProfile {
+        self.profile
+    }
 }
 
 /// Serializes one validated frame into its fixed-size canonical byte form. Only
@@ -180,15 +200,21 @@ pub fn encode_frame(frame: &ValidatedSvsFrame) -> [u8; SVS_FRAME_LEN] {
 }
 
 /// Decodes one frame from its canonical byte form, failing closed, and derives
-/// availability from the decoded inputs.
+/// availability from the decoded inputs against `profile`. The wire bytes carry
+/// no profile: the same block decodes identically regardless of `profile`, and
+/// only the derived availability differs, so the profile is receiver-controlled
+/// evaluation context rather than producer data.
 ///
 /// # Errors
 ///
 /// [`AbiError`] on a wrong-length buffer, an unsupported version, an unknown
 /// enumerated value, a non-finite coordinate, a non-unit attitude, or a
 /// semantically malformed block.
-pub fn decode_frame(buf: &[u8]) -> Result<ValidatedSvsFrame, AbiError> {
-    codec::decode(buf)
+pub fn decode_frame(
+    buf: &[u8],
+    profile: &AvailabilityProfile,
+) -> Result<ValidatedSvsFrame, AbiError> {
+    codec::decode(buf, profile)
 }
 
 #[cfg(test)]

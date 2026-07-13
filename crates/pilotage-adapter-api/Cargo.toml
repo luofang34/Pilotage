@@ -11,6 +11,7 @@ workspace = true
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 pilotage-frames = { workspace = true }
+pilotage-calibration-id = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 sha2 = "0.10.9"

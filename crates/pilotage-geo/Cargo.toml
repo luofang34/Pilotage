@@ -9,5 +9,6 @@ workspace = true
 
 [dependencies]
 pilotage-frames = { workspace = true }
+pilotage-calibration-id = { workspace = true }
 libm = { workspace = true }
 thiserror = { workspace = true }

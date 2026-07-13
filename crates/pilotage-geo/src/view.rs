@@ -15,26 +15,17 @@
 
 use crate::error::GeoError;
 
-/// Accepted-calibration identity. Mirrors the authoritative
-/// `pilotage-adapter-api` `CalibrationId(u32)` field for field — same width,
-/// same `0 = none` sentinel — so a geo reference and the calibration artifact
-/// it points at share one identity space with no truncation. This crate is
-/// `no_std` and adapter-api is `std`, so the type is documented-mapped here
-/// (like the datum ↔ `AltitudeClass` mapping) rather than depended on across
-/// the direction boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CalibrationId(pub u32);
+/// The one canonical calibration identity, owned by the dependency-free `no_std`
+/// `pilotage-calibration-id` leaf and re-exported here. A geo projection
+/// reference and the `std` calibration artifact it points at are the *same*
+/// type over one identity space, not two mirrored `u32`s a lossy conversion
+/// could drift apart.
+pub use pilotage_calibration_id::CalibrationId;
 
-impl CalibrationId {
-    /// The sentinel meaning no calibration identity is referenced.
-    pub const NONE: Self = Self(0);
-
-    /// Whether a calibration identity is actually referenced.
-    #[must_use]
-    pub const fn is_referenced(self) -> bool {
-        self.0 != 0
-    }
-}
+/// Compile-time proof that geo's `CalibrationId` *is* the leaf's, not a second
+/// definition: a leaf value must be usable here with no conversion. If this
+/// re-export is ever replaced by a local type, the coercion fails the build.
+const _: fn(CalibrationId) -> pilotage_calibration_id::CalibrationId = |id| id;
 
 /// A reference to one accepted, validated calibration artifact — identity and
 /// content hash only. The view is meaningless without it, and it deliberately
