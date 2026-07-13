@@ -40,6 +40,7 @@ import {
   startDisplayLoop,
   tickInstrumentSet,
 } from "./instrument-health.js";
+import { TurnDerivation } from "./turn-derivation.js";
 import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
@@ -133,6 +134,7 @@ function retireSessionPresentation(phase) {
   // Drop the previous session's snapshot history so a new session can never
   // associate a video frame against a stale snapshot from the old one.
   snapshotHistory.reset();
+  turnDerivation.reset();
   setTelemetrySessionState(els, phase);
 }
 
@@ -937,6 +939,13 @@ async function startControlLoop(transport, token) {
 
 // ---- instrument panels (ADR-0017) -------------------------------------------
 
+// DYN-01: turn-rate derivation is measurement-coherent — it advances
+// only on a NEW accepted heading measurement identity and differences
+// over the acquisition clock (see turn-derivation.js). Rendering
+// cadence cannot inflate or zero the rate, and session retirement
+// resets it below.
+const turnDerivation = new TurnDerivation();
+
 /** The explicit SIM heading declaration: local-NED yaw from the
  * published attitude quaternion, declared sim-local-true. Returns null
  * when no attitude estimate exists — no sample, never a zero heading. */
@@ -947,40 +956,6 @@ function declaredSimHeading(attitude) {
   return { rad: yaw, reference: 2, ageMs: attitude.ageMs };
 }
 
-// DYN-01: the feeder — never the display — derives the turn indication,
-// as heading rate by circular differencing of consecutive declared SIM
-// headings on the feeder's own coherent clock. Documented limits: a
-// sample pair closer than MIN_TURN_DT_MS is too noisy to differentiate
-// and one farther apart than MAX_TURN_DT_MS is stale for a rate; both
-// yield no sample rather than a wild or frozen rate. Slip has no sim
-// source and is deliberately never fabricated.
-const MIN_TURN_DT_MS = 5;
-const MAX_TURN_DT_MS = 500;
-const turnDerivation = { headingRad: null, atMs: null };
-
-function derivedSimTurn(heading, nowMs) {
-  if (!heading) {
-    turnDerivation.headingRad = null;
-    turnDerivation.atMs = null;
-    return null;
-  }
-  const prevRad = turnDerivation.headingRad;
-  const prevAt = turnDerivation.atMs;
-  turnDerivation.headingRad = heading.rad;
-  turnDerivation.atMs = nowMs;
-  if (prevRad === null) return null;
-  const dtMs = nowMs - prevAt;
-  if (!(dtMs >= MIN_TURN_DT_MS && dtMs <= MAX_TURN_DT_MS)) return null;
-  // Circular difference into (-π, π] so 359°→1° is +2°, never −358°.
-  let delta = (heading.rad - prevRad) % (2 * Math.PI);
-  if (delta > Math.PI) delta -= 2 * Math.PI;
-  if (delta <= -Math.PI) delta += 2 * Math.PI;
-  return {
-    turnBasis: 0, // heading rate
-    turnRps: delta / (dtMs / 1000),
-    ageMs: heading.ageMs,
-  };
-}
 
 /** Maps the latest wire avionics estimate into the instrument state ABI
  * and draws both panels; runs on the display's own rAF cadence. Every
@@ -1014,7 +989,11 @@ function renderInstruments() {
   // its own, so removing this declaration flags HDG instead of
   // freezing a fabricated rose.
   const heading = declaredSimHeading(attitude);
-  const dynamics = derivedSimTurn(heading, performance.now());
+  const dynamics = turnDerivation.update(
+    heading === null ? NaN : heading.rad,
+    heading === null ? NaN : heading.ageMs,
+    attitude?.stamp ?? null,
+  );
   const panelState = {
     attitude,
     kinematics,
