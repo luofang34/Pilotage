@@ -1,0 +1,2 @@
+# SIM / NOT FOR FLIGHT. Self-test fixture: no reference entries at all. The
+# guard must FAIL closed rather than reporting green on absent data.

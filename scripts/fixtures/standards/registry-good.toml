@@ -1,0 +1,31 @@
+# SIM / NOT FOR FLIGHT. Self-test fixture: a corrected registry that must PASS.
+# Mirrors the shape of docs/instruments/standards-registry.toml.
+
+[[reference]]
+std_id = "STD-061"
+title = "FAA AC 20-167B — airworthiness approval of EVS/EFVS/CVS equipment"
+selected_revision = "AC 20-167B"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1044323"
+supersedes = "AC 20-167A"
+verified_on = "2026-07-13"
+
+[[reference]]
+std_id = "STD-062"
+title = "FAA AC 20-185A — airworthiness approval of SVS/SVGS/ASA-SVS equipment"
+selected_revision = "AC 20-185A"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1039337"
+supersedes = "AC 20-185"
+verified_on = "2026-07-13"
+
+[[reference]]
+std_id = "STD-066"
+title = "RTCA DO-407 / EUROCAE ED-326 — MASPS for SVS, SVGS, and CVS"
+selected_revision = "DO-407 / ED-326"
+authority_status = "latest engineering baseline"
+publisher_url = "https://www.rtca.org/news/new-rtca-technical-products-address-global-aviation-functions-and-performance/"
+secondary_url = "https://www.eurocae.net/product/ed-326-masps-for-svs-svgs-cvs/"
+supersedes = ""
+authority_recognition = "unresolved"
+verified_on = "2026-07-13"
