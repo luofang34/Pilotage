@@ -275,6 +275,47 @@ fn inverted_flight_is_unambiguous() {
 }
 
 #[test]
+fn chevrons_point_toward_the_horizon_even_inverted() {
+    // The recovery cue is defined as pointing toward the horizon: nose-high
+    // puts the horizon below the symbol so the chevron points down, nose-low
+    // mirrors it. That must hold at every orientation, including inverted
+    // flight (bank beyond 90°) — the sense keys on the display pitch and
+    // never silently reverses. Sweep the inverted band and assert the
+    // invariant `HorizonBelow ⟺ display pitch above the horizon`.
+    let profile = AirframeDisplayProfile::simulator();
+    let rolls = [120.0f64, 150.0, 180.0, -150.0, -120.0];
+    let mut inverted_with_cue = 0;
+    for &roll in rolls.iter() {
+        let mut pitch = -70.0f64;
+        while pitch <= 70.0 {
+            let mut state = UnusualAttitudeState::default();
+            let p = state.step(quat_f64(roll, pitch, 0.0), &profile);
+            if p.bank_rad.abs() > PI / 2.0 {
+                assert!(
+                    p.inverted,
+                    "roll {roll} pitch {pitch}: bank beyond 90° reads inverted"
+                );
+            }
+            if let Some(sense) = p.chevrons {
+                assert_eq!(
+                    sense == ChevronSense::HorizonBelow,
+                    p.pitch_rad > 0.0,
+                    "roll {roll} pitch {pitch}: chevron must point to the horizon side",
+                );
+                if p.inverted {
+                    inverted_with_cue += 1;
+                }
+            }
+            pitch += 5.0;
+        }
+    }
+    assert!(
+        inverted_with_cue > 0,
+        "the sweep must exercise recovery cues while inverted"
+    );
+}
+
+#[test]
 fn threshold_jitter_cannot_chatter() {
     // Oscillate ±0.5° around the 65° bank entry: one engagement, no
     // release until the 60° exit is crossed.
