@@ -42,10 +42,12 @@ pub(crate) async fn spawn_camera_bridge() -> (
         Ok(mut bridge) => {
             let (tx, rx) = tokio::sync::mpsc::channel(4);
             // Aviate has no correlation between the sim capture clock and the
-            // flight controller's clock, so the mapping is unavailable.
+            // flight controller's clock, so the mapping is unavailable; it also
+            // publishes no camera calibration.
             let mut stamper = FrameStamper::new(
                 incarnation,
                 pilotage_adapter_api::CaptureClockMapping::Unavailable,
+                std::collections::BTreeMap::new(),
             );
             let forwarder = bridge.take_frame_rx().map(|mut bridge_rx| {
                 tokio::spawn(async move {

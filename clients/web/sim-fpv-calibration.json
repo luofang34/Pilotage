@@ -1,0 +1,5 @@
+{
+  "description": "Published SIMULATOR onboard-FPV camera calibration (ADR-0021, schema v2). SIM / NOT FOR FLIGHT: a simulated pinhole camera and synthetic design eye, never real HUD optics. Generated from pilotage_adapter_api::calibration::sim_fpv_calibration; canonicalBase64 is the exact canonical byte form the recorded SHA-256 is taken over. Derivable quantities (field of view, pixel-to-angle factor, budget totals) are NOT stored; the browser recomputes the hash over these bytes, derives those quantities, semantically validates the parsed geometry/lifecycle/allowances, and fails closed on any mismatch or invariant violation.",
+  "canonicalBase64": "AgABAAAAAAAAAAEAAAABAAAAAAAAAIq5NZrlFQAAU6vnZ3ccAQAAAAEAAAABQAEAAPAAAADKcCshaddnQMpwKyFp12dAAAAAAAAAZEAAAAAAAABeQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJqZmZmZmfE/AAAAAAAAAAAzMzMzMzPTPwAAAAAAAOA/AAAAAAAA4L8AAAAAAADgvwAAAAAAAOC/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/pLg9HZ6k0D+AajVXczXXP4BqNVdzNdc/AAAAAAAA4D97FK5H4Xp0P/yp8dJNYmA/LUMc6+I2Kj8=",
+  "recordedHashHex": "a679741da81ac245014df30bbab39e20afd41c5a06c84ea22fa49b23d3926a1c"
+}

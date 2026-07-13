@@ -32,18 +32,27 @@ pub struct FrameStamper {
     incarnation: SourceIncarnation,
     epoch: u32,
     mapping: CaptureClockMapping,
+    calibrations: BTreeMap<u32, CalibrationId>,
     next_sequence: BTreeMap<u8, u32>,
 }
 
 impl FrameStamper {
     /// Builds a stamper for one attachment identified by `incarnation`, whose
-    /// frames map to the flight-state clock via `mapping`.
+    /// frames map to the flight-state clock via `mapping`. `calibrations` binds
+    /// a camera id to its published calibration id; a camera absent from the
+    /// map stamps [`CalibrationId::NONE`], so a conformal consumer keeps its
+    /// gate closed for it.
     #[must_use]
-    pub fn new(incarnation: SourceIncarnation, mapping: CaptureClockMapping) -> Self {
+    pub fn new(
+        incarnation: SourceIncarnation,
+        mapping: CaptureClockMapping,
+        calibrations: BTreeMap<u32, CalibrationId>,
+    ) -> Self {
         Self {
             incarnation,
             epoch: 0,
             mapping,
+            calibrations,
             next_sequence: BTreeMap::new(),
         }
     }
@@ -88,8 +97,13 @@ impl FrameStamper {
             capture: VideoCaptureStamp {
                 stamp,
                 camera_id: CameraId(frame.camera_id),
-                // The Gazebo sidecar publishes no calibration identity.
-                calibration_id: CalibrationId::NONE,
+                // The published calibration for this camera, if any; a camera
+                // with no published calibration stamps NONE.
+                calibration_id: self
+                    .calibrations
+                    .get(&frame.camera_id)
+                    .copied()
+                    .unwrap_or(CalibrationId::NONE),
                 mapping: self.mapping,
             },
         }
@@ -109,12 +123,21 @@ impl FrameStamper {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::FrameStamper;
     use pilotage_adapter_api::{
         CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, SourceIncarnation,
     };
 
     use crate::wire::BridgeFrame;
+
+    /// Test calibration binding: camera 0 resolves to calibration id 7.
+    fn calibrations() -> BTreeMap<u32, CalibrationId> {
+        let mut map = BTreeMap::new();
+        map.insert(0, CalibrationId(7));
+        map
+    }
 
     fn bridge_frame(camera_id: u32, sim_time_ns: u64) -> BridgeFrame {
         BridgeFrame {
@@ -131,6 +154,7 @@ mod tests {
         FrameStamper::new(
             SourceIncarnation::new([9; 16]),
             CaptureClockMapping::identity(MeasurementClock::Simulation),
+            calibrations(),
         )
     }
 
@@ -196,9 +220,27 @@ mod tests {
         let mut stamper = FrameStamper::new(
             SourceIncarnation::new([1; 16]),
             CaptureClockMapping::Unavailable,
+            BTreeMap::new(),
         );
         let frame = stamper.stamp(bridge_frame(0, 1));
         assert!(!frame.capture.mapping.is_available());
         assert_eq!(frame.capture.mapping.error_bound_ns(), None);
+    }
+
+    #[test]
+    fn calibration_is_stamped_for_bound_cameras_only() {
+        let mut stamper = stamper();
+        let fpv = stamper.stamp(bridge_frame(0, 1));
+        let chase = stamper.stamp(bridge_frame(1, 2));
+        assert_eq!(
+            fpv.capture.calibration_id,
+            CalibrationId(7),
+            "the bound FPV camera stamps its published calibration"
+        );
+        assert_eq!(
+            chase.capture.calibration_id,
+            CalibrationId::NONE,
+            "an unbound camera stamps NONE and stays gate-closed"
+        );
     }
 }

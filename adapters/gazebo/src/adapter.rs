@@ -7,11 +7,13 @@
 //! frames are exposed alongside the trait via [`GazeboAdapter::subscribe_frames`]
 //! because streaming video does not fit the pull-based `sample_telemetry` shape.
 
+use std::collections::BTreeMap;
+
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, CaptureClockMapping, Disposition, ExecutionMode,
-    LinkLossPolicy, MeasurementClock, Pose2d, RejectReason, ScopeDescriptor, SourceIncarnation,
-    StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter, VehicleDescriptor,
-    VideoCaptureStamp, VideoSource,
+    AdapterCapabilities, ApplyOutcome, CalibrationId, CaptureClockMapping, Disposition,
+    ExecutionMode, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason, SIM_FPV_CALIBRATION_ID,
+    SIM_FPV_CAMERA_ID, ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch,
+    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoCaptureStamp, VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
@@ -100,7 +102,11 @@ impl GazeboAdapter {
         let mut bridge = BridgeClient::spawn_and_connect(config).await?;
 
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(depth);
-        let stamper = FrameStamper::new(new_incarnation()?, sim_capture_mapping());
+        let stamper = FrameStamper::new(
+            new_incarnation()?,
+            sim_capture_mapping(),
+            sim_calibrations(),
+        );
         let frame_forwarder = bridge
             .take_frame_rx()
             .map(|bridge_rx| tokio::spawn(forward_frames(bridge_rx, raw_tx, stamper)));
@@ -119,7 +125,11 @@ impl GazeboAdapter {
     #[cfg(test)]
     fn from_bridge(vehicle: VehicleId, mut bridge: BridgeClient) -> Self {
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(4);
-        let stamper = FrameStamper::new(SourceIncarnation::new([0; 16]), sim_capture_mapping());
+        let stamper = FrameStamper::new(
+            SourceIncarnation::new([0; 16]),
+            sim_capture_mapping(),
+            sim_calibrations(),
+        );
         let frame_forwarder = bridge
             .take_frame_rx()
             .map(|bridge_rx| tokio::spawn(forward_frames(bridge_rx, raw_tx, stamper)));
@@ -270,6 +280,16 @@ fn new_incarnation() -> Result<SourceIncarnation, GazeboAdapterError> {
 /// mapping is the identity with zero residual error (ADR-0020).
 fn sim_capture_mapping() -> CaptureClockMapping {
     CaptureClockMapping::identity(MeasurementClock::Simulation)
+}
+
+/// Camera-to-calibration bindings this adapter publishes: the onboard FPV
+/// camera resolves to the published simulator FPV calibration (ADR-0021). The
+/// chase camera has no published calibration, so it stamps `NONE` and keeps a
+/// conformal consumer's gate closed for it.
+fn sim_calibrations() -> BTreeMap<u32, CalibrationId> {
+    let mut calibrations = BTreeMap::new();
+    calibrations.insert(SIM_FPV_CAMERA_ID, CalibrationId(SIM_FPV_CALIBRATION_ID));
+    calibrations
 }
 
 /// Forwards `BridgeFrame`s to the adapter's `RawVideoFrame` channel, stamping
