@@ -316,6 +316,34 @@ fn chevrons_point_toward_the_horizon_even_inverted() {
 }
 
 #[test]
+fn recovery_indication_starts_within_one_second() {
+    // Human-factors acceptance, deterministic logic bound only — real pilot
+    // response and HIL timing are separate evidence, not asserted here. Once
+    // the attitude is unusual, the display must begin the correct recovery
+    // indication within one second. At a 50 Hz refresh that is 50 frames; the
+    // tier machine raises the chevron on the first frame past the threshold,
+    // far inside the budget, pointed toward the horizon.
+    const BUDGET_FRAMES: u32 = 50;
+    let profile = AirframeDisplayProfile::simulator();
+    let mut state = UnusualAttitudeState::default();
+    let unusual = quat_f64(0.0, 55.0, 0.0); // beyond the +50° chevron entry
+    let mut onset = None;
+    for frame in 0..BUDGET_FRAMES {
+        let p = state.step(unusual, &profile);
+        if onset.is_none() && p.chevrons.is_some() {
+            onset = Some((frame, p.chevrons));
+        }
+    }
+    let (frame, sense) = onset.expect("recovery chevron appears within one second");
+    assert!(frame < BUDGET_FRAMES, "onset within the one-second budget");
+    assert_eq!(
+        sense,
+        Some(ChevronSense::HorizonBelow),
+        "the recovery cue points toward the horizon for a nose-high upset"
+    );
+}
+
+#[test]
 fn threshold_jitter_cannot_chatter() {
     // Oscillate ±0.5° around the 65° bank entry: one engagement, no
     // release until the 60° exit is crossed.
@@ -378,6 +406,7 @@ fn invalid_profiles_are_rejected() {
         chevron_pitch_up: good,
         chevron_pitch_down: good,
         bank_hold_pitch: good,
+        min_reverse_band: 2.5 * DEG,
     };
     assert!(AirframeDisplayProfile::new(base).is_ok());
     let mut inverted = base;
@@ -397,5 +426,19 @@ fn invalid_profiles_are_rejected() {
     assert_eq!(
         AirframeDisplayProfile::new(nan),
         Err(ProfileError::NonFinite)
+    );
+    // A non-positive or too-large reverse-color band is rejected: the band
+    // must leave the horizon room inside the field.
+    let mut no_band = base;
+    no_band.min_reverse_band = 0.0;
+    assert_eq!(
+        AirframeDisplayProfile::new(no_band),
+        Err(ProfileError::OutOfRange)
+    );
+    let mut huge_band = base;
+    huge_band.min_reverse_band = 45.0 * DEG;
+    assert_eq!(
+        AirframeDisplayProfile::new(huge_band),
+        Err(ProfileError::OutOfRange)
     );
 }

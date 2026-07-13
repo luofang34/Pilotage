@@ -14,17 +14,33 @@ use crate::palette;
 
 const PX_PER_DEG_PITCH: f32 = 7.2;
 const ROLL_ARC_R: f32 = 144.0;
+/// Half the panel height expressed in degrees of pitch: the pitch at which
+/// the level horizon reaches the top/bottom edge. Beyond it the true
+/// horizon has left the viewport.
+const VIEWPORT_HALF_PITCH_DEG: f32 = (crate::PANEL_H / 2.0) / PX_PER_DEG_PITCH;
 /// Pitch-ladder marks are culled beyond this radius so they stay inside
 /// the roll arc (the pyG5 clip).
 const LADDER_MAX_Y: f32 = 104.0;
 
 /// Optional sky/ground fill in the roll-rotated attitude frame.
+///
+/// The fill boundary is clamped so that at extreme pitch — when the true
+/// horizon has left the viewport — a minimum reverse-color band of the
+/// opposite field stays at the edge, and the attitude background never
+/// collapses to a single flat color. The band sits on the physical
+/// ground/sky side (the sign of display pitch), not an Euler branch, and
+/// its thickness is the profile's `min_reverse_band`. The pitch ladder and
+/// horizon line keep the true, unclamped pitch (they cull off-screen), so
+/// only the color field is held.
 pub fn draw_background(
     scene: &mut SceneWriter<'_>,
     roll_rad: f32,
     pitch_rad: f32,
+    min_reverse_band_rad: f32,
 ) -> Result<(), SceneError> {
-    let pitch_deg = pitch_rad * RAD_TO_DEG;
+    let band_deg = min_reverse_band_rad * RAD_TO_DEG;
+    let fill_limit_deg = VIEWPORT_HALF_PITCH_DEG - band_deg;
+    let pitch_deg = (pitch_rad * RAD_TO_DEG).clamp(-fill_limit_deg, fill_limit_deg);
     let horizon_y = pitch_deg * PX_PER_DEG_PITCH;
 
     scene.save()?;

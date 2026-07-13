@@ -27,6 +27,13 @@ const CY: f64 = PANEL_H as f64 / 2.0;
 /// Horizon geometry constant shared with `pfd/horizon.rs`: screen pixels
 /// per degree of display pitch.
 const PX_PER_DEG_PITCH: f64 = 7.2;
+/// The simulator profile's minimum reverse-color band, in degrees of pitch.
+const SIM_BAND_DEG: f64 = 2.5;
+/// Pitch at which the level horizon reaches the panel edge (180 px / 7.2).
+const VIEWPORT_HALF_PITCH_DEG: f64 = 25.0;
+/// Display pitch beyond which the background fill boundary is clamped so the
+/// reverse-color band survives. Mirrors `horizon.rs`.
+const FILL_LIMIT_DEG: f64 = VIEWPORT_HALF_PITCH_DEG - SIM_BAND_DEG;
 
 /// Sky and ground fills (mirrors `panels::palette`), the only two colors a
 /// clean background sample can take.
@@ -51,11 +58,11 @@ fn euler_quat(roll_deg: f32, pitch_deg: f32, yaw_deg: f32) -> Quat {
 
 /// A valid flying state at the given orientation, populated enough that the
 /// PFD paints every band.
-fn state_at(roll_deg: f32, pitch_deg: f32) -> AircraftState {
+fn state_from_quat(quat: Quat) -> AircraftState {
     let mut state = AircraftState {
         attitude: Stamped {
             data: Some(Attitude {
-                quat: euler_quat(roll_deg, pitch_deg, 0.0),
+                quat,
                 rates_rps: [0.0, 0.0, 0.0],
             }),
             age_ms: Some(20.0),
@@ -114,7 +121,12 @@ fn ref_is_sky(px: u32, py: u32, pitch_rad: f64, bank_rad: f64) -> bool {
     let dx = f64::from(px) + 0.5 - CX;
     let dy = f64::from(py) + 0.5 - CY;
     let y_rot = dx * bank_rad.sin() + dy * bank_rad.cos();
-    let horizon_y = pitch_rad.to_degrees() * PX_PER_DEG_PITCH;
+    // The fill boundary is clamped to preserve the reverse-color band, so the
+    // oracle clamps the same way; the sign (physical ground/sky side) is kept.
+    let fill_deg = pitch_rad
+        .to_degrees()
+        .clamp(-FILL_LIMIT_DEG, FILL_LIMIT_DEG);
+    let horizon_y = fill_deg * PX_PER_DEG_PITCH;
     y_rot < horizon_y
 }
 
@@ -152,7 +164,12 @@ fn classify(px: [u8; 3]) -> Fill {
 
 /// Renders the PFD at an orientation into an RGBA framebuffer.
 fn render_pfd(roll_deg: f32, pitch_deg: f32) -> Vec<u8> {
-    let data = resolve(&state_at(roll_deg, pitch_deg), &FreshnessPolicy::default());
+    render_quat(euler_quat(roll_deg, pitch_deg, 0.0))
+}
+
+/// Renders the PFD from a raw attitude quaternion into an RGBA framebuffer.
+fn render_quat(quat: Quat) -> Vec<u8> {
+    let data = resolve(&state_from_quat(quat), &FreshnessPolicy::default());
     let mut buf = std::vec![0u8; MAX_SCENE_BYTES];
     let mut writer = SceneWriter::new(&mut buf).expect("writer");
     draw_pfd(&data, &PfdConfig::default(), None, &mut writer).expect("pfd");
@@ -297,36 +314,105 @@ fn sky_ground_band_matches_the_independent_reference() {
     }
 }
 
+/// Sky and ground pixel counts over the clean background band.
+fn bg_counts(fb: &[u8]) -> (u32, u32) {
+    let (mut sky, mut ground) = (0u32, 0u32);
+    let mut py = 4;
+    while py < H - 4 {
+        let mut px = 4;
+        while px < W - 4 {
+            if is_clean_bg(px, py) {
+                match classify(pixel(fb, px, py)) {
+                    Fill::Sky => sky += 1,
+                    Fill::Ground => ground += 1,
+                    Fill::Other => {}
+                }
+            }
+            px += 6;
+        }
+        py += 6;
+    }
+    (sky, ground)
+}
+
 #[test]
-fn passage_through_the_vertical_never_flips_sky_ground() {
-    // Acceptance: continuous passage through ±90° must not flip sky/ground
-    // meaning. Nose high through 89/90/91° keeps the display filled with
-    // sky (looking up); nose low keeps it ground. A flip would swap the
-    // dominant band between adjacent steps.
+fn extreme_pitch_keeps_a_reverse_color_band() {
+    // Reopened ATT-01 defect: at ±89/90/91° the true horizon leaves the 360 px
+    // viewport and the background used to collapse to a single flat color,
+    // losing one of its two orientation cues. The clamped fill now keeps a
+    // minimum band of the REVERSE color. Looking up (nose-high) sky dominates
+    // with a ground band still present; looking down, ground dominates with a
+    // sky band. The sky/ground MEANING never flips (the dominant field stays
+    // correct through the vertical); only the band's edge follows the physical
+    // orientation over the top. Both colors are always present — never one flat
+    // field.
+    const MIN_BAND: u32 = 40;
     for pitch in [89.0f32, 90.0, 91.0] {
-        let fb = render_pfd(0.0, pitch);
-        assert_eq!(
-            strip_fill(&fb, 8),
-            Fill::Sky,
-            "nose-high {pitch}° top stays sky"
+        let (sky, ground) = bg_counts(&render_pfd(0.0, pitch));
+        assert!(
+            sky > ground,
+            "nose-high {pitch}°: sky dominates (no meaning flip)"
         );
-        assert_eq!(
-            strip_fill(&fb, H - 8),
-            Fill::Sky,
-            "nose-high {pitch}° bottom stays sky (no flip)"
+        assert!(
+            ground > MIN_BAND,
+            "nose-high {pitch}°: reverse-color ground band present"
         );
     }
     for pitch in [-89.0f32, -90.0, -91.0] {
-        let fb = render_pfd(0.0, pitch);
-        assert_eq!(
-            strip_fill(&fb, 8),
-            Fill::Ground,
-            "nose-low {pitch}° top stays ground"
+        let (sky, ground) = bg_counts(&render_pfd(0.0, pitch));
+        assert!(
+            ground > sky,
+            "nose-low {pitch}°: ground dominates (no meaning flip)"
         );
+        assert!(
+            sky > MIN_BAND,
+            "nose-low {pitch}°: reverse-color sky band present"
+        );
+    }
+    // At the upright extremes (just short of vertical, before the display goes
+    // over the top) the band sits on the physically correct edge.
+    let up = render_pfd(0.0, 89.0);
+    assert_eq!(strip_fill(&up, 8), Fill::Sky, "nose-high 89°: sky above");
+    assert_eq!(
+        strip_fill(&up, H - 6),
+        Fill::Ground,
+        "nose-high 89°: ground reverse-band at the bottom edge"
+    );
+    let down = render_pfd(0.0, -89.0);
+    assert_eq!(
+        strip_fill(&down, 6),
+        Fill::Sky,
+        "nose-low 89°: sky reverse-band at the top edge"
+    );
+    assert_eq!(
+        strip_fill(&down, H - 8),
+        Fill::Ground,
+        "nose-low 89°: ground below"
+    );
+}
+
+#[test]
+fn q_and_negated_q_render_identically() {
+    // q and -q are one physical orientation; the SO(3)-safe presentation reads
+    // only quadratic quaternion forms, so the lit frame must be byte-identical
+    // — proven at the raster, across the extreme envelope and the band.
+    for (roll, pitch, yaw) in [
+        (0.0f32, 89.0f32, 0.0f32),
+        (180.0, 0.0, 30.0),
+        (150.0, 12.0, -20.0),
+        (0.0, -90.0, 0.0),
+    ] {
+        let q = euler_quat(roll, pitch, yaw);
+        let nq = Quat {
+            w: -q.w,
+            x: -q.x,
+            y: -q.y,
+            z: -q.z,
+        };
         assert_eq!(
-            strip_fill(&fb, H - 8),
-            Fill::Ground,
-            "nose-low {pitch}° bottom stays ground (no flip)"
+            render_quat(q),
+            render_quat(nq),
+            "roll {roll} pitch {pitch}: q and -q must render identically"
         );
     }
 }
