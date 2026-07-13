@@ -52,9 +52,8 @@ pub use abi::{
     ABI_VERSION, RawSvsFrame, SVS_FRAME_LEN, ValidatedSvsFrame, decode_frame, encode_frame,
 };
 pub use availability::{
-    AvailabilityReason, ExternalHealth, InputHealth, MAX_FRESH_AGE_NS, MAX_FRESH_ATT_MRAD,
-    MAX_FRESH_POS_MM, MAX_USABLE_AGE_NS, MAX_USABLE_ATT_MRAD, MAX_USABLE_POS_MM, SvsAvailability,
-    SvsInputs, derive_inputs, health_from_integrity,
+    AvailabilityProfile, AvailabilityProfileId, AvailabilityReason, ExternalHealth, InputHealth,
+    SIMULATOR_PROFILE_ID, SvsAvailability, SvsInputs, derive_inputs, health_from_integrity,
 };
 pub use datum::{
     BaroSettingId, DatumRealizationId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum,

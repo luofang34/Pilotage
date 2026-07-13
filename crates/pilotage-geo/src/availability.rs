@@ -13,38 +13,11 @@
 
 use pilotage_frames::Epoch;
 
-use crate::identity::{
-    AttitudeQuality, IntegrityLevel, PositionQuality, StatedAttitude, StatedPosition,
-};
+use crate::identity::{IntegrityLevel, PositionQuality, StatedAttitude, StatedPosition};
 
-/// Position/attitude older than this is stale and degrades the scene. A
-/// conformal scene at typical closing speeds is visibly wrong within a few
-/// hundred milliseconds of latency, so freshness beyond this bound is not
-/// trustworthy at full assurance.
-pub const MAX_FRESH_AGE_NS: u64 = 200_000_000;
+mod profile;
 
-/// Position/attitude older than this is unusable for a scene: at this age the
-/// registration error is unbounded for any useful motion, so the input fails
-/// rather than degrades.
-pub const MAX_USABLE_AGE_NS: u64 = 1_000_000_000;
-
-/// Position 1-sigma accuracy (per axis) beyond this degrades the scene: a few
-/// meters of registration error is visible but a conformal overlay can still
-/// aid orientation. A conservative SIM placeholder; a flight profile derives
-/// its own from the assurance allocation.
-pub const MAX_FRESH_POS_MM: u32 = 5_000;
-
-/// Position 1-sigma accuracy (per axis) beyond this is unusable for a scene:
-/// tens of meters places symbology on the wrong feature, so the input fails.
-pub const MAX_USABLE_POS_MM: u32 = 50_000;
-
-/// Attitude 1-sigma accuracy beyond this degrades the scene: about half a
-/// degree of angular error is visible at range but still orienting.
-pub const MAX_FRESH_ATT_MRAD: u32 = 10;
-
-/// Attitude 1-sigma accuracy beyond this is unusable: several degrees of
-/// angular error swings the horizon off the true one, so the input fails.
-pub const MAX_USABLE_ATT_MRAD: u32 = 50;
+pub use profile::{AvailabilityProfile, AvailabilityProfileId, SIMULATOR_PROFILE_ID};
 
 /// The finite set of reasons synthetic vision can be degraded or unavailable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,46 +224,29 @@ const fn worse(a: InputHealth, b: InputHealth) -> InputHealth {
     if a.to_u8() >= b.to_u8() { a } else { b }
 }
 
-/// Maps a position accuracy to the health it contributes: within the fresh
-/// bound is usable, beyond the usable bound fails, and in between degrades. The
+/// Maps a position accuracy to the health it contributes under `profile`: the
 /// worse of the horizontal and vertical axes decides.
 #[must_use]
-const fn health_from_position_quality(q: PositionQuality) -> InputHealth {
-    worse(mm_health(q.horizontal_mm), mm_health(q.vertical_mm))
-}
-
-#[must_use]
-const fn mm_health(mm: u32) -> InputHealth {
-    if mm > MAX_USABLE_POS_MM {
-        InputHealth::Failed
-    } else if mm > MAX_FRESH_POS_MM {
-        InputHealth::Degraded
-    } else {
-        InputHealth::Ok
-    }
-}
-
-/// Maps an attitude accuracy to the health it contributes.
-#[must_use]
-const fn health_from_attitude_quality(q: AttitudeQuality) -> InputHealth {
-    if q.angular_mrad > MAX_USABLE_ATT_MRAD {
-        InputHealth::Failed
-    } else if q.angular_mrad > MAX_FRESH_ATT_MRAD {
-        InputHealth::Degraded
-    } else {
-        InputHealth::Ok
-    }
+const fn health_from_position_quality(
+    q: PositionQuality,
+    profile: &AvailabilityProfile,
+) -> InputHealth {
+    worse(
+        profile.position_mm_health(q.horizontal_mm),
+        profile.position_mm_health(q.vertical_mm),
+    )
 }
 
 /// Derives time/coherence health from the position and attitude stamps and the
-/// frame reference time, failing closed: incompatible clocks/scales, a future
-/// sample, no declared coherent snapshot, or an unusable age all fail; a merely
-/// stale but usable pair degrades.
+/// frame reference time under `profile`, failing closed: incompatible
+/// clocks/scales, a future sample, no declared coherent snapshot, or an unusable
+/// age all fail; a merely stale but usable pair degrades.
 #[must_use]
 fn derive_time_coherence(
     position: &StatedPosition,
     attitude: &StatedAttitude,
     reference_time: Epoch,
+    profile: &AvailabilityProfile,
 ) -> InputHealth {
     // A coherent scene requires the position and attitude to be one declared
     // coherent snapshot on one time base.
@@ -305,37 +261,32 @@ fn derive_time_coherence(
     ) else {
         return InputHealth::Failed;
     };
-    let age = pos_age.max(att_age);
-    if age > MAX_USABLE_AGE_NS {
-        InputHealth::Failed
-    } else if age > MAX_FRESH_AGE_NS {
-        InputHealth::Degraded
-    } else {
-        InputHealth::Ok
-    }
+    profile.age_health(pos_age.max(att_age))
 }
 
 /// Derives the full input health from the validated position and attitude, the
-/// producer-stated external health, and the frame reference time. Position,
-/// attitude, and time/coherence are computed here; the rest are taken as stated.
+/// producer-stated external health, the frame reference time, and the selected
+/// availability `profile`. Position, attitude, and time/coherence are computed
+/// here against the profile's limits; the rest are taken as stated.
 #[must_use]
 pub fn derive_inputs(
     position: &StatedPosition,
     attitude: &StatedAttitude,
     external: &ExternalHealth,
     reference_time: Epoch,
+    profile: &AvailabilityProfile,
 ) -> SvsInputs {
     SvsInputs {
         position: worse(
             health_from_integrity(position.stamp.integrity),
-            health_from_position_quality(position.quality),
+            health_from_position_quality(position.quality, profile),
         ),
         attitude: worse(
             health_from_integrity(attitude.stamp.integrity),
-            health_from_attitude_quality(attitude.quality),
+            profile.attitude_mrad_health(attitude.quality.angular_mrad),
         ),
         integrity: external.integrity,
-        time_coherence: derive_time_coherence(position, attitude, reference_time),
+        time_coherence: derive_time_coherence(position, attitude, reference_time, profile),
         calibration: external.calibration,
         database: external.database,
         coverage: external.coverage,

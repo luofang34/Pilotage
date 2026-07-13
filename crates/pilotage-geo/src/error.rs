@@ -106,6 +106,14 @@ pub enum GeoError {
     /// The aircraft attitude quaternion is not a unit rotation.
     #[error("aircraft attitude is not a unit rotation")]
     AttitudeNotARotation,
+    /// An availability profile limit is zero or non-monotonic (a fresh limit is
+    /// not strictly tighter than its usable limit), so the profile could admit a
+    /// reading it should reject.
+    #[error("availability profile limit {field} is invalid (zero or non-monotonic)")]
+    InvalidAvailabilityProfile {
+        /// The offending limit pair.
+        field: &'static str,
+    },
 }
 
 /// Why an age could not be computed between two epochs. There is no

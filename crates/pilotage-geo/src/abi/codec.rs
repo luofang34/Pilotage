@@ -4,7 +4,7 @@
 
 use pilotage_frames::{ClockDomain, Epoch, Quat, TimeScale};
 
-use crate::availability::{ExternalHealth, InputHealth};
+use crate::availability::{AvailabilityProfile, ExternalHealth, InputHealth};
 use crate::datum::{
     BaroSettingId, DatumRealizationId, GeodeticPosition, GeoidModelId, HorizontalDatum,
     LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition,
@@ -379,8 +379,13 @@ fn get_external(r: &mut Reader) -> Result<ExternalHealth, AbiError> {
     })
 }
 
-/// Decodes one frame from its canonical byte form, failing closed.
-pub(super) fn decode(buf: &[u8]) -> Result<ValidatedSvsFrame, AbiError> {
+/// Decodes one frame from its canonical byte form, failing closed, deriving
+/// availability against `profile`. The profile influences only the derived
+/// verdict, never how the bytes are parsed.
+pub(super) fn decode(
+    buf: &[u8],
+    profile: &AvailabilityProfile,
+) -> Result<ValidatedSvsFrame, AbiError> {
     if buf.len() != SVS_FRAME_LEN {
         return Err(AbiError::WrongLength {
             needed: SVS_FRAME_LEN,
@@ -403,5 +408,6 @@ pub(super) fn decode(buf: &[u8]) -> Result<ValidatedSvsFrame, AbiError> {
         view,
         external,
         reference_time,
+        profile,
     ))
 }
