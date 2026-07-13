@@ -55,7 +55,8 @@ export class TurnDerivation {
    * - Stream change (source/incarnation/epoch/clock): reset, then seed.
    * - Same sequence: repeated render — re-declare the cached rate with
    *   the measurement's current age; no state advance.
-   * - Serially older sequence: reordered — ignored entirely.
+   * - Serially older sequence: reordered — ignored entirely,
+   *   declaring nothing (its age must not refresh freshness).
    * - Newer sequence: difference over acquiredAtNanos within the
    *   documented bounds; out-of-bound dt seeds but declares nothing.
    */
@@ -74,7 +75,10 @@ export class TurnDerivation {
       return this.#declare(ageMs);
     }
     if (!serialIsNewer(stamp.sequence, prev.stamp.sequence)) {
-      return this.#declare(ageMs);
+      // A serially older sample is ignored ENTIRELY: it neither
+      // advances state nor produces a declaration — its age must never
+      // refresh the freshness of a rate it did not contribute to.
+      return null;
     }
     const dtMs = Number(stamp.acquiredAtNanos - prev.stamp.acquiredAtNanos) / 1e6;
     this.#prev = { headingRad, stamp };

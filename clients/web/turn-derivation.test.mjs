@@ -83,10 +83,15 @@ function stamp(sequence, atMs, over = {}) {
     "an exact duplicate re-declares without advancing state",
     dup !== null && dup.turnRps === base.turnRps,
   );
-  const reordered = d.update(50 * DEG, 5, stamp(1, 0));
+  const reordered = d.update(50 * DEG, 999, stamp(1, 0));
   check(
-    "a serially older sample is ignored entirely",
-    reordered !== null && reordered.turnRps === base.turnRps,
+    "a serially older sample declares nothing at all",
+    reordered === null,
+  );
+  const redeclared = d.update(2 * DEG, 7, stamp(2, 100));
+  check(
+    "freshness after a reorder comes only from the accepted sample's age",
+    redeclared !== null && redeclared.ageMs === 7 && redeclared.turnRps === base.turnRps,
   );
   const next = d.update(4 * DEG, 5, stamp(3, 200));
   check(
