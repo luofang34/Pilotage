@@ -1,11 +1,11 @@
-// Exact unsigned wire-range predicates for browser-side identity validators
-// (GEO-68). Every identity field decoded from the wire has one exact unsigned
-// type; these predicates enforce that type and its range, fail-closed, with no
-// clamping. A value that is negative, fractional, out of range, or of the wrong
-// numeric kind (a Number where a BigInt is required, or a BigInt where a Number
-// is required) is rejected — never coerced. Reason strings pair with the
-// predicates so a validator can report exactly which field and which rule
-// refused a value.
+// Exact unsigned wire-range predicates and typed rejection reasons for
+// browser-side identity validators (GEO-68). Every identity field decoded from
+// the wire has one exact unsigned type; these enforce that type and its range,
+// fail-closed, with no clamping. A value that is negative, fractional, out of
+// range, or of the wrong numeric kind (a Number where a BigInt is required, or
+// a BigInt where a Number is required) is rejected — never coerced. `firstFault`
+// pairs the rules with field names so a validator reports exactly which field
+// and which rule refused a value (a typed reason, not a bare boolean).
 
 /** Largest u8 wire value. */
 export const U8_MAX = 0xff;
@@ -17,11 +17,19 @@ export const U64_MAX = 0xffff_ffff_ffff_ffffn;
 /** Canonical 128-bit incarnation spelling: exactly 32 lowercase hex digits. */
 export const INCARNATION_HEX = /^[0-9a-f]{32}$/;
 
+/** The specific rule a field violated, for a typed rejection reason. */
+export const RULE = Object.freeze({
+  WRONG_KIND: "wrong-numeric-kind",
+  NEGATIVE: "negative",
+  FRACTIONAL: "fractional",
+  OUT_OF_RANGE: "out-of-range",
+  MALFORMED: "malformed",
+});
+
 /**
  * A Number-typed unsigned wire integer within `[0, max]`. Rejects a BigInt
  * (a Number field must not be given a BigInt), a fractional or non-finite
- * value, a negative value, and anything above `max`. `Number.isInteger`
- * already excludes BigInt, NaN, Infinity, and fractions.
+ * value, a negative value, and anything above `max`.
  */
 export function isUintInRange(value, max) {
   return Number.isInteger(value) && value >= 0 && value <= max;
@@ -54,4 +62,41 @@ export function isU64(value) {
 /** A 128-bit incarnation field: a string of exactly 32 lowercase hex digits. */
 export function isIncarnation(value) {
   return typeof value === "string" && INCARNATION_HEX.test(value);
+}
+
+/** The typed rule a value violates for its kind, or `null` when it is valid. */
+export function fieldFault(kind, value) {
+  switch (kind) {
+    case "u8":
+    case "u32": {
+      const max = kind === "u8" ? U8_MAX : U32_MAX;
+      if (typeof value !== "number") return RULE.WRONG_KIND;
+      if (!Number.isInteger(value)) return RULE.FRACTIONAL;
+      if (value < 0) return RULE.NEGATIVE;
+      return value > max ? RULE.OUT_OF_RANGE : null;
+    }
+    case "u64": {
+      if (typeof value !== "bigint") return RULE.WRONG_KIND;
+      if (value < 0n) return RULE.NEGATIVE;
+      return value > U64_MAX ? RULE.OUT_OF_RANGE : null;
+    }
+    case "incarnation":
+      return isIncarnation(value) ? null : RULE.MALFORMED;
+    default:
+      return RULE.MALFORMED;
+  }
+}
+
+/**
+ * The first field to violate its wire type/range in `spec`, as a typed
+ * `{ field, rule }` reason, or `null` when every field is valid. `spec` is an
+ * array of `[fieldName, kind, value]`. Evaluation order is the spec order, so
+ * the reported field is deterministic.
+ */
+export function firstFault(spec) {
+  for (const [field, kind, value] of spec) {
+    const rule = fieldFault(kind, value);
+    if (rule !== null) return { field, rule };
+  }
+  return null;
 }

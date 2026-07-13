@@ -475,3 +475,35 @@ for (const test of [
   test();
   console.log(`ok - ${test.name}`);
 }
+
+// ---- GEO-68: out-of-range / wrong-kind stamp identity rejected, typed reason -
+
+{
+  const gate = ingress();
+  assert.equal(
+    gate.ingest(packet(stamp(1, 100n, 0x1_0000_0000), null), 0),
+    false,
+    "a source_epoch past u32 is refused, never clamped into range",
+  );
+  assert.deepEqual(gate.diagnostics().lastRejectReason, {
+    field: "sourceEpoch",
+    rule: "out-of-range",
+  });
+}
+{
+  const gate = ingress();
+  // sourceId is a u64: a Number is the wrong numeric kind (silent 2^53 truncation).
+  assert.equal(gate.ingest(packet(stamp(1, 100n, 1, 10), null), 0), false);
+  assert.deepEqual(gate.diagnostics().lastRejectReason, {
+    field: "sourceId",
+    rule: "wrong-numeric-kind",
+  });
+}
+{
+  const gate = ingress();
+  assert.equal(
+    gate.ingest(packet(stamp(1, 100n, 0xffff_ffff), null), 0),
+    true,
+    "the exact u32 max epoch is accepted",
+  );
+}

@@ -4,6 +4,9 @@
 
 import {
   INCARNATION_HEX,
+  RULE,
+  fieldFault,
+  firstFault,
   U32_MAX,
   U64_MAX,
   U8_MAX,
@@ -63,6 +66,29 @@ check("the incarnation regex is anchored", INCARNATION_HEX.source.startsWith("^"
 // ---- generic range ----------------------------------------------------------
 
 check("isUintInRange respects an arbitrary max", isUintInRange(5, 5) && !isUintInRange(6, 5));
+
+// ---- typed rejection reasons ------------------------------------------------
+
+check("fieldFault: a valid u32 has no fault", fieldFault("u32", 5) === null);
+check("fieldFault: a bigint for u32 is wrong-kind", fieldFault("u32", 5n) === RULE.WRONG_KIND);
+check("fieldFault: a Number for u64 is wrong-kind", fieldFault("u64", 5) === RULE.WRONG_KIND);
+check("fieldFault: a negative is negative", fieldFault("u32", -1) === RULE.NEGATIVE);
+check("fieldFault: a fraction is fractional", fieldFault("u32", 1.5) === RULE.FRACTIONAL);
+check("fieldFault: over max is out-of-range", fieldFault("u32", U32_MAX + 1) === RULE.OUT_OF_RANGE);
+check("fieldFault: a bad incarnation is malformed", fieldFault("incarnation", "xyz") === RULE.MALFORMED);
+
+check(
+  "firstFault reports the first offending field and its rule",
+  (() => {
+    const r = firstFault([
+      ["sourceId", "u64", 10n],
+      ["sourceEpoch", "u32", 0x1_0000_0000],
+      ["sequence", "u32", -1],
+    ]);
+    return r !== null && r.field === "sourceEpoch" && r.rule === RULE.OUT_OF_RANGE;
+  })(),
+);
+check("firstFault returns null when every field is valid", firstFault([["a", "u32", 0], ["b", "u64", 0n]]) === null);
 
 if (failures > 0) {
   console.error(`${failures} check(s) failed`);

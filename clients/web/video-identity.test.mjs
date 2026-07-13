@@ -323,11 +323,6 @@ check(
   check("tracker-rejected frame does not associate", stale.association.reason === ASSOCIATION.NOT_ADMITTED);
 }
 
-if (failures > 0) {
-  console.error(`\n${failures} check(s) failed`);
-  process.exit(1);
-}
-console.log("\nall video identity checks passed");
 
 // ---- GEO-68: hostile wire-range meta is refused as malformed ----------------
 
@@ -354,3 +349,34 @@ console.log("\nall video identity checks passed");
     );
   }
 }
+
+// ---- GEO-68: a malformed meta identity can never be conformal-ready ---------
+
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_SIMULATION, sourceId: 256, calibrationId: 7 }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check(
+    "a malformed meta (u8 sourceId=256) is refused by the gate, never ready",
+    g.conformalReady === false && g.reason === "malformed-meta",
+  );
+}
+{
+  const g = conformalGate(
+    meta({ mappingAvailable: true, mappingTargetClock: CLOCK_SIMULATION, calibrationId: 7n }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check(
+    "a bigint calibrationId (u32 must be Number) is refused by the gate",
+    g.conformalReady === false && g.reason === "malformed-meta",
+  );
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} check(s) failed`);
+  process.exit(1);
+}
+console.log("\nall video identity checks passed");

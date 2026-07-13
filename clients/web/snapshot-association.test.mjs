@@ -265,11 +265,6 @@ function frameMeta(overrides = {}) {
 
 check("default history capacity is documented and positive", Number.isInteger(DEFAULT_HISTORY_CAPACITY) && DEFAULT_HISTORY_CAPACITY > 0);
 
-if (failures > 0) {
-  console.error(`\n${failures} check(s) failed`);
-  process.exit(1);
-}
-console.log("\nall snapshot association checks passed");
 
 // ---- GEO-68: hostile wire-range identities are refused, never observed ------
 
@@ -297,3 +292,28 @@ console.log("\nall snapshot association checks passed");
   ok.observe(snapId());
   check("a well-formed identity is observed", ok.diagnostics().size === 1);
 }
+
+// ---- GEO-68: the refusal records a typed { field, rule } reason -------------
+
+function assertReason(reason, field, rule) {
+  check(
+    `typed reason names the field and rule: ${field}/${rule}`,
+    reason !== null && reason.field === field && reason.rule === rule,
+  );
+}
+
+{
+  const a = new SnapshotAssociator();
+  a.observe(snapId({ sourceEpoch: 0x1_0000_0000 }));
+  assertReason(a.diagnostics().lastInvalidReason, "sourceEpoch", "out-of-range");
+  a.observe(snapId({ sourceId: 10 }));
+  assertReason(a.diagnostics().lastInvalidReason, "sourceId", "wrong-numeric-kind");
+  a.observe(snapId({ sourceIncarnation: "xyz" }));
+  assertReason(a.diagnostics().lastInvalidReason, "sourceIncarnation", "malformed");
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} check(s) failed`);
+  process.exit(1);
+}
+console.log("\nall snapshot association checks passed");

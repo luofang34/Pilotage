@@ -78,6 +78,11 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
       reason,
     });
   if (!meta || meta.mappingAvailable !== true) return closed("mapping-unavailable");
+  // The gate is the final authority: malformed identity fields (out-of-range,
+  // wrong numeric kind) can never produce a ready verdict, even when the
+  // mapping and calibration are otherwise valid. This also closes the direct
+  // associate() path, which does not run admit()'s validator.
+  if (!isMetaValid(meta)) return closed("malformed-meta");
   if (!snapshotIdentity || snapshotIdentity.clock !== meta.mappingTargetClock) {
     return closed("clock-mismatch");
   }

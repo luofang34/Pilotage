@@ -373,6 +373,25 @@ check(
   })(),
 );
 
+
+// ---- GEO-68: the stamp decoder surfaces over-range values, never clamps -----
+
+{
+  const over = 0x1_0000_0000; // 2^32, one past u32 max
+  const av = [];
+  bytesField(av, 17, measurementStamp(5n, over, over, 100n, 1, 0xab));
+  const decoded = decodeAvionicsOnly(av).avionics.attitudeStamp;
+  check("a source_epoch past u32 is surfaced raw, not clamped to 0", decoded.sourceEpoch === over);
+  check("a sequence past u32 is surfaced raw, not clamped to 0", decoded.sequence === over);
+}
+{
+  const max = 0xffff_ffff;
+  const av = [];
+  bytesField(av, 17, measurementStamp(5n, max, max, 100n, 1, 0xab));
+  const decoded = decodeAvionicsOnly(av).avionics.attitudeStamp;
+  check("the exact u32 max round-trips through decode unchanged", decoded.sourceEpoch === max);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

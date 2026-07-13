@@ -2,7 +2,7 @@
 // Publication/receipt time is transport metadata: freshness advances only
 // when a source group presents a new epoch/sequence.
 
-import { isIncarnation, isU32, isU64 } from "./wire-bounds.js";
+import { firstFault } from "./wire-bounds.js";
 
 export const COHERENCE = Object.freeze({
   INSUFFICIENT: "insufficient",
@@ -36,22 +36,26 @@ export function serialIsNewer(candidate, current) {
   return distance !== 0 && distance < SERIAL_HALF_RANGE;
 }
 
-function isStampValid(stamp) {
-  // Identity fields are bounded to their exact wire ranges: source id and
-  // acquisition time are u64 (BigInt, upper-bounded — a decoded varint past
-  // 2^64 is refused, not accepted), epoch and sequence are u32. Fail-closed,
-  // never clamped; this tightens identity validation without changing the
-  // reorder/freshness gating below.
-  return (
-    stamp !== null &&
-    typeof stamp === "object" &&
-    isU64(stamp.sourceId) &&
-    isIncarnation(stamp.sourceIncarnation) &&
-    isU32(stamp.sourceEpoch) &&
-    isU32(stamp.sequence) &&
-    isU64(stamp.acquiredAtNanos) &&
-    (stamp.clock === CLOCK_VEHICLE_BOOT || stamp.clock === CLOCK_SIMULATION)
-  );
+// The first stamp field to violate its exact wire type and range, as a typed
+// `{ field, rule }` reason, or `null` when the stamp is valid: source id and
+// acquisition time are u64 (BigInt, upper-bounded — a decoded varint past 2^64
+// is refused, not accepted), epoch and sequence are u32. Fail-closed, never
+// clamped; this tightens identity validation without changing the
+// reorder/freshness gating below.
+function stampFault(stamp) {
+  if (stamp === null || typeof stamp !== "object") return { field: "stamp", rule: "malformed" };
+  const fault = firstFault([
+    ["sourceId", "u64", stamp.sourceId],
+    ["sourceIncarnation", "incarnation", stamp.sourceIncarnation],
+    ["sourceEpoch", "u32", stamp.sourceEpoch],
+    ["sequence", "u32", stamp.sequence],
+    ["acquiredAtNanos", "u64", stamp.acquiredAtNanos],
+  ]);
+  if (fault) return fault;
+  if (stamp.clock !== CLOCK_VEHICLE_BOOT && stamp.clock !== CLOCK_SIMULATION) {
+    return { field: "clock", rule: "malformed" };
+  }
+  return null;
 }
 
 function copyAttitude(avionics) {
@@ -182,6 +186,7 @@ export class AvionicsIngress {
     this.quality = QUALITY_UNUSABLE;
     this.generation = 0;
     this.lastCoherence = COHERENCE.INSUFFICIENT;
+    this.lastRejectReason = null;
     this.counters = {
       duplicates: 0,
       reordered: 0,
@@ -317,8 +322,10 @@ export class AvionicsIngress {
 
   acceptGroup(name, stamp, copyData, avionics, nowMs) {
     if (stamp === null || stamp === undefined) return false;
-    if (!isStampValid(stamp)) {
+    const fault = stampFault(stamp);
+    if (fault !== null) {
       this.bump("invalidStamps");
+      this.lastRejectReason = fault;
       return false;
     }
     if (!this.acceptSource(stamp.sourceId)) return false;
@@ -445,7 +452,7 @@ export class AvionicsIngress {
   }
 
   diagnostics() {
-    return Object.freeze({ ...this.counters });
+    return Object.freeze({ ...this.counters, lastRejectReason: this.lastRejectReason });
   }
 
   bump(name, amount = 1) {

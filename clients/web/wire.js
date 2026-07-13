@@ -624,8 +624,10 @@ function decodeMeasurementStamp(bytes) {
   return {
     sourceId: firstBigVarint(f, 1),
     sourceIncarnation: decodeIncarnation(firstBytes(f, 6)),
-    sourceEpoch: firstVarint(f, 2) >>> 0,
-    sequence: firstVarint(f, 3) >>> 0,
+    // No `>>> 0`: a wire value past u32 must be REJECTED by the identity
+    // validator downstream, never silently truncated into range.
+    sourceEpoch: firstVarint(f, 2),
+    sequence: firstVarint(f, 3),
     acquiredAtNanos: firstBigVarint(f, 4),
     clock: firstVarint(f, 5),
   };
