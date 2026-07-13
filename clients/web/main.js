@@ -130,6 +130,9 @@ function newSimulatorAvionicsIngress() {
 
 function retireSessionPresentation(phase) {
   instruments.ingress = newSimulatorAvionicsIngress();
+  // Drop the previous session's snapshot history so a new session can never
+  // associate a video frame against a stale snapshot from the old one.
+  snapshotHistory.reset();
   setTelemetrySessionState(els, phase);
 }
 

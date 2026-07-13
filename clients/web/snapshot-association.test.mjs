@@ -130,7 +130,50 @@ function frameMeta(overrides = {}) {
   a.observe(snapId({ sourceIncarnation: INC_B, acquiredAtNanos: 5000n }));
   const v = a.associate(frameMeta({ captureTimeNanos: 1000n }), RECOGNIZED);
   check("incarnation discontinuity is not ready", v.ready === false);
-  check("incarnation discontinuity reason is reported", v.reason === ASSOCIATION.INCARNATION_DISCONTINUITY);
+  check("incarnation discontinuity reason is reported", v.reason === ASSOCIATION.STREAM_DISCONTINUITY);
+}
+
+// (a) Same source and incarnation, epoch increments (a reset within one
+// attachment): a snapshot from the OLD epoch that is closer in time is not
+// selected — the stream is identified by sourceId + incarnation + epoch.
+{
+  const a = new SnapshotAssociator();
+  a.observe(snapId({ sourceEpoch: 0, acquiredAtNanos: 1000n }));
+  a.observe(snapId({ sourceEpoch: 1, acquiredAtNanos: 5000n }));
+  const v = a.associate(frameMeta({ captureTimeNanos: 1000n }), RECOGNIZED);
+  check("epoch reset: old-epoch nearest snapshot is not selected", v.ready === false && v.reason === ASSOCIATION.STREAM_DISCONTINUITY);
+  check("epoch reset: no old-epoch snapshot identity is returned", v.snapshotIdentity === null);
+}
+
+// (b) After a source switch, the old source is never selected even when nearest.
+{
+  const a = new SnapshotAssociator();
+  a.observe(snapId({ sourceId: 10n, acquiredAtNanos: 1000n }));
+  a.observe(snapId({ sourceId: 20n, acquiredAtNanos: 5000n }));
+  const v = a.associate(frameMeta({ captureTimeNanos: 1000n }), RECOGNIZED);
+  check("source switch: old source is never selected", v.ready === false && v.reason === ASSOCIATION.STREAM_DISCONTINUITY);
+  check("source switch: no old-source snapshot identity is returned", v.snapshotIdentity === null);
+}
+
+// (c) Two identities differing ONLY in sourceId must not be deduped.
+{
+  const a = new SnapshotAssociator();
+  a.observe(snapId({ sourceId: 10n, acquiredAtNanos: 1000n }));
+  const second = a.observe(snapId({ sourceId: 20n, acquiredAtNanos: 1000n }));
+  check("differing sourceId is not deduped", second === true);
+  check("both distinct-source snapshots are retained", a.diagnostics().size === 2 && a.diagnostics().deduped === 0);
+}
+
+// (d) After a transport/session reset, the old session's history cannot produce
+// a ready verdict.
+{
+  const a = new SnapshotAssociator();
+  a.observe(snapId({ acquiredAtNanos: 1000n }));
+  const before = a.associate(frameMeta({ captureTimeNanos: 1000n }), RECOGNIZED);
+  check("pre-reset frame would be ready", before.ready === true);
+  a.reset();
+  const after = a.associate(frameMeta({ captureTimeNanos: 1000n }), RECOGNIZED);
+  check("after session reset the old session yields no ready verdict", after.ready === false && after.reason === ASSOCIATION.EMPTY_HISTORY);
 }
 
 // Budget boundary is inclusive: a total error exactly at the budget is ready,

@@ -9,12 +9,19 @@
 // CaptureClockMapping into the snapshot clock domain and selects the nearest
 // snapshot by acquisition time.
 //
-// Everything fails closed: an empty history, a clock-domain mismatch, a nearest
-// snapshot that crosses a source-incarnation discontinuity, or a total error
-// (mapping error bound + association delta) over budget all yield "not ready".
-// The result is finally passed through conformalGate, so the #62 checks
-// (mapping validity, target-clock match, published/recognized calibration,
-// overflow-safe mapped time, error budget) can never be bypassed.
+// The current aircraft stream is identified by the full AV-01 tuple
+// (sourceId + sourceIncarnation + sourceEpoch). Only snapshots from that stream
+// are eligible: if the nearest snapshot by time belongs to a superseded source,
+// incarnation, or epoch, the association is an explicit discontinuity, never a
+// ready verdict — a snapshot from before a source switch or an epoch reset can
+// never anchor a conformal overlay even when it is closest in time.
+//
+// Everything fails closed: an empty history, a clock-domain mismatch, a
+// stream-identity discontinuity, or a total error (mapping error bound +
+// association delta) over budget all yield "not ready". The result is finally
+// passed through conformalGate, so its checks (mapping validity, target-clock
+// match, published/recognized calibration, overflow-safe mapped time, error
+// budget) can never be bypassed.
 
 import { conformalGate, mapCaptureTime, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
 
@@ -37,7 +44,7 @@ export const ASSOCIATION = Object.freeze({
   MAPPED_TIME_OVERFLOW: "mapped-time-overflow",
   EMPTY_HISTORY: "empty-history",
   CLOCK_MISMATCH: "clock-mismatch",
-  INCARNATION_DISCONTINUITY: "incarnation-discontinuity",
+  STREAM_DISCONTINUITY: "stream-discontinuity",
   TOTAL_ERROR_EXCEEDS_BUDGET: "total-error-exceeds-budget",
   NOT_ADMITTED: "not-admitted",
 });
@@ -46,6 +53,7 @@ function isSnapshotIdentityValid(id) {
   return (
     id !== null &&
     typeof id === "object" &&
+    (typeof id.sourceId === "bigint" || Number.isInteger(id.sourceId)) &&
     typeof id.sourceIncarnation === "string" &&
     INCARNATION_HEX.test(id.sourceIncarnation) &&
     Number.isInteger(id.sourceEpoch) &&
@@ -67,8 +75,30 @@ function identityOf(id) {
   });
 }
 
+// The stream identity: the AV-01 tuple that must be continuous for a snapshot
+// to anchor the same conformal timeline. A change in any of sourceId (a
+// different source), sourceIncarnation (a source restart), or sourceEpoch (an
+// epoch reset) begins a new stream.
+function streamOf(id) {
+  return Object.freeze({
+    sourceId: id.sourceId,
+    sourceIncarnation: id.sourceIncarnation,
+    sourceEpoch: id.sourceEpoch,
+  });
+}
+
+function sameStream(id, stream) {
+  return (
+    stream !== null &&
+    id.sourceId === stream.sourceId &&
+    id.sourceIncarnation === stream.sourceIncarnation &&
+    id.sourceEpoch === stream.sourceEpoch
+  );
+}
+
 function sameIdentity(a, b) {
   return (
+    a.sourceId === b.sourceId &&
     a.sourceIncarnation === b.sourceIncarnation &&
     a.sourceEpoch === b.sourceEpoch &&
     a.sequence === b.sequence &&
@@ -103,13 +133,14 @@ export class SnapshotAssociator {
     }
     this.capacity = capacity;
     this.entries = [];
-    this.currentIncarnation = null;
+    this.currentStream = null;
     this.counters = { observed: 0, deduped: 0, dropped: 0, invalid: 0 };
   }
 
-  /** Records one accepted snapshot identity, oldest-first. Consecutive
-   *  duplicates are ignored (main.js re-reads the accepted snapshot each
-   *  telemetry frame); overflow drops the oldest entry and is counted. */
+  /** Records one accepted snapshot identity, oldest-first, and adopts its
+   *  stream as the current one. Consecutive duplicates are ignored (main.js
+   *  re-reads the accepted snapshot each telemetry frame); overflow drops the
+   *  oldest entry and is counted. */
   observe(identity) {
     if (!isSnapshotIdentityValid(identity)) {
       this.bump("invalid");
@@ -122,13 +153,21 @@ export class SnapshotAssociator {
       return false;
     }
     this.entries.push(entry);
-    this.currentIncarnation = entry.sourceIncarnation;
+    this.currentStream = streamOf(entry);
     this.bump("observed");
     if (this.entries.length > this.capacity) {
       this.entries.shift();
       this.bump("dropped");
     }
     return true;
+  }
+
+  /** Clears the history and current stream. main.js calls this on a
+   *  transport/session reset so a new session can never associate a frame
+   *  against a snapshot the previous session left in the ring. */
+  reset() {
+    this.entries = [];
+    this.currentStream = null;
   }
 
   /**
@@ -156,10 +195,12 @@ export class SnapshotAssociator {
         nearest = entry;
       }
     }
-    // A snapshot from a superseded source incarnation cannot anchor a conformal
-    // association: the estimator restarted between that snapshot and now.
-    if (nearest.sourceIncarnation !== this.currentIncarnation) {
-      return closed(ASSOCIATION.INCARNATION_DISCONTINUITY);
+    // The nearest snapshot by time must belong to the current stream. If it is
+    // from a superseded source, incarnation, or epoch, the aircraft identity
+    // changed between that snapshot and now, so no ready association is
+    // possible — even though it is closest in time.
+    if (!sameStream(nearest, this.currentStream)) {
+      return closed(ASSOCIATION.STREAM_DISCONTINUITY);
     }
 
     const totalError = meta.clockErrorBoundNanos + bestDelta;
@@ -167,7 +208,7 @@ export class SnapshotAssociator {
     if (totalError > budget) {
       return this.verdict(false, snapshotIdentity, mapped, totalError, ASSOCIATION.TOTAL_ERROR_EXCEEDS_BUDGET);
     }
-    // The #62 gate is the final authority: it re-checks mapping validity, the
+    // conformalGate is the final authority: it re-checks mapping validity, the
     // target-clock match against the associated snapshot, the calibration, and
     // the mapping's own error bound. Association never bypasses it.
     const gate = conformalGate(meta, snapshotIdentity, options);
