@@ -15,35 +15,57 @@
 
 use crate::error::GeoError;
 
-/// A reference to one accepted, validated calibration artifact. The view is
-/// meaningless without it: id and content hash identify the exact artifact, and
-/// the alignment bound is the artifact's published conservative angular bound
-/// that a conformal consumer composes into its total error budget.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Accepted-calibration identity. Mirrors the authoritative
+/// `pilotage-adapter-api` `CalibrationId(u32)` field for field — same width,
+/// same `0 = none` sentinel — so a geo reference and the calibration artifact
+/// it points at share one identity space with no truncation. This crate is
+/// `no_std` and adapter-api is `std`, so the type is documented-mapped here
+/// (like the datum ↔ `AltitudeClass` mapping) rather than depended on across
+/// the direction boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CalibrationId(pub u32);
+
+impl CalibrationId {
+    /// The sentinel meaning no calibration identity is referenced.
+    pub const NONE: Self = Self(0);
+
+    /// Whether a calibration identity is actually referenced.
+    #[must_use]
+    pub const fn is_referenced(self) -> bool {
+        self.0 != 0
+    }
+}
+
+/// A reference to one accepted, validated calibration artifact — identity and
+/// content hash only. The view is meaningless without it, and it deliberately
+/// carries **no** geometry or error bound: the alignment bound, principal
+/// point, distortion, boresight, design eye, and lifecycle all belong to the
+/// artifact and are obtained by *resolving* this reference against a verified
+/// artifact (in the `std` calibration contract). A producer cannot write an
+/// alignment bound onto the wire here, so it cannot understate one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CalibrationRef {
-    /// Accepted-calibration identity (must be non-zero).
-    pub calibration_id: u64,
-    /// The artifact's recorded content hash (must not be all-zero).
+    /// Accepted-calibration identity (must be referenced).
+    pub calibration_id: CalibrationId,
+    /// The artifact's recorded content hash (must not be all-zero); a resolver
+    /// admits the reference only if a verified artifact with this id hashes to
+    /// exactly this value.
     pub content_hash: [u8; 32],
-    /// The artifact's published conservative alignment bound, radians
-    /// (must be finite and `> 0`).
-    pub alignment_bound_rad: f64,
 }
 
 impl CalibrationRef {
-    /// Validates the reference: a non-zero id, a non-zero content hash, and a
-    /// finite positive alignment bound.
+    /// Validates the reference is well-formed: a referenced id and a non-zero
+    /// content hash. Whether the referenced artifact exists, is unexpired, and
+    /// matches the camera is a *resolution* concern the consumer settles
+    /// against a verified artifact — this contract only guarantees the
+    /// reference names something.
     ///
     /// # Errors
     ///
-    /// [`GeoError::IncompleteCalibrationReference`] when any part is missing.
+    /// [`GeoError::IncompleteCalibrationReference`] when id or hash is missing.
     pub fn validate(&self) -> Result<(), GeoError> {
         let hash_declared = self.content_hash.iter().any(|&b| b != 0);
-        if self.calibration_id == 0
-            || !hash_declared
-            || !self.alignment_bound_rad.is_finite()
-            || self.alignment_bound_rad <= 0.0
-        {
+        if !self.calibration_id.is_referenced() || !hash_declared {
             return Err(GeoError::IncompleteCalibrationReference);
         }
         Ok(())

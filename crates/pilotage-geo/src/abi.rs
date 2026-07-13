@@ -38,7 +38,7 @@ const GEODETIC_LEN: usize = 8 + 8 + 1 + 2 + 8 + 1 + 2 + 4 + 4 + 8;
 const POSITION_LEN: usize = GEODETIC_LEN + STAMP_LEN + (4 + 4);
 const QUAT_LEN: usize = 4 * 4;
 const ATTITUDE_LEN: usize = QUAT_LEN + STAMP_LEN + 4;
-const VIEW_LEN: usize = 8 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1;
+const VIEW_LEN: usize = 4 + 32 + 1 + 8 + 8 + 8 + 8 + 1;
 const EXTERNAL_LEN: usize = 5;
 const EPOCH_LEN: usize = 1 + 1 + 8;
 

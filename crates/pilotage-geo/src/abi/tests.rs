@@ -18,7 +18,9 @@ use crate::identity::{
     AttitudeQuality, CoherentSnapshot, IntegrityLevel, PositionQuality, SourceIncarnation,
     SourceStamp, StatedAttitude, StatedPosition,
 };
-use crate::view::{CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView};
+use crate::view::{
+    CalibrationId, CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView,
+};
 
 const ACQ_NS: u64 = 1_700_000_000_000_000_000;
 const REF_NS: u64 = ACQ_NS + 10_000_000; // 10 ms after acquisition: fresh.
@@ -89,9 +91,8 @@ fn attitude(integrity: IntegrityLevel) -> StatedAttitude {
 fn view() -> ProjectionView {
     ProjectionView {
         calibration: CalibrationRef {
-            calibration_id: 0x0FED_CBA9,
+            calibration_id: CalibrationId(0x0FED_CBA9),
             content_hash: [7u8; 32],
-            alignment_bound_rad: 0.0117,
         },
         projection: Projection::Perspective,
         near_far: NearFarPolicy {
@@ -319,15 +320,15 @@ fn an_incomplete_datum_identity_fails_closed() {
 #[test]
 fn an_incomplete_calibration_reference_fails_closed() {
     let mut r = raw();
-    r.view.calibration.calibration_id = 0;
+    r.view.calibration.calibration_id = CalibrationId::NONE;
     assert!(matches!(
         r.validate(),
         Err(crate::error::GeoError::IncompleteCalibrationReference)
     ));
-    // Decode refuses a zero calibration id on the wire (id at view offset:
+    // Decode refuses a zero calibration id on the wire (u32 id at view offset:
     // version(4)+position(125)+attitude(91) = 220).
     let mut bytes = encode_frame(&validated());
-    bytes[220..228].copy_from_slice(&0u64.to_le_bytes());
+    bytes[220..224].copy_from_slice(&0u32.to_le_bytes());
     assert!(matches!(
         decode_frame(&bytes),
         Err(AbiError::Malformed { field: "view", .. })
@@ -364,6 +365,24 @@ fn an_orthographic_frame_is_not_read_as_perspective() {
         },
         "the projection kind byte selects the payload; it is not silently perspective",
     );
+}
+
+#[test]
+fn an_unknown_external_health_byte_is_refused_not_coerced() {
+    // External health sits just before the 10-byte reference time; the first of
+    // its five bytes is the navigation-integrity monitor. An unknown value must
+    // be refused with UnknownEnum, not silently coerced to Failed — otherwise
+    // decode-then-encode would change the bytes.
+    let mut bytes = encode_frame(&validated());
+    let external_off = SVS_FRAME_LEN - 5 - 10;
+    bytes[external_off] = 200;
+    match decode_frame(&bytes) {
+        Err(AbiError::UnknownEnum { field, value }) => {
+            assert_eq!(field, "external_integrity");
+            assert_eq!(value, 200);
+        }
+        other => panic!("expected UnknownEnum, got {other:?}"),
+    }
 }
 
 #[test]

@@ -64,24 +64,32 @@ SIM / NOT FOR FLIGHT.
 - **The view references the one validated calibration.** There is exactly one
   authoritative camera model — the versioned, hashed calibration artifact
   (ADR-0021). [`ProjectionView`] does not re-mint intrinsics, distortion,
-  viewport, pose, or field of view; it *references* the accepted calibration by
-  id and content hash, carries its published alignment bound, and adds only the
-  render-time policy (projection kind, near/far, minification). Perspective and
-  orthographic are typed payloads — a focal-derived field of view is not an
-  orthographic invariant — and the field of view is a property of the resolved
-  calibration, never stored here.
+  viewport, pose, field of view, or the alignment bound; it *references* the
+  accepted calibration by id and content hash **only**, and adds only the
+  render-time policy (projection kind, near/far, minification). The alignment
+  bound and geometry come from *resolving* that reference against a verified
+  artifact (in the `std` calibration contract), so a producer cannot write an
+  understated bound onto the wire — there is no bound field to write. The
+  reference id is [`CalibrationId`], a `u32` mirroring the authoritative
+  adapter-api `CalibrationId(u32)` field for field (documented mapping across
+  the no_std/std boundary, like the datum ↔ `AltitudeClass` mapping), so the two
+  share one identity space with no truncation. Perspective and orthographic are
+  typed payloads — a focal-derived field of view is not an orthographic
+  invariant.
 
 - **Availability is derived, never self-reported.** The wire carries **no**
   availability. A frame decodes to a [`ValidatedSvsFrame`] whose
   [`SvsAvailability`] is *computed* from the validated inputs: position and
-  attitude health from their integrity, time/coherence from the age, future-
-  sample check, and coherent-snapshot binding against the frame reference time;
-  only the inputs the contract cannot check (navigation-integrity monitor,
-  calibration, database, coverage, renderer) are producer-stated. `assess` maps
-  input health to `Available`, `Degraded(reason)`, or `Unavailable(reason)` over
-  a finite [`AvailabilityReason`] set by a **fixed precedence**. An untrusted or
-  incoherent input can never yield an available scene, and there is no wire byte
-  a producer could set to claim otherwise.
+  attitude health from the **worse** of their integrity and their accuracy
+  (position 1-sigma in millimeters, attitude 1-sigma in milliradians, against
+  degrade/fail thresholds), time/coherence from the age, future-sample check,
+  and coherent-snapshot binding against the frame reference time; only the
+  inputs the contract cannot check (navigation-integrity monitor, calibration,
+  database, coverage, renderer) are producer-stated. `assess` maps input health
+  to `Available`, `Degraded(reason)`, or `Unavailable(reason)` over a finite
+  [`AvailabilityReason`] set by a **fixed precedence**. An untrusted, grossly
+  inaccurate, or incoherent input can never yield an available scene, and there
+  is no wire byte a producer could set to claim otherwise.
 
 - **TAWS is an independent input.** A [`TawsAlert`] is a separate type with its
   own source stamp; nothing derives a TAWS alert from the SVS scene or folds SVS

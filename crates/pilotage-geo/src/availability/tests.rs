@@ -124,7 +124,8 @@ fn availability_reason_wire_codes_round_trip_and_reject_unknown() {
 use pilotage_frames::{ClockDomain, Epoch, Quat, TimeScale};
 
 use super::{
-    ExternalHealth, MAX_FRESH_AGE_NS, MAX_USABLE_AGE_NS, derive_inputs, health_from_integrity,
+    ExternalHealth, MAX_FRESH_AGE_NS, MAX_FRESH_ATT_MRAD, MAX_FRESH_POS_MM, MAX_USABLE_AGE_NS,
+    MAX_USABLE_ATT_MRAD, derive_inputs, health_from_integrity,
 };
 use crate::datum::{
     BaroSettingId, DatumRealizationId, GeodeticPosition, GeoidModelId, HorizontalDatum,
@@ -321,4 +322,76 @@ fn incoherent_position_and_attitude_fail_time_coherence() {
         SvsAvailability::assess(&inputs),
         SvsAvailability::Unavailable(AvailabilityReason::TimeCoherence),
     );
+}
+
+#[test]
+fn a_trusted_but_grossly_inaccurate_position_is_never_available() {
+    // Trusted integrity, fresh, coherent — but the position 1-sigma is
+    // u32::MAX mm. Accuracy participates: the scene is unavailable.
+    let now = epoch(MAX_FRESH_AGE_NS / 2);
+    let mut pos = position(IntegrityLevel::Trusted, 0);
+    pos.quality = PositionQuality {
+        horizontal_mm: u32::MAX,
+        vertical_mm: 0,
+    };
+    let inputs = derive_inputs(
+        &pos,
+        &attitude(IntegrityLevel::Trusted, 0),
+        &external_ok(),
+        now,
+    );
+    assert_eq!(
+        SvsAvailability::assess(&inputs),
+        SvsAvailability::Unavailable(AvailabilityReason::Position),
+    );
+}
+
+#[test]
+fn a_trusted_but_imprecise_attitude_degrades_or_fails() {
+    let now = epoch(MAX_FRESH_AGE_NS / 2);
+    let mut att = attitude(IntegrityLevel::Trusted, 0);
+    att.quality = AttitudeQuality {
+        angular_mrad: MAX_FRESH_ATT_MRAD + 1,
+    };
+    let inputs = derive_inputs(
+        &position(IntegrityLevel::Trusted, 0),
+        &att,
+        &external_ok(),
+        now,
+    );
+    assert_eq!(
+        SvsAvailability::assess(&inputs),
+        SvsAvailability::Degraded(AvailabilityReason::Attitude),
+    );
+
+    att.quality = AttitudeQuality {
+        angular_mrad: MAX_USABLE_ATT_MRAD + 1,
+    };
+    let inputs = derive_inputs(
+        &position(IntegrityLevel::Trusted, 0),
+        &att,
+        &external_ok(),
+        now,
+    );
+    assert_eq!(
+        SvsAvailability::assess(&inputs),
+        SvsAvailability::Unavailable(AvailabilityReason::Attitude),
+    );
+}
+
+#[test]
+fn position_quality_at_the_fresh_bound_is_still_available() {
+    let now = epoch(MAX_FRESH_AGE_NS / 2);
+    let mut pos = position(IntegrityLevel::Trusted, 0);
+    pos.quality = PositionQuality {
+        horizontal_mm: MAX_FRESH_POS_MM,
+        vertical_mm: MAX_FRESH_POS_MM,
+    };
+    let inputs = derive_inputs(
+        &pos,
+        &attitude(IntegrityLevel::Trusted, 0),
+        &external_ok(),
+        now,
+    );
+    assert_eq!(SvsAvailability::assess(&inputs), SvsAvailability::Available);
 }

@@ -2,14 +2,15 @@
 //! payloads, projection boundary, and fail-closed validation.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView};
+use super::{
+    CalibrationId, CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView,
+};
 use crate::error::GeoError;
 
 fn calibration() -> CalibrationRef {
     CalibrationRef {
-        calibration_id: 0x0FED_CBA9,
+        calibration_id: CalibrationId(0x0FED_CBA9),
         content_hash: [7u8; 32],
-        alignment_bound_rad: 0.0117,
     }
 }
 
@@ -62,7 +63,7 @@ fn valid_orthographic_view_passes() {
 #[test]
 fn an_incomplete_calibration_reference_is_refused() {
     let mut v = view();
-    v.calibration.calibration_id = 0;
+    v.calibration.calibration_id = CalibrationId::NONE;
     assert!(matches!(
         v.validate(),
         Err(GeoError::IncompleteCalibrationReference)
@@ -74,20 +75,6 @@ fn an_incomplete_calibration_reference_is_refused() {
         matches!(v.validate(), Err(GeoError::IncompleteCalibrationReference)),
         "an all-zero content hash does not identify an artifact"
     );
-
-    let mut v = view();
-    v.calibration.alignment_bound_rad = 0.0;
-    assert!(
-        matches!(v.validate(), Err(GeoError::IncompleteCalibrationReference)),
-        "a zero alignment bound is an unbounded claim"
-    );
-
-    let mut v = view();
-    v.calibration.alignment_bound_rad = f64::NAN;
-    assert!(matches!(
-        v.validate(),
-        Err(GeoError::IncompleteCalibrationReference)
-    ));
 }
 
 #[test]

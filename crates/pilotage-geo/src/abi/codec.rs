@@ -14,7 +14,9 @@ use crate::identity::{
     AttitudeQuality, CoherentSnapshot, IntegrityLevel, PositionQuality, SourceIncarnation,
     SourceStamp, StatedAttitude, StatedPosition,
 };
-use crate::view::{CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView};
+use crate::view::{
+    CalibrationId, CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView,
+};
 
 use super::{ABI_VERSION, ATTITUDE_NORM_TOLERANCE, SVS_FRAME_LEN, ValidatedSvsFrame};
 
@@ -111,8 +113,8 @@ impl Reader<'_> {
         let code = self.u8()?;
         map(code).ok_or(AbiError::UnknownEnum { field, value: code })
     }
-    fn health(&mut self) -> Result<InputHealth, AbiError> {
-        Ok(InputHealth::from_u8_fail_closed(self.u8()?))
+    fn health(&mut self, field: &'static str) -> Result<InputHealth, AbiError> {
+        self.enum_u8(field, InputHealth::from_u8)
     }
     fn epoch(&mut self) -> Result<Epoch, AbiError> {
         let clock = self.enum_u8("clock", clock_from_u8)?;
@@ -188,9 +190,8 @@ fn put_position(w: &mut Writer, p: &StatedPosition) {
 }
 
 fn put_view(w: &mut Writer, v: &ProjectionView) {
-    w.u64(v.calibration.calibration_id);
+    w.u32(v.calibration.calibration_id.0);
     w.bytes(&v.calibration.content_hash);
-    w.f64(v.calibration.alignment_bound_rad);
     w.u8(v.projection.kind_u8());
     let (ex, ey) = match v.projection {
         Projection::Perspective => (0.0, 0.0),
@@ -330,10 +331,9 @@ fn get_attitude(r: &mut Reader) -> Result<StatedAttitude, AbiError> {
 }
 
 fn get_view(r: &mut Reader) -> Result<ProjectionView, AbiError> {
-    let calibration_id = r.u64()?;
+    let calibration_id = CalibrationId(r.u32()?);
     let mut content_hash = [0u8; 32];
     content_hash.copy_from_slice(r.take(32)?);
-    let alignment_bound_rad = r.finite_f64("alignment_bound_rad")?;
     let projection_kind = r.u8()?;
     let extent_x_m = r.f64()?;
     let extent_y_m = r.f64()?;
@@ -357,7 +357,6 @@ fn get_view(r: &mut Reader) -> Result<ProjectionView, AbiError> {
         calibration: CalibrationRef {
             calibration_id,
             content_hash,
-            alignment_bound_rad,
         },
         projection,
         near_far: NearFarPolicy { near_m, far_m },
@@ -372,11 +371,11 @@ fn get_view(r: &mut Reader) -> Result<ProjectionView, AbiError> {
 
 fn get_external(r: &mut Reader) -> Result<ExternalHealth, AbiError> {
     Ok(ExternalHealth {
-        integrity: r.health()?,
-        calibration: r.health()?,
-        database: r.health()?,
-        coverage: r.health()?,
-        renderer: r.health()?,
+        integrity: r.health("external_integrity")?,
+        calibration: r.health("external_calibration")?,
+        database: r.health("external_database")?,
+        coverage: r.health("external_coverage")?,
+        renderer: r.health("external_renderer")?,
     })
 }
 

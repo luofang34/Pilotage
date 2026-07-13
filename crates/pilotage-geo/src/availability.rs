@@ -13,7 +13,9 @@
 
 use pilotage_frames::Epoch;
 
-use crate::identity::{IntegrityLevel, StatedAttitude, StatedPosition};
+use crate::identity::{
+    AttitudeQuality, IntegrityLevel, PositionQuality, StatedAttitude, StatedPosition,
+};
 
 /// Position/attitude older than this is stale and degrades the scene. A
 /// conformal scene at typical closing speeds is visibly wrong within a few
@@ -25,6 +27,24 @@ pub const MAX_FRESH_AGE_NS: u64 = 200_000_000;
 /// registration error is unbounded for any useful motion, so the input fails
 /// rather than degrades.
 pub const MAX_USABLE_AGE_NS: u64 = 1_000_000_000;
+
+/// Position 1-sigma accuracy (per axis) beyond this degrades the scene: a few
+/// meters of registration error is visible but a conformal overlay can still
+/// aid orientation. A conservative SIM placeholder; a flight profile derives
+/// its own from the assurance allocation.
+pub const MAX_FRESH_POS_MM: u32 = 5_000;
+
+/// Position 1-sigma accuracy (per axis) beyond this is unusable for a scene:
+/// tens of meters places symbology on the wrong feature, so the input fails.
+pub const MAX_USABLE_POS_MM: u32 = 50_000;
+
+/// Attitude 1-sigma accuracy beyond this degrades the scene: about half a
+/// degree of angular error is visible at range but still orienting.
+pub const MAX_FRESH_ATT_MRAD: u32 = 10;
+
+/// Attitude 1-sigma accuracy beyond this is unusable: several degrees of
+/// angular error swings the horizon off the true one, so the input fails.
+pub const MAX_USABLE_ATT_MRAD: u32 = 50;
 
 /// The finite set of reasons synthetic vision can be degraded or unavailable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,8 +115,22 @@ impl InputHealth {
         self as u8
     }
 
-    /// Decodes the wire byte, failing closed: an unknown value is
-    /// [`Self::Failed`], never `Ok`.
+    /// Decodes a wire byte strictly: an unknown value is `None`, so the ABI can
+    /// refuse non-canonical data rather than silently coercing it (which would
+    /// also make decode-then-encode change the bytes).
+    #[must_use]
+    pub const fn from_u8(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Ok),
+            1 => Some(Self::Degraded),
+            2 => Some(Self::Failed),
+            _ => None,
+        }
+    }
+
+    /// Decodes a wire byte defensively: an unknown value is [`Self::Failed`],
+    /// never `Ok`. Used where a non-strict, fail-safe interpretation is wanted;
+    /// the ABI itself decodes strictly via [`Self::from_u8`].
     #[must_use]
     pub const fn from_u8_fail_closed(code: u8) -> Self {
         match code {
@@ -210,6 +244,44 @@ pub const fn health_from_integrity(level: IntegrityLevel) -> InputHealth {
     }
 }
 
+/// The worse of two healths (`Ok` < `Degraded` < `Failed`), so a reading is no
+/// healthier than its weakest attribute.
+#[must_use]
+const fn worse(a: InputHealth, b: InputHealth) -> InputHealth {
+    if a.to_u8() >= b.to_u8() { a } else { b }
+}
+
+/// Maps a position accuracy to the health it contributes: within the fresh
+/// bound is usable, beyond the usable bound fails, and in between degrades. The
+/// worse of the horizontal and vertical axes decides.
+#[must_use]
+const fn health_from_position_quality(q: PositionQuality) -> InputHealth {
+    worse(mm_health(q.horizontal_mm), mm_health(q.vertical_mm))
+}
+
+#[must_use]
+const fn mm_health(mm: u32) -> InputHealth {
+    if mm > MAX_USABLE_POS_MM {
+        InputHealth::Failed
+    } else if mm > MAX_FRESH_POS_MM {
+        InputHealth::Degraded
+    } else {
+        InputHealth::Ok
+    }
+}
+
+/// Maps an attitude accuracy to the health it contributes.
+#[must_use]
+const fn health_from_attitude_quality(q: AttitudeQuality) -> InputHealth {
+    if q.angular_mrad > MAX_USABLE_ATT_MRAD {
+        InputHealth::Failed
+    } else if q.angular_mrad > MAX_FRESH_ATT_MRAD {
+        InputHealth::Degraded
+    } else {
+        InputHealth::Ok
+    }
+}
+
 /// Derives time/coherence health from the position and attitude stamps and the
 /// frame reference time, failing closed: incompatible clocks/scales, a future
 /// sample, no declared coherent snapshot, or an unusable age all fail; a merely
@@ -254,8 +326,14 @@ pub fn derive_inputs(
     reference_time: Epoch,
 ) -> SvsInputs {
     SvsInputs {
-        position: health_from_integrity(position.stamp.integrity),
-        attitude: health_from_integrity(attitude.stamp.integrity),
+        position: worse(
+            health_from_integrity(position.stamp.integrity),
+            health_from_position_quality(position.quality),
+        ),
+        attitude: worse(
+            health_from_integrity(attitude.stamp.integrity),
+            health_from_attitude_quality(attitude.quality),
+        ),
         integrity: external.integrity,
         time_coherence: derive_time_coherence(position, attitude, reference_time),
         calibration: external.calibration,
