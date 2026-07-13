@@ -2,6 +2,8 @@
 // Publication/receipt time is transport metadata: freshness advances only
 // when a source group presents a new epoch/sequence.
 
+import { isIncarnation, isU32, isU64 } from "./wire-bounds.js";
+
 export const COHERENCE = Object.freeze({
   INSUFFICIENT: "insufficient",
   COHERENT: "coherent",
@@ -35,20 +37,19 @@ export function serialIsNewer(candidate, current) {
 }
 
 function isStampValid(stamp) {
+  // Identity fields are bounded to their exact wire ranges: source id and
+  // acquisition time are u64 (BigInt, upper-bounded — a decoded varint past
+  // 2^64 is refused, not accepted), epoch and sequence are u32. Fail-closed,
+  // never clamped; this tightens identity validation without changing the
+  // reorder/freshness gating below.
   return (
     stamp !== null &&
     typeof stamp === "object" &&
-    typeof stamp.sourceId === "bigint" &&
-    typeof stamp.sourceIncarnation === "string" &&
-    /^[0-9a-f]{32}$/.test(stamp.sourceIncarnation) &&
-    Number.isInteger(stamp.sourceEpoch) &&
-    stamp.sourceEpoch >= 0 &&
-    stamp.sourceEpoch <= 0xffff_ffff &&
-    Number.isInteger(stamp.sequence) &&
-    stamp.sequence >= 0 &&
-    stamp.sequence <= 0xffff_ffff &&
-    typeof stamp.acquiredAtNanos === "bigint" &&
-    stamp.acquiredAtNanos >= 0n &&
+    isU64(stamp.sourceId) &&
+    isIncarnation(stamp.sourceIncarnation) &&
+    isU32(stamp.sourceEpoch) &&
+    isU32(stamp.sequence) &&
+    isU64(stamp.acquiredAtNanos) &&
     (stamp.clock === CLOCK_VEHICLE_BOOT || stamp.clock === CLOCK_SIMULATION)
   );
 }

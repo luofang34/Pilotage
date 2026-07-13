@@ -270,3 +270,30 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("\nall snapshot association checks passed");
+
+// ---- GEO-68: hostile wire-range identities are refused, never observed ------
+
+{
+  const hostile = [
+    ["negative sourceEpoch", { sourceEpoch: -1 }],
+    ["overflowing sourceEpoch", { sourceEpoch: 0x1_0000_0000 }],
+    ["fractional sequence", { sequence: 1.5 }],
+    ["Number sourceId (u64 must be BigInt)", { sourceId: 10 }],
+    ["negative sourceId bigint", { sourceId: -1n }],
+    ["overflowing sourceId bigint", { sourceId: (1n << 64n) }],
+    ["negative acquiredAtNanos", { acquiredAtNanos: -1n }],
+    ["overflowing acquiredAtNanos", { acquiredAtNanos: (1n << 64n) }],
+    ["Number acquiredAtNanos", { acquiredAtNanos: 1000 }],
+    ["malformed incarnation", { sourceIncarnation: "xyz" }],
+  ];
+  for (const [name, override] of hostile) {
+    const a = new SnapshotAssociator();
+    a.observe(snapId(override));
+    const d = a.diagnostics();
+    check(`hostile identity refused, never observed: ${name}`, d.invalid === 1 && d.size === 0);
+  }
+  // The nominal identity is still accepted.
+  const ok = new SnapshotAssociator();
+  ok.observe(snapId());
+  check("a well-formed identity is observed", ok.diagnostics().size === 1);
+}

@@ -9,10 +9,10 @@
 // than reimplemented, so both paths share one definition of "newer".
 
 import { serialIsNewer } from "./telemetry-ingress.js";
+import { isIncarnation, isU32, isU64, isU8 } from "./wire-bounds.js";
 
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
-const INCARNATION_HEX = /^[0-9a-f]{32}$/;
 const U64_MAX = (1n << 64n) - 1n;
 
 // Maximum clock-mapping error a conformal overlay tolerates. A bounded mapping
@@ -91,7 +91,7 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
   // budget, and maps without overflow. Conformal readiness additionally demands
   // a published, recognized calibration.
   const calibrationReady =
-    Number.isInteger(meta.calibrationId) &&
+    isU32(meta.calibrationId) &&
     meta.calibrationId !== 0 &&
     recognized.has(meta.calibrationId);
   return Object.freeze({
@@ -104,22 +104,20 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
 }
 
 function isMetaValid(meta) {
+  // Each field at its exact wire type and range: the video-frame source id is
+  // a u8, epoch/sequence/camera id/calibration id are u32, and the capture
+  // time is a u64 (a BigInt, never a truncating Number). Negative, fractional,
+  // over-range, or wrong-numeric-kind values are refused fail-closed.
   return (
     meta !== null &&
     typeof meta === "object" &&
-    Number.isInteger(meta.sourceId) &&
-    typeof meta.sourceIncarnation === "string" &&
-    INCARNATION_HEX.test(meta.sourceIncarnation) &&
-    Number.isInteger(meta.sourceEpoch) &&
-    meta.sourceEpoch >= 0 &&
-    meta.sourceEpoch <= 0xffff_ffff &&
-    Number.isInteger(meta.sequence) &&
-    meta.sequence >= 0 &&
-    meta.sequence <= 0xffff_ffff &&
-    typeof meta.captureTimeNanos === "bigint" &&
-    meta.captureTimeNanos >= 0n &&
-    Number.isInteger(meta.cameraId) &&
-    Number.isInteger(meta.calibrationId) &&
+    isU8(meta.sourceId) &&
+    isIncarnation(meta.sourceIncarnation) &&
+    isU32(meta.sourceEpoch) &&
+    isU32(meta.sequence) &&
+    isU64(meta.captureTimeNanos) &&
+    isU32(meta.cameraId) &&
+    isU32(meta.calibrationId) &&
     (meta.captureClock === CLOCK_VEHICLE_BOOT || meta.captureClock === CLOCK_SIMULATION)
   );
 }

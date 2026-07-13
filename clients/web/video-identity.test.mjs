@@ -328,3 +328,29 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("\nall video identity checks passed");
+
+// ---- GEO-68: hostile wire-range meta is refused as malformed ----------------
+
+{
+  const hostile = [
+    ["negative sourceId (u8)", { sourceId: -1 }],
+    ["overflowing sourceId (u8)", { sourceId: 256 }],
+    ["bigint sourceId (u8 must be Number)", { sourceId: 0n }],
+    ["overflowing sourceEpoch", { sourceEpoch: 0x1_0000_0000 }],
+    ["fractional sequence", { sequence: 2.5 }],
+    ["Number captureTimeNanos (u64 must be BigInt)", { captureTimeNanos: 1000 }],
+    ["overflowing captureTimeNanos", { captureTimeNanos: (1n << 64n) }],
+    ["negative cameraId", { cameraId: -1 }],
+    ["overflowing calibrationId", { calibrationId: 0x1_0000_0000 }],
+    ["bigint calibrationId (u32 must be Number)", { calibrationId: 7n }],
+    ["malformed incarnation", { sourceIncarnation: "nope" }],
+  ];
+  for (const [name, override] of hostile) {
+    const t = new VideoIdentityTracker();
+    const verdict = t.admit(meta(override));
+    check(
+      `hostile meta refused as malformed: ${name}`,
+      verdict.accepted === false && verdict.reason === ADMIT.MALFORMED,
+    );
+  }
+}

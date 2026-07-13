@@ -24,10 +24,10 @@
 // budget) can never be bypassed.
 
 import { conformalGate, mapCaptureTime, DEFAULT_MAX_CLOCK_ERROR_NANOS } from "./video-identity.js";
+import { isIncarnation, isU32, isU64 } from "./wire-bounds.js";
 
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
-const INCARNATION_HEX = /^[0-9a-f]{32}$/;
 
 // History ring size. The mapped capture time of a displayed frame is at most a
 // glass-to-glass latency old (transport + host queue + decode, well under a
@@ -50,16 +50,18 @@ export const ASSOCIATION = Object.freeze({
 });
 
 function isSnapshotIdentityValid(id) {
+  // Each field is exactly its AV-01 wire type at its exact range: source id is
+  // a u64 (a BigInt, never a truncating Number), epoch and sequence are u32,
+  // and the acquisition time is a u64. Out-of-range, negative, fractional, or
+  // wrong-numeric-kind values are refused fail-closed, never clamped.
   return (
     id !== null &&
     typeof id === "object" &&
-    (typeof id.sourceId === "bigint" || Number.isInteger(id.sourceId)) &&
-    typeof id.sourceIncarnation === "string" &&
-    INCARNATION_HEX.test(id.sourceIncarnation) &&
-    Number.isInteger(id.sourceEpoch) &&
-    Number.isInteger(id.sequence) &&
-    typeof id.acquiredAtNanos === "bigint" &&
-    id.acquiredAtNanos >= 0n &&
+    isU64(id.sourceId) &&
+    isIncarnation(id.sourceIncarnation) &&
+    isU32(id.sourceEpoch) &&
+    isU32(id.sequence) &&
+    isU64(id.acquiredAtNanos) &&
     (id.clock === CLOCK_VEHICLE_BOOT || id.clock === CLOCK_SIMULATION)
   );
 }
