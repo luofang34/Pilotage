@@ -10,7 +10,10 @@ workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
-sha2 = { workspace = true }
+# Direct version rather than `workspace = true`: the content-digest hash must
+# resolve on this lane alone, independent of whether another lane has yet
+# introduced sha2 into the workspace dependency table.
+sha2 = "0.10.9"
 
 [[bin]]
 name = "evidence-gate"
