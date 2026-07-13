@@ -29,53 +29,76 @@ SIM / NOT FOR FLIGHT.
   `#![no_std]`, allocation-free, and `forbid(unsafe_code)`, so it compiles for a
   bare-metal target and can sit beneath both consumers.
 
-- **Datum discipline; no bare altitude.** A height is a [`VerticalPosition`] that
-  always carries a [`VerticalDatum`] (ellipsoid, MSL, AGL, barometric-indicated,
-  pressure, or local-relative), a geoid model for MSL, and a local origin for a
-  relative height. A [`GeodeticPosition`] always carries a [`HorizontalDatum`].
-  Unknown datums are refused. The vertical vocabulary is minted here — not taken
-  from instrument-state's `AltitudeClass` — because this crate is foundational
-  and instrument-state is a consumer; the module documents the field-for-field
-  mapping so the two never drift.
+- **Datum discipline; no bare altitude, no implicit realization.** A height is a
+  [`VerticalPosition`] that always carries a [`VerticalDatum`] (ellipsoid, MSL,
+  AGL, barometric-indicated, pressure, or local-relative) **and the identity that
+  datum needs**: a declared geoid model for MSL, a terrain/ground reference for
+  AGL, an applied altimeter-setting identity for barometric-indicated, and a
+  local origin for a relative height. A [`GeodeticPosition`] always carries a
+  [`HorizontalDatum`] and, for a realization-bearing datum (NAD83, ITRF), a
+  declared realization/reference-epoch id. Unknown datums, undeclared
+  realizations, and missing identities are refused with a specific typed reason
+  (a horizontal fault never reports a vertical-datum reason), and an invalid tile
+  size is a `Result`, never a plausible zero tile. The vertical vocabulary is
+  minted here — not taken from instrument-state's `AltitudeClass` — because this
+  crate is foundational and instrument-state is a consumer; the module documents
+  the field-for-field mapping so the two never drift.
 
 - **Longitude is normalized; poles and seams are explicit.** `new` wraps
   longitude to `[-180, 180)`, so the anti-meridian has one canonical spelling;
   `at_pole` and `on_antimeridian` flag the degenerate cases; and `tile` floors
   into exactly one tile so a seam never oscillates.
 
-- **Identity and coherence reuse the AV-01 `MeasurementStamp` shape.** A
-  [`SourceStamp`] carries source id, incarnation, generation, sequence,
-  acquisition [`Epoch`] (clock **and** scale **and** nanos), integrity,
-  accuracy, and a coherent-snapshot id. Age is only computed between readings on
-  the same clock and scale — across clocks it is `None`, never a silently
-  inferred difference — and coherence requires a declared, matching snapshot id.
+- **Identity is separate from function-specific quality.** A [`SourceStamp`]
+  carries only source id, incarnation, generation, sequence, acquisition
+  [`Epoch`] (clock **and** scale **and** nanos), integrity, and a
+  coherent-snapshot identity — never an accuracy. Position accuracy is a length
+  (`PositionQuality`, millimeters) and attitude accuracy is an angle
+  (`AttitudeQuality`, milliradians): distinct types, so a position accuracy can
+  never be read as an attitude's. Age fails closed — a different clock, a
+  different scale, or a future sample is a typed `AgeError`, never a saturated
+  zero — and coherence binds the full snapshot identity (producer incarnation,
+  generation, instance id) and time base, so an equal numeric id from a
+  different stream is not coherent.
 
-- **The view derives its field of view.** [`ProjectionView`] stores the
-  viewport, focal lengths, projection, near/far policy, minification,
-  convention, and camera pose (frames named `Body` → `Installation`); the field
-  of view is **derived** from viewport and focal (aligning with the ADR-0021
-  calibration contract), never stored.
+- **The view references the one validated calibration.** There is exactly one
+  authoritative camera model — the versioned, hashed calibration artifact
+  (ADR-0021). [`ProjectionView`] does not re-mint intrinsics, distortion,
+  viewport, pose, or field of view; it *references* the accepted calibration by
+  id and content hash, carries its published alignment bound, and adds only the
+  render-time policy (projection kind, near/far, minification). Perspective and
+  orthographic are typed payloads — a focal-derived field of view is not an
+  orthographic invariant — and the field of view is a property of the resolved
+  calibration, never stored here.
 
-- **Availability is finite, deterministic, and traceable.** [`SvsAvailability`]
-  is `Available`, `Degraded(reason)`, or `Unavailable(reason)` over a finite
-  [`AvailabilityReason`] set (position, attitude, integrity, time/coherence,
-  calibration, database, coverage, renderer). `assess` maps the stated health of
-  each input to a verdict by a **fixed precedence**, so the same inputs always
-  yield the same verdict and reason. Health is stated, never defaulted: an
-  unknown input is `Failed`, and "nothing known" is `Unavailable`, never a
-  normal scene.
+- **Availability is derived, never self-reported.** The wire carries **no**
+  availability. A frame decodes to a [`ValidatedSvsFrame`] whose
+  [`SvsAvailability`] is *computed* from the validated inputs: position and
+  attitude health from their integrity, time/coherence from the age, future-
+  sample check, and coherent-snapshot binding against the frame reference time;
+  only the inputs the contract cannot check (navigation-integrity monitor,
+  calibration, database, coverage, renderer) are producer-stated. `assess` maps
+  input health to `Available`, `Degraded(reason)`, or `Unavailable(reason)` over
+  a finite [`AvailabilityReason`] set by a **fixed precedence**. An untrusted or
+  incoherent input can never yield an available scene, and there is no wire byte
+  a producer could set to claim otherwise.
 
 - **TAWS is an independent input.** A [`TawsAlert`] is a separate type with its
   own source stamp; nothing derives a TAWS alert from the SVS scene or folds SVS
   availability into a terrain hazard. The availability API's signature contains
   no TAWS type, so the two cannot leak into one another.
 
-- **The ABI is versioned, fixed-size, and fail-closed.** One [`SvsFrame`]
-  encodes to a fixed little-endian byte block led by a version `u32`;
-  [`decode_frame`] refuses a truncated buffer, an unsupported version, an
-  enumerated value outside its known set (reporting the actual value), a
-  non-finite coordinate, and a semantically malformed block (e.g. an MSL height
-  with no geoid). Encoding is allocation-free (it writes a fixed array).
+- **The ABI is versioned, fixed-size, and fail-closed.** One frame encodes to a
+  fixed little-endian byte block led by a version `u32`; the length must match
+  exactly (trailing bytes are as suspect as truncation). [`decode_frame`]
+  refuses a wrong length, an unsupported version, an enumerated value outside
+  its known set (reporting the actual value), a non-finite coordinate, a
+  non-unit aircraft attitude, an incomplete datum identity (an MSL height with
+  no geoid, an AGL height with no terrain reference, a barometric-indicated
+  height with no applied setting, a NAD83/ITRF datum with no realization), and
+  an incomplete calibration reference. Only a [`ValidatedSvsFrame`] can be
+  encoded, so an invalid frame cannot be serialized; encoding is
+  allocation-free.
 
 ## Consequences
 

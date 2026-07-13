@@ -1,26 +1,37 @@
 //! Edge-case tests for datum discipline (anti-meridian, polar, tile-seam,
-//! vertical datum).
+//! vertical datum, and the datum-identity completeness the contract requires).
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    GeodeticPosition, GeoidModelId, HorizontalDatum, LocalOriginId, VerticalDatum,
-    VerticalPosition, wrap_longitude_deg,
+    BaroSettingId, DatumRealizationId, GeodeticPosition, GeoidModelId, HorizontalDatum,
+    LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition, wrap_longitude_deg,
 };
 use crate::error::GeoError;
 
 fn ellipsoid(height_m: f64) -> VerticalPosition {
+    ellipsoid_result(height_m).expect("ellipsoid height is well-formed")
+}
+
+fn ellipsoid_result(height_m: f64) -> Result<VerticalPosition, GeoError> {
     VerticalPosition::new(
         height_m,
         VerticalDatum::Ellipsoid,
         GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
         LocalOriginId::UNDECLARED,
     )
-    .expect("ellipsoid height is well-formed")
 }
 
 fn pos(lat: f64, lon: f64) -> GeodeticPosition {
-    GeodeticPosition::new(lat, lon, HorizontalDatum::Wgs84, ellipsoid(100.0))
-        .expect("well-formed geodetic position")
+    GeodeticPosition::new(
+        lat,
+        lon,
+        HorizontalDatum::Wgs84,
+        DatumRealizationId::UNDECLARED,
+        ellipsoid(100.0),
+    )
+    .expect("well-formed geodetic position")
 }
 
 #[test]
@@ -56,8 +67,14 @@ fn poles_are_valid_and_flagged() {
 
 #[test]
 fn latitude_out_of_range_is_refused() {
-    let err = GeodeticPosition::new(90.001, 0.0, HorizontalDatum::Wgs84, ellipsoid(0.0))
-        .expect_err("beyond the pole is refused");
+    let err = GeodeticPosition::new(
+        90.001,
+        0.0,
+        HorizontalDatum::Wgs84,
+        DatumRealizationId::UNDECLARED,
+        ellipsoid(0.0),
+    )
+    .expect_err("beyond the pole is refused");
     assert!(matches!(err, GeoError::LatitudeOutOfRange { .. }));
 }
 
@@ -65,11 +82,24 @@ fn latitude_out_of_range_is_refused() {
 fn tile_seam_belongs_to_exactly_one_tile() {
     // A position exactly on a 1-degree seam floors into the higher tile, and a
     // hair below floors into the lower one — deterministic, never oscillating.
-    assert_eq!(pos(0.5, 1.0).tile(1.0).lon_index, 1);
-    assert_eq!(pos(0.5, 0.999_999).tile(1.0).lon_index, 0);
+    assert_eq!(pos(0.5, 1.0).tile(1.0).expect("tile").lon_index, 1);
+    assert_eq!(pos(0.5, 0.999_999).tile(1.0).expect("tile").lon_index, 0);
     // The anti-meridian seam maps consistently (normalized to -180).
-    assert_eq!(pos(0.5, 180.0).tile(1.0).lon_index, -180);
-    assert_eq!(pos(0.5, -180.0).tile(1.0).lon_index, -180);
+    assert_eq!(pos(0.5, 180.0).tile(1.0).expect("tile").lon_index, -180);
+    assert_eq!(pos(0.5, -180.0).tile(1.0).expect("tile").lon_index, -180);
+}
+
+#[test]
+fn invalid_tile_size_is_refused_not_a_zero_tile() {
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            matches!(
+                pos(0.5, 1.0).tile(bad),
+                Err(GeoError::InvalidTileSize { .. })
+            ),
+            "tile size {bad} must be refused, never a plausible zero tile"
+        );
+    }
 }
 
 #[test]
@@ -78,6 +108,8 @@ fn unknown_vertical_datum_is_refused() {
         10.0,
         VerticalDatum::Unknown,
         GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
         LocalOriginId::UNDECLARED,
     )
     .expect_err("an unknown datum has no interpretable reference");
@@ -90,6 +122,8 @@ fn geometric_msl_requires_a_declared_geoid() {
         10.0,
         VerticalDatum::Msl,
         GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
         LocalOriginId::UNDECLARED,
     )
     .expect_err("MSL without a geoid model is undefined");
@@ -99,9 +133,59 @@ fn geometric_msl_requires_a_declared_geoid() {
         10.0,
         VerticalDatum::Msl,
         GeoidModelId(12),
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
         LocalOriginId::UNDECLARED,
     )
     .expect("MSL with a declared geoid model is well-formed");
+}
+
+#[test]
+fn agl_requires_a_declared_terrain_reference() {
+    let missing = VerticalPosition::new(
+        50.0,
+        VerticalDatum::Agl,
+        GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
+        LocalOriginId::UNDECLARED,
+    )
+    .expect_err("AGL without a ground reference is unidentified");
+    assert!(matches!(missing, GeoError::UndeclaredTerrainReference));
+
+    VerticalPosition::new(
+        50.0,
+        VerticalDatum::Agl,
+        GeoidModelId::UNDECLARED,
+        TerrainRefId(3),
+        BaroSettingId::UNDECLARED,
+        LocalOriginId::UNDECLARED,
+    )
+    .expect("AGL with a declared terrain reference is well-formed");
+}
+
+#[test]
+fn barometric_indicated_requires_an_applied_setting_identity() {
+    let missing = VerticalPosition::new(
+        3000.0,
+        VerticalDatum::BaroIndicated,
+        GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
+        LocalOriginId::UNDECLARED,
+    )
+    .expect_err("barometric-indicated without an applied setting is unidentified");
+    assert!(matches!(missing, GeoError::UndeclaredBaroSetting));
+
+    VerticalPosition::new(
+        3000.0,
+        VerticalDatum::BaroIndicated,
+        GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId(101_325),
+        LocalOriginId::UNDECLARED,
+    )
+    .expect("barometric-indicated with a declared applied setting is well-formed");
 }
 
 #[test]
@@ -110,24 +194,64 @@ fn local_relative_requires_a_declared_origin() {
         10.0,
         VerticalDatum::LocalRelative,
         GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
         LocalOriginId::UNDECLARED,
     )
     .expect_err("a relative height without an origin is a silent rebase risk");
-    assert!(matches!(missing, GeoError::NonFinite { .. }));
+    assert!(
+        matches!(missing, GeoError::UndeclaredLocalOrigin),
+        "the reason is a local-origin refusal, not a disguised NonFinite"
+    );
 
     VerticalPosition::new(
         10.0,
         VerticalDatum::LocalRelative,
         GeoidModelId::UNDECLARED,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
         LocalOriginId(7),
     )
     .expect("local-relative with a declared origin is well-formed");
 }
 
 #[test]
+fn realization_bearing_datums_require_a_declared_realization() {
+    for datum in [HorizontalDatum::Nad83, HorizontalDatum::Itrf2014] {
+        let missing = GeodeticPosition::new(
+            10.0,
+            20.0,
+            datum,
+            DatumRealizationId::UNDECLARED,
+            ellipsoid(0.0),
+        )
+        .expect_err("realization-bearing datum without a realization is ambiguous");
+        assert!(matches!(missing, GeoError::UndeclaredDatumRealization));
+
+        GeodeticPosition::new(10.0, 20.0, datum, DatumRealizationId(2011), ellipsoid(0.0))
+            .expect("a declared realization is well-formed");
+    }
+    // WGS-84 does not require a realization id in this contract.
+    GeodeticPosition::new(
+        10.0,
+        20.0,
+        HorizontalDatum::Wgs84,
+        DatumRealizationId::UNDECLARED,
+        ellipsoid(0.0),
+    )
+    .expect("WGS-84 needs no explicit realization here");
+}
+
+#[test]
 fn non_finite_coordinates_are_refused() {
     assert!(matches!(
-        GeodeticPosition::new(f64::NAN, 0.0, HorizontalDatum::Wgs84, ellipsoid(0.0)),
+        GeodeticPosition::new(
+            f64::NAN,
+            0.0,
+            HorizontalDatum::Wgs84,
+            DatumRealizationId::UNDECLARED,
+            ellipsoid(0.0)
+        ),
         Err(GeoError::NonFinite { .. })
     ));
     assert!(matches!(
@@ -136,20 +260,20 @@ fn non_finite_coordinates_are_refused() {
     ));
 }
 
-fn ellipsoid_result(height_m: f64) -> Result<VerticalPosition, GeoError> {
-    VerticalPosition::new(
-        height_m,
-        VerticalDatum::Ellipsoid,
-        GeoidModelId::UNDECLARED,
-        LocalOriginId::UNDECLARED,
-    )
-}
-
 #[test]
-fn unknown_horizontal_datum_is_refused() {
-    let err = GeodeticPosition::new(0.0, 0.0, HorizontalDatum::Unknown, ellipsoid(0.0))
-        .expect_err("an unknown horizontal datum has no interpretable frame");
-    assert!(matches!(err, GeoError::UnknownVerticalDatum));
+fn unknown_horizontal_datum_is_refused_with_the_right_reason() {
+    let err = GeodeticPosition::new(
+        0.0,
+        0.0,
+        HorizontalDatum::Unknown,
+        DatumRealizationId::UNDECLARED,
+        ellipsoid(0.0),
+    )
+    .expect_err("an unknown horizontal datum has no interpretable frame");
+    assert!(
+        matches!(err, GeoError::UnknownHorizontalDatum),
+        "a horizontal fault must not report a vertical-datum reason"
+    );
 }
 
 #[test]

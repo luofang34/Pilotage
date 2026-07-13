@@ -1,11 +1,30 @@
-//! Synthetic-vision availability: a finite, deterministic, traceable verdict.
+//! Synthetic-vision availability: a finite, deterministic, traceable verdict
+//! **derived** from validated inputs, never self-reported by a wire producer.
 //!
-//! A missing, inconsistent, or untrusted input never yields a plausible normal
-//! scene. [`SvsAvailability::assess`] maps the typed health of each input to a
-//! verdict by a **fixed precedence**, so the same inputs always yield the same
-//! verdict and the reason names the specific input that decided it. Health is
-//! stated, never defaulted: an unknown input is [`InputHealth::Failed`], not
-//! silently `Ok`.
+//! [`SvsAvailability::assess`] maps the typed health of each input to a verdict
+//! by a **fixed precedence**, so the same inputs always yield the same verdict
+//! and the reason names the specific input that decided it. The health of the
+//! inputs the contract can check for itself — position, attitude, and
+//! time/coherence — is *derived* ([`derive_inputs`]) from the actual position
+//! and attitude stamps and the frame reference time; only the inputs the
+//! contract cannot check (navigation-integrity monitor, calibration, database,
+//! coverage, renderer) are producer-stated ([`ExternalHealth`]). An untrusted
+//! reading can never produce an [`SvsAvailability::Available`] scene.
+
+use pilotage_frames::Epoch;
+
+use crate::identity::{IntegrityLevel, StatedAttitude, StatedPosition};
+
+/// Position/attitude older than this is stale and degrades the scene. A
+/// conformal scene at typical closing speeds is visibly wrong within a few
+/// hundred milliseconds of latency, so freshness beyond this bound is not
+/// trustworthy at full assurance.
+pub const MAX_FRESH_AGE_NS: u64 = 200_000_000;
+
+/// Position/attitude older than this is unusable for a scene: at this age the
+/// registration error is unbounded for any useful motion, so the input fails
+/// rather than degrades.
+pub const MAX_USABLE_AGE_NS: u64 = 1_000_000_000;
 
 /// The finite set of reasons synthetic vision can be degraded or unavailable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +107,43 @@ impl InputHealth {
     }
 }
 
-/// The stated health of every synthetic-vision input.
+/// The producer-stated health of the inputs this contract cannot verify for
+/// itself: the navigation-integrity monitor and the calibration, database,
+/// coverage, and renderer subsystems. Position, attitude, and time/coherence
+/// health are never stated here — they are derived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalHealth {
+    /// Navigation-integrity monitor health (e.g. RAIM/SBAS protection level
+    /// versus alert limit) — an external monitor the contract cannot recompute.
+    pub integrity: InputHealth,
+    /// Camera/eye calibration health.
+    pub calibration: InputHealth,
+    /// Terrain/obstacle database health.
+    pub database: InputHealth,
+    /// Database coverage health at the current position.
+    pub coverage: InputHealth,
+    /// Renderer health.
+    pub renderer: InputHealth,
+}
+
+impl ExternalHealth {
+    /// All external inputs failed — the fail-closed default when nothing is
+    /// stated.
+    #[must_use]
+    pub const fn all_failed() -> Self {
+        let f = InputHealth::Failed;
+        Self {
+            integrity: f,
+            calibration: f,
+            database: f,
+            coverage: f,
+            renderer: f,
+        }
+    }
+}
+
+/// The health of every synthetic-vision input, position/attitude/time-coherence
+/// derived and the rest producer-stated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SvsInputs {
     /// Position source health.
@@ -140,6 +195,73 @@ impl SvsInputs {
             (AvailabilityReason::Coverage, self.coverage),
             (AvailabilityReason::Renderer, self.renderer),
         ]
+    }
+}
+
+/// Maps an integrity level to the health a reading at that level contributes:
+/// only `Trusted` is fully usable, `Monitored` degrades, and an untrusted or
+/// unmonitored reading fails closed.
+#[must_use]
+pub const fn health_from_integrity(level: IntegrityLevel) -> InputHealth {
+    match level {
+        IntegrityLevel::Trusted => InputHealth::Ok,
+        IntegrityLevel::Monitored => InputHealth::Degraded,
+        IntegrityLevel::Untrusted | IntegrityLevel::Unknown => InputHealth::Failed,
+    }
+}
+
+/// Derives time/coherence health from the position and attitude stamps and the
+/// frame reference time, failing closed: incompatible clocks/scales, a future
+/// sample, no declared coherent snapshot, or an unusable age all fail; a merely
+/// stale but usable pair degrades.
+#[must_use]
+fn derive_time_coherence(
+    position: &StatedPosition,
+    attitude: &StatedAttitude,
+    reference_time: Epoch,
+) -> InputHealth {
+    // A coherent scene requires the position and attitude to be one declared
+    // coherent snapshot on one time base.
+    if !position.stamp.coherent_with(&attitude.stamp) {
+        return InputHealth::Failed;
+    }
+    // Both ages must be physical durations relative to the reference time; a
+    // future sample or an incompatible clock/scale fails closed.
+    let (Ok(pos_age), Ok(att_age)) = (
+        position.stamp.age_ns(reference_time),
+        attitude.stamp.age_ns(reference_time),
+    ) else {
+        return InputHealth::Failed;
+    };
+    let age = pos_age.max(att_age);
+    if age > MAX_USABLE_AGE_NS {
+        InputHealth::Failed
+    } else if age > MAX_FRESH_AGE_NS {
+        InputHealth::Degraded
+    } else {
+        InputHealth::Ok
+    }
+}
+
+/// Derives the full input health from the validated position and attitude, the
+/// producer-stated external health, and the frame reference time. Position,
+/// attitude, and time/coherence are computed here; the rest are taken as stated.
+#[must_use]
+pub fn derive_inputs(
+    position: &StatedPosition,
+    attitude: &StatedAttitude,
+    external: &ExternalHealth,
+    reference_time: Epoch,
+) -> SvsInputs {
+    SvsInputs {
+        position: health_from_integrity(position.stamp.integrity),
+        attitude: health_from_integrity(attitude.stamp.integrity),
+        integrity: external.integrity,
+        time_coherence: derive_time_coherence(position, attitude, reference_time),
+        calibration: external.calibration,
+        database: external.database,
+        coverage: external.coverage,
+        renderer: external.renderer,
     }
 }
 

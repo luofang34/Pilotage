@@ -1,82 +1,82 @@
-//! Viewport, projection, camera pose, and the derived field of view.
+//! The projection view: a reference to one validated calibration plus the
+//! render-time projection and clip policy.
 //!
-//! Aligned with the SVS-01 sibling calibration contract (ADR-0021): the field
-//! of view is **derived** from the viewport and focal lengths, never stored;
-//! the optical convention is OpenCV; and the camera pose names its frames with
-//! the `pilotage-frames` vocabulary (`Body` → `Installation`). Nothing here
-//! renders — it declares the view a renderer must honor.
-
-use pilotage_frames::{FrameId, Quat};
+//! There is exactly one authoritative camera model in the program — the
+//! versioned, hashed calibration artifact (the SVS-01 sibling calibration
+//! contract, ADR-0021). This crate does **not** re-mint a second camera model:
+//! intrinsics, distortion, principal point, viewport, extrinsics, boresight,
+//! design eye, and the alignment-error bound all live in that artifact. A
+//! [`ProjectionView`] only *references* the accepted calibration by identity and
+//! content hash, carries its published alignment bound, and adds the render-time
+//! policy (projection kind and payload, near/far, minification). A consumer
+//! resolves the reference against a validated artifact to obtain the geometry;
+//! the field of view is a property of that resolved calibration, never stored
+//! here.
 
 use crate::error::GeoError;
 
-/// The optical coordinate convention intrinsics and the boresight are expressed
-/// in. Explicit so a projection is never read against a guessed axis layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum OpticalConvention {
-    /// OpenCV: `+Z` along the optical axis, `+X` right, `+Y` down.
-    OpenCv = 0,
-}
-
-impl OpticalConvention {
-    /// Wire encoding.
-    #[must_use]
-    pub const fn to_u8(self) -> u8 {
-        self as u8
-    }
-    /// Decodes the wire byte, or `None` for an unknown value.
-    #[must_use]
-    pub const fn from_u8(code: u8) -> Option<Self> {
-        match code {
-            0 => Some(Self::OpenCv),
-            _ => None,
-        }
-    }
-}
-
-/// The image sensor viewport, in pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Viewport {
-    /// Image width, pixels.
-    pub width_px: u32,
-    /// Image height, pixels.
-    pub height_px: u32,
-}
-
-/// Angular field of view, in radians. Always a **derived** result, never a
-/// stored field.
+/// A reference to one accepted, validated calibration artifact. The view is
+/// meaningless without it: id and content hash identify the exact artifact, and
+/// the alignment bound is the artifact's published conservative angular bound
+/// that a conformal consumer composes into its total error budget.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FieldOfView {
-    /// Horizontal field of view, radians.
-    pub horizontal_rad: f64,
-    /// Vertical field of view, radians.
-    pub vertical_rad: f64,
+pub struct CalibrationRef {
+    /// Accepted-calibration identity (must be non-zero).
+    pub calibration_id: u64,
+    /// The artifact's recorded content hash (must not be all-zero).
+    pub content_hash: [u8; 32],
+    /// The artifact's published conservative alignment bound, radians
+    /// (must be finite and `> 0`).
+    pub alignment_bound_rad: f64,
 }
 
-/// The projection a renderer must apply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ProjectionKind {
-    /// Perspective projection.
-    Perspective = 0,
-    /// Orthographic projection.
-    Orthographic = 1,
-}
-
-impl ProjectionKind {
-    /// Wire encoding.
-    #[must_use]
-    pub const fn to_u8(self) -> u8 {
-        self as u8
+impl CalibrationRef {
+    /// Validates the reference: a non-zero id, a non-zero content hash, and a
+    /// finite positive alignment bound.
+    ///
+    /// # Errors
+    ///
+    /// [`GeoError::IncompleteCalibrationReference`] when any part is missing.
+    pub fn validate(&self) -> Result<(), GeoError> {
+        let hash_declared = self.content_hash.iter().any(|&b| b != 0);
+        if self.calibration_id == 0
+            || !hash_declared
+            || !self.alignment_bound_rad.is_finite()
+            || self.alignment_bound_rad <= 0.0
+        {
+            return Err(GeoError::IncompleteCalibrationReference);
+        }
+        Ok(())
     }
-    /// Decodes the wire byte, or `None` for an unknown value.
+}
+
+/// The projection a renderer must apply, with the payload each kind needs. A
+/// perspective view derives its field of view from the referenced calibration's
+/// focal lengths and viewport; an orthographic view is defined by metric
+/// extents, because a focal-derived field of view is not an orthographic
+/// invariant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Projection {
+    /// Perspective projection; the field of view derives from the referenced
+    /// calibration (focal lengths + viewport), never stored here.
+    Perspective,
+    /// Orthographic projection defined by its metric extents across the
+    /// viewport, meters. Both extents must be finite and positive.
+    Orthographic {
+        /// Metric extent across the viewport width, meters.
+        extent_x_m: f64,
+        /// Metric extent across the viewport height, meters.
+        extent_y_m: f64,
+    },
+}
+
+impl Projection {
+    /// The wire discriminant for the projection kind.
     #[must_use]
-    pub const fn from_u8(code: u8) -> Option<Self> {
-        match code {
-            0 => Some(Self::Perspective),
-            1 => Some(Self::Orthographic),
-            _ => None,
+    pub const fn kind_u8(self) -> u8 {
+        match self {
+            Self::Perspective => 0,
+            Self::Orthographic { .. } => 1,
         }
     }
 }
@@ -129,79 +129,30 @@ impl NearFarPolicy {
     }
 }
 
-/// The camera pose: where the camera sits and how it is oriented, with both
-/// frames named (`Body` → `Installation`, the sensor mount).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CameraPose {
-    /// Camera optical-frame origin in the `from_frame`, meters.
-    pub translation_m: [f64; 3],
-    /// Rotation from `from_frame` directions to the camera optical frame.
-    pub attitude: Quat,
-    /// The frame the translation is in and the rotation maps from.
-    pub from_frame: FrameId,
-    /// The frame the rotation maps into (the sensor/installation mount).
-    pub to_frame: FrameId,
-}
-
-/// The complete projection view: viewport, focal lengths, projection, clip
-/// policy, minification, convention, and camera pose. The field of view is
-/// derived from the viewport and focal lengths, never stored.
+/// The projection view: a reference to the one validated calibration plus the
+/// render-time projection and clip policy. It holds no camera model of its own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProjectionView {
-    /// Image viewport.
-    pub viewport: Viewport,
-    /// Focal length x, pixels (`> 0`).
-    pub focal_x_px: f64,
-    /// Focal length y, pixels (`> 0`).
-    pub focal_y_px: f64,
-    /// Projection kind.
-    pub projection: ProjectionKind,
+    /// Reference to the accepted, validated calibration artifact.
+    pub calibration: CalibrationRef,
+    /// Projection kind and payload.
+    pub projection: Projection,
     /// Near/far clip policy.
     pub near_far: NearFarPolicy,
     /// Minification sampling policy.
     pub minification: MinificationPolicy,
-    /// Optical convention.
-    pub convention: OpticalConvention,
-    /// Camera pose.
-    pub camera: CameraPose,
 }
 
 impl ProjectionView {
-    /// Derives the angular field of view from the viewport and focal lengths:
-    /// `fov = 2·atan((size/2)/focal)` per axis.
-    #[must_use]
-    pub fn field_of_view(&self) -> FieldOfView {
-        let half_w = f64::from(self.viewport.width_px) / 2.0;
-        let half_h = f64::from(self.viewport.height_px) / 2.0;
-        FieldOfView {
-            horizontal_rad: 2.0 * libm::atan(half_w / self.focal_x_px),
-            vertical_rad: 2.0 * libm::atan(half_h / self.focal_y_px),
-        }
-    }
-
-    /// Validates the view, failing closed on a degenerate viewport, a
-    /// non-positive focal, an invalid clip policy, a non-finite camera
-    /// translation, a non-unit camera attitude, or wrong pose frames.
+    /// Validates the view, failing closed on an incomplete calibration
+    /// reference, an invalid clip policy, or an orthographic projection without
+    /// positive finite extents.
     ///
     /// # Errors
     ///
     /// A [`GeoError`] describing the first violation.
     pub fn validate(&self) -> Result<(), GeoError> {
-        if self.viewport.width_px == 0 || self.viewport.height_px == 0 {
-            return Err(GeoError::InvalidViewport {
-                width_px: self.viewport.width_px,
-                height_px: self.viewport.height_px,
-            });
-        }
-        if !(self.focal_x_px.is_finite() && self.focal_y_px.is_finite())
-            || self.focal_x_px <= 0.0
-            || self.focal_y_px <= 0.0
-        {
-            return Err(GeoError::NonPositiveFocal {
-                focal_x_px: self.focal_x_px,
-                focal_y_px: self.focal_y_px,
-            });
-        }
+        self.calibration.validate()?;
         if !(self.near_far.near_m.is_finite() && self.near_far.far_m.is_finite())
             || self.near_far.near_m <= 0.0
             || self.near_far.far_m <= self.near_far.near_m
@@ -211,20 +162,17 @@ impl ProjectionView {
                 far_m: self.near_far.far_m,
             });
         }
-        if !self.camera.translation_m.iter().all(|v| v.is_finite()) {
-            return Err(GeoError::NonFinite {
-                field: "camera_translation_m",
-            });
-        }
-        if self.camera.attitude.renormalized(1e-4).is_err() {
-            return Err(GeoError::NonFinite {
-                field: "camera_attitude_not_a_rotation",
-            });
-        }
-        if self.camera.from_frame != FrameId::Body || self.camera.to_frame != FrameId::Installation
+        if let Projection::Orthographic {
+            extent_x_m,
+            extent_y_m,
+        } = self.projection
+            && (!(extent_x_m.is_finite() && extent_y_m.is_finite())
+                || extent_x_m <= 0.0
+                || extent_y_m <= 0.0)
         {
-            return Err(GeoError::NonFinite {
-                field: "camera_pose_frames",
+            return Err(GeoError::InvalidOrthographicExtent {
+                extent_x_m,
+                extent_y_m,
             });
         }
         Ok(())

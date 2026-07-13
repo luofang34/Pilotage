@@ -48,18 +48,21 @@ mod identity;
 mod taws;
 mod view;
 
-pub use abi::{ABI_VERSION, SvsFrame, decode_frame, encode_frame};
-pub use availability::{AvailabilityReason, InputHealth, SvsAvailability, SvsInputs};
-pub use datum::{
-    GeodeticPosition, GeoidModelId, HorizontalDatum, LocalOriginId, VerticalDatum, VerticalPosition,
+pub use abi::{
+    ABI_VERSION, RawSvsFrame, SVS_FRAME_LEN, ValidatedSvsFrame, decode_frame, encode_frame,
 };
-pub use error::{AbiError, GeoError};
+pub use availability::{
+    AvailabilityReason, ExternalHealth, InputHealth, MAX_FRESH_AGE_NS, MAX_USABLE_AGE_NS,
+    SvsAvailability, SvsInputs, derive_inputs, health_from_integrity,
+};
+pub use datum::{
+    BaroSettingId, DatumRealizationId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum,
+    LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition, wrap_longitude_deg,
+};
+pub use error::{AbiError, AgeError, GeoError};
 pub use identity::{
-    Accuracy, IntegrityLevel, SnapshotId, SourceIncarnation, SourceStamp, StatedAttitude,
-    StatedPosition,
+    AttitudeQuality, CoherentSnapshot, IntegrityLevel, PositionQuality, SourceIncarnation,
+    SourceStamp, StatedAttitude, StatedPosition,
 };
 pub use taws::{TawsAlert, TawsHazard};
-pub use view::{
-    CameraPose, FieldOfView, MinificationPolicy, NearFarPolicy, OpticalConvention, ProjectionKind,
-    ProjectionView, Viewport,
-};
+pub use view::{CalibrationRef, MinificationPolicy, NearFarPolicy, Projection, ProjectionView};
