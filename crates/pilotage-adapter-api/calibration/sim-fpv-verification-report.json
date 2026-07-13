@@ -1,0 +1,22 @@
+{
+  "description": "Synthetic-target verification report for the published simulator FPV camera calibration (ADR-0021). SIM / NOT FOR FLIGHT: a self-consistency check of a simulated pinhole fit, never a measurement of real HUD optics. Regenerated deterministically by pilotage_adapter_api::calibration::verify_sim_recovery; the test `sim_recovery_is_within_documented_tolerance` enforces the tolerances below, so this artifact cannot drift out of tolerance unnoticed.",
+  "provenance": "sim-synthetic-tool",
+  "toolVersion": "1.0.0",
+  "targetCount": 169,
+  "known": { "focalXPx": 190.38, "focalYPx": 190.38, "principalXPx": 160.0, "principalYPx": 120.0 },
+  "recovered": { "focalXPx": 190.0, "focalYPx": 191.208791, "principalXPx": 160.0, "principalYPx": 120.0 },
+  "residualRmsPx": 0.260047,
+  "residualMaxPx": 0.362637,
+  "errors": {
+    "focalXErrorRatio": 0.00383567,
+    "focalYErrorRatio": 0.00250199,
+    "principalXErrorPx": 0.0,
+    "principalYErrorPx": 0.0
+  },
+  "tolerances": {
+    "focalErrorRatioMax": 0.01,
+    "principalErrorPxMax": 1.0,
+    "residualRmsPxMax": 0.5
+  },
+  "withinTolerance": true
+}

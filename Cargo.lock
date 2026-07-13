@@ -910,9 +910,11 @@ dependencies = [
 name = "pilotage-adapter-api"
 version = "0.1.0"
 dependencies = [
+ "pilotage-frames",
  "pilotage-protocol",
  "pilotage-timing",
  "serde",
+ "sha2 0.10.9",
  "thiserror",
 ]
 
