@@ -154,6 +154,23 @@ if [ ! -f "$matrix" ]; then
 else
     awk -F '\t' '
         function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+        # Whitespace- and case-normalized form used for exact status comparison.
+        function norm(s) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+            gsub(/[[:space:]]+/, " ", s)
+            return tolower(s)
+        }
+        # The matrix carries the machine-readable authority status as a backtick
+        # code span; the parenthetical after it is human annotation. Returns the
+        # first code span, or "" when the cell has no terminated span.
+        function code_span(s,   a, inner, b) {
+            a = index(s, "`")
+            if (a == 0) return ""
+            inner = substr(s, a + 1)
+            b = index(inner, "`")
+            if (b == 0) return ""
+            return substr(inner, 1, b - 1)
+        }
         function split_row(row, out,   tmp, k, i, m) {
             k = split(row, tmp, "|")
             m = 0
@@ -211,10 +228,24 @@ else
                             }
                         }
                     }
-                    if (aidx != "" && aidx != 0) {
+                    # The Authority status column must exist and every governed
+                    # row must carry a status that exactly matches the registry.
+                    # A missing column or empty cell fails rather than passing
+                    # silently, so the matrix can never omit the status the
+                    # registry asserts.
+                    if (aidx == "" || aidx == 0) {
+                        printf "DRIFT: %s table has no \"Authority status\" column; registry status \"%s\" cannot be verified against the matrix\n", id, rauth[id] > "/dev/stderr"; bad = 1
+                    } else {
                         authcell = dcells[aidx]
-                        if (index(authcell, rauth[id]) == 0) {
-                            printf "DRIFT: %s \"Authority status\" cell (%s) does not match registry status \"%s\"\n", id, trim(authcell), rauth[id] > "/dev/stderr"; bad = 1
+                        if (norm(authcell) == "") {
+                            printf "DRIFT: %s \"Authority status\" cell is missing or empty\n", id > "/dev/stderr"; bad = 1
+                        } else {
+                            span = code_span(authcell)
+                            if (span == "") {
+                                printf "DRIFT: %s \"Authority status\" cell (%s) carries no backtick-delimited status term\n", id, trim(authcell) > "/dev/stderr"; bad = 1
+                            } else if (norm(span) != norm(rauth[id])) {
+                                printf "DRIFT: %s \"Authority status\" cell status \"%s\" does not exactly match registry status \"%s\"\n", id, trim(span), rauth[id] > "/dev/stderr"; bad = 1
+                            }
                         }
                     }
                     if (rpub[id] != "" && index(line, rpub[id]) == 0) {

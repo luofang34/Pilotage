@@ -76,6 +76,20 @@ expect_failure drift \
     "$fixtures/matrix-drift.md" \
     "DRIFT"
 
+# A matrix that dropped the Authority status column cannot be shown to agree
+# with the registry on status, so the guard must fail rather than pass.
+expect_failure no-status-column \
+    "$fixtures/registry-good.toml" \
+    "$fixtures/matrix-no-status.md" \
+    "no \"Authority status\" column"
+
+# A matrix whose authority-status cell differs from the registry must fail the
+# exact-match comparison.
+expect_failure status-mismatch \
+    "$fixtures/registry-good.toml" \
+    "$fixtures/matrix-status-mismatch.md" \
+    "does not exactly match registry status"
+
 # An empty registry must fail closed, never report green on absent data.
 expect_failure empty \
     "$fixtures/registry-empty.toml" \
@@ -88,4 +102,4 @@ expect_failure absent \
     "$fixtures/matrix-good.md" \
     "MISSING REGISTRY"
 
-echo "standards-registry-selftest: OK (7 cases)"
+echo "standards-registry-selftest: OK (9 cases)"
