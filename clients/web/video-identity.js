@@ -32,7 +32,7 @@ export const DEFAULT_RECOGNIZED_CALIBRATIONS = Object.freeze(new Set());
 /** Applies a mapping offset to a capture time, refusing (returns `null`) when
  *  the signed offset would carry the result outside the u64 nanosecond range,
  *  rather than wrapping into a plausible-looking but wrong time. */
-function mapCaptureTime(captureTimeNanos, offsetNanos) {
+export function mapCaptureTime(captureTimeNanos, offsetNanos) {
   if (typeof captureTimeNanos !== "bigint" || typeof offsetNanos !== "bigint") return null;
   const mapped = captureTimeNanos + offsetNanos;
   if (mapped < 0n || mapped > U64_MAX) return null;

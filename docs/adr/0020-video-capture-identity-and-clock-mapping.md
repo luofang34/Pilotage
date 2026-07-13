@@ -90,12 +90,29 @@ property of the integration, not something a consumer may assume.
   prerequisite for a HUD-SIM overlay, NOT an airborne HUD capability, and is NOT
   FOR FLIGHT.
 
-- **Deferred:** actual capture-to-snapshot *association* — selecting, at render
-  time, the specific aircraft snapshot a given frame corresponds to — is not
-  implemented in this change. The gate is the mechanism that association will
-  use; the browser deliberately does not evaluate conformal readiness against
-  the latest snapshot, which would reintroduce the receipt-time conflation this
-  ADR exists to remove.
+- The browser performs **capture-to-snapshot association**
+  (`snapshot-association.js`). It observes the aircraft snapshots the AV-01
+  ingestion has already accepted — it does not gate them — into a bounded
+  history ring, each entry carrying the snapshot's `MeasurementStamp` identity.
+  Given an accepted video frame, it maps the capture time through the frame's
+  mapping into the snapshot clock domain and selects the **nearest snapshot by
+  acquisition time**. The current aircraft stream is identified by the full
+  AV-01 tuple `source_id + source_incarnation + source_epoch`; only snapshots
+  from that stream are eligible, so a nearest snapshot from a different source,
+  a superseded incarnation, or an old epoch (e.g. one that survives in the ring
+  after an epoch reset) yields an explicit stream discontinuity, never a ready
+  association — even when it is closest in time. The result is a typed verdict
+  carrying the associated snapshot identity, the mapped capture time, and a
+  **total error** (the mapping's error bound plus the association delta). It
+  fails closed: an empty history, a clock-domain mismatch, a stream-identity
+  discontinuity, or a total error over budget all yield "not ready".
+  Association runs only on frames the identity tracker accepted (so a replay
+  never associates fresh), the history is dropped on a transport/session reset
+  so a new session cannot associate against the old one, and the verdict is
+  finally passed through `conformalGate`, so the calibration/clock/mapping
+  checks can never be bypassed. The browser never associates against the
+  *latest* snapshot by receipt — only by capture time — which is the whole
+  point of this ADR.
 
 ## Consequences
 
