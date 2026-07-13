@@ -63,6 +63,11 @@ impl Hysteresis {
 /// thresholds cannot exist.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AirframeDisplayProfile {
+    /// Whether a missing/failed turn or slip indication must show a
+    /// visible failure cue instead of quietly disappearing (DYN-01).
+    /// Benchmarked airframes with required rate/coordination displays
+    /// set this; the simulator profile sets it so absence is loud.
+    pub require_dynamics_cue: bool,
     unusual_pitch_up: Hysteresis,
     unusual_pitch_down: Hysteresis,
     unusual_bank: Hysteresis,
@@ -122,6 +127,7 @@ impl AirframeDisplayProfile {
             i += 1;
         }
         Ok(Self {
+            require_dynamics_cue: true,
             unusual_pitch_up: limits.unusual_pitch_up,
             unusual_pitch_down: limits.unusual_pitch_down,
             unusual_bank: limits.unusual_bank,
@@ -138,6 +144,7 @@ impl AirframeDisplayProfile {
     /// imply no aircraft approval.
     pub fn simulator() -> Self {
         Self {
+            require_dynamics_cue: true,
             unusual_pitch_up: Hysteresis {
                 entry: 30.0 * DEG,
                 exit: 25.0 * DEG,

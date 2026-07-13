@@ -69,6 +69,9 @@ pub struct StateIntegrity {
     pub heading: Option<GroupFault>,
     /// Magnetic-variation fault: non-finite value or undeclared source.
     pub variation: Option<GroupFault>,
+    /// Dynamics fault: non-finite turn rate or lateral force, or an
+    /// unknown turn basis.
+    pub dynamics: Option<GroupFault>,
 }
 
 fn all_finite(values: &[f32]) -> bool {
@@ -172,6 +175,19 @@ pub fn validate_state(state: &AircraftState) -> StateIntegrity {
             integrity.variation = Some(GroupFault::NonFinite);
         } else if variation.source == crate::heading::VariationSourceId::UNDECLARED {
             integrity.variation = Some(GroupFault::SourceAbsent);
+        }
+    }
+    if let Some(dynamics) = &state.dynamics.data {
+        let turn_bad = dynamics.turn.is_some_and(|sample| {
+            !sample.rate_rps.is_finite() || sample.basis == crate::dynamics::TurnBasis::Unknown
+        });
+        let unknown_basis = dynamics
+            .turn
+            .is_some_and(|sample| sample.basis == crate::dynamics::TurnBasis::Unknown);
+        if unknown_basis {
+            integrity.dynamics = Some(GroupFault::UnknownEnum);
+        } else if turn_bad || !opt_finite(dynamics.lateral_mps2) {
+            integrity.dynamics = Some(GroupFault::NonFinite);
         }
     }
     integrity

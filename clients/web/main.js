@@ -947,6 +947,41 @@ function declaredSimHeading(attitude) {
   return { rad: yaw, reference: 2, ageMs: attitude.ageMs };
 }
 
+// DYN-01: the feeder — never the display — derives the turn indication,
+// as heading rate by circular differencing of consecutive declared SIM
+// headings on the feeder's own coherent clock. Documented limits: a
+// sample pair closer than MIN_TURN_DT_MS is too noisy to differentiate
+// and one farther apart than MAX_TURN_DT_MS is stale for a rate; both
+// yield no sample rather than a wild or frozen rate. Slip has no sim
+// source and is deliberately never fabricated.
+const MIN_TURN_DT_MS = 5;
+const MAX_TURN_DT_MS = 500;
+const turnDerivation = { headingRad: null, atMs: null };
+
+function derivedSimTurn(heading, nowMs) {
+  if (!heading) {
+    turnDerivation.headingRad = null;
+    turnDerivation.atMs = null;
+    return null;
+  }
+  const prevRad = turnDerivation.headingRad;
+  const prevAt = turnDerivation.atMs;
+  turnDerivation.headingRad = heading.rad;
+  turnDerivation.atMs = nowMs;
+  if (prevRad === null) return null;
+  const dtMs = nowMs - prevAt;
+  if (!(dtMs >= MIN_TURN_DT_MS && dtMs <= MAX_TURN_DT_MS)) return null;
+  // Circular difference into (-π, π] so 359°→1° is +2°, never −358°.
+  let delta = (heading.rad - prevRad) % (2 * Math.PI);
+  if (delta > Math.PI) delta -= 2 * Math.PI;
+  if (delta <= -Math.PI) delta += 2 * Math.PI;
+  return {
+    turnBasis: 0, // heading rate
+    turnRps: delta / (dtMs / 1000),
+    ageMs: heading.ageMs,
+  };
+}
+
 /** Maps the latest wire avionics estimate into the instrument state ABI
  * and draws both panels; runs on the display's own rAF cadence. Every
  * render result is honored: a validated frame is blitted, anything else
@@ -979,6 +1014,7 @@ function renderInstruments() {
   // its own, so removing this declaration flags HDG instead of
   // freezing a fabricated rose.
   const heading = declaredSimHeading(attitude);
+  const dynamics = derivedSimTurn(heading, performance.now());
   const panelState = {
     attitude,
     kinematics,
@@ -987,6 +1023,7 @@ function renderInstruments() {
     wind: null,
     selections: { headingBugRad: 0, headingBugReference: 2 },
     heading,
+    dynamics,
     quality: snapshot.quality,
     valid: {
       attitude: !!(validFlags & 1),
@@ -994,6 +1031,7 @@ function renderInstruments() {
       position: !!(validFlags & 4),
       velocity: !!(validFlags & 8),
       heading: heading !== null && !!(validFlags & 1),
+      turn: dynamics !== null && !!(validFlags & 1),
     },
     snapshot: { generation: snapshot.generation, coherence },
   };

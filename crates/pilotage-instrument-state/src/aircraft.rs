@@ -1,6 +1,7 @@
 //! The raw input state a feeder writes.
 
 use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
+use crate::dynamics::DynSample;
 use crate::heading::{HeadingReference, HeadingSample, MagneticVariation};
 use pilotage_frames::Quat;
 
@@ -162,6 +163,10 @@ pub struct ValidFlags {
     pub heading: bool,
     /// The variation sample is declared valid.
     pub variation: bool,
+    /// The turn-rate sample is declared valid.
+    pub turn: bool,
+    /// The lateral-force (slip/skid) sample is declared valid.
+    pub slip: bool,
 }
 
 /// One estimate group with the age a feeder stamped it with.
@@ -235,6 +240,9 @@ pub struct AircraftState {
     /// Magnetic-variation sample for the single sanctioned
     /// magnetic/true conversion path.
     pub variation: Stamped<MagneticVariation>,
+    /// Typed turn and slip/skid estimates (DYN-01); body rates never
+    /// substitute for either.
+    pub dynamics: Stamped<DynSample>,
 }
 
 impl Default for Selections {

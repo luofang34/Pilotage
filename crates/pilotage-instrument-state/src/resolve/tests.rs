@@ -85,8 +85,10 @@ fn source_invalidity_beats_freshness() {
     s.valid.attitude = false;
     let p = resolve(&s, &FreshnessPolicy::default());
     assert_eq!(p.roll_rad.status, SignalStatus::Failed);
-    // Rates flag is independent of the attitude flag.
-    assert_eq!(p.turn_rate_rps.status, SignalStatus::Valid);
+    // The turn indication comes only from the dynamics group; with no
+    // dynamics data it is Missing — body rates cannot leak in through
+    // an attitude-flag path (DYN-01).
+    assert_eq!(p.turn.rate_rps.status, SignalStatus::Missing);
 }
 
 #[test]
@@ -130,7 +132,6 @@ fn excessive_skew_degrades_both_stamped_groups() {
     // Each value stays individually usable (amber, shown) but the pair
     // must not present as one coherent aircraft state.
     assert_eq!(p.roll_rad.status, SignalStatus::Degraded);
-    assert_eq!(p.turn_rate_rps.status, SignalStatus::Degraded);
     assert_eq!(p.altitude.value_ft.status, SignalStatus::Degraded);
     assert_eq!(p.vsi_fpm.status, SignalStatus::Degraded);
     // Groups outside the stamped attitude/kinematics pair are untouched.
@@ -253,7 +254,8 @@ fn every_showable_output_is_finite_under_hostile_input() {
             ("roll", p.roll_rad),
             ("pitch", p.pitch_rad),
             ("heading", p.heading.value_rad),
-            ("turn", p.turn_rate_rps),
+            ("turn", p.turn.rate_rps),
+            ("slip", p.slip_lat_mps2),
             ("ias", p.ias_kt),
             ("gs", p.gs_kt),
             ("alt", p.altitude.value_ft),

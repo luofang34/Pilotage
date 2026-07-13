@@ -1149,6 +1149,32 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       Math.abs(view.getFloat32(164, true) - 0.03) < 1e-6 &&
       view.getUint8(172) === 0b11,
   );
+
+  // DYN-01: undeclared dynamics write no sample and an unknown basis —
+  // there is no encoding through which body yaw rate could pose as a
+  // turn indication.
+  const bare3 = mod.writeState({ selections: { headingBugRad: 0 } });
+  check("dynamicsless state write succeeds", bare3.ok === true);
+  check(
+    "undeclared dynamics fail closed on the wire",
+    view.getUint8(173) === 255 &&
+      Number.isNaN(view.getFloat32(176, true)) &&
+      Number.isNaN(view.getFloat32(184, true)),
+  );
+  const dyn = mod.writeState({
+    selections: { headingBugRad: 0 },
+    dynamics: { turnBasis: 0, turnRps: 0.05, lateralMps2: -0.8, ageMs: 15 },
+    valid: { turn: true, slip: true },
+  });
+  check("typed dynamics write succeeds", dyn.ok === true);
+  check(
+    "declared dynamics encode exactly (abi.rs parity)",
+    view.getUint8(173) === 0 &&
+      Math.abs(view.getFloat32(176, true) - 0.05) < 1e-6 &&
+      Math.abs(view.getFloat32(180, true) + 0.8) < 1e-6 &&
+      Math.abs(view.getFloat32(184, true) - 15) < 1e-6 &&
+      view.getUint8(172) === 0b1100,
+  );
 }
 
 // ---- glyph text painting (REN-02 consumption) ---------------------------------

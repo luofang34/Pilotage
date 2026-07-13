@@ -6,6 +6,7 @@ use crate::aircraft::{
     AircraftState, EstimateQuality, NavData, NavSource, Selections, SnapshotCoherence, Wind,
 };
 use crate::altitude::{AltitudeClass, OriginId};
+use crate::dynamics::TurnBasis;
 use crate::presentation::{AirframeDisplayProfile, AttitudePresentation, UnusualAttitudeState};
 use crate::signal::{FreshnessPolicy, Sig, SignalStatus};
 use crate::units::{M_TO_FT, MPS_TO_FPM, MPS_TO_KT};
@@ -51,6 +52,19 @@ pub struct ResolvedAltitude {
     pub bug_compatible: bool,
 }
 
+/// Turn indication resolved from the typed dynamics group (DYN-01):
+/// the rate, its explicit basis, and nothing derived from body rates.
+/// The value is retained unclamped for monitoring — only the pointer
+/// geometry saturates at the display scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedTurn {
+    /// Turn rate in radians/second, positive right; NEVER body yaw
+    /// rate — an absent dynamics group resolves `Missing`.
+    pub rate_rps: Sig<f32>,
+    /// What the displayed rate measures.
+    pub basis: TurnBasis,
+}
+
 /// Display-ready state consumed by every panel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanelData {
@@ -63,8 +77,11 @@ pub struct PanelData {
     /// Heading bug presented in the rose reference; `Failed` when the
     /// bug's own reference is unknown or cannot convert.
     pub heading_bug_rose_rad: Sig<f32>,
-    /// Body yaw rate, radians/second (turn-rate proxy).
-    pub turn_rate_rps: Sig<f32>,
+    /// Typed turn indication; body rates never feed this.
+    pub turn: ResolvedTurn,
+    /// Lateral specific force (m/s², body +Y right) for the slip/skid
+    /// ball; missing stays missing, never synthesized centered.
+    pub slip_lat_mps2: Sig<f32>,
     /// Indicated airspeed, knots.
     pub ias_kt: Sig<f32>,
     /// Groundspeed, knots.
@@ -91,6 +108,9 @@ pub struct PanelData {
     /// continuous bank). Meaningful only while the attitude signals'
     /// status shows a value; an invalid attitude resets it to default.
     pub presentation: AttitudePresentation,
+    /// Profile policy: a missing/failed turn or slip indication must
+    /// show a visible failure cue (DYN-01).
+    pub require_dynamics_cue: bool,
 }
 
 fn quality_status(q: EstimateQuality) -> SignalStatus {
@@ -193,11 +213,10 @@ pub fn resolve_stateful(
         coherence: coherence_status(state.snapshot.coherence),
     };
 
-    let (presentation, turn_rate) = attitude_geometry(state, profile, unusual);
+    let presentation = attitude_geometry(state, profile, unusual);
     let has_att = state.attitude.data.is_some();
     let att_fresh = group_freshness(policy, has_att, state.attitude.age_ms);
     let att_status = trust.fold(has_att, att_fresh, integrity.attitude, state.valid.attitude);
-    let rate_status = trust.fold(has_att, att_fresh, integrity.rates, state.valid.rates);
 
     let has_kin = state.kinematics.data.is_some();
     let kin_fresh = group_freshness(policy, has_kin, state.kinematics.age_ms);
@@ -233,7 +252,8 @@ pub fn resolve_stateful(
         pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
         heading,
         heading_bug_rose_rad: finite(bug),
-        turn_rate_rps: finite(Sig::with_status(turn_rate, rate_status)),
+        turn: turn_resolved(state, policy, &trust, &integrity),
+        slip_lat_mps2: slip_resolved(state, policy, &trust, &integrity),
         ias_kt: finite(ias),
         gs_kt: finite(Sig::with_status(gs_kt, vel_status)),
         altitude: altitude_resolved(state, policy, &trust, &integrity, pos_status, rel_alt_ft),
@@ -245,6 +265,7 @@ pub fn resolve_stateful(
         selections: sanitized_selections(state.selections),
         integrity,
         presentation,
+        require_dynamics_cue: profile.require_dynamics_cue,
     }
 }
 
@@ -308,18 +329,18 @@ fn attitude_geometry(
     state: &AircraftState,
     profile: &AirframeDisplayProfile,
     unusual: &mut UnusualAttitudeState,
-) -> (AttitudePresentation, f32) {
+) -> AttitudePresentation {
     match state.attitude.data {
         Some(att) => match validate_quat(att.quat) {
-            Ok(quat) => (unusual.step(quat, profile), att.rates_rps[2]),
+            Ok(quat) => unusual.step(quat, profile),
             Err(_) => {
                 unusual.reset();
-                (AttitudePresentation::default(), att.rates_rps[2])
+                AttitudePresentation::default()
             }
         },
         None => {
             unusual.reset();
-            (AttitudePresentation::default(), 0.0)
+            AttitudePresentation::default()
         }
     }
 }
@@ -424,13 +445,17 @@ fn wind_signal(
 }
 
 mod altitude_signal;
+mod dynamics_signal;
 use altitude_signal::altitude_resolved;
+use dynamics_signal::{slip_resolved, turn_resolved};
 mod heading_signal;
 pub use heading_signal::ResolvedHeading;
 use heading_signal::{heading_resolved, presented_angle, presented_true, presented_wind};
 
 #[cfg(test)]
 mod altitude_tests;
+#[cfg(test)]
+mod dynamics_tests;
 #[cfg(test)]
 mod heading_tests;
 #[cfg(test)]
