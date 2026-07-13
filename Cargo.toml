@@ -19,6 +19,7 @@ members = [
     "crates/pilotage-instrument-glyphs",
     "crates/pilotage-instrument-panels",
     "crates/pilotage-instrument-raster",
+    "crates/pilotage-evidence",
     "adapters/reference-headless",
     "adapters/aviate",
     "tools/hid-probe",

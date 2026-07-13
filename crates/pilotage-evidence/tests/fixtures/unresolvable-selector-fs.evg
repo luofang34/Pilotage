@@ -1,0 +1,31 @@
+# Negative fixture for filesystem resolution: the selector names a test symbol
+# that the target file does not define. Structurally complete; fails only when
+# selectors are resolved against the tree.
+evidence-graph 1
+scope ATT-01
+scope-requirement AIR-ENV-002
+
+node PFD intended-function
+node FC-ATT-06 hazard
+node AIR-ENV-002 safety-requirement
+node DESIGN-SO3 design
+node IMPL-STEP implementation
+
+node CASE-BAND verification-case
+locator tests/fixtures/sample_tests.rs
+attr test symbol_that_does_not_exist
+
+node RESULT-BAND verification-result
+node CFG-BASE configuration-item
+node TOOL-CARGO tool
+
+edge FC-ATT-06 derives-from PFD
+edge AIR-ENV-002 mitigates FC-ATT-06
+edge AIR-ENV-002 allocated-to DESIGN-SO3
+edge DESIGN-SO3 implemented-by IMPL-STEP
+edge AIR-ENV-002 verified-by CASE-BAND
+edge CASE-BAND covers AIR-ENV-002
+edge RESULT-BAND result-of CASE-BAND
+edge RESULT-BAND covers AIR-ENV-002
+edge RESULT-BAND justified-by CFG-BASE
+edge RESULT-BAND justified-by TOOL-CARGO

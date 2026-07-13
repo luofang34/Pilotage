@@ -1,0 +1,4 @@
+# Negative fixture: a declared scope but no nodes. Fails closed (empty graph).
+evidence-graph 1
+scope ATT-01
+scope-requirement AIR-ENV-002

@@ -1,0 +1,17 @@
+[package]
+name = "pilotage-evidence"
+description = "Standard-neutral lifecycle evidence graph and scoped no-orphan gate (ASSURE-01, SIM / NOT FOR FLIGHT engineering tooling; establishes no DO-178C/ISO-26262/ECSS/TSO/certification claim)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+
+[[bin]]
+name = "evidence-gate"
+path = "src/bin/evidence-gate.rs"
