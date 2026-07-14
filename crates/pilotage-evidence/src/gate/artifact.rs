@@ -4,10 +4,15 @@
 //! repo-relative path) and pins that output with an `output-digest`. This
 //! resolver reads the committed artifact, hashes it, and requires the hash to
 //! equal the declared digest — so a digest can never be a detached string: it
-//! must bind to committed, content-addressed run output. A missing artifact, or
-//! one whose content does not hash to the declared digest, is a fail-closed
-//! finding. Presence of the fields is checked separately, so a result missing
-//! them is skipped here to avoid double-reporting.
+//! must bind to committed, content-addressed run output. It then parses the
+//! artifact as a structured run record and requires its command, configuration
+//! digest, tool version, and outcome to MATCH the graph result node: hash
+//! equality alone is not evidence the run happened with the declared
+//! command/config/tool and produced the declared outcome, and a source file
+//! (with no run-record fields) can never satisfy it. A missing artifact, a
+//! content/digest mismatch, an unstructured file, or any disagreeing field is a
+//! fail-closed finding. Presence of the fields is checked separately, so a
+//! result missing them is skipped here to avoid double-reporting.
 
 use std::fs;
 use std::path::Path;
@@ -16,6 +21,8 @@ use sha2::{Digest, Sha256};
 
 use crate::gate::{Finding, FindingCode};
 use crate::graph::Graph;
+use crate::id::NodeId;
+use crate::node::Node;
 use crate::node::NodeKind;
 use crate::policy::Policy;
 
@@ -38,28 +45,69 @@ pub(super) fn resolve(
             (Some(path), Some(expected)) => (path, expected.trim()),
             _ => continue,
         };
-        let full = repo_root.join(path);
-        match fs::read(&full) {
-            Err(_) => findings.push(Finding::new(
-                FindingCode::PlaceholderResult,
-                Some(id.clone()),
-                format!("result {id}: execution-output artifact {path} not found under repo root"),
-            )),
-            Ok(bytes) => {
-                let actual = format!(
-                    "sha256:{}",
-                    crate::report::hex(&Sha256::digest(&bytes).into())
+        let bytes = match fs::read(repo_root.join(path)) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                push(
+                    findings,
+                    id,
+                    format!("execution-output artifact {path} not found under repo root"),
                 );
-                if actual != expected {
-                    findings.push(Finding::new(
-                        FindingCode::PlaceholderResult,
-                        Some(id.clone()),
-                        format!(
-                            "result {id}: artifact {path} hashes to {actual}, not the declared {expected}"
-                        ),
-                    ));
-                }
+                continue;
             }
+        };
+        let actual = format!(
+            "sha256:{}",
+            crate::report::hex(&Sha256::digest(&bytes).into())
+        );
+        if actual != expected {
+            push(
+                findings,
+                id,
+                format!("artifact {path} hashes to {actual}, not the declared {expected}"),
+            );
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        for problem in field_problems(&text, node, policy, path) {
+            push(findings, id, problem);
         }
     }
+}
+
+/// Records a placeholder-result finding against `id`.
+fn push(findings: &mut Vec<Finding>, id: &NodeId, detail: String) {
+    findings.push(Finding::new(
+        FindingCode::PlaceholderResult,
+        Some(id.clone()),
+        format!("result {id}: {detail}"),
+    ));
+}
+
+/// The ways the artifact's parsed run-record fields disagree with the node, or
+/// the single way it is not a structured run record at all.
+fn field_problems(text: &str, node: &Node, policy: &Policy, path: &str) -> Vec<String> {
+    policy
+        .result_artifact_fields
+        .iter()
+        .filter_map(|field| match (node.attr(field), field_value(text, field)) {
+            (Some(declared), Some(found)) if declared == found => None,
+            (Some(declared), Some(found)) => Some(format!(
+                "artifact {path} {field} {found:?} does not match the result's {declared:?}"
+            )),
+            (_, None) => Some(format!(
+                "artifact {path} is not a structured run record: no {field} field"
+            )),
+            (None, _) => None,
+        })
+        .collect()
+}
+
+/// The value of a `<field>: <value>` line in a structured run record.
+fn field_value(text: &str, field: &str) -> Option<String> {
+    let key = format!("{field}:");
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(&key)
+            .map(|value| value.trim().to_string())
+    })
 }

@@ -283,6 +283,72 @@ fn mismatched_artifact_fixture_fails() {
 }
 
 #[test]
+fn field_mismatch_artifact_fixture_fails() {
+    // The artifact hashes to the declared digest, but its parsed command names a
+    // different package than the result node declares.
+    let graph = fixture("field-mismatch-artifact.evg");
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    let finding = resolved
+        .findings
+        .iter()
+        .find(|f| f.code == FindingCode::PlaceholderResult && !f.excepted)
+        .expect("field mismatch reported");
+    assert!(
+        finding.detail.contains("command"),
+        "detail: {}",
+        finding.detail
+    );
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn source_as_artifact_fixture_fails() {
+    // A test source file used as the execution-output artifact hashes correctly
+    // but is not a structured run record, so it carries none of the run fields.
+    let graph = fixture("source-as-artifact.evg");
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    let finding = resolved
+        .findings
+        .iter()
+        .find(|f| f.code == FindingCode::PlaceholderResult && !f.excepted)
+        .expect("unstructured artifact reported");
+    assert!(
+        finding.detail.contains("not a structured run record"),
+        "detail: {}",
+        finding.detail
+    );
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn the_att01_artifacts_parse_and_match_the_results() {
+    // Happy path: every ATT-01 result's committed artifact resolves, hashes to
+    // its output-digest, and its parsed command/config/tool/outcome match the
+    // result node — so no result is a placeholder. The only open finding remains
+    // the honestly pending review.
+    let resolved = validate_resolving(&real_graph(), &Policy::engineering_trace(), &repo_root());
+    assert!(
+        !has_open(&resolved, FindingCode::PlaceholderResult),
+        "an ATT-01 artifact failed to resolve or match: {:?}",
+        resolved.findings
+    );
+    let open: Vec<FindingCode> = resolved
+        .findings
+        .iter()
+        .filter(|f| !f.excepted)
+        .map(|f| f.code)
+        .collect();
+    assert_eq!(
+        open,
+        vec![FindingCode::ReviewIncomplete],
+        "findings: {:?}",
+        resolved.findings
+    );
+}
+
+#[test]
 fn unresolved_review_entry_fixture_fails_on_the_specific_entry() {
     // The record file holds a complete entry AND the pending entry this review
     // names; resolution must fail on the NAMED (pending) entry, not the file.

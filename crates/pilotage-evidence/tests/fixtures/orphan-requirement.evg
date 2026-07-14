@@ -20,8 +20,9 @@ attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
 attr tool-version rustc 1.95.0
 attr source-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
 attr artifact tests/fixtures/att01-run-output.txt
-attr output-digest sha256:a05ac827ccd641d352fa1827b3592974c303bce6858a88faaec08125bc3c8db2
+attr output-digest sha256:d34a8abb658c037032e33e444813d8b935af8f8598e87cd5700b6c5e02f7548b
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
+attr outcome pass
 node CFG-BASE configuration-item
 node TOOL-CARGO tool
 

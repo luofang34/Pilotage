@@ -96,16 +96,18 @@ jobs:
 
       - name: Filesystem resolution rejects unresolvable evidence
         # These fixtures are structurally VALID and fail only when the gate
-        # resolves them against the tree: a test selector naming a missing symbol,
-        # an execution-output artifact that is absent or whose content does not
-        # hash to its declared digest, and a review whose named record entry is
-        # still pending.
+        # resolves them against the tree: a test selector naming a missing symbol;
+        # an execution-output artifact that is absent, whose content does not hash
+        # to its declared digest, whose parsed run-record fields disagree with the
+        # result, or which is a source file with no run-record fields; and a review
+        # whose named record entry is still pending.
         run: |
           set -u
           bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
           fail=0
           for f in unresolvable-selector-fs unresolvable-artifact \
-                   mismatched-artifact unresolved-review-entry; do
+                   mismatched-artifact field-mismatch-artifact \
+                   source-as-artifact unresolved-review-entry; do
             if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
                 --repo-root crates/pilotage-evidence \
                 --resolve-selectors >/dev/null 2>&1; then

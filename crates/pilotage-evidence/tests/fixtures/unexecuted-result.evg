@@ -23,6 +23,7 @@ attr source-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
 attr artifact tests/fixtures/att01-run-output.txt
 attr output-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
+attr outcome pass
 
 node CFG-BASE configuration-item
 node TOOL-CARGO tool

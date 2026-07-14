@@ -60,6 +60,11 @@ pub struct Policy {
     /// (repo-relative). Under resolution the gate reads that file, hashes it, and
     /// requires the hash to equal [`result_output_attr`](Self::result_output_attr).
     pub result_artifact_attr: String,
+    /// Attributes whose values must also appear, and match, as parsed fields in
+    /// the resolved artifact's structured run record. Hash equality alone is not
+    /// evidence the run happened with the declared command/config/tool and
+    /// produced the declared outcome.
+    pub result_artifact_fields: Vec<String>,
     /// Whether an exception must record an independent review to apply.
     pub exception_requires_review: bool,
     /// The ISO-8601 date (`YYYY-MM-DD`) an exception's expiry is checked
@@ -126,9 +131,16 @@ impl Policy {
                 "artifact".to_string(),
                 "output-digest".to_string(),
                 "run-id".to_string(),
+                "outcome".to_string(),
             ],
             result_output_attr: "output-digest".to_string(),
             result_artifact_attr: "artifact".to_string(),
+            result_artifact_fields: vec![
+                "command".to_string(),
+                "config-digest".to_string(),
+                "tool-version".to_string(),
+                "outcome".to_string(),
+            ],
             exception_requires_review: true,
             exception_as_of: None,
             selector_attr: "test".to_string(),
