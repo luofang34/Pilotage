@@ -80,4 +80,19 @@ impl Exception {
         }
         missing
     }
+
+    /// Whether the exception has lapsed as of `as_of`.
+    ///
+    /// Both `expiry` and `as_of` are expected to be ISO-8601 dates
+    /// (`YYYY-MM-DD`), which compare correctly lexicographically, so no clock or
+    /// date library is needed and the check stays deterministic. An empty
+    /// expiry is treated as not-yet-expired here; [`missing_fields`] reports the
+    /// missing expiry separately.
+    ///
+    /// [`missing_fields`]: Self::missing_fields
+    #[must_use]
+    pub fn is_expired(&self, as_of: &str) -> bool {
+        let expiry = self.expiry.trim();
+        !expiry.is_empty() && expiry < as_of.trim()
+    }
 }

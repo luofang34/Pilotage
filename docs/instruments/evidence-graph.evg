@@ -5,7 +5,7 @@
 # extreme-attitude behavior slice. It establishes NO DO-178C, ISO 26262, ECSS,
 # ARP4754A/4761, TSO, or ASIL claim and is not tool qualification (DO-330). It
 # records that the declared engineering trace is internally complete and
-# resolvable. Reviews below remain PENDING (AIR-01 issue 24, AIR-02 issue 27);
+# resolvable in both directions — nothing more. Reviews below remain PENDING;
 # the graph records that a review artifact exists, not that it is approved.
 #
 # Program-standard views (DO-178C / ISO 26262 / ECSS objective mappings) are
@@ -51,11 +51,11 @@ attr notification docs/instruments/fha.md derived-requirement column
 # --- Design ---
 
 node DESIGN-SO3-PRESENTATION design
-title SO(3)-safe attitude presentation — down-vector geometry and UnusualAttitudeState
+title SO(3)-safe attitude presentation — down-vector geometry, UnusualAttitudeState, and the AirframeDisplayProfile reverse-band floor
 locator crates/pilotage-instrument-state/src/presentation.rs
 
 node DESIGN-HORIZON-GEOMETRY design
-title PFD horizon geometry — background, cues, and recovery chevrons
+title PFD horizon geometry — background reverse-color-band clamp and recovery chevrons
 locator crates/pilotage-instrument-panels/src/pfd/horizon.rs
 
 # --- Implementation units ---
@@ -75,59 +75,69 @@ title draw_background
 locator crates/pilotage-instrument-panels/src/pfd/horizon.rs
 attr symbol draw_background
 
-node IMPL-DRAW-HORIZON-CUES implementation
-title draw_horizon_cues
-locator crates/pilotage-instrument-panels/src/pfd/horizon.rs
-attr symbol draw_horizon_cues
-
 node IMPL-DRAW-CHEVRONS implementation
 title draw_recovery_chevrons
 locator crates/pilotage-instrument-panels/src/pfd.rs
 attr symbol draw_recovery_chevrons
 
-# --- Verification cases (raster behavior, pixel-level sky/ground vs f64 reference) ---
+# --- Verification cases (raster behavior: pixel-level sky/ground vs f64 reference) ---
 
-node CASE-RASTER-BAND verification-case
-title sky/ground band matches the independent f64 reference
+node CASE-RASTER-UPRIGHT verification-case
+title upright level paints sky over ground
 locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
-attr test sky_ground_band_matches_the_independent_reference
-
-node CASE-RASTER-VERTICAL verification-case
-title passage through the vertical never flips sky/ground
-locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
-attr test passage_through_the_vertical_never_flips_sky_ground
+attr test upright_level_paints_sky_over_ground
 
 node CASE-RASTER-INVERTED verification-case
 title inverted level paints ground over sky (reverse-color band)
 locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
 attr test inverted_level_paints_ground_over_sky
 
-node CASE-RASTER-CHEVRONS verification-case
-title inverted nose-high paints recovery chevrons
+node CASE-RASTER-BAND verification-case
+title sky/ground band matches the independent f64 reference
 locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
-attr test inverted_nose_high_paints_recovery_chevrons
+attr test sky_ground_band_matches_the_independent_reference
+
+node CASE-RASTER-PITCH-BAND verification-case
+title extreme pitch keeps a reverse-color band
+locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
+attr test extreme_pitch_keeps_a_reverse_color_band
+
+node CASE-RASTER-QNEG verification-case
+title q and negated q render identically (double-cover safety)
+locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
+attr test q_and_negated_q_render_identically
 
 node CASE-RASTER-REPRO verification-case
 title extreme attitudes render bit-reproducibly
 locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
 attr test extreme_attitudes_render_bit_reproducibly
 
-# --- Verification cases (SO(3) unit) ---
+node CASE-RASTER-CHEVRONS verification-case
+title inverted nose-high paints recovery chevrons
+locator crates/pilotage-instrument-raster/src/raster/tests/attitude_behavior.rs
+attr test inverted_nose_high_paints_recovery_chevrons
 
-node CASE-SO3-CUBE verification-case
-title all 24 cube rotations match the f64 reference
+# --- Verification cases (SO(3) presentation unit) ---
+
+node CASE-PRES-RECOVERY verification-case
+title recovery indication starts within one second
 locator crates/pilotage-instrument-state/src/presentation/tests.rs
-attr test all_24_cube_rotations_match_the_f64_reference
+attr test recovery_indication_starts_within_one_second
 
-node CASE-SO3-QNEG verification-case
+node CASE-PRES-CHEVRONS verification-case
+title chevrons point toward the horizon even inverted
+locator crates/pilotage-instrument-state/src/presentation/tests.rs
+attr test chevrons_point_toward_the_horizon_even_inverted
+
+node CASE-PRES-INVERTED verification-case
+title inverted flight is unambiguous
+locator crates/pilotage-instrument-state/src/presentation/tests.rs
+attr test inverted_flight_is_unambiguous
+
+node CASE-PRES-QNEG verification-case
 title q and negated q are bit-identical (double-cover safety)
 locator crates/pilotage-instrument-state/src/presentation/tests.rs
 attr test q_and_negated_q_are_bit_identical
-
-node CASE-SO3-GRID verification-case
-title dense SO(3) grid is finite, bounded, and tracks the f64 reference
-locator crates/pilotage-instrument-state/src/presentation/tests.rs
-attr test dense_so3_grid_is_finite_bounded_and_tracks_the_f64_reference
 
 # --- Verification cases (PFD panel attitude) ---
 
@@ -135,11 +145,6 @@ node CASE-PFD-CHEVRONS verification-case
 title recovery chevrons point toward the horizon
 locator crates/pilotage-instrument-panels/src/pfd/attitude_tests.rs
 attr test chevrons_point_toward_the_horizon
-
-node CASE-PFD-EXTREME verification-case
-title every extreme orientation emits finite layered scenes
-locator crates/pilotage-instrument-panels/src/pfd/attitude_tests.rs
-attr test every_extreme_orientation_emits_finite_layered_scenes
 
 # --- Coverage analysis ---
 
@@ -152,7 +157,7 @@ locator docs/instruments/fha.md
 node RESULT-RASTER verification-result
 title raster extreme-attitude behavior — recorded pass
 
-node RESULT-SO3 verification-result
+node RESULT-PRESENTATION verification-result
 title SO(3) presentation unit suite — recorded pass
 
 node RESULT-PFD verification-result
@@ -161,10 +166,12 @@ title PFD attitude panel suite — recorded pass
 # --- Configuration and tool identity ---
 
 node CFG-WORKTREE configuration-item
-title engineering worktree baseline (git configuration record; not certified SCM)
+title engineering worktree baseline — the git working tree the recorded results were produced against (not certified SCM)
+attr scm git-worktree
 
 node TOOL-CARGO-TEST tool
-title cargo test on Rust stable (not DO-330 tool-qualified)
+title cargo test on Rust stable — not DO-330 tool-qualified
+attr toolchain rust stable channel
 
 # --- Review ---
 
@@ -192,37 +199,42 @@ edge AIR-HAZ-012 allocated-to DESIGN-SO3-PRESENTATION
 edge DESIGN-SO3-PRESENTATION implemented-by IMPL-UNUSUAL-STEP
 edge DESIGN-SO3-PRESENTATION implemented-by IMPL-DOWN-IN-BODY
 edge DESIGN-HORIZON-GEOMETRY implemented-by IMPL-DRAW-BACKGROUND
-edge DESIGN-HORIZON-GEOMETRY implemented-by IMPL-DRAW-HORIZON-CUES
 edge DESIGN-HORIZON-GEOMETRY implemented-by IMPL-DRAW-CHEVRONS
 
 # --- Verification: requirement -> case, and case covers requirement ---
 
+edge AIR-ENV-002 verified-by CASE-RASTER-UPRIGHT
 edge AIR-ENV-002 verified-by CASE-RASTER-BAND
-edge AIR-ENV-002 verified-by CASE-RASTER-VERTICAL
 edge AIR-ENV-002 verified-by CASE-RASTER-REPRO
-edge AIR-ENV-002 verified-by CASE-SO3-CUBE
-edge AIR-ENV-002 verified-by CASE-SO3-GRID
+edge AIR-ENV-002 verified-by CASE-RASTER-QNEG
+edge AIR-ENV-002 verified-by CASE-PRES-QNEG
+edge CASE-RASTER-UPRIGHT covers AIR-ENV-002
 edge CASE-RASTER-BAND covers AIR-ENV-002
-edge CASE-RASTER-VERTICAL covers AIR-ENV-002
 edge CASE-RASTER-REPRO covers AIR-ENV-002
-edge CASE-SO3-CUBE covers AIR-ENV-002
-edge CASE-SO3-GRID covers AIR-ENV-002
+edge CASE-RASTER-QNEG covers AIR-ENV-002
+edge CASE-PRES-QNEG covers AIR-ENV-002
 
 edge AIR-MODE-003 verified-by CASE-RASTER-INVERTED
+edge AIR-MODE-003 verified-by CASE-RASTER-PITCH-BAND
 edge AIR-MODE-003 verified-by CASE-RASTER-CHEVRONS
+edge AIR-MODE-003 verified-by CASE-PRES-RECOVERY
+edge AIR-MODE-003 verified-by CASE-PRES-CHEVRONS
+edge AIR-MODE-003 verified-by CASE-PRES-INVERTED
 edge AIR-MODE-003 verified-by CASE-PFD-CHEVRONS
-edge AIR-MODE-003 verified-by CASE-PFD-EXTREME
 edge CASE-RASTER-INVERTED covers AIR-MODE-003
+edge CASE-RASTER-PITCH-BAND covers AIR-MODE-003
 edge CASE-RASTER-CHEVRONS covers AIR-MODE-003
+edge CASE-PRES-RECOVERY covers AIR-MODE-003
+edge CASE-PRES-CHEVRONS covers AIR-MODE-003
+edge CASE-PRES-INVERTED covers AIR-MODE-003
 edge CASE-PFD-CHEVRONS covers AIR-MODE-003
-edge CASE-PFD-EXTREME covers AIR-MODE-003
 
-edge AIR-HAZ-012 verified-by CASE-SO3-QNEG
-edge AIR-HAZ-012 verified-by CASE-RASTER-CHEVRONS
-edge AIR-HAZ-012 verified-by CASE-RASTER-VERTICAL
-edge CASE-SO3-QNEG covers AIR-HAZ-012
-edge CASE-RASTER-CHEVRONS covers AIR-HAZ-012
-edge CASE-RASTER-VERTICAL covers AIR-HAZ-012
+edge AIR-HAZ-012 verified-by CASE-RASTER-QNEG
+edge AIR-HAZ-012 verified-by CASE-PRES-QNEG
+edge AIR-HAZ-012 verified-by CASE-PRES-CHEVRONS
+edge CASE-RASTER-QNEG covers AIR-HAZ-012
+edge CASE-PRES-QNEG covers AIR-HAZ-012
+edge CASE-PRES-CHEVRONS covers AIR-HAZ-012
 
 # --- Coverage analysis covers the requirements ---
 
@@ -231,27 +243,30 @@ edge COV-ORIENTATION covers AIR-MODE-003
 
 # --- Results: result -> executed case, covered requirement, baseline, tool ---
 
-edge RESULT-RASTER result-of CASE-RASTER-BAND
-edge RESULT-RASTER result-of CASE-RASTER-VERTICAL
+edge RESULT-RASTER result-of CASE-RASTER-UPRIGHT
 edge RESULT-RASTER result-of CASE-RASTER-INVERTED
-edge RESULT-RASTER result-of CASE-RASTER-CHEVRONS
+edge RESULT-RASTER result-of CASE-RASTER-BAND
+edge RESULT-RASTER result-of CASE-RASTER-PITCH-BAND
+edge RESULT-RASTER result-of CASE-RASTER-QNEG
 edge RESULT-RASTER result-of CASE-RASTER-REPRO
+edge RESULT-RASTER result-of CASE-RASTER-CHEVRONS
 edge RESULT-RASTER covers AIR-ENV-002
 edge RESULT-RASTER covers AIR-MODE-003
 edge RESULT-RASTER covers AIR-HAZ-012
 edge RESULT-RASTER justified-by CFG-WORKTREE
 edge RESULT-RASTER justified-by TOOL-CARGO-TEST
 
-edge RESULT-SO3 result-of CASE-SO3-CUBE
-edge RESULT-SO3 result-of CASE-SO3-QNEG
-edge RESULT-SO3 result-of CASE-SO3-GRID
-edge RESULT-SO3 covers AIR-ENV-002
-edge RESULT-SO3 covers AIR-HAZ-012
-edge RESULT-SO3 justified-by CFG-WORKTREE
-edge RESULT-SO3 justified-by TOOL-CARGO-TEST
+edge RESULT-PRESENTATION result-of CASE-PRES-RECOVERY
+edge RESULT-PRESENTATION result-of CASE-PRES-CHEVRONS
+edge RESULT-PRESENTATION result-of CASE-PRES-INVERTED
+edge RESULT-PRESENTATION result-of CASE-PRES-QNEG
+edge RESULT-PRESENTATION covers AIR-ENV-002
+edge RESULT-PRESENTATION covers AIR-MODE-003
+edge RESULT-PRESENTATION covers AIR-HAZ-012
+edge RESULT-PRESENTATION justified-by CFG-WORKTREE
+edge RESULT-PRESENTATION justified-by TOOL-CARGO-TEST
 
 edge RESULT-PFD result-of CASE-PFD-CHEVRONS
-edge RESULT-PFD result-of CASE-PFD-EXTREME
 edge RESULT-PFD covers AIR-MODE-003
 edge RESULT-PFD justified-by CFG-WORKTREE
 edge RESULT-PFD justified-by TOOL-CARGO-TEST

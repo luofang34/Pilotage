@@ -35,6 +35,11 @@ pub struct Policy {
     pub derived_requires_review: bool,
     /// Whether an exception must record an independent review to apply.
     pub exception_requires_review: bool,
+    /// The ISO-8601 date (`YYYY-MM-DD`) an exception's expiry is checked
+    /// against. `None` disables the expiry check so the default policy stays
+    /// clock-free and deterministic; a caller that wants expiry enforced injects
+    /// an explicit as-of date.
+    pub exception_as_of: Option<String>,
     /// The attribute on a verification case naming the executed test symbol.
     pub selector_attr: String,
 }
@@ -69,6 +74,7 @@ impl Policy {
             ],
             derived_requires_review: true,
             exception_requires_review: true,
+            exception_as_of: None,
             selector_attr: "test".to_string(),
         }
     }

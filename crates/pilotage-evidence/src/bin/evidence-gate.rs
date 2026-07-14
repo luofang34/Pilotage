@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! evidence-gate [--graph PATH] [--repo-root PATH] [--resolve-selectors]
-//!               [--impact NODE_ID]
+//!               [--impact NODE_ID] [--trace]
 //! ```
 //!
 //! The gate is an engineering trace check. A clean run is **not** a DO-178C,
@@ -18,7 +18,7 @@ use std::process::ExitCode;
 
 use pilotage_evidence::gate::{validate, validate_resolving};
 use pilotage_evidence::policy::Policy;
-use pilotage_evidence::{EvidenceError, NodeId, impact, parse, report};
+use pilotage_evidence::{EvidenceError, NodeId, impact, parse, report, trace};
 
 const DEFAULT_GRAPH: &str = "docs/instruments/evidence-graph.evg";
 
@@ -38,6 +38,7 @@ struct Options {
     repo_root: Option<PathBuf>,
     resolve_selectors: bool,
     impact: Option<String>,
+    trace: bool,
 }
 
 fn run(args: Vec<String>) -> Result<ExitCode, EvidenceError> {
@@ -72,6 +73,11 @@ fn run(args: Vec<String>) -> Result<ExitCode, EvidenceError> {
     let mut stdout = io::stdout().lock();
     write!(stdout, "{}", report::render_gate(&gate_report, &graph)).ok();
 
+    if options.trace {
+        let resolution = trace::resolve(&graph);
+        write!(stdout, "\n{}", report::render_trace(&resolution, &graph)).ok();
+    }
+
     if let Some(raw) = options.impact {
         match NodeId::new(raw) {
             Ok(id) => {
@@ -93,7 +99,7 @@ fn run(args: Vec<String>) -> Result<ExitCode, EvidenceError> {
 }
 
 const USAGE: &str = "usage: evidence-gate [--graph PATH] [--repo-root PATH] \
-[--resolve-selectors] [--impact NODE_ID]";
+[--resolve-selectors] [--impact NODE_ID] [--trace]";
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut options = Options {
@@ -101,6 +107,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         repo_root: None,
         resolve_selectors: false,
         impact: None,
+        trace: false,
     };
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -111,6 +118,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--resolve-selectors" => options.resolve_selectors = true,
             "--impact" => options.impact = Some(next(&mut iter, "--impact")?),
+            "--trace" => options.trace = true,
             "-h" | "--help" => return Err("help requested".to_string()),
             other => return Err(format!("unknown argument {other:?}")),
         }

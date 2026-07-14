@@ -18,7 +18,9 @@
 //! to a certification objective. It fails closed — an empty or absent graph is
 //! never reported valid — and surfaces justified [`Exception`]s without letting
 //! them become a silent success. [`mod@impact`] answers "what does changing
-//! this node affect".
+//! this node affect", and [`mod@trace`] resolves the declared slice in both
+//! directions — behavior down to a recorded result, and a result back up to
+//! behavior and its configuration and tool identity.
 //!
 //! # SIM / NOT FOR FLIGHT
 //!
@@ -36,6 +38,7 @@ pub mod impact;
 pub mod parse;
 pub mod policy;
 pub mod report;
+pub mod trace;
 
 mod error;
 mod graph;

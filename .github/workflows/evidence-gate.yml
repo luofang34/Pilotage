@@ -35,7 +35,7 @@ jobs:
       - name: ATT-01 slice — structural trace (authoritative advisory check)
         run: >
           cargo run -q -p pilotage-evidence --bin evidence-gate --
-          --graph docs/instruments/evidence-graph.evg --repo-root .
+          --graph docs/instruments/evidence-graph.evg --repo-root . --trace
 
       - name: ATT-01 slice — resolve selectors against the tree
         # Informational: selector resolution reads the referenced test files.
@@ -53,7 +53,8 @@ jobs:
           bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
           fail=0
           for f in empty missing-root missing-layer dangling-edge \
-                   unresolved-selector orphan-requirement; do
+                   unresolved-selector orphan-requirement \
+                   missing-result invalid-exception; do
             if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
                 --repo-root crates/pilotage-evidence >/dev/null 2>&1; then
               echo "REGRESSION: $f.evg unexpectedly PASSED the gate"; fail=1

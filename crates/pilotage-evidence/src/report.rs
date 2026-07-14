@@ -9,6 +9,8 @@ use crate::gate::{GateReport, GateVerdict};
 use crate::graph::Graph;
 use crate::id::NodeId;
 use crate::impact::ImpactReport;
+use crate::node::NodeKind;
+use crate::trace::Resolution;
 
 /// Renders a gate report, listing every finding and every recorded exception.
 #[must_use]
@@ -64,6 +66,53 @@ pub fn render_impact(report: &ImpactReport) -> String {
     section(&mut out, "configuration bundles", &report.bundles);
     section(&mut out, "other", &report.other);
     out
+}
+
+/// Renders a bidirectional scope resolution.
+#[must_use]
+pub fn render_trace(resolution: &Resolution, graph: &Graph) -> String {
+    let mut out = String::new();
+    line(
+        &mut out,
+        &format!(
+            "=== Bidirectional resolution — scope {} ===",
+            resolution.scope_id
+        ),
+    );
+    line(
+        &mut out,
+        "SIM / NOT FOR FLIGHT engineering trace. Not certification, not tool qualification.",
+    );
+    let forward = resolution.forward_reaches(graph, NodeKind::VerificationResult);
+    let backward = resolution.backward_reaches(graph, NodeKind::IntendedFunction);
+    line(
+        &mut out,
+        &format!(
+            "forward  (behavior -> result): {} — {} node(s) reached",
+            yes_no(forward),
+            resolution.forward.len()
+        ),
+    );
+    line(
+        &mut out,
+        &format!(
+            "backward (result -> behavior): {} — {} node(s) reached",
+            yes_no(backward),
+            resolution.backward.len()
+        ),
+    );
+    line(
+        &mut out,
+        &format!(
+            "resolves both ways: {}",
+            yes_no(resolution.resolves_both_ways(graph))
+        ),
+    );
+    out
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "NO" }
 }
 
 fn render_findings(out: &mut String, report: &GateReport) {

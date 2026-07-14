@@ -1,0 +1,38 @@
+# Negative fixture: an exception tries to cover a real gap — the result records
+# no configuration baseline — but the exception is itself invalid: it is expired
+# and names no independent review. An invalid or expired exception can never
+# suppress a finding, so the gap stays open and the graph is INVALID.
+evidence-graph 1
+scope ATT-01
+scope-requirement AIR-ENV-002
+
+node PFD intended-function
+node FC-ATT-06 hazard
+node AIR-ENV-002 safety-requirement
+node DESIGN-SO3 design
+node IMPL-STEP implementation
+
+node CASE-BAND verification-case
+locator tests/fixtures/sample_tests.rs
+attr test band_matches_reference
+
+node RESULT-BAND verification-result
+node CFG-BASE configuration-item
+node TOOL-CARGO tool
+
+edge FC-ATT-06 derives-from PFD
+edge AIR-ENV-002 mitigates FC-ATT-06
+edge AIR-ENV-002 allocated-to DESIGN-SO3
+edge DESIGN-SO3 implemented-by IMPL-STEP
+edge AIR-ENV-002 verified-by CASE-BAND
+edge CASE-BAND covers AIR-ENV-002
+edge RESULT-BAND result-of CASE-BAND
+edge RESULT-BAND covers AIR-ENV-002
+edge RESULT-BAND justified-by TOOL-CARGO
+
+exception EX-1
+covers RESULT-BAND
+owner sokoly
+rationale configuration baseline capture deferred
+status open
+expiry 2020-01-01

@@ -141,6 +141,45 @@ pub(super) fn results(graph: &Graph, findings: &mut Vec<Finding>) {
     }
 }
 
+/// Every verification case that covers an in-scope requirement must have a
+/// recorded result. A case with no incoming `result-of` from a
+/// verification-result is a gap: the trace names a check but records no outcome.
+pub(super) fn cases_have_results(graph: &Graph, findings: &mut Vec<Finding>) {
+    for id in graph.ids_of_kind(NodeKind::VerificationCase) {
+        if !verifies_scope_requirement(graph, id) || has_result(graph, id) {
+            continue;
+        }
+        findings.push(Finding::new(
+            FindingCode::MissingResult,
+            Some(id.clone()),
+            format!(
+                "verification case {id} covers an in-scope requirement but has no recorded result"
+            ),
+        ));
+    }
+}
+
+/// Whether some verification-result is the recorded outcome of running `case`.
+fn has_result(graph: &Graph, case: &NodeId) -> bool {
+    graph.edges().any(|e| {
+        e.to == *case
+            && e.relation == RelationKind::ResultOf
+            && graph.kind_of(&e.from) == Some(NodeKind::VerificationResult)
+    })
+}
+
+/// Whether `case` verifies or covers an in-scope requirement.
+fn verifies_scope_requirement(graph: &Graph, case: &NodeId) -> bool {
+    graph.edges().any(|e| {
+        (e.to == *case
+            && e.relation == RelationKind::VerifiedBy
+            && graph.scope.requirements.contains(&e.from))
+            || (e.from == *case
+                && e.relation == RelationKind::Covers
+                && graph.scope.requirements.contains(&e.to))
+    })
+}
+
 /// Every derived requirement must carry its safety record and a review.
 pub(super) fn derived_requirements(graph: &Graph, policy: &Policy, findings: &mut Vec<Finding>) {
     for id in graph.scope.requirements.iter() {

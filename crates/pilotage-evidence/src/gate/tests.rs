@@ -130,3 +130,49 @@ fn a_malformed_exception_cannot_suppress() {
     assert!(has_open(&text, FindingCode::ExceptionMalformed));
     assert_eq!(verdict_of(&text), GateVerdict::Invalid);
 }
+
+#[test]
+fn a_case_without_a_result_fails() {
+    // A second case covers the requirement but records no result. The
+    // requirement still reaches the result layer through CASE-BAND, so this is a
+    // missing result, not a missing layer.
+    let text = format!(
+        "{VALID_SLICE}\nnode CASE-EXTRA verification-case\n\
+         locator tests/fixtures/sample_tests.rs\nattr test vertical_never_flips\n\
+         edge AIR-ENV-002 verified-by CASE-EXTRA\nedge CASE-EXTRA covers AIR-ENV-002\n"
+    );
+    assert!(has_open(&text, FindingCode::MissingResult));
+    assert!(!has_open(&text, FindingCode::MissingDownstreamLayer));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
+
+#[test]
+fn an_expired_exception_cannot_suppress() {
+    // The exception is complete and independently reviewed, but expired: with an
+    // as-of date past its expiry it cannot apply, so the gap stays open.
+    let gap = without("justified-by CFG-BASE");
+    let text = format!(
+        "{gap}\n\nexception EX-1\ncovers RESULT-BAND\nowner sokoly\n\
+         rationale baseline pending\nstatus open\nexpiry 2020-01-01\nreview REVIEW-1\n"
+    );
+    let graph = parse_graph(&text).expect("fixture parses");
+    let policy = Policy {
+        exception_as_of: Some("2026-07-14".to_string()),
+        ..Policy::engineering_trace()
+    };
+    let report = validate(&graph, &policy);
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.code == FindingCode::ResultUnresolved && !f.excepted),
+        "the expired exception must not suppress the gap"
+    );
+    let malformed = report
+        .findings
+        .iter()
+        .find(|f| f.code == FindingCode::ExceptionMalformed)
+        .expect("the expired exception is reported malformed");
+    assert!(malformed.detail.contains("expired"), "{}", malformed.detail);
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+}

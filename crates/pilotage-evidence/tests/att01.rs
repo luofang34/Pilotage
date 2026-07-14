@@ -13,7 +13,8 @@ use pilotage_evidence::gate::{FindingCode, GateReport, GateVerdict, validate, va
 use pilotage_evidence::impact::impact;
 use pilotage_evidence::parse::parse_graph;
 use pilotage_evidence::policy::Policy;
-use pilotage_evidence::{Graph, NodeId};
+use pilotage_evidence::trace::resolve;
+use pilotage_evidence::{Graph, NodeId, NodeKind};
 
 fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -75,22 +76,52 @@ fn the_real_att01_slice_is_structurally_valid() {
 #[test]
 fn the_att01_slice_resolves_bidirectionally() {
     let graph = real_graph();
-    // behavior -> current result
-    let from_requirement = impact(&graph, &id("AIR-ENV-002"));
+    let resolution = resolve(&graph);
     assert!(
-        from_requirement.tests.contains(&id("RESULT-RASTER")),
-        "AIR-ENV-002 must resolve forward to a recorded result"
+        resolution.resolves_both_ways(&graph),
+        "the ATT-01 slice must resolve forward and backward"
     );
-    // result -> behavior / configuration
+
+    // Forward: behavior -> hazard -> requirement -> design -> implementation ->
+    // verification case -> result.
+    for kind in [
+        NodeKind::Hazard,
+        NodeKind::SafetyRequirement,
+        NodeKind::DerivedRequirement,
+        NodeKind::Design,
+        NodeKind::Implementation,
+        NodeKind::VerificationCase,
+        NodeKind::VerificationResult,
+    ] {
+        assert!(
+            resolution.forward_reaches(&graph, kind),
+            "forward resolution missing {kind:?}"
+        );
+    }
+
+    // Backward: result -> case -> covered requirement -> design/implementation
+    // -> behavior, plus the configuration baseline and tool identity.
+    for kind in [
+        NodeKind::VerificationCase,
+        NodeKind::SafetyRequirement,
+        NodeKind::Design,
+        NodeKind::Implementation,
+        NodeKind::Hazard,
+        NodeKind::IntendedFunction,
+        NodeKind::ConfigurationItem,
+        NodeKind::Tool,
+    ] {
+        assert!(
+            resolution.backward_reaches(&graph, kind),
+            "backward resolution missing {kind:?}"
+        );
+    }
+
+    // The undirected impact view agrees: a result connects back to its
+    // requirement and configuration baseline.
     let from_result = impact(&graph, &id("RESULT-RASTER"));
-    assert!(
-        from_result.requirements.contains(&id("AIR-ENV-002")),
-        "a result must resolve back to its requirement"
-    );
-    assert!(
-        from_result.bundles.contains(&id("CFG-WORKTREE")),
-        "a result must resolve back to its configuration baseline"
-    );
+    assert!(from_result.requirements.contains(&id("AIR-ENV-002")));
+    assert!(from_result.bundles.contains(&id("CFG-WORKTREE")));
 }
 
 #[test]
@@ -140,6 +171,45 @@ fn unresolved_selector_fixture_fails() {
 fn orphan_requirement_fixture_fails() {
     let report = report(&fixture("orphan-requirement.evg"));
     assert!(has_open(&report, FindingCode::MissingUpstream));
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn missing_result_fixture_fails() {
+    let report = report(&fixture("missing-result.evg"));
+    assert!(has_open(&report, FindingCode::MissingResult));
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn invalid_exception_fixture_fails() {
+    let graph = fixture("invalid-exception.evg");
+    // Under the default policy the exception is malformed (it names no review),
+    // so it cannot suppress the underlying gap: both findings stay open.
+    let report = validate(&graph, &Policy::engineering_trace());
+    assert!(has_open(&report, FindingCode::ResultUnresolved));
+    assert!(has_open(&report, FindingCode::ExceptionMalformed));
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+
+    // With an as-of date the same exception is rejected specifically for being
+    // expired, independent of the missing-review path.
+    let dated = Policy {
+        exception_requires_review: false,
+        exception_as_of: Some("2026-07-14".to_string()),
+        ..Policy::engineering_trace()
+    };
+    let report = validate(&graph, &dated);
+    let malformed = report
+        .findings
+        .iter()
+        .find(|f| f.code == FindingCode::ExceptionMalformed)
+        .expect("the expired exception is reported malformed");
+    assert!(
+        malformed.detail.contains("expired"),
+        "detail: {}",
+        malformed.detail
+    );
+    assert!(has_open(&report, FindingCode::ResultUnresolved));
     assert_eq!(report.verdict, GateVerdict::Invalid);
 }
 
