@@ -378,3 +378,54 @@ fn return_to_primary_cannot_chatter() {
     );
     assert!(!returned.reverted);
 }
+
+#[test]
+fn stale_primary_does_not_strand_a_fresh_secondary() {
+    // A stale primary must not anchor the comparison epoch: doing so would
+    // reject a fresh, valid secondary of a different epoch as incoherent and
+    // strand the display on the failed primary instead of reverting.
+    let p = pol_air();
+    let mut c = SourceComparator::new(MiscompareFault::Airspeed);
+    let stale_primary = Candidate {
+        receive_time_ms: 0,
+        source_time_ms: 0,
+        ..air(1, 1000, 100.0)
+    };
+    let fresh_secondary = Candidate {
+        epoch: SourceEpoch(2),
+        ..air(2, 1000, 130.0)
+    };
+    let out = c.step(&[stale_primary, fresh_secondary], &p, 1000);
+    assert_eq!(
+        out.selected,
+        Some(SourceId(2)),
+        "reverts to the fresh secondary rather than stranding on the stale primary"
+    );
+    assert!(out.reverted);
+}
+
+#[test]
+fn future_receive_time_is_not_treated_as_fresh() {
+    // A receive stamp in the future must be rejected as invalid, not
+    // saturated to age zero and accepted as maximally fresh.
+    let p = pol_air();
+    let mut c = SourceComparator::new(MiscompareFault::Airspeed);
+    let future_receive = Candidate {
+        receive_time_ms: 2000,
+        ..air(2, 1000, 100.0)
+    };
+    let out = c.step(&[air(1, 1000, 100.0), future_receive], &p, 1000);
+    assert_eq!(
+        out.state,
+        ComparisonState::InsufficientSources,
+        "a future-stamped peer is excluded, not compared"
+    );
+    assert_eq!(out.selected, Some(SourceId(1)));
+    let mut c2 = SourceComparator::new(MiscompareFault::Airspeed);
+    let present = c2.step(&[air(1, 1000, 100.0), air(2, 1000, 100.0)], &p, 1000);
+    assert_eq!(
+        present.state,
+        ComparisonState::Agree,
+        "a present-time peer at the same instant does compare"
+    );
+}

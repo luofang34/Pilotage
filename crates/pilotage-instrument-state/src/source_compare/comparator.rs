@@ -16,7 +16,7 @@ mod gating;
 use gating::RawComparison;
 use gating::{
     Usable, apply_integrity_tiebreak, available_set, evaluate_pairs, fault_level,
-    first_available_in_priority, reference_epoch,
+    first_available_in_priority, is_fresh, reference_epoch,
 };
 
 /// Per-source sequence high-water marks, so a replayed or reordered sample
@@ -128,7 +128,7 @@ impl SourceComparator {
         now_ms: u64,
     ) -> SourceComparison {
         let prev = (self.selected, self.reverted, self.state);
-        let reference_epoch = reference_epoch(candidates, policy);
+        let reference_epoch = reference_epoch(candidates, policy, now_ms);
         self.reset_on_epoch_change(reference_epoch);
 
         let usable = self.collect_usable(candidates, policy, now_ms);
@@ -184,7 +184,7 @@ impl SourceComparator {
             if !c.valid || !c.measurement.well_formed() || Some(c.epoch) != self.epoch {
                 continue;
             }
-            if now_ms.saturating_sub(c.receive_time_ms) > policy.max_age_ms() {
+            if !is_fresh(c, now_ms, policy.max_age_ms()) {
                 continue;
             }
             if self

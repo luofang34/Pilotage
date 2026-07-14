@@ -47,17 +47,29 @@ pub(super) enum RawComparison {
     Compared { max_diff: f32 },
 }
 
-/// The clock the step tracks: the epoch of the highest-priority valid,
-/// well-formed candidate, so a restart of the primary is seen at once.
+/// Whether a sample is a usable simultaneous sample time-wise: its receive
+/// and source stamps are not in the future (a future stamp is invalid, never
+/// maximally fresh) and its receive age is within the budget.
+pub(super) fn is_fresh<M>(candidate: &Candidate<M>, now_ms: u64, max_age_ms: u64) -> bool {
+    candidate.receive_time_ms <= now_ms
+        && candidate.source_time_ms <= now_ms
+        && now_ms - candidate.receive_time_ms <= max_age_ms
+}
+
+/// The clock the step tracks: the epoch of the highest-priority candidate
+/// that is itself usable — valid, well-formed, and fresh. A stale or
+/// future-stamped primary must not anchor the epoch, or it would filter out a
+/// fresh, valid secondary on a different epoch and strand the display.
 pub(super) fn reference_epoch<M: Comparable>(
     candidates: &[Candidate<M>],
     policy: &AirframeSourcePolicy,
+    now_ms: u64,
 ) -> Option<SourceEpoch> {
+    let max_age = policy.max_age_ms();
     for &id in policy.priority().as_slice() {
-        if let Some(c) = candidates
-            .iter()
-            .find(|c| c.source == id && c.valid && c.measurement.well_formed())
-        {
+        if let Some(c) = candidates.iter().find(|c| {
+            c.source == id && c.valid && c.measurement.well_formed() && is_fresh(c, now_ms, max_age)
+        }) {
             return Some(c.epoch);
         }
     }

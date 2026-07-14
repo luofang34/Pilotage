@@ -32,6 +32,7 @@ mod presentation;
 mod resolve;
 mod signal;
 mod source_compare;
+mod source_monitor;
 pub mod units;
 mod validate;
 
@@ -59,6 +60,10 @@ pub use source_compare::{
     HeadingMeasure, IntegrityLevel, MAX_SOURCES, ScalarMeasure, ScalarUnit, SourceAltitude,
     SourceComparator, SourceComparison, SourceEpoch, SourceId, SourceList, SourcePolicyError,
     SourcePolicyLimits, VectorMeasure,
+};
+pub use source_monitor::{
+    FunctionSelection, SourceInputs, SourceMonitorReport, SourceMonitors, SourcePolicies,
+    SourceSelection, SourceStep, resolve_with_sources,
 };
 pub use validate::{
     GroupFault, QUAT_NORM_TOLERANCE, StateIntegrity, validate_quat, validate_state,
