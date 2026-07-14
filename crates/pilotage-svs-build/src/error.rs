@@ -187,4 +187,54 @@ pub enum VerifyError {
         /// The source whose digest disagreed.
         source_id: u32,
     },
+    /// A lineage record lists no source, so an output record traces to nothing.
+    #[error("lineage record (class {class}, tile {lat_index},{lon_index}) lists no source")]
+    EmptyLineageSources {
+        /// The record's feature-class wire code.
+        class: u8,
+        /// Tile latitude index.
+        lat_index: i32,
+        /// Tile longitude index.
+        lon_index: i32,
+    },
+    /// A lineage source reference names a source with no signed summary, so it is
+    /// dangling.
+    #[error("lineage references source {source_id}, which has no signed source summary")]
+    UnknownLineageSource {
+        /// The referenced source with no summary.
+        source_id: u32,
+    },
+    /// A lineage record lists the same source reference twice.
+    #[error("lineage record references source {source_id} record {record} more than once")]
+    DuplicateLineageSource {
+        /// The duplicated source.
+        source_id: u32,
+        /// The duplicated record index.
+        record: u32,
+    },
+    /// A lineage source reference names a record index beyond the source's
+    /// recorded record count.
+    #[error("lineage references source {source_id} record {record}, out of range (count {count})")]
+    SourceRecordOutOfRange {
+        /// The referenced source.
+        source_id: u32,
+        /// The out-of-range record index.
+        record: u32,
+        /// The source's recorded record count.
+        count: u32,
+    },
+    /// A signed source summary is referenced by no lineage record, so it is an
+    /// extra source the output does not draw from.
+    #[error("source summary {source_id} is referenced by no lineage record")]
+    UnreferencedSourceSummary {
+        /// The unreferenced source.
+        source_id: u32,
+    },
+    /// A dataset source has no signed summary, so the provenance does not cover
+    /// every source.
+    #[error("dataset source {source_id} has no signed source summary")]
+    SourceSummaryMissing {
+        /// The dataset source with no summary.
+        source_id: u32,
+    },
 }

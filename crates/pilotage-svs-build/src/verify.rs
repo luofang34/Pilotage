@@ -11,6 +11,7 @@
 //! were substituted or altered.
 
 mod bijection;
+mod sources;
 
 #[cfg(test)]
 mod tests;
@@ -32,6 +33,7 @@ use crate::provenance::RecordKey;
 use crate::source::SourceDataset;
 
 use bijection::check_bijection;
+use sources::check_lineage_sources;
 
 /// The identity of one emitted record: its class, tile, and decodable key.
 pub(crate) type RecordIdentity = (u8, i32, i32, RecordKey);
@@ -88,19 +90,30 @@ pub fn verify_artifact(
     let decoded = decode_package(artifact)?;
     check_reports(artifact, &decoded.reports)?;
     check_bijection(artifact, &decoded.identities)?;
+    check_lineage_sources(artifact)?;
     Ok(())
 }
 
-/// Verifies the recorded source content digests against the source input.
+/// Verifies the recorded source digests against the source input over the exact
+/// source set: every signed summary matches a dataset source's version and
+/// content digest, and every dataset source has a signed summary. Neither side
+/// may carry a source the other lacks.
 ///
 /// # Errors
 ///
-/// [`VerifyError::SourceDigestMismatch`] when a recorded digest or version does
-/// not match the source input the provenance claims to describe.
+/// [`VerifyError::SourceDigestMismatch`] for a summary that names no dataset
+/// source or whose digest/version disagrees, or [`VerifyError::SourceSummaryMissing`]
+/// for a dataset source with no summary.
 pub fn verify_source_digests(
     artifact: &BuildArtifact,
     source: &SourceDataset,
 ) -> Result<(), VerifyError> {
+    let summary_ids: BTreeSet<u32> = artifact
+        .provenance
+        .sources
+        .iter()
+        .map(|summary| summary.id.0)
+        .collect();
     for summary in &artifact.provenance.sources {
         let meta = source
             .meta_for(summary.id)
@@ -111,6 +124,13 @@ pub fn verify_source_digests(
         if summary.version != meta.version || summary.content_digest != digest {
             return Err(VerifyError::SourceDigestMismatch {
                 source_id: summary.id.0,
+            });
+        }
+    }
+    for meta in &source.meta {
+        if !summary_ids.contains(&meta.id.0) {
+            return Err(VerifyError::SourceSummaryMissing {
+                source_id: meta.id.0,
             });
         }
     }

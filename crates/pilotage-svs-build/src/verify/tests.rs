@@ -11,7 +11,8 @@ use crate::bundle::canonical_bundle_bytes;
 use crate::chain::{BuildArtifact, build_package};
 use crate::error::VerifyError;
 use crate::fixtures;
-use crate::provenance::{RecordKey, RecordLineage};
+use crate::provenance::{RecordKey, RecordLineage, SourceSummary};
+use crate::source::{LicenseCode, SourceId, SourceRecordRef};
 
 /// A trust root that trusts the fixture signing key.
 fn trust_root() -> TrustRoot {
@@ -256,5 +257,137 @@ fn mismatched_source_digest_is_rejected() {
     assert!(
         matches!(result, Err(VerifyError::SourceDigestMismatch { .. })),
         "a provenance whose source digest does not match the input must be rejected: {result:?}"
+    );
+}
+
+/// Verifies a mutated, re-signed artifact, so only the source-reference checks
+/// can be what fails.
+fn verify_resigned(artifact: &mut BuildArtifact) -> Result<(), VerifyError> {
+    resign_bundle(artifact);
+    verify_artifact(
+        artifact,
+        &trust_root(),
+        DayNumber(150),
+        None,
+        UsePolicy::SimulatorPermitted,
+    )
+}
+
+#[test]
+fn empty_lineage_sources_fail() {
+    let mut artifact = built();
+    artifact.provenance.records[0].sources.clear();
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(result, Err(VerifyError::EmptyLineageSources { .. })),
+        "a lineage record with no source must fail: {result:?}"
+    );
+}
+
+#[test]
+fn unknown_lineage_source_fails() {
+    let mut artifact = built();
+    artifact.provenance.records[0].sources = vec![SourceRecordRef {
+        source: SourceId(999),
+        record: 0,
+    }];
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(
+            result,
+            Err(VerifyError::UnknownLineageSource { source_id: 999 })
+        ),
+        "a dangling source reference must fail: {result:?}"
+    );
+}
+
+#[test]
+fn duplicated_lineage_source_fails() {
+    let mut artifact = built();
+    let dup = SourceRecordRef {
+        source: fixtures::TERRAIN_SRC,
+        record: 0,
+    };
+    artifact.provenance.records[0].sources = vec![dup, dup];
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(result, Err(VerifyError::DuplicateLineageSource { .. })),
+        "a duplicated source reference must fail: {result:?}"
+    );
+}
+
+#[test]
+fn out_of_range_lineage_source_fails() {
+    let mut artifact = built();
+    artifact.provenance.records[0].sources = vec![SourceRecordRef {
+        source: fixtures::TERRAIN_SRC,
+        record: 999_999,
+    }];
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(result, Err(VerifyError::SourceRecordOutOfRange { .. })),
+        "an out-of-range source record index must fail: {result:?}"
+    );
+}
+
+#[test]
+fn summary_referenced_by_no_lineage_fails() {
+    let mut artifact = built();
+    artifact.provenance.sources.push(SourceSummary {
+        id: SourceId(999),
+        version: 1,
+        content_digest: [0u8; 32],
+        license: LicenseCode::Open,
+        horizontal_datum: 1,
+        vertical_datum: 1,
+        accuracy_h_mm: 0,
+        accuracy_v_mm: 0,
+        record_count: 1,
+    });
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(
+            result,
+            Err(VerifyError::UnreferencedSourceSummary { source_id: 999 })
+        ),
+        "a summary referenced by no lineage must fail: {result:?}"
+    );
+}
+
+#[test]
+fn dataset_source_without_summary_fails() {
+    let artifact = built();
+    // A dataset with an extra source the provenance summaries do not cover.
+    let mut extra = fixtures::dataset();
+    extra
+        .meta
+        .push(fixtures::meta(SourceId(9), LicenseCode::Open));
+    let result = verify_source_digests(&artifact, &extra);
+    assert!(
+        matches!(
+            result,
+            Err(VerifyError::SourceSummaryMissing { source_id: 9 })
+        ),
+        "a dataset source with no summary must fail: {result:?}"
+    );
+}
+
+#[test]
+fn source_set_bijection_holds_on_a_clean_build() {
+    let artifact = built();
+    verify_artifact(
+        &artifact,
+        &trust_root(),
+        DayNumber(150),
+        None,
+        UsePolicy::SimulatorPermitted,
+    )
+    .expect("every lineage source is valid and every summary is referenced");
+    verify_source_digests(&artifact, &fixtures::dataset())
+        .expect("digests cover every source, both sides");
+    assert_eq!(
+        artifact.provenance.sources.len(),
+        fixtures::dataset().meta.len(),
+        "the summary set equals the dataset source set"
     );
 }
