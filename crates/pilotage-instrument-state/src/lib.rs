@@ -62,8 +62,8 @@ pub use source_compare::{
     SourcePolicyLimits, VectorMeasure,
 };
 pub use source_monitor::{
-    FunctionSelection, SourceInputs, SourceMonitorReport, SourceMonitors, SourcePolicies,
-    SourceSelection, SourceStep, resolve_with_sources,
+    SourceInputs, SourceMonitorReport, SourceMonitors, SourcePolicies, SourceSelection, SourceStep,
+    Sourced, SourcedFunction, resolve_with_sources,
 };
 pub use validate::{
     GroupFault, QUAT_NORM_TOLERANCE, StateIntegrity, validate_quat, validate_state,

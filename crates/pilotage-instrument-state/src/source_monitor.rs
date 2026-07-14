@@ -11,51 +11,34 @@
 //! alert seams.
 
 use pilotage_alerts::{AlertEvent, MiscompareFault};
+use pilotage_frames::Quat;
 
 use crate::resolve::resolve_stateful;
 use crate::source_compare::{
-    AirframeSourcePolicy, AttitudeMeasure, Candidate, ComparisonState, HeadingMeasure,
-    ScalarMeasure, SourceAltitude, SourceComparator, SourceComparison, SourceId,
+    AirframeSourcePolicy, AttitudeMeasure, Candidate, HeadingMeasure, ScalarMeasure,
+    SourceAltitude, SourceComparator, SourceComparison,
 };
 use crate::{
     AircraftState, AirframeDisplayProfile, FreshnessPolicy, PanelData, UnusualAttitudeState,
 };
 
-/// One display function's selected source and reversion state, for the panel
-/// to annunciate. Defaults to "no selection established".
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct FunctionSelection {
-    /// The source a panel displays for this function, or `None` when every
-    /// candidate failed.
-    pub selected: Option<SourceId>,
-    /// The displayed source is not the configured primary, so the panel
-    /// annunciates a non-primary selection.
-    pub reverted: bool,
-    /// The four-state comparison result for this function.
-    pub state: ComparisonState,
-}
+mod sourced;
+use sourced::sourced_function;
+pub use sourced::{Sourced, SourcedFunction};
 
-impl FunctionSelection {
-    fn of(comparison: &SourceComparison) -> Self {
-        Self {
-            selected: comparison.selected,
-            reverted: comparison.reverted,
-            state: comparison.state,
-        }
-    }
-}
-
-/// The per-function source selection folded into [`PanelData`].
+/// The per-function selected value, bound to its source, folded into
+/// [`PanelData`]. Each field carries the selected source's own value, so a
+/// panel cannot render one source's value under another's label.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SourceSelection {
-    /// Attitude source selection.
-    pub attitude: FunctionSelection,
-    /// Heading source selection.
-    pub heading: FunctionSelection,
-    /// Altitude source selection.
-    pub altitude: FunctionSelection,
-    /// Airspeed source selection.
-    pub airspeed: FunctionSelection,
+    /// Attitude selection (the selected source's orientation).
+    pub attitude: SourcedFunction<Quat>,
+    /// Heading selection (radians from the selected source).
+    pub heading: SourcedFunction<f32>,
+    /// Altitude selection (meters from the selected source).
+    pub altitude: SourcedFunction<f32>,
+    /// Airspeed selection (the selected source's value).
+    pub airspeed: SourcedFunction<f32>,
 }
 
 /// Candidate sources for one resolve step, one slice per display function.
@@ -161,17 +144,6 @@ pub struct SourceMonitorReport {
 }
 
 impl SourceMonitorReport {
-    /// The display-facing selection summary to fold into [`PanelData`].
-    #[must_use]
-    pub fn selection(&self) -> SourceSelection {
-        SourceSelection {
-            attitude: FunctionSelection::of(&self.attitude),
-            heading: FunctionSelection::of(&self.heading),
-            altitude: FunctionSelection::of(&self.altitude),
-            airspeed: FunctionSelection::of(&self.airspeed),
-        }
-    }
-
     /// The ALR-01 transitions to forward to the alert manager this step; a
     /// `None` entry carries no edge.
     #[must_use]
@@ -212,7 +184,12 @@ pub fn resolve_with_sources(
 ) -> (PanelData, SourceMonitorReport) {
     let report = monitors.step(&sources.inputs, sources.policies, sources.now_ms);
     let mut panel = resolve_stateful(state, policy, profile, unusual);
-    panel.sources = report.selection();
+    panel.sources = SourceSelection {
+        attitude: sourced_function(sources.inputs.attitude, &report.attitude),
+        heading: sourced_function(sources.inputs.heading, &report.heading),
+        altitude: sourced_function(sources.inputs.altitude, &report.altitude),
+        airspeed: sourced_function(sources.inputs.airspeed, &report.airspeed),
+    };
     (panel, report)
 }
 

@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::source_compare::{
-    AttitudeMeasure, Candidate, ComparisonState, FrameTag, IntegrityLevel, SourceEpoch, SourceId,
+    AttitudeMeasure, Candidate, ComparisonState, FrameTag, IntegrityLevel, ScalarMeasure,
+    ScalarUnit, SourceEpoch, SourceId,
 };
 use crate::{AircraftState, AirframeDisplayProfile, FreshnessPolicy, Quat, UnusualAttitudeState};
 use pilotage_alerts::{
@@ -10,6 +11,88 @@ use pilotage_alerts::{
 };
 
 const DEG: f32 = core::f32::consts::PI / 180.0;
+
+/// A valid airspeed candidate carrying a distinct value in knots.
+fn air(src: u8, now: u64, kt: f32) -> Candidate<ScalarMeasure> {
+    Candidate {
+        source: SourceId(src),
+        epoch: SourceEpoch(1),
+        source_time_ms: now,
+        receive_time_ms: now,
+        sequence: now as u32,
+        valid: true,
+        integrity: IntegrityLevel::None,
+        accuracy: 0.0,
+        measurement: ScalarMeasure {
+            value: kt,
+            unit: ScalarUnit::Knots,
+        },
+    }
+}
+
+#[test]
+fn selected_value_and_source_are_inseparable_and_switch_together() {
+    let policies = SourcePolicies::simulator();
+    let profile = AirframeDisplayProfile::simulator();
+    let fresh = FreshnessPolicy::default();
+    let state = AircraftState::default();
+    let mut monitors = SourceMonitors::new();
+    let mut unusual = UnusualAttitudeState::default();
+
+    // Two airspeed sources carry distinct values; the primary is selected, so
+    // the value read out is the primary's own.
+    let inputs = SourceInputs {
+        airspeed: &[air(1, 0, 100.0), air(2, 0, 200.0)],
+        ..SourceInputs::default()
+    };
+    let step = SourceStep {
+        inputs,
+        policies: &policies,
+        now_ms: 0,
+    };
+    let (panel, _report) =
+        resolve_with_sources(&state, &fresh, &profile, &mut unusual, &mut monitors, &step);
+    let sel = panel
+        .sources
+        .airspeed
+        .selected
+        .expect("a source is selected");
+    assert_eq!(sel.source(), SourceId(1));
+    assert_eq!(sel.value(), 100.0, "the value is the selected source's own");
+    assert!(!panel.sources.airspeed.reverted);
+
+    // The primary fails: the value and its source id move to the secondary
+    // together — one cannot switch without the other.
+    let inputs = SourceInputs {
+        airspeed: &[
+            Candidate {
+                valid: false,
+                ..air(1, 100, 100.0)
+            },
+            air(2, 100, 200.0),
+        ],
+        ..SourceInputs::default()
+    };
+    let step = SourceStep {
+        inputs,
+        policies: &policies,
+        now_ms: 100,
+    };
+    let (panel, _report) =
+        resolve_with_sources(&state, &fresh, &profile, &mut unusual, &mut monitors, &step);
+    let sel = panel
+        .sources
+        .airspeed
+        .selected
+        .expect("the reverted source is selected");
+    assert_eq!(sel.source(), SourceId(2), "the source id switched");
+    assert_eq!(
+        sel.value(),
+        200.0,
+        "the value switched to the secondary with its id"
+    );
+    assert!(panel.sources.airspeed.reverted);
+}
 
 /// A valid attitude candidate rotated `ang_deg` about the yaw axis.
 fn att(src: u8, now: u64, ang_deg: f32) -> Candidate<AttitudeMeasure> {
@@ -86,7 +169,7 @@ fn resolve_with_sources_annunciates_selection_and_feeds_alr01() {
     let (panel, out) = last.expect("stepped at least once");
     assert_eq!(panel.sources.attitude.state, ComparisonState::Miscompare);
     assert_eq!(
-        panel.sources.attitude.selected,
+        panel.sources.attitude.selected.map(|s| s.source()),
         Some(SourceId(1)),
         "the displayed value identifies its source; ambiguity keeps the primary"
     );
@@ -116,7 +199,7 @@ fn resolve_with_sources_annunciates_selection_and_feeds_alr01() {
     let (panel, _report) =
         resolve_with_sources(&state, &fresh, &profile, &mut unusual, &mut monitors, &step);
     assert_eq!(
-        panel.sources.attitude.selected,
+        panel.sources.attitude.selected.map(|s| s.source()),
         Some(SourceId(2)),
         "a failed primary reverts to the secondary"
     );

@@ -11,6 +11,7 @@ use crate::status_paint;
 use crate::{PANEL_H, PANEL_W};
 
 mod horizon;
+mod source_readout;
 mod tapes;
 
 /// Airframe reference speeds (knots) driving the speed-tape color bands.
@@ -134,6 +135,7 @@ pub fn draw_pfd(
     if data.altitude.value_ft.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
+    source_readout::draw_source_readout(scene, &data.sources.airspeed)?;
     if let Some(alerts) = alerts {
         crate::annunciation::draw_alert_stack(scene, alerts)?;
     }
@@ -234,5 +236,7 @@ mod attitude_tests;
 mod datum_tests;
 #[cfg(test)]
 mod dyn_tests;
+#[cfg(test)]
+mod source_readout_tests;
 #[cfg(test)]
 pub(crate) mod tests;
