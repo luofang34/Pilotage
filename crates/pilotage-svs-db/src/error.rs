@@ -122,6 +122,14 @@ pub enum DbError {
         /// The restriction bits that forbade operational use.
         restrictions: u32,
     },
+    /// The manifest carries an unrecognized signed use-restriction bit. Such a
+    /// bit could be a forbid-operational flag this build does not understand, so
+    /// the package is refused rather than assumed permissive.
+    #[error("manifest carries unknown use-restriction bits {restrictions:#x}")]
+    UnknownUseRestriction {
+        /// The full restriction bits, including the unrecognized ones.
+        restrictions: u32,
+    },
 }
 
 impl DbError {
@@ -143,9 +151,10 @@ impl DbError {
             Self::RollbackBlocked { .. } => DbUnavailable::Rollback,
             Self::SimulationOnlyForbidden => DbUnavailable::SimulationOnly,
             Self::OperationalUseRestricted { .. } => DbUnavailable::Restricted,
-            Self::EmptyFeatureSet | Self::InvalidCoverage { .. } | Self::BadEffectivity => {
-                DbUnavailable::Malformed
-            }
+            Self::EmptyFeatureSet
+            | Self::InvalidCoverage { .. }
+            | Self::BadEffectivity
+            | Self::UnknownUseRestriction { .. } => DbUnavailable::Malformed,
         }
     }
 

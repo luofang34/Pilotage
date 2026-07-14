@@ -123,6 +123,7 @@ fn assert_rollback_blocked() {
         provider: ProviderId(0xB2),
         version: PackageVersion::new(2, 0, 0),
         simulation_only: true,
+        content_hash: [0; 32],
     };
     assert_eq!(
         verify_package(
@@ -259,6 +260,38 @@ fn signed_use_restrictions_refuse_operational_use() {
             UsePolicy::OperationalRequired,
         )
         .is_ok()
+    );
+}
+
+/// Acceptance (fail-closed): a manifest carrying an unknown use-restriction bit
+/// is refused at validation — an unrecognized restriction is never assumed to
+/// permit operational use — and it is refused under every policy, not only the
+/// operational one.
+#[test]
+fn unknown_use_restriction_bit_is_refused() {
+    let unknown = fixtures::unknown_restriction_candidate();
+    let expected = Err(DbError::UnknownUseRestriction {
+        restrictions: unknown.manifest.provenance.restrictions.bits(),
+    });
+    assert_eq!(
+        verify_package(
+            &unknown,
+            &trusted(),
+            fixtures::NOW,
+            None,
+            UsePolicy::OperationalRequired,
+        ),
+        expected
+    );
+    assert_eq!(
+        verify_package(
+            &unknown,
+            &trusted(),
+            fixtures::NOW,
+            None,
+            UsePolicy::SimulatorPermitted,
+        ),
+        expected
     );
 }
 

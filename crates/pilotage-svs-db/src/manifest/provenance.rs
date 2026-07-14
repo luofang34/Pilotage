@@ -51,6 +51,10 @@ impl UseRestrictions {
     pub const NO_OPERATIONAL_USE: Self = Self(1 << 0);
     /// The package is limited to training use.
     pub const TRAINING_ONLY: Self = Self(1 << 1);
+    /// Every restriction bit this build understands. A bit outside this mask is
+    /// an unknown restriction and is refused at validation rather than assumed
+    /// harmless.
+    pub const KNOWN_MASK: Self = Self(Self::NO_OPERATIONAL_USE.0 | Self::TRAINING_ONLY.0);
 
     /// Whether every restriction bit in `other` is set here.
     #[must_use]
@@ -64,6 +68,14 @@ impl UseRestrictions {
     #[must_use]
     pub const fn forbids_operational(self) -> bool {
         self.contains(Self::NO_OPERATIONAL_USE) || self.contains(Self::TRAINING_ONLY)
+    }
+
+    /// Whether any bit outside [`Self::KNOWN_MASK`] is set. An unknown
+    /// restriction could be a forbid-operational flag this build does not
+    /// understand, so it must be refused rather than assumed permissive.
+    #[must_use]
+    pub const fn has_unknown_bits(self) -> bool {
+        self.0 & !Self::KNOWN_MASK.0 != 0
     }
 
     /// The raw bits, for the canonical serialization.

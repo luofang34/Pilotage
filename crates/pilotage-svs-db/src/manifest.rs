@@ -78,7 +78,8 @@ pub struct PackageManifest {
 
 impl PackageManifest {
     /// The active-database id this manifest describes, for output and
-    /// diagnostics.
+    /// diagnostics. The id is content-addressed: it carries the hash of the
+    /// signed manifest bytes, so distinct content never shares an id.
     #[must_use]
     pub fn active_id(&self) -> ActiveDbId {
         ActiveDbId {
@@ -86,6 +87,7 @@ impl PackageManifest {
             provider: self.provenance.provider,
             version: self.provenance.version,
             simulation_only: self.simulation_only,
+            content_hash: crate::canonical::manifest_content_hash(self),
         }
     }
 
@@ -115,6 +117,11 @@ impl PackageManifest {
         }
         if !self.effectivity.is_ordered() {
             return Err(DbError::BadEffectivity);
+        }
+        if self.provenance.restrictions.has_unknown_bits() {
+            return Err(DbError::UnknownUseRestriction {
+                restrictions: self.provenance.restrictions.bits(),
+            });
         }
         self.validate_datum()
     }

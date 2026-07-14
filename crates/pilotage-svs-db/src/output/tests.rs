@@ -65,3 +65,43 @@ fn rendered_output_provenance_bound_and_checked() {
         Err(DbUnavailable::ProvenanceMismatch)
     );
 }
+
+/// Acceptance (fail-closed): output provenance is content-addressed, not merely
+/// version-keyed. Re-signing DIFFERENT content under the SAME dataset and
+/// version produces a DIFFERENT active id, so a stamp minted against the earlier
+/// content is rejected once the new content is active.
+#[test]
+fn output_provenance_is_content_addressed_across_same_version() {
+    let trust = fixtures::trust_root();
+    let inside = fixtures::position(40.5, -74.5);
+    let mut store = PackageStore::new();
+
+    let id_a = store
+        .stage_and_activate(
+            &fixtures::candidate_tagged(DatasetId(1), PackageVersion::new(1, 0, 0), 0x11),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("content A activates");
+    let stamp_a = store.render_stamp(fixtures::NOW, &inside).expect("stamp A");
+    assert_eq!(stamp_a.active_db(), id_a);
+
+    // Different content, same dataset and version.
+    let id_b = store
+        .stage_and_activate(
+            &fixtures::candidate_tagged(DatasetId(1), PackageVersion::new(1, 0, 0), 0x22),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("content B activates");
+    assert_eq!(id_a.version, id_b.version, "same version");
+    assert_ne!(id_a, id_b, "different content must yield a different id");
+
+    // The earlier stamp is refused now that different content is active.
+    assert_eq!(
+        store.verify_output_provenance(&stamp_a),
+        Err(DbUnavailable::ProvenanceMismatch)
+    );
+}

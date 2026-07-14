@@ -64,8 +64,11 @@ impl fmt::Display for DayNumber {
 
 /// The identity of the currently active database, carried into rendered output
 /// and diagnostics so every produced frame can name the exact package it was
-/// drawn against. The `simulation_only` flag travels with the id so a simulator
-/// package can never be presented as an operational one downstream.
+/// drawn against. Identity is content-addressed: [`Self::content_hash`] is the
+/// hash of the signed manifest bytes (which cover the tile-root), so two
+/// different databases can never share an id even when re-signed under the same
+/// dataset and version. The `simulation_only` flag travels with the id so a
+/// simulator package can never be presented as an operational one downstream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActiveDbId {
     /// The dataset this package is a release of.
@@ -76,16 +79,24 @@ pub struct ActiveDbId {
     pub version: PackageVersion,
     /// Whether the package is a permanently-marked simulator fixture.
     pub simulation_only: bool,
+    /// The content hash of the signed manifest, binding this id to the exact
+    /// package content. Distinct content yields a distinct id even at the same
+    /// version.
+    pub content_hash: [u8; 32],
 }
 
 impl fmt::Display for ActiveDbId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "svsdb:{:016x}/{:016x}@{}{}",
+            "svsdb:{:016x}/{:016x}@{}#{:02x}{:02x}{:02x}{:02x}{}",
             self.dataset.0,
             self.provider.0,
             self.version,
+            self.content_hash[0],
+            self.content_hash[1],
+            self.content_hash[2],
+            self.content_hash[3],
             if self.simulation_only { " SIM" } else { "" }
         )
     }

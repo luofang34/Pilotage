@@ -256,3 +256,19 @@ pub(crate) fn restricted_candidate() -> CandidatePackage {
     sign(&mut manifest);
     CandidatePackage { manifest, tiles }
 }
+
+/// A signed package carrying an unknown use-restriction bit (outside
+/// `KNOWN_MASK`), which must be refused at validation rather than assumed
+/// permissive.
+pub(crate) fn unknown_restriction_candidate() -> CandidatePackage {
+    let tiles = tiles();
+    let mut manifest = base_manifest(
+        &tiles,
+        DatasetId(1),
+        PackageVersion::new(1, 0, 0),
+        false,
+        UseRestrictions(1 << 31),
+    );
+    sign(&mut manifest);
+    CandidatePackage { manifest, tiles }
+}
