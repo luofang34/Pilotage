@@ -24,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+mod bundle;
 mod chain;
 mod config;
 mod datum;
@@ -35,22 +36,25 @@ mod payload;
 mod provenance;
 mod report;
 mod source;
+mod verify;
 
 #[cfg(test)]
 mod fixtures;
 
+pub use bundle::canonical_bundle_bytes;
 pub use chain::{BuildArtifact, build_package};
 pub use config::{BuildConfig, ChainParams, PackageIdentity, SigningConfig, TargetDatum};
 pub use datum::{convert_horizontal, convert_vertical, geoid_separation_m};
 pub use diff::{SemanticDiff, TileChangeKind, TileDiffEntry};
-pub use error::BuildError;
+pub use error::{BuildError, VerifyError};
 pub use package::canonical_package_bytes;
 pub use provenance::{
-    BuildProvenance, Disposition, ParamSnapshot, RecordDisposition, SourceSummary, StageRecord,
-    TOOL_ID, TOOL_VERSION, TileLineage,
+    BuildProvenance, Disposition, ParamSnapshot, RecordDisposition, RecordKey, RecordLineage,
+    SourceSummary, StageRecord, TOOL_ID, TOOL_VERSION, TileLineage,
 };
 pub use report::{BuildReports, CoverageReport, HoleCheck, QualityReport, SeamCheck, VoidNode};
 pub use source::{
     Aerodrome, LicenseCode, Obstacle, ObstacleKind, Runway, SourceDataset, SourceId, SourceMeta,
     SourceRecordRef, TerrainGrid,
 };
+pub use verify::{DecodedReports, decode_package_reports, verify_artifact};

@@ -7,8 +7,15 @@
 //! contents and never depend on element insertion order. Floating-point values
 //! are written as IEEE-754 bit patterns, matching the SVS-02 canonical style.
 
+mod decode;
+
 #[cfg(test)]
 mod tests;
+
+pub(crate) use decode::{
+    DecodedObstacle, DecodedPost, decode_aerodrome_count, decode_obstacles, decode_runway_count,
+    decode_terrain,
+};
 
 use crate::element::{OutputAerodrome, OutputObstacle, OutputPost, OutputRunway};
 

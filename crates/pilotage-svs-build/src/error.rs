@@ -92,4 +92,59 @@ pub enum BuildError {
         #[source]
         source: DbError,
     },
+    /// The provenance/report bundle could not be serialized for signing, so the
+    /// build cannot bind and sign it. Refused rather than emitting an unsigned
+    /// bundle.
+    #[error("provenance/report bundle serialization failed: {source}")]
+    BundleSerialization {
+        /// The serialization error.
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
+/// Why an emitted artifact failed independent verification. Each variant is a
+/// refusal: a package that does not verify, a bundle whose signature does not
+/// verify or is not bound to the package, or reports that disagree with the
+/// package they claim to describe.
+#[derive(Debug, thiserror::Error)]
+pub enum VerifyError {
+    /// The package itself failed SVS-02 verification.
+    #[error("package failed SVS-02 verification: {source}")]
+    Package {
+        /// The verifier's refusal.
+        #[source]
+        source: DbError,
+    },
+    /// The provenance/report bundle could not be serialized to re-derive the
+    /// bytes the signature covers.
+    #[error("bundle serialization failed: {source}")]
+    BundleSerialization {
+        /// The serialization error.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// The bundle signature did not verify against the trust root — the
+    /// provenance or reports were altered, the signer is untrusted, or the key
+    /// is malformed.
+    #[error("bundle signature failed verification; provenance or reports were altered")]
+    BundleSignatureInvalid,
+    /// The bundle names a different package than the one it travels with, so it
+    /// is not bound to this package.
+    #[error("bundle is not bound to this package: provenance content hash does not match")]
+    BundleBindingMismatch,
+    /// A report field disagrees with the value re-derived by decoding the
+    /// produced package.
+    #[error("report field {field} disagrees with the decoded package")]
+    ReportMismatch {
+        /// The field that disagreed.
+        field: &'static str,
+    },
+    /// A tile payload could not be decoded, so the package cannot be
+    /// independently re-derived.
+    #[error("package tile payload could not be decoded: {reason}")]
+    PayloadDecode {
+        /// What was wrong with the payload.
+        reason: &'static str,
+    },
 }

@@ -21,14 +21,16 @@ mod terrain;
 mod tests;
 
 use pilotage_geo::{
-    BaroSettingId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum, LocalOriginId,
-    TerrainRefId, VerticalDatum, VerticalPosition,
+    BaroSettingId, DatumRealizationId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum,
+    LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition,
 };
 use pilotage_svs_db::{CandidatePackage, Tile};
 
 use crate::config::BuildConfig;
 use crate::error::BuildError;
-use crate::provenance::{BuildProvenance, RecordDisposition, StageRecord, TileLineage};
+use crate::provenance::{
+    BuildProvenance, RecordDisposition, RecordLineage, StageRecord, TileLineage,
+};
 use crate::report::{BuildReports, VoidNode};
 use crate::source::{SourceDataset, SourceId};
 
@@ -69,6 +71,8 @@ pub(crate) struct PipelineOutput {
     pub tiles: Vec<Tile>,
     /// Per-tile lineage.
     pub lineages: Vec<TileLineage>,
+    /// Per-record lineage for the records this pipeline emitted.
+    pub records: Vec<RecordLineage>,
     /// The change report for the pipeline's records.
     pub dispositions: Vec<RecordDisposition>,
     /// The stages the pipeline ran.
@@ -109,8 +113,9 @@ pub(crate) struct Metrics {
     pub voids: Vec<VoidNode>,
 }
 
-/// A build's three deliverables: the signed package, its structured provenance,
-/// and the coverage/quality/seam/hole reports.
+/// A build's deliverables: the signed package, its structured provenance, the
+/// coverage/quality/seam/hole reports, and the Ed25519 signature that binds the
+/// provenance+report bundle so it cannot be altered without detection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BuildArtifact {
     /// The signed, verifiable SVS-02 candidate package.
@@ -119,6 +124,10 @@ pub struct BuildArtifact {
     pub provenance: BuildProvenance,
     /// The coverage, quality, seam, and hole reports.
     pub reports: BuildReports,
+    /// The Ed25519 signature over the canonical provenance+report bundle, under
+    /// the same key that signed the package. Any mutation of the provenance or
+    /// reports invalidates it (see [`crate::verify_artifact`]).
+    pub bundle_signature: [u8; 64],
 }
 
 /// Runs the full chain and returns the package, provenance, and reports.
@@ -146,10 +155,13 @@ pub fn build_package(
     let outputs = [&terrain, &obstacles, &aero];
     let reports = assemble::build_reports(config, &outputs);
     let provenance = assemble::build_provenance(config, source, &outputs, signed.content_hash);
+    let bundle_signature =
+        crate::package::sign_bundle(&config.signing.signing_seed, &provenance, &reports)?;
     Ok(BuildArtifact {
         package: signed.package,
         provenance,
         reports,
+        bundle_signature,
     })
 }
 
@@ -241,6 +253,32 @@ pub(crate) fn geo_tile_for(
     lat_deg: f64,
     lon_deg: f64,
 ) -> Result<GeoTile, BuildError> {
+    tile_of(
+        config.target.horizontal,
+        config.target.realization,
+        config.params.tile_deg,
+        source_id,
+        lat_deg,
+        lon_deg,
+    )
+}
+
+/// The core tiling primitive: the tile a position falls in, in the given target
+/// datum at the given tile size. Reuses [`pilotage_geo::GeodeticPosition::tile`]
+/// so the build and any independent verifier agree on tile assignment.
+///
+/// # Errors
+///
+/// [`BuildError::InvalidGeodetic`] when the coordinates are not a valid geodetic
+/// position at `tile_deg`.
+pub(crate) fn tile_of(
+    horizontal: HorizontalDatum,
+    realization: DatumRealizationId,
+    tile_deg: f64,
+    source_id: u32,
+    lat_deg: f64,
+    lon_deg: f64,
+) -> Result<GeoTile, BuildError> {
     let vertical = VerticalPosition::new(
         0.0,
         VerticalDatum::Ellipsoid,
@@ -250,15 +288,9 @@ pub(crate) fn geo_tile_for(
         LocalOriginId::UNDECLARED,
     )
     .map_err(|source| BuildError::InvalidGeodetic { source_id, source })?;
-    let position = GeodeticPosition::new(
-        lat_deg,
-        lon_deg,
-        config.target.horizontal,
-        config.target.realization,
-        vertical,
-    )
-    .map_err(|source| BuildError::InvalidGeodetic { source_id, source })?;
+    let position = GeodeticPosition::new(lat_deg, lon_deg, horizontal, realization, vertical)
+        .map_err(|source| BuildError::InvalidGeodetic { source_id, source })?;
     position
-        .tile(config.params.tile_deg)
+        .tile(tile_deg)
         .map_err(|source| BuildError::InvalidGeodetic { source_id, source })
 }

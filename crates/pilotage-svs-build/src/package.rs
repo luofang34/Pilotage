@@ -20,9 +20,11 @@ use pilotage_svs_db::{
     tile_leaf_hash, verify_package,
 };
 
+use crate::bundle::canonical_bundle_bytes;
 use crate::config::BuildConfig;
 use crate::error::BuildError;
-use crate::provenance::TOOL_ID;
+use crate::provenance::{BuildProvenance, TOOL_ID};
+use crate::report::BuildReports;
 use crate::source::SourceDataset;
 
 /// A signed package together with the content hash the provenance binds to.
@@ -187,4 +189,22 @@ pub fn canonical_package_bytes(package: &CandidatePackage) -> Vec<u8> {
         out.extend_from_slice(&tile_canonical_bytes(tile));
     }
     out
+}
+
+/// Signs the provenance/report bundle with the configured key, over the
+/// canonical bundle bytes, so any later mutation of the provenance or reports
+/// invalidates the signature.
+///
+/// # Errors
+///
+/// [`BuildError::BundleSerialization`] if the bundle cannot be serialized.
+pub(crate) fn sign_bundle(
+    seed: &[u8; 32],
+    provenance: &BuildProvenance,
+    reports: &BuildReports,
+) -> Result<[u8; 64], BuildError> {
+    let bytes = canonical_bundle_bytes(provenance, reports)
+        .map_err(|source| BuildError::BundleSerialization { source })?;
+    let signing_key = SigningKey::from_bytes(seed);
+    Ok(signing_key.sign(&bytes).to_bytes())
 }

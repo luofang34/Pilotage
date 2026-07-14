@@ -15,7 +15,7 @@ use crate::datum::convert_horizontal;
 use crate::element::OutputRunway;
 use crate::error::BuildError;
 use crate::payload::encode_runways;
-use crate::provenance::{Disposition, RecordDisposition, TileLineage};
+use crate::provenance::{Disposition, RecordDisposition, RecordKey, RecordLineage, TileLineage};
 use crate::source::{Runway, SourceMeta, SourceRecordRef};
 
 /// The map from tile index to the runways placed in it.
@@ -97,9 +97,12 @@ fn outlier_reason(runway: &Runway) -> Option<&'static str> {
 }
 
 /// Builds runway tiles and lineage from the grouped runways.
-pub(crate) fn build_tiles(groups: RunwayGroups) -> (Vec<Tile>, Vec<TileLineage>) {
+pub(crate) fn build_tiles(
+    groups: RunwayGroups,
+) -> (Vec<Tile>, Vec<TileLineage>, Vec<RecordLineage>) {
     let mut tiles = Vec::with_capacity(groups.len());
     let mut lineages = Vec::with_capacity(groups.len());
+    let mut records: Vec<RecordLineage> = Vec::new();
     for ((lat_index, lon_index), runways) in groups {
         let key = TileKey {
             class: FeatureClass::Runways,
@@ -116,6 +119,19 @@ pub(crate) fn build_tiles(groups: RunwayGroups) -> (Vec<Tile>, Vec<TileLineage>)
         let mut sources: Vec<SourceRecordRef> = runways.iter().map(|r| r.source).collect();
         sources.sort();
         sources.dedup();
+        for runway in &runways {
+            records.push(RecordLineage {
+                class: FeatureClass::Runways.to_u8(),
+                lat_index,
+                lon_index,
+                key: RecordKey::Runway {
+                    designator: runway.designator,
+                    end_a_lat_bits: runway.end_a_lat_deg.to_bits(),
+                    end_a_lon_bits: runway.end_a_lon_deg.to_bits(),
+                },
+                sources: vec![runway.source],
+            });
+        }
         lineages.push(TileLineage {
             class: FeatureClass::Runways.to_u8(),
             lat_index,
@@ -124,5 +140,5 @@ pub(crate) fn build_tiles(groups: RunwayGroups) -> (Vec<Tile>, Vec<TileLineage>)
             sources,
         });
     }
-    (tiles, lineages)
+    (tiles, lineages, records)
 }

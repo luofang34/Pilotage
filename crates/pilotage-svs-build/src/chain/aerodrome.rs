@@ -18,7 +18,9 @@ use crate::datum::{convert_horizontal, convert_vertical};
 use crate::element::OutputAerodrome;
 use crate::error::BuildError;
 use crate::payload::encode_aerodromes;
-use crate::provenance::{Disposition, RecordDisposition, StageRecord, TileLineage};
+use crate::provenance::{
+    Disposition, RecordDisposition, RecordKey, RecordLineage, StageRecord, TileLineage,
+};
 use crate::source::{Aerodrome, SourceDataset, SourceMeta, SourceRecordRef};
 
 use runway::{RunwayGroups, build_tiles as build_runway_tiles, place as place_runway};
@@ -86,12 +88,13 @@ fn assemble(
     counts: (u32, u32, u32),
 ) -> PipelineOutput {
     let (inputs, outliers, clipped) = counts;
-    let (mut tiles, mut lineages) = build_aero_tiles(aero_groups);
+    let (mut tiles, mut lineages, mut records) = build_aero_tiles(aero_groups);
     let aerodrome_tiles = tiles.len() as u32;
-    let (rwy_tiles, rwy_lineages) = build_runway_tiles(rwy_groups);
+    let (rwy_tiles, rwy_lineages, rwy_records) = build_runway_tiles(rwy_groups);
     let runway_tiles = rwy_tiles.len() as u32;
     tiles.extend(rwy_tiles);
     lineages.extend(rwy_lineages);
+    records.extend(rwy_records);
     let emitted = lineages
         .iter()
         .fold(0u32, |acc, l| acc.wrapping_add(l.element_count));
@@ -106,6 +109,7 @@ fn assemble(
     PipelineOutput {
         tiles,
         lineages,
+        records,
         dispositions,
         stages,
         metrics,
@@ -186,10 +190,12 @@ fn coverage_contains(coverage: &CoverageBox, lat: f64, lon: f64) -> bool {
     coverage.contains_lat_lon(lat, lon)
 }
 
-/// Builds aerodrome tiles and lineage from the grouped reference points.
-fn build_aero_tiles(groups: AeroGroups) -> (Vec<Tile>, Vec<TileLineage>) {
+/// Builds aerodrome tiles, tile lineage, and per-record lineage from the grouped
+/// reference points.
+fn build_aero_tiles(groups: AeroGroups) -> (Vec<Tile>, Vec<TileLineage>, Vec<RecordLineage>) {
     let mut tiles = Vec::with_capacity(groups.len());
     let mut lineages = Vec::with_capacity(groups.len());
+    let mut records: Vec<RecordLineage> = Vec::new();
     for ((lat_index, lon_index), aerodromes) in groups {
         let key = TileKey {
             class: FeatureClass::Aerodromes,
@@ -206,6 +212,17 @@ fn build_aero_tiles(groups: AeroGroups) -> (Vec<Tile>, Vec<TileLineage>) {
         let mut sources: Vec<SourceRecordRef> = aerodromes.iter().map(|a| a.source).collect();
         sources.sort();
         sources.dedup();
+        for aerodrome in &aerodromes {
+            records.push(RecordLineage {
+                class: FeatureClass::Aerodromes.to_u8(),
+                lat_index,
+                lon_index,
+                key: RecordKey::Aerodrome {
+                    ident: aerodrome.ident,
+                },
+                sources: vec![aerodrome.source],
+            });
+        }
         lineages.push(TileLineage {
             class: FeatureClass::Aerodromes.to_u8(),
             lat_index,
@@ -214,7 +231,7 @@ fn build_aero_tiles(groups: AeroGroups) -> (Vec<Tile>, Vec<TileLineage>) {
             sources,
         });
     }
-    (tiles, lineages)
+    (tiles, lineages, records)
 }
 
 /// The stage records for the aerodrome pipeline.

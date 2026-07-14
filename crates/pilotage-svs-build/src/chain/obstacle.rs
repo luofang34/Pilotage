@@ -20,7 +20,9 @@ use crate::datum::convert_horizontal;
 use crate::element::OutputObstacle;
 use crate::error::BuildError;
 use crate::payload::encode_obstacles;
-use crate::provenance::{Disposition, RecordDisposition, StageRecord, TileLineage};
+use crate::provenance::{
+    Disposition, RecordDisposition, RecordKey, RecordLineage, StageRecord, TileLineage,
+};
 use crate::source::{Obstacle, ObstacleKind, SourceDataset, SourceRecordRef};
 
 use merge::merge_tile;
@@ -61,7 +63,7 @@ pub(crate) fn process(
         }
     }
     let mut merged = 0u32;
-    let (tiles, lineages) = build_tiles(config, groups, &mut dispositions, &mut merged);
+    let (tiles, lineages, records) = build_tiles(config, groups, &mut dispositions, &mut merged);
     let emitted = tiles_element_count(&lineages);
     let stages = obstacle_stages(inputs, outliers, clipped, emitted, merged);
     let metrics = Metrics {
@@ -75,6 +77,7 @@ pub(crate) fn process(
     Ok(PipelineOutput {
         tiles,
         lineages,
+        records,
         dispositions,
         stages,
         metrics,
@@ -159,15 +162,17 @@ fn within(coverage: &CoverageBox, lat: f64, lon: f64) -> bool {
     coverage.contains_lat_lon(lat, lon)
 }
 
-/// Merges each tile's obstacles and builds the tiles and lineage.
+/// Merges each tile's obstacles and builds the tiles, tile lineage, and
+/// per-record lineage.
 fn build_tiles(
     config: &BuildConfig,
     groups: BTreeMap<(i32, i32), Vec<TileObstacle>>,
     dispositions: &mut Vec<RecordDisposition>,
     merged: &mut u32,
-) -> (Vec<Tile>, Vec<TileLineage>) {
+) -> (Vec<Tile>, Vec<TileLineage>, Vec<RecordLineage>) {
     let mut tiles = Vec::with_capacity(groups.len());
     let mut lineages = Vec::with_capacity(groups.len());
+    let mut records: Vec<RecordLineage> = Vec::new();
     for ((lat_index, lon_index), items) in groups {
         let obstacles = merge_tile(
             items,
@@ -187,9 +192,22 @@ fn build_tiles(
             key,
             bytes: encode_obstacles(&obstacles),
         });
+        for obstacle in &obstacles {
+            records.push(RecordLineage {
+                class: FeatureClass::Obstacles.to_u8(),
+                lat_index,
+                lon_index,
+                key: RecordKey::Obstacle {
+                    lat_bits: obstacle.lat_deg.to_bits(),
+                    lon_bits: obstacle.lon_deg.to_bits(),
+                    kind: obstacle.kind.to_u8(),
+                },
+                sources: obstacle.sources.clone(),
+            });
+        }
         lineages.push(lineage(lat_index, lon_index, &obstacles));
     }
-    (tiles, lineages)
+    (tiles, lineages, records)
 }
 
 /// The lineage of an obstacle tile.

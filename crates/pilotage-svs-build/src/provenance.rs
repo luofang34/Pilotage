@@ -4,11 +4,13 @@
 //! Provenance records, for the whole build, the tool identity and version, the
 //! parameters, a per-source summary (including license and datum), the ordered
 //! stages with their input/output/rejected counts, a change report of every
-//! record's disposition (kept, rejected as an outlier, clipped, voided, or
-//! merged), and a per-tile roll-up of contributing source records. It closes
-//! with the content hash of the package it describes, binding the lineage to the
-//! exact bytes signed. Everything serializes deterministically (sorted keys,
-//! no maps), so the provenance of a reproduced build is byte-identical too.
+//! changed record's disposition (rejected as an outlier, clipped, or merged), a
+//! per-tile roll-up of contributing sources, and a per-record lineage tracing
+//! each emitted output record back to the specific source record(s) that
+//! produced it. It closes with the content hash of the package it describes,
+//! binding the lineage to the exact bytes signed. Everything serializes
+//! deterministically (sorted keys, no maps), so the provenance of a reproduced
+//! build is byte-identical too.
 //!
 //! # SIM / NOT FOR FLIGHT
 //!
@@ -106,6 +108,63 @@ pub struct TileLineage {
     pub sources: Vec<SourceRecordRef>,
 }
 
+/// A decodable identity for one emitted output record within its tile, so a
+/// record's lineage can be resolved back to the record actually present in the
+/// package. The fields are exactly the identity fields the tile payload encodes,
+/// so a decoder can find the same record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum RecordKey {
+    /// A terrain post at its global grid indices.
+    TerrainNode {
+        /// Global grid row index (latitude).
+        i: u32,
+        /// Global grid column index (longitude).
+        j: u32,
+    },
+    /// An obstacle at a position and kind (position as IEEE-754 bit patterns).
+    Obstacle {
+        /// Latitude bit pattern.
+        lat_bits: u64,
+        /// Longitude bit pattern.
+        lon_bits: u64,
+        /// Obstacle kind wire code.
+        kind: u8,
+    },
+    /// An aerodrome reference point, by identifier.
+    Aerodrome {
+        /// The aerodrome identifier.
+        ident: u32,
+    },
+    /// A runway, by designator and end-A position (bit patterns).
+    Runway {
+        /// Runway designator.
+        designator: u16,
+        /// End-A latitude bit pattern.
+        end_a_lat_bits: u64,
+        /// End-A longitude bit pattern.
+        end_a_lon_bits: u64,
+    },
+}
+
+/// The lineage of one emitted output record: its tile, its decodable identity,
+/// and the exact source record(s) it was derived from. This is the record-level
+/// traceability the standard requires — a single output post, obstacle, or
+/// runway resolves to the specific source records that produced it, not merely a
+/// tile-wide aggregate.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RecordLineage {
+    /// The feature-class wire code.
+    pub class: u8,
+    /// Tile latitude index.
+    pub lat_index: i32,
+    /// Tile longitude index.
+    pub lon_index: i32,
+    /// The record's decodable identity within the tile.
+    pub key: RecordKey,
+    /// The source record(s) this output record was derived from, sorted.
+    pub sources: Vec<SourceRecordRef>,
+}
+
 /// The numeric parameters the build ran under, for the provenance record.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ParamSnapshot {
@@ -160,6 +219,9 @@ pub struct BuildProvenance {
     pub dispositions: Vec<RecordDisposition>,
     /// Per-tile lineage, sorted by tile identity.
     pub tiles: Vec<TileLineage>,
+    /// Per-record lineage: every emitted output record traced to its source
+    /// record(s), sorted by class then tile then record key.
+    pub records: Vec<RecordLineage>,
     /// The content hash of the package this provenance describes, hex-encoded,
     /// binding the lineage to the exact signed bytes.
     #[serde(serialize_with = "serialize_hex32")]

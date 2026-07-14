@@ -20,7 +20,7 @@ use crate::config::BuildConfig;
 use crate::element::OutputPost;
 use crate::error::BuildError;
 use crate::payload::encode_terrain;
-use crate::provenance::{RecordDisposition, StageRecord, TileLineage};
+use crate::provenance::{RecordDisposition, RecordKey, RecordLineage, StageRecord, TileLineage};
 use crate::report::VoidNode;
 use crate::source::{SourceDataset, SourceRecordRef};
 
@@ -56,7 +56,7 @@ pub(crate) fn process(
     let (n_lat, n_lon) = output_grid_dims(config)?;
     let total_nodes = u64::from(n_lat).saturating_mul(u64::from(n_lon)) as u32;
     let resampled = resample_grid(config, &prepared, n_lat, n_lon)?;
-    let (tiles, lineages, terrain_tiles) = build_tiles(resampled.groups);
+    let (tiles, lineages, records, terrain_tiles) = build_tiles(resampled.groups);
     let stages = terrain_stages(
         source_posts,
         survived,
@@ -77,6 +77,7 @@ pub(crate) fn process(
     Ok(PipelineOutput {
         tiles,
         lineages,
+        records,
         dispositions,
         stages,
         metrics,
@@ -153,12 +154,14 @@ fn resample_grid(
     })
 }
 
-/// Builds terrain tiles and their lineage from the grouped posts.
+/// Builds terrain tiles, their tile-level lineage, and per-record lineage from
+/// the grouped posts.
 fn build_tiles(
     groups: BTreeMap<(i32, i32), Vec<OutputPost>>,
-) -> (Vec<Tile>, Vec<TileLineage>, u32) {
+) -> (Vec<Tile>, Vec<TileLineage>, Vec<RecordLineage>, u32) {
     let mut tiles = Vec::with_capacity(groups.len());
     let mut lineages = Vec::with_capacity(groups.len());
+    let mut records: Vec<RecordLineage> = Vec::new();
     let mut count = 0u32;
     for ((lat_index, lon_index), posts) in groups {
         let key = TileKey {
@@ -179,6 +182,18 @@ fn build_tiles(
             .collect();
         sources.sort();
         sources.dedup();
+        for post in &posts {
+            records.push(RecordLineage {
+                class: FeatureClass::Terrain.to_u8(),
+                lat_index,
+                lon_index,
+                key: RecordKey::TerrainNode {
+                    i: post.i,
+                    j: post.j,
+                },
+                sources: post.sources.clone(),
+            });
+        }
         lineages.push(TileLineage {
             class: FeatureClass::Terrain.to_u8(),
             lat_index,
@@ -188,7 +203,7 @@ fn build_tiles(
         });
         count = count.wrapping_add(1);
     }
-    (tiles, lineages, count)
+    (tiles, lineages, records, count)
 }
 
 /// The per-axis node count the coverage box implies at the post spacing.

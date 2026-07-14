@@ -10,8 +10,8 @@
 use crate::chain::{Metrics, PipelineOutput, STAGE_INGEST, STAGE_SERIALIZE};
 use crate::config::BuildConfig;
 use crate::provenance::{
-    BuildProvenance, ParamSnapshot, RecordDisposition, SourceSummary, StageRecord, TOOL_ID,
-    TOOL_VERSION, TileLineage,
+    BuildProvenance, ParamSnapshot, RecordDisposition, RecordLineage, SourceSummary, StageRecord,
+    TOOL_ID, TOOL_VERSION, TileLineage,
 };
 use crate::report::{BuildReports, CoverageReport, HoleCheck, QualityReport, SeamCheck};
 use crate::source::SourceDataset;
@@ -115,8 +115,25 @@ pub(crate) fn build_provenance(
         stages: stage_records(source, outputs),
         dispositions: dispositions(outputs),
         tiles: tile_lineages(outputs),
+        records: record_lineages(outputs),
         package_content_hash,
     }
+}
+
+/// Every per-record lineage, sorted by class then tile then record key.
+fn record_lineages(outputs: &[&PipelineOutput]) -> Vec<RecordLineage> {
+    let mut all: Vec<RecordLineage> = Vec::new();
+    for output in outputs {
+        all.extend(output.records.iter().cloned());
+    }
+    all.sort_by(|a, b| {
+        a.class
+            .cmp(&b.class)
+            .then(a.lat_index.cmp(&b.lat_index))
+            .then(a.lon_index.cmp(&b.lon_index))
+            .then(a.key.cmp(&b.key))
+    });
+    all
 }
 
 /// The numeric parameter snapshot from the configuration.
