@@ -44,6 +44,27 @@ certification basis.
   ([`AIR-BAS-006`](requirements.md#air-bas-006)). Assurance-level-dependent
   applicability in this matrix is therefore provisional until AIR-02 closes.
 
+## Structured registry and drift guard
+
+The vision-guidance references whose active revision and supersession state are
+easiest to get wrong — the FAA vision advisory circulars and the harmonized
+synthetic-vision MASPS — have a single machine-checkable source of truth in
+[`standards-registry.toml`](standards-registry.toml). For each it records the
+reference identity, the selected (active) revision, the publisher URL, the
+authority status, what the active revision supersedes, and a `verified_on`
+date. The registry rows below (STD-061, STD-062, STD-066) are **checked against**
+that file, not maintained independently of it.
+
+`scripts/check-standards-registry.sh` fails CI when the registry is missing or
+empty (fail-closed — a data outage is never green), when an entry lacks status
+provenance (identity, authority status, publisher URL, or a well-formed
+`verified_on`), when it classifies a revision as both active and superseded, or
+when this matrix's revision or authority-status cells diverge from the registry.
+The guard checks internal consistency and matrix/registry agreement only. It
+does **not** re-fetch any source and does not prove a revision is still current:
+external freshness remains a periodic expert and source review and is never
+presented as automatically proven by CI.
+
 ## Authority-status vocabulary
 
 Each row is classified as exactly one of the following for its *selected*
@@ -131,8 +152,8 @@ thing, and the two diverge most sharply for the vision standards.
 
 | ID | Standard / reference | Selected revision | Authority status | Authority acceptance (2026-07-12) | Rationale | Known gaps | Issue paper / authority agreement |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| STD-061 | FAA AC 20-167A — airworthiness approval of EVS/SVS/CVS/EFVS equipment | AC 20-167A (guidance) | `authority-accepted` (guidance) | Accepted (active FAA AC) | Recognized FAA approval guidance for synthetic/enhanced vision; an engineering input while SVS is supplemental. | Operational SVS credit would need the full guidance set, a performance standard, and a safety case not in current scope. | Required if operational SVS/EFVS credit is ever pursued. |
-| STD-062 | FAA AC 20-185 — airworthiness approval of synthetic vision systems | AC 20-185 (guidance) | `authority-accepted` (guidance) | Accepted (active FAA AC) | Companion synthetic-vision approval guidance; same conditional applicability as STD-061. | As STD-061. | Required if operational SVS credit is pursued. |
+| STD-061 | [FAA AC 20-167B](https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1044323) — airworthiness approval of EVS/EFVS/CVS equipment | AC 20-167B (guidance) | `authority-accepted` (guidance) | Accepted (active FAA AC; AC 20-167A superseded, re-verified 2026-07-13) | Recognized FAA approval guidance for enhanced and combined vision equipment; AC 20-167B supersedes the earlier AC 20-167A. An engineering input while these vision functions are supplemental. | Operational EVS/EFVS credit would need the full guidance set, a performance standard, and a safety case not in current scope. | Required if operational EVS/EFVS credit is ever pursued. |
+| STD-062 | [FAA AC 20-185A](https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1039337) — airworthiness approval of SVS/SVGS/ASA-SVS equipment | AC 20-185A (guidance) | `authority-accepted` (guidance) | Accepted (active FAA AC; AC 20-185 superseded, re-verified 2026-07-13) | Synthetic-vision approval guidance; AC 20-185A supersedes the earlier AC 20-185. Same conditional applicability as STD-061 for SVS/SVGS content. | As STD-061, for synthetic-vision content. | Required if operational SVS credit is pursued. |
 | STD-063 | RTCA DO-315 / EUROCAE ED-179 — earlier MASPS for EVS/SVS/CVS/EFVS | DO-315 / ED-179 family | `latest engineering baseline` (earlier MASPS) | Not an FAA-named means of compliance; earlier engineering baseline, refined by STD-066 | Earlier vision-systems MASPS, retained as engineering reference; the current harmonized MASPS is DO-407 / ED-326 (STD-066). | No performance credit claimed; the applicable member of the family depends on the SVS function selected. | Required if operational SVS/EFVS performance credit is pursued. |
 | STD-066 | [RTCA DO-407](https://www.rtca.org/news/new-rtca-technical-products-address-global-aviation-functions-and-performance/) / [EUROCAE ED-326](https://www.eurocae.net/product/ed-326-masps-for-svs-svgs-cvs/) — MASPS for SVS, SVGS, and CVS | DO-407 (RTCA-approved 2024-12-12) / ED-326 (published 2025-01) | `latest engineering baseline` (released MASPS) | Not accepted — no recognizing FAA AC identified as of 2026-07-12; recognition **to confirm** at authority engagement (STD-066 open action) | Current harmonized RTCA SC-213 / EUROCAE WG-79 MASPS refining SVS, ASA-SVS, SVGS, and CVS performance for head-down and head-up displays; an engineering reference while SVS remains supplemental. Released engineering standard, distinct from the DO-326A / ED-202A security family. | No operational SVS/SVGS/CVS credit is sought; the applicable performance section depends on the function selected. | Required if operational SVS/SVGS/CVS credit is pursued; authority recognition of DO-407 / ED-326 must be confirmed first. |
 | STD-064 | SVGS / low-visibility operational credit guidance | Not selected | `not applicable` (current scope) | n/a — no SVGS function present | The baseline supplies **no** Synthetic Vision Guidance System function or low-visibility operational credit ([`AIR-OUT-009`](requirements.md#air-out-009)); the governing SVGS guidance is therefore not applicable. | Adding SVGS requires a distinct intended function, safety assessment, performance standard, and approval basis. | Required only if an SVGS function is introduced. |
@@ -173,6 +194,13 @@ thing, and the two diverge most sharply for the vision standards.
   STD-052) is classified `not applicable` as a *certification obligation* because
   there is no airborne system or certification basis — not because security is
   unimportant. It may be adopted selectively as engineering practice.
+- **FAA vision advisory circulars — active revisions.** The active EVS/EFVS/CVS
+  guidance is **AC 20-167B** (STD-061), which supersedes AC 20-167A; the active
+  SVS/SVGS/ASA-SVS guidance is **AC 20-185A** (STD-062), which supersedes
+  AC 20-185. The superseded revisions are recorded as superseded, never as the
+  selected active revision. These identities are held in
+  [`standards-registry.toml`](standards-registry.toml) and enforced against this
+  matrix by `scripts/check-standards-registry.sh`.
 - **DO-407 / ED-326 are synthetic-vision MASPS, not security.** DO-407 (RTCA,
   approved 2024-12-12 by SC-213) and ED-326 (EUROCAE, published 2025-01 by WG-79)
   are the current harmonized Minimum Aviation System Performance Standards for SVS,

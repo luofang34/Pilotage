@@ -1,0 +1,22 @@
+# SIM / NOT FOR FLIGHT. Self-test fixture: deliberately STALE — it lists the
+# superseded AC 20-167A as the active selected revision while the supersession
+# record still names AC 20-167A as replaced. The guard must FAIL this with a
+# contradictory active/superseded classification.
+
+[[reference]]
+std_id = "STD-061"
+title = "FAA AC 20-167A — airworthiness approval of EVS/EFVS/CVS equipment"
+selected_revision = "AC 20-167A"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1044323"
+supersedes = "AC 20-167A"
+verified_on = "2026-07-13"
+
+[[reference]]
+std_id = "STD-062"
+title = "FAA AC 20-185A — airworthiness approval of SVS/SVGS/ASA-SVS equipment"
+selected_revision = "AC 20-185A"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1039337"
+supersedes = "AC 20-185"
+verified_on = "2026-07-13"

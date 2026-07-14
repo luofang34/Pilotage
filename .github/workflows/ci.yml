@@ -68,6 +68,14 @@ jobs:
         # compliance, approval, or airworthiness claim about this SIM project.
         run: bash scripts/check-certification-claims.sh
 
+      - name: standards registry drift guard (AIR-04)
+        # Keep the standards registry honest and the applicability matrix in
+        # sync with it: fail closed on an absent/empty registry, on missing
+        # status provenance, on contradictory active/superseded classifications,
+        # and on matrix drift. This checks internal consistency only and does
+        # not prove external freshness, which remains a human source review.
+        run: bash scripts/check-standards-registry.sh
+
       - name: instrument trace inventory (AIR-03)
         # Emit a requirement/test/review/configuration inventory to the log.
         # This is an inventory, not a compliance trace, and fabricates nothing.

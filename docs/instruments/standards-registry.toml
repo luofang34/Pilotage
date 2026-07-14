@@ -1,0 +1,63 @@
+# Standards registry (AIR-04) — structured source of truth
+#
+# SIM / NOT FOR FLIGHT. This registry is the machine-checkable record of the
+# vision-guidance references whose active revision and supersession state must
+# not drift from the human-readable applicability matrix
+# (standards-applicability.md). For each reference it fixes identity, the
+# selected (active) revision, the publisher source, the authority status, what
+# the active revision supersedes, and the date the identity and status were
+# checked against the cited primary source. It is an engineering planning
+# record. It makes no certification, compliance, approval, or airworthiness
+# claim, and nothing here authorizes airborne use of any Pilotage output.
+#
+# `verified_on` records when each reference was checked against its primary
+# source. That check fixes document identity as of that date; it does NOT
+# establish authority acceptance, and it does NOT prove the revision is still
+# current. External freshness is a periodic human action:
+# scripts/check-standards-registry.sh verifies internal consistency and that
+# the matrix agrees with this file. It does NOT re-fetch sources and cannot
+# certify that any revision is up to date — that remains an expert/source
+# review, never an automatic CI claim.
+#
+# authority_status vocabulary (mirrors standards-applicability.md):
+#   authority-accepted            selected revision is named by active authority
+#                                 guidance and can anchor a basis
+#   latest engineering baseline   current industry revision, ahead of any
+#                                 revision named in active authority guidance
+#   requires authority agreement  cannot anchor a basis until the authority agrees
+#   not applicable                out of current SIM-only scope
+#
+# supersedes            the prior revision this active revision replaces; the
+#                       named revision must never be selected as active.
+# authority_recognition required for `latest engineering baseline` entries;
+#                       "unresolved" states that no recognizing authority
+#                       guidance has been identified.
+
+[[reference]]
+std_id = "STD-061"
+title = "FAA AC 20-167B — airworthiness approval of EVS/EFVS/CVS equipment"
+selected_revision = "AC 20-167B"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1044323"
+supersedes = "AC 20-167A"
+verified_on = "2026-07-13"
+
+[[reference]]
+std_id = "STD-062"
+title = "FAA AC 20-185A — airworthiness approval of SVS/SVGS/ASA-SVS equipment"
+selected_revision = "AC 20-185A"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1039337"
+supersedes = "AC 20-185"
+verified_on = "2026-07-13"
+
+[[reference]]
+std_id = "STD-066"
+title = "RTCA DO-407 / EUROCAE ED-326 — MASPS for SVS, SVGS, and CVS"
+selected_revision = "DO-407 / ED-326"
+authority_status = "latest engineering baseline"
+publisher_url = "https://www.rtca.org/news/new-rtca-technical-products-address-global-aviation-functions-and-performance/"
+secondary_url = "https://www.eurocae.net/product/ed-326-masps-for-svs-svgs-cvs/"
+supersedes = ""
+authority_recognition = "unresolved"
+verified_on = "2026-07-13"

@@ -1,0 +1,20 @@
+# SIM / NOT FOR FLIGHT. Self-test fixture: STD-062 has no verified_on date, so
+# its status carries no provenance. The guard must FAIL this on missing
+# provenance.
+
+[[reference]]
+std_id = "STD-061"
+title = "FAA AC 20-167B — airworthiness approval of EVS/EFVS/CVS equipment"
+selected_revision = "AC 20-167B"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1044323"
+supersedes = "AC 20-167A"
+verified_on = "2026-07-13"
+
+[[reference]]
+std_id = "STD-062"
+title = "FAA AC 20-185A — airworthiness approval of SVS/SVGS/ASA-SVS equipment"
+selected_revision = "AC 20-185A"
+authority_status = "authority-accepted"
+publisher_url = "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1039337"
+supersedes = "AC 20-185"
