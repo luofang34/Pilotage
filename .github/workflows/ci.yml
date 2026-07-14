@@ -101,6 +101,13 @@ jobs:
         # fail-closed versioned ABI for synthetic vision and conformal HUD.
         run: cargo test -p pilotage-geo
 
+      - name: database package integrity (SVS-02)
+        # Signed, provenance-preserving, atomically activated aeronautical
+        # database packages: one-byte mutation fails tile/package verification,
+        # interrupted update yields the prior package or none, and trust-root,
+        # rollback, expiry, coverage, and datum rules fail closed.
+        run: cargo test -p pilotage-svs-db
+
       - name: reference rasterizer frame hashes (REN-03)
         # Re-render the PFD and HSI panels and assert their pinned SHA-256
         # frame hashes, proving the software rasterizer is bit-reproducible.
