@@ -147,4 +147,44 @@ pub enum VerifyError {
         /// What was wrong with the payload.
         reason: &'static str,
     },
+    /// A decoded package record has no matching lineage entry, so an output
+    /// record is untraceable.
+    #[error(
+        "decoded package record (class {class}, tile {lat_index},{lon_index}) has no lineage entry"
+    )]
+    LineageMissingForRecord {
+        /// The record's feature-class wire code.
+        class: u8,
+        /// Tile latitude index.
+        lat_index: i32,
+        /// Tile longitude index.
+        lon_index: i32,
+    },
+    /// A lineage entry has no matching decoded package record, so it describes a
+    /// record the package does not contain.
+    #[error(
+        "lineage entry (class {class}, tile {lat_index},{lon_index}) has no decoded package record"
+    )]
+    LineageOrphan {
+        /// The record's feature-class wire code.
+        class: u8,
+        /// Tile latitude index.
+        lat_index: i32,
+        /// Tile longitude index.
+        lon_index: i32,
+    },
+    /// Two records share one identity on the package or lineage side, so the
+    /// mapping cannot be a bijection.
+    #[error("duplicate record identity (class {class}) breaks the record-lineage bijection")]
+    DuplicateRecord {
+        /// The record's feature-class wire code.
+        class: u8,
+    },
+    /// A recorded source content digest does not match the source input, so the
+    /// provenance does not describe the source it claims.
+    #[error("source {source_id} content digest does not match the source input")]
+    SourceDigestMismatch {
+        /// The source whose digest disagreed.
+        source_id: u32,
+    },
 }

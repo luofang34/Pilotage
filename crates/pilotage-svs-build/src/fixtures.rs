@@ -77,6 +77,7 @@ pub(crate) fn config() -> BuildConfig {
 pub(crate) fn meta(id: SourceId, license: LicenseCode) -> SourceMeta {
     SourceMeta {
         id,
+        version: 1,
         license,
         horizontal_datum: HorizontalDatum::Wgs84,
         realization: DatumRealizationId::UNDECLARED,

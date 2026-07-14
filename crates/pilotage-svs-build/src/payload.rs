@@ -12,10 +12,7 @@ mod decode;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use decode::{
-    DecodedObstacle, DecodedPost, decode_aerodrome_count, decode_obstacles, decode_runway_count,
-    decode_terrain,
-};
+pub(crate) use decode::{decode_aerodromes, decode_obstacles, decode_runways, decode_terrain};
 
 use crate::element::{OutputAerodrome, OutputObstacle, OutputPost, OutputRunway};
 

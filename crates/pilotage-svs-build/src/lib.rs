@@ -57,4 +57,4 @@ pub use source::{
     Aerodrome, LicenseCode, Obstacle, ObstacleKind, Runway, SourceDataset, SourceId, SourceMeta,
     SourceRecordRef, TerrainGrid,
 };
-pub use verify::{DecodedReports, decode_package_reports, verify_artifact};
+pub use verify::{DecodedReports, decode_package_reports, verify_artifact, verify_source_digests};

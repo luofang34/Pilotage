@@ -1,14 +1,16 @@
 //! Independent verification of a build artifact.
 //!
-//! [`verify_artifact`] is the counterpart to the build: it accepts an artifact
-//! only when four things all hold — the package passes the SVS-02 verifier, the
-//! provenance+report bundle signature verifies against the trust root (so the
+//! [`verify_artifact`] accepts an artifact only when the package passes the
+//! SVS-02 verifier, the provenance+report bundle signature verifies (so the
 //! provenance and reports could not have been altered), the bundle is bound to
-//! this exact package (its recorded content hash matches), and the reports agree
-//! with what the package actually contains when independently decoded. The last
-//! check is derived by [`decode_package_reports`], which decodes the produced
-//! tiles rather than trusting the pipeline's own counters, so a package that
-//! disagrees with its reports is caught.
+//! this exact package, the reports agree with the independently decoded package,
+//! and the decoded package records and the lineage records are in exact 1:1
+//! correspondence — no untraceable output record and no lineage entry without a
+//! record. [`verify_source_digests`] additionally checks the recorded source
+//! content digests against the source input, catching a provenance whose sources
+//! were substituted or altered.
+
+mod bijection;
 
 #[cfg(test)]
 mod tests;
@@ -25,12 +27,16 @@ use pilotage_svs_db::{
 use crate::bundle::canonical_bundle_bytes;
 use crate::chain::{BuildArtifact, tile_of};
 use crate::error::VerifyError;
-use crate::payload::{
-    decode_aerodrome_count, decode_obstacles, decode_runway_count, decode_terrain,
-};
+use crate::payload::{decode_aerodromes, decode_obstacles, decode_runways, decode_terrain};
+use crate::provenance::RecordKey;
+use crate::source::SourceDataset;
 
-/// The report fields re-derived by decoding the produced package, independent of
-/// the pipeline's own counters.
+use bijection::check_bijection;
+
+/// The identity of one emitted record: its class, tile, and decodable key.
+pub(crate) type RecordIdentity = (u8, i32, i32, RecordKey);
+
+/// The report fields re-derived by decoding the produced package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodedReports {
     /// Terrain tiles found in the package.
@@ -47,17 +53,27 @@ pub struct DecodedReports {
     pub obstacles: u32,
     /// Populated grid nodes (equal to decoded terrain posts).
     pub covered_nodes: u32,
-    /// Whether every decoded terrain post lands in the tile that holds it and no
-    /// node appears in more than one tile.
+    /// Whether every decoded record lands in the tile that holds it and no
+    /// terrain node appears in more than one tile.
     pub seam_ok: bool,
 }
+
+/// The full result of decoding a package: its reports and every record identity.
+struct DecodedPackage {
+    reports: DecodedReports,
+    identities: Vec<RecordIdentity>,
+}
+
+/// The datum and tile size used to recompute tile assignment.
+type TilingContext = (HorizontalDatum, DatumRealizationId, f64);
 
 /// Verifies an artifact end to end.
 ///
 /// # Errors
 ///
 /// A [`VerifyError`] for a rejected package, an invalid or unbound bundle
-/// signature, or reports that disagree with the decoded package.
+/// signature, reports that disagree with the decoded package, or a broken
+/// record-lineage bijection.
 pub fn verify_artifact(
     artifact: &BuildArtifact,
     trust: &TrustRoot,
@@ -69,7 +85,35 @@ pub fn verify_artifact(
         .map_err(|source| VerifyError::Package { source })?;
     verify_bundle(artifact, trust)?;
     verify_binding(artifact)?;
-    verify_reports(artifact)?;
+    let decoded = decode_package(artifact)?;
+    check_reports(artifact, &decoded.reports)?;
+    check_bijection(artifact, &decoded.identities)?;
+    Ok(())
+}
+
+/// Verifies the recorded source content digests against the source input.
+///
+/// # Errors
+///
+/// [`VerifyError::SourceDigestMismatch`] when a recorded digest or version does
+/// not match the source input the provenance claims to describe.
+pub fn verify_source_digests(
+    artifact: &BuildArtifact,
+    source: &SourceDataset,
+) -> Result<(), VerifyError> {
+    for summary in &artifact.provenance.sources {
+        let meta = source
+            .meta_for(summary.id)
+            .ok_or(VerifyError::SourceDigestMismatch {
+                source_id: summary.id.0,
+            })?;
+        let digest = crate::source::source_content_digest(source, meta);
+        if summary.version != meta.version || summary.content_digest != digest {
+            return Err(VerifyError::SourceDigestMismatch {
+                source_id: summary.id.0,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -101,8 +145,7 @@ fn verify_binding(artifact: &BuildArtifact) -> Result<(), VerifyError> {
 
 /// Re-derives the reports by decoding the package and checks them against the
 /// artifact's reports.
-fn verify_reports(artifact: &BuildArtifact) -> Result<(), VerifyError> {
-    let decoded = decode_package_reports(artifact)?;
+fn check_reports(artifact: &BuildArtifact, decoded: &DecodedReports) -> Result<(), VerifyError> {
     let claimed = &artifact.reports.coverage;
     check_eq(
         "terrain_tiles",
@@ -146,71 +189,201 @@ fn check_eq(field: &'static str, claimed: u32, decoded: u32) -> Result<(), Verif
     }
 }
 
-/// Decodes the package and re-derives the package-observable report fields,
-/// including an independent seam check that each terrain post lands in the tile
-/// holding it.
+/// Decodes the package and re-derives the report fields (with an independent seam
+/// check).
 ///
 /// # Errors
 ///
 /// [`VerifyError::PayloadDecode`] for a malformed tile payload.
 pub fn decode_package_reports(artifact: &BuildArtifact) -> Result<DecodedReports, VerifyError> {
-    let package = &artifact.package;
-    let (horizontal, realization, tile_deg) = tiling_context(artifact);
-    let (min_lat, min_lon) = (
+    Ok(decode_package(artifact)?.reports)
+}
+
+/// One decode pass over the package producing both the reports and the record
+/// identities.
+fn decode_package(artifact: &BuildArtifact) -> Result<DecodedPackage, VerifyError> {
+    let ctx = tiling_context(artifact);
+    let grid = (
         artifact.reports.coverage.min_lat_deg,
         artifact.reports.coverage.min_lon_deg,
+        artifact.provenance.params.post_spacing_deg,
     );
-    let spacing = artifact.provenance.params.post_spacing_deg;
-    let mut counts = ClassCounts::default();
-    let mut seam_ok = true;
-    let mut seen: BTreeSet<(u32, u32)> = BTreeSet::new();
-    for tile in &package.tiles {
-        match tile.key.class {
-            FeatureClass::Terrain => {
-                let posts = decode_terrain(&tile.bytes)
-                    .ok_or(VerifyError::PayloadDecode { reason: "terrain" })?;
-                counts.terrain_tiles += 1;
-                counts.terrain_posts += posts.len() as u32;
-                seam_ok &= terrain_tile_ok(
-                    tile,
-                    &posts,
-                    (horizontal, realization, tile_deg),
-                    (min_lat, min_lon, spacing),
-                    &mut seen,
-                );
-            }
-            FeatureClass::Obstacles => {
-                let obstacles =
-                    decode_obstacles(&tile.bytes).ok_or(VerifyError::PayloadDecode {
-                        reason: "obstacles",
-                    })?;
-                counts.obstacle_tiles += 1;
-                counts.obstacles += obstacles.len() as u32;
-                seam_ok &= obstacle_tile_ok(tile, &obstacles, (horizontal, realization, tile_deg));
-            }
-            FeatureClass::Aerodromes => {
-                decode_aerodrome_count(&tile.bytes).ok_or(VerifyError::PayloadDecode {
-                    reason: "aerodromes",
-                })?;
-                counts.aerodrome_tiles += 1;
-            }
-            FeatureClass::Runways => {
-                decode_runway_count(&tile.bytes)
-                    .ok_or(VerifyError::PayloadDecode { reason: "runways" })?;
-                counts.runway_tiles += 1;
-            }
-            // This build never emits taxiway tiles; the reports carry no taxiway
-            // field, so there is nothing to cross-check for one.
-            FeatureClass::Taxiways => {}
+    let mut state = DecodeState::default();
+    for tile in &artifact.package.tiles {
+        decode_tile(tile, ctx, grid, &mut state)?;
+    }
+    Ok(DecodedPackage {
+        reports: state.counts.into_reports(state.seam_ok),
+        identities: state.identities,
+    })
+}
+
+/// The mutable accumulator threaded through the decode pass. `seam_ok` starts
+/// `true` and is cleared by any record that fails its tile or uniqueness check.
+struct DecodeState {
+    counts: ClassCounts,
+    identities: Vec<RecordIdentity>,
+    seam_ok: bool,
+    seen: BTreeSet<(u32, u32)>,
+}
+
+impl Default for DecodeState {
+    fn default() -> Self {
+        Self {
+            counts: ClassCounts::default(),
+            identities: Vec::new(),
+            seam_ok: true,
+            seen: BTreeSet::new(),
         }
     }
-    Ok(counts.into_reports(seam_ok))
+}
+
+/// Decodes one tile into the accumulator.
+fn decode_tile(
+    tile: &pilotage_svs_db::Tile,
+    ctx: TilingContext,
+    grid: (f64, f64, f64),
+    state: &mut DecodeState,
+) -> Result<(), VerifyError> {
+    let (li, lo) = (tile.key.tile.lat_index, tile.key.tile.lon_index);
+    match tile.key.class {
+        FeatureClass::Terrain => decode_terrain_tile(tile, li, lo, ctx, grid, state),
+        FeatureClass::Obstacles => decode_obstacle_tile(tile, li, lo, ctx, state),
+        FeatureClass::Aerodromes => decode_aerodrome_tile(tile, li, lo, ctx, state),
+        FeatureClass::Runways => decode_runway_tile(tile, li, lo, ctx, state),
+        // This build never emits taxiway tiles.
+        FeatureClass::Taxiways => Ok(()),
+    }
+}
+
+/// Decodes a terrain tile: counts, seam check, node identities.
+fn decode_terrain_tile(
+    tile: &pilotage_svs_db::Tile,
+    li: i32,
+    lo: i32,
+    ctx: TilingContext,
+    grid: (f64, f64, f64),
+    state: &mut DecodeState,
+) -> Result<(), VerifyError> {
+    let (min_lat, min_lon, spacing) = grid;
+    let posts =
+        decode_terrain(&tile.bytes).ok_or(VerifyError::PayloadDecode { reason: "terrain" })?;
+    state.counts.terrain_tiles += 1;
+    state.counts.terrain_posts += posts.len() as u32;
+    for post in &posts {
+        let lat = min_lat + f64::from(post.i) * spacing;
+        let lon = min_lon + f64::from(post.j) * spacing;
+        state.seam_ok &= post.elevation_m.is_finite()
+            && state.seen.insert((post.i, post.j))
+            && lands_in(li, lo, ctx, lat, lon);
+        state.identities.push((
+            FeatureClass::Terrain.to_u8(),
+            li,
+            lo,
+            RecordKey::TerrainNode {
+                i: post.i,
+                j: post.j,
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// Decodes an obstacle tile: count, seam check, obstacle identities.
+fn decode_obstacle_tile(
+    tile: &pilotage_svs_db::Tile,
+    li: i32,
+    lo: i32,
+    ctx: TilingContext,
+    state: &mut DecodeState,
+) -> Result<(), VerifyError> {
+    let obstacles = decode_obstacles(&tile.bytes).ok_or(VerifyError::PayloadDecode {
+        reason: "obstacles",
+    })?;
+    state.counts.obstacle_tiles += 1;
+    state.counts.obstacles += obstacles.len() as u32;
+    for obstacle in &obstacles {
+        state.seam_ok &= lands_in(li, lo, ctx, obstacle.lat_deg, obstacle.lon_deg);
+        state.identities.push((
+            FeatureClass::Obstacles.to_u8(),
+            li,
+            lo,
+            RecordKey::Obstacle {
+                lat_bits: obstacle.lat_deg.to_bits(),
+                lon_bits: obstacle.lon_deg.to_bits(),
+                kind: obstacle.kind,
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// Decodes an aerodrome tile: count, seam check, aerodrome identities.
+fn decode_aerodrome_tile(
+    tile: &pilotage_svs_db::Tile,
+    li: i32,
+    lo: i32,
+    ctx: TilingContext,
+    state: &mut DecodeState,
+) -> Result<(), VerifyError> {
+    let aerodromes = decode_aerodromes(&tile.bytes).ok_or(VerifyError::PayloadDecode {
+        reason: "aerodromes",
+    })?;
+    state.counts.aerodrome_tiles += 1;
+    for aerodrome in &aerodromes {
+        state.seam_ok &= lands_in(li, lo, ctx, aerodrome.lat_deg, aerodrome.lon_deg);
+        state.identities.push((
+            FeatureClass::Aerodromes.to_u8(),
+            li,
+            lo,
+            RecordKey::Aerodrome {
+                ident: aerodrome.ident,
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// Decodes a runway tile: count, seam check, runway identities.
+fn decode_runway_tile(
+    tile: &pilotage_svs_db::Tile,
+    li: i32,
+    lo: i32,
+    ctx: TilingContext,
+    state: &mut DecodeState,
+) -> Result<(), VerifyError> {
+    let runways =
+        decode_runways(&tile.bytes).ok_or(VerifyError::PayloadDecode { reason: "runways" })?;
+    state.counts.runway_tiles += 1;
+    for runway in &runways {
+        state.seam_ok &= lands_in(li, lo, ctx, runway.end_a_lat_deg, runway.end_a_lon_deg);
+        state.identities.push((
+            FeatureClass::Runways.to_u8(),
+            li,
+            lo,
+            RecordKey::Runway {
+                designator: runway.designator,
+                end_a_lat_bits: runway.end_a_lat_deg.to_bits(),
+                end_a_lon_bits: runway.end_a_lon_deg.to_bits(),
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `(lat, lon)` tiles to `(lat_index, lon_index)` under `ctx`.
+fn lands_in(lat_index: i32, lon_index: i32, ctx: TilingContext, lat: f64, lon: f64) -> bool {
+    let (horizontal, realization, tile_deg) = ctx;
+    match tile_of(horizontal, realization, tile_deg, 0, lat, lon) {
+        Ok(tile) => tile.lat_index == lat_index && tile.lon_index == lon_index,
+        Err(_) => false,
+    }
 }
 
 /// The datum and tile size to recompute tile assignment, from the provenance
-/// parameters. Falls back to WGS-84 if the recorded datum code is unknown, which
-/// the report cross-check then surfaces as a seam mismatch.
-fn tiling_context(artifact: &BuildArtifact) -> (HorizontalDatum, DatumRealizationId, f64) {
+/// parameters. An unknown recorded datum code falls back to WGS-84, which the
+/// seam cross-check then surfaces as a mismatch.
+fn tiling_context(artifact: &BuildArtifact) -> TilingContext {
     let params = &artifact.provenance.params;
     let horizontal =
         HorizontalDatum::from_u8(params.target_horizontal).unwrap_or(HorizontalDatum::Wgs84);
@@ -219,66 +392,6 @@ fn tiling_context(artifact: &BuildArtifact) -> (HorizontalDatum, DatumRealizatio
         DatumRealizationId(params.target_realization),
         params.tile_deg,
     )
-}
-
-/// Whether every post in a terrain tile lands in that tile and is globally
-/// unique.
-fn terrain_tile_ok(
-    tile: &pilotage_svs_db::Tile,
-    posts: &[crate::payload::DecodedPost],
-    datum: (HorizontalDatum, DatumRealizationId, f64),
-    grid: (f64, f64, f64),
-    seen: &mut BTreeSet<(u32, u32)>,
-) -> bool {
-    let (horizontal, realization, tile_deg) = datum;
-    let (min_lat, min_lon, spacing) = grid;
-    for post in posts {
-        if !post.elevation_m.is_finite() || !seen.insert((post.i, post.j)) {
-            return false;
-        }
-        let lat = min_lat + f64::from(post.i) * spacing;
-        let lon = min_lon + f64::from(post.j) * spacing;
-        match tile_of(horizontal, realization, tile_deg, 0, lat, lon) {
-            Ok(computed) => {
-                if computed.lat_index != tile.key.tile.lat_index
-                    || computed.lon_index != tile.key.tile.lon_index
-                {
-                    return false;
-                }
-            }
-            Err(_) => return false,
-        }
-    }
-    true
-}
-
-/// Whether every obstacle in a tile lands in that tile.
-fn obstacle_tile_ok(
-    tile: &pilotage_svs_db::Tile,
-    obstacles: &[crate::payload::DecodedObstacle],
-    datum: (HorizontalDatum, DatumRealizationId, f64),
-) -> bool {
-    let (horizontal, realization, tile_deg) = datum;
-    for obstacle in obstacles {
-        match tile_of(
-            horizontal,
-            realization,
-            tile_deg,
-            0,
-            obstacle.lat_deg,
-            obstacle.lon_deg,
-        ) {
-            Ok(computed) => {
-                if computed.lat_index != tile.key.tile.lat_index
-                    || computed.lon_index != tile.key.tile.lon_index
-                {
-                    return false;
-                }
-            }
-            Err(_) => return false,
-        }
-    }
-    true
 }
 
 /// Accumulates decoded tile and element counts.

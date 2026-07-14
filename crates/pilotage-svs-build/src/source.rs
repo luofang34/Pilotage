@@ -9,11 +9,13 @@
 //! is deliberately small and synthetic; large or license-restricted datasets are
 //! never checked in.
 
+mod digest;
 mod license;
 
 #[cfg(test)]
 mod tests;
 
+pub(crate) use digest::source_content_digest;
 pub use license::LicenseCode;
 
 use pilotage_geo::{DatumRealizationId, GeoidModelId, HorizontalDatum, VerticalDatum};
@@ -41,6 +43,10 @@ pub struct SourceRecordRef {
 pub struct SourceMeta {
     /// The source this metadata describes.
     pub id: SourceId,
+    /// The immutable version of this source input. Bound, with the content
+    /// digest, into the signed provenance so a changed input is a changed
+    /// version.
+    pub version: u32,
     /// The license the data is used under, which maps to package use
     /// restrictions.
     pub license: LicenseCode,

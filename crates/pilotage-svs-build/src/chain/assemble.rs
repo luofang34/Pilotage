@@ -159,13 +159,16 @@ fn param_snapshot(config: &BuildConfig) -> ParamSnapshot {
     }
 }
 
-/// One summary per source, sorted by id, with its record count.
+/// One summary per source, sorted by id, with its immutable content digest and
+/// record count.
 fn source_summaries(source: &SourceDataset) -> Vec<SourceSummary> {
     let mut summaries: Vec<SourceSummary> = source
         .meta
         .iter()
         .map(|meta| SourceSummary {
             id: meta.id,
+            version: meta.version,
+            content_digest: crate::source::source_content_digest(source, meta),
             license: meta.license,
             horizontal_datum: meta.horizontal_datum.to_u8(),
             vertical_datum: meta.vertical_datum.to_u8(),

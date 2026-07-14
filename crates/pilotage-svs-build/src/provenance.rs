@@ -73,11 +73,18 @@ pub struct StageRecord {
     pub rejected: u32,
 }
 
-/// A per-source summary: identity, license, datum, accuracy, and record count.
+/// A per-source summary: identity, immutable version and content digest,
+/// license, datum, accuracy, and record count. The version and digest bind the
+/// exact source input into the signed provenance.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct SourceSummary {
     /// The source identity.
     pub id: SourceId,
+    /// The immutable version of the source input.
+    pub version: u32,
+    /// The SHA-256 content digest of the source input, hex-encoded.
+    #[serde(serialize_with = "serialize_hex32")]
+    pub content_digest: [u8; 32],
     /// The license the source's data is used under.
     pub license: LicenseCode,
     /// The source horizontal datum wire code.
