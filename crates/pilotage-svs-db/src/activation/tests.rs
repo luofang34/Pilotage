@@ -5,11 +5,11 @@
 use pilotage_geo::AvailabilityReason;
 
 use super::{ActivePackage, PackageStore};
-use crate::error::DbUnavailable;
+use crate::error::{DbError, DbUnavailable};
 use crate::fixtures;
 use crate::identity::{DatasetId, DayNumber, PackageVersion};
 use crate::tile::CandidatePackage;
-use crate::verify::{UsePolicy, verify_package};
+use crate::verify::UsePolicy;
 
 /// Uniform tile-payload tag for version 1, so v1 and v2 content is disjoint.
 const TAG_V1: u8 = 0x11;
@@ -85,16 +85,13 @@ fn interrupted_update_yields_prior_or_no_package() {
 
     // Two-phase: a verified token is held but not yet installed — the swap is
     // the only mutation, so the prior package remains active until it happens.
-    let token = verify_package(
-        &v2(),
-        &trust,
-        fixtures::NOW,
-        store.active_id(),
-        UsePolicy::SimulatorPermitted,
-    )
-    .expect("v2 verifies");
+    let token = store
+        .verify(&v2(), &trust, fixtures::NOW, UsePolicy::SimulatorPermitted)
+        .expect("v2 verifies");
     assert_eq!(store.active_id(), Some(id1), "prior intact before the swap");
-    let id2 = store.activate(token);
+    let id2 = store
+        .activate(token)
+        .expect("swap installs the new package");
     assert_eq!(
         store.active_id(),
         Some(id2),
@@ -218,19 +215,19 @@ fn interrupted_update_preserves_complete_content_never_a_mix() {
 
     // A verified token held but not yet installed leaves the complete v1 content
     // in place; the swap then installs the complete v2 content with no v1 bytes.
-    let token = verify_package(
-        &v2_tagged(),
-        &trust,
-        fixtures::NOW,
-        store.active_id(),
-        UsePolicy::SimulatorPermitted,
-    )
-    .expect("v2 verifies");
+    let token = store
+        .verify(
+            &v2_tagged(),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("v2 verifies");
     assert!(
         all_tiles_have_tag(store.active().expect("active"), TAG_V1),
         "still complete v1 before the swap"
     );
-    store.activate(token);
+    store.activate(token).expect("swap installs v2");
     let active = store.active().expect("active");
     assert!(
         all_tiles_have_tag(active, TAG_V2),
@@ -273,6 +270,49 @@ fn currency_is_rechecked_at_use_time() {
         store.availability(DayNumber(50), &inside),
         Err(DbUnavailable::Currency),
         "not yet effective also fails closed"
+    );
+}
+
+/// Acceptance (fail-closed): a stale verification token cannot roll the active
+/// package backward. A token verified against the empty store is refused once a
+/// different package has been activated, and the active package (id and content)
+/// is left unchanged. The only public activation path is the atomic
+/// `stage_and_activate`; the raw token swap is crate-internal and CAS-guarded.
+#[test]
+fn stale_verification_token_cannot_roll_back_the_active_package() {
+    let trust = fixtures::trust_root();
+    let mut store = PackageStore::new();
+
+    // Verify v1 against the empty store and hold the token.
+    let v1_token = store
+        .verify(
+            &v1_tagged(),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("v1 verifies");
+
+    // Activate v2 normally.
+    let id2 = store
+        .stage_and_activate(
+            &v2_tagged(),
+            &trust,
+            fixtures::NOW,
+            UsePolicy::SimulatorPermitted,
+        )
+        .expect("v2 activates");
+
+    // Replaying the stale v1 token is refused; v2 stays fully active.
+    let err = store
+        .activate(v1_token)
+        .expect_err("stale token must be refused");
+    assert!(matches!(err, DbError::StaleActivation { .. }));
+    assert_eq!(err.to_availability_reason(), AvailabilityReason::Database);
+    assert_eq!(store.active_id(), Some(id2), "v2 id remains");
+    assert!(
+        all_tiles_have_tag(store.active().expect("active"), TAG_V2),
+        "v2 content remains; not rolled back to v1"
     );
 }
 

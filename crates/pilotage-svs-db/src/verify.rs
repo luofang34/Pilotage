@@ -33,10 +33,19 @@ pub enum UsePolicy {
 /// [`verify_package`] accepted exactly the manifest **and** tiles it holds —
 /// activation installs the two together, so content can never mix across
 /// versions.
+///
+/// A token also records the store state it was verified against — the active id
+/// and the activation generation observed at verify time. Activation refuses a
+/// token whose recorded state no longer matches the store, so a stale token
+/// cannot be replayed to roll the active package backward. The token is inert
+/// outside its crate: only [`crate::PackageStore`] can install it, and only when
+/// the store is still in the state the token expects.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifiedPackage {
     manifest: PackageManifest,
     tiles: Vec<Tile>,
+    expected_active: Option<ActiveDbId>,
+    expected_generation: u64,
 }
 
 impl VerifiedPackage {
@@ -56,6 +65,26 @@ impl VerifiedPackage {
     #[must_use]
     pub fn active_id(&self) -> ActiveDbId {
         self.manifest.active_id()
+    }
+
+    /// The active id the token was verified against.
+    #[must_use]
+    pub(crate) fn expected_active(&self) -> Option<ActiveDbId> {
+        self.expected_active
+    }
+
+    /// The activation generation the token was verified against.
+    #[must_use]
+    pub(crate) fn expected_generation(&self) -> u64 {
+        self.expected_generation
+    }
+
+    /// Records the activation generation this token was verified against, so
+    /// activation can detect an intervening activation.
+    #[must_use]
+    pub(crate) fn stamp_generation(mut self, generation: u64) -> Self {
+        self.expected_generation = generation;
+        self
     }
 
     /// Consumes the token, yielding the verified manifest and tiles as one unit
@@ -92,6 +121,8 @@ pub fn verify_package(
     Ok(VerifiedPackage {
         manifest: manifest.clone(),
         tiles: candidate.tiles.clone(),
+        expected_active: active,
+        expected_generation: 0,
     })
 }
 

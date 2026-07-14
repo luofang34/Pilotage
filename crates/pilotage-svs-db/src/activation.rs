@@ -84,17 +84,23 @@ impl ActivePackage {
 }
 
 /// The in-memory active-package store. Holds at most one active package;
-/// activation replaces it atomically.
+/// activation replaces it atomically. A monotonic `generation` counter advances
+/// on every successful activation, so a verification token minted against an
+/// earlier state can be detected and refused.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PackageStore {
     active: Option<ActivePackage>,
+    generation: u64,
 }
 
 impl PackageStore {
     /// An empty store with no active package.
     #[must_use]
     pub fn new() -> Self {
-        Self { active: None }
+        Self {
+            active: None,
+            generation: 0,
+        }
     }
 
     /// The active package, if any.
@@ -119,23 +125,58 @@ impl PackageStore {
         }
     }
 
+    /// Verifies a candidate against the trust root, the current day, and the
+    /// store's current state, minting a token stamped with the state it was
+    /// verified against. The token is only installable while the store is still
+    /// in that state.
+    ///
+    /// # Errors
+    ///
+    /// The [`DbError`] from verification.
+    pub(crate) fn verify(
+        &self,
+        candidate: &CandidatePackage,
+        trust: &TrustRoot,
+        now: DayNumber,
+        policy: UsePolicy,
+    ) -> Result<VerifiedPackage, DbError> {
+        verify_package(candidate, trust, now, self.active_id(), policy)
+            .map(|token| token.stamp_generation(self.generation))
+    }
+
     /// Installs an already-verified package — its manifest and verified tiles
     /// together — replacing any prior one with a single assignment (the atomic
-    /// swap). The manifest and tiles move as one unit, so a torn update can only
-    /// ever leave the complete prior package or the complete new one. Returns
-    /// the new active id.
-    pub fn activate(&mut self, verified: VerifiedPackage) -> ActiveDbId {
+    /// swap) and advancing the generation. The token is refused with
+    /// [`DbError::StaleActivation`] if the store has changed since it was
+    /// verified, so a replayed token cannot roll the active package backward;
+    /// the existing active package is then left unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::StaleActivation`] when the token's expected state no longer
+    /// matches the store.
+    pub(crate) fn activate(&mut self, verified: VerifiedPackage) -> Result<ActiveDbId, DbError> {
+        if verified.expected_generation() != self.generation
+            || verified.expected_active() != self.active_id()
+        {
+            return Err(DbError::StaleActivation {
+                expected_generation: verified.expected_generation(),
+                actual_generation: self.generation,
+            });
+        }
         let (manifest, tiles) = verified.into_parts();
         let active = ActivePackage { manifest, tiles };
         let id = active.id();
         self.active = Some(active);
-        id
+        self.generation = self.generation.wrapping_add(1);
+        Ok(id)
     }
 
     /// Verifies a candidate against the trust root, the current day, and the
-    /// active id (for rollback), then activates it. On any failure the store is
-    /// left holding the prior package (or nothing) unchanged — the swap is
-    /// reached only after full verification succeeds.
+    /// active id (for rollback), then activates it — atomically, in one call, so
+    /// there is no reusable token to replay. On any failure the store is left
+    /// holding the prior package (or nothing) unchanged; the swap is reached
+    /// only after full verification succeeds.
     ///
     /// # Errors
     ///
@@ -147,8 +188,8 @@ impl PackageStore {
         now: DayNumber,
         policy: UsePolicy,
     ) -> Result<ActiveDbId, DbError> {
-        let verified = verify_package(candidate, trust, now, self.active_id(), policy)?;
-        Ok(self.activate(verified))
+        let verified = self.verify(candidate, trust, now, policy)?;
+        self.activate(verified)
     }
 
     /// The availability of the active database at the current day and a

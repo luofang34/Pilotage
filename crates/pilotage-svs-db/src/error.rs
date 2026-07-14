@@ -130,6 +130,20 @@ pub enum DbError {
         /// The full restriction bits, including the unrecognized ones.
         restrictions: u32,
     },
+    /// A verification token was submitted for activation after the store changed
+    /// since it was verified. Installing it would replay a stale decision (for
+    /// example rolling the active package backward), so it is refused and the
+    /// current active package is left unchanged.
+    #[error(
+        "stale activation: token verified against generation {expected_generation}, \
+         store is at {actual_generation}"
+    )]
+    StaleActivation {
+        /// The activation generation the token was verified against.
+        expected_generation: u64,
+        /// The store's current activation generation.
+        actual_generation: u64,
+    },
 }
 
 impl DbError {
@@ -148,7 +162,7 @@ impl DbError {
             | Self::UnknownVerticalDatum
             | Self::UndeclaredRealization
             | Self::UndeclaredGeoid => DbUnavailable::Datum,
-            Self::RollbackBlocked { .. } => DbUnavailable::Rollback,
+            Self::RollbackBlocked { .. } | Self::StaleActivation { .. } => DbUnavailable::Rollback,
             Self::SimulationOnlyForbidden => DbUnavailable::SimulationOnly,
             Self::OperationalUseRestricted { .. } => DbUnavailable::Restricted,
             Self::EmptyFeatureSet
