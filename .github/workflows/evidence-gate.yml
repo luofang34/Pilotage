@@ -94,12 +94,24 @@ jobs:
             echo "REGRESSION: exception rejected before its expiry date"; exit 1
           fi
 
-      - name: Filesystem selector resolution rejects a missing symbol
+      - name: Filesystem resolution rejects unresolvable evidence
+        # These fixtures are structurally VALID and fail only when the gate
+        # resolves them against the tree: a test selector naming a missing symbol,
+        # an execution-output artifact that is absent or whose content does not
+        # hash to its declared digest, and a review whose named record entry is
+        # still pending.
         run: |
-          if cargo run -q -p pilotage-evidence --bin evidence-gate -- \
-              --graph "$FIXTURES/unresolvable-selector-fs.evg" \
-              --repo-root crates/pilotage-evidence \
-              --resolve-selectors >/dev/null 2>&1; then
-            echo "REGRESSION: fs selector fixture unexpectedly passed"; exit 1
-          fi
-          echo "ok: fs selector fixture correctly failed resolution"
+          set -u
+          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
+          fail=0
+          for f in unresolvable-selector-fs unresolvable-artifact \
+                   mismatched-artifact unresolved-review-entry; do
+            if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
+                --repo-root crates/pilotage-evidence \
+                --resolve-selectors >/dev/null 2>&1; then
+              echo "REGRESSION: $f.evg unexpectedly passed resolution"; fail=1
+            else
+              echo "ok: $f.evg correctly failed resolution"
+            fi
+          done
+          exit $fail

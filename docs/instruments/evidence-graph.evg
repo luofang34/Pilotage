@@ -160,7 +160,8 @@ attr command cargo test -p pilotage-instrument-raster
 attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
-attr output-digest sha256:029acbfbbed694fee82be59b456e4ad5b9bf4ed0478a20e529e6c019e0756d34
+attr artifact docs/instruments/evidence-artifacts/att01/raster.run.txt
+attr output-digest sha256:78d71cd279e3f216aa416a212d03205a0536f61cd5aa19108c2b687876533a31
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
 
 node RESULT-PRESENTATION verification-result
@@ -169,7 +170,8 @@ attr command cargo test -p pilotage-instrument-state
 attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:4e4b9d1da1c6dfb7b7d1077d96155e6a79ff961b
-attr output-digest sha256:25010e71ded6afcf87a43b15e354eb2f5e4ea92ed624760aa53c29b7959621da
+attr artifact docs/instruments/evidence-artifacts/att01/presentation.run.txt
+attr output-digest sha256:973bd9c1538b9d42ea55b9eb610d39cc8cefee3b81185bb648b11e9738c69bf8
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
 
 node RESULT-PFD verification-result
@@ -178,7 +180,8 @@ attr command cargo test -p pilotage-instrument-panels
 attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:a836ec8a29f0cddb7905a9f1d5c3876ae163f38e
-attr output-digest sha256:64ff5bcfd68d061ca743d03f32cd96035605a6cc641ae7b29fa28ece508fc6a8
+attr artifact docs/instruments/evidence-artifacts/att01/panel.run.txt
+attr output-digest sha256:3183bf6919bd7690e3acd01287a15aebbe515ebe9df675d0908e6db87e6e4ad7
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
 
 # --- Configuration and tool identity ---
@@ -198,7 +201,7 @@ attr version rustc 1.95.0 (59807616e 2026-04-14)
 
 node REVIEW-AIR01 review
 title AIR-01 intended-function review record
-locator docs/instruments/review-record.md
+locator docs/instruments/review-record.md#rec-att-01
 attr status pending
 attr independent yes
 

@@ -11,6 +11,7 @@
 //! a justified [`Exception`](crate::scope::Exception) is always surfaced rather
 //! than silently turned into success.
 
+mod artifact;
 mod checks;
 mod review;
 mod selector;
@@ -176,6 +177,7 @@ fn collect(graph: &Graph, policy: &Policy, repo_root: Option<&Path>) -> Vec<Find
     checks::selectors_present(graph, policy, &mut findings);
     if let Some(root) = repo_root {
         selector::resolve(graph, policy, root, &mut findings);
+        artifact::resolve(graph, policy, root, &mut findings);
         review::resolve(graph, policy, root, &mut findings);
     }
     findings

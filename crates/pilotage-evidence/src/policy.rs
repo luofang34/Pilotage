@@ -49,13 +49,17 @@ pub struct Policy {
     pub review_requires_independence: bool,
     /// Attributes every recorded result must carry so it is real evidence and
     /// not a placeholder — the executed command, the configuration commit/tree
-    /// digest, the pinned tool version, an immutable execution-output digest of
-    /// the captured run, and the run identity.
+    /// digest, the pinned tool version, a repo-relative execution-output
+    /// artifact path, the digest of that artifact, and the run identity.
     pub result_required_attrs: Vec<String>,
     /// The result attribute that must reference an immutable execution output
     /// (the captured run's recorded result/log), not the test source. A value
     /// using the source-blob scheme is rejected as a placeholder.
     pub result_output_attr: String,
+    /// The result attribute naming the committed execution-output artifact file
+    /// (repo-relative). Under resolution the gate reads that file, hashes it, and
+    /// requires the hash to equal [`result_output_attr`](Self::result_output_attr).
+    pub result_artifact_attr: String,
     /// Whether an exception must record an independent review to apply.
     pub exception_requires_review: bool,
     /// The ISO-8601 date (`YYYY-MM-DD`) an exception's expiry is checked
@@ -119,10 +123,12 @@ impl Policy {
                 "command".to_string(),
                 "config-digest".to_string(),
                 "tool-version".to_string(),
+                "artifact".to_string(),
                 "output-digest".to_string(),
                 "run-id".to_string(),
             ],
             result_output_attr: "output-digest".to_string(),
+            result_artifact_attr: "artifact".to_string(),
             exception_requires_review: true,
             exception_as_of: None,
             selector_attr: "test".to_string(),

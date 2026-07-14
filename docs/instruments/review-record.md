@@ -64,3 +64,18 @@ subsequent aircraft-specific validation.
 - Tracking issue may close: NO
 - Decision revision/commit: PENDING
 - Decision owner and date: PENDING
+
+## Machine-readable record entries
+
+The evidence gate (`pilotage-evidence`) resolves the specific entry a review
+names, by anchor, and verifies that entry's fields. A `PENDING` reviewer or date,
+a disposition that is not a closed outcome, or a reviewed node the entry does not
+cover means the entry — and therefore the review — is not complete.
+
+<a id="rec-att-01"></a>
+### rec-att-01 — ATT-01 attitude-behavior intended-function review
+
+- reviewer: PENDING
+- date: PENDING
+- disposition: PENDING
+- covers: [`AIR-ENV-002`](requirements.md#air-env-002) [`AIR-MODE-003`](requirements.md#air-mode-003) [`AIR-HAZ-012`](requirements.md#air-haz-012) DESIGN-SO3-PRESENTATION

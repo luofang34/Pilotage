@@ -204,7 +204,7 @@ fn a_source_blob_output_is_a_placeholder() {
     // A result whose execution-output digest is only the test-source blob is a
     // placeholder: it proves what code exists, not that it ran or what it emitted.
     let text = VALID_SLICE.replace(
-        "attr output-digest sha256:029acbfbbed694fee82be59b456e4ad5b9bf4ed0478a20e529e6c019e0756d34",
+        "attr output-digest sha256:a05ac827ccd641d352fa1827b3592974c303bce6858a88faaec08125bc3c8db2",
         "attr output-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6",
     );
     assert!(has_open(&text, FindingCode::PlaceholderResult));

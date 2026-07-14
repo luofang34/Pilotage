@@ -1,0 +1,9 @@
+Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
+scope: ATT-01
+suite: SO(3) presentation unit
+command: cargo test -p pilotage-instrument-state
+config-digest: 8363e9e81d6654506e95051bec48ea32df50ef10
+tool-version: rustc 1.95.0 (59807616e 2026-04-14)
+outcome:
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 128 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out

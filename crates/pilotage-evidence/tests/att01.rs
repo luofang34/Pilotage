@@ -248,10 +248,76 @@ fn unbacked_review_fixture_fails() {
 }
 
 #[test]
-fn a_review_marked_complete_but_whose_record_is_pending_fails_resolution() {
-    // Fully populate the review node as complete, but the real review record on
-    // disk (docs/instruments/review-record.md) is still PENDING, so filesystem
-    // resolution rejects the claim — a status string cannot outrun its record.
+fn unresolvable_artifact_fixture_fails() {
+    // The output-digest names an artifact that is not committed: structurally
+    // valid, but its digest cannot be bound to any content on resolution.
+    let graph = fixture("unresolvable-artifact.evg");
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    assert!(
+        has_open(&resolved, FindingCode::PlaceholderResult),
+        "findings: {:?}",
+        resolved.findings
+    );
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn mismatched_artifact_fixture_fails() {
+    // The artifact is committed, but its content does not hash to the declared
+    // output-digest — a detached/forged digest, caught on resolution.
+    let graph = fixture("mismatched-artifact.evg");
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    let finding = resolved
+        .findings
+        .iter()
+        .find(|f| f.code == FindingCode::PlaceholderResult && !f.excepted)
+        .expect("hash mismatch reported");
+    assert!(
+        finding.detail.contains("hashes to"),
+        "detail: {}",
+        finding.detail
+    );
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn unresolved_review_entry_fixture_fails_on_the_specific_entry() {
+    // The record file holds a complete entry AND the pending entry this review
+    // names; resolution must fail on the NAMED (pending) entry, not the file.
+    let graph = fixture("unresolved-review-entry.evg");
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    assert!(
+        has_open(&resolved, FindingCode::ReviewIncomplete),
+        "findings: {:?}",
+        resolved.findings
+    );
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn a_review_naming_a_complete_entry_resolves() {
+    // Pointed at the file's complete entry, the same review passes — proving
+    // specific-entry resolution accepts a genuine record, not just rejects one.
+    let raw = read(&crate_dir().join("tests/fixtures/unresolved-review-entry.evg"));
+    let graph = parse_graph(&raw.replace("#rec-pending", "#rec-complete")).expect("parses");
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    assert_eq!(
+        resolved.verdict,
+        GateVerdict::Valid,
+        "findings: {:?}",
+        resolved.findings
+    );
+}
+
+#[test]
+fn a_review_marked_complete_but_whose_record_entry_is_pending_fails_resolution() {
+    // Fully populate the review node as complete, but the specific record entry it
+    // names in docs/instruments/review-record.md (#rec-att-01) is still PENDING,
+    // so entry resolution rejects the claim — a status string cannot outrun its
+    // record entry.
     let raw = read(&repo_root().join("docs/instruments/evidence-graph.evg"));
     let text = raw.replace(
         "attr status pending\nattr independent yes",
