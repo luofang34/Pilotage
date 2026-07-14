@@ -3,6 +3,16 @@
 Engine-independent platform for low-latency remote control, supervision, simulation,
 and training of maritime, aerial, and terrestrial vehicles.
 
+> **⚠️ Work in progress — experimental.** Pilotage is early-stage, experimental
+> software under active development, provided **as is** with **no warranty or
+> guarantee of any kind**, express or implied — including, without limitation,
+> fitness for a particular purpose, correctness, reliability, availability, or
+> safety. Interfaces, wire formats, and behavior may change without notice.
+>
+> **SIM / NOT FOR FLIGHT.** Nothing here is certified, approved, or airworthy.
+> Nothing may be used for operational control of a real vehicle or for any
+> safety-critical purpose. Use at your own risk.
+
 **Status:** early implementation. The core protocol/authority/input crates, a
 WebTransport session host, and a Gazebo adapter are in place; a browser and a native
 client drive a real Gazebo vehicle end-to-end (video, telemetry, and control). The
