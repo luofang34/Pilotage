@@ -22,6 +22,7 @@ mod fixed_str;
 mod hsi;
 mod palette;
 mod pfd;
+mod source_label;
 mod status_paint;
 
 pub use hsi::draw_hsi;

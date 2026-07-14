@@ -13,18 +13,21 @@
 use pilotage_alerts::{AlertEvent, MiscompareFault};
 use pilotage_frames::Quat;
 
-use crate::resolve::resolve_stateful;
+use crate::heading::wrap_2pi;
+use crate::resolve::{ResolvedHeading, resolve_stateful};
 use crate::source_compare::{
     AirframeSourcePolicy, AttitudeMeasure, Candidate, HeadingMeasure, ScalarMeasure,
     SourceAltitude, SourceComparator, SourceComparison,
 };
+use crate::units::{M_TO_FT, MPS_TO_KT};
+use crate::validate::validate_quat;
 use crate::{
-    AircraftState, AirframeDisplayProfile, FreshnessPolicy, PanelData, UnusualAttitudeState,
+    AircraftState, AirframeDisplayProfile, FreshnessPolicy, PanelData, Sig, UnusualAttitudeState,
 };
 
 mod sourced;
-use sourced::sourced_function;
 pub use sourced::{Sourced, SourcedFunction};
+use sourced::{selected_candidate, sourced_function};
 
 /// The per-function selected value, bound to its source, folded into
 /// [`PanelData`]. Each field carries the selected source's own value, so a
@@ -184,6 +187,7 @@ pub fn resolve_with_sources(
 ) -> (PanelData, SourceMonitorReport) {
     let report = monitors.step(&sources.inputs, sources.policies, sources.now_ms);
     let mut panel = resolve_stateful(state, policy, profile, unusual);
+    apply_selected_sources(&mut panel, &sources.inputs, &report, profile);
     panel.sources = SourceSelection {
         attitude: sourced_function(sources.inputs.attitude, &report.attitude),
         heading: sourced_function(sources.inputs.heading, &report.heading),
@@ -191,6 +195,42 @@ pub fn resolve_with_sources(
         airspeed: sourced_function(sources.inputs.airspeed, &report.airspeed),
     };
     (panel, report)
+}
+
+/// Overwrites each monitored function's authoritative displayed value with
+/// the selected source's own — the tape a panel draws and the source label
+/// it names are then read from one candidate and cannot disagree. The
+/// selected source passed the comparator's usability gate, so its value is
+/// shown `Valid`. Unmonitored functions keep the single-source value from the
+/// base resolve; this runs only through [`resolve_with_sources`].
+fn apply_selected_sources(
+    panel: &mut PanelData,
+    inputs: &SourceInputs,
+    report: &SourceMonitorReport,
+    profile: &AirframeDisplayProfile,
+) {
+    if let Some(c) = selected_candidate(inputs.airspeed, &report.airspeed) {
+        panel.ias_kt = Sig::valid(c.measurement.value * MPS_TO_KT);
+    }
+    if let Some(c) = selected_candidate(inputs.altitude, &report.altitude) {
+        panel.altitude.value_ft = Sig::valid(c.measurement.value_m * M_TO_FT);
+        panel.altitude.class = c.measurement.class;
+        panel.altitude.origin = c.measurement.origin;
+    }
+    if let Some(c) = selected_candidate(inputs.heading, &report.heading) {
+        panel.heading = ResolvedHeading {
+            value_rad: Sig::valid(wrap_2pi(c.measurement.heading_rad)),
+            reference: c.measurement.reference,
+        };
+    }
+    if let Some(c) = selected_candidate(inputs.attitude, &report.attitude)
+        && let Ok(quat) = validate_quat(c.measurement.quat)
+    {
+        let presentation = UnusualAttitudeState::default().step(quat, profile);
+        panel.roll_rad = Sig::valid(presentation.bank_rad);
+        panel.pitch_rad = Sig::valid(presentation.pitch_rad);
+        panel.presentation = presentation;
+    }
 }
 
 #[cfg(test)]

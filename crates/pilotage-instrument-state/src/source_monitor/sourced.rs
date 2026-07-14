@@ -112,6 +112,19 @@ impl<T> Default for SourcedFunction<T> {
     }
 }
 
+/// The candidate the comparator selected this step (the first with the
+/// selected id), or `None` when nothing was selected. The one lookup that
+/// both the displayed value and its label are drawn from, so they can never
+/// name different sources.
+pub(crate) fn selected_candidate<'a, M>(
+    candidates: &'a [Candidate<M>],
+    comparison: &SourceComparison,
+) -> Option<&'a Candidate<M>> {
+    comparison
+        .selected
+        .and_then(|id| candidates.iter().find(|c| c.source == id))
+}
+
 /// Binds the comparator's selected source to that source's own candidate
 /// value. The value comes from the candidate the id names, so value and id
 /// can never diverge.
@@ -119,14 +132,8 @@ pub(crate) fn sourced_function<M: DisplayValue>(
     candidates: &[Candidate<M>],
     comparison: &SourceComparison,
 ) -> SourcedFunction<M::Value> {
-    let selected = comparison.selected.and_then(|id| {
-        candidates
-            .iter()
-            .find(|c| c.source == id)
-            .map(|c| Sourced::from_candidate(c))
-    });
     SourcedFunction {
-        selected,
+        selected: selected_candidate(candidates, comparison).map(Sourced::from_candidate),
         reverted: comparison.reverted,
         state: comparison.state,
     }

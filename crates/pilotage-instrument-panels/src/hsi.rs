@@ -89,6 +89,7 @@ pub fn draw_hsi(
     } else {
         status_paint::draw_red_x(scene, CX - 140.0, CY - 140.0, 280.0, 280.0, "HDG")?;
     }
+    crate::source_label::draw_source_label(scene, CX + 90.0, 14.0, "HDG", &data.sources.heading)?;
     if let Some(alerts) = alerts {
         crate::annunciation::draw_alert_stack(scene, alerts)?;
     }
@@ -96,5 +97,7 @@ pub fn draw_hsi(
     Ok(())
 }
 
+#[cfg(test)]
+mod source_tests;
 #[cfg(test)]
 mod tests;
