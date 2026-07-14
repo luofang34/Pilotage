@@ -48,7 +48,9 @@ title recorded band outcome
 attr command cargo test -p pilotage-instrument-raster
 attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
 attr tool-version rustc 1.95.0
-attr artifact git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
+attr source-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
+attr output-digest sha256:029acbfbbed694fee82be59b456e4ad5b9bf4ed0478a20e529e6c019e0756d34
+attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
 
 node CFG-BASE configuration-item
 title worktree baseline
@@ -60,6 +62,9 @@ node REVIEW-1 review
 title intended-function review record
 attr status complete
 attr independent yes
+attr reviewer J. Doe
+attr date 2026-07-14
+attr disposition APPROVED
 
 edge FC-ATT-06 derives-from PFD
 edge AIR-ENV-002 mitigates FC-ATT-06

@@ -37,13 +37,25 @@ pub struct Policy {
     /// status is absent or outside this set (e.g. `pending`, `in-progress`) is
     /// incomplete and cannot yield a VALID verdict.
     pub review_complete_statuses: Vec<String>,
+    /// Attributes a completed review must carry so its status is backed by a
+    /// substantive record entry, not merely a status string — the reviewer
+    /// identity, the date, and the disposition.
+    pub review_record_attrs: Vec<String>,
+    /// Disposition values that count as a closed review outcome. A completed
+    /// review whose disposition is absent or outside this set (e.g. `pending`)
+    /// has no real outcome recorded and stays incomplete.
+    pub review_closed_dispositions: Vec<String>,
     /// Whether a review must be marked independent to be accepted.
     pub review_requires_independence: bool,
     /// Attributes every recorded result must carry so it is real evidence and
-    /// not a placeholder — typically the executed command, the configuration
-    /// commit/tree digest, the pinned tool version, and an immutable artifact
-    /// reference.
+    /// not a placeholder — the executed command, the configuration commit/tree
+    /// digest, the pinned tool version, an immutable execution-output digest of
+    /// the captured run, and the run identity.
     pub result_required_attrs: Vec<String>,
+    /// The result attribute that must reference an immutable execution output
+    /// (the captured run's recorded result/log), not the test source. A value
+    /// using the source-blob scheme is rejected as a placeholder.
+    pub result_output_attr: String,
     /// Whether an exception must record an independent review to apply.
     pub exception_requires_review: bool,
     /// The ISO-8601 date (`YYYY-MM-DD`) an exception's expiry is checked
@@ -90,13 +102,27 @@ impl Policy {
                 "accepted".to_string(),
                 "closed".to_string(),
             ],
+            review_record_attrs: vec![
+                "reviewer".to_string(),
+                "date".to_string(),
+                "disposition".to_string(),
+            ],
+            review_closed_dispositions: vec![
+                "approved".to_string(),
+                "approved with actions".to_string(),
+                "approved-with-actions".to_string(),
+                "accepted".to_string(),
+                "rejected".to_string(),
+            ],
             review_requires_independence: true,
             result_required_attrs: vec![
                 "command".to_string(),
                 "config-digest".to_string(),
                 "tool-version".to_string(),
-                "artifact".to_string(),
+                "output-digest".to_string(),
+                "run-id".to_string(),
             ],
+            result_output_attr: "output-digest".to_string(),
             exception_requires_review: true,
             exception_as_of: None,
             selector_attr: "test".to_string(),

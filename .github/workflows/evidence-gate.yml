@@ -61,7 +61,8 @@ jobs:
           for f in empty missing-root missing-layer dangling-edge \
                    unresolved-selector orphan-requirement \
                    missing-result invalid-exception \
-                   pending-review placeholder-result; do
+                   pending-review placeholder-result \
+                   unexecuted-result unbacked-review; do
             if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
                 --repo-root crates/pilotage-evidence >/dev/null 2>&1; then
               echo "REGRESSION: $f.evg unexpectedly PASSED the gate"; fail=1

@@ -181,9 +181,11 @@ fn verifies_scope_requirement(graph: &Graph, case: &NodeId) -> bool {
 }
 
 /// Every recorded result must carry immutable provenance: the executed command,
-/// the configuration commit/tree digest, the pinned tool version, and an
-/// immutable artifact reference. A result missing any of these is a placeholder,
-/// not evidence, and must fail the gate.
+/// the configuration commit/tree digest, the pinned tool version, an immutable
+/// execution-output digest of the captured run, and the run identity. A result
+/// missing any of these — or whose execution-output digest merely points at the
+/// test source rather than a captured run output — is a placeholder, not
+/// evidence, and must fail the gate.
 pub(super) fn result_provenance(graph: &Graph, policy: &Policy, findings: &mut Vec<Finding>) {
     for id in graph.ids_of_kind(NodeKind::VerificationResult) {
         let node = match graph.node(id) {
@@ -205,8 +207,27 @@ pub(super) fn result_provenance(graph: &Graph, policy: &Policy, findings: &mut V
                     missing.join(", ")
                 ),
             ));
+            continue;
+        }
+        if let Some(output) = node.attr(&policy.result_output_attr)
+            && is_source_blob(output)
+        {
+            findings.push(Finding::new(
+                FindingCode::PlaceholderResult,
+                Some(id.clone()),
+                format!(
+                    "result {id} is a placeholder: {} {output} references the test source, not a captured execution output",
+                    policy.result_output_attr
+                ),
+            ));
         }
     }
+}
+
+/// Whether a digest reference points at source content rather than a run output.
+fn is_source_blob(value: &str) -> bool {
+    let value = value.trim();
+    value.starts_with("git-blob:") || value.starts_with("blob:") || value.starts_with("source:")
 }
 
 /// Every review that reviews another node must be complete, and independent
@@ -231,15 +252,49 @@ pub(super) fn reviews_complete(graph: &Graph, policy: &Policy, findings: &mut Ve
                     "review {id} has status '{status}', not a completed review status (the trace is complete but the review is not)"
                 ),
             ));
+            // An openly pending review needs no further record findings piled on.
+            continue;
         }
-        if policy.review_requires_independence && !is_independent(node) {
+        for problem in completed_review_problems(node, policy) {
             findings.push(Finding::new(
                 FindingCode::ReviewIncomplete,
                 Some(id.clone()),
-                format!("review {id} is not marked independent"),
+                format!("review {id}: {problem}"),
             ));
         }
     }
+}
+
+/// The ways a review that *claims* completion is not backed by a substantive,
+/// closed record: missing reviewer/date/disposition, a disposition that is not a
+/// closed outcome, or missing independence. A `status complete` alone is never
+/// enough.
+fn completed_review_problems(node: &Node, policy: &Policy) -> Vec<String> {
+    let mut problems = Vec::new();
+    let missing: Vec<&str> = policy
+        .review_record_attrs
+        .iter()
+        .filter(|attr| node.attr(attr).is_none())
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        problems.push(format!(
+            "status is complete but the substantive record is missing {}",
+            missing.join(", ")
+        ));
+    }
+    if let Some(disposition) = node.attr("disposition") {
+        let normalized = disposition.trim().to_ascii_lowercase();
+        if !policy.review_closed_dispositions.contains(&normalized) {
+            problems.push(format!(
+                "disposition '{disposition}' is not a closed review outcome"
+            ));
+        }
+    }
+    if policy.review_requires_independence && !is_independent(node) {
+        problems.push("review is not marked independent".to_string());
+    }
+    problems
 }
 
 /// Whether `id` has any outgoing `reviews` edge.

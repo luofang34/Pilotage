@@ -83,11 +83,23 @@ fn the_real_att01_slice_is_structurally_traced_but_review_pending() {
     );
     assert_ne!(pending.verdict, GateVerdict::Valid);
 
-    // Completing the review is all that stands between the slice and VALID:
-    // everything else already traces, resolves, and carries result provenance.
-    let text = read(&repo_root().join("docs/instruments/evidence-graph.evg"))
-        .replace("attr status pending", "attr status complete");
-    let completed = parse_graph(&text).expect("edited graph parses");
+    let raw = read(&repo_root().join("docs/instruments/evidence-graph.evg"));
+
+    // Flipping the status string alone is NOT enough: without a substantive
+    // record (reviewer, date, closed disposition) the review is still incomplete.
+    let flipped = parse_graph(&raw.replace("attr status pending", "attr status complete"))
+        .expect("edited graph parses");
+    assert!(has_open(&report(&flipped), FindingCode::ReviewIncomplete));
+    assert_ne!(report(&flipped).verdict, GateVerdict::Valid);
+
+    // A completed status backed by a real record entry is what makes it VALID
+    // (everything else already traces, resolves, and carries result provenance).
+    let completed = parse_graph(&raw.replace(
+        "attr status pending\nattr independent yes",
+        "attr status complete\nattr independent yes\nattr reviewer J. Doe\n\
+         attr date 2026-07-14\nattr disposition APPROVED",
+    ))
+    .expect("edited graph parses");
     let completed_report = report(&completed);
     assert_eq!(
         completed_report.verdict,
@@ -217,6 +229,46 @@ fn placeholder_result_fixture_fails() {
     let report = report(&fixture("placeholder-result.evg"));
     assert!(has_open(&report, FindingCode::PlaceholderResult));
     assert_eq!(report.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn unexecuted_result_fixture_fails() {
+    // The result's execution-output digest is a source blob, not a captured run.
+    let report = report(&fixture("unexecuted-result.evg"));
+    assert!(has_open(&report, FindingCode::PlaceholderResult));
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn unbacked_review_fixture_fails() {
+    // Status says complete, but the substantive record disposition is PENDING.
+    let report = report(&fixture("unbacked-review.evg"));
+    assert!(has_open(&report, FindingCode::ReviewIncomplete));
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn a_review_marked_complete_but_whose_record_is_pending_fails_resolution() {
+    // Fully populate the review node as complete, but the real review record on
+    // disk (docs/instruments/review-record.md) is still PENDING, so filesystem
+    // resolution rejects the claim — a status string cannot outrun its record.
+    let raw = read(&repo_root().join("docs/instruments/evidence-graph.evg"));
+    let text = raw.replace(
+        "attr status pending\nattr independent yes",
+        "attr status complete\nattr independent yes\nattr reviewer J. Doe\n\
+         attr date 2026-07-14\nattr disposition APPROVED",
+    );
+    let graph = parse_graph(&text).expect("edited graph parses");
+    // Structurally the node now looks complete...
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    // ...but the record file is still PENDING, so resolution fails closed.
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &repo_root());
+    assert!(
+        has_open(&resolved, FindingCode::ReviewIncomplete),
+        "findings: {:?}",
+        resolved.findings
+    );
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
 }
 
 #[test]

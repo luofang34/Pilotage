@@ -198,3 +198,24 @@ fn a_placeholder_result_fails() {
     assert!(has_open(&text, FindingCode::PlaceholderResult));
     assert_eq!(verdict_of(&text), GateVerdict::Invalid);
 }
+
+#[test]
+fn a_source_blob_output_is_a_placeholder() {
+    // A result whose execution-output digest is only the test-source blob is a
+    // placeholder: it proves what code exists, not that it ran or what it emitted.
+    let text = VALID_SLICE.replace(
+        "attr output-digest sha256:029acbfbbed694fee82be59b456e4ad5b9bf4ed0478a20e529e6c019e0756d34",
+        "attr output-digest git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6",
+    );
+    assert!(has_open(&text, FindingCode::PlaceholderResult));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
+
+#[test]
+fn a_review_without_a_closed_disposition_is_incomplete() {
+    // The status still says complete, but the record's disposition is stripped:
+    // a completed status with no recorded outcome is not a substantive review.
+    let text = without("disposition APPROVED");
+    assert!(has_open(&text, FindingCode::ReviewIncomplete));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
