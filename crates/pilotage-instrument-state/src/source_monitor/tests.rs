@@ -5,7 +5,10 @@ use crate::source_compare::{
     AttitudeMeasure, Candidate, ComparisonState, FrameTag, IntegrityLevel, ScalarMeasure,
     ScalarUnit, SourceEpoch, SourceId,
 };
-use crate::{AircraftState, AirframeDisplayProfile, FreshnessPolicy, Quat, UnusualAttitudeState};
+use crate::{
+    AirData, AircraftState, AirframeDisplayProfile, Attitude, EstimateQuality, FreshnessPolicy,
+    Quat, SignalStatus, Stamped, UnusualAttitudeState, ValidFlags,
+};
 use pilotage_alerts::{
     AlertCondition, AlertContext, AlertEvent, AlertManager, AlertProfile, MiscompareFault,
 };
@@ -207,4 +210,168 @@ fn resolve_with_sources_annunciates_selection_and_feeds_alr01() {
         panel.sources.attitude.reverted,
         "the non-primary selection is annunciated"
     );
+}
+
+/// A base state carrying a valid airspeed and attitude, so a fall-back to it
+/// would be visible if a monitored function failed to fail closed.
+fn base_state() -> AircraftState {
+    AircraftState {
+        air: Stamped {
+            data: Some(AirData {
+                ias_mps: Some(50.0),
+                baro_setting_hpa: Some(1013.0),
+            }),
+            age_ms: Some(10.0),
+        },
+        attitude: Stamped {
+            data: Some(Attitude {
+                quat: Quat::IDENTITY,
+                rates_rps: [0.0, 0.0, 0.0],
+            }),
+            age_ms: Some(10.0),
+        },
+        quality: EstimateQuality::Good,
+        valid: ValidFlags {
+            attitude: true,
+            rates: true,
+            ..ValidFlags::default()
+        },
+        ..AircraftState::default()
+    }
+}
+
+/// A valid attitude candidate banked `deg` degrees right (roll about body x).
+fn att_bank(src: u8, now: u64, deg: f32) -> Candidate<AttitudeMeasure> {
+    let half = deg.to_radians() / 2.0;
+    Candidate {
+        source: SourceId(src),
+        epoch: SourceEpoch(1),
+        source_time_ms: now,
+        receive_time_ms: now,
+        sequence: now as u32,
+        valid: true,
+        integrity: IntegrityLevel::None,
+        accuracy: 0.0,
+        measurement: AttitudeMeasure {
+            quat: Quat {
+                w: libm::cosf(half),
+                x: libm::sinf(half),
+                y: 0.0,
+                z: 0.0,
+            },
+            frame: FrameTag(1),
+        },
+    }
+}
+
+#[test]
+fn all_failed_monitored_function_fails_closed() {
+    let policies = SourcePolicies::simulator();
+    let profile = AirframeDisplayProfile::simulator();
+    let fresh = FreshnessPolicy::default();
+    let state = base_state();
+    let mut monitors = SourceMonitors::new();
+    let mut unusual = UnusualAttitudeState::default();
+
+    // Airspeed and attitude are monitored but every candidate is invalid.
+    let bad_air = [Candidate {
+        valid: false,
+        ..air(1, 0, 150.0)
+    }];
+    let bad_att = [Candidate {
+        valid: false,
+        ..att_bank(1, 0, 10.0)
+    }];
+    let inputs = SourceInputs {
+        airspeed: &bad_air,
+        attitude: &bad_att,
+        ..SourceInputs::default()
+    };
+    let step = SourceStep {
+        inputs,
+        policies: &policies,
+        now_ms: 0,
+    };
+    let (panel, _report) =
+        resolve_with_sources(&state, &fresh, &profile, &mut unusual, &mut monitors, &step);
+
+    assert_eq!(
+        panel.ias_kt.status,
+        SignalStatus::Failed,
+        "no usable airspeed source fails closed, never the stale base value"
+    );
+    assert_eq!(panel.roll_rad.status, SignalStatus::Failed);
+    assert_eq!(panel.pitch_rad.status, SignalStatus::Failed);
+}
+
+#[test]
+fn airspeed_respects_the_knots_unit() {
+    let policies = SourcePolicies::simulator();
+    let profile = AirframeDisplayProfile::simulator();
+    let fresh = FreshnessPolicy::default();
+    let state = AircraftState::default();
+    let mut monitors = SourceMonitors::new();
+    let mut unusual = UnusualAttitudeState::default();
+
+    // `air` declares Knots; the displayed value must be those knots, not the
+    // m/s misreading (150 * MPS_TO_KT ~ 291).
+    let knots = [air(1, 0, 150.0)];
+    let inputs = SourceInputs {
+        airspeed: &knots,
+        ..SourceInputs::default()
+    };
+    let step = SourceStep {
+        inputs,
+        policies: &policies,
+        now_ms: 0,
+    };
+    let (panel, _report) =
+        resolve_with_sources(&state, &fresh, &profile, &mut unusual, &mut monitors, &step);
+
+    assert!(
+        (panel.ias_kt.value - 150.0).abs() < 0.5,
+        "knots rendered as knots: {}",
+        panel.ias_kt.value
+    );
+    assert!(
+        (panel.ias_kt.value - 150.0 * crate::units::MPS_TO_KT).abs() > 100.0,
+        "not misread as meters per second"
+    );
+}
+
+#[test]
+fn selected_attitude_hysteresis_holds_across_frames() {
+    let policies = SourcePolicies::simulator();
+    let profile = AirframeDisplayProfile::simulator();
+    let fresh = FreshnessPolicy::default();
+    let state = AircraftState::default();
+    let mut monitors = SourceMonitors::new();
+    let mut unusual = UnusualAttitudeState::default();
+
+    // Jitter bank around the 65-degree unusual-bank entry; the persistent
+    // per-source presentation must engage once and hold (exit is 60 degrees),
+    // never resetting and chattering each frame.
+    let mut transitions = 0u32;
+    let mut last = false;
+    for i in 0..40u64 {
+        let bank = if i % 2 == 0 { 65.4 } else { 64.6 };
+        let att = [att_bank(1, i, bank)];
+        let inputs = SourceInputs {
+            attitude: &att,
+            ..SourceInputs::default()
+        };
+        let step = SourceStep {
+            inputs,
+            policies: &policies,
+            now_ms: i,
+        };
+        let (panel, _report) =
+            resolve_with_sources(&state, &fresh, &profile, &mut unusual, &mut monitors, &step);
+        if panel.presentation.high_bank != last {
+            transitions = transitions.wrapping_add(1);
+            last = panel.presentation.high_bank;
+        }
+    }
+    assert_eq!(transitions, 1, "engages once, no cross-frame chatter");
+    assert!(last, "still latched inside the hysteresis band");
 }
