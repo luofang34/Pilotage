@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use crate::gate::{Finding, FindingCode};
 use crate::graph::Graph;
 use crate::id::NodeId;
-use crate::node::NodeKind;
+use crate::node::{Node, NodeKind};
 use crate::policy::Policy;
 use crate::relation::{Edge, RelationKind};
 
@@ -178,6 +178,83 @@ fn verifies_scope_requirement(graph: &Graph, case: &NodeId) -> bool {
                 && e.relation == RelationKind::Covers
                 && graph.scope.requirements.contains(&e.to))
     })
+}
+
+/// Every recorded result must carry immutable provenance: the executed command,
+/// the configuration commit/tree digest, the pinned tool version, and an
+/// immutable artifact reference. A result missing any of these is a placeholder,
+/// not evidence, and must fail the gate.
+pub(super) fn result_provenance(graph: &Graph, policy: &Policy, findings: &mut Vec<Finding>) {
+    for id in graph.ids_of_kind(NodeKind::VerificationResult) {
+        let node = match graph.node(id) {
+            Some(node) => node,
+            None => continue,
+        };
+        let missing: Vec<&str> = policy
+            .result_required_attrs
+            .iter()
+            .filter(|attr| node.attr(attr).is_none())
+            .map(String::as_str)
+            .collect();
+        if !missing.is_empty() {
+            findings.push(Finding::new(
+                FindingCode::PlaceholderResult,
+                Some(id.clone()),
+                format!(
+                    "result {id} is a placeholder: missing {}",
+                    missing.join(", ")
+                ),
+            ));
+        }
+    }
+}
+
+/// Every review that reviews another node must be complete, and independent
+/// where the policy requires it. A pending, incomplete, or non-independent
+/// review is surfaced so a graph whose review is unfinished can never read as
+/// VALID — the honest state is "structurally traced but review pending".
+pub(super) fn reviews_complete(graph: &Graph, policy: &Policy, findings: &mut Vec<Finding>) {
+    for id in graph.ids_of_kind(NodeKind::Review) {
+        if !reviews_something(graph, id) {
+            continue;
+        }
+        let node = match graph.node(id) {
+            Some(node) => node,
+            None => continue,
+        };
+        let status = node.attr("status").unwrap_or("<missing>");
+        if !policy.review_complete_statuses.iter().any(|s| s == status) {
+            findings.push(Finding::new(
+                FindingCode::ReviewIncomplete,
+                Some(id.clone()),
+                format!(
+                    "review {id} has status '{status}', not a completed review status (the trace is complete but the review is not)"
+                ),
+            ));
+        }
+        if policy.review_requires_independence && !is_independent(node) {
+            findings.push(Finding::new(
+                FindingCode::ReviewIncomplete,
+                Some(id.clone()),
+                format!("review {id} is not marked independent"),
+            ));
+        }
+    }
+}
+
+/// Whether `id` has any outgoing `reviews` edge.
+fn reviews_something(graph: &Graph, id: &NodeId) -> bool {
+    graph
+        .edges()
+        .any(|e| e.from == *id && e.relation == RelationKind::Reviews)
+}
+
+/// Whether a review node records its independence.
+fn is_independent(node: &Node) -> bool {
+    matches!(
+        node.attr("independent"),
+        Some("yes" | "true" | "independent")
+    )
 }
 
 /// Every derived requirement must carry its safety record and a review.

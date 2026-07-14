@@ -1,16 +1,20 @@
-# Negative fixture: an exception covers a real gap (the result is not justified
-# by a configuration baseline). The exception is complete and independently
-# reviewed, but EXPIRED — so once the gate runs with an as-of date past its
-# expiry it cannot apply and the gap stays open. Run with --as-of before the
-# expiry and the same exception legitimately applies (VALID WITH EXCEPTIONS),
-# which is how the advisory workflow proves expiry is actually enforced.
+# Negative fixture: the review artifact exists and reviews the derived
+# requirement, but its status is still pending, so the gate must NOT report
+# VALID. The honest state is "structurally traced, review pending".
 evidence-graph 1
 scope ATT-01
 scope-requirement AIR-ENV-002
+scope-requirement AIR-HAZ-012
 
 node PFD intended-function
 node FC-ATT-06 hazard
 node AIR-ENV-002 safety-requirement
+
+node AIR-HAZ-012 derived-requirement
+attr safety-impact catastrophic-if-credited
+attr rationale sign-and-order-preserved-through-singularities
+attr disposition notified-and-retained
+
 node DESIGN-SO3 design
 node IMPL-STEP implementation
 
@@ -28,23 +32,21 @@ node CFG-BASE configuration-item
 node TOOL-CARGO tool
 
 node REVIEW-1 review
-attr status complete
+attr status pending
 attr independent yes
 
 edge FC-ATT-06 derives-from PFD
 edge AIR-ENV-002 mitigates FC-ATT-06
+edge AIR-HAZ-012 mitigates FC-ATT-06
 edge AIR-ENV-002 allocated-to DESIGN-SO3
+edge AIR-HAZ-012 allocated-to DESIGN-SO3
 edge DESIGN-SO3 implemented-by IMPL-STEP
 edge AIR-ENV-002 verified-by CASE-BAND
+edge AIR-HAZ-012 verified-by CASE-BAND
 edge CASE-BAND covers AIR-ENV-002
+edge CASE-BAND covers AIR-HAZ-012
 edge RESULT-BAND result-of CASE-BAND
 edge RESULT-BAND covers AIR-ENV-002
+edge RESULT-BAND justified-by CFG-BASE
 edge RESULT-BAND justified-by TOOL-CARGO
-
-exception EX-1
-covers RESULT-BAND
-owner sokoly
-rationale configuration baseline capture deferred
-status open
-expiry 2020-01-01
-review REVIEW-1
+edge REVIEW-1 reviews AIR-HAZ-012

@@ -38,6 +38,12 @@ pub enum FindingCode {
     /// A verification case that covers an in-scope requirement has no recorded
     /// result (no verification-result resolves to it).
     MissingResult,
+    /// A recorded result lacks the immutable provenance that makes it evidence
+    /// (executed command, configuration digest, tool version, artifact).
+    PlaceholderResult,
+    /// A review exists but is pending, incomplete, or not independent, so it
+    /// cannot yield a VALID verdict.
+    ReviewIncomplete,
     /// A derived requirement is missing safety impact, rationale, disposition,
     /// or review.
     DerivedRequirementIncomplete,
@@ -59,6 +65,8 @@ impl FindingCode {
             FindingCode::MissingDownstreamLayer => "missing-downstream-layer",
             FindingCode::ResultUnresolved => "result-unresolved",
             FindingCode::MissingResult => "missing-result",
+            FindingCode::PlaceholderResult => "placeholder-result",
+            FindingCode::ReviewIncomplete => "review-incomplete",
             FindingCode::DerivedRequirementIncomplete => "derived-requirement-incomplete",
             FindingCode::UnresolvedSelector => "unresolved-selector",
             FindingCode::ExceptionMalformed => "exception-malformed",
@@ -160,7 +168,9 @@ fn collect(graph: &Graph, policy: &Policy, repo_root: Option<&Path>) -> Vec<Find
     checks::dangling_edges(graph, &mut findings);
     checks::requirement_traces(graph, policy, &mut findings);
     checks::results(graph, &mut findings);
+    checks::result_provenance(graph, policy, &mut findings);
     checks::cases_have_results(graph, &mut findings);
+    checks::reviews_complete(graph, policy, &mut findings);
     checks::derived_requirements(graph, policy, &mut findings);
     checks::selectors_present(graph, policy, &mut findings);
     if let Some(root) = repo_root {

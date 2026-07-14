@@ -1,6 +1,6 @@
-# Negative fixture: a verification case that covers the in-scope requirement has
-# no recorded result. The requirement still reaches the result layer through the
-# other case, so this isolates the missing-result gap from a whole missing layer.
+# Negative fixture: the result records no immutable provenance — no executed
+# command, configuration digest, pinned tool version, or artifact reference — so
+# it is a placeholder titled "pass", not evidence. A placeholder result fails.
 evidence-graph 1
 scope ATT-01
 scope-requirement AIR-ENV-002
@@ -15,15 +15,9 @@ node CASE-BAND verification-case
 locator tests/fixtures/sample_tests.rs
 attr test band_matches_reference
 
-node CASE-VERTICAL verification-case
-locator tests/fixtures/sample_tests.rs
-attr test vertical_never_flips
-
 node RESULT-BAND verification-result
-attr command cargo test -p pilotage-instrument-raster
-attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
-attr tool-version rustc 1.95.0
-attr artifact git-blob:7ab0d7f2dafef691899dde6f837e3f8561554ec6
+title recorded pass
+
 node CFG-BASE configuration-item
 node TOOL-CARGO tool
 
@@ -32,9 +26,7 @@ edge AIR-ENV-002 mitigates FC-ATT-06
 edge AIR-ENV-002 allocated-to DESIGN-SO3
 edge DESIGN-SO3 implemented-by IMPL-STEP
 edge AIR-ENV-002 verified-by CASE-BAND
-edge AIR-ENV-002 verified-by CASE-VERTICAL
 edge CASE-BAND covers AIR-ENV-002
-edge CASE-VERTICAL covers AIR-ENV-002
 edge RESULT-BAND result-of CASE-BAND
 edge RESULT-BAND covers AIR-ENV-002
 edge RESULT-BAND justified-by CFG-BASE

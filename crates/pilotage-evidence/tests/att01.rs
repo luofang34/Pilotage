@@ -59,17 +59,41 @@ fn id(raw: &str) -> NodeId {
 }
 
 #[test]
-fn the_real_att01_slice_is_structurally_valid() {
-    let report = report(&real_graph());
-    assert_eq!(
-        report.verdict,
-        GateVerdict::Valid,
-        "open findings: {:?}",
-        report.findings
-    );
+fn the_real_att01_slice_is_structurally_traced_but_review_pending() {
+    let graph = real_graph();
+    let pending = report(&graph);
     assert!(
-        report.node_count > 20,
+        pending.node_count > 20,
         "the slice is a real graph, not a stub"
+    );
+    // The trace is structurally complete, but the review is still pending, so the
+    // honest verdict is not VALID and the ONLY open finding is the incomplete
+    // review — the gate must not green-wash a pending review.
+    let open: Vec<FindingCode> = pending
+        .findings
+        .iter()
+        .filter(|f| !f.excepted)
+        .map(|f| f.code)
+        .collect();
+    assert_eq!(
+        open,
+        vec![FindingCode::ReviewIncomplete],
+        "unexpected open findings: {:?}",
+        pending.findings
+    );
+    assert_ne!(pending.verdict, GateVerdict::Valid);
+
+    // Completing the review is all that stands between the slice and VALID:
+    // everything else already traces, resolves, and carries result provenance.
+    let text = read(&repo_root().join("docs/instruments/evidence-graph.evg"))
+        .replace("attr status pending", "attr status complete");
+    let completed = parse_graph(&text).expect("edited graph parses");
+    let completed_report = report(&completed);
+    assert_eq!(
+        completed_report.verdict,
+        GateVerdict::Valid,
+        "open findings once reviewed: {:?}",
+        completed_report.findings
     );
 }
 
@@ -182,35 +206,56 @@ fn missing_result_fixture_fails() {
 }
 
 #[test]
-fn invalid_exception_fixture_fails() {
-    let graph = fixture("invalid-exception.evg");
-    // Under the default policy the exception is malformed (it names no review),
-    // so it cannot suppress the underlying gap: both findings stay open.
-    let report = validate(&graph, &Policy::engineering_trace());
-    assert!(has_open(&report, FindingCode::ResultUnresolved));
-    assert!(has_open(&report, FindingCode::ExceptionMalformed));
+fn pending_review_fixture_fails() {
+    let report = report(&fixture("pending-review.evg"));
+    assert!(has_open(&report, FindingCode::ReviewIncomplete));
     assert_eq!(report.verdict, GateVerdict::Invalid);
+}
 
-    // With an as-of date the same exception is rejected specifically for being
-    // expired, independent of the missing-review path.
-    let dated = Policy {
-        exception_requires_review: false,
+#[test]
+fn placeholder_result_fixture_fails() {
+    let report = report(&fixture("placeholder-result.evg"));
+    assert!(has_open(&report, FindingCode::PlaceholderResult));
+    assert_eq!(report.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn invalid_exception_fixture_fails_when_expired() {
+    let graph = fixture("invalid-exception.evg");
+    // Past the expiry the reviewed, complete exception can no longer apply, so
+    // the gap it covers stays open and is reported.
+    let after = Policy {
         exception_as_of: Some("2026-07-14".to_string()),
         ..Policy::engineering_trace()
     };
-    let report = validate(&graph, &dated);
+    let report = validate(&graph, &after);
+    assert!(
+        has_open(&report, FindingCode::ResultUnresolved),
+        "an expired exception must not suppress the gap: {:?}",
+        report.findings
+    );
     let malformed = report
         .findings
         .iter()
         .find(|f| f.code == FindingCode::ExceptionMalformed)
-        .expect("the expired exception is reported malformed");
+        .expect("the expired exception is reported");
     assert!(
         malformed.detail.contains("expired"),
         "detail: {}",
         malformed.detail
     );
-    assert!(has_open(&report, FindingCode::ResultUnresolved));
     assert_eq!(report.verdict, GateVerdict::Invalid);
+
+    // Before its expiry the same exception legitimately applies — proving the
+    // as-of date, not a constant, drives the outcome.
+    let before = Policy {
+        exception_as_of: Some("2019-01-01".to_string()),
+        ..Policy::engineering_trace()
+    };
+    assert_eq!(
+        validate(&graph, &before).verdict,
+        GateVerdict::ValidWithExceptions
+    );
 }
 
 #[test]

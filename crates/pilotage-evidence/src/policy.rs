@@ -33,6 +33,17 @@ pub struct Policy {
     pub derived_required_attrs: Vec<String>,
     /// Whether a derived requirement must have an incoming review.
     pub derived_requires_review: bool,
+    /// The `status` values that count as a completed review. A review whose
+    /// status is absent or outside this set (e.g. `pending`, `in-progress`) is
+    /// incomplete and cannot yield a VALID verdict.
+    pub review_complete_statuses: Vec<String>,
+    /// Whether a review must be marked independent to be accepted.
+    pub review_requires_independence: bool,
+    /// Attributes every recorded result must carry so it is real evidence and
+    /// not a placeholder — typically the executed command, the configuration
+    /// commit/tree digest, the pinned tool version, and an immutable artifact
+    /// reference.
+    pub result_required_attrs: Vec<String>,
     /// Whether an exception must record an independent review to apply.
     pub exception_requires_review: bool,
     /// The ISO-8601 date (`YYYY-MM-DD`) an exception's expiry is checked
@@ -73,6 +84,19 @@ impl Policy {
                 "disposition".to_string(),
             ],
             derived_requires_review: true,
+            review_complete_statuses: vec![
+                "complete".to_string(),
+                "approved".to_string(),
+                "accepted".to_string(),
+                "closed".to_string(),
+            ],
+            review_requires_independence: true,
+            result_required_attrs: vec![
+                "command".to_string(),
+                "config-digest".to_string(),
+                "tool-version".to_string(),
+                "artifact".to_string(),
+            ],
             exception_requires_review: true,
             exception_as_of: None,
             selector_attr: "test".to_string(),

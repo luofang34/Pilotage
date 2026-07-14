@@ -176,3 +176,25 @@ fn an_expired_exception_cannot_suppress() {
     assert!(malformed.detail.contains("expired"), "{}", malformed.detail);
     assert_eq!(report.verdict, GateVerdict::Invalid);
 }
+
+#[test]
+fn a_pending_review_prevents_valid() {
+    let text = VALID_SLICE.replace("attr status complete", "attr status pending");
+    assert!(has_open(&text, FindingCode::ReviewIncomplete));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
+
+#[test]
+fn a_non_independent_review_prevents_valid() {
+    let text = without("attr independent yes");
+    assert!(has_open(&text, FindingCode::ReviewIncomplete));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
+
+#[test]
+fn a_placeholder_result_fails() {
+    // Stripping the executed command leaves the result without full provenance.
+    let text = without("attr command");
+    assert!(has_open(&text, FindingCode::PlaceholderResult));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
