@@ -76,6 +76,11 @@ pub struct AirframeDisplayProfile {
     /// |pitch| beyond which display bank holds its last value (the
     /// vertical parameter singularity).
     bank_hold_pitch: Hysteresis,
+    /// Minimum angular thickness of the reverse-color sky/ground band the
+    /// display keeps at the edge when the true horizon has left the
+    /// viewport, so an extreme pitch never presents a single flat color and
+    /// the ground/sky reference is never lost.
+    min_reverse_band: f32,
 }
 
 /// The raw threshold set [`AirframeDisplayProfile::new`] validates.
@@ -93,11 +98,18 @@ pub struct ProfileLimits {
     pub chevron_pitch_down: Hysteresis,
     /// Bank-hold pitch magnitude entry/exit.
     pub bank_hold_pitch: Hysteresis,
+    /// Minimum reverse-color sky/ground band thickness, radians of pitch.
+    /// Kept at the edge at extreme pitch so the display never loses one of
+    /// its two orientation cues.
+    pub min_reverse_band: f32,
 }
 
 const DEG: f32 = core::f32::consts::PI / 180.0;
 const HALF_PI: f32 = core::f32::consts::FRAC_PI_2;
 const PI: f32 = core::f32::consts::PI;
+/// Upper bound on the reverse-color band: comfortably inside the viewport's
+/// pitch extent so the clamped fill always leaves the horizon room to move.
+const MAX_REVERSE_BAND: f32 = 10.0 * DEG;
 
 impl AirframeDisplayProfile {
     /// Builds a profile after validating every threshold pair.
@@ -126,6 +138,15 @@ impl AirframeDisplayProfile {
             }
             i += 1;
         }
+        if !limits.min_reverse_band.is_finite() {
+            return Err(ProfileError::NonFinite);
+        }
+        // A band must be positive and must leave room inside the viewport's
+        // pitch extent for the horizon itself; a band as tall as the whole
+        // field would collapse the fill to one color.
+        if limits.min_reverse_band <= 0.0 || limits.min_reverse_band >= MAX_REVERSE_BAND {
+            return Err(ProfileError::OutOfRange);
+        }
         Ok(Self {
             require_dynamics_cue: true,
             unusual_pitch_up: limits.unusual_pitch_up,
@@ -134,6 +155,7 @@ impl AirframeDisplayProfile {
             chevron_pitch_up: limits.chevron_pitch_up,
             chevron_pitch_down: limits.chevron_pitch_down,
             bank_hold_pitch: limits.bank_hold_pitch,
+            min_reverse_band: limits.min_reverse_band,
         })
     }
 
@@ -169,7 +191,16 @@ impl AirframeDisplayProfile {
                 entry: 88.0 * DEG,
                 exit: 87.0 * DEG,
             },
+            // ~2.5° of pitch, an ~18 px band on the 360 px panel: clearly
+            // visible without disturbing the normal envelope, whose unusual
+            // entry is far higher (30° nose-up).
+            min_reverse_band: 2.5 * DEG,
         }
+    }
+
+    /// The minimum reverse-color band thickness, radians of pitch.
+    pub fn min_reverse_band(&self) -> f32 {
+        self.min_reverse_band
     }
 }
 
@@ -205,6 +236,11 @@ pub struct AttitudePresentation {
     pub inverted: bool,
     /// Recovery chevrons to draw, pointing toward the horizon.
     pub chevrons: Option<ChevronSense>,
+    /// Minimum reverse-color band thickness (radians of pitch) the
+    /// background keeps at the ground/sky edge at extreme pitch. Carried
+    /// from the profile so the renderer, which owns the pixel geometry,
+    /// never invents its own limit.
+    pub min_reverse_band_rad: f32,
 }
 
 impl Default for AttitudePresentation {
@@ -218,6 +254,7 @@ impl Default for AttitudePresentation {
             high_bank: false,
             inverted: false,
             chevrons: None,
+            min_reverse_band_rad: 0.0,
         }
     }
 }
@@ -315,6 +352,7 @@ impl UnusualAttitudeState {
             } else {
                 None
             },
+            min_reverse_band_rad: profile.min_reverse_band,
         }
     }
 }

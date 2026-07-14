@@ -173,6 +173,18 @@ fn chevrons_point_toward_the_horizon() {
     };
     assert!(apex_sign(&nose_high).iter().all(|&down| down));
     assert!(apex_sign(&nose_low).iter().all(|&down| !down));
+
+    // Inverted flight still cues recovery: an inverted, steeply nose-high
+    // attitude reaches the tier through the display's physical pitch (not a
+    // Euler branch) and draws chevrons, which the roll-rotated frame then
+    // aims at the horizon on screen.
+    let inv_data = oriented(180.0, 60.0);
+    assert!(inv_data.presentation.inverted, "inverted tier reached");
+    assert_eq!(
+        chevrons_in(&render(&inv_data, &PfdConfig::default())),
+        2,
+        "inverted nose-high chevrons drawn"
+    );
 }
 
 #[test]

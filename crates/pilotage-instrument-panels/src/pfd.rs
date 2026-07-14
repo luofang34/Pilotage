@@ -80,7 +80,12 @@ pub fn draw_pfd(
             scene.fill_color(palette::BLACK)?;
             scene.rect(PaintMode::Fill, 0.0, 0.0, PANEL_W, PANEL_H)?;
             if att_status.shows_value() {
-                horizon::draw_background(scene, data.roll_rad.value, data.pitch_rad.value)?;
+                horizon::draw_background(
+                    scene,
+                    data.roll_rad.value,
+                    data.pitch_rad.value,
+                    data.presentation.min_reverse_band_rad,
+                )?;
             }
             scene.end_layer(LayerId::Background)?;
         }

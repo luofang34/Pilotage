@@ -6,6 +6,7 @@ use pilotage_instrument_scene::{Anchor, LayerId, MAX_SCENE_BYTES, PaintMode, Rgb
 
 use crate::{FrameId, FramebufferDims, RasterError, RenderReport, RenderStatus, render};
 
+mod attitude_behavior;
 mod conformance;
 mod frame_hashes;
 mod work_budget;

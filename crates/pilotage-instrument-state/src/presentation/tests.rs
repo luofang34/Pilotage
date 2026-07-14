@@ -275,6 +275,75 @@ fn inverted_flight_is_unambiguous() {
 }
 
 #[test]
+fn chevrons_point_toward_the_horizon_even_inverted() {
+    // The recovery cue is defined as pointing toward the horizon: nose-high
+    // puts the horizon below the symbol so the chevron points down, nose-low
+    // mirrors it. That must hold at every orientation, including inverted
+    // flight (bank beyond 90°) — the sense keys on the display pitch and
+    // never silently reverses. Sweep the inverted band and assert the
+    // invariant `HorizonBelow ⟺ display pitch above the horizon`.
+    let profile = AirframeDisplayProfile::simulator();
+    let rolls = [120.0f64, 150.0, 180.0, -150.0, -120.0];
+    let mut inverted_with_cue = 0;
+    for &roll in rolls.iter() {
+        let mut pitch = -70.0f64;
+        while pitch <= 70.0 {
+            let mut state = UnusualAttitudeState::default();
+            let p = state.step(quat_f64(roll, pitch, 0.0), &profile);
+            if p.bank_rad.abs() > PI / 2.0 {
+                assert!(
+                    p.inverted,
+                    "roll {roll} pitch {pitch}: bank beyond 90° reads inverted"
+                );
+            }
+            if let Some(sense) = p.chevrons {
+                assert_eq!(
+                    sense == ChevronSense::HorizonBelow,
+                    p.pitch_rad > 0.0,
+                    "roll {roll} pitch {pitch}: chevron must point to the horizon side",
+                );
+                if p.inverted {
+                    inverted_with_cue += 1;
+                }
+            }
+            pitch += 5.0;
+        }
+    }
+    assert!(
+        inverted_with_cue > 0,
+        "the sweep must exercise recovery cues while inverted"
+    );
+}
+
+#[test]
+fn recovery_indication_starts_within_one_second() {
+    // Human-factors acceptance, deterministic logic bound only — real pilot
+    // response and HIL timing are separate evidence, not asserted here. Once
+    // the attitude is unusual, the display must begin the correct recovery
+    // indication within one second. At a 50 Hz refresh that is 50 frames; the
+    // tier machine raises the chevron on the first frame past the threshold,
+    // far inside the budget, pointed toward the horizon.
+    const BUDGET_FRAMES: u32 = 50;
+    let profile = AirframeDisplayProfile::simulator();
+    let mut state = UnusualAttitudeState::default();
+    let unusual = quat_f64(0.0, 55.0, 0.0); // beyond the +50° chevron entry
+    let mut onset = None;
+    for frame in 0..BUDGET_FRAMES {
+        let p = state.step(unusual, &profile);
+        if onset.is_none() && p.chevrons.is_some() {
+            onset = Some((frame, p.chevrons));
+        }
+    }
+    let (frame, sense) = onset.expect("recovery chevron appears within one second");
+    assert!(frame < BUDGET_FRAMES, "onset within the one-second budget");
+    assert_eq!(
+        sense,
+        Some(ChevronSense::HorizonBelow),
+        "the recovery cue points toward the horizon for a nose-high upset"
+    );
+}
+
+#[test]
 fn threshold_jitter_cannot_chatter() {
     // Oscillate ±0.5° around the 65° bank entry: one engagement, no
     // release until the 60° exit is crossed.
@@ -337,6 +406,7 @@ fn invalid_profiles_are_rejected() {
         chevron_pitch_up: good,
         chevron_pitch_down: good,
         bank_hold_pitch: good,
+        min_reverse_band: 2.5 * DEG,
     };
     assert!(AirframeDisplayProfile::new(base).is_ok());
     let mut inverted = base;
@@ -356,5 +426,19 @@ fn invalid_profiles_are_rejected() {
     assert_eq!(
         AirframeDisplayProfile::new(nan),
         Err(ProfileError::NonFinite)
+    );
+    // A non-positive or too-large reverse-color band is rejected: the band
+    // must leave the horizon room inside the field.
+    let mut no_band = base;
+    no_band.min_reverse_band = 0.0;
+    assert_eq!(
+        AirframeDisplayProfile::new(no_band),
+        Err(ProfileError::OutOfRange)
+    );
+    let mut huge_band = base;
+    huge_band.min_reverse_band = 45.0 * DEG;
+    assert_eq!(
+        AirframeDisplayProfile::new(huge_band),
+        Err(ProfileError::OutOfRange)
     );
 }
