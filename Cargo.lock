@@ -1228,6 +1228,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-svs-build"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "pilotage-geo",
+ "pilotage-svs-db",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-svs-db"
 version = "0.1.0"
 dependencies = [

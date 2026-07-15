@@ -13,6 +13,7 @@ members = [
     "crates/pilotage-camera-calibration",
     "crates/pilotage-geo",
     "crates/pilotage-svs-db",
+    "crates/pilotage-svs-build",
     "crates/pilotage-alerts",
     "crates/pilotage-instrument-scene",
     "crates/pilotage-instrument-state",

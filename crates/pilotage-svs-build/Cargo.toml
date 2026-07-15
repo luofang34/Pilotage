@@ -1,0 +1,18 @@
+[package]
+name = "pilotage-svs-build"
+description = "Deterministic offline terrain/obstacle/aerodrome processing chain that emits a signed, provenance-preserving SVS-02 package (SVS-03, SIM / NOT FOR FLIGHT)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-geo = { workspace = true }
+pilotage-svs-db = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
