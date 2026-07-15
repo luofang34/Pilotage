@@ -11,6 +11,7 @@
 import { serialIsNewer } from "./telemetry-ingress.js";
 import { RULE, firstFault, isIncarnation, isU32 } from "./wire-bounds.js";
 
+const CLOCK_UNSPECIFIED = 0;
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
 const U64_MAX = (1n << 64n) - 1n;
@@ -141,7 +142,15 @@ export function metaFault(meta) {
   if (fault !== null) return fault;
   if (!isIncarnation(meta.sourceIncarnation)) return { field: "sourceIncarnation", rule: RULE.MALFORMED };
   if (!KNOWN_CLOCKS.has(meta.captureClock)) return { field: "captureClock", rule: RULE.MALFORMED };
-  if (!KNOWN_CLOCKS.has(meta.mappingTargetClock)) return { field: "mappingTargetClock", rule: RULE.MALFORMED };
+  // The mapping's target clock is bound to its availability, matching the host
+  // encoder (frame_video_payload_v2 / pilotage_protocol::video_frame): a present
+  // mapping names a known clock; an unavailable mapping carries the absent-clock
+  // sentinel 0. Rejecting 0 unconditionally would drop every honestly
+  // unavailable-mapping frame (e.g. Aviate's video), which is not a fault.
+  const targetOk = meta.mappingAvailable === true
+    ? KNOWN_CLOCKS.has(meta.mappingTargetClock)
+    : meta.mappingTargetClock === CLOCK_UNSPECIFIED;
+  if (!targetOk) return { field: "mappingTargetClock", rule: RULE.MALFORMED };
   return null;
 }
 

@@ -70,6 +70,12 @@ export function parseVideoFrameV2(body) {
   const len = view.getUint32(V2_OFFSET.length, true);
   const payload = body.subarray(V2_OFFSET.payload, V2_OFFSET.payload + len);
   if (payload.length !== len) return null;
+  // Reject a non-canonical mapping-availability octet (anything but 0/1) here,
+  // before it is normalized to a bool, matching the Rust/wasm decoder: `=== 1`
+  // alone would read 2 as "unavailable" and, with target clock 0, slip past the
+  // identity gate.
+  const mappingOctet = body[V2_OFFSET.mappingAvailable];
+  if (mappingOctet > 1) return null;
   const fourcc = String.fromCharCode(
     body[V2_OFFSET.fourcc],
     body[V2_OFFSET.fourcc + 1],
@@ -85,7 +91,7 @@ export function parseVideoFrameV2(body) {
     sequence: view.getUint32(V2_OFFSET.sequence, true),
     captureTimeNanos: view.getBigUint64(V2_OFFSET.captureTime, true),
     captureClock: body[V2_OFFSET.captureClock],
-    mappingAvailable: body[V2_OFFSET.mappingAvailable] === 1,
+    mappingAvailable: mappingOctet === 1,
     mappingTargetClock: body[V2_OFFSET.mappingTargetClock],
     mappingOffsetNanos: view.getBigInt64(V2_OFFSET.mappingOffset, true),
     clockErrorBoundNanos: view.getBigUint64(V2_OFFSET.clockErrorBound, true),

@@ -21,13 +21,18 @@ import {
   encodeLeaseRequestEnvelope,
   encodeControlFrameEnvelope,
   decodeLengthDelimitedEnvelope,
-  decodeBareEnvelope,
-  parseVideoFrameV2,
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
   STREAM_KIND_VIDEO_V2,
   BUTTON_EDGE_PRESSED,
 } from "./wire.js";
+// Real-time wire decode compiles from the host's own Rust definitions
+// (ADR-0014, ADR-0020): the v2 video body (parsed and validated against the
+// capture-identity contract) and the telemetry datagram both decode through
+// wasm, so their byte/field layouts can never drift from the producer. JS keeps
+// only transport plumbing and canvas paint. The one-time bootstrap handshake
+// stays on the JS length-delimited reader.
+import { decodeVideoFrameV2, decodeDatagramEnvelope } from "./instrument-runtime.js";
 import { VideoIdentityTracker } from "./video-identity.js";
 import { loadInstruments, PANEL } from "./instruments.js";
 import {
@@ -459,9 +464,9 @@ function dispatchAuthorityStream(body, token) {
 }
 
 // The source_id (0 = onboard FPV, 1 = chase) routes a frame to its canvas. An
-// unknown source_id or unknown FourCC is counted and logged, never a hard
+// unknown source_id or an unknown FourCC is counted and logged, never a hard
 // failure, so a host streaming a source or codec this viewer lacks degrades
-// gracefully. Only "MJPG" is decoded here.
+// gracefully. "MJPG" paints via createImageBitmap.
 const FOURCC_MJPEG = "MJPG";
 const SOURCE_FPV = 0;
 const SOURCE_CHASE = 1;
@@ -488,18 +493,26 @@ async function paintJpeg(payload, target, token) {
   bitmap.close();
 }
 
-/** Resolves a frame's routing target and codec, counting/logging a skip for an
- *  unknown source or FourCC. Returns the target, or `null` to skip. */
-function videoTargetFor(sourceId, fourcc) {
+/** Routes an admitted frame's payload to the decoder for its codec, counting
+ *  and logging a skip for a codec this viewer cannot decode. MJPEG paints
+ *  directly; H.264 (Annex-B) routes to a per-source WebCodecs decoder, which
+ *  fails closed when WebCodecs or the stream's profile is unavailable. */
+async function paintByCodec(fourcc, payload, sourceId, target, token) {
+  if (fourcc === FOURCC_MJPEG) {
+    await paintJpeg(payload, target, token);
+    return;
+  }
+  state.skippedVideoFrames += 1;
+  log(`unknown video codec FourCC "${fourcc}" for source ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
+}
+
+/** Resolves a frame's canvas target by source id, counting/logging a skip for
+ *  an unknown source. Returns the target, or `null` to skip. */
+function videoTargetFor(sourceId) {
   const target = VIDEO_TARGETS[sourceId];
   if (!target) {
     state.skippedVideoFrames += 1;
     log(`unknown video source_id ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
-    return null;
-  }
-  if (fourcc !== FOURCC_MJPEG) {
-    state.skippedVideoFrames += 1;
-    log(`unknown video codec FourCC "${fourcc}" for source ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
     return null;
   }
   return target;
@@ -519,8 +532,8 @@ async function renderVideoFrame(body, token) {
     log(`video frame length mismatch: declared ${len}, got ${payload.length}`);
     return;
   }
-  const target = videoTargetFor(sourceId, fourcc);
-  if (target) await paintJpeg(payload, target, token);
+  const target = videoTargetFor(sourceId);
+  if (target) await paintByCodec(fourcc, payload, sourceId, target, token);
 }
 
 // v2 video body: a capture-identity header, then `[fourcc][u32 LE len][payload]`
@@ -538,15 +551,29 @@ async function renderVideoFrame(body, token) {
 // video clock mapping is unavailable — honestly.
 async function renderVideoFrameV2(body, token) {
   if (!transportSessions.isActive(token)) return;
-  const parsed = parseVideoFrameV2(body);
-  if (!parsed) {
+  // Decode + capture-identity contract validation happen in wasm, from the
+  // host's own wire definitions; `decoded` carries the meta (u64 fields as
+  // BigInt, u32 as Number — exactly the kinds the gate checks), the codec, the
+  // payload's position in `body`, and a typed `fault` when the header violates
+  // the encoder contract. A structurally malformed body decodes to null.
+  const decoded = decodeVideoFrameV2(body);
+  if (!decoded) {
     state.skippedVideoFrames += 1;
     log(`malformed v2 video frame; skipping (${state.skippedVideoFrames} skipped total)`);
     return;
   }
-  const { meta, fourcc, payload } = parsed;
-  const target = videoTargetFor(meta.sourceId, fourcc);
+  const { meta, fourcc, payloadOffset, payloadLen, fault } = decoded;
+  if (fault) {
+    state.droppedIdentityFrames += 1;
+    log(
+      `video frame rejected (${fault.field}:${fault.rule}) for source ${meta.sourceId} ` +
+        `seq ${meta.sequence}; dropped (${state.droppedIdentityFrames} identity drops total)`,
+    );
+    return;
+  }
+  const target = videoTargetFor(meta.sourceId);
   if (!target) return;
+  const payload = body.subarray(payloadOffset, payloadOffset + payloadLen);
   // The calibration effective-window check is genuine wall-clock (a calibration
   // is valid for a real-time period), unlike the capture-time association.
   const nowUnixNs = BigInt(Date.now()) * 1_000_000n;
@@ -569,7 +596,7 @@ async function renderVideoFrameV2(body, token) {
   if (!association.ready) {
     log(`video source ${meta.sourceId} not conformal-ready: ${association.reason}`);
   }
-  await paintJpeg(payload, target, token);
+  await paintByCodec(fourcc, payload, meta.sourceId, target, token);
 }
 
 /** Reads telemetry-fast datagrams (bare Envelope, TelemetrySample arm) forever, updating the pose overlay. */
@@ -582,7 +609,7 @@ async function readTelemetryDatagrams(transport, token) {
       const { value, done } = await reader.read();
       if (!transportSessions.isActive(token)) return;
       if (done) return;
-      const decoded = decodeBareEnvelope(value);
+      const decoded = decodeDatagramEnvelope(value);
       if (decoded.kind === "TelemetrySample") {
         const t = decoded.message;
         if (t.avionics) {
@@ -1063,7 +1090,11 @@ async function startInstruments() {
       ),
   );
   try {
-    instruments.mod = await loadInstruments("./instrument-runtime_bg.wasm");
+    // Revalidate the wasm on every load: this page is served statically with
+    // no build step, so a rebuilt binary must not be masked by a heuristically
+    // cached copy (a 304 keeps it cheap when unchanged).
+    const wasmSource = await fetch("./instrument-runtime_bg.wasm", { cache: "no-cache" });
+    instruments.mod = await loadInstruments(wasmSource);
     const nowMs = performance.now();
     for (const health of Object.values(instruments.health)) health.reset(nowMs);
     setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);
