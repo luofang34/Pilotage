@@ -228,6 +228,11 @@ function decoderOptions(overrides) {
   const live = makeFrame();
   instances[1].output(live);
   check("the live decoder's callback still paints", draws.length === before + 1);
+  instances[0].error(new Error("late error from the superseded decoder"));
+  check("a stale error cannot poison the live session", dec.failed === false);
+  const after = makeFrame();
+  instances[1].output(after);
+  check("the live decoder still paints after the stale error", draws.length === before + 2);
 }
 
 // After close() (session replacement / discontinuity path), the old decoder's
