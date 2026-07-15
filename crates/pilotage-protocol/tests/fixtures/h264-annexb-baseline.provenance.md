@@ -1,11 +1,12 @@
 # H.264 Annex-B baseline fixture
 
 A short, deterministic H.264 Annex-B elementary stream used to exercise the
-browser decoder's Annex-B classification (keyframe detection, in-band SPS/PPS
-presence, and `avc1.PPCCLL` config extraction) over real encoder output rather
-than only synthetic NAL units. It is not decoded in CI (WebCodecs needs a
-browser); `video-h264.test.mjs` runs the parser/keyframe/config path over it and
-pins its digest.
+decode path over real encoder output rather than only synthetic NAL units.
+Three layers consume it: the Rust unit tests classify it and pin its digest
+(`src/h264/tests.rs`), `wire-wasm.test.mjs` proves the wasm export classifies
+it identically, and `video-h264.browser.test.mjs` decodes it with a real
+Chromium/WebCodecs `VideoDecoder` through the viewer's platform adapter,
+asserting every frame's output, dimensions, and close.
 
 - File: `h264-annexb-baseline.h264` (1640 bytes)
 - SHA-256: `84d843b4334d9a5a2aec482d0a56f4fb60ce450a5c87b6f8414eb9d3a39fe6c7`

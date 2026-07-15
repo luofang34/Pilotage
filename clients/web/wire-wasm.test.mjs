@@ -261,10 +261,12 @@ const envelopeBytes = new Uint8Array([...varintField(1, 1), ...lenField(4, sampl
   const nal = (type, ...body) => [0, 0, 0, 1, type & 0x1f, ...body];
   const noPps = new Uint8Array([...nal(7, 0x42, 0xe0, 0x1e), ...nal(5, 1)]);
   const bad = classifyH264Chunk(noPps);
-  check("h264: keyframe without PPS is undecodable with the typed reason", bad.kind === "undecodable-keyframe" && bad.reason === "missing in-band PPS");
+  check("h264: keyframe without PPS is undecodable with the typed reason", bad.kind === "undecodable-keyframe" && bad.reason === "no in-band PPS precedes the IDR");
+  const late = classifyH264Chunk(new Uint8Array([...nal(5, 1), ...nal(7, 0x42, 0xe0, 0x1e), ...nal(8, 1)]));
+  check("h264: parameter sets after the IDR do not configure it", late.kind === "undecodable-keyframe" && late.reason === "no in-band SPS precedes the IDR");
   const delta = classifyH264Chunk(new Uint8Array(nal(1, 7)));
   check("h264: non-IDR access unit is delta", delta.kind === "delta");
-  check("h264: garbage classifies as delta (nothing to start on)", classifyH264Chunk(new Uint8Array([9, 9, 9])).kind === "delta");
+  check("h264: bytes with no NAL units are invalid, not delta", classifyH264Chunk(new Uint8Array([9, 9, 9])).kind === "invalid");
 }
 
 // A pong datagram decodes to the Pong kind.

@@ -1,41 +1,40 @@
-// H.264 (Annex-B) decode session layer for the viewer, behind the same
-// capture identity gate as MJPEG (ADR-0016 codec FourCC dispatch). The host
-// does not emit H.264 yet; this is the decode side of that path so a host
-// that adopts it renders without a viewer change, and a browser lacking
-// WebCodecs (or the stream's profile) fails visible with a typed reason
-// rather than a blank canvas.
+// H.264 (Annex-B) platform adapter for the viewer, behind the same capture
+// identity gate as MJPEG (ADR-0016 codec FourCC dispatch). A host tagging a
+// video body with the H264 FourCC renders here without a viewer change, and
+// a browser lacking WebCodecs (or the stream's profile) fails visible with a
+// typed reason rather than a blank canvas.
 //
-// The bitstream is decoded by the browser's WebCodecs VideoDecoder, and what
-// a chunk MEANS (keyframe, in-band SPS/PPS, codec string) is classified by
-// the shared Rust wasm export `classifyH264Chunk` — the same
-// pilotage_protocol::h264 definitions every consumer uses, so NAL-structure
-// rules can never drift into hand-written JS. This module keeps only the
-// platform-API session layer: decoder ownership bound to the transport
-// session that created it (`isActive`), configure/feed, and paint; the
-// caller closes and recreates a decoder on session replacement, disconnect,
-// capture discontinuity, or an in-band codec-config change, so a callback
-// from a retired session can never govern a live one.
+// Every decision lives in shared Rust (pilotage_protocol::h264, via the wasm
+// exports): what a chunk means, the decode-session state machine
+// (configure/feed/drop/fail), and per-source decoder ownership by session
+// token. This module is the thin layer the browser platform forces: it
+// executes the returned actions against WebCodecs `VideoDecoder`, reports
+// platform failures back into the session machine, and blits decoded frames —
+// there is no second parser, validator, or ownership state machine in JS.
 
-import { classifyH264Chunk } from "./instrument-runtime.js";
+import { H264DecodeSession, H264SourceOwnership } from "./instrument-runtime.js";
 
 /** FourCC the host tags an H.264 Annex-B video body with (ADR-0016). */
 export const FOURCC_H264 = "H264";
 
 /**
- * Decodes one source's H.264 Annex-B stream to a canvas via WebCodecs. Bound at
- * construction to the owning session's liveness (`options.isActive`); its output
- * callback tests that liveness, so once the caller replaces the decoder on a new
- * session the retired one can no longer paint. Fails visible: it configures only
- * once a keyframe carrying both parameter sets (SPS and PPS) arrives, drops delta
- * frames until then, reconfigures when a keyframe's codec string changes, and on
- * any unavailability
- * (no WebCodecs, unsupported profile, decoder error) marks a typed failed state,
- * leaves a marker on the canvas, and stops — never throwing into the frame path.
+ * Executes decode-session actions for one source against WebCodecs, painting
+ * to a canvas. Bound at construction to the owning session's liveness
+ * (`options.isActive`); the paint callback tests that liveness, so once the
+ * caller replaces the decoder on a new session the retired one can no longer
+ * paint. All decode decisions come from the wasm session machine, and every
+ * platform callback carries the decoder GENERATION it was configured under:
+ * the machine honors it only while that generation is current, so a callback
+ * from a replaced, reset, failed, or retired decoder can never paint over
+ * its successor or the failure marker. A platform failure (no WebCodecs,
+ * configure error, decode throw, the asynchronous error callback) is
+ * reported back with `platformFailed()` and surfaced once with a typed
+ * reason and a fail-visible canvas marker.
  *
  * `options`: `isActive` (owning session's liveness, default always-live),
- * `log` (diagnostics sink), `classify` (chunk classifier; defaults to the
- * shared wasm export), and `VideoDecoder`/`EncodedVideoChunk` (injectable
- * for tests; default to the globals).
+ * `log` (diagnostics sink), `session` (decode-session machine; defaults to a
+ * fresh wasm `H264DecodeSession`), and `VideoDecoder`/`EncodedVideoChunk`
+ * (injectable for tests; default to the globals).
  */
 export class H264CanvasDecoder {
   constructor(target, options = {}) {
@@ -47,46 +46,46 @@ export class H264CanvasDecoder {
     this.EncodedChunkCtor =
       options.EncodedVideoChunk ??
       (typeof EncodedVideoChunk !== "undefined" ? EncodedVideoChunk : undefined);
-    this.classify = options.classify ?? classifyH264Chunk;
+    this.session = options.session ?? new H264DecodeSession();
     this.decoder = null;
-    this.codecString = null;
-    this.configured = false;
-    this.failed = false;
+    this.failReported = false;
     this.timestamp = 0;
   }
 
-  /** Feeds one access unit (the codec payload). No token is captured here: the
-   *  output callback tests the session liveness bound at construction. */
+  /** Session-failure surface for callers and tests; the state itself lives
+   *  in the wasm session machine. */
+  get failed() {
+    return this.session.failed;
+  }
+
+  /** Feeds one access unit (the codec payload) through the session machine
+   *  and executes its decision. */
   decode(payload) {
-    if (this.failed) return;
+    const step = this.session.onChunk(payload);
+    if (step.action === "drop") return;
+    if (step.action === "fail") {
+      this.fail(`H.264 keyframe cannot configure a decoder: ${step.reason}`);
+      return;
+    }
     if (!this.VideoDecoderCtor || !this.EncodedChunkCtor) {
+      this.session.platformFailed();
       this.fail("WebCodecs VideoDecoder unavailable in this browser");
       return;
     }
-    const cls = this.classify(payload);
-    if (cls.kind === "undecodable-keyframe") {
-      // A keyframe that cannot configure a decoder (missing SPS/PPS, or an
-      // SPS too short to name a profile) fails visible with the typed reason.
-      this.fail(`H.264 keyframe cannot configure a decoder: ${cls.reason}`);
+    if (step.action === "configure-and-feed" && !this.configure(step.codec)) {
       return;
     }
-    const keyframe = cls.kind === "keyframe";
-    // (Re)configure when a keyframe's SPS-derived codec string changes, so an
-    // in-band configuration change is honored.
-    if (keyframe && cls.codec !== this.codecString && !this.configure(cls.codec)) {
-      return;
-    }
-    if (!this.configured) return; // Cannot start mid-GOP; wait for a keyframe.
     this.timestamp += 1;
     try {
       this.decoder.decode(
         new this.EncodedChunkCtor({
-          type: keyframe ? "key" : "delta",
+          type: step.keyframe ? "key" : "delta",
           timestamp: this.timestamp,
           data: payload,
         }),
       );
     } catch (error) {
+      this.session.platformFailed();
       this.fail(`H.264 decode failed: ${error}`);
     }
   }
@@ -95,24 +94,31 @@ export class H264CanvasDecoder {
     // Close the currently-held decoder, if any, before configuring a fresh one
     // for `codec`, so a codec change replaces it rather than leaking a stream.
     this.closeDecoder();
+    // Every callback of this platform decoder carries the generation the
+    // session machine assigned to this configuration; the machine refuses
+    // output and errors from any superseded generation.
+    const generation = this.session.generation;
     try {
       this.decoder = new this.VideoDecoderCtor({
-        output: (frame) => this.paint(frame),
-        error: (error) => this.fail(`H.264 decoder error: ${error}`),
+        output: (frame) => this.paint(frame, generation),
+        error: (error) => {
+          if (!this.session.acceptsOutputFrom(generation)) return;
+          this.session.platformFailed();
+          this.fail(`H.264 decoder error: ${error}`);
+        },
       });
       this.decoder.configure({ codec, optimizeForLatency: true });
     } catch (error) {
+      this.session.platformFailed();
       this.fail(`H.264 decoder configure failed (codec ${codec}): ${error}`);
       return false;
     }
-    this.codecString = codec;
-    this.configured = true;
     return true;
   }
 
-  paint(frame) {
+  paint(frame, generation) {
     try {
-      if (!this.isActive()) return;
+      if (!this.session.acceptsOutputFrom(generation) || !this.isActive()) return;
       const { canvas, ctx } = this.target;
       if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
         canvas.width = frame.displayWidth;
@@ -124,10 +130,12 @@ export class H264CanvasDecoder {
     }
   }
 
+  /** Surfaces one typed failure (log + fail-visible marker) and closes the
+   *  platform decoder. The session machine already refuses further feeds;
+   *  this only guards duplicate reporting. */
   fail(message) {
-    if (this.failed) return;
-    this.failed = true;
-    this.configured = false;
+    if (this.failReported) return;
+    this.failReported = true;
     this.log(`video codec H264 unavailable: ${message}`);
     this.paintFailure();
     this.closeDecoder();
@@ -153,10 +161,12 @@ export class H264CanvasDecoder {
     }
   }
 
-  /** Closes the decoder and its output stream. The caller invokes this on
-   *  session replacement, disconnect, capture discontinuity, or teardown.
-   *  Safe to call repeatedly. */
+  /** Retires the session machine and closes the platform decoder. The
+   *  caller invokes this on session replacement, disconnect, capture
+   *  discontinuity, or teardown; retirement is permanent, so any callback
+   *  the old decoder still holds is refused. Safe to call repeatedly. */
   close() {
+    this.session.retire();
     this.closeDecoder();
   }
 
@@ -169,47 +179,47 @@ export class H264CanvasDecoder {
       }
       this.decoder = null;
     }
-    this.configured = false;
   }
 }
 
 /**
- * Owns one H.264 decoder per video source, each bound to the transport session
- * that created it. This is the ownership boundary that keeps a decoder from
- * outliving its session: `for(sourceId, token)` hands back the decoder for the
- * current session; a different token (session replacement / reconnect) closes
- * the held decoder and builds one whose callbacks test the new session, so a
- * retired token can never govern a live session's frames. `reset(sourceId)`
- * drops one source's decoder (a capture discontinuity is a GOP boundary it
- * cannot span), and `closeAll()` empties the registry on session teardown.
+ * Holds one H.264 decoder object per video source and executes the ownership
+ * transitions decided by the shared Rust machine (`H264SourceOwnership`,
+ * keyed by the transport session token's numeric `generation`): `reuse`
+ * hands back the held decoder; `replace` closes the retired decoder and
+ * builds one whose callbacks test the new session, so a retired token can
+ * never govern a live session's frames. `reset(sourceId)` drops one source's
+ * decoder (a capture discontinuity is a GOP boundary it cannot span), and
+ * `closeAll()` empties the registry on session teardown.
  *
  * `makeDecoder(target, token)` builds a bound decoder; it is injected so the
- * ownership logic is testable without a real `VideoDecoder`.
+ * platform layer is testable without a real `VideoDecoder`.
  */
 export class H264DecoderRegistry {
-  constructor(makeDecoder) {
+  constructor(makeDecoder, ownership = new H264SourceOwnership()) {
     this.makeDecoder = makeDecoder;
-    this.entries = new Map();
+    this.ownership = ownership;
+    this.decoders = new Map();
   }
 
   for(sourceId, target, token) {
-    const held = this.entries.get(sourceId);
-    if (held && held.token === token) return held.decoder;
-    if (held) held.decoder.close();
+    const claim = this.ownership.claim(sourceId, token?.generation ?? 0);
+    if (claim === "reuse") return this.decoders.get(sourceId);
+    if (claim === "replace") this.decoders.get(sourceId)?.close();
     const decoder = this.makeDecoder(target, token);
-    this.entries.set(sourceId, { decoder, token });
+    this.decoders.set(sourceId, decoder);
     return decoder;
   }
 
   reset(sourceId) {
-    const held = this.entries.get(sourceId);
-    if (!held) return;
-    held.decoder.close();
-    this.entries.delete(sourceId);
+    if (!this.ownership.reset(sourceId)) return;
+    this.decoders.get(sourceId)?.close();
+    this.decoders.delete(sourceId);
   }
 
   closeAll() {
-    for (const held of this.entries.values()) held.decoder.close();
-    this.entries.clear();
+    this.ownership.clear();
+    for (const decoder of this.decoders.values()) decoder.close();
+    this.decoders.clear();
   }
 }
