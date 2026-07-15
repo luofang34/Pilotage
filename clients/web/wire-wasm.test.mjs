@@ -247,6 +247,28 @@ const envelopeBytes = new Uint8Array([...varintField(1, 1), ...lenField(4, sampl
   check("telemetry: kinematics absent (no stamp) is nullish", wasm.message.avionics.kinematics === null || wasm.message.avionics.kinematics === undefined);
 }
 
+// ---- H.264 chunk classification (shared pilotage_protocol::h264) ------------
+// The recorded encoder fixture and synthetic faults classify identically to
+// the Rust unit tests: same kinds, same codec string, same typed reasons.
+{
+  const { classifyH264Chunk } = await import("./instrument-runtime.js");
+  const fixture = new Uint8Array(
+    readFileSync(new URL("../../crates/pilotage-protocol/tests/fixtures/h264-annexb-baseline.h264", import.meta.url)),
+  );
+  const cls = classifyH264Chunk(fixture);
+  check("h264: recorded fixture is a decodable keyframe", cls.kind === "keyframe");
+  check("h264: recorded fixture names the libx264 baseline codec", cls.codec === "avc1.42c00a");
+  const nal = (type, ...body) => [0, 0, 0, 1, type & 0x1f, ...body];
+  const noPps = new Uint8Array([...nal(7, 0x42, 0xe0, 0x1e), ...nal(5, 1)]);
+  const bad = classifyH264Chunk(noPps);
+  check("h264: keyframe without PPS is undecodable with the typed reason", bad.kind === "undecodable-keyframe" && bad.reason === "no in-band PPS precedes the IDR");
+  const late = classifyH264Chunk(new Uint8Array([...nal(5, 1), ...nal(7, 0x42, 0xe0, 0x1e), ...nal(8, 1)]));
+  check("h264: parameter sets after the IDR do not configure it", late.kind === "undecodable-keyframe" && late.reason === "no in-band SPS precedes the IDR");
+  const delta = classifyH264Chunk(new Uint8Array(nal(1, 7)));
+  check("h264: non-IDR access unit is delta", delta.kind === "delta");
+  check("h264: bytes with no NAL units are invalid, not delta", classifyH264Chunk(new Uint8Array([9, 9, 9])).kind === "invalid");
+}
+
 // A pong datagram decodes to the Pong kind.
 {
   const pong = new Uint8Array([...varintField(1, 1), ...lenField(11, [])]);

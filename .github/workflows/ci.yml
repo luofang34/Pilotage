@@ -162,6 +162,15 @@ jobs:
         # contract; this loads the real wasm artifact built above.
         run: node clients/web/wire-wasm.test.mjs
 
+      - name: browser H.264 decode lifecycle + Annex-B fixture (REN)
+        run: node clients/web/video-h264.test.mjs
+
+      - name: real Chromium/WebCodecs fixture decode (VID-02)
+        # A real browser decodes the recorded Annex-B fixture through the
+        # viewer's wasm session machine and platform adapter: every frame
+        # output, at the recorded dimensions, and closed by the adapter.
+        run: node clients/web/video-h264.browser.test.mjs
+
       - name: browser snapshot-association tests (HUD-01)
         run: node clients/web/snapshot-association.test.mjs
 

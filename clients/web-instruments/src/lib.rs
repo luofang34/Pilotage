@@ -20,6 +20,7 @@
 //! attempts. Successful scene bytes remain valid until the next render attempt
 //! or reinitialization and must be consumed within that interval.
 
+mod classify_h264;
 mod decode_envelope;
 mod decode_video;
 mod exports;

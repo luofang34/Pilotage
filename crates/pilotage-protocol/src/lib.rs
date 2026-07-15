@@ -6,6 +6,7 @@
 
 mod control;
 mod convert;
+pub mod h264;
 mod ids;
 mod session;
 mod session_convert;

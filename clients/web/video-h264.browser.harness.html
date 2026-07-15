@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<!-- Browser side of the H.264 fixture-decode boundary test: decodes the
+     recorded Annex-B fixture through the REAL viewer path — wasm
+     classification/session machine + the WebCodecs platform adapter — in a
+     real Chromium, and POSTs what happened to the Node driver at /result.
+     Every check (frame count, dimensions, per-frame close, painted pixels)
+     is asserted by the driver; this page only observes and reports. -->
+<meta charset="utf-8" />
+<title>H.264 fixture decode harness</title>
+<canvas id="video"></canvas>
+<script type="module">
+  const report = (result) =>
+    fetch("/result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  try {
+    const runtime = await import("./instrument-runtime.js");
+    await runtime.default();
+    const { H264CanvasDecoder } = await import("./video-h264.js");
+    const bytes = new Uint8Array(
+      await (await fetch("/fixtures/h264-annexb-baseline.h264")).arrayBuffer(),
+    );
+
+    // Test scaffolding only: segment the recorded stream into the per-datagram
+    // access units the wire delivers (each slice NAL starts a unit; parameter
+    // sets ride with the keyframe). What each unit MEANS is still decided
+    // solely by the shared Rust classifier inside the adapter.
+    const starts = [];
+    for (let i = 0; i + 3 < bytes.length; i += 1) {
+      const three = bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1;
+      const four = bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 0 && bytes[i + 3] === 1;
+      if (!three && !four) continue;
+      const header = i + (three ? 3 : 4);
+      starts.push({ at: i, type: bytes[header] & 0x1f });
+      i = header;
+    }
+    const cuts = starts.filter((s, idx) => idx === 0 || s.type === 1).map((s) => s.at);
+    const units = cuts.map((at, idx) => bytes.subarray(at, cuts[idx + 1] ?? bytes.length));
+
+    // Observe every frame the platform decoder outputs: dimensions before the
+    // adapter sees it, and whether the adapter closed it (format becomes null
+    // on close) before returning.
+    const frames = [];
+    class ObservedVideoDecoder extends VideoDecoder {
+      constructor(init) {
+        super({
+          output: (frame) => {
+            const seen = { width: frame.displayWidth, height: frame.displayHeight };
+            init.output(frame);
+            seen.closedByAdapter = frame.format === null;
+            frames.push(seen);
+          },
+          error: init.error,
+        });
+      }
+    }
+
+    const canvas = document.getElementById("video");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const logs = [];
+    const decoder = new H264CanvasDecoder(
+      { canvas, ctx },
+      { log: (message) => logs.push(message), VideoDecoder: ObservedVideoDecoder },
+    );
+    for (const unit of units) decoder.decode(unit);
+    await decoder.decoder.flush();
+
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let painted = false;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i] || pixels[i + 1] || pixels[i + 2]) {
+        painted = true;
+        break;
+      }
+    }
+    decoder.close();
+    await report({
+      units: units.length,
+      frames,
+      canvas: { width: canvas.width, height: canvas.height },
+      painted,
+      failed: decoder.failed,
+      logs,
+    });
+  } catch (error) {
+    await report({ error: String(error && error.stack ? error.stack : error) });
+  }
+</script>
