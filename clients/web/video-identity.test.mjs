@@ -302,7 +302,8 @@ const CLOCK_VEHICLE_BOOT = 1;
 // The mapping's target clock is bound to its availability (matching the host
 // encoder): unavailable carries the absent-clock sentinel 0; present names a
 // known clock. Either mismatch is malformed, but an honestly unavailable
-// mapping is not — the exact case the pre-fix validator wrongly rejected.
+// mapping is not — a validator requiring a known clock unconditionally would
+// drop every frame from a producer with no capture-clock mapping.
 {
   check(
     "unavailable mapping with target 0 is well-formed",
