@@ -223,3 +223,53 @@ fn derived_alignment_bound_is_positive_and_conservative() {
     // Sim FPV: ~0.0117 rad; a loose upper sanity bound, not a knife-edge.
     assert!(budget.total_angular_bound_rad < 0.05);
 }
+
+// ---- CAL-01: verify() is the sole minter of a VerifiedCameraModel ----------
+
+#[test]
+fn verify_mints_a_verified_camera_model_bound_to_the_artifact() {
+    let cal = sim_fpv_calibration();
+    let model = cal
+        .verified_camera_model(SIM_FPV_CALIBRATION_HASH, NOW_IN_WINDOW_NS)
+        .expect("a genuine calibration mints a verified camera model");
+    // The minted model is bound to the verified identity and content hash, and
+    // carries the resolved geometry a conformal projector needs.
+    assert_eq!(model.calibration_id(), cal.identity.calibration_id);
+    assert_eq!(model.content_hash(), SIM_FPV_CALIBRATION_HASH);
+    let (half_x, half_y) = model.half_fov_tangents();
+    assert!(half_x > 0.0 && half_y > 0.0);
+    assert!(model.alignment_bound_rad() > 0.0);
+}
+
+#[test]
+fn a_tampered_calibration_cannot_mint() {
+    let mut cal = sim_fpv_calibration();
+    // Alter the geometry after the hash was recorded: the recomputed hash no
+    // longer matches, so verify() fails and nothing is minted.
+    cal.geometry.intrinsics.focal_x_px += 1.0;
+    assert!(
+        matches!(
+            cal.verified_camera_model(SIM_FPV_CALIBRATION_HASH, NOW_IN_WINDOW_NS),
+            Err(CalibrationError::ContentHashMismatch { .. })
+        ),
+        "a tampered calibration cannot mint a verified camera model"
+    );
+}
+
+#[test]
+fn an_out_of_window_or_revoked_calibration_cannot_mint() {
+    // Before the effective window: no mint.
+    let cal = sim_fpv_calibration();
+    assert!(matches!(
+        cal.verified_camera_model(SIM_FPV_CALIBRATION_HASH, 0),
+        Err(CalibrationError::Expired { .. })
+    ));
+    // Revoked, with the hash re-recorded so only the status blocks it: no mint.
+    let mut revoked = sim_fpv_calibration();
+    revoked.identity.status = ValidityStatus::Revoked;
+    let recorded = revoked.content_hash();
+    assert!(matches!(
+        revoked.verified_camera_model(recorded, NOW_IN_WINDOW_NS),
+        Err(CalibrationError::NotValid { .. })
+    ));
+}

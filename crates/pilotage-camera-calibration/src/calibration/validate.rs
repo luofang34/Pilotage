@@ -73,7 +73,7 @@ fn validate_intrinsics_viewport(geometry: &CameraGeometry) -> Result<(), Calibra
 }
 
 fn norm(components: &[f64]) -> f64 {
-    components.iter().map(|c| c * c).sum::<f64>().sqrt()
+    libm::sqrt(components.iter().map(|c| c * c).sum::<f64>())
 }
 
 fn validate_extrinsics_boresight(geometry: &CameraGeometry) -> Result<(), CalibrationError> {
@@ -117,11 +117,11 @@ fn validate_extrinsics_boresight(geometry: &CameraGeometry) -> Result<(), Calibr
         });
     }
     let quat_norm = norm(&e.rotation_quat_wxyz);
-    if (quat_norm - 1.0).abs() > UNIT_NORM_TOLERANCE {
+    if libm::fabs(quat_norm - 1.0) > UNIT_NORM_TOLERANCE {
         return Err(CalibrationError::NonUnitQuaternion { norm: quat_norm });
     }
     let boresight_norm = norm(&geometry.boresight.direction_camera);
-    if (boresight_norm - 1.0).abs() > UNIT_NORM_TOLERANCE {
+    if libm::fabs(boresight_norm - 1.0) > UNIT_NORM_TOLERANCE {
         return Err(CalibrationError::NonUnitBoresight {
             norm: boresight_norm,
         });

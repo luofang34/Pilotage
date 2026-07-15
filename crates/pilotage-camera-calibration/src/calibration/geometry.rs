@@ -156,8 +156,8 @@ impl CameraGeometry {
         let half_w = f64::from(self.viewport.width_px) / 2.0;
         let half_h = f64::from(self.viewport.height_px) / 2.0;
         FieldOfView {
-            horizontal_rad: 2.0 * (half_w / self.intrinsics.focal_x_px).atan(),
-            vertical_rad: 2.0 * (half_h / self.intrinsics.focal_y_px).atan(),
+            horizontal_rad: 2.0 * libm::atan(half_w / self.intrinsics.focal_x_px),
+            vertical_rad: 2.0 * libm::atan(half_h / self.intrinsics.focal_y_px),
         }
     }
 }

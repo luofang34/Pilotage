@@ -10,6 +10,7 @@ members = [
     "crates/pilotage-conformance",
     "crates/pilotage-frames",
     "crates/pilotage-calibration-id",
+    "crates/pilotage-camera-calibration",
     "crates/pilotage-geo",
     "crates/pilotage-svs-db",
     "crates/pilotage-alerts",
@@ -54,6 +55,7 @@ pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-frames = { path = "crates/pilotage-frames" }
 pilotage-calibration-id = { path = "crates/pilotage-calibration-id" }
+pilotage-camera-calibration = { path = "crates/pilotage-camera-calibration" }
 pilotage-geo = { path = "crates/pilotage-geo" }
 pilotage-svs-db = { path = "crates/pilotage-svs-db" }
 pilotage-alerts = { path = "crates/pilotage-alerts" }

@@ -6,7 +6,7 @@
 //! [`CalibrationId`] itself is the routing identity a video frame already
 //! carries (HUD-01 identity contract); the rest pins what that id resolves to.
 
-pub use crate::video::CalibrationId;
+pub use pilotage_calibration_id::CalibrationId;
 
 /// The content version of a calibration: a change in any calibrated value bumps
 /// this. Distinct from the schema version, which is fixed by the code.
