@@ -56,13 +56,13 @@
 //! # Execution-time measurement
 //! The renderer is straight-line over the scene and framebuffer with no I/O
 //! and only documented-bounded loops, so a target-independent worst-case
-//! execution time is a sum of bounded step counts — command dispatches (at
-//! most [`pilotage_instrument_scene::MAX_LAYER_COMMANDS`] times the layer
-//! count) and per-pixel coverage tests (at most framebuffer pixels times a
-//! shape's edges) — multiplied by the selected target's per-step cycle bound.
-//! A step-counting harness can wrap the coverage predicate and command
-//! dispatch without changing output; measured cycle costs and the final WCET
-//! wait for hardware selection and are out of scope here.
+//! execution time is a sum of bounded step counts. [`RenderWork`] counts
+//! them per frame — coverage samples, worst-case per-edge/segment/disc tests
+//! inside those samples, and composites — and [`timing::TargetTimingModel`]
+//! prices the counts into a WCET gated against a recorded frame deadline.
+//! Until display hardware is selected and measured over USB CDC, the shipped
+//! model is a named conservative bound; the timing artifact records the
+//! bounds, their rationale, and the derived WCET.
 
 #![no_std]
 
@@ -79,6 +79,7 @@ mod state;
 mod stroke;
 mod surface;
 mod text;
+pub mod timing;
 mod transform;
 
 pub use error::RasterError;

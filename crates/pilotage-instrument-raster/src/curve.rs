@@ -83,6 +83,8 @@ fn paint(
         let dy = (py as f32 + 0.5) - disc.cy;
         for px in region.left..region.right {
             surface.count_sample();
+            // One disc-distance test per sample, priced like an edge test.
+            surface.count_edge_tests(1);
             let dx = (px as f32 + 0.5) - disc.cx;
             let dist = libm::sqrtf(dx * dx + dy * dy);
             if covered(dist, dx, dy) {

@@ -50,6 +50,9 @@ pub(crate) struct Surface<'a> {
     /// primitive's bounded region loop). A pure function of scene and
     /// dimensions, so it doubles as the target-independent work metric.
     coverage_samples: u64,
+    /// Worst-case per-edge/segment/disc tests inside coverage evaluations —
+    /// the priced unit of the target timing model.
+    edge_tests: u64,
     /// Source-over composites actually applied.
     composites: u64,
 }
@@ -89,6 +92,7 @@ impl<'a> Surface<'a> {
             height: dims.height as i32,
             stride,
             coverage_samples: 0,
+            edge_tests: 0,
             composites: 0,
         })
     }
@@ -127,10 +131,19 @@ impl<'a> Surface<'a> {
         self.coverage_samples = self.coverage_samples.wrapping_add(1);
     }
 
-    /// The work performed so far: coverage evaluations and composites.
+    /// Counts the bounded per-edge/segment/disc tests one coverage
+    /// evaluation performs — the unit the target timing model prices, so the
+    /// count is the caller's worst case (every edge), not an early-exit path.
+    pub(crate) fn count_edge_tests(&mut self, n: u64) {
+        self.edge_tests = self.edge_tests.wrapping_add(n);
+    }
+
+    /// The work performed so far: coverage evaluations, edge tests, and
+    /// composites.
     pub(crate) fn work(&self) -> crate::report::RenderWork {
         crate::report::RenderWork {
             coverage_samples: self.coverage_samples,
+            edge_tests: self.edge_tests,
             composites: self.composites,
         }
     }

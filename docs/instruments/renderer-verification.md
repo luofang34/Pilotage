@@ -78,12 +78,20 @@ is `panel_fixtures_fit_within_work_budget` (with
 budget is a hard CI failure with instructions to investigate the scene or the
 region loops before raising the constant.
 
-The WCET for a specific target is the counted work multiplied by the selected
-target's per-operation cycle bound; measured cycle costs and the final WCET wait
-for hardware selection and are out of scope here. Frame time is one of the gated
-budgets: a target that cannot meet its frame deadline fails, and the browser
-watchdog (`PanelHealth`, simulator-only) latches a stalled panel as `LIVENESS`
-past its deadline.
+The WCET for a specific target is the counted work multiplied by the target's
+per-operation cycle bound. `RenderWork::edge_tests` counts the priced unit (a
+polygon sample walks every edge; an arc sample tests one disc), and
+`timing::TargetTimingModel` derives the WCET and gates it against a recorded
+frame deadline (`budget_wcet_meets_the_frame_deadline`). No display hardware is
+selected yet — the USB CDC scan (`scripts/detect-target.sh`) detects a
+connected target rather than asking — so the shipped model is the named
+conservative bound recorded, with its rationale and derived WCET, in
+`docs/instruments/evidence-artifacts/timing/target-timing.txt`; a drift guard
+keeps that artifact equal to the shipped constants. The recorded deadline is an
+anti-regression envelope for the conservative model, not a display-suitability
+claim; a measured target replaces the bounds and tightens the deadline to the
+display requirement. The browser watchdog (`PanelHealth`, simulator-only)
+latches a stalled panel as `LIVENESS` past its deadline.
 
 ## The conformance corpus
 
