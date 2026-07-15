@@ -1160,6 +1160,7 @@ name = "pilotage-instrument-state"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "pilotage-alerts",
  "pilotage-frames",
 ]
 

@@ -91,6 +91,69 @@ fn attitude_compares_q_and_negated_q_identically() {
 }
 
 #[test]
+fn knots_airspeeds_are_judged_against_thresholds_in_meters_per_second() {
+    let air = |src: u8, now: u64, kt: f32| Candidate {
+        source: SourceId(src),
+        epoch: SourceEpoch(1),
+        source_time_ms: now,
+        receive_time_ms: now,
+        sequence: now as u32,
+        valid: true,
+        integrity: IntegrityLevel::None,
+        accuracy: 0.0,
+        measurement: ScalarMeasure {
+            value: kt,
+            unit: ScalarUnit::Knots,
+        },
+    };
+    let p = AirframeSourcePolicy::simulator(MiscompareFault::Airspeed);
+
+    // The simulator airspeed thresholds are 2.5/5 m/s. An 8 kt split is
+    // ~4.1 m/s — inside the miscompare hysteresis band, never a sustained
+    // miscompare. Judged as raw knots it would read as 8.0 ≥ 5.0 and
+    // annunciate.
+    let mut c = SourceComparator::new(MiscompareFault::Airspeed);
+    for t in [0u64, 500, 1_000, 1_500] {
+        assert_eq!(
+            c.step(&[air(1, t, 120.0), air(2, t, 128.0)], &p, t).state,
+            ComparisonState::Agree,
+            "8 kt is ~4.1 m/s, within the hysteresis band"
+        );
+    }
+
+    // A split genuinely beyond 5 m/s (12 kt ≈ 6.2 m/s) still sustains into a
+    // miscompare — the canonical unit narrows nothing it should not.
+    let mut c2 = SourceComparator::new(MiscompareFault::Airspeed);
+    c2.step(&[air(1, 0, 120.0), air(2, 0, 132.0)], &p, 0);
+    let sustained = c2.step(&[air(1, 1_000, 120.0), air(2, 1_000, 132.0)], &p, 1_000);
+    assert_eq!(sustained.state, ComparisonState::Miscompare);
+    assert_eq!(sustained.fault, Some(MiscompareFault::Airspeed));
+}
+
+#[test]
+fn scalar_and_vector_differences_are_canonical_meters_per_second() {
+    const KT_TO_MPS: f32 = 1852.0 / 3600.0;
+    let s = |kt: f32| ScalarMeasure {
+        value: kt,
+        unit: ScalarUnit::Knots,
+    };
+    assert!((s(110.0).difference(&s(100.0)) - 10.0 * KT_TO_MPS).abs() < 1e-4);
+    let mps = |v: f32| ScalarMeasure {
+        value: v,
+        unit: ScalarUnit::MetersPerSecond,
+    };
+    assert!(
+        (mps(110.0).difference(&mps(100.0)) - 10.0).abs() < 1e-4,
+        "meters-per-second differences are already canonical"
+    );
+    let v = |x: f32| VectorMeasure {
+        value: [x, 0.0, 0.0],
+        unit: ScalarUnit::Knots,
+    };
+    assert!((v(103.0).difference(&v(100.0)) - 3.0 * KT_TO_MPS).abs() < 1e-4);
+}
+
+#[test]
 fn incompatible_altitude_datums_are_not_comparable() {
     let p = AirframeSourcePolicy::simulator(MiscompareFault::Altitude);
     let alt = |src: u8, class: AltitudeClass, origin: u32, val: f32| Candidate {

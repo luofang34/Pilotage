@@ -35,7 +35,8 @@ pub struct SourcePolicyLimits {
     /// fallbacks a reversion walks.
     pub priority: SourceList,
     /// Difference at or below which comparable samples agree (the hysteresis
-    /// exit), in the metric's natural unit.
+    /// exit), in the metric's canonical unit (radians, meters,
+    /// meters/second).
     pub agree_within: f32,
     /// Difference at or beyond which comparable samples disagree (the
     /// hysteresis entry); must sit strictly beyond `agree_within`.
@@ -90,8 +91,9 @@ impl AirframeSourcePolicy {
     }
 
     /// The simulator benchmark profile for one display function. Thresholds
-    /// are benchmark inputs (roughly: attitude 2°/5°, heading 3°/6°,
-    /// altitude 30 m/60 m, airspeed 2.5/5 m/s) with a two-source priority,
+    /// are benchmark inputs in the metric's canonical unit (roughly: attitude
+    /// 2°/5°, heading 3°/6°, altitude 30 m/60 m, airspeed 2.5/5 m/s — applied
+    /// in m/s even to sources that report knots) with a two-source priority,
     /// reversion and manual selection enabled, and integrity tiebreak on.
     /// They are profile data only and imply no aircraft approval.
     #[must_use]

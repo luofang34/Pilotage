@@ -3,7 +3,10 @@
 //!
 //! Each metric decides its own notion of "same datum" and "how far apart".
 //! None converts across datums or units silently — a cross-datum pair is
-//! not comparable, never coerced into agreement or disagreement.
+//! not comparable, never coerced into agreement or disagreement. A
+//! difference between same-unit samples is expressed in the metric's
+//! canonical unit (radians, meters, meters/second), so a policy threshold
+//! has exactly one meaning regardless of the unit a source reports in.
 
 use libm::{acosf, sqrtf};
 
@@ -146,6 +149,9 @@ impl Comparable for SourceAltitude {
     }
 }
 
+/// Exactly one international knot in meters per second (1852 m per hour).
+const KT_TO_MPS: f32 = 1852.0 / 3600.0;
+
 /// Units for an explicit scalar or vector quantity. Zero-cost tag that keeps
 /// two samples in different units from ever being compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,8 +166,25 @@ pub enum ScalarUnit {
     Unknown,
 }
 
+impl ScalarUnit {
+    /// How many canonical SI units (meters for a length, meters/second for a
+    /// speed) one of this unit is. A difference is multiplied by this so the
+    /// policy thresholds — stated in the canonical unit — apply identically
+    /// to a knots pair and a meters-per-second pair. `Unknown` has no
+    /// canonical expression and maps to infinity, so a difference involving
+    /// it can never read as agreement.
+    const fn canonical_factor(self) -> f32 {
+        match self {
+            Self::Meters | Self::MetersPerSecond => 1.0,
+            Self::Knots => KT_TO_MPS,
+            Self::Unknown => f32::INFINITY,
+        }
+    }
+}
+
 /// An explicit scalar sample (airspeed, a distance) compared by absolute
-/// difference within one declared unit.
+/// difference within one declared unit, expressed canonically (meters or
+/// meters/second).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScalarMeasure {
     /// The value in `unit`.
@@ -179,13 +202,21 @@ impl Comparable for ScalarMeasure {
         self.unit == other.unit && self.unit != ScalarUnit::Unknown
     }
 
+    /// The absolute difference in the canonical unit, so a knots pair is
+    /// judged against the same policy thresholds as a meters-per-second pair.
     fn difference(&self, other: &Self) -> f32 {
-        (self.value - other.value).abs()
+        // Unreachable for a well-formed, datum-compatible pair; an infinite
+        // difference never agrees.
+        if self.unit != other.unit || self.unit == ScalarUnit::Unknown {
+            return f32::INFINITY;
+        }
+        (self.value - other.value).abs() * self.unit.canonical_factor()
     }
 }
 
 /// An explicit three-vector sample (a velocity, a position) compared by the
-/// Euclidean norm of the difference within one declared unit.
+/// Euclidean norm of the difference within one declared unit, expressed
+/// canonically (meters or meters/second).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VectorMeasure {
     /// The vector components in `unit`.
@@ -203,10 +234,17 @@ impl Comparable for VectorMeasure {
         self.unit == other.unit && self.unit != ScalarUnit::Unknown
     }
 
+    /// The norm of the difference in the canonical unit, so a knots pair is
+    /// judged against the same policy thresholds as a meters-per-second pair.
     fn difference(&self, other: &Self) -> f32 {
+        // Unreachable for a well-formed, datum-compatible pair; an infinite
+        // difference never agrees.
+        if self.unit != other.unit || self.unit == ScalarUnit::Unknown {
+            return f32::INFINITY;
+        }
         let dx = self.value[0] - other.value[0];
         let dy = self.value[1] - other.value[1];
         let dz = self.value[2] - other.value[2];
-        sqrtf(dx * dx + dy * dy + dz * dz)
+        sqrtf(dx * dx + dy * dy + dz * dz) * self.unit.canonical_factor()
     }
 }

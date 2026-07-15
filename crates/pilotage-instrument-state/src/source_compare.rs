@@ -85,8 +85,8 @@ pub trait Comparable: Copy {
     fn datum_compatible(&self, other: &Self) -> bool;
 
     /// The magnitude of disagreement between two compatible samples, in the
-    /// metric's natural unit (radians, meters, meters/second). Always
-    /// non-negative.
+    /// metric's canonical unit (radians, meters, meters/second) regardless of
+    /// the unit the samples were reported in. Always non-negative.
     fn difference(&self, other: &Self) -> f32;
 }
 
@@ -111,8 +111,9 @@ pub struct Candidate<M> {
     pub valid: bool,
     /// Independent integrity evidence about this sample.
     pub integrity: IntegrityLevel,
-    /// Declared accuracy (1-sigma) in the metric's natural unit; widens the
-    /// agreement band under policy but never selects a source.
+    /// Declared accuracy (1-sigma) in the metric's canonical unit (radians,
+    /// meters, meters/second); widens the agreement band under policy but
+    /// never selects a source.
     pub accuracy: f32,
     /// The measured value and its datum.
     pub measurement: M,
