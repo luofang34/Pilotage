@@ -16,6 +16,7 @@ mod checks;
 mod contained;
 mod review;
 mod selector;
+mod source;
 
 use std::path::Path;
 
@@ -179,6 +180,7 @@ fn collect(graph: &Graph, policy: &Policy, repo_root: Option<&Path>) -> Vec<Find
     if let Some(root) = repo_root {
         selector::resolve(graph, policy, root, &mut findings);
         artifact::resolve(graph, policy, root, &mut findings);
+        source::resolve(graph, policy, root, &mut findings);
         review::resolve(graph, policy, root, &mut findings);
     }
     findings

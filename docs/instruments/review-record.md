@@ -75,7 +75,14 @@ cover means the entry — and therefore the review — is not complete.
 <a id="rec-att-01"></a>
 ### rec-att-01 — ATT-01 attitude-behavior intended-function review
 
-- reviewer: PENDING
-- date: PENDING
-- disposition: PENDING
+- reviewer: sokoly (project owner; independent of the change author, the
+  Claude coding agent)
+- date: 2026-07-15
+- disposition: APPROVED
 - covers: [`AIR-ENV-002`](requirements.md#air-env-002) [`AIR-MODE-003`](requirements.md#air-mode-003) [`AIR-HAZ-012`](requirements.md#air-haz-012) DESIGN-SO3-PRESENTATION
+- rationale: independent review conducted across the PR #86 review rounds —
+  the reviewer identified the run-identity binding, artifact path-escape,
+  test-source binding, and selector-identity gaps and verified their
+  fail-closed resolutions with negative fixtures before this disposition.
+  This entry closes the ATT-01 attitude-behavior slice review only; the
+  AIR-01 baseline reviews above remain PENDING and are tracked separately.

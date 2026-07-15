@@ -205,8 +205,11 @@ attr version rustc 1.95.0 (59807616e 2026-04-14)
 node REVIEW-AIR01 review
 title AIR-01 intended-function review record
 locator docs/instruments/review-record.md#rec-att-01
-attr status pending
+attr status complete
 attr independent yes
+attr reviewer sokoly
+attr date 2026-07-15
+attr disposition approved
 
 # --- Upstream: requirement -> hazard -> intended function ---
 

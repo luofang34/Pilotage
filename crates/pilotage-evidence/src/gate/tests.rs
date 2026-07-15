@@ -219,3 +219,39 @@ fn a_review_without_a_closed_disposition_is_incomplete() {
     assert!(has_open(&text, FindingCode::ReviewIncomplete));
     assert_eq!(verdict_of(&text), GateVerdict::Invalid);
 }
+
+#[test]
+fn a_selector_binds_to_a_genuine_test_definition_only() {
+    // A real #[test] fn resolves; every textual decoy is refused: the name in
+    // a line comment, in a block comment, in a string literal, a plain helper
+    // with no test attribute, and an attribute separated by other code.
+    let text = r#"
+#[test]
+fn real_test() {}
+
+#[tokio::test]
+async fn async_real_test() {}
+
+#[test_case(1)]
+fn parameterized_test() {}
+
+// fn commented_out(
+/* fn block_commented( */
+fn helper_only() {
+    let _ = "fn string_decoy(";
+}
+
+#[test]
+fn other() {}
+fn after_code_no_attr() {}
+"#;
+    assert!(super::selector::defines(text, "real_test"));
+    assert!(super::selector::defines(text, "async_real_test"));
+    assert!(super::selector::defines(text, "parameterized_test"));
+    assert!(!super::selector::defines(text, "commented_out"));
+    assert!(!super::selector::defines(text, "block_commented"));
+    assert!(!super::selector::defines(text, "string_decoy"));
+    assert!(!super::selector::defines(text, "helper_only"));
+    assert!(!super::selector::defines(text, "after_code_no_attr"));
+    assert!(!super::selector::defines(text, "absent_entirely"));
+}

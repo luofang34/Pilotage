@@ -1,6 +1,6 @@
-# Negative fixture for filesystem resolution: the selector names a test symbol
-# that the target file does not define. Structurally complete; fails only when
-# selectors are resolved against the tree.
+# Negative fixture for test-source binding: the artifact resolves and every
+# field matches, but the declared source-digest names an older blob of the
+# test source — the recorded result predates the current test and must fail.
 evidence-graph 1
 scope ATT-01
 scope-requirement AIR-ENV-002
@@ -13,17 +13,18 @@ node IMPL-STEP implementation
 
 node CASE-BAND verification-case
 locator tests/fixtures/sample_tests.rs
-attr test symbol_that_does_not_exist
+attr test band_matches_reference
 
 node RESULT-BAND verification-result
 attr command cargo test -p pilotage-instrument-raster
 attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
 attr tool-version rustc 1.95.0
-attr source-digest git-blob:c86e9a44ffd131b9bc0e610985ff447628288ed6
+attr source-digest git-blob:0000000000000000000000000000000000000000
 attr artifact tests/fixtures/att01-run-output.txt
 attr output-digest sha256:68f3f7ef347c988e36d958289927da97247fe728b73fd6d2d32adc34aa29f6c2
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
 attr outcome pass
+
 node CFG-BASE configuration-item
 node TOOL-CARGO tool
 

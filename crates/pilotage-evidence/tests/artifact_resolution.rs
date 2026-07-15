@@ -142,6 +142,20 @@ fn traversal_artifact_path_fixture_fails() {
 }
 
 #[test]
+fn stale_source_artifact_fixture_fails() {
+    // The artifact resolves and every run-record field matches, but the
+    // declared source-digest names an older blob of the test source: the
+    // recorded result predates the current test and must not keep passing.
+    let finding = resolved_placeholder("stale-source-artifact.evg");
+    assert!(
+        finding.detail.contains("source-digest")
+            && finding.detail.contains("predates the test source"),
+        "detail: {}",
+        finding.detail
+    );
+}
+
+#[test]
 fn symlink_escape_artifact_fixture_fails() {
     // The declared path is relative and clean, but it is a committed symlink
     // whose canonical target lies outside the evidence root.

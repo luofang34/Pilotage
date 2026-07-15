@@ -56,6 +56,12 @@ pub struct Policy {
     /// (the captured run's recorded result/log), not the test source. A value
     /// using the source-blob scheme is rejected as a placeholder.
     pub result_output_attr: String,
+    /// The result attribute pinning the exact test-source content
+    /// (`git-blob:<sha1>`) the recorded run executed. Under resolution the
+    /// gate hashes every case locator the result resolves from and requires
+    /// equality — a recorded result cannot keep passing after the test source
+    /// it claims to record has changed.
+    pub result_source_attr: String,
     /// The result attribute naming the committed execution-output artifact file
     /// (repo-relative). Under resolution the gate reads that file, hashes it, and
     /// requires the hash to equal [`result_output_attr`](Self::result_output_attr).
@@ -128,12 +134,14 @@ impl Policy {
                 "command".to_string(),
                 "config-digest".to_string(),
                 "tool-version".to_string(),
+                "source-digest".to_string(),
                 "artifact".to_string(),
                 "output-digest".to_string(),
                 "run-id".to_string(),
                 "outcome".to_string(),
             ],
             result_output_attr: "output-digest".to_string(),
+            result_source_attr: "source-digest".to_string(),
             result_artifact_attr: "artifact".to_string(),
             result_artifact_fields: vec![
                 "command".to_string(),

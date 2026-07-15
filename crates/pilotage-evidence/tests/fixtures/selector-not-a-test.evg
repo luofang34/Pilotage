@@ -1,6 +1,6 @@
-# Negative fixture for filesystem resolution: the selector names a test symbol
-# that the target file does not define. Structurally complete; fails only when
-# selectors are resolved against the tree.
+# Negative fixture for selector resolution: the named symbol exists textually
+# in the file but is a plain helper with no #[test] attribute, so the selector
+# must not resolve — the harness would never run it.
 evidence-graph 1
 scope ATT-01
 scope-requirement AIR-ENV-002
@@ -13,7 +13,7 @@ node IMPL-STEP implementation
 
 node CASE-BAND verification-case
 locator tests/fixtures/sample_tests.rs
-attr test symbol_that_does_not_exist
+attr test helper_not_a_test
 
 node RESULT-BAND verification-result
 attr command cargo test -p pilotage-instrument-raster
@@ -24,6 +24,7 @@ attr artifact tests/fixtures/att01-run-output.txt
 attr output-digest sha256:68f3f7ef347c988e36d958289927da97247fe728b73fd6d2d32adc34aa29f6c2
 attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
 attr outcome pass
+
 node CFG-BASE configuration-item
 node TOOL-CARGO tool
 

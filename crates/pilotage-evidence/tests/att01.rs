@@ -60,54 +60,42 @@ fn id(raw: &str) -> NodeId {
 }
 
 #[test]
-fn the_real_att01_slice_is_structurally_traced_but_review_pending() {
+fn the_real_att01_slice_is_traced_and_its_recorded_review_is_valid() {
     let graph = real_graph();
-    let pending = report(&graph);
+    let current = report(&graph);
     assert!(
-        pending.node_count > 20,
+        current.node_count > 20,
         "the slice is a real graph, not a stub"
     );
-    // The trace is structurally complete, but the review is still pending, so the
-    // honest verdict is not VALID and the ONLY open finding is the incomplete
-    // review — the gate must not green-wash a pending review.
-    let open: Vec<FindingCode> = pending
-        .findings
-        .iter()
-        .filter(|f| !f.excepted)
-        .map(|f| f.code)
-        .collect();
+    // The trace is structurally complete and the independent review is
+    // recorded (rec-att-01), so the slice is VALID with no open findings.
     assert_eq!(
-        open,
-        vec![FindingCode::ReviewIncomplete],
-        "unexpected open findings: {:?}",
-        pending.findings
+        current.verdict,
+        GateVerdict::Valid,
+        "open findings: {:?}",
+        current.findings
     );
-    assert_ne!(pending.verdict, GateVerdict::Valid);
 
     let raw = read(&repo_root().join("docs/instruments/evidence-graph.evg"));
 
-    // Flipping the status string alone is NOT enough: without a substantive
-    // record (reviewer, date, closed disposition) the review is still incomplete.
-    let flipped = parse_graph(&raw.replace("attr status pending", "attr status complete"))
-        .expect("edited graph parses");
-    assert!(has_open(&report(&flipped), FindingCode::ReviewIncomplete));
-    assert_ne!(report(&flipped).verdict, GateVerdict::Valid);
-
-    // A completed status backed by a real record entry is what makes it VALID
-    // (everything else already traces, resolves, and carries result provenance).
-    let completed = parse_graph(&raw.replace(
-        "attr status pending\nattr independent yes",
-        "attr status complete\nattr independent yes\nattr reviewer J. Doe\n\
-         attr date 2026-07-14\nattr disposition APPROVED",
+    // Green-washing guard: a completed status with the substantive record
+    // fields stripped is incomplete again — the status string alone is never
+    // enough.
+    let stripped = parse_graph(&raw.replace(
+        "attr status complete\nattr independent yes\nattr reviewer sokoly\n\
+         attr date 2026-07-15\nattr disposition approved",
+        "attr status complete\nattr independent yes",
     ))
     .expect("edited graph parses");
-    let completed_report = report(&completed);
-    assert_eq!(
-        completed_report.verdict,
-        GateVerdict::Valid,
-        "open findings once reviewed: {:?}",
-        completed_report.findings
-    );
+    assert!(has_open(&report(&stripped), FindingCode::ReviewIncomplete));
+    assert_ne!(report(&stripped).verdict, GateVerdict::Valid);
+
+    // And a review whose status regresses to pending is never valid, however
+    // complete its recorded fields remain.
+    let pending = parse_graph(&raw.replace("attr status complete", "attr status pending"))
+        .expect("edited graph parses");
+    assert!(has_open(&report(&pending), FindingCode::ReviewIncomplete));
+    assert_ne!(report(&pending).verdict, GateVerdict::Valid);
 }
 
 #[test]
@@ -251,9 +239,9 @@ fn unbacked_review_fixture_fails() {
 #[test]
 fn the_att01_artifacts_parse_and_match_the_results() {
     // Happy path: every ATT-01 result's committed artifact resolves, hashes to
-    // its output-digest, and its parsed command/config/tool/outcome match the
-    // result node — so no result is a placeholder. The only open finding remains
-    // the honestly pending review.
+    // its output-digest, its parsed command/config/tool/run-id/outcome match
+    // the result node, and every source-digest matches the current test
+    // sources — so the fully resolved slice is VALID with no open findings.
     let resolved = validate_resolving(&real_graph(), &Policy::engineering_trace(), &repo_root());
     assert!(
         !has_open(&resolved, FindingCode::PlaceholderResult),
@@ -266,12 +254,8 @@ fn the_att01_artifacts_parse_and_match_the_results() {
         .filter(|f| !f.excepted)
         .map(|f| f.code)
         .collect();
-    assert_eq!(
-        open,
-        vec![FindingCode::ReviewIncomplete],
-        "findings: {:?}",
-        resolved.findings
-    );
+    assert_eq!(open, vec![], "findings: {:?}", resolved.findings);
+    assert_eq!(resolved.verdict, GateVerdict::Valid);
 }
 
 #[test]
@@ -305,21 +289,17 @@ fn a_review_naming_a_complete_entry_resolves() {
 }
 
 #[test]
-fn a_review_marked_complete_but_whose_record_entry_is_pending_fails_resolution() {
-    // Fully populate the review node as complete, but the specific record entry it
-    // names in docs/instruments/review-record.md (#rec-att-01) is still PENDING,
-    // so entry resolution rejects the claim — a status string cannot outrun its
-    // record entry.
+fn a_review_status_cannot_outrun_its_named_record_entry() {
+    // The real review node stays fully populated, but its locator is pointed
+    // at an anchor the record file does not contain: entry resolution must
+    // reject the claim — a completed status is only as good as the specific,
+    // resolvable record entry it names.
     let raw = read(&repo_root().join("docs/instruments/evidence-graph.evg"));
-    let text = raw.replace(
-        "attr status pending\nattr independent yes",
-        "attr status complete\nattr independent yes\nattr reviewer J. Doe\n\
-         attr date 2026-07-14\nattr disposition APPROVED",
-    );
+    let text = raw.replace("#rec-att-01", "#rec-does-not-exist");
     let graph = parse_graph(&text).expect("edited graph parses");
-    // Structurally the node now looks complete...
+    // Structurally the node still looks complete...
     assert_eq!(report(&graph).verdict, GateVerdict::Valid);
-    // ...but the record file is still PENDING, so resolution fails closed.
+    // ...but the named entry does not resolve, so resolution fails closed.
     let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &repo_root());
     assert!(
         has_open(&resolved, FindingCode::ReviewIncomplete),
@@ -387,5 +367,21 @@ fn a_selector_naming_a_missing_symbol_fails_resolution() {
     assert_eq!(report(&graph).verdict, GateVerdict::Valid);
     let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
     assert!(has_open(&resolved, FindingCode::UnresolvedSelector));
+    assert_eq!(resolved.verdict, GateVerdict::Invalid);
+}
+
+#[test]
+fn a_selector_naming_a_non_test_function_fails_resolution() {
+    // The symbol exists textually in the file, but it is a plain helper with
+    // no #[test] attribute: the harness would never run it, so a result
+    // "recorded" for it is not evidence and the selector must not resolve.
+    let graph = fixture("selector-not-a-test.evg");
+    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
+    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
+    assert!(
+        has_open(&resolved, FindingCode::UnresolvedSelector),
+        "findings: {:?}",
+        resolved.findings
+    );
     assert_eq!(resolved.verdict, GateVerdict::Invalid);
 }
