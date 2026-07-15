@@ -43,12 +43,12 @@ pub(crate) struct Interpolated {
 }
 
 /// The timing facts of one interpolation: how far the capture time sits outside
-/// the bracket (extrapolation), how badly attitude and position are co-timed
+/// the bracket (extrapolation), how badly each sample's components are co-timed
 /// (skew), and the bracket span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Timing {
-    /// Attitude/position co-timing skew, the worst of the two samples,
-    /// nanoseconds.
+    /// Component co-timing skew — the widest epoch spread across a sample's
+    /// pose and kinematic epochs, the worst of the two samples, nanoseconds.
     pub skew_ns: u64,
     /// How far the capture time falls outside `[older, newer]`, nanoseconds; `0`
     /// when the capture time is bracketed (a true interpolation).
@@ -101,10 +101,24 @@ fn lerp3_f32(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     ]
 }
 
+/// The co-timing spread of one sample: the widest gap among its component
+/// epochs — the pose's acquisition epochs plus each kinematic value's tagged
+/// epoch and acquisition epoch. A velocity or body rate timed away from the
+/// pose widens the spread exactly like an attitude/position skew, so it is
+/// charged to the policy skew limit and the latency budget term rather than
+/// silently bridged.
 fn skew_of(sample: &KinematicSample) -> u64 {
-    let att = sample.attitude.stamp.acquired_at.nanos;
-    let pos = sample.position.stamp.acquired_at.nanos;
-    att.abs_diff(pos)
+    let epochs = [
+        sample.attitude.stamp.acquired_at.nanos,
+        sample.position.stamp.acquired_at.nanos,
+        sample.velocity.epoch.nanos,
+        sample.velocity.meta.acquired_at.nanos,
+        sample.body_rate.epoch.nanos,
+        sample.body_rate.meta.acquired_at.nanos,
+    ];
+    let hi = epochs.into_iter().max().unwrap_or(0);
+    let lo = epochs.into_iter().min().unwrap_or(0);
+    hi.saturating_sub(lo)
 }
 
 /// Interpolates the coherent bracket at `capture_ns`. The caller has already

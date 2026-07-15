@@ -38,8 +38,9 @@ pub enum ConformalReason {
     /// the projection view references, so the projection would run through the
     /// wrong camera model.
     CalibrationMismatch,
-    /// The capture time is not on the same clock domain and time scale as the
-    /// aircraft state, so it cannot be aligned to it.
+    /// The capture time — or a kinematic value's epoch — is not on the same
+    /// clock domain and time scale as the aircraft state, so it cannot be
+    /// aligned to it.
     ClockIncoherent,
     /// A sample's attitude and position are not one declared coherent snapshot,
     /// so the pose is not a single trustworthy fix.
@@ -56,7 +57,8 @@ pub enum ConformalReason {
     /// A bracket endpoint's velocity or body rate does not share the pose's
     /// coherent snapshot, so the kinematics are not one trustworthy fix.
     KinematicProvenance,
-    /// Attitude and position are co-timed worse than the policy allows.
+    /// A sample's components (pose, velocity, body rate) are co-timed worse
+    /// than the policy allows.
     ExcessiveSkew,
     /// The capture time falls further outside the bracket than the policy allows.
     ExcessiveExtrapolation,

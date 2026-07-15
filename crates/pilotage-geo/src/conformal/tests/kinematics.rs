@@ -1,7 +1,9 @@
 //! The kinematic-input validity gate: regressions for the invalid-input
 //! blockers. A non-unit attitude, a mis-framed velocity or body rate, a
-//! mis-provenanced kinematic input, an untrusted integrity, and a wildly
-//! inaccurate velocity must each fail closed rather than draw a conformal cue.
+//! mis-provenanced kinematic input, an untrusted integrity (pose, velocity, or
+//! body rate), a kinematic epoch off the pose clock or timed away from the
+//! pose, and a wildly inaccurate velocity must each fail closed rather than
+//! draw a conformal cue.
 //!
 //! Shares the parent module's fixtures via `use super::*`.
 
@@ -9,6 +11,7 @@ use super::*;
 
 use pilotage_frames::FrameId;
 
+use crate::availability::AvailabilityReason;
 use crate::identity::IntegrityLevel;
 use crate::{ConformalReason, ConformalState};
 
@@ -108,6 +111,157 @@ fn kinematics_from_a_different_snapshot_are_non_conformal() {
         ConformalState::NonConformal(ConformalReason::KinematicProvenance)
     );
     assert!(fix.cues.is_none());
+}
+
+#[test]
+fn an_unknown_integrity_velocity_alone_is_unavailable_never_drawable() {
+    // The velocity steers the flight-path marker; a velocity the producer cannot
+    // vouch for must fail the derived availability even when the pose is fully
+    // trusted — nothing else about the sample is perturbed.
+    let mut newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2);
+    newer.velocity.meta.integrity = IntegrityLevel::Unknown;
+    let b = Bracket {
+        older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
+        newer,
+    };
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::Unavailable(ConformalReason::Availability(AvailabilityReason::Integrity))
+    );
+    assert!(fix.cues.is_none() && fix.error.is_none());
+}
+
+#[test]
+fn an_unknown_integrity_body_rate_alone_is_unavailable_never_drawable() {
+    // The body rate scales the timing sensitivity of the whole error budget; a
+    // rate the producer cannot vouch for must fail the derived availability.
+    let mut newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2);
+    newer.body_rate.meta.integrity = IntegrityLevel::Unknown;
+    let b = Bracket {
+        older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
+        newer,
+    };
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::Unavailable(ConformalReason::Availability(AvailabilityReason::Integrity))
+    );
+    assert!(fix.cues.is_none() && fix.error.is_none());
+}
+
+#[test]
+fn a_monitored_velocity_degrades_the_scene_to_limited() {
+    // A monitored (reduced-integrity) velocity degrades rather than fails: the
+    // cues stay drawable but must carry the reduced-confidence mark.
+    let mut b = steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]);
+    b.newer.velocity.meta.integrity = IntegrityLevel::Monitored;
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::Limited(ConformalReason::Availability(AvailabilityReason::Integrity))
+    );
+    assert!(fix.cues.expect("a limited fix draws cues").limited);
+}
+
+#[test]
+fn a_velocity_timed_seconds_from_the_pose_is_non_conformal() {
+    // A velocity tagged nine seconds away from the pose epoch is not the state
+    // at the pose's instant, however coherent its snapshot identity is — the
+    // spread is charged as co-timing skew and exceeds the policy limit.
+    let mut newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2);
+    newer.velocity.epoch = epoch(9_000_002_000);
+    newer.velocity.meta.acquired_at = epoch(9_000_002_000);
+    let b = Bracket {
+        older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
+        newer,
+    };
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::NonConformal(ConformalReason::ExcessiveSkew)
+    );
+    assert!(fix.cues.is_none());
+}
+
+#[test]
+fn a_velocity_value_epoch_alone_timed_from_the_pose_is_non_conformal() {
+    // The value epoch (the instant the velocity is valid at) participates in the
+    // skew on its own, even when the acquisition stamp stays co-timed.
+    let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
+    older.velocity.epoch = epoch(9_000_001_000);
+    let b = Bracket {
+        older,
+        newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
+    };
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::NonConformal(ConformalReason::ExcessiveSkew)
+    );
+    assert!(fix.cues.is_none());
+}
+
+#[test]
+fn a_body_rate_acquired_seconds_from_the_pose_is_non_conformal() {
+    // The body rate's acquisition epoch participates in the skew exactly like
+    // the velocity's.
+    let mut newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2);
+    newer.body_rate.meta.acquired_at = epoch(9_000_002_000);
+    let b = Bracket {
+        older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
+        newer,
+    };
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::NonConformal(ConformalReason::ExcessiveSkew)
+    );
+    assert!(fix.cues.is_none());
+}
+
+#[test]
+fn a_kinematic_value_epoch_on_a_different_clock_is_non_conformal() {
+    // A velocity value epoch on a different clock cannot be compared to the pose
+    // epoch at all, so it is refused as clock-incoherent rather than having its
+    // nanoseconds read as if they were on the pose clock.
+    let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
+    older.velocity.epoch.clock = ClockDomain::Gnss;
+    let b = Bracket {
+        older,
+        newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
+    };
+    let fix = run(&b, capture(1_500), &generous());
+    assert_eq!(
+        fix.state,
+        ConformalState::NonConformal(ConformalReason::ClockIncoherent)
+    );
+    assert!(fix.cues.is_none());
+}
+
+#[test]
+fn a_small_kinematic_skew_is_charged_to_the_budget_not_refused() {
+    // A 5 ms velocity skew is within the 10 ms policy limit: the fix stays
+    // drawable, and the skew lands in the latency term of the error budget
+    // rather than being silently bridged.
+    let nominal = run(
+        &steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]),
+        capture(1_500),
+        &generous(),
+    );
+    let mut skewed = steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]);
+    skewed.newer.velocity.epoch = epoch(5_002_000);
+    skewed.newer.velocity.meta.acquired_at = epoch(5_002_000);
+    let fix = run(&skewed, capture(1_500), &generous());
+    assert!(fix.state.draws_cues(), "a within-limit skew stays drawable");
+    let (e0, e1) = (
+        nominal.error.expect("ran"),
+        fix.error.expect("interpolation ran"),
+    );
+    assert!(
+        e1.latency_rad > e0.latency_rad && e1.total_rad > e0.total_rad,
+        "the kinematic skew is charged into the latency term"
+    );
 }
 
 #[test]

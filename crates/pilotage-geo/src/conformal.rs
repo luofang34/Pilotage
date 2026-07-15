@@ -35,7 +35,10 @@
 
 use pilotage_frames::{AngularVelocity, Epoch, FrameId, ROTATION_NORM_TOLERANCE, Velocity};
 
-use crate::availability::{AvailabilityProfile, ExternalHealth, SvsAvailability, derive_inputs};
+use crate::availability::{
+    AvailabilityProfile, ExternalHealth, SvsAvailability, derive_inputs, health_from_integrity,
+    worse,
+};
 use crate::identity::{
     CoherentSnapshot, SourceIncarnation, SourceStamp, StatedAttitude, StatedPosition,
 };
@@ -77,7 +80,9 @@ pub struct VelocityQuality {
 /// snapshot) plus the velocity and body rate — each frame-, epoch-, and
 /// snapshot-tagged, not a bare array. The velocity is NED (the flight-path-marker
 /// reference) and the body rate is body-frame; [`assess_conformal`] enforces both
-/// frames and that the velocity and rate share the pose's coherent snapshot.
+/// frames, that the velocity and rate share the pose's coherent snapshot and
+/// clock, folds their integrity into the derived availability, and charges their
+/// epoch skew against the policy co-timing limit and the error budget.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KinematicSample {
     /// Body → NED attitude, with its identity stamp and angular accuracy.
@@ -259,8 +264,9 @@ pub fn assess_conformal(
         return ConformalFix::refused(ConformalState::NonConformal(reason), identity);
     }
     // Both endpoint attitudes must be unit rotations, and the velocity/rate must be
-    // in their expected frames and share the pose's coherent snapshot — a zero
-    // quaternion or a mis-framed/mis-provenanced kinematic input never registers.
+    // in their expected frames, share the pose's coherent snapshot, and carry value
+    // epochs on the pose clock — a zero quaternion or a mis-framed, mis-provenanced,
+    // or clock-incoherent kinematic input never registers.
     if let Some(reason) = kinematic_fault(bracket) {
         return ConformalFix::refused(ConformalState::NonConformal(reason), identity);
     }
@@ -305,7 +311,11 @@ pub fn assess_conformal(
 /// Derives the synthetic-vision availability from the ACTUAL bracket samples —
 /// each endpoint's integrity and accuracy against the profile — taking the worse
 /// of the two. An untrusted or low-accuracy sample yields Unavailable or Degraded
-/// no matter what a caller claims.
+/// no matter what a caller claims. The velocity and body rate steer the
+/// flight-path marker exactly as the pose steers the horizon, so their stated
+/// integrity participates too: it is folded into the navigation-integrity input,
+/// and an untrusted or unknown kinematic reading fails the scene rather than
+/// silently steering a registered cue.
 ///
 /// Freshness is judged against the later of the capture time and the newer
 /// endpoint, so that a bracketed capture time (which precedes the newer sample)
@@ -325,13 +335,21 @@ fn derive_availability(
         newer_at
     };
     let assess = |s: &KinematicSample| {
-        SvsAvailability::assess(&derive_inputs(
+        let mut inputs = derive_inputs(
             &s.position,
             &s.attitude,
             &availability.external,
             reference,
             &availability.profile,
-        ))
+        );
+        inputs.integrity = worse(
+            inputs.integrity,
+            worse(
+                health_from_integrity(s.velocity.meta.integrity),
+                health_from_integrity(s.body_rate.meta.integrity),
+            ),
+        );
+        SvsAvailability::assess(&inputs)
     };
     worst_availability(assess(&bracket.older), assess(&bracket.newer))
 }
@@ -351,8 +369,9 @@ fn worst_availability(a: SvsAvailability, b: SvsAvailability) -> SvsAvailability
 }
 
 /// The kinematic-validity fault of a bracket: a non-unit attitude quaternion at
-/// either endpoint, a velocity or body rate in the wrong frame, or a velocity/rate
-/// whose provenance is not the pose's coherent snapshot. `None` when both samples
+/// either endpoint, a velocity or body rate in the wrong frame, a velocity/rate
+/// whose provenance is not the pose's coherent snapshot, or a velocity/rate value
+/// epoch on a different clock or scale than the pose. `None` when both samples
 /// are well-formed.
 fn kinematic_fault(bracket: &Bracket) -> Option<ConformalReason> {
     for s in [&bracket.older, &bracket.newer] {
@@ -370,6 +389,16 @@ fn kinematic_fault(bracket: &Bracket) -> Option<ConformalReason> {
             || !s.attitude.stamp.coherent_with(&s.body_rate.meta)
         {
             return Some(ConformalReason::KinematicProvenance);
+        }
+        // Coherence binds the *acquisition* epochs' clock/scale; the value epochs
+        // (the instant each kinematic value is valid at) must be on the pose clock
+        // too, or the co-timing skew charged by the interpolation would compare
+        // nanoseconds from incomparable clocks.
+        let pose = s.attitude.stamp.acquired_at;
+        for value_epoch in [s.velocity.epoch, s.body_rate.epoch] {
+            if value_epoch.clock != pose.clock || value_epoch.scale != pose.scale {
+                return Some(ConformalReason::ClockIncoherent);
+            }
         }
     }
     None

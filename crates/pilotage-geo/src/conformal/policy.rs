@@ -91,8 +91,8 @@ impl ConformalPolicy {
     ///
     /// - beyond ~50 ms of extrapolation past the newest snapshot a maneuvering
     ///   aircraft's registration is no longer trustworthy;
-    /// - attitude and position must be co-timed to within ~10 ms to share one
-    ///   conformal fix;
+    /// - a sample's components (attitude, position, velocity, body rate) must be
+    ///   co-timed to within ~10 ms to share one conformal fix;
     /// - above ~1 rad/s (~57°/s) body rate the smear over any residual timing
     ///   error swamps the budget, so conformal cues are suppressed;
     /// - sub-degree (~0.57°) total registration error is drawn as fully
@@ -182,8 +182,8 @@ impl ConformalPolicy {
     pub const fn max_extrapolation_ns(&self) -> u64 {
         self.max_extrapolation_ns
     }
-    /// Maximum attitude/position co-timing skew for one conformal fix,
-    /// nanoseconds.
+    /// Maximum co-timing skew among one sample's component epochs (pose,
+    /// velocity, body rate) for one conformal fix, nanoseconds.
     #[must_use]
     pub const fn max_skew_ns(&self) -> u64 {
         self.max_skew_ns
