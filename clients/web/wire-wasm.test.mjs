@@ -1,10 +1,10 @@
 // Conformance between the wasm wire decode (compiled from the host's Rust
-// definitions) and the hand-written JS reference decoders it replaces in
-// production. The wasm exports are the drift-proof source of truth; these
-// tests pin that they agree with the JS reference on the field layout, the
-// numeric kinds (u64 -> BigInt, u32 -> Number), and the capture-identity
-// contract — including the unavailable-mapping case that the pre-fix validator
-// wrongly rejected.
+// definitions) and the hand-written JS reference decoders retained as an
+// independent defense. The wasm exports are the drift-proof source of truth;
+// these tests pin that the two agree on the field layout, the numeric kinds
+// (u64 -> BigInt, u32 -> Number), and the capture-identity contract —
+// including the honestly-unavailable mapping (target clock 0), which is
+// well-formed and must never be rejected as malformed.
 
 import { readFileSync } from "node:fs";
 import { parseVideoFrameV2, decodeBareEnvelope } from "./wire.js";
@@ -113,8 +113,9 @@ const baseFrame = {
   check("v2 bounded: u32 fields are Number", typeof wasm.meta.sourceEpoch === "number");
 }
 
-// The unavailable-mapping case (target clock 0): the fix accepts it — this is
-// the exact aviate frame that the pre-fix validator dropped as malformed.
+// The unavailable-mapping case (target clock 0) is well-formed: a producer
+// with no capture-clock mapping (aviate publishes exactly this shape) must
+// decode cleanly, never as malformed.
 {
   const body = encodeV2Body({
     ...baseFrame,
