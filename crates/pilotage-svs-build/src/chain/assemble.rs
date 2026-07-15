@@ -10,11 +10,11 @@
 use crate::chain::{Metrics, PipelineOutput, STAGE_INGEST, STAGE_SERIALIZE};
 use crate::config::BuildConfig;
 use crate::provenance::{
-    BuildProvenance, ParamSnapshot, RecordDisposition, RecordLineage, SourceSummary, StageRecord,
-    TOOL_ID, TOOL_VERSION, TileLineage,
+    BuildProvenance, Disposition, ParamSnapshot, RecordDisposition, RecordLineage, SourceSummary,
+    StageRecord, TOOL_ID, TOOL_VERSION, TileLineage,
 };
 use crate::report::{BuildReports, CoverageReport, HoleCheck, QualityReport, SeamCheck};
-use crate::source::SourceDataset;
+use crate::source::{SourceDataset, SourceRecordRef, source_record_refs};
 
 /// Sums the scalar metrics and collects the voids across pipelines.
 fn merge_metrics(outputs: &[&PipelineOutput]) -> Metrics {
@@ -113,7 +113,7 @@ pub(crate) fn build_provenance(
         params: param_snapshot(config),
         sources: source_summaries(source),
         stages: stage_records(source, outputs),
-        dispositions: dispositions(outputs),
+        dispositions: complete_dispositions(source, outputs),
         tiles: tile_lineages(outputs),
         records: record_lineages(outputs),
         package_content_hash,
@@ -248,6 +248,37 @@ fn dispositions(outputs: &[&PipelineOutput]) -> Vec<RecordDisposition> {
     let mut all: Vec<RecordDisposition> = Vec::new();
     for output in outputs {
         all.extend(output.dispositions.iter().copied());
+    }
+    all.sort_by_key(|d| d.source);
+    all
+}
+
+/// The change report with every input record's fate made explicit: a record
+/// the pipelines neither traced into output lineage nor recorded a
+/// disposition for (every derived node void, or every candidate lost
+/// deterministic resolution) is given a [`Disposition::NoContribution`]
+/// entry, so a consumed source can never look like a phantom summary.
+fn complete_dispositions(
+    source: &SourceDataset,
+    outputs: &[&PipelineOutput],
+) -> Vec<RecordDisposition> {
+    let mut all = dispositions(outputs);
+    let mut fated: std::collections::BTreeSet<SourceRecordRef> =
+        all.iter().map(|d| d.source).collect();
+    for output in outputs {
+        for record in &output.records {
+            fated.extend(record.sources.iter().copied());
+        }
+    }
+    for source_ref in source_record_refs(source) {
+        if fated.insert(source_ref) {
+            all.push(RecordDisposition {
+                source: source_ref,
+                disposition: Disposition::NoContribution {
+                    reason: "no surviving output",
+                },
+            });
+        }
     }
     all.sort_by_key(|d| d.source);
     all

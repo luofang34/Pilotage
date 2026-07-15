@@ -40,6 +40,23 @@ pub enum BuildError {
         /// What declaration was missing.
         reason: &'static str,
     },
+    /// The dataset declares the same source id twice, so which metadata governs
+    /// that source is ambiguous; the build refuses rather than picking one.
+    #[error("dataset declares source {source_id} metadata more than once")]
+    DuplicateSourceIdentity {
+        /// The duplicated source.
+        source_id: u32,
+    },
+    /// The freshly built artifact failed its own end-to-end verification
+    /// (package, bundle, provenance, and source digests), so it was withheld
+    /// rather than emitted: a build must never return an artifact the full
+    /// verifier would reject.
+    #[error("built artifact failed end-to-end self-verification")]
+    ArtifactSelfVerification {
+        /// The verification failure.
+        #[source]
+        source: crate::error::VerifyError,
+    },
     /// The requested datum conversion is not one this build implements. A
     /// conversion it does not know is refused rather than approximated.
     #[error("unsupported {axis} datum conversion from code {from} to code {to}")]
@@ -228,6 +245,13 @@ pub enum VerifyError {
     /// identity is ambiguous.
     #[error("source summary {source_id} appears more than once in the signed provenance")]
     DuplicateSourceSummary {
+        /// The duplicated source.
+        source_id: u32,
+    },
+    /// The dataset declares the same source id twice, so which metadata (datum,
+    /// license, version) governs that source is ambiguous.
+    #[error("dataset declares source {source_id} metadata more than once")]
+    DuplicateSourceMeta {
         /// The duplicated source.
         source_id: u32,
     },

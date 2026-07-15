@@ -10,10 +10,11 @@
 //! dataset source record, and that no two dataset records share a reference, is
 //! proven against the dataset in [`super::verify_source_digests`].)
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::chain::BuildArtifact;
 use crate::error::VerifyError;
+use crate::source::{SourceDataset, SourceRecordRef, source_record_refs};
 
 /// Rejects a duplicate source id in the signed summary sequence.
 ///
@@ -32,7 +33,33 @@ pub(crate) fn reject_duplicate_summaries(artifact: &BuildArtifact) -> Result<(),
     Ok(())
 }
 
+/// Rejects a dataset that declares the same source id twice: which metadata
+/// (datum, license, version) governs that source would be ambiguous, and the
+/// digest check would silently bind to whichever entry came first.
+///
+/// # Errors
+///
+/// [`VerifyError::DuplicateSourceMeta`] if a source id appears twice.
+pub(crate) fn reject_duplicate_meta(
+    source: &crate::source::SourceDataset,
+) -> Result<(), VerifyError> {
+    let mut seen: BTreeSet<u32> = BTreeSet::new();
+    for meta in &source.meta {
+        if !seen.insert(meta.id.0) {
+            return Err(VerifyError::DuplicateSourceMeta {
+                source_id: meta.id.0,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Validates the summary sequence and every lineage source reference.
+///
+/// A summary counts as referenced when output lineage draws from it **or**
+/// when a recorded disposition names one of its records — a source whose
+/// every record was rejected, voided, or clipped is still traceably
+/// consumed. A summary referenced by neither is a phantom source and fails.
 ///
 /// # Errors
 ///
@@ -50,6 +77,9 @@ pub(crate) fn check_lineage_sources(artifact: &BuildArtifact) -> Result<(), Veri
     let mut referenced: BTreeSet<u32> = BTreeSet::new();
     for record in &artifact.provenance.records {
         check_record_sources(record, &summaries, &mut referenced)?;
+    }
+    for disposition in &artifact.provenance.dispositions {
+        referenced.insert(disposition.source.source.0);
     }
     for summary in &artifact.provenance.sources {
         if !referenced.contains(&summary.id.0) {
@@ -87,6 +117,91 @@ fn check_record_sources(
             });
         }
         referenced.insert(source.source.0);
+    }
+    Ok(())
+}
+
+/// Verifies the recorded source digests against the source input over the exact
+/// source set: every signed summary matches a dataset source's version and
+/// content digest, and every dataset source has a signed summary. Neither side
+/// may carry a source the other lacks.
+///
+/// # Errors
+///
+/// [`VerifyError::SourceDigestMismatch`] for a summary that names no dataset
+/// source or whose digest/version disagrees, or [`VerifyError::SourceSummaryMissing`]
+/// for a dataset source with no summary.
+pub fn verify_source_digests(
+    artifact: &BuildArtifact,
+    source: &SourceDataset,
+) -> Result<(), VerifyError> {
+    reject_duplicate_summaries(artifact)?;
+    reject_duplicate_meta(source)?;
+    let summary_ids: BTreeSet<u32> = artifact
+        .provenance
+        .sources
+        .iter()
+        .map(|summary| summary.id.0)
+        .collect();
+    for summary in &artifact.provenance.sources {
+        let meta = source
+            .meta_for(summary.id)
+            .ok_or(VerifyError::SourceDigestMismatch {
+                source_id: summary.id.0,
+            })?;
+        let digest = crate::source::source_content_digest(source, meta);
+        if summary.version != meta.version || summary.content_digest != digest {
+            return Err(VerifyError::SourceDigestMismatch {
+                source_id: summary.id.0,
+            });
+        }
+    }
+    for meta in &source.meta {
+        if !summary_ids.contains(&meta.id.0) {
+            return Err(VerifyError::SourceSummaryMissing {
+                source_id: meta.id.0,
+            });
+        }
+    }
+    check_source_resolution(artifact, source)
+}
+
+/// Proves every lineage source reference resolves to exactly one dataset source
+/// record and that no two distinct dataset records share a reference.
+fn check_source_resolution(
+    artifact: &BuildArtifact,
+    source: &SourceDataset,
+) -> Result<(), VerifyError> {
+    let mut counts: BTreeMap<SourceRecordRef, u32> = BTreeMap::new();
+    for source_ref in source_record_refs(source) {
+        counts
+            .entry(source_ref)
+            .and_modify(|count| *count = count.wrapping_add(1))
+            .or_insert(1);
+    }
+    for (source_ref, count) in &counts {
+        if *count > 1 {
+            return Err(VerifyError::AmbiguousSourceRecord {
+                source_id: source_ref.source.0,
+            });
+        }
+    }
+    for record in &artifact.provenance.records {
+        for source_ref in &record.sources {
+            match counts.get(source_ref) {
+                None => {
+                    return Err(VerifyError::UnresolvedSourceRef {
+                        source_id: source_ref.source.0,
+                    });
+                }
+                Some(1) => {}
+                Some(_) => {
+                    return Err(VerifyError::AmbiguousSourceRecord {
+                        source_id: source_ref.source.0,
+                    });
+                }
+            }
+        }
     }
     Ok(())
 }

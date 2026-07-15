@@ -16,7 +16,7 @@ mod sources;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use pilotage_geo::{DatumRealizationId, HorizontalDatum};
@@ -30,10 +30,11 @@ use crate::chain::{BuildArtifact, tile_of};
 use crate::error::VerifyError;
 use crate::payload::{decode_aerodromes, decode_obstacles, decode_runways, decode_terrain};
 use crate::provenance::RecordKey;
-use crate::source::{SourceDataset, SourceRecordRef, source_record_refs};
+use crate::source::SourceDataset;
 
 use bijection::check_bijection;
-use sources::{check_lineage_sources, reject_duplicate_summaries};
+use sources::check_lineage_sources;
+pub use sources::verify_source_digests;
 
 /// The identity of one emitted record: its class, tile, and decodable key.
 pub(crate) type RecordIdentity = (u8, i32, i32, RecordKey);
@@ -69,7 +70,31 @@ struct DecodedPackage {
 /// The datum and tile size used to recompute tile assignment.
 type TilingContext = (HorizontalDatum, DatumRealizationId, f64);
 
-/// Verifies an artifact end to end.
+/// Verifies an artifact end to end AND its recorded source digests against
+/// the source dataset, in one call. This is the entry point to use whenever
+/// the source input is at hand: source verification cannot be skipped by
+/// forgetting a second call.
+///
+/// # Errors
+///
+/// Every [`verify_artifact`] error, plus the source-digest errors of
+/// [`verify_source_digests`].
+pub fn verify_artifact_with_sources(
+    artifact: &BuildArtifact,
+    source: &SourceDataset,
+    trust: &TrustRoot,
+    now: DayNumber,
+    active: Option<ActiveDbId>,
+    policy: UsePolicy,
+) -> Result<(), VerifyError> {
+    verify_artifact(artifact, trust, now, active, policy)?;
+    verify_source_digests(artifact, source)
+}
+
+/// Verifies an artifact end to end: package, bundle signature and binding,
+/// decoded reports, and the record-lineage bijection. Prefer
+/// [`verify_artifact_with_sources`] whenever the source dataset is at hand —
+/// this variant alone cannot check the recorded source digests.
 ///
 /// # Errors
 ///
@@ -91,90 +116,6 @@ pub fn verify_artifact(
     check_reports(artifact, &decoded.reports)?;
     check_bijection(artifact, &decoded.identities)?;
     check_lineage_sources(artifact)?;
-    Ok(())
-}
-
-/// Verifies the recorded source digests against the source input over the exact
-/// source set: every signed summary matches a dataset source's version and
-/// content digest, and every dataset source has a signed summary. Neither side
-/// may carry a source the other lacks.
-///
-/// # Errors
-///
-/// [`VerifyError::SourceDigestMismatch`] for a summary that names no dataset
-/// source or whose digest/version disagrees, or [`VerifyError::SourceSummaryMissing`]
-/// for a dataset source with no summary.
-pub fn verify_source_digests(
-    artifact: &BuildArtifact,
-    source: &SourceDataset,
-) -> Result<(), VerifyError> {
-    reject_duplicate_summaries(artifact)?;
-    let summary_ids: BTreeSet<u32> = artifact
-        .provenance
-        .sources
-        .iter()
-        .map(|summary| summary.id.0)
-        .collect();
-    for summary in &artifact.provenance.sources {
-        let meta = source
-            .meta_for(summary.id)
-            .ok_or(VerifyError::SourceDigestMismatch {
-                source_id: summary.id.0,
-            })?;
-        let digest = crate::source::source_content_digest(source, meta);
-        if summary.version != meta.version || summary.content_digest != digest {
-            return Err(VerifyError::SourceDigestMismatch {
-                source_id: summary.id.0,
-            });
-        }
-    }
-    for meta in &source.meta {
-        if !summary_ids.contains(&meta.id.0) {
-            return Err(VerifyError::SourceSummaryMissing {
-                source_id: meta.id.0,
-            });
-        }
-    }
-    check_source_resolution(artifact, source)
-}
-
-/// Proves every lineage source reference resolves to exactly one dataset source
-/// record and that no two distinct dataset records share a reference.
-fn check_source_resolution(
-    artifact: &BuildArtifact,
-    source: &SourceDataset,
-) -> Result<(), VerifyError> {
-    let mut counts: BTreeMap<SourceRecordRef, u32> = BTreeMap::new();
-    for source_ref in source_record_refs(source) {
-        counts
-            .entry(source_ref)
-            .and_modify(|count| *count = count.wrapping_add(1))
-            .or_insert(1);
-    }
-    for (source_ref, count) in &counts {
-        if *count > 1 {
-            return Err(VerifyError::AmbiguousSourceRecord {
-                source_id: source_ref.source.0,
-            });
-        }
-    }
-    for record in &artifact.provenance.records {
-        for source_ref in &record.sources {
-            match counts.get(source_ref) {
-                None => {
-                    return Err(VerifyError::UnresolvedSourceRef {
-                        source_id: source_ref.source.0,
-                    });
-                }
-                Some(1) => {}
-                Some(_) => {
-                    return Err(VerifyError::AmbiguousSourceRecord {
-                        source_id: source_ref.source.0,
-                    });
-                }
-            }
-        }
-    }
     Ok(())
 }
 

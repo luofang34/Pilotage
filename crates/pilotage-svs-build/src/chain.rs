@@ -20,11 +20,12 @@ mod terrain;
 #[cfg(test)]
 mod tests;
 
+use ed25519_dalek::SigningKey;
 use pilotage_geo::{
     BaroSettingId, DatumRealizationId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum,
     LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition,
 };
-use pilotage_svs_db::{CandidatePackage, Tile};
+use pilotage_svs_db::{CandidatePackage, Tile, TrustAnchor, TrustRoot, UsePolicy};
 
 use crate::config::BuildConfig;
 use crate::error::BuildError;
@@ -157,12 +158,37 @@ pub fn build_package(
     let provenance = assemble::build_provenance(config, source, &outputs, signed.content_hash);
     let bundle_signature =
         crate::package::sign_bundle(&config.signing.signing_seed, &provenance, &reports)?;
-    Ok(BuildArtifact {
+    let artifact = BuildArtifact {
         package: signed.package,
         provenance,
         reports,
         bundle_signature,
-    })
+    };
+    // The build never emits an artifact the full verifier would reject: the
+    // finished artifact is verified end to end — package, bundle binding,
+    // provenance decode, lineage bijection, AND source digests — under a trust
+    // root derived from its own signing key, at the package's effectivity
+    // start, before it is returned.
+    let key = SigningKey::from_bytes(&config.signing.signing_seed);
+    let trust = TrustRoot::new(vec![TrustAnchor {
+        key_id: config.signing.key_id,
+        public_key: key.verifying_key().to_bytes(),
+    }]);
+    let policy = if config.identity.simulation_only {
+        UsePolicy::SimulatorPermitted
+    } else {
+        UsePolicy::OperationalRequired
+    };
+    crate::verify::verify_artifact_with_sources(
+        &artifact,
+        source,
+        &trust,
+        config.identity.effectivity.effective,
+        None,
+        policy,
+    )
+    .map_err(|source| BuildError::ArtifactSelfVerification { source })?;
+    Ok(artifact)
 }
 
 /// Validates that every source referenced has metadata and that its datums are
@@ -170,6 +196,16 @@ pub fn build_package(
 /// datum aborts the build rather than being guessed.
 fn validate_sources(config: &BuildConfig, source: &SourceDataset) -> Result<(), BuildError> {
     validate_target_datum(config)?;
+    // A duplicated source id makes the governing metadata (datum, license,
+    // version) ambiguous; the build refuses rather than picking the first.
+    let mut declared = std::collections::BTreeSet::new();
+    for meta in &source.meta {
+        if !declared.insert(meta.id.0) {
+            return Err(BuildError::DuplicateSourceIdentity {
+                source_id: meta.id.0,
+            });
+        }
+    }
     let mut ids: Vec<SourceId> = source.terrain.iter().map(|g| g.source).collect();
     ids.extend(source.obstacles.iter().map(|o| o.source.source));
     ids.extend(source.aerodromes.iter().map(|a| a.source.source));

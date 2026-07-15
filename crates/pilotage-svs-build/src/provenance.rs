@@ -40,6 +40,13 @@ pub enum Disposition {
     },
     /// The record fell outside the coverage box and was clipped.
     Clipped,
+    /// The record was consumed but contributed no output (every derived node
+    /// stayed void, or every candidate lost deterministic resolution) — its
+    /// fate is recorded so no consumed source can look like a phantom.
+    NoContribution {
+        /// Why nothing survived.
+        reason: &'static str,
+    },
     /// An obstacle merged into another obstacle at the given position.
     Merged {
         /// Latitude of the obstacle it merged into, degrees.
