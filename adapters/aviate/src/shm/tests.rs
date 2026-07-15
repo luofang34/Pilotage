@@ -2,7 +2,27 @@
 
 use std::time::{Duration, Instant};
 
-use super::{SHM_SIZE, ShmFreshness, ShmObservation, decode_sample, enu_quat_to_ned, enu_to_ned};
+use super::{
+    SHM_SIZE, ShmFreshness, ShmObservation, admissible_capacity, decode_sample, enu_quat_to_ned,
+    enu_to_ned,
+};
+
+#[test]
+fn capacity_rejects_negative_and_short_admits_exact_and_page_rounded() {
+    // A negative st_size must never be coerced to a huge unsigned capacity.
+    assert_eq!(admissible_capacity(-1, SHM_SIZE), None);
+    assert_eq!(admissible_capacity(i64::MIN, SHM_SIZE), None);
+    // One byte short of the required block is refused.
+    assert_eq!(admissible_capacity(SHM_SIZE as i64 - 1, SHM_SIZE), None);
+    // Exactly the required size is admitted.
+    assert_eq!(
+        admissible_capacity(SHM_SIZE as i64, SHM_SIZE),
+        Some(SHM_SIZE as u64)
+    );
+    // A page-rounded object (16 KiB page on Apple Silicon for a 216-byte
+    // ftruncate) is admitted; the mapping still reads only SHM_SIZE bytes.
+    assert_eq!(admissible_capacity(16384, SHM_SIZE), Some(16384));
+}
 
 fn put_f64(buf: &mut [u8; SHM_SIZE], off: usize, v: f64) {
     buf[off..off + 8].copy_from_slice(&v.to_ne_bytes());

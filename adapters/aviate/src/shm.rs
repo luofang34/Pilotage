@@ -24,11 +24,29 @@ const fn device_identity(device: libc::dev_t) -> u64 {
     device as u64
 }
 
-/// Byte size of `AviateSharedState` (natural C alignment, all fields
-/// 8-byte aligned or packed tail).
+/// Byte count the reader maps and reads from `AviateSharedState`. This size
+/// and the `OFF_*` offsets below hand-mirror the producer's `shared_state.h`
+/// and are not validated against a magic/version/declared-size header, so a
+/// producer layout change is not detected here. Capacity does not establish
+/// layout compatibility: the check below only proves the object is large
+/// enough to map, never that these offsets are still correct.
 const SHM_SIZE: usize = 216;
 
-// Field offsets in `AviateSharedState` (shared_state.h).
+/// Whether a POSIX shm object whose kernel-reported `st_size` is `st_size`
+/// bytes can back a `required`-byte read-only mapping, returning the admitted
+/// capacity. This is a CAPACITY decision only: the kernel may page-round the
+/// object up (a 216-byte `ftruncate` reports `st_size = 16384` on a 16 KiB
+/// page), so any capacity at least `required` is admitted and only `required`
+/// bytes are ever mapped. A negative `st_size` (which must never be coerced to
+/// a huge unsigned value) or one smaller than `required` is refused. It makes
+/// no claim about field layout or version.
+fn admissible_capacity(st_size: i64, required: usize) -> Option<u64> {
+    let capacity = u64::try_from(st_size).ok()?;
+    (capacity >= required as u64).then_some(capacity)
+}
+
+// Field offsets in `AviateSharedState` (shared_state.h) — provisional, see
+// `SHM_SIZE`.
 const OFF_POS: usize = 0; // double[3]
 const OFF_QUAT: usize = 24; // double[4] (w, x, y, z), ENU/FLU
 const OFF_VEL: usize = 56; // double[3], ENU world
@@ -94,7 +112,7 @@ impl GzStateShm {
     /// # Errors
     ///
     /// Returns a typed [`AviateAdapterError`] when the region does not
-    /// exist, its ABI size differs, or it cannot be mapped.
+    /// exist, is too small to back the mapping, or cannot be mapped.
     pub fn open(instance: u8) -> Result<Self, AviateAdapterError> {
         let name = if instance == 0 {
             "/aviate_gz_bridge".to_owned()
@@ -130,15 +148,14 @@ impl GzStateShm {
                 });
             }
             let metadata = metadata.assume_init();
-            let size = u64::try_from(metadata.st_size).unwrap_or(u64::MAX);
-            if size != SHM_SIZE as u64 {
+            let Some(capacity) = admissible_capacity(metadata.st_size, SHM_SIZE) else {
                 libc::close(fd);
-                return Err(AviateAdapterError::ShmSizeMismatch {
+                return Err(AviateAdapterError::ShmCapacityTooSmall {
                     name,
-                    expected: SHM_SIZE,
-                    actual: size,
+                    required: SHM_SIZE,
+                    observed: metadata.st_size,
                 });
-            }
+            };
             let ptr = libc::mmap(
                 std::ptr::null_mut(),
                 SHM_SIZE,
@@ -160,7 +177,7 @@ impl GzStateShm {
                 ShmIdentity {
                     device: device_identity(metadata.st_dev),
                     inode: metadata.st_ino,
-                    size,
+                    size: capacity,
                 },
             )
         };
