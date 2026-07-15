@@ -9,6 +9,7 @@ mod convert;
 mod ids;
 mod session;
 mod session_convert;
+pub mod video_frame;
 pub mod wire;
 
 pub use control::{ButtonEdge, ControlPayload, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
@@ -21,4 +22,7 @@ pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleI
 pub use session::{
     ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRequest,
     LeaseResponse, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
+};
+pub use video_frame::{
+    CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,
 };

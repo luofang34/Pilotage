@@ -17,4 +17,8 @@ pilotage-instrument-glyphs = { workspace = true }
 pilotage-instrument-panels = { workspace = true }
 pilotage-instrument-scene = { workspace = true }
 pilotage-instrument-state = { workspace = true }
+pilotage-protocol = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
 wasm-bindgen = { workspace = true }
