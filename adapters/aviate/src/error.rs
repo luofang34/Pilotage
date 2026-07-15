@@ -38,14 +38,17 @@ pub enum AviateAdapterError {
         #[source]
         source: std::io::Error,
     },
-    /// The shared-memory object's ABI size does not match the reader.
-    #[error("Aviate state shm {name} has {actual} bytes; expected {expected}")]
-    ShmSizeMismatch {
+    /// The shared-memory object is too small to back the reader's mapping.
+    /// This is a capacity check, not a layout/version check: it proves only
+    /// that at least `required` bytes are present, never that the block's
+    /// fields match (that gate is Aviate#262).
+    #[error("Aviate state shm {name} reports {observed} bytes; needs at least {required}")]
+    ShmCapacityTooSmall {
         /// The POSIX shm object name.
         name: String,
-        /// Required byte size.
-        expected: usize,
-        /// Observed byte size.
-        actual: u64,
+        /// Byte count the reader must be able to map.
+        required: usize,
+        /// The kernel-reported object size (`st_size`), which may be negative.
+        observed: i64,
     },
 }
