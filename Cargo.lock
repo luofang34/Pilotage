@@ -990,11 +990,11 @@ name = "pilotage-adapter-api"
 version = "0.1.0"
 dependencies = [
  "pilotage-calibration-id",
+ "pilotage-camera-calibration",
  "pilotage-frames",
  "pilotage-protocol",
  "pilotage-timing",
  "serde",
- "sha2 0.10.9",
  "thiserror",
 ]
 
@@ -1060,6 +1060,17 @@ dependencies = [
 [[package]]
 name = "pilotage-calibration-id"
 version = "0.1.0"
+
+[[package]]
+name = "pilotage-camera-calibration"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "pilotage-calibration-id",
+ "pilotage-frames",
+ "sha2 0.10.9",
+ "thiserror",
+]
 
 [[package]]
 name = "pilotage-conformance"
