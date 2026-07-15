@@ -181,8 +181,8 @@ impl CaptureHeader {
     /// header is admissible. Fail-closed: an unknown capture clock, or a
     /// mapping whose target clock is inconsistent with its availability flag,
     /// is rejected. A mapping declared unavailable legitimately carries target
-    /// clock 0 (the absent-clock sentinel), so that case is accepted — the
-    /// exact case the browser validator wrongly rejected.
+    /// clock 0 (the absent-clock sentinel), so that case is accepted: the
+    /// target clock is bound to the availability flag, never checked alone.
     #[must_use]
     pub fn contract_fault(&self) -> Option<ContractFault> {
         if !is_present_clock(self.capture_clock) {
@@ -380,8 +380,10 @@ mod tests {
 
     #[test]
     fn unavailable_mapping_with_zero_target_is_admissible() {
-        // The exact aviate case the browser validator wrongly rejected: no
-        // mapping, so target clock 0 is legitimate, not malformed.
+        // An unavailable capture-clock mapping carries target clock 0 (the
+        // absent-clock sentinel); that is legitimate, not malformed. Aviate
+        // publishes exactly this shape, so a validator requiring a known
+        // clock unconditionally would drop every one of its frames.
         let header = CaptureHeader {
             mapping_available: false,
             mapping_target_clock: 0,
