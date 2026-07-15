@@ -5,8 +5,8 @@
 //! formula and origin, and the total is a conservative worst-case linear sum (not
 //! root-sum-square) so a consumer never under-counts. In particular there is no
 //! baked-in latency offset: the latency contribution is the caller's *measured*
-//! pipeline latency plus the attitude/position co-timing skew computed from the
-//! stamps.
+//! pipeline latency plus the component co-timing skew computed from the sample
+//! epochs.
 //!
 //! Angular rate and speed are not standalone additive terms — they are the
 //! *sensitivities* that turn a timing error into an angular error: attitude smears
@@ -44,7 +44,7 @@ pub struct AlignmentErrorBound {
     /// mapping error bound × `(angular_rate + speed / reference_range)`.
     pub clock_rad: f64,
     /// Latency times the registration sensitivity: `(measured pipeline latency +
-    /// attitude/position skew)` × `(angular_rate + speed / reference_range)`.
+    /// component co-timing skew)` × `(angular_rate + speed / reference_range)`.
     pub latency_rad: f64,
     /// Extrapolation times the registration sensitivity: the distance the capture
     /// time falls outside the bracket × `(angular_rate + speed / reference_range)`;

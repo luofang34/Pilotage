@@ -220,7 +220,7 @@ pub const fn health_from_integrity(level: IntegrityLevel) -> InputHealth {
 /// The worse of two healths (`Ok` < `Degraded` < `Failed`), so a reading is no
 /// healthier than its weakest attribute.
 #[must_use]
-const fn worse(a: InputHealth, b: InputHealth) -> InputHealth {
+pub(crate) const fn worse(a: InputHealth, b: InputHealth) -> InputHealth {
     if a.to_u8() >= b.to_u8() { a } else { b }
 }
 
