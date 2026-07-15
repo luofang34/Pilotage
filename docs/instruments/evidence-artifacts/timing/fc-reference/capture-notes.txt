@@ -1,0 +1,30 @@
+Pilotage evidence — reference FC CDC capture notes (SIM / NOT FOR FLIGHT)
+scope: REN-04 (#30 reference hardware record)
+artifact: mavlink-capture.bin
+sha256: 29ff88aa8e15c946b74b2d72dc97d3ea7143e8b00721e5dbc7da1a578c82e951
+captured: 2026-07-15 (UTC), from /dev/cu.usbmodem01 on the development Mac;
+  the exact wall-clock of the read was not logged — the capture session is
+  bounded by this file's git commit time.
+command: python3 os.open('/dev/cu.usbmodem01', O_RDONLY|O_NONBLOCK) raw read,
+  3 s window, 16411 bytes captured (stty raw -echo beforehand)
+analysis: parsed as MAVLink v1 with zero resync misses across the full
+  capture, 390 frames. HEARTBEAT payload: autopilot=12 (MAV_AUTOPILOT_PX4),
+  vehicle_type=2 (quadrotor), mavlink_version=3. Complete message-id table
+  (id x count): 0 HEARTBEAT x2, 1 SYS_STATUS x7, 4 PING x2,
+  8 LINK_NODE_STATUS x1, 29 SCALED_PRESSURE x2, 30 ATTITUDE x126,
+  31 ATTITUDE_QUATERNION x63, 32 LOCAL_POSITION_NED x39,
+  42 MISSION_CURRENT x2, 74 VFR_HUD x14, 83 ATTITUDE_TARGET x14,
+  85 POSITION_TARGET_LOCAL_NED x14, 105 HIGHRES_IMU x63, 111 TIMESYNC x14,
+  141 ALTITUDE x14, 147 BATTERY_STATUS x2, 230 ESTIMATOR_STATUS x2,
+  241 VIBRATION x2, 245 EXTENDED_SYS_STATE x7.
+identity claim supported by this capture: a PX4-profile flight controller
+  (quadrotor). NOTHING MORE.
+what this capture does NOT prove: the MCU part. The board was disconnected
+  before USB device descriptors (idVendor/idProduct/product string/serial)
+  could be read — an attempted ioreg read on 2026-07-15T07:32Z found no CDC
+  device present (raw ioreg output shows only an unrelated game controller).
+  The "STM32H743" designation is the operator's verbal statement and is
+  recorded as UNVERIFIED. A verified identity requires, with the board
+  connected: the USB descriptor set (raw ioreg/system_profiler capture with
+  command, time, digest) plus, for a measured timing model, the firmware
+  identity handshake fields listed in target-timing.txt.

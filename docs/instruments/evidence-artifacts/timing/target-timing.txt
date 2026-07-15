@@ -2,8 +2,22 @@ Pilotage evidence — target render timing model (SIM / NOT FOR FLIGHT)
 scope: REN-04
 artifact: per-class conservative cycle bounds, display-derived frame deadline,
   and the resulting PROVISIONAL COST ENVELOPE (not a WCET claim)
-detection: usb-cdc scan (scripts/detect-target.sh) found no connected target,
-  2026-07-15; no identity handshake was therefore possible
+detection: usb-cdc scan (scripts/detect-target.sh), 2026-07-15: one CDC
+  device was present and identified passively from its stream — a
+  zero-resync MAVLink v1 telemetry set with a PX4-profile message mix
+  (HEARTBEAT autopilot 12, quadrotor type). Raw capture, command, and
+  digest: fc-reference/capture-notes.txt (mavlink-capture.bin,
+  sha256 29ff88aa8e15c946b74b2d72dc97d3ea7143e8b00721e5dbc7da1a578c82e951).
+  It runs flight firmware, not a render-measurement harness, so it grounds
+  no measured model.
+reference-hardware: a PX4-profile flight controller, MCU UNVERIFIED. The
+  MAVLink stream proves the firmware profile only; the board was
+  disconnected before its USB descriptors could be read, so the operator's
+  "STM32H743" statement is recorded as unverified (see
+  fc-reference/capture-notes.txt for exactly what the capture does and does
+  not prove). Whatever the part is, it is at most a class high-end
+  reference; it is explicitly NOT the minimum display target, whose
+  measured model will bound the envelope from below.
 target: conservative-cortex-m7-class
 provenance: conservative-bound
 assumed-cpu-hz: 480000000
