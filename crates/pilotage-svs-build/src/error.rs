@@ -255,6 +255,16 @@ pub enum VerifyError {
         /// The duplicated source.
         source_id: u32,
     },
+    /// A recorded disposition is not a trustworthy record fate: it references a
+    /// record with no signed summary or no dataset record, duplicates another
+    /// disposition, or contradicts the output lineage.
+    #[error("disposition for source {source_id} is invalid: {reason}")]
+    DispositionInvalid {
+        /// The source the disposition references.
+        source_id: u32,
+        /// Why the disposition is not trustworthy.
+        reason: &'static str,
+    },
     /// A lineage source reference matches no source record in the dataset, so it
     /// resolves to nothing.
     #[error("lineage source reference to source {source_id} resolves to no dataset record")]

@@ -75,18 +75,58 @@ pub(crate) fn check_lineage_sources(artifact: &BuildArtifact) -> Result<(), Veri
         .map(|summary| summary.id.0)
         .collect();
     let mut referenced: BTreeSet<u32> = BTreeSet::new();
+    let mut lineage_refs: BTreeSet<crate::source::SourceRecordRef> = BTreeSet::new();
     for record in &artifact.provenance.records {
         check_record_sources(record, &summaries, &mut referenced)?;
+        lineage_refs.extend(record.sources.iter().copied());
     }
-    for disposition in &artifact.provenance.dispositions {
-        referenced.insert(disposition.source.source.0);
-    }
+    check_dispositions(artifact, &summaries, &lineage_refs, &mut referenced)?;
     for summary in &artifact.provenance.sources {
         if !referenced.contains(&summary.id.0) {
             return Err(VerifyError::UnreferencedSourceSummary {
                 source_id: summary.id.0,
             });
         }
+    }
+    Ok(())
+}
+
+/// Validates every recorded disposition before it may vouch for a summary: it
+/// must reference a source with a signed summary, no record may carry two
+/// dispositions, and a no-contribution fate must not contradict output
+/// lineage that draws from the same record.
+fn check_dispositions(
+    artifact: &BuildArtifact,
+    summaries: &BTreeSet<u32>,
+    lineage_refs: &BTreeSet<crate::source::SourceRecordRef>,
+    referenced: &mut BTreeSet<u32>,
+) -> Result<(), VerifyError> {
+    let mut seen: BTreeSet<crate::source::SourceRecordRef> = BTreeSet::new();
+    for disposition in &artifact.provenance.dispositions {
+        let source_id = disposition.source.source.0;
+        if !summaries.contains(&source_id) {
+            return Err(VerifyError::DispositionInvalid {
+                source_id,
+                reason: "references a source with no signed summary",
+            });
+        }
+        if !seen.insert(disposition.source) {
+            return Err(VerifyError::DispositionInvalid {
+                source_id,
+                reason: "the record carries more than one disposition",
+            });
+        }
+        if matches!(
+            disposition.disposition,
+            crate::provenance::Disposition::NoContribution { .. }
+        ) && lineage_refs.contains(&disposition.source)
+        {
+            return Err(VerifyError::DispositionInvalid {
+                source_id,
+                reason: "claims no contribution but output lineage draws from the record",
+            });
+        }
+        referenced.insert(source_id);
     }
     Ok(())
 }
@@ -201,6 +241,16 @@ fn check_source_resolution(
                     });
                 }
             }
+        }
+    }
+    // A disposition is a claim about a real input record: one that resolves to
+    // no dataset record is fabricated provenance and is refused.
+    for disposition in &artifact.provenance.dispositions {
+        if counts.get(&disposition.source) != Some(&1) {
+            return Err(VerifyError::DispositionInvalid {
+                source_id: disposition.source.source.0,
+                reason: "resolves to no unique dataset source record",
+            });
         }
     }
     Ok(())

@@ -194,11 +194,22 @@ fn record_count(source: &SourceDataset, id: crate::source::SourceId) -> u32 {
             .filter(|o| o.source.source == id)
             .count() as u32,
     );
-    for aerodrome in source.aerodromes.iter().filter(|a| a.source.source == id) {
-        count = count
-            .wrapping_add(1)
-            .wrapping_add(aerodrome.runways.len() as u32);
-    }
+    count = count.wrapping_add(
+        source
+            .aerodromes
+            .iter()
+            .filter(|a| a.source.source == id)
+            .count() as u32,
+    );
+    // Runways are counted for THEIR OWN source, not the aerodrome's.
+    count = count.wrapping_add(
+        source
+            .aerodromes
+            .iter()
+            .flat_map(|a| a.runways.iter())
+            .filter(|r| r.source.source == id)
+            .count() as u32,
+    );
     count
 }
 

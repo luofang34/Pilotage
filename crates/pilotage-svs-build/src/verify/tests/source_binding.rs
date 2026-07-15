@@ -4,6 +4,8 @@
 
 use super::*;
 
+use crate::provenance::{Disposition, RecordDisposition};
+
 #[test]
 fn source_digest_changes_when_input_changes() {
     let a = built();
@@ -301,5 +303,133 @@ fn source_set_bijection_holds_on_a_clean_build() {
         artifact.provenance.sources.len(),
         fixtures::dataset().meta.len(),
         "the summary set equals the dataset source set"
+    );
+}
+
+#[test]
+fn a_runway_with_an_unknown_datum_source_fails_the_build() {
+    // The runway carries its own source record: its datum is validated in its
+    // own right, never inherited from the enclosing aerodrome's source.
+    let mut dataset = fixtures::dataset();
+    let mut rogue = fixtures::meta(SourceId(9), LicenseCode::Open);
+    rogue.horizontal_datum = pilotage_geo::HorizontalDatum::Unknown;
+    dataset.meta.push(rogue);
+    dataset.aerodromes[0].runways[0].source =
+        SourceRecordRef::runway(SourceId(9), fixtures::AERODROME_IDENT, 0x0918);
+    let result = build_package(&fixtures::config(), &dataset);
+    assert!(
+        matches!(
+            result,
+            Err(BuildError::UnknownSourceDatum { source_id: 9, .. })
+        ),
+        "a runway from an Unknown-datum source must fail the build: {result:?}"
+    );
+}
+
+#[test]
+fn runway_bytes_bind_to_their_own_source_digest() {
+    // A runway owned by source B under an aerodrome of source A belongs to B's
+    // digest and record count, never A's.
+    let mut dataset = fixtures::dataset();
+    dataset.aerodromes[0].runways[0].source =
+        SourceRecordRef::runway(fixtures::OBSTACLE_SRC, fixtures::AERODROME_IDENT, 0x0918);
+    let aero_meta = *dataset.meta_for(fixtures::AERODROME_SRC).expect("meta");
+    let rwy_meta = *dataset.meta_for(fixtures::OBSTACLE_SRC).expect("meta");
+    let aero_before = crate::source::source_content_digest(&dataset, &aero_meta);
+    let rwy_before = crate::source::source_content_digest(&dataset, &rwy_meta);
+    dataset.aerodromes[0].runways[0].end_a_lat_deg += 0.001;
+    let aero_after = crate::source::source_content_digest(&dataset, &aero_meta);
+    let rwy_after = crate::source::source_content_digest(&dataset, &rwy_meta);
+    assert_eq!(
+        aero_before, aero_after,
+        "the aerodrome source's digest must not absorb another source's runway"
+    );
+    assert_ne!(
+        rwy_before, rwy_after,
+        "the runway's own source digest must cover the runway bytes"
+    );
+}
+
+#[test]
+fn a_disposition_for_a_nonexistent_record_fails_the_full_verifier() {
+    // A disposition claiming a fate for a record the dataset never contained
+    // is fabricated provenance; the combined verifier refuses it even after a
+    // clean re-sign.
+    let mut artifact = built();
+    artifact.provenance.dispositions.push(RecordDisposition {
+        source: SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 999),
+        disposition: Disposition::Clipped,
+    });
+    resign_bundle(&mut artifact);
+    let config = fixtures::config();
+    let key = SigningKey::from_bytes(&config.signing.signing_seed);
+    let trust = TrustRoot::new(vec![TrustAnchor {
+        key_id: config.signing.key_id,
+        public_key: key.verifying_key().to_bytes(),
+    }]);
+    let result = verify_artifact_with_sources(
+        &artifact,
+        &fixtures::dataset(),
+        &trust,
+        DayNumber(150),
+        None,
+        UsePolicy::SimulatorPermitted,
+    );
+    assert!(
+        matches!(result, Err(VerifyError::DispositionInvalid { .. })),
+        "a disposition naming no dataset record must fail: {result:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_or_contradictory_disposition_fails_artifact_verification() {
+    // Two dispositions for one record are ambiguous provenance.
+    let mut artifact = built();
+    let target = SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 0);
+    artifact.provenance.dispositions.push(RecordDisposition {
+        source: target,
+        disposition: Disposition::Clipped,
+    });
+    artifact.provenance.dispositions.push(RecordDisposition {
+        source: target,
+        disposition: Disposition::Clipped,
+    });
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(result, Err(VerifyError::DispositionInvalid { .. })),
+        "duplicate dispositions must fail: {result:?}"
+    );
+
+    // A no-contribution claim for a record the output lineage draws from is a
+    // contradiction.
+    let mut artifact = built();
+    let drawn = artifact.provenance.records[0].sources[0];
+    artifact.provenance.dispositions.push(RecordDisposition {
+        source: drawn,
+        disposition: Disposition::NoContribution {
+            reason: "fabricated",
+        },
+    });
+    let result = verify_resigned(&mut artifact);
+    assert!(
+        matches!(result, Err(VerifyError::DispositionInvalid { .. })),
+        "a contradictory no-contribution disposition must fail: {result:?}"
+    );
+}
+
+#[test]
+fn the_aerodrome_stage_ledger_counts_runways_as_inputs() {
+    // The pipeline consumes the aerodrome AND its runway, and emits both: the
+    // stage ledger must conserve (fixture: 1 aerodrome + 1 runway = 2 inputs).
+    let artifact = built();
+    let stage = artifact
+        .provenance
+        .stages
+        .iter()
+        .find(|s| s.name == "aerodrome-outlier")
+        .expect("aerodrome stage recorded");
+    assert_eq!(
+        stage.inputs, 2,
+        "1 aerodrome + 1 runway must both be stage inputs"
     );
 }

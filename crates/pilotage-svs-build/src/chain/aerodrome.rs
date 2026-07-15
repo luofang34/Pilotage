@@ -42,7 +42,14 @@ pub(crate) fn process(
     let mut rwy_groups: RunwayGroups = BTreeMap::new();
     let mut outliers = 0u32;
     let mut clipped = 0u32;
-    let inputs = source.aerodromes.len() as u32;
+    // The pipeline consumes aerodrome reference points AND their runways, so
+    // both are stage inputs — the ledger must conserve across every record.
+    let inputs = source
+        .aerodromes
+        .iter()
+        .fold(source.aerodromes.len() as u32, |acc, a| {
+            acc.wrapping_add(a.runways.len() as u32)
+        });
     for aerodrome in &source.aerodromes {
         let meta = source.meta_for(aerodrome.source.source).ok_or(
             BuildError::UndeclaredSourceIdentity {
@@ -59,9 +66,18 @@ pub(crate) fn process(
             (&mut outliers, &mut clipped),
         )?;
         for rwy in &aerodrome.runways {
+            // A runway carries its own source record: its datum and metadata
+            // come from THAT source, never inherited from the aerodrome's.
+            let rwy_meta =
+                source
+                    .meta_for(rwy.source.source)
+                    .ok_or(BuildError::UndeclaredSourceIdentity {
+                        source_id: rwy.source.source.0,
+                        reason: "no source metadata declared",
+                    })?;
             place_runway(
                 config,
-                meta,
+                rwy_meta,
                 rwy,
                 &mut rwy_groups,
                 &mut dispositions,

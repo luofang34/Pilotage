@@ -30,6 +30,7 @@ fn canonical_source_bytes(dataset: &SourceDataset, meta: &SourceMeta) -> Vec<u8>
     append_terrain(&mut out, dataset, meta.id);
     append_obstacles(&mut out, dataset, meta.id);
     append_aerodromes(&mut out, dataset, meta.id);
+    append_runways(&mut out, dataset, meta.id);
     out
 }
 
@@ -139,14 +140,24 @@ fn append_aerodromes(out: &mut Vec<u8>, dataset: &SourceDataset, id: SourceId) {
         push_f64(out, aerodrome.ref_lon_deg);
         push_f64(out, aerodrome.elevation_m);
         push_source_ref(out, &aerodrome.source);
-        append_runways(out, &aerodrome.runways);
     }
 }
 
-/// Appends an aerodrome's runways, ordered by designator.
-fn append_runways(out: &mut Vec<u8>, runways: &[super::Runway]) {
-    let mut ordered: Vec<&super::Runway> = runways.iter().collect();
-    ordered.sort_by_key(|r| r.designator);
+/// Appends this source's runways from across every aerodrome, in a fixed
+/// order. A runway carries its own source record, so its bytes belong to THAT
+/// source's digest — never folded into the enclosing aerodrome's source.
+fn append_runways(out: &mut Vec<u8>, dataset: &SourceDataset, id: SourceId) {
+    let mut ordered: Vec<&super::Runway> = dataset
+        .aerodromes
+        .iter()
+        .flat_map(|a| a.runways.iter())
+        .filter(|r| r.source.source == id)
+        .collect();
+    ordered.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then(a.designator.cmp(&b.designator))
+    });
     out.extend_from_slice(&(ordered.len() as u64).to_le_bytes());
     for runway in ordered {
         out.extend_from_slice(&runway.designator.to_le_bytes());

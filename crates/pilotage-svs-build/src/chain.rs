@@ -209,6 +209,14 @@ fn validate_sources(config: &BuildConfig, source: &SourceDataset) -> Result<(), 
     let mut ids: Vec<SourceId> = source.terrain.iter().map(|g| g.source).collect();
     ids.extend(source.obstacles.iter().map(|o| o.source.source));
     ids.extend(source.aerodromes.iter().map(|a| a.source.source));
+    // Runways carry their own source records; their datums are validated in
+    // their own right, never inherited from the enclosing aerodrome's source.
+    ids.extend(
+        source
+            .aerodromes
+            .iter()
+            .flat_map(|a| a.runways.iter().map(|r| r.source.source)),
+    );
     for id in ids {
         let meta = source
             .meta_for(id)
