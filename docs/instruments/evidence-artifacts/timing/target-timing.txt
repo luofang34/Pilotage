@@ -1,0 +1,62 @@
+Pilotage evidence — target render timing model (SIM / NOT FOR FLIGHT)
+scope: REN-04
+artifact: per-class conservative cycle bounds, display-derived frame deadline,
+  and the resulting PROVISIONAL COST ENVELOPE (not a WCET claim)
+detection: usb-cdc scan (scripts/detect-target.sh) found no connected target,
+  2026-07-15; no identity handshake was therefore possible
+target: conservative-cortex-m7-class
+provenance: conservative-bound
+assumed-cpu-hz: 480000000
+cycles-per-polygon-edge-test: 40
+cycles-per-stroke-segment-test: 80
+cycles-per-disc-test: 60
+cycles-per-arc-test: 240
+cycles-per-composite: 80
+frame-overhead-cycles: 2000000
+budget-coverage-samples: 1100000
+budget-polygon-edge-tests: 3600000
+budget-stroke-segment-tests: 250000
+budget-disc-tests: 175000
+budget-arc-tests: 175000
+budget-composites: 900000
+envelope-cycles: 290500000
+envelope-us: 605209
+frame-deadline-us: 1000000
+deadline-source: SIM display liveness requirement — PanelHealth
+  livenessDeadlineMs = 1000 ms (clients/web/instrument-health.js); a panel
+  whose frame generation has not advanced within it fails LIVENESS, so
+  producing one frame must fit inside it. The deadline is not derived from
+  this envelope and predates it; a selected display's refresh requirement
+  will replace it.
+rationale:
+- The work is counted per cost class (RenderWork): integer polygon winding
+  edge tests, f32 stroke segment-distance tests, circle/arc disc tests, arc
+  angular-membership extras (two cap sqrtf, atan2f, fmodf — priced as their
+  own class so an arc sample is never billed as a bare disc test), and
+  source-over composites. Counting is worst-case per sample so predicate
+  early exits never under-count, and the counters are a pure function of
+  scene bytes and dimensions.
+- Each cycle bound is a zero-wait instruction-level estimate DOUBLED as a
+  memory-system allowance (flash wait states, cache misses, framebuffer
+  traffic): winding edge ~20 -> 40; stroke segment ~40 -> 80; disc ~30 -> 60;
+  arc extras ~120 -> 240; composite ~40 -> 80. These are engineering bounds
+  with rationale, not measurements.
+- assumed-cpu-hz 480000000 is the Cortex-M7 class ceiling and is an
+  ASSUMPTION: a slower configured clock lengthens the envelope
+  proportionally. It binds only after measurement on the selected target.
+- Class budgets are 2x the worse of the PFD/HSI demo fixtures at 480x360
+  (PFD measures 547549 samples / 1780493 polygon edge tests / 115506 stroke
+  segment tests / 84681 disc tests / 84681 arc tests / 433729 composites).
+- Derived: envelope(budget) = 3600000*40 + 250000*80 + 175000*60 +
+  175000*240 + 900000*80 + 2000000 = 290500000 cycles = 605209 us at the
+  assumed clock — inside the 1000000 us liveness deadline, with the margin
+  consumed as the deadline tightens to a real display refresh requirement.
+- A measured model (provenance measured-usb-cdc) must record the firmware
+  identity and build hash reported over the CDC handshake, the MCU part, the
+  measured clock and cache/flash/memory configuration, the compiler and
+  flags, and the committed raw measurement output; only then does the priced
+  figure become a WCET claim and the deadline a display requirement.
+gate: timing::tests::budget_envelope_fits_the_display_derived_deadline and
+  the drift guard timing::tests::the_timing_artifact_matches_the_shipped_model
+  (crates/pilotage-instrument-raster) fail CI when the model, the budgets, or
+  this record disagree.

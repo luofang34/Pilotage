@@ -39,6 +39,10 @@ pub(crate) fn stroke_path(
         let cy = py as f32 + 0.5;
         for px in region.left..region.right {
             surface.count_sample();
+            // The coverage test early-exits on a hit; the priced count is the
+            // worst case (every segment, or the single point) so the timing
+            // model never under-counts.
+            surface.count_stroke_segment_tests(seg_count.max(1) as u64);
             let cx = px as f32 + 0.5;
             if covered(verts, seg_count, cx, cy, hw) {
                 surface.composite(px, py, color);

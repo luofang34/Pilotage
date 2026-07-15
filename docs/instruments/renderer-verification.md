@@ -78,12 +78,25 @@ is `panel_fixtures_fit_within_work_budget` (with
 budget is a hard CI failure with instructions to investigate the scene or the
 region loops before raising the constant.
 
-The WCET for a specific target is the counted work multiplied by the selected
-target's per-operation cycle bound; measured cycle costs and the final WCET wait
-for hardware selection and are out of scope here. Frame time is one of the gated
-budgets: a target that cannot meet its frame deadline fails, and the browser
-watchdog (`PanelHealth`, simulator-only) latches a stalled panel as `LIVENESS`
-past its deadline.
+The per-frame cost for a specific target is the counted work priced per cost
+class. `RenderWork` counts polygon edge tests, stroke segment tests, disc
+tests, arc angular extras (cap distances, `atan2f`, `fmodf` — their own class,
+so an arc sample is never billed as a bare disc test), and composites;
+`timing::TargetTimingModel` derives a **provisional cost envelope** — not a
+WCET claim until per-operation cycles are measured on selected hardware — and
+gates it against the frame deadline derived from the SIM display liveness
+requirement (`PanelHealth` `livenessDeadlineMs` = 1000 ms:
+`budget_envelope_fits_the_display_derived_deadline`). No display hardware is
+selected yet — the USB CDC scan (`scripts/detect-target.sh`) detects a
+connected target and attempts an identity handshake rather than asking — so
+the shipped model is the named conservative bound recorded, with its
+assumptions and derivation, in
+`docs/instruments/evidence-artifacts/timing/target-timing.txt`; a drift guard
+keeps that artifact equal to the shipped constants. A measured model must bind
+the firmware/build identity, MCU, clock and memory configuration, compiler
+flags, and raw output; only then does the envelope become a WCET and the
+deadline a display refresh requirement. The browser watchdog (`PanelHealth`,
+simulator-only) latches a stalled panel as `LIVENESS` past its deadline.
 
 ## The conformance corpus
 

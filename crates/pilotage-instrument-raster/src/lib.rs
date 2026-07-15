@@ -53,16 +53,17 @@
 //!   [`MAX_POLYGON_VERTICES`] per shape, and the scene crate's stack, command,
 //!   and byte budgets. The worst-case frame size is [`WORST_CASE_FRAME_BYTES`].
 //!
-//! # Execution-time measurement
+//! # Execution-time pricing
 //! The renderer is straight-line over the scene and framebuffer with no I/O
-//! and only documented-bounded loops, so a target-independent worst-case
-//! execution time is a sum of bounded step counts — command dispatches (at
-//! most [`pilotage_instrument_scene::MAX_LAYER_COMMANDS`] times the layer
-//! count) and per-pixel coverage tests (at most framebuffer pixels times a
-//! shape's edges) — multiplied by the selected target's per-step cycle bound.
-//! A step-counting harness can wrap the coverage predicate and command
-//! dispatch without changing output; measured cycle costs and the final WCET
-//! wait for hardware selection and are out of scope here.
+//! and only documented-bounded loops, so its per-frame cost is a sum of
+//! bounded step counts. [`RenderWork`] counts them per cost class — polygon
+//! edge tests, stroke segment tests, disc tests, arc angular extras, and
+//! composites — and [`timing::TargetTimingModel`] prices the counts into a
+//! provisional cost envelope gated against the display-derived frame
+//! deadline. Until a target is detected over USB CDC and measured, the
+//! shipped model is a named conservative bound and the envelope is not a
+//! WCET claim; the timing artifact records the bounds, assumptions, and
+//! derivation.
 
 #![no_std]
 
@@ -79,6 +80,7 @@ mod state;
 mod stroke;
 mod surface;
 mod text;
+pub mod timing;
 mod transform;
 
 pub use error::RasterError;

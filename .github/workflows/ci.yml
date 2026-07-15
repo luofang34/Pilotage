@@ -96,6 +96,18 @@ jobs:
           -p pilotage-instrument-raster
           --target thumbv7em-none-eabihf
 
+      - name: target timing gate (REN-04)
+        # No display hardware is selected: the USB CDC scan documents that no
+        # target is connected, and the envelope gate prices the per-class
+        # work budget with the conservative model against the frame deadline
+        # derived from the SIM display liveness requirement. The artifact
+        # drift guard keeps the committed timing record equal to the shipped
+        # model. The envelope is provisional — not a WCET claim — until a
+        # measured target binds firmware, clock, memory, and compiler state.
+        run: |
+          bash scripts/detect-target.sh
+          cargo test -p pilotage-instrument-raster timing
+
       - name: geospatial contract (SVS-01)
         # Datum discipline, coherence, view/projection, availability, and the
         # fail-closed versioned ABI for synthetic vision and conformal HUD.

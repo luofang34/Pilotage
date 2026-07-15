@@ -25,7 +25,7 @@ pub(crate) struct Disc {
 
 /// Fills the disc with `color`.
 pub(crate) fn fill_circle(surface: &mut Surface<'_>, clip: PixelRect, disc: Disc, color: [u8; 4]) {
-    paint(surface, clip, disc, disc.r, color, |dist, _, _| {
+    paint(surface, clip, disc, disc.r, color, 0, |dist, _, _| {
         dist <= disc.r
     });
 }
@@ -38,7 +38,7 @@ pub(crate) fn stroke_circle(
     hw: f32,
     color: [u8; 4],
 ) {
-    paint(surface, clip, disc, disc.r + hw, color, |dist, _, _| {
+    paint(surface, clip, disc, disc.r + hw, color, 0, |dist, _, _| {
         libm::fabsf(dist - disc.r) <= hw
     });
 }
@@ -56,12 +56,22 @@ pub(crate) fn stroke_arc(
 ) {
     let cap0 = end_point(disc, start);
     let cap1 = end_point(disc, start + sweep);
-    paint(surface, clip, disc, disc.r + hw, color, |dist, dx, dy| {
-        if near(dx, dy, cap0, hw) || near(dx, dy, cap1, hw) {
-            return true;
-        }
-        libm::fabsf(dist - disc.r) <= hw && arc_contains(libm::atan2f(dy, dx), start, sweep)
-    });
+    // Each arc sample may evaluate two cap distances, `atan2f`, and `fmodf`
+    // beyond its disc test — priced as one arc test per sample.
+    paint(
+        surface,
+        clip,
+        disc,
+        disc.r + hw,
+        color,
+        1,
+        |dist, dx, dy| {
+            if near(dx, dy, cap0, hw) || near(dx, dy, cap1, hw) {
+                return true;
+            }
+            libm::fabsf(dist - disc.r) <= hw && arc_contains(libm::atan2f(dy, dx), start, sweep)
+        },
+    );
 }
 
 /// Iterates the pixel box of radius `reach` around the center, compositing
@@ -73,6 +83,7 @@ fn paint(
     disc: Disc,
     reach: f32,
     color: [u8; 4],
+    arc_tests_per_sample: u64,
     covered: impl Fn(f32, f32, f32) -> bool,
 ) {
     if reach < 0.0 || clip.is_empty() {
@@ -83,6 +94,8 @@ fn paint(
         let dy = (py as f32 + 0.5) - disc.cy;
         for px in region.left..region.right {
             surface.count_sample();
+            surface.count_disc_tests(1);
+            surface.count_arc_tests(arc_tests_per_sample);
             let dx = (px as f32 + 0.5) - disc.cx;
             let dist = libm::sqrtf(dx * dx + dy * dy);
             if covered(dist, dx, dy) {

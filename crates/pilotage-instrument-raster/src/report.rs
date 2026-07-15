@@ -75,31 +75,52 @@ pub struct RenderReport {
 pub struct RenderWork {
     /// Pixel-center coverage evaluations across all primitives.
     pub coverage_samples: u64,
+    /// Integer winding edge tests inside polygon coverage samples (a sample
+    /// walks every edge of its polygon).
+    pub polygon_edge_tests: u64,
+    /// f32 capsule segment-distance tests inside stroke coverage samples
+    /// (worst case: every segment, so an early exit never under-counts).
+    pub stroke_segment_tests: u64,
+    /// Center-distance (`sqrtf`) tests inside circle/arc coverage samples,
+    /// one per sample.
+    pub disc_tests: u64,
+    /// Arc angular-membership evaluations — the transcendental extras an arc
+    /// sample may perform beyond its disc test (two cap distances, `atan2f`,
+    /// `fmodf`) — one per arc coverage sample, priced as their own class.
+    pub arc_tests: u64,
     /// Source-over composites applied.
     pub composites: u64,
 }
 
 impl RenderWork {
-    /// Engineering work budget for one panel frame.
+    /// Engineering work budget for one panel frame, per cost class.
     ///
     /// The fully populated PFD demo fixture — every band painting content —
-    /// measures ~547k coverage samples and ~434k composites on the 480x360
-    /// panel (~3.2 samples and ~2.5 composites per output pixel). The budget
-    /// grants 2x headroom over that worst measured fixture, rounded up, so
-    /// scenes can grow denser without churning the constant while per-frame
-    /// work stays bounded at ~6.4 samples per pixel. Because the counters
-    /// are a pure function of scene bytes and dimensions, exceeding this
-    /// budget is a deterministic CI failure on every platform, not a timing
-    /// flake. Wall-clock budgets are added when display hardware is
-    /// selected; until then this operation count is the portable proxy.
+    /// is the worst measured panel scene on the 480x360 panel; each class
+    /// budget grants 2x headroom over the worse of the PFD/HSI fixtures,
+    /// rounded up, so scenes can grow denser without churning the constants.
+    /// Because the counters are a pure function of scene bytes and
+    /// dimensions, exceeding any class budget is a deterministic CI failure
+    /// on every platform, not a timing flake. The [`crate::timing`] model
+    /// prices this budget into a provisional cost envelope and gates it
+    /// against the display-derived frame deadline.
     pub const BUDGET: RenderWork = RenderWork {
         coverage_samples: 1_100_000,
+        polygon_edge_tests: 3_600_000,
+        stroke_segment_tests: 250_000,
+        disc_tests: 175_000,
+        arc_tests: 175_000,
         composites: 900_000,
     };
 
-    /// Whether this work fits inside `budget` on both axes.
+    /// Whether this work fits inside `budget` on every axis.
     #[must_use]
     pub const fn within(&self, budget: &RenderWork) -> bool {
-        self.coverage_samples <= budget.coverage_samples && self.composites <= budget.composites
+        self.coverage_samples <= budget.coverage_samples
+            && self.polygon_edge_tests <= budget.polygon_edge_tests
+            && self.stroke_segment_tests <= budget.stroke_segment_tests
+            && self.disc_tests <= budget.disc_tests
+            && self.arc_tests <= budget.arc_tests
+            && self.composites <= budget.composites
     }
 }

@@ -50,6 +50,14 @@ pub(crate) struct Surface<'a> {
     /// primitive's bounded region loop). A pure function of scene and
     /// dimensions, so it doubles as the target-independent work metric.
     coverage_samples: u64,
+    /// Integer winding edge tests inside polygon coverage samples.
+    polygon_edge_tests: u64,
+    /// f32 segment-distance tests inside stroke samples (worst case).
+    stroke_segment_tests: u64,
+    /// Center-distance tests inside circle/arc samples.
+    disc_tests: u64,
+    /// Arc angular-membership extras beyond the disc test.
+    arc_tests: u64,
     /// Source-over composites actually applied.
     composites: u64,
 }
@@ -89,6 +97,10 @@ impl<'a> Surface<'a> {
             height: dims.height as i32,
             stride,
             coverage_samples: 0,
+            polygon_edge_tests: 0,
+            stroke_segment_tests: 0,
+            disc_tests: 0,
+            arc_tests: 0,
             composites: 0,
         })
     }
@@ -127,10 +139,37 @@ impl<'a> Surface<'a> {
         self.coverage_samples = self.coverage_samples.wrapping_add(1);
     }
 
-    /// The work performed so far: coverage evaluations and composites.
+    /// Counts the integer winding edge tests of one polygon coverage sample
+    /// (every edge — the count is the worst case the timing model prices).
+    pub(crate) fn count_polygon_edge_tests(&mut self, n: u64) {
+        self.polygon_edge_tests = self.polygon_edge_tests.wrapping_add(n);
+    }
+
+    /// Counts the f32 segment-distance tests of one stroke coverage sample
+    /// (every segment, never an early-exit path).
+    pub(crate) fn count_stroke_segment_tests(&mut self, n: u64) {
+        self.stroke_segment_tests = self.stroke_segment_tests.wrapping_add(n);
+    }
+
+    /// Counts one circle/arc center-distance test.
+    pub(crate) fn count_disc_tests(&mut self, n: u64) {
+        self.disc_tests = self.disc_tests.wrapping_add(n);
+    }
+
+    /// Counts one arc angular-membership evaluation (cap distances, `atan2f`,
+    /// `fmodf`) beyond the sample's disc test.
+    pub(crate) fn count_arc_tests(&mut self, n: u64) {
+        self.arc_tests = self.arc_tests.wrapping_add(n);
+    }
+
+    /// The work performed so far, by cost class.
     pub(crate) fn work(&self) -> crate::report::RenderWork {
         crate::report::RenderWork {
             coverage_samples: self.coverage_samples,
+            polygon_edge_tests: self.polygon_edge_tests,
+            stroke_segment_tests: self.stroke_segment_tests,
+            disc_tests: self.disc_tests,
+            arc_tests: self.arc_tests,
             composites: self.composites,
         }
     }
