@@ -34,6 +34,7 @@ import {
 // stays on the JS length-delimited reader.
 import { decodeVideoFrameV2, decodeDatagramEnvelope } from "./instrument-runtime.js";
 import { VideoIdentityTracker } from "./video-identity.js";
+import { H264CanvasDecoder, H264DecoderRegistry, FOURCC_H264 } from "./video-h264.js";
 import { loadInstruments, PANEL } from "./instruments.js";
 import {
   coverInstrumentFailures,
@@ -155,6 +156,9 @@ function retireSessionPresentation(phase) {
   // associate a video frame against a stale snapshot from the old one.
   snapshotHistory.reset();
   turnDerivation.reset();
+  // Close every H.264 decoder so none outlives the session that owned it; a
+  // reconnect rebuilds them bound to the new session token.
+  h264Registry.closeAll();
   setTelemetrySessionState(els, phase);
 }
 
@@ -464,9 +468,9 @@ function dispatchAuthorityStream(body, token) {
 }
 
 // The source_id (0 = onboard FPV, 1 = chase) routes a frame to its canvas. An
-// unknown source_id or an unknown FourCC is counted and logged, never a hard
-// failure, so a host streaming a source or codec this viewer lacks degrades
-// gracefully. "MJPG" paints via createImageBitmap.
+// unknown source_id is counted and logged, never a hard failure, so a host
+// streaming a source this viewer lacks degrades gracefully. Codec dispatch is
+// separate: "MJPG" paints via createImageBitmap; "H264" routes to WebCodecs.
 const FOURCC_MJPEG = "MJPG";
 const SOURCE_FPV = 0;
 const SOURCE_CHASE = 1;
@@ -474,6 +478,18 @@ const VIDEO_TARGETS = {
   [SOURCE_FPV]: { canvas: els.canvas, ctx },
   [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
 };
+
+// Per-source H.264 decoders, each bound to the transport session that built it
+// (H264DecoderRegistry owns that lifetime — see video-h264.js). A source that
+// only ever carries MJPEG never constructs one. The decoder's output callback
+// tests its own session's liveness, so a reconnect's fresh decoder supersedes
+// any retired one.
+const h264Registry = new H264DecoderRegistry((target, token) =>
+  new H264CanvasDecoder(target, {
+    log: (message) => log(message),
+    isActive: () => transportSessions.isActive(token),
+  }),
+);
 
 /** Decodes one MJPEG payload and blits it to `target`, resizing its canvas to
  *  the frame. Session-token checked around the async decode so a frame decoded
@@ -500,6 +516,10 @@ async function paintJpeg(payload, target, token) {
 async function paintByCodec(fourcc, payload, sourceId, target, token) {
   if (fourcc === FOURCC_MJPEG) {
     await paintJpeg(payload, target, token);
+    return;
+  }
+  if (fourcc === FOURCC_H264) {
+    h264Registry.for(sourceId, target, token).decode(payload);
     return;
   }
   state.skippedVideoFrames += 1;
@@ -591,6 +611,9 @@ async function renderVideoFrameV2(body, token) {
   }
   if (admit.discontinuity) {
     log(`video source ${meta.sourceId} capture discontinuity: fresh epoch/incarnation/calibration`);
+    // A discontinuity is a GOP boundary an H.264 decoder cannot span; drop this
+    // source's decoder so the next keyframe reconfigures a fresh one (MJPEG: no-op).
+    h264Registry.reset(meta.sourceId);
   }
   state.lastAssociation = association;
   if (!association.ready) {

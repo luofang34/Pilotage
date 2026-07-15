@@ -162,6 +162,9 @@ jobs:
         # contract; this loads the real wasm artifact built above.
         run: node clients/web/wire-wasm.test.mjs
 
+      - name: browser H.264 decode lifecycle + Annex-B fixture (REN)
+        run: node clients/web/video-h264.test.mjs
+
       - name: browser snapshot-association tests (HUD-01)
         run: node clients/web/snapshot-association.test.mjs
 
