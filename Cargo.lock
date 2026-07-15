@@ -1197,6 +1197,7 @@ dependencies = [
  "proptest",
  "prost",
  "prost-build",
+ "sha2 0.10.9",
  "thiserror",
 ]
 

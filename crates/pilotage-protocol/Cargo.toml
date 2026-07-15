@@ -17,3 +17,6 @@ prost-build = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+# Direct version rather than `workspace = true`: the fixture-provenance digest
+# must resolve on this lane alone, independent of other lanes' dep tables.
+sha2 = "0.10.9"

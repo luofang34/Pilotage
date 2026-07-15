@@ -1,22 +1,13 @@
-// Tests for the H.264 Annex-B classification helpers, the WebCodecs decoder
-// lifecycle, and the per-source decoder registry that binds a decoder to its
-// transport session. Classification is pure and is also run over a recorded
-// real Annex-B fixture. The decoder and registry are exercised with an injected
-// fake VideoDecoder, so session ownership (replacement, discontinuity reset,
-// teardown), delta-before-keyframe gating, configuration change, the decode and
-// async-error failure paths, and frame close are all host-runnable without a
-// browser. WebCodecs itself needs a browser, so it is not decoded here.
+// Tests for the WebCodecs decode SESSION layer: decoder lifecycle, the
+// per-source decoder registry that binds a decoder to its transport session,
+// and every failure path (configure throw, decode throw, async decoder error,
+// absent WebCodecs, undecodable keyframe). What a chunk MEANS is classified by
+// the shared Rust wasm export; here a fake classifier is injected so the
+// session logic is exercised in isolation — the classification itself is
+// pinned by the Rust unit tests (pilotage-protocol::h264, over synthetic NALs
+// and the recorded Annex-B fixture) and by the wasm conformance suite.
 
-import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import {
-  forEachNalType,
-  isKeyframe,
-  hasParameterSets,
-  avcCodecString,
-  H264CanvasDecoder,
-  H264DecoderRegistry,
-} from "./video-h264.js";
+import { H264CanvasDecoder, H264DecoderRegistry } from "./video-h264.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -28,44 +19,24 @@ function check(name, cond) {
   }
 }
 
-// nal(type, ...body) with a 4-byte start code; sps() carries profile/constraint/level.
-function nal(type, ...body) {
-  return [0, 0, 0, 1, type & 0x1f, ...body];
-}
-function sps(profile, constraint, level) {
-  return nal(7, profile, constraint, level);
-}
-
-// A keyframe access unit: SPS + PPS + IDR slice.
-{
-  const au = new Uint8Array([...sps(0x42, 0xe0, 0x1e), ...nal(8), ...nal(5, 9, 9, 9)]);
-  const types = [];
-  forEachNalType(au, (t) => types.push(t));
-  check("iterates every NAL type in order", types.join(",") === "7,8,5");
-  check("IDR slice marks a keyframe", isKeyframe(au) === true);
-  check("codec string is avc1 from the SPS bytes", avcCodecString(au) === "avc1.42e01e");
-}
-
-// A delta access unit: a non-IDR slice, no SPS.
-{
-  const au = new Uint8Array(nal(1, 4, 4));
-  check("non-IDR access unit is not a keyframe", isKeyframe(au) === false);
-  check("no SPS yields no codec string", avcCodecString(au) === null);
-}
-
-// The 3-byte start code (0x000001) is recognized as well as the 4-byte one.
-{
-  const au = new Uint8Array([0, 0, 1, 5, 1, 2, 3]);
-  check("3-byte start code is recognized", isKeyframe(au) === true);
-}
-
-// Garbage without any start code yields no NAL units (fail closed).
-{
-  const au = new Uint8Array([9, 9, 9, 9, 9]);
-  let count = 0;
-  forEachNalType(au, () => (count += 1));
-  check("no start code yields no NAL units", count === 0);
-  check("garbage is not a keyframe", isKeyframe(au) === false);
+// ---- injected classifier ----------------------------------------------------
+// Payloads are tagged by their first byte; the fake classifier maps the tag to
+// a classification in the wasm export's exact result vocabulary.
+const KEYFRAME_A = new Uint8Array([1, 0xaa]);
+const KEYFRAME_B = new Uint8Array([2, 0xbb]);
+const DELTA = new Uint8Array([3, 0xcc]);
+const UNDECODABLE = new Uint8Array([9, 0xdd]);
+function fakeClassify(payload) {
+  switch (payload[0]) {
+    case 1:
+      return { kind: "keyframe", codec: "avc1.42e01e", reason: null };
+    case 2:
+      return { kind: "keyframe", codec: "avc1.640028", reason: null };
+    case 9:
+      return { kind: "undecodable-keyframe", codec: null, reason: "missing in-band PPS" };
+    default:
+      return { kind: "delta", codec: null, reason: null };
+  }
 }
 
 // ---- decoder lifecycle with an injected fake VideoDecoder -------------------
@@ -116,25 +87,23 @@ function makeDecoderCtor(opts = {}) {
   return { ctor, instances };
 }
 
-const keyframeAU = new Uint8Array([...sps(0x42, 0xe0, 0x1e), ...nal(8), ...nal(5, 1, 2, 3)]);
-const keyframe2AU = new Uint8Array([...sps(0x64, 0x00, 0x28), ...nal(8), ...nal(5, 4, 5, 6)]);
-const deltaAU = new Uint8Array(nal(1, 7, 7));
-
 function decoderOptions(overrides) {
   return {
     VideoDecoder: overrides.VideoDecoder,
     EncodedVideoChunk: makeChunkCtor(),
+    classify: overrides.classify ?? fakeClassify,
     log: overrides.log ?? (() => {}),
     isActive: overrides.isActive ?? (() => true),
   };
 }
 
-// Initial keyframe: configures from the SPS, decodes, paints, and closes the frame.
+// Initial keyframe: configures from the classified codec, decodes, paints, and
+// closes the frame.
 {
   const { target, draws } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor }));
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   check("initial keyframe configures the decoder", instances.length === 1 && instances[0].config.codec === "avc1.42e01e");
   check("initial keyframe decodes a key chunk", instances[0].decodes.length === 1 && instances[0].decodes[0].type === "key");
   check("initial keyframe paints one frame", draws.length === 1);
@@ -146,7 +115,7 @@ function decoderOptions(overrides) {
   const { target, draws } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor }));
-  dec.decode(deltaAU);
+  dec.decode(DELTA);
   check("delta before keyframe builds no decoder", instances.length === 0);
   check("delta before keyframe paints nothing", draws.length === 0);
 }
@@ -157,19 +126,19 @@ function decoderOptions(overrides) {
   const { target, draws } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, isActive: () => false }));
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   check("retired session paints nothing", draws.length === 0);
   check("retired session still closes the decoded frame", instances[0].decodes.length === 1);
 }
 
-// A keyframe with a new SPS reconfigures: the old decoder is closed and a new
-// one built for the new codec string.
+// A keyframe with a new codec string reconfigures: the old decoder is closed
+// and a new one built for the new codec.
 {
   const { target } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor }));
-  dec.decode(keyframeAU);
-  dec.decode(keyframe2AU);
+  dec.decode(KEYFRAME_A);
+  dec.decode(KEYFRAME_B);
   check("config change closes the first decoder", instances[0].closed === true);
   check("config change builds a second decoder for the new codec", instances.length === 2 && instances[1].config.codec === "avc1.640028");
 }
@@ -179,7 +148,7 @@ function decoderOptions(overrides) {
   const { target } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor }));
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   dec.close();
   check("close() closes the underlying decoder", instances[0].closed === true);
 }
@@ -191,12 +160,12 @@ function decoderOptions(overrides) {
   const { ctor } = makeDecoderCtor({ configureThrows: true });
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   check("configure failure logs a typed unavailable reason", logs.some((m) => /unavailable/.test(m)));
   check("configure failure marks the decoder failed", dec.failed === true);
   check("configure failure paints a fail-visible marker", draws.length === 0 && target.canvas.width > 0);
   const before = logs.length;
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   check("a failed decoder drops later frames without re-logging", logs.length === before);
 }
 
@@ -205,22 +174,20 @@ function decoderOptions(overrides) {
   const { target } = makeTarget();
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: undefined, log: (m) => logs.push(m) }));
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   check("absent WebCodecs fails visible with a typed reason", dec.failed === true && logs.some((m) => /unavailable/.test(m)));
 }
 
-// A keyframe with an SPS but no PPS is not decodable: it fails visible rather
-// than configuring a decoder that would stall for want of slice parameters.
+// An undecodable keyframe (the classifier's typed fault, e.g. a missing PPS)
+// fails visible rather than configuring a decoder that would stall.
 {
   const { target } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const logs = [];
-  const noPps = new Uint8Array([...sps(0x42, 0xe0, 0x1e), ...nal(5, 1, 2, 3)]);
-  check("hasParameterSets is false without a PPS", hasParameterSets(noPps) === false);
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
-  dec.decode(noPps);
-  check("keyframe without PPS builds no decoder", instances.length === 0);
-  check("keyframe without PPS fails visible with a typed SPS/PPS reason", dec.failed === true && logs.some((m) => /SPS\/PPS/.test(m)));
+  dec.decode(UNDECODABLE);
+  check("undecodable keyframe builds no decoder", instances.length === 0);
+  check("undecodable keyframe fails visible with the typed reason", dec.failed === true && logs.some((m) => /missing in-band PPS/.test(m)));
 }
 
 // A decode() throw (the synchronous WebCodecs decode failure path) fails visible.
@@ -229,7 +196,7 @@ function decoderOptions(overrides) {
   const { ctor, instances } = makeDecoderCtor({ decodeThrows: true });
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
-  dec.decode(keyframeAU);
+  dec.decode(KEYFRAME_A);
   check("decode throw is caught (configure succeeded)", instances.length === 1 && instances[0].config !== null);
   check("decode throw fails visible with a typed reason", dec.failed === true && logs.some((m) => /decode failed/.test(m)));
 }
@@ -241,7 +208,7 @@ function decoderOptions(overrides) {
   const { ctor, instances } = makeDecoderCtor();
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
-  dec.decode(keyframeAU); // configures; captures the decoder's error callback
+  dec.decode(KEYFRAME_A); // configures; captures the decoder's error callback
   instances[0].error(new Error("hardware reset"));
   check("async decoder error fails visible with a typed reason", dec.failed === true && logs.some((m) => /decoder error/.test(m)));
   check("async decoder error closes the decoder", instances[0].closed === true);
@@ -313,29 +280,14 @@ const targetA = {};
     new H264CanvasDecoder(tgt, decoderOptions({ VideoDecoder: makeDecoderCtor().ctor, isActive: () => liveToken === token })),
   );
   const first = registry.for(0, target, T1);
-  first.decode(keyframeAU);
+  first.decode(KEYFRAME_A);
   check("live session paints", draws.length === 1);
   liveToken = T2; // session replaced
   const second = registry.for(0, target, T2);
   check("session replacement supersedes the retired decoder", second !== first);
-  first.decode(keyframeAU); // a stale callback path: retired token must not paint
+  first.decode(KEYFRAME_A); // a stale callback path: retired token must not paint
   check("retired-token decoder no longer paints", draws.length === 1);
 }
 
-// ---- real recorded Annex-B fixture -----------------------------------------
-
-{
-  const fixtureUrl = new URL("./fixtures/h264-annexb-baseline.h264", import.meta.url);
-  const bytes = new Uint8Array(readFileSync(fixtureUrl));
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  const PINNED = "84d843b4334d9a5a2aec482d0a56f4fb60ce450a5c87b6f8414eb9d3a39fe6c7";
-  check("fixture matches its pinned SHA-256 (provenance intact)", digest === PINNED);
-  const types = [];
-  forEachNalType(bytes, (t) => types.push(t));
-  check("fixture leads with SPS(7) and PPS(8)", types[0] === 7 && types.includes(8));
-  check("fixture is classified as a keyframe with both parameter sets", isKeyframe(bytes) && hasParameterSets(bytes));
-  check("fixture config extraction yields a valid avc1 codec string", /^avc1\.[0-9a-f]{6}$/.test(avcCodecString(bytes) ?? ""));
-}
-
-console.log(failures === 0 ? "\nall H.264 classification + lifecycle + registry + fixture checks passed" : `\n${failures} check(s) failed`);
+console.log(failures === 0 ? "\nall H.264 session-layer + registry checks passed" : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

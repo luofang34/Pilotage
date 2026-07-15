@@ -1,97 +1,25 @@
-// H.264 (Annex-B) decode groundwork for the viewer, behind the same capture
-// identity gate as MJPEG (ADR-0016 codec FourCC dispatch). The host does not
-// emit H.264 yet; this is the decode side of that path so a host that adopts it
-// renders without a viewer change, and a browser lacking WebCodecs (or the
-// stream's profile) fails visible with a typed reason rather than a blank
-// canvas.
+// H.264 (Annex-B) decode session layer for the viewer, behind the same
+// capture identity gate as MJPEG (ADR-0016 codec FourCC dispatch). The host
+// does not emit H.264 yet; this is the decode side of that path so a host
+// that adopts it renders without a viewer change, and a browser lacking
+// WebCodecs (or the stream's profile) fails visible with a typed reason
+// rather than a blank canvas.
 //
-// The bitstream is decoded by the browser's WebCodecs VideoDecoder, not by hand
-// in JS: this module only classifies Annex-B NAL units (to mark keyframes and
-// derive the decoder config), feeds chunks, and blits the decoded frames — the
-// transport/paint role the viewer keeps. Decoder ownership is bound to the
-// transport session that created it (`isActive`); the caller closes and
-// recreates it on session replacement, disconnect, capture discontinuity, or an
-// in-band codec-config change, so a callback from a retired session can never
-// govern a live one.
+// The bitstream is decoded by the browser's WebCodecs VideoDecoder, and what
+// a chunk MEANS (keyframe, in-band SPS/PPS, codec string) is classified by
+// the shared Rust wasm export `classifyH264Chunk` — the same
+// pilotage_protocol::h264 definitions every consumer uses, so NAL-structure
+// rules can never drift into hand-written JS. This module keeps only the
+// platform-API session layer: decoder ownership bound to the transport
+// session that created it (`isActive`), configure/feed, and paint; the
+// caller closes and recreates a decoder on session replacement, disconnect,
+// capture discontinuity, or an in-band codec-config change, so a callback
+// from a retired session can never govern a live one.
+
+import { classifyH264Chunk } from "./instrument-runtime.js";
 
 /** FourCC the host tags an H.264 Annex-B video body with (ADR-0016). */
 export const FOURCC_H264 = "H264";
-
-// H.264 NAL unit types read from the byte after each Annex-B start code
-// (nal_unit_type = byte & 0x1F): 5 = IDR slice (keyframe), 7 = SPS, 8 = PPS.
-const NAL_IDR = 5;
-const NAL_SPS = 7;
-const NAL_PPS = 8;
-
-/**
- * Iterates the `nal_unit_type` of every NAL unit in an Annex-B buffer,
- * invoking `onNal(type, bodyOffset)` for each. Recognizes both the 3-byte
- * (0x000001) and 4-byte (0x00000001) start codes. Malformed input simply
- * yields no NAL callbacks — the caller then treats the access unit as
- * undecodable (fail closed).
- */
-export function forEachNalType(bytes, onNal) {
-  let i = 0;
-  const n = bytes.length;
-  while (i + 3 <= n) {
-    const isStart3 = bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1;
-    const isStart4 =
-      i + 4 <= n && bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 0 && bytes[i + 3] === 1;
-    if (isStart4) {
-      const at = i + 4;
-      if (at < n) onNal(bytes[at] & 0x1f, at);
-      i = at + 1;
-    } else if (isStart3) {
-      const at = i + 3;
-      if (at < n) onNal(bytes[at] & 0x1f, at);
-      i = at + 1;
-    } else {
-      i += 1;
-    }
-  }
-}
-
-/** True when the access unit carries an IDR slice, i.e. a keyframe. An IDR
- *  slice alone is not decodable without its parameter sets; see
- *  [`hasParameterSets`]. */
-export function isKeyframe(bytes) {
-  let key = false;
-  forEachNalType(bytes, (type) => {
-    if (type === NAL_IDR) key = true;
-  });
-  return key;
-}
-
-/** True when the access unit carries BOTH parameter sets (SPS and PPS)
- *  in-band. A keyframe configures a decoder only when both are present:
- *  the SPS names the profile/level and the PPS the slice parameters, and
- *  WebCodecs cannot decode an Annex-B keyframe missing either. */
-export function hasParameterSets(bytes) {
-  let sps = false;
-  let pps = false;
-  forEachNalType(bytes, (type) => {
-    if (type === NAL_SPS) sps = true;
-    if (type === NAL_PPS) pps = true;
-  });
-  return sps && pps;
-}
-
-/**
- * The WebCodecs codec string (`avc1.PPCCLL`) for the access unit's SPS, or
- * `null` if it carries none. `PP`/`CC`/`LL` are the SPS profile_idc,
- * constraint flags, and level_idc — the three bytes after the SPS NAL header —
- * which is exactly what VideoDecoder.configure expects to select a profile.
- */
-export function avcCodecString(bytes) {
-  let codec = null;
-  forEachNalType(bytes, (type, at) => {
-    if (type !== NAL_SPS || codec !== null) return;
-    if (at + 3 >= bytes.length) return;
-    const hex = (v) => v.toString(16).padStart(2, "0");
-    codec = `avc1.${hex(bytes[at + 1])}${hex(bytes[at + 2])}${hex(bytes[at + 3])}`;
-  });
-  return codec;
-}
 
 /**
  * Decodes one source's H.264 Annex-B stream to a canvas via WebCodecs. Bound at
@@ -105,7 +33,8 @@ export function avcCodecString(bytes) {
  * leaves a marker on the canvas, and stops — never throwing into the frame path.
  *
  * `options`: `isActive` (owning session's liveness, default always-live),
- * `log` (diagnostics sink), and `VideoDecoder`/`EncodedVideoChunk` (injectable
+ * `log` (diagnostics sink), `classify` (chunk classifier; defaults to the
+ * shared wasm export), and `VideoDecoder`/`EncodedVideoChunk` (injectable
  * for tests; default to the globals).
  */
 export class H264CanvasDecoder {
@@ -118,6 +47,7 @@ export class H264CanvasDecoder {
     this.EncodedChunkCtor =
       options.EncodedVideoChunk ??
       (typeof EncodedVideoChunk !== "undefined" ? EncodedVideoChunk : undefined);
+    this.classify = options.classify ?? classifyH264Chunk;
     this.decoder = null;
     this.codecString = null;
     this.configured = false;
@@ -133,23 +63,18 @@ export class H264CanvasDecoder {
       this.fail("WebCodecs VideoDecoder unavailable in this browser");
       return;
     }
-    const keyframe = isKeyframe(payload);
-    if (keyframe) {
-      // A decodable keyframe carries both parameter sets in-band; require SPS
-      // and PPS, and (re)configure when the SPS-derived codec string changes so
-      // an in-band configuration change is honored.
-      if (!hasParameterSets(payload)) {
-        this.fail("H.264 keyframe missing in-band SPS/PPS; cannot configure decoder");
-        return;
-      }
-      const codec = avcCodecString(payload);
-      if (!codec) {
-        this.fail("H.264 keyframe carries no SPS; cannot configure decoder");
-        return;
-      }
-      if (codec !== this.codecString && !this.configure(codec)) {
-        return;
-      }
+    const cls = this.classify(payload);
+    if (cls.kind === "undecodable-keyframe") {
+      // A keyframe that cannot configure a decoder (missing SPS/PPS, or an
+      // SPS too short to name a profile) fails visible with the typed reason.
+      this.fail(`H.264 keyframe cannot configure a decoder: ${cls.reason}`);
+      return;
+    }
+    const keyframe = cls.kind === "keyframe";
+    // (Re)configure when a keyframe's SPS-derived codec string changes, so an
+    // in-band configuration change is honored.
+    if (keyframe && cls.codec !== this.codecString && !this.configure(cls.codec)) {
+      return;
     }
     if (!this.configured) return; // Cannot start mid-GOP; wait for a keyframe.
     this.timestamp += 1;
