@@ -98,10 +98,12 @@ jobs:
 
       - name: target timing gate (REN-04)
         # No display hardware is selected: the USB CDC scan documents that no
-        # target is connected, and the WCET gate prices the counted work
-        # budget with the conservative model against the recorded frame
-        # deadline. The artifact drift guard keeps the committed timing
-        # record equal to the shipped model.
+        # target is connected, and the envelope gate prices the per-class
+        # work budget with the conservative model against the frame deadline
+        # derived from the SIM display liveness requirement. The artifact
+        # drift guard keeps the committed timing record equal to the shipped
+        # model. The envelope is provisional — not a WCET claim — until a
+        # measured target binds firmware, clock, memory, and compiler state.
         run: |
           bash scripts/detect-target.sh
           cargo test -p pilotage-instrument-raster timing

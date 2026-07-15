@@ -1,55 +1,96 @@
-//! The CI timing gate and the WCET pricing invariants.
+//! The CI envelope gate and the pricing invariants.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{CONSERVATIVE_CORTEX_M7_CLASS, CycleProvenance, TargetTimingModel};
 use crate::report::RenderWork;
 
 #[test]
-fn budget_wcet_meets_the_frame_deadline() {
-    // THE timing gate: the engineering work budget, priced by the recorded
-    // model, must fit the recorded frame deadline. Growing the budget or the
-    // cycle bounds past the deadline is a deterministic CI failure that
-    // forces a reasoned artifact update, never a silent regression.
+fn budget_envelope_fits_the_display_derived_deadline() {
+    // THE timing gate: the per-class work budget, priced by the recorded
+    // model, must fit the frame deadline derived from the SIM display
+    // liveness requirement. Growing a budget or a cycle bound past it is a
+    // deterministic CI failure that forces a reasoned artifact update,
+    // never a silent regression.
     let model = CONSERVATIVE_CORTEX_M7_CLASS;
     assert!(
-        model.meets_deadline(&RenderWork::BUDGET),
-        "budget WCET {} us exceeds the {} us frame deadline",
-        model.wcet_us(&RenderWork::BUDGET),
+        model.within_deadline(&RenderWork::BUDGET),
+        "budget envelope {} us exceeds the {} us frame deadline",
+        model.envelope_us(&RenderWork::BUDGET),
         model.frame_deadline_us,
     );
 }
 
 #[test]
-fn wcet_is_monotonic_in_the_counted_work() {
+fn the_envelope_is_monotonic_in_every_cost_class() {
     let model = CONSERVATIVE_CORTEX_M7_CLASS;
     let base = RenderWork {
         coverage_samples: 10,
-        edge_tests: 100,
+        polygon_edge_tests: 100,
+        stroke_segment_tests: 100,
+        disc_tests: 100,
+        arc_tests: 100,
         composites: 50,
     };
-    let more_edges = RenderWork {
-        edge_tests: 101,
-        ..base
-    };
-    let more_composites = RenderWork {
-        composites: 51,
-        ..base
-    };
-    assert!(model.wcet_cycles(&more_edges) > model.wcet_cycles(&base));
-    assert!(model.wcet_cycles(&more_composites) > model.wcet_cycles(&base));
+    let bumped = [
+        RenderWork {
+            polygon_edge_tests: 101,
+            ..base
+        },
+        RenderWork {
+            stroke_segment_tests: 101,
+            ..base
+        },
+        RenderWork {
+            disc_tests: 101,
+            ..base
+        },
+        RenderWork {
+            arc_tests: 101,
+            ..base
+        },
+        RenderWork {
+            composites: 51,
+            ..base
+        },
+    ];
+    for work in bumped {
+        assert!(model.envelope_cycles(&work) > model.envelope_cycles(&base));
+    }
 }
 
 #[test]
-fn wcet_saturates_instead_of_wrapping() {
-    // An absurd count must never wrap into a small, plausible-looking WCET.
+fn an_arc_test_is_priced_dearer_than_a_disc_test() {
+    // The review counterexample: an arc sample performs cap distances,
+    // atan2f, and fmodf beyond its disc test, so pricing an arc like a bare
+    // disc under-counts. The model must keep the arc class strictly dearer.
+    let model = CONSERVATIVE_CORTEX_M7_CLASS;
+    assert!(model.cycles_per_arc_test > model.cycles_per_disc_test);
+    let disc_only = RenderWork {
+        disc_tests: 1_000,
+        ..RenderWork::default()
+    };
+    let arc_heavy = RenderWork {
+        disc_tests: 1_000,
+        arc_tests: 1_000,
+        ..RenderWork::default()
+    };
+    assert!(model.envelope_cycles(&arc_heavy) > model.envelope_cycles(&disc_only));
+}
+
+#[test]
+fn the_envelope_saturates_instead_of_wrapping() {
+    // An absurd count must never wrap into a small, plausible-looking figure.
     let model = CONSERVATIVE_CORTEX_M7_CLASS;
     let absurd = RenderWork {
         coverage_samples: u64::MAX,
-        edge_tests: u64::MAX,
+        polygon_edge_tests: u64::MAX,
+        stroke_segment_tests: u64::MAX,
+        disc_tests: u64::MAX,
+        arc_tests: u64::MAX,
         composites: u64::MAX,
     };
-    assert_eq!(model.wcet_cycles(&absurd), u64::MAX);
-    assert!(!model.meets_deadline(&absurd));
+    assert_eq!(model.envelope_cycles(&absurd), u64::MAX);
+    assert!(!model.within_deadline(&absurd));
 }
 
 #[test]
@@ -60,14 +101,15 @@ fn a_sub_megahertz_clock_prices_to_the_failing_extreme() {
         cpu_hz: 999_999,
         ..CONSERVATIVE_CORTEX_M7_CLASS
     };
-    assert_eq!(model.wcet_us(&RenderWork::BUDGET), u64::MAX);
-    assert!(!model.meets_deadline(&RenderWork::BUDGET));
+    assert_eq!(model.envelope_us(&RenderWork::BUDGET), u64::MAX);
+    assert!(!model.within_deadline(&RenderWork::BUDGET));
 }
 
 #[test]
 fn the_shipped_model_is_a_conservative_bound_not_a_measurement() {
-    // Until a target is detected over USB CDC and measured, the shipped
-    // model must say so; a measured model carries the firmware identity.
+    // Until a target is detected over USB CDC and measured — with its
+    // firmware/build identity, MCU, clock and memory configuration, compiler
+    // flags, and raw output recorded — the shipped model must say so.
     assert_eq!(
         CONSERVATIVE_CORTEX_M7_CLASS.provenance,
         CycleProvenance::ConservativeBound
@@ -88,7 +130,8 @@ fn artifact_field(text: &str, field: &str) -> std::string::String {
 fn the_timing_artifact_matches_the_shipped_model() {
     // The committed timing artifact is the reviewable record of the model;
     // this guard fails CI when either side drifts, so the recorded bounds,
-    // budget, WCET, and deadline can never disagree with the shipped code.
+    // budgets, envelope, and deadline can never disagree with the shipped
+    // code.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/instruments/evidence-artifacts/timing/target-timing.txt");
     let text =
@@ -98,15 +141,27 @@ fn the_timing_artifact_matches_the_shipped_model() {
     assert_eq!(artifact_field(&text, "target"), model.name);
     assert_eq!(artifact_field(&text, "provenance"), "conservative-bound");
     let numbers = [
-        ("cpu-hz", model.cpu_hz),
-        ("cycles-per-edge-test", model.cycles_per_edge_test),
+        ("assumed-cpu-hz", model.cpu_hz),
+        (
+            "cycles-per-polygon-edge-test",
+            model.cycles_per_polygon_edge_test,
+        ),
+        (
+            "cycles-per-stroke-segment-test",
+            model.cycles_per_stroke_segment_test,
+        ),
+        ("cycles-per-disc-test", model.cycles_per_disc_test),
+        ("cycles-per-arc-test", model.cycles_per_arc_test),
         ("cycles-per-composite", model.cycles_per_composite),
         ("frame-overhead-cycles", model.frame_overhead_cycles),
         ("budget-coverage-samples", budget.coverage_samples),
-        ("budget-edge-tests", budget.edge_tests),
+        ("budget-polygon-edge-tests", budget.polygon_edge_tests),
+        ("budget-stroke-segment-tests", budget.stroke_segment_tests),
+        ("budget-disc-tests", budget.disc_tests),
+        ("budget-arc-tests", budget.arc_tests),
         ("budget-composites", budget.composites),
-        ("wcet-cycles", model.wcet_cycles(&budget)),
-        ("wcet-us", model.wcet_us(&budget)),
+        ("envelope-cycles", model.envelope_cycles(&budget)),
+        ("envelope-us", model.envelope_us(&budget)),
         ("frame-deadline-us", model.frame_deadline_us),
     ];
     for (field, expected) in numbers {

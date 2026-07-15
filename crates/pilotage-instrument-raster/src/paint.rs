@@ -30,7 +30,7 @@ pub(crate) fn fill_polygon(
             surface.count_sample();
             // The winding test always walks every edge, so the priced count
             // is exact, not an upper bound.
-            surface.count_edge_tests(verts.len() as u64);
+            surface.count_polygon_edge_tests(verts.len() as u64);
             let cx = Fx::pixel_center(px).raw();
             if winding_nonzero(verts, cx, cy) {
                 surface.composite(px, py, color);

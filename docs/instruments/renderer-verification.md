@@ -78,20 +78,25 @@ is `panel_fixtures_fit_within_work_budget` (with
 budget is a hard CI failure with instructions to investigate the scene or the
 region loops before raising the constant.
 
-The WCET for a specific target is the counted work multiplied by the target's
-per-operation cycle bound. `RenderWork::edge_tests` counts the priced unit (a
-polygon sample walks every edge; an arc sample tests one disc), and
-`timing::TargetTimingModel` derives the WCET and gates it against a recorded
-frame deadline (`budget_wcet_meets_the_frame_deadline`). No display hardware is
+The per-frame cost for a specific target is the counted work priced per cost
+class. `RenderWork` counts polygon edge tests, stroke segment tests, disc
+tests, arc angular extras (cap distances, `atan2f`, `fmodf` — their own class,
+so an arc sample is never billed as a bare disc test), and composites;
+`timing::TargetTimingModel` derives a **provisional cost envelope** — not a
+WCET claim until per-operation cycles are measured on selected hardware — and
+gates it against the frame deadline derived from the SIM display liveness
+requirement (`PanelHealth` `livenessDeadlineMs` = 1000 ms:
+`budget_envelope_fits_the_display_derived_deadline`). No display hardware is
 selected yet — the USB CDC scan (`scripts/detect-target.sh`) detects a
-connected target rather than asking — so the shipped model is the named
-conservative bound recorded, with its rationale and derived WCET, in
+connected target and attempts an identity handshake rather than asking — so
+the shipped model is the named conservative bound recorded, with its
+assumptions and derivation, in
 `docs/instruments/evidence-artifacts/timing/target-timing.txt`; a drift guard
-keeps that artifact equal to the shipped constants. The recorded deadline is an
-anti-regression envelope for the conservative model, not a display-suitability
-claim; a measured target replaces the bounds and tightens the deadline to the
-display requirement. The browser watchdog (`PanelHealth`, simulator-only)
-latches a stalled panel as `LIVENESS` past its deadline.
+keeps that artifact equal to the shipped constants. A measured model must bind
+the firmware/build identity, MCU, clock and memory configuration, compiler
+flags, and raw output; only then does the envelope become a WCET and the
+deadline a display refresh requirement. The browser watchdog (`PanelHealth`,
+simulator-only) latches a stalled panel as `LIVENESS` past its deadline.
 
 ## The conformance corpus
 

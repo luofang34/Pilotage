@@ -53,16 +53,17 @@
 //!   [`MAX_POLYGON_VERTICES`] per shape, and the scene crate's stack, command,
 //!   and byte budgets. The worst-case frame size is [`WORST_CASE_FRAME_BYTES`].
 //!
-//! # Execution-time measurement
+//! # Execution-time pricing
 //! The renderer is straight-line over the scene and framebuffer with no I/O
-//! and only documented-bounded loops, so a target-independent worst-case
-//! execution time is a sum of bounded step counts. [`RenderWork`] counts
-//! them per frame — coverage samples, worst-case per-edge/segment/disc tests
-//! inside those samples, and composites — and [`timing::TargetTimingModel`]
-//! prices the counts into a WCET gated against a recorded frame deadline.
-//! Until display hardware is selected and measured over USB CDC, the shipped
-//! model is a named conservative bound; the timing artifact records the
-//! bounds, their rationale, and the derived WCET.
+//! and only documented-bounded loops, so its per-frame cost is a sum of
+//! bounded step counts. [`RenderWork`] counts them per cost class — polygon
+//! edge tests, stroke segment tests, disc tests, arc angular extras, and
+//! composites — and [`timing::TargetTimingModel`] prices the counts into a
+//! provisional cost envelope gated against the display-derived frame
+//! deadline. Until a target is detected over USB CDC and measured, the
+//! shipped model is a named conservative bound and the envelope is not a
+//! WCET claim; the timing artifact records the bounds, assumptions, and
+//! derivation.
 
 #![no_std]
 
