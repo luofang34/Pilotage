@@ -131,7 +131,11 @@ impl GzStateShm {
             }
             let metadata = metadata.assume_init();
             let size = u64::try_from(metadata.st_size).unwrap_or(u64::MAX);
-            if size != SHM_SIZE as u64 {
+            // The kernel may round a shm object up to the page size (16 KiB
+            // pages on Apple Silicon report st_size = 16384 for a 216-byte
+            // ftruncate), so only a size too SMALL to hold the state is a
+            // layout mismatch; mapping reads just SHM_SIZE bytes regardless.
+            if size < SHM_SIZE as u64 {
                 libc::close(fd);
                 return Err(AviateAdapterError::ShmSizeMismatch {
                     name,
