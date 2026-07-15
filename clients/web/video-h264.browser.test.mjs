@@ -114,7 +114,9 @@ const chrome = spawn(
     `--user-data-dir=${profile}`,
     origin,
   ],
-  { stdio: "ignore" },
+  // Chrome is a process tree (browser, renderers, crashpad); detach it into
+  // its own process group so teardown can kill the whole tree at once.
+  { stdio: "ignore", detached: true },
 );
 
 const timeout = setTimeout(() => {
@@ -125,13 +127,30 @@ const timeout = setTimeout(() => {
 
 const observed = await result;
 clearTimeout(timeout);
-// Wait for Chrome to actually exit before removing its profile: a kill
-// signal returns immediately while the browser is still writing there.
+// Kill the whole process group and wait for the launcher to exit; helper
+// processes can keep writing to the profile for a moment after that, so
+// removal retries — and a profile that still lingers is a warning, not a
+// verdict: the decode assertions below are the test.
 const exited = new Promise((resolve) => chrome.once("exit", resolve));
-chrome.kill("SIGKILL");
+try {
+  process.kill(-chrome.pid, "SIGKILL");
+} catch {
+  chrome.kill("SIGKILL");
+}
 await exited;
 server.close();
-rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+for (let attempt = 0; ; attempt += 1) {
+  try {
+    rmSync(profile, { recursive: true, force: true });
+    break;
+  } catch (error) {
+    if (attempt >= 20) {
+      console.warn(`leaving temp profile ${profile}: ${error}`);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 
 check("harness ran without throwing", !observed.error);
 if (observed.error) {
