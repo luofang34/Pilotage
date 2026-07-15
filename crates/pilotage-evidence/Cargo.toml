@@ -1,0 +1,24 @@
+[package]
+name = "pilotage-evidence"
+description = "Standard-neutral lifecycle evidence graph and scoped no-orphan gate (ASSURE-01, SIM / NOT FOR FLIGHT engineering tooling; establishes no DO-178C/ISO-26262/ECSS/TSO/certification claim)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+# Direct version rather than `workspace = true`: the content-digest hash must
+# resolve on this lane alone, independent of whether another lane has yet
+# introduced sha2 into the workspace dependency table.
+sha2 = "0.10.9"
+# Git blob identity (`git-blob:<sha1>`) of the test sources a recorded result
+# was produced from — SHA-1 because that is git's object id, not a security
+# boundary; the content it names is separately pinned by sha2 digests.
+sha1 = "0.10.6"
+
+[[bin]]
+name = "evidence-gate"
+path = "src/bin/evidence-gate.rs"

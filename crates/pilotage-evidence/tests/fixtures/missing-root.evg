@@ -1,0 +1,6 @@
+# Negative fixture: the scope names a requirement that is not defined.
+evidence-graph 1
+scope ATT-01
+scope-requirement AIR-GHOST-001
+
+node PFD intended-function

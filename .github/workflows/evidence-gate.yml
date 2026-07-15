@@ -1,0 +1,123 @@
+# ADVISORY / NON-BLOCKING engineering trace gate (ASSURE-01, issue 77).
+#
+# This is a SEPARATE workflow, deliberately NOT part of the required
+# `quality-gates` job in ci.yml. Its check must never be added to the
+# branch-protection required set: a failing evidence trace must not block a
+# merge or fail the main required CI. It runs the scoped no-orphan gate so the
+# trace is observable, and is NOT a certification, compliance, or tool
+# qualification result (SIM / NOT FOR FLIGHT).
+name: Evidence trace gate (advisory)
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  FIXTURES: crates/pilotage-evidence/tests/fixtures
+
+jobs:
+  evidence-trace-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the evidence gate and run its tests
+        run: cargo test -p pilotage-evidence --all-targets
+
+      - name: ATT-01 slice — honest verdict and bidirectional trace
+        # Informational. The slice is structurally traced, resolves both ways,
+        # and its independent review is recorded (rec-att-01), so the expected
+        # verdict is VALID; the hard guard is the crate's own tests (run
+        # above), which assert the same and the green-washing inverses.
+        continue-on-error: true
+        run: >
+          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          --graph docs/instruments/evidence-graph.evg --repo-root . --trace
+
+      - name: ATT-01 slice — resolve selectors against the tree
+        # Informational: selector resolution reads the referenced test files.
+        # A lane those cases point at may not be present on this branch yet, so
+        # a non-resolving selector here is expected and must not redden the job.
+        continue-on-error: true
+        run: >
+          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          --graph docs/instruments/evidence-graph.evg --repo-root .
+          --resolve-selectors
+
+      - name: Negative fixtures must all FAIL the gate
+        run: |
+          set -u
+          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
+          fail=0
+          for f in empty missing-root missing-layer dangling-edge \
+                   unresolved-selector orphan-requirement \
+                   missing-result invalid-exception \
+                   pending-review placeholder-result \
+                   unexecuted-result unbacked-review; do
+            if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
+                --repo-root crates/pilotage-evidence >/dev/null 2>&1; then
+              echo "REGRESSION: $f.evg unexpectedly PASSED the gate"; fail=1
+            else
+              echo "ok: $f.evg correctly failed the gate"
+            fi
+          done
+          exit $fail
+
+      - name: Exception expiry is actually enforced in the gate
+        # The invalid-exception fixture is complete and independently reviewed but
+        # EXPIRED. Past its expiry it must fail; before its expiry the same
+        # exception legitimately applies. This proves the as-of date drives the
+        # outcome and expiry is not silently skipped.
+        run: |
+          set -u
+          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
+          fixture="$FIXTURES/invalid-exception.evg"
+          root=crates/pilotage-evidence
+          if "${bin[@]}" --graph "$fixture" --repo-root "$root" \
+              --as-of 2026-07-14 >/dev/null 2>&1; then
+            echo "REGRESSION: expired exception was not caught as of 2026-07-14"; exit 1
+          fi
+          echo "ok: expired exception fails once past its expiry"
+          if "${bin[@]}" --graph "$fixture" --repo-root "$root" \
+              --as-of 2019-01-01 >/dev/null 2>&1; then
+            echo "ok: the same exception applies before its expiry"
+          else
+            echo "REGRESSION: exception rejected before its expiry date"; exit 1
+          fi
+
+      - name: Filesystem resolution rejects unresolvable evidence
+        # These fixtures are structurally VALID and fail only when the gate
+        # resolves them against the tree: a test selector naming a missing symbol;
+        # an execution-output artifact that is absent, whose content does not hash
+        # to its declared digest, whose parsed run-record fields (including the
+        # run identity) disagree with the result, or which is a source file with
+        # no run-record fields; an artifact path that is absolute, climbs out via
+        # '..', or symlinks outside the evidence root; and a review whose named
+        # record entry is still pending.
+        run: |
+          set -u
+          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
+          fail=0
+          for f in unresolvable-selector-fs unresolvable-artifact \
+                   mismatched-artifact field-mismatch-artifact \
+                   runid-mismatch-artifact absolute-artifact \
+                   traversal-artifact symlink-escape-artifact \
+                   stale-source-artifact selector-not-a-test \
+                   source-as-artifact unresolved-review-entry; do
+            if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
+                --repo-root crates/pilotage-evidence \
+                --resolve-selectors >/dev/null 2>&1; then
+              echo "REGRESSION: $f.evg unexpectedly passed resolution"; fail=1
+            else
+              echo "ok: $f.evg correctly failed resolution"
+            fi
+          done
+          exit $fail

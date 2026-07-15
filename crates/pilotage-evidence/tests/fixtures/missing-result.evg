@@ -1,0 +1,45 @@
+# Negative fixture: a verification case that covers the in-scope requirement has
+# no recorded result. The requirement still reaches the result layer through the
+# other case, so this isolates the missing-result gap from a whole missing layer.
+evidence-graph 1
+scope ATT-01
+scope-requirement AIR-ENV-002
+
+node PFD intended-function
+node FC-ATT-06 hazard
+node AIR-ENV-002 safety-requirement
+node DESIGN-SO3 design
+node IMPL-STEP implementation
+
+node CASE-BAND verification-case
+locator tests/fixtures/sample_tests.rs
+attr test band_matches_reference
+
+node CASE-VERTICAL verification-case
+locator tests/fixtures/sample_tests.rs
+attr test vertical_never_flips
+
+node RESULT-BAND verification-result
+attr command cargo test -p pilotage-instrument-raster
+attr config-digest 8363e9e81d6654506e95051bec48ea32df50ef10
+attr tool-version rustc 1.95.0
+attr source-digest git-blob:c86e9a44ffd131b9bc0e610985ff447628288ed6
+attr artifact tests/fixtures/att01-run-output.txt
+attr output-digest sha256:68f3f7ef347c988e36d958289927da97247fe728b73fd6d2d32adc34aa29f6c2
+attr run-id local:8363e9e81d6654506e95051bec48ea32df50ef10
+attr outcome pass
+node CFG-BASE configuration-item
+node TOOL-CARGO tool
+
+edge FC-ATT-06 derives-from PFD
+edge AIR-ENV-002 mitigates FC-ATT-06
+edge AIR-ENV-002 allocated-to DESIGN-SO3
+edge DESIGN-SO3 implemented-by IMPL-STEP
+edge AIR-ENV-002 verified-by CASE-BAND
+edge AIR-ENV-002 verified-by CASE-VERTICAL
+edge CASE-BAND covers AIR-ENV-002
+edge CASE-VERTICAL covers AIR-ENV-002
+edge RESULT-BAND result-of CASE-BAND
+edge RESULT-BAND covers AIR-ENV-002
+edge RESULT-BAND justified-by CFG-BASE
+edge RESULT-BAND justified-by TOOL-CARGO
