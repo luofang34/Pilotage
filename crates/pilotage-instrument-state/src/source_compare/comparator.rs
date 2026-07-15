@@ -20,7 +20,7 @@ use gating::{
 };
 
 /// Per-source sequence high-water marks, so a replayed or reordered sample
-/// (one whose sequence does not advance) is dropped.
+/// (one whose sequence does not advance in wrapping order) is dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SeqTable {
     entries: [(SourceId, u32); MAX_SOURCES],
@@ -58,6 +58,17 @@ impl SeqTable {
     fn clear(&mut self) {
         self.len = 0;
     }
+}
+
+/// Whether `current` advances past `previous` in wrapping (serial-number)
+/// order: the modular delta must be non-zero and strictly inside the forward
+/// half range. A duplicate (delta 0), a backward or reordered sample, and the
+/// ambiguous exact half-range step (`0x8000_0000`, equally far forward and
+/// backward) are all rejected. Producers count with `wrapping_add(1)`, so
+/// `u32::MAX → 0` is a normal single advance, never a replay.
+fn sequence_advances(previous: u32, current: u32) -> bool {
+    let delta = current.wrapping_sub(previous);
+    delta != 0 && delta < 0x8000_0000
 }
 
 /// Monitors one display function's candidate sources across frames.
@@ -168,7 +179,8 @@ impl SourceComparator {
 
     /// Keeps the samples that can serve as simultaneous valid data: declared
     /// valid, well formed, on the reference epoch, fresh, and advancing in
-    /// sequence. At most one sample per source (the first in slice order).
+    /// wrapping sequence order. At most one sample per source (the first in
+    /// slice order).
     fn collect_usable<M: Comparable>(
         &mut self,
         candidates: &[Candidate<M>],
@@ -190,7 +202,7 @@ impl SourceComparator {
             if self
                 .seq
                 .last(c.source)
-                .is_some_and(|last| c.sequence <= last)
+                .is_some_and(|last| !sequence_advances(last, c.sequence))
             {
                 continue;
             }

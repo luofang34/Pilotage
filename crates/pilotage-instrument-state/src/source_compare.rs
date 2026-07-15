@@ -104,8 +104,9 @@ pub struct Candidate<M> {
     /// When the sample was received, milliseconds on the shared scale.
     /// Drives staleness relative to the step's `now`.
     pub receive_time_ms: u64,
-    /// Per-source monotonically increasing sequence. A sample whose sequence
-    /// does not advance is a replay or reorder and is dropped.
+    /// Per-source wrapping sequence counter. A sample whose sequence does not
+    /// advance in wrapping (serial-number) order is a replay or reorder and
+    /// is dropped; `u32::MAX → 0` is a normal single advance.
     pub sequence: u32,
     /// The source declares the sample valid. A `false` sample is unusable.
     pub valid: bool,
