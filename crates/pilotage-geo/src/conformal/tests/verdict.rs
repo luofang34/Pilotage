@@ -6,13 +6,14 @@
 
 use super::*;
 
+use crate::identity::IntegrityLevel;
 use crate::view::{CalibrationId, CalibrationRef, Projection, ProjectionView};
 use crate::{AvailabilityReason, ConformalPolicyId, ConformalReason, ConformalState, ViewGeometry};
 
-/// Assess with an overridden view and availability (for the structural gates). A
-/// generous policy keeps the sim calibration's static bound within the valid
-/// budget, so the availability verdict — not the error budget — decides.
-fn run_full(bracket: &Bracket, v: &ProjectionView, avail: SvsAvailability) -> ConformalFix {
+/// Assess with an overridden view and availability inputs (for the structural
+/// gates). A generous policy keeps the sim calibration's static bound within the
+/// valid budget, so the derived availability — not the error budget — decides.
+fn run_full(bracket: &Bracket, v: &ProjectionView, avail: AvailabilityInputs) -> ConformalFix {
     assess_conformal(bracket, capture(1_500), v, &geom(), avail, &generous(), &[])
 }
 
@@ -24,7 +25,7 @@ fn run_geom(bracket: &Bracket, g: &ViewGeometry) -> ConformalFix {
         capture(1_500),
         &view(),
         g,
-        SvsAvailability::Available,
+        availability(),
         &sim(),
         &[],
     )
@@ -37,15 +38,7 @@ fn run_path(
     policy: &ConformalPolicy,
     path: &[[f64; 3]],
 ) -> ConformalFix {
-    assess_conformal(
-        bracket,
-        cap,
-        &view(),
-        &geom(),
-        SvsAvailability::Available,
-        policy,
-        path,
-    )
+    assess_conformal(bracket, cap, &view(), &geom(), availability(), policy, path)
 }
 
 #[test]
@@ -223,7 +216,7 @@ fn unreferenced_calibration_is_unavailable() {
     let fix = run_full(
         &steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]),
         &v,
-        SvsAvailability::Available,
+        availability(),
     );
     assert_eq!(
         fix.state,
@@ -242,7 +235,7 @@ fn orthographic_view_is_not_a_conformal_view() {
     let fix = run_full(
         &steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]),
         &v,
-        SvsAvailability::Available,
+        availability(),
     );
     assert_eq!(
         fix.state,
@@ -251,13 +244,17 @@ fn orthographic_view_is_not_a_conformal_view() {
 }
 
 #[test]
-fn unavailable_scene_delegates_the_availability_reason() {
-    let avail = SvsAvailability::Unavailable(AvailabilityReason::Position);
-    let fix = run_full(
-        &steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]),
-        &view(),
-        avail,
-    );
+fn unavailable_scene_derived_from_a_sample_delegates_the_availability_reason() {
+    // The availability is DERIVED from the samples, not asserted: an untrusted
+    // position integrity in an endpoint makes the derived scene Unavailable, and
+    // the conformal verdict delegates that reason.
+    let mut older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1);
+    older.position.stamp.integrity = IntegrityLevel::Untrusted;
+    let b = Bracket {
+        older,
+        newer: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 2),
+    };
+    let fix = run_full(&b, &view(), availability());
     assert_eq!(
         fix.state,
         ConformalState::Unavailable(ConformalReason::Availability(AvailabilityReason::Position))
@@ -267,7 +264,15 @@ fn unavailable_scene_delegates_the_availability_reason() {
 
 #[test]
 fn degraded_scene_marks_the_cues_limited() {
-    let avail = SvsAvailability::Degraded(AvailabilityReason::Database);
+    // A producer-stated external input degrades: the derived scene is Degraded and
+    // the cues are drawn but marked reduced.
+    let avail = AvailabilityInputs {
+        external: ExternalHealth {
+            database: InputHealth::Degraded,
+            ..healthy_external()
+        },
+        profile: AvailabilityProfile::simulator(),
+    };
     let fix = run_full(
         &steady(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3]),
         &view(),
@@ -284,17 +289,21 @@ fn degraded_scene_marks_the_cues_limited() {
 }
 
 #[test]
-fn fix_identity_ties_video_capture_time_to_the_overlay_snapshot() {
+fn fix_identity_retains_both_bracket_endpoints_and_the_capture_time() {
+    let older = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 11);
     let newer = sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 2_000, 77);
-    let b = Bracket {
-        older: sample(Quat::IDENTITY, [50.0, 0.0, 0.0], [0.0; 3], 1_000, 1),
-        newer,
-    };
+    let b = Bracket { older, newer };
     let cap = capture(1_800);
     let fix = run(&b, cap, &sim());
-    // Overlay identity = the newest coherent snapshot's; video identity = the
-    // capture epoch. They are one FixIdentity, reusing the existing types.
-    assert_eq!(fix.identity.snapshot, newer.attitude.stamp.snapshot);
+    // The interpolation reads BOTH endpoints, so both snapshot identities are
+    // retained — an interpolated fix belongs to no single snapshot. Video identity
+    // is the capture epoch; overlay identity is the pair of coherent snapshots.
+    assert_eq!(fix.identity.older_snapshot, older.attitude.stamp.snapshot);
+    assert_eq!(fix.identity.newer_snapshot, newer.attitude.stamp.snapshot);
+    assert_ne!(
+        fix.identity.older_snapshot, fix.identity.newer_snapshot,
+        "the two endpoints are distinct snapshots, both kept"
+    );
     assert_eq!(
         fix.identity.source_incarnation,
         newer.attitude.stamp.incarnation
@@ -403,7 +412,7 @@ fn geometry_from_a_mismatched_calibration_is_not_valid() {
         calibration_id: CalibrationId(0x9999_0000),
         content_hash: calibration().content_hash,
     };
-    let fix = run_full(&bracket, &wrong_id, SvsAvailability::Available);
+    let fix = run_full(&bracket, &wrong_id, availability());
     assert_ne!(fix.state, ConformalState::Valid);
     assert_eq!(
         fix.state,
@@ -416,7 +425,7 @@ fn geometry_from_a_mismatched_calibration_is_not_valid() {
     let mut wrong_hash = view();
     wrong_hash.calibration.content_hash = [9; 32];
     assert_eq!(
-        run_full(&bracket, &wrong_hash, SvsAvailability::Available).state,
+        run_full(&bracket, &wrong_hash, availability()).state,
         ConformalState::Unavailable(ConformalReason::CalibrationMismatch)
     );
 }

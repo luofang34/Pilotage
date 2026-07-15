@@ -32,6 +32,14 @@ pub struct AlignmentErrorBound {
     /// Position error as an angular parallax bound at the policy reference range:
     /// `position_sigma / reference_range`.
     pub position_rad: f64,
+    /// Velocity error as an angular parallax bound: the velocity 1-sigma
+    /// propagated over the total timing uncertainty into a position error, then
+    /// divided by the reference range — `velocity_sigma × (clock + latency +
+    /// extrapolation) / reference_range`. The state is bridged across those timing
+    /// gaps by the velocity, so an uncertain velocity leaves the extrapolated
+    /// position (and thus the near-field registration) uncertain. This is the
+    /// velocity-accuracy analog of [`Self::position_rad`].
+    pub velocity_rad: f64,
     /// Clock uncertainty times the registration sensitivity: the capture-clock
     /// mapping error bound × `(angular_rate + speed / reference_range)`.
     pub clock_rad: f64,
@@ -95,6 +103,11 @@ pub(crate) fn compute(
     let calibration_rad = calibration_bound_rad;
     let attitude_quality_rad = interp.attitude_sigma_rad;
     let position_rad = interp.position_sigma_m / range;
+    // The velocity bridges the state across the timing gaps (clock, latency,
+    // extrapolation), so a velocity 1-sigma leaves the extrapolated position
+    // uncertain by `velocity_sigma × timing`; as a parallax angle at the
+    // reference range that is the velocity-accuracy contribution.
+    let velocity_rad = interp.velocity_sigma_mps * (clock_s + latency_s + extrap_s) / range;
     let clock_rad = clock_s * sensitivity;
     let latency_rad = latency_s * sensitivity;
     let extrapolation_rad = extrap_s * sensitivity;
@@ -103,12 +116,14 @@ pub(crate) fn compute(
         calibration_rad,
         attitude_quality_rad,
         position_rad,
+        velocity_rad,
         clock_rad,
         latency_rad,
         extrapolation_rad,
         total_rad: calibration_rad
             + attitude_quality_rad
             + position_rad
+            + velocity_rad
             + clock_rad
             + latency_rad
             + extrapolation_rad,

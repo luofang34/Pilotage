@@ -47,6 +47,15 @@ pub enum ConformalReason {
     /// The two bracket samples are not one continuous source stream, or the
     /// bracket is out of time order (a reordered or restarted timeline).
     StreamDiscontinuity,
+    /// A bracket endpoint's attitude quaternion is not a unit rotation (e.g. a
+    /// zero or denormalized quaternion), so it cannot orient the projection.
+    AttitudeNotARotation,
+    /// A bracket endpoint's velocity or body rate is not in its required frame
+    /// (velocity must be NED, body rate body-frame), so it cannot be projected.
+    KinematicFrame,
+    /// A bracket endpoint's velocity or body rate does not share the pose's
+    /// coherent snapshot, so the kinematics are not one trustworthy fix.
+    KinematicProvenance,
     /// Attitude and position are co-timed worse than the policy allows.
     ExcessiveSkew,
     /// The capture time falls further outside the bracket than the policy allows.

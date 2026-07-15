@@ -35,6 +35,9 @@ pub(crate) struct Interpolated {
     /// The conservative (worst-of-bracket) horizontal position 1-sigma accuracy,
     /// meters.
     pub position_sigma_m: f64,
+    /// The conservative (worst-of-bracket) velocity 1-sigma accuracy,
+    /// meters/second — the velocity-error input to the alignment budget.
+    pub velocity_sigma_mps: f64,
     /// Timing facts of the interpolation.
     pub timing: Timing,
 }
@@ -135,13 +138,15 @@ pub(crate) fn interpolate(
 
     let attitude_sigma_rad = sigma_att(older).max(sigma_att(newer));
     let position_sigma_m = sigma_pos(older).max(sigma_pos(newer));
+    let velocity_sigma_mps = sigma_vel(older).max(sigma_vel(newer));
 
     Interpolated {
         attitude: nlerp(older.attitude.attitude, newer.attitude.attitude, t as f32),
-        velocity_ned_mps: lerp3_f64(older.velocity_ned_mps, newer.velocity_ned_mps, t),
-        body_rate_rps: lerp3_f32(older.body_rate_rps, newer.body_rate_rps, t as f32),
+        velocity_ned_mps: lerp3_f64(older.velocity.value, newer.velocity.value, t),
+        body_rate_rps: lerp3_f32(older.body_rate.value, newer.body_rate.value, t as f32),
         attitude_sigma_rad,
         position_sigma_m,
+        velocity_sigma_mps,
         timing: Timing {
             skew_ns: skew_of(older).max(skew_of(newer)),
             extrapolation_ns,
@@ -156,4 +161,8 @@ fn sigma_att(sample: &KinematicSample) -> f64 {
 
 fn sigma_pos(sample: &KinematicSample) -> f64 {
     f64::from(sample.position.quality.horizontal_mm) * 1e-3
+}
+
+fn sigma_vel(sample: &KinematicSample) -> f64 {
+    f64::from(sample.velocity_quality.sigma_mmps) * 1e-3
 }
