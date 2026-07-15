@@ -61,7 +61,11 @@ fn entry_problems(
             "is marked complete but its locator names no specific record entry (expected path#anchor)"
         )];
     };
-    let text = match fs::read_to_string(repo_root.join(path)) {
+    let full = match crate::gate::contained::resolve_contained(repo_root, path) {
+        Ok(full) => full,
+        Err(escape) => return vec![format!("record file {}", escape.detail(path))],
+    };
+    let text = match fs::read_to_string(&full) {
         Ok(text) => text,
         Err(_) => return vec![format!("record file {path} not found under repo root")],
     };

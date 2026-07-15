@@ -2,7 +2,8 @@
 //!
 //! These use the public API only. The real maintained record lives at
 //! `docs/instruments/evidence-graph.evg`; the negative fixtures live beside this
-//! file under `tests/fixtures/`.
+//! file under `tests/fixtures/`. The execution-output artifact negatives
+//! (digest, run-id, and path-containment) live in `artifact_resolution.rs`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -245,81 +246,6 @@ fn unbacked_review_fixture_fails() {
     let report = report(&fixture("unbacked-review.evg"));
     assert!(has_open(&report, FindingCode::ReviewIncomplete));
     assert_eq!(report.verdict, GateVerdict::Invalid);
-}
-
-#[test]
-fn unresolvable_artifact_fixture_fails() {
-    // The output-digest names an artifact that is not committed: structurally
-    // valid, but its digest cannot be bound to any content on resolution.
-    let graph = fixture("unresolvable-artifact.evg");
-    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
-    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
-    assert!(
-        has_open(&resolved, FindingCode::PlaceholderResult),
-        "findings: {:?}",
-        resolved.findings
-    );
-    assert_eq!(resolved.verdict, GateVerdict::Invalid);
-}
-
-#[test]
-fn mismatched_artifact_fixture_fails() {
-    // The artifact is committed, but its content does not hash to the declared
-    // output-digest — a detached/forged digest, caught on resolution.
-    let graph = fixture("mismatched-artifact.evg");
-    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
-    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
-    let finding = resolved
-        .findings
-        .iter()
-        .find(|f| f.code == FindingCode::PlaceholderResult && !f.excepted)
-        .expect("hash mismatch reported");
-    assert!(
-        finding.detail.contains("hashes to"),
-        "detail: {}",
-        finding.detail
-    );
-    assert_eq!(resolved.verdict, GateVerdict::Invalid);
-}
-
-#[test]
-fn field_mismatch_artifact_fixture_fails() {
-    // The artifact hashes to the declared digest, but its parsed command names a
-    // different package than the result node declares.
-    let graph = fixture("field-mismatch-artifact.evg");
-    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
-    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
-    let finding = resolved
-        .findings
-        .iter()
-        .find(|f| f.code == FindingCode::PlaceholderResult && !f.excepted)
-        .expect("field mismatch reported");
-    assert!(
-        finding.detail.contains("command"),
-        "detail: {}",
-        finding.detail
-    );
-    assert_eq!(resolved.verdict, GateVerdict::Invalid);
-}
-
-#[test]
-fn source_as_artifact_fixture_fails() {
-    // A test source file used as the execution-output artifact hashes correctly
-    // but is not a structured run record, so it carries none of the run fields.
-    let graph = fixture("source-as-artifact.evg");
-    assert_eq!(report(&graph).verdict, GateVerdict::Valid);
-    let resolved = validate_resolving(&graph, &Policy::engineering_trace(), &crate_dir());
-    let finding = resolved
-        .findings
-        .iter()
-        .find(|f| f.code == FindingCode::PlaceholderResult && !f.excepted)
-        .expect("unstructured artifact reported");
-    assert!(
-        finding.detail.contains("not a structured run record"),
-        "detail: {}",
-        finding.detail
-    );
-    assert_eq!(resolved.verdict, GateVerdict::Invalid);
 }
 
 #[test]

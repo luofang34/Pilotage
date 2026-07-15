@@ -13,6 +13,7 @@
 
 mod artifact;
 mod checks;
+mod contained;
 mod review;
 mod selector;
 

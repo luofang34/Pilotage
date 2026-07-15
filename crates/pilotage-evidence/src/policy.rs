@@ -139,6 +139,7 @@ impl Policy {
                 "command".to_string(),
                 "config-digest".to_string(),
                 "tool-version".to_string(),
+                "run-id".to_string(),
                 "outcome".to_string(),
             ],
             exception_requires_review: true,

@@ -35,7 +35,17 @@ pub(super) fn resolve(
             Some(test) => test,
             None => continue,
         };
-        let full = repo_root.join(path);
+        let full = match crate::gate::contained::resolve_contained(repo_root, path) {
+            Ok(full) => full,
+            Err(escape) => {
+                findings.push(Finding::new(
+                    FindingCode::UnresolvedSelector,
+                    Some(id.clone()),
+                    format!("selector for {id}: file {}", escape.detail(path)),
+                ));
+                continue;
+            }
+        };
         match fs::read_to_string(&full) {
             Err(_) => findings.push(Finding::new(
                 FindingCode::UnresolvedSelector,

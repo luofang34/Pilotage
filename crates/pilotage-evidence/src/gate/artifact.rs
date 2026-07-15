@@ -2,17 +2,21 @@
 //!
 //! A verification result names its captured run output with an `artifact` (a
 //! repo-relative path) and pins that output with an `output-digest`. This
-//! resolver reads the committed artifact, hashes it, and requires the hash to
-//! equal the declared digest — so a digest can never be a detached string: it
-//! must bind to committed, content-addressed run output. It then parses the
-//! artifact as a structured run record and requires its command, configuration
-//! digest, tool version, and outcome to MATCH the graph result node: hash
-//! equality alone is not evidence the run happened with the declared
-//! command/config/tool and produced the declared outcome, and a source file
-//! (with no run-record fields) can never satisfy it. A missing artifact, a
-//! content/digest mismatch, an unstructured file, or any disagreeing field is a
-//! fail-closed finding. Presence of the fields is checked separately, so a
-//! result missing them is skipped here to avoid double-reporting.
+//! resolver first contains the declared path — it must be root-relative, free
+//! of parent (`..`) components, and canonicalize (after symlinks) inside the
+//! evidence root — so a result can never bind evidence to a file outside the
+//! tree. It then reads the committed artifact, hashes it, and requires the
+//! hash to equal the declared digest — so a digest can never be a detached
+//! string: it must bind to committed, content-addressed run output. It then
+//! parses the artifact as a structured run record and requires its command,
+//! configuration digest, tool version, run identity, and outcome to MATCH the
+//! graph result node: hash equality alone is not evidence the run happened
+//! with the declared command/config/tool as the declared run and produced the
+//! declared outcome, and a source file (with no run-record fields) can never
+//! satisfy it. An escaping or missing artifact, a content/digest mismatch, an
+//! unstructured file, or any disagreeing field is a fail-closed finding.
+//! Presence of the fields is checked separately, so a result missing them is
+//! skipped here to avoid double-reporting.
 
 use std::fs;
 use std::path::Path;
@@ -45,7 +49,18 @@ pub(super) fn resolve(
             (Some(path), Some(expected)) => (path, expected.trim()),
             _ => continue,
         };
-        let bytes = match fs::read(repo_root.join(path)) {
+        let full = match crate::gate::contained::resolve_contained(repo_root, path) {
+            Ok(full) => full,
+            Err(escape) => {
+                push(
+                    findings,
+                    id,
+                    format!("execution-output artifact {}", escape.detail(path)),
+                );
+                continue;
+            }
+        };
+        let bytes = match fs::read(&full) {
             Ok(bytes) => bytes,
             Err(_) => {
                 push(
