@@ -1087,6 +1087,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-evidence"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-frames"
 version = "0.1.0"
 dependencies = [
