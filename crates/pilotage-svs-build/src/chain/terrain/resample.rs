@@ -54,12 +54,14 @@ fn resample_from(
     let top = h00 * (1.0 - tc) + h01 * tc;
     let bottom = h10 * (1.0 - tc) + h11 * tc;
     let elevation_m = top * (1.0 - tr) + bottom * tr;
-    let mut sources = vec![
-        grid.record_ref(r0, c0),
-        grid.record_ref(r0, c0 + 1),
-        grid.record_ref(r0 + 1, c0),
-        grid.record_ref(r0 + 1, c0 + 1),
-    ];
+    // Cite the records that actually contribute each corner value: a
+    // gap-filled corner resolves to its bounding posts, so a rejected or
+    // void input record never appears in output lineage.
+    let mut sources = Vec::with_capacity(8);
+    grid.contributor_refs(r0, c0, &mut sources);
+    grid.contributor_refs(r0, c0 + 1, &mut sources);
+    grid.contributor_refs(r0 + 1, c0, &mut sources);
+    grid.contributor_refs(r0 + 1, c0 + 1, &mut sources);
     sources.sort();
     sources.dedup();
     Some(OutputPost {

@@ -265,6 +265,14 @@ pub enum VerifyError {
         /// Why the disposition is not trustworthy.
         reason: &'static str,
     },
+    /// A dataset input record appears in no output lineage and no disposition,
+    /// so its fate is unrecorded — the provenance does not account for every
+    /// input it claims to describe.
+    #[error("source {source_id} has an input record with no lineage and no disposition")]
+    UnrecordedSourceFate {
+        /// The source whose record has no recorded fate.
+        source_id: u32,
+    },
     /// A lineage source reference matches no source record in the dataset, so it
     /// resolves to nothing.
     #[error("lineage source reference to source {source_id} resolves to no dataset record")]

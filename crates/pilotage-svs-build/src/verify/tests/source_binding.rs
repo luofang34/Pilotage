@@ -4,8 +4,6 @@
 
 use super::*;
 
-use crate::provenance::{Disposition, RecordDisposition};
-
 #[test]
 fn source_digest_changes_when_input_changes() {
     let a = built();
@@ -46,7 +44,7 @@ fn mismatched_source_digest_is_rejected() {
 
 /// Verifies a mutated, re-signed artifact, so only the source-reference checks
 /// can be what fails.
-fn verify_resigned(artifact: &mut BuildArtifact) -> Result<(), VerifyError> {
+pub(super) fn verify_resigned(artifact: &mut BuildArtifact) -> Result<(), VerifyError> {
     resign_bundle(artifact);
     verify_artifact(
         artifact,
@@ -347,73 +345,6 @@ fn runway_bytes_bind_to_their_own_source_digest() {
     assert_ne!(
         rwy_before, rwy_after,
         "the runway's own source digest must cover the runway bytes"
-    );
-}
-
-#[test]
-fn a_disposition_for_a_nonexistent_record_fails_the_full_verifier() {
-    // A disposition claiming a fate for a record the dataset never contained
-    // is fabricated provenance; the combined verifier refuses it even after a
-    // clean re-sign.
-    let mut artifact = built();
-    artifact.provenance.dispositions.push(RecordDisposition {
-        source: SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 999),
-        disposition: Disposition::Clipped,
-    });
-    resign_bundle(&mut artifact);
-    let config = fixtures::config();
-    let key = SigningKey::from_bytes(&config.signing.signing_seed);
-    let trust = TrustRoot::new(vec![TrustAnchor {
-        key_id: config.signing.key_id,
-        public_key: key.verifying_key().to_bytes(),
-    }]);
-    let result = verify_artifact_with_sources(
-        &artifact,
-        &fixtures::dataset(),
-        &trust,
-        DayNumber(150),
-        None,
-        UsePolicy::SimulatorPermitted,
-    );
-    assert!(
-        matches!(result, Err(VerifyError::DispositionInvalid { .. })),
-        "a disposition naming no dataset record must fail: {result:?}"
-    );
-}
-
-#[test]
-fn a_duplicate_or_contradictory_disposition_fails_artifact_verification() {
-    // Two dispositions for one record are ambiguous provenance.
-    let mut artifact = built();
-    let target = SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 0);
-    artifact.provenance.dispositions.push(RecordDisposition {
-        source: target,
-        disposition: Disposition::Clipped,
-    });
-    artifact.provenance.dispositions.push(RecordDisposition {
-        source: target,
-        disposition: Disposition::Clipped,
-    });
-    let result = verify_resigned(&mut artifact);
-    assert!(
-        matches!(result, Err(VerifyError::DispositionInvalid { .. })),
-        "duplicate dispositions must fail: {result:?}"
-    );
-
-    // A no-contribution claim for a record the output lineage draws from is a
-    // contradiction.
-    let mut artifact = built();
-    let drawn = artifact.provenance.records[0].sources[0];
-    artifact.provenance.dispositions.push(RecordDisposition {
-        source: drawn,
-        disposition: Disposition::NoContribution {
-            reason: "fabricated",
-        },
-    });
-    let result = verify_resigned(&mut artifact);
-    assert!(
-        matches!(result, Err(VerifyError::DispositionInvalid { .. })),
-        "a contradictory no-contribution disposition must fail: {result:?}"
     );
 }
 

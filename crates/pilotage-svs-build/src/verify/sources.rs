@@ -116,14 +116,30 @@ fn check_dispositions(
                 reason: "the record carries more than one disposition",
             });
         }
+        let drawn = lineage_refs.contains(&disposition.source);
+        let dropped = matches!(
+            disposition.disposition,
+            crate::provenance::Disposition::RejectedOutlier { .. }
+                | crate::provenance::Disposition::Clipped
+                | crate::provenance::Disposition::NoContribution { .. }
+        );
+        // A dropped fate and output lineage are mutually exclusive claims
+        // about one record; a merged record must be drawn by the surviving
+        // output's lineage or the merge never happened.
+        if dropped && drawn {
+            return Err(VerifyError::DispositionInvalid {
+                source_id,
+                reason: "claims a dropped fate but output lineage draws from the record",
+            });
+        }
         if matches!(
             disposition.disposition,
-            crate::provenance::Disposition::NoContribution { .. }
-        ) && lineage_refs.contains(&disposition.source)
+            crate::provenance::Disposition::Merged { .. }
+        ) && !drawn
         {
             return Err(VerifyError::DispositionInvalid {
                 source_id,
-                reason: "claims no contribution but output lineage draws from the record",
+                reason: "claims a merge but no output lineage draws from the record",
             });
         }
         referenced.insert(source_id);
@@ -250,6 +266,25 @@ fn check_source_resolution(
             return Err(VerifyError::DispositionInvalid {
                 source_id: disposition.source.source.0,
                 reason: "resolves to no unique dataset source record",
+            });
+        }
+    }
+    // Completeness: every dataset input record must have a recorded fate —
+    // output lineage or a disposition. Deleting a record's only disposition
+    // must be detectable, not a silently vanished input.
+    let mut fated: BTreeSet<SourceRecordRef> = artifact
+        .provenance
+        .dispositions
+        .iter()
+        .map(|d| d.source)
+        .collect();
+    for record in &artifact.provenance.records {
+        fated.extend(record.sources.iter().copied());
+    }
+    for source_ref in source_record_refs(source) {
+        if !fated.contains(&source_ref) {
+            return Err(VerifyError::UnrecordedSourceFate {
+                source_id: source_ref.source.0,
             });
         }
     }

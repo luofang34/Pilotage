@@ -32,6 +32,10 @@ pub(crate) struct PreparedGrid {
     pub cols: u32,
     /// Row-major heights in the target vertical datum; `None` is a void.
     heights_t: Vec<Option<f64>>,
+    /// For a gap-filled node, the bounding columns `(left, right)` of the fill
+    /// in its row; `None` for an original post or a void. Lineage cites the
+    /// bounding posts, never the rejected/void record the fill replaced.
+    fill_bounds: Vec<Option<(u32, u32)>>,
 }
 
 impl PreparedGrid {
@@ -49,6 +53,25 @@ impl PreparedGrid {
 
     /// The unambiguous source record reference of node `(r, c)`: the source, the
     /// grid (by its source origin), and the node position.
+    /// Appends the source records that actually contribute the value at
+    /// `(r, c)`: the node's own record, or — when the node was gap-filled —
+    /// the two bounding posts the fill interpolated between. A rejected or
+    /// void input record never appears as a contributor.
+    pub(crate) fn contributor_refs(&self, r: u32, c: u32, out: &mut Vec<SourceRecordRef>) {
+        let filled = (r as usize)
+            .checked_mul(self.cols as usize)
+            .and_then(|base| base.checked_add(c as usize))
+            .and_then(|idx| self.fill_bounds.get(idx).copied())
+            .flatten();
+        match filled {
+            Some((left, right)) => {
+                out.push(self.record_ref(r, left));
+                out.push(self.record_ref(r, right));
+            }
+            None => out.push(self.record_ref(r, c)),
+        }
+    }
+
     pub(crate) fn record_ref(&self, r: u32, c: u32) -> SourceRecordRef {
         SourceRecordRef::terrain(
             self.source,
@@ -85,7 +108,9 @@ pub(crate) fn prepare_grid(
 ) -> Result<Prepared, BuildError> {
     validate_grid(grid)?;
     let (mut src_heights, outliers, survived) = reject_outliers(grid, config, dispositions);
+    let mut fill_bounds = vec![None; src_heights.len()];
     row_gap_fill(
+        &mut fill_bounds,
         &mut src_heights,
         grid.rows,
         grid.cols,
@@ -109,6 +134,7 @@ pub(crate) fn prepare_grid(
             rows: grid.rows,
             cols: grid.cols,
             heights_t,
+            fill_bounds,
         },
         outliers,
         survived,
@@ -181,7 +207,13 @@ fn reject_outliers(
 /// sides of a row by linear interpolation. Edge runs (a run reaching a row edge
 /// with no bounding post) and runs wider than the policy stay `None`. Runs never
 /// cross a row boundary, so a fill is always between two posts of the same row.
-fn row_gap_fill(heights: &mut [Option<f64>], rows: u32, cols: u32, max_span: u32) {
+fn row_gap_fill(
+    fill_bounds: &mut [Option<(u32, u32)>],
+    heights: &mut [Option<f64>],
+    rows: u32,
+    cols: u32,
+    max_span: u32,
+) {
     let cols = cols as usize;
     if max_span == 0 || cols < 3 {
         return;
@@ -201,6 +233,9 @@ fn row_gap_fill(heights: &mut [Option<f64>], rows: u32, cols: u32, max_span: u32
                 && let (Some(left), Some(right)) = (heights[base + c - 1], heights[base + run_end])
             {
                 fill_run(heights, base, c, run_end, left, right);
+                for k in c..run_end {
+                    fill_bounds[base + k] = Some(((c - 1) as u32, run_end as u32));
+                }
             }
             c = run_end.max(c + 1);
         }

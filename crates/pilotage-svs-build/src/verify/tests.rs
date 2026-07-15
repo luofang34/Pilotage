@@ -3,6 +3,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod dispositions;
 mod source_binding;
 
 use ed25519_dalek::{Signer, SigningKey};
