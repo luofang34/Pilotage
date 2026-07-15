@@ -43,7 +43,7 @@ fn fpv_intrinsics() -> PinholeIntrinsics {
     // Square pixels, principal point at the image center; focal length from the
     // horizontal FOV: fx = (width/2) / tan(hfov/2).
     let half_w = f64::from(FPV_WIDTH_PX) / 2.0;
-    let focal = half_w / (FPV_HFOV_RAD / 2.0).tan();
+    let focal = half_w / libm::tan(FPV_HFOV_RAD / 2.0);
     PinholeIntrinsics {
         focal_x_px: focal,
         focal_y_px: focal,

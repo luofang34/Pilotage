@@ -32,6 +32,9 @@ mod identity;
 mod recovery;
 mod sim;
 mod validate;
+mod verified;
+
+use pilotage_frames::Quat;
 
 pub use budget::{AlignmentAllowances, AlignmentErrorBudget, derive_budget, radians_per_pixel};
 pub use canonical::{
@@ -51,6 +54,7 @@ pub use sim::{
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, sim_fpv_calibration,
 };
 pub use validate::validate;
+pub use verified::VerifiedCameraModel;
 
 /// A complete calibration artifact: a simulated camera's geometry, its identity
 /// and lifecycle metadata, and the stored alignment-error allowances.
@@ -116,6 +120,47 @@ impl CameraCalibration {
     /// [`CalibrationError::WrongCamera`] on a mismatch.
     pub fn verify_camera(&self, frame_camera_id: u32) -> Result<(), CalibrationError> {
         verify_camera(self, frame_camera_id)
+    }
+
+    /// Verifies the artifact against `recorded_hash` at `now_unix_ns` and, on
+    /// success, mints the [`VerifiedCameraModel`] a conformal projector derives
+    /// its view geometry from.
+    ///
+    /// This is the **sole** path to a [`VerifiedCameraModel`]: its constructor is
+    /// crate-private and reached only here, after [`Self::verify`] recomputes the
+    /// content hash and runs every semantic check. So a `VerifiedCameraModel`
+    /// cannot exist without a genuine hash-verification of the artifact it
+    /// describes. The resolved geometry is read from the same verified artifact:
+    /// the body→camera extrinsics rotation, the field-of-view half-tangents
+    /// `((w/2)/fx, (h/2)/fy)`, and the published alignment bound.
+    ///
+    /// # Errors
+    ///
+    /// The first failing [`CalibrationError`] from [`Self::verify`].
+    pub fn verified_camera_model(
+        &self,
+        recorded_hash: [u8; 32],
+        now_unix_ns: u64,
+    ) -> Result<VerifiedCameraModel, CalibrationError> {
+        self.verify(recorded_hash, now_unix_ns)?;
+        let intrinsics = &self.geometry.intrinsics;
+        let viewport = &self.geometry.viewport;
+        let [w, x, y, z] = self.geometry.extrinsics.rotation_quat_wxyz;
+        Ok(VerifiedCameraModel::new(
+            self.identity.calibration_id,
+            self.content_hash(),
+            Quat {
+                w: w as f32,
+                x: x as f32,
+                y: y as f32,
+                z: z as f32,
+            },
+            (
+                (f64::from(viewport.width_px) / 2.0) / intrinsics.focal_x_px,
+                (f64::from(viewport.height_px) / 2.0) / intrinsics.focal_y_px,
+            ),
+            self.budget().total_angular_bound_rad,
+        ))
     }
 }
 

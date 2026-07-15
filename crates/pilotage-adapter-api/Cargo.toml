@@ -12,6 +12,8 @@ pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 pilotage-frames = { workspace = true }
 pilotage-calibration-id = { workspace = true }
+# CAL-01 (#90): the camera calibration contract now lives in its own no_std
+# crate; adapter-api re-exports it so consumer paths are unchanged.
+pilotage-camera-calibration = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
-sha2 = "0.10.9"

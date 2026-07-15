@@ -10,6 +10,8 @@
 //! its canonical bytes; [`verify`] recomputes and compares, so a mutated value
 //! whose recorded hash was not also updated fails closed.
 
+use alloc::vec::Vec;
+
 use sha2::{Digest, Sha256};
 
 use super::CameraCalibration;

@@ -10,6 +10,8 @@
 //! reprojection residuals. Extrinsics and distortion are declared from the sim
 //! world, not recovered here; this tool verifies the intrinsics.
 
+use alloc::vec::Vec;
+
 use super::geometry::{OpticalConvention, PinholeIntrinsics};
 
 /// Documented tolerance: a recovered focal length must be within this fraction
@@ -82,8 +84,8 @@ pub fn synthetic_targets(known: &PinholeIntrinsics) -> Vec<SyntheticTarget> {
         for j in 0..=steps {
             let rx = -0.6 + 1.2 * (f64::from(i) / f64::from(steps));
             let ry = -0.45 + 0.9 * (f64::from(j) / f64::from(steps));
-            let u = (known.focal_x_px * rx + known.principal_x_px).round();
-            let v = (known.focal_y_px * ry + known.principal_y_px).round();
+            let u = libm::round(known.focal_x_px * rx + known.principal_x_px);
+            let v = libm::round(known.focal_y_px * ry + known.principal_y_px);
             targets.push(SyntheticTarget {
                 point_camera_m: [rx, ry, 1.0],
                 observed_px: [u, v],
@@ -136,11 +138,11 @@ fn residuals(recovered: &PinholeIntrinsics, targets: &[SyntheticTarget]) -> (f64
         let ry = t.point_camera_m[1] / t.point_camera_m[2];
         let du = recovered.focal_x_px * rx + recovered.principal_x_px - t.observed_px[0];
         let dv = recovered.focal_y_px * ry + recovered.principal_y_px - t.observed_px[1];
-        let err = (du * du + dv * dv).sqrt();
+        let err = libm::sqrt(du * du + dv * dv);
         sum_sq += err * err;
         max = max.max(err);
     }
-    ((sum_sq / targets.len() as f64).sqrt(), max)
+    (libm::sqrt(sum_sq / targets.len() as f64), max)
 }
 
 /// Recovers `known` from synthetic targets and reports the residuals and the
@@ -155,10 +157,10 @@ pub fn recovery_report(known: &PinholeIntrinsics) -> RecoveryReport {
         recovered,
         residual_rms_px,
         residual_max_px,
-        focal_x_error_ratio: (recovered.focal_x_px - known.focal_x_px).abs() / known.focal_x_px,
-        focal_y_error_ratio: (recovered.focal_y_px - known.focal_y_px).abs() / known.focal_y_px,
-        principal_x_error_px: (recovered.principal_x_px - known.principal_x_px).abs(),
-        principal_y_error_px: (recovered.principal_y_px - known.principal_y_px).abs(),
+        focal_x_error_ratio: libm::fabs(recovered.focal_x_px - known.focal_x_px) / known.focal_x_px,
+        focal_y_error_ratio: libm::fabs(recovered.focal_y_px - known.focal_y_px) / known.focal_y_px,
+        principal_x_error_px: libm::fabs(recovered.principal_x_px - known.principal_x_px),
+        principal_y_error_px: libm::fabs(recovered.principal_y_px - known.principal_y_px),
     }
 }
 

@@ -5,7 +5,6 @@
 //! calls and I/O live in adapter implementations such as
 //! `pilotage-adapter-reference`, per ADR-0002.
 
-mod calibration;
 mod capability;
 mod control;
 mod step;
@@ -13,18 +12,21 @@ mod telemetry;
 mod vehicle_adapter;
 mod video;
 
-pub use calibration::{
+pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, VehicleDescriptor};
+pub use control::{ApplyOutcome, Disposition, LinkLossPolicy, RejectReason};
+// CAL-01 (#90): the camera calibration contract moved to
+// `pilotage-camera-calibration`; re-export it so `pilotage_adapter_api::…` paths
+// for consumers are unchanged, and expose the new `VerifiedCameraModel`.
+pub use pilotage_camera_calibration::{
     AlignmentAllowances, AlignmentErrorBudget, BodyToCameraExtrinsics, Boresight,
     BrownConradyDistortion, CALIBRATION_SCHEMA_VERSION, CalibrationError, CalibrationIdentity,
     CalibrationVersion, CameraCalibration, CameraGeometry, DesignEye, EffectivePeriod, FieldOfView,
     OpticalConvention, PinholeIntrinsics, ProvenanceSource, RecoveryReport, Residuals,
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, SyntheticTarget,
-    ToolVersion, ValidityStatus, Viewport, content_hash, derive_budget, radians_per_pixel,
-    recover_intrinsics, sim_fpv_calibration, to_canonical, validate, verify, verify_camera,
-    verify_sim_recovery,
+    ToolVersion, ValidityStatus, VerifiedCameraModel, Viewport, content_hash, derive_budget,
+    radians_per_pixel, recover_intrinsics, sim_fpv_calibration, to_canonical, validate, verify,
+    verify_camera, verify_sim_recovery,
 };
-pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, VehicleDescriptor};
-pub use control::{ApplyOutcome, Disposition, LinkLossPolicy, RejectReason};
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
     AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, MeasurementClock,
