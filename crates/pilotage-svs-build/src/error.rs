@@ -205,23 +205,10 @@ pub enum VerifyError {
         source_id: u32,
     },
     /// A lineage record lists the same source reference twice.
-    #[error("lineage record references source {source_id} record {record} more than once")]
+    #[error("lineage record references source {source_id} more than once")]
     DuplicateLineageSource {
         /// The duplicated source.
         source_id: u32,
-        /// The duplicated record index.
-        record: u32,
-    },
-    /// A lineage source reference names a record index beyond the source's
-    /// recorded record count.
-    #[error("lineage references source {source_id} record {record}, out of range (count {count})")]
-    SourceRecordOutOfRange {
-        /// The referenced source.
-        source_id: u32,
-        /// The out-of-range record index.
-        record: u32,
-        /// The source's recorded record count.
-        count: u32,
     },
     /// A signed source summary is referenced by no lineage record, so it is an
     /// extra source the output does not draw from.
@@ -235,6 +222,27 @@ pub enum VerifyError {
     #[error("dataset source {source_id} has no signed source summary")]
     SourceSummaryMissing {
         /// The dataset source with no summary.
+        source_id: u32,
+    },
+    /// The signed source-summary sequence lists the same source twice, so source
+    /// identity is ambiguous.
+    #[error("source summary {source_id} appears more than once in the signed provenance")]
+    DuplicateSourceSummary {
+        /// The duplicated source.
+        source_id: u32,
+    },
+    /// A lineage source reference matches no source record in the dataset, so it
+    /// resolves to nothing.
+    #[error("lineage source reference to source {source_id} resolves to no dataset record")]
+    UnresolvedSourceRef {
+        /// The source whose reference did not resolve.
+        source_id: u32,
+    },
+    /// Two distinct dataset source records share one reference, so a lineage
+    /// reference to it would be ambiguous.
+    #[error("source {source_id} has two distinct records sharing one reference")]
+    AmbiguousSourceRecord {
+        /// The source with the colliding records.
         source_id: u32,
     },
 }

@@ -117,34 +117,28 @@ pub(crate) fn obstacle() -> Obstacle {
         lon_deg: -74.7,
         height_m: 50.0,
         kind: ObstacleKind::Tower,
-        source: SourceRecordRef {
-            source: OBSTACLE_SRC,
-            record: 0,
-        },
+        source: SourceRecordRef::obstacle(OBSTACLE_SRC, 0),
     }
 }
+
+/// The fixture aerodrome identifier.
+pub(crate) const AERODROME_IDENT: u32 = 0x4B50_5859;
 
 /// One aerodrome with a single runway, inside coverage.
 pub(crate) fn aerodrome() -> Aerodrome {
     Aerodrome {
-        ident: 0x4B50_5859,
+        ident: AERODROME_IDENT,
         ref_lat_deg: 40.5,
         ref_lon_deg: -74.5,
         elevation_m: 100.0,
-        source: SourceRecordRef {
-            source: AERODROME_SRC,
-            record: 0,
-        },
+        source: SourceRecordRef::aerodrome(AERODROME_SRC, AERODROME_IDENT),
         runways: vec![Runway {
             designator: 0x0918,
             end_a_lat_deg: 40.49,
             end_a_lon_deg: -74.51,
             end_b_lat_deg: 40.51,
             end_b_lon_deg: -74.49,
-            source: SourceRecordRef {
-                source: AERODROME_SRC,
-                record: 1,
-            },
+            source: SourceRecordRef::runway(AERODROME_SRC, AERODROME_IDENT, 0x0918),
         }],
     }
 }

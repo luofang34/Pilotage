@@ -44,10 +44,7 @@ fn new_obstacle_tile_is_added_old_is_removed() {
         lon_deg: -74.1,
         height_m: 30.0,
         kind: ObstacleKind::Mast,
-        source: SourceRecordRef {
-            source: fixtures::OBSTACLE_SRC,
-            record: 1,
-        },
+        source: SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 1),
     });
     let grown = build_package(&fixtures::config(), &dataset).expect("grown");
     let added = SemanticDiff::between(&base, &grown);

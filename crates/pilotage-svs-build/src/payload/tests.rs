@@ -13,10 +13,7 @@ fn post(i: u32, j: u32, elev: f64) -> OutputPost {
         lat_deg: 0.0,
         lon_deg: 0.0,
         elevation_m: elev,
-        sources: vec![SourceRecordRef {
-            source: SourceId(1),
-            record: i * 10 + j,
-        }],
+        sources: vec![SourceRecordRef::terrain(SourceId(1), 0.0, 0.0, i, j)],
     }
 }
 
@@ -44,10 +41,7 @@ fn obstacle(lat: f64, lon: f64, kind: ObstacleKind) -> OutputObstacle {
         lon_deg: lon,
         height_m: 10.0,
         kind,
-        sources: vec![SourceRecordRef {
-            source: SourceId(2),
-            record: 0,
-        }],
+        sources: vec![SourceRecordRef::obstacle(SourceId(2), 0)],
     }
 }
 

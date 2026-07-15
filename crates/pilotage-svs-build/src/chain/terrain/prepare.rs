@@ -16,6 +16,10 @@ use crate::source::{SourceId, SourceMeta, SourceRecordRef, TerrainGrid};
 pub(crate) struct PreparedGrid {
     /// The source this grid came from.
     pub source: SourceId,
+    /// The source-frame origin latitude, degrees (the grid's identity).
+    pub src_origin_lat_deg: f64,
+    /// The source-frame origin longitude, degrees (the grid's identity).
+    pub src_origin_lon_deg: f64,
     /// Target-frame latitude of node row 0.
     pub origin_lat_t: f64,
     /// Target-frame longitude of node column 0.
@@ -43,12 +47,16 @@ impl PreparedGrid {
         self.heights_t.get(idx).copied().flatten()
     }
 
-    /// The source record reference of node `(r, c)`.
+    /// The unambiguous source record reference of node `(r, c)`: the source, the
+    /// grid (by its source origin), and the node position.
     pub(crate) fn record_ref(&self, r: u32, c: u32) -> SourceRecordRef {
-        SourceRecordRef {
-            source: self.source,
-            record: r.wrapping_mul(self.cols).wrapping_add(c),
-        }
+        SourceRecordRef::terrain(
+            self.source,
+            self.src_origin_lat_deg,
+            self.src_origin_lon_deg,
+            r,
+            c,
+        )
     }
 }
 
@@ -93,6 +101,8 @@ pub(crate) fn prepare_grid(
     Ok(Prepared {
         grid: PreparedGrid {
             source: grid.source,
+            src_origin_lat_deg: grid.origin_lat_deg,
+            src_origin_lon_deg: grid.origin_lon_deg,
             origin_lat_t,
             origin_lon_t,
             step_deg: grid.step_deg,
@@ -146,10 +156,13 @@ fn reject_outliers(
                 }
                 Some(_) => {
                     dispositions.push(RecordDisposition {
-                        source: SourceRecordRef {
-                            source: grid.source,
-                            record: grid.record_index(r, c),
-                        },
+                        source: SourceRecordRef::terrain(
+                            grid.source,
+                            grid.origin_lat_deg,
+                            grid.origin_lon_deg,
+                            r,
+                            c,
+                        ),
                         disposition: Disposition::RejectedOutlier {
                             reason: "terrain elevation out of bounds",
                         },

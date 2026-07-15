@@ -315,19 +315,16 @@ fn record_lineage_resolves_a_post_to_its_source_corners() {
     let artifact = build_package(&fixtures::config(), &fixtures::dataset()).expect("build");
     // Node (0,0) is at lat 40.0, lon -75.0. Over the source grid (origin
     // 39.5,-75.5, step 0.5, 4 cols) it brackets source cells (1,1),(1,2),(2,1),
-    // (2,2), i.e. record indices 5,6,9,10 of the terrain source.
+    // (2,2), each named by the grid origin and its row/column.
     let record = artifact
         .provenance
         .records
         .iter()
         .find(|r| r.key == RecordKey::TerrainNode { i: 0, j: 0 })
         .expect("a lineage entry for node (0,0)");
-    let expected: Vec<SourceRecordRef> = [5, 6, 9, 10]
+    let expected: Vec<SourceRecordRef> = [(1, 1), (1, 2), (2, 1), (2, 2)]
         .into_iter()
-        .map(|record| SourceRecordRef {
-            source: fixtures::TERRAIN_SRC,
-            record,
-        })
+        .map(|(row, col)| SourceRecordRef::terrain(fixtures::TERRAIN_SRC, 39.5, -75.5, row, col))
         .collect();
     assert_eq!(
         record.sources, expected,
@@ -344,20 +341,14 @@ fn record_lineage_of_a_merged_obstacle_lists_every_source() {
             lon_deg: -74.7000,
             height_m: 50.0,
             kind: ObstacleKind::Tower,
-            source: SourceRecordRef {
-                source: fixtures::OBSTACLE_SRC,
-                record: 0,
-            },
+            source: SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 0),
         },
         Obstacle {
             lat_deg: 40.2005,
             lon_deg: -74.7005,
             height_m: 60.0,
             kind: ObstacleKind::Tower,
-            source: SourceRecordRef {
-                source: fixtures::OBSTACLE_SRC,
-                record: 1,
-            },
+            source: SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 1),
         },
     ];
     let artifact = build_package(&fixtures::config(), &dataset).expect("build");
@@ -370,14 +361,8 @@ fn record_lineage_of_a_merged_obstacle_lists_every_source() {
     assert_eq!(
         record.sources,
         vec![
-            SourceRecordRef {
-                source: fixtures::OBSTACLE_SRC,
-                record: 0,
-            },
-            SourceRecordRef {
-                source: fixtures::OBSTACLE_SRC,
-                record: 1,
-            },
+            SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 0),
+            SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 1),
         ],
         "a merged obstacle must trace to every source that merged into it"
     );

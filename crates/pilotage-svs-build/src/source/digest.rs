@@ -9,7 +9,7 @@
 
 use sha2::{Digest, Sha256};
 
-use super::{SourceDataset, SourceId, SourceMeta};
+use super::{SourceDataset, SourceId, SourceMeta, SourceRecordKey, SourceRecordRef};
 
 /// Domain-separating magic for a source's canonical input bytes.
 const SOURCE_MAGIC: &[u8; 8] = b"SVSBSRC0";
@@ -78,17 +78,45 @@ fn append_terrain(out: &mut Vec<u8>, dataset: &SourceDataset, id: SourceId) {
     }
 }
 
-/// Appends this source's obstacles, ordered by record index.
+/// Appends a source record reference's class and key, so a record's identity is
+/// part of the digest.
+fn push_source_ref(out: &mut Vec<u8>, source_ref: &SourceRecordRef) {
+    out.push(source_ref.class_code());
+    match source_ref.key {
+        SourceRecordKey::TerrainNode {
+            grid_lat_bits,
+            grid_lon_bits,
+            row,
+            col,
+        } => {
+            out.extend_from_slice(&grid_lat_bits.to_le_bytes());
+            out.extend_from_slice(&grid_lon_bits.to_le_bytes());
+            out.extend_from_slice(&row.to_le_bytes());
+            out.extend_from_slice(&col.to_le_bytes());
+        }
+        SourceRecordKey::Obstacle { index } => out.extend_from_slice(&index.to_le_bytes()),
+        SourceRecordKey::Aerodrome { ident } => out.extend_from_slice(&ident.to_le_bytes()),
+        SourceRecordKey::Runway {
+            aerodrome,
+            designator,
+        } => {
+            out.extend_from_slice(&aerodrome.to_le_bytes());
+            out.extend_from_slice(&designator.to_le_bytes());
+        }
+    }
+}
+
+/// Appends this source's obstacles, ordered by their reference.
 fn append_obstacles(out: &mut Vec<u8>, dataset: &SourceDataset, id: SourceId) {
     let mut obstacles: Vec<&super::Obstacle> = dataset
         .obstacles
         .iter()
         .filter(|o| o.source.source == id)
         .collect();
-    obstacles.sort_by_key(|o| o.source.record);
+    obstacles.sort_by_key(|o| o.source);
     out.extend_from_slice(&(obstacles.len() as u64).to_le_bytes());
     for obstacle in obstacles {
-        out.extend_from_slice(&obstacle.source.record.to_le_bytes());
+        push_source_ref(out, &obstacle.source);
         push_f64(out, obstacle.lat_deg);
         push_f64(out, obstacle.lon_deg);
         push_f64(out, obstacle.height_m);
@@ -110,7 +138,7 @@ fn append_aerodromes(out: &mut Vec<u8>, dataset: &SourceDataset, id: SourceId) {
         push_f64(out, aerodrome.ref_lat_deg);
         push_f64(out, aerodrome.ref_lon_deg);
         push_f64(out, aerodrome.elevation_m);
-        out.extend_from_slice(&aerodrome.source.record.to_le_bytes());
+        push_source_ref(out, &aerodrome.source);
         append_runways(out, &aerodrome.runways);
     }
 }
@@ -126,6 +154,6 @@ fn append_runways(out: &mut Vec<u8>, runways: &[super::Runway]) {
         push_f64(out, runway.end_a_lon_deg);
         push_f64(out, runway.end_b_lat_deg);
         push_f64(out, runway.end_b_lon_deg);
-        out.extend_from_slice(&runway.source.record.to_le_bytes());
+        push_source_ref(out, &runway.source);
     }
 }

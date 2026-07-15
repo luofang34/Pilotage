@@ -287,10 +287,7 @@ fn empty_lineage_sources_fail() {
 #[test]
 fn unknown_lineage_source_fails() {
     let mut artifact = built();
-    artifact.provenance.records[0].sources = vec![SourceRecordRef {
-        source: SourceId(999),
-        record: 0,
-    }];
+    artifact.provenance.records[0].sources = vec![SourceRecordRef::obstacle(SourceId(999), 0)];
     let result = verify_resigned(&mut artifact);
     assert!(
         matches!(
@@ -304,10 +301,7 @@ fn unknown_lineage_source_fails() {
 #[test]
 fn duplicated_lineage_source_fails() {
     let mut artifact = built();
-    let dup = SourceRecordRef {
-        source: fixtures::TERRAIN_SRC,
-        record: 0,
-    };
+    let dup = SourceRecordRef::terrain(fixtures::TERRAIN_SRC, 39.5, -75.5, 1, 1);
     artifact.provenance.records[0].sources = vec![dup, dup];
     let result = verify_resigned(&mut artifact);
     assert!(
@@ -317,16 +311,68 @@ fn duplicated_lineage_source_fails() {
 }
 
 #[test]
-fn out_of_range_lineage_source_fails() {
+fn duplicate_source_summary_fails() {
     let mut artifact = built();
-    artifact.provenance.records[0].sources = vec![SourceRecordRef {
-        source: fixtures::TERRAIN_SRC,
-        record: 999_999,
-    }];
+    // List the first source twice; source identity is now ambiguous.
+    let duplicate = artifact.provenance.sources[0];
+    artifact.provenance.sources.push(duplicate);
     let result = verify_resigned(&mut artifact);
     assert!(
-        matches!(result, Err(VerifyError::SourceRecordOutOfRange { .. })),
-        "an out-of-range source record index must fail: {result:?}"
+        matches!(result, Err(VerifyError::DuplicateSourceSummary { .. })),
+        "a source listed twice in the signed provenance must fail: {result:?}"
+    );
+}
+
+#[test]
+fn unresolved_lineage_source_ref_is_rejected_against_dataset() {
+    let mut artifact = built();
+    // A terrain node outside the source grid resolves to no dataset record. The
+    // source still has a summary, so only resolution against the dataset catches
+    // it.
+    artifact.provenance.records[0].sources = vec![SourceRecordRef::terrain(
+        fixtures::TERRAIN_SRC,
+        39.5,
+        -75.5,
+        999,
+        999,
+    )];
+    resign_bundle(&mut artifact);
+    let result = verify_source_digests(&artifact, &fixtures::dataset());
+    assert!(
+        matches!(result, Err(VerifyError::UnresolvedSourceRef { .. })),
+        "a lineage ref resolving to no source record must fail: {result:?}"
+    );
+}
+
+#[test]
+fn ambiguous_source_records_are_rejected() {
+    // A dataset where two distinct obstacles share one reference: the reference
+    // cannot name exactly one source record.
+    let mut ambiguous = fixtures::dataset();
+    let shared = SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, 0);
+    ambiguous.obstacles = vec![
+        crate::source::Obstacle {
+            lat_deg: 40.2,
+            lon_deg: -74.7,
+            height_m: 50.0,
+            kind: crate::source::ObstacleKind::Tower,
+            source: shared,
+        },
+        crate::source::Obstacle {
+            lat_deg: 40.25,
+            lon_deg: -74.65,
+            height_m: 60.0,
+            kind: crate::source::ObstacleKind::Mast,
+            source: shared,
+        },
+    ];
+    // Build from the ambiguous dataset so digests match; only resolution catches
+    // the collision.
+    let artifact = build_package(&fixtures::config(), &ambiguous).expect("build");
+    let result = verify_source_digests(&artifact, &ambiguous);
+    assert!(
+        matches!(result, Err(VerifyError::AmbiguousSourceRecord { .. })),
+        "two distinct source records sharing a reference must fail: {result:?}"
     );
 }
 

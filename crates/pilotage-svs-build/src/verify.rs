@@ -16,7 +16,7 @@ mod sources;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use pilotage_geo::{DatumRealizationId, HorizontalDatum};
@@ -30,10 +30,10 @@ use crate::chain::{BuildArtifact, tile_of};
 use crate::error::VerifyError;
 use crate::payload::{decode_aerodromes, decode_obstacles, decode_runways, decode_terrain};
 use crate::provenance::RecordKey;
-use crate::source::SourceDataset;
+use crate::source::{SourceDataset, SourceRecordRef, source_record_refs};
 
 use bijection::check_bijection;
-use sources::check_lineage_sources;
+use sources::{check_lineage_sources, reject_duplicate_summaries};
 
 /// The identity of one emitted record: its class, tile, and decodable key.
 pub(crate) type RecordIdentity = (u8, i32, i32, RecordKey);
@@ -108,6 +108,7 @@ pub fn verify_source_digests(
     artifact: &BuildArtifact,
     source: &SourceDataset,
 ) -> Result<(), VerifyError> {
+    reject_duplicate_summaries(artifact)?;
     let summary_ids: BTreeSet<u32> = artifact
         .provenance
         .sources
@@ -132,6 +133,46 @@ pub fn verify_source_digests(
             return Err(VerifyError::SourceSummaryMissing {
                 source_id: meta.id.0,
             });
+        }
+    }
+    check_source_resolution(artifact, source)
+}
+
+/// Proves every lineage source reference resolves to exactly one dataset source
+/// record and that no two distinct dataset records share a reference.
+fn check_source_resolution(
+    artifact: &BuildArtifact,
+    source: &SourceDataset,
+) -> Result<(), VerifyError> {
+    let mut counts: BTreeMap<SourceRecordRef, u32> = BTreeMap::new();
+    for source_ref in source_record_refs(source) {
+        counts
+            .entry(source_ref)
+            .and_modify(|count| *count = count.wrapping_add(1))
+            .or_insert(1);
+    }
+    for (source_ref, count) in &counts {
+        if *count > 1 {
+            return Err(VerifyError::AmbiguousSourceRecord {
+                source_id: source_ref.source.0,
+            });
+        }
+    }
+    for record in &artifact.provenance.records {
+        for source_ref in &record.sources {
+            match counts.get(source_ref) {
+                None => {
+                    return Err(VerifyError::UnresolvedSourceRef {
+                        source_id: source_ref.source.0,
+                    });
+                }
+                Some(1) => {}
+                Some(_) => {
+                    return Err(VerifyError::AmbiguousSourceRecord {
+                        source_id: source_ref.source.0,
+                    });
+                }
+            }
         }
     }
     Ok(())

@@ -14,10 +14,7 @@ fn extra_obstacle(record: u32, lat: f64, lon: f64, height: f64, kind: ObstacleKi
         lon_deg: lon,
         height_m: height,
         kind,
-        source: SourceRecordRef {
-            source: fixtures::OBSTACLE_SRC,
-            record,
-        },
+        source: SourceRecordRef::obstacle(fixtures::OBSTACLE_SRC, record),
     }
 }
 

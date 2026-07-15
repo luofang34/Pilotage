@@ -26,7 +26,6 @@ fn terrain_grid_indexing_is_consistent() {
     assert_eq!(grid.post(0, 0), Some(100.0));
     assert_eq!(grid.post(1, 2), Some(100.0 + 10.0 + 2.0));
     assert_eq!(grid.post(grid.rows, 0), None, "out-of-range index is None");
-    assert_eq!(grid.record_index(1, 2), grid.cols + 2);
 }
 
 #[test]

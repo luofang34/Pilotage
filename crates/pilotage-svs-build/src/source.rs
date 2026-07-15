@@ -11,12 +11,14 @@
 
 mod digest;
 mod license;
+mod records;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) use digest::source_content_digest;
 pub use license::LicenseCode;
+pub(crate) use records::source_record_refs;
 
 use pilotage_geo::{DatumRealizationId, GeoidModelId, HorizontalDatum, VerticalDatum};
 use pilotage_svs_db::Accuracy;
@@ -28,14 +30,123 @@ pub struct SourceId(
     pub u32,
 );
 
+/// The feature-class-specific identity of one source record within its source.
+/// The variant fixes the feature class, and its fields locate exactly one record,
+/// so no two distinct source records can share a key: a terrain node is named by
+/// its grid (origin bit patterns) and node row/column, an obstacle by its index,
+/// an aerodrome by its identifier, and a runway by its aerodrome and designator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+pub enum SourceRecordKey {
+    /// A terrain grid node, named by the grid's origin and the node's position.
+    TerrainNode {
+        /// The source grid's origin latitude bit pattern (grid identity).
+        grid_lat_bits: u64,
+        /// The source grid's origin longitude bit pattern (grid identity).
+        grid_lon_bits: u64,
+        /// The node's row (latitude) within the grid.
+        row: u32,
+        /// The node's column (longitude) within the grid.
+        col: u32,
+    },
+    /// An obstacle, named by its index within the source.
+    Obstacle {
+        /// The obstacle's index within the source.
+        index: u32,
+    },
+    /// An aerodrome, named by its identifier.
+    Aerodrome {
+        /// The aerodrome identifier.
+        ident: u32,
+    },
+    /// A runway, named by its aerodrome and designator.
+    Runway {
+        /// The aerodrome the runway belongs to.
+        aerodrome: u32,
+        /// The runway designator.
+        designator: u16,
+    },
+}
+
+impl SourceRecordKey {
+    /// The feature-class wire code this key belongs to.
+    #[must_use]
+    pub const fn class_code(&self) -> u8 {
+        match self {
+            Self::TerrainNode { .. } => 1,
+            Self::Obstacle { .. } => 2,
+            Self::Aerodrome { .. } => 3,
+            Self::Runway { .. } => 4,
+        }
+    }
+}
+
 /// A back-reference from an output element to the exact source record it came
-/// from. Ordered so provenance can list contributors in a stable order.
+/// from: the source and a class-specific key that names exactly one record.
+/// Ordered so provenance can list contributors in a stable order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub struct SourceRecordRef {
     /// The source the record came from.
     pub source: SourceId,
-    /// The record's index within that source.
-    pub record: u32,
+    /// The class-specific identity of the record within the source.
+    pub key: SourceRecordKey,
+}
+
+impl SourceRecordRef {
+    /// A reference to a terrain grid node.
+    #[must_use]
+    pub fn terrain(
+        source: SourceId,
+        origin_lat_deg: f64,
+        origin_lon_deg: f64,
+        row: u32,
+        col: u32,
+    ) -> Self {
+        Self {
+            source,
+            key: SourceRecordKey::TerrainNode {
+                grid_lat_bits: origin_lat_deg.to_bits(),
+                grid_lon_bits: origin_lon_deg.to_bits(),
+                row,
+                col,
+            },
+        }
+    }
+
+    /// A reference to an obstacle by its index within the source.
+    #[must_use]
+    pub const fn obstacle(source: SourceId, index: u32) -> Self {
+        Self {
+            source,
+            key: SourceRecordKey::Obstacle { index },
+        }
+    }
+
+    /// A reference to an aerodrome by its identifier.
+    #[must_use]
+    pub const fn aerodrome(source: SourceId, ident: u32) -> Self {
+        Self {
+            source,
+            key: SourceRecordKey::Aerodrome { ident },
+        }
+    }
+
+    /// A reference to a runway by its aerodrome and designator.
+    #[must_use]
+    pub const fn runway(source: SourceId, aerodrome: u32, designator: u16) -> Self {
+        Self {
+            source,
+            key: SourceRecordKey::Runway {
+                aerodrome,
+                designator,
+            },
+        }
+    }
+
+    /// The feature-class wire code this reference names.
+    #[must_use]
+    pub const fn class_code(&self) -> u8 {
+        self.key.class_code()
+    }
 }
 
 /// The reference frame, license, and quality a source states for its records.
@@ -150,12 +261,6 @@ impl TerrainGrid {
             .checked_mul(self.cols as usize)?
             .checked_add(c as usize)?;
         self.posts.get(idx).copied().flatten()
-    }
-
-    /// The record index of node `(r, c)` within this source, for provenance.
-    #[must_use]
-    pub fn record_index(&self, r: u32, c: u32) -> u32 {
-        r.wrapping_mul(self.cols).wrapping_add(c)
     }
 }
 
