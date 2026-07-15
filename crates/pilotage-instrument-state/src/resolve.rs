@@ -111,6 +111,10 @@ pub struct PanelData {
     /// Profile policy: a missing/failed turn or slip indication must
     /// show a visible failure cue (DYN-01).
     pub require_dynamics_cue: bool,
+    /// Per-function selected source and reversion state (SRC-01). Default
+    /// when the caller resolves without source comparison;
+    /// [`crate::resolve_with_sources`] populates it.
+    pub sources: crate::source_monitor::SourceSelection,
 }
 
 fn quality_status(q: EstimateQuality) -> SignalStatus {
@@ -266,6 +270,7 @@ pub fn resolve_stateful(
         integrity,
         presentation,
         require_dynamics_cue: profile.require_dynamics_cue,
+        sources: crate::source_monitor::SourceSelection::default(),
     }
 }
 
