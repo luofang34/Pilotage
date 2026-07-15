@@ -164,7 +164,8 @@ export class H264CanvasDecoder {
   /** Retires the session machine and closes the platform decoder. The
    *  caller invokes this on session replacement, disconnect, capture
    *  discontinuity, or teardown; retirement is permanent, so any callback
-   *  the old decoder still holds is refused. Safe to call repeatedly. */
+   *  a superseded decoder still holds is refused. Safe to call
+   *  repeatedly. */
   close() {
     this.session.retire();
     this.closeDecoder();

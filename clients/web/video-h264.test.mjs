@@ -126,7 +126,7 @@ function decoderOptions(overrides) {
   check("retired session still closes the decoded frame", instances[0].decodes.length === 1);
 }
 
-// A keyframe with a new codec string reconfigures: the old decoder is closed
+// A keyframe with a new codec string reconfigures: the superseded decoder closes
 // and a new one built for the new codec.
 {
   const { target } = makeTarget();
@@ -212,7 +212,7 @@ function decoderOptions(overrides) {
 
 // ---- stale platform callbacks (the retained-callback hazards) ---------------
 
-// An in-band codec change replaces the decoder; the OLD decoder's retained
+// An in-band codec change replaces the decoder; the superseded decoder's retained
 // output callback must not paint over the new stream, even within one session.
 {
   const { target, draws } = makeTarget();
@@ -235,7 +235,7 @@ function decoderOptions(overrides) {
   check("the live decoder still paints after the stale error", draws.length === before + 2);
 }
 
-// After close() (session replacement / discontinuity path), the old decoder's
+// After close() (session replacement / discontinuity path), the superseded decoder's
 // retained callback must not paint — retirement is permanent.
 {
   const { target, draws } = makeTarget();
@@ -325,7 +325,8 @@ const targetA = {};
 }
 
 // End to end: a real H264CanvasDecoder whose session is retired stops painting,
-// and the registry, on a new token, supersedes it — the retired-token bug.
+// and the registry, on a new token, supersedes it: a retired token must
+// never govern a live session's frames.
 {
   const { target, draws } = makeTarget();
   let liveToken = T1;
@@ -339,7 +340,7 @@ const targetA = {};
   const second = registry.for(0, target, T2);
   check("session replacement supersedes the retired decoder", second !== first);
   first.decode(KEYFRAME_A); // a stale callback path: retired token must not paint
-  check("retired-token decoder no longer paints", draws.length === 1);
+  check("a decoder held under a retired token no longer paints", draws.length === 1);
 }
 
 console.log(failures === 0 ? "\nall H.264 platform-adapter + registry checks passed" : `\n${failures} check(s) failed`);

@@ -1,9 +1,12 @@
-//! Browser-facing H.264 access-unit classification, compiled from the same
+//! Browser-facing H.264 decode decisions, compiled from the same
 //! [`pilotage_protocol::h264`] definitions every other consumer uses, so the
-//! NAL-structure rules (keyframe, in-band SPS/PPS, codec string) can never
-//! drift between the viewer and the wire's producers. The viewer keeps only
-//! the WebCodecs session layer — decoder ownership, configure/feed, paint —
-//! and asks this export what a chunk MEANS before acting on it.
+//! NAL-structure rules (keyframe, in-band SPS/PPS, codec string), the
+//! decode-session state machine with its decoder generations, and per-source
+//! decoder ownership can never drift between the viewer and the wire's
+//! producers. The viewer keeps only what the browser platform forces —
+//! executing the returned actions against WebCodecs `VideoDecoder`,
+//! reporting platform failures back, and painting frames — and holds no
+//! decision state of its own.
 
 use pilotage_protocol::h264::{ChunkClass, classify_chunk};
 use serde::Serialize;
@@ -13,9 +16,9 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use crate::wire_js::to_js;
 
 /// One access unit's meaning, in the session layer's vocabulary: `kind` is
-/// `"delta"`, `"keyframe"`, or `"undecodable-keyframe"`; `codec` is the
-/// `avc1.PPCCLL` string on a decodable keyframe; `reason` is the typed fault
-/// on an undecodable one.
+/// `"invalid"`, `"delta"`, `"keyframe"`, or `"undecodable-keyframe"`;
+/// `codec` is the `avc1.PPCCLL` string on a decodable keyframe; `reason` is
+/// the typed fault on an invalid or undecodable one.
 #[derive(Serialize)]
 struct ChunkClassJs {
     kind: &'static str,
@@ -24,9 +27,9 @@ struct ChunkClassJs {
 }
 
 /// Classifies one H.264 Annex-B access unit (the codec payload of an `H264`
-/// FourCC video body). Never throws: every input maps to a classification,
-/// and malformed bytes classify as `"delta"`, which a session layer cannot
-/// act on before a decodable keyframe.
+/// FourCC video body). Never throws: every input maps to a classification.
+/// Bytes with no NAL units classify as `"invalid"` with a typed reason — a
+/// session layer fails closed on them rather than feeding a decoder.
 #[wasm_bindgen(js_name = classifyH264Chunk)]
 #[must_use]
 pub fn classify_h264_chunk(payload: &[u8]) -> JsValue {

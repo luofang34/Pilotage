@@ -27,5 +27,6 @@ ffmpeg -y -f lavfi -i "testsrc=size=48x32:rate=5:duration=1" \
 
 The input is FFmpeg's synthetic `testsrc` pattern, so no external media is
 involved. libx264's output for a fixed input and these parameters is
-deterministic enough to serve as a pinned fixture; if a future libx264 changes
-the bytes, regenerate and update the digest above.
+deterministic enough to serve as a pinned fixture. If regenerating with a
+libx264 whose output bytes differ, update the SHA-256 above and the digest
+pinned in `src/h264/tests.rs` to the new file's hash.
