@@ -20,8 +20,11 @@
 //! attempts. Successful scene bytes remain valid until the next render attempt
 //! or reinitialization and must be consumed within that interval.
 
+mod decode_envelope;
+mod decode_video;
 mod exports;
 mod render_status;
+mod wire_js;
 
 pub use exports::{InstrumentRuntime, abi_version};
 pub use render_status::RenderStatus;

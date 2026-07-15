@@ -6,6 +6,7 @@
 import {
   VideoIdentityTracker,
   conformalGate,
+  metaFault,
   ADMIT,
   DEFAULT_MAX_CLOCK_ERROR_NANOS,
 } from "./video-identity.js";
@@ -284,12 +285,41 @@ const CLOCK_VEHICLE_BOOT = 1;
   check("ready verdict exposes the mapped capture time", g.mappedCaptureTimeNanos === 1050n);
 }
 
-// An unavailable mapping is not mapping-valid regardless of the snapshot.
+// An unavailable mapping (carrying the absent-clock sentinel 0, as the host
+// encodes it) is well-formed but not mapping-valid regardless of the snapshot.
 {
-  const g = conformalGate(meta({ mappingAvailable: false }), snap(CLOCK_SIMULATION), RECOGNIZED);
+  const g = conformalGate(
+    meta({ mappingAvailable: false, mappingTargetClock: 0 }),
+    snap(CLOCK_SIMULATION),
+    RECOGNIZED,
+  );
+  check("unavailable mapping is well-formed then unavailable", g.reason === "mapping-unavailable");
   check("unavailable mapping is not mapping-valid", g.mappingValid === false);
   check("unavailable mapping is not conformal-ready", g.conformalReady === false);
   check("unavailable mapping has no error bound", g.clockErrorBoundNanos === null);
+}
+
+// The mapping's target clock is bound to its availability (matching the host
+// encoder): unavailable carries the absent-clock sentinel 0; present names a
+// known clock. Either mismatch is malformed, but an honestly unavailable
+// mapping is not — the exact case the pre-fix validator wrongly rejected.
+{
+  check(
+    "unavailable mapping with target 0 is well-formed",
+    metaFault(meta({ mappingAvailable: false, mappingTargetClock: 0 })) === null,
+  );
+  check(
+    "unavailable mapping naming a clock is malformed",
+    metaFault(meta({ mappingAvailable: false, mappingTargetClock: 2 }))?.field === "mappingTargetClock",
+  );
+  check(
+    "present mapping with target 0 is malformed",
+    metaFault(meta({ mappingAvailable: true, mappingTargetClock: 0 }))?.field === "mappingTargetClock",
+  );
+  check(
+    "present mapping naming a known clock is well-formed",
+    metaFault(meta({ mappingAvailable: true, mappingTargetClock: 1 })) === null,
+  );
 }
 
 // The gate fails closed for absent metadata or an absent candidate snapshot.
