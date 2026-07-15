@@ -39,9 +39,9 @@ pub enum AviateAdapterError {
         source: std::io::Error,
     },
     /// The shared-memory object is too small to back the reader's mapping.
-    /// This is a capacity check, not a layout/version check: it proves only
-    /// that at least `required` bytes are present, never that the block's
-    /// fields match (that gate is Aviate#262).
+    /// This is a capacity check, not a layout/version check: capacity does
+    /// not establish layout compatibility — it proves only that at least
+    /// `required` bytes are present, never that the block's fields match.
     #[error("Aviate state shm {name} reports {observed} bytes; needs at least {required}")]
     ShmCapacityTooSmall {
         /// The POSIX shm object name.

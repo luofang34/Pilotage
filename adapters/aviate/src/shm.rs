@@ -24,12 +24,12 @@ const fn device_identity(device: libc::dev_t) -> u64 {
     device as u64
 }
 
-/// Byte count the reader maps and reads from `AviateSharedState`. This size and
-/// the `OFF_*` offsets below are a PROVISIONAL hand-mirror of the producer's
-/// `shared_state.h`; they are not validated against a magic/version/declared
-/// size, so a producer layout change is not detected here (that gate is
-/// Aviate#262). The capacity check only proves the object is large enough to
-/// map, never that these offsets are still correct.
+/// Byte count the reader maps and reads from `AviateSharedState`. This size
+/// and the `OFF_*` offsets below hand-mirror the producer's `shared_state.h`
+/// and are not validated against a magic/version/declared-size header, so a
+/// producer layout change is not detected here. Capacity does not establish
+/// layout compatibility: the check below only proves the object is large
+/// enough to map, never that these offsets are still correct.
 const SHM_SIZE: usize = 216;
 
 /// Whether a POSIX shm object whose kernel-reported `st_size` is `st_size`
