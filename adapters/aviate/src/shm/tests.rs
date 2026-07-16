@@ -1,31 +1,20 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use std::io;
 use std::time::{Duration, Instant};
 
+use aviate_xil_contract::{AttachError, WriterState};
+use aviate_xil_shm::{AttachFailure, ModelStateSnapshot, SimWriterSession};
+
 use super::{
-    SHM_SIZE, ShmFreshness, ShmObservation, admissible_capacity, decode_sample, enu_quat_to_ned,
-    enu_to_ned,
+    GzStateShm, ShmFreshness, ShmObservation, attach_error, enu_quat_to_ned, enu_to_ned,
+    sample_from_snapshot,
 };
+use crate::error::AviateAdapterError;
 
-#[test]
-fn capacity_rejects_negative_and_short_admits_exact_and_page_rounded() {
-    // A negative st_size must never be coerced to a huge unsigned capacity.
-    assert_eq!(admissible_capacity(-1, SHM_SIZE), None);
-    assert_eq!(admissible_capacity(i64::MIN, SHM_SIZE), None);
-    // One byte short of the required block is refused.
-    assert_eq!(admissible_capacity(SHM_SIZE as i64 - 1, SHM_SIZE), None);
-    // Exactly the required size is admitted.
-    assert_eq!(
-        admissible_capacity(SHM_SIZE as i64, SHM_SIZE),
-        Some(SHM_SIZE as u64)
-    );
-    // A page-rounded object (16 KiB page on Apple Silicon for a 216-byte
-    // ftruncate) is admitted; the mapping still reads only SHM_SIZE bytes.
-    assert_eq!(admissible_capacity(16384, SHM_SIZE), Some(16384));
-}
-
-fn put_f64(buf: &mut [u8; SHM_SIZE], off: usize, v: f64) {
-    buf[off..off + 8].copy_from_slice(&v.to_ne_bytes());
+fn unique_name(tag: &str) -> String {
+    // macOS caps shm names at 31 chars; keep the unique suffix short.
+    format!("/plt_t_{tag}_{}", std::process::id())
 }
 
 #[test]
@@ -54,50 +43,165 @@ fn identity_enu_flu_attitude_is_heading_east_in_ned() {
 }
 
 #[test]
-fn block_decodes_positions_velocities_and_time() {
-    let mut buf = [0u8; SHM_SIZE];
-    // pos ENU (east 1, north 2, up 3).
-    put_f64(&mut buf, super::OFF_POS, 1.0);
-    put_f64(&mut buf, super::OFF_POS + 8, 2.0);
-    put_f64(&mut buf, super::OFF_POS + 16, 3.0);
-    // identity quaternion.
-    put_f64(&mut buf, super::OFF_QUAT, 1.0);
-    // vel ENU (0.5 east, 0 north, -1 up = descending).
-    put_f64(&mut buf, super::OFF_VEL, 0.5);
-    put_f64(&mut buf, super::OFF_VEL + 16, -1.0);
-    buf[super::OFF_TIME_US..super::OFF_TIME_US + 8].copy_from_slice(&42_000_000u64.to_ne_bytes());
-
-    let s = decode_sample(&buf, 7);
-    assert_eq!(s.pos_ned_m, [2.0, 1.0, -3.0]);
-    assert_eq!(s.vel_ned_mps, [0.0, 0.5, 1.0]);
-    assert_eq!(s.time_us, 42_000_000);
-    assert_eq!(s.seq, 7);
+fn ninety_degree_enu_yaw_is_the_ned_identity() {
+    // A 90° yaw about ENU up points body forward at +y_ENU = north; in
+    // NED/FRD facing north is the identity attitude.
+    let half = core::f64::consts::FRAC_1_SQRT_2;
+    let q = enu_quat_to_ned([half, 0.0, 0.0, half]);
+    let expected = [1.0_f32, 0.0, 0.0, 0.0];
+    for (component, want) in q.iter().zip(expected) {
+        assert!((component - want).abs() < 1e-6, "quat {q:?}");
+    }
 }
 
 #[test]
-fn frozen_sample_never_revives_without_a_new_identity() {
+fn snapshot_conversion_translates_frames_and_preserves_identity_fields() {
+    let snapshot = ModelStateSnapshot {
+        reset_generation: 5,
+        sim_step: 777,
+        time_us: 42_000_000,
+        // pos ENU (east 1, north 2, up 3).
+        pos: [1.0, 2.0, 3.0],
+        quat: [1.0, 0.0, 0.0, 0.0],
+        // vel ENU (0.5 east, 0 north, -1 up = descending).
+        vel: [0.5, 0.0, -1.0],
+        ang_vel: [0.0; 3],
+    };
+    let sample = sample_from_snapshot(&snapshot);
+    assert_eq!(sample.pos_ned_m, [2.0, 1.0, -3.0]);
+    assert_eq!(sample.vel_ned_mps, [0.0, 0.5, 1.0]);
+    assert_eq!(sample.quat_wxyz, enu_quat_to_ned([1.0, 0.0, 0.0, 0.0]));
+    assert_eq!(sample.time_us, 42_000_000);
+    assert_eq!(sample.sim_step, 777);
+    assert_eq!(sample.reset_generation, 5);
+}
+
+#[test]
+fn world_angular_velocity_never_reaches_the_sample() {
+    // The contract's ang_vel lane is world-frame and advisory — NOT a
+    // body gyro. Two snapshots differing only in that lane must convert
+    // identically: no field of the sample may derive from it.
+    let still = ModelStateSnapshot {
+        reset_generation: 1,
+        sim_step: 10,
+        time_us: 1_000,
+        pos: [1.0, 2.0, 3.0],
+        quat: [1.0, 0.0, 0.0, 0.0],
+        vel: [0.5, 0.0, -1.0],
+        ang_vel: [0.0; 3],
+    };
+    let spinning = ModelStateSnapshot {
+        ang_vel: [7.0, -3.0, 11.0],
+        ..still
+    };
+    assert_eq!(
+        sample_from_snapshot(&still),
+        sample_from_snapshot(&spinning)
+    );
+}
+
+#[test]
+fn attach_failures_map_to_typed_errors_preserving_context() {
+    let io = attach_error(
+        "/t",
+        AttachFailure::Io(io::Error::from(io::ErrorKind::NotFound)),
+    );
+    assert!(
+        matches!(
+            io,
+            AviateAdapterError::ShmAttachIo { ref name, ref source }
+                if name == "/t" && source.kind() == io::ErrorKind::NotFound
+        ),
+        "got {io:?}"
+    );
+
+    let contract = attach_error(
+        "/t",
+        AttachFailure::Contract(AttachError::VersionMismatch { found: 2 }),
+    );
+    assert!(
+        matches!(
+            contract,
+            AviateAdapterError::ShmContractMismatch {
+                ref name,
+                violation: AttachError::VersionMismatch { found: 2 },
+            } if name == "/t"
+        ),
+        "got {contract:?}"
+    );
+
+    let not_ready = attach_error("/t", AttachFailure::NotReady);
+    assert!(
+        matches!(
+            not_ready,
+            AviateAdapterError::ShmWriterNotReady { ref name } if name == "/t"
+        ),
+        "got {not_ready:?}"
+    );
+}
+
+#[test]
+fn attach_to_an_absent_object_fails_closed_with_io_context() {
+    let refusal = GzStateShm::open_named(&unique_name("no"));
+    assert!(
+        matches!(refusal, Err(AviateAdapterError::ShmAttachIo { .. })),
+        "got {refusal:?}"
+    );
+}
+
+#[test]
+fn attach_reads_the_writers_published_snapshot_until_it_exits() {
+    let name = unique_name("att");
+    let writer = SimWriterSession::create(&name).expect("create writer");
+    let generation = writer.reset_generation();
+    writer.write_model_state(&ModelStateSnapshot {
+        reset_generation: generation,
+        sim_step: 2,
+        time_us: 1_000,
+        pos: [1.0, 2.0, 3.0],
+        quat: [1.0, 0.0, 0.0, 0.0],
+        vel: [0.0; 3],
+        ang_vel: [0.0; 3],
+    });
+
+    let reader = GzStateShm::open_named(&name).expect("attach accepts the block");
+    assert_eq!(reader.writer_state(), WriterState::Current);
+    let sample = reader.read().expect("coherent sample");
+    assert_eq!(sample.sim_step, 2);
+    assert_eq!(sample.reset_generation, generation);
+    assert_eq!(sample.time_us, 1_000);
+    assert_eq!(sample.pos_ned_m, [2.0, 1.0, -3.0]);
+
+    // The writer's exit is announced by the writer-state machine, not by
+    // the mapping (which still holds the dead world's final snapshot).
+    drop(writer);
+    assert_eq!(reader.writer_state(), WriterState::Gone);
+}
+
+#[test]
+fn frozen_sample_never_revives_without_new_progress() {
     let start = Instant::now();
     let mut freshness = ShmFreshness::new_at(start);
     assert_eq!(
-        freshness.observe_at(7, 42_000, start),
+        freshness.observe_at(8, 42_000, start),
         ShmObservation::Advancing
     );
     assert_eq!(
-        freshness.observe_at(7, 42_000, start + Duration::from_secs(4)),
+        freshness.observe_at(8, 42_000, start + Duration::from_secs(4)),
         ShmObservation::Unchanged(Duration::from_secs(4))
     );
     assert_eq!(
-        freshness.observe_at(7, 42_000, start + Duration::from_secs(8)),
+        freshness.observe_at(8, 42_000, start + Duration::from_secs(8)),
         ShmObservation::Unchanged(Duration::from_secs(8))
     );
 }
 
 #[test]
-fn same_object_rollback_is_quarantined_but_sequence_wrap_is_valid() {
+fn same_epoch_rollback_is_quarantined_but_step_wrap_is_valid() {
     let start = Instant::now();
     let mut wrapped = ShmFreshness::new_at(start);
     assert_eq!(
-        wrapped.observe_at(u32::MAX, 100, start),
+        wrapped.observe_at(u64::MAX, 100, start),
         ShmObservation::Advancing
     );
     assert_eq!(

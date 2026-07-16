@@ -104,7 +104,9 @@ enum Source {
         // Kept alive for its receive task; dropped with the adapter.
         _link: Option<AviateLink>,
     },
-    Shm(ShmSource),
+    // Boxed: the session machine (attachment, fault, freshness, naming)
+    // dwarfs the MAVLink variant.
+    Shm(Box<ShmSource>),
 }
 
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
@@ -217,7 +219,21 @@ impl AviateAdapter {
         instance: u8,
         incarnation: SourceIncarnation,
     ) -> Result<Source, AviateAdapterError> {
-        Ok(Source::Shm(ShmSource::open(instance, incarnation)?))
+        Ok(Source::Shm(Box::new(ShmSource::open(
+            instance,
+            incarnation,
+        )?)))
+    }
+
+    /// The typed fault that has fail-closed the shared-memory source, if
+    /// any. A faulted source publishes no telemetry and does not
+    /// re-attach. Only the shared-memory source carries a fail-closed
+    /// fault state; the MAVLink source reports `None` here.
+    pub fn shm_fault(&self) -> Option<&AviateAdapterError> {
+        match &self.source {
+            Source::Shm(source) => source.fault(),
+            Source::Mavlink { .. } => None,
+        }
     }
 
     async fn mavlink_source(

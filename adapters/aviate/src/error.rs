@@ -18,37 +18,34 @@ pub enum AviateAdapterError {
         #[source]
         source: std::io::Error,
     },
-    /// The generated POSIX shared-memory name was not a valid C string.
-    #[error("Aviate state shm name {name} is invalid: {source}")]
-    ShmName {
+    /// Attaching to the XIL shm object failed at the operating-system
+    /// level: the object does not exist (no simulation writer is up) or
+    /// the kernel refused the read-only mapping.
+    #[error("Aviate XIL shm {name} attach failed: {source}")]
+    ShmAttachIo {
         /// The POSIX shm object name.
         name: String,
-        /// The embedded-NUL error.
-        #[source]
-        source: std::ffi::NulError,
-    },
-    /// A POSIX shared-memory operation failed.
-    #[error("Aviate state shm {name} operation {operation} failed: {source}")]
-    ShmIo {
-        /// The POSIX shm object name.
-        name: String,
-        /// The operation that failed.
-        operation: &'static str,
-        /// The operating-system failure.
+        /// The operating-system failure reported by the upstream attach.
         #[source]
         source: std::io::Error,
     },
-    /// The shared-memory object is too small to back the reader's mapping.
-    /// This is a capacity check, not a layout/version check: capacity does
-    /// not establish layout compatibility — it proves only that at least
-    /// `required` bytes are present, never that the block's fields match.
-    #[error("Aviate state shm {name} reports {observed} bytes; needs at least {required}")]
-    ShmCapacityTooSmall {
+    /// The object exists but is not the contract block this build was
+    /// compiled against (foreign magic, layout version, declared size, or
+    /// a truncated mapping). Reading it would be plausible garbage, so the
+    /// attachment fails closed.
+    #[error("Aviate XIL shm {name} contract violation: {violation:?}")]
+    ShmContractMismatch {
         /// The POSIX shm object name.
         name: String,
-        /// Byte count the reader must be able to map.
-        required: usize,
-        /// The kernel-reported object size (`st_size`), which may be negative.
-        observed: i64,
+        /// The upstream attach-rule violation, verbatim.
+        violation: aviate_xil_contract::AttachError,
+    },
+    /// The block validates but the simulation writer has not published
+    /// readiness yet (writer mid-initialization). Retryable: attach again
+    /// once the writer is up; payload fields must not be read before then.
+    #[error("Aviate XIL shm {name} writer not ready")]
+    ShmWriterNotReady {
+        /// The POSIX shm object name.
+        name: String,
     },
 }

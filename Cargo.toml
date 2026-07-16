@@ -34,6 +34,11 @@ members = [
 edition = "2024"
 
 [workspace.dependencies]
+# The Aviate XIL contract crates are consumed only at one exact upstream
+# revision: both crates must always pin the identical rev so the layout
+# types, the transport, and the canonical object name cannot drift apart.
+aviate-xil-contract = { git = "https://github.com/luofang34/Aviate.git", rev = "ac9bd248406a892fbe97a712d921326c96abd8b6" }
+aviate-xil-shm = { git = "https://github.com/luofang34/Aviate.git", rev = "ac9bd248406a892fbe97a712d921326c96abd8b6" }
 thiserror = { version = "2.0.18", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
