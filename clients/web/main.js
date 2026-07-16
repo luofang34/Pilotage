@@ -106,6 +106,10 @@ const state = {
   connected: false,
   leaseGranted: false,
   skippedVideoFrames: 0,
+  // Page-lifetime latch: wasm absence never heals without a reload (the
+  // instrument module loads once at boot), so the H.264-unavailable notice
+  // is worth one line, not one line per frame at stream rate.
+  h264UnavailableLogged: false,
   droppedIdentityFrames: 0,
   // Latest capture-to-snapshot association verdict for an accepted frame
   // (ADR-0020), a diagnostic surface only — no conformal overlay is drawn yet.
@@ -158,7 +162,7 @@ function retireSessionPresentation(phase) {
   turnDerivation.reset();
   // Close every H.264 decoder so none outlives the session that owned it; a
   // reconnect rebuilds them bound to the new session token.
-  h264Registry.closeAll();
+  h264Registry?.closeAll();
   setTelemetrySessionState(els, phase);
 }
 
@@ -483,13 +487,21 @@ const VIDEO_TARGETS = {
 // (H264DecoderRegistry owns that lifetime — see video-h264.js). A source that
 // only ever carries MJPEG never constructs one. The decoder's output callback
 // tests its own session's liveness, so a reconnect's fresh decoder supersedes
-// any retired one.
-const h264Registry = new H264DecoderRegistry((target, token) =>
-  new H264CanvasDecoder(target, {
-    log: (message) => log(message),
-    isActive: () => transportSessions.isActive(token),
-  }),
-);
+// any retired one. The registry's ownership table lives in the instrument
+// wasm, so construction must wait for that module to initialize — constructing
+// it here would trap on the uninitialized wasm binding and take the whole
+// viewer module down with it. Until the wasm is ready (or if it fails to
+// load), the H.264 path skips frames visibly; MJPEG is unaffected.
+let h264Registry = null;
+
+function buildH264Registry() {
+  return new H264DecoderRegistry((target, token) =>
+    new H264CanvasDecoder(target, {
+      log: (message) => log(message),
+      isActive: () => transportSessions.isActive(token),
+    }),
+  );
+}
 
 /** Decodes one MJPEG payload and blits it to `target`, resizing its canvas to
  *  the frame. Session-token checked around the async decode so a frame decoded
@@ -519,6 +531,14 @@ async function paintByCodec(fourcc, payload, sourceId, target, token) {
     return;
   }
   if (fourcc === FOURCC_H264) {
+    if (!h264Registry) {
+      state.skippedVideoFrames += 1;
+      if (!state.h264UnavailableLogged) {
+        state.h264UnavailableLogged = true;
+        log("H.264 decode unavailable (instrument wasm not loaded); skipping H.264 frames silently");
+      }
+      return;
+    }
     h264Registry.for(sourceId, target, token).decode(payload);
     return;
   }
@@ -613,7 +633,7 @@ async function renderVideoFrameV2(body, token) {
     log(`video source ${meta.sourceId} capture discontinuity: fresh epoch/incarnation/calibration`);
     // A discontinuity is a GOP boundary an H.264 decoder cannot span; drop this
     // source's decoder so the next keyframe reconfigures a fresh one (MJPEG: no-op).
-    h264Registry.reset(meta.sourceId);
+    h264Registry?.reset(meta.sourceId);
   }
   state.lastAssociation = association;
   if (!association.ready) {
@@ -1118,6 +1138,7 @@ async function startInstruments() {
     // cached copy (a 304 keeps it cheap when unchanged).
     const wasmSource = await fetch("./instrument-runtime_bg.wasm", { cache: "no-cache" });
     instruments.mod = await loadInstruments(wasmSource);
+    h264Registry = buildH264Registry();
     const nowMs = performance.now();
     for (const health of Object.values(instruments.health)) health.reset(nowMs);
     setInterval(watchdogTick, WATCHDOG_INTERVAL_MS);

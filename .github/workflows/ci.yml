@@ -171,6 +171,13 @@ jobs:
         # output, at the recorded dimensions, and closed by the adapter.
         run: node clients/web/video-h264.browser.test.mjs
 
+      - name: viewer entrypoint boot contract (VID-04)
+        # A real browser loads the unmodified index.html + main.js: module
+        # evaluation must complete with no wasm-backed object constructed
+        # before wasm init, a good wasm load ends in live panels, and a
+        # failed wasm load degrades visibly without killing the viewer.
+        run: node clients/web/viewer-boot.browser.test.mjs
+
       - name: browser snapshot-association tests (HUD-01)
         run: node clients/web/snapshot-association.test.mjs
 
