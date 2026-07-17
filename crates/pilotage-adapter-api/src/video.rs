@@ -157,10 +157,14 @@ pub struct VideoCaptureStamp {
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{CalibrationId, CameraId, CaptureClockMapping, VideoCaptureStamp};
-    use crate::telemetry::{MeasurementClock, MeasurementStamp, SourceIncarnation};
+    use crate::telemetry::{
+        MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,
+    };
 
     fn stamp() -> MeasurementStamp {
         MeasurementStamp {
+            role: SourceRole::VideoCapture,
+            integrity: SourceIntegrity::Unprotected,
             source_id: 0,
             source_incarnation: SourceIncarnation::new([7; 16]),
             source_epoch: 0,

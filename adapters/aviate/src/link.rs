@@ -76,6 +76,15 @@ impl Default for LinkConfig {
 }
 
 impl LinkConfig {
+    /// Physical-vehicle profile: the conservative reset policy (never
+    /// infer a reboot from replayable telemetry) and the fail-safe zero
+    /// inter-group skew budget. Every real deployment must set a budget
+    /// derived from its link characteristics.
+    #[must_use]
+    pub fn physical() -> Self {
+        Self::default()
+    }
+
     /// Simulator profile with the bounded boot-clock reset heuristic enabled.
     #[must_use]
     pub fn simulator() -> Self {

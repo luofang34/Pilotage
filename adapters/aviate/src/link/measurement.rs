@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{MeasurementClock, MeasurementStamp};
+use pilotage_adapter_api::{MeasurementClock, MeasurementStamp, SourceIntegrity, SourceRole};
 use tracing::warn;
 
 use super::{LatestAviate, ResetPolicy};
@@ -255,6 +255,9 @@ fn next_group_stamp(
     update_high_water(latest, time_boot_ms);
     latest.last_accepted_at = Some(now);
     Some(MeasurementStamp {
+        role: SourceRole::OperationalEstimate,
+        // MAVLink frames are CRC-checked but unsigned.
+        integrity: SourceIntegrity::ChecksummedOnly,
         source_id: latest.source_id,
         source_incarnation: latest.source_incarnation,
         source_epoch: latest.source_epoch,

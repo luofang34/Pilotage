@@ -29,6 +29,9 @@ pub struct Args {
     /// If set, save the first, a middle, and the last decoded video frame as
     /// PNG files under this directory.
     pub save_frames: Option<String>,
+    /// Write every decoded telemetry observation (all role lanes, full
+    /// provenance) as JSON lines to this path.
+    pub capture: Option<String>,
 }
 
 const DEFAULT_SECONDS: u64 = 3;
@@ -63,6 +66,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, ProbeError> {
         });
     }
     let save_frames = optional_flag(args, "--save-frames")?;
+    let capture = optional_flag(args, "--capture")?;
     Ok(Args {
         url,
         insecure_loopback,
@@ -71,6 +75,7 @@ pub fn parse_args(args: &[String]) -> Result<Args, ProbeError> {
         rate,
         drive,
         save_frames,
+        capture,
     })
 }
 
@@ -148,6 +153,7 @@ mod tests {
                 rate: 100,
                 drive: false,
                 save_frames: None,
+                capture: None,
             }
         );
     }

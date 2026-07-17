@@ -350,6 +350,17 @@ impl FlightUplink {
     }
 
     /// The socket's local address, for tests.
+    /// The MAVLink (system, component) identity this uplink accepts FC
+    /// reports from — the provenance identity for those reports.
+    pub fn expected_source(&self) -> (u8, u8) {
+        (self.expected_system_id, self.expected_component_id)
+    }
+
+    /// The local socket address this uplink receives FC replies on.
+    ///
+    /// # Errors
+    ///
+    /// Returns the socket introspection error.
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.socket.local_addr()
     }

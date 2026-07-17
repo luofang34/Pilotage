@@ -21,6 +21,17 @@ pub enum HostError {
     /// Constructing the tokio runtime failed.
     #[error("failed to build the tokio runtime: {0}")]
     Runtime(#[source] std::io::Error),
+    /// `PILOTAGE_AVIATE_PROFILE` held a value that is not a known session
+    /// profile. Unknown values fail startup rather than falling back: a
+    /// typo in a physical deployment must never fail open into the
+    /// simulation profile.
+    #[error(
+        "invalid PILOTAGE_AVIATE_PROFILE value {value:?} (expected physical, simulation, or oracle-only)"
+    )]
+    AviateProfile {
+        /// The rejected value, lossily decoded for this message.
+        value: String,
+    },
     /// Spawning or connecting the Gazebo sidecar bridge failed.
     #[error("failed to start the Gazebo adapter: {0}")]
     GazeboAdapter(#[source] pilotage_adapter_gazebo::GazeboAdapterError),

@@ -143,7 +143,7 @@ function uint64Message(value) {
   return out;
 }
 
-function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock, incarnationByte) {
+function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock, incarnationByte, role = 1, integrity = 2) {
   const out = [];
   for (const [field, value] of [
     [1, sourceId],
@@ -151,7 +151,10 @@ function measurementStamp(sourceId, epoch, sequence, acquiredAtNanos, clock, inc
     [3, sequence],
     [4, acquiredAtNanos],
     [5, clock],
+    [7, role],
+    [8, integrity],
   ]) {
+    if (value === 0) continue; // proto3 omits defaults
     varint(out, (field << 3) | 0);
     varint(out, value);
   }
@@ -390,6 +393,87 @@ check(
   bytesField(av, 17, measurementStamp(5n, max, max, 100n, 1, 0xab));
   const decoded = decodeAvionicsOnly(av).avionics.attitudeStamp;
   check("the exact u32 max round-trips through decode unchanged", decoded.sourceEpoch === max);
+}
+
+// ---- LINK-04 source-role lanes: sim_truth (7) and fc_state (8) --------------
+// Truth and FC state travel as their own stamped messages; each is
+// unconsumable (null) without its provenance stamp, and the stamp's role
+// field is surfaced for role gating.
+
+{
+  const simTruth = [];
+  f32Field(simTruth, 1, 1.0); // quat_w
+  f32Field(simTruth, 5, 2.0); // pos_n
+  f32Field(simTruth, 6, 1.0); // pos_e
+  f32Field(simTruth, 7, -3.0); // pos_d
+  f32Field(simTruth, 10, 1.0); // vel_d
+  bytesField(simTruth, 11, measurementStamp(1, 2, 40, 1_000_000, 2, 0x11, 2, 3));
+  varint(simTruth, (12 << 3) | 0); // valid_flags
+  varint(simTruth, 0b1101);
+
+  const fcState = [];
+  varint(fcState, (1 << 3) | 0); // arm_state
+  varint(fcState, 2);
+  bytesField(fcState, 2, measurementStamp(1, 1, 3, 77, 3, 0x22, 3));
+
+  const telemetry = [];
+  bytesField(telemetry, 1, uint64Message(1));
+  bytesField(telemetry, 2, uint64Message(42));
+  bytesField(telemetry, 7, simTruth);
+  bytesField(telemetry, 8, fcState);
+  const envelopeBytes = [];
+  varint(envelopeBytes, (1 << 3) | 0);
+  varint(envelopeBytes, SCHEMA_VERSION);
+  bytesField(envelopeBytes, 4, telemetry);
+  const message = decodeBareEnvelope(new Uint8Array(envelopeBytes)).message;
+
+  check("truth lane decodes NED pose", message.simTruth?.posNed?.[0] === 2.0
+    && message.simTruth?.posNed?.[2] === -3.0);
+  check("truth lane surfaces availability and stamp integrity",
+    message.simTruth?.validFlags === 0b1101 && message.simTruth?.stamp?.integrity === 3);
+  check("truth stamp carries the simulation-truth role and clock",
+    message.simTruth?.stamp?.role === 2 && message.simTruth?.stamp?.clock === 2);
+  check("fc lane decodes arm state under the FC role and host clock",
+    message.fcState?.armState === 2 && message.fcState?.stamp?.role === 3
+    && message.fcState?.stamp?.clock === 3);
+  check("no estimate lane is synthesized alongside truth", message.avionics === null);
+
+  // Provenance-free lanes are unconsumable, not defaulted.
+  const bare = [];
+  varint(bare, (1 << 3) | 0);
+  varint(bare, 2);
+  const telemetryBare = [];
+  bytesField(telemetryBare, 1, uint64Message(1));
+  bytesField(telemetryBare, 8, bare);
+  const envelopeBare = [];
+  varint(envelopeBare, (1 << 3) | 0);
+  varint(envelopeBare, SCHEMA_VERSION);
+  bytesField(envelopeBare, 4, telemetryBare);
+  const bareMessage = decodeBareEnvelope(new Uint8Array(envelopeBare)).message;
+  check("an unstamped fc_state decodes to null", bareMessage.fcState === null);
+
+  // Mislabeled lanes are unconsumable: a truth-role fcState and an
+  // FC-role simTruth both decode to null instead of rendering.
+  const wrongTruth = [];
+  f32Field(wrongTruth, 5, 1.0);
+  bytesField(wrongTruth, 11, measurementStamp(1, 2, 41, 1_000_100, 2, 0x11, 3)); // FC role
+  varint(wrongTruth, (12 << 3) | 0);
+  varint(wrongTruth, 0b1101);
+  const wrongFc = [];
+  varint(wrongFc, (1 << 3) | 0);
+  varint(wrongFc, 2);
+  bytesField(wrongFc, 2, measurementStamp(1, 1, 4, 78, 3, 0x22, 2)); // truth role
+  const telemetryWrong = [];
+  bytesField(telemetryWrong, 1, uint64Message(1));
+  bytesField(telemetryWrong, 7, wrongTruth);
+  bytesField(telemetryWrong, 8, wrongFc);
+  const envelopeWrong = [];
+  varint(envelopeWrong, (1 << 3) | 0);
+  varint(envelopeWrong, SCHEMA_VERSION);
+  bytesField(envelopeWrong, 4, telemetryWrong);
+  const wrongMessage = decodeBareEnvelope(new Uint8Array(envelopeWrong)).message;
+  check("a truth lane with a non-truth role decodes to null", wrongMessage.simTruth === null);
+  check("an fc lane with a non-FC role decodes to null", wrongMessage.fcState === null);
 }
 
 if (failures > 0) {

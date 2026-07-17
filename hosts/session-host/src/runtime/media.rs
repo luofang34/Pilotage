@@ -379,7 +379,7 @@ mod tests {
     use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
     use pilotage_adapter_api::{
         CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
-        SourceIncarnation, VideoCaptureStamp,
+        SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
     };
     use pilotage_adapter_gazebo::RawVideoFrame;
     use pilotage_timing::SimTick;
@@ -387,6 +387,8 @@ mod tests {
     fn capture_stamp() -> VideoCaptureStamp {
         VideoCaptureStamp {
             stamp: MeasurementStamp {
+                role: SourceRole::VideoCapture,
+                integrity: SourceIntegrity::Unprotected,
                 source_id: 1,
                 source_incarnation: SourceIncarnation::new([5; 16]),
                 source_epoch: 0,

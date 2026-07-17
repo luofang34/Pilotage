@@ -12,12 +12,11 @@
 //! frozen block ages into withheld telemetry instead of replaying.
 //!
 //! The block is coherent simulator ground truth, not an FC operational
-//! estimate. The adapter currently exposes it through an estimator-shaped
-//! COMPATIBILITY PROJECTION (the stamps assert which simulator fields are
-//! present, not that an FC estimator authorized anything), selects it
-//! ahead of MAVLink in `Auto`, and uses its pose for SITL command
-//! construction. These behaviors are SIM-only; explicit truth/estimate
-//! separation remains required by #107 before flight-capable use.
+//! estimate. It is published only as the typed simulation-truth oracle
+//! (`SimTruthSample`) under its own source identity: it drives no
+//! primary panel, never seeds command construction, and is not a
+//! fallback for a missing FC estimate — a session without an estimate
+//! rejects state-dependent control rather than borrowing truth.
 //!
 //! The contract's angular-velocity lane is world-frame and advisory
 //! (gz's `WorldAngularVelocity` verbatim; zero on the known setup). It is

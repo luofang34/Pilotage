@@ -92,6 +92,9 @@ fn envelope_roundtrips_for_authority_event_arm() {
 }
 
 #[test]
+// The deprecated legacy arm lane must keep round-tripping unchanged for
+// as long as the field exists on the wire.
+#[allow(deprecated)]
 fn envelope_roundtrips_for_telemetry_sample_arm() {
     let sample = wire::TelemetrySample {
         vehicle: Some(wire::VehicleId { value: 2 }),
@@ -131,6 +134,8 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
                 sequence: 10,
                 acquired_at_ns: 1_000_000,
                 clock: wire::MeasurementClock::VehicleBoot as i32,
+                role: wire::SourceRole::OperationalEstimate as i32,
+                integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
             }),
             kinematics_stamp: Some(wire::MeasurementStamp {
                 source_id: 7,
@@ -139,6 +144,8 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
                 sequence: 5,
                 acquired_at_ns: 900_000,
                 clock: wire::MeasurementClock::VehicleBoot as i32,
+                role: wire::SourceRole::OperationalEstimate as i32,
+                integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
             }),
             estimator_status_stamp: Some(wire::MeasurementStamp {
                 source_id: 7,
@@ -147,8 +154,12 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
                 sequence: 11,
                 acquired_at_ns: 1_000_000,
                 clock: wire::MeasurementClock::VehicleBoot as i32,
+                role: wire::SourceRole::OperationalEstimate as i32,
+                integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
             }),
         }),
+        sim_truth: None,
+        fc_state: None,
     };
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,

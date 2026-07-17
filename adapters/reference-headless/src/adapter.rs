@@ -208,6 +208,8 @@ impl VehicleAdapter for ReferenceAdapter {
                 }),
                 speed: Some(self.skiff.speed),
                 avionics: None,
+                sim_truth: None,
+                fc_state: None,
             }],
         }
     }

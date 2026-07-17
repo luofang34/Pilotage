@@ -48,7 +48,7 @@ import {
 } from "./instrument-health.js";
 import { TurnDerivation } from "./turn-derivation.js";
 import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
-import { AvionicsIngress, INCARNATION_POLICY } from "./telemetry-ingress.js";
+import { AvionicsIngress, FcStateTracker, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
@@ -156,6 +156,9 @@ function newSimulatorAvionicsIngress() {
 
 function retireSessionPresentation(phase) {
   instruments.ingress = newSimulatorAvionicsIngress();
+  // FC-state freshness is session-scoped: a new session must not
+  // inherit the old session's arm report or its age.
+  instruments.fcState = new FcStateTracker();
   // Drop the previous session's snapshot history so a new session can never
   // associate a video frame against a stale snapshot from the old one.
   snapshotHistory.reset();
@@ -170,6 +173,7 @@ const instruments = {
   mod: null,
   moduleFault: null,
   ingress: newSimulatorAvionicsIngress(),
+  fcState: new FcStateTracker(),
   health: {
     [PANEL.PFD]: new PanelHealth(),
     [PANEL.HSI]: new PanelHealth(),
@@ -278,6 +282,7 @@ async function connect() {
     // token prevents readers from the replaced transport from reaching this
     // newly empty ingress even if their promises settle later.
     instruments.ingress = newSimulatorAvionicsIngress();
+    instruments.fcState = new FcStateTracker();
     setTelemetrySessionState(els, "awaiting");
     state.connected = true;
     acceptIncomingUniStreams(transport, token).catch((error) => {
@@ -668,7 +673,10 @@ async function readTelemetryDatagrams(transport, token) {
           }
         }
         if (t.vehicleId !== VEHICLE_ID) continue;
-        els.telemetry.textContent = formatTelemetrySummary(t);
+        els.telemetry.textContent = formatTelemetrySummary(
+          t,
+          instruments.fcState.observe(t.fcState ?? null, performance.now()),
+        );
       } else if (decoded.kind === "Pong") {
         // RTT probing is out of scope for this demo viewer; ignored.
       } else if (decoded.kind === "FrameRejected") {

@@ -258,6 +258,8 @@ fn telemetry_from_odometry(vehicle: VehicleId, odom: &BridgeOdometry) -> Telemet
         }),
         speed: Some(odom.speed),
         avionics: None,
+        sim_truth: None,
+        fc_state: None,
     }
 }
 

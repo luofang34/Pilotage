@@ -5,6 +5,7 @@
 //! Not part of the sans-IO core (ADR-0002): this binary owns the
 //! WebTransport connection, device I/O, and wall-clock timing.
 
+mod capture;
 mod cli;
 mod control_source;
 mod drive;

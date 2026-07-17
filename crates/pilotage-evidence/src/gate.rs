@@ -12,6 +12,7 @@
 //! than silently turned into success.
 
 mod artifact;
+mod baseline;
 mod checks;
 mod contained;
 mod review;
@@ -181,6 +182,7 @@ fn collect(graph: &Graph, policy: &Policy, repo_root: Option<&Path>) -> Vec<Find
         selector::resolve(graph, policy, root, &mut findings);
         artifact::resolve(graph, policy, root, &mut findings);
         source::resolve(graph, policy, root, &mut findings);
+        baseline::resolve(graph, policy, root, &mut findings);
         review::resolve(graph, policy, root, &mut findings);
     }
     findings

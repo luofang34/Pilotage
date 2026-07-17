@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   AvionicsIngress,
   COHERENCE,
+  FcStateTracker,
   INCARNATION_POLICY,
   serialIsNewer,
+  stampFaultForRole,
 } from "./telemetry-ingress.js";
 
 const VEHICLE = 1n;
@@ -21,7 +23,18 @@ function stamp(
   sourceId = SOURCE,
   sourceIncarnation = INCARNATION_A,
 ) {
-  return { sourceId, sourceIncarnation, sourceEpoch, sequence, acquiredAtNanos, clock: CLOCK };
+  // Role 1 = operational estimate (the only role the ingress admits),
+  // checksummed-only integrity: the complete stamp the validator needs.
+  return {
+    sourceId,
+    sourceIncarnation,
+    sourceEpoch,
+    sequence,
+    acquiredAtNanos,
+    clock: CLOCK,
+    role: 1,
+    integrity: 2,
+  };
 }
 
 function avionics(attitudeStamp, kinematicsStamp, value = 1) {
@@ -507,3 +520,109 @@ for (const test of [
     "the exact u32 max epoch is accepted",
   );
 }
+
+function fcReport(sequence, armState = 2, overrides = {}) {
+  return {
+    armState,
+    stamp: {
+      sourceId: 0x01ben,
+      sourceIncarnation: INCARNATION_A,
+      sourceEpoch: 1,
+      sequence,
+      acquiredAtNanos: BigInt(sequence) * 1_000_000n,
+      clock: 3, // host-monotonic: the FC-state role's only legal clock
+      role: 3,
+      integrity: 2, // checksummed-only MAVLink
+      ...overrides,
+    },
+  };
+}
+
+function testFcStateDuplicatesNeverRefreshAge() {
+  const tracker = new FcStateTracker(3000);
+  assert.equal(tracker.observe(null, 0), null, "missing before any report");
+
+  let view = tracker.observe(fcReport(1), 1000);
+  assert.equal(view.armState, 2);
+  assert.equal(view.stale, false);
+
+  // The SAME report re-published keeps aging: duplicates never refresh.
+  view = tracker.observe(fcReport(1), 4500);
+  assert.equal(view.stale, true, "duplicate must not reset the age clock");
+
+  // A NEW report (sequence advanced) restarts freshness.
+  view = tracker.observe(fcReport(2), 4600);
+  assert.equal(view.stale, false);
+
+  // Silence after the last new report goes stale.
+  view = tracker.observe(null, 9000);
+  assert.equal(view.stale, true, "heartbeat loss surfaces as stale");
+}
+testFcStateDuplicatesNeverRefreshAge();
+console.log("ok - testFcStateDuplicatesNeverRefreshAge");
+
+function testFcStateRejectsReorderedAndOldSequences() {
+  const tracker = new FcStateTracker(3000);
+  let view = tracker.observe(fcReport(10, 2), 1000); // fresh ARMED seq=10
+  assert.equal(view.armState, 2);
+
+  // A reordered OLDER report must not present as fresh: stale ARMED
+  // seq=10 followed by DISARMED seq=9 keeps ARMED and keeps its age.
+  view = tracker.observe(fcReport(9, 1), 4500);
+  assert.equal(view.armState, 2, "older sequence must not replace state");
+  assert.equal(view.stale, true, "older sequence must not refresh age");
+
+  // Wrapping serial order: u32 wrap is an advance, not a regression.
+  const wrapped = new FcStateTracker(3000);
+  wrapped.observe(fcReport(0xffffffff), 0);
+  view = wrapped.observe(fcReport(0), 10);
+  assert.equal(view.stale, false, "u32 sequence wrap is an advance");
+
+  // A newer epoch restarts the numbering; an older epoch is a replay.
+  view = tracker.observe(fcReport(1, 1, { sourceEpoch: 2 }), 4600);
+  assert.equal(view.armState, 1, "newer epoch restarts the numbering");
+  view = tracker.observe(fcReport(50, 2, { sourceEpoch: 1 }), 4700);
+  assert.equal(view.armState, 1, "older epoch is a replay");
+}
+testFcStateRejectsReorderedAndOldSequences();
+console.log("ok - testFcStateRejectsReorderedAndOldSequences");
+
+function testFcStatePinsIdentityAndValidatesProvenance() {
+  const tracker = new FcStateTracker(3000);
+  tracker.observe(fcReport(1), 0);
+
+  // Pinned identity: another incarnation or id is not this stream.
+  let view = tracker.observe(fcReport(2, 1, { sourceIncarnation: INCARNATION_B }), 10);
+  assert.equal(view.armState, 2, "foreign incarnation rejected");
+  view = tracker.observe(fcReport(2, 1, { sourceId: 7n }), 20);
+  assert.equal(view.armState, 2, "foreign source id rejected");
+
+  // Malformed provenance and out-of-contract fields are all rejected.
+  for (const overrides of [
+    { clock: 2 }, // truth clock on an FC-state stamp
+    { role: 2 }, // wrong role
+    { integrity: 0 }, // unspecified integrity
+    { sourceEpoch: -1 },
+    { acquiredAtNanos: 5 }, // not a BigInt u64
+  ]) {
+    view = tracker.observe(fcReport(3, 1, overrides), 30);
+    assert.equal(view.armState, 2, `must reject ${JSON.stringify(overrides)}`);
+  }
+
+  // Out-of-range arm values are rejected whole.
+  view = tracker.observe(fcReport(4, 7), 40);
+  assert.equal(view.armState, 2, "invalid arm value rejected");
+}
+testFcStatePinsIdentityAndValidatesProvenance();
+console.log("ok - testFcStatePinsIdentityAndValidatesProvenance");
+
+function testEstimateStampsRequireKnownIntegrity() {
+  assert.equal(
+    stampFaultForRole({ ...stamp(1, 100n), integrity: 0 }, 1)?.field,
+    "integrity",
+    "unspecified integrity is a fault on the estimate lane",
+  );
+  assert.equal(stampFaultForRole({ ...stamp(1, 100n), integrity: 2 }, 1), null);
+}
+testEstimateStampsRequireKnownIntegrity();
+console.log("ok - testEstimateStampsRequireKnownIntegrity");

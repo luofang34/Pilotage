@@ -37,7 +37,15 @@ fn main() -> ExitCode {
     // A build script cannot propagate `Result` to `main`'s caller the way a
     // library can (ADR-0015 bans `process::exit`), so a non-zero `ExitCode`
     // is the sanctioned way to fail the build without `expect`/`panic`.
-    match prost_build::Config::new().compile_protos(&protos, &[schema_root]) {
+    // The truth/FC-state messages ride inside TelemetrySample, whose
+    // envelope Payload variant must stay comparable in size to its
+    // siblings; boxing keeps the rarely-populated oracle lanes off the
+    // hot variant.
+    match prost_build::Config::new()
+        .boxed(".pilotage.v1.TelemetrySample.sim_truth")
+        .boxed(".pilotage.v1.TelemetrySample.fc_state")
+        .compile_protos(&protos, &[schema_root])
+    {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             println!("cargo:warning=failed to compile pilotage.v1 schemas: {err}");
