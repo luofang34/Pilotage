@@ -921,6 +921,20 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 
 // ---- failure latch, recovery, liveness (injected clock) ---------------------
 
+// Ticks on the watchdog's own cadence from its last tick up to and
+// including `target`, then returns that final tick's display. A real
+// watchdog fires every interval, so liveness is exercised without the
+// gaps tripping the starvation guard; the final tick lands exactly on
+// `target` for precise deadline-boundary checks.
+function tickToCadence(health, target, interval = 250) {
+  let t = health.lastTickMs + interval;
+  while (t < target) {
+    health.tick(t);
+    t += interval;
+  }
+  return health.tick(target);
+}
+
 {
   const health = new PanelHealth({ livenessDeadlineMs: 1000, recoveryFrames: 3 }, 0);
   check("healthy start shows no failure", health.display().showFailure === false);
@@ -946,7 +960,9 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 {
   const health = new PanelHealth({ livenessDeadlineMs: 1000, recoveryFrames: 3 }, 0);
   health.reportSuccess(0, 1);
-  check("at the deadline the panel is still live", health.tick(1000).showFailure === false);
+  // Ticks fire on cadence; at the deadline boundary the panel is still
+  // live, and the first tick strictly past it latches LIVENESS.
+  check("at the deadline the panel is still live", tickToCadence(health, 1000).showFailure === false);
   const d = health.tick(1001);
   check("past the deadline the panel fails LIVENESS", d.showFailure && d.reason === REASON.LIVENESS);
   check("liveness trip counted", health.snapshot().counters.livenessTrips === 1);
@@ -964,6 +980,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   health.reportSuccess(0, 5);
   health.reportSuccess(500, 5); // duplicate generation: no freshness credit
   check("duplicate generation counted", health.snapshot().counters.duplicates === 1);
+  tickToCadence(health, 1000);
   const d = health.tick(1001);
   check(
     "repeated generations cannot keep a stalled panel alive",
@@ -974,8 +991,97 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 {
   const health = new PanelHealth({ livenessDeadlineMs: 1000, recoveryFrames: 3 }, 0);
   health.reportSuccess(0, 0xffffffff);
+  tickToCadence(health, 750);
   health.reportSuccess(900, 0); // u32 wrap is an advance, not a duplicate
-  check("generation wrap counts as advancement", health.tick(1500).showFailure === false);
+  check("generation wrap counts as advancement", tickToCadence(health, 1500).showFailure === false);
+}
+
+// ---- scheduling starvation: a stalled watchdog clock must not judge ---------
+//
+// PERMANENT CONTRACT: LIVENESS may only latch from a tick whose own
+// arrival is on cadence. A browser that suspends rAF and clamps timers
+// for an occluded/backgrounded page starves the watchdog's clock along
+// with the render loop; a deadline measured by that stalled clock says
+// nothing about the render pipeline, and latching from it makes panels
+// blink FAIL/OK with every compositor burst. A late tick re-arms the
+// deadline; a genuinely dead render loop still trips within one deadline
+// of ticks running on cadence again — exactly when a viewer is looking.
+
+{
+  const health = new PanelHealth(
+    { livenessDeadlineMs: 1000, recoveryFrames: 3, tickIntervalMs: 250 },
+    0,
+  );
+  health.reportSuccess(0, 1);
+  health.tick(250); // on cadence: establishes the tick clock
+  const d = health.tick(2000); // throttled: 1750 ms gap >> 2 × 250 ms
+  check(
+    "a starved tick past the deadline does not latch LIVENESS",
+    d.showFailure === false && health.snapshot().counters.livenessTrips === 0,
+  );
+  check("starved tick is counted", health.snapshot().counters.starvedTicks === 1);
+  check(
+    "the starved tick re-armed the deadline",
+    health.tick(2250).showFailure === false,
+  );
+
+  // Scheduling has resumed (ticks on cadence) but frames never advance:
+  // the panel must fail within one deadline of the resume, not sooner.
+  health.tick(2500);
+  health.tick(2750);
+  health.tick(3000);
+  check("re-armed deadline holds until it elapses", health.display().showFailure === false);
+  const tripped = health.tick(3001);
+  check(
+    "a dead render loop trips one deadline after scheduling resumes",
+    tripped.showFailure === true && tripped.reason === REASON.LIVENESS,
+  );
+}
+
+{
+  // The FIRST tick can be the late one: if the page was backgrounded
+  // before the watchdog ever fired, the initial tick arrives long past
+  // the deadline with no preceding cadence-establishing tick. It must be
+  // recognized as starvation, not latch LIVENESS — the tick clock is
+  // seeded at reset so even the first tick has a baseline.
+  const health = new PanelHealth(
+    { livenessDeadlineMs: 1000, recoveryFrames: 3, tickIntervalMs: 250 },
+    0,
+  );
+  health.reportSuccess(0, 1);
+  const first = health.tick(2000); // first tick, no prior tick, 2000 ms late
+  check(
+    "a delayed first tick does not latch LIVENESS",
+    first.showFailure === false && health.snapshot().counters.livenessTrips === 0,
+  );
+  check("the delayed first tick is counted as starved", health.snapshot().counters.starvedTicks === 1);
+
+  // Scheduling then resumes on cadence with no renders: a genuinely dead
+  // renderer must still trip within one deadline of the resume.
+  health.tick(2250);
+  health.tick(2500);
+  health.tick(3000);
+  check("re-armed deadline holds until it elapses", health.display().showFailure === false);
+  const tripped = health.tick(3001);
+  check(
+    "a dead renderer trips one deadline after the delayed first tick",
+    tripped.showFailure === true && tripped.reason === REASON.LIVENESS,
+  );
+}
+
+{
+  // Starvation must not unlatch or mask an already-latched failure.
+  const health = new PanelHealth(
+    { livenessDeadlineMs: 1000, recoveryFrames: 3, tickIntervalMs: 250 },
+    0,
+  );
+  health.reportFailure(10, REASON.PAINT_FAILED);
+  health.tick(250);
+  const d = health.tick(5000); // starved while latched
+  check(
+    "a starved tick keeps a latched failure visible",
+    d.showFailure === true && d.reason === REASON.PAINT_FAILED,
+  );
 }
 
 {

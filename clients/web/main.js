@@ -169,21 +169,23 @@ function retireSessionPresentation(phase) {
   setTelemetrySessionState(els, phase);
 }
 
+// Browser watchdog cadence (simulator-only): a scheduling domain separate
+// from requestAnimationFrame, so a stalled render loop still trips the
+// liveness deadline and covers the stale frame. Passed to each panel's
+// health so a tick arriving late against this cadence is recognized as
+// page-wide scheduling starvation rather than a render-pipeline fault.
+const WATCHDOG_INTERVAL_MS = 250;
+
 const instruments = {
   mod: null,
   moduleFault: null,
   ingress: newSimulatorAvionicsIngress(),
   fcState: new FcStateTracker(),
   health: {
-    [PANEL.PFD]: new PanelHealth(),
-    [PANEL.HSI]: new PanelHealth(),
+    [PANEL.PFD]: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
+    [PANEL.HSI]: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
   },
 };
-
-// Browser watchdog cadence (simulator-only): a scheduling domain separate
-// from requestAnimationFrame, so a stalled render loop still trips the
-// liveness deadline and covers the stale frame.
-const WATCHDOG_INTERVAL_MS = 250;
 
 /** The two instrument paint targets and their independent fault surfaces. */
 function instrumentTargets() {
