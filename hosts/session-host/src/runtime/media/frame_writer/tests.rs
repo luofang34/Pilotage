@@ -15,7 +15,13 @@ use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::{EncodedFrame, FrameChannel, FrameStream, drain_frames};
+use wtransport::VarInt;
+use wtransport::error::{StreamOpeningError, StreamWriteError};
+
+use super::{
+    EncodedFrame, FatalKind, FrameChannel, FrameStream, StreamError, classify_open, classify_write,
+    drain_frames,
+};
 
 fn capture_stamp() -> VideoCaptureStamp {
     VideoCaptureStamp {
@@ -51,27 +57,33 @@ struct Tally {
     reset: AtomicU32,
 }
 
-/// How a mock stream behaves once opened.
+/// How a mock stream behaves once opened. The failure cases construct a
+/// real `StreamWriteError` and route it through the production
+/// `classify_write`, so the drain tests exercise the actual mapping — a
+/// reversed classifier would flip these outcomes too.
 #[derive(Clone, Copy)]
 enum Write {
     /// `write_all` never completes (a wedged consumer).
     Stall,
-    /// The peer stopped this stream alone (peer-local, one-frame loss).
-    PeerStopped(u64),
-    /// The connection is gone (connection-fatal).
+    /// The peer stopped this stream alone (`StreamWriteError::Stopped`).
+    PeerStopped(u32),
+    /// The stream was already closed locally (`StreamWriteError::Closed`).
+    Closed,
+    /// The connection is gone (`StreamWriteError::NotConnected`).
     ConnFatal,
     /// Writes and finishes normally.
     Ok,
 }
 
-/// How a mock `open()` behaves.
+/// How a mock `open()` behaves; the failure cases route real
+/// `StreamOpeningError`s through the production `classify_open`.
 #[derive(Clone, Copy)]
 enum Open {
     /// `open()` never completes (the peer's stream allowance is full).
     Stall,
-    /// The peer refused this stream alone (peer-local, one-frame loss).
+    /// The peer refused this stream alone (`StreamOpeningError::Refused`).
     Refused,
-    /// The connection is gone (connection-fatal).
+    /// The connection is gone (`StreamOpeningError::NotConnected`).
     ConnFatal,
     /// `open()` yields a stream with the given write behavior.
     Ready(Write),
@@ -83,22 +95,23 @@ struct MockStream {
 }
 
 impl FrameStream for MockStream {
-    async fn write_all(&mut self, _buf: &[u8]) -> Result<(), super::StreamError> {
+    async fn write_all(&mut self, _buf: &[u8]) -> Result<(), StreamError> {
         match self.write {
             Write::Stall => {
                 std::future::pending::<()>().await;
                 Ok(())
             }
-            Write::PeerStopped(code) => Err(super::StreamError::PeerLocal {
-                phase: "write",
-                code: Some(code),
-            }),
-            Write::ConnFatal => Err(super::StreamError::ConnectionFatal("not connected")),
+            Write::PeerStopped(code) => Err(classify_write(
+                &StreamWriteError::Stopped(VarInt::from_u32(code)),
+                "write",
+            )),
+            Write::Closed => Err(classify_write(&StreamWriteError::Closed, "write")),
+            Write::ConnFatal => Err(classify_write(&StreamWriteError::NotConnected, "write")),
             Write::Ok => Ok(()),
         }
     }
 
-    async fn finish(&mut self) -> Result<(), super::StreamError> {
+    async fn finish(&mut self) -> Result<(), StreamError> {
         self.tally.finished.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -118,7 +131,7 @@ struct MockChannel {
 impl FrameChannel for MockChannel {
     type Stream = MockStream;
 
-    async fn open(&self) -> Result<MockStream, super::StreamError> {
+    async fn open(&self) -> Result<MockStream, StreamError> {
         let n = self.tally.opened.fetch_add(1, Ordering::SeqCst) as usize;
         match self
             .script
@@ -130,11 +143,8 @@ impl FrameChannel for MockChannel {
                 std::future::pending::<()>().await;
                 unreachable!("a stalled open never resolves")
             }
-            Open::Refused => Err(super::StreamError::PeerLocal {
-                phase: "open",
-                code: None,
-            }),
-            Open::ConnFatal => Err(super::StreamError::ConnectionFatal("not connected")),
+            Open::Refused => Err(classify_open(&StreamOpeningError::Refused)),
+            Open::ConnFatal => Err(classify_open(&StreamOpeningError::NotConnected)),
             Open::Ready(write) => Ok(MockStream {
                 write,
                 tally: self.tally.clone(),
@@ -301,5 +311,89 @@ async fn a_connection_fatal_open_retires_the_writer() {
         tally.opened.load(Ordering::SeqCst),
         1,
         "the writer retires on a connection-fatal open; the next frame is never opened"
+    );
+}
+
+/// A local `Closed` is recoverable frame-local loss: the next frame opens
+/// and finishes, the writer survives, and no stream reset is issued (the
+/// stream was already closed, not deadline-abandoned).
+#[tokio::test(start_paused = true)]
+async fn a_local_close_loses_one_frame_and_the_writer_survives() {
+    let mut rx = queue(2).await;
+    let tally = Arc::new(Tally::default());
+    let channel = MockChannel {
+        script: vec![Open::Ready(Write::Closed), Open::Ready(Write::Ok)],
+        tally: tally.clone(),
+    };
+
+    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+
+    assert_eq!(
+        tally.opened.load(Ordering::SeqCst),
+        2,
+        "the writer survives a local close and opens the next frame's stream"
+    );
+    assert_eq!(
+        tally.finished.load(Ordering::SeqCst),
+        1,
+        "the frame after the local close finishes cleanly"
+    );
+    assert_eq!(
+        tally.reset.load(Ordering::SeqCst),
+        0,
+        "a local close does not reset a stream"
+    );
+}
+
+// ---- direct classifier matrix: every pinned wtransport variant --------------
+//
+// The drain tests above route through `classify_write`/`classify_open`,
+// but these pin the mapping itself so a reversed production classifier
+// (peer-local vs connection-fatal swapped) fails outright.
+
+#[test]
+fn classify_write_maps_every_pinned_variant() {
+    assert_eq!(
+        classify_write(&StreamWriteError::Stopped(VarInt::from_u32(9)), "write"),
+        StreamError::PeerStop {
+            phase: "write",
+            code: Some(9),
+        },
+    );
+    assert_eq!(
+        classify_write(&StreamWriteError::Closed, "finish"),
+        StreamError::LocalClose { phase: "finish" },
+    );
+    assert_eq!(
+        classify_write(&StreamWriteError::NotConnected, "write"),
+        StreamError::ConnectionFatal {
+            phase: "write",
+            kind: FatalKind::NotConnected,
+        },
+    );
+    assert_eq!(
+        classify_write(&StreamWriteError::QuicProto, "write"),
+        StreamError::ConnectionFatal {
+            phase: "write",
+            kind: FatalKind::QuicProto,
+        },
+    );
+}
+
+#[test]
+fn classify_open_maps_every_pinned_variant() {
+    assert_eq!(
+        classify_open(&StreamOpeningError::Refused),
+        StreamError::PeerStop {
+            phase: "open",
+            code: None,
+        },
+    );
+    assert_eq!(
+        classify_open(&StreamOpeningError::NotConnected),
+        StreamError::ConnectionFatal {
+            phase: "open",
+            kind: FatalKind::NotConnected,
+        },
     );
 }

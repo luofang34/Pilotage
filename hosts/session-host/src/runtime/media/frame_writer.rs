@@ -8,7 +8,7 @@ use std::time::Duration;
 use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 use wtransport::error::{StreamOpeningError, StreamWriteError};
 use wtransport::{Connection, SendStream, VarInt};
 
@@ -30,35 +30,92 @@ const FRAME_WRITE_DEADLINE: Duration = Duration::from_secs(2);
 /// partial frame regardless of the code.
 const STALL_RESET_CODE: u32 = 1;
 
-/// Why an open, write, or finish failed, classified so a peer's decision
-/// to abandon ONE stream does not retire the whole source writer.
+/// A connection-fatal error's kind, preserved rather than erased so the
+/// log names what actually failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FatalKind {
+    /// The connection has been dropped.
+    NotConnected,
+    /// A QUIC protocol error.
+    QuicProto,
+    /// The uni-stream open request itself failed (connection-level).
+    OpenRequest,
+}
+
+impl FatalKind {
+    /// A stable log string for the fatal kind.
+    fn as_str(self) -> &'static str {
+        match self {
+            FatalKind::NotConnected => "not connected",
+            FatalKind::QuicProto => "QUIC protocol error",
+            FatalKind::OpenRequest => "uni stream request failed",
+        }
+    }
+}
+
+/// Why an open, write, or finish failed, classified so neither a peer's
+/// decision to abandon ONE stream nor a local close retires the writer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamError {
     /// The peer stopped or refused this stream alone (`Stopped`,
-    /// `Refused`), or it was already closed locally. The connection and
-    /// every other source are unaffected — this is one-frame loss.
-    PeerLocal {
+    /// `Refused`): a peer-attributed one-frame loss; the connection and
+    /// every other source are unaffected.
+    PeerStop {
         /// The phase that surfaced it (`open`, `write`, `finish`).
         phase: &'static str,
         /// The peer's application error code, when it carried one.
         code: Option<u64>,
     },
-    /// Connection-level loss or a protocol failure (`NotConnected`,
-    /// `QuicProto`, or an open-request `ConnectionError`): the writer must
+    /// The stream was already closed locally (`Closed`): a frame-local
+    /// anomaly, recoverable like a peer stop but NOT a peer stop/refusal.
+    LocalClose {
+        /// The phase that surfaced it.
+        phase: &'static str,
+    },
+    /// Connection-level loss or a protocol failure: the writer must
     /// retire — no further frame can be delivered on this connection.
-    ConnectionFatal(&'static str),
+    ConnectionFatal {
+        /// The phase that surfaced it.
+        phase: &'static str,
+        /// The preserved underlying kind, not erased to a string.
+        kind: FatalKind,
+    },
 }
 
-/// Classifies a wtransport write/finish error: only `NotConnected` and
-/// `QuicProto` are connection-fatal; `Stopped`/`Closed` are peer-local.
+/// Classifies a wtransport write/finish error: `Stopped` is a peer stop,
+/// `Closed` is a local close, `NotConnected`/`QuicProto` are
+/// connection-fatal. Pinned to wtransport 0.7.1's four variants.
 fn classify_write(error: &StreamWriteError, phase: &'static str) -> StreamError {
     match error {
-        StreamWriteError::Stopped(code) => StreamError::PeerLocal {
+        StreamWriteError::Stopped(code) => StreamError::PeerStop {
             phase,
             code: Some(code.into_inner()),
         },
-        StreamWriteError::Closed => StreamError::PeerLocal { phase, code: None },
-        StreamWriteError::NotConnected => StreamError::ConnectionFatal("not connected"),
-        StreamWriteError::QuicProto => StreamError::ConnectionFatal("QUIC protocol error"),
+        StreamWriteError::Closed => StreamError::LocalClose { phase },
+        StreamWriteError::NotConnected => StreamError::ConnectionFatal {
+            phase,
+            kind: FatalKind::NotConnected,
+        },
+        StreamWriteError::QuicProto => StreamError::ConnectionFatal {
+            phase,
+            kind: FatalKind::QuicProto,
+        },
+    }
+}
+
+/// Classifies a wtransport stream-opening error: `Refused` is a peer
+/// refusal of this stream alone, `NotConnected` is connection-fatal.
+/// Pinned to wtransport 0.7.1's two variants.
+fn classify_open(error: &StreamOpeningError) -> StreamError {
+    match error {
+        StreamOpeningError::Refused => StreamError::PeerStop {
+            phase: "open",
+            code: None,
+        },
+        StreamOpeningError::NotConnected => StreamError::ConnectionFatal {
+            phase: "open",
+            kind: FatalKind::NotConnected,
+        },
     }
 }
 
@@ -115,14 +172,11 @@ impl FrameChannel for Connection {
         let opening = self
             .open_uni()
             .await
-            .map_err(|_| StreamError::ConnectionFatal("uni stream request failed"))?;
-        opening.await.map_err(|e| match e {
-            StreamOpeningError::Refused => StreamError::PeerLocal {
+            .map_err(|_| StreamError::ConnectionFatal {
                 phase: "open",
-                code: None,
-            },
-            StreamOpeningError::NotConnected => StreamError::ConnectionFatal("not connected"),
-        })
+                kind: FatalKind::OpenRequest,
+            })?;
+        opening.await.map_err(|e| classify_open(&e))
     }
 }
 
@@ -151,21 +205,42 @@ enum FrameOutcome {
     Stalled { reset: bool },
     /// The peer stopped or refused this stream alone; the connection and
     /// other sources are healthy — one-frame loss, keep writing.
-    PeerLocal {
+    PeerStop {
         /// The phase (`open`, `write`, `finish`) that surfaced it.
         phase: &'static str,
         /// The peer's application error code, when it carried one.
         code: Option<u64>,
     },
+    /// The stream was already closed locally — a frame-local anomaly,
+    /// recoverable, but not a peer stop/refusal.
+    LocalClose {
+        /// The phase that surfaced it.
+        phase: &'static str,
+    },
     /// Connection-level loss or protocol failure; retire the writer.
-    ConnectionFatal(&'static str),
+    ConnectionFatal {
+        /// The phase that surfaced it.
+        phase: &'static str,
+        /// The preserved underlying kind.
+        kind: FatalKind,
+    },
+}
+
+/// The running per-writer loss counters, kept distinguishable so logs and
+/// metrics separate deadline stalls, peer-local stop/refusal, and
+/// local closes from the one connection-fatal event that ends the writer.
+#[derive(Default)]
+struct LossCounters {
+    stalls: u64,
+    peer_drops: u64,
+    local_closes: u64,
 }
 
 /// Drains the handoff channel, delivering one frame per stream under a
 /// single absolute per-frame deadline that covers BOTH opening the stream
-/// and writing it. A frame lost to a deadline or a peer-local stop/refusal
-/// costs one frame and the writer proceeds; only connection-level loss
-/// retires the writer.
+/// and writing it. A frame lost to a deadline, a peer stop/refusal, or a
+/// local close costs one frame and the writer proceeds; only
+/// connection-level loss retires the writer.
 async fn drain_frames<C: FrameChannel>(
     client: ClientKey,
     source_id: u8,
@@ -173,8 +248,7 @@ async fn drain_frames<C: FrameChannel>(
     frames: &mut mpsc::Receiver<EncodedFrame>,
     start: Instant,
 ) {
-    let mut stalls: u64 = 0;
-    let mut peer_drops: u64 = 0;
+    let mut counters = LossCounters::default();
     while let Some(frame) = frames.recv().await {
         // Stamp publication at the moment of write, distinct from the receive
         // stamp taken at dequeue, so a consumer can separate host queueing
@@ -194,41 +268,75 @@ async fn drain_frames<C: FrameChannel>(
             continue;
         };
         let deadline = Instant::now() + FRAME_WRITE_DEADLINE;
-        match deliver_frame(channel, deadline, VIDEO_FRAME_V2, &body).await {
-            FrameOutcome::Sent => {}
-            FrameOutcome::Stalled { reset } => {
-                stalls = stalls.wrapping_add(1);
-                warn!(
-                    client = client.as_u64(),
-                    source_id,
-                    total_stalls = stalls,
-                    stream_reset = reset,
-                    "video frame exceeded its deadline; continuing with the next frame"
-                );
-            }
-            FrameOutcome::PeerLocal { phase, code } => {
-                peer_drops = peer_drops.wrapping_add(1);
-                warn!(
-                    client = client.as_u64(),
-                    source_id,
-                    phase,
-                    peer_code = code,
-                    total_peer_drops = peer_drops,
-                    "peer stopped or refused this video stream; the connection is healthy, \
-                     continuing with the next frame"
-                );
-            }
-            FrameOutcome::ConnectionFatal(reason) => {
-                // Connection-level loss; stop writing video to it. The
-                // connection task's own teardown deregisters this client.
-                debug!(
-                    client = client.as_u64(),
-                    source_id, reason, "video writer stopping"
-                );
-                return;
-            }
+        let outcome = deliver_frame(channel, deadline, VIDEO_FRAME_V2, &body).await;
+        if !record_outcome(client, source_id, outcome, &mut counters) {
+            return;
         }
     }
+}
+
+/// Folds one frame's outcome into the counters and logs it, returning
+/// `false` when the outcome is connection-fatal and the writer must retire.
+fn record_outcome(
+    client: ClientKey,
+    source_id: u8,
+    outcome: FrameOutcome,
+    counters: &mut LossCounters,
+) -> bool {
+    match outcome {
+        FrameOutcome::Sent => {}
+        FrameOutcome::Stalled { reset } => {
+            counters.stalls = counters.stalls.wrapping_add(1);
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                total_stalls = counters.stalls,
+                stream_reset = reset,
+                "video frame exceeded its deadline; continuing with the next frame"
+            );
+        }
+        FrameOutcome::PeerStop { phase, code } => {
+            counters.peer_drops = counters.peer_drops.wrapping_add(1);
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                phase,
+                peer_code = code,
+                total_peer_drops = counters.peer_drops,
+                "peer stopped or refused this video stream; the connection is healthy, \
+                 continuing with the next frame"
+            );
+        }
+        FrameOutcome::LocalClose { phase } => {
+            counters.local_closes = counters.local_closes.wrapping_add(1);
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                phase,
+                total_local_closes = counters.local_closes,
+                "video stream was already closed locally; frame-local loss, continuing \
+                 with the next frame"
+            );
+        }
+        FrameOutcome::ConnectionFatal { phase, kind } => {
+            // Connection-level loss retires the writer; a distinguishable
+            // fatal record, not a debug line. The connection task's own
+            // teardown deregisters this client.
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                phase,
+                reason = kind.as_str(),
+                total_connection_failures = 1_u64,
+                total_stalls = counters.stalls,
+                total_peer_drops = counters.peer_drops,
+                total_local_closes = counters.local_closes,
+                "video writer stopping: connection-level failure"
+            );
+            return false;
+        }
+    }
+    true
 }
 
 /// Opens a stream and writes the tag then the framed body, all under one
@@ -260,12 +368,15 @@ async fn deliver_frame<C: FrameChannel>(
 }
 
 impl StreamError {
-    /// Maps a stream error to its frame outcome, preserving the peer-local
-    /// vs connection-fatal classification.
+    /// Maps a stream error to its frame outcome, preserving the peer-stop,
+    /// local-close, and connection-fatal classification.
     fn into_outcome(self) -> FrameOutcome {
         match self {
-            StreamError::PeerLocal { phase, code } => FrameOutcome::PeerLocal { phase, code },
-            StreamError::ConnectionFatal(reason) => FrameOutcome::ConnectionFatal(reason),
+            StreamError::PeerStop { phase, code } => FrameOutcome::PeerStop { phase, code },
+            StreamError::LocalClose { phase } => FrameOutcome::LocalClose { phase },
+            StreamError::ConnectionFatal { phase, kind } => {
+                FrameOutcome::ConnectionFatal { phase, kind }
+            }
         }
     }
 }
