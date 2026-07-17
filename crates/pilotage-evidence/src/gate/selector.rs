@@ -77,29 +77,200 @@ pub(super) fn defines_in(path: &str, text: &str, symbol: &str) -> bool {
 }
 
 /// Whether `text` defines `symbol` as a genuine JavaScript test: a
-/// top-level `function <symbol>(` definition AND a separate bare
-/// reference to `<symbol>` — the runner registration these suites use
-/// (`for (const test of [ ...names ])`). Requiring both mirrors the Rust
-/// rule's "definition plus `#[test]`": a helper that is defined but never
-/// registered does not resolve, and a name that appears only in the
-/// runner list without a definition does not either. Comment and
-/// string-literal occurrences are blanked first, so no decoy resolves.
+/// TOP-LEVEL `function <symbol>(` definition AND membership in a top-level
+/// `for (const <v> of [ ... ])` runner array — the registration construct
+/// these suites use to actually invoke their tests. Requiring both, at
+/// top level, mirrors the Rust rule's "definition plus `#[test]`": a
+/// nested definition, a helper defined but never registered, a name only
+/// referenced by a call (self-recursion or another helper, which are
+/// invocations, not runner-array elements), and every comment or
+/// string-literal decoy (single-, double-, or backtick-quoted) all fail
+/// to resolve. All string and comment content is blanked before matching.
 pub(super) fn defines_js(text: &str, symbol: &str) -> bool {
-    let needle = format!("function {symbol}(");
-    let mut in_block_comment = false;
-    let mut defined = false;
-    let mut registered = false;
-    for raw in text.lines() {
-        let code = code_of_line(raw, &mut in_block_comment);
-        if !defined && code.contains(&needle) {
-            defined = true;
-            continue;
-        }
-        if !registered && mentions_symbol(&code, symbol) {
-            registered = true;
-        }
+    let code = strip_js_literals(text);
+    top_level_function(&code, symbol) && registered_in_runner(&code, symbol)
+}
+
+/// Blanks every comment and string literal (single-, double-, and
+/// backtick-quoted, the latter including any `${…}` interpolation) to
+/// spaces, preserving newlines and every structural character, so
+/// definition and registration matching sees only real code and no decoy
+/// hidden in a string or comment can resolve.
+fn strip_js_literals(text: &str) -> String {
+    #[derive(PartialEq)]
+    enum State {
+        Code,
+        Line,
+        Block,
+        Str(char),
     }
-    defined && registered
+    let mut state = State::Code;
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match &state {
+            State::Code => match c {
+                '/' if chars.peek() == Some(&'/') => state = State::Line,
+                '/' if chars.peek() == Some(&'*') => state = State::Block,
+                '"' | '\'' | '`' => {
+                    state = State::Str(c);
+                    out.push(' ');
+                    continue;
+                }
+                _ => {
+                    out.push(c);
+                    continue;
+                }
+            },
+            State::Line => {
+                if c == '\n' {
+                    state = State::Code;
+                    out.push('\n');
+                    continue;
+                }
+            }
+            State::Block => {
+                if c == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    state = State::Code;
+                    out.push_str("  ");
+                    continue;
+                }
+            }
+            State::Str(quote) => {
+                if c == '\\' {
+                    out.push(' ');
+                    if let Some(next) = chars.next() {
+                        out.push(if next == '\n' { '\n' } else { ' ' });
+                    }
+                    continue;
+                }
+                if c == *quote {
+                    state = State::Code;
+                    out.push(' ');
+                    continue;
+                }
+            }
+        }
+        out.push(if c == '\n' { '\n' } else { ' ' });
+    }
+    out
+}
+
+/// Whether `code` contains a `function <symbol>(` definition at brace
+/// depth zero — a top-level test, never a function nested inside another.
+fn top_level_function(code: &str, symbol: &str) -> bool {
+    let needle = format!("function {symbol}(");
+    let mut depth: i32 = 0;
+    let mut prev: Option<char> = None;
+    for (i, c) in code.char_indices() {
+        if depth == 0 && code[i..].starts_with(&needle) && prev.is_none_or(|p| !is_ident_char(p)) {
+            return true;
+        }
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
+        prev = Some(c);
+    }
+    false
+}
+
+/// Whether `symbol` is a whole-identifier element of some top-level
+/// `for (… of [ … ])` array — the test runner. A `for` nested inside a
+/// function body (a helper's own loop) is not top level and does not
+/// count, so a test referenced only from a helper never resolves here.
+fn registered_in_runner(code: &str, symbol: &str) -> bool {
+    let mut depth: i32 = 0;
+    let mut prev: Option<char> = None;
+    for (i, c) in code.char_indices() {
+        if depth == 0
+            && code[i..].starts_with("for")
+            && prev.is_none_or(|p| !is_ident_char(p))
+            && let Some(array) = for_of_array(code, i + "for".len())
+            && mentions_symbol(array, symbol)
+        {
+            return true;
+        }
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
+        prev = Some(c);
+    }
+    false
+}
+
+/// The array-literal contents of a `for (… of [ … ])` header whose `for`
+/// ends at `for_end`, or `None` for a C-style `for` or any header without
+/// an `of [`. Only the header (up to its closing `)`) is scanned.
+fn for_of_array(code: &str, for_end: usize) -> Option<&str> {
+    let bytes = code.as_bytes();
+    let mut i = skip_ws(bytes, for_end);
+    if bytes.get(i) != Some(&b'(') {
+        return None;
+    }
+    i += 1;
+    let mut paren: i32 = 1;
+    while i < bytes.len() && paren > 0 {
+        if bytes[i] == b'o'
+            && bytes.get(i + 1) == Some(&b'f')
+            && (i == 0 || !is_ident_byte(bytes[i - 1]))
+            && bytes.get(i + 2).is_none_or(|b| !is_ident_byte(*b))
+        {
+            let j = skip_ws(bytes, i + 2);
+            if bytes.get(j) == Some(&b'[') {
+                return capture_bracket(code, j);
+            }
+        }
+        match bytes[i] {
+            b'(' => paren += 1,
+            b')' => paren -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The contents between the `[` at `open` and its matching `]`.
+fn capture_bracket(code: &str, open: usize) -> Option<&str> {
+    let bytes = code.as_bytes();
+    let mut depth: i32 = 0;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&code[open + 1..i]);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Advances past ASCII whitespace from `from`.
+fn skip_ws(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Whether `code` contains `symbol` as a whole identifier (both
@@ -112,12 +283,9 @@ fn mentions_symbol(code: &str, symbol: &str) -> bool {
         let before_ok = code[..pos]
             .chars()
             .next_back()
-            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            .is_none_or(|c| !is_ident_char(c));
         let after = &code[pos + symbol.len()..];
-        let after_ok = after
-            .chars()
-            .next()
-            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        let after_ok = after.chars().next().is_none_or(|c| !is_ident_char(c));
         if before_ok && after_ok {
             return true;
         }

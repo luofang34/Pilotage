@@ -385,6 +385,13 @@ export class AvionicsIngress {
     const currentStatusStamp = this.estimatorStatus?.stamp;
     const statusMatches = stampsEqual(avionics.estimatorStatusStamp, currentStatusStamp);
     const incomingValidFlags = avionics.validFlags >>> 0;
+    // The CURRENT status regime is a monotonic authorization ceiling: even
+    // when a numeric legitimately falls under a still-good previous regime,
+    // the estimator's most recent declared state caps it. Without this a
+    // duplicate-status downgrade of the current regime could be reversed by
+    // a numeric acquired just before that status but selected onto the
+    // earlier good regime. A good current regime (all bits set) caps
+    // nothing, so the legitimate interleave case is untouched.
     let pairedQuality = null;
     if (acceptedAttitude) {
       const regime = statusMatches
@@ -392,12 +399,21 @@ export class AvionicsIngress {
         : null;
       this.attitudeAuthorizationPaired = regime !== null;
       const attitudeFlags =
-        regime !== null ? regime.validFlags & incomingValidFlags & ATTITUDE_VALID_FLAGS : 0;
+        regime !== null
+          ? regime.validFlags &
+            this.statusRegime.validFlags &
+            incomingValidFlags &
+            ATTITUDE_VALID_FLAGS
+          : 0;
       this.validFlags = (
         (this.validFlags & ~ATTITUDE_VALID_FLAGS) | attitudeFlags
       ) >>> 0;
       if (regime !== null) {
-        pairedQuality = Math.max(regime.quality, avionics.quality >>> 0);
+        pairedQuality = Math.max(
+          regime.quality,
+          this.statusRegime.quality,
+          avionics.quality >>> 0,
+        );
       }
     }
     if (acceptedKinematics) {
@@ -406,14 +422,21 @@ export class AvionicsIngress {
         : null;
       this.kinematicsAuthorizationPaired = regime !== null;
       const kinematicsFlags =
-        regime !== null ? regime.validFlags & incomingValidFlags & KINEMATICS_VALID_FLAGS : 0;
+        regime !== null
+          ? regime.validFlags &
+            this.statusRegime.validFlags &
+            incomingValidFlags &
+            KINEMATICS_VALID_FLAGS
+          : 0;
       this.validFlags = (
         (this.validFlags & ~KINEMATICS_VALID_FLAGS) | kinematicsFlags
       ) >>> 0;
       if (regime !== null) {
         pairedQuality = Math.max(
           pairedQuality ?? 0,
-          Math.max(regime.quality, avionics.quality >>> 0),
+          regime.quality,
+          this.statusRegime.quality,
+          avionics.quality >>> 0,
         );
       }
     }

@@ -423,6 +423,38 @@ function testDuplicateStatusStampCanOnlyPublishALocalDowngrade() {
   assert.equal(snapshot.attitude.ageMs, 20);
 }
 
+function testDowngradeIsNotReversibleThroughThePreviousRegime() {
+  // The reversal must not sneak back in through the PREVIOUS regime: a
+  // numeric acquired between the previous and current status selects the
+  // previous (still-good) regime, but the current status — downgraded to
+  // unusable — is a ceiling that caps it. Without the ceiling the panel
+  // would flash back to authorized against an estimator that just
+  // declared its state unusable.
+  const gate = ingress(); // budget: 100n
+  const prev = stamp(10, 1_000n);
+  const curr = stamp(11, 1_200n);
+  gate.ingest(statusPacket(prev, 0b1111, 0), 0);
+  gate.ingest(pairedPacket(stamp(1, 1_000n), null, prev, 1, 0b1111, 0), 1);
+  assert.equal(gate.snapshot(1).validFlags, 0b0011);
+
+  // Current status arrives good (previous regime retained), then a
+  // duplicate of it downgrades to unusable.
+  gate.ingest(statusPacket(curr, 0b1111, 0), 2);
+  assert.equal(gate.ingest(statusPacket(curr, 0, 2), 3), true);
+  assert.equal(gate.snapshot(3).validFlags, 0);
+  assert.equal(gate.snapshot(3).quality, 2);
+
+  // A fresh numeric acquired at 1100 — after the last accepted numeric
+  // (1000, so it advances and is admitted) and between prev@1000 and
+  // curr@1200, within the budget of both — selects the previous good
+  // regime. The downgraded current regime ceilings it, so it stays
+  // unauthorized.
+  gate.ingest(pairedPacket(stamp(2, 1_100n), null, curr, 2, 0b1111, 0), 4);
+  const snapshot = gate.snapshot(4);
+  assert.equal(snapshot.validFlags, 0, "the current downgrade ceilings the previous regime");
+  assert.equal(snapshot.quality, 2);
+}
+
 function testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric() {
   // A duplicate status stamp downgrades authorization to unusable; the
   // regime the downgrade closed must not still vouch for a *later*
@@ -558,6 +590,7 @@ for (const test of [
   testCombinedStatusRevokesBeforeOneNumericGroupRecovers,
   testDuplicateStatusStampCanOnlyPublishALocalDowngrade,
   testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric,
+  testDowngradeIsNotReversibleThroughThePreviousRegime,
   testStatusOrderingIsIndependent,
   testStatusResetsWithSourceIdentity,
   testSnapshotsAreAtomicAndImmutable,
