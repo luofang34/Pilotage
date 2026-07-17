@@ -192,6 +192,30 @@ fn a_non_independent_review_prevents_valid() {
 }
 
 #[test]
+fn a_review_wired_without_reviews_edges_prevents_valid() {
+    // The review is attached to the graph through `covers` instead of
+    // `reviews`: only `reviews` edges enforce completion, so this wiring
+    // would let an explicitly pending review coexist with VALID.
+    let text = VALID_SLICE
+        .replace(
+            "edge REVIEW-1 reviews AIR-HAZ-012",
+            "edge REVIEW-1 covers AIR-HAZ-012",
+        )
+        .replace("attr status complete", "attr status pending");
+    assert!(has_open(&text, FindingCode::ReviewIncomplete));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
+
+#[test]
+fn an_orphan_review_slot_prevents_valid() {
+    // A review node with no edges at all is a decorative slot: it claims a
+    // review exists without ever naming what it reviews.
+    let text = without("edge REVIEW-1 reviews AIR-HAZ-012");
+    assert!(has_open(&text, FindingCode::ReviewIncomplete));
+    assert_eq!(verdict_of(&text), GateVerdict::Invalid);
+}
+
+#[test]
 fn a_placeholder_result_fails() {
     // Stripping the executed command leaves the result without full provenance.
     let text = without("attr command");

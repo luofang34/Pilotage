@@ -230,13 +230,35 @@ fn is_source_blob(value: &str) -> bool {
     value.starts_with("git-blob:") || value.starts_with("blob:") || value.starts_with("source:")
 }
 
-/// Every review that reviews another node must be complete, and independent
-/// where the policy requires it. A pending, incomplete, or non-independent
-/// review is surfaced so a graph whose review is unfinished can never read as
-/// VALID — the honest state is "structurally traced but review pending".
+/// Every review must name its subjects with `reviews` edges, be complete,
+/// and be independent where the policy requires it. A pending, incomplete,
+/// or non-independent review is surfaced so a graph whose review is
+/// unfinished can never read as VALID — the honest state is "structurally
+/// traced but review pending". A review node wired into the graph through
+/// any other relation (or none) is itself a finding: only `reviews` edges
+/// enforce completion, so a decorative review slot attached via `covers`
+/// would otherwise let an explicitly pending review coexist with VALID.
 pub(super) fn reviews_complete(graph: &Graph, policy: &Policy, findings: &mut Vec<Finding>) {
     for id in graph.ids_of_kind(NodeKind::Review) {
         if !reviews_something(graph, id) {
+            // An exception's recorded review is attached through the
+            // exception block, not an edge; the exception checks own its
+            // completeness there.
+            let backs_an_exception = graph
+                .exceptions()
+                .iter()
+                .any(|e| e.review.as_ref() == Some(id));
+            if !backs_an_exception {
+                findings.push(Finding::new(
+                    FindingCode::ReviewIncomplete,
+                    Some(id.clone()),
+                    format!(
+                        "review {id} does not review anything: a review slot must name its \
+                         subjects with 'reviews' edges — attached through any other relation \
+                         its completion is never enforced"
+                    ),
+                ));
+            }
             continue;
         }
         let node = match graph.node(id) {
