@@ -10,9 +10,11 @@
 # is PENDING; the graph records that a review artifact slot exists, not that
 # anything is approved.
 #
-# Results are recorded against the committed code baseline named by
-# CFG-LINK-WORKTREE; this file lives in a separate evidence-only commit so
-# the baseline the results claim exists independently of the record.
+# Results are recorded against committed code baselines: the LINK-04
+# results against CFG-LINK-WORKTREE, and the later client authorization
+# result (LINK-AUTHZ-005) against CFG-LINK-AUTHZ, the commit that lands it.
+# This file lives in a separate evidence-only commit so each baseline the
+# results claim exists independently of the record.
 
 evidence-graph 1
 scope LINK-04
@@ -20,6 +22,7 @@ scope-title source-role separation traceability slice (issue 107 / LINK-01)
 scope-requirement LINK-ROLE-001
 scope-requirement LINK-CTRL-002
 scope-requirement LINK-PROV-003
+scope-requirement LINK-AUTHZ-005
 
 # --- Intended function ---
 
@@ -47,6 +50,10 @@ node LINK-PROV-003 safety-requirement
 title FC-state provenance and role/integrity survive the wire and capture; duplicates never refresh freshness
 locator docs/link/README.md#link-prov-003
 
+node LINK-AUTHZ-005 safety-requirement
+title Client authorization follows the acquisition-governing status regime and is monotone under one status stamp; a fail-closed downgrade is irreversible
+locator docs/link/README.md#link-authz-005
+
 # --- Design ---
 
 node DESIGN-ROLE-PROVENANCE design
@@ -60,6 +67,10 @@ locator adapters/aviate/src/adapter/sources.rs
 node DESIGN-CAPTURE design
 title Capture retains stamped role lanes verbatim and persists them as structured records; unattributed lanes dropped
 locator tools/loopback-probe/src/capture.rs
+
+node DESIGN-AUTHZ-REGIME design
+title Estimator-status authorization regimes in the client ingress — a numeric is judged by the regime governing its acquisition instant; a duplicate-status downgrade folds monotonically into the regime
+locator clients/web/telemetry-ingress.js
 
 # --- Implementation ---
 
@@ -87,6 +98,11 @@ node IMPL-CAPTURE-WRITER implementation
 title CaptureWriter — line-oriented structured capture sink
 locator tools/loopback-probe/src/capture.rs
 attr symbol CaptureWriter
+
+node IMPL-AUTHZ-REGIME implementation
+title AvionicsIngress authorization regime — applyStatusDowngrade folds the downgrade into statusRegime; authorizationRegimeFor selects the acquisition-governing regime
+locator clients/web/telemetry-ingress.js
+attr symbol applyStatusDowngrade
 
 # --- Verification cases (adapter behavior) ---
 
@@ -147,6 +163,13 @@ title unstamped lanes are dropped, not defaulted
 locator tools/loopback-probe/src/telemetry.rs
 attr test unstamped_lanes_are_dropped_not_defaulted
 
+# --- Verification case (client authorization regime, browser suite) ---
+
+node CASE-LINK-AUTHZ verification-case
+title a duplicate-status downgrade cannot be reversed by a later numeric
+locator clients/web/telemetry-ingress.test.mjs
+attr test testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric
+
 # --- Verification results ---
 
 node RESULT-LINK-ADAPTER verification-result
@@ -206,16 +229,38 @@ attr outcome pass
 
 # --- Configuration and tool identity ---
 
+node RESULT-LINK-AUTHZ verification-result
+title browser authorization-regime suite — recorded pass
+attr command node clients/web/telemetry-ingress.test.mjs
+attr config-digest 337e9b8e616f71778681b7381f397ac9a7178087
+attr tool-version node v26.5.0
+attr source-digest git-blob:0a5eca31635fd49bca87459c43b7ac0439259bef
+attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
+attr output-digest sha256:58c5f895a2a5dd6fbc2a6aad61feb6cde484478d6333d2bf6bc55c228cbe8f4d
+attr run-id local:337e9b8e616f71778681b7381f397ac9a7178087
+attr outcome pass
+
 node CFG-LINK-WORKTREE configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
 attr scm git
 attr commit 5dfedb440a562919894be17e1ff199bcaae4e25c
 attr tree a000c09c465aeb5a3a3b1fa35d6f90276559895a
 
+node CFG-LINK-AUTHZ configuration-item
+title committed code baseline for the client authorization-regime result (LINK-05 lands after LINK-04, on its own commit)
+attr scm git
+attr commit 337e9b8e616f71778681b7381f397ac9a7178087
+attr tree c80a85d393d8559a5dadec251999b8878fabb0a9
+
 node TOOL-LINK-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
 attr toolchain rust stable channel
 attr version rustc 1.95.0 (59807616e 2026-04-14)
+
+node TOOL-LINK-NODE tool
+title node test runner for the browser suites — not DO-330 tool-qualified
+attr toolchain node
+attr version node v26.5.0
 
 # --- Review (records that a review slot exists; it is PENDING) ---
 
@@ -231,6 +276,7 @@ edge LINK-HAZ-01 derives-from LINK-IF
 edge LINK-ROLE-001 mitigates LINK-HAZ-01
 edge LINK-CTRL-002 mitigates LINK-HAZ-01
 edge LINK-PROV-003 mitigates LINK-HAZ-01
+edge LINK-AUTHZ-005 mitigates LINK-HAZ-01
 
 # --- Allocation: requirement -> design -> implementation ---
 
@@ -238,12 +284,14 @@ edge LINK-ROLE-001 allocated-to DESIGN-ROLE-PROVENANCE
 edge LINK-CTRL-002 allocated-to DESIGN-PROFILE-BINDING
 edge LINK-PROV-003 allocated-to DESIGN-ROLE-PROVENANCE
 edge LINK-PROV-003 allocated-to DESIGN-CAPTURE
+edge LINK-AUTHZ-005 allocated-to DESIGN-AUTHZ-REGIME
 
 edge DESIGN-ROLE-PROVENANCE implemented-by IMPL-FC-STATE-SAMPLE
 edge DESIGN-PROFILE-BINDING implemented-by IMPL-BIND-SOURCES
 edge DESIGN-PROFILE-BINDING implemented-by IMPL-CURRENT-POSE
 edge DESIGN-CAPTURE implemented-by IMPL-OBSERVATION
 edge DESIGN-CAPTURE implemented-by IMPL-CAPTURE-WRITER
+edge DESIGN-AUTHZ-REGIME implemented-by IMPL-AUTHZ-REGIME
 
 # --- Verification: requirement <-> case ---
 
@@ -273,6 +321,9 @@ edge CASE-LINK-WIRE covers LINK-PROV-003
 edge CASE-LINK-CAPTURE covers LINK-PROV-003
 edge CASE-LINK-CAPTURE-RT covers LINK-PROV-003
 edge CASE-LINK-CAPTURE-SINK covers LINK-PROV-003
+
+edge LINK-AUTHZ-005 verified-by CASE-LINK-AUTHZ
+edge CASE-LINK-AUTHZ covers LINK-AUTHZ-005
 
 # --- Results: result -> executed case, covered requirement, baseline, tool ---
 
@@ -309,8 +360,14 @@ edge RESULT-LINK-CAPTURE-SINK covers LINK-PROV-003
 edge RESULT-LINK-CAPTURE-SINK justified-by CFG-LINK-WORKTREE
 edge RESULT-LINK-CAPTURE-SINK justified-by TOOL-LINK-CARGO
 
+edge RESULT-LINK-AUTHZ result-of CASE-LINK-AUTHZ
+edge RESULT-LINK-AUTHZ covers LINK-AUTHZ-005
+edge RESULT-LINK-AUTHZ justified-by CFG-LINK-AUTHZ
+edge RESULT-LINK-AUTHZ justified-by TOOL-LINK-NODE
+
 # --- Review coverage ---
 
 edge REVIEW-LINK04 reviews LINK-ROLE-001
 edge REVIEW-LINK04 reviews LINK-CTRL-002
 edge REVIEW-LINK04 reviews LINK-PROV-003
+edge REVIEW-LINK04 reviews LINK-AUTHZ-005
