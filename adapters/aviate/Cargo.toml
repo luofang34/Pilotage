@@ -5,28 +5,13 @@ version = "0.1.0"
 edition.workspace = true
 publish = false
 
-# Not `workspace = true`: the workspace forbids unsafe_code outright,
-# but the shared-memory vehicle link (ADR-0019) needs shm_open/mmap.
-# This crate denies unsafe_code and allows it only at contained sites in
-# shm.rs, each with a SAFETY justification; everything else
-# matches the workspace wall.
-[lints.rust]
-unsafe_code = "deny"
-missing_docs = "deny"
-
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-let_underscore_must_use = "deny"
-let_underscore_future = "deny"
-await_holding_lock = "deny"
-disallowed_types = "deny"
-disallowed_macros = "deny"
+[lints]
+workspace = true
 
 [dependencies]
+aviate-xil-contract = { workspace = true }
+aviate-xil-shm = { workspace = true }
 getrandom = { version = "0.3.4", features = ["std"] }
-libc = { workspace = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-adapter-gazebo = { workspace = true }
 pilotage-protocol = { workspace = true }

@@ -69,6 +69,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "aviate-xil-contract"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Aviate.git?rev=ac9bd248406a892fbe97a712d921326c96abd8b6#ac9bd248406a892fbe97a712d921326c96abd8b6"
+
+[[package]]
+name = "aviate-xil-shm"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Aviate.git?rev=ac9bd248406a892fbe97a712d921326c96abd8b6#ac9bd248406a892fbe97a712d921326c96abd8b6"
+dependencies = [
+ "aviate-xil-contract",
+ "libc",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1002,8 +1016,9 @@ dependencies = [
 name = "pilotage-adapter-aviate"
 version = "0.1.0"
 dependencies = [
+ "aviate-xil-contract",
+ "aviate-xil-shm",
  "getrandom 0.3.4",
- "libc",
  "pilotage-adapter-api",
  "pilotage-adapter-gazebo",
  "pilotage-protocol",
