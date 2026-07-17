@@ -1,0 +1,4 @@
+# `cargo xtask <command>` — the repo's orchestration entry point
+# (tools/xtask): launches SITL sessions, wraps the reset script.
+[alias]
+xtask = "run -q -p xtask --"

@@ -25,6 +25,7 @@ members = [
     "adapters/aviate",
     "tools/hid-probe",
     "tools/loopback-probe",
+    "tools/xtask",
     "hosts/session-host",
     "adapters/gazebo",
     "clients/web-instruments",
