@@ -66,11 +66,16 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
 
     // The reset script consults this marker: while a supervisor owns
     // the flight controller, the script must not respawn its own.
+    // Every failure past this point owns the already-running children:
+    // returning without teardown would orphan the whole simulator stack.
     let pid_file = log_dir.join("supervisor.pid");
-    std::fs::write(&pid_file, std::process::id().to_string()).map_err(|source| XtaskError::Io {
-        context: "writing the supervisor pid marker",
-        source,
-    })?;
+    if let Err(source) = std::fs::write(&pid_file, std::process::id().to_string()) {
+        teardown(&mut children);
+        return Err(XtaskError::Io {
+            context: "writing the supervisor pid marker",
+            source,
+        });
+    }
 
     let url = viewer_url(args.viewer_port, args.host_port, &certificate);
     print_line("");
@@ -287,15 +292,21 @@ async fn supervise(children: &mut [ManagedChild], stages: &[Stage]) -> Result<()
                     if stage.spec.name != "flight-controller" {
                         return Err(death);
                     }
-                    fc_restarts += 1;
+                    fc_restarts = fc_restarts.wrapping_add(1);
                     if fc_restarts > MAX_STAGE_RESTARTS {
                         return Err(death);
                     }
                     print_line(&format!(
                         "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
                     ));
+                    // A replacement that spawns but never reports ready
+                    // must not outlive the error return: it is not in
+                    // `children`, so the caller's teardown would miss it.
                     let mut replacement = ManagedChild::spawn(&stage.spec)?;
-                    await_ready(&mut replacement, &stage.readiness).await?;
+                    if let Err(error) = await_ready(&mut replacement, &stage.readiness).await {
+                        replacement.terminate_group();
+                        return Err(error);
+                    }
                     print_line("flight-controller ready");
                     children[index] = replacement;
                 }
@@ -320,5 +331,128 @@ fn open_in_browser(url: &str) {
     };
     if let Err(error) = Command::new(opener).arg(url).spawn() {
         tracing::warn!(%error, opener, "could not open the browser; use the printed URL");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{start_stages, supervise};
+    use crate::backend::Stage;
+    use crate::process::{ManagedChild, ProcessSpec};
+    use crate::readiness::Readiness;
+
+    /// Builds a stage running `script` under sh, with `marker` planted in
+    /// argv so liveness is observable from outside via pgrep.
+    fn stage(name: &'static str, script: &str, marker: &str, readiness: Readiness) -> Stage {
+        let log = std::env::temp_dir().join(format!("plt_xtask_{marker}.log"));
+        Stage {
+            spec: ProcessSpec {
+                name,
+                program: "sh".to_owned(),
+                args: vec!["-c".to_owned(), script.to_owned(), marker.to_owned()],
+                cwd: None,
+                env: Vec::new(),
+                remove_env: Vec::new(),
+                log_path: log,
+            },
+            readiness,
+        }
+    }
+
+    fn marker_alive(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .args(["-f", marker])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn wait_until(deadline: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let end = Instant::now() + deadline;
+        while Instant::now() < end {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        done()
+    }
+
+    /// A stage that never reports ready must not leave the stages started
+    /// before it (or itself) running.
+    #[tokio::test]
+    async fn readiness_failure_tears_down_every_started_stage() {
+        let a = format!("plt_xt_rdy_a_{}", std::process::id());
+        let b = format!("plt_xt_rdy_b_{}", std::process::id());
+        let stages = vec![
+            stage(
+                "first",
+                "echo READY; sleep 30",
+                &a,
+                Readiness::LogContains {
+                    needle: "READY",
+                    timeout_s: 5,
+                },
+            ),
+            stage(
+                "second",
+                "sleep 30",
+                &b,
+                Readiness::LogContains {
+                    needle: "NEVER_APPEARS",
+                    timeout_s: 1,
+                },
+            ),
+        ];
+
+        let outcome = start_stages(&stages).await;
+
+        assert!(outcome.is_err(), "the second stage can never become ready");
+        assert!(
+            wait_until(Duration::from_secs(5), || !marker_alive(&a)
+                && !marker_alive(&b)),
+            "both stages must be torn down after the readiness failure"
+        );
+    }
+
+    /// A flight-controller replacement that spawns but never reports
+    /// ready is not in `children`, so the supervisor must kill it before
+    /// returning the error.
+    #[tokio::test]
+    async fn failed_restart_kills_the_unready_replacement() {
+        let marker = format!("plt_xt_fcr_{}", std::process::id());
+        let fc = stage(
+            "flight-controller",
+            "sleep 30",
+            &marker,
+            Readiness::LogContains {
+                needle: "NEVER_APPEARS",
+                timeout_s: 1,
+            },
+        );
+        // The supervised child exits immediately, triggering the restart.
+        let dying = stage(
+            "flight-controller",
+            "exit 7",
+            "plt_xt_dying",
+            Readiness::LogContains {
+                needle: "",
+                timeout_s: 1,
+            },
+        );
+        let child = ManagedChild::spawn(&dying.spec).expect("dying stage spawns");
+        let mut children = vec![child];
+        let stages = vec![fc];
+
+        let outcome = supervise(&mut children, &stages).await;
+
+        assert!(outcome.is_err(), "the replacement can never become ready");
+        assert!(
+            wait_until(Duration::from_secs(5), || !marker_alive(&marker)),
+            "the unready replacement must not outlive the error"
+        );
     }
 }

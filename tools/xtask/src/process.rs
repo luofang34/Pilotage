@@ -125,14 +125,17 @@ impl ManagedChild {
     }
 
     /// Terminates the stage's whole process group: TERM, a bounded
-    /// grace wait, then KILL, then reap.
+    /// grace wait, then an unconditional group KILL, then reap. The
+    /// leader exiting only ends the grace wait early — descendants
+    /// that ignored TERM outlive it in the same group, so the KILL is
+    /// sent regardless (killing an already-empty group is harmless).
     pub fn terminate_group(&mut self) {
         let pid = self.child.id();
         signal_group(pid, "-TERM");
         let deadline = Instant::now() + TERM_GRACE;
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {
-                return;
+                break;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -152,4 +155,83 @@ fn signal_group(pid: u32, signal: &str) {
         .stderr(Stdio::null())
         .status()
         .ok();
+}
+
+/// Whether any member of `pid`'s process group is still alive (signal 0
+/// probes without delivering).
+#[cfg(test)]
+pub(crate) fn group_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .arg("-0")
+        .arg("--")
+        .arg(format!("-{pid}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{ManagedChild, ProcessSpec, group_alive};
+
+    fn spec(name: &'static str, script: &str, log: &std::path::Path) -> ProcessSpec {
+        ProcessSpec {
+            name,
+            program: "sh".to_owned(),
+            args: vec!["-c".to_owned(), script.to_owned()],
+            cwd: None,
+            env: Vec::new(),
+            remove_env: Vec::new(),
+            log_path: log.to_path_buf(),
+        }
+    }
+
+    fn wait_until(deadline: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let end = Instant::now() + deadline;
+        while Instant::now() < end {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        done()
+    }
+
+    /// The leader exiting must not spare its descendants: a grandchild
+    /// that ignores TERM still dies from the unconditional group KILL.
+    #[test]
+    fn group_kill_reaches_term_ignoring_descendants_after_the_leader_exits() {
+        let log = std::env::temp_dir().join(format!("plt_xtask_grp_{}.log", std::process::id()));
+        let mut child = ManagedChild::spawn(&spec(
+            "group-test",
+            // The grandchild ignores TERM and holds the group; the
+            // leader exits immediately.
+            "sh -c 'trap \"\" TERM; sleep 30' & exit 0",
+            &log,
+        ))
+        .expect("test stage spawns");
+        let pid = child.child.id();
+
+        assert!(
+            wait_until(Duration::from_secs(5), || child.check_running().is_err()),
+            "the leader must exit on its own"
+        );
+        assert!(
+            group_alive(pid),
+            "the TERM-ignoring grandchild must be holding the group"
+        );
+
+        child.terminate_group();
+
+        assert!(
+            wait_until(Duration::from_secs(5), || !group_alive(pid)),
+            "the group KILL must reach the grandchild even though the leader already exited"
+        );
+        std::fs::remove_file(&log).ok();
+    }
 }

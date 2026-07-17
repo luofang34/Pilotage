@@ -134,9 +134,19 @@ fn required_port(
     flag: &'static str,
 ) -> Result<u16, XtaskError> {
     let raw = required_value(iter, flag)?;
-    raw.parse().map_err(|_| XtaskError::Usage {
+    let port: u16 = raw.parse().map_err(|_| XtaskError::Usage {
         message: format!("{flag} expects a port number, got {raw:?}"),
-    })
+    })?;
+    // Port 0 asks the OS for an ephemeral port, but readiness checks and
+    // the printed viewer URL would keep using the literal 0 — nothing
+    // reports the allocated port back, so the session could never be
+    // reached. Reject it rather than print a URL that cannot work.
+    if port == 0 {
+        return Err(XtaskError::Usage {
+            message: format!("{flag} must be 1-65535: port 0 (ephemeral) cannot be advertised"),
+        });
+    }
+    Ok(port)
 }
 
 /// The `help` text.
@@ -202,5 +212,18 @@ mod tests {
         assert!(matches!(refusal, Err(XtaskError::Usage { .. })));
         let refusal = parse_args(&args(&["fly"]));
         assert!(matches!(refusal, Err(XtaskError::Usage { .. })));
+    }
+
+    #[test]
+    fn port_zero_is_rejected_on_both_port_flags() {
+        // Port 0 would bind an ephemeral port that readiness checks and
+        // the printed viewer URL never learn about.
+        for flag in ["--port", "--viewer-port"] {
+            let refusal = parse_args(&args(&["sim", flag, "0"]));
+            assert!(
+                matches!(refusal, Err(XtaskError::Usage { .. })),
+                "{flag} 0 must be refused"
+            );
+        }
     }
 }
