@@ -978,6 +978,63 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check("generation wrap counts as advancement", health.tick(1500).showFailure === false);
 }
 
+// ---- scheduling starvation: a stalled watchdog clock must not judge ---------
+//
+// PERMANENT CONTRACT: LIVENESS may only latch from a tick whose own
+// arrival is on cadence. A browser that suspends rAF and clamps timers
+// for an occluded/backgrounded page starves the watchdog's clock along
+// with the render loop; a deadline measured by that stalled clock says
+// nothing about the render pipeline, and latching from it makes panels
+// blink FAIL/OK with every compositor burst. A late tick re-arms the
+// deadline; a genuinely dead render loop still trips within one deadline
+// of ticks running on cadence again — exactly when a viewer is looking.
+
+{
+  const health = new PanelHealth(
+    { livenessDeadlineMs: 1000, recoveryFrames: 3, tickIntervalMs: 250 },
+    0,
+  );
+  health.reportSuccess(0, 1);
+  health.tick(250); // on cadence: establishes the tick clock
+  const d = health.tick(2000); // throttled: 1750 ms gap >> 2 × 250 ms
+  check(
+    "a starved tick past the deadline does not latch LIVENESS",
+    d.showFailure === false && health.snapshot().counters.livenessTrips === 0,
+  );
+  check("starved tick is counted", health.snapshot().counters.starvedTicks === 1);
+  check(
+    "the starved tick re-armed the deadline",
+    health.tick(2250).showFailure === false,
+  );
+
+  // Scheduling has resumed (ticks on cadence) but frames never advance:
+  // the panel must fail within one deadline of the resume, not sooner.
+  health.tick(2500);
+  health.tick(2750);
+  health.tick(3000);
+  check("re-armed deadline holds until it elapses", health.display().showFailure === false);
+  const tripped = health.tick(3001);
+  check(
+    "a dead render loop trips one deadline after scheduling resumes",
+    tripped.showFailure === true && tripped.reason === REASON.LIVENESS,
+  );
+}
+
+{
+  // Starvation must not unlatch or mask an already-latched failure.
+  const health = new PanelHealth(
+    { livenessDeadlineMs: 1000, recoveryFrames: 3, tickIntervalMs: 250 },
+    0,
+  );
+  health.reportFailure(10, REASON.PAINT_FAILED);
+  health.tick(250);
+  const d = health.tick(5000); // starved while latched
+  check(
+    "a starved tick keeps a latched failure visible",
+    d.showFailure === true && d.reason === REASON.PAINT_FAILED,
+  );
+}
+
 {
   const health = new PanelHealth({ livenessDeadlineMs: 1000, recoveryFrames: 3 }, 0);
   health.reportFailure(10, REASON.RENDER_TRAP);

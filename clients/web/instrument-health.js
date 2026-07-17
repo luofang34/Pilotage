@@ -95,9 +95,25 @@ export class PanelHealth {
   //   advanced for strictly longer than this is failed (LIVENESS).
   // recoveryFrames: consecutive validated frames required to clear a
   //   latched failure — one arbitrary good frame never clears it.
-  constructor({ livenessDeadlineMs = 1000, recoveryFrames = 30 } = {}, nowMs = 0) {
+  // tickIntervalMs: the cadence the caller schedules `tick` at. A tick
+  //   arriving later than twice this cadence proves the watchdog's own
+  //   scheduling domain was starved (browser throttling of an occluded
+  //   or backgrounded page suspends rAF and clamps timers together), so
+  //   that tick re-arms the deadline instead of judging liveness — a
+  //   deadline measured by a clock that itself stopped says nothing
+  //   about the render pipeline, and latching from it makes panels
+  //   blink FAIL/OK with every compositor burst. A genuinely dead
+  //   render loop on a normally scheduled page still trips within one
+  //   deadline of ticks running on cadence — including within one
+  //   deadline of scheduling resuming, which is exactly when a viewer
+  //   is looking again.
+  constructor(
+    { livenessDeadlineMs = 1000, recoveryFrames = 30, tickIntervalMs = 250 } = {},
+    nowMs = 0,
+  ) {
     this.livenessDeadlineMs = livenessDeadlineMs;
     this.recoveryFrames = recoveryFrames;
+    this.tickIntervalMs = tickIntervalMs;
     this.reset(nowMs);
   }
 
@@ -109,7 +125,14 @@ export class PanelHealth {
     this.goodStreak = 0;
     this.lastGeneration = null;
     this.lastAdvanceMs = nowMs;
-    this.counters = { failures: 0, duplicates: 0, recoveries: 0, livenessTrips: 0 };
+    this.lastTickMs = null;
+    this.counters = {
+      failures: 0,
+      duplicates: 0,
+      recoveries: 0,
+      livenessTrips: 0,
+      starvedTicks: 0,
+    };
   }
 
   // A validated frame was produced. Freshness credit requires the WASM
@@ -148,8 +171,18 @@ export class PanelHealth {
   // Watchdog tick from a scheduling domain independent of the render
   // loop; latches LIVENESS when frame advancement stalls past the
   // deadline (strictly greater: an advance exactly at the deadline is
-  // still on time).
+  // still on time). A tick whose own arrival is late against
+  // `tickIntervalMs` proves page-wide scheduling starvation and re-arms
+  // the deadline instead of judging with a stalled clock (see the
+  // constructor's tickIntervalMs contract).
   tick(nowMs) {
+    const starved = this.lastTickMs !== null && nowMs - this.lastTickMs > 2 * this.tickIntervalMs;
+    this.lastTickMs = nowMs;
+    if (starved) {
+      this.lastAdvanceMs = nowMs;
+      this.counters.starvedTicks += 1;
+      return this.display();
+    }
     if (nowMs - this.lastAdvanceMs > this.livenessDeadlineMs && !this.latched) {
       this.latched = true;
       this.reason = REASON.LIVENESS;
