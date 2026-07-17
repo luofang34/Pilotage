@@ -15,6 +15,15 @@
 # result (LINK-AUTHZ-005) against CFG-LINK-AUTHZ, the commit that lands it.
 # This file lives in a separate evidence-only commit so each baseline the
 # results claim exists independently of the record.
+#
+# MERGE/REBASE RULE (ASSURE-04): a declared config-digest must name a
+# commit REACHABLE from merged history, not a lane commit that a rebase
+# will rewrite. If a lane is rebased (or squashed) after recording, its
+# original commit becomes a force-push orphan a fresh clone cannot fetch,
+# and the baseline is broken. Re-record against the rewritten/durable
+# commit BEFORE merge. The `--require-resolvable` gate enforces this:
+# CFG-LINK-AUTHZ was moved from the orphaned pre-rebase lane commit
+# 337e9b8 to the reachable merged commit 2114068 for exactly this reason.
 
 evidence-graph 1
 scope LINK-04
@@ -232,12 +241,12 @@ attr outcome pass
 node RESULT-LINK-AUTHZ verification-result
 title browser authorization-regime suite — recorded pass
 attr command node clients/web/telemetry-ingress.test.mjs
-attr config-digest 337e9b8e616f71778681b7381f397ac9a7178087
+attr config-digest 211406836a102c64c0e0065a796e238a8af16f3a
 attr tool-version node v26.5.0
 attr source-digest git-blob:0a5eca31635fd49bca87459c43b7ac0439259bef
 attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
-attr output-digest sha256:58c5f895a2a5dd6fbc2a6aad61feb6cde484478d6333d2bf6bc55c228cbe8f4d
-attr run-id local:337e9b8e616f71778681b7381f397ac9a7178087
+attr output-digest sha256:064e32f9b8cc9b78472dcf7de91e20b35b76a7b4263208bfccc3bab45418ad67
+attr run-id local:211406836a102c64c0e0065a796e238a8af16f3a
 attr outcome pass
 
 node CFG-LINK-WORKTREE configuration-item
@@ -249,8 +258,8 @@ attr tree a000c09c465aeb5a3a3b1fa35d6f90276559895a
 node CFG-LINK-AUTHZ configuration-item
 title committed code baseline for the client authorization-regime result (LINK-05 lands after LINK-04, on its own commit)
 attr scm git
-attr commit 337e9b8e616f71778681b7381f397ac9a7178087
-attr tree c80a85d393d8559a5dadec251999b8878fabb0a9
+attr commit 211406836a102c64c0e0065a796e238a8af16f3a
+attr tree 9cf15bb9b43f4202e55c314aef7f495dd3c20082
 
 node TOOL-LINK-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
