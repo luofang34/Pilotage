@@ -21,10 +21,12 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 use wtransport::Connection;
 
-use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
+use frame_writer::client_writer;
+
+mod frame_writer;
 
 /// JPEG quality (1-100) for encoded camera frames. 75 balances size against
 /// visible quality for a teleop preview (ADR-0005: owned, tunable pipeline).
@@ -298,78 +300,6 @@ fn encode_jpeg(frame: &RawVideoFrame) -> Option<Vec<u8>> {
         return None;
     }
     Some(jpeg)
-}
-
-/// Per-(client, source) writer: receives the latest encoded frame and writes
-/// it as one host-initiated uni stream tagged [`VIDEO_FRAME_V2`], one stream
-/// per frame (ADR-0005, ADR-0020), leading with the frame's capture identity.
-/// Exits when the handoff channel closes (client deregistered or media task
-/// shutting down).
-async fn client_writer(
-    client: ClientKey,
-    source_id: u8,
-    connection: Connection,
-    mut frames: mpsc::Receiver<EncodedFrame>,
-    start: Instant,
-) {
-    while let Some(frame) = frames.recv().await {
-        // Stamp publication at the moment of write, distinct from the receive
-        // stamp taken at dequeue, so a consumer can separate host queueing
-        // latency from the capture-to-receipt gap.
-        let published_at_ns = now_ns(start);
-        if let Err(reason) = write_one_frame(&connection, source_id, &frame, published_at_ns).await
-        {
-            // A failed uni-stream open/write means the connection is going
-            // away; stop writing video to it. The connection task's own
-            // teardown deregisters this client.
-            debug!(
-                client = client.as_u64(),
-                source_id, reason, "video writer stopping"
-            );
-            return;
-        }
-    }
-}
-
-/// Opens one host-initiated uni stream, writes the [`VIDEO_FRAME_V2`] tag then
-/// the capture-identity header and codec-tagged, length-prefixed JPEG, and
-/// finishes the stream (ADR-0005 media unit; ADR-0016 FourCC codec tag;
-/// ADR-0020 capture identity).
-async fn write_one_frame(
-    connection: &Connection,
-    source_id: u8,
-    frame: &EncodedFrame,
-    published_at_ns: u64,
-) -> Result<(), &'static str> {
-    let Some(body) = frame_video_payload_v2(
-        source_id,
-        &frame.capture,
-        frame.received_at_ns,
-        published_at_ns,
-        FOURCC_MJPEG,
-        &frame.jpeg,
-    ) else {
-        // A frame larger than u32::MAX cannot be length-prefixed; skip it
-        // without failing the writer (no real camera frame reaches this).
-        error!("video frame exceeds u32 length prefix; skipping");
-        return Ok(());
-    };
-    let mut stream = connection
-        .open_uni()
-        .await
-        .map_err(|_| "uni stream request failed")?
-        .await
-        .map_err(|_| "uni stream failed to open")?;
-    stream
-        .write_all(&[VIDEO_FRAME_V2])
-        .await
-        .map_err(|_| "tag write failed")?;
-    stream
-        .write_all(&body)
-        .await
-        .map_err(|_| "payload write failed")?;
-    stream.finish().await.map_err(|_| "stream finish failed")?;
-    Ok(())
 }
 
 #[cfg(test)]
