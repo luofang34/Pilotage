@@ -99,7 +99,7 @@ fn check_locator(
 }
 
 /// The distinct locators of the cases this result records (`result-of`).
-fn case_locators<'a>(graph: &'a Graph, id: &NodeId) -> BTreeSet<&'a str> {
+pub(super) fn case_locators<'a>(graph: &'a Graph, id: &NodeId) -> BTreeSet<&'a str> {
     graph
         .edges()
         .filter(|e| e.from == *id && e.relation == RelationKind::ResultOf)

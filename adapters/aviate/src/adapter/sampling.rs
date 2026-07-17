@@ -115,7 +115,6 @@ fn effective_authorization(
 pub(crate) fn mavlink_batch(
     vehicle: VehicleId,
     state: &Arc<Mutex<LatestAviate>>,
-    arm_state: u32,
 ) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
@@ -153,7 +152,6 @@ pub(crate) fn mavlink_batch(
         estimator_status_stamp,
         valid_flags,
         quality,
-        arm_state,
     });
     let source_time_ms = kinematics
         .map(|kin| kin.time_boot_ms)
@@ -166,6 +164,8 @@ pub(crate) fn mavlink_batch(
             pose: planar_pose,
             speed: planar_speed,
             avionics,
+            sim_truth: None,
+            fc_state: None,
         }],
     }
 }

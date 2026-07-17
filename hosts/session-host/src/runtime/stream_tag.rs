@@ -38,11 +38,13 @@ pub const VIDEO_FRAME_V2: u8 = 0x03;
 
 /// Wire code for a [`MeasurementClock`], matching the `pilotage.v1`
 /// `MeasurementClock` enum the browser already decodes: 1 vehicle-boot, 2
-/// simulation. `0` (unspecified) is reserved for an absent target clock.
+/// simulation, 3 host-monotonic. `0` (unspecified) is reserved for an
+/// absent target clock.
 fn measurement_clock_code(clock: MeasurementClock) -> u8 {
     match clock {
         MeasurementClock::VehicleBoot => 1,
         MeasurementClock::Simulation => 2,
+        MeasurementClock::HostMonotonic => 3,
     }
 }
 
@@ -211,7 +213,7 @@ mod tests {
     use super::{VideoCaptureStamp, frame_video_payload_v2};
     use pilotage_adapter_api::{
         CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
-        SourceIncarnation,
+        SourceIncarnation, SourceIntegrity, SourceRole,
     };
     use pilotage_protocol::video_frame::META_LEN;
 
@@ -234,6 +236,8 @@ mod tests {
     fn sample_capture(mapping: CaptureClockMapping) -> VideoCaptureStamp {
         VideoCaptureStamp {
             stamp: MeasurementStamp {
+                role: SourceRole::VideoCapture,
+                integrity: SourceIntegrity::Unprotected,
                 source_id: 1,
                 source_incarnation: SourceIncarnation::new([0xAB; 16]),
                 source_epoch: 7,

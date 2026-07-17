@@ -3,6 +3,15 @@
 /// Errors this tool's run loop can produce.
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeError {
+    /// The `--capture` file could not be created or its header written.
+    #[error("cannot create capture file {path}: {source}")]
+    CaptureFile {
+        /// The requested capture path.
+        path: String,
+        /// The underlying I/O failure.
+        #[source]
+        source: std::io::Error,
+    },
     /// Argument parsing failed: an unknown flag or missing/malformed value.
     #[error("usage error: {message}")]
     Usage {

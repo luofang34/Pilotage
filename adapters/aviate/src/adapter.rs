@@ -1,33 +1,42 @@
-//! `VehicleAdapter` implementation over a selectable Aviate vehicle link
-//! (ADR-0019): shared memory when co-located with the SITL, MAVLink over
-//! UDP otherwise.
+//! `VehicleAdapter` implementation over the Aviate vehicle's role-bound
+//! links (ADR-0019, LINK-04): the MAVLink link carries the FC
+//! operational estimate, the co-located shm block carries simulation
+//! truth, and the uplink socket carries FC-owned state reports.
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, RejectReason,
-    ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
-    VehicleDescriptor, VideoSource,
+    ScopeDescriptor, SourceIncarnation, SourceRole, StepBudget, StepOutcome, TelemetryBatch,
+    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
 };
 use pilotage_timing::SimTick;
 
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+
+#[cfg(test)]
+use crate::link::LatestAviate;
+
 use crate::error::AviateAdapterError;
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
-use crate::link::{AviateLink, LatestAviate, LinkConfig};
+use crate::link::LinkConfig;
 use crate::uplink::FlightUplink;
 
 mod camera;
 mod control;
 mod sampling;
 mod shm_sampling;
+mod sources;
+use control::{flight_button_pressed, normalized_flight_sticks, rejected_control};
 use sampling::{
     mavlink_batch, measurement_pair_is_coherent, measurement_pair_supports_pose, yaw_of,
 };
 use shm_sampling::ShmSource;
+use sources::{ArmReport, EstimateSource, bind_sources, fc_state_sample};
 
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
@@ -51,62 +60,29 @@ pub const RESET_BUTTON: u16 = 2;
 /// brake-to-hold) and FPV mode (attitude sticks, direct thrust).
 pub const FPV_TOGGLE_BUTTON: u16 = 3;
 
-fn flight_button_pressed(frame: &ScopedControlFrame, button: u16) -> bool {
-    frame.payload.edges.iter().any(|(candidate, edge)| {
-        *edge == ButtonEdge::Pressed && *candidate == LogicalButtonId::new(button)
-    })
-}
-
-fn rejected_control(tick: SimTick, reason: RejectReason) -> ApplyOutcome {
-    ApplyOutcome {
-        tick,
-        disposition: Disposition::Rejected(reason),
-    }
-}
-
-fn normalized_flight_sticks(frame: &ScopedControlFrame) -> ([f32; 4], bool) {
-    let mut sticks = [0.0_f32; 4];
-    let mut transformed = false;
-    for (axis, value) in &frame.payload.axes {
-        let clamped = if value.is_nan() {
-            0.0
-        } else {
-            value.clamp(-1.0, 1.0)
-        };
-        transformed |= clamped != *value;
-        sticks[usize::from(axis.as_u16().min(3))] = clamped;
-    }
-    (sticks, transformed)
-}
-
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
 /// frozen value replaying forever (the same withholding discipline as
 /// the Gazebo adapter's dead-reader path).
 const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
 
-/// Which vehicle link the adapter binds (ADR-0019).
+/// Which session profile the adapter runs (LINK-04). A profile binds
+/// source ROLES — the MAVLink link carries the FC operational estimate,
+/// the shm block carries simulation truth — and transports are never
+/// alternatives for one another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AviateLinkMode {
-    /// Try the shared-memory block first, fall back to MAVLink/UDP.
+pub enum AviateProfile {
+    /// Physical vehicle: FC estimate + FC state. A truth source must not
+    /// exist and is never synthesized.
+    Physical,
+    /// Simulation: FC estimate + FC state, plus the simulation-truth
+    /// oracle while the co-located shm block is attachable.
     #[default]
-    Auto,
-    /// Shared-memory state block only (co-located SITL).
-    Shm,
-    /// MAVLink over UDP only (routed/remote setups, PX4 compatibility).
-    Mavlink,
-}
-
-#[derive(Debug)]
-enum Source {
-    Mavlink {
-        state: Arc<Mutex<LatestAviate>>,
-        // Kept alive for its receive task; dropped with the adapter.
-        _link: Option<AviateLink>,
-    },
-    // Boxed: the session machine (attachment, fault, freshness, naming)
-    // dwarfs the MAVLink variant.
-    Shm(Box<ShmSource>),
+    Simulation,
+    /// Oracle-only diagnostics: the truth stream alone. No uplink is
+    /// bound and no motion-control scope is advertised — operational
+    /// control is structurally absent, not merely rejected.
+    OracleOnly,
 }
 
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
@@ -117,15 +93,26 @@ enum Source {
 #[derive(Debug)]
 pub struct AviateAdapter {
     vehicle: VehicleId,
-    source: Source,
+    // Source roles are structural (LINK-04): the MAVLink link only ever
+    // produces the FC operational estimate and the shm link only ever
+    // produces the simulation-truth oracle. Neither substitutes for the
+    // other: a missing estimate rejects state-dependent control instead
+    // of borrowing truth.
+    estimate: Option<EstimateSource>,
+    truth: Option<Box<ShmSource>>,
     uplink: Option<FlightUplink>,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
     _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
-    // Latest armed report from FC heartbeats on the uplink socket.
-    armed: Option<bool>,
+    // Latest FC arm report from uplink heartbeats, with its receive
+    // metadata; `None` until the FC has reported at least once.
+    arm: Option<ArmReport>,
+    // Identity under which arm reports are stamped.
+    arm_incarnation: SourceIncarnation,
+    // Zero point of the host-monotonic acquisition clock.
+    started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
     link_loss_policy: Option<LinkLossPolicy>,
     // FPV mode latch (FPV_TOGGLE_BUTTON): attitude sticks + direct
@@ -134,19 +121,20 @@ pub struct AviateAdapter {
 }
 
 impl AviateAdapter {
-    /// Binds the vehicle link per `mode` and returns a ready adapter.
+    /// Binds the profile's source roles and returns a ready adapter.
     ///
     /// # Errors
     ///
-    /// Returns [`AviateAdapterError`] when the selected link cannot be
-    /// established (`Auto` errors only if both links fail).
+    /// Returns [`AviateAdapterError`] when a link the profile requires
+    /// cannot be established (`Simulation` tolerates only a missing
+    /// truth oracle).
     pub async fn start(
         vehicle: VehicleId,
-        mode: AviateLinkMode,
+        profile: AviateProfile,
         config: LinkConfig,
     ) -> Result<Self, AviateAdapterError> {
         let mut provider = OsIncarnationProvider;
-        Self::start_with_incarnation_provider(vehicle, mode, config, &mut provider).await
+        Self::start_with_incarnation_provider(vehicle, profile, config, &mut provider).await
     }
 
     /// Binds the vehicle link using a caller-owned attachment identity source.
@@ -160,47 +148,44 @@ impl AviateAdapter {
     /// vehicle link fails.
     pub async fn start_with_incarnation_provider<P: IncarnationProvider>(
         vehicle: VehicleId,
-        mode: AviateLinkMode,
+        profile: AviateProfile,
         config: LinkConfig,
         provider: &mut P,
     ) -> Result<Self, AviateAdapterError> {
-        let incarnation = provider.next_incarnation_blocking()?;
-        let source = match mode {
-            AviateLinkMode::Shm => Self::shm_source(0, incarnation)?,
-            AviateLinkMode::Mavlink => Self::mavlink_source(config, incarnation).await?,
-            AviateLinkMode::Auto => match Self::shm_source(0, incarnation) {
-                Ok(source) => {
-                    tracing::info!("Aviate link: shared-memory state block");
-                    source
+        let arm_incarnation = provider.next_incarnation_blocking()?;
+        let (estimate, truth) = bind_sources(profile, config, provider).await?;
+        // Oracle-only sessions bind no uplink at all: with no motion
+        // scope advertised, operational control is structurally absent
+        // rather than rejected case by case. Elsewhere a failed uplink
+        // bind degrades to telemetry-only rather than failing the
+        // adapter: displaying a flight you cannot command beats
+        // displaying nothing.
+        let uplink = if profile == AviateProfile::OracleOnly {
+            None
+        } else {
+            match FlightUplink::new() {
+                Ok(mut uplink) => {
+                    uplink.set_expected_source(config.system_id, config.component_id);
+                    Some(uplink)
                 }
                 Err(error) => {
-                    tracing::info!(%error, "Aviate shm not available; using MAVLink/UDP");
-                    Self::mavlink_source(config, incarnation).await?
+                    tracing::warn!(%error, "flight uplink unavailable; telemetry-only");
+                    None
                 }
-            },
-        };
-        // A failed uplink bind degrades to telemetry-only rather than
-        // failing the adapter: displaying a flight you cannot command
-        // beats displaying nothing.
-        let uplink = match FlightUplink::new() {
-            Ok(mut uplink) => {
-                uplink.set_expected_source(config.system_id, config.component_id);
-                Some(uplink)
-            }
-            Err(error) => {
-                tracing::warn!(%error, "flight uplink unavailable; telemetry-only");
-                None
             }
         };
         let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
         Ok(Self {
             vehicle,
-            source,
+            estimate,
+            truth,
             uplink,
             frames,
             _camera_bridge: camera_bridge,
             _frame_forwarder: frame_forwarder,
-            armed: None,
+            arm: None,
+            arm_incarnation,
+            started_at: std::time::Instant::now(),
             last_reset: None,
             fpv_mode: false,
             link_loss_policy: None,
@@ -215,36 +200,13 @@ impl AviateAdapter {
         self.frames.take()
     }
 
-    fn shm_source(
-        instance: u8,
-        incarnation: SourceIncarnation,
-    ) -> Result<Source, AviateAdapterError> {
-        Ok(Source::Shm(Box::new(ShmSource::open(
-            instance,
-            incarnation,
-        )?)))
-    }
-
-    /// The typed fault that has fail-closed the shared-memory source, if
-    /// any. A faulted source publishes no telemetry and does not
-    /// re-attach. Only the shared-memory source carries a fail-closed
-    /// fault state; the MAVLink source reports `None` here.
+    /// The typed fault that has fail-closed the simulation-truth source,
+    /// if any. A faulted source publishes no telemetry and does not
+    /// re-attach. Only the shared-memory truth source carries a
+    /// fail-closed fault state; the MAVLink estimate link reports `None`
+    /// here.
     pub fn shm_fault(&self) -> Option<&AviateAdapterError> {
-        match &self.source {
-            Source::Shm(source) => source.fault(),
-            Source::Mavlink { .. } => None,
-        }
-    }
-
-    async fn mavlink_source(
-        config: LinkConfig,
-        incarnation: SourceIncarnation,
-    ) -> Result<Source, AviateAdapterError> {
-        let link = AviateLink::start(config, incarnation).await?;
-        Ok(Source::Mavlink {
-            state: link.state(),
-            _link: Some(link),
-        })
+        self.truth.as_ref().and_then(|source| source.fault())
     }
 
     /// Wires an adapter around a caller-supplied state cache, for tests.
@@ -252,12 +214,15 @@ impl AviateAdapter {
     pub(crate) fn from_state(vehicle: VehicleId, state: Arc<Mutex<LatestAviate>>) -> Self {
         Self {
             vehicle,
-            source: Source::Mavlink { state, _link: None },
+            estimate: Some(EstimateSource { state, _link: None }),
+            truth: None,
             uplink: None,
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,
-            armed: None,
+            arm: None,
+            arm_incarnation: SourceIncarnation::new([0; 16]),
+            started_at: std::time::Instant::now(),
             last_reset: None,
             fpv_mode: false,
             link_loss_policy: None,
@@ -272,30 +237,28 @@ impl AviateAdapter {
     }
 
     /// The vehicle's current measured yaw (radians clockwise from
-    /// north) and NED position.
+    /// north) and NED position, FROM THE FC OPERATIONAL ESTIMATE ONLY
+    /// (LINK-04): simulation truth is never eligible to seed command
+    /// construction, so without a live authorized estimate there is no
+    /// pose and state-dependent control is rejected instead of
+    /// borrowing truth.
     fn current_pose(&mut self) -> Option<(f32, [f32; 3])> {
-        match &mut self.source {
-            Source::Shm(source) => source.current_pose(),
-            Source::Mavlink { state, .. } => {
-                let latest = state.lock().ok()?;
-                latest.estimator_status_stamp()?;
-                let attitude = latest
-                    .attitude
-                    .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
-                let kinematics = latest
-                    .kinematics
-                    .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)?;
-                if !measurement_pair_is_coherent(
-                    attitude,
-                    kinematics,
-                    latest.maximum_inter_group_skew_ms,
-                ) || !measurement_pair_supports_pose(attitude, kinematics)
-                {
-                    return None;
-                }
-                Some((yaw_of(attitude.quat_wxyz) as f32, kinematics.pos_ned_m))
-            }
+        let latest = self.estimate.as_ref()?.state.lock().ok()?;
+        latest.estimator_status_stamp()?;
+        let attitude = latest
+            .attitude
+            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
+        let kinematics = latest
+            .kinematics
+            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
+        if !measurement_pair_is_coherent(attitude, kinematics, latest.maximum_inter_group_skew_ms)
+            || !measurement_pair_supports_pose(attitude, kinematics)
+        {
+            return None;
         }
+        Some((yaw_of(attitude.quat_wxyz) as f32, kinematics.pos_ned_m))
     }
 
     fn validate_flight_frame(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
@@ -427,17 +390,54 @@ impl VehicleAdapter for AviateAdapter {
         if let Some(uplink) = self.uplink.as_mut()
             && let Some(armed) = uplink.poll_fc()
         {
-            self.armed = Some(armed);
+            let (system_id, component_id) = uplink.expected_source();
+            let sequence = self.arm.map_or(0, |report| report.sequence.wrapping_add(1));
+            self.arm = Some(ArmReport {
+                armed,
+                system_id,
+                component_id,
+                sequence,
+                acquired_at: std::time::Instant::now(),
+            });
         }
-        let arm_state = match self.armed {
-            None => 0,
-            Some(false) => 1,
-            Some(true) => 2,
+        let fc_state = fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
+        let truth = self.truth.as_mut().and_then(|source| source.truth_sample());
+        let mut batch = match &self.estimate {
+            Some(source) => mavlink_batch(self.vehicle, &source.state),
+            None => TelemetryBatch::default(),
         };
-        match &mut self.source {
-            Source::Mavlink { state, .. } => mavlink_batch(self.vehicle, state, arm_state),
-            Source::Shm(source) => source.sample(self.vehicle, arm_state),
+        if let Some(sample) = batch.samples.first_mut() {
+            sample.sim_truth = truth;
+            sample.fc_state = fc_state;
+            return batch;
         }
+        // No estimate sample this tick: the truth oracle and the FC's
+        // stamped state report still publish under their own identities —
+        // with the panels' avionics estimate honestly absent, never
+        // synthesized from truth. A healthy FC heartbeat alone is a
+        // publishable observation; it must not vanish because no other
+        // source produced a sample.
+        if truth.is_some() || fc_state.is_some() {
+            return TelemetryBatch {
+                samples: vec![TelemetrySample {
+                    vehicle: self.vehicle,
+                    // Without a simulation clock the tick has no source;
+                    // FC-state freshness reasoning uses its stamp, never
+                    // this transport tick.
+                    tick: SimTick::new(
+                        truth
+                            .as_ref()
+                            .map_or(0, |sample| sample.stamp.acquired_at_ns),
+                    ),
+                    pose: None,
+                    speed: None,
+                    avionics: None,
+                    sim_truth: truth,
+                    fc_state,
+                }],
+            };
+        }
+        batch
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {
@@ -473,13 +473,20 @@ impl VehicleAdapter for AviateAdapter {
     }
 
     fn step(&mut self, _budget: StepBudget) -> StepOutcome {
-        let tick = match &self.source {
-            Source::Mavlink { state, .. } => state
+        // The simulation clock is sim infrastructure, not vehicle state:
+        // when the truth oracle is bound its time drives the session
+        // tick; otherwise the estimate's source time does.
+        let tick = if let Some(source) = &self.truth {
+            source.tick()
+        } else if let Some(source) = &self.estimate {
+            source
+                .state
                 .lock()
                 .ok()
                 .and_then(|latest| latest.kinematics)
-                .map_or(0, |kin| u64::from(kin.time_boot_ms).wrapping_mul(1_000_000)),
-            Source::Shm(source) => source.tick(),
+                .map_or(0, |kin| u64::from(kin.time_boot_ms).wrapping_mul(1_000_000))
+        } else {
+            0
         };
         StepOutcome {
             advanced: 0,

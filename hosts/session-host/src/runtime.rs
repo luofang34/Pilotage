@@ -4,6 +4,7 @@
 //!
 //! [`SessionEngine`]: pilotage_session::SessionEngine
 
+mod aviate_profile;
 mod connection;
 mod engine_actor;
 mod gazebo_launch;
@@ -193,18 +194,17 @@ async fn spawn_aviate_runtime(
     shutdown_rx: oneshot::Receiver<()>,
     start: tokio::time::Instant,
 ) -> Result<tokio::task::JoinHandle<()>, HostError> {
-    // PILOTAGE_AVIATE_LINK selects the vehicle link (ADR-0019): "shm"
-    // (co-located SITL), "mavlink" (routed/remote), or the default "auto" (shm
-    // when present, else MAVLink).
-    let mode = match std::env::var("PILOTAGE_AVIATE_LINK").as_deref() {
-        Ok("shm") => pilotage_adapter_aviate::AviateLinkMode::Shm,
-        Ok("mavlink") => pilotage_adapter_aviate::AviateLinkMode::Mavlink,
-        _ => pilotage_adapter_aviate::AviateLinkMode::Auto,
-    };
+    // PILOTAGE_AVIATE_PROFILE selects the session profile (LINK-04):
+    // "physical" (FC estimate + FC state; no truth), the default
+    // "simulation" (estimate + FC state, plus the truth oracle when the
+    // co-located shm block attaches), or "oracle-only" (truth stream
+    // only; no uplink, no operational control). Parsing fails closed and
+    // Physical gets the conservative link configuration.
+    let profile = aviate_profile::profile_from_env(std::env::var("PILOTAGE_AVIATE_PROFILE"))?;
     let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
         HOST_VEHICLE,
-        mode,
-        pilotage_adapter_aviate::LinkConfig::simulator(),
+        profile,
+        aviate_profile::link_config(profile),
     )
     .await
     .map_err(HostError::AviateAdapter)?;

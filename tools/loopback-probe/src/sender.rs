@@ -96,6 +96,7 @@ pub async fn run_send_loop(
     events_rx: &mut mpsc::Receiver<ReceiverEvent>,
     metrics: &mut RunMetrics,
     video: &mut VideoStats,
+    capture: &mut Option<crate::capture::CaptureWriter>,
 ) -> Result<SequenceNum, ProbeError> {
     // `--drive` takes precedence over `--hid`: it is this tool's deliberate
     // "move the real vehicle" demo mode, so a HID device (present or absent)
@@ -134,7 +135,7 @@ pub async fn run_send_loop(
                 send_ping(connection, run_start, &mut state);
             }
             Some(event) = events_rx.recv() => {
-                handle_event(event, &mut state, metrics, video, run_start.elapsed());
+                handle_event(event, &mut state, metrics, video, capture, run_start.elapsed());
             }
         }
     }
@@ -249,11 +250,15 @@ fn handle_event(
     state: &mut SendLoopState,
     metrics: &mut RunMetrics,
     video: &mut VideoStats,
+    capture: &mut Option<crate::capture::CaptureWriter>,
     elapsed: Duration,
 ) {
     match event {
         ReceiverEvent::Telemetry(observation) => {
             metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
+            if let Some(writer) = capture {
+                writer.record(&observation);
+            }
             fold_telemetry(&observation, state, metrics);
         }
         ReceiverEvent::FrameRejected(_) => {

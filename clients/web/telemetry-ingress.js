@@ -18,6 +18,24 @@ export const INCARNATION_POLICY = Object.freeze({
 const SERIAL_HALF_RANGE = 0x80000000;
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
+const CLOCK_HOST_MONOTONIC = 3;
+// Source roles (LINK-04). Primary panels admit only the operational
+// estimate; truth and FC state have their own consumers. Every consumer
+// validates the COMPLETE stamp for its exact role.
+export const ROLE = Object.freeze({
+  OPERATIONAL_ESTIMATE: 1,
+  SIMULATION_TRUTH: 2,
+  FC_STATE: 3,
+});
+// Role-specific stamp rules: which clock domains a role may legitimately
+// stamp. Estimates carry source clocks; truth is simulation-clocked; FC
+// state is stamped at host receipt (its wire carries no source time).
+const ROLE_CLOCKS = Object.freeze({
+  [ROLE.OPERATIONAL_ESTIMATE]: [CLOCK_VEHICLE_BOOT, CLOCK_SIMULATION],
+  [ROLE.SIMULATION_TRUTH]: [CLOCK_SIMULATION],
+  [ROLE.FC_STATE]: [CLOCK_HOST_MONOTONIC],
+});
+const KNOWN_INTEGRITY = Object.freeze([1, 2, 3]);
 const QUALITY_UNUSABLE = 2;
 const ATTITUDE_VALID_FLAGS = 0b0011;
 const KINEMATICS_VALID_FLAGS = 0b1100;
@@ -36,14 +54,19 @@ export function serialIsNewer(candidate, current) {
   return distance !== 0 && distance < SERIAL_HALF_RANGE;
 }
 
-// The first stamp field to violate its exact wire type and range, as a typed
-// `{ field, rule }` reason, or `null` when the stamp is valid: source id and
-// acquisition time are u64 (BigInt, upper-bounded — a decoded varint past 2^64
-// is refused, not accepted), epoch and sequence are u32. Fail-closed, never
-// clamped; this tightens identity validation without changing the
-// reorder/freshness gating below.
-function stampFault(stamp) {
-  if (stamp === null || typeof stamp !== "object") return { field: "stamp", rule: "malformed" };
+// The first stamp field to violate its exact wire type, range, or role
+// contract, as a typed `{ field, rule }` reason, or `null` when the stamp
+// is valid for `role`: source id and acquisition time are u64 (BigInt,
+// upper-bounded — a decoded varint past 2^64 is refused, not accepted),
+// epoch and sequence are u32, the role must match the lane exactly, the
+// clock must be legal for that role, and the integrity classification
+// must be KNOWN (unspecified is a fault, not a default). Fail-closed,
+// never clamped. This one validator serves the estimate, truth, and
+// FC-state lanes so no lane ships weaker provenance checks.
+export function stampFaultForRole(stamp, role) {
+  if (stamp === null || stamp === undefined || typeof stamp !== "object") {
+    return { field: "stamp", rule: "malformed" };
+  }
   const fault = firstFault([
     ["sourceId", "u64", stamp.sourceId],
     ["sourceIncarnation", "incarnation", stamp.sourceIncarnation],
@@ -52,8 +75,14 @@ function stampFault(stamp) {
     ["acquiredAtNanos", "u64", stamp.acquiredAtNanos],
   ]);
   if (fault) return fault;
-  if (stamp.clock !== CLOCK_VEHICLE_BOOT && stamp.clock !== CLOCK_SIMULATION) {
+  if (stamp.role !== role) {
+    return { field: "role", rule: "role-mismatch" };
+  }
+  if (!ROLE_CLOCKS[role].includes(stamp.clock)) {
     return { field: "clock", rule: "malformed" };
+  }
+  if (!KNOWN_INTEGRITY.includes(stamp.integrity)) {
+    return { field: "integrity", rule: "unknown" };
   }
   return null;
 }
@@ -322,7 +351,7 @@ export class AvionicsIngress {
 
   acceptGroup(name, stamp, copyData, avionics, nowMs) {
     if (stamp === null || stamp === undefined) return false;
-    const fault = stampFault(stamp);
+    const fault = stampFaultForRole(stamp, ROLE.OPERATIONAL_ESTIMATE);
     if (fault !== null) {
       this.bump("invalidStamps");
       this.lastRejectReason = fault;
@@ -457,5 +486,75 @@ export class AvionicsIngress {
 
   bump(name, amount = 1) {
     this.counters[name] = increment(this.counters[name], amount);
+  }
+}
+
+// FC-state freshness, fail closed. A report is accepted only when its
+// COMPLETE stamp validates for the FC-state role; the source identity
+// (id + incarnation) is pinned at first acceptance for the session; the
+// epoch/sequence pair must strictly ADVANCE in wrapping serial order —
+// duplicates and reordered/older reports never refresh age and never
+// regress the displayed state; and the arm value itself must be in
+// range. Heartbeat loss surfaces as stale instead of a forever-fresh
+// arm state.
+export class FcStateTracker {
+  constructor(staleAfterMs = 3000) {
+    this.staleAfterMs = staleAfterMs;
+    this.last = null;
+  }
+
+  // Feeds one decoded fcState lane (or null) and returns the current
+  // view. Only a NEW report — pinned identity, epoch advanced, or same
+  // epoch with the sequence strictly newer in wrapping order — restarts
+  // the age clock.
+  observe(fcState, nowMs) {
+    if (this.accepts(fcState)) {
+      const stamp = fcState.stamp;
+      this.last = {
+        armState: fcState.armState >>> 0,
+        sourceId: stamp.sourceId,
+        sourceIncarnation: stamp.sourceIncarnation,
+        sourceEpoch: stamp.sourceEpoch,
+        sequence: stamp.sequence,
+        firstSeenMs: nowMs,
+      };
+    }
+    return this.view(nowMs);
+  }
+
+  // Whether a report is a valid, strictly-new observation from the
+  // pinned source. Every rejection is fail-closed: the previous view
+  // (and its age) stands.
+  accepts(fcState) {
+    if (!fcState) return false;
+    if (stampFaultForRole(fcState.stamp, ROLE.FC_STATE) !== null) return false;
+    const armState = fcState.armState;
+    if (!Number.isInteger(armState) || armState < 0 || armState > 2) return false;
+    const last = this.last;
+    if (last === null) return true;
+    const stamp = fcState.stamp;
+    // Identity is pinned for the session: a different source id or
+    // incarnation is not this FC's report stream.
+    if (stamp.sourceId !== last.sourceId || stamp.sourceIncarnation !== last.sourceIncarnation) {
+      return false;
+    }
+    if (stamp.sourceEpoch === last.sourceEpoch) {
+      return serialIsNewer(stamp.sequence, last.sequence);
+    }
+    // A newer epoch (FC restart/re-attach) restarts the numbering; an
+    // older epoch is a replay.
+    return serialIsNewer(stamp.sourceEpoch, last.sourceEpoch);
+  }
+
+  // The display view: null before any report; stale once the newest
+  // report's age exceeds the threshold.
+  view(nowMs) {
+    if (this.last === null) return null;
+    const ageMs = nowMs - this.last.firstSeenMs;
+    return {
+      armState: this.last.armState,
+      ageMs,
+      stale: ageMs > this.staleAfterMs,
+    };
   }
 }

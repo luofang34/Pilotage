@@ -41,8 +41,9 @@ use crate::wire_session::{StreamMessage, decode_one};
 /// One event the receiver task hands to the run loop.
 #[derive(Debug)]
 pub enum ReceiverEvent {
-    /// A decoded telemetry sample.
-    Telemetry(TelemetryObservation),
+    /// A decoded telemetry sample. Boxed: the captured provenance lanes
+    /// dwarf the other variants.
+    Telemetry(Box<TelemetryObservation>),
     /// A `FrameRejected` notice for a control frame this client sent.
     FrameRejected(pilotage_protocol::FrameRejected),
     /// A `Pong` reply to a `Ping` this client sent, plus the client-local
@@ -233,9 +234,9 @@ fn decode_datagram_event(
         message: "datagram envelope carried no payload".to_string(),
     })?;
     match payload {
-        wire::envelope::Payload::TelemetrySample(sample) => Ok(ReceiverEvent::Telemetry(
+        wire::envelope::Payload::TelemetrySample(sample) => Ok(ReceiverEvent::Telemetry(Box::new(
             observation_from_sample(&sample, received_at),
-        )),
+        ))),
         wire::envelope::Payload::Pong(pong) => Ok(ReceiverEvent::Pong {
             pong: pilotage_protocol::Pong::try_from(pong).map_err(|source| ProbeError::Decode {
                 source: pilotage_protocol::DecodeError::Convert(source),
@@ -330,10 +331,79 @@ mod tests {
                 }),
                 velocity: None,
                 avionics: None,
+                sim_truth: None,
+                fc_state: None,
             },
         ));
         let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(5)).expect("telemetry");
         assert!(matches!(event, ReceiverEvent::Telemetry(_)));
+    }
+
+    #[test]
+    fn round_trip_capture_retains_role_lanes() {
+        // Encode -> transport bytes -> decode -> observation: the
+        // capture must retain the truth and FC-state lanes with their
+        // provenance intact end to end.
+        let stamp = wire::MeasurementStamp {
+            role: wire::SourceRole::SimulationTruth as i32,
+            integrity: wire::SourceIntegrity::Unprotected as i32,
+            source_id: 1,
+            source_epoch: 2,
+            sequence: 40,
+            acquired_at_ns: 1_000_000,
+            clock: wire::MeasurementClock::Simulation as i32,
+            source_incarnation: vec![0x11; 16],
+        };
+        let fc_stamp = wire::MeasurementStamp {
+            role: wire::SourceRole::FcState as i32,
+            integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
+            source_id: (255 << 8) | 190,
+            clock: wire::MeasurementClock::HostMonotonic as i32,
+            ..stamp.clone()
+        };
+        let bytes = encode(wire::envelope::Payload::TelemetrySample(
+            wire::TelemetrySample {
+                vehicle: Some(wire::VehicleId { value: 1 }),
+                tick: Some(wire::SimTick { value: 1_000_000 }),
+                observed_at: Some(wire::MonoTimestamp { nanos: 5 }),
+                pose: None,
+                velocity: None,
+                avionics: None,
+                sim_truth: Some(Box::new(wire::SimTruthState {
+                    pos_n_m: 2.0,
+                    pos_e_m: 1.0,
+                    pos_d_m: -3.0,
+                    valid_flags: 0b1101,
+                    stamp: Some(stamp),
+                    ..Default::default()
+                })),
+                fc_state: Some(Box::new(wire::FcState {
+                    arm_state: 2,
+                    stamp: Some(fc_stamp),
+                })),
+            },
+        ));
+        let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(9)).expect("telemetry");
+        let ReceiverEvent::Telemetry(observation) = event else {
+            panic!("expected telemetry, got {event:?}");
+        };
+        let truth = observation.sim_truth.expect("truth captured");
+        assert_eq!(truth.pos_ned_m, (2.0, 1.0, -3.0));
+        assert_eq!(
+            truth.provenance.role,
+            wire::SourceRole::SimulationTruth as i32
+        );
+        assert_eq!(
+            truth.provenance.integrity,
+            wire::SourceIntegrity::Unprotected as i32
+        );
+        let fc_state = observation.fc_state.expect("fc state captured");
+        assert_eq!(fc_state.arm_state, 2);
+        assert_eq!(fc_state.provenance.source_id, (255 << 8) | 190);
+        assert_eq!(
+            fc_state.provenance.clock,
+            wire::MeasurementClock::HostMonotonic as i32
+        );
     }
 
     #[test]

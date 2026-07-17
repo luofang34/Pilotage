@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use pilotage_adapter_api::{
     CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
-    SourceIncarnation, VideoCaptureStamp,
+    SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
 };
 use pilotage_timing::SimTick;
 
@@ -80,6 +80,9 @@ impl FrameStamper {
         let source_id = u8::try_from(frame.camera_id).unwrap_or(u8::MAX);
         let sequence = self.take_sequence(source_id);
         let stamp = MeasurementStamp {
+            role: SourceRole::VideoCapture,
+            // Sim camera frames arrive over unauthenticated gz transport.
+            integrity: SourceIntegrity::Unprotected,
             source_id: u64::from(source_id),
             source_incarnation: self.incarnation,
             source_epoch: self.epoch,

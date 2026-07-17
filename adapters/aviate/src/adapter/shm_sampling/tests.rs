@@ -4,10 +4,9 @@ use std::time::{Duration, Instant};
 
 use aviate_xil_contract::AttachError;
 use aviate_xil_shm::{AttachFailure, ModelStateSnapshot, SimWriterSession};
-use pilotage_adapter_api::SourceIncarnation;
-use pilotage_protocol::VehicleId;
+use pilotage_adapter_api::{MeasurementClock, SourceIncarnation, SourceIntegrity, SourceRole};
 
-use super::{REATTACH_INTERVAL, ShmSource, TRUTH_VALID_FLAGS, batch_from_sample};
+use super::{REATTACH_INTERVAL, ShmSource, TRUTH_VALID_FLAGS, truth_from_sample};
 use crate::error::AviateAdapterError;
 use crate::shm::{GzStateSample, attach_error};
 
@@ -35,28 +34,29 @@ fn snapshot(generation: u32, sim_step: u64, time_us: u64) -> ModelStateSnapshot 
 }
 
 #[test]
-fn coherent_snapshot_flows_with_truth_stamping_and_no_body_rates() {
+fn coherent_snapshot_flows_as_a_stamped_truth_sample() {
     let name = unique_name("flow");
     let writer = SimWriterSession::create(&name).expect("create writer");
     writer.write_model_state(&snapshot(writer.reset_generation(), 40, 1_000));
 
     let mut source = ShmSource::open_named(&name, 0, incarnation()).expect("attach");
-    let batch = source.sample(VehicleId::new(1), 0);
-    let avionics = batch.samples[0].avionics.expect("avionics");
-    let attitude = avionics.attitude.expect("attitude");
-    let kinematics = avionics.kinematics.expect("kinematics");
+    let truth = source.truth_sample().expect("truth sample");
 
-    assert_eq!(kinematics.pos_ned_m, [2.0, 1.0, -3.0]);
-    assert_eq!(kinematics.vel_ned_mps, [0.0, 0.5, 1.0]);
-    assert_eq!(attitude.stamp.sequence, 40, "sim_step is the sequence");
-    assert_eq!(attitude.stamp.source_epoch, 1);
-    assert_eq!(attitude.stamp.acquired_at_ns, 1_000_000);
-
-    // The producer publishes non-zero world-frame angular velocity; it
-    // must not surface as authoritative body rates.
-    assert_eq!(avionics.valid_flags & 0b10, 0, "rates bit must stay clear");
-    assert_eq!(avionics.valid_flags, TRUTH_VALID_FLAGS);
-    assert_eq!(attitude.rates_rps, [0.0; 3]);
+    assert_eq!(truth.pos_ned_m, [2.0, 1.0, -3.0]);
+    assert_eq!(truth.vel_ned_mps, [0.0, 0.5, 1.0]);
+    // The truth role carries its own identity: the reserved truth id
+    // space, the simulation clock, and sim_step as the sequence. The
+    // sample type has no estimator-status, no authorization flags, and
+    // no body-rate field — the producer's non-zero world ang_vel has
+    // nowhere to leak.
+    assert_eq!(truth.stamp.role, SourceRole::SimulationTruth);
+    assert_eq!(truth.stamp.source_epoch, 1);
+    assert_eq!(truth.stamp.sequence, 40);
+    assert_eq!(truth.stamp.acquired_at_ns, 1_000_000);
+    assert_eq!(truth.stamp.clock, MeasurementClock::Simulation);
+    assert_eq!(truth.valid_flags, TRUTH_VALID_FLAGS);
+    assert_eq!(truth.valid_flags & 0b10, 0, "no body-rate availability");
+    assert_eq!(truth.stamp.integrity, SourceIntegrity::Unprotected);
 }
 
 #[test]
@@ -207,31 +207,26 @@ fn a_contract_mismatch_is_a_sticky_fail_closed_fault() {
 }
 
 #[test]
-fn simulator_batch_is_an_estimator_shaped_projection_with_shared_stamps() {
-    let batch = batch_from_sample(
-        VehicleId::new(1),
-        0,
+fn truth_conversion_preserves_identity_and_truncates_the_step_sequence() {
+    let truth = truth_from_sample(
         GzStateSample {
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
             pos_ned_m: [0.0; 3],
             vel_ned_mps: [0.0; 3],
             time_us: 42,
-            // Verifies the u64 step truncates to the wrapping u32 wire
-            // sequence by its low bits.
+            // The u64 step truncates to the wrapping u32 wire sequence
+            // by its low bits.
             sim_step: (1 << 32) | 7,
             reset_generation: 1,
         },
-        0,
         3,
+        5,
         incarnation(),
     );
-
-    let avionics = batch.samples[0].avionics.expect("avionics");
-    let status = avionics.estimator_status_stamp.expect("status stamp");
-    assert_eq!(status, avionics.attitude.expect("attitude").stamp);
-    assert_eq!(status, avionics.kinematics.expect("kinematics").stamp);
-    assert_eq!(status.sequence, 7);
-    assert_eq!(status.source_epoch, 3);
-    assert_eq!(avionics.valid_flags, TRUTH_VALID_FLAGS);
-    assert_eq!(avionics.quality, 0);
+    assert_eq!(truth.stamp.role, SourceRole::SimulationTruth);
+    assert_eq!(truth.stamp.source_id, 4);
+    assert_eq!(truth.stamp.source_epoch, 5);
+    assert_eq!(truth.stamp.sequence, 7);
+    assert_eq!(truth.stamp.acquired_at_ns, 42_000);
+    assert_eq!(truth.stamp.clock, MeasurementClock::Simulation);
 }

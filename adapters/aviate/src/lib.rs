@@ -22,7 +22,7 @@ pub mod shm;
 mod uplink;
 
 pub use adapter::{
-    ARM_BUTTON, AviateAdapter, AviateLinkMode, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
+    ARM_BUTTON, AviateAdapter, AviateProfile, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
     THROTTLE_AXIS, YAW_AXIS,
 };
 pub use error::AviateAdapterError;

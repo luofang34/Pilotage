@@ -14,29 +14,29 @@
 //! frozen data is never replayed. A `reset_generation` change on the same
 //! writer starts a new source epoch and accepts the simulation-time
 //! rewind.
+//!
+//! What this source publishes is a [`SimTruthSample`] — the simulation
+//! oracle, with its own identity, epoch, sequence, and clock — never an
+//! `AvionicsSample`: simulator truth does not impersonate an FC
+//! estimator and is not eligible for operational control.
 
 use std::time::{Duration, Instant};
 
 use aviate_xil_contract::WriterState;
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, MeasurementClock,
-    MeasurementStamp, Pose2d, SourceIncarnation, TelemetryBatch, TelemetrySample,
+    MeasurementClock, MeasurementStamp, SimTruthSample, SourceIncarnation, SourceIntegrity,
+    SourceRole,
 };
-use pilotage_protocol::VehicleId;
-use pilotage_timing::SimTick;
 
-use super::{WITHHOLD_AFTER, yaw_of};
+use super::WITHHOLD_AFTER;
 use crate::error::AviateAdapterError;
 use crate::shm::{GzStateSample, GzStateShm, ShmFreshness, ShmObservation, object_name};
 
 const REATTACH_INTERVAL: Duration = Duration::from_millis(250);
 
-/// Simulator-field availability, in the wire batch's flag positions:
-/// attitude (bit 0), position (bit 2), and velocity (bit 3) are present.
-/// The rates bit (1) stays CLEAR: the contract carries no body gyro — its
-/// angular-velocity lane is world-frame and advisory — so body rates are
-/// published unavailable. This says which simulator fields exist; it is
-/// NOT an FC-estimator authorization.
+/// Which truth fields the shm block supplies, in the estimate mask's bit
+/// positions: attitude (bit 0), position (bit 2), velocity (bit 3). The
+/// rates bit (1) stays clear — the contract carries no body gyro.
 const TRUTH_VALID_FLAGS: u32 = 0b1101;
 
 #[derive(Debug)]
@@ -67,7 +67,7 @@ impl ShmSource {
 
     /// Attaches to an explicit object name. [`Self::open`] resolves the
     /// canonical production name; tests attach to a private object.
-    fn open_named(
+    pub(super) fn open_named(
         name: &str,
         instance: u8,
         incarnation: SourceIncarnation,
@@ -85,11 +85,6 @@ impl ShmSource {
         })
     }
 
-    pub(super) fn current_pose(&mut self) -> Option<(f32, [f32; 3])> {
-        self.usable_sample(Instant::now())
-            .map(|sample| (yaw_of(sample.quat_wxyz) as f32, sample.pos_ned_m))
-    }
-
     pub(super) fn tick(&self) -> u64 {
         self.session
             .as_ref()
@@ -103,19 +98,16 @@ impl ShmSource {
         self.fault.as_ref()
     }
 
-    pub(super) fn sample(&mut self, vehicle: VehicleId, arm_state: u32) -> TelemetryBatch {
-        let now = Instant::now();
-        let Some(sample) = self.usable_sample(now) else {
-            return TelemetryBatch::default();
-        };
-        batch_from_sample(
-            vehicle,
-            arm_state,
+    /// One fresh simulation-truth observation, or `None` while the
+    /// machine withholds (detached, faulted, frozen, or unpublished).
+    pub(super) fn truth_sample(&mut self) -> Option<SimTruthSample> {
+        let sample = self.usable_sample(Instant::now())?;
+        Some(truth_from_sample(
             sample,
             self.instance,
             self.epoch,
             self.incarnation,
-        )
+        ))
     }
 
     fn usable_sample(&mut self, now: Instant) -> Option<GzStateSample> {
@@ -227,67 +219,35 @@ impl ShmSource {
     }
 }
 
-fn batch_from_sample(
-    vehicle: VehicleId,
-    arm_state: u32,
+fn truth_from_sample(
     sample: GzStateSample,
     instance: u8,
     epoch: u32,
     incarnation: SourceIncarnation,
-) -> TelemetryBatch {
-    let heading = yaw_of(sample.quat_wxyz);
-    let stamp = MeasurementStamp {
-        source_id: u64::from(instance).wrapping_add(1),
-        source_incarnation: incarnation,
-        source_epoch: epoch,
-        // The stamp carries a wrapping u32 group sequence; the physics
-        // step counter's low 32 bits preserve adjacency and wrap
-        // semantics.
-        sequence: sample.sim_step as u32,
-        acquired_at_ns: sample.time_us.wrapping_mul(1_000),
-        clock: MeasurementClock::Simulation,
-    };
-    let speed = f64::from(
-        (sample.vel_ned_mps[0] * sample.vel_ned_mps[0]
-            + sample.vel_ned_mps[1] * sample.vel_ned_mps[1])
-            .sqrt(),
-    );
-    TelemetryBatch {
-        samples: vec![TelemetrySample {
-            vehicle,
-            tick: SimTick::new(sample.time_us.wrapping_mul(1_000)),
-            pose: Some(Pose2d {
-                x: f64::from(sample.pos_ned_m[0]),
-                y: f64::from(sample.pos_ned_m[1]),
-                heading,
-            }),
-            speed: Some(speed),
-            avionics: Some(AvionicsSample {
-                attitude: Some(AvionicsAttitudeSample {
-                    quat_wxyz: sample.quat_wxyz,
-                    // No body gyro exists on this source (see the
-                    // `crate::shm` docs): rates are neutral with their
-                    // validity bit clear in `TRUTH_VALID_FLAGS`.
-                    rates_rps: [0.0; 3],
-                    stamp,
-                }),
-                kinematics: Some(AvionicsKinematicsSample {
-                    pos_ned_m: sample.pos_ned_m,
-                    vel_ned_mps: sample.vel_ned_mps,
-                    stamp,
-                }),
-                // COMPATIBILITY PROJECTION: the wire batch has one
-                // estimator-shaped avionics sample, so simulator truth
-                // rides it with the stamp marking simulator-field
-                // availability — not an FC estimator's authorization.
-                // The truth-versus-estimate source split is a separate
-                // concern, not solved by this projection.
-                estimator_status_stamp: Some(stamp),
-                valid_flags: TRUTH_VALID_FLAGS,
-                quality: 0,
-                arm_state,
-            }),
-        }],
+) -> SimTruthSample {
+    SimTruthSample {
+        quat_wxyz: sample.quat_wxyz,
+        pos_ned_m: sample.pos_ned_m,
+        vel_ned_mps: sample.vel_ned_mps,
+        valid_flags: TRUTH_VALID_FLAGS,
+        stamp: MeasurementStamp {
+            // Role is the discriminator; the id is adapter-local and may
+            // collide with other roles' ids.
+            role: SourceRole::SimulationTruth,
+            // The shm block validates a layout fingerprint but carries
+            // no cryptographic authentication; its trust is host
+            // process isolation.
+            integrity: SourceIntegrity::Unprotected,
+            source_id: u64::from(instance).wrapping_add(1),
+            source_incarnation: incarnation,
+            source_epoch: epoch,
+            // The stamp carries a wrapping u32 group sequence; the physics
+            // step counter's low 32 bits preserve adjacency and wrap
+            // semantics.
+            sequence: sample.sim_step as u32,
+            acquired_at_ns: sample.time_us.wrapping_mul(1_000),
+            clock: MeasurementClock::Simulation,
+        },
     }
 }
 

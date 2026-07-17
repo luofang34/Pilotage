@@ -1,3 +1,7 @@
+# Negative fixture for baseline membership: every artifact and digest
+# resolves against the CURRENT tree, but the declared configuration
+# commit does not exist in the object store — the baseline is
+# unverifiable and the gate must fail closed.
 # Minimal valid attitude fixture. Its verification-case selector resolves
 # against sample_tests.rs when the crate directory is the repo root.
 evidence-graph 1
@@ -17,12 +21,12 @@ attr test band_matches_reference
 
 node RESULT-BAND verification-result
 attr command cargo test -p pilotage-instrument-raster
-attr config-digest 339eec92812c375aa46d55fec7c0367a5ced6b27
+attr config-digest 0000000000000000000000000000000000000000
 attr tool-version rustc 1.95.0
 attr source-digest git-blob:c86e9a44ffd131b9bc0e610985ff447628288ed6
-attr artifact tests/fixtures/att01-run-output-baselined.txt
-attr output-digest sha256:aeb9c0e376143aaa35b9c9837ed928c5bd6ced76a2df6038e076714d2b55a64f
-attr run-id local:339eec92812c375aa46d55fec7c0367a5ced6b27
+attr artifact tests/fixtures/att01-run-output-unverifiable.txt
+attr output-digest sha256:fc9087ffff7715e9fec71f16be1fa4e55800b7a67874402bed793667fc18d818
+attr run-id local:0000000000000000000000000000000000000000
 attr outcome pass
 node CFG-BASE configuration-item
 node TOOL-CARGO tool

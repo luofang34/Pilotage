@@ -1,8 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, MeasurementClock,
-    MeasurementStamp, Pose2d, SourceIncarnation, TelemetrySample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcStateSample,
+    MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample, SourceIncarnation, SourceIntegrity,
+    SourceRole, TelemetrySample,
 };
 use pilotage_protocol::{VehicleId, wire};
 use pilotage_timing::{MonoTimestamp, SimTick};
@@ -12,6 +13,8 @@ use super::{avionics_to_wire, sample_to_wire};
 #[test]
 fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let attitude = MeasurementStamp {
+        role: SourceRole::OperationalEstimate,
+        integrity: SourceIntegrity::ChecksummedOnly,
         source_id: 7,
         source_incarnation: SourceIncarnation::new([0xA5; 16]),
         source_epoch: 3,
@@ -52,8 +55,9 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
             estimator_status_stamp: Some(estimator_status),
             valid_flags: 0b1111,
             quality: 0,
-            arm_state: 2,
         }),
+        sim_truth: None,
+        fc_state: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(9_000_000));
@@ -90,6 +94,8 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
 
 fn simulation_stamp(sequence: u32) -> MeasurementStamp {
     MeasurementStamp {
+        role: SourceRole::OperationalEstimate,
+        integrity: SourceIntegrity::ChecksummedOnly,
         source_id: 1,
         source_incarnation: SourceIncarnation::new([0x5A; 16]),
         source_epoch: 1,
@@ -107,7 +113,6 @@ fn estimator_authorization_is_normalized_at_wire_boundary() {
         estimator_status_stamp: Some(simulation_stamp(1)),
         valid_flags: u32::MAX,
         quality: u32::MAX,
-        arm_state: 0,
     });
 
     assert_eq!(avionics.valid_flags, 0x0f);
@@ -131,8 +136,9 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
             estimator_status_stamp: None,
             valid_flags: 0b1100,
             quality: 0,
-            arm_state: 0,
         }),
+        sim_truth: None,
+        fc_state: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(1));
@@ -168,8 +174,9 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
             estimator_status_stamp: None,
             valid_flags: 0b0011,
             quality: 0,
-            arm_state: 2,
         }),
+        sim_truth: None,
+        fc_state: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(1));
@@ -180,4 +187,82 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
     assert_eq!(avionics.rate_r_rad_s, 0.3);
     assert_eq!(avionics.attitude_stamp.expect("attitude").sequence, 9);
     assert!(avionics.kinematics_stamp.is_none());
+}
+
+#[test]
+fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
+    let truth_stamp = MeasurementStamp {
+        role: SourceRole::SimulationTruth,
+        integrity: SourceIntegrity::Unprotected,
+        source_id: 1,
+        source_incarnation: SourceIncarnation::new([0x11; 16]),
+        source_epoch: 2,
+        sequence: 40,
+        acquired_at_ns: 1_000_000,
+        clock: MeasurementClock::Simulation,
+    };
+    let fc_stamp = MeasurementStamp {
+        role: SourceRole::FcState,
+        integrity: SourceIntegrity::ChecksummedOnly,
+        source_id: 1,
+        source_incarnation: SourceIncarnation::new([0x22; 16]),
+        source_epoch: 1,
+        sequence: 3,
+        acquired_at_ns: 77,
+        clock: MeasurementClock::HostMonotonic,
+    };
+    let sample = TelemetrySample {
+        vehicle: VehicleId::new(1),
+        tick: SimTick::new(1_000_000),
+        pose: None,
+        speed: None,
+        // No estimate exists: nothing may synthesize one from truth.
+        avionics: None,
+        sim_truth: Some(SimTruthSample {
+            quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+            pos_ned_m: [2.0, 1.0, -3.0],
+            vel_ned_mps: [0.0, 0.5, 1.0],
+            valid_flags: 0b1101,
+            stamp: truth_stamp,
+        }),
+        fc_state: Some(FcStateSample {
+            arm_state: 2,
+            stamp: fc_stamp,
+        }),
+    };
+
+    let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(5));
+    assert!(
+        wire_sample.avionics.is_none(),
+        "truth must not be projected into the estimator lane"
+    );
+    let truth = wire_sample.sim_truth.expect("sim truth");
+    assert_eq!(truth.pos_n_m, 2.0);
+    assert_eq!(truth.vel_d_mps, 1.0);
+    assert_eq!(truth.valid_flags, 0b1101);
+    let truth_wire_stamp = truth.stamp.expect("truth stamp");
+    assert_eq!(
+        truth_wire_stamp.role,
+        wire::SourceRole::SimulationTruth as i32
+    );
+    assert_eq!(
+        truth_wire_stamp.integrity,
+        wire::SourceIntegrity::Unprotected as i32
+    );
+    assert_eq!(
+        truth_wire_stamp.clock,
+        wire::MeasurementClock::Simulation as i32
+    );
+    let fc = wire_sample.fc_state.expect("fc state");
+    assert_eq!(fc.arm_state, 2);
+    let fc_wire_stamp = fc.stamp.expect("fc stamp");
+    assert_eq!(fc_wire_stamp.role, wire::SourceRole::FcState as i32);
+    assert_eq!(
+        fc_wire_stamp.clock,
+        wire::MeasurementClock::HostMonotonic as i32
+    );
+    assert_ne!(
+        truth_wire_stamp.source_incarnation, fc_wire_stamp.source_incarnation,
+        "roles carry independent identities"
+    );
 }

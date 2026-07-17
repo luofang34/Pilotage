@@ -12,6 +12,12 @@ pub enum MeasurementClock {
     VehicleBoot,
     /// Monotonic simulation time supplied by the simulator.
     Simulation,
+    /// Monotonic time on the ground host that received the observation,
+    /// for reports whose wire carries no source timestamp (an FC
+    /// heartbeat). Receive time is not acquisition time; consumers may
+    /// only reason about staleness in this domain, never correlate it
+    /// with vehicle or simulation clocks without an explicit mapping.
+    HostMonotonic,
 }
 
 /// Opaque identity of one source attachment or boot instance.
@@ -36,11 +42,52 @@ impl SourceIncarnation {
     }
 }
 
+/// Explicit role of the source behind a measurement. Role is carried in
+/// provenance — never encoded into id ranges — so a configured source id
+/// can collide across roles without ambiguity, and consumers gate on the
+/// role itself (panels and control accept only
+/// [`SourceRole::OperationalEstimate`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceRole {
+    /// FC estimator output: the only role eligible for primary panels
+    /// and operational command construction.
+    OperationalEstimate,
+    /// Simulator ground truth: logging, assertions, and comparison in
+    /// simulation profiles only.
+    SimulationTruth,
+    /// FC-owned vehicle state (arm/mode/failsafe) reports.
+    FcState,
+    /// Video capture identity for camera frames.
+    VideoCapture,
+}
+
+/// Integrity classification of the path that delivered an observation.
+/// The distinction that matters end-to-end is authenticated source data
+/// versus merely checksummed or unprotected observations; a consumer
+/// making a safety claim must require the level the claim needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceIntegrity {
+    /// Cryptographically authenticated end-to-end source data.
+    Authenticated,
+    /// Checksummed (CRC-style) but unauthenticated transport.
+    ChecksummedOnly,
+    /// No integrity protection beyond the transport's own boundaries
+    /// (a local shared-memory mapping relies on host process isolation).
+    Unprotected,
+}
+
 /// Identity and acquisition stamp for one independently advancing
 /// measurement group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeasurementStamp {
-    /// Adapter-defined source identifier, stable within one vehicle.
+    /// Explicit source role; consumers gate on this, never on id ranges.
+    pub role: SourceRole,
+    /// Integrity classification of the path that delivered this
+    /// observation; every role carries it so authenticated, checksummed,
+    /// and unprotected inputs stay distinguishable end to end.
+    pub integrity: SourceIntegrity,
+    /// Adapter-defined source identifier, stable within one vehicle and
+    /// one role. Ids may collide across roles; the role disambiguates.
     pub source_id: u64,
     /// Opaque attachment/boot identity for the producing source.
     pub source_incarnation: SourceIncarnation,
@@ -88,8 +135,10 @@ pub struct AvionicsKinematicsSample {
     pub stamp: MeasurementStamp,
 }
 
-/// Raw avionics state estimate for flight vehicles (ADR-0018): the
-/// estimator's output, not display-ready numbers. Ground vehicles leave
+/// Raw avionics state estimate for flight vehicles (ADR-0018): the FC
+/// estimator's output, not display-ready numbers and never simulator
+/// truth — a simulator oracle publishes [`SimTruthSample`] instead, and
+/// the two are not interchangeable. Ground vehicles leave
 /// [`TelemetrySample::avionics`] as `None`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AvionicsSample {
@@ -111,9 +160,43 @@ pub struct AvionicsSample {
     /// observation and is meaningful only when
     /// [`Self::estimator_status_stamp`] is present.
     pub quality: u32,
-    /// Arm state as the vehicle reports it: 0 unknown, 1 disarmed,
-    /// 2 armed.
+}
+
+/// One coherent simulator ground-truth sample: a simulation oracle for
+/// logging, test assertions, and estimate-versus-truth comparison in
+/// simulation profiles only. It is a distinct type from
+/// [`AvionicsSample`] so truth can never be passed where an FC
+/// operational estimate is required: it drives no primary panel and no
+/// operational command construction, and it is not a fallback for a
+/// missing estimate. Physical profiles must not synthesize one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SimTruthSample {
+    /// Attitude quaternion (w, x, y, z), body FRD → world NED.
+    pub quat_wxyz: [f32; 4],
+    /// Position NED, meters.
+    pub pos_ned_m: [f32; 3],
+    /// Velocity NED, m/s.
+    pub vel_ned_mps: [f32; 3],
+    /// Which truth fields this sample carries, in the same bit positions
+    /// as the estimate's authorization mask: bit0 attitude, bit1 rates,
+    /// bit2 position, bit3 velocity. Availability only — truth has no
+    /// estimator authorization to claim.
+    pub valid_flags: u32,
+    /// Identity, acquisition time, and integrity of this truth
+    /// observation.
+    pub stamp: MeasurementStamp,
+}
+
+/// FC-owned vehicle state (arm today; mode/failsafe belong here as they
+/// arrive) with its own provenance: the FC is the only author, and the
+/// stamp records which link observation reported it — it is never merged
+/// unstamped into an estimate or truth sample.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FcStateSample {
+    /// Arm state as the FC reports it: 0 unknown, 1 disarmed, 2 armed.
     pub arm_state: u32,
+    /// Identity and acquisition time of the FC report carrying this state.
+    pub stamp: MeasurementStamp,
 }
 
 /// A single vehicle's telemetry at one simulation tick.
@@ -127,9 +210,17 @@ pub struct TelemetrySample {
     pub pose: Option<Pose2d>,
     /// Scalar speed at this tick, or `None` when it is not measured.
     pub speed: Option<f64>,
-    /// Raw avionics estimate for flight vehicles; `None` for ground
-    /// vehicles (ADR-0018).
+    /// Raw FC avionics estimate for flight vehicles; `None` for ground
+    /// vehicles (ADR-0018) and whenever no operational estimate exists —
+    /// simulator truth is never projected here.
     pub avionics: Option<AvionicsSample>,
+    /// Simulator ground-truth oracle, present only in simulation
+    /// profiles. Independent of [`Self::avionics`] in identity, epoch,
+    /// sequence, clock, and validity; not eligible as an operational
+    /// fallback.
+    pub sim_truth: Option<SimTruthSample>,
+    /// FC-owned arm/mode state with its own provenance stamp.
+    pub fc_state: Option<FcStateSample>,
 }
 
 /// A batch of telemetry samples returned from a single `sample_telemetry`
@@ -175,6 +266,8 @@ mod tests {
             }),
             speed: Some(3.0),
             avionics: None,
+            sim_truth: None,
+            fc_state: None,
         };
         assert_eq!(sample.pose.expect("pose").x, 1.0);
         assert_eq!(sample.speed, Some(3.0));

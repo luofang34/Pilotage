@@ -1,6 +1,9 @@
 //! Lossless adapter-to-wire telemetry mapping.
 
-use pilotage_adapter_api::{AvionicsSample, MeasurementClock, MeasurementStamp, TelemetrySample};
+use pilotage_adapter_api::{
+    AvionicsSample, FcStateSample, MeasurementClock, MeasurementStamp, SimTruthSample,
+    SourceIntegrity, SourceRole, TelemetrySample,
+};
 use pilotage_protocol::wire;
 use pilotage_timing::MonoTimestamp;
 
@@ -32,6 +35,12 @@ pub(super) fn sample_to_wire(
             angular_rad_s: 0.0,
         }),
         avionics: sample.avionics.map(avionics_to_wire),
+        sim_truth: sample
+            .sim_truth
+            .map(|truth| Box::new(sim_truth_to_wire(truth))),
+        fc_state: sample
+            .fc_state
+            .map(|state| Box::new(fc_state_to_wire(state))),
     }
 }
 
@@ -39,8 +48,22 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
     let clock = match stamp.clock {
         MeasurementClock::VehicleBoot => wire::MeasurementClock::VehicleBoot,
         MeasurementClock::Simulation => wire::MeasurementClock::Simulation,
+        MeasurementClock::HostMonotonic => wire::MeasurementClock::HostMonotonic,
+    };
+    let role = match stamp.role {
+        SourceRole::OperationalEstimate => wire::SourceRole::OperationalEstimate,
+        SourceRole::SimulationTruth => wire::SourceRole::SimulationTruth,
+        SourceRole::FcState => wire::SourceRole::FcState,
+        SourceRole::VideoCapture => wire::SourceRole::VideoCapture,
+    };
+    let integrity = match stamp.integrity {
+        SourceIntegrity::Authenticated => wire::SourceIntegrity::Authenticated,
+        SourceIntegrity::ChecksummedOnly => wire::SourceIntegrity::ChecksummedOnly,
+        SourceIntegrity::Unprotected => wire::SourceIntegrity::Unprotected,
     };
     wire::MeasurementStamp {
+        role: role as i32,
+        integrity: integrity as i32,
         source_id: stamp.source_id,
         source_epoch: stamp.source_epoch,
         sequence: stamp.sequence,
@@ -50,6 +73,9 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
     }
 }
 
+// The deprecated wire lane `arm_state` is initialized (to 0, unknown) but
+// never populated: FC-owned arm state travels as TelemetrySample.fc_state.
+#[allow(deprecated)]
 fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
     let attitude = sample.attitude;
     let kinematics = sample.kinematics;
@@ -77,10 +103,37 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         vel_d_mps: kinematics.map_or(0.0, |group| group.vel_ned_mps[2]),
         valid_flags,
         quality,
-        arm_state: sample.arm_state,
+        // FC-owned arm state travels as TelemetrySample.fc_state with its
+        // own provenance; this legacy lane stays at 0 (unknown) so an
+        // unstamped copy is never merged into the estimate.
+        arm_state: 0,
         attitude_stamp: attitude.map(|group| measurement_stamp_to_wire(group.stamp)),
         kinematics_stamp: kinematics.map(|group| measurement_stamp_to_wire(group.stamp)),
         estimator_status_stamp: sample.estimator_status_stamp.map(measurement_stamp_to_wire),
+    }
+}
+
+fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
+    wire::SimTruthState {
+        quat_w: sample.quat_wxyz[0],
+        quat_x: sample.quat_wxyz[1],
+        quat_y: sample.quat_wxyz[2],
+        quat_z: sample.quat_wxyz[3],
+        pos_n_m: sample.pos_ned_m[0],
+        pos_e_m: sample.pos_ned_m[1],
+        pos_d_m: sample.pos_ned_m[2],
+        vel_n_mps: sample.vel_ned_mps[0],
+        vel_e_mps: sample.vel_ned_mps[1],
+        vel_d_mps: sample.vel_ned_mps[2],
+        valid_flags: sample.valid_flags,
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+    }
+}
+
+fn fc_state_to_wire(sample: FcStateSample) -> wire::FcState {
+    wire::FcState {
+        arm_state: sample.arm_state,
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
     }
 }
 

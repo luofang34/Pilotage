@@ -29,6 +29,42 @@ enum MeasurementClock {
   MEASUREMENT_CLOCK_UNSPECIFIED = 0;
   MEASUREMENT_CLOCK_VEHICLE_BOOT = 1;
   MEASUREMENT_CLOCK_SIMULATION = 2;
+  // Monotonic time on the ground host that received the observation, for
+  // reports whose wire carries no source timestamp (an FC heartbeat).
+  // Receive time is not acquisition time: staleness reasoning only, never
+  // cross-domain correlation without an explicit mapping.
+  MEASUREMENT_CLOCK_HOST_MONOTONIC = 3;
+}
+
+// Explicit role of the source behind a measurement. Role travels in
+// provenance — never in id ranges — so a configured source id may collide
+// across roles without ambiguity; consumers gate on the role itself.
+enum SourceRole {
+  SOURCE_ROLE_UNSPECIFIED = 0;
+  // FC estimator output: the only role eligible for primary panels and
+  // operational command construction.
+  SOURCE_ROLE_OPERATIONAL_ESTIMATE = 1;
+  // Simulator ground truth: logging, assertions, and comparison in
+  // simulation profiles only.
+  SOURCE_ROLE_SIMULATION_TRUTH = 2;
+  // FC-owned vehicle state (arm/mode/failsafe) reports.
+  SOURCE_ROLE_FC_STATE = 3;
+  // Video capture identity for camera frames.
+  SOURCE_ROLE_VIDEO_CAPTURE = 4;
+}
+
+// Integrity classification of the path that delivered an observation. The
+// end-to-end distinction that matters is authenticated source data versus
+// merely checksummed or unprotected observations.
+enum SourceIntegrity {
+  SOURCE_INTEGRITY_UNSPECIFIED = 0;
+  // Cryptographically authenticated end-to-end source data.
+  SOURCE_INTEGRITY_AUTHENTICATED = 1;
+  // Checksummed (CRC-style) but unauthenticated transport.
+  SOURCE_INTEGRITY_CHECKSUMMED_ONLY = 2;
+  // No integrity protection beyond the transport's own boundaries (a local
+  // shared-memory mapping relies on host process isolation).
+  SOURCE_INTEGRITY_UNPROTECTED = 3;
 }
 
 // Identity and acquisition stamp for one independently advancing measurement
@@ -46,6 +82,12 @@ message MeasurementStamp {
   // Opaque 128-bit attachment/boot identity. Receivers compare this for
   // equality and accept changes only at an authorized lifecycle boundary.
   bytes source_incarnation = 6;
+  // Explicit source role; consumers gate on this, never on id ranges.
+  SourceRole role = 7;
+  // Integrity classification of the delivering path; carried by every
+  // role so authenticated, checksummed, and unprotected inputs stay
+  // distinguishable end to end.
+  SourceIntegrity integrity = 8;
 }
 
 // Raw avionics state estimate for flight vehicles (ADR-0018): attitude
@@ -81,7 +123,10 @@ message AvionicsState {
   // meaningful only when estimator_status_stamp is present.
   uint32 quality = 15;
   // 0 unknown, 1 disarmed, 2 armed (from the vehicle's own report).
-  uint32 arm_state = 16;
+  // FC-owned arm state with provenance is published as
+  // TelemetrySample.fc_state; a publisher emitting fc_state leaves this
+  // field 0 rather than merging an unstamped copy here.
+  uint32 arm_state = 16 [deprecated = true];
   // Attitude/rates and position/velocity advance independently. Absence means
   // that group was not supplied in this publication.
   MeasurementStamp attitude_stamp = 17;
@@ -90,6 +135,44 @@ message AvionicsState {
   // quality. Absence means no explicit estimator authorization was supplied
   // and consumers fail closed.
   MeasurementStamp estimator_status_stamp = 19;
+}
+
+// One coherent simulator ground-truth sample: the simulation oracle for
+// logging, test assertions, and estimate-versus-truth comparison in
+// simulation profiles only. Truth is not an FC estimator output: it drives
+// no primary panel, never constructs operational commands, and is never a
+// fallback for a missing estimate. Physical profiles must not publish it.
+message SimTruthState {
+  // Attitude quaternion (w, x, y, z), body FRD → world NED.
+  float quat_w = 1;
+  float quat_x = 2;
+  float quat_y = 3;
+  float quat_z = 4;
+  // NED position (meters) and velocity (m/s).
+  float pos_n_m = 5;
+  float pos_e_m = 6;
+  float pos_d_m = 7;
+  float vel_n_mps = 8;
+  float vel_e_mps = 9;
+  float vel_d_mps = 10;
+  // Identity and acquisition of this truth observation. Absence makes the
+  // sample unconsumable: truth without provenance is discarded.
+  MeasurementStamp stamp = 11;
+  // Which truth fields this sample carries, in the estimate mask's bit
+  // positions: bit0 attitude, bit1 rates, bit2 position, bit3 velocity.
+  // Availability only — truth has no estimator authorization to claim.
+  uint32 valid_flags = 12;
+}
+
+// FC-owned vehicle state (arm today; mode/failsafe belong here as they
+// arrive) under its own provenance stamp: the FC is the only author, and
+// the stamp records the link observation that reported it.
+message FcState {
+  // 0 unknown, 1 disarmed, 2 armed.
+  uint32 arm_state = 1;
+  // Identity and acquisition of the FC report carrying this state.
+  // Absence makes the sample unconsumable.
+  MeasurementStamp stamp = 2;
 }
 
 // A single best-effort telemetry sample for one vehicle.
@@ -104,4 +187,9 @@ message TelemetrySample {
   Pose2d pose = 4;
   Velocity2d velocity = 5;
   AvionicsState avionics = 6;
+  // Simulation-truth oracle, independent of avionics in identity, epoch,
+  // sequence, clock, and validity; never an operational fallback.
+  SimTruthState sim_truth = 7;
+  // FC-owned arm/mode state with its own provenance stamp.
+  FcState fc_state = 8;
 }

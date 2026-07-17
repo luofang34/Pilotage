@@ -73,6 +73,7 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
 
     let mut metrics = RunMetrics::new(HISTOGRAM_CAPACITY);
     let mut video = VideoStats::new();
+    let mut capture = open_capture(args)?;
     let session = outcome.welcome.session;
     let generation = outcome.lease.generation;
     let run_budget = Duration::from_secs(args.seconds);
@@ -87,6 +88,7 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
         &mut events_rx,
         &mut metrics,
         &mut video,
+        &mut capture,
     )
     .await?;
 
@@ -99,10 +101,11 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
         &mut events_rx,
         &mut metrics,
         &mut video,
+        &mut capture,
     )
     .await;
 
-    drain_pending_events(&mut events_rx, &mut metrics, &mut video);
+    drain_pending_events(&mut events_rx, &mut metrics, &mut video, &mut capture);
     receiver_handle.abort();
     metrics.dropped_events = dropped_events.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -110,8 +113,27 @@ pub async fn run(args: &Args) -> Result<(), ProbeError> {
         crate::save_frames::save_proof_frames(&video, dir).await;
     }
 
+    if let Some(writer) = capture.take() {
+        let (records, failures) = writer.finish();
+        crate::output::print_line(&format!(
+            "capture: {records} observation(s) written, {failures} write failure(s)"
+        ));
+    }
     print_summary(&metrics, &video, run_start.elapsed(), fencing_confirmed);
     Ok(())
+}
+
+/// Opens the `--capture` sink when requested.
+fn open_capture(args: &Args) -> Result<Option<crate::capture::CaptureWriter>, ProbeError> {
+    let Some(path) = &args.capture else {
+        return Ok(None);
+    };
+    crate::capture::CaptureWriter::create(std::path::Path::new(path))
+        .map(Some)
+        .map_err(|source| ProbeError::CaptureFile {
+            path: path.clone(),
+            source,
+        })
 }
 
 /// Sends one control frame carrying a generation strictly older than the
@@ -127,6 +149,7 @@ async fn send_stale_generation_probe(
     events_rx: &mut mpsc::Receiver<ReceiverEvent>,
     metrics: &mut RunMetrics,
     video: &mut VideoStats,
+    capture: &mut Option<crate::capture::CaptureWriter>,
 ) -> bool {
     let stale_generation =
         pilotage_protocol::Generation::new(current_generation.as_u64().wrapping_sub(1));
@@ -148,7 +171,7 @@ async fn send_stale_generation_probe(
     }
     metrics.frames_sent = metrics.frames_sent.saturating_add(1);
 
-    wait_for_rejection(events_rx, stale_sequence, metrics, video).await
+    wait_for_rejection(events_rx, stale_sequence, metrics, video, capture).await
 }
 
 /// Waits up to a short fixed deadline for a `FrameRejected` matching
@@ -159,6 +182,7 @@ async fn wait_for_rejection(
     sequence: SequenceNum,
     metrics: &mut RunMetrics,
     video: &mut VideoStats,
+    capture: &mut Option<crate::capture::CaptureWriter>,
 ) -> bool {
     const FENCING_WAIT: Duration = Duration::from_millis(500);
     let deadline = Instant::now() + FENCING_WAIT;
@@ -176,6 +200,9 @@ async fn wait_for_rejection(
             }
             Ok(Some(ReceiverEvent::Telemetry(observation))) => {
                 metrics.telemetry_received = metrics.telemetry_received.saturating_add(1);
+                if let Some(writer) = capture {
+                    writer.record(&observation);
+                }
                 if observation.pose.is_some() {
                     metrics.last_pose = observation.pose;
                 }
@@ -196,12 +223,16 @@ fn drain_pending_events(
     events_rx: &mut mpsc::Receiver<ReceiverEvent>,
     metrics: &mut RunMetrics,
     video: &mut VideoStats,
+    capture: &mut Option<crate::capture::CaptureWriter>,
 ) {
     let mut last_video_at: Option<Instant> = None;
     while let Ok(event) = events_rx.try_recv() {
         match event {
             ReceiverEvent::Telemetry(observation) => {
                 metrics.telemetry_received = metrics.telemetry_received.wrapping_add(1);
+                if let Some(writer) = capture {
+                    writer.record(&observation);
+                }
                 if observation.pose.is_some() {
                     metrics.last_pose = observation.pose;
                 }

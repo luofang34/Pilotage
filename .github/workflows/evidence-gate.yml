@@ -22,6 +22,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Baseline membership verification resolves declared configuration
+          # commits against real history; a shallow clone would make every
+          # recorded baseline unverifiable.
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -41,6 +46,23 @@ jobs:
         run: >
           cargo run -q -p pilotage-evidence --bin evidence-gate --
           --graph docs/instruments/evidence-graph.evg --repo-root . --trace
+
+      - name: LINK-04 slice — honest verdict and bidirectional trace
+        # Informational. The source-role slice is structurally traced and
+        # resolves both ways; its review node records a PENDING review slot.
+        # The hard guard is the Rust suites its results record, which run in
+        # the required quality gates.
+        continue-on-error: true
+        run: >
+          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          --graph docs/link/evidence-graph.evg --repo-root . --trace
+
+      - name: LINK-04 slice — resolve selectors against the tree
+        continue-on-error: true
+        run: >
+          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          --graph docs/link/evidence-graph.evg --repo-root .
+          --resolve-selectors
 
       - name: ATT-01 slice — resolve selectors against the tree
         # Informational: selector resolution reads the referenced test files.
@@ -111,7 +133,8 @@ jobs:
                    runid-mismatch-artifact absolute-artifact \
                    traversal-artifact symlink-escape-artifact \
                    stale-source-artifact selector-not-a-test \
-                   source-as-artifact unresolved-review-entry; do
+                   source-as-artifact unresolved-review-entry \
+                   baseline-unverifiable; do
             if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
                 --repo-root crates/pilotage-evidence \
                 --resolve-selectors >/dev/null 2>&1; then

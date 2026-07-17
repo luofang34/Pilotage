@@ -528,7 +528,7 @@ function decodeLeaseResponse(bytes) {
 }
 
 // telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,
-// velocity=5, avionics=6
+// velocity=5, avionics=6, sim_truth=7, fc_state=8
 // Pose2d: x_m=1, y_m=2, heading_rad=3 (all float, wire type 5)
 function decodeTelemetrySample(bytes) {
   if (!bytes) return {};
@@ -547,6 +547,55 @@ function decodeTelemetrySample(bytes) {
     linearXMps: velocity?.linearXMps ?? null,
     angularRadS: velocity?.angularRadS ?? null,
     avionics: decodeAvionicsState(firstBytes(fields, 6)),
+    simTruth: decodeSimTruthState(firstBytes(fields, 7)),
+    fcState: decodeFcState(firstBytes(fields, 8)),
+  };
+}
+
+// telemetry.proto SimTruthState: quat_w..z=1..4, pos_n/e/d_m=5..7,
+// vel_n/e/d_mps=8..10 (float), stamp=11, valid_flags=12, integrity=13.
+// The simulation-truth oracle: structurally separate from the avionics
+// estimate, and unconsumable (null) without its provenance stamp.
+function decodeSimTruthState(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  const stamp = decodeMeasurementStamp(firstBytes(f, 11));
+  // Exact-role gate: a truth lane whose stamp does not carry the
+  // simulation-truth role is mislabeled and unconsumable.
+  if (stamp === null || stamp.role !== 2) return null;
+  return {
+    quat: {
+      w: decodeFloat32(firstBytes(f, 1)),
+      x: decodeFloat32(firstBytes(f, 2)),
+      y: decodeFloat32(firstBytes(f, 3)),
+      z: decodeFloat32(firstBytes(f, 4)),
+    },
+    posNed: [
+      decodeFloat32(firstBytes(f, 5)),
+      decodeFloat32(firstBytes(f, 6)),
+      decodeFloat32(firstBytes(f, 7)),
+    ],
+    velNed: [
+      decodeFloat32(firstBytes(f, 8)),
+      decodeFloat32(firstBytes(f, 9)),
+      decodeFloat32(firstBytes(f, 10)),
+    ],
+    validFlags: firstVarint(f, 12) ?? 0,
+    stamp,
+  };
+}
+
+// telemetry.proto FcState: arm_state=1 (varint), stamp=2. FC-owned arm
+// state under its own provenance; unconsumable (null) without the stamp.
+function decodeFcState(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  const stamp = decodeMeasurementStamp(firstBytes(f, 2));
+  // Exact-role gate: FC state must carry the FC-state role.
+  if (stamp === null || stamp.role !== 3) return null;
+  return {
+    armState: firstVarint(f, 1) ?? 0,
+    stamp,
   };
 }
 
@@ -636,6 +685,12 @@ function decodeMeasurementStamp(bytes) {
     sequence: firstVarint(f, 3),
     acquiredAtNanos: firstBigVarint(f, 4),
     clock: firstVarint(f, 5),
+    // Explicit source role (1 estimate, 2 simulation truth, 3 FC state,
+    // 4 video capture); consumers gate on this, never on id ranges.
+    role: firstVarint(f, 7) ?? 0,
+    // Integrity of the delivering path (1 authenticated, 2 checksummed
+    // only, 3 unprotected; 0 unspecified).
+    integrity: firstVarint(f, 8) ?? 0,
   };
 }
 

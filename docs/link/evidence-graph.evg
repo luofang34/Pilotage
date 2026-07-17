@@ -1,0 +1,316 @@
+# Pilotage lifecycle evidence graph — LINK-04 vertical slice
+# format: pilotage-evidence graph v1 (see crates/pilotage-evidence)
+#
+# SIM / NOT FOR FLIGHT. This is the maintained engineering trace record for
+# the source-role separation behavior slice (FC operational estimate vs
+# simulation truth vs FC-owned state). It establishes NO DO-178C, ISO 26262,
+# ECSS, ARP4754A/4761, TSO, or ASIL claim and is not tool qualification
+# (DO-330). It records that the declared engineering trace is internally
+# complete and resolvable in both directions — nothing more. The review below
+# is PENDING; the graph records that a review artifact slot exists, not that
+# anything is approved.
+#
+# Results are recorded against the committed code baseline named by
+# CFG-LINK-WORKTREE; this file lives in a separate evidence-only commit so
+# the baseline the results claim exists independently of the record.
+
+evidence-graph 1
+scope LINK-04
+scope-title source-role separation traceability slice (issue 107 / LINK-01)
+scope-requirement LINK-ROLE-001
+scope-requirement LINK-CTRL-002
+scope-requirement LINK-PROV-003
+
+# --- Intended function ---
+
+node LINK-IF intended-function
+title Vehicle-link telemetry plane — estimate-driven panels/control with a clearly-roled simulation oracle
+locator docs/link/README.md
+
+# --- Hazard ---
+
+node LINK-HAZ-01 hazard
+title Truth-as-estimate masquerade — simulator truth silently drives panels or command construction
+locator docs/link/README.md
+
+# --- Requirements ---
+
+node LINK-ROLE-001 safety-requirement
+title Explicit role and integrity in provenance; estimate/truth/FC-state structurally separate and role-gated
+locator docs/link/README.md#link-role-001
+
+node LINK-CTRL-002 safety-requirement
+title Operational control requires the operational estimate; truth never seeds a command
+locator docs/link/README.md#link-ctrl-002
+
+node LINK-PROV-003 safety-requirement
+title FC-state provenance and role/integrity survive the wire and capture; duplicates never refresh freshness
+locator docs/link/README.md#link-prov-003
+
+# --- Design ---
+
+node DESIGN-ROLE-PROVENANCE design
+title SourceRole and SourceIntegrity carried in every MeasurementStamp; SimTruthSample and FcStateSample as distinct types
+locator crates/pilotage-adapter-api/src/telemetry.rs
+
+node DESIGN-PROFILE-BINDING design
+title Profile-bound role sources — estimate/truth/FC-state links bound per AviateProfile, never substituted
+locator adapters/aviate/src/adapter/sources.rs
+
+node DESIGN-CAPTURE design
+title Capture retains stamped role lanes verbatim and persists them as structured records; unattributed lanes dropped
+locator tools/loopback-probe/src/capture.rs
+
+# --- Implementation ---
+
+node IMPL-CURRENT-POSE implementation
+title AviateAdapter::current_pose — estimate-only, role-gated pose for command construction
+locator adapters/aviate/src/adapter.rs
+attr symbol AviateAdapter::current_pose
+
+node IMPL-BIND-SOURCES implementation
+title bind_sources — per-profile role binding
+locator adapters/aviate/src/adapter/sources.rs
+attr symbol bind_sources
+
+node IMPL-FC-STATE-SAMPLE implementation
+title fc_state_sample — stamped FC-state publication with FC identity and host-receive clock
+locator adapters/aviate/src/adapter/sources.rs
+attr symbol fc_state_sample
+
+node IMPL-OBSERVATION implementation
+title observation_from_sample — provenance-retaining capture projection
+locator tools/loopback-probe/src/telemetry.rs
+attr symbol observation_from_sample
+
+node IMPL-CAPTURE-WRITER implementation
+title CaptureWriter — line-oriented structured capture sink
+locator tools/loopback-probe/src/capture.rs
+attr symbol CaptureWriter
+
+# --- Verification cases (adapter behavior) ---
+
+node CASE-LINK-DIVERGENT verification-case
+title divergent truth and estimate flow as separate identities
+locator adapters/aviate/src/adapter/tests/source_roles.rs
+attr test divergent_truth_and_estimate_flow_as_separate_identities
+
+node CASE-LINK-TRUTH-CTL verification-case
+title healthy truth cannot seed a control setpoint
+locator adapters/aviate/src/adapter/tests/source_roles.rs
+attr test healthy_truth_cannot_seed_a_control_setpoint
+
+node CASE-LINK-EST-LOSS verification-case
+title estimate loss rejects control while truth stays healthy
+locator adapters/aviate/src/adapter/tests/source_roles.rs
+attr test estimate_loss_rejects_control_while_truth_stays_healthy
+
+node CASE-LINK-FC-PROV verification-case
+title FC state publishes standalone with host-receive provenance
+locator adapters/aviate/src/adapter/tests/source_roles.rs
+attr test fc_state_publishes_standalone_with_host_receive_provenance
+
+node CASE-LINK-ORACLE verification-case
+title oracle-only shape advertises no control and streams truth
+locator adapters/aviate/src/adapter/tests/source_roles.rs
+attr test oracle_only_shape_advertises_no_control_and_streams_truth
+
+node CASE-LINK-MISLABEL verification-case
+title mislabeled estimate roles cannot seed a control setpoint
+locator adapters/aviate/src/adapter/tests/source_roles.rs
+attr test mislabeled_estimate_roles_cannot_seed_a_control_setpoint
+
+# --- Verification cases (wire and capture) ---
+
+node CASE-LINK-WIRE verification-case
+title truth and FC state survive the wire under their own identities
+locator hosts/session-host/src/runtime/engine_actor/telemetry/tests.rs
+attr test truth_and_fc_state_survive_the_wire_under_their_own_identities
+
+node CASE-LINK-CAPTURE verification-case
+title capture retains role lanes with full provenance
+locator tools/loopback-probe/src/telemetry.rs
+attr test capture_retains_role_lanes_with_full_provenance
+
+node CASE-LINK-CAPTURE-RT verification-case
+title round trip capture retains role lanes
+locator tools/loopback-probe/src/receiver.rs
+attr test round_trip_capture_retains_role_lanes
+
+node CASE-LINK-CAPTURE-SINK verification-case
+title capture sink round-trips every provenance field
+locator tools/loopback-probe/src/capture.rs
+attr test capture_round_trips_every_provenance_field
+
+node CASE-LINK-UNSTAMPED verification-case
+title unstamped lanes are dropped, not defaulted
+locator tools/loopback-probe/src/telemetry.rs
+attr test unstamped_lanes_are_dropped_not_defaulted
+
+# --- Verification results ---
+
+node RESULT-LINK-ADAPTER verification-result
+title adapter source-role acceptance suite — recorded pass
+attr command cargo test -p pilotage-adapter-aviate source_roles
+attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:df97524b1f96016992494b6a0cb78bd9445cca0f
+attr artifact docs/link/evidence-artifacts/link04/adapter.run.txt
+attr output-digest sha256:beff03b0157c24fe78d165d819d31d2b22cabd9e87a8f38abc8044be2afa1542
+attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr outcome pass
+
+node RESULT-LINK-WIRE verification-result
+title host wire-mapping suite — recorded pass
+attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
+attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:9475d75821336825f4aba67953ba544b20aa856e
+attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
+attr output-digest sha256:6c3699e4e04694149b4aebc4d274c83e9c1aff82abbed60ef10310079dcb8d2a
+attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr outcome pass
+
+node RESULT-LINK-CAPTURE verification-result
+title loopback-probe capture projection suite — recorded pass
+attr command cargo test -p loopback-probe telemetry::
+attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:d54d1f5f5ce4cd3d65d7723ccd089a5dee0bed20
+attr artifact docs/link/evidence-artifacts/link04/capture.run.txt
+attr output-digest sha256:ebc55085be041f1f5f5339c65201233870b81efb545d4dee378979d9f7df148c
+attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr outcome pass
+
+node RESULT-LINK-CAPTURE-RT verification-result
+title loopback-probe receiver round-trip suite — recorded pass
+attr command cargo test -p loopback-probe receiver::
+attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:fbc947454e43c051a94e4722cb639d317373767e
+attr artifact docs/link/evidence-artifacts/link04/capture-rt.run.txt
+attr output-digest sha256:62b2fdb06c63262726e288c1c7fc411eed594f484b283b0a997a5453ed07a1f0
+attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr outcome pass
+
+node RESULT-LINK-CAPTURE-SINK verification-result
+title loopback-probe capture sink suite — recorded pass
+attr command cargo test -p loopback-probe capture::
+attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:7442d11b6f3011d51a20fd807b655c16b1c42bc3
+attr artifact docs/link/evidence-artifacts/link04/capture-sink.run.txt
+attr output-digest sha256:071adfde6ec1bfa2609a21a99482bfcff7113984de059dc77d68bba60f790f9b
+attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr outcome pass
+
+# --- Configuration and tool identity ---
+
+node CFG-LINK-WORKTREE configuration-item
+title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
+attr scm git
+attr commit 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr tree a000c09c465aeb5a3a3b1fa35d6f90276559895a
+
+node TOOL-LINK-CARGO tool
+title cargo test on Rust stable — not DO-330 tool-qualified
+attr toolchain rust stable channel
+attr version rustc 1.95.0 (59807616e 2026-04-14)
+
+# --- Review (records that a review slot exists; it is PENDING) ---
+
+node REVIEW-LINK04 review
+title LINK-04 source-role slice review record
+locator docs/link/README.md
+attr status pending
+attr independent yes
+
+# --- Upstream: requirement -> hazard -> intended function ---
+
+edge LINK-HAZ-01 derives-from LINK-IF
+edge LINK-ROLE-001 mitigates LINK-HAZ-01
+edge LINK-CTRL-002 mitigates LINK-HAZ-01
+edge LINK-PROV-003 mitigates LINK-HAZ-01
+
+# --- Allocation: requirement -> design -> implementation ---
+
+edge LINK-ROLE-001 allocated-to DESIGN-ROLE-PROVENANCE
+edge LINK-CTRL-002 allocated-to DESIGN-PROFILE-BINDING
+edge LINK-PROV-003 allocated-to DESIGN-ROLE-PROVENANCE
+edge LINK-PROV-003 allocated-to DESIGN-CAPTURE
+
+edge DESIGN-ROLE-PROVENANCE implemented-by IMPL-FC-STATE-SAMPLE
+edge DESIGN-PROFILE-BINDING implemented-by IMPL-BIND-SOURCES
+edge DESIGN-PROFILE-BINDING implemented-by IMPL-CURRENT-POSE
+edge DESIGN-CAPTURE implemented-by IMPL-OBSERVATION
+edge DESIGN-CAPTURE implemented-by IMPL-CAPTURE-WRITER
+
+# --- Verification: requirement <-> case ---
+
+edge LINK-ROLE-001 verified-by CASE-LINK-DIVERGENT
+edge LINK-ROLE-001 verified-by CASE-LINK-ORACLE
+edge LINK-ROLE-001 verified-by CASE-LINK-UNSTAMPED
+edge CASE-LINK-DIVERGENT covers LINK-ROLE-001
+edge CASE-LINK-ORACLE covers LINK-ROLE-001
+edge CASE-LINK-UNSTAMPED covers LINK-ROLE-001
+
+edge LINK-CTRL-002 verified-by CASE-LINK-TRUTH-CTL
+edge LINK-CTRL-002 verified-by CASE-LINK-EST-LOSS
+edge LINK-CTRL-002 verified-by CASE-LINK-MISLABEL
+edge LINK-CTRL-002 verified-by CASE-LINK-ORACLE
+edge CASE-LINK-TRUTH-CTL covers LINK-CTRL-002
+edge CASE-LINK-EST-LOSS covers LINK-CTRL-002
+edge CASE-LINK-MISLABEL covers LINK-CTRL-002
+edge CASE-LINK-ORACLE covers LINK-CTRL-002
+
+edge LINK-PROV-003 verified-by CASE-LINK-FC-PROV
+edge LINK-PROV-003 verified-by CASE-LINK-WIRE
+edge LINK-PROV-003 verified-by CASE-LINK-CAPTURE
+edge LINK-PROV-003 verified-by CASE-LINK-CAPTURE-RT
+edge LINK-PROV-003 verified-by CASE-LINK-CAPTURE-SINK
+edge CASE-LINK-FC-PROV covers LINK-PROV-003
+edge CASE-LINK-WIRE covers LINK-PROV-003
+edge CASE-LINK-CAPTURE covers LINK-PROV-003
+edge CASE-LINK-CAPTURE-RT covers LINK-PROV-003
+edge CASE-LINK-CAPTURE-SINK covers LINK-PROV-003
+
+# --- Results: result -> executed case, covered requirement, baseline, tool ---
+
+edge RESULT-LINK-ADAPTER result-of CASE-LINK-DIVERGENT
+edge RESULT-LINK-ADAPTER result-of CASE-LINK-TRUTH-CTL
+edge RESULT-LINK-ADAPTER result-of CASE-LINK-EST-LOSS
+edge RESULT-LINK-ADAPTER result-of CASE-LINK-FC-PROV
+edge RESULT-LINK-ADAPTER result-of CASE-LINK-ORACLE
+edge RESULT-LINK-ADAPTER result-of CASE-LINK-MISLABEL
+edge RESULT-LINK-ADAPTER covers LINK-ROLE-001
+edge RESULT-LINK-ADAPTER covers LINK-CTRL-002
+edge RESULT-LINK-ADAPTER justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
+
+edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE
+edge RESULT-LINK-WIRE covers LINK-PROV-003
+edge RESULT-LINK-WIRE justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-WIRE justified-by TOOL-LINK-CARGO
+
+edge RESULT-LINK-CAPTURE result-of CASE-LINK-CAPTURE
+edge RESULT-LINK-CAPTURE result-of CASE-LINK-UNSTAMPED
+edge RESULT-LINK-CAPTURE covers LINK-PROV-003
+edge RESULT-LINK-CAPTURE covers LINK-ROLE-001
+edge RESULT-LINK-CAPTURE justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-CAPTURE justified-by TOOL-LINK-CARGO
+
+edge RESULT-LINK-CAPTURE-RT result-of CASE-LINK-CAPTURE-RT
+edge RESULT-LINK-CAPTURE-RT covers LINK-PROV-003
+edge RESULT-LINK-CAPTURE-RT justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-CAPTURE-RT justified-by TOOL-LINK-CARGO
+
+edge RESULT-LINK-CAPTURE-SINK result-of CASE-LINK-CAPTURE-SINK
+edge RESULT-LINK-CAPTURE-SINK covers LINK-PROV-003
+edge RESULT-LINK-CAPTURE-SINK justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-CAPTURE-SINK justified-by TOOL-LINK-CARGO
+
+# --- Review coverage ---
+
+edge REVIEW-LINK04 reviews LINK-ROLE-001
+edge REVIEW-LINK04 reviews LINK-CTRL-002
+edge REVIEW-LINK04 reviews LINK-PROV-003

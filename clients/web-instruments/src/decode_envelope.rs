@@ -46,6 +46,10 @@ struct Stamp {
     sequence: u32,
     acquired_at_nanos: u64,
     clock: i32,
+    // Explicit source role; consumers gate on this, never on id ranges.
+    role: i32,
+    // Integrity classification of the delivering path.
+    integrity: i32,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -105,6 +109,27 @@ struct Velocity {
     angular_rad_s: f32,
 }
 
+/// Simulation-truth oracle sample in the browser's shape: the simulator's
+/// pose under its own provenance stamp. Kept structurally apart from
+/// `Avionics` — truth is never merged into the estimate the panels consume.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SimTruth {
+    quat: Quat,
+    pos_ned: [f32; 3],
+    vel_ned: [f32; 3],
+    valid_flags: u32,
+    stamp: Stamp,
+}
+
+/// FC-owned arm/mode state under its own provenance stamp.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FcState {
+    arm_state: u32,
+    stamp: Stamp,
+}
+
 /// A telemetry sample. `pose`/`velocity` are absent when the host supplies no
 /// coherent projection; the flattened `xM`/`yM`/`headingRad`/`linearXMps`/
 /// `angularRadS` mirror them so a consumer can read either form.
@@ -122,6 +147,8 @@ struct TelemetryMessage {
     linear_x_mps: Option<f32>,
     angular_rad_s: Option<f32>,
     avionics: Option<Avionics>,
+    sim_truth: Option<SimTruth>,
+    fc_state: Option<FcState>,
 }
 
 /// Decodes one bare (non-length-delimited) datagram `Envelope`, returning
@@ -191,9 +218,51 @@ fn telemetry_message(sample: wire::TelemetrySample) -> TelemetryMessage {
         linear_x_mps,
         angular_rad_s,
         avionics: sample.avionics.map(avionics_message),
+        sim_truth: sample.sim_truth.and_then(|truth| sim_truth_message(*truth)),
+        fc_state: sample.fc_state.and_then(|state| fc_state_message(*state)),
     }
 }
 
+/// `None` when the wire sample carries no provenance stamp: truth without
+/// identity is unconsumable and is dropped, never defaulted.
+fn sim_truth_message(state: wire::SimTruthState) -> Option<SimTruth> {
+    let stamp = state.stamp?;
+    // Exact-role gate: a truth lane whose stamp does not carry the
+    // simulation-truth role is mislabeled and unconsumable.
+    if stamp.role != wire::SourceRole::SimulationTruth as i32 {
+        return None;
+    }
+    Some(SimTruth {
+        quat: Quat {
+            w: state.quat_w,
+            x: state.quat_x,
+            y: state.quat_y,
+            z: state.quat_z,
+        },
+        pos_ned: [state.pos_n_m, state.pos_e_m, state.pos_d_m],
+        vel_ned: [state.vel_n_mps, state.vel_e_mps, state.vel_d_mps],
+        valid_flags: state.valid_flags,
+        stamp: stamp_message(stamp),
+    })
+}
+
+/// `None` when the wire report carries no provenance stamp: an unstamped
+/// arm state is exactly what this lane exists to prevent.
+fn fc_state_message(state: wire::FcState) -> Option<FcState> {
+    let stamp = state.stamp?;
+    // Exact-role gate: FC state must carry the FC-state role.
+    if stamp.role != wire::SourceRole::FcState as i32 {
+        return None;
+    }
+    Some(FcState {
+        arm_state: state.arm_state,
+        stamp: stamp_message(stamp),
+    })
+}
+
+// Surfaces the deprecated wire lane `arm_state` verbatim (hosts leave it 0);
+// consumers take arm from the stamped `fcState` message instead.
+#[allow(deprecated)]
 fn avionics_message(state: wire::AvionicsState) -> Avionics {
     let attitude_stamp = state.attitude_stamp.map(stamp_message);
     let kinematics_stamp = state.kinematics_stamp.map(stamp_message);
@@ -239,6 +308,8 @@ fn stamp_message(stamp: wire::MeasurementStamp) -> Stamp {
         sequence: stamp.sequence,
         acquired_at_nanos: stamp.acquired_at_ns,
         clock: stamp.clock,
+        role: stamp.role,
+        integrity: stamp.integrity,
     }
 }
 
@@ -250,6 +321,8 @@ mod tests {
 
     fn stamp(source_id: u64, incarnation: Vec<u8>) -> wire::MeasurementStamp {
         wire::MeasurementStamp {
+            role: wire::SourceRole::OperationalEstimate as i32,
+            integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
             source_id,
             source_epoch: 3,
             sequence: 9,
@@ -259,6 +332,7 @@ mod tests {
         }
     }
 
+    #[allow(deprecated)]
     fn full_avionics() -> wire::AvionicsState {
         wire::AvionicsState {
             quat_w: 1.0,
@@ -344,6 +418,8 @@ mod tests {
                 angular_rad_s: 0.1,
             }),
             avionics: None,
+            sim_truth: None,
+            fc_state: None,
         };
         let message = telemetry_message(sample);
         assert_eq!(message.vehicle_id, 1);
