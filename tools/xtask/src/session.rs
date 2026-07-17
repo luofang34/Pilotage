@@ -17,6 +17,10 @@ use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log, viewer_ur
 /// How often the supervisor re-checks stage health.
 const SUPERVISE_INTERVAL: Duration = Duration::from_millis(500);
 
+/// How many times a restartable stage may die and be relaunched before
+/// the session gives up (a crash loop is a failure, not a lifecycle).
+const MAX_STAGE_RESTARTS: u32 = 3;
+
 /// Runs one full SITL session until ctrl-c or a stage failure.
 ///
 /// # Errors
@@ -58,9 +62,36 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     ));
     stages.push(viewer_stage(&ctx)?);
 
+    let (mut children, certificate) = start_stages(&stages).await?;
+
+    // The reset script consults this marker: while a supervisor owns
+    // the flight controller, the script must not respawn its own.
+    let pid_file = log_dir.join("supervisor.pid");
+    std::fs::write(&pid_file, std::process::id().to_string()).map_err(|source| XtaskError::Io {
+        context: "writing the supervisor pid marker",
+        source,
+    })?;
+
+    let url = viewer_url(args.viewer_port, args.host_port, &certificate);
+    print_line("");
+    print_line(&format!("session ready: {url}"));
+    print_line("press ctrl-c to stop the session");
+    if args.open {
+        open_in_browser(&url);
+    }
+
+    let outcome = supervise(&mut children, &stages).await;
+    std::fs::remove_file(&pid_file).ok();
+    teardown(&mut children);
+    outcome
+}
+
+/// Spawns every stage in order, awaiting each one's readiness signal.
+/// Already-started children are torn down on any failure.
+async fn start_stages(stages: &[Stage]) -> Result<(Vec<ManagedChild>, String), XtaskError> {
     let mut children: Vec<ManagedChild> = Vec::new();
     let mut certificate = String::new();
-    for stage in &stages {
+    for stage in stages {
         print_line(&format!("starting {}...", stage.spec.name));
         let mut child = match ManagedChild::spawn(&stage.spec) {
             Ok(child) => child,
@@ -85,18 +116,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
         ));
         children.push(child);
     }
-
-    let url = viewer_url(args.viewer_port, args.host_port, &certificate);
-    print_line("");
-    print_line(&format!("session ready: {url}"));
-    print_line("press ctrl-c to stop the session");
-    if args.open {
-        open_in_browser(&url);
-    }
-
-    let outcome = supervise(&mut children).await;
-    teardown(&mut children);
-    outcome
+    Ok((children, certificate))
 }
 
 /// Resets the running simulation via the selected backend.
@@ -241,8 +261,12 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
     })
 }
 
-/// Waits for ctrl-c (clean stop) or any stage dying (error).
-async fn supervise(children: &mut [ManagedChild]) -> Result<(), XtaskError> {
+/// Waits for ctrl-c (clean stop) or a stage dying. A dead
+/// flight-controller stage is RESTARTED in place (bounded): the reset
+/// flow kills the FC by design (world reset + FC restart), and the
+/// session must survive it. Every other stage's death ends the session.
+async fn supervise(children: &mut [ManagedChild], stages: &[Stage]) -> Result<(), XtaskError> {
+    let mut fc_restarts: u32 = 0;
     loop {
         tokio::select! {
             signal = tokio::signal::ctrl_c() => {
@@ -255,8 +279,25 @@ async fn supervise(children: &mut [ManagedChild]) -> Result<(), XtaskError> {
                 return Ok(());
             }
             () = tokio::time::sleep(SUPERVISE_INTERVAL) => {
-                for child in children.iter_mut() {
-                    child.check_running()?;
+                for index in 0..children.len() {
+                    let Err(death) = children[index].check_running() else {
+                        continue;
+                    };
+                    let stage = &stages[index];
+                    if stage.spec.name != "flight-controller" {
+                        return Err(death);
+                    }
+                    fc_restarts += 1;
+                    if fc_restarts > MAX_STAGE_RESTARTS {
+                        return Err(death);
+                    }
+                    print_line(&format!(
+                        "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
+                    ));
+                    let mut replacement = ManagedChild::spawn(&stage.spec)?;
+                    await_ready(&mut replacement, &stage.readiness).await?;
+                    print_line("flight-controller ready");
+                    children[index] = replacement;
                 }
             }
         }

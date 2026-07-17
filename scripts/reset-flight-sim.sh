@@ -17,6 +17,17 @@ gz service -s "/world/${WORLD}/control" \
 
 echo "restarting FC..."
 pkill -9 -f sitl-gazebo-x500 2>/dev/null || true
+
+# When `cargo xtask sim` supervises the session, the supervisor restarts
+# the flight controller itself; a script-spawned second FC would fight it
+# over the shm writer lease.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SUPERVISOR_PID_FILE="${REPO_ROOT}/target/xtask-sim/supervisor.pid"
+if [[ -f "${SUPERVISOR_PID_FILE}" ]] && kill -0 "$(cat "${SUPERVISOR_PID_FILE}")" 2>/dev/null; then
+  echo "done — the xtask supervisor restarts the FC; re-arm from the browser once it logs ready"
+  exit 0
+fi
+
 sleep 1
 AVIATE_DIR="${AVIATE_DIR:-$HOME/Aviate}"
 nohup "${AVIATE_DIR}/target/debug/sitl-gazebo-x500" > /tmp/fc_manual.log 2>&1 &
