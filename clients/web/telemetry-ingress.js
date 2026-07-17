@@ -126,18 +126,33 @@ function stampsEqual(left, right) {
   );
 }
 
-function sameAcquisition(left, right) {
-  return (
-    left !== null &&
-    left !== undefined &&
-    right !== null &&
-    right !== undefined &&
-    left.sourceId === right.sourceId &&
-    left.sourceIncarnation === right.sourceIncarnation &&
-    left.sourceEpoch === right.sourceEpoch &&
-    left.acquiredAtNanos === right.acquiredAtNanos &&
-    left.clock === right.clock
-  );
+// Whether `status` can vouch for a numeric group acquired at `numeric`:
+// identical source identity and clock, and an acquisition gap within the
+// coherence budget. The host merges lanes into one sample per tick, so a
+// numeric group lawfully arrives alongside a status acquired a few
+// milliseconds later (attitude, position, and status streams interleave
+// at their own rates); demanding the exact same instant would strip a
+// validly authorized lane on every interleaved arrival and flash the
+// panels between valid and invalid. Beyond the budget — or across any
+// identity or clock change — authorization still fails closed.
+function acquisitionPaired(numeric, status, maximumSkewNanos) {
+  if (
+    numeric === null ||
+    numeric === undefined ||
+    status === null ||
+    status === undefined ||
+    numeric.sourceId !== status.sourceId ||
+    numeric.sourceIncarnation !== status.sourceIncarnation ||
+    numeric.sourceEpoch !== status.sourceEpoch ||
+    numeric.clock !== status.clock
+  ) {
+    return false;
+  }
+  const skew =
+    numeric.acquiredAtNanos >= status.acquiredAtNanos
+      ? numeric.acquiredAtNanos - status.acquiredAtNanos
+      : status.acquiredAtNanos - numeric.acquiredAtNanos;
+  return skew <= maximumSkewNanos;
 }
 
 function groupSnapshot(group, nowMs) {
@@ -209,6 +224,8 @@ export class AvionicsIngress {
     this.attitude = null;
     this.kinematics = null;
     this.estimatorStatus = null;
+    this.statusRegime = null;
+    this.previousStatusRegime = null;
     this.attitudeAuthorizationPaired = false;
     this.kinematicsAuthorizationPaired = false;
     this.validFlags = 0;
@@ -251,6 +268,26 @@ export class AvionicsIngress {
       avionics,
       nowMs,
     );
+    if (acceptedStatus) {
+      // Each accepted status opens a new authorization regime; the one it
+      // closes is retained so a numeric group acquired under the closed
+      // regime (the host merges lanes into one sample per tick, so lanes
+      // interleave with the status stream) is judged by the estimator
+      // state that actually governed its acquisition instant.
+      const s = avionics.estimatorStatusStamp;
+      this.previousStatusRegime = this.statusRegime;
+      this.statusRegime = Object.freeze({
+        stamp: Object.freeze({
+          sourceId: s.sourceId,
+          sourceIncarnation: s.sourceIncarnation,
+          sourceEpoch: s.sourceEpoch,
+          acquiredAtNanos: s.acquiredAtNanos,
+          clock: s.clock,
+        }),
+        validFlags: avionics.validFlags >>> 0,
+        quality: avionics.quality >>> 0,
+      });
+    }
     const acceptedAttitude = this.acceptGroup(
       "attitude",
       avionics.attitudeStamp,
@@ -292,47 +329,123 @@ export class AvionicsIngress {
   }
 
   applyStatusDowngrade(avionics) {
+    const incomingValidFlags = avionics.validFlags >>> 0;
+    const incomingQuality = avionics.quality >>> 0;
+    // A duplicate status stamp may only tighten authorization, never
+    // restore it — so the downgrade must fold into the regime itself,
+    // not only the published flags. Otherwise a later numeric bearing
+    // this same status stamp would consult the pre-downgrade regime and
+    // reverse a fail-closed decision. The fold is monotone (bitwise-and
+    // of flags, max of quality), so re-applying the status that opened
+    // the regime is a no-op and successive duplicates only ever tighten.
+    if (this.statusRegime !== null) {
+      this.statusRegime = Object.freeze({
+        stamp: this.statusRegime.stamp,
+        validFlags: (this.statusRegime.validFlags & incomingValidFlags) >>> 0,
+        quality: Math.max(this.statusRegime.quality, incomingQuality),
+      });
+    }
     if (!this.hasEstablishedAuthorization()) {
       this.failClosedAuthorization();
       return;
     }
-    this.validFlags = (this.validFlags & (avionics.validFlags >>> 0)) >>> 0;
-    this.quality = Math.max(this.quality, avionics.quality >>> 0);
+    this.validFlags = (this.validFlags & incomingValidFlags) >>> 0;
+    this.quality = Math.max(this.quality, incomingQuality);
+  }
+
+  // The regime whose declared estimator state governs a numeric group
+  // acquired at `numericStamp`: the current status when acquired at or
+  // after its instant, else the previous status when acquired within its
+  // reign. The skew budget against the current status keeps a stale
+  // numeric from borrowing authority across a stream gap; identity and
+  // clock must match in every case, so nothing authorizes across a
+  // source reset. Null means no status can vouch for this acquisition —
+  // fail closed.
+  authorizationRegimeFor(numericStamp) {
+    const current = this.statusRegime;
+    if (
+      current === null ||
+      !acquisitionPaired(numericStamp, current.stamp, this.maximumSkewNanos)
+    ) {
+      return null;
+    }
+    if (numericStamp.acquiredAtNanos >= current.stamp.acquiredAtNanos) return current;
+    const previous = this.previousStatusRegime;
+    if (
+      previous !== null &&
+      acquisitionPaired(numericStamp, previous.stamp, this.maximumSkewNanos) &&
+      numericStamp.acquiredAtNanos >= previous.stamp.acquiredAtNanos
+    ) {
+      return previous;
+    }
+    return null;
   }
 
   updateAuthorizationFromNumeric(avionics, acceptedAttitude, acceptedKinematics) {
     const currentStatusStamp = this.estimatorStatus?.stamp;
     const statusMatches = stampsEqual(avionics.estimatorStatusStamp, currentStatusStamp);
     const incomingValidFlags = avionics.validFlags >>> 0;
-    let acceptedExactPair = false;
+    // The CURRENT status regime is a monotonic authorization ceiling: even
+    // when a numeric legitimately falls under a still-good previous regime,
+    // the estimator's most recent declared state caps it. Without this a
+    // duplicate-status downgrade of the current regime could be reversed by
+    // a numeric acquired just before that status but selected onto the
+    // earlier good regime. A good current regime (all bits set) caps
+    // nothing, so the legitimate interleave case is untouched.
+    let pairedQuality = null;
     if (acceptedAttitude) {
-      this.attitudeAuthorizationPaired =
-        statusMatches && sameAcquisition(avionics.attitudeStamp, currentStatusStamp);
-      const attitudeFlags = this.attitudeAuthorizationPaired
-        ? incomingValidFlags & ATTITUDE_VALID_FLAGS
-        : 0;
+      const regime = statusMatches
+        ? this.authorizationRegimeFor(avionics.attitudeStamp)
+        : null;
+      this.attitudeAuthorizationPaired = regime !== null;
+      const attitudeFlags =
+        regime !== null
+          ? regime.validFlags &
+            this.statusRegime.validFlags &
+            incomingValidFlags &
+            ATTITUDE_VALID_FLAGS
+          : 0;
       this.validFlags = (
         (this.validFlags & ~ATTITUDE_VALID_FLAGS) | attitudeFlags
       ) >>> 0;
-      acceptedExactPair = this.attitudeAuthorizationPaired;
+      if (regime !== null) {
+        pairedQuality = Math.max(
+          regime.quality,
+          this.statusRegime.quality,
+          avionics.quality >>> 0,
+        );
+      }
     }
     if (acceptedKinematics) {
-      this.kinematicsAuthorizationPaired =
-        statusMatches && sameAcquisition(avionics.kinematicsStamp, currentStatusStamp);
-      const kinematicsFlags = this.kinematicsAuthorizationPaired
-        ? incomingValidFlags & KINEMATICS_VALID_FLAGS
-        : 0;
+      const regime = statusMatches
+        ? this.authorizationRegimeFor(avionics.kinematicsStamp)
+        : null;
+      this.kinematicsAuthorizationPaired = regime !== null;
+      const kinematicsFlags =
+        regime !== null
+          ? regime.validFlags &
+            this.statusRegime.validFlags &
+            incomingValidFlags &
+            KINEMATICS_VALID_FLAGS
+          : 0;
       this.validFlags = (
         (this.validFlags & ~KINEMATICS_VALID_FLAGS) | kinematicsFlags
       ) >>> 0;
-      acceptedExactPair = acceptedExactPair || this.kinematicsAuthorizationPaired;
+      if (regime !== null) {
+        pairedQuality = Math.max(
+          pairedQuality ?? 0,
+          regime.quality,
+          this.statusRegime.quality,
+          avionics.quality >>> 0,
+        );
+      }
     }
 
     if ((this.validFlags & KNOWN_VALID_FLAGS) === 0) {
       this.quality = QUALITY_UNUSABLE;
       return;
     }
-    if (acceptedExactPair) this.quality = avionics.quality >>> 0;
+    if (pairedQuality !== null) this.quality = pairedQuality;
   }
 
   hasEstablishedAuthorization() {
@@ -425,6 +538,8 @@ export class AvionicsIngress {
     this.attitude = null;
     this.kinematics = null;
     this.estimatorStatus = null;
+    this.statusRegime = null;
+    this.previousStatusRegime = null;
     this.failClosedAuthorization();
     this.lastCoherence = COHERENCE.INSUFFICIENT;
     this.bump("incarnationTransitions");
@@ -445,6 +560,8 @@ export class AvionicsIngress {
     this.attitude = null;
     this.kinematics = null;
     this.estimatorStatus = null;
+    this.statusRegime = null;
+    this.previousStatusRegime = null;
     this.failClosedAuthorization();
     this.bump("sourceResets");
     return true;

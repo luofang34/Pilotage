@@ -288,9 +288,11 @@ function testMismatchedGroupCannotRegainThroughOtherNumeric() {
     1,
   );
 
+  // The attitude is acquired 101n before the current status — beyond
+  // the pairing budget — so no status can vouch for it: stripped.
   const nextStatus = stamp(11, 1_200n);
   gate.ingest(statusPacket(nextStatus, 0b1111, 0), 2);
-  gate.ingest(pairedPacket(stamp(2, 1_100n), null, nextStatus, 2, 0b1111, 0), 3);
+  gate.ingest(pairedPacket(stamp(2, 1_099n), null, nextStatus, 2, 0b1111, 0), 3);
   assert.equal(gate.snapshot(3).validFlags, 0b1100);
 
   gate.ingest(pairedPacket(null, stamp(2, 1_200n), nextStatus, 3, 0b1111, 0), 4);
@@ -323,6 +325,50 @@ function testStatusGoodReauthorizesOnlyExactNumericGroup() {
 
   gate.ingest(pairedPacket(stamp(2, 1_200n), null, goodStatus, 3, 0b1111, 0), 5);
   assert.equal(gate.snapshot(5).validFlags, 0b1111);
+}
+
+function testInterleavedLaneWithinBudgetKeepsItsAuthorization() {
+  // The host merges lanes into one sample per tick, so a numeric group
+  // lawfully rides alongside a status acquired a few instants later
+  // (attitude, position, and status streams interleave at their own
+  // rates). A gap within the coherence budget must not strip the lane —
+  // stripping it flashes the panels between valid and invalid on every
+  // interleaved arrival.
+  const gate = ingress(); // budget: 100n
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), status, 1, 0b1111, 0),
+    1,
+  );
+  assert.equal(gate.snapshot(1).validFlags, 0b1111);
+
+  // A newer status arrives merged with a fresh attitude of the SAME
+  // acquisition and a kinematics update acquired 60n earlier — inside
+  // the budget. Every lane stays authorized.
+  const later = stamp(11, 1_100n);
+  gate.ingest(statusPacket(later, 0b1111, 0), 2);
+  gate.ingest(
+    pairedPacket(stamp(2, 1_100n), stamp(2, 1_040n), later, 2, 0b1111, 0),
+    3,
+  );
+  const snapshot = gate.snapshot(3);
+  assert.equal(snapshot.validFlags, 0b1111);
+  assert.equal(snapshot.quality, 0);
+}
+
+function testNumericBeyondSkewBudgetIsNotAuthorized() {
+  // Beyond the coherence budget the status cannot vouch for the numeric:
+  // the lane's bits fail closed exactly as an unpaired lane always has.
+  const gate = ingress(); // budget: 100n
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 849n), status, 1, 0b1111, 0),
+    1,
+  );
+  const snapshot = gate.snapshot(1);
+  assert.equal(snapshot.validFlags, 0b0011, "attitude pairs; kinematics is 151n away");
 }
 
 function testCombinedStatusRevokesBeforeOneNumericGroupRecovers() {
@@ -375,6 +421,68 @@ function testDuplicateStatusStampCanOnlyPublishALocalDowngrade() {
   assert.equal(snapshot.validFlags, 0);
   assert.equal(snapshot.quality, 2);
   assert.equal(snapshot.attitude.ageMs, 20);
+}
+
+function testDowngradeIsNotReversibleThroughThePreviousRegime() {
+  // The reversal must not sneak back in through the PREVIOUS regime: a
+  // numeric acquired between the previous and current status selects the
+  // previous (still-good) regime, but the current status — downgraded to
+  // unusable — is a ceiling that caps it. Without the ceiling the panel
+  // would flash back to authorized against an estimator that just
+  // declared its state unusable.
+  const gate = ingress(); // budget: 100n
+  const prev = stamp(10, 1_000n);
+  const curr = stamp(11, 1_200n);
+  gate.ingest(statusPacket(prev, 0b1111, 0), 0);
+  gate.ingest(pairedPacket(stamp(1, 1_000n), null, prev, 1, 0b1111, 0), 1);
+  assert.equal(gate.snapshot(1).validFlags, 0b0011);
+
+  // Current status arrives good (previous regime retained), then a
+  // duplicate of it downgrades to unusable.
+  gate.ingest(statusPacket(curr, 0b1111, 0), 2);
+  assert.equal(gate.ingest(statusPacket(curr, 0, 2), 3), true);
+  assert.equal(gate.snapshot(3).validFlags, 0);
+  assert.equal(gate.snapshot(3).quality, 2);
+
+  // A fresh numeric acquired at 1100 — after the last accepted numeric
+  // (1000, so it advances and is admitted) and between prev@1000 and
+  // curr@1200, within the budget of both — selects the previous good
+  // regime. The downgraded current regime ceilings it, so it stays
+  // unauthorized.
+  gate.ingest(pairedPacket(stamp(2, 1_100n), null, curr, 2, 0b1111, 0), 4);
+  const snapshot = gate.snapshot(4);
+  assert.equal(snapshot.validFlags, 0, "the current downgrade ceilings the previous regime");
+  assert.equal(snapshot.quality, 2);
+}
+
+function testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric() {
+  // A duplicate status stamp downgrades authorization to unusable; the
+  // regime the downgrade closed must not still vouch for a *later*
+  // numeric bearing that same status stamp. Regression: the downgrade
+  // tightened only the published flags, so a fresh numeric sequence
+  // consulted the stale good regime and reversed the fail-closed
+  // decision.
+  const gate = ingress();
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(pairedPacket(stamp(1, 1_000n), null, status, 1, 0b1111, 0), 1);
+  assert.equal(gate.snapshot(1).validFlags, 0b0011);
+  assert.equal(gate.snapshot(1).quality, 0);
+
+  // Duplicate status stamp, now carrying unusable/zero flags.
+  assert.equal(gate.ingest(statusPacket(status, 0, 2), 2), true);
+  assert.equal(gate.snapshot(2).validFlags, 0);
+  assert.equal(gate.snapshot(2).quality, 2);
+
+  // A NEW attitude sequence — acquired 50n later, so it is genuinely
+  // fresh (not an age-frozen duplicate), yet still within the status's
+  // skew budget — bearing that same status stamp and the original good
+  // payload. The downgrade folded into the regime, so the fresh numeric
+  // consults the tightened regime and stays unauthorized.
+  gate.ingest(pairedPacket(stamp(2, 1_050n), null, status, 2, 0b1111, 0), 3);
+  const snapshot = gate.snapshot(3);
+  assert.equal(snapshot.validFlags, 0, "the downgrade cannot be reversed");
+  assert.equal(snapshot.quality, 2);
 }
 
 function testStatusOrderingIsIndependent() {
@@ -477,8 +585,12 @@ for (const test of [
   testStatusPayloadAloneControlsAuthorization,
   testMismatchedGroupCannotRegainThroughOtherNumeric,
   testStatusGoodReauthorizesOnlyExactNumericGroup,
+  testInterleavedLaneWithinBudgetKeepsItsAuthorization,
+  testNumericBeyondSkewBudgetIsNotAuthorized,
   testCombinedStatusRevokesBeforeOneNumericGroupRecovers,
   testDuplicateStatusStampCanOnlyPublishALocalDowngrade,
+  testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric,
+  testDowngradeIsNotReversibleThroughThePreviousRegime,
   testStatusOrderingIsIndependent,
   testStatusResetsWithSourceIdentity,
   testSnapshotsAreAtomicAndImmutable,

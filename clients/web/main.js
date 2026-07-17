@@ -55,9 +55,10 @@ import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
-// Aviate publishes attitude at 10 Hz and kinematics at 4 Hz. This simulator
-// profile admits one kinematics period plus transport jitter; an aircraft
-// profile must derive its own limit from the intended function.
+// Aviate publishes attitude at 50 Hz and kinematics at 30 Hz. This simulator
+// profile admits several stream periods plus transport jitter; an aircraft
+// profile must derive its own limit from the intended function. The same
+// budget bounds status-to-numeric authorization pairing in the ingress.
 const SIM_COHERENCE_LIMIT_NS = 300_000_000n;
 const MOTION_SCOPE = "vehicle.motion";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
