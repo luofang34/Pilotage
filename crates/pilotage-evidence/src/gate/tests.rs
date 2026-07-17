@@ -279,3 +279,111 @@ fn after_code_no_attr() {}
     assert!(!super::selector::defines(text, "after_code_no_attr"));
     assert!(!super::selector::defines(text, "absent_entirely"));
 }
+
+/// A JS test fixture exercising the runner rule: one genuine registered
+/// test plus every shape that must NOT resolve.
+const JS_SELECTOR_FIXTURE: &str = r#"
+function testRealBehaviour() {
+  assert.equal(1, 1);
+}
+
+// Defined at top level but never placed in the runner array.
+function testHelperOnly() {}
+
+// Defined and only ever calls itself: recursion is not registration.
+function testSelfReferencing() {
+  if (false) testSelfReferencing();
+}
+
+// Referenced only by another helper's call, never by the runner.
+function testCalledByHelper() {}
+function driver() {
+  testCalledByHelper();
+  for (const t of [testInsideHelperArray]) t();
+}
+
+// A definition nested inside another function is not a top-level test.
+function outer() {
+  function testNested() {}
+  return testNested;
+}
+
+// Decoys in each string flavour and in comments.
+// function testLineCommentDecoy() {}
+/* function testBlockCommentDecoy() {} */
+const dq = "function testDoubleQuoteDecoy(";
+const sq = 'function testSingleQuoteDecoy(';
+const tpl = `function testTemplateDecoy( ${cooked}`;
+
+function testSubstringBase() {}
+
+for (const test of [
+  testRealBehaviour,
+  testSubstringBaseExtra,
+]) {
+  test();
+}
+"#;
+
+#[test]
+fn a_js_selector_needs_a_top_level_definition_and_runner_registration() {
+    let js = super::selector::defines_js;
+    // The one genuine, registered, top-level test resolves.
+    assert!(js(JS_SELECTOR_FIXTURE, "testRealBehaviour"));
+    // Structural negatives: definition or registration missing at top level.
+    assert!(
+        !js(JS_SELECTOR_FIXTURE, "testHelperOnly"),
+        "defined but never registered"
+    );
+    assert!(
+        !js(JS_SELECTOR_FIXTURE, "testSelfReferencing"),
+        "self-reference is not registration"
+    );
+    assert!(
+        !js(JS_SELECTOR_FIXTURE, "testCalledByHelper"),
+        "a helper's call is not registration"
+    );
+    assert!(
+        !js(JS_SELECTOR_FIXTURE, "testInsideHelperArray"),
+        "a helper's own for-of is not the runner"
+    );
+    assert!(
+        !js(JS_SELECTOR_FIXTURE, "testNested"),
+        "a nested definition is not a top-level test"
+    );
+    assert!(
+        !js(JS_SELECTOR_FIXTURE, "testSubstringBase"),
+        "substring of a registered name"
+    );
+    assert!(!js(JS_SELECTOR_FIXTURE, "testAbsentEntirely"));
+
+    // The extension dispatch routes .mjs/.js to the JS rule and
+    // everything else to the Rust rule.
+    assert!(super::selector::defines_in(
+        "clients/web/x.test.mjs",
+        JS_SELECTOR_FIXTURE,
+        "testRealBehaviour"
+    ));
+    assert!(!super::selector::defines_in(
+        "src/x.rs",
+        JS_SELECTOR_FIXTURE,
+        "testRealBehaviour"
+    ));
+}
+
+#[test]
+fn a_js_selector_refuses_comment_and_string_decoys() {
+    let js = super::selector::defines_js;
+    for decoy in [
+        "testLineCommentDecoy",
+        "testBlockCommentDecoy",
+        "testDoubleQuoteDecoy",
+        "testSingleQuoteDecoy",
+        "testTemplateDecoy",
+    ] {
+        assert!(
+            !js(JS_SELECTOR_FIXTURE, decoy),
+            "a decoy in a comment or string literal must not resolve: {decoy}"
+        );
+    }
+}

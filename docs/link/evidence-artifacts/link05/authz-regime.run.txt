@@ -1,0 +1,14 @@
+Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
+scope: LINK-04
+suite: browser avionics-ingress authorization regime
+command: node clients/web/telemetry-ingress.test.mjs
+config-digest: 337e9b8e616f71778681b7381f397ac9a7178087
+tool-version: node v26.5.0
+run-id: local:337e9b8e616f71778681b7381f397ac9a7178087
+outcome: pass
+summary:
+  27 browser ingress checks passed; LINK-AUTHZ-005 cases:
+  ok - testInterleavedLaneWithinBudgetKeepsItsAuthorization
+  ok - testNumericBeyondSkewBudgetIsNotAuthorized
+  ok - testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric
+  ok - testDowngradeIsNotReversibleThroughThePreviousRegime
