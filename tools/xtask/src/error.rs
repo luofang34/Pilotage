@@ -92,4 +92,18 @@ pub enum XtaskError {
         #[source]
         source: std::io::Error,
     },
+    /// The user pressed ctrl-c before the session was ready; every
+    /// started stage has been torn down. A requested stop, not a fault.
+    #[error("session stopped before it was ready")]
+    Cancelled,
+    /// The host proved it is listening on a different port than the one
+    /// requested: advertising the requested port would hand out a URL
+    /// that cannot connect.
+    #[error("host is listening on port {actual}, not the requested {requested}")]
+    PortMismatch {
+        /// The port the launcher asked for.
+        requested: u16,
+        /// The port the host's LISTENING line proved.
+        actual: u16,
+    },
 }

@@ -62,22 +62,34 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     ));
     stages.push(viewer_stage(&ctx)?);
 
-    let (mut children, certificate) = start_stages(&stages).await?;
+    // The cancellation source must exist before the first child spawns:
+    // each child lives in its own process group, so a terminal ctrl-c
+    // delivered under default SIGINT disposition would kill only this
+    // launcher and orphan every already-started stage.
+    let mut cancel = spawn_cancel_listener()?;
+
+    let (mut children, listening) = start_stages(&stages, &mut cancel).await?;
+
+    let Some((actual_port, certificate)) = listening else {
+        teardown(&mut children);
+        return Err(XtaskError::Io {
+            context: "the host never proved a listening port",
+            source: std::io::Error::other("no LISTENING line was captured"),
+        });
+    };
+    if let Err(error) = verify_listening_port(args.host_port, actual_port) {
+        teardown(&mut children);
+        return Err(error);
+    }
 
     // The reset script consults this marker: while a supervisor owns
     // the flight controller, the script must not respawn its own.
     // Every failure past this point owns the already-running children:
     // returning without teardown would orphan the whole simulator stack.
     let pid_file = log_dir.join("supervisor.pid");
-    if let Err(source) = std::fs::write(&pid_file, std::process::id().to_string()) {
-        teardown(&mut children);
-        return Err(XtaskError::Io {
-            context: "writing the supervisor pid marker",
-            source,
-        });
-    }
+    claim_supervisor(&pid_file, &mut children)?;
 
-    let url = viewer_url(args.viewer_port, args.host_port, &certificate);
+    let url = viewer_url(args.viewer_port, actual_port, &certificate);
     print_line("");
     print_line(&format!("session ready: {url}"));
     print_line("press ctrl-c to stop the session");
@@ -85,17 +97,69 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
         open_in_browser(&url);
     }
 
-    let outcome = supervise(&mut children, &stages).await;
+    let outcome = supervise(&mut children, &stages, &mut cancel).await;
     std::fs::remove_file(&pid_file).ok();
     teardown(&mut children);
     outcome
 }
 
-/// Spawns every stage in order, awaiting each one's readiness signal.
-/// Already-started children are torn down on any failure.
-async fn start_stages(stages: &[Stage]) -> Result<(Vec<ManagedChild>, String), XtaskError> {
+/// Registers the SIGINT handler and returns a receiver that flips to
+/// `true` on ctrl-c. Registration happens synchronously in this call so
+/// no child can be spawned while the default (kill-the-launcher-only)
+/// disposition is still active.
+fn spawn_cancel_listener() -> Result<tokio::sync::watch::Receiver<bool>, XtaskError> {
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .map_err(|source| XtaskError::Io {
+            context: "registering the ctrl-c handler",
+            source,
+        })?;
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        if sigint.recv().await.is_some() {
+            tx.send(true).ok();
+        }
+    });
+    Ok(rx)
+}
+
+/// Fails closed when the host proves a different port than the one
+/// requested: the URL printed to the user must be a port the host
+/// actually bound.
+fn verify_listening_port(requested: u16, actual: u16) -> Result<(), XtaskError> {
+    if actual == requested {
+        Ok(())
+    } else {
+        Err(XtaskError::PortMismatch { requested, actual })
+    }
+}
+
+/// Writes the supervisor pid marker, tearing the session down when the
+/// write fails: a session the reset script cannot coordinate with must
+/// not keep running.
+fn claim_supervisor(
+    pid_file: &std::path::Path,
+    children: &mut Vec<ManagedChild>,
+) -> Result<(), XtaskError> {
+    if let Err(source) = std::fs::write(pid_file, std::process::id().to_string()) {
+        teardown(children);
+        return Err(XtaskError::Io {
+            context: "writing the supervisor pid marker",
+            source,
+        });
+    }
+    Ok(())
+}
+
+/// Spawns every stage in order, awaiting each one's readiness signal or
+/// a ctrl-c. Already-started children — including the child whose
+/// readiness wait a cancellation interrupts — are torn down on any exit
+/// but success.
+async fn start_stages(
+    stages: &[Stage],
+    cancel: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<(Vec<ManagedChild>, Option<(u16, String)>), XtaskError> {
     let mut children: Vec<ManagedChild> = Vec::new();
-    let mut certificate = String::new();
+    let mut listening = None;
     for stage in stages {
         print_line(&format!("starting {}...", stage.spec.name));
         let mut child = match ManagedChild::spawn(&stage.spec) {
@@ -105,8 +169,20 @@ async fn start_stages(stages: &[Stage]) -> Result<(Vec<ManagedChild>, String), X
                 return Err(error);
             }
         };
-        match await_ready(&mut child, &stage.readiness).await {
-            Ok(ReadySignal::HostCertificate(cert)) => certificate = cert,
+        let ready = tokio::select! {
+            ready = await_ready(&mut child, &stage.readiness) => ready,
+            _ = cancel.changed() => {
+                print_line("");
+                print_line("stopping the session...");
+                child.terminate_group();
+                teardown(&mut children);
+                return Err(XtaskError::Cancelled);
+            }
+        };
+        match ready {
+            Ok(ReadySignal::HostListening { port, certificate }) => {
+                listening = Some((port, certificate));
+            }
             Ok(ReadySignal::Up) => {}
             Err(error) => {
                 child.terminate_group();
@@ -121,7 +197,7 @@ async fn start_stages(stages: &[Stage]) -> Result<(Vec<ManagedChild>, String), X
         ));
         children.push(child);
     }
-    Ok((children, certificate))
+    Ok((children, listening))
 }
 
 /// Resets the running simulation via the selected backend.
@@ -270,15 +346,18 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
 /// flight-controller stage is RESTARTED in place (bounded): the reset
 /// flow kills the FC by design (world reset + FC restart), and the
 /// session must survive it. Every other stage's death ends the session.
-async fn supervise(children: &mut [ManagedChild], stages: &[Stage]) -> Result<(), XtaskError> {
+/// The restart's readiness wait races the cancellation source, so a
+/// ctrl-c during an FC restart stops the session promptly instead of
+/// waiting out the replacement's readiness deadline.
+async fn supervise(
+    children: &mut [ManagedChild],
+    stages: &[Stage],
+    cancel: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<(), XtaskError> {
     let mut fc_restarts: u32 = 0;
     loop {
         tokio::select! {
-            signal = tokio::signal::ctrl_c() => {
-                signal.map_err(|source| XtaskError::Io {
-                    context: "waiting for ctrl-c",
-                    source,
-                })?;
+            _ = cancel.changed() => {
                 print_line("");
                 print_line("stopping the session...");
                 return Ok(());
@@ -303,7 +382,16 @@ async fn supervise(children: &mut [ManagedChild], stages: &[Stage]) -> Result<()
                     // must not outlive the error return: it is not in
                     // `children`, so the caller's teardown would miss it.
                     let mut replacement = ManagedChild::spawn(&stage.spec)?;
-                    if let Err(error) = await_ready(&mut replacement, &stage.readiness).await {
+                    let ready = tokio::select! {
+                        ready = await_ready(&mut replacement, &stage.readiness) => ready,
+                        _ = cancel.changed() => {
+                            print_line("");
+                            print_line("stopping the session...");
+                            replacement.terminate_group();
+                            return Ok(());
+                        }
+                    };
+                    if let Err(error) = ready {
                         replacement.terminate_group();
                         return Err(error);
                     }
@@ -335,124 +423,4 @@ fn open_in_browser(url: &str) {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use std::time::{Duration, Instant};
-
-    use super::{start_stages, supervise};
-    use crate::backend::Stage;
-    use crate::process::{ManagedChild, ProcessSpec};
-    use crate::readiness::Readiness;
-
-    /// Builds a stage running `script` under sh, with `marker` planted in
-    /// argv so liveness is observable from outside via pgrep.
-    fn stage(name: &'static str, script: &str, marker: &str, readiness: Readiness) -> Stage {
-        let log = std::env::temp_dir().join(format!("plt_xtask_{marker}.log"));
-        Stage {
-            spec: ProcessSpec {
-                name,
-                program: "sh".to_owned(),
-                args: vec!["-c".to_owned(), script.to_owned(), marker.to_owned()],
-                cwd: None,
-                env: Vec::new(),
-                remove_env: Vec::new(),
-                log_path: log,
-            },
-            readiness,
-        }
-    }
-
-    fn marker_alive(marker: &str) -> bool {
-        std::process::Command::new("pgrep")
-            .args(["-f", marker])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    fn wait_until(deadline: Duration, mut done: impl FnMut() -> bool) -> bool {
-        let end = Instant::now() + deadline;
-        while Instant::now() < end {
-            if done() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        done()
-    }
-
-    /// A stage that never reports ready must not leave the stages started
-    /// before it (or itself) running.
-    #[tokio::test]
-    async fn readiness_failure_tears_down_every_started_stage() {
-        let a = format!("plt_xt_rdy_a_{}", std::process::id());
-        let b = format!("plt_xt_rdy_b_{}", std::process::id());
-        let stages = vec![
-            stage(
-                "first",
-                "echo READY; sleep 30",
-                &a,
-                Readiness::LogContains {
-                    needle: "READY",
-                    timeout_s: 5,
-                },
-            ),
-            stage(
-                "second",
-                "sleep 30",
-                &b,
-                Readiness::LogContains {
-                    needle: "NEVER_APPEARS",
-                    timeout_s: 1,
-                },
-            ),
-        ];
-
-        let outcome = start_stages(&stages).await;
-
-        assert!(outcome.is_err(), "the second stage can never become ready");
-        assert!(
-            wait_until(Duration::from_secs(5), || !marker_alive(&a)
-                && !marker_alive(&b)),
-            "both stages must be torn down after the readiness failure"
-        );
-    }
-
-    /// A flight-controller replacement that spawns but never reports
-    /// ready is not in `children`, so the supervisor must kill it before
-    /// returning the error.
-    #[tokio::test]
-    async fn failed_restart_kills_the_unready_replacement() {
-        let marker = format!("plt_xt_fcr_{}", std::process::id());
-        let fc = stage(
-            "flight-controller",
-            "sleep 30",
-            &marker,
-            Readiness::LogContains {
-                needle: "NEVER_APPEARS",
-                timeout_s: 1,
-            },
-        );
-        // The supervised child exits immediately, triggering the restart.
-        let dying = stage(
-            "flight-controller",
-            "exit 7",
-            "plt_xt_dying",
-            Readiness::LogContains {
-                needle: "",
-                timeout_s: 1,
-            },
-        );
-        let child = ManagedChild::spawn(&dying.spec).expect("dying stage spawns");
-        let mut children = vec![child];
-        let stages = vec![fc];
-
-        let outcome = supervise(&mut children, &stages).await;
-
-        assert!(outcome.is_err(), "the replacement can never become ready");
-        assert!(
-            wait_until(Duration::from_secs(5), || !marker_alive(&marker)),
-            "the unready replacement must not outlive the error"
-        );
-    }
-}
+mod tests;

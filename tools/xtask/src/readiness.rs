@@ -55,8 +55,16 @@ pub enum Readiness {
 pub enum ReadySignal {
     /// The stage is up.
     Up,
-    /// The host is listening with this certificate hash.
-    HostCertificate(String),
+    /// The host proved it is listening: the port from its LISTENING
+    /// line (the one it actually bound, carried so the caller can fail
+    /// closed on a mismatch instead of advertising a dead URL) and its
+    /// certificate hash.
+    HostListening {
+        /// The port the host proved.
+        port: u16,
+        /// The certificate hash the host printed.
+        certificate: String,
+    },
 }
 
 /// Waits until `readiness` holds for `child`, failing fast if the stage
@@ -143,7 +151,7 @@ fn probe(child: &ManagedChild, readiness: &Readiness) -> Option<ReadySignal> {
             content
                 .lines()
                 .find_map(parse_listening)
-                .map(|(_, cert)| ReadySignal::HostCertificate(cert))
+                .map(|(port, certificate)| ReadySignal::HostListening { port, certificate })
         }
     }
 }

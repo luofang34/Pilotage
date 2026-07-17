@@ -160,78 +160,75 @@ fn signal_group(pid: u32, signal: &str) {
 /// Whether any member of `pid`'s process group is still alive (signal 0
 /// probes without delivering).
 #[cfg(test)]
-pub(crate) fn group_alive(pid: u32) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg("--")
-        .arg(format!("-{pid}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::io::Read;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
-    use super::{ManagedChild, ProcessSpec, group_alive};
+    use super::{ManagedChild, ProcessSpec};
 
-    fn spec(name: &'static str, script: &str, log: &std::path::Path) -> ProcessSpec {
-        ProcessSpec {
-            name,
-            program: "sh".to_owned(),
-            args: vec!["-c".to_owned(), script.to_owned()],
-            cwd: None,
-            env: Vec::new(),
-            remove_env: Vec::new(),
-            log_path: log.to_path_buf(),
-        }
-    }
-
-    fn wait_until(deadline: Duration, mut done: impl FnMut() -> bool) -> bool {
-        let end = Instant::now() + deadline;
-        while Instant::now() < end {
-            if done() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        done()
-    }
+    const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
 
     /// The leader exiting must not spare its descendants: a grandchild
     /// that ignores TERM still dies from the unconditional group KILL.
+    /// The fifo synchronizes on process events, not polling: its open is
+    /// the grandchild-started event, and EOF fires only when every
+    /// process holding the write end — the whole group — is gone.
     #[test]
     fn group_kill_reaches_term_ignoring_descendants_after_the_leader_exits() {
-        let log = std::env::temp_dir().join(format!("plt_xtask_grp_{}.log", std::process::id()));
-        let mut child = ManagedChild::spawn(&spec(
-            "group-test",
-            // The grandchild ignores TERM and holds the group; the
-            // leader exits immediately.
-            "sh -c 'trap \"\" TERM; sleep 30' & exit 0",
-            &log,
-        ))
-        .expect("test stage spawns");
-        let pid = child.child.id();
+        let tag = format!("plt_grp_{}", std::process::id());
+        let fifo = std::env::temp_dir().join(format!("{tag}.fifo"));
+        let log = std::env::temp_dir().join(format!("{tag}.log"));
+        std::fs::remove_file(&fifo).ok();
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo runs");
+        assert!(status.success(), "mkfifo creates the fifo");
 
-        assert!(
-            wait_until(Duration::from_secs(5), || child.check_running().is_err()),
-            "the leader must exit on its own"
-        );
-        assert!(
-            group_alive(pid),
-            "the TERM-ignoring grandchild must be holding the group"
-        );
+        let (tx, rx) = mpsc::channel();
+        let reader_path = fifo.clone();
+        std::thread::spawn(move || {
+            let mut file =
+                std::fs::File::open(&reader_path).expect("fifo opens once the grandchild starts");
+            tx.send("open").ok();
+            let mut sink = Vec::new();
+            file.read_to_end(&mut sink).ok();
+            tx.send("eof").ok();
+            std::fs::remove_file(&reader_path).ok();
+        });
+
+        // The grandchild ignores TERM and holds the fifo; the leader
+        // exits immediately.
+        let mut child = ManagedChild::spawn(&ProcessSpec {
+            name: "group-test",
+            program: "sh".to_owned(),
+            args: vec![
+                "-c".to_owned(),
+                format!(
+                    "sh -c 'trap \"\" TERM; exec 9>{}; sleep 30' & exit 0",
+                    fifo.display()
+                ),
+            ],
+            cwd: None,
+            env: Vec::new(),
+            remove_env: Vec::new(),
+            log_path: log.clone(),
+        })
+        .expect("test stage spawns");
+
+        let event = rx.recv_timeout(EVENT_TIMEOUT).expect("grandchild starts");
+        assert_eq!(event, "open", "the grandchild is holding the group");
+        // The leader exits on its own; reaped or not, the group must die.
+        child.child.wait().ok();
 
         child.terminate_group();
 
-        assert!(
-            wait_until(Duration::from_secs(5), || !group_alive(pid)),
-            "the group KILL must reach the grandchild even though the leader already exited"
-        );
+        let event = rx
+            .recv_timeout(EVENT_TIMEOUT)
+            .expect("the group KILL reaches the grandchild");
+        assert_eq!(event, "eof", "every group member is gone");
         std::fs::remove_file(&log).ok();
     }
 }

@@ -20,8 +20,11 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
+        // A ctrl-c before the session was ready is a requested stop:
+        // everything started has been torn down, nothing failed.
+        Err(error::XtaskError::Cancelled) => ExitCode::SUCCESS,
         Err(error) => {
-            print_line(&format!("error: {error}"));
+            tracing::error!(%error, "xtask failed");
             ExitCode::FAILURE
         }
     }
