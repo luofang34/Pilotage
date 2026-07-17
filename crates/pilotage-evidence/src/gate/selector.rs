@@ -52,7 +52,7 @@ pub(super) fn resolve(
                 Some(id.clone()),
                 format!("selector for {id}: file {path} not found under repo root"),
             )),
-            Ok(text) if !defines(&text, test) => findings.push(Finding::new(
+            Ok(text) if !defines_in(path, &text, test) => findings.push(Finding::new(
                 FindingCode::UnresolvedSelector,
                 Some(id.clone()),
                 format!("selector for {id}: test {test} not defined in {path}"),
@@ -60,6 +60,70 @@ pub(super) fn resolve(
             Ok(_) => {}
         }
     }
+}
+
+/// Whether `text` defines `symbol` as a genuine test, dispatching on the
+/// locator's language. A `.mjs`/`.js` test file uses the JavaScript rule
+/// (definition plus explicit runner registration); everything else uses
+/// the Rust rule (`#[test]`-attributed `fn`). The browser suites are real
+/// CI gates, so a case may bind one of their tests with the same
+/// rename/delete safety the Rust rule gives.
+pub(super) fn defines_in(path: &str, text: &str, symbol: &str) -> bool {
+    if path.ends_with(".mjs") || path.ends_with(".js") {
+        defines_js(text, symbol)
+    } else {
+        defines(text, symbol)
+    }
+}
+
+/// Whether `text` defines `symbol` as a genuine JavaScript test: a
+/// top-level `function <symbol>(` definition AND a separate bare
+/// reference to `<symbol>` — the runner registration these suites use
+/// (`for (const test of [ ...names ])`). Requiring both mirrors the Rust
+/// rule's "definition plus `#[test]`": a helper that is defined but never
+/// registered does not resolve, and a name that appears only in the
+/// runner list without a definition does not either. Comment and
+/// string-literal occurrences are blanked first, so no decoy resolves.
+pub(super) fn defines_js(text: &str, symbol: &str) -> bool {
+    let needle = format!("function {symbol}(");
+    let mut in_block_comment = false;
+    let mut defined = false;
+    let mut registered = false;
+    for raw in text.lines() {
+        let code = code_of_line(raw, &mut in_block_comment);
+        if !defined && code.contains(&needle) {
+            defined = true;
+            continue;
+        }
+        if !registered && mentions_symbol(&code, symbol) {
+            registered = true;
+        }
+    }
+    defined && registered
+}
+
+/// Whether `code` contains `symbol` as a whole identifier (both
+/// neighbours are non-identifier characters), so a longer name that
+/// merely contains `symbol` as a substring is not a match.
+fn mentions_symbol(code: &str, symbol: &str) -> bool {
+    let mut from = 0;
+    while let Some(rel) = code[from..].find(symbol) {
+        let pos = from + rel;
+        let before_ok = code[..pos]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        let after = &code[pos + symbol.len()..];
+        let after_ok = after
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        if before_ok && after_ok {
+            return true;
+        }
+        from = pos + symbol.len();
+    }
+    false
 }
 
 /// Whether `text` defines `symbol` as a genuine test: an actual function

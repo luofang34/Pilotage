@@ -329,12 +329,28 @@ export class AvionicsIngress {
   }
 
   applyStatusDowngrade(avionics) {
+    const incomingValidFlags = avionics.validFlags >>> 0;
+    const incomingQuality = avionics.quality >>> 0;
+    // A duplicate status stamp may only tighten authorization, never
+    // restore it — so the downgrade must fold into the regime itself,
+    // not only the published flags. Otherwise a later numeric bearing
+    // this same status stamp would consult the pre-downgrade regime and
+    // reverse a fail-closed decision. The fold is monotone (bitwise-and
+    // of flags, max of quality), so re-applying the status that opened
+    // the regime is a no-op and successive duplicates only ever tighten.
+    if (this.statusRegime !== null) {
+      this.statusRegime = Object.freeze({
+        stamp: this.statusRegime.stamp,
+        validFlags: (this.statusRegime.validFlags & incomingValidFlags) >>> 0,
+        quality: Math.max(this.statusRegime.quality, incomingQuality),
+      });
+    }
     if (!this.hasEstablishedAuthorization()) {
       this.failClosedAuthorization();
       return;
     }
-    this.validFlags = (this.validFlags & (avionics.validFlags >>> 0)) >>> 0;
-    this.quality = Math.max(this.quality, avionics.quality >>> 0);
+    this.validFlags = (this.validFlags & incomingValidFlags) >>> 0;
+    this.quality = Math.max(this.quality, incomingQuality);
   }
 
   // The regime whose declared estimator state governs a numeric group

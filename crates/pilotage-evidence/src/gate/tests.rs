@@ -279,3 +279,56 @@ fn after_code_no_attr() {}
     assert!(!super::selector::defines(text, "after_code_no_attr"));
     assert!(!super::selector::defines(text, "absent_entirely"));
 }
+
+#[test]
+fn a_js_selector_binds_a_defined_and_registered_test_only() {
+    // A JS test resolves only when it is both defined and registered in
+    // the runner list; a defined-but-unregistered helper, a name that
+    // appears only in the runner list, and every comment/string decoy are
+    // refused — the same rename/delete safety the Rust rule gives.
+    let text = r#"
+function testRealBehaviour() {
+  assert.equal(1, 1);
+}
+
+function testHelperOnly() {}
+
+// function testCommentedOut() {}
+/* function testBlockCommented() {} */
+const decoy = "function testStringDecoy(";
+
+function testRegisteredButRenamedSubstring() {}
+
+for (const test of [
+  testRealBehaviour,
+  testRegisteredButRenamedSubstringExtra,
+]) {
+  test();
+}
+"#;
+    assert!(super::selector::defines_js(text, "testRealBehaviour"));
+    // Defined but never registered in the runner list.
+    assert!(!super::selector::defines_js(text, "testHelperOnly"));
+    // Registered name is a longer identifier; the substring must not match.
+    assert!(!super::selector::defines_js(
+        text,
+        "testRegisteredButRenamedSubstring"
+    ));
+    assert!(!super::selector::defines_js(text, "testCommentedOut"));
+    assert!(!super::selector::defines_js(text, "testBlockCommented"));
+    assert!(!super::selector::defines_js(text, "testStringDecoy"));
+    assert!(!super::selector::defines_js(text, "testAbsentEntirely"));
+
+    // The extension dispatch routes .mjs/.js to the JS rule and
+    // everything else to the Rust rule.
+    assert!(super::selector::defines_in(
+        "clients/web/x.test.mjs",
+        text,
+        "testRealBehaviour"
+    ));
+    assert!(!super::selector::defines_in(
+        "src/x.rs",
+        text,
+        "testRealBehaviour"
+    ));
+}

@@ -423,6 +423,36 @@ function testDuplicateStatusStampCanOnlyPublishALocalDowngrade() {
   assert.equal(snapshot.attitude.ageMs, 20);
 }
 
+function testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric() {
+  // A duplicate status stamp downgrades authorization to unusable; the
+  // regime the downgrade closed must not still vouch for a *later*
+  // numeric bearing that same status stamp. Regression: the downgrade
+  // tightened only the published flags, so a fresh numeric sequence
+  // consulted the stale good regime and reversed the fail-closed
+  // decision.
+  const gate = ingress();
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(pairedPacket(stamp(1, 1_000n), null, status, 1, 0b1111, 0), 1);
+  assert.equal(gate.snapshot(1).validFlags, 0b0011);
+  assert.equal(gate.snapshot(1).quality, 0);
+
+  // Duplicate status stamp, now carrying unusable/zero flags.
+  assert.equal(gate.ingest(statusPacket(status, 0, 2), 2), true);
+  assert.equal(gate.snapshot(2).validFlags, 0);
+  assert.equal(gate.snapshot(2).quality, 2);
+
+  // A NEW attitude sequence — acquired 50n later, so it is genuinely
+  // fresh (not an age-frozen duplicate), yet still within the status's
+  // skew budget — bearing that same status stamp and the original good
+  // payload. The downgrade folded into the regime, so the fresh numeric
+  // consults the tightened regime and stays unauthorized.
+  gate.ingest(pairedPacket(stamp(2, 1_050n), null, status, 2, 0b1111, 0), 3);
+  const snapshot = gate.snapshot(3);
+  assert.equal(snapshot.validFlags, 0, "the downgrade cannot be reversed");
+  assert.equal(snapshot.quality, 2);
+}
+
 function testStatusOrderingIsIndependent() {
   const gate = ingress();
   gate.ingest(statusPacket(stamp(10, 1_000n), 0, 2), 0);
@@ -527,6 +557,7 @@ for (const test of [
   testNumericBeyondSkewBudgetIsNotAuthorized,
   testCombinedStatusRevokesBeforeOneNumericGroupRecovers,
   testDuplicateStatusStampCanOnlyPublishALocalDowngrade,
+  testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric,
   testStatusOrderingIsIndependent,
   testStatusResetsWithSourceIdentity,
   testSnapshotsAreAtomicAndImmutable,

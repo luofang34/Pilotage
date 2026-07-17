@@ -48,3 +48,19 @@ configured FC identity, host-receive clock, and checksummed-only
 integrity; role, identity, and integrity survive the host-to-client wire
 and session capture verbatim, and duplicate reports never refresh
 freshness downstream.
+
+### LINK-AUTHZ-005 {#link-authz-005}
+
+Client-side authorization of an estimate group is decided by the
+estimator-status regime that governed that group's acquisition instant,
+bounded by the coherence budget — so a numeric group interleaving with a
+faster status stream keeps the authorization it was actually granted
+instead of being stripped whenever the two lanes arrive a few
+milliseconds apart. Authorization is monotone under a single status
+stamp: a duplicate status carrying a downgrade folds into the regime
+itself, so a later numeric bearing that same status stamp can never
+reverse a fail-closed decision. The rule fails closed across any source
+identity, epoch, or clock change, beyond the skew budget, and for a
+group acquired under a declared-unusable status. The guard is the same
+shared ingress on every profile; only the numeric coherence budget is
+profile-specific.
