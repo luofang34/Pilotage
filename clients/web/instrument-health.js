@@ -125,7 +125,13 @@ export class PanelHealth {
     this.goodStreak = 0;
     this.lastGeneration = null;
     this.lastAdvanceMs = nowMs;
-    this.lastTickMs = null;
+    // Seed the tick clock at reset so the FIRST tick has a cadence
+    // baseline: a first tick already late against the scheduled cadence
+    // (the page was backgrounded before the watchdog ever ran) is
+    // recognized as starvation, not read as a dead renderer. Without
+    // this the first tick could never detect starvation and would falsely
+    // latch LIVENESS on a delayed initial fire.
+    this.lastTickMs = nowMs;
     this.counters = {
       failures: 0,
       duplicates: 0,
@@ -176,7 +182,9 @@ export class PanelHealth {
   // the deadline instead of judging with a stalled clock (see the
   // constructor's tickIntervalMs contract).
   tick(nowMs) {
-    const starved = this.lastTickMs !== null && nowMs - this.lastTickMs > 2 * this.tickIntervalMs;
+    // lastTickMs is seeded at reset, so even the first tick has a cadence
+    // baseline to measure its own lateness against.
+    const starved = nowMs - this.lastTickMs > 2 * this.tickIntervalMs;
     this.lastTickMs = nowMs;
     if (starved) {
       this.lastAdvanceMs = nowMs;
