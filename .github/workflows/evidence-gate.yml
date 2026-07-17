@@ -1,12 +1,17 @@
-# ADVISORY / NON-BLOCKING engineering trace gate (ASSURE-01, issue 77).
+# Engineering trace gate (ASSURE-01, issue 77; ASSURE-04, issue 133).
 #
-# This is a SEPARATE workflow, deliberately NOT part of the required
-# `quality-gates` job in ci.yml. Its check must never be added to the
-# branch-protection required set: a failing evidence trace must not block a
-# merge or fail the main required CI. It runs the scoped no-orphan gate so the
-# trace is observable, and is NOT a certification, compliance, or tool
+# The trace VERDICT is advisory: a review may honestly stay PENDING, and a
+# pending review must never block a merge, so the verdict steps stay
+# `continue-on-error`. It is NOT a certification, compliance, or tool
 # qualification result (SIM / NOT FOR FLIGHT).
-name: Evidence trace gate (advisory)
+#
+# Baseline RESOLVABILITY is NOT advisory. The "baselines MUST be reachable
+# and resolvable (HARD)" step and the negative-fixture must-fail loops carry
+# no `continue-on-error`, so a broken or orphaned baseline — a declared SCM
+# commit unreachable from HEAD, a missing selector, or a missing artifact —
+# reddens this job. Durable evidence resolution is enforced; the review
+# verdict is not.
+name: Evidence trace gate
 
 on:
   push:
@@ -63,6 +68,18 @@ jobs:
           cargo run -q -p pilotage-evidence --bin evidence-gate --
           --graph docs/link/evidence-graph.evg --repo-root .
           --resolve-selectors
+
+      - name: LINK-04 slice — baselines MUST be reachable and resolvable (HARD)
+        # NOT advisory (no continue-on-error). The review verdict may stay
+        # PENDING, but every recorded result must resolve: its declared SCM
+        # baseline reachable from HEAD (not a force-push orphan), and its
+        # selectors and artifacts present. A broken or orphaned baseline
+        # reddens this job (ASSURE-04, issue 133). Needs full history
+        # (fetch-depth: 0 above) so reachability is decidable.
+        run: >
+          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          --graph docs/link/evidence-graph.evg --repo-root .
+          --require-resolvable
 
       - name: ATT-01 slice — resolve selectors against the tree
         # Informational: selector resolution reads the referenced test files.
@@ -134,7 +151,7 @@ jobs:
                    traversal-artifact symlink-escape-artifact \
                    stale-source-artifact selector-not-a-test \
                    source-as-artifact unresolved-review-entry \
-                   baseline-unverifiable; do
+                   baseline-unverifiable baseline-unreachable; do
             if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
                 --repo-root crates/pilotage-evidence \
                 --resolve-selectors >/dev/null 2>&1; then

@@ -2,8 +2,15 @@
 //!
 //! ```text
 //! evidence-gate [--graph PATH] [--repo-root PATH] [--resolve-selectors]
-//!               [--impact NODE_ID] [--trace]
+//!               [--require-resolvable] [--impact NODE_ID] [--trace]
 //! ```
+//!
+//! `--require-resolvable` is a hard check meant for a required (not
+//! advisory) CI job: every recorded result must resolve — its baseline
+//! reachable from HEAD, its selectors and artifacts present — and the
+//! process exits non-zero if any does not. A review that is honestly
+//! PENDING is tolerated, so the check enforces durable evidence
+//! resolution without asserting the review is complete.
 //!
 //! The gate is an engineering trace check. A clean run is **not** a DO-178C,
 //! ISO 26262, ECSS, TSO, or ASIL result and is not tool qualification. The
@@ -21,7 +28,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pilotage_evidence::gate::{validate, validate_resolving};
+use pilotage_evidence::gate::{FindingCode, validate, validate_resolving};
 use pilotage_evidence::policy::Policy;
 use pilotage_evidence::{EvidenceError, NodeId, impact, parse, report, trace};
 
@@ -42,6 +49,7 @@ struct Options {
     graph: Option<PathBuf>,
     repo_root: Option<PathBuf>,
     resolve_selectors: bool,
+    require_resolvable: bool,
     impact: Option<String>,
     trace: bool,
     as_of: Option<String>,
@@ -74,7 +82,9 @@ fn run(args: Vec<String>) -> Result<ExitCode, EvidenceError> {
         ..Policy::engineering_trace()
     };
 
-    let gate_report = if options.resolve_selectors {
+    // Resolvability (baseline reachability, selector, artifact) is filesystem-
+    // and git-backed, so it needs the repo root; `--require-resolvable` implies it.
+    let gate_report = if options.resolve_selectors || options.require_resolvable {
         validate_resolving(&graph, &policy, &repo_root)
     } else {
         validate(&graph, &policy)
@@ -102,6 +112,10 @@ fn run(args: Vec<String>) -> Result<ExitCode, EvidenceError> {
         }
     }
 
+    if options.require_resolvable {
+        return Ok(resolvable_exit(&gate_report));
+    }
+
     Ok(if gate_report.verdict.passed() {
         ExitCode::SUCCESS
     } else {
@@ -109,14 +123,40 @@ fn run(args: Vec<String>) -> Result<ExitCode, EvidenceError> {
     })
 }
 
+/// The exit code for `--require-resolvable`: a hard, non-advisory check
+/// that every result resolves — its baseline reachable, its selectors and
+/// artifacts present. The review verdict may honestly stay PENDING, so a
+/// `ReviewIncomplete` finding is tolerated; every other non-excepted
+/// finding fails. Safe to wire as a required CI step that a broken or
+/// orphaned baseline can never leave green.
+fn resolvable_exit(gate_report: &pilotage_evidence::gate::GateReport) -> ExitCode {
+    let blocking = gate_report
+        .findings
+        .iter()
+        .filter(|f| !f.excepted && f.code != FindingCode::ReviewIncomplete)
+        .count();
+    if blocking > 0 {
+        writeln!(
+            io::stderr(),
+            "evidence-gate: {blocking} unresolved finding(s) fail --require-resolvable \
+             (review-pending is tolerated; broken baselines/selectors/artifacts are not)"
+        )
+        .ok();
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 const USAGE: &str = "usage: evidence-gate [--graph PATH] [--repo-root PATH] \
-[--resolve-selectors] [--impact NODE_ID] [--trace] [--as-of YYYY-MM-DD]";
+[--resolve-selectors] [--require-resolvable] [--impact NODE_ID] [--trace] [--as-of YYYY-MM-DD]";
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut options = Options {
         graph: None,
         repo_root: None,
         resolve_selectors: false,
+        require_resolvable: false,
         impact: None,
         trace: false,
         as_of: None,
@@ -129,6 +169,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 options.repo_root = Some(PathBuf::from(next(&mut iter, "--repo-root")?))
             }
             "--resolve-selectors" => options.resolve_selectors = true,
+            "--require-resolvable" => options.require_resolvable = true,
             "--impact" => options.impact = Some(next(&mut iter, "--impact")?),
             "--trace" => options.trace = true,
             "--as-of" => options.as_of = Some(next(&mut iter, "--as-of")?),

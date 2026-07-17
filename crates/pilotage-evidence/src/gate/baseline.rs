@@ -62,6 +62,38 @@ pub(super) fn resolve(
             );
             continue;
         };
+        // A blob that resolves at `commit` proves nothing if `commit`
+        // itself is not reachable from HEAD: a force-push leaves the old
+        // commit as a dangling object that `rev-parse` still answers, yet
+        // a fresh clone (which fetches only reachable history) can never
+        // retrieve it. Require reachability so the recorded baseline is
+        // durable, not a force-push artifact.
+        match commit_is_reachable(repo_root, commit) {
+            Ok(true) => {}
+            Ok(false) => {
+                push(
+                    findings,
+                    id,
+                    format!(
+                        "baseline {commit} is not reachable from HEAD: a non-ancestor commit is \
+                         a force-push artifact that a fresh clone cannot fetch; an unreachable \
+                         baseline fails closed"
+                    ),
+                );
+                continue;
+            }
+            Err(reason) => {
+                push(
+                    findings,
+                    id,
+                    format!(
+                        "baseline {commit} reachability cannot be determined: {reason}; an \
+                         unverifiable baseline fails closed"
+                    ),
+                );
+                continue;
+            }
+        }
         for locator in case_locators(graph, id) {
             let path = locator.split('#').next().unwrap_or(locator);
             check_locator(
@@ -135,6 +167,29 @@ fn git_toplevel(repo_root: &Path) -> Option<std::path::PathBuf> {
     let text = String::from_utf8(output.stdout).ok()?;
     let trimmed = text.trim();
     (!trimmed.is_empty()).then(|| std::path::PathBuf::from(trimmed))
+}
+
+/// Whether `commit` is reachable from HEAD (an ancestor of, or equal to,
+/// HEAD), or why git could not answer. Reachability — not mere presence
+/// in the object store — is what a fresh clone can rely on: `git
+/// merge-base --is-ancestor` exits 0 for an ancestor, 1 for a
+/// non-ancestor present in the store, and >1 on error (e.g. an unknown
+/// commit).
+fn commit_is_reachable(repo_root: &Path, commit: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["merge-base", "--is-ancestor", commit, "HEAD"])
+        .output()
+        .map_err(|error| format!("git could not run ({error})"))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!(
+            "git merge-base --is-ancestor {commit} HEAD failed ({})",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
 }
 
 /// The blob object id `commit` records for `relative`, or why git could
@@ -267,6 +322,48 @@ mod tests {
                 .iter()
                 .any(|f| f.detail.contains("unverifiable baseline fails closed")),
             "missing commit: {findings:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_present_but_unreachable_baseline_fails_closed() {
+        // Simulate a force-push orphan: commit, note its id, then amend so
+        // the original commit is still in the object store (rev-parse and
+        // blob lookups answer) but is no longer an ancestor of HEAD — a
+        // fresh clone could never fetch it.
+        let dir = std::env::temp_dir().join(format!("plt_evg_reach_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join("sample_tests.rs"), "#[test]\nfn sample() {}\n")
+            .expect("write source");
+        git(&dir, &["add", "sample_tests.rs"]);
+        git(&dir, &["commit", "-qm", "baseline"]);
+        let orphan = git(&dir, &["rev-parse", "HEAD"]);
+        let blob = git(&dir, &["rev-parse", "HEAD:sample_tests.rs"]);
+        // Amend to rewrite HEAD; `orphan` is now a dangling object.
+        git(
+            &dir,
+            &["commit", "-q", "--amend", "-m", "baseline (amended)"],
+        );
+        let head = git(&dir, &["rev-parse", "HEAD"]);
+        assert_ne!(orphan, head, "amend rewrote the commit");
+        // The orphan's blob still resolves — presence is not reachability.
+        assert_eq!(
+            super::git_blob_at(&dir, &orphan, "sample_tests.rs").expect("blob resolves"),
+            blob,
+            "the orphan is still present in the object store"
+        );
+
+        let graph = parse_graph(&graph_text(&orphan, &blob)).expect("graph parses");
+        let mut findings = Vec::new();
+        resolve(&graph, &Policy::default(), &dir, &mut findings);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.detail.contains("not reachable from HEAD")),
+            "a present-but-unreachable baseline must fail closed: {findings:?}"
         );
 
         std::fs::remove_dir_all(&dir).ok();
