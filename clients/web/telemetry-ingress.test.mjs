@@ -288,9 +288,11 @@ function testMismatchedGroupCannotRegainThroughOtherNumeric() {
     1,
   );
 
+  // The attitude is acquired 101n before the current status — beyond
+  // the pairing budget — so no status can vouch for it: stripped.
   const nextStatus = stamp(11, 1_200n);
   gate.ingest(statusPacket(nextStatus, 0b1111, 0), 2);
-  gate.ingest(pairedPacket(stamp(2, 1_100n), null, nextStatus, 2, 0b1111, 0), 3);
+  gate.ingest(pairedPacket(stamp(2, 1_099n), null, nextStatus, 2, 0b1111, 0), 3);
   assert.equal(gate.snapshot(3).validFlags, 0b1100);
 
   gate.ingest(pairedPacket(null, stamp(2, 1_200n), nextStatus, 3, 0b1111, 0), 4);
@@ -323,6 +325,50 @@ function testStatusGoodReauthorizesOnlyExactNumericGroup() {
 
   gate.ingest(pairedPacket(stamp(2, 1_200n), null, goodStatus, 3, 0b1111, 0), 5);
   assert.equal(gate.snapshot(5).validFlags, 0b1111);
+}
+
+function testInterleavedLaneWithinBudgetKeepsItsAuthorization() {
+  // The host merges lanes into one sample per tick, so a numeric group
+  // lawfully rides alongside a status acquired a few instants later
+  // (attitude, position, and status streams interleave at their own
+  // rates). A gap within the coherence budget must not strip the lane —
+  // stripping it flashes the panels between valid and invalid on every
+  // interleaved arrival.
+  const gate = ingress(); // budget: 100n
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), status, 1, 0b1111, 0),
+    1,
+  );
+  assert.equal(gate.snapshot(1).validFlags, 0b1111);
+
+  // A newer status arrives merged with a fresh attitude of the SAME
+  // acquisition and a kinematics update acquired 60n earlier — inside
+  // the budget. Every lane stays authorized.
+  const later = stamp(11, 1_100n);
+  gate.ingest(statusPacket(later, 0b1111, 0), 2);
+  gate.ingest(
+    pairedPacket(stamp(2, 1_100n), stamp(2, 1_040n), later, 2, 0b1111, 0),
+    3,
+  );
+  const snapshot = gate.snapshot(3);
+  assert.equal(snapshot.validFlags, 0b1111);
+  assert.equal(snapshot.quality, 0);
+}
+
+function testNumericBeyondSkewBudgetIsNotAuthorized() {
+  // Beyond the coherence budget the status cannot vouch for the numeric:
+  // the lane's bits fail closed exactly as an unpaired lane always has.
+  const gate = ingress(); // budget: 100n
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(
+    pairedPacket(stamp(1, 1_000n), stamp(1, 849n), status, 1, 0b1111, 0),
+    1,
+  );
+  const snapshot = gate.snapshot(1);
+  assert.equal(snapshot.validFlags, 0b0011, "attitude pairs; kinematics is 151n away");
 }
 
 function testCombinedStatusRevokesBeforeOneNumericGroupRecovers() {
@@ -477,6 +523,8 @@ for (const test of [
   testStatusPayloadAloneControlsAuthorization,
   testMismatchedGroupCannotRegainThroughOtherNumeric,
   testStatusGoodReauthorizesOnlyExactNumericGroup,
+  testInterleavedLaneWithinBudgetKeepsItsAuthorization,
+  testNumericBeyondSkewBudgetIsNotAuthorized,
   testCombinedStatusRevokesBeforeOneNumericGroupRecovers,
   testDuplicateStatusStampCanOnlyPublishALocalDowngrade,
   testStatusOrderingIsIndependent,
