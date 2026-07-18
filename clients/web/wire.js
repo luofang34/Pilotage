@@ -249,7 +249,7 @@ function encodeLeaseRequest({ vehicleId, scope }) {
 // (envelope.proto): schema_version = 1; oneof payload: control_frame=2,
 // authority_event=3, telemetry_sample=4, host_capabilities=5, client_hello=6,
 // server_welcome=7, lease_request=8, lease_response=9, ping=10, pong=11,
-// frame_rejected=12.
+// frame_rejected=12, lease_release=13, lease_released=14.
 const ENVELOPE_FIELD = {
   schemaVersion: 1,
   controlFrame: 2,
@@ -263,6 +263,8 @@ const ENVELOPE_FIELD = {
   ping: 10,
   pong: 11,
   frameRejected: 12,
+  leaseRelease: 13,
+  leaseReleased: 14,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
@@ -281,6 +283,20 @@ export function encodeClientHelloEnvelope(hello) {
 /** Encodes a `LeaseRequest` as a bare `Envelope` (payload field 8). */
 export function encodeLeaseRequestEnvelope(request) {
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.leaseRequest, encodeLeaseRequest(request)));
+}
+
+// ---- session.proto: LeaseRelease (field numbers 1,2) -----------------------
+// message LeaseRelease { VehicleId vehicle = 1; ScopeId scope = 2; }
+function encodeLeaseRelease({ vehicleId, scope }) {
+  const bytes = [];
+  fieldBytes(bytes, 1, encodeVehicleId(vehicleId));
+  fieldBytes(bytes, 2, encodeScopeId(scope));
+  return bytes;
+}
+
+/** Encodes a `LeaseRelease` as a bare `Envelope` (payload field 13). */
+export function encodeLeaseReleaseEnvelope(release) {
+  return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.leaseRelease, encodeLeaseRelease(release)));
 }
 
 // ---- control.proto: ControlFrame (field numbers per schema) ----------------
@@ -503,6 +519,9 @@ function decodeEnvelopeBody(body) {
   if (fields.has(ENVELOPE_FIELD.frameRejected)) {
     return { kind: "FrameRejected", message: decodeFrameRejected(firstBytes(fields, ENVELOPE_FIELD.frameRejected)) };
   }
+  if (fields.has(ENVELOPE_FIELD.leaseReleased)) {
+    return { kind: "LeaseReleased", message: decodeLeaseReleased(firstBytes(fields, ENVELOPE_FIELD.leaseReleased)) };
+  }
   return { kind: "unknown", message: {} };
 }
 
@@ -524,6 +543,18 @@ function decodeLeaseResponse(bytes) {
     granted: !!firstVarint(fields, 3),
     generation: decodeUint64Message(firstBytes(fields, 4)),
     reason: firstVarint(fields, 5),
+  };
+}
+
+// session.proto LeaseReleased: vehicle=1, scope=2, released=3, generation=4
+function decodeLeaseReleased(bytes) {
+  if (!bytes) return {};
+  const fields = parseFields(bytes);
+  return {
+    vehicleId: decodeUint64Message(firstBytes(fields, 1)),
+    scope: decodeStringMessage(firstBytes(fields, 2)),
+    released: !!firstVarint(fields, 3),
+    generation: decodeUint64Message(firstBytes(fields, 4)),
   };
 }
 
