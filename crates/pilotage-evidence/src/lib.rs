@@ -29,6 +29,19 @@
 //! or certification claim, and is not tool qualification (DO-330). It records
 //! that the declared engineering trace is internally complete and resolvable,
 //! nothing more.
+//!
+//! # Durable baselines (ASSURE-04)
+//!
+//! A recorded result's `config-digest` must name a commit **reachable from
+//! HEAD** — an ancestor of merged history, not a lane commit a rebase or
+//! squash will rewrite. A rewritten commit becomes a force-push orphan: it
+//! may linger locally as a dangling object that `git rev-parse` still
+//! answers, but a fresh clone fetches only reachable history and can never
+//! retrieve it, so the baseline is broken. `gate::baseline` enforces
+//! reachability, and the `--require-resolvable` mode of the `evidence-gate`
+//! binary turns any unreachable/unresolvable baseline into a hard failure.
+//! If a lane whose evidence names its own commit is rebased before merge,
+//! re-record against the rewritten commit first.
 
 #![forbid(unsafe_code)]
 
