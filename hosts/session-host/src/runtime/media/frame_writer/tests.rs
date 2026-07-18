@@ -16,11 +16,11 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use wtransport::VarInt;
-use wtransport::error::{StreamOpeningError, StreamWriteError};
+use wtransport::error::{ConnectionError, StreamOpeningError, StreamWriteError};
 
 use super::{
-    EncodedFrame, FatalKind, FrameChannel, FrameStream, StreamError, classify_open, classify_write,
-    drain_frames,
+    EncodedFrame, FatalKind, FrameChannel, FrameStream, StreamError, classify_open,
+    classify_open_request, classify_write, drain_frames,
 };
 
 fn capture_stamp() -> VideoCaptureStamp {
@@ -396,4 +396,26 @@ fn classify_open_maps_every_pinned_variant() {
             kind: FatalKind::NotConnected,
         },
     );
+}
+
+#[test]
+fn an_open_request_error_preserves_its_concrete_cause() {
+    // A concrete ConnectionError must survive classification, not be
+    // erased to a static string: it is retained in the OpenRequest kind
+    // and reachable through the error source chain and Display.
+    let classified = classify_open_request(ConnectionError::TimedOut);
+    assert_eq!(
+        classified,
+        StreamError::ConnectionFatal {
+            phase: "open",
+            kind: FatalKind::OpenRequest(ConnectionError::TimedOut),
+        },
+    );
+    // The source chain reaches the exact ConnectionError.
+    let via_source = std::error::Error::source(&classified)
+        .and_then(std::error::Error::source)
+        .and_then(|e| e.downcast_ref::<ConnectionError>());
+    assert_eq!(via_source, Some(&ConnectionError::TimedOut));
+    // ...and its Display carries the concrete cause for the log.
+    assert!(classified.to_string().contains("timed out"), "{classified}");
 }

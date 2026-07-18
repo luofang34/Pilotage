@@ -9,7 +9,7 @@ use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{error, warn};
-use wtransport::error::{StreamOpeningError, StreamWriteError};
+use wtransport::error::{ConnectionError, StreamOpeningError, StreamWriteError};
 use wtransport::{Connection, SendStream, VarInt};
 
 use super::{EncodedFrame, now_ns};
@@ -31,35 +31,31 @@ const FRAME_WRITE_DEADLINE: Duration = Duration::from_secs(2);
 const STALL_RESET_CODE: u32 = 1;
 
 /// A connection-fatal error's kind, preserved rather than erased so the
-/// log names what actually failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// log names — and the error chain carries — what actually failed. The
+/// open-request kind keeps the real [`ConnectionError`] as its `#[source]`
+/// (timeout, application-close reason/code, H3, QUIC details all survive).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 enum FatalKind {
     /// The connection has been dropped.
+    #[error("not connected")]
     NotConnected,
     /// A QUIC protocol error.
+    #[error("QUIC protocol error")]
     QuicProto,
-    /// The uni-stream open request itself failed (connection-level).
-    OpenRequest,
-}
-
-impl FatalKind {
-    /// A stable log string for the fatal kind.
-    fn as_str(self) -> &'static str {
-        match self {
-            FatalKind::NotConnected => "not connected",
-            FatalKind::QuicProto => "QUIC protocol error",
-            FatalKind::OpenRequest => "uni stream request failed",
-        }
-    }
+    /// The uni-stream open request itself failed (connection-level); the
+    /// concrete cause is preserved.
+    #[error("uni stream request failed: {0}")]
+    OpenRequest(#[source] ConnectionError),
 }
 
 /// Why an open, write, or finish failed, classified so neither a peer's
 /// decision to abandon ONE stream nor a local close retires the writer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 enum StreamError {
     /// The peer stopped or refused this stream alone (`Stopped`,
     /// `Refused`): a peer-attributed one-frame loss; the connection and
     /// every other source are unaffected.
+    #[error("peer stopped or refused the stream at {phase}")]
     PeerStop {
         /// The phase that surfaced it (`open`, `write`, `finish`).
         phase: &'static str,
@@ -68,16 +64,19 @@ enum StreamError {
     },
     /// The stream was already closed locally (`Closed`): a frame-local
     /// anomaly, recoverable like a peer stop but NOT a peer stop/refusal.
+    #[error("stream already closed locally at {phase}")]
     LocalClose {
         /// The phase that surfaced it.
         phase: &'static str,
     },
     /// Connection-level loss or a protocol failure: the writer must
     /// retire — no further frame can be delivered on this connection.
+    #[error("connection-fatal at {phase}: {kind}")]
     ConnectionFatal {
         /// The phase that surfaced it.
         phase: &'static str,
-        /// The preserved underlying kind, not erased to a string.
+        /// The preserved underlying kind (its own `#[source]` chain).
+        #[source]
         kind: FatalKind,
     },
 }
@@ -116,6 +115,16 @@ fn classify_open(error: &StreamOpeningError) -> StreamError {
             phase: "open",
             kind: FatalKind::NotConnected,
         },
+    }
+}
+
+/// Classifies an open-request [`ConnectionError`] (the first `open_uni`
+/// await): always connection-fatal, but the concrete cause is retained
+/// rather than discarded to a static string.
+fn classify_open_request(error: ConnectionError) -> StreamError {
+    StreamError::ConnectionFatal {
+        phase: "open",
+        kind: FatalKind::OpenRequest(error),
     }
 }
 
@@ -167,15 +176,9 @@ impl FrameChannel for Connection {
     type Stream = SendStream;
 
     async fn open(&self) -> Result<SendStream, StreamError> {
-        // The open-request error is connection-level; the opening error can
-        // be a peer refusal of this stream alone.
-        let opening = self
-            .open_uni()
-            .await
-            .map_err(|_| StreamError::ConnectionFatal {
-                phase: "open",
-                kind: FatalKind::OpenRequest,
-            })?;
+        // The open-request error is connection-level (its cause preserved);
+        // the opening error can be a peer refusal of this stream alone.
+        let opening = self.open_uni().await.map_err(classify_open_request)?;
         opening.await.map_err(|e| classify_open(&e))
     }
 }
@@ -320,13 +323,15 @@ fn record_outcome(
         }
         FrameOutcome::ConnectionFatal { phase, kind } => {
             // Connection-level loss retires the writer; a distinguishable
-            // fatal record, not a debug line. The connection task's own
-            // teardown deregisters this client.
+            // fatal record, not a debug line. `%source` logs the preserved
+            // cause (timeout, application-close reason/code, H3, QUIC), not a
+            // static string. The connection task's own teardown deregisters
+            // this client.
             warn!(
                 client = client.as_u64(),
                 source_id,
                 phase,
-                reason = kind.as_str(),
+                source = %kind,
                 total_connection_failures = 1_u64,
                 total_stalls = counters.stalls,
                 total_peer_drops = counters.peer_drops,
