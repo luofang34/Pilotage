@@ -48,6 +48,13 @@ impl ControlState {
         self.steering = steering;
     }
 
+    /// Whether a link-loss policy is currently engaged (the control latch:
+    /// ordinary frames must be rejected while this holds).
+    #[must_use]
+    pub fn policy_engaged(&self) -> bool {
+        self.policy.is_some()
+    }
+
     /// Sets or clears the link-loss policy, arming a `HoldBrief` countdown
     /// if applicable.
     ///

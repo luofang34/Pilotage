@@ -5,8 +5,8 @@
 use crate::convert::ConvertError;
 use crate::ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 use crate::session::{
-    ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRequest,
-    LeaseResponse, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
+    ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRelease,
+    LeaseReleased, LeaseRequest, LeaseResponse, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
 };
 use crate::wire;
 use pilotage_timing::MonoTimestamp;
@@ -138,6 +138,73 @@ impl TryFrom<wire::LeaseRequest> for LeaseRequest {
         Ok(LeaseRequest {
             vehicle: VehicleId::new(vehicle.value),
             scope: ScopeId::new(scope.value),
+        })
+    }
+}
+
+impl TryFrom<wire::LeaseRelease> for LeaseRelease {
+    type Error = ConvertError;
+
+    fn try_from(release: wire::LeaseRelease) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.LeaseRelease",
+            field,
+        };
+        let vehicle = release.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = release.scope.ok_or_else(|| missing("scope"))?;
+        Ok(LeaseRelease {
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
+        })
+    }
+}
+
+impl From<&LeaseRelease> for wire::LeaseRelease {
+    fn from(release: &LeaseRelease) -> Self {
+        wire::LeaseRelease {
+            vehicle: Some(wire::VehicleId {
+                value: release.vehicle.as_u64(),
+            }),
+            scope: Some(wire::ScopeId {
+                value: release.scope.as_str().to_owned(),
+            }),
+        }
+    }
+}
+
+impl From<&LeaseReleased> for wire::LeaseReleased {
+    fn from(released: &LeaseReleased) -> Self {
+        wire::LeaseReleased {
+            vehicle: Some(wire::VehicleId {
+                value: released.vehicle.as_u64(),
+            }),
+            scope: Some(wire::ScopeId {
+                value: released.scope.as_str().to_owned(),
+            }),
+            released: released.released,
+            generation: Some(wire::Generation {
+                value: released.generation.as_u64(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<wire::LeaseReleased> for LeaseReleased {
+    type Error = ConvertError;
+
+    fn try_from(released: wire::LeaseReleased) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.LeaseReleased",
+            field,
+        };
+        let vehicle = released.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = released.scope.ok_or_else(|| missing("scope"))?;
+        let generation = released.generation.ok_or_else(|| missing("generation"))?;
+        Ok(LeaseReleased {
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
+            released: released.released,
+            generation: Generation::new(generation.value),
         })
     }
 }

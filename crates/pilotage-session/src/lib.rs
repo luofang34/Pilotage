@@ -21,13 +21,14 @@ mod capabilities;
 mod clients;
 mod config;
 mod engine;
+mod liveness;
 mod message;
 mod outbound;
 
 #[cfg(test)]
 mod tests;
 
-pub use action::{CloseReason, SessionAction, SessionOutcome};
+pub use action::{CloseReason, LinkLossTrigger, SessionAction, SessionOutcome};
 pub use config::SessionConfig;
 pub use engine::SessionEngine;
 pub use message::{ClientKey, DomainEnvelope};

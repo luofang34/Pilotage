@@ -97,9 +97,9 @@ pub enum BootstrapDecodeError {
 /// Decodes one length-delimited envelope from the front of `bytes` into a
 /// client-origin [`DomainEnvelope`] plus the unconsumed remainder.
 ///
-/// Only `ClientHello` and `LeaseRequest` are legitimately received on the
-/// bootstrap stream (ADR-0005): control frames and `Ping` travel as
-/// datagrams instead.
+/// Only `ClientHello`, `LeaseRequest`, and `LeaseRelease` are legitimately
+/// received on the bootstrap stream (ADR-0005): control frames and `Ping`
+/// travel as datagrams instead.
 ///
 /// # Errors
 ///
@@ -123,6 +123,9 @@ pub fn decode_bootstrap_message(
         Some(wire::envelope::Payload::LeaseRequest(request)) => {
             DomainEnvelope::Lease(LeaseRequest::try_from(request).map_err(DecodeError::from)?)
         }
+        Some(wire::envelope::Payload::LeaseRelease(release)) => DomainEnvelope::Release(
+            pilotage_protocol::LeaseRelease::try_from(release).map_err(DecodeError::from)?,
+        ),
         _ => return Err(BootstrapDecodeError::UnexpectedPayload),
     };
     Ok((domain, rest))
@@ -176,6 +179,9 @@ pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
         OutboundMessage::Welcome(welcome) => wire::envelope::Payload::ServerWelcome(welcome.into()),
         OutboundMessage::LeaseResponse(response) => {
             wire::envelope::Payload::LeaseResponse(response.into())
+        }
+        OutboundMessage::LeaseReleased(released) => {
+            wire::envelope::Payload::LeaseReleased(released.into())
         }
         OutboundMessage::Pong(pong) => wire::envelope::Payload::Pong(pong.into()),
         OutboundMessage::Authority(effect) => {

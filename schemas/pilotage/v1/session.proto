@@ -80,6 +80,29 @@ message LeaseResponse {
   LeaseDenialReason reason = 5;
 }
 
+// A holder voluntarily relinquishes a control scope — the viewer latched
+// input loss (window blur froze its input sources), or any client choosing
+// to stand down. Routed through the authority engine's release path: the
+// generation advances (stragglers are fenced) and the vehicle's link-loss
+// policy engages, exactly as for an involuntary loss. Sent on the reliable
+// bootstrap stream, never as a droppable datagram.
+message LeaseRelease {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+}
+
+// The host's acknowledgement of a `LeaseRelease`: the client may treat its
+// authority as relinquished the moment this arrives (the host silence
+// watchdog remains the independent backup if it never does).
+message LeaseReleased {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  // False when the sender did not hold the scope (nothing was released).
+  bool released = 3;
+  // The fencing generation now in force.
+  Generation generation = 4;
+}
+
 // An RTT/offset probe carrying the sender's local transport-time sample.
 // `nonce` correlates a `Ping` with its `Pong`; it carries no ordering or
 // uniqueness guarantee beyond what the sender chooses.

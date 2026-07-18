@@ -9,7 +9,7 @@
 //!
 //! [`SessionEngine`]: crate::SessionEngine
 
-use pilotage_protocol::{ClientHello, LeaseRequest, Ping, ScopedControlFrame};
+use pilotage_protocol::{ClientHello, LeaseRelease, LeaseRequest, Ping, ScopedControlFrame};
 
 /// Identifies one connected client (one WebTransport session) within a
 /// [`SessionEngine`].
@@ -54,6 +54,10 @@ pub enum DomainEnvelope {
     /// A request to lease a control scope, routed through the authority
     /// engine's grant path.
     Lease(LeaseRequest),
+    /// A holder voluntarily relinquishing a scope, routed through the
+    /// authority engine's release path (generation advances, link-loss
+    /// policy engages) and acknowledged with a `LeaseReleased`.
+    Release(LeaseRelease),
     /// A real-time control frame to be staleness-checked, fence-verified, and
     /// forwarded to the adapter or rejected.
     Frame(ScopedControlFrame),

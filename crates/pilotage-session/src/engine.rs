@@ -12,17 +12,20 @@
 //! See [`SessionEngine`] for the full caveat and the RTT/offset follow-up.
 
 mod handlers;
+mod link_loss;
 
 use pilotage_adapter_api::AdapterCapabilities;
 use pilotage_authority::{AuthorityCommand, AuthorityEffect, AuthorityEngine, LinkState};
 use pilotage_timing::{MonoTimestamp, StalenessPolicy};
 
-use crate::action::{SessionAction, SessionOutcome};
+use crate::action::{LinkLossTrigger, SessionAction, SessionOutcome};
 use crate::capabilities::scope_pairs;
 use crate::clients::ClientRegistry;
 use crate::config::SessionConfig;
+use crate::liveness::{ExpiredHolder, HolderLiveness};
 use crate::message::{ClientKey, DomainEnvelope};
 use crate::outbound::OutboundMessage;
+use link_loss::LinkLossState;
 
 /// A pure host-side session state machine driven by decoded messages and an
 /// explicit clock.
@@ -54,6 +57,17 @@ pub struct SessionEngine {
     staleness: StalenessPolicy,
     config: SessionConfig,
     clients: ClientRegistry,
+    /// Frame-silence deadlines for every scope that has a holder; drives the
+    /// watchdog that releases a holder whose client stops sending while its
+    /// connection stays open.
+    liveness: HolderLiveness,
+    /// Per-vehicle declared link-loss policy selection and which vehicles
+    /// currently have a policy engaged (awaiting the recovery activation
+    /// condition).
+    link_loss: LinkLossState,
+    /// Reusable buffer for the watchdog's expiry pass, so the steady-state
+    /// tick allocates nothing.
+    expired_scratch: Vec<ExpiredHolder>,
 }
 
 impl SessionEngine {
@@ -71,17 +85,24 @@ impl SessionEngine {
         // Registration time is irrelevant (no command consults `now`); a zero
         // stamp keeps construction free of a clock, per ADR-0002.
         let now = MonoTimestamp::from_nanos(0);
+        let mut scope_count: usize = 0;
         for (vehicle, scope) in scope_pairs(&capabilities) {
             clients.register_scope((vehicle, scope.clone()));
             let effects = authority.handle(AuthorityCommand::RegisterScope { vehicle, scope }, now);
             drop(effects);
+            scope_count = scope_count.saturating_add(1);
         }
+        let link_loss =
+            LinkLossState::from_capabilities(&capabilities, &config.link_loss_overrides);
         Self {
             authority,
             capabilities,
             staleness,
             config,
             clients,
+            liveness: HolderLiveness::with_scope_capacity(scope_count),
+            link_loss,
+            expired_scratch: Vec::with_capacity(scope_count),
         }
     }
 
@@ -102,6 +123,9 @@ impl SessionEngine {
         match msg {
             DomainEnvelope::Hello(hello) => self.on_hello(client, hello, &mut actions),
             DomainEnvelope::Lease(request) => self.on_lease(client, request, now, &mut actions),
+            DomainEnvelope::Release(release) => {
+                self.on_release(client, release, now, &mut actions);
+            }
             DomainEnvelope::Frame(frame) => self.on_frame(client, frame, now, &mut actions),
             DomainEnvelope::Ping(ping) => self.on_ping(client, ping, now, &mut actions),
             DomainEnvelope::Disconnect => self.on_disconnect(client, &mut actions),
@@ -109,43 +133,108 @@ impl SessionEngine {
         actions.into_outcome()
     }
 
-    /// Advances time-driven state (offer expiry) to `now`.
+    /// Advances time-driven state to `now`: offer expiry, then the
+    /// holder-silence watchdog.
     ///
-    /// Delegates expiry entirely to the embedded [`AuthorityEngine`], turning
-    /// each expiry effect into an authority broadcast.
+    /// Offer expiry is delegated to the embedded [`AuthorityEngine`]. The
+    /// watchdog then releases every holder whose frame-silence deadline has
+    /// passed by routing a synthetic `HolderLinkChanged { Lost }` through the
+    /// same authority path a disconnect uses, so the generation advances (late
+    /// straggler frames are fenced) and the vehicle is neutralized exactly once.
     ///
     /// The returned [`SessionOutcome`] carries [`SessionOutcome::dropped`], the
-    /// count of broadcasts the per-call cap forced the engine to drop; a
-    /// non-zero value is a correctness signal the driver MUST count.
+    /// count of actions the per-call cap forced the engine to drop; a non-zero
+    /// value is a correctness signal the driver MUST count.
     #[must_use]
     pub fn handle_tick(&mut self, now: MonoTimestamp) -> SessionOutcome {
         let mut actions = Actions::new(self.config.max_actions_per_call);
         let effects = self.authority.expire_due(now);
-        self.fan_out_authority(effects, &mut actions);
+        self.fan_out_authority(
+            effects,
+            now,
+            LinkLossTrigger::AuthorityRevoked,
+            &mut actions,
+        );
+        // A holder that stopped sending frames while its connection stayed open
+        // (a frozen client the QUIC keepalive holds up) is released here. The
+        // expiry list reuses the engine's scratch buffer (taken and restored
+        // around the loop so the borrow does not pin `self`).
+        let mut expired = core::mem::take(&mut self.expired_scratch);
+        self.liveness.expire_into(now, &mut expired);
+        for holder in expired.drain(..) {
+            let effects = self.authority.handle(
+                AuthorityCommand::HolderLinkChanged {
+                    vehicle: holder.vehicle,
+                    scope: holder.scope,
+                    principal: holder.principal,
+                    state: LinkState::Lost,
+                },
+                now,
+            );
+            self.fan_out_authority(effects, now, LinkLossTrigger::HolderSilence, &mut actions);
+        }
+        self.expired_scratch = expired;
         actions.into_outcome()
     }
 
     /// Returns the next time the engine wants a [`SessionEngine::handle_tick`]
-    /// call, delegating to the authority engine's earliest offer expiry.
+    /// call: the earlier of the authority engine's next offer expiry and the
+    /// earliest holder-silence deadline.
     #[must_use]
     pub fn next_deadline(&self) -> Option<MonoTimestamp> {
-        self.authority.next_deadline()
+        min_option(
+            self.authority.next_deadline(),
+            self.liveness.next_deadline(),
+        )
     }
 
     /// Broadcasts each authority effect and keeps holder bookkeeping in sync.
     ///
     /// Every effect that installs or clears an effective holder updates the
-    /// registry so the disconnect path releases exactly the scopes the client
-    /// still holds.
+    /// registry (so the disconnect path releases exactly the scopes the client
+    /// still holds), refreshes or clears the holder-silence watchdog, and emits
+    /// the adapter link-loss engagement for the transition after the broadcast:
+    /// clients learn the fenced state first, then the vehicle is neutralized.
+    /// The engagement rides the uncapped safety lane — a burst of broadcasts
+    /// hitting the per-call cap must never swallow the neutralization
+    /// (fail-closed, never dropped).
     pub(crate) fn fan_out_authority(
         &mut self,
         effects: Vec<AuthorityEffect>,
+        now: MonoTimestamp,
+        trigger: LinkLossTrigger,
         actions: &mut Actions,
     ) {
         for effect in effects {
             self.record_holder_change(&effect);
+            let transition = self.holder_transition_action(&effect, now, trigger);
             actions.broadcast(OutboundMessage::Authority(effect));
+            if let Some(action) = transition {
+                match action {
+                    SessionAction::EngageLinkLoss { .. } => actions.push_safety(action),
+                    _ => actions.push(action),
+                }
+            }
         }
+    }
+
+    /// Refreshes a holder's frame-silence deadline after it sent an accepted
+    /// axis-bearing frame; called from the on-frame accept path. Refresh is
+    /// in place (no allocation) and only for the recorded holder — a frame
+    /// can never create or resurrect a watchdog entry.
+    pub(crate) fn note_frame_accepted(
+        &mut self,
+        vehicle: pilotage_protocol::VehicleId,
+        scope: &pilotage_protocol::ScopeId,
+        holder: pilotage_protocol::PrincipalId,
+        now: MonoTimestamp,
+    ) {
+        self.liveness.refresh(
+            vehicle,
+            scope,
+            holder,
+            now.saturating_add(self.config.holder_silence),
+        );
     }
 
     /// Updates the registry's holder bookkeeping from one authority effect.
@@ -208,6 +297,10 @@ impl SessionEngine {
         scopes: Vec<crate::clients::ScopePair>,
         actions: &mut Actions,
     ) {
+        // Link-loss release and its neutralization do not consult `now` (the
+        // clear path sets no new deadline); a zero stamp keeps disconnect
+        // independent of a clock.
+        let now = MonoTimestamp::from_nanos(0);
         for (vehicle, scope) in scopes {
             let effects = self.authority.handle(
                 AuthorityCommand::HolderLinkChanged {
@@ -216,12 +309,18 @@ impl SessionEngine {
                     principal,
                     state: LinkState::Lost,
                 },
-                // Link-loss handling does not consult `now`; a zero stamp is
-                // sound and keeps disconnect independent of a clock.
-                MonoTimestamp::from_nanos(0),
+                now,
             );
-            self.fan_out_authority(effects, actions);
+            self.fan_out_authority(effects, now, LinkLossTrigger::HolderDisconnect, actions);
         }
+    }
+}
+
+/// The lesser of two optional deadlines, or whichever is present.
+fn min_option(a: Option<MonoTimestamp>, b: Option<MonoTimestamp>) -> Option<MonoTimestamp> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (some, None) | (None, some) => some,
     }
 }
 
@@ -234,6 +333,9 @@ impl SessionEngine {
 #[derive(Debug)]
 pub(crate) struct Actions {
     items: Vec<SessionAction>,
+    /// Count of ordinary (cap-subject) actions in `items`; safety-lane
+    /// pushes are excluded so they never consume ordinary budget.
+    ordinary: usize,
     cap: usize,
     dropped: usize,
 }
@@ -242,6 +344,7 @@ impl Actions {
     fn new(cap: usize) -> Self {
         Self {
             items: Vec::new(),
+            ordinary: 0,
             cap,
             dropped: 0,
         }
@@ -249,10 +352,24 @@ impl Actions {
 
     /// Appends an action unless the per-call cap is already reached.
     pub(crate) fn push(&mut self, action: SessionAction) {
-        if self.items.len() >= self.cap {
+        if self.ordinary >= self.cap {
             self.dropped = self.dropped.wrapping_add(1);
             return;
         }
+        self.ordinary = self.ordinary.saturating_add(1);
+        self.items.push(action);
+    }
+
+    /// Appends a safety-critical action REGARDLESS of the per-call cap.
+    ///
+    /// The cap exists to bound amplification of untrusted client input;
+    /// safety enactments (link-loss engagement) are bounded by the number
+    /// of registered scopes, not by client traffic, and dropping one would
+    /// leave a vehicle executing its last command with authority already
+    /// fenced. A safety action is therefore never droppable behind the
+    /// broadcast cap — the vector may exceed the cap by at most the scope
+    /// count.
+    pub(crate) fn push_safety(&mut self, action: SessionAction) {
         self.items.push(action);
     }
 

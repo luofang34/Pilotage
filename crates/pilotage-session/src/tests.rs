@@ -13,19 +13,26 @@ mod frame;
 mod handshake;
 mod lease;
 mod ping;
+mod recovery;
+mod release;
+mod watchdog;
 
 use core::time::Duration;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ExecutionMode, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
+use pilotage_authority::AuthorityEffect;
 use pilotage_protocol::{
-    ClientHello, ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame,
-    SequenceNum, SessionId, VehicleId,
+    ButtonEdge, ClientHello, ControlPayload, Generation, LeaseRequest, LogicalAxisId,
+    LogicalButtonId, ScopeId, ScopedControlFrame, SequenceNum, SessionId, VehicleId,
 };
 use pilotage_timing::{MonoTimestamp, StalenessPolicy};
 
-use crate::{ClientKey, SessionConfig, SessionEngine};
+use crate::{
+    ClientKey, DomainEnvelope, LinkLossTrigger, OutboundMessage, SessionAction, SessionConfig,
+    SessionEngine, SessionOutcome,
+};
 
 /// The single motion scope used across the tests.
 pub(crate) fn motion() -> ScopeId {
@@ -112,4 +119,115 @@ pub(crate) fn frame(
             edges: Vec::new(),
         },
     }
+}
+
+/// An engine whose holder-silence window is `silence`, so deadlines land at
+/// small, readable nanosecond values.
+pub(crate) fn engine_with_silence(silence: Duration) -> SessionEngine {
+    SessionEngine::new(
+        capabilities(),
+        staleness(),
+        SessionConfig::new(1, "host-test").with_holder_silence(silence),
+    )
+}
+
+/// Grants the motion lease to `client` at `now`, returning the granted
+/// generation the holder must fence its frames with.
+pub(crate) fn grant(engine: &mut SessionEngine, client: ClientKey, now: u64) -> Generation {
+    let outcome = engine.handle_client_message(
+        client,
+        DomainEnvelope::Lease(LeaseRequest {
+            vehicle: VEHICLE,
+            scope: motion(),
+        }),
+        MonoTimestamp::from_nanos(now),
+    );
+    match outcome.actions.last() {
+        Some(SessionAction::SendToClient {
+            envelope: OutboundMessage::LeaseResponse(response),
+            ..
+        }) if response.granted => response.generation,
+        other => panic!("expected a granted lease, got {other:?}"),
+    }
+}
+
+/// Count of `EngageLinkLoss { policy: Neutralize }` actions for [`VEHICLE`].
+pub(crate) fn engaged_neutralize(outcome: &SessionOutcome) -> usize {
+    outcome
+        .actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                SessionAction::EngageLinkLoss {
+                    vehicle,
+                    policy: LinkLossPolicy::Neutralize,
+                    ..
+                } if *vehicle == VEHICLE
+            )
+        })
+        .count()
+}
+
+/// The trigger of the first `EngageLinkLoss` in the outcome, if any.
+pub(crate) fn engage_trigger(outcome: &SessionOutcome) -> Option<LinkLossTrigger> {
+    outcome.actions.iter().find_map(|action| match action {
+        SessionAction::EngageLinkLoss { trigger, .. } => Some(*trigger),
+        _ => None,
+    })
+}
+
+/// Count of `ClearLinkLoss` actions for [`VEHICLE`].
+pub(crate) fn cleared(outcome: &SessionOutcome) -> usize {
+    outcome
+        .actions
+        .iter()
+        .filter(
+            |action| matches!(action, SessionAction::ClearLinkLoss { vehicle } if *vehicle == VEHICLE),
+        )
+        .count()
+}
+
+/// Whether the outcome broadcast a `HolderLinkLost` authority effect.
+pub(crate) fn link_lost(outcome: &SessionOutcome) -> bool {
+    outcome.actions.iter().any(|action| {
+        matches!(
+            action,
+            SessionAction::Broadcast {
+                envelope: OutboundMessage::Authority(AuthorityEffect::HolderLinkLost { .. }),
+            }
+        )
+    })
+}
+
+/// A control frame whose payload demonstrates neutral input (axis at
+/// center, no edges) — the recovery activation condition.
+pub(crate) fn neutral_frame(
+    session: SessionId,
+    generation: Generation,
+    sequence: SequenceNum,
+    sampled_at: MonoTimestamp,
+) -> ScopedControlFrame {
+    let mut f = frame(session, generation, sequence, sampled_at);
+    f.payload = ControlPayload {
+        axes: vec![(LogicalAxisId::new(0), 0.0)],
+        edges: Vec::new(),
+    };
+    f
+}
+
+/// A control frame carrying only a pressed button edge — alive traffic
+/// that is neither setpoint freshness nor a neutral demonstration.
+pub(crate) fn edge_only_frame(
+    session: SessionId,
+    generation: Generation,
+    sequence: SequenceNum,
+    sampled_at: MonoTimestamp,
+) -> ScopedControlFrame {
+    let mut f = frame(session, generation, sequence, sampled_at);
+    f.payload = ControlPayload {
+        axes: Vec::new(),
+        edges: vec![(LogicalButtonId::new(0), ButtonEdge::Pressed)],
+    };
+    f
 }

@@ -7,7 +7,8 @@
 //!
 //! [`SessionEngine`]: crate::SessionEngine
 
-use pilotage_protocol::{FrameRejected, ScopedControlFrame};
+use pilotage_adapter_api::LinkLossPolicy;
+use pilotage_protocol::{FrameRejected, Generation, ScopeId, ScopedControlFrame, VehicleId};
 
 use crate::message::ClientKey;
 use crate::outbound::OutboundMessage;
@@ -81,6 +82,55 @@ pub enum SessionAction {
         /// Why the connection is being closed.
         reason: CloseReason,
     },
+    /// Engage a vehicle's link-loss policy on the adapter because its holder was
+    /// lost (ADR-0008, ADR-0010). Emitted exactly once per loss, after the
+    /// fencing generation has already advanced, so the adapter drives its
+    /// declared policy state (stop / zero velocity / hover-brake) a single
+    /// time. The host does NOT re-transmit: a real flight controller ages
+    /// that final setpoint and enters its own offboard-loss terminal state
+    /// if the link stays absent. This action is emitted on the uncapped
+    /// safety lane — it is never dropped behind the per-call action cap.
+    EngageLinkLoss {
+        /// Vehicle whose control link was lost.
+        vehicle: VehicleId,
+        /// The scope whose holder was lost.
+        scope: ScopeId,
+        /// The fencing generation in force after the loss advanced it;
+        /// straggler frames from the lost holder are behind this value.
+        generation: Generation,
+        /// What judged the link lost.
+        trigger: LinkLossTrigger,
+        /// Policy the adapter should enact, selected and validated from the
+        /// vehicle's declared `link_loss_actions` profile at engine
+        /// construction ([`LinkLossPolicy::Neutralize`] when the profile
+        /// declares it or declares nothing — the fail-closed floor).
+        policy: LinkLossPolicy,
+    },
+    /// Clear a vehicle's engaged link-loss policy on the adapter — the only path
+    /// back to normal control (ADR-0008). Emitted only after BOTH recovery
+    /// conditions hold: a fresh lease generation installed a holder (grant,
+    /// handover, or override — never reconnection alone), and that holder
+    /// demonstrated the scope's activation condition with an accepted
+    /// neutral-axes frame, so a client reconnecting with deflected sticks
+    /// cannot revive motion.
+    ClearLinkLoss {
+        /// Vehicle returning to normal control under a new holder.
+        vehicle: VehicleId,
+    },
+}
+
+/// What judged a holder's control link lost (ADR-0010): typed provenance for
+/// the [`SessionAction::EngageLinkLoss`] it produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkLossTrigger {
+    /// The holder's transport disconnected.
+    HolderDisconnect,
+    /// The holder stayed transport-connected but sent no accepted
+    /// axis-bearing frame within the holder-silence window.
+    HolderSilence,
+    /// The holder's lease was revoked by an authority transition (an
+    /// explicit release or an override displacing it).
+    AuthorityRevoked,
 }
 
 /// Why the engine asked the driver to close a client connection.

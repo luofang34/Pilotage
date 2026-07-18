@@ -30,5 +30,7 @@ message Envelope {
     Ping ping = 10;
     Pong pong = 11;
     FrameRejected frame_rejected = 12;
+    LeaseRelease lease_release = 13;
+    LeaseReleased lease_released = 14;
   }
 }

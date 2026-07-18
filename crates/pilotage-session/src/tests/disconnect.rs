@@ -166,8 +166,22 @@ fn disconnect_dropping_link_lost_broadcasts_is_reported_not_silent() {
         DomainEnvelope::Disconnect,
         MonoTimestamp::from_nanos(5),
     );
-    // The cap truncated the emitted actions...
-    assert_eq!(outcome.actions.len(), cap);
+    // The cap truncated the ordinary actions (broadcasts), while the safety
+    // lane still delivered the vehicle's single link-loss engagement above
+    // the cap — a safety enactment is never droppable behind the broadcast
+    // cap.
+    let engagements = outcome
+        .actions
+        .iter()
+        .filter(|a| matches!(a, SessionAction::EngageLinkLoss { .. }))
+        .count();
+    assert_eq!(engagements, 1, "one engagement per vehicle loss");
+    assert_eq!(
+        outcome.actions.len(),
+        cap + engagements,
+        "ordinary actions stay capped: {:?}",
+        outcome.actions
+    );
     // ...and the truncation is reported, not silent (the finding's contract).
     assert!(
         outcome.dropped > 0,

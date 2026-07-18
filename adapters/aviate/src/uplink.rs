@@ -20,6 +20,8 @@ use crate::mavlink::{
     encode_velocity_setpoint,
 };
 
+mod fc_replies;
+
 /// Full-stick horizontal velocity demand.
 const MAX_HORIZONTAL_MPS: f32 = 3.0;
 /// FPV mode: full-stick roll/pitch attitude demand (~35°).
@@ -315,45 +317,49 @@ impl FlightUplink {
         self.send(&frame);
     }
 
-    /// Drains FC replies off the uplink socket (COMMAND_ACK, heartbeats
-    /// the FC sends its learned commander), returning the latest
-    /// armed-state report if any heartbeat arrived. Non-blocking; call
-    /// from the sampling tick.
-    pub fn poll_fc(&mut self) -> Option<bool> {
-        let mut buf = [0u8; 512];
-        let mut messages: Vec<(crate::mavlink::FrameSource, crate::mavlink::AviateMessage)> =
-            Vec::new();
-        let mut armed: Option<bool> = None;
-        while let Ok((len, _)) = self.socket.recv_from(&mut buf) {
-            messages.clear();
-            crate::mavlink::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
-            for (source, message) in &messages {
-                if source.system_id != self.expected_system_id
-                    || source.component_id != self.expected_component_id
-                {
-                    continue;
-                }
-                match *message {
-                    crate::mavlink::AviateMessage::Heartbeat { armed: a } => armed = Some(a),
-                    crate::mavlink::AviateMessage::CommandAck { command, result } => {
-                        if result == 0 {
-                            info!(command, "FC accepted command");
-                        } else {
-                            warn!(command, result, "FC rejected command");
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        armed
-    }
-
     /// The socket's local address, for tests.
     /// The MAVLink (system, component) identity this uplink accepts FC
     /// reports from — the provenance identity for those reports.
     pub fn expected_source(&self) -> (u8, u8) {
         (self.expected_system_id, self.expected_component_id)
+    }
+
+    /// Wrapping count of datagrams the socket refused to send. A safety
+    /// enactment (link-loss neutralize) compares this across its send:
+    /// an increment means the FC never received the command, which must
+    /// surface as a typed enactment failure — never as silent success.
+    pub fn send_failures(&self) -> u64 {
+        self.send_failures
+    }
+
+    /// Invalidates any captured position-hold context. A link-loss
+    /// transition MUST call this: the hold point was captured under the
+    /// lost lease, and the vehicle may have drifted arbitrarily far while
+    /// neutralized, so a hold surviving the loss would command recovery
+    /// back toward an obsolete point the instant control resumes.
+    pub fn clear_hold_state(&mut self) {
+        self.hold_pos_ned = None;
+        self.last_vel_ned = [0.0; 3];
+    }
+
+    /// Whether a position-hold point is currently captured, for tests.
+    #[cfg(test)]
+    pub(crate) fn hold_captured(&self) -> bool {
+        self.hold_pos_ned.is_some()
+    }
+
+    /// Plants a captured hold point, for tests exercising the stale-hold
+    /// invalidation contract without flying a full trajectory.
+    #[cfg(test)]
+    pub(crate) fn seed_hold_for_test(&mut self, pos_ned_m: [f32; 3]) {
+        self.hold_pos_ned = Some(pos_ned_m);
+    }
+
+    /// Expires the post-arm quiet window immediately, so tests advance
+    /// past it deterministically instead of sleeping wall-clock time.
+    #[cfg(test)]
+    pub(crate) fn expire_quiet_for_test(&mut self) {
+        self.quiet_until = None;
     }
 
     /// The local socket address this uplink receives FC replies on.

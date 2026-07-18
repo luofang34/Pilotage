@@ -11,9 +11,10 @@ use std::collections::BTreeMap;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, CalibrationId, CaptureClockMapping, Disposition,
-    ExecutionMode, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason, SIM_FPV_CALIBRATION_ID,
-    SIM_FPV_CAMERA_ID, ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoCaptureStamp, VideoSource,
+    ExecutionMode, LinkLossEnactError, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason,
+    SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, ScopeDescriptor, SourceIncarnation, StepBudget,
+    StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter, VehicleDescriptor,
+    VideoCaptureStamp, VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
@@ -347,6 +348,16 @@ impl VehicleAdapter for GazeboAdapter {
                 disposition: Disposition::Rejected(reason),
             };
         }
+        // The link-loss latch: while a policy is engaged the wheels stay
+        // stopped and ordinary frames are suppressed, so a newly granted
+        // holder with deflected sticks cannot drive the vehicle out of its
+        // policy state before the host clears the latch.
+        if self.link_loss_policy.is_some() {
+            return ApplyOutcome {
+                tick: self.latest_tick(),
+                disposition: Disposition::Rejected(RejectReason::LinkLossEngaged),
+            };
+        }
         let (control, transformed) = control_from_frame(frame);
         if !self.bridge.try_send_control(control) {
             return ApplyOutcome {
@@ -395,24 +406,33 @@ impl VehicleAdapter for GazeboAdapter {
         ]
     }
 
-    fn set_link_loss_policy(&mut self, vehicle: VehicleId, policy: Option<LinkLossPolicy>) {
+    fn set_link_loss_policy(
+        &mut self,
+        vehicle: VehicleId,
+        policy: Option<LinkLossPolicy>,
+    ) -> Result<(), LinkLossEnactError> {
         if vehicle != self.vehicle {
-            return;
+            return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
         self.link_loss_policy = policy;
         // On link loss, halt the vehicle immediately. Only `Neutralize` is
         // advertised (a diff-drive without onboard automation has no richer
         // safe action), so any engaged policy stops the wheels; clearing the
         // policy (`None`, link recovery) leaves the last operator command in
-        // effect. A closed control link means the vehicle is already stopping
-        // on its own bridge-side timeout, so a failed send is not fatal here.
-        if policy.is_some() {
-            let stopped = self.bridge.try_send_control(BridgeControl {
+        // effect. The bridge also stops the vehicle on its own timeout when
+        // the control link is closed, but a refused stop is still a fault
+        // the caller must count — the latch is engaged either way.
+        if policy.is_some()
+            && !self.bridge.try_send_control(BridgeControl {
                 linear_x: 0.0,
                 angular_z: 0.0,
+            })
+        {
+            return Err(LinkLossEnactError::ChannelRejected {
+                detail: "bridge refused the neutral stop command".to_owned(),
             });
-            let _ = stopped;
         }
+        Ok(())
     }
 
     fn step(&mut self, _budget: StepBudget) -> StepOutcome {

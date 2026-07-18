@@ -7,11 +7,11 @@
 use pilotage_authority::{AuthorityCommand, AuthorityEffect, FrameVerdict};
 use pilotage_protocol::{
     ClientHello, FrameRejected, FrameRejectionReason, Generation, LeaseDenialReason, LeaseRequest,
-    Ping, Pong, ScopedControlFrame, ServerWelcome,
+    Ping, Pong, PrincipalId, ScopedControlFrame, ServerWelcome,
 };
 use pilotage_timing::{Freshness, MonoTimestamp};
 
-use crate::action::{CloseReason, SessionAction};
+use crate::action::{CloseReason, LinkLossTrigger, SessionAction};
 use crate::capabilities::host_capabilities;
 use crate::clients::ScopePair;
 use crate::engine::{Actions, SessionEngine};
@@ -111,8 +111,10 @@ impl SessionEngine {
             .iter()
             .any(|effect| matches!(effect, AuthorityEffect::CommandRejected { .. }));
         // `fan_out_authority` updates the holder record from the grant effect,
-        // so the post-grant generation lookup reflects the advanced value.
-        self.fan_out_authority(effects, actions);
+        // so the post-grant generation lookup reflects the advanced value. A
+        // grant can also displace a prior holder (revoke effect), which is an
+        // authority-driven loss, not silence or a disconnect.
+        self.fan_out_authority(effects, now, LinkLossTrigger::AuthorityRevoked, actions);
         let current_generation = self
             .clients
             .generation_of(&pair)
@@ -123,6 +125,54 @@ impl SessionEngine {
             lease_granted(&request, current_generation)
         };
         actions.send(client, OutboundMessage::LeaseResponse(response));
+    }
+
+    /// Routes a voluntary scope release through the authority engine and
+    /// acknowledges it (ADR-0006). A successful release advances the
+    /// fencing generation and engages the vehicle's link-loss policy —
+    /// the same authoritative state an involuntary loss produces — so a
+    /// client that latched input loss relinquishes deterministically
+    /// instead of waiting out the silence watchdog (which remains the
+    /// independent backup). The acknowledgement is unicast on the
+    /// reliable bootstrap stream; `released` is false when the sender did
+    /// not hold the scope, so a stale or duplicate release is a no-op the
+    /// client can observe.
+    pub(super) fn on_release(
+        &mut self,
+        client: ClientKey,
+        release: pilotage_protocol::LeaseRelease,
+        now: MonoTimestamp,
+        actions: &mut Actions,
+    ) {
+        let Some(principal) = self.welcomed_principal(client, actions) else {
+            return;
+        };
+        let pair: ScopePair = (release.vehicle, release.scope.clone());
+        let effects = self.authority.handle(
+            AuthorityCommand::Release {
+                vehicle: release.vehicle,
+                scope: release.scope.clone(),
+                by: principal,
+            },
+            now,
+        );
+        let released = effects
+            .iter()
+            .any(|effect| matches!(effect, AuthorityEffect::ScopeLeaseRevoked { .. }));
+        self.fan_out_authority(effects, now, LinkLossTrigger::AuthorityRevoked, actions);
+        let generation = self
+            .clients
+            .generation_of(&pair)
+            .unwrap_or_else(|| Generation::new(0));
+        actions.send(
+            client,
+            OutboundMessage::LeaseReleased(pilotage_protocol::LeaseReleased {
+                vehicle: release.vehicle,
+                scope: release.scope,
+                released,
+                generation,
+            }),
+        );
     }
 
     /// Staleness-checks, fence-verifies, then forwards or rejects a control
@@ -172,9 +222,7 @@ impl SessionEngine {
             .authority
             .verify_frame(frame.vehicle, &frame.scope, frame.generation)
         {
-            FrameVerdict::Accepted => {
-                actions.push(SessionAction::ApplyToAdapter { frame });
-            }
+            FrameVerdict::Accepted => self.accept_frame(frame, sender, now, actions),
             FrameVerdict::RejectedStaleGeneration { current } => {
                 actions.push(reject_frame(
                     client,
@@ -201,6 +249,31 @@ impl SessionEngine {
                 ));
             }
         }
+    }
+
+    /// Books an accepted frame: refreshes setpoint freshness, runs the
+    /// recovery activation check, and forwards the frame to the adapter.
+    fn accept_frame(
+        &mut self,
+        frame: ScopedControlFrame,
+        sender: PrincipalId,
+        now: MonoTimestamp,
+        actions: &mut Actions,
+    ) {
+        // The holder is actively driving; push its frame-silence deadline
+        // forward so the watchdog only fires on real silence. Only an
+        // axis-bearing frame counts as setpoint freshness — discrete/
+        // edge-only traffic proves the client is alive, not that it is
+        // commanding the vehicle, and must not hold the lease of an
+        // axis-silent holder open.
+        if !frame.payload.axes.is_empty() {
+            self.note_frame_accepted(frame.vehicle, &frame.scope, sender, now);
+        }
+        // A demonstrated-neutral frame from the fenced new holder is the
+        // recovery activation condition; the clear (if any) is emitted
+        // before the apply so the adapter un-latches first.
+        self.maybe_activate_recovery(frame.vehicle, &frame.scope, &frame.payload, actions);
+        actions.push(SessionAction::ApplyToAdapter { frame });
     }
 
     /// Answers a `Ping` with a `Pong` echoing the sender sample and stamping
