@@ -50,10 +50,12 @@ import { TurnDerivation } from "./turn-derivation.js";
 import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, FcStateTracker, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
+import { runBootstrapReader } from "./bootstrap.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
+import { createReconnectController } from "./reconnect.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -225,13 +227,30 @@ function hexToBytes(hex) {
   return out;
 }
 
-async function connect() {
+// A superseded attempt (a newer session token began) returns this so the
+// reconnect controller does not treat it as a failure and reschedule — the
+// newer flow owns recovery.
+const SUPERSEDED = { ok: true };
+
+// Opening one session. `manual` is true only for a user-initiated Connect:
+// only then is the motion lease requested and control resumed. An automatic
+// reconnect (`manual: false`) restores transport, telemetry, and video but
+// NEVER re-requests motion authority — control stays suspended until the user
+// explicitly reconnects. Returns `{ ok }` / `{ ok: false, failure }` for the
+// reconnect controller.
+async function connect({ manual } = { manual: true }) {
   const host = els.host.value.trim();
   const port = els.port.value.trim();
   const certHashHex = els.certHash.value.trim();
   if (!host || !port || !certHashHex) {
     log("host, port, and cert hash are all required");
-    return;
+    return { ok: false, failure: { phase: "construct" } };
+  }
+  // A SHA-256 hash is exactly 32 bytes; anything else is a configuration
+  // error (non-retryable), not something WebTransport should be handed.
+  if (!/^[0-9a-fA-F]{64}$/.test(certHashHex)) {
+    log("certificate hash must be exactly 64 hexadecimal characters (SHA-256)");
+    return { ok: false, failure: { phase: "construct" } };
   }
   const url = `https://${host}:${port}/pilotage`;
   const certHash = hexToBytes(certHashHex);
@@ -243,7 +262,7 @@ async function connect() {
     });
   } catch (error) {
     log(`WebTransport creation failed: ${error}`);
-    return;
+    return { ok: false, failure: { phase: "construct" } };
   }
   const token = transportSessions.begin(transport);
   transportSessions.runIfActive(token, () => {
@@ -259,7 +278,8 @@ async function connect() {
     state.skippedVideoFrames = 0;
     resetVideoDiagnostics();
     retireSessionPresentation("connecting");
-    log(`connecting to ${url} pinned to cert hash ${certHashHex.slice(0, 16)}...`);
+    const mode = manual ? "requesting control" : "auto-reconnect, telemetry/video only";
+    log(`connecting to ${url} (${mode}) pinned to cert hash ${certHashHex.slice(0, 16)}...`);
   });
 
   transport.closed.then(
@@ -269,20 +289,42 @@ async function connect() {
 
   try {
     await transport.ready;
-    if (!transportSessions.isActive(token)) return;
+    if (!transportSessions.isActive(token)) return SUPERSEDED;
     log("WebTransport session ready");
 
     const bidi = await transport.createBidirectionalStream();
-    if (!transportSessions.isActive(token)) return;
+    if (!transportSessions.isActive(token)) return SUPERSEDED;
     const writer = bidi.writable.getWriter();
     const reader = bidi.readable.getReader();
-    if (!transportSessions.trackWriter(token, writer)) return;
-    if (!transportSessions.trackReader(token, reader)) return;
+    if (!transportSessions.trackWriter(token, writer)) return SUPERSEDED;
+    if (!transportSessions.trackReader(token, reader)) return SUPERSEDED;
 
-    if (!(await sendClientHello(writer, token))) return;
-    const negotiated = await runBootstrapReader(reader, writer, token);
-    if (!transportSessions.isActive(token)) return;
-    if (!negotiated) throw new Error("bootstrap stream closed before LeaseResponse");
+    if (!(await sendClientHello(writer, token))) return SUPERSEDED;
+    // Only a manual connect requests the motion lease; an auto-reconnect
+    // completes bootstrap at ServerWelcome, leaving control suspended.
+    const bootstrap = await runBootstrapReader({
+      reader,
+      decode: decodeLengthDelimitedEnvelope,
+      isActive: () => transportSessions.isActive(token),
+      onMessage: (decoded) => handleBootstrapMessage(decoded, token),
+      requestLease: manual,
+      sendLeaseRequest: () => sendLeaseRequest(writer, token),
+    });
+    if (!transportSessions.isActive(token)) return SUPERSEDED;
+    if (!bootstrap.completed) {
+      // An untyped stream end is RETRYABLE wherever it lands in the
+      // handshake: the host's Close carries no wire payload today, so a
+      // pre-welcome EOF is indistinguishable from an ordinary early
+      // transport drop, and classifying it as a rejection would
+      // permanently stop recovery after a network blip. Only a TYPED
+      // protocol rejection may set `bootstrapRejected` (none exists on
+      // the wire yet — tracked in the reconnection issue).
+      throw new Error(
+        bootstrap.welcomed
+          ? "bootstrap stream closed after welcome, before it completed"
+          : "bootstrap stream closed before ServerWelcome",
+      );
+    }
 
     // Negotiation is the lifecycle boundary for measurement ordering. The
     // token prevents readers from the replaced transport from reaching this
@@ -291,6 +333,9 @@ async function connect() {
     instruments.fcState = new FcStateTracker();
     setTelemetrySessionState(els, "awaiting");
     state.connected = true;
+    // Bootstrap is proven good only here — reset the reconnect backoff now, not
+    // at transport.ready (which precedes bootstrap).
+    reconnect.notifyBootstrapComplete();
     acceptIncomingUniStreams(transport, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`incoming uni-stream accept loop error: ${error}`));
     });
@@ -301,19 +346,27 @@ async function connect() {
       startControlLoop(transport, token).catch((error) => {
         transportSessions.runIfActive(token, () => log(`control loop stopped: ${error}`));
       });
-    } else {
+    } else if (manual) {
       // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
       // advertises no controllable scopes; sending control frames anyway
       // would only generate a 30 Hz stream of rejections.
       log("no control lease granted; viewer is telemetry/video only");
+    } else {
+      log("reconnected (telemetry/video); press Connect to resume control");
     }
+    return { ok: true };
   } catch (error) {
-    if (!transportSessions.isActive(token)) return;
+    if (!transportSessions.isActive(token)) return SUPERSEDED;
     state.connected = false;
     state.transport = null;
     retireSessionPresentation("failed");
     log(`connect failed: ${error}`);
     transportSessions.close(token);
+    // "rejected" (non-retryable) is reserved for a TYPED protocol
+    // rejection or authenticated close code; an untyped failure — EOF,
+    // reset, timeout — is always a retryable transport drop.
+    const phase = error && error.bootstrapRejected ? "rejected" : "transport";
+    return { ok: false, failure: { phase } };
   }
 }
 
@@ -324,7 +377,25 @@ function handleTransportClosed(token, error) {
   retireSessionPresentation(error === null ? "disconnected" : "failed");
   log(error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
   transportSessions.retire(token);
+  // The drop was not user-initiated (there is no disconnect control); recover
+  // the transport if the user still wants a session. A clean or errored close
+  // is treated as a transient transport drop — retried with capped, jittered
+  // backoff. Control is NOT resumed by the reconnect (see connect: manual).
+  reconnect.notifyDropped({ phase: "transport" });
 }
+
+/** Auto-recovery for an unexpectedly dropped session: reconnects the transport
+ *  (telemetry/video) with capped, jittered backoff, and never re-requests
+ *  motion authority. Uses real timers, page visibility, and session state. */
+const reconnect = createReconnectController({
+  connect,
+  schedule: (delayMs, cb) => setTimeout(cb, delayMs),
+  cancel: (handle) => clearTimeout(handle),
+  isVisible: () => document.visibilityState === "visible",
+  isActive: () => transportSessions.active !== null,
+  random: () => Math.random(),
+  log,
+});
 
 /** Writes a length-delimited `ClientHello` envelope onto the bootstrap bidi stream. */
 async function sendClientHello(writer, token) {
@@ -370,30 +441,6 @@ function lengthDelimit(envelopeBytes) {
   return out;
 }
 
-/** Reads bootstrap frames until ServerWelcome and LeaseResponse establish the session. */
-async function runBootstrapReader(reader, writer, token) {
-  let pending = new Uint8Array(0);
-  let sentLease = false;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (!transportSessions.isActive(token)) return false;
-    if (done) return false;
-    pending = appendBytes(pending, value);
-    for (;;) {
-      const decoded = decodeLengthDelimitedEnvelope(pending);
-      if (!decoded) break;
-      pending = pending.subarray(decoded.consumed);
-      handleBootstrapMessage(decoded, token);
-      if (decoded.kind === "ServerWelcome" && !sentLease) {
-        sentLease = true;
-        if (!(await sendLeaseRequest(writer, token))) return false;
-      }
-      if (decoded.kind === "LeaseResponse") {
-        return true;
-      }
-    }
-  }
-}
 
 function handleBootstrapMessage(decoded, token) {
   if (!transportSessions.isActive(token)) return;
@@ -1226,5 +1273,14 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   state.pendingReset = true;
 });
 els.connectBtn.addEventListener("click", () => {
-  void connect();
+  // An explicit, user-initiated start: resets the reconnect backoff and is the
+  // only path that requests control.
+  reconnect.requestConnect();
+});
+
+// Returning to a tab the browser had frozen is the moment to recover: the
+// session likely idle-dropped while away, and only now can a reconnect succeed
+// (a hidden tab would just drop again).
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") reconnect.notifyVisible();
 });
