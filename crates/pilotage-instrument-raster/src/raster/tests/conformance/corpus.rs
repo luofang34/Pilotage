@@ -11,6 +11,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 mod builders;
+mod layer_builders;
 
 use std::vec::Vec;
 
@@ -195,7 +196,7 @@ pub(super) fn corpus() -> Vec<CorpusEntry> {
     builders::text_entries(&mut out);
     builders::paint_fault_entries(&mut out);
     builders::malformed_entries(&mut out);
-    builders::layer_entries(&mut out);
-    builders::budget_entries(&mut out);
+    layer_builders::layer_entries(&mut out);
+    layer_builders::budget_entries(&mut out);
     out
 }

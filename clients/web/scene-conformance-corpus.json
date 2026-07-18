@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
-  "corpusVersion": 2,
+  "corpusVersion": 3,
   "generatedBy": "pilotage-instrument-raster REN-04 conformance reference",
   "simOnly": "Canvas/browser backend is SIM / NOT FOR FLIGHT",
   "canonicalization": "trace args are Q8.8 floor(v*256); non-finite as nan/inf/-inf",
   "review": {
-    "reason": "Add interpreterRejects: the browser interpreter now enforces raw-argument guards (finite floats, |coordinate| <= coordLimitPx, path vertex budget) and the golden pins where it must throw; new paint-fault cases cover the rotate/translate/arc/stroke-width guard paths.",
+    "reason": "Add text-centered-multichar: a center-anchored multi-digit run at a readout-like size, pinning that both backends place centered readout values from the same nominal advance (DISP-02's width-aware readout fitting relies on that agreement).",
     "approvedBy": "REN-04 owner; regenerated goldens require human review and are never rewritten by CI."
   },
   "budgets": {
@@ -19,7 +19,7 @@
     "coordLimitPx": 32767,
     "worstCaseFrameBytes": 67108864
   },
-  "corpusSha256": "52d0c09cec4c8b73aea1bda4d9adbb6597a86fe184881e75d777520af4b576f3",
+  "corpusSha256": "7130efd29b19c2f0fb4622cefd7357dd4e6c038f70efa27e0adbebc4d03cdc6f",
   "entries": [
     {
       "name": "empty-background-canonical",
@@ -185,6 +185,20 @@
       "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 2, "layerCommands": [0, 4, 0, 0, 0, 0] },
       "render": { "ok": true, "error": null },
       "commandTrace": ["50:1", "01", "10:255,255,255,255", "30:3584,0,10240,10240,31", "02", "51:1"],
+      "interpreterRejects": null,
+      "canvasMethods": null,
+      "framingBoundaries": null
+    },
+    {
+      "name": "text-centered-multichar",
+      "category": "text",
+      "notes": "Center-anchored multi-digit run at a readout-like size: both backends place the run from the same nominal advance, so a centered readout value lands identically.",
+      "bytesHex": "0150010002010000100400ffffffff3012000000a841050000704300003443313033303002000051010002",
+      "framingValid": true,
+      "decode": { "ok": true, "error": null },
+      "gate": { "verdict": "accept", "error": null, "unknownOpcodes": 0, "layersPresent": 4, "layerCommands": [0, 0, 4, 0, 0, 0] },
+      "render": { "ok": true, "error": null },
+      "commandTrace": ["50:2", "01", "10:255,255,255,255", "30:5376,5,61440,46080,3130333030", "02", "51:2"],
       "interpreterRejects": null,
       "canvasMethods": null,
       "framingBoundaries": null
