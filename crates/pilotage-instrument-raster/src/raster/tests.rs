@@ -9,6 +9,7 @@ use crate::{FrameId, FramebufferDims, RasterError, RenderReport, RenderStatus, r
 mod attitude_behavior;
 mod conformance;
 mod frame_hashes;
+mod readout_bounds;
 mod work_budget;
 
 const BLACK: Rgba8 = Rgba8::rgb(0, 0, 0);

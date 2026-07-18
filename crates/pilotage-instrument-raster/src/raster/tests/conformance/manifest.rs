@@ -22,10 +22,10 @@ use super::outcomes::{Outcome, outcome_of};
 use crate::{MAX_DIMENSION, MAX_POLYGON_VERTICES, WORST_CASE_FRAME_BYTES};
 
 const SCHEMA_VERSION: u32 = 2;
-const CORPUS_VERSION: u32 = 2;
-const REVIEW_REASON: &str = "Add interpreterRejects: the browser interpreter now enforces raw-argument \
-guards (finite floats, |coordinate| <= coordLimitPx, path vertex budget) and the golden pins where it \
-must throw; new paint-fault cases cover the rotate/translate/arc/stroke-width guard paths.";
+const CORPUS_VERSION: u32 = 3;
+const REVIEW_REASON: &str = "Add text-centered-multichar: a center-anchored multi-digit run at a \
+readout-like size, pinning that both backends place centered readout values from the same nominal \
+advance (DISP-02's width-aware readout fitting relies on that agreement).";
 const REVIEW_APPROVED_BY: &str =
     "REN-04 owner; regenerated goldens require human review and are never rewritten by CI.";
 

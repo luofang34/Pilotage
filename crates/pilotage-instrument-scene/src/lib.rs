@@ -23,6 +23,7 @@ mod decode;
 mod encode;
 mod layer;
 mod opcode;
+mod text_metrics;
 
 pub use cmd::{Anchor, Cmd, HAlign, MAX_TEXT_BYTES, PaintMode, PointsRef, VAlign};
 pub use color::Rgba8;
@@ -31,6 +32,9 @@ pub use encode::{SceneError, SceneWriter};
 pub use layer::{
     LAYER_COUNT, LayerError, LayerId, LayerReport, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES,
     MAX_STACK_DEPTH, validate_layers,
+};
+pub use text_metrics::{
+    NOMINAL_ADVANCE_RATIO, NOMINAL_GLYPH_RATIO, nominal_text_ink_width, nominal_text_width,
 };
 
 /// Format version written as the first byte of every encoded scene.

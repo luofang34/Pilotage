@@ -21,7 +21,7 @@ use crate::{FrameId, FramebufferDims, RenderStatus, render};
 // covers the reference-typed heading: the rose turns with the fixture's
 // explicit SIM-declared independent sample — never quaternion yaw — and
 // paints the amber SIM reference label (NAV-01).
-const PFD_SHA256: &str = "3148b8e9d5c3d9cc5c1ac812c3f5674615649c65d4966ad3f1a85d1ce1f1d952";
+const PFD_SHA256: &str = "43b49bde6bbf7372d704d54214d4a3d0b9cd3ad09e86862a8ffc20fd6ae05ef1";
 const HSI_SHA256: &str = "66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c";
 
 /// A fixed, richly populated state so every panel band paints content.

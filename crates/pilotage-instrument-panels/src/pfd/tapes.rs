@@ -4,7 +4,9 @@
 //! height (7.2 px/kt), altitude ±150 ft (1.2 px/ft), VSI ±1500 fpm full
 //! scale.
 
-use pilotage_instrument_scene::{Anchor, PaintMode, Rgba8, SceneError, SceneWriter};
+use pilotage_instrument_scene::{
+    Anchor, PaintMode, Rgba8, SceneError, SceneWriter, nominal_text_ink_width, nominal_text_width,
+};
 use pilotage_instrument_state::AltitudeClass;
 use pilotage_instrument_state::{PanelData, Sig};
 
@@ -55,7 +57,7 @@ pub fn speed_tape(
 
     // Pointed readout box, always drawn so `Missing` shows dashes.
     let text = fmt_label!(8, "{:03}", libm::roundf(ias.value) as i32);
-    pointed_box_right(scene, ias, text.as_str())?;
+    pointed_readout(scene, ias, text.as_str(), &IAS_READOUT)?;
 
     // Groundspeed box under the tape.
     let gs = data.gs_kt;
@@ -105,10 +107,47 @@ fn band_rect(
     Ok(())
 }
 
-fn pointed_box_right(
+/// Geometry of a pointed tape readout: the rectangular body spans
+/// `far_x`..`near_x`, the tip at `tip_x` points toward the tape, and
+/// the value is anchored at `text_x`, no larger than `preferred_size`.
+struct PointedBox {
+    far_x: f32,
+    near_x: f32,
+    tip_x: f32,
+    text_x: f32,
+    preferred_size: f32,
+}
+
+/// Airspeed readout: body at the panel's left edge, tip pointing right.
+const IAS_READOUT: PointedBox = PointedBox {
+    far_x: 2.0,
+    near_x: 75.0,
+    tip_x: 90.0,
+    text_x: 40.0,
+    preferred_size: 28.0,
+};
+
+/// Altitude readout: body at the panel's right edge, tip pointing left.
+const ALT_READOUT: PointedBox = PointedBox {
+    far_x: 478.0,
+    near_x: 405.0,
+    tip_x: 390.0,
+    text_x: 442.0,
+    preferred_size: 26.0,
+};
+
+/// Pointed value readout beside a tape. The run size shrinks
+/// deterministically from `preferred_size` until the run's nominal ink
+/// (the scene text-metrics contract every backend honors) fits the box
+/// body, so a wide value — "10300", "-1030" — renders smaller, never
+/// outside the box: an overflowing readout is silent display
+/// corruption (DISP-02), which the box must make impossible for the
+/// signal's whole representable range.
+fn pointed_readout(
     scene: &mut SceneWriter<'_>,
     sig: Sig<f32>,
     text: &str,
+    geo: &PointedBox,
 ) -> Result<(), SceneError> {
     scene.fill_color(palette::BOX_BG)?;
     let border = status_paint::status_accent(sig.status).unwrap_or(palette::WHITE);
@@ -116,13 +155,13 @@ fn pointed_box_right(
     scene.polygon(
         PaintMode::FillStroke,
         &[
-            [2.0, 155.0],
-            [75.0, 155.0],
-            [75.0, 168.0],
-            [90.0, 180.0],
-            [75.0, 192.0],
-            [75.0, 205.0],
-            [2.0, 205.0],
+            [geo.far_x, 155.0],
+            [geo.near_x, 155.0],
+            [geo.near_x, 168.0],
+            [geo.tip_x, 180.0],
+            [geo.near_x, 192.0],
+            [geo.near_x, 205.0],
+            [geo.far_x, 205.0],
         ],
     )?;
     scene.fill_color(if sig.status.shows_value() {
@@ -135,8 +174,31 @@ fn pointed_box_right(
     } else {
         "---"
     };
-    scene.text(40.0, 180.0, 28.0, Anchor::CENTER, shown)?;
+    let size = fitted_text_size(geo, shown.chars().count());
+    scene.text(geo.text_x, 180.0, size, Anchor::CENTER, shown)?;
     Ok(())
+}
+
+/// Largest run size, capped at the box's preferred size, whose nominal
+/// extents stay inside the box body from the box's text anchor: a
+/// center anchor overhangs half the anchor width leftward and the ink
+/// width minus that half rightward, and both extents scale linearly
+/// with size, so the cap is a pure ratio.
+fn fitted_text_size(geo: &PointedBox, chars: usize) -> f32 {
+    let body_left = geo.far_x.min(geo.near_x);
+    let body_right = geo.far_x.max(geo.near_x);
+    let width = nominal_text_width(geo.preferred_size, chars);
+    let ink = nominal_text_ink_width(geo.preferred_size, chars);
+    let left_need = width / 2.0;
+    let right_need = ink - width / 2.0;
+    let mut scale = 1.0f32;
+    if left_need > geo.text_x - body_left {
+        scale = scale.min((geo.text_x - body_left) / left_need);
+    }
+    if right_need > body_right - geo.text_x {
+        scale = scale.min((body_right - geo.text_x) / right_need);
+    }
+    geo.preferred_size * scale.max(0.0)
 }
 
 /// Right-edge altitude tape with selected-altitude bug and baro box.
@@ -190,7 +252,7 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
     }
 
     let text = fmt_label!(12, "{}", libm::roundf(alt.value / 10.0) as i64 * 10);
-    pointed_box_left(scene, alt, text.as_str())?;
+    pointed_readout(scene, alt, text.as_str(), &ALT_READOUT)?;
     reference_label(scene, data)?;
     baro_and_sel_boxes(scene, data)?;
     Ok(())
@@ -207,40 +269,6 @@ fn reference_label(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), 
         _ => palette::WHITE,
     })?;
     scene.text(442.0, 222.0, 12.0, Anchor::CENTER, class.label())?;
-    Ok(())
-}
-
-fn pointed_box_left(
-    scene: &mut SceneWriter<'_>,
-    sig: Sig<f32>,
-    text: &str,
-) -> Result<(), SceneError> {
-    scene.fill_color(palette::BOX_BG)?;
-    let border = status_paint::status_accent(sig.status).unwrap_or(palette::WHITE);
-    scene.stroke(border, 2.0)?;
-    scene.polygon(
-        PaintMode::FillStroke,
-        &[
-            [478.0, 155.0],
-            [405.0, 155.0],
-            [405.0, 168.0],
-            [390.0, 180.0],
-            [405.0, 192.0],
-            [405.0, 205.0],
-            [478.0, 205.0],
-        ],
-    )?;
-    scene.fill_color(if sig.status.shows_value() {
-        palette::WHITE
-    } else {
-        palette::RED
-    })?;
-    let shown = if sig.status.shows_value() {
-        text
-    } else {
-        "---"
-    };
-    scene.text(442.0, 180.0, 26.0, Anchor::CENTER, shown)?;
     Ok(())
 }
 
