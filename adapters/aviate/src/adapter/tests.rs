@@ -6,11 +6,12 @@ use pilotage_adapter_api::{
     Disposition, MeasurementClock, MeasurementStamp, RejectReason, SourceIncarnation, SourceRole,
     VehicleAdapter,
 };
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
+use pilotage_protocol::{ButtonEdge, LogicalButtonId, VehicleId};
 
 use crate::link::KinematicsUpdate;
 
 mod fixtures;
+mod flight_control;
 mod source_roles;
 use fixtures::{flight_frame, state_with, state_with_acquisition_skew};
 
@@ -280,101 +281,6 @@ fn disarm_does_not_require_a_current_measurement_pair() {
         f32::from_le_bytes(buf[10..14].try_into().expect("param1")),
         0.0
     );
-}
-
-#[test]
-fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
-    // A fake FC: any UDP socket we can read the uplink's frames from.
-    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
-    fc.set_read_timeout(Some(Duration::from_secs(2)))
-        .expect("timeout");
-
-    let mut uplink = crate::uplink::FlightUplink::new().expect("uplink");
-    uplink.set_target(fc.local_addr().expect("addr"));
-    // Heading east (yaw 90°) so body-frame rotation is observable.
-    let mut adapter = AviateAdapter::from_state(
-        VehicleId::new(1),
-        state_with(Duration::ZERO, Duration::ZERO),
-    )
-    .with_uplink(uplink);
-
-    let caps = adapter.capabilities();
-    assert_eq!(caps.vehicles[0].scopes.len(), 1, "flight scope advertised");
-    assert_eq!(caps.vehicles[0].scopes[0].axes.len(), 4);
-
-    // Arm edge (stick frames are suppressed for a beat afterward so the
-    // FC's single command slot is not overwritten before its loop runs).
-    let outcome = adapter.apply_control(&flight_frame(
-        vec![],
-        vec![(LogicalButtonId::new(super::ARM_BUTTON), ButtonEdge::Pressed)],
-    ));
-    assert_eq!(outcome.disposition, Disposition::Accepted);
-
-    let mut buf = [0u8; 128];
-    // First datagram: the arm command (COMMAND_LONG 400, param1=1).
-    let (n, _) = fc.recv_from(&mut buf).expect("arm frame");
-    assert_eq!(buf[7], 76, "COMMAND_LONG id");
-    assert_eq!(
-        f32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]),
-        1.0
-    );
-    assert!(n >= 45);
-
-    // Past the post-arm quiet window: full forward stick + half climb,
-    // streamed like the 30 Hz control loop. The slew limiter ramps the
-    // command from zero, so assert the ramp rather than an instant step.
-    std::thread::sleep(Duration::from_millis(200));
-    let f = |buf: &[u8; 128], off: usize| {
-        f32::from_le_bytes([buf[10 + off], buf[11 + off], buf[12 + off], buf[13 + off]])
-    };
-    let mut last_ve = 0.0f32;
-    for _ in 0..30 {
-        let outcome = adapter.apply_control(&flight_frame(
-            vec![
-                (LogicalAxisId::new(super::PITCH_AXIS), 1.0),
-                (LogicalAxisId::new(super::THROTTLE_AXIS), 0.5),
-            ],
-            vec![],
-        ));
-        assert_eq!(outcome.disposition, Disposition::Accepted);
-        fc.recv_from(&mut buf).expect("setpoint frame");
-        assert_eq!(buf[7], 84, "SET_POSITION_TARGET id");
-        let ve = f(&buf, 20);
-        assert!(
-            ve >= last_ve - 1e-4,
-            "ramp must not reverse: {ve} < {last_ve}"
-        );
-        last_ve = ve;
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    // Heading is east (yaw 90°), stick full-forward → velocity is +east:
-    // vn≈0, ve ramping toward 3.
-    let (vn, vz) = (f(&buf, 16), f(&buf, 24));
-    assert!(vn.abs() < 0.05, "vn {vn}");
-    assert!(last_ve > 1.0, "ramped east velocity, got {last_ve}");
-    assert!(vz < -0.2, "climb demand present, got {vz}");
-    let type_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
-    assert_eq!(type_mask, 2503);
-
-    // Centered sticks switch to position-hold (DJI brake-then-hold):
-    // the hold loop runs on the FC, so the ground streams a
-    // position-valid setpoint (mask 2552) at the captured hold point
-    // — the fake pose's NED position — with no ground-side gains.
-    let outcome = adapter.apply_control(&flight_frame(
-        vec![
-            (LogicalAxisId::new(super::PITCH_AXIS), 0.0),
-            (LogicalAxisId::new(super::THROTTLE_AXIS), 0.0),
-        ],
-        vec![],
-    ));
-    assert_eq!(outcome.disposition, Disposition::Accepted);
-    fc.recv_from(&mut buf).expect("hold frame");
-    let hold_mask = u16::from_le_bytes([buf[10 + 48], buf[11 + 48]]);
-    assert_eq!(hold_mask, 2552, "hold streams FC position mode");
-    // Position fields carry the captured point (fake pose 10, 20, -30).
-    assert!((f(&buf, 4) - 10.0).abs() < 1e-3, "hold north");
-    assert!((f(&buf, 8) - 20.0).abs() < 1e-3, "hold east");
-    assert!((f(&buf, 12) + 30.0).abs() < 1e-3, "hold down");
 }
 
 #[test]

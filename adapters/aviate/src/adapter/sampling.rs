@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, Pose2d, TelemetryBatch,
-    TelemetrySample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, Pose2d, SourceRole,
+    TelemetryBatch, TelemetrySample,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
@@ -168,4 +168,51 @@ pub(crate) fn mavlink_batch(
             fc_state: None,
         }],
     }
+}
+
+impl super::AviateAdapter {
+    /// The vehicle's current measured yaw (radians clockwise from
+    /// north), NED position, and independently validated NED velocity,
+    /// FROM THE FC OPERATIONAL ESTIMATE ONLY (LINK-04): simulation truth
+    /// is never eligible to seed command construction, so without a live
+    /// authorized estimate there is no pose and state-dependent control
+    /// is rejected instead of borrowing truth.
+    ///
+    /// Velocity carries its own validity: `None` when the FC did not
+    /// declare the velocity group valid or any component is non-finite.
+    /// A pose can be usable while velocity is not; a caller must never
+    /// infer "stopped" from a missing velocity.
+    pub(super) fn current_pose(&mut self) -> Option<(f32, [f32; 3], Option<[f32; 3]>)> {
+        let latest = self.estimate.as_ref()?.state.lock().ok()?;
+        latest.estimator_status_stamp()?;
+        let attitude = latest
+            .attitude
+            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
+        let kinematics = latest
+            .kinematics
+            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
+            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
+        if !measurement_pair_is_coherent(attitude, kinematics, latest.maximum_inter_group_skew_ms)
+            || !measurement_pair_supports_pose(attitude, kinematics)
+        {
+            return None;
+        }
+        Some((
+            yaw_of(attitude.quat_wxyz) as f32,
+            kinematics.pos_ned_m,
+            validated_velocity(kinematics),
+        ))
+    }
+}
+
+/// The kinematics velocity as independently validated data: present only
+/// when the FC declared the velocity group valid (bit 3, the same gate the
+/// planar speed projection uses) and every component is finite. NaN would
+/// otherwise poison downstream comparisons silently — `NaN > threshold` is
+/// false, which reads as "stopped".
+fn validated_velocity(kinematics: KinematicsUpdate) -> Option<[f32; 3]> {
+    let declared_valid = kinematics.valid_flags & 0b1000 != 0;
+    let finite = kinematics.vel_ned_mps.iter().all(|v| v.is_finite());
+    (declared_valid && finite).then_some(kinematics.vel_ned_mps)
 }
