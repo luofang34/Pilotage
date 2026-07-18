@@ -47,7 +47,8 @@ pub struct SimArgs {
     pub host_port: u16,
     /// Static viewer port (`--viewer-port`).
     pub viewer_port: u16,
-    /// Open the ready URL in the default browser (`--open`).
+    /// Open the ready URL in the default browser (default on;
+    /// `--no-open` suppresses it, `--open` states it explicitly).
     pub open: bool,
 }
 
@@ -95,7 +96,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     let mut profile = Profile::Simulation;
     let mut host_port: u16 = 4433;
     let mut viewer_port: u16 = 8080;
-    let mut open = false;
+    let mut open = true;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -104,6 +105,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
             "--port" => host_port = required_port(&mut iter, "--port")?,
             "--viewer-port" => viewer_port = required_port(&mut iter, "--viewer-port")?,
             "--open" => open = true,
+            "--no-open" => open = false,
             other => {
                 return Err(XtaskError::Usage {
                     message: format!("unknown sim flag {other:?}"),
@@ -160,7 +162,7 @@ commands:
          --profile <p>        physical | simulation (default) | oracle-only
          --port <n>           host WebTransport port (default: 4433)
          --viewer-port <n>    static viewer port (default: 8080)
-         --open               open the ready URL in the default browser
+         --no-open            do not open the ready URL in the default browser
   reset  reset the running simulation world and restart the FC
   help   print this text";
 
@@ -183,6 +185,14 @@ mod tests {
         assert_eq!(sim.profile, Profile::Simulation);
         assert_eq!(sim.host_port, 4433);
         assert_eq!(sim.viewer_port, 8080);
+        assert!(sim.open, "the browser opens by default");
+    }
+
+    #[test]
+    fn no_open_suppresses_the_browser() {
+        let Command::Sim(sim) = parse_args(&args(&["sim", "--no-open"])).expect("parses") else {
+            panic!("expected sim");
+        };
         assert!(!sim.open);
     }
 

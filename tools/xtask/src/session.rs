@@ -210,9 +210,22 @@ pub fn run_reset(fc: &str) -> Result<(), XtaskError> {
     backend.reset(&repo_root()?)
 }
 
-/// This repository's root (the workspace this binary was built from).
+/// This repository's root: the checkout `cargo xtask` was INVOKED from.
+///
+/// `cargo run` exports `CARGO_MANIFEST_DIR` into the child's runtime
+/// environment, pointing at the invoking workspace's `tools/xtask` — so a
+/// binary cached from another checkout (a worktree, a moved clone) still
+/// operates on the repository the user is standing in. The compile-time
+/// path is only the fallback for running the binary outside cargo.
 fn repo_root() -> Result<PathBuf, XtaskError> {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    root_from(&manifest)
+}
+
+/// The workspace root two levels above `tools/xtask`.
+fn root_from(manifest: &std::path::Path) -> Result<PathBuf, XtaskError> {
     manifest
         .ancestors()
         .nth(2)

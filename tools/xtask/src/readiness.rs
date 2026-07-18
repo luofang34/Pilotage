@@ -171,9 +171,13 @@ pub fn parse_listening(line: &str) -> Option<(u16, String)> {
     Some((port, cert.to_owned()))
 }
 
-/// The pinned viewer URL for a ready session.
+/// The pinned viewer URL for a ready session. `autoconnect=1` tells the
+/// viewer to connect on load — the URL already pins host, port, and
+/// certificate, so a Connect click would add nothing.
 pub fn viewer_url(viewer_port: u16, host_port: u16, cert: &str) -> String {
-    format!("http://127.0.0.1:{viewer_port}/index.html?host=127.0.0.1&port={host_port}&cert={cert}")
+    format!(
+        "http://127.0.0.1:{viewer_port}/index.html?host=127.0.0.1&port={host_port}&cert={cert}&autoconnect=1"
+    )
 }
 
 /// The log file a stage writes under `log_dir`.
@@ -210,11 +214,13 @@ mod tests {
     }
 
     #[test]
-    fn viewer_url_pins_host_port_and_certificate() {
+    fn viewer_url_pins_host_port_certificate_and_autoconnect() {
         let cert = "0f".repeat(32);
         assert_eq!(
             viewer_url(8080, 4433, &cert),
-            format!("http://127.0.0.1:8080/index.html?host=127.0.0.1&port=4433&cert={cert}")
+            format!(
+                "http://127.0.0.1:8080/index.html?host=127.0.0.1&port=4433&cert={cert}&autoconnect=1"
+            )
         );
     }
 }
