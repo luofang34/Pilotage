@@ -57,6 +57,7 @@ import {
   shouldLogReadFailure,
   restartVerdict,
 } from "./video-diagnostics.js";
+import { reconnectDelayMs, reconnectDecision } from "./session-recovery.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -261,6 +262,8 @@ async function connect() {
     state.leaseGranted = false;
     state.skippedVideoFrames = 0;
     resetVideoDiagnostics();
+    reconnectState.wanted = true;
+    clearReconnectTimer();
     retireSessionPresentation("connecting");
     log(`connecting to ${url} pinned to cert hash ${certHashHex.slice(0, 16)}...`);
   });
@@ -273,6 +276,7 @@ async function connect() {
   try {
     await transport.ready;
     if (!transportSessions.isActive(token)) return;
+    reconnectState.attempts = 0; // a successful handshake clears the backoff.
     log("WebTransport session ready");
 
     const bidi = await transport.createBidirectionalStream();
@@ -317,6 +321,9 @@ async function connect() {
     retireSessionPresentation("failed");
     log(`connect failed: ${error}`);
     transportSessions.close(token);
+    // A failed attempt (host briefly unreachable while the browser froze)
+    // backs off and retries up to the budget rather than giving up here.
+    scheduleReconnect();
   }
 }
 
@@ -327,6 +334,57 @@ function handleTransportClosed(token, error) {
   retireSessionPresentation(error === null ? "disconnected" : "failed");
   log(error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
   transportSessions.retire(token);
+  // A drop the user did not ask for (an errored close, or a graceful close
+  // the host initiated while the viewer still wants to fly) leaves control,
+  // gamepad, and video dead with no way back. Recover the session rather than
+  // stranding the pilot; a hidden/frozen tab waits until the user returns.
+  scheduleReconnect();
+}
+
+// --- connection auto-recovery ----------------------------------------------
+// A backgrounded tab the browser freezes stops the control loop, so its
+// keepalive datagrams cease and the WebTransport session idle-drops; the pilot
+// returns to a dead session ("controller stopped, sim unresponsive"). These
+// bound the automatic reconnect so a genuinely unreachable host does not spin.
+const RECONNECT_MAX_ATTEMPTS = 6;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+const reconnectState = { wanted: false, attempts: 0, timer: null };
+
+function clearReconnectTimer() {
+  if (reconnectState.timer !== null) {
+    clearTimeout(reconnectState.timer);
+    reconnectState.timer = null;
+  }
+}
+
+/** Schedules the next reconnect if one is warranted (session dropped, user
+ *  wants to stay connected, tab visible, budget left). Idempotent while a
+ *  reconnect is already pending. */
+function scheduleReconnect() {
+  if (reconnectState.timer !== null) return;
+  const decision = reconnectDecision({
+    wanted: reconnectState.wanted,
+    active: transportSessions.active !== null,
+    visible: document.visibilityState === "visible",
+    attempts: reconnectState.attempts,
+    maxAttempts: RECONNECT_MAX_ATTEMPTS,
+  });
+  if (decision.giveUp) {
+    log("auto-reconnect gave up after repeated failures; press Connect to retry");
+    return;
+  }
+  if (!decision.attempt) return; // not wanted / already active / hidden — wait.
+  const delayMs = reconnectDelayMs(reconnectState.attempts, {
+    baseMs: RECONNECT_BASE_MS,
+    maxMs: RECONNECT_MAX_MS,
+  });
+  reconnectState.timer = setTimeout(() => {
+    reconnectState.timer = null;
+    reconnectState.attempts += 1;
+    log(`connection lost — auto-reconnecting (attempt ${reconnectState.attempts})...`);
+    void connect();
+  }, delayMs);
 }
 
 /** Writes a length-delimited `ClientHello` envelope onto the bootstrap bidi stream. */
@@ -1070,6 +1128,23 @@ function updateFlightReadout(pad, f) {
     `climb=${f.throttle.toFixed(2)} yaw=${f.yaw.toFixed(2)} | arm: Options/Enter, disarm: Create/Backspace`;
 }
 
+/** Neutral (zeroed) control axes for a flight mode: rover carries only
+ *  throttle/yaw, the flight modes carry roll/pitch/throttle/yaw. Held while the
+ *  window is unfocused so a frozen stick cannot keep driving the vehicle. */
+function neutralAxesFor(mode) {
+  return mode === "rover"
+    ? [
+        [AXIS_THROTTLE, 0],
+        [AXIS_YAW, 0],
+      ]
+    : [
+        [AXIS_ROLL, 0],
+        [AXIS_PITCH, 0],
+        [AXIS_THROTTLE, 0],
+        [AXIS_YAW, 0],
+      ];
+}
+
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
 async function startControlLoop(transport, token) {
   if (!transportSessions.isActive(token)) return;
@@ -1096,7 +1171,16 @@ async function startControlLoop(transport, token) {
       const profile = pad ? profileFor(pad.id) : null;
       let axes;
       let edges = [];
-      if (mode === "rover") {
+      if (!document.hasFocus()) {
+        // Losing window focus FREEZES the Gamepad API (Chrome stops updating
+        // stick values) and stops keyboard events, so the last input would
+        // keep driving the vehicle — a runaway throttle. Hold NEUTRAL until
+        // the window is focused again, and say so, rather than fly on a stale
+        // stick. Arm/reset/fpv edges are suppressed too; nothing off-window
+        // should command the vehicle.
+        axes = neutralAxesFor(mode);
+        els.gamepad.textContent = "control paused — focus the window to fly (holding neutral)";
+      } else if (mode === "rover") {
         // Ground vehicles (the Gazebo yard world) accept only the
         // throttle/yaw pair; extra axes would be rejected as unknown.
         const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
@@ -1282,5 +1366,16 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   state.pendingReset = true;
 });
 els.connectBtn.addEventListener("click", () => {
+  // A manual Connect is a fresh start: clear any pending auto-reconnect and
+  // reset its backoff so the user's explicit action is not deferred.
+  clearReconnectTimer();
+  reconnectState.attempts = 0;
   void connect();
+});
+
+// Returning to a tab the browser had frozen is the moment to recover: the
+// session likely idle-dropped while away, and only now can a reconnect
+// succeed (a hidden tab would just drop again).
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") scheduleReconnect();
 });

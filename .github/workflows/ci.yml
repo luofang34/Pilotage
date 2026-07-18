@@ -159,6 +159,9 @@ jobs:
       - name: viewer video-diagnostics decision logic (log dedup + reader restart)
         run: node clients/web/video-diagnostics.test.mjs
 
+      - name: viewer connection auto-recovery decision logic (backoff + reconnect gating)
+        run: node clients/web/session-recovery.test.mjs
+
       - name: wasm wire-decode conformance (REN)
         # The wasm exports the viewer decodes with must agree with the JS
         # reference decoders on layout, numeric kinds, and the capture-identity
