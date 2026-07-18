@@ -52,6 +52,8 @@ import { AvionicsIngress, FcStateTracker, INCARNATION_POLICY } from "./telemetry
 import { TransportSessionLifecycle } from "./transport-session.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
+import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
+import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -255,6 +257,7 @@ async function connect() {
     state.connected = false;
     state.leaseGranted = false;
     state.skippedVideoFrames = 0;
+    resetVideoDiagnostics();
     retireSessionPresentation("connecting");
     log(`connecting to ${url} pinned to cert hash ${certHashHex.slice(0, 16)}...`);
   });
@@ -289,7 +292,7 @@ async function connect() {
     setTelemetrySessionState(els, "awaiting");
     state.connected = true;
     acceptIncomingUniStreams(transport, token).catch((error) => {
-      transportSessions.runIfActive(token, () => log(`uni stream accept failed: ${error}`));
+      transportSessions.runIfActive(token, () => log(`incoming uni-stream accept loop error: ${error}`));
     });
     readTelemetryDatagrams(transport, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`telemetry reader stopped: ${error}`));
@@ -414,24 +417,42 @@ function appendBytes(existing, incoming) {
   return out;
 }
 
-/** Accepts every host-initiated uni stream and dispatches on its leading kind-tag byte. */
-async function acceptIncomingUniStreams(transport, token) {
-  if (!transportSessions.isActive(token)) return;
-  const uniStreams = transport.incomingUnidirectionalStreams;
-  const streamReader = uniStreams.getReader();
-  if (!transportSessions.trackReader(token, streamReader)) return;
-  try {
-    for (;;) {
-      const { value: stream, done } = await streamReader.read();
-      if (!transportSessions.isActive(token)) return;
-      if (done) return;
-      readOneUniStream(stream, token).catch((error) => {
-        transportSessions.runIfActive(token, () => log(`uni stream read failed: ${error}`));
-      });
-    }
-  } finally {
-    transportSessions.untrackReader(token, streamReader);
+/** Coalesces uni-stream read failures into at most one log line per interval
+ * (after the first, which logs immediately): a host that resets a stalled
+ * frame's stream (ADR video deadline) surfaces a WebTransportError here every
+ * frame, which after the first is expected, not per-frame news. */
+function noteStreamReadFailure(error) {
+  streamReadFailures.count += 1;
+  const nowMs = performance.now();
+  if (
+    !shouldLogReadFailure(
+      nowMs,
+      streamReadFailures.lastLoggedMs,
+      STREAM_READ_FAILURE_LOG_INTERVAL_MS,
+    )
+  ) {
+    return;
   }
+  streamReadFailures.lastLoggedMs = nowMs;
+  log(`uni stream read failed: ${error} (${streamReadFailures.count} total this session)`);
+}
+
+/** Runs the one incoming-uni-stream accept loop for this session. An individual
+ * received stream failing loses only that frame and the loop keeps accepting;
+ * the collection stream itself closing or erroring is terminal for the whole
+ * WebTransport session (a re-acquired reader is handed the same stored error),
+ * so it is surfaced once as a session failure and never reacquired. */
+async function acceptIncomingUniStreams(transport, token) {
+  await runIncomingStreamAcceptLoop(transport.incomingUnidirectionalStreams, {
+    isActive: () => transportSessions.isActive(token),
+    handleStream: (stream) => readOneUniStream(stream, token),
+    onStreamFailure: (error) =>
+      transportSessions.runIfActive(token, () => noteStreamReadFailure(error)),
+    onCollectionTerminal: (error) =>
+      transportSessions.runIfActive(token, () => handleTransportClosed(token, error)),
+    trackReader: (reader) => transportSessions.trackReader(token, reader),
+    untrackReader: (reader) => transportSessions.untrackReader(token, reader),
+  });
 }
 
 /** Drains one uni stream to completion, buffering bytes, reading the kind tag, then dispatching. */
@@ -597,6 +618,37 @@ async function renderVideoFrame(body, token) {
 // the verdict still stays not-ready because the Gazebo rover publishes planar
 // pose rather than an avionics snapshot to associate against, and Aviate's
 // video clock mapping is unavailable — honestly.
+// Per-source conformal-readiness, so a persistent state (e.g. Aviate's
+// mapping-unavailable) is logged once on transition instead of every frame.
+// `undefined` = never logged; `null` = last logged ready; a string = last
+// logged not-ready reason. Reset per session (resetVideoDiagnostics).
+const videoReadinessLog = new Map();
+
+// Coalesces uni-stream read failures: under the host's per-frame stall/reset
+// regime a reset surfaces as a WebTransportError on the frame's stream, which
+// after the first is expected and must not spam one line per frame.
+// `lastLoggedMs === null` means never logged, so the first failure logs at once.
+const streamReadFailures = { count: 0, lastLoggedMs: null };
+const STREAM_READ_FAILURE_LOG_INTERVAL_MS = 2000;
+
+function resetVideoDiagnostics() {
+  videoReadinessLog.clear();
+  streamReadFailures.count = 0;
+  streamReadFailures.lastLoggedMs = null;
+}
+
+/** Logs a per-source conformal-readiness change once, never per frame. */
+function logVideoReadiness(sourceId, association) {
+  const transition = readinessTransition(
+    videoReadinessLog.get(sourceId),
+    association.ready,
+    association.reason,
+  );
+  if (!transition) return;
+  videoReadinessLog.set(sourceId, transition.state);
+  log(`video source ${sourceId} ${transition.message}`);
+}
+
 async function renderVideoFrameV2(body, token) {
   if (!transportSessions.isActive(token)) return;
   // Decode + capture-identity contract validation happen in wasm, from the
@@ -644,9 +696,7 @@ async function renderVideoFrameV2(body, token) {
     h264Registry?.reset(meta.sourceId);
   }
   state.lastAssociation = association;
-  if (!association.ready) {
-    log(`video source ${meta.sourceId} not conformal-ready: ${association.reason}`);
-  }
+  logVideoReadiness(meta.sourceId, association);
   await paintByCodec(fourcc, payload, meta.sourceId, target, token);
 }
 
