@@ -6,6 +6,4 @@
 ./crates/pilotage-instrument-state/src/abi.rs	decode_state	125
 ./crates/pilotage-instrument-state/src/abi.rs	encode_state	97
 ./crates/pilotage-authority/src/wire.rs	from	88
-./adapters/aviate/src/adapter/tests.rs	stick_frame_reaches_the_fc_as_a_velocity_setpoint	93
-./adapters/aviate/src/uplink.rs	send_stick_frame	90
 ./hosts/session-host/tests/loopback.rs	hello_lease_frame_and_stale_generation_rejection	99

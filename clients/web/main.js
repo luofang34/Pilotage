@@ -19,6 +19,7 @@
 import {
   encodeClientHelloEnvelope,
   encodeLeaseRequestEnvelope,
+  encodeLeaseReleaseEnvelope,
   encodeControlFrameEnvelope,
   decodeLengthDelimitedEnvelope,
   STREAM_KIND_AUTHORITY,
@@ -50,10 +51,16 @@ import { TurnDerivation } from "./turn-derivation.js";
 import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, FcStateTracker, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
+import { runBootstrapReader } from "./bootstrap.js";
+import { createControlGate } from "./control-gate.js";
+import { createReleaseTracker } from "./lease-release.js";
+import { negotiateSessionAuthority } from "./connect-authority.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
+import { createReconnectController } from "./reconnect.js";
+import { pressedArmInputs, risingArmEdges } from "./control-edges.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -225,17 +232,73 @@ function hexToBytes(hex) {
   return out;
 }
 
-async function connect() {
+// A superseded attempt (a newer session token began) returns this so the
+// reconnect controller does not treat it as a failure and reschedule — the
+// newer flow owns recovery.
+const SUPERSEDED = { ok: true };
+
+// Opening one session. `manual` is true only for a user-initiated Connect:
+// only then is the motion lease requested and control resumed. An automatic
+// reconnect (`manual: false`) restores transport, telemetry, and video but
+// NEVER re-requests motion authority — control stays suspended until the user
+// explicitly reconnects. Returns `{ ok }` / `{ ok: false, failure }` for the
+// reconnect controller.
+async function connect({ manual } = { manual: true }) {
   const host = els.host.value.trim();
   const port = els.port.value.trim();
   const certHashHex = els.certHash.value.trim();
   if (!host || !port || !certHashHex) {
     log("host, port, and cert hash are all required");
-    return;
+    return { ok: false, failure: { phase: "construct" } };
+  }
+  // A SHA-256 hash is exactly 32 bytes; anything else is a configuration
+  // error (non-retryable), not something WebTransport should be handed.
+  if (!/^[0-9a-fA-F]{64}$/.test(certHashHex)) {
+    log("certificate hash must be exactly 64 hexadecimal characters (SHA-256)");
+    return { ok: false, failure: { phase: "construct" } };
   }
   const url = `https://${host}:${port}/pilotage`;
   const certHash = hexToBytes(certHashHex);
 
+  // The gate re-arm, release-settlement wait, live lease probe, and
+  // post-grant decision run inside the production orchestration module,
+  // which the lifecycle tests execute directly.
+  const session = await negotiateSessionAuthority({
+    manual,
+    gate: controlGate,
+    releases: releaseTracker,
+    openAndBootstrap: (leaseProbe) =>
+      openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }),
+    startControl: ({ transport, token }) => {
+      startControlLoop(transport, token).catch((error) => {
+        transportSessions.runIfActive(token, () => log(`control loop stopped: ${error}`));
+      });
+    },
+    releaseLease: ({ token }) => {
+      sendLeaseRelease(token);
+      els.gamepad.textContent =
+        "control released — input lost during connect; press Connect to resume";
+      log("input lost during connect — lease released immediately");
+    },
+    telemetryOnly: (_session, wasManual) => {
+      if (wasManual) {
+        // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
+        // advertises no controllable scopes; sending control frames
+        // anyway would only generate a 30 Hz stream of rejections.
+        log("no control lease granted; viewer is telemetry/video only");
+      } else {
+        log("reconnected (telemetry/video); press Connect to resume control");
+      }
+    },
+  });
+  return session.result;
+}
+
+/** Transport construction, handshake, and bootstrap for one session
+ *  attempt. Resolves to `{ completed, leaseGranted, transport, token,
+ *  result }`; `result` is connect()'s return contract for the reconnect
+ *  controller (SUPERSEDED, ok, or a classified failure). */
+async function openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }) {
   let transport;
   try {
     transport = new WebTransport(url, {
@@ -243,11 +306,12 @@ async function connect() {
     });
   } catch (error) {
     log(`WebTransport creation failed: ${error}`);
-    return;
+    return { completed: false, result: { ok: false, failure: { phase: "construct" } } };
   }
   const token = transportSessions.begin(transport);
   transportSessions.runIfActive(token, () => {
     state.transport = transport;
+    state.sessionWriter = null;
     state.sessionId = 0;
     state.generation = 0n;
     state.sequence = 0;
@@ -259,7 +323,8 @@ async function connect() {
     state.skippedVideoFrames = 0;
     resetVideoDiagnostics();
     retireSessionPresentation("connecting");
-    log(`connecting to ${url} pinned to cert hash ${certHashHex.slice(0, 16)}...`);
+    const mode = manual ? "requesting control" : "auto-reconnect, telemetry/video only";
+    log(`connecting to ${url} (${mode}) pinned to cert hash ${certHashHex.slice(0, 16)}...`);
   });
 
   transport.closed.then(
@@ -269,20 +334,46 @@ async function connect() {
 
   try {
     await transport.ready;
-    if (!transportSessions.isActive(token)) return;
+    if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
     log("WebTransport session ready");
 
     const bidi = await transport.createBidirectionalStream();
-    if (!transportSessions.isActive(token)) return;
+    if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
     const writer = bidi.writable.getWriter();
     const reader = bidi.readable.getReader();
-    if (!transportSessions.trackWriter(token, writer)) return;
-    if (!transportSessions.trackReader(token, reader)) return;
+    if (!transportSessions.trackWriter(token, writer)) return { completed: false, result: SUPERSEDED };
+    if (!transportSessions.trackReader(token, reader)) return { completed: false, result: SUPERSEDED };
 
-    if (!(await sendClientHello(writer, token))) return;
-    const negotiated = await runBootstrapReader(reader, writer, token);
-    if (!transportSessions.isActive(token)) return;
-    if (!negotiated) throw new Error("bootstrap stream closed before LeaseResponse");
+    if (!(await sendClientHello(writer, token))) return { completed: false, result: SUPERSEDED };
+    // Only a manual connect requests the motion lease; an auto-reconnect
+    // completes bootstrap at ServerWelcome, leaving control suspended.
+    const bootstrap = await runBootstrapReader({
+      reader,
+      decode: decodeLengthDelimitedEnvelope,
+      isActive: () => transportSessions.isActive(token),
+      onMessage: (decoded) => handleBootstrapMessage(decoded, token),
+      // The orchestration module's live probe, evaluated at the
+      // ServerWelcome moment immediately before the one LeaseRequest
+      // emission: a blur latched during ANY await of this connect
+      // suppresses the request entirely.
+      requestLease: leaseProbe,
+      sendLeaseRequest: () => sendLeaseRequest(writer, token),
+    });
+    if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
+    if (!bootstrap.completed) {
+      // An untyped stream end is RETRYABLE wherever it lands in the
+      // handshake: the host's Close carries no wire payload today, so a
+      // pre-welcome EOF is indistinguishable from an ordinary early
+      // transport drop, and classifying it as a rejection would
+      // permanently stop recovery after a network blip. Only a TYPED
+      // protocol rejection may set `bootstrapRejected` (none exists on
+      // the wire yet — tracked in the reconnection issue).
+      throw new Error(
+        bootstrap.welcomed
+          ? "bootstrap stream closed after welcome, before it completed"
+          : "bootstrap stream closed before ServerWelcome",
+      );
+    }
 
     // Negotiation is the lifecycle boundary for measurement ordering. The
     // token prevents readers from the replaced transport from reaching this
@@ -291,29 +382,38 @@ async function connect() {
     instruments.fcState = new FcStateTracker();
     setTelemetrySessionState(els, "awaiting");
     state.connected = true;
+    // Bootstrap is proven good only here — reset the reconnect backoff now, not
+    // at transport.ready (which precedes bootstrap).
+    reconnect.notifyBootstrapComplete();
+    state.sessionWriter = writer;
+    runSessionStreamReader(reader, token).catch((error) => {
+      transportSessions.runIfActive(token, () => log(`session stream reader stopped: ${error}`));
+    });
     acceptIncomingUniStreams(transport, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`incoming uni-stream accept loop error: ${error}`));
     });
     readTelemetryDatagrams(transport, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`telemetry reader stopped: ${error}`));
     });
-    if (state.leaseGranted) {
-      startControlLoop(transport, token).catch((error) => {
-        transportSessions.runIfActive(token, () => log(`control loop stopped: ${error}`));
-      });
-    } else {
-      // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
-      // advertises no controllable scopes; sending control frames anyway
-      // would only generate a 30 Hz stream of rejections.
-      log("no control lease granted; viewer is telemetry/video only");
-    }
+    return {
+      completed: true,
+      leaseGranted: state.leaseGranted,
+      transport,
+      token,
+      result: { ok: true },
+    };
   } catch (error) {
-    if (!transportSessions.isActive(token)) return;
+    if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
     state.connected = false;
     state.transport = null;
     retireSessionPresentation("failed");
     log(`connect failed: ${error}`);
     transportSessions.close(token);
+    // "rejected" (non-retryable) is reserved for a TYPED protocol
+    // rejection or authenticated close code; an untyped failure — EOF,
+    // reset, timeout — is always a retryable transport drop.
+    const phase = error && error.bootstrapRejected ? "rejected" : "transport";
+    return { completed: false, result: { ok: false, failure: { phase } } };
   }
 }
 
@@ -321,10 +421,42 @@ function handleTransportClosed(token, error) {
   if (!transportSessions.isActive(token)) return;
   state.connected = false;
   state.transport = null;
+  state.sessionWriter = null;
+  // An unacknowledged release rides down with the transport; the host
+  // watchdog covers it from here.
+  releaseTracker.abandon();
   retireSessionPresentation(error === null ? "disconnected" : "failed");
   log(error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
   transportSessions.retire(token);
+  // The drop was not user-initiated (there is no disconnect control); recover
+  // the transport if the user still wants a session. A clean or errored close
+  // is treated as a transient transport drop — retried with capped, jittered
+  // backoff. Control is NOT resumed by the reconnect (see connect: manual).
+  reconnect.notifyDropped({ phase: "transport" });
 }
+
+// Input-loss gate (CTRL-04): blur LATCHES loss synchronously so a
+// blur/refocus between control-loop ticks can never be missed; only an
+// explicit new connect re-arms it.
+const controlGate = createControlGate({ isFocused: () => document.hasFocus() });
+
+// One in-flight explicit lease release and its acknowledgement; an
+// immediate reconnect waits (bounded) for settlement so it cannot race
+// into an AlreadyHeld denial. The host watchdog stays the backup.
+const releaseTracker = createReleaseTracker();
+
+/** Auto-recovery for an unexpectedly dropped session: reconnects the transport
+ *  (telemetry/video) with capped, jittered backoff, and never re-requests
+ *  motion authority. Uses real timers, page visibility, and session state. */
+const reconnect = createReconnectController({
+  connect,
+  schedule: (delayMs, cb) => setTimeout(cb, delayMs),
+  cancel: (handle) => clearTimeout(handle),
+  isVisible: () => document.visibilityState === "visible",
+  isActive: () => transportSessions.active !== null,
+  random: () => Math.random(),
+  log,
+});
 
 /** Writes a length-delimited `ClientHello` envelope onto the bootstrap bidi stream. */
 async function sendClientHello(writer, token) {
@@ -350,6 +482,52 @@ async function sendLeaseRequest(writer, token) {
   return true;
 }
 
+/** Sends a `LeaseRelease` for the motion scope on the reliable session
+ *  stream and starts the bounded wait for the host's acknowledgement. */
+function sendLeaseRelease(token) {
+  const writer = state.sessionWriter;
+  if (!writer || !transportSessions.isActive(token)) return;
+  if (releaseTracker.isPending()) return; // one release per loss; the ack settles it
+  const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: MOTION_SCOPE });
+  const settled = releaseTracker.begin();
+  settled.then((outcome) => {
+    transportSessions.runIfActive(token, () => log(`lease release ${outcome}`));
+  });
+  writer.write(lengthDelimit(release)).catch(() => {
+    // The reliable stream refused the write: the transport is dying, and
+    // the host watchdog will do the release.
+    releaseTracker.abandon();
+  });
+  log("sent LeaseRelease for " + MOTION_SCOPE);
+}
+
+/** Reads the session (bootstrap) stream after the handshake completes:
+ *  the host's `LeaseReleased` acknowledgement arrives here. */
+async function runSessionStreamReader(reader, token) {
+  let pending = new Uint8Array(0);
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (!transportSessions.isActive(token) || done) return;
+    pending = appendBytes(pending, value);
+    for (;;) {
+      const decoded = decodeLengthDelimitedEnvelope(pending);
+      if (!decoded) break;
+      pending = pending.subarray(decoded.consumed);
+      if (decoded.kind === "LeaseReleased") {
+        // Validate the acknowledgement before it settles anything: an
+        // ack for another vehicle or scope proves nothing about ours.
+        const m = decoded.message;
+        if (Number(m.vehicleId) === VEHICLE_ID && m.scope === MOTION_SCOPE) {
+          releaseTracker.acknowledge();
+          log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
+        } else {
+          log(`ignoring LeaseReleased for vehicle=${m.vehicleId} scope=${m.scope}`);
+        }
+      }
+    }
+  }
+}
+
 /** Prefixes an already-encoded `Envelope` with a protobuf varint byte-length, matching `encode_length_delimited` on the host. */
 function lengthDelimit(envelopeBytes) {
   const prefix = [];
@@ -370,30 +548,6 @@ function lengthDelimit(envelopeBytes) {
   return out;
 }
 
-/** Reads bootstrap frames until ServerWelcome and LeaseResponse establish the session. */
-async function runBootstrapReader(reader, writer, token) {
-  let pending = new Uint8Array(0);
-  let sentLease = false;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (!transportSessions.isActive(token)) return false;
-    if (done) return false;
-    pending = appendBytes(pending, value);
-    for (;;) {
-      const decoded = decodeLengthDelimitedEnvelope(pending);
-      if (!decoded) break;
-      pending = pending.subarray(decoded.consumed);
-      handleBootstrapMessage(decoded, token);
-      if (decoded.kind === "ServerWelcome" && !sentLease) {
-        sentLease = true;
-        if (!(await sendLeaseRequest(writer, token))) return false;
-      }
-      if (decoded.kind === "LeaseResponse") {
-        return true;
-      }
-    }
-  }
-}
 
 function handleBootstrapMessage(decoded, token) {
   if (!transportSessions.isActive(token)) return;
@@ -906,22 +1060,28 @@ function flightAxesFromGamepad(pad, profile, mode) {
   };
 }
 
-/** One-shot arm/disarm edges from gamepad buttons and keys: Enter arms,
- *  Backspace disarms; pad options (9) arms, create (8) disarms. */
+/** The arm/disarm inputs held right now, from gamepad buttons and keys: Enter
+ *  arms, Backspace disarms; pad options (9) arms, create (8) disarms. */
+function currentArmInputs(pad) {
+  return pressedArmInputs({
+    padArm: !!pad?.buttons?.[PAD_ARM_BUTTON]?.pressed,
+    padDisarm: !!pad?.buttons?.[PAD_DISARM_BUTTON]?.pressed,
+    keyArm: state.keys.has("Enter"),
+    keyDisarm: state.keys.has("Backspace"),
+  });
+}
+
+/** One-shot arm/disarm edges: only inputs newly pressed since last tick fire.
+ *  `state.prevArmInputs` is primed to the held set at control start, so a
+ *  button held across a reconnect does not read as a fresh command. */
 function collectArmEdges(pad) {
-  const pressedNow = new Set();
-  if (pad?.buttons?.[PAD_ARM_BUTTON]?.pressed) pressedNow.add("pad-arm");
-  if (pad?.buttons?.[PAD_DISARM_BUTTON]?.pressed) pressedNow.add("pad-disarm");
-  if (state.keys.has("Enter")) pressedNow.add("key-arm");
-  if (state.keys.has("Backspace")) pressedNow.add("key-disarm");
+  const pressedNow = currentArmInputs(pad);
   const edges = [];
-  for (const which of pressedNow) {
-    if (!state.prevArmInputs.has(which)) {
-      const arm = which.endsWith("-arm");
-      edges.push([arm ? BUTTON_ARM : BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
-      els.overlay.textContent = arm ? "ARM sent" : "DISARM sent";
-      log(arm ? "arm command sent" : "disarm command sent");
-    }
+  for (const which of risingArmEdges(pressedNow, state.prevArmInputs)) {
+    const arm = which.endsWith("-arm");
+    edges.push([arm ? BUTTON_ARM : BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
+    els.overlay.textContent = arm ? "ARM sent" : "DISARM sent";
+    log(arm ? "arm command sent" : "disarm command sent");
   }
   state.prevArmInputs = pressedNow;
   return edges;
@@ -1014,11 +1174,31 @@ function updateFlightReadout(pad, f) {
     `climb=${f.throttle.toFixed(2)} yaw=${f.yaw.toFixed(2)} | arm: Options/Enter, disarm: Create/Backspace`;
 }
 
+/** Neutral (zeroed) control axes for a flight mode: rover carries only
+ *  throttle/yaw, the flight modes carry roll/pitch/throttle/yaw. */
+function neutralAxesFor(mode) {
+  return mode === "rover"
+    ? [
+        [AXIS_THROTTLE, 0],
+        [AXIS_YAW, 0],
+      ]
+    : [
+        [AXIS_ROLL, 0],
+        [AXIS_PITCH, 0],
+        [AXIS_THROTTLE, 0],
+        [AXIS_YAW, 0],
+      ];
+}
+
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
 async function startControlLoop(transport, token) {
   if (!transportSessions.isActive(token)) return;
   const writer = transport.datagrams.writable.getWriter();
   if (!transportSessions.trackWriter(token, writer)) return;
+  // Prime the arm-edge baseline to whatever is held right now, so a button held
+  // down as control starts (e.g. across a reconnect) is not read as a fresh
+  // arm/disarm on the first tick.
+  state.prevArmInputs = currentArmInputs(activeGamepad());
   const intervalMs = 1000 / CONTROL_HZ;
   // Self-paced async loop rather than setInterval: it awaits the writer's
   // backpressure signal (`ready`) before each send, so datagrams never queue up
@@ -1036,6 +1216,23 @@ async function startControlLoop(transport, token) {
       // A connected gamepad drives under its profile; the keyboard is the
       // fallback when none is present. The readout shows the live mapping.
       const mode = els.flightMode ? els.flightMode.value : "rover";
+      if (!controlGate.mayPublish()) {
+        // Input loss RELINQUISHES control authority. The latch is
+        // absolute: NO frame — not even a neutral — is sent under this
+        // generation, because the explicit LeaseRelease (sent by the
+        // blur handler the instant the latch set; re-attempted here for
+        // the polled-unfocused fallback) makes the host fence the
+        // generation and drive the vehicle to its link-loss policy. A
+        // client-side neutral would both violate the latch invariant and
+        // refresh the very setpoint freshness the silence watchdog (the
+        // independent backup) is watching.
+        state.prevArmInputs = new Set();
+        sendLeaseRelease(token);
+        els.gamepad.textContent =
+          "control released — input lost; press Connect to resume control";
+        log("input lost — control authority released (host acknowledges or watchdog covers)");
+        return;
+      }
       const pad = activeGamepad();
       const profile = pad ? profileFor(pad.id) : null;
       let axes;
@@ -1069,6 +1266,10 @@ async function startControlLoop(transport, token) {
           [AXIS_YAW, f.yaw],
         ];
       }
+      // Re-check the latch immediately before the write: no frame may be
+      // sent under this generation once input loss latched, regardless of
+      // which await the latch interleaved with.
+      if (!controlGate.mayPublish()) continue;
       state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
       const envelope = encodeControlFrameEnvelope({
         sessionId: state.sessionId,
@@ -1226,5 +1427,47 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   state.pendingReset = true;
 });
 els.connectBtn.addEventListener("click", () => {
-  void connect();
+  // An explicit, user-initiated start: resets the reconnect backoff and is the
+  // only path that requests control.
+  reconnect.requestConnect();
+});
+// A launcher-pinned URL (host + port + cert all present, autoconnect=1)
+// connects on load through the SAME explicit path as the button — the URL
+// already states everything the click would add. Anything less than a
+// fully pinned URL still requires the click. Runs after all wiring so the
+// full connect stack (control gate, reconnect controller) is in place.
+{
+  const params = new URLSearchParams(window.location.search);
+  if (
+    params.get("autoconnect") === "1" &&
+    els.host.value &&
+    els.port.value &&
+    els.certHash.value
+  ) {
+    reconnect.requestConnect();
+  }
+}
+
+// Returning to a tab the browser had frozen is the moment to recover: the
+// session likely idle-dropped while away, and only now can a reconnect succeed
+// (a hidden tab would just drop again).
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") reconnect.notifyVisible();
+});
+
+// Losing window focus can swallow keyup events, leaving keys "stuck". Clear the
+// keyboard and arm-edge state immediately on blur so input released off-window
+// does not linger and a button still held when focus returns cannot edge.
+window.addEventListener("blur", () => {
+  // Latch FIRST, synchronously: the control loop may be parked on an
+  // await, and a refocus before its next tick must not un-happen the
+  // loss. Frames under the current generation end here — and the
+  // explicit release starts HERE too, not at the loop's next tick, so a
+  // Connect click racing the blur always finds the release in flight.
+  controlGate.latchInputLoss();
+  if (state.leaseGranted && transportSessions.active !== null) {
+    sendLeaseRelease(transportSessions.active);
+  }
+  state.keys.clear();
+  state.prevArmInputs = new Set();
 });
