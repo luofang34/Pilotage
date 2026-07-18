@@ -45,7 +45,9 @@ fn neutralize_zeroes_controls_and_speed_decays_via_drag() {
     let speed_before_loss = measured_speed(&mut adapter);
     assert!(speed_before_loss > 0.0);
 
-    adapter.set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize));
+    adapter
+        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize))
+        .expect("policy enacted");
     adapter.step(StepBudget { ticks: 1 });
     let speed_after_one_tick = measured_speed(&mut adapter);
     assert!(speed_after_one_tick < speed_before_loss);
@@ -66,13 +68,17 @@ fn clearing_link_loss_policy_restores_normal_control() {
     let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
     adapter.apply_control(&full_throttle_frame(vehicle));
 
-    adapter.set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize));
+    adapter
+        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize))
+        .expect("policy enacted");
     adapter.step(StepBudget { ticks: 1 });
     let speed_while_neutralized = measured_speed(&mut adapter);
 
     // Link recovery: clearing the policy and re-applying full throttle must
     // resume acceleration rather than staying neutralized permanently.
-    adapter.set_link_loss_policy(vehicle, None);
+    adapter
+        .set_link_loss_policy(vehicle, None)
+        .expect("policy enacted");
     adapter.apply_control(&full_throttle_frame(vehicle));
     for _ in 0..50u32 {
         adapter.step(StepBudget { ticks: 1 });
@@ -87,7 +93,9 @@ fn hold_brief_holds_controls_then_neutralizes() {
     let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
     adapter.apply_control(&full_throttle_frame(vehicle));
 
-    adapter.set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 3 }));
+    adapter
+        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 3 }))
+        .expect("policy enacted");
 
     // While held, throttle keeps applying: speed should still be climbing
     // for the held ticks (comparable to no link loss at all).
@@ -118,7 +126,9 @@ fn hold_brief_expiry_is_not_undone_by_a_later_apply_control() {
     let vehicle = VehicleId::new(3);
     let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
     adapter.apply_control(&full_throttle_frame(vehicle));
-    adapter.set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 1 }));
+    adapter
+        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 1 }))
+        .expect("policy enacted");
 
     // Run past the hold window so the policy has neutralized.
     adapter.step(StepBudget { ticks: 2 });

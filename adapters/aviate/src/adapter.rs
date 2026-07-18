@@ -22,8 +22,6 @@ use std::sync::{Arc, Mutex};
 use crate::link::LatestAviate;
 
 use crate::error::AviateAdapterError;
-use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
-use crate::link::LinkConfig;
 use crate::uplink::FlightUplink;
 
 mod camera;
@@ -31,12 +29,13 @@ mod control;
 mod sampling;
 mod shm_sampling;
 mod sources;
+mod startup;
 use control::{flight_button_pressed, normalized_flight_sticks, rejected_control};
 use sampling::{
     mavlink_batch, measurement_pair_is_coherent, measurement_pair_supports_pose, yaw_of,
 };
 use shm_sampling::ShmSource;
-use sources::{ArmReport, EstimateSource, bind_sources, fc_state_sample};
+use sources::{ArmReport, EstimateSource, fc_state_sample};
 
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
@@ -121,77 +120,6 @@ pub struct AviateAdapter {
 }
 
 impl AviateAdapter {
-    /// Binds the profile's source roles and returns a ready adapter.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AviateAdapterError`] when a link the profile requires
-    /// cannot be established (`Simulation` tolerates only a missing
-    /// truth oracle).
-    pub async fn start(
-        vehicle: VehicleId,
-        profile: AviateProfile,
-        config: LinkConfig,
-    ) -> Result<Self, AviateAdapterError> {
-        let mut provider = OsIncarnationProvider;
-        Self::start_with_incarnation_provider(vehicle, profile, config, &mut provider).await
-    }
-
-    /// Binds the vehicle link using a caller-owned attachment identity source.
-    ///
-    /// Aircraft integrations use this entry point to supply a persistent boot
-    /// counter or source-issued UUID instead of the simulator CSPRNG provider.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AviateAdapterError`] when identity creation or the selected
-    /// vehicle link fails.
-    pub async fn start_with_incarnation_provider<P: IncarnationProvider>(
-        vehicle: VehicleId,
-        profile: AviateProfile,
-        config: LinkConfig,
-        provider: &mut P,
-    ) -> Result<Self, AviateAdapterError> {
-        let arm_incarnation = provider.next_incarnation_blocking()?;
-        let (estimate, truth) = bind_sources(profile, config, provider).await?;
-        // Oracle-only sessions bind no uplink at all: with no motion
-        // scope advertised, operational control is structurally absent
-        // rather than rejected case by case. Elsewhere a failed uplink
-        // bind degrades to telemetry-only rather than failing the
-        // adapter: displaying a flight you cannot command beats
-        // displaying nothing.
-        let uplink = if profile == AviateProfile::OracleOnly {
-            None
-        } else {
-            match FlightUplink::new() {
-                Ok(mut uplink) => {
-                    uplink.set_expected_source(config.system_id, config.component_id);
-                    Some(uplink)
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "flight uplink unavailable; telemetry-only");
-                    None
-                }
-            }
-        };
-        let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
-        Ok(Self {
-            vehicle,
-            estimate,
-            truth,
-            uplink,
-            frames,
-            _camera_bridge: camera_bridge,
-            _frame_forwarder: frame_forwarder,
-            arm: None,
-            arm_incarnation,
-            started_at: std::time::Instant::now(),
-            last_reset: None,
-            fpv_mode: false,
-            link_loss_policy: None,
-        })
-    }
-
     /// Takes the raw-frame receiver for the host media task, if cameras
     /// are up and it has not been taken.
     pub fn subscribe_frames(
@@ -227,6 +155,24 @@ impl AviateAdapter {
             fpv_mode: false,
             link_loss_policy: None,
         }
+    }
+
+    /// Expires the bound uplink's post-arm quiet window, so tests step
+    /// past it deterministically instead of sleeping wall-clock time.
+    #[cfg(test)]
+    pub(crate) fn expire_uplink_quiet_for_test(&mut self) {
+        if let Some(uplink) = self.uplink.as_mut() {
+            uplink.expire_quiet_for_test();
+        }
+    }
+
+    /// Whether the bound uplink currently holds a captured position-hold
+    /// point, for tests of the link-loss hold-invalidation contract.
+    #[cfg(test)]
+    pub(crate) fn uplink_hold_captured(&self) -> bool {
+        self.uplink
+            .as_ref()
+            .is_some_and(crate::uplink::FlightUplink::hold_captured)
     }
 
     /// Installs a test uplink, for tests.
@@ -325,6 +271,14 @@ impl VehicleAdapter for AviateAdapter {
         }
         if let Err(reason) = self.validate_flight_frame(frame) {
             return rejected_control(tick, reason);
+        }
+        // The link-loss latch: while a policy is engaged the FC holds its
+        // policy state (braked hover) and ordinary frames are suppressed,
+        // so a newly granted holder with deflected sticks cannot fly the
+        // vehicle out of it. The host clears the latch only after the
+        // holder demonstrates neutral input.
+        if self.link_loss_policy.is_some() {
+            return rejected_control(tick, RejectReason::LinkLossEngaged);
         }
         if flight_button_pressed(frame, RESET_BUTTON) {
             self.spawn_reset();
@@ -456,20 +410,45 @@ impl VehicleAdapter for AviateAdapter {
         ]
     }
 
-    fn set_link_loss_policy(&mut self, vehicle: VehicleId, policy: Option<LinkLossPolicy>) {
+    fn set_link_loss_policy(
+        &mut self,
+        vehicle: VehicleId,
+        policy: Option<LinkLossPolicy>,
+    ) -> Result<(), pilotage_adapter_api::LinkLossEnactError> {
         if vehicle != self.vehicle {
-            return;
+            return Err(pilotage_adapter_api::LinkLossEnactError::UnknownVehicle { vehicle });
         }
+        // Latch first, fail after: even an unenactable engage suppresses
+        // ordinary control frames. Any link-loss transition also
+        // invalidates the captured position-hold context — a hold point
+        // captured under the lost lease is obsolete, and letting it
+        // survive would command recovery back toward it the instant
+        // control resumes.
         self.link_loss_policy = policy;
-        // Engaging any policy sends a zero-velocity setpoint: the FC's
-        // velocity mode brakes to a hover, which is the only safe action
-        // a camera drone has (`Neutralize`). Clearing (link recovery)
-        // leaves the FC hovering until the operator commands again.
-        if policy.is_some()
-            && let Some(uplink) = self.uplink.as_mut()
-        {
-            uplink.send_neutral();
+        if let Some(uplink) = self.uplink.as_mut() {
+            uplink.clear_hold_state();
         }
+        if policy.is_some() {
+            // Engaging any policy sends a zero-velocity setpoint: the FC's
+            // velocity mode brakes to a hover, which is the only safe action
+            // a camera drone has (`Neutralize`). Clearing (link recovery)
+            // leaves the FC hovering until the operator commands again.
+            let Some(uplink) = self.uplink.as_mut() else {
+                return Err(pilotage_adapter_api::LinkLossEnactError::NoActuationChannel);
+            };
+            // Success is only claimed for a datagram the socket accepted;
+            // a refused send must reach the host's fail-closed counter,
+            // not vanish into a log line. The uplink counts refused sends,
+            // so an increment across this send IS the refusal.
+            let failures_before = uplink.send_failures();
+            uplink.send_neutral();
+            if uplink.send_failures() != failures_before {
+                return Err(pilotage_adapter_api::LinkLossEnactError::ChannelRejected {
+                    detail: "the neutral setpoint datagram was not sent".to_owned(),
+                });
+            }
+        }
+        Ok(())
     }
 
     fn step(&mut self, _budget: StepBudget) -> StepOutcome {

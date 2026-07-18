@@ -2,9 +2,9 @@
 //! vehicle (ADR-0008).
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, Pose2d,
-    RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
+    LinkLossPolicy, Pose2d, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
+    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
@@ -167,6 +167,16 @@ impl VehicleAdapter for ReferenceAdapter {
                 disposition: Disposition::Rejected(reason),
             };
         }
+        // The link-loss latch: `tick_link_loss` already forces the dynamics
+        // to the policy state, but accepting frames while engaged would
+        // store deflected controls that spring back the instant the policy
+        // clears. Suppress them typed instead.
+        if self.controls.policy_engaged() {
+            return ApplyOutcome {
+                tick: self.tick,
+                disposition: Disposition::Rejected(RejectReason::LinkLossEngaged),
+            };
+        }
         let mut throttle = self.controls.throttle;
         let mut steering = self.controls.steering;
         let mut transformed = false;
@@ -218,10 +228,16 @@ impl VehicleAdapter for ReferenceAdapter {
         Vec::new()
     }
 
-    fn set_link_loss_policy(&mut self, vehicle: VehicleId, policy: Option<LinkLossPolicy>) {
-        if vehicle == self.vehicle {
-            self.controls.set_policy(policy);
+    fn set_link_loss_policy(
+        &mut self,
+        vehicle: VehicleId,
+        policy: Option<LinkLossPolicy>,
+    ) -> Result<(), LinkLossEnactError> {
+        if vehicle != self.vehicle {
+            return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
+        self.controls.set_policy(policy);
+        Ok(())
     }
 
     fn step(&mut self, budget: StepBudget) -> StepOutcome {

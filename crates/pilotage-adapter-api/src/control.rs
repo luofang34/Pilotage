@@ -16,6 +16,13 @@ pub enum RejectReason {
     Fenced,
     /// A measurement required to apply the frame is unavailable.
     MeasurementUnavailable,
+    /// A link-loss policy is engaged on the vehicle; control frames are
+    /// suppressed until the policy is cleared through the host's recovery
+    /// path (a fresh authority generation plus the scope's activation
+    /// condition, ADR-0008). Without this latch a newly granted holder
+    /// with deflected sticks would drive the vehicle straight out of its
+    /// neutralized state.
+    LinkLossEngaged,
     /// The adapter rejected the frame for a reason not covered above.
     Other(String),
 }
@@ -62,6 +69,32 @@ pub enum LinkLossPolicy {
     Pause,
     /// Hand control to an onboard automation system.
     EngageAutomation,
+}
+
+/// Why an adapter could not enact a link-loss policy change.
+///
+/// A failed enactment is a fail-closed fault the driver must count and
+/// surface (never a silent no-op): the host has already fenced authority,
+/// so an unenacted policy means the vehicle may still be executing its
+/// last command with nobody in control.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LinkLossEnactError {
+    /// The adapter does not expose the named vehicle.
+    #[error("vehicle {vehicle:?} is not exposed by this adapter")]
+    UnknownVehicle {
+        /// The vehicle the policy change targeted.
+        vehicle: pilotage_protocol::VehicleId,
+    },
+    /// No actuation channel is bound, so the adapter cannot drive the
+    /// vehicle to its policy state (e.g. a telemetry-only profile).
+    #[error("no actuation channel is bound; the policy cannot be enacted")]
+    NoActuationChannel,
+    /// The actuation channel refused or dropped the policy command.
+    #[error("the actuation channel rejected the policy command: {detail}")]
+    ChannelRejected {
+        /// Channel-specific failure detail.
+        detail: String,
+    },
 }
 
 #[cfg(test)]

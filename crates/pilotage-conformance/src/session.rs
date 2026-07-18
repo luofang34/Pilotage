@@ -171,10 +171,17 @@ impl ScriptedSession {
     }
 
     fn apply_link_loss_policy(&mut self, vehicle: VehicleId, policy: Option<LinkLossPolicy>) {
-        self.adapter.set_link_loss_policy(vehicle, policy);
+        // A refused enactment must be visible in the comparable event log —
+        // an adapter that cannot drive its declared policy is a conformance
+        // divergence, not a silent no-op.
+        let enacted = self.adapter.set_link_loss_policy(vehicle, policy);
         self.events.push(SessionEvent::LinkLossPolicyEngaged {
             vehicle,
-            policy: policy_label(policy),
+            policy: if enacted.is_ok() {
+                policy_label(policy)
+            } else {
+                "enact-failed"
+            },
         });
     }
 }

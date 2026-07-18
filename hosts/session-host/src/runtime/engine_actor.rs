@@ -22,6 +22,11 @@ use crate::runtime::wire_codec::{
 mod telemetry;
 use telemetry::sample_to_wire;
 
+#[cfg(test)]
+mod tests;
+
+mod link_loss;
+
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
 /// Bounded per ADR-0009's discipline: a lagging engine actor is a
@@ -112,6 +117,11 @@ pub struct EngineActor<A: VehicleAdapter> {
     clients: ClientRegistry,
     latency: BoundedLatencyLog<LATENCY_LOG_CAPACITY>,
     drops: DropCounters,
+    /// Wrapping count of link-loss policy changes the adapter failed to
+    /// enact. A non-zero value is a fail-closed fault, not noise: authority
+    /// was already fenced, so an unenacted policy means the vehicle may
+    /// still be executing its last command with nobody in control.
+    link_loss_enact_failures: u64,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -135,6 +145,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             clients: ClientRegistry::new(),
             latency: BoundedLatencyLog::new(),
             drops: DropCounters::default(),
+            link_loss_enact_failures: 0,
             start,
         }
     }
@@ -273,6 +284,10 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 let outcome = self.adapter.apply_control(&frame);
                 self.record_stage(Stage::Apply, apply_start.elapsed());
                 debug!(?outcome, "control frame applied to adapter");
+            }
+            action @ (SessionAction::EngageLinkLoss { .. }
+            | SessionAction::ClearLinkLoss { .. }) => {
+                self.enact_link_loss(action);
             }
         }
     }
@@ -450,7 +465,8 @@ fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConn
             ToConnection::AuthorityMessage(encode_envelope_message(envelope))
         }
         pilotage_session::OutboundMessage::Welcome(_)
-        | pilotage_session::OutboundMessage::LeaseResponse(_) => {
+        | pilotage_session::OutboundMessage::LeaseResponse(_)
+        | pilotage_session::OutboundMessage::LeaseReleased(_) => {
             ToConnection::BootstrapMessage(encode_envelope_message(envelope))
         }
     }

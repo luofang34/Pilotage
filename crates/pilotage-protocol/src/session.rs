@@ -58,6 +58,33 @@ pub struct LeaseRequest {
     pub scope: ScopeId,
 }
 
+/// A holder voluntarily relinquishing a control scope (ADR-0006): routed
+/// through the authority engine's release path, so the generation advances
+/// (stragglers are fenced) and the vehicle's link-loss policy engages
+/// exactly as for an involuntary loss.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaseRelease {
+    /// Vehicle the released scope belongs to.
+    pub vehicle: VehicleId,
+    /// Control scope being relinquished.
+    pub scope: ScopeId,
+}
+
+/// The host's acknowledgement of a [`LeaseRelease`]: authority is
+/// relinquished the moment this arrives (the host silence watchdog remains
+/// the independent backup if it never does).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaseReleased {
+    /// Vehicle the released scope belongs to.
+    pub vehicle: VehicleId,
+    /// The scope the release targeted.
+    pub scope: ScopeId,
+    /// False when the sender did not hold the scope (nothing was released).
+    pub released: bool,
+    /// The fencing generation now in force.
+    pub generation: Generation,
+}
+
 /// Why a `LeaseRequest` was denied (ADR-0006, ADR-0010).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaseDenialReason {

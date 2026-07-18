@@ -408,3 +408,5 @@ fn control_frames_are_rejected_at_the_boundary() {
         Disposition::Rejected(RejectReason::UnknownScope)
     );
 }
+
+mod link_loss_enact;
