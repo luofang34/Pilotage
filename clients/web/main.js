@@ -1431,6 +1431,22 @@ els.connectBtn.addEventListener("click", () => {
   // only path that requests control.
   reconnect.requestConnect();
 });
+// A launcher-pinned URL (host + port + cert all present, autoconnect=1)
+// connects on load through the SAME explicit path as the button — the URL
+// already states everything the click would add. Anything less than a
+// fully pinned URL still requires the click. Runs after all wiring so the
+// full connect stack (control gate, reconnect controller) is in place.
+{
+  const params = new URLSearchParams(window.location.search);
+  if (
+    params.get("autoconnect") === "1" &&
+    els.host.value &&
+    els.port.value &&
+    els.certHash.value
+  ) {
+    reconnect.requestConnect();
+  }
+}
 
 // Returning to a tab the browser had frozen is the moment to recover: the
 // session likely idle-dropped while away, and only now can a reconnect succeed
