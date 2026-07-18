@@ -42,11 +42,40 @@ const MAX_YAW_RATE_RPS: f32 = 0.9;
 /// Longest believable gap between control frames when integrating the
 /// yaw-rate stick; anything longer is a stall, not a dt.
 const MAX_DT_S: f32 = 0.1;
+/// Measured speed below which the hold point may be captured after the
+/// sticks center. Capturing while still moving commands PositionHold on
+/// a point the vehicle is about to overrun — it brakes past it, then
+/// flies back (~1.5–2 m from a full-stick release). Above this speed
+/// the uplink streams zero-velocity setpoints and lets the FC's
+/// velocity mode brake; this is a threshold on a measurement, not a
+/// control gain — the hold loop itself stays on the FC.
+const HOLD_CAPTURE_MAX_MPS: f32 = 0.3;
 /// Stick frames are suppressed this long after an arm/disarm send: the
 /// FC stages inbound commands in a single slot, so a setpoint arriving
 /// in the same poll batch would overwrite the arm before the control
 /// loop consumes it.
 const ARM_QUIET: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// The uplink's time source. Production reads the system monotonic clock;
+/// tests substitute a manually advanced instant so timing behavior (the
+/// post-arm quiet window, the slew-limiter dt) is exercised without
+/// real-time sleeps.
+#[derive(Debug)]
+enum UplinkClock {
+    System,
+    #[cfg(test)]
+    Manual(Instant),
+}
+
+impl UplinkClock {
+    fn now(&self) -> Instant {
+        match self {
+            Self::System => Instant::now(),
+            #[cfg(test)]
+            Self::Manual(at) => *at,
+        }
+    }
+}
 
 /// The UDP MAVLink command uplink to the FC.
 #[derive(Debug)]
@@ -68,6 +97,7 @@ pub struct FlightUplink {
     hold_pos_ned: Option<[f32; 3]>,
     last_vel_ned: [f32; 3],
     started: Instant,
+    clock: UplinkClock,
     send_failures: u64,
     expected_system_id: u8,
     expected_component_id: u8,
@@ -105,10 +135,26 @@ impl FlightUplink {
             hold_pos_ned: None,
             last_vel_ned: [0.0; 3],
             started: Instant::now(),
+            clock: UplinkClock::System,
             send_failures: 0,
             expected_system_id: 1,
             expected_component_id: 1,
         })
+    }
+
+    /// Switches to the manually advanced clock, anchored at construction
+    /// time, so tests drive the quiet window and slew dt deterministically.
+    #[cfg(test)]
+    pub(crate) fn use_manual_clock(&mut self) {
+        self.clock = UplinkClock::Manual(self.started);
+    }
+
+    /// Advances the manual clock; a no-op on the system clock.
+    #[cfg(test)]
+    pub(crate) fn advance_clock(&mut self, dt: std::time::Duration) {
+        if let UplinkClock::Manual(at) = &mut self.clock {
+            *at += dt;
+        }
     }
 
     /// Selects the MAVLink system/component whose replies may affect state.
@@ -144,7 +190,7 @@ impl FlightUplink {
 
     fn send_arm_command(&mut self, arm: bool) {
         self.last_frame = None;
-        self.quiet_until = Some(Instant::now() + ARM_QUIET);
+        self.quiet_until = Some(self.clock.now() + ARM_QUIET);
         self.airborne = false;
         self.hold_pos_ned = None;
         self.last_vel_ned = [0.0; 3];
@@ -164,7 +210,7 @@ impl FlightUplink {
     /// to collective thrust around the hover point — altitude is the
     /// pilot's axis in FPV.
     pub fn send_fpv_frame(&mut self, roll: f32, pitch: f32, throttle: f32, yaw: f32) {
-        let now = Instant::now();
+        let now = self.clock.now();
         if let Some(quiet) = self.quiet_until {
             if now < quiet {
                 return;
@@ -192,7 +238,10 @@ impl FlightUplink {
         };
         let frame = encode_attitude_setpoint(
             self.seq,
-            self.started.elapsed().as_millis() as u32,
+            self.clock
+                .now()
+                .saturating_duration_since(self.started)
+                .as_millis() as u32,
             crate::mavlink::AttitudeTarget {
                 roll_rad: roll * FPV_MAX_TILT_RAD,
                 pitch_rad: pitch * FPV_MAX_TILT_RAD,
@@ -208,7 +257,11 @@ impl FlightUplink {
     /// Converts one canonical stick frame (`[-1, 1]` roll/pitch/
     /// throttle/yaw, stick conventions: pitch + = forward, roll + =
     /// right, throttle + = climb, yaw + = clockwise) into a velocity
-    /// setpoint and sends it.
+    /// setpoint and sends it. `current_vel_ned_mps` is the measured
+    /// (estimated) velocity as independently validated data — `None`
+    /// when the estimate did not declare it valid or it is non-finite —
+    /// used only to decide when braking has finished after the sticks
+    /// center.
     #[allow(clippy::too_many_arguments)]
     pub fn send_stick_frame(
         &mut self,
@@ -218,8 +271,9 @@ impl FlightUplink {
         yaw: f32,
         current_yaw_rad: f32,
         current_pos_ned_m: [f32; 3],
+        current_vel_ned_mps: Option<[f32; 3]>,
     ) {
-        let now = Instant::now();
+        let now = self.clock.now();
         if let Some(quiet) = self.quiet_until {
             if now < quiet {
                 return;
@@ -238,13 +292,12 @@ impl FlightUplink {
             .map_or(0.0, |t| now.duration_since(t).as_secs_f32())
             .clamp(0.0, MAX_DT_S);
         self.last_frame = Some(now);
-        let time_boot_ms = self.started.elapsed().as_millis() as u32;
+        let time_boot_ms = self
+            .clock
+            .now()
+            .saturating_duration_since(self.started)
+            .as_millis() as u32;
 
-        // DJI brake-then-hold: with every stick centered, capture the
-        // current position once and stream a position setpoint. The
-        // hold loop itself runs on the FC (PositionHold cascade) —
-        // ground code carries no control gains, only the captured
-        // point. Any stick deflection returns to velocity mode.
         let sticks_active = roll
             .abs()
             .max(pitch.abs())
@@ -252,17 +305,7 @@ impl FlightUplink {
             .max(yaw.abs())
             > 0.02;
         if !sticks_active {
-            let hold = *self.hold_pos_ned.get_or_insert(current_pos_ned_m);
-            self.last_vel_ned = [0.0; 3];
-            let frame = encode_position_setpoint(
-                self.seq,
-                time_boot_ms,
-                hold,
-                self.heading_sp_rad,
-                self.expected_system_id,
-                self.expected_component_id,
-            );
-            self.send(&frame);
+            self.send_brake_or_hold(current_pos_ned_m, current_vel_ned_mps, time_boot_ms);
             return;
         }
         self.hold_pos_ned = None;
@@ -301,11 +344,66 @@ impl FlightUplink {
         self.send(&frame);
     }
 
+    /// DJI brake-then-hold, entered while every stick is centered:
+    /// first brake — stream zero-velocity setpoints while the vehicle
+    /// still moves — then capture the position once braking finishes
+    /// and stream it as the hold point. Capturing at release instead
+    /// would command PositionHold on a point the momentum overruns,
+    /// and the FC would faithfully fly back to it. The hold loop
+    /// itself runs on the FC (PositionHold cascade) — ground code
+    /// carries no control gains, only the captured point. Once
+    /// captured, the hold point is sticky against gusts (re-capturing
+    /// on a velocity blip would let the vehicle drift downwind); any
+    /// stick deflection returns to velocity mode.
+    fn send_brake_or_hold(
+        &mut self,
+        current_pos_ned_m: [f32; 3],
+        current_vel_ned_mps: Option<[f32; 3]>,
+        time_boot_ms: u32,
+    ) {
+        self.last_vel_ned = [0.0; 3];
+        // The hold is captured only on POSITIVE evidence of stillness: a
+        // validated, finite velocity at or below the capture threshold.
+        // Missing or invalid velocity keeps braking — "stopped" is never
+        // inferred from absent data (a NaN comparison is silently false,
+        // which would otherwise capture the hold at full speed, the exact
+        // defect this state machine exists to prevent).
+        let demonstrated_still = current_vel_ned_mps.is_some_and(|vel| {
+            (vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]).sqrt() <= HOLD_CAPTURE_MAX_MPS
+        });
+        if self.hold_pos_ned.is_none() && !demonstrated_still {
+            let frame = encode_velocity_setpoint(
+                self.seq,
+                time_boot_ms,
+                [0.0; 3],
+                self.heading_sp_rad,
+                self.expected_system_id,
+                self.expected_component_id,
+            );
+            self.send(&frame);
+            return;
+        }
+        let hold = *self.hold_pos_ned.get_or_insert(current_pos_ned_m);
+        let frame = encode_position_setpoint(
+            self.seq,
+            time_boot_ms,
+            hold,
+            self.heading_sp_rad,
+            self.expected_system_id,
+            self.expected_component_id,
+        );
+        self.send(&frame);
+    }
+
     /// Sends a zero-velocity setpoint holding the current heading — the
     /// link-loss neutralize action (the FC's velocity mode brakes to a
     /// hover on zero demand).
     pub fn send_neutral(&mut self) {
-        let time_boot_ms = self.started.elapsed().as_millis() as u32;
+        let time_boot_ms = self
+            .clock
+            .now()
+            .saturating_duration_since(self.started)
+            .as_millis() as u32;
         let frame = encode_velocity_setpoint(
             self.seq,
             time_boot_ms,

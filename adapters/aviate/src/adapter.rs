@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, RejectReason,
-    ScopeDescriptor, SourceIncarnation, SourceRole, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
+    VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
@@ -31,9 +31,7 @@ mod shm_sampling;
 mod sources;
 mod startup;
 use control::{flight_button_pressed, normalized_flight_sticks, rejected_control};
-use sampling::{
-    mavlink_batch, measurement_pair_is_coherent, measurement_pair_supports_pose, yaw_of,
-};
+use sampling::mavlink_batch;
 use shm_sampling::ShmSource;
 use sources::{ArmReport, EstimateSource, fc_state_sample};
 
@@ -182,29 +180,10 @@ impl AviateAdapter {
         self
     }
 
-    /// The vehicle's current measured yaw (radians clockwise from
-    /// north) and NED position, FROM THE FC OPERATIONAL ESTIMATE ONLY
-    /// (LINK-04): simulation truth is never eligible to seed command
-    /// construction, so without a live authorized estimate there is no
-    /// pose and state-dependent control is rejected instead of
-    /// borrowing truth.
-    fn current_pose(&mut self) -> Option<(f32, [f32; 3])> {
-        let latest = self.estimate.as_ref()?.state.lock().ok()?;
-        latest.estimator_status_stamp()?;
-        let attitude = latest
-            .attitude
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
-            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
-        let kinematics = latest
-            .kinematics
-            .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
-            .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
-        if !measurement_pair_is_coherent(attitude, kinematics, latest.maximum_inter_group_skew_ms)
-            || !measurement_pair_supports_pose(attitude, kinematics)
-        {
-            return None;
-        }
-        Some((yaw_of(attitude.quat_wxyz) as f32, kinematics.pos_ned_m))
+    /// The bound uplink, for tests that drive its manual clock.
+    #[cfg(test)]
+    pub(crate) fn uplink_mut(&mut self) -> Option<&mut FlightUplink> {
+        self.uplink.as_mut()
     }
 
     fn validate_flight_frame(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
@@ -293,7 +272,7 @@ impl VehicleAdapter for AviateAdapter {
                 disposition: Disposition::Accepted,
             };
         }
-        let Some((current_yaw, current_pos)) = self.current_pose() else {
+        let Some((current_yaw, current_pos, current_vel)) = self.current_pose() else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
         let Some(uplink) = self.uplink.as_mut() else {
@@ -328,6 +307,7 @@ impl VehicleAdapter for AviateAdapter {
                 sticks[usize::from(YAW_AXIS)],
                 current_yaw,
                 current_pos,
+                current_vel,
             );
         }
         ApplyOutcome {
