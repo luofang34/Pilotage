@@ -30,7 +30,12 @@
  *   length-delimited envelope decoder; null means "need more bytes"
  * @param {() => boolean} deps.isActive superseded sessions stop reading
  * @param {(decoded: object) => void} deps.onMessage decoded-frame sink
- * @param {boolean} deps.requestLease request motion authority (manual connect)
+ * @param {boolean | (() => boolean)} deps.requestLease whether to request
+ *   motion authority. Accepts a FUNCTION evaluated at the `ServerWelcome`
+ *   moment — the instant before the one `LeaseRequest` emission — so a
+ *   live condition (an input-loss latch set during an earlier await of
+ *   this very connect) is honored, not a stale flag captured when the
+ *   connect began.
  * @param {() => Promise<boolean>} deps.sendLeaseRequest writes the
  *   `LeaseRequest`; false means the session was superseded mid-send
  */
@@ -57,7 +62,9 @@ export async function runBootstrapReader({
       onMessage(decoded);
       if (decoded.kind === "ServerWelcome") {
         welcomed = true;
-        if (!requestLease) {
+        const wantsLease =
+          typeof requestLease === "function" ? requestLease() : requestLease;
+        if (!wantsLease) {
           // Telemetry/video only; control stays suspended.
           return { completed: true, welcomed };
         }
