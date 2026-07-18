@@ -8,7 +8,8 @@ use std::time::Duration;
 use pilotage_session::ClientKey;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
+use wtransport::error::{ConnectionError, StreamOpeningError, StreamWriteError};
 use wtransport::{Connection, SendStream, VarInt};
 
 use super::{EncodedFrame, now_ns};
@@ -29,6 +30,104 @@ const FRAME_WRITE_DEADLINE: Duration = Duration::from_secs(2);
 /// partial frame regardless of the code.
 const STALL_RESET_CODE: u32 = 1;
 
+/// A connection-fatal error's kind, preserved rather than erased so the
+/// log names — and the error chain carries — what actually failed. The
+/// open-request kind keeps the real [`ConnectionError`] as its `#[source]`
+/// (timeout, application-close reason/code, H3, QUIC details all survive).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+enum FatalKind {
+    /// The connection has been dropped.
+    #[error("not connected")]
+    NotConnected,
+    /// A QUIC protocol error.
+    #[error("QUIC protocol error")]
+    QuicProto,
+    /// The uni-stream open request itself failed (connection-level); the
+    /// concrete cause is preserved.
+    #[error("uni stream request failed: {0}")]
+    OpenRequest(#[source] ConnectionError),
+}
+
+/// Why an open, write, or finish failed, classified so neither a peer's
+/// decision to abandon ONE stream nor a local close retires the writer.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+enum StreamError {
+    /// The peer stopped or refused this stream alone (`Stopped`,
+    /// `Refused`): a peer-attributed one-frame loss; the connection and
+    /// every other source are unaffected.
+    #[error("peer stopped or refused the stream at {phase}")]
+    PeerStop {
+        /// The phase that surfaced it (`open`, `write`, `finish`).
+        phase: &'static str,
+        /// The peer's application error code, when it carried one.
+        code: Option<u64>,
+    },
+    /// The stream was already closed locally (`Closed`): a frame-local
+    /// anomaly, recoverable like a peer stop but NOT a peer stop/refusal.
+    #[error("stream already closed locally at {phase}")]
+    LocalClose {
+        /// The phase that surfaced it.
+        phase: &'static str,
+    },
+    /// Connection-level loss or a protocol failure: the writer must
+    /// retire — no further frame can be delivered on this connection.
+    #[error("connection-fatal at {phase}: {kind}")]
+    ConnectionFatal {
+        /// The phase that surfaced it.
+        phase: &'static str,
+        /// The preserved underlying kind (its own `#[source]` chain).
+        #[source]
+        kind: FatalKind,
+    },
+}
+
+/// Classifies a wtransport write/finish error: `Stopped` is a peer stop,
+/// `Closed` is a local close, `NotConnected`/`QuicProto` are
+/// connection-fatal. Pinned to wtransport 0.7.1's four variants.
+fn classify_write(error: &StreamWriteError, phase: &'static str) -> StreamError {
+    match error {
+        StreamWriteError::Stopped(code) => StreamError::PeerStop {
+            phase,
+            code: Some(code.into_inner()),
+        },
+        StreamWriteError::Closed => StreamError::LocalClose { phase },
+        StreamWriteError::NotConnected => StreamError::ConnectionFatal {
+            phase,
+            kind: FatalKind::NotConnected,
+        },
+        StreamWriteError::QuicProto => StreamError::ConnectionFatal {
+            phase,
+            kind: FatalKind::QuicProto,
+        },
+    }
+}
+
+/// Classifies a wtransport stream-opening error: `Refused` is a peer
+/// refusal of this stream alone, `NotConnected` is connection-fatal.
+/// Pinned to wtransport 0.7.1's two variants.
+fn classify_open(error: &StreamOpeningError) -> StreamError {
+    match error {
+        StreamOpeningError::Refused => StreamError::PeerStop {
+            phase: "open",
+            code: None,
+        },
+        StreamOpeningError::NotConnected => StreamError::ConnectionFatal {
+            phase: "open",
+            kind: FatalKind::NotConnected,
+        },
+    }
+}
+
+/// Classifies an open-request [`ConnectionError`] (the first `open_uni`
+/// await): always connection-fatal, but the concrete cause is retained
+/// rather than discarded to a static string.
+fn classify_open_request(error: ConnectionError) -> StreamError {
+    StreamError::ConnectionFatal {
+        phase: "open",
+        kind: FatalKind::OpenRequest(error),
+    }
+}
+
 /// One per-frame outbound stream. `write_all`/`finish` are the clean send
 /// path; `reset` is the explicit RESET_STREAM a deadline-exceeded frame
 /// needs. Dropping a wtransport/Quinn `SendStream` attempts a graceful
@@ -38,9 +137,9 @@ const STALL_RESET_CODE: u32 = 1;
 /// because the writer runs as a spawned task on a multi-threaded runtime.
 trait FrameStream {
     /// Writes the whole buffer, awaiting flow-control credit.
-    fn write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), &'static str>> + Send;
+    fn write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), StreamError>> + Send;
     /// Finishes the stream cleanly (graceful FIN).
-    fn finish(&mut self) -> impl Future<Output = Result<(), &'static str>> + Send;
+    fn finish(&mut self) -> impl Future<Output = Result<(), StreamError>> + Send;
     /// Resets the stream (RESET_STREAM); a no-op on an already-closed one.
     fn reset(&mut self);
 }
@@ -50,20 +149,20 @@ trait FrameChannel {
     /// The stream this channel opens.
     type Stream: FrameStream;
     /// Opens one host-initiated uni stream.
-    fn open(&self) -> impl Future<Output = Result<Self::Stream, &'static str>> + Send;
+    fn open(&self) -> impl Future<Output = Result<Self::Stream, StreamError>> + Send;
 }
 
 impl FrameStream for SendStream {
-    async fn write_all(&mut self, buf: &[u8]) -> Result<(), &'static str> {
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), StreamError> {
         SendStream::write_all(self, buf)
             .await
-            .map_err(|_| "payload write failed")
+            .map_err(|e| classify_write(&e, "write"))
     }
 
-    async fn finish(&mut self) -> Result<(), &'static str> {
+    async fn finish(&mut self) -> Result<(), StreamError> {
         SendStream::finish(self)
             .await
-            .map_err(|_| "stream finish failed")
+            .map_err(|e| classify_write(&e, "finish"))
     }
 
     fn reset(&mut self) {
@@ -76,12 +175,11 @@ impl FrameStream for SendStream {
 impl FrameChannel for Connection {
     type Stream = SendStream;
 
-    async fn open(&self) -> Result<SendStream, &'static str> {
-        self.open_uni()
-            .await
-            .map_err(|_| "uni stream request failed")?
-            .await
-            .map_err(|_| "uni stream failed to open")
+    async fn open(&self) -> Result<SendStream, StreamError> {
+        // The open-request error is connection-level (its cause preserved);
+        // the opening error can be a peer refusal of this stream alone.
+        let opening = self.open_uni().await.map_err(classify_open_request)?;
+        opening.await.map_err(|e| classify_open(&e))
     }
 }
 
@@ -108,17 +206,44 @@ enum FrameOutcome {
     /// had opened and was explicitly reset, false when the open itself
     /// timed out (there was no stream to reset).
     Stalled { reset: bool },
-    /// The open or write failed outright; the connection is going away.
-    Failed(&'static str),
+    /// The peer stopped or refused this stream alone; the connection and
+    /// other sources are healthy — one-frame loss, keep writing.
+    PeerStop {
+        /// The phase (`open`, `write`, `finish`) that surfaced it.
+        phase: &'static str,
+        /// The peer's application error code, when it carried one.
+        code: Option<u64>,
+    },
+    /// The stream was already closed locally — a frame-local anomaly,
+    /// recoverable, but not a peer stop/refusal.
+    LocalClose {
+        /// The phase that surfaced it.
+        phase: &'static str,
+    },
+    /// Connection-level loss or protocol failure; retire the writer.
+    ConnectionFatal {
+        /// The phase that surfaced it.
+        phase: &'static str,
+        /// The preserved underlying kind.
+        kind: FatalKind,
+    },
+}
+
+/// The running per-writer loss counters, kept distinguishable so logs and
+/// metrics separate deadline stalls, peer-local stop/refusal, and
+/// local closes from the one connection-fatal event that ends the writer.
+#[derive(Default)]
+struct LossCounters {
+    stalls: u64,
+    peer_drops: u64,
+    local_closes: u64,
 }
 
 /// Drains the handoff channel, delivering one frame per stream under a
 /// single absolute per-frame deadline that covers BOTH opening the stream
-/// and writing it. A frame that exceeds its deadline costs one frame and
-/// the writer proceeds — a mid-write timeout resets the opened stream
-/// (RESET_STREAM), an open timeout simply skips (no stream exists). An
-/// outright open/write failure means the connection is going away and ends
-/// the writer.
+/// and writing it. A frame lost to a deadline, a peer stop/refusal, or a
+/// local close costs one frame and the writer proceeds; only
+/// connection-level loss retires the writer.
 async fn drain_frames<C: FrameChannel>(
     client: ClientKey,
     source_id: u8,
@@ -126,7 +251,7 @@ async fn drain_frames<C: FrameChannel>(
     frames: &mut mpsc::Receiver<EncodedFrame>,
     start: Instant,
 ) {
-    let mut stalls: u64 = 0;
+    let mut counters = LossCounters::default();
     while let Some(frame) = frames.recv().await {
         // Stamp publication at the moment of write, distinct from the receive
         // stamp taken at dequeue, so a consumer can separate host queueing
@@ -146,37 +271,86 @@ async fn drain_frames<C: FrameChannel>(
             continue;
         };
         let deadline = Instant::now() + FRAME_WRITE_DEADLINE;
-        match deliver_frame(channel, deadline, VIDEO_FRAME_V2, &body).await {
-            FrameOutcome::Sent => {}
-            FrameOutcome::Stalled { reset } => {
-                stalls = stalls.wrapping_add(1);
-                warn!(
-                    client = client.as_u64(),
-                    source_id,
-                    total_stalls = stalls,
-                    stream_reset = reset,
-                    "video frame exceeded its deadline; continuing with the next frame"
-                );
-            }
-            FrameOutcome::Failed(reason) => {
-                // A failed open/write means the connection is going away; stop
-                // writing video to it. The connection task's own teardown
-                // deregisters this client.
-                debug!(
-                    client = client.as_u64(),
-                    source_id, reason, "video writer stopping"
-                );
-                return;
-            }
+        let outcome = deliver_frame(channel, deadline, VIDEO_FRAME_V2, &body).await;
+        if !record_outcome(client, source_id, outcome, &mut counters) {
+            return;
         }
     }
+}
+
+/// Folds one frame's outcome into the counters and logs it, returning
+/// `false` when the outcome is connection-fatal and the writer must retire.
+fn record_outcome(
+    client: ClientKey,
+    source_id: u8,
+    outcome: FrameOutcome,
+    counters: &mut LossCounters,
+) -> bool {
+    match outcome {
+        FrameOutcome::Sent => {}
+        FrameOutcome::Stalled { reset } => {
+            counters.stalls = counters.stalls.wrapping_add(1);
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                total_stalls = counters.stalls,
+                stream_reset = reset,
+                "video frame exceeded its deadline; continuing with the next frame"
+            );
+        }
+        FrameOutcome::PeerStop { phase, code } => {
+            counters.peer_drops = counters.peer_drops.wrapping_add(1);
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                phase,
+                peer_code = code,
+                total_peer_drops = counters.peer_drops,
+                "peer stopped or refused this video stream; the connection is healthy, \
+                 continuing with the next frame"
+            );
+        }
+        FrameOutcome::LocalClose { phase } => {
+            counters.local_closes = counters.local_closes.wrapping_add(1);
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                phase,
+                total_local_closes = counters.local_closes,
+                "video stream was already closed locally; frame-local loss, continuing \
+                 with the next frame"
+            );
+        }
+        FrameOutcome::ConnectionFatal { phase, kind } => {
+            // Connection-level loss retires the writer; a distinguishable
+            // fatal record, not a debug line. `%source` logs the preserved
+            // cause (timeout, application-close reason/code, H3, QUIC), not a
+            // static string. The connection task's own teardown deregisters
+            // this client.
+            warn!(
+                client = client.as_u64(),
+                source_id,
+                phase,
+                source = %kind,
+                total_connection_failures = 1_u64,
+                total_stalls = counters.stalls,
+                total_peer_drops = counters.peer_drops,
+                total_local_closes = counters.local_closes,
+                "video writer stopping: connection-level failure"
+            );
+            return false;
+        }
+    }
+    true
 }
 
 /// Opens a stream and writes the tag then the framed body, all under one
 /// absolute `deadline`. An open that exceeds the deadline yields a stall
 /// with no stream to reset; a write that exceeds it explicitly resets the
 /// opened stream (RESET_STREAM), retained across the timed region so the
-/// reset can fire rather than a dropped-future FIN.
+/// reset can fire rather than a dropped-future FIN. Typed open/write
+/// failures pass their peer-local vs connection-fatal classification
+/// through unchanged.
 async fn deliver_frame<C: FrameChannel>(
     channel: &C,
     deadline: Instant,
@@ -185,15 +359,29 @@ async fn deliver_frame<C: FrameChannel>(
 ) -> FrameOutcome {
     let mut stream = match tokio::time::timeout_at(deadline, channel.open()).await {
         Ok(Ok(stream)) => stream,
-        Ok(Err(reason)) => return FrameOutcome::Failed(reason),
+        Ok(Err(error)) => return error.into_outcome(),
         Err(_elapsed) => return FrameOutcome::Stalled { reset: false },
     };
     match tokio::time::timeout_at(deadline, write_body(&mut stream, tag, body)).await {
         Ok(Ok(())) => FrameOutcome::Sent,
-        Ok(Err(reason)) => FrameOutcome::Failed(reason),
+        Ok(Err(error)) => error.into_outcome(),
         Err(_elapsed) => {
             stream.reset();
             FrameOutcome::Stalled { reset: true }
+        }
+    }
+}
+
+impl StreamError {
+    /// Maps a stream error to its frame outcome, preserving the peer-stop,
+    /// local-close, and connection-fatal classification.
+    fn into_outcome(self) -> FrameOutcome {
+        match self {
+            StreamError::PeerStop { phase, code } => FrameOutcome::PeerStop { phase, code },
+            StreamError::LocalClose { phase } => FrameOutcome::LocalClose { phase },
+            StreamError::ConnectionFatal { phase, kind } => {
+                FrameOutcome::ConnectionFatal { phase, kind }
+            }
         }
     }
 }
@@ -203,232 +391,11 @@ async fn write_body<S: FrameStream>(
     stream: &mut S,
     tag: u8,
     body: &[u8],
-) -> Result<(), &'static str> {
+) -> Result<(), StreamError> {
     stream.write_all(&[tag]).await?;
     stream.write_all(body).await?;
     stream.finish().await
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    use pilotage_adapter_api::{
-        CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
-        SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
-    };
-    use pilotage_session::ClientKey;
-    use tokio::sync::mpsc;
-    use tokio::time::Instant;
-
-    use super::{EncodedFrame, FrameChannel, FrameStream, drain_frames};
-
-    fn capture_stamp() -> VideoCaptureStamp {
-        VideoCaptureStamp {
-            stamp: MeasurementStamp {
-                role: SourceRole::VideoCapture,
-                integrity: SourceIntegrity::Unprotected,
-                source_id: 1,
-                source_incarnation: SourceIncarnation::new([5; 16]),
-                source_epoch: 0,
-                sequence: 3,
-                acquired_at_ns: 999,
-                clock: MeasurementClock::Simulation,
-            },
-            camera_id: CameraId(1),
-            calibration_id: CalibrationId::NONE,
-            mapping: CaptureClockMapping::identity(MeasurementClock::Simulation),
-        }
-    }
-
-    fn encoded_frame() -> EncodedFrame {
-        EncodedFrame {
-            jpeg: Arc::new(vec![0xFF, 0xD8, 0xFF, 0xD9]),
-            capture: capture_stamp(),
-            received_at_ns: 0,
-        }
-    }
-
-    /// Shared call tallies a test asserts against.
-    #[derive(Default)]
-    struct Tally {
-        opened: AtomicU32,
-        finished: AtomicU32,
-        reset: AtomicU32,
-    }
-
-    /// How a mock stream behaves once opened.
-    #[derive(Clone, Copy)]
-    enum Write {
-        /// `write_all` never completes (a wedged consumer).
-        Stall,
-        /// `write_all` returns an error (connection going away).
-        Fail,
-        /// Writes and finishes normally.
-        Ok,
-    }
-
-    /// How a mock `open()` behaves.
-    #[derive(Clone, Copy)]
-    enum Open {
-        /// `open()` never completes (the peer's stream allowance is full).
-        Stall,
-        /// `open()` yields a stream with the given write behavior.
-        Ready(Write),
-    }
-
-    struct MockStream {
-        write: Write,
-        tally: Arc<Tally>,
-    }
-
-    impl FrameStream for MockStream {
-        async fn write_all(&mut self, _buf: &[u8]) -> Result<(), &'static str> {
-            match self.write {
-                Write::Stall => {
-                    std::future::pending::<()>().await;
-                    Ok(())
-                }
-                Write::Fail => Err("payload write failed"),
-                Write::Ok => Ok(()),
-            }
-        }
-
-        async fn finish(&mut self) -> Result<(), &'static str> {
-            self.tally.finished.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        fn reset(&mut self) {
-            self.tally.reset.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    /// Hands out opens from a per-open script; opens beyond the script are
-    /// `Ready(Write::Ok)`.
-    struct MockChannel {
-        script: Vec<Open>,
-        tally: Arc<Tally>,
-    }
-
-    impl FrameChannel for MockChannel {
-        type Stream = MockStream;
-
-        async fn open(&self) -> Result<MockStream, &'static str> {
-            let n = self.tally.opened.fetch_add(1, Ordering::SeqCst) as usize;
-            match self
-                .script
-                .get(n)
-                .copied()
-                .unwrap_or(Open::Ready(Write::Ok))
-            {
-                Open::Stall => {
-                    std::future::pending::<()>().await;
-                    unreachable!("a stalled open never resolves")
-                }
-                Open::Ready(write) => Ok(MockStream {
-                    write,
-                    tally: self.tally.clone(),
-                }),
-            }
-        }
-    }
-
-    async fn queue(frames: usize) -> mpsc::Receiver<EncodedFrame> {
-        let (tx, rx) = mpsc::channel(frames.max(1));
-        for _ in 0..frames {
-            tx.send(encoded_frame()).await.expect("frame queues");
-        }
-        drop(tx);
-        rx
-    }
-
-    /// A stalled write must reset its stream exactly once (RESET_STREAM,
-    /// not a dropped FIN) and the next frame must open its own stream and
-    /// finish cleanly. Virtual time fires the deadline without real waiting.
-    #[tokio::test(start_paused = true)]
-    async fn a_stalled_write_resets_once_and_the_next_frame_proceeds() {
-        let mut rx = queue(2).await;
-        let tally = Arc::new(Tally::default());
-        let channel = MockChannel {
-            script: vec![Open::Ready(Write::Stall), Open::Ready(Write::Ok)],
-            tally: tally.clone(),
-        };
-
-        drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
-
-        assert_eq!(
-            tally.reset.load(Ordering::SeqCst),
-            1,
-            "the stalled frame's stream is reset exactly once"
-        );
-        assert_eq!(
-            tally.opened.load(Ordering::SeqCst),
-            2,
-            "the next frame opens its own stream"
-        );
-        assert_eq!(
-            tally.finished.load(Ordering::SeqCst),
-            1,
-            "the second frame finishes cleanly and is not reset"
-        );
-    }
-
-    /// A stalled OPEN also costs one frame: the per-frame deadline covers
-    /// opening, so an open that never completes is skipped (nothing to
-    /// reset) and the next frame opens its own stream and finishes.
-    #[tokio::test(start_paused = true)]
-    async fn a_stalled_open_is_skipped_and_the_next_frame_proceeds() {
-        let mut rx = queue(2).await;
-        let tally = Arc::new(Tally::default());
-        let channel = MockChannel {
-            script: vec![Open::Stall, Open::Ready(Write::Ok)],
-            tally: tally.clone(),
-        };
-
-        drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
-
-        assert_eq!(
-            tally.opened.load(Ordering::SeqCst),
-            2,
-            "the next frame opens its own stream after the stalled open"
-        );
-        assert_eq!(
-            tally.finished.load(Ordering::SeqCst),
-            1,
-            "the second frame finishes cleanly"
-        );
-        assert_eq!(
-            tally.reset.load(Ordering::SeqCst),
-            0,
-            "a stalled open has no stream to reset"
-        );
-    }
-
-    /// An outright open/write error ends the writer: the connection is going
-    /// away, so the frame after the failed one is never opened.
-    #[tokio::test(start_paused = true)]
-    async fn a_write_error_ends_the_writer() {
-        let mut rx = queue(2).await;
-        let tally = Arc::new(Tally::default());
-        let channel = MockChannel {
-            script: vec![Open::Ready(Write::Fail), Open::Ready(Write::Ok)],
-            tally: tally.clone(),
-        };
-
-        drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
-
-        assert_eq!(
-            tally.opened.load(Ordering::SeqCst),
-            1,
-            "the writer stops after the failed frame; the next is never opened"
-        );
-        assert_eq!(
-            tally.reset.load(Ordering::SeqCst),
-            0,
-            "an outright failure is not a reset"
-        );
-    }
-}
+mod tests;
