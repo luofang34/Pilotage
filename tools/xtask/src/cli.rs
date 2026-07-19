@@ -158,7 +158,7 @@ cargo xtask <command>
 commands:
   sim    launch a full SITL session (simulator + FC + host + viewer),
          print the ready URL, supervise, and tear down on ctrl-c
-         --fc <name>          FC backend (default: aviate)
+         --fc <name>          FC backend: aviate-gz (alias aviate), px4-gz (alias px4)
          --profile <p>        physical | simulation (default) | oracle-only
          --port <n>           host WebTransport port (default: 4433)
          --viewer-port <n>    static viewer port (default: 8080)

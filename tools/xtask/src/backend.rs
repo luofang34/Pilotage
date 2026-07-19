@@ -10,7 +10,8 @@ use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::Readiness;
 
-mod aviate_gz;
+pub(crate) mod aviate_gz;
+mod px4_gz;
 
 /// Everything a backend may need to plan its stages.
 #[derive(Debug)]
@@ -71,7 +72,10 @@ pub trait SimBackend {
 /// does not implement.
 pub fn backend_for(name: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
     match name {
-        "aviate" => Ok(Box::new(aviate_gz::AviateGz)),
+        // Canonical names pair the FC family with the simulator behind
+        // it; the bare FC name stays accepted as the family's default.
+        "aviate-gz" | "aviate" => Ok(Box::new(aviate_gz::AviateGz)),
+        "px4-gz" | "px4" => Ok(Box::new(px4_gz::Px4Gz)),
         _ => Err(XtaskError::UnknownBackend {
             name: name.to_owned(),
         }),
@@ -86,8 +90,11 @@ mod tests {
 
     #[test]
     fn backend_selection_fails_closed() {
-        assert_eq!(backend_for("aviate").expect("known").name(), "aviate");
-        let refusal = backend_for("px4");
+        assert_eq!(backend_for("aviate").expect("known").name(), "aviate-gz");
+        assert_eq!(backend_for("aviate-gz").expect("known").name(), "aviate-gz");
+        assert_eq!(backend_for("px4").expect("known").name(), "px4-gz");
+        assert_eq!(backend_for("px4-gz").expect("known").name(), "px4-gz");
+        let refusal = backend_for("px4-jsbsim");
         assert!(matches!(refusal, Err(XtaskError::UnknownBackend { .. })));
     }
 }

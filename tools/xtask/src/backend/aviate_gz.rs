@@ -20,7 +20,7 @@ pub struct AviateGz;
 
 impl SimBackend for AviateGz {
     fn name(&self) -> &'static str {
-        "aviate"
+        "aviate-gz"
     }
 
     fn host_adapter(&self) -> &'static str {
@@ -74,7 +74,7 @@ fn aviate_dir(repo_root: &Path) -> PathBuf {
 /// `PATH` for spawned tools, with Homebrew's prefix appended when it
 /// exists (gz lives there on macOS; a login shell has it, a bare spawn
 /// may not).
-fn search_path() -> String {
+pub(crate) fn search_path() -> String {
     let inherited = std::env::var("PATH").unwrap_or_default();
     let brew = Path::new("/opt/homebrew/bin");
     if brew.is_dir() && !inherited.split(':').any(|p| p == "/opt/homebrew/bin") {
