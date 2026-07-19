@@ -33,14 +33,16 @@ impl SimBackend for Px4Gz {
     }
 
     fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![("GZ_IP".to_owned(), "127.0.0.1".to_owned())]
+        vec![
+            ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+            ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
+        ]
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
-        // The PX4 adapter implements only the simulation profile; the
-        // host would silently ignore any other selection, so refuse it
-        // here instead of launching a session that lies about its
-        // policy.
+        // The PX4 adapter implements only the simulation profile. Keep
+        // the launcher boundary aligned with the host boundary so no
+        // unsupported session reaches process startup.
         if ctx.profile != Profile::Simulation {
             return Err(XtaskError::Usage {
                 message: format!(
@@ -246,8 +248,8 @@ fn px4_stage(
 mod tests {
     use std::path::PathBuf;
 
-    use super::plan_with_px4_dir;
-    use crate::backend::SessionContext;
+    use super::{Px4Gz, plan_with_px4_dir};
+    use crate::backend::{SessionContext, SimBackend};
     use crate::cli::Profile;
     use crate::error::XtaskError;
 
@@ -266,6 +268,32 @@ mod tests {
         let px4 = root.join("PX4-Autopilot");
         std::fs::create_dir_all(&px4).expect("scaffold");
         (root, px4)
+    }
+
+    #[test]
+    fn plan_refuses_physical_and_oracle_only_profiles() {
+        let backend = Px4Gz;
+        for profile in [Profile::Physical, Profile::OracleOnly] {
+            let mut ctx = context(PathBuf::from("unused-for-profile-refusal"));
+            ctx.profile = profile;
+            let refusal = backend.plan(&ctx);
+            assert!(
+                matches!(refusal, Err(XtaskError::Usage { .. })),
+                "{profile:?} must be refused, got {refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn host_environment_declares_the_px4_simulation_profile() {
+        let backend = Px4Gz;
+        let ctx = context(PathBuf::from("unused-for-host-environment"));
+        assert!(
+            backend
+                .host_env(&ctx)
+                .iter()
+                .any(|(key, value)| { key == "PILOTAGE_PX4_PROFILE" && value == "simulation" })
+        );
     }
 
     #[test]

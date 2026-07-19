@@ -214,6 +214,27 @@ mod tests {
     }
 
     #[test]
+    fn reset_fc_selection_parses_and_malformed_flags_fail_closed() {
+        assert_eq!(
+            parse_args(&args(&["reset"])).expect("default reset parses"),
+            Command::Reset("aviate".to_owned())
+        );
+        assert_eq!(
+            parse_args(&args(&["reset", "--fc", "px4-gz"])).expect("explicit PX4 reset parses"),
+            Command::Reset("px4-gz".to_owned())
+        );
+        for malformed in [
+            args(&["reset", "--fc"]),
+            args(&["reset", "--backend", "px4-gz"]),
+        ] {
+            assert!(matches!(
+                parse_args(&malformed),
+                Err(XtaskError::Usage { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn sim_flags_parse_and_unknown_values_fail_closed() {
         let Command::Sim(sim) = parse_args(&args(&[
             "sim",
