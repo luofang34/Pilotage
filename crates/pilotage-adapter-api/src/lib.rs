@@ -13,7 +13,10 @@ mod vehicle_adapter;
 mod video;
 
 pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, VehicleDescriptor};
-pub use control::{ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason};
+pub use control::{
+    ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason,
+    payload_satisfies_neutral_activation,
+};
 // CAL-01 (#90): the camera calibration contract moved to
 // `pilotage-camera-calibration`; re-export it so `pilotage_adapter_api::…` paths
 // for consumers are unchanged, and expose the new `VerifiedCameraModel`.
