@@ -3,7 +3,7 @@
 //! path beyond the caller's message vector.
 //!
 //! The decoded telemetry set includes liveness, estimator values, and both
-//! standard and Aviate-specific estimator status. Anything else is counted
+//! standard and Aviate-private estimator status. Anything else is counted
 //! and skipped. CRC is the MAVLink X.25 accumulator seeded with
 //! each message's CRC_EXTRA (values cross-checked against Aviate's
 //! `aviate-link` implementation, the peer this parser must interoperate
@@ -29,7 +29,7 @@ pub const AVIATE_ESTIMATOR_STATUS_ID: u32 = 20_000;
 
 /// One parsed frame event from the Aviate subset.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AviateMessage {
+pub enum FcMessage {
     /// A private estimator-status frame whose integrity or framing could not
     /// be validated. This event can only revoke authorization.
     InvalidAviateEstimatorStatus,
@@ -166,7 +166,7 @@ fn record_invalid_private_status(
     bytes: &[u8],
     at: usize,
     stats: &mut ParseStats,
-    out: &mut Vec<(FrameSource, AviateMessage)>,
+    out: &mut Vec<(FrameSource, FcMessage)>,
 ) {
     let Some((source, message_id)) = frame_header(bytes, at) else {
         return;
@@ -174,7 +174,7 @@ fn record_invalid_private_status(
     if message_id == AVIATE_ESTIMATOR_STATUS_ID {
         stats.invalid_estimator_status_frames =
             stats.invalid_estimator_status_frames.wrapping_add(1);
-        out.push((source, AviateMessage::InvalidAviateEstimatorStatus));
+        out.push((source, FcMessage::InvalidAviateEstimatorStatus));
     }
 }
 
@@ -185,7 +185,7 @@ fn record_invalid_private_status(
 /// Unknown ids and ordinary CRC failures skip the frame. A private-status
 /// integrity failure appends a source-tagged revocation event. Stray bytes
 /// before a frame start are discarded byte-by-byte.
-pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, AviateMessage)>) -> ParseStats {
+pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, FcMessage)>) -> ParseStats {
     let mut stats = ParseStats::default();
     let mut at = 0usize;
     while at < bytes.len() {
@@ -237,7 +237,7 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, AviateMessage)>)
                     if msg_id == AVIATE_ESTIMATOR_STATUS_ID {
                         stats.invalid_estimator_status_frames =
                             stats.invalid_estimator_status_frames.wrapping_add(1);
-                        out.push((source, AviateMessage::InvalidAviateEstimatorStatus));
+                        out.push((source, FcMessage::InvalidAviateEstimatorStatus));
                     }
                 }
             }
@@ -384,7 +384,7 @@ pub fn encode_velocity_setpoint(
 /// Body-rate demand is intentionally absent because the FC attitude loop
 /// derives rate commands from this target.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct AttitudeTarget {
+pub struct AttitudeTarget {
     /// Roll demand in radians.
     pub roll_rad: f32,
     /// Pitch demand in radians.
@@ -400,11 +400,7 @@ pub(crate) struct AttitudeTarget {
 }
 
 /// Encodes one absolute attitude target for the selected component.
-pub(crate) fn encode_attitude_setpoint(
-    seq: u8,
-    time_boot_ms: u32,
-    target: AttitudeTarget,
-) -> [u8; 51] {
+pub fn encode_attitude_setpoint(seq: u8, time_boot_ms: u32, target: AttitudeTarget) -> [u8; 51] {
     const SET_ATTITUDE_TARGET_ID: u32 = 82;
     let (sr, cr) = (target.roll_rad * 0.5).sin_cos();
     let (sp, cp) = (target.pitch_rad * 0.5).sin_cos();

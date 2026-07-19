@@ -1021,6 +1021,7 @@ dependencies = [
  "getrandom 0.3.4",
  "pilotage-adapter-api",
  "pilotage-adapter-gazebo",
+ "pilotage-mavlink",
  "pilotage-protocol",
  "pilotage-timing",
  "thiserror",
@@ -1202,6 +1203,16 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "pilotage-mavlink"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

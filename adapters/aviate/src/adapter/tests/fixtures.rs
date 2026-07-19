@@ -9,10 +9,10 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::VehicleId;
 
-use crate::link::estimator::{EstimatorAuthorization, EstimatorStatusUpdate};
-use crate::link::{AttitudeUpdate, KinematicsUpdate, LatestAviate};
+use pilotage_mavlink::link::estimator::{EstimatorAuthorization, EstimatorStatusUpdate};
+use pilotage_mavlink::link::{AttitudeUpdate, KinematicsUpdate, LinkState};
 
-pub(super) fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LatestAviate>> {
+pub(super) fn state_with(att_age: Duration, kin_age: Duration) -> Arc<Mutex<LinkState>> {
     state_with_acquisition_skew(att_age, kin_age, 0)
 }
 
@@ -20,7 +20,7 @@ pub(super) fn state_with_acquisition_skew(
     att_age: Duration,
     kin_age: Duration,
     acquisition_skew_ns: u64,
-) -> Arc<Mutex<LatestAviate>> {
+) -> Arc<Mutex<LinkState>> {
     let now = Instant::now();
     let attitude_stamp = MeasurementStamp {
         role: SourceRole::OperationalEstimate,
@@ -56,7 +56,7 @@ pub(super) fn state_with_acquisition_skew(
             ..attitude_stamp
         },
     };
-    let state = LatestAviate {
+    let state = LinkState {
         attitude: Some(AttitudeUpdate {
             // 90° yaw: heading east.
             quat_wxyz: [
@@ -83,7 +83,7 @@ pub(super) fn state_with_acquisition_skew(
         }),
         estimator_status: Some(estimator_status),
         maximum_inter_group_skew_ms: 300,
-        ..LatestAviate::default()
+        ..LinkState::default()
     };
     Arc::new(Mutex::new(state))
 }

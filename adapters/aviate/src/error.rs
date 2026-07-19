@@ -10,14 +10,9 @@ pub enum AviateAdapterError {
         #[source]
         source: getrandom::Error,
     },
-    /// Neither the direct MAVLink port nor an ephemeral fallback socket
-    /// could be bound.
-    #[error("binding a UDP socket for MAVLink telemetry failed: {source}")]
-    Bind {
-        /// The underlying socket error.
-        #[source]
-        source: std::io::Error,
-    },
+    /// The MAVLink receive link could not start.
+    #[error(transparent)]
+    Link(#[from] pilotage_mavlink::LinkError),
     /// Attaching to the XIL shm object failed at the operating-system
     /// level: the object does not exist (no simulation writer is up) or
     /// the kernel refused the read-only mapping.

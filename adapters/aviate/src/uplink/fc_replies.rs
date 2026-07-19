@@ -13,12 +13,14 @@ impl FlightUplink {
     /// from the sampling tick.
     pub fn poll_fc(&mut self) -> Option<bool> {
         let mut buf = [0u8; 512];
-        let mut messages: Vec<(crate::mavlink::FrameSource, crate::mavlink::AviateMessage)> =
-            Vec::new();
+        let mut messages: Vec<(
+            pilotage_mavlink::codec::FrameSource,
+            pilotage_mavlink::codec::FcMessage,
+        )> = Vec::new();
         let mut armed: Option<bool> = None;
         while let Ok((len, _)) = self.socket.recv_from(&mut buf) {
             messages.clear();
-            crate::mavlink::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
+            pilotage_mavlink::codec::parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
             for (source, message) in &messages {
                 if source.system_id != self.expected_system_id
                     || source.component_id != self.expected_component_id
@@ -26,8 +28,8 @@ impl FlightUplink {
                     continue;
                 }
                 match *message {
-                    crate::mavlink::AviateMessage::Heartbeat { armed: a } => armed = Some(a),
-                    crate::mavlink::AviateMessage::CommandAck { command, result } => {
+                    pilotage_mavlink::codec::FcMessage::Heartbeat { armed: a } => armed = Some(a),
+                    pilotage_mavlink::codec::FcMessage::CommandAck { command, result } => {
                         if result == 0 {
                             info!(command, "FC accepted command");
                         } else {

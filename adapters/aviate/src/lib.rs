@@ -16,10 +16,10 @@
 mod adapter;
 mod error;
 mod incarnation;
-mod link;
-pub mod mavlink;
 pub mod shm;
 mod uplink;
+
+pub use pilotage_mavlink::codec as mavlink;
 
 pub use adapter::{
     ARM_BUTTON, AviateAdapter, AviateProfile, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
@@ -27,5 +27,5 @@ pub use adapter::{
 };
 pub use error::AviateAdapterError;
 pub use incarnation::{IncarnationProvider, OsIncarnationProvider};
-pub use link::{LinkConfig, ResetPolicy};
+pub use pilotage_mavlink::link::{LinkConfig, ResetPolicy};
 pub use uplink::FlightUplink;

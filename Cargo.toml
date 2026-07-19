@@ -7,6 +7,7 @@ members = [
     "crates/pilotage-input",
     "crates/pilotage-timing",
     "crates/pilotage-adapter-api",
+    "crates/pilotage-mavlink",
     "crates/pilotage-conformance",
     "crates/pilotage-frames",
     "crates/pilotage-calibration-id",
@@ -62,6 +63,7 @@ pilotage-protocol = { path = "crates/pilotage-protocol" }
 pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
+pilotage-mavlink = { path = "crates/pilotage-mavlink" }
 pilotage-frames = { path = "crates/pilotage-frames" }
 pilotage-calibration-id = { path = "crates/pilotage-calibration-id" }
 pilotage-camera-calibration = { path = "crates/pilotage-camera-calibration" }

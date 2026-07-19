@@ -6,8 +6,8 @@ use pilotage_protocol::VehicleId;
 use super::{AviateAdapter, AviateProfile, camera, sources::bind_sources};
 use crate::error::AviateAdapterError;
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
-use crate::link::LinkConfig;
 use crate::uplink::FlightUplink;
+use pilotage_mavlink::link::LinkConfig;
 
 impl AviateAdapter {
     /// Binds the profile's source roles and returns a ready adapter.

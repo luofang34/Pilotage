@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use pilotage_adapter_api::SourceIncarnation;
 
-use crate::mavlink::{AviateMessage, FrameSource};
+use crate::codec::{FcMessage, FrameSource};
 
-use super::{LatestAviate, ResetPolicy, apply_messages_at};
+use super::{LinkState, ResetPolicy, apply_messages_at};
 
 const SELECTED: FrameSource = FrameSource {
     system_id: 1,
@@ -15,7 +15,7 @@ const SELECTED: FrameSource = FrameSource {
     frame_sequence: 0,
 };
 
-fn state(policy: ResetPolicy) -> Arc<Mutex<LatestAviate>> {
+fn state(policy: ResetPolicy) -> Arc<Mutex<LinkState>> {
     let maximum_inter_group_skew_ms = if policy == ResetPolicy::SimulatorHeuristic {
         300
     } else {
@@ -24,22 +24,19 @@ fn state(policy: ResetPolicy) -> Arc<Mutex<LatestAviate>> {
     state_with_skew(policy, maximum_inter_group_skew_ms)
 }
 
-fn state_with_skew(
-    policy: ResetPolicy,
-    maximum_inter_group_skew_ms: u32,
-) -> Arc<Mutex<LatestAviate>> {
-    Arc::new(Mutex::new(LatestAviate {
+fn state_with_skew(policy: ResetPolicy, maximum_inter_group_skew_ms: u32) -> Arc<Mutex<LinkState>> {
+    Arc::new(Mutex::new(LinkState {
         reset_policy: policy,
         maximum_inter_group_skew_ms,
         source_incarnation: SourceIncarnation::new([0xA5; 16]),
-        ..LatestAviate::default()
+        ..LinkState::default()
     }))
 }
 
-fn attitude_at(time_boot_ms: u32, qw: f32) -> (FrameSource, AviateMessage) {
+fn attitude_at(time_boot_ms: u32, qw: f32) -> (FrameSource, FcMessage) {
     (
         SELECTED,
-        AviateMessage::AttitudeQuaternion {
+        FcMessage::AttitudeQuaternion {
             time_boot_ms,
             quat_wxyz: [qw, 0.0, 0.0, 0.0],
             rates_rps: [0.0; 3],
@@ -47,10 +44,10 @@ fn attitude_at(time_boot_ms: u32, qw: f32) -> (FrameSource, AviateMessage) {
     )
 }
 
-fn kinematics_at(time_boot_ms: u32, north: f32) -> (FrameSource, AviateMessage) {
+fn kinematics_at(time_boot_ms: u32, north: f32) -> (FrameSource, FcMessage) {
     (
         SELECTED,
-        AviateMessage::LocalPositionNed {
+        FcMessage::LocalPositionNed {
             time_boot_ms,
             pos_ned_m: [north, 0.0, 0.0],
             vel_ned_mps: [0.0; 3],
@@ -58,10 +55,10 @@ fn kinematics_at(time_boot_ms: u32, north: f32) -> (FrameSource, AviateMessage) 
     )
 }
 
-fn status_at(time_boot_ms: u32, valid_flags: u8, quality: u8) -> (FrameSource, AviateMessage) {
+fn status_at(time_boot_ms: u32, valid_flags: u8, quality: u8) -> (FrameSource, FcMessage) {
     (
         SELECTED,
-        AviateMessage::AviateEstimatorStatus {
+        FcMessage::AviateEstimatorStatus {
             time_usec: u64::from(time_boot_ms).saturating_mul(1_000),
             valid_flags,
             quality,
@@ -69,11 +66,7 @@ fn status_at(time_boot_ms: u32, valid_flags: u8, quality: u8) -> (FrameSource, A
     )
 }
 
-fn apply_at(
-    state: &Arc<Mutex<LatestAviate>>,
-    messages: &[(FrameSource, AviateMessage)],
-    now: Instant,
-) {
+fn apply_at(state: &Arc<Mutex<LinkState>>, messages: &[(FrameSource, FcMessage)], now: Instant) {
     apply_messages_at(state, messages, 0, 0, now);
 }
 
@@ -160,7 +153,7 @@ fn invalid_status_frame_revokes_without_fabricating_source_time() {
         .expect("status");
     apply_messages_at(
         &state,
-        &[(SELECTED, AviateMessage::InvalidAviateEstimatorStatus)],
+        &[(SELECTED, FcMessage::InvalidAviateEstimatorStatus)],
         1,
         0,
         now,
@@ -180,7 +173,7 @@ fn invalid_status_poisons_authorization_for_delayed_exact_numeric() {
     apply_at(&state, &[status_at(100, 0x0f, 2)], now);
     apply_at(
         &state,
-        &[(SELECTED, AviateMessage::InvalidAviateEstimatorStatus)],
+        &[(SELECTED, FcMessage::InvalidAviateEstimatorStatus)],
         now,
     );
     apply_at(&state, &[kinematics_at(100, 1.0)], now);
@@ -200,7 +193,7 @@ fn trailing_invalid_status_wins_within_a_multi_frame_datagram() {
             status_at(100, 0x0f, 2),
             attitude_at(100, 0.5),
             kinematics_at(100, 1.0),
-            (SELECTED, AviateMessage::InvalidAviateEstimatorStatus),
+            (SELECTED, FcMessage::InvalidAviateEstimatorStatus),
         ],
         now,
     );
@@ -231,7 +224,7 @@ fn wrong_source_invalid_status_cannot_revoke_selected_source() {
     wrong.system_id = 2;
     apply_at(
         &state,
-        &[(wrong, AviateMessage::InvalidAviateEstimatorStatus)],
+        &[(wrong, FcMessage::InvalidAviateEstimatorStatus)],
         now,
     );
 
@@ -259,7 +252,7 @@ fn out_of_range_status_revokes_without_fabricating_source_time() {
         &state,
         &[(
             SELECTED,
-            AviateMessage::AviateEstimatorStatus {
+            FcMessage::AviateEstimatorStatus {
                 time_usec: (u64::from(u32::MAX) + 1).saturating_mul(1_000),
                 valid_flags: 0x0f,
                 quality: 2,
@@ -336,7 +329,7 @@ fn same_datagram_cross_group_replay_cannot_confirm_reset() {
     assert_eq!(latest.source_resets, 0);
 }
 
-fn confirm_attitude_reset(state: &Arc<Mutex<LatestAviate>>, start: Instant, first_low_ms: u32) {
+fn confirm_attitude_reset(state: &Arc<Mutex<LinkState>>, start: Instant, first_low_ms: u32) {
     apply_at(
         state,
         &[attitude_at(first_low_ms, 0.6)],

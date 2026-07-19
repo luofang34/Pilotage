@@ -9,7 +9,7 @@ use std::time::Duration;
 use pilotage_adapter_api::{Disposition, VehicleAdapter};
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
 
-use crate::link::{KinematicsUpdate, LatestAviate};
+use pilotage_mavlink::link::{KinematicsUpdate, LinkState};
 
 use super::super::{ARM_BUTTON, AviateAdapter, PITCH_AXIS, THROTTLE_AXIS};
 use super::fixtures::{flight_frame, state_with};
@@ -36,7 +36,7 @@ fn centered_frame() -> pilotage_protocol::ScopedControlFrame {
 }
 
 /// Rewrites the fixture's kinematics group, fresh as of now.
-fn set_kinematics(state: &Arc<Mutex<LatestAviate>>, mutate: impl FnOnce(&mut KinematicsUpdate)) {
+fn set_kinematics(state: &Arc<Mutex<LinkState>>, mutate: impl FnOnce(&mut KinematicsUpdate)) {
     let mut latest = state.lock().expect("state lock");
     let kin = latest.kinematics.as_mut().expect("kinematics fixture");
     mutate(kin);
@@ -44,7 +44,7 @@ fn set_kinematics(state: &Arc<Mutex<LatestAviate>>, mutate: impl FnOnce(&mut Kin
 }
 
 /// Rewrites the fixture's measured velocity, fresh as of now.
-fn set_velocity(state: &Arc<Mutex<LatestAviate>>, vel: [f32; 3]) {
+fn set_velocity(state: &Arc<Mutex<LinkState>>, vel: [f32; 3]) {
     set_kinematics(state, |kin| kin.vel_ned_mps = vel);
 }
 
@@ -52,7 +52,7 @@ fn set_velocity(state: &Arc<Mutex<LatestAviate>>, vel: [f32; 3]) {
 /// can be read from), heading east (yaw 90°) so body-frame rotation is
 /// observable. The state handle steers the fixture's measurements; the
 /// uplink runs on its manual clock so no test sleeps against real time.
-fn flying_adapter(fc: &std::net::UdpSocket) -> (AviateAdapter, Arc<Mutex<LatestAviate>>) {
+fn flying_adapter(fc: &std::net::UdpSocket) -> (AviateAdapter, Arc<Mutex<LinkState>>) {
     let mut uplink = crate::uplink::FlightUplink::new().expect("uplink");
     uplink.set_target(fc.local_addr().expect("addr"));
     uplink.use_manual_clock();

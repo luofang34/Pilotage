@@ -13,16 +13,16 @@ use super::AviateProfile;
 use super::shm_sampling::ShmSource;
 use crate::error::AviateAdapterError;
 use crate::incarnation::IncarnationProvider;
-use crate::link::{AviateLink, LatestAviate, LinkConfig};
+use pilotage_mavlink::link::{LinkConfig, LinkState, MavlinkLink};
 
 /// The MAVLink estimate link: the latest-value cache plus the receive
 /// task that feeds it. This link only ever produces the FC operational
 /// estimate role.
 #[derive(Debug)]
 pub(super) struct EstimateSource {
-    pub(super) state: Arc<Mutex<LatestAviate>>,
+    pub(super) state: Arc<Mutex<LinkState>>,
     // Kept alive for its receive task; dropped with the adapter.
-    pub(super) _link: Option<AviateLink>,
+    pub(super) _link: Option<MavlinkLink>,
 }
 
 /// One FC arm report received on the uplink socket, with receive-side
@@ -81,7 +81,7 @@ async fn estimate_source(
     config: LinkConfig,
     incarnation: SourceIncarnation,
 ) -> Result<EstimateSource, AviateAdapterError> {
-    let link = AviateLink::start(config, incarnation).await?;
+    let link = MavlinkLink::start(config, incarnation).await?;
     Ok(EstimateSource {
         state: link.state(),
         _link: Some(link),
