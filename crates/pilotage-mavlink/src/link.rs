@@ -14,21 +14,10 @@ use pilotage_adapter_api::{MeasurementStamp, SourceIncarnation};
 
 use crate::codec::{FcMessage, FrameSource, encode_gcs_heartbeat, parse_datagram};
 
-/// Why the MAVLink link could not start.
-#[derive(Debug, thiserror::Error)]
-pub enum LinkError {
-    /// Neither the direct MAVLink port nor an ephemeral fallback socket
-    /// could be bound.
-    #[error("binding a UDP socket for MAVLink telemetry failed: {source}")]
-    Bind {
-        /// The underlying socket error.
-        #[source]
-        source: std::io::Error,
-    },
-}
-
+mod error;
 pub mod estimator;
 pub mod measurement;
+pub use error::LinkError;
 use estimator::{
     EstimatorStatusUpdate, accept_status, authorization_at, invalidate_cached_authorization,
 };
@@ -78,6 +67,11 @@ pub struct LinkConfig {
     pub reset_policy: ResetPolicy,
     /// Which message carries estimator authorization for this source.
     pub authorization_source: AuthorizationSource,
+    /// Ceiling on a low boot clock that may seed a simulator reset
+    /// candidate. Must exceed the FC's worst-case boot-to-streaming
+    /// time: a rebooted FC whose clock is already above this ceiling is
+    /// rejected as reordered forever instead of starting a new epoch.
+    pub reset_candidate_max_ms: u32,
     /// Largest source-clock lag admitted when a second measurement group
     /// first joins or advances behind the epoch high-water mark.
     ///
@@ -100,6 +94,7 @@ impl Default for LinkConfig {
             source_id: 1,
             reset_policy: ResetPolicy::Conservative,
             authorization_source: AuthorizationSource::AviatePrivate,
+            reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
             maximum_inter_group_skew_ms: 0,
         }
     }
@@ -143,6 +138,8 @@ pub struct LinkState {
     pub reset_policy: ResetPolicy,
     /// Which message carries estimator authorization for this source.
     pub authorization_source: AuthorizationSource,
+    /// Configured ceiling on a reset-candidate boot clock.
+    pub reset_candidate_max_ms: u32,
     /// Configured epoch-wide inter-group source-clock lag bound.
     pub maximum_inter_group_skew_ms: u32,
     /// Latest attitude estimate: quaternion (w,x,y,z), body rates,
@@ -193,6 +190,7 @@ impl Default for LinkState {
             source_incarnation: SourceIncarnation::new([0; 16]),
             reset_policy: ResetPolicy::Conservative,
             authorization_source: AuthorizationSource::AviatePrivate,
+            reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
             maximum_inter_group_skew_ms: 0,
             attitude: None,
             kinematics: None,
@@ -224,6 +222,7 @@ impl LinkState {
             source_incarnation,
             reset_policy: config.reset_policy,
             authorization_source: config.authorization_source,
+            reset_candidate_max_ms: config.reset_candidate_max_ms,
             maximum_inter_group_skew_ms: config.maximum_inter_group_skew_ms,
             source_epoch: 1,
             ..Self::default()
