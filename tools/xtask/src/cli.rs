@@ -169,24 +169,33 @@ fn required_port(
 
 /// The `help` text.
 pub const USAGE: &str = "\
-cargo xtask <command>
+cargo xtask <command> [options]
 
 commands:
-  sim    launch a full SITL session (simulator + FC + host + viewer),
-         print the ready URL, supervise, and tear down on ctrl-c
-         --fc <name>          FC backend: aviate-gz (alias aviate), px4-gz (alias px4)
-    reset [--fc <name>]      reset the named backend's world and FC (default aviate)
-         --profile <p>        physical | simulation (default) | oracle-only
-         --port <n>           host WebTransport port (default: 4433)
-         --viewer-port <n>    static viewer port (default: 8080)
-         --no-open            do not open the ready URL in the default browser
-  reset  reset the running simulation world and restart the FC
-  help   print this text";
+  sim [options]
+      Launch a full SITL session, print its ready URL, supervise it, and
+      tear it down on ctrl-c.
+
+      --fc <name>          FC backend: aviate-gz (alias aviate, default)
+                           or px4-gz (alias px4)
+      --profile <profile>  physical | simulation (default) | oracle-only
+      --port <port>        host WebTransport port (default: 4433)
+      --viewer-port <port> static viewer port (default: 8080)
+      --open               open the ready URL (default)
+      --no-open            do not open the ready URL
+
+  reset [options]
+      Reset the running simulation world and restart its FC.
+
+      --fc <name>          FC backend (default: aviate)
+
+  help
+      Print this help text.";
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{Command, Profile, parse_args};
+    use super::{Command, Profile, USAGE, parse_args};
     use crate::error::XtaskError;
 
     fn args(list: &[&str]) -> Vec<String> {
@@ -203,6 +212,35 @@ mod tests {
         assert_eq!(sim.host_port, 4433);
         assert_eq!(sim.viewer_port, 8080);
         assert!(sim.open, "the browser opens by default");
+    }
+
+    #[test]
+    fn help_groups_each_command_once_and_matches_parser_defaults() {
+        let sim_heading = "  sim [options]\n";
+        let reset_heading = "  reset [options]\n";
+        let help_heading = "  help\n";
+
+        for heading in [sim_heading, reset_heading, help_heading] {
+            assert_eq!(USAGE.matches(heading).count(), 1, "heading {heading:?}");
+        }
+
+        let sim_start = USAGE.find(sim_heading).expect("sim heading");
+        let reset_start = USAGE.find(reset_heading).expect("reset heading");
+        let help_start = USAGE.find(help_heading).expect("help heading");
+        assert!(sim_start < reset_start && reset_start < help_start);
+
+        let sim_help = &USAGE[sim_start..reset_start];
+        assert!(sim_help.contains("aviate-gz (alias aviate, default)"));
+        assert!(sim_help.contains("simulation (default)"));
+        assert!(sim_help.contains("default: 4433"));
+        assert!(sim_help.contains("default: 8080"));
+        assert!(sim_help.contains("--open"));
+        assert!(sim_help.contains("--no-open"));
+
+        let reset_help = &USAGE[reset_start..help_start];
+        assert!(reset_help.contains("--fc <name>"));
+        assert!(reset_help.contains("default: aviate"));
+        assert!(!reset_help.contains("--profile"));
     }
 
     #[test]
