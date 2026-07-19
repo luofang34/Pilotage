@@ -238,6 +238,13 @@ fn link_config() -> LinkConfig {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], 14_550)));
+    // The GCS mavlink instance owns the telemetry stream this adapter
+    // consumes; interval requests must come from the link's own socket
+    // (the instance retargets its stream to the last peer that spoke).
+    let gcs_command = std::env::var("PILOTAGE_PX4_GCS_ADDR")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], 18_570)));
     LinkConfig {
         endpoint,
         authorization_source: AuthorizationSource::StandardEstimatorStatus,
@@ -245,6 +252,11 @@ fn link_config() -> LinkConfig {
         // message-interval negotiation), so its post-restart clock is
         // far above the default reset-candidate ceiling.
         reset_candidate_max_ms: 60_000,
+        stream_command_target: Some(gcs_command),
+        // Attitude and local position at ~30 Hz; the estimator status
+        // at 10 Hz so every numeric group finds a status inside the
+        // display's 300 ms pairing budget.
+        stream_interval_requests: &[(31, 33_333), (32, 33_333), (230, 100_000)],
         ..LinkConfig::simulator()
     }
 }
@@ -340,12 +352,8 @@ impl VehicleAdapter for Px4Adapter {
         for sample in &mut batch.samples {
             sample.fc_state = fc_state;
         }
-        let telemetry_flowing = batch
-            .samples
-            .first()
-            .is_some_and(|sample| sample.avionics.is_some());
         if let Some(uplink) = self.uplink.as_mut() {
-            uplink.maintain(telemetry_flowing);
+            uplink.maintain();
         }
         batch
     }

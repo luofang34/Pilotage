@@ -43,8 +43,10 @@ const OFFBOARD_WARMUP: Duration = Duration::from_millis(300);
 /// emitted at this period so PX4's offboard-loss failsafe does not
 /// trip between control frames.
 const STREAM_KEEPALIVE: Duration = Duration::from_millis(50);
-/// Message-interval requests are re-sent at this period until the
-/// telemetry actually flows.
+/// Message-interval requests are re-sent at this period for the whole
+/// session: they are idempotent, and a request lost during PX4's boot
+/// would otherwise leave the estimator status at its sparse default
+/// rate — too sparse for the display's status-to-numeric pairing.
 const INTERVAL_RETRY: Duration = Duration::from_secs(2);
 
 /// MAV_CMD_DO_SET_MODE.
@@ -57,8 +59,9 @@ const BASE_MODE_CUSTOM: f32 = 1.0;
 const PX4_MAIN_MODE_OFFBOARD: f32 = 6.0;
 /// Message ids whose intervals are requested, with the interval in
 /// microseconds: attitude quaternion and local position at ~30 Hz,
-/// the estimator status at 5 Hz.
-const STREAMS: [(u32, f32); 3] = [(31, 33_333.0), (32, 33_333.0), (230, 200_000.0)];
+/// the estimator status at 10 Hz — every numeric group must find a
+/// status within the display's 300 ms pairing budget.
+const STREAMS: [(u32, f32); 3] = [(31, 33_333.0), (32, 33_333.0), (230, 100_000.0)];
 
 /// The uplink's time source; tests substitute a manually advanced
 /// instant so sequencing is exercised without real-time sleeps.
@@ -183,10 +186,10 @@ impl Px4Uplink {
     }
 
     /// Periodic presence and stream upkeep: the 1 Hz GCS heartbeat,
-    /// message-interval requests until telemetry flows, keepalive
-    /// setpoints between control frames, and the warmup step of the
-    /// offboard arm sequence. Call at telemetry-sampling cadence.
-    pub fn maintain(&mut self, telemetry_flowing: bool) {
+    /// periodic message-interval requests, keepalive setpoints between
+    /// control frames, and the warmup step of the offboard arm
+    /// sequence. Call at telemetry-sampling cadence.
+    pub fn maintain(&mut self) {
         let now = self.clock.now();
         if self
             .last_heartbeat
@@ -196,10 +199,9 @@ impl Px4Uplink {
             let frame = encode_gcs_heartbeat(self.seq);
             self.send(&frame);
         }
-        if !telemetry_flowing
-            && self
-                .last_interval_request
-                .is_none_or(|at| now.duration_since(at) >= INTERVAL_RETRY)
+        if self
+            .last_interval_request
+            .is_none_or(|at| now.duration_since(at) >= INTERVAL_RETRY)
         {
             self.last_interval_request = Some(now);
             self.request_streams();

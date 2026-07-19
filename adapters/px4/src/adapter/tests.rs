@@ -132,7 +132,7 @@ fn arm_sequence_streams_before_offboard_and_arm() {
     // Before the warmup elapses, maintenance emits only heartbeat and
     // keepalive setpoints — never DO_SET_MODE or arm.
     uplink.advance_clock(Duration::from_millis(100));
-    uplink.maintain(true);
+    uplink.maintain();
     loop {
         let (msg_id, command) = received_kind(&fc);
         assert!(
@@ -146,7 +146,7 @@ fn arm_sequence_streams_before_offboard_and_arm() {
 
     // After the warmup, DO_SET_MODE (OFFBOARD) then arm, in order.
     uplink.advance_clock(Duration::from_millis(300));
-    uplink.maintain(true);
+    uplink.maintain();
     let mut commands = vec![];
     while commands.len() < 2 {
         let (_, command) = received_kind(&fc);
