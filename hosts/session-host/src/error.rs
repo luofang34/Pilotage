@@ -38,4 +38,7 @@ pub enum HostError {
     /// Starting the Aviate MAVLink telemetry link failed.
     #[error("failed to start the Aviate adapter: {0}")]
     AviateAdapter(#[source] pilotage_adapter_aviate::AviateAdapterError),
+    /// Starting the PX4 MAVLink link failed.
+    #[error("failed to start the PX4 adapter: {0}")]
+    Px4Adapter(#[source] pilotage_adapter_px4::Px4AdapterError),
 }

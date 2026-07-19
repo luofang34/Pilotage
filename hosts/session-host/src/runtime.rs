@@ -182,6 +182,22 @@ async fn spawn_host_runtime(
         AdapterKind::Aviate => {
             spawn_aviate_runtime(endpoint, engine_tx, engine_rx, shutdown_rx, start).await
         }
+        AdapterKind::Px4 => {
+            let adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE)
+                .await
+                .map_err(HostError::Px4Adapter)?;
+            let engine = build_engine(&adapter);
+            Ok(tokio::spawn(run_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                None,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+                start,
+            )))
+        }
     }
 }
 

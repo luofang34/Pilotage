@@ -1045,6 +1045,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-adapter-px4"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-mavlink",
+ "pilotage-protocol",
+ "pilotage-timing",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pilotage-adapter-reference"
 version = "0.1.0"
 dependencies = [
@@ -1245,6 +1258,7 @@ dependencies = [
  "pilotage-adapter-api",
  "pilotage-adapter-aviate",
  "pilotage-adapter-gazebo",
+ "pilotage-adapter-px4",
  "pilotage-adapter-reference",
  "pilotage-authority",
  "pilotage-protocol",
