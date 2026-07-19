@@ -12,12 +12,6 @@
     <gravity>0 0 -9.8</gravity>
     <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
     <atmosphere type="adiabatic"/>
-    <scene>
-      <grid>false</grid>
-      <ambient>0.4 0.4 0.4 1</ambient>
-      <background>0.7 0.7 0.7 1</background>
-      <shadows>true</shadows>
-    </scene>
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -25,7 +19,7 @@
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>1 1</size>
+              <size>100 100</size>
             </plane>
           </geometry>
           <surface>
@@ -40,13 +34,13 @@
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>500 500</size>
+              <size>100 100</size>
             </plane>
           </geometry>
           <material>
-            <ambient>0.8 0.8 0.8 1</ambient>
-            <diffuse>0.8 0.8 0.8 1</diffuse>
-            <specular>0.8 0.8 0.8 1</specular>
+            <ambient>0.3 0.5 0.3 1</ambient>
+            <diffuse>0.3 0.5 0.3 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
           </material>
         </visual>
         <pose>0 0 0 0 -0 0</pose>
@@ -67,24 +61,18 @@
       <pose>0 0 0 0 -0 0</pose>
       <self_collide>false</self_collide>
     </model>
-    <light name="sunUTC" type="directional">
-      <pose>0 0 500 0 -0 0</pose>
+    <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
-      <intensity>1</intensity>
-      <direction>0.001 0.625 -0.78</direction>
-      <diffuse>0.904 0.904 0.904 1</diffuse>
-      <specular>0.271 0.271 0.271 1</specular>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
       <attenuation>
-        <range>2000</range>
-        <linear>0</linear>
-        <constant>1</constant>
-        <quadratic>0</quadratic>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
       </attenuation>
-      <spot>
-        <inner_angle>0</inner_angle>
-        <outer_angle>0</outer_angle>
-        <falloff>0</falloff>
-      </spot>
+      <direction>-0.5 0.1 -0.9</direction>
     </light>
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>

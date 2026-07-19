@@ -277,6 +277,38 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
+    // The two FC families keep separate worlds (their physics steps,
+    // vehicle models, and FC glue genuinely differ), but the flight
+    // deck must LOOK the same from the cameras: one green field, one
+    // sun, one rig. This pins the shared appearance so the two files
+    // cannot drift apart silently.
+    #[test]
+    fn both_flight_deck_worlds_share_the_same_look() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("repo root");
+        let aviate = std::fs::read_to_string(repo_root.join("sim/worlds/x500_flightdeck.sdf"))
+            .expect("aviate world");
+        let px4 = std::fs::read_to_string(repo_root.join("sim/worlds/px4_flightdeck.sdf"))
+            .expect("px4 world");
+        for invariant in [
+            "<ambient>0.3 0.5 0.3 1</ambient>",
+            "<size>100 100</size>",
+            "<direction>-0.5 0.1 -0.9</direction>",
+            "<magnetic_field>",
+            "<model name=\"x500_camera_rig\">",
+            "<topic>camera</topic>",
+            "<topic>chase_camera</topic>",
+        ] {
+            assert!(aviate.contains(invariant), "aviate world lost {invariant}");
+            assert!(px4.contains(invariant), "px4 world lost {invariant}");
+        }
+        // The default sky is part of the look: neither world may
+        // override the scene with a gray background.
+        assert!(!aviate.contains("<scene>") && !px4.contains("<scene>"));
+    }
+
     #[test]
     fn a_complete_checkout_plans_gz_then_px4_standalone() {
         let (root, px4) = scaffold("complete");
