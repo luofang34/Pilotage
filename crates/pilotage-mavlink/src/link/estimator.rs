@@ -4,18 +4,26 @@ use std::time::Instant;
 
 use pilotage_adapter_api::MeasurementStamp;
 
-use super::LatestAviate;
+use super::LinkState;
 use super::measurement::next_estimator_status_stamp;
 
-pub(crate) const KNOWN_VALID_FLAGS: u32 = 0x0f;
-pub(crate) const QUALITY_GOOD: u32 = 0;
-pub(crate) const QUALITY_DEGRADED: u32 = 1;
-pub(crate) const QUALITY_UNUSABLE: u32 = 2;
+/// The validity bits this dialect defines; unknown bits are masked off.
+pub const KNOWN_VALID_FLAGS: u32 = 0x0f;
+/// Canonical quality: fully usable.
+pub const QUALITY_GOOD: u32 = 0;
+/// Canonical quality: degraded but present.
+pub const QUALITY_DEGRADED: u32 = 1;
+/// Canonical quality: unusable; consumers must not act on the values.
+pub const QUALITY_UNUSABLE: u32 = 2;
 
+/// The authorization an estimator-status report grants to cached
+/// numeric groups: masked validity bits plus a canonical quality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct EstimatorAuthorization {
-    pub(crate) valid_flags: u32,
-    pub(crate) quality: u32,
+pub struct EstimatorAuthorization {
+    /// Validity bits, masked to [`KNOWN_VALID_FLAGS`].
+    pub valid_flags: u32,
+    /// Canonical quality (`QUALITY_GOOD` / `_DEGRADED` / `_UNUSABLE`).
+    pub quality: u32,
 }
 
 impl EstimatorAuthorization {
@@ -46,16 +54,21 @@ impl EstimatorAuthorization {
     }
 }
 
+/// One accepted estimator-status report with its acquisition stamp.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct EstimatorStatusUpdate {
-    pub(crate) time_usec: u64,
-    pub(crate) time_boot_ms: u32,
-    pub(crate) authorization: EstimatorAuthorization,
-    pub(crate) stamp: MeasurementStamp,
+pub struct EstimatorStatusUpdate {
+    /// Source-reported time, microseconds.
+    pub time_usec: u64,
+    /// Milliseconds since FC boot derived from `time_usec`.
+    pub time_boot_ms: u32,
+    /// The authorization this report grants.
+    pub authorization: EstimatorAuthorization,
+    /// Identity and acquisition stamp for this report.
+    pub stamp: MeasurementStamp,
 }
 
 pub(super) fn accept_status(
-    latest: &mut LatestAviate,
+    latest: &mut LinkState,
     time_usec: u64,
     valid_flags: u8,
     quality: u8,
@@ -97,12 +110,12 @@ fn status_time_boot_ms(time_usec: u64) -> Option<u32> {
     u32::try_from(time_usec / 1_000).ok()
 }
 
-fn fail_closed_out_of_range_status(latest: &mut LatestAviate) {
+fn fail_closed_out_of_range_status(latest: &mut LinkState) {
     latest.invalid_estimator_statuses = latest.invalid_estimator_statuses.wrapping_add(1);
     invalidate_cached_authorization(latest);
 }
 
-pub(super) fn authorization_at(latest: &LatestAviate, time_boot_ms: u32) -> EstimatorAuthorization {
+pub(super) fn authorization_at(latest: &LinkState, time_boot_ms: u32) -> EstimatorAuthorization {
     let time_usec = u64::from(time_boot_ms).saturating_mul(1_000);
     latest
         .estimator_status
@@ -115,7 +128,7 @@ pub(super) fn authorization_at(latest: &LatestAviate, time_boot_ms: u32) -> Esti
         })
 }
 
-fn degrade_cached_groups(latest: &mut LatestAviate, status: EstimatorAuthorization) {
+fn degrade_cached_groups(latest: &mut LinkState, status: EstimatorAuthorization) {
     if let Some(attitude) = latest.attitude.as_mut() {
         attitude.valid_flags &= status.valid_flags;
         attitude.quality = attitude.quality.max(status.quality);
@@ -126,7 +139,7 @@ fn degrade_cached_groups(latest: &mut LatestAviate, status: EstimatorAuthorizati
     }
 }
 
-pub(super) fn invalidate_cached_authorization(latest: &mut LatestAviate) {
+pub(super) fn invalidate_cached_authorization(latest: &mut LinkState) {
     let fail_closed = EstimatorAuthorization::fail_closed();
     if let Some(status) = latest.estimator_status.as_mut() {
         status.authorization = fail_closed;

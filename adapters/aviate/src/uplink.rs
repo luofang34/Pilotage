@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use tracing::{info, warn};
 
-use crate::mavlink::{
+use pilotage_mavlink::codec::{
     encode_arm_command, encode_attitude_setpoint, encode_position_setpoint,
     encode_velocity_setpoint,
 };
@@ -242,7 +242,7 @@ impl FlightUplink {
                 .now()
                 .saturating_duration_since(self.started)
                 .as_millis() as u32,
-            crate::mavlink::AttitudeTarget {
+            pilotage_mavlink::codec::AttitudeTarget {
                 roll_rad: roll * FPV_MAX_TILT_RAD,
                 pitch_rad: pitch * FPV_MAX_TILT_RAD,
                 yaw_rad: self.heading_sp_rad,

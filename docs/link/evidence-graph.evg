@@ -184,12 +184,12 @@ attr test testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric
 node RESULT-LINK-ADAPTER verification-result
 title adapter source-role acceptance suite — recorded pass
 attr command cargo test -p pilotage-adapter-aviate source_roles
-attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr config-digest a06be9513007911cd726e2a76416b4389b036c15
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:df97524b1f96016992494b6a0cb78bd9445cca0f
+attr source-digest git-blob:aab8e146252f94229733a7d22f49481dd5d23470
 attr artifact docs/link/evidence-artifacts/link04/adapter.run.txt
-attr output-digest sha256:beff03b0157c24fe78d165d819d31d2b22cabd9e87a8f38abc8044be2afa1542
-attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr output-digest sha256:67b753585fb73f0dc60582e0460e7b686aa349a5df04c3f5ca4c271e6a07be52
+attr run-id local:a06be9513007911cd726e2a76416b4389b036c15
 attr outcome pass
 
 node RESULT-LINK-WIRE verification-result
@@ -248,6 +248,12 @@ attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
 attr output-digest sha256:064e32f9b8cc9b78472dcf7de91e20b35b76a7b4263208bfccc3bab45418ad67
 attr run-id local:211406836a102c64c0e0065a796e238a8af16f3a
 attr outcome pass
+
+node CFG-LINK-EXTRACTION configuration-item
+title committed code baseline of the re-recorded adapter suite (the MAVLink extraction commit)
+attr scm git
+attr commit a06be9513007911cd726e2a76416b4389b036c15
+attr tree 202df9f54fdef93e367a99d902d3f5c041b4cc5f
 
 node CFG-LINK-WORKTREE configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
@@ -344,7 +350,7 @@ edge RESULT-LINK-ADAPTER result-of CASE-LINK-ORACLE
 edge RESULT-LINK-ADAPTER result-of CASE-LINK-MISLABEL
 edge RESULT-LINK-ADAPTER covers LINK-ROLE-001
 edge RESULT-LINK-ADAPTER covers LINK-CTRL-002
-edge RESULT-LINK-ADAPTER justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-ADAPTER justified-by CFG-LINK-EXTRACTION
 edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE

@@ -101,7 +101,7 @@ fn link_loss_transitions_invalidate_the_captured_hold_point() {
 
 /// Stamps the fixture as (near-)still at `pos`, fresh as of now.
 fn set_still_at(
-    state: &std::sync::Arc<std::sync::Mutex<crate::link::LatestAviate>>,
+    state: &std::sync::Arc<std::sync::Mutex<pilotage_mavlink::link::LinkState>>,
     pos: [f32; 3],
 ) {
     let mut latest = state.lock().expect("state lock");

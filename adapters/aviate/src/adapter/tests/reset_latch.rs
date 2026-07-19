@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
 
-use crate::link::{LatestAviate, ResetPolicy, apply_messages_at};
-use crate::mavlink::{AviateMessage, FrameSource};
+use pilotage_mavlink::codec::{FcMessage, FrameSource};
+use pilotage_mavlink::link::apply_messages_at;
+use pilotage_mavlink::{LinkState, ResetPolicy};
 
 use super::super::{
     ARM_BUTTON, AviateAdapter, DISARM_BUTTON, PITCH_AXIS, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS,
@@ -27,7 +28,7 @@ const SOURCE: FrameSource = FrameSource {
     frame_sequence: 0,
 };
 
-fn adapter_with_fake_fc() -> (AviateAdapter, std::net::UdpSocket, Arc<Mutex<LatestAviate>>) {
+fn adapter_with_fake_fc() -> (AviateAdapter, std::net::UdpSocket, Arc<Mutex<LinkState>>) {
     let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("timeout");
@@ -57,31 +58,31 @@ fn neutral() -> pilotage_protocol::ScopedControlFrame {
     )
 }
 
-fn status(time_boot_ms: u32) -> AviateMessage {
-    AviateMessage::AviateEstimatorStatus {
+fn status(time_boot_ms: u32) -> FcMessage {
+    FcMessage::AviateEstimatorStatus {
         time_usec: u64::from(time_boot_ms).saturating_mul(1_000),
         valid_flags: 0x0f,
         quality: 2,
     }
 }
 
-fn attitude(time_boot_ms: u32) -> AviateMessage {
-    AviateMessage::AttitudeQuaternion {
+fn attitude(time_boot_ms: u32) -> FcMessage {
+    FcMessage::AttitudeQuaternion {
         time_boot_ms,
         quat_wxyz: [1.0, 0.0, 0.0, 0.0],
         rates_rps: [0.0; 3],
     }
 }
 
-fn kinematics(time_boot_ms: u32) -> AviateMessage {
-    AviateMessage::LocalPositionNed {
+fn kinematics(time_boot_ms: u32) -> FcMessage {
+    FcMessage::LocalPositionNed {
         time_boot_ms,
         pos_ned_m: [0.0; 3],
         vel_ned_mps: [0.0; 3],
     }
 }
 
-fn apply_at(state: &Arc<Mutex<LatestAviate>>, messages: &[AviateMessage], now: Instant) {
+fn apply_at(state: &Arc<Mutex<LinkState>>, messages: &[FcMessage], now: Instant) {
     let sourced = messages
         .iter()
         .copied()
@@ -90,7 +91,7 @@ fn apply_at(state: &Arc<Mutex<LatestAviate>>, messages: &[AviateMessage], now: I
     apply_messages_at(state, &sourced, 0, 0, now);
 }
 
-fn drive_fresh_epoch(state: &Arc<Mutex<LatestAviate>>) {
+fn drive_fresh_epoch(state: &Arc<Mutex<LinkState>>) {
     let start = Instant::now();
     {
         let mut latest = state.lock().expect("state");

@@ -14,7 +14,7 @@ use pilotage_protocol::VehicleId;
 use super::{flight_frame, state_with};
 use crate::adapter::AviateAdapter;
 use crate::adapter::shm_sampling::ShmSource;
-use crate::link::LatestAviate;
+use pilotage_mavlink::link::LinkState;
 
 fn truth_writer(tag: &str) -> (String, aviate_xil_shm::SimWriterSession) {
     // macOS caps shm names at 31 chars; keep the unique suffix short.
@@ -74,7 +74,7 @@ fn healthy_truth_cannot_seed_a_control_setpoint() {
     let uplink = crate::uplink::FlightUplink::new().expect("uplink");
     let mut adapter = AviateAdapter::from_state(
         VehicleId::new(1),
-        Arc::new(Mutex::new(LatestAviate::default())),
+        Arc::new(Mutex::new(LinkState::default())),
     )
     .with_uplink(uplink);
     adapter.estimate = None;
@@ -124,13 +124,16 @@ fn fc_state_publishes_standalone_with_host_receive_provenance() {
     let uplink_addr = uplink.local_addr().expect("uplink addr");
     let mut adapter = AviateAdapter::from_state(
         VehicleId::new(1),
-        Arc::new(Mutex::new(LatestAviate::default())),
+        Arc::new(Mutex::new(LinkState::default())),
     )
     .with_uplink(uplink);
     adapter.estimate = None;
 
-    fc.send_to(&crate::mavlink::encode_gcs_heartbeat(0), uplink_addr)
-        .expect("send heartbeat");
+    fc.send_to(
+        &pilotage_mavlink::codec::encode_gcs_heartbeat(0),
+        uplink_addr,
+    )
+    .expect("send heartbeat");
     // The receive is a kernel handoff on loopback; poll until the
     // datagram lands rather than sleeping.
     let mut batch = TelemetryBatch::default();
@@ -169,7 +172,7 @@ fn oracle_only_shape_advertises_no_control_and_streams_truth() {
     let (name, _writer) = truth_writer("orc");
     let mut adapter = AviateAdapter::from_state(
         VehicleId::new(1),
-        Arc::new(Mutex::new(LatestAviate::default())),
+        Arc::new(Mutex::new(LinkState::default())),
     );
     adapter.estimate = None;
     attach_truth(&mut adapter, &name);

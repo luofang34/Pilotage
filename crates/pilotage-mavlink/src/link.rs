@@ -1,4 +1,4 @@
-//! The UDP MAVLink link task: receives Aviate telemetry, caches the
+//! The UDP MAVLink link task: receives FC telemetry, caches the
 //! latest estimate, and (in router mode) keeps this endpoint registered
 //! with GCS heartbeats.
 
@@ -12,11 +12,23 @@ use tracing::{debug, error, info, warn};
 
 use pilotage_adapter_api::{MeasurementStamp, SourceIncarnation};
 
-use crate::error::AviateAdapterError;
-use crate::mavlink::{AviateMessage, FrameSource, encode_gcs_heartbeat, parse_datagram};
+use crate::codec::{FcMessage, FrameSource, encode_gcs_heartbeat, parse_datagram};
 
-pub(crate) mod estimator;
-mod measurement;
+/// Why the MAVLink link could not start.
+#[derive(Debug, thiserror::Error)]
+pub enum LinkError {
+    /// Neither the direct MAVLink port nor an ephemeral fallback socket
+    /// could be bound.
+    #[error("binding a UDP socket for MAVLink telemetry failed: {source}")]
+    Bind {
+        /// The underlying socket error.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+pub mod estimator;
+pub mod measurement;
 use estimator::{
     EstimatorStatusUpdate, accept_status, authorization_at, invalidate_cached_authorization,
 };
@@ -33,7 +45,7 @@ pub enum ResetPolicy {
     SimulatorHeuristic,
 }
 
-/// Where the Aviate MAVLink telemetry is reachable.
+/// Where the FC MAVLink telemetry is reachable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkConfig {
     /// The MAVLink GCS endpoint. If this port is free the adapter binds
@@ -100,7 +112,7 @@ impl LinkConfig {
 /// can propagate to consumers (ADR-0018: loss of data marks groups
 /// stale rather than freezing them).
 #[derive(Debug)]
-pub struct LatestAviate {
+pub struct LinkState {
     /// Configured MAVLink vehicle system id.
     pub system_id: u8,
     /// Configured MAVLink producer component id.
@@ -120,7 +132,7 @@ pub struct LatestAviate {
     /// stamp.
     pub kinematics: Option<KinematicsUpdate>,
     /// Latest accepted lossless estimator authorization report.
-    pub(crate) estimator_status: Option<EstimatorStatusUpdate>,
+    pub estimator_status: Option<EstimatorStatusUpdate>,
     /// Receive stamp of the last FC heartbeat.
     pub last_heartbeat: Option<Instant>,
     /// Total decoded frames.
@@ -136,7 +148,7 @@ pub struct LatestAviate {
     /// Receive time of the last accepted new group measurement.
     pub last_accepted_at: Option<Instant>,
     /// Candidate low timestamps awaiting simulator-only confirmation.
-    pub(crate) pending_reset: Option<measurement::ResetCandidate>,
+    pub pending_reset: Option<measurement::ResetCandidate>,
     /// Duplicate group measurements rejected before entering the cache.
     pub duplicate_measurements: u64,
     /// Older group measurements rejected before entering the cache.
@@ -152,7 +164,7 @@ pub struct LatestAviate {
     pub wrong_sources: u64,
 }
 
-impl Default for LatestAviate {
+impl Default for LinkState {
     fn default() -> Self {
         Self {
             system_id: 1,
@@ -182,7 +194,7 @@ impl Default for LatestAviate {
     }
 }
 
-impl LatestAviate {
+impl LinkState {
     fn for_source(config: LinkConfig, source_incarnation: SourceIncarnation) -> Self {
         Self {
             system_id: config.system_id,
@@ -196,7 +208,8 @@ impl LatestAviate {
         }
     }
 
-    pub(crate) fn estimator_status_stamp(&self) -> Option<MeasurementStamp> {
+    /// Stamp of the last accepted estimator authorization report, if any.
+    pub fn estimator_status_stamp(&self) -> Option<MeasurementStamp> {
         self.estimator_status.map(|status| status.stamp)
     }
 }
@@ -242,22 +255,22 @@ pub struct KinematicsUpdate {
 /// A running MAVLink link: the receive task plus the shared latest-state
 /// cache the adapter samples from.
 #[derive(Debug)]
-pub struct AviateLink {
-    state: Arc<Mutex<LatestAviate>>,
+pub struct MavlinkLink {
+    state: Arc<Mutex<LinkState>>,
     task: JoinHandle<()>,
 }
 
-impl AviateLink {
+impl MavlinkLink {
     /// Binds the socket (direct or router mode) and spawns the receive
     /// task.
     ///
     /// # Errors
     ///
-    /// Returns [`AviateAdapterError::Bind`] when no socket can be bound.
+    /// Returns [`LinkError::Bind`] when no socket can be bound.
     pub async fn start(
         config: LinkConfig,
         source_incarnation: SourceIncarnation,
-    ) -> Result<Self, AviateAdapterError> {
+    ) -> Result<Self, LinkError> {
         if config.maximum_inter_group_skew_ms == 0 {
             warn!(
                 "inter-group skew budget is zero: the slower of any \
@@ -271,16 +284,16 @@ impl AviateLink {
                 debug!(%direct_err, "MAVLink endpoint taken; assuming a router owns it");
                 let socket = UdpSocket::bind((config.endpoint.ip(), 0))
                     .await
-                    .map_err(|source| AviateAdapterError::Bind { source })?;
+                    .map_err(|source| LinkError::Bind { source })?;
                 (socket, true)
             }
         };
         info!(
             mode = if router_mode { "router" } else { "direct" },
             endpoint = %config.endpoint,
-            "Aviate MAVLink link listening"
+            "MAVLink link listening"
         );
-        let state = Arc::new(Mutex::new(LatestAviate::for_source(
+        let state = Arc::new(Mutex::new(LinkState::for_source(
             config,
             source_incarnation,
         )));
@@ -294,12 +307,12 @@ impl AviateLink {
     }
 
     /// The shared latest-state cache.
-    pub fn state(&self) -> Arc<Mutex<LatestAviate>> {
+    pub fn state(&self) -> Arc<Mutex<LinkState>> {
         self.state.clone()
     }
 }
 
-impl Drop for AviateLink {
+impl Drop for MavlinkLink {
     fn drop(&mut self) {
         self.task.abort();
     }
@@ -309,7 +322,7 @@ async fn run_link(
     socket: UdpSocket,
     endpoint: SocketAddr,
     router_mode: bool,
-    state: Arc<Mutex<LatestAviate>>,
+    state: Arc<Mutex<LinkState>>,
 ) {
     let mut buf = vec![0u8; 2048];
     let mut messages = Vec::with_capacity(8);
@@ -360,17 +373,20 @@ async fn run_link(
 /// Folds decoded messages into the shared cache. Kept synchronous and
 /// lock-scoped: the lock is never held across an await.
 fn apply_messages(
-    state: &Arc<Mutex<LatestAviate>>,
-    messages: &[(FrameSource, AviateMessage)],
+    state: &Arc<Mutex<LinkState>>,
+    messages: &[(FrameSource, FcMessage)],
     crc_failures: u32,
     unknown_ids: u32,
 ) {
     apply_messages_at(state, messages, crc_failures, unknown_ids, Instant::now());
 }
 
-pub(crate) fn apply_messages_at(
-    state: &Arc<Mutex<LatestAviate>>,
-    messages: &[(FrameSource, AviateMessage)],
+/// Folds decoded messages into the shared cache at an explicit receive
+/// instant. Public so adapter crates can drive the cache in tests
+/// without a socket; production traffic arrives via the link task.
+pub fn apply_messages_at(
+    state: &Arc<Mutex<LinkState>>,
+    messages: &[(FrameSource, FcMessage)],
     crc_failures: u32,
     unknown_ids: u32,
     now: Instant,
@@ -385,23 +401,23 @@ pub(crate) fn apply_messages_at(
             latest.wrong_sources = latest.wrong_sources.wrapping_add(1);
             continue;
         }
-        if message == AviateMessage::InvalidAviateEstimatorStatus {
+        if message == FcMessage::InvalidAviateEstimatorStatus {
             latest.invalid_estimator_statuses = latest.invalid_estimator_statuses.wrapping_add(1);
             invalidate_cached_authorization(&mut latest);
             continue;
         }
         latest.decoded = latest.decoded.wrapping_add(1);
         match message {
-            AviateMessage::InvalidAviateEstimatorStatus => {}
-            AviateMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
-            AviateMessage::CommandAck { .. } => {}
-            AviateMessage::EstimatorStatus { .. } => {}
-            AviateMessage::AviateEstimatorStatus {
+            FcMessage::InvalidAviateEstimatorStatus => {}
+            FcMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
+            FcMessage::CommandAck { .. } => {}
+            FcMessage::EstimatorStatus { .. } => {}
+            FcMessage::AviateEstimatorStatus {
                 time_usec,
                 valid_flags,
                 quality,
             } => accept_status(&mut latest, time_usec, valid_flags, quality, now),
-            AviateMessage::AttitudeQuaternion {
+            FcMessage::AttitudeQuaternion {
                 time_boot_ms,
                 quat_wxyz,
                 rates_rps,
@@ -419,7 +435,7 @@ pub(crate) fn apply_messages_at(
                     });
                 }
             }
-            AviateMessage::LocalPositionNed {
+            FcMessage::LocalPositionNed {
                 time_boot_ms,
                 pos_ned_m,
                 vel_ned_mps,

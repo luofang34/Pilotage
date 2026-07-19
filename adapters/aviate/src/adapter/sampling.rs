@@ -10,8 +10,8 @@ use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
 use super::WITHHOLD_AFTER;
-use crate::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
-use crate::link::{AttitudeUpdate, KinematicsUpdate, LatestAviate};
+use pilotage_mavlink::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
+use pilotage_mavlink::link::{AttitudeUpdate, KinematicsUpdate, LinkState};
 
 /// Yaw extracted from the body→NED quaternion (heading, radians
 /// clockwise from north).
@@ -112,10 +112,7 @@ fn effective_authorization(
     (flags, quality)
 }
 
-pub(crate) fn mavlink_batch(
-    vehicle: VehicleId,
-    state: &Arc<Mutex<LatestAviate>>,
-) -> TelemetryBatch {
+pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
     };

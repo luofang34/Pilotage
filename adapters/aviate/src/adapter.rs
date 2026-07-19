@@ -19,7 +19,7 @@ use pilotage_timing::SimTick;
 use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
-use crate::link::LatestAviate;
+use pilotage_mavlink::link::LinkState;
 
 use crate::error::AviateAdapterError;
 use crate::uplink::FlightUplink;
@@ -147,7 +147,7 @@ impl AviateAdapter {
 
     /// Wires an adapter around a caller-supplied state cache, for tests.
     #[cfg(test)]
-    pub(crate) fn from_state(vehicle: VehicleId, state: Arc<Mutex<LatestAviate>>) -> Self {
+    pub(crate) fn from_state(vehicle: VehicleId, state: Arc<Mutex<LinkState>>) -> Self {
         Self {
             vehicle,
             estimate: Some(EstimateSource { state, _link: None }),

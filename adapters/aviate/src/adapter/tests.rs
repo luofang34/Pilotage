@@ -8,7 +8,7 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ButtonEdge, LogicalButtonId, VehicleId};
 
-use crate::link::KinematicsUpdate;
+use pilotage_mavlink::link::KinematicsUpdate;
 
 mod fixtures;
 mod flight_control;
@@ -276,7 +276,7 @@ fn disarm_does_not_require_a_current_measurement_pair() {
     let mut buf = [0_u8; 128];
     let len = fc.recv(&mut buf).expect("receive disarm");
     assert!(len >= 45);
-    assert_eq!(buf[7], crate::mavlink::COMMAND_LONG_ID as u8);
+    assert_eq!(buf[7], pilotage_mavlink::codec::COMMAND_LONG_ID as u8);
     assert_eq!(
         f32::from_le_bytes(buf[10..14].try_into().expect("param1")),
         0.0
@@ -315,5 +315,6 @@ fn control_frames_are_rejected_at_the_boundary() {
     );
 }
 
+mod estimator_authorization;
 mod link_loss_enact;
 mod reset_latch;
