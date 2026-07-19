@@ -93,12 +93,12 @@ fn plan_with_px4_dir(ctx: &SessionContext, px4: &Path) -> Result<Vec<Stage>, Xta
             hint: "build it: make px4_sitl in the PX4-Autopilot checkout",
         });
     }
-    let world = px4.join("Tools/simulation/gz/worlds/default.sdf");
+    let world = ctx.repo_root.join("sim/worlds/px4_flightdeck.sdf");
     if !world.is_file() {
         return Err(XtaskError::MissingArtifact {
-            what: "PX4 gz world",
+            what: "px4 flight-deck world",
             path: world,
-            hint: "the PX4 checkout is missing Tools/simulation/gz (update submodules)",
+            hint: "run from the Pilotage repository root",
         });
     }
     let server_config = px4.join("Tools/simulation/gz/server.config");
@@ -142,7 +142,8 @@ fn gz_stage(
         (
             "GZ_SIM_RESOURCE_PATH".to_owned(),
             format!(
-                "{}:{}",
+                "{}:{}:{}",
+                ctx.repo_root.join("sim/worlds").display(),
                 px4.join("Tools/simulation/gz/worlds").display(),
                 px4.join("Tools/simulation/gz/models").display()
             ),
@@ -203,10 +204,12 @@ fn px4_stage(
                 ("PATH".to_owned(), path.to_owned()),
                 ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
                 // Standalone: xtask owns the gz server; px4 attaches to
-                // it and spawns the model instead of forking its own.
+                // the statically included model (which carries the
+                // Pilotage camera rig) instead of spawning its own.
                 ("PX4_GZ_STANDALONE".to_owned(), "1".to_owned()),
                 ("PX4_SYS_AUTOSTART".to_owned(), SYS_AUTOSTART.to_owned()),
                 ("PX4_SIM_MODEL".to_owned(), "gz_x500".to_owned()),
+                ("PX4_GZ_MODEL_NAME".to_owned(), "x500_0".to_owned()),
                 ("PX4_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
             ],
             remove_env: vec![],
@@ -279,13 +282,15 @@ mod tests {
         let (root, px4) = scaffold("complete");
         for file in [
             "build/px4_sitl_default/bin/px4",
-            "Tools/simulation/gz/worlds/default.sdf",
             "Tools/simulation/gz/server.config",
         ] {
             let path = px4.join(file);
             std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
             std::fs::write(&path, b"x").expect("file");
         }
+        let world = root.join("sim/worlds/px4_flightdeck.sdf");
+        std::fs::create_dir_all(world.parent().expect("parent")).expect("dirs");
+        std::fs::write(&world, b"x").expect("world");
         let ctx = context(root.clone());
         let stages = plan_with_px4_dir(&ctx, &px4).expect("plan");
         assert_eq!(stages.len(), 2);
@@ -297,6 +302,12 @@ mod tests {
                 .iter()
                 .any(|(k, v)| k == "PX4_GZ_STANDALONE" && v == "1"),
             "px4 must attach to the xtask-owned gz server, not spawn its own"
+        );
+        assert!(
+            fc_env
+                .iter()
+                .any(|(k, v)| k == "PX4_GZ_MODEL_NAME" && v == "x500_0"),
+            "px4 must attach to the world's rig-bearing model, not spawn one"
         );
         assert!(
             stages[0]
