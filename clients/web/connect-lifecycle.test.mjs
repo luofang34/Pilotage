@@ -48,7 +48,7 @@ function reader(steps) {
 // Drives the PRODUCTION orchestration over the real bootstrap loop, the
 // way main.js wires it: openAndBootstrap runs the reader with the
 // module's live probe and reports whether a lease was granted.
-async function drive({ gate, tracker, steps }) {
+async function drive({ gate, tracker, steps, controlStarts = true }) {
   const events = [];
   let leaseRequests = 0;
   const session = await negotiateSessionAuthority({
@@ -73,11 +73,32 @@ async function drive({ gate, tracker, steps }) {
         result,
       };
     },
-    startControl: () => events.push("start-control"),
+    startControl: () => {
+      events.push("start-control");
+      return controlStarts;
+    },
+    controlUnavailable: () => events.push("control-unavailable"),
     releaseLease: () => events.push("release-now"),
     telemetryOnly: () => events.push("telemetry-only"),
   });
   return { session, events, leaseRequests };
+}
+
+// --- a granted lease with no datagram writer is surrendered -----------------
+{
+  const gate = createControlGate({ isFocused: () => true });
+  const tracker = createReleaseTracker();
+  const { events, leaseRequests } = await drive({
+    gate,
+    tracker,
+    steps: [{ bytes: [WELCOME] }, { bytes: [LEASE_RESPONSE] }],
+    controlStarts: false,
+  });
+  check("writer refusal follows one granted request", leaseRequests === 1);
+  check(
+    "writer refusal makes control unavailable and surrenders authority",
+    events.join(",") === "start-control,control-unavailable",
+  );
 }
 
 // --- a blur during the release-settlement await stays latched ---------------
