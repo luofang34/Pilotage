@@ -2,8 +2,7 @@
 
 //! Adapter-boundary behavior: the offboard arm sequence ordering on
 //! the wire, sampling authorization from the standard status, and the
-//! same gate discipline the Aviate adapter carries (commanded-reset
-//! latch, disarm bypass).
+//! same gate discipline the Aviate adapter carries.
 
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
@@ -80,9 +79,7 @@ fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
 }
 
 fn uplink_to(addr: std::net::SocketAddr) -> Px4Uplink {
-    let mut uplink = Px4Uplink::new().expect("uplink");
-    uplink.set_target(addr);
-    uplink
+    Px4Uplink::new(addr).expect("uplink")
 }
 
 fn press(button: u16) -> pilotage_protocol::ScopedControlFrame {
@@ -304,7 +301,7 @@ fn reset_press_latches_and_disarm_bypasses() {
     assert_eq!(
         outcome.disposition,
         Disposition::Accepted,
-        "disarm always passes"
+        "disarm bypasses the commanded-reset latch"
     );
     let mut buf = [0u8; 128];
     fc.recv_from(&mut buf).expect("disarm datagram");
@@ -317,8 +314,7 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("timeout");
-    let mut uplink = Px4Uplink::new().expect("uplink");
-    uplink.set_target(fc.local_addr().expect("addr"));
+    let uplink = Px4Uplink::new(fc.local_addr().expect("addr")).expect("uplink");
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink);
     adapter.apply_control(&press(RESET_BUTTON));
 

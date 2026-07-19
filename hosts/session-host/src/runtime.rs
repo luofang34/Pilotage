@@ -9,6 +9,7 @@ mod connection;
 mod engine_actor;
 mod gazebo_launch;
 mod media;
+mod px4_config;
 mod registry;
 mod shutdown;
 mod stream_tag;
@@ -183,7 +184,8 @@ async fn spawn_host_runtime(
             spawn_aviate_runtime(endpoint, engine_tx, engine_rx, shutdown_rx, start).await
         }
         AdapterKind::Px4 => {
-            let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE)
+            let config = px4_config::from_env()?;
+            let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
                 .await
                 .map_err(HostError::Px4Adapter)?;
             let engine = build_engine(&adapter);

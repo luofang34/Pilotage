@@ -497,8 +497,9 @@ check(
     ],
     edges: [],
   });
-  // Walk the raw envelope: frame field 8 (payload) must contain four
-  // field-1 (axis sample) entries even though every value is neutral.
+  // Walk envelope field 2 (control frame) directly: frame field 8
+  // (payload) must contain four field-1 (axis sample) entries even
+  // though every value is neutral.
   function fieldsOf(bytes) {
     const out = [];
     let i = 0;
@@ -526,8 +527,7 @@ check(
     return out;
   }
   const envelopeFields = fieldsOf(Array.from(neutral));
-  const frame = envelopeFields.find(([f, v]) => f === 7 && v)?.[1]
-    ?? envelopeFields.find(([f, v]) => v && v.length > 8)?.[1];
+  const frame = envelopeFields.find(([f, v]) => f === 2 && v)?.[1] ?? [];
   const frameFields = fieldsOf(frame);
   const payload = frameFields.find(([f]) => f === 8)?.[1] ?? [];
   const axisEntries = fieldsOf(payload).filter(([f]) => f === 1);

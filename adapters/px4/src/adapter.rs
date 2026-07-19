@@ -1,7 +1,7 @@
 //! The PX4 `VehicleAdapter`: telemetry sampling from the shared
 //! MAVLink link and offboard flight control with the same gate
-//! discipline as the Aviate adapter (link-loss latch, commanded-reset
-//! latch, disarm always allowed).
+//! discipline as the Aviate adapter (link-loss latch followed by the
+//! commanded-reset latch).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,8 +15,9 @@ use pilotage_protocol::VehicleId;
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
-use pilotage_mavlink::{AuthorizationSource, LinkConfig, LinkState, MavlinkLink};
+use pilotage_mavlink::{LinkState, MavlinkLink};
 
+use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
 use crate::uplink::Px4Uplink;
 
@@ -102,24 +103,22 @@ struct ArmReport {
 }
 
 impl Px4Adapter {
-    /// Binds the MAVLink receive link (`PILOTAGE_PX4_ADDR`, default
-    /// `127.0.0.1:14550` — PX4 streams attitude, local position, and
-    /// the estimator status on its GCS instance) and the offboard
-    /// command uplink. A failed uplink bind degrades to
-    /// telemetry-only rather than failing the adapter.
+    /// Binds the configured MAVLink receive link and offboard command
+    /// uplink. A failed uplink bind degrades to telemetry-only rather
+    /// than failing the adapter.
     ///
     /// # Errors
     ///
     /// Returns [`Px4AdapterError::Link`] when the receive link cannot
     /// bind any socket.
-    pub async fn start(vehicle: VehicleId) -> Result<Self, Px4AdapterError> {
-        let config = link_config();
+    pub async fn start(vehicle: VehicleId, config: Px4Config) -> Result<Self, Px4AdapterError> {
+        let link_config = config.link_config();
         let incarnation = pilotage_adapter_api::SourceIncarnation::new(rand_incarnation());
-        let link = MavlinkLink::start(config, incarnation).await?;
+        let link = MavlinkLink::start(link_config, incarnation).await?;
         let state = link.state();
-        let uplink = match Px4Uplink::new() {
+        let uplink = match Px4Uplink::new(config.command_endpoint) {
             Ok(mut uplink) => {
-                uplink.set_expected_source(config.system_id, config.component_id);
+                uplink.set_expected_source(link_config.system_id, link_config.component_id);
                 Some(uplink)
             }
             Err(error) => {
@@ -230,37 +229,6 @@ impl Px4Adapter {
             }
         }
         Ok(())
-    }
-}
-
-fn link_config() -> LinkConfig {
-    let endpoint = std::env::var("PILOTAGE_PX4_ADDR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], 14_550)));
-    // The GCS mavlink instance owns the telemetry stream this adapter
-    // consumes; interval requests must come from the link's own socket
-    // (the instance retargets its stream to the last peer that spoke).
-    let gcs_command = std::env::var("PILOTAGE_PX4_GCS_ADDR")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], 18_570)));
-    LinkConfig {
-        endpoint,
-        authorization_source: AuthorizationSource::StandardEstimatorStatus,
-        // The status is requested at 10 Hz; a 300 ms lag ceiling covers
-        // that with margin and matches the display's pairing budget.
-        standard_status_max_lag_ms: 300,
-        // PX4 streams only ~15-20 s after boot (logger, EKF, and the
-        // message-interval negotiation), so its post-restart clock is
-        // far above the default reset-candidate ceiling.
-        reset_candidate_max_ms: 60_000,
-        stream_command_target: Some(gcs_command),
-        // Attitude and local position at ~30 Hz; the estimator status
-        // at 10 Hz so every numeric group finds a status inside the
-        // display's 300 ms pairing budget.
-        stream_interval_requests: &[(31, 33_333), (32, 33_333), (230, 100_000)],
-        ..LinkConfig::simulator()
     }
 }
 

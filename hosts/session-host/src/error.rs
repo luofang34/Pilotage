@@ -32,6 +32,42 @@ pub enum HostError {
         /// The rejected value, lossily decoded for this message.
         value: String,
     },
+    /// The PX4 adapter requires an explicit simulation profile.
+    #[error("PILOTAGE_PX4_PROFILE is required and must be set to simulation")]
+    Px4ProfileMissing,
+    /// A present PX4 profile did not name the only supported policy.
+    #[error("invalid PILOTAGE_PX4_PROFILE value {value:?} (expected simulation)")]
+    Px4Profile {
+        /// The rejected value.
+        value: String,
+    },
+    /// The PX4 profile could not be decoded as UTF-8.
+    #[error("PILOTAGE_PX4_PROFILE is not valid UTF-8: {source}")]
+    Px4ProfileEncoding {
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
+    /// A present PX4 endpoint was not a socket address.
+    #[error("invalid {variable} value {value:?}: {source}")]
+    Px4Endpoint {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The rejected value.
+        value: String,
+        /// The socket-address parse failure.
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    /// A PX4 endpoint could not be decoded as UTF-8.
+    #[error("{variable} is not valid UTF-8: {source}")]
+    Px4EndpointEncoding {
+        /// The environment variable being parsed.
+        variable: &'static str,
+        /// The environment decoding failure.
+        #[source]
+        source: std::env::VarError,
+    },
     /// Spawning or connecting the Gazebo sidecar bridge failed.
     #[error("failed to start the Gazebo adapter: {0}")]
     GazeboAdapter(#[source] pilotage_adapter_gazebo::GazeboAdapterError),

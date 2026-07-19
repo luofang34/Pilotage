@@ -1,7 +1,6 @@
 //! Flight-control input helpers, control gating, and reset handling —
 //! the same gate discipline as the Aviate adapter: link-loss latch,
-//! reset/disarm buttons, then the commanded-reset latch, with disarm
-//! always allowed.
+//! reset/disarm buttons, then the commanded-reset latch.
 
 use std::time::{Duration, Instant};
 
@@ -121,8 +120,8 @@ impl Px4Adapter {
         if flight_button_pressed(frame, RESET_BUTTON) {
             self.spawn_reset();
         }
-        // Disarm is checked BEFORE the reset latch: surrendering
-        // authority must never be blocked, and it needs no measurement.
+        // Disarm is checked before the commanded-reset latch, but only
+        // after the link-loss gate above has admitted the frame.
         if flight_button_pressed(frame, DISARM_BUTTON) {
             let Some(uplink) = self.uplink.as_mut() else {
                 return Some(rejected_control(tick, RejectReason::UnknownScope));

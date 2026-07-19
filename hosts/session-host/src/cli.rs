@@ -128,6 +128,13 @@ mod tests {
     }
 
     #[test]
+    fn px4_adapter_parses() {
+        let args = vec!["--adapter".to_owned(), "px4".to_owned()];
+        let parsed = parse_args(&args).expect("PX4 adapter parses");
+        assert_eq!(parsed.adapter, AdapterKind::Px4);
+    }
+
+    #[test]
     fn unknown_adapter_is_an_error() {
         let args = vec!["--adapter".to_owned(), "unreal".to_owned()];
         assert_eq!(

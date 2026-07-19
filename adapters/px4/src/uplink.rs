@@ -101,17 +101,13 @@ pub struct Px4Uplink {
 }
 
 impl Px4Uplink {
-    /// Binds an ephemeral socket toward PX4's onboard command port
-    /// (`PILOTAGE_PX4_FC_ADDR`, default `127.0.0.1:14580`).
+    /// Binds an ephemeral socket toward the configured PX4 onboard
+    /// command endpoint.
     ///
     /// # Errors
     ///
     /// Returns the socket bind error.
-    pub fn new() -> std::io::Result<Self> {
-        let target = std::env::var("PILOTAGE_PX4_FC_ADDR")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 14_580)));
+    pub fn new(target: SocketAddr) -> std::io::Result<Self> {
         let socket = UdpSocket::bind("127.0.0.1:0")?;
         socket.set_nonblocking(true)?;
         info!(%target, "PX4 offboard uplink ready");
