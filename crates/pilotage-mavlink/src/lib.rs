@@ -15,6 +15,6 @@ pub mod link;
 
 pub use codec::{FcMessage, FrameSource, ParseStats, parse_datagram};
 pub use link::{
-    AttitudeUpdate, AuthorizationSource, KinematicsUpdate, LinkConfig, LinkError, LinkState,
-    MavlinkLink, ResetPolicy,
+    AttitudeUpdate, AuthorizationSource, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate,
+    LinkConfig, LinkError, LinkState, MavlinkLink, ResetPolicy,
 };

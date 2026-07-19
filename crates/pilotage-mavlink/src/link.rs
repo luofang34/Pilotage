@@ -18,10 +18,12 @@ mod apply;
 mod error;
 pub mod estimator;
 pub mod measurement;
+mod updates;
 use apply::apply_messages;
 pub use apply::apply_messages_at;
 pub use error::LinkError;
 use estimator::EstimatorStatusUpdate;
+pub use updates::{AttitudeUpdate, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate};
 
 /// Which message carries the estimator authorization for cached numeric
 /// groups.
@@ -172,6 +174,13 @@ pub struct LinkState {
     pub kinematics: Option<KinematicsUpdate>,
     /// Latest accepted lossless estimator authorization report.
     pub estimator_status: Option<EstimatorStatusUpdate>,
+    /// Latest gimbal-device orientation report. Cached outside the
+    /// estimate measurement discipline: it is payload-device status,
+    /// never an input to vehicle state or control validation.
+    pub gimbal_device: Option<GimbalDeviceAttitude>,
+    /// Latest command acknowledgement, kept so uplink senders can
+    /// surface a typed denial instead of a silently dead command path.
+    pub last_command_ack: Option<CommandAckReport>,
     /// Receive stamp of the last FC heartbeat.
     pub last_heartbeat: Option<Instant>,
     /// Whether the last FC heartbeat reported the vehicle armed.
@@ -220,6 +229,8 @@ impl Default for LinkState {
             attitude: None,
             kinematics: None,
             estimator_status: None,
+            gimbal_device: None,
+            last_command_ack: None,
             last_heartbeat: None,
             heartbeat_armed: None,
             decoded: 0,
@@ -262,50 +273,13 @@ impl LinkState {
     }
 }
 
-/// One attitude update with its receive stamp.
-#[derive(Debug, Clone, Copy)]
-pub struct AttitudeUpdate {
-    /// Quaternion (w, x, y, z), body FRD → world NED.
-    pub quat_wxyz: [f32; 4],
-    /// Body rates (p, q, r) rad/s.
-    pub rates_rps: [f32; 3],
-    /// Milliseconds since FC boot.
-    pub time_boot_ms: u32,
-    /// Identity and acquisition stamp for this group update.
-    pub stamp: MeasurementStamp,
-    /// Authorization bits retained for this numeric acquisition.
-    pub valid_flags: u32,
-    /// Canonical quality retained for this numeric acquisition.
-    pub quality: u32,
-    /// When this update was received.
-    pub received_at: Instant,
-}
-
-/// One kinematics update with its receive stamp.
-#[derive(Debug, Clone, Copy)]
-pub struct KinematicsUpdate {
-    /// Position NED, meters.
-    pub pos_ned_m: [f32; 3],
-    /// Velocity NED, m/s.
-    pub vel_ned_mps: [f32; 3],
-    /// Milliseconds since FC boot.
-    pub time_boot_ms: u32,
-    /// Identity and acquisition stamp for this group update.
-    pub stamp: MeasurementStamp,
-    /// Authorization bits retained for this numeric acquisition.
-    pub valid_flags: u32,
-    /// Canonical quality retained for this numeric acquisition.
-    pub quality: u32,
-    /// When this update was received.
-    pub received_at: Instant,
-}
-
 /// A running MAVLink link: the receive task plus the shared latest-state
 /// cache the adapter samples from.
 #[derive(Debug)]
 pub struct MavlinkLink {
     state: Arc<Mutex<LinkState>>,
     task: JoinHandle<()>,
+    outbound: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
 
 impl MavlinkLink {
@@ -345,13 +319,35 @@ impl MavlinkLink {
             config,
             source_incarnation,
         )));
-        let task = tokio::spawn(run_link(socket, config, router_mode, state.clone()));
-        Ok(Self { state, task })
+        let (outbound, outbound_rx) = tokio::sync::mpsc::channel(64);
+        let task = tokio::spawn(run_link(
+            socket,
+            config,
+            router_mode,
+            state.clone(),
+            outbound_rx,
+        ));
+        Ok(Self {
+            state,
+            task,
+            outbound,
+        })
     }
 
     /// The shared latest-state cache.
     pub fn state(&self) -> Arc<Mutex<LinkState>> {
         self.state.clone()
+    }
+
+    /// A sender whose frames leave through the link's own socket
+    /// toward the stream-command target. The FC's GCS instance
+    /// retargets its stream to whichever peer last spoke, so uplink
+    /// traffic for that instance (gimbal-manager demands, claims) must
+    /// use this path — a second socket would steal the telemetry
+    /// stream. Frames are dropped with a warning when the link has no
+    /// stream-command target.
+    pub fn outbound(&self) -> tokio::sync::mpsc::Sender<Vec<u8>> {
+        self.outbound.clone()
     }
 }
 
@@ -366,6 +362,7 @@ async fn run_link(
     config: LinkConfig,
     router_mode: bool,
     state: Arc<Mutex<LinkState>>,
+    mut outbound_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
 ) {
     let endpoint = config.endpoint;
     let mut buf = vec![0u8; 2048];
@@ -374,6 +371,20 @@ async fn run_link(
     let mut seq: u8 = 0;
     loop {
         tokio::select! {
+            frame = outbound_rx.recv() => {
+                match (frame, config.stream_command_target) {
+                    (Some(frame), Some(target)) => {
+                        if let Err(error) = socket.send_to(&frame, target).await {
+                            warn!(%error, "outbound uplink frame send failed");
+                        }
+                    }
+                    (Some(_), None) => {
+                        warn!("outbound uplink frame dropped: link has no stream command target");
+                    }
+                    // All senders dropped; the link is being torn down.
+                    (None, _) => {}
+                }
+            }
             _ = heartbeat.tick() => {
                 if router_mode {
                     let frame = encode_gcs_heartbeat(seq);
@@ -401,23 +412,7 @@ async fn run_link(
             received = socket.recv_from(&mut buf) => {
                 match received {
                     Ok((len, _from)) => {
-                        messages.clear();
-                        let stats = parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
-                        apply_messages(
-                            &state,
-                            &messages,
-                            stats.crc_failures,
-                            stats.unknown_ids,
-                        );
-                        if stats.crc_failures > 0 {
-                            warn!(crc_failures = stats.crc_failures, "MAVLink CRC failures in datagram");
-                        }
-                        if stats.invalid_estimator_status_frames > 0 {
-                            error!(
-                                invalid_frames = stats.invalid_estimator_status_frames,
-                                "private estimator status frame failed validation"
-                            );
-                        }
+                        fold_datagram(buf.get(..len).unwrap_or(&[]), &state, &mut messages);
                     }
                     Err(error) => {
                         warn!(%error, "MAVLink socket receive failed");
@@ -426,6 +421,30 @@ async fn run_link(
                 }
             }
         }
+    }
+}
+
+/// Parses one datagram into the reusable message buffer, folds it into
+/// the shared cache, and surfaces integrity failures loudly.
+fn fold_datagram(
+    bytes: &[u8],
+    state: &Arc<Mutex<LinkState>>,
+    messages: &mut Vec<(crate::codec::FrameSource, crate::codec::FcMessage)>,
+) {
+    messages.clear();
+    let stats = parse_datagram(bytes, messages);
+    apply_messages(state, messages, stats.crc_failures, stats.unknown_ids);
+    if stats.crc_failures > 0 {
+        warn!(
+            crc_failures = stats.crc_failures,
+            "MAVLink CRC failures in datagram"
+        );
+    }
+    if stats.invalid_estimator_status_frames > 0 {
+        error!(
+            invalid_frames = stats.invalid_estimator_status_frames,
+            "private estimator status frame failed validation"
+        );
     }
 }
 

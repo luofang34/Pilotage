@@ -7,7 +7,10 @@ use std::time::Instant;
 
 use super::estimator::{accept_status, authorization_at, invalidate_cached_authorization};
 use super::measurement::{next_attitude_stamp, next_kinematics_stamp};
-use super::{AttitudeUpdate, AuthorizationSource, KinematicsUpdate, LinkState, estimator};
+use super::{
+    AttitudeUpdate, AuthorizationSource, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate,
+    LinkState, estimator,
+};
 use crate::codec::{FcMessage, FrameSource};
 
 /// Folds decoded messages into the shared cache. Kept synchronous and
@@ -67,57 +70,88 @@ pub fn apply_messages_at(
             continue;
         }
         latest.decoded = latest.decoded.wrapping_add(1);
-        match message {
-            FcMessage::InvalidAviateEstimatorStatus => {}
-            FcMessage::Heartbeat { armed } => {
-                latest.last_heartbeat = Some(now);
-                latest.heartbeat_armed = Some(armed);
+        apply_message(&mut latest, message, now);
+    }
+}
+
+/// Applies one source-matched decoded message to the cache.
+fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    match message {
+        FcMessage::InvalidAviateEstimatorStatus => {}
+        FcMessage::Heartbeat { armed } => {
+            latest.last_heartbeat = Some(now);
+            latest.heartbeat_armed = Some(armed);
+        }
+        FcMessage::CommandAck { command, result } => {
+            note_command_ack(command, result);
+            latest.last_command_ack = Some(CommandAckReport {
+                command,
+                result,
+                received_at: now,
+            });
+        }
+        FcMessage::EstimatorStatus { time_usec, flags } => {
+            apply_standard_status(latest, time_usec, flags, now);
+        }
+        FcMessage::AviateEstimatorStatus {
+            time_usec,
+            valid_flags,
+            quality,
+        } => accept_status(latest, time_usec, valid_flags, quality, now),
+        FcMessage::AttitudeQuaternion {
+            time_boot_ms,
+            quat_wxyz,
+            rates_rps,
+        } => {
+            if let Some(stamp) = next_attitude_stamp(latest, time_boot_ms, now) {
+                let authorization = authorization_at(latest, time_boot_ms);
+                latest.attitude = Some(AttitudeUpdate {
+                    quat_wxyz,
+                    rates_rps,
+                    time_boot_ms,
+                    stamp,
+                    valid_flags: authorization.valid_flags,
+                    quality: authorization.quality,
+                    received_at: now,
+                });
             }
-            FcMessage::CommandAck { command, result } => note_command_ack(command, result),
-            FcMessage::EstimatorStatus { time_usec, flags } => {
-                apply_standard_status(&mut latest, time_usec, flags, now);
+        }
+        FcMessage::LocalPositionNed {
+            time_boot_ms,
+            pos_ned_m,
+            vel_ned_mps,
+        } => {
+            if let Some(stamp) = next_kinematics_stamp(latest, time_boot_ms, now) {
+                let authorization = authorization_at(latest, time_boot_ms);
+                latest.kinematics = Some(KinematicsUpdate {
+                    pos_ned_m,
+                    vel_ned_mps,
+                    time_boot_ms,
+                    stamp,
+                    valid_flags: authorization.valid_flags,
+                    quality: authorization.quality,
+                    received_at: now,
+                });
             }
-            FcMessage::AviateEstimatorStatus {
-                time_usec,
-                valid_flags,
-                quality,
-            } => accept_status(&mut latest, time_usec, valid_flags, quality, now),
-            FcMessage::AttitudeQuaternion {
-                time_boot_ms,
+        }
+        FcMessage::GimbalDeviceAttitudeStatus {
+            time_boot_ms,
+            quat_wxyz,
+            rates_rps,
+            flags,
+            failure_flags,
+        } => {
+            if failure_flags != 0 {
+                tracing::warn!(failure_flags, "gimbal device reports a failure condition");
+            }
+            latest.gimbal_device = Some(GimbalDeviceAttitude {
                 quat_wxyz,
                 rates_rps,
-            } => {
-                if let Some(stamp) = next_attitude_stamp(&mut latest, time_boot_ms, now) {
-                    let authorization = authorization_at(&latest, time_boot_ms);
-                    latest.attitude = Some(AttitudeUpdate {
-                        quat_wxyz,
-                        rates_rps,
-                        time_boot_ms,
-                        stamp,
-                        valid_flags: authorization.valid_flags,
-                        quality: authorization.quality,
-                        received_at: now,
-                    });
-                }
-            }
-            FcMessage::LocalPositionNed {
                 time_boot_ms,
-                pos_ned_m,
-                vel_ned_mps,
-            } => {
-                if let Some(stamp) = next_kinematics_stamp(&mut latest, time_boot_ms, now) {
-                    let authorization = authorization_at(&latest, time_boot_ms);
-                    latest.kinematics = Some(KinematicsUpdate {
-                        pos_ned_m,
-                        vel_ned_mps,
-                        time_boot_ms,
-                        stamp,
-                        valid_flags: authorization.valid_flags,
-                        quality: authorization.quality,
-                        received_at: now,
-                    });
-                }
-            }
+                flags,
+                failure_flags,
+                received_at: now,
+            });
         }
     }
 }

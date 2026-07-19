@@ -2,7 +2,7 @@
 
 use super::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, COMMAND_ACK_ID, ESTIMATOR_STATUS_ID,
-    FcMessage, HEARTBEAT_ID, LOCAL_POSITION_NED_ID,
+    FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, HEARTBEAT_ID, LOCAL_POSITION_NED_ID,
 };
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
@@ -80,6 +80,27 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             time_usec: u64_at(payload, 0),
             valid_flags: payload.get(8).copied().unwrap_or(0),
             quality: payload.get(9).copied().unwrap_or(0),
+        }),
+        // Wire order: time_boot_ms u32 @0, q[4] @4..20, angular
+        // velocity x/y/z @20..32, failure_flags u32 @32, flags u16
+        // @36, targets @38..40, then v2 extension fields this decoder
+        // ignores (zero-truncated payloads shorter than 40 still
+        // decode via the zero-extending accessors).
+        GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(FcMessage::GimbalDeviceAttitudeStatus {
+            time_boot_ms: u32_at(payload, 0),
+            quat_wxyz: [
+                f32_at(payload, 4),
+                f32_at(payload, 8),
+                f32_at(payload, 12),
+                f32_at(payload, 16),
+            ],
+            rates_rps: [
+                f32_at(payload, 20),
+                f32_at(payload, 24),
+                f32_at(payload, 28),
+            ],
+            failure_flags: u32_at(payload, 32),
+            flags: u16_at(payload, 36),
         }),
         _ => None,
     }
