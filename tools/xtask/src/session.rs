@@ -3,7 +3,7 @@
 //! signal — print the pinned URL, supervise, and tear everything down
 //! in reverse order on ctrl-c or when any stage dies.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -218,10 +218,19 @@ pub fn run_reset(fc: &str) -> Result<(), XtaskError> {
 /// operates on the repository the user is standing in. The compile-time
 /// path is only the fallback for running the binary outside cargo.
 fn repo_root() -> Result<PathBuf, XtaskError> {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-    root_from(&manifest)
+    let runtime_manifest = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
+    let manifest = resolve_manifest(
+        runtime_manifest.as_deref(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    root_from(manifest)
+}
+
+fn resolve_manifest<'a>(
+    runtime_manifest: Option<&'a Path>,
+    compiled_manifest: &'a Path,
+) -> &'a Path {
+    runtime_manifest.unwrap_or(compiled_manifest)
 }
 
 /// The workspace root two levels above `tools/xtask`.
