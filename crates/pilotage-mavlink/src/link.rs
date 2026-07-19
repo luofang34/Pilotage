@@ -34,6 +34,21 @@ use estimator::{
 };
 use measurement::{next_attitude_stamp, next_kinematics_stamp};
 
+/// Which message carries the estimator authorization for cached numeric
+/// groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthorizationSource {
+    /// Aviate's private lossless estimator status (msg 20000): the FC
+    /// emits a status for every numeric millisecond, so authorization
+    /// requires an exact source-time match.
+    #[default]
+    AviatePrivate,
+    /// The standard ESTIMATOR_STATUS (msg 230), as PX4 streams it: the
+    /// status arrives at its own (slower) rate, so a numeric group is
+    /// authorized by the most recent status within a bounded lag.
+    StandardEstimatorStatus,
+}
+
 /// Whether an unstamped MAVLink boot-clock regression may use the simulator
 /// reset heuristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -61,6 +76,8 @@ pub struct LinkConfig {
     pub source_id: u64,
     /// Policy for a boot-clock regression without a source boot UUID.
     pub reset_policy: ResetPolicy,
+    /// Which message carries estimator authorization for this source.
+    pub authorization_source: AuthorizationSource,
     /// Largest source-clock lag admitted when a second measurement group
     /// first joins or advances behind the epoch high-water mark.
     ///
@@ -82,6 +99,7 @@ impl Default for LinkConfig {
             component_id: 1,
             source_id: 1,
             reset_policy: ResetPolicy::Conservative,
+            authorization_source: AuthorizationSource::AviatePrivate,
             maximum_inter_group_skew_ms: 0,
         }
     }
@@ -123,6 +141,8 @@ pub struct LinkState {
     pub source_incarnation: SourceIncarnation,
     /// Reset inference policy for this source.
     pub reset_policy: ResetPolicy,
+    /// Which message carries estimator authorization for this source.
+    pub authorization_source: AuthorizationSource,
     /// Configured epoch-wide inter-group source-clock lag bound.
     pub maximum_inter_group_skew_ms: u32,
     /// Latest attitude estimate: quaternion (w,x,y,z), body rates,
@@ -172,6 +192,7 @@ impl Default for LinkState {
             source_id: 1,
             source_incarnation: SourceIncarnation::new([0; 16]),
             reset_policy: ResetPolicy::Conservative,
+            authorization_source: AuthorizationSource::AviatePrivate,
             maximum_inter_group_skew_ms: 0,
             attitude: None,
             kinematics: None,
@@ -202,6 +223,7 @@ impl LinkState {
             source_id: config.source_id,
             source_incarnation,
             reset_policy: config.reset_policy,
+            authorization_source: config.authorization_source,
             maximum_inter_group_skew_ms: config.maximum_inter_group_skew_ms,
             source_epoch: 1,
             ..Self::default()
@@ -411,7 +433,15 @@ pub fn apply_messages_at(
             FcMessage::InvalidAviateEstimatorStatus => {}
             FcMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
             FcMessage::CommandAck { .. } => {}
-            FcMessage::EstimatorStatus { .. } => {}
+            FcMessage::EstimatorStatus { time_usec, flags } => {
+                // Standard-status dialects authorize from msg 230; the
+                // Aviate dialect treats it as diagnostic only.
+                if latest.authorization_source == AuthorizationSource::StandardEstimatorStatus {
+                    let (valid_flags, quality) = estimator::standard_authorization(flags);
+                    let aligned_usec = (time_usec / 1_000) * 1_000;
+                    accept_status(&mut latest, aligned_usec, valid_flags, quality, now);
+                }
+            }
             FcMessage::AviateEstimatorStatus {
                 time_usec,
                 valid_flags,
