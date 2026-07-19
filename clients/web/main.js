@@ -61,6 +61,7 @@ import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.j
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
 import { pressedArmInputs, risingArmEdges } from "./control-edges.js";
+import { startDatagramControl } from "./datagram-control.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -269,16 +270,21 @@ async function connect({ manual } = { manual: true }) {
     releases: releaseTracker,
     openAndBootstrap: (leaseProbe) =>
       openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }),
-    startControl: ({ transport, token }) => {
-      startControlLoop(transport, token).catch((error) => {
-        transportSessions.runIfActive(token, () => log(`control loop stopped: ${error}`));
+    startControl: ({ transport, token }) => startControlLoop(transport, token),
+    controlUnavailable: ({ token }) => {
+      transportSessions.runIfActive(token, () => {
+        state.leaseGranted = false;
+        sendLeaseRelease(token);
       });
     },
     releaseLease: ({ token }) => {
-      sendLeaseRelease(token);
-      els.gamepad.textContent =
-        "control released — input lost during connect; press Connect to resume";
-      log("input lost during connect — lease released immediately");
+      transportSessions.runIfActive(token, () => {
+        state.leaseGranted = false;
+        sendLeaseRelease(token);
+        els.gamepad.textContent =
+          "control released — input lost during connect; press Connect to resume";
+        log("input lost during connect — lease released immediately");
+      });
     },
     telemetryOnly: (_session, wasManual) => {
       if (wasManual) {
@@ -1191,10 +1197,28 @@ function neutralAxesFor(mode) {
 }
 
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
-async function startControlLoop(transport, token) {
-  if (!transportSessions.isActive(token)) return;
-  const writer = transport.datagrams.writable.getWriter();
-  if (!transportSessions.trackWriter(token, writer)) return;
+function startControlLoop(transport, token) {
+  const started = startDatagramControl({
+    datagrams: transport.datagrams,
+    lifecycle: transportSessions,
+    token,
+    run: (writer) => runControlLoop(writer, token),
+    onError: (error) => log(`control loop stopped: ${error}`),
+  });
+  if (!started.ok) {
+    const detail =
+      started.reason === "send-stream-unavailable"
+        ? "no datagram send stream"
+        : "datagram writer acquisition failed";
+    els.gamepad.textContent = `control unavailable — ${detail}`;
+    els.overlay.textContent = "control unavailable";
+    log(`control unavailable: ${detail}`);
+  }
+  return started.ok;
+}
+
+/** Runs the control-fast send loop with an acquired, session-owned writer. */
+async function runControlLoop(writer, token) {
   // Prime the arm-edge baseline to whatever is held right now, so a button held
   // down as control starts (e.g. across a reconnect) is not read as a fresh
   // arm/disarm on the first tick.
@@ -1205,8 +1229,7 @@ async function startControlLoop(transport, token) {
   // in the WritableStream and get flushed in a burst with stale `sampled_at`
   // (which the host rejects as too old, ADR-0009). `sampled_at` is stamped right
   // before the write, after `ready`, so it reflects the real send moment.
-  try {
-    while (transportSessions.isActive(token) && state.connected) {
+  while (transportSessions.isActive(token) && state.connected) {
       try {
         await writer.ready;
       } catch {
@@ -1286,9 +1309,6 @@ async function startControlLoop(transport, token) {
         transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
       });
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-  } finally {
-    transportSessions.untrackWriter(token, writer);
   }
 }
 

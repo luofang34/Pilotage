@@ -27,7 +27,8 @@
  *   through as the reader's live `requestLease` and resolve to a session
  *   object with `completed` (bootstrap finished) and `leaseGranted`;
  *   anything not `completed` is returned to the caller untouched.
- * @param {(session: object) => void} deps.startControl
+ * @param {(session: object) => boolean|void} deps.startControl
+ * @param {(session: object) => void} deps.controlUnavailable
  * @param {(session: object) => void} deps.releaseLease
  * @param {(session: object, manual: boolean) => void} deps.telemetryOnly
  */
@@ -37,6 +38,7 @@ export async function negotiateSessionAuthority({
   releases,
   openAndBootstrap,
   startControl,
+  controlUnavailable,
   releaseLease,
   telemetryOnly,
 }) {
@@ -48,7 +50,7 @@ export async function negotiateSessionAuthority({
   if (!session || !session.completed) return session;
   if (session.leaseGranted) {
     if (gate.mayPublish()) {
-      startControl(session);
+      if (startControl(session) === false) controlUnavailable(session);
     } else {
       // The blur raced the grant: input loss latched after the lease
       // request was already emitted. Surrender immediately.

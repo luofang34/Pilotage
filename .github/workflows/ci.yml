@@ -147,6 +147,9 @@ jobs:
       - name: transport session identity contract
         run: node clients/web/transport-session.test.mjs
 
+      - name: control datagram capability contract
+        run: node clients/web/datagram-control.test.mjs
+
       - name: instrument display fail-visible contract
         run: node clients/web/instruments.test.mjs
 
