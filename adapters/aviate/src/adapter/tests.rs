@@ -316,3 +316,4 @@ fn control_frames_are_rejected_at_the_boundary() {
 }
 
 mod link_loss_enact;
+mod reset_latch;

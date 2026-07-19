@@ -76,6 +76,9 @@ impl AviateAdapter {
             arm_incarnation,
             started_at: std::time::Instant::now(),
             last_reset: None,
+            reset_latch: None,
+            #[cfg(test)]
+            reset_spawns: 0,
             fpv_mode: false,
             link_loss_policy: None,
         })

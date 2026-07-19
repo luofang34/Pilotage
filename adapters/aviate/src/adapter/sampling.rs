@@ -184,7 +184,7 @@ impl super::AviateAdapter {
     /// infer "stopped" from a missing velocity.
     pub(super) fn current_pose(&mut self) -> Option<(f32, [f32; 3], Option<[f32; 3]>)> {
         let latest = self.estimate.as_ref()?.state.lock().ok()?;
-        latest.estimator_status_stamp()?;
+        let status_stamp = latest.estimator_status_stamp()?;
         let attitude = latest
             .attitude
             .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
@@ -193,7 +193,15 @@ impl super::AviateAdapter {
             .kinematics
             .filter(|update| update.received_at.elapsed() <= WITHHOLD_AFTER)
             .filter(|update| update.stamp.role == SourceRole::OperationalEstimate)?;
-        if !measurement_pair_is_coherent(attitude, kinematics, latest.maximum_inter_group_skew_ms)
+        let current_epoch = latest.source_epoch;
+        if status_stamp.source_epoch != current_epoch
+            || attitude.stamp.source_epoch != current_epoch
+            || kinematics.stamp.source_epoch != current_epoch
+            || !measurement_pair_is_coherent(
+                attitude,
+                kinematics,
+                latest.maximum_inter_group_skew_ms,
+            )
             || !measurement_pair_supports_pose(attitude, kinematics)
         {
             return None;
