@@ -19,6 +19,7 @@ use crate::graph::Graph;
 use crate::id::NodeId;
 use crate::node::NodeKind;
 use crate::policy::Policy;
+use crate::relation::RelationKind;
 
 /// The digest scheme naming a git blob object id.
 const GIT_BLOB_SCHEME: &str = "git-blob:";
@@ -100,6 +101,39 @@ pub(super) fn resolve(
                 graph, repo_root, toplevel, commit, path, expected, findings, id,
             );
         }
+        check_configuration_identity(graph, id, commit, findings);
+    }
+}
+
+/// The result's declared `config-digest` must equal the commit of a
+/// configuration-item that justifies it: a result vouched for by a
+/// configuration node recording a DIFFERENT commit carries two
+/// contradictory identities, and the trace silently stops meaning
+/// anything.
+fn check_configuration_identity(
+    graph: &Graph,
+    id: &NodeId,
+    commit: &str,
+    findings: &mut Vec<Finding>,
+) {
+    let mut configuration_commits = graph
+        .edges()
+        .filter(|edge| edge.from == *id && edge.relation == RelationKind::JustifiedBy)
+        .filter_map(|edge| graph.node(&edge.to))
+        .filter(|node| node.kind == NodeKind::ConfigurationItem)
+        .filter_map(|node| node.attr("commit").map(str::trim))
+        .peekable();
+    if configuration_commits.peek().is_none() {
+        return; // structural completeness is judged elsewhere
+    }
+    if !configuration_commits.any(|declared| declared == commit) {
+        push(
+            findings,
+            id,
+            format!(
+                "config-digest {commit} does not match any justifying configuration-item's                  recorded commit; the result claims one baseline while its configuration                  record names another"
+            ),
+        );
     }
 }
 
@@ -278,6 +312,51 @@ mod tests {
              edge RESULT result-of CASE\n\
              edge RESULT covers R1\n"
         )
+    }
+
+    fn graph_text_with_configuration(commit: &str, blob: &str, cfg_commit: &str) -> String {
+        format!(
+            "{}node CFG configuration-item\n\
+             attr scm git\n\
+             attr commit {cfg_commit}\n\
+             edge RESULT justified-by CFG\n",
+            graph_text(commit, blob)
+        )
+    }
+
+    #[test]
+    fn a_configuration_item_recording_a_different_commit_is_a_finding() {
+        let dir = std::env::temp_dir().join(format!("plt_evg_cfgid_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join("sample_tests.rs"), "#[test]\nfn sample() {}\n")
+            .expect("write source");
+        git(&dir, &["add", "sample_tests.rs"]);
+        git(&dir, &["commit", "-qm", "baseline"]);
+        let commit = git(&dir, &["rev-parse", "HEAD"]);
+        let blob = git(&dir, &["rev-parse", "HEAD:sample_tests.rs"]);
+        let policy = Policy::default();
+
+        // Matching identities: no finding.
+        let graph = parse_graph(&graph_text_with_configuration(&commit, &blob, &commit))
+            .expect("graph parses");
+        let mut findings = Vec::new();
+        resolve(&graph, &policy, &dir, &mut findings);
+        assert!(findings.is_empty(), "matching identity: {findings:?}");
+
+        // The configuration node recording a DIFFERENT commit is the
+        // two-baselines lie and must fail closed.
+        let mismatched = graph_text_with_configuration(&commit, &blob, &"1".repeat(40));
+        let graph = parse_graph(&mismatched).expect("graph parses");
+        let mut findings = Vec::new();
+        resolve(&graph, &policy, &dir, &mut findings);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.detail.contains("does not match any justifying")),
+            "mismatched configuration identity must be a finding: {findings:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -249,6 +249,12 @@ attr output-digest sha256:064e32f9b8cc9b78472dcf7de91e20b35b76a7b4263208bfccc3ba
 attr run-id local:211406836a102c64c0e0065a796e238a8af16f3a
 attr outcome pass
 
+node CFG-LINK-EXTRACTION configuration-item
+title committed code baseline of the re-recorded adapter suite (the MAVLink extraction commit)
+attr scm git
+attr commit a06be9513007911cd726e2a76416b4389b036c15
+attr tree 202df9f54fdef93e367a99d902d3f5c041b4cc5f
+
 node CFG-LINK-WORKTREE configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
 attr scm git
@@ -344,7 +350,7 @@ edge RESULT-LINK-ADAPTER result-of CASE-LINK-ORACLE
 edge RESULT-LINK-ADAPTER result-of CASE-LINK-MISLABEL
 edge RESULT-LINK-ADAPTER covers LINK-ROLE-001
 edge RESULT-LINK-ADAPTER covers LINK-CTRL-002
-edge RESULT-LINK-ADAPTER justified-by CFG-LINK-WORKTREE
+edge RESULT-LINK-ADAPTER justified-by CFG-LINK-EXTRACTION
 edge RESULT-LINK-ADAPTER justified-by TOOL-LINK-CARGO
 
 edge RESULT-LINK-WIRE result-of CASE-LINK-WIRE
