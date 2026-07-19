@@ -7,7 +7,8 @@ use tracing::warn;
 
 use super::{LinkState, ResetPolicy};
 
-const RESET_CANDIDATE_MAX_MS: u32 = 5_000;
+/// Default ceiling on a low boot clock that may seed a reset candidate.
+pub(super) const DEFAULT_RESET_CANDIDATE_MAX_MS: u32 = 5_000;
 pub(super) const RESET_SILENCE: Duration = Duration::from_secs(3);
 pub(super) const RESET_RECEIVE_DWELL: Duration = Duration::from_millis(250);
 pub(super) const RESET_SOURCE_DWELL_MS: u32 = 250;
@@ -76,7 +77,7 @@ fn reset_candidate_or_reject(
     time_boot_ms: u32,
     now: Instant,
 ) -> TimeObservation {
-    if time_boot_ms > RESET_CANDIDATE_MAX_MS
+    if time_boot_ms > latest.reset_candidate_max_ms
         || latest.reset_policy == ResetPolicy::Conservative
         || !accepted_stream_is_silent(latest, now)
     {

@@ -115,17 +115,75 @@ fn fail_closed_out_of_range_status(latest: &mut LinkState) {
     invalidate_cached_authorization(latest);
 }
 
+/// Default ceiling on how long a standard-status authorization stays
+/// current for later numeric groups; a deployment must configure a
+/// budget derived from its actual status rate.
+pub const DEFAULT_STANDARD_STATUS_MAX_LAG_MS: u32 = 2_000;
+
 pub(super) fn authorization_at(latest: &LinkState, time_boot_ms: u32) -> EstimatorAuthorization {
-    let time_usec = u64::from(time_boot_ms).saturating_mul(1_000);
-    latest
-        .estimator_status
-        .map_or_else(EstimatorAuthorization::fail_closed, |status| {
+    let Some(status) = latest.estimator_status else {
+        return EstimatorAuthorization::fail_closed();
+    };
+    match latest.authorization_source {
+        // Aviate emits a status for every numeric millisecond:
+        // authorization requires the exact pair.
+        super::AuthorizationSource::AviatePrivate => {
+            let time_usec = u64::from(time_boot_ms).saturating_mul(1_000);
             if status.time_usec == time_usec {
                 status.authorization
             } else {
                 EstimatorAuthorization::fail_closed()
             }
-        })
+        }
+        // Standard-status dialects authorize from the most recent
+        // report within a bounded lag. The wrapping distance keeps the
+        // comparison correct across a boot-clock wrap: a status AHEAD
+        // of the numeric (distance in the upper half) is also current.
+        super::AuthorizationSource::StandardEstimatorStatus => {
+            let distance = time_boot_ms.wrapping_sub(status.time_boot_ms);
+            if distance <= latest.standard_status_max_lag_ms || distance > u32::MAX / 2 {
+                status.authorization
+            } else {
+                EstimatorAuthorization::fail_closed()
+            }
+        }
+    }
+}
+
+/// Maps standard ESTIMATOR_STATUS (msg 230) flags onto this crate's
+/// wire authorization vocabulary: bit 0 (attitude) grants attitude and
+/// rates, horizontal+vertical position bits grant position, and
+/// horizontal+vertical velocity bits grant velocity. Wire quality is
+/// GOOD (2) with attitude, position, and velocity all present,
+/// DEGRADED (1) with attitude alone, otherwise UNUSABLE (0).
+pub(super) fn standard_authorization(flags: u16) -> (u8, u8) {
+    const ATTITUDE: u16 = 1;
+    const VELOCITY_HORIZ: u16 = 2;
+    const VELOCITY_VERT: u16 = 4;
+    const POS_HORIZ_REL: u16 = 8;
+    const POS_HORIZ_ABS: u16 = 16;
+    const POS_VERT_ABS: u16 = 32;
+    let attitude = flags & ATTITUDE != 0;
+    let position = flags & (POS_HORIZ_REL | POS_HORIZ_ABS) != 0 && flags & POS_VERT_ABS != 0;
+    let velocity = flags & VELOCITY_HORIZ != 0 && flags & VELOCITY_VERT != 0;
+    let mut valid: u8 = 0;
+    if attitude {
+        valid |= 0b0011;
+    }
+    if position {
+        valid |= 0b0100;
+    }
+    if velocity {
+        valid |= 0b1000;
+    }
+    let quality = if attitude && position && velocity {
+        2
+    } else if attitude {
+        1
+    } else {
+        0
+    };
+    (valid, quality)
 }
 
 fn degrade_cached_groups(latest: &mut LinkState, status: EstimatorAuthorization) {

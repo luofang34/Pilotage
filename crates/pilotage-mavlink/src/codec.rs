@@ -308,6 +308,32 @@ pub fn encode_arm_command(seq: u8, arm: bool, target_system: u8, target_componen
     frame
 }
 
+/// Serializes an arbitrary COMMAND_LONG frame (mode changes, message
+/// interval requests, and any other MAV_CMD the arm helper does not
+/// cover) for the selected MAVLink system and component.
+///
+/// Wire order (33 bytes): param1..7 f32 @0..28, command u16 @28,
+/// target_system @30, target_component @31, confirmation @32.
+pub fn encode_command_long(
+    seq: u8,
+    command: u16,
+    params: [f32; 7],
+    target_system: u8,
+    target_component: u8,
+) -> [u8; 45] {
+    let mut payload = [0u8; 33];
+    for (index, param) in params.iter().enumerate() {
+        let at = index * 4;
+        payload[at..at + 4].copy_from_slice(&param.to_le_bytes());
+    }
+    payload[28..30].copy_from_slice(&command.to_le_bytes());
+    payload[30] = target_system;
+    payload[31] = target_component;
+    let mut frame = [0u8; 45];
+    encode_frame_v2(seq, COMMAND_LONG_ID, &payload, 152, &mut frame);
+    frame
+}
+
 /// Serializes a SET_POSITION_TARGET_LOCAL_NED velocity setpoint: NED
 /// velocity plus absolute yaw, everything else masked out
 /// (`type_mask` ignores position, acceleration, and yaw rate — the

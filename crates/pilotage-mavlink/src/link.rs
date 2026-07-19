@@ -12,27 +12,34 @@ use tracing::{debug, error, info, warn};
 
 use pilotage_adapter_api::{MeasurementStamp, SourceIncarnation};
 
-use crate::codec::{FcMessage, FrameSource, encode_gcs_heartbeat, parse_datagram};
+use crate::codec::{encode_gcs_heartbeat, parse_datagram};
 
-/// Why the MAVLink link could not start.
-#[derive(Debug, thiserror::Error)]
-pub enum LinkError {
-    /// Neither the direct MAVLink port nor an ephemeral fallback socket
-    /// could be bound.
-    #[error("binding a UDP socket for MAVLink telemetry failed: {source}")]
-    Bind {
-        /// The underlying socket error.
-        #[source]
-        source: std::io::Error,
-    },
-}
-
+mod apply;
+mod error;
 pub mod estimator;
 pub mod measurement;
-use estimator::{
-    EstimatorStatusUpdate, accept_status, authorization_at, invalidate_cached_authorization,
-};
-use measurement::{next_attitude_stamp, next_kinematics_stamp};
+use apply::apply_messages;
+pub use apply::apply_messages_at;
+pub use error::LinkError;
+use estimator::EstimatorStatusUpdate;
+
+/// Which message carries the estimator authorization for cached numeric
+/// groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthorizationSource {
+    /// Aviate's private lossless estimator status (msg 20000): the FC
+    /// emits a status for every numeric millisecond, so authorization
+    /// requires an exact source-time match.
+    #[default]
+    AviatePrivate,
+    /// The standard ESTIMATOR_STATUS (msg 230), as PX4 streams it: the
+    /// status arrives at its own (slower) rate, so a numeric group is
+    /// authorized by the most recent status within a bounded lag.
+    StandardEstimatorStatus,
+}
+
+/// MAV_CMD_SET_MESSAGE_INTERVAL.
+const SET_MESSAGE_INTERVAL: u16 = 511;
 
 /// Whether an unstamped MAVLink boot-clock regression may use the simulator
 /// reset heuristic.
@@ -61,6 +68,27 @@ pub struct LinkConfig {
     pub source_id: u64,
     /// Policy for a boot-clock regression without a source boot UUID.
     pub reset_policy: ResetPolicy,
+    /// Which message carries estimator authorization for this source.
+    pub authorization_source: AuthorizationSource,
+    /// Longest a standard-status authorization stays current for later
+    /// numeric groups (StandardEstimatorStatus only). Must cover the
+    /// configured status interval with margin, and must not exceed the
+    /// display's status-to-numeric pairing budget or the panels flag
+    /// samples this link still authorizes.
+    pub standard_status_max_lag_ms: u32,
+    /// Ceiling on a low boot clock that may seed a simulator reset
+    /// candidate. Must exceed the FC's worst-case boot-to-streaming
+    /// time: a rebooted FC whose clock is already above this ceiling is
+    /// rejected as reordered forever instead of starting a new epoch.
+    pub reset_candidate_max_ms: u32,
+    /// Where periodic message-interval requests are sent, when the
+    /// source needs them (PX4's GCS instance streams sparse defaults).
+    /// They MUST originate from the link's own socket: the instance
+    /// retargets its stream to whichever peer last spoke to it, so a
+    /// request from any other socket steals the stream.
+    pub stream_command_target: Option<SocketAddr>,
+    /// (message id, interval µs) pairs requested at the heartbeat tick.
+    pub stream_interval_requests: &'static [(u32, u32)],
     /// Largest source-clock lag admitted when a second measurement group
     /// first joins or advances behind the epoch high-water mark.
     ///
@@ -82,6 +110,11 @@ impl Default for LinkConfig {
             component_id: 1,
             source_id: 1,
             reset_policy: ResetPolicy::Conservative,
+            authorization_source: AuthorizationSource::AviatePrivate,
+            standard_status_max_lag_ms: estimator::DEFAULT_STANDARD_STATUS_MAX_LAG_MS,
+            reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
+            stream_command_target: None,
+            stream_interval_requests: &[],
             maximum_inter_group_skew_ms: 0,
         }
     }
@@ -123,6 +156,12 @@ pub struct LinkState {
     pub source_incarnation: SourceIncarnation,
     /// Reset inference policy for this source.
     pub reset_policy: ResetPolicy,
+    /// Which message carries estimator authorization for this source.
+    pub authorization_source: AuthorizationSource,
+    /// Configured standard-status authorization lag ceiling.
+    pub standard_status_max_lag_ms: u32,
+    /// Configured ceiling on a reset-candidate boot clock.
+    pub reset_candidate_max_ms: u32,
     /// Configured epoch-wide inter-group source-clock lag bound.
     pub maximum_inter_group_skew_ms: u32,
     /// Latest attitude estimate: quaternion (w,x,y,z), body rates,
@@ -135,6 +174,8 @@ pub struct LinkState {
     pub estimator_status: Option<EstimatorStatusUpdate>,
     /// Receive stamp of the last FC heartbeat.
     pub last_heartbeat: Option<Instant>,
+    /// Whether the last FC heartbeat reported the vehicle armed.
+    pub heartbeat_armed: Option<bool>,
     /// Total decoded frames.
     pub decoded: u64,
     /// Total CRC failures (a correctness signal, logged).
@@ -172,11 +213,15 @@ impl Default for LinkState {
             source_id: 1,
             source_incarnation: SourceIncarnation::new([0; 16]),
             reset_policy: ResetPolicy::Conservative,
+            authorization_source: AuthorizationSource::AviatePrivate,
+            standard_status_max_lag_ms: estimator::DEFAULT_STANDARD_STATUS_MAX_LAG_MS,
+            reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
             maximum_inter_group_skew_ms: 0,
             attitude: None,
             kinematics: None,
             estimator_status: None,
             last_heartbeat: None,
+            heartbeat_armed: None,
             decoded: 0,
             crc_failures: 0,
             unknown_ids: 0,
@@ -202,6 +247,9 @@ impl LinkState {
             source_id: config.source_id,
             source_incarnation,
             reset_policy: config.reset_policy,
+            authorization_source: config.authorization_source,
+            standard_status_max_lag_ms: config.standard_status_max_lag_ms,
+            reset_candidate_max_ms: config.reset_candidate_max_ms,
             maximum_inter_group_skew_ms: config.maximum_inter_group_skew_ms,
             source_epoch: 1,
             ..Self::default()
@@ -297,12 +345,7 @@ impl MavlinkLink {
             config,
             source_incarnation,
         )));
-        let task = tokio::spawn(run_link(
-            socket,
-            config.endpoint,
-            router_mode,
-            state.clone(),
-        ));
+        let task = tokio::spawn(run_link(socket, config, router_mode, state.clone()));
         Ok(Self { state, task })
     }
 
@@ -320,10 +363,11 @@ impl Drop for MavlinkLink {
 
 async fn run_link(
     socket: UdpSocket,
-    endpoint: SocketAddr,
+    config: LinkConfig,
     router_mode: bool,
     state: Arc<Mutex<LinkState>>,
 ) {
+    let endpoint = config.endpoint;
     let mut buf = vec![0u8; 2048];
     let mut messages = Vec::with_capacity(8);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
@@ -336,6 +380,21 @@ async fn run_link(
                     seq = seq.wrapping_add(1);
                     if let Err(error) = socket.send_to(&frame, endpoint).await {
                         warn!(%error, "GCS heartbeat send failed");
+                    }
+                }
+                if let Some(target) = config.stream_command_target {
+                    for &(message_id, interval_us) in config.stream_interval_requests {
+                        let frame = crate::codec::encode_command_long(
+                            seq,
+                            SET_MESSAGE_INTERVAL,
+                            [message_id as f32, interval_us as f32, 0.0, 0.0, 0.0, 0.0, 0.0],
+                            config.system_id,
+                            config.component_id,
+                        );
+                        seq = seq.wrapping_add(1);
+                        if let Err(error) = socket.send_to(&frame, target).await {
+                            warn!(%error, "stream interval request send failed");
+                        }
                     }
                 }
             }
@@ -364,93 +423,6 @@ async fn run_link(
                         warn!(%error, "MAVLink socket receive failed");
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-                }
-            }
-        }
-    }
-}
-
-/// Folds decoded messages into the shared cache. Kept synchronous and
-/// lock-scoped: the lock is never held across an await.
-fn apply_messages(
-    state: &Arc<Mutex<LinkState>>,
-    messages: &[(FrameSource, FcMessage)],
-    crc_failures: u32,
-    unknown_ids: u32,
-) {
-    apply_messages_at(state, messages, crc_failures, unknown_ids, Instant::now());
-}
-
-/// Folds decoded messages into the shared cache at an explicit receive
-/// instant. Public so adapter crates can drive the cache in tests
-/// without a socket; production traffic arrives via the link task.
-pub fn apply_messages_at(
-    state: &Arc<Mutex<LinkState>>,
-    messages: &[(FrameSource, FcMessage)],
-    crc_failures: u32,
-    unknown_ids: u32,
-    now: Instant,
-) {
-    let Ok(mut latest) = state.lock() else {
-        return;
-    };
-    latest.crc_failures = latest.crc_failures.wrapping_add(u64::from(crc_failures));
-    latest.unknown_ids = latest.unknown_ids.wrapping_add(u64::from(unknown_ids));
-    for &(source, message) in messages {
-        if source.system_id != latest.system_id || source.component_id != latest.component_id {
-            latest.wrong_sources = latest.wrong_sources.wrapping_add(1);
-            continue;
-        }
-        if message == FcMessage::InvalidAviateEstimatorStatus {
-            latest.invalid_estimator_statuses = latest.invalid_estimator_statuses.wrapping_add(1);
-            invalidate_cached_authorization(&mut latest);
-            continue;
-        }
-        latest.decoded = latest.decoded.wrapping_add(1);
-        match message {
-            FcMessage::InvalidAviateEstimatorStatus => {}
-            FcMessage::Heartbeat { .. } => latest.last_heartbeat = Some(now),
-            FcMessage::CommandAck { .. } => {}
-            FcMessage::EstimatorStatus { .. } => {}
-            FcMessage::AviateEstimatorStatus {
-                time_usec,
-                valid_flags,
-                quality,
-            } => accept_status(&mut latest, time_usec, valid_flags, quality, now),
-            FcMessage::AttitudeQuaternion {
-                time_boot_ms,
-                quat_wxyz,
-                rates_rps,
-            } => {
-                if let Some(stamp) = next_attitude_stamp(&mut latest, time_boot_ms, now) {
-                    let authorization = authorization_at(&latest, time_boot_ms);
-                    latest.attitude = Some(AttitudeUpdate {
-                        quat_wxyz,
-                        rates_rps,
-                        time_boot_ms,
-                        stamp,
-                        valid_flags: authorization.valid_flags,
-                        quality: authorization.quality,
-                        received_at: now,
-                    });
-                }
-            }
-            FcMessage::LocalPositionNed {
-                time_boot_ms,
-                pos_ned_m,
-                vel_ned_mps,
-            } => {
-                if let Some(stamp) = next_kinematics_stamp(&mut latest, time_boot_ms, now) {
-                    let authorization = authorization_at(&latest, time_boot_ms);
-                    latest.kinematics = Some(KinematicsUpdate {
-                        pos_ned_m,
-                        vel_ned_mps,
-                        time_boot_ms,
-                        stamp,
-                        valid_flags: authorization.valid_flags,
-                        quality: authorization.quality,
-                        received_at: now,
-                    });
                 }
             }
         }
