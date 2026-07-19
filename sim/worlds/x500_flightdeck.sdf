@@ -74,33 +74,12 @@
       <direction>-0.5 0.1 -0.9</direction>
     </light>
 
-    <!-- Ground plane -->
-    <model name="ground_plane">
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <plane>
-              <normal>0 0 1</normal>
-              <size>100 100</size>
-            </plane>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <plane>
-              <normal>0 0 1</normal>
-              <size>100 100</size>
-            </plane>
-          </geometry>
-          <material>
-            <ambient>0.3 0.5 0.3 1</ambient>
-            <diffuse>0.3 0.5 0.3 1</diffuse>
-            <specular>0.1 0.1 0.1 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
+    <!-- Shared Pilotage scenery: the same field for every FC family
+         (sim/models/flightdeck_scenery). Per-FC worlds carry only
+         physics, environment, the vehicle, and FC glue. -->
+    <include>
+      <uri>model://flightdeck_scenery</uri>
+    </include>
 
     <!-- Vehicle: x500 (instance 0) -->
     <include>
