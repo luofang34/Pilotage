@@ -5,15 +5,24 @@
 
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
-use pilotage_protocol::{ButtonEdge, LogicalButtonId, ScopedControlFrame};
+use pilotage_adapter_api::{
+    ApplyOutcome, Disposition, RejectReason, payload_satisfies_neutral_activation,
+};
+use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
-use super::{DISARM_BUTTON, Px4Adapter, RESET_BUTTON};
+use super::{
+    DISARM_BUTTON, PITCH_AXIS, Px4Adapter, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+};
 
-/// Full-stick magnitude below which a frame counts as neutral for
-/// reset-latch clearance (the host's recovery-activation deadband scale).
-const RESET_CLEAR_DEADBAND: f32 = 0.05;
+/// Reset clearance uses the same 5%-of-full-stick scale as host recovery.
+const RESET_CLEAR_DEADBAND_MILLI: u32 = 50;
+const FLIGHT_AXES: [LogicalAxisId; 4] = [
+    LogicalAxisId::new(ROLL_AXIS),
+    LogicalAxisId::new(PITCH_AXIS),
+    LogicalAxisId::new(THROTTLE_AXIS),
+    LogicalAxisId::new(YAW_AXIS),
+];
 
 /// The engaged commanded-reset latch: the estimate stream's source epoch
 /// observed at engagement. `engaged_epoch` is `None` when no estimate
@@ -52,19 +61,11 @@ pub(super) fn normalized_flight_sticks(frame: &ScopedControlFrame) -> ([f32; 4],
     (sticks, transformed)
 }
 
-/// A frame demonstrates neutral input: every axis inside the deadband
-/// (NaN is not neutral) and no pressed button edges.
+/// Reset clearance uses the canonical full-coverage neutral activation:
+/// every declared axis must be REPORTED neutral — an empty payload
+/// demonstrates nothing.
 fn frame_is_neutral(frame: &ScopedControlFrame) -> bool {
-    frame
-        .payload
-        .axes
-        .iter()
-        .all(|(_, value)| value.abs() <= RESET_CLEAR_DEADBAND)
-        && frame
-            .payload
-            .edges
-            .iter()
-            .all(|(_, edge)| *edge != ButtonEdge::Pressed)
+    payload_satisfies_neutral_activation(&frame.payload, &FLIGHT_AXES, RESET_CLEAR_DEADBAND_MILLI)
 }
 
 impl Px4Adapter {

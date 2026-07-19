@@ -43,25 +43,13 @@ const OFFBOARD_WARMUP: Duration = Duration::from_millis(300);
 /// emitted at this period so PX4's offboard-loss failsafe does not
 /// trip between control frames.
 const STREAM_KEEPALIVE: Duration = Duration::from_millis(50);
-/// Message-interval requests are re-sent at this period for the whole
-/// session: they are idempotent, and a request lost during PX4's boot
-/// would otherwise leave the estimator status at its sparse default
-/// rate — too sparse for the display's status-to-numeric pairing.
-const INTERVAL_RETRY: Duration = Duration::from_secs(2);
 
 /// MAV_CMD_DO_SET_MODE.
 const CMD_DO_SET_MODE: u16 = 176;
-/// MAV_CMD_SET_MESSAGE_INTERVAL.
-const CMD_SET_MESSAGE_INTERVAL: u16 = 511;
 /// MAV_MODE_FLAG_CUSTOM_MODE_ENABLED.
 const BASE_MODE_CUSTOM: f32 = 1.0;
 /// PX4 custom main mode OFFBOARD.
 const PX4_MAIN_MODE_OFFBOARD: f32 = 6.0;
-/// Message ids whose intervals are requested, with the interval in
-/// microseconds: attitude quaternion and local position at ~30 Hz,
-/// the estimator status at 10 Hz — every numeric group must find a
-/// status within the display's 300 ms pairing budget.
-const STREAMS: [(u32, f32); 3] = [(31, 33_333.0), (32, 33_333.0), (230, 100_000.0)];
 
 /// The uplink's time source; tests substitute a manually advanced
 /// instant so sequencing is exercised without real-time sleeps.
@@ -105,7 +93,6 @@ pub struct Px4Uplink {
     arm_phase: ArmPhase,
     warmup_since: Option<Instant>,
     last_heartbeat: Option<Instant>,
-    last_interval_request: Option<Instant>,
     started: Instant,
     clock: UplinkClock,
     send_failures: u64,
@@ -138,7 +125,6 @@ impl Px4Uplink {
             arm_phase: ArmPhase::Idle,
             warmup_since: None,
             last_heartbeat: None,
-            last_interval_request: None,
             started: Instant::now(),
             clock: UplinkClock::System,
             send_failures: 0,
@@ -186,9 +172,11 @@ impl Px4Uplink {
     }
 
     /// Periodic presence and stream upkeep: the 1 Hz GCS heartbeat,
-    /// periodic message-interval requests, keepalive setpoints between
-    /// control frames, and the warmup step of the offboard arm
-    /// sequence. Call at telemetry-sampling cadence.
+    /// keepalive setpoints between control frames, and the warmup step
+    /// of the offboard arm sequence. Stream-interval negotiation is NOT
+    /// here: it must originate from the receive link's own socket (the
+    /// FC retargets a stream to the last peer that spoke on that link).
+    /// Call at telemetry-sampling cadence.
     pub fn maintain(&mut self) {
         let now = self.clock.now();
         if self
@@ -198,13 +186,6 @@ impl Px4Uplink {
             self.last_heartbeat = Some(now);
             let frame = encode_gcs_heartbeat(self.seq);
             self.send(&frame);
-        }
-        if self
-            .last_interval_request
-            .is_none_or(|at| now.duration_since(at) >= INTERVAL_RETRY)
-        {
-            self.last_interval_request = Some(now);
-            self.request_streams();
         }
         if self.arm_phase != ArmPhase::Idle
             && self
@@ -220,19 +201,6 @@ impl Px4Uplink {
                 .is_some_and(|since| now.duration_since(since) >= OFFBOARD_WARMUP)
         {
             self.command_offboard_and_arm();
-        }
-    }
-
-    fn request_streams(&mut self) {
-        for (message_id, interval_us) in STREAMS {
-            let frame = encode_command_long(
-                self.seq,
-                CMD_SET_MESSAGE_INTERVAL,
-                [message_id as f32, interval_us, 0.0, 0.0, 0.0, 0.0, 0.0],
-                self.expected_system_id,
-                self.expected_component_id,
-            );
-            self.send(&frame);
         }
     }
 

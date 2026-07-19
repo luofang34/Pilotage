@@ -248,6 +248,9 @@ fn link_config() -> LinkConfig {
     LinkConfig {
         endpoint,
         authorization_source: AuthorizationSource::StandardEstimatorStatus,
+        // The status is requested at 10 Hz; a 300 ms lag ceiling covers
+        // that with margin and matches the display's pairing budget.
+        standard_status_max_lag_ms: 300,
         // PX4 streams only ~15-20 s after boot (logger, EKF, and the
         // message-interval negotiation), so its post-restart clock is
         // far above the default reset-candidate ceiling.

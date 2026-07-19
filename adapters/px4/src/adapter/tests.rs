@@ -26,18 +26,23 @@ const SOURCE: FrameSource = FrameSource {
 };
 
 fn live_state() -> Arc<Mutex<LinkState>> {
+    live_state_at(Instant::now()).0
+}
+
+fn live_state_at(start: Instant) -> (Arc<Mutex<LinkState>>, Instant) {
     let state = Arc::new(Mutex::new(LinkState {
         authorization_source: AuthorizationSource::StandardEstimatorStatus,
+        reset_policy: pilotage_mavlink::ResetPolicy::SimulatorHeuristic,
         maximum_inter_group_skew_ms: 300,
         ..LinkState::default()
     }));
-    feed(&state, 1_000);
-    state
+    feed_at(&state, 60_000, start);
+    (state, start)
 }
 
 /// Feeds an authorized status + attitude + kinematics trio at the
 /// given boot time, the way a live PX4 stream populates the cache.
-fn feed(state: &Arc<Mutex<LinkState>>, time_boot_ms: u32) {
+fn feed_at(state: &Arc<Mutex<LinkState>>, time_boot_ms: u32, now: Instant) {
     let messages = [
         (
             SOURCE,
@@ -63,7 +68,7 @@ fn feed(state: &Arc<Mutex<LinkState>>, time_boot_ms: u32) {
             },
         ),
     ];
-    apply_messages_at(state, &messages, 0, 0, Instant::now());
+    apply_messages_at(state, &messages, 0, 0, now);
 }
 
 fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
@@ -87,8 +92,70 @@ fn press(button: u16) -> pilotage_protocol::ScopedControlFrame {
     )
 }
 
+/// Neutral demonstration: every declared axis REPORTED at center — an
+/// empty payload demonstrates nothing and must not clear a latch.
 fn neutral() -> pilotage_protocol::ScopedControlFrame {
-    frame(vec![], vec![])
+    frame(
+        vec![
+            (LogicalAxisId::new(super::ROLL_AXIS), 0.0),
+            (LogicalAxisId::new(super::PITCH_AXIS), 0.0),
+            (LogicalAxisId::new(THROTTLE_AXIS), 0.0),
+            (LogicalAxisId::new(super::YAW_AXIS), 0.0),
+        ],
+        vec![],
+    )
+}
+
+/// Drives a REAL source-epoch advance through the production message
+/// path: the old stream goes silent, a low boot clock is quarantined,
+/// dwells, and confirms — exactly what a restarted PX4 looks like.
+fn drive_epoch_advance(state: &Arc<Mutex<LinkState>>, start: Instant) {
+    let status = |tbm: u32| FcMessage::EstimatorStatus {
+        time_usec: u64::from(tbm) * 1_000,
+        flags: 1 | 2 | 4 | 8 | 32,
+    };
+    // Quarantined candidate after the silence budget, then source and
+    // receive dwell, then confirmation.
+    apply_messages_at(
+        state,
+        &[(SOURCE, status(1_000))],
+        0,
+        0,
+        start + Duration::from_secs(4),
+    );
+    apply_messages_at(
+        state,
+        &[(SOURCE, status(1_400))],
+        0,
+        0,
+        start + Duration::from_millis(4_400),
+    );
+    assert_eq!(
+        state.lock().expect("state").source_epoch,
+        2,
+        "the reset heuristic must confirm a fresh epoch"
+    );
+    // The restarted stream repopulates the cleared cache.
+    let trio = [
+        (SOURCE, status(1_500)),
+        (
+            SOURCE,
+            FcMessage::AttitudeQuaternion {
+                time_boot_ms: 1_500,
+                quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+                rates_rps: [0.0; 3],
+            },
+        ),
+        (
+            SOURCE,
+            FcMessage::LocalPositionNed {
+                time_boot_ms: 1_500,
+                pos_ned_m: [1.0, 2.0, -3.0],
+                vel_ned_mps: [0.0; 3],
+            },
+        ),
+    ];
+    apply_messages_at(state, &trio, 0, 0, start + Duration::from_millis(4_500));
 }
 
 fn frame(
@@ -245,24 +312,57 @@ fn reset_press_latches_and_disarm_bypasses() {
 
 #[test]
 fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
-    let (_fc, addr) = fake_fc();
-    let state = live_state();
-    let mut adapter =
-        Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink_to(addr));
+    let start = Instant::now();
+    let (state, start) = live_state_at(start);
+    let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
+    fc.set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("timeout");
+    let mut uplink = Px4Uplink::new().expect("uplink");
+    uplink.set_target(fc.local_addr().expect("addr"));
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink);
     adapter.apply_control(&press(RESET_BUTTON));
 
-    // The restarted PX4's stream begins a new acquisition epoch and
-    // repopulates the cleared cache.
-    state.lock().expect("state").source_epoch = 2;
+    // The restarted PX4's stream is what advances the epoch — driven
+    // through the production message path, never by poking counters.
+    drive_epoch_advance(&state, start);
+
+    // An arm edge is not neutral: clearing on it would let the very
+    // frame that re-arms ride in before sticks were ever released.
+    let outcome = adapter.apply_control(&press(ARM_BUTTON));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::ResetInProgress),
+        "an arm edge does not clear the latch"
+    );
+    // A deflected stick is not neutral, and neither is a payload that
+    // omits declared axes — partial coverage demonstrates nothing.
     let deflected = frame(vec![(LogicalAxisId::new(THROTTLE_AXIS), 0.6)], vec![]);
     let outcome = adapter.apply_control(&deflected);
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::ResetInProgress),
-        "active input does not clear the latch"
+        "deflected sticks do not clear the latch"
     );
+    let empty = frame(vec![], vec![]);
+    let outcome = adapter.apply_control(&empty);
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::ResetInProgress),
+        "an EMPTY payload must not count as a neutral demonstration"
+    );
+
     let outcome = adapter.apply_control(&neutral());
-    assert_eq!(outcome.disposition, Disposition::Accepted, "neutral clears");
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Accepted,
+        "a full-axis neutral frame over the fresh stream clears the latch"
+    );
     let outcome = adapter.apply_control(&press(ARM_BUTTON));
-    assert_eq!(outcome.disposition, Disposition::Accepted, "arm proceeds");
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Accepted,
+        "arm proceeds once the latch has cleared"
+    );
+    let mut buf = [0u8; 128];
+    fc.recv_from(&mut buf).expect("arm datagram reaches the FC");
 }
