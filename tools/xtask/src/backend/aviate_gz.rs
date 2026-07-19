@@ -141,9 +141,10 @@ fn gz_stage(ctx: &SessionContext, aviate: &Path, path: &str, world: &Path) -> St
         (
             "GZ_SIM_RESOURCE_PATH".to_owned(),
             format!(
-                "{}:{}",
+                "{}:{}:{}",
                 models.display(),
-                ctx.repo_root.join("sim/worlds").display()
+                ctx.repo_root.join("sim/worlds").display(),
+                ctx.repo_root.join("sim/models").display()
             ),
         ),
     ];

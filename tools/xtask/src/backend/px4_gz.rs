@@ -160,8 +160,9 @@ fn gz_stage(
         (
             "GZ_SIM_RESOURCE_PATH".to_owned(),
             format!(
-                "{}:{}:{}",
+                "{}:{}:{}:{}",
                 ctx.repo_root.join("sim/worlds").display(),
+                ctx.repo_root.join("sim/models").display(),
                 px4.join("Tools/simulation/gz/worlds").display(),
                 px4.join("Tools/simulation/gz/models").display()
             ),
@@ -337,8 +338,7 @@ mod tests {
         let px4 = std::fs::read_to_string(repo_root.join("sim/worlds/px4_flightdeck.sdf"))
             .expect("px4 world");
         for invariant in [
-            "<ambient>0.3 0.5 0.3 1</ambient>",
-            "<size>100 100</size>",
+            "<uri>model://flightdeck_scenery</uri>",
             "<direction>-0.5 0.1 -0.9</direction>",
             "<magnetic_field>",
             "<model name=\"x500_camera_rig\">",
@@ -348,6 +348,15 @@ mod tests {
             assert!(aviate.contains(invariant), "aviate world lost {invariant}");
             assert!(px4.contains(invariant), "px4 world lost {invariant}");
         }
+        // Neither world may carry its own ground: the field lives in
+        // the ONE shared scenery model (green, 500 m) so future props
+        // appear for every FC family at once.
+        assert!(!aviate.contains("ground_plane") && !px4.contains("ground_plane"));
+        let scenery =
+            std::fs::read_to_string(repo_root.join("sim/models/flightdeck_scenery/model.sdf"))
+                .expect("scenery model");
+        assert!(scenery.contains("<ambient>0.3 0.5 0.3 1</ambient>"));
+        assert!(scenery.contains("<size>500 500</size>"));
         // The default sky is part of the look: neither world may
         // override the scene with a gray background.
         assert!(!aviate.contains("<scene>") && !px4.contains("<scene>"));
