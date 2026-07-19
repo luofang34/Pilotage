@@ -24,6 +24,7 @@ members = [
     "crates/pilotage-evidence",
     "adapters/reference-headless",
     "adapters/aviate",
+    "adapters/px4",
     "tools/hid-probe",
     "tools/loopback-probe",
     "tools/xtask",
@@ -78,6 +79,7 @@ pilotage-instrument-raster = { path = "crates/pilotage-instrument-raster" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-adapter-aviate = { path = "adapters/aviate" }
+pilotage-adapter-px4 = { path = "adapters/px4" }
 pilotage-session = { path = "crates/pilotage-session" }
 
 [workspace.lints.rust]

@@ -318,7 +318,13 @@ function encodeAxisSample(axisId, value) {
 function encodeControlPayload(axes, edges) {
   const bytes = [];
   for (const [axisId, value] of axes) {
-    fieldBytes(bytes, 1, encodeAxisSample(axisId, value));
+    // Every reported axis must appear on the wire even when fully
+    // neutral (axis 0 at value 0 encodes to an EMPTY submessage): the
+    // host's full-coverage neutral checks — link-loss recovery and
+    // reset-latch clearance — require every declared axis REPORTED,
+    // and a sample omitted by proto3 default-skipping reads as "this
+    // axis was never demonstrated".
+    fieldMessage(bytes, 1, encodeAxisSample(axisId, value));
   }
   for (const [buttonId, edge] of edges ?? []) {
     fieldBytes(bytes, 2, encodeButtonEdgeSample(buttonId, edge));

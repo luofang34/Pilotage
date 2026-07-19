@@ -9,6 +9,7 @@ mod connection;
 mod engine_actor;
 mod gazebo_launch;
 mod media;
+mod px4_config;
 mod registry;
 mod shutdown;
 mod stream_tag;
@@ -181,6 +182,39 @@ async fn spawn_host_runtime(
         }
         AdapterKind::Aviate => {
             spawn_aviate_runtime(endpoint, engine_tx, engine_rx, shutdown_rx, start).await
+        }
+        AdapterKind::Px4 => {
+            let config = px4_config::from_env()?;
+            let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
+                .await
+                .map_err(HostError::Px4Adapter)?;
+            let engine = build_engine(&adapter);
+            match adapter.subscribe_frames() {
+                Some(frames) => {
+                    let (media, media_task) = media::spawn_media_task(frames, start);
+                    Ok(tokio::spawn(run_with_media_until_shutdown(
+                        endpoint,
+                        engine,
+                        adapter,
+                        media,
+                        media_task,
+                        engine_tx,
+                        engine_rx,
+                        shutdown_rx,
+                        start,
+                    )))
+                }
+                None => Ok(tokio::spawn(run_until_shutdown(
+                    endpoint,
+                    engine,
+                    adapter,
+                    None,
+                    engine_tx,
+                    engine_rx,
+                    shutdown_rx,
+                    start,
+                ))),
+            }
         }
     }
 }

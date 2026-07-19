@@ -476,6 +476,67 @@ check(
   check("an fc lane with a non-FC role decodes to null", wrongMessage.fcState === null);
 }
 
+// --- a fully neutral frame reports EVERY axis on the wire ---------------
+// The host's full-coverage neutral checks (link-loss recovery, reset-latch
+// clearance) require every declared axis REPORTED; proto3 default-skipping
+// of a neutral axis sample would silently make recovery unsatisfiable.
+{
+  const neutral = encodeControlFrameEnvelope({
+    sessionId: 1,
+    vehicleId: 1,
+    scope: "vehicle.motion",
+    generation: 1,
+    sequence: 1,
+    sampledAtNanos: 0n,
+    profileRevision: 1,
+    axes: [
+      [0, 0.0],
+      [1, 0.0],
+      [2, 0.0],
+      [3, 0.0],
+    ],
+    edges: [],
+  });
+  // Walk envelope field 2 (control frame) directly: frame field 8
+  // (payload) must contain four field-1 (axis sample) entries even
+  // though every value is neutral.
+  function fieldsOf(bytes) {
+    const out = [];
+    let i = 0;
+    while (i < bytes.length) {
+      const tag = bytes[i++];
+      const field = tag >> 3;
+      const wire = tag & 7;
+      if (wire === 0) {
+        while (bytes[i] & 0x80) i++;
+        i++;
+        out.push([field, null]);
+      } else if (wire === 2) {
+        let len = 0, shift = 0;
+        while (bytes[i] & 0x80) { len |= (bytes[i] & 0x7f) << shift; shift += 7; i++; }
+        len |= bytes[i] << shift; i++;
+        out.push([field, bytes.slice(i, i + len)]);
+        i += len;
+      } else if (wire === 5) {
+        out.push([field, bytes.slice(i, i + 4)]);
+        i += 4;
+      } else {
+        break;
+      }
+    }
+    return out;
+  }
+  const envelopeFields = fieldsOf(Array.from(neutral));
+  const frame = envelopeFields.find(([f, v]) => f === 2 && v)?.[1] ?? [];
+  const frameFields = fieldsOf(frame);
+  const payload = frameFields.find(([f]) => f === 8)?.[1] ?? [];
+  const axisEntries = fieldsOf(payload).filter(([f]) => f === 1);
+  check(
+    "a fully neutral frame reports all four axes on the wire",
+    axisEntries.length === 4,
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);
