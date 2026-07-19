@@ -19,7 +19,9 @@
 //! [`LinkLossPolicy::Neutralize`] — the only universally safe floor — as
 //! does an unconfigured vehicle.
 
-use pilotage_adapter_api::{AdapterCapabilities, LinkLossPolicy};
+use pilotage_adapter_api::{
+    AdapterCapabilities, LinkLossPolicy, payload_satisfies_neutral_activation,
+};
 use pilotage_authority::AuthorityEffect;
 use pilotage_protocol::{ControlPayload, LogicalAxisId, ScopeId, VehicleId};
 use pilotage_timing::MonoTimestamp;
@@ -201,7 +203,11 @@ impl SessionEngine {
             // anything; stay engaged (fail closed).
             return;
         };
-        if !payload_is_neutral(payload, declared, self.config.activation_deadband_milli) {
+        if !payload_satisfies_neutral_activation(
+            payload,
+            declared,
+            self.config.activation_deadband_milli,
+        ) {
             return;
         }
         self.link_loss.clear_scope(vehicle, scope);
@@ -226,33 +232,4 @@ fn declared_axes<'a>(
         .iter()
         .find(|descriptor| descriptor.scope == *scope)
         .map(|descriptor| descriptor.axes.as_slice())
-}
-
-/// The activation condition for one scope: EVERY axis the scope declares is
-/// reported inside the neutral deadband, every reported axis (declared or
-/// not) is inside it too, and no edge is pressed. Requiring full declared
-/// coverage matters because adapters retain latest-valid values per axis: a
-/// frame omitting a previously deflected axis would un-latch straight into
-/// that stale deflection.
-fn payload_is_neutral(
-    payload: &ControlPayload,
-    declared: &[LogicalAxisId],
-    deadband_milli: u32,
-) -> bool {
-    let deadband = deadband_milli as f32 / 1000.0;
-    let all_declared_reported_neutral = declared.iter().all(|axis| {
-        payload
-            .axes
-            .iter()
-            .any(|(reported, value)| reported == axis && value.abs() <= deadband)
-    });
-    let all_reported_neutral = payload
-        .axes
-        .iter()
-        .all(|(_, value)| value.abs() <= deadband);
-    let no_pressed_edge = payload
-        .edges
-        .iter()
-        .all(|(_, edge)| *edge != pilotage_protocol::ButtonEdge::Pressed);
-    all_declared_reported_neutral && all_reported_neutral && no_pressed_edge
 }

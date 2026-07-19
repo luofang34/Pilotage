@@ -30,7 +30,7 @@ mod sampling;
 mod shm_sampling;
 mod sources;
 mod startup;
-use control::{flight_button_pressed, normalized_flight_sticks, rejected_control};
+use control::{normalized_flight_sticks, rejected_control};
 use sampling::mavlink_batch;
 use shm_sampling::ShmSource;
 use sources::{ArmReport, EstimateSource, fc_state_sample};
@@ -112,6 +112,16 @@ pub struct AviateAdapter {
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
     link_loss_policy: Option<LinkLossPolicy>,
+    // Commanded-reset latch: engaged when a sim reset is requested,
+    // cleared only by a fresh estimate source epoch plus demonstrated
+    // neutral input (control::ResetLatch). While engaged, everything
+    // except disarm is rejected.
+    reset_latch: Option<control::ResetLatch>,
+    // Reset script spawns recorded instead of executed, so tests can
+    // press the reset button without running the real script (which
+    // kills any live SITL FC on the machine).
+    #[cfg(test)]
+    reset_spawns: u32,
     // FPV mode latch (FPV_TOGGLE_BUTTON): attitude sticks + direct
     // thrust instead of velocity sticks + brake-to-hold.
     fpv_mode: bool,
@@ -150,6 +160,8 @@ impl AviateAdapter {
             arm_incarnation: SourceIncarnation::new([0; 16]),
             started_at: std::time::Instant::now(),
             last_reset: None,
+            reset_latch: None,
+            reset_spawns: 0,
             fpv_mode: false,
             link_loss_policy: None,
         }
@@ -245,32 +257,8 @@ impl VehicleAdapter for AviateAdapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
-        if self.uplink.is_none() {
-            return rejected_control(tick, RejectReason::UnknownScope);
-        }
-        if let Err(reason) = self.validate_flight_frame(frame) {
-            return rejected_control(tick, reason);
-        }
-        // The link-loss latch: while a policy is engaged the FC holds its
-        // policy state (braked hover) and ordinary frames are suppressed,
-        // so a newly granted holder with deflected sticks cannot fly the
-        // vehicle out of it. The host clears the latch only after the
-        // holder demonstrates neutral input.
-        if self.link_loss_policy.is_some() {
-            return rejected_control(tick, RejectReason::LinkLossEngaged);
-        }
-        if flight_button_pressed(frame, RESET_BUTTON) {
-            self.spawn_reset();
-        }
-        if flight_button_pressed(frame, DISARM_BUTTON) {
-            let Some(uplink) = self.uplink.as_mut() else {
-                return rejected_control(tick, RejectReason::UnknownScope);
-            };
-            uplink.send_disarm();
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-            };
+        if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
+            return outcome;
         }
         let Some((current_yaw, current_pos, current_vel)) = self.current_pose() else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);

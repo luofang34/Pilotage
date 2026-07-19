@@ -368,7 +368,7 @@ fn apply_messages(
     apply_messages_at(state, messages, crc_failures, unknown_ids, Instant::now());
 }
 
-fn apply_messages_at(
+pub(crate) fn apply_messages_at(
     state: &Arc<Mutex<LatestAviate>>,
     messages: &[(FrameSource, AviateMessage)],
     crc_failures: u32,
