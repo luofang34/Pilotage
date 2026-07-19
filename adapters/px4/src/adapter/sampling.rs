@@ -6,8 +6,9 @@
 use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, SourceRole, TelemetryBatch,
-    TelemetrySample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcStateSample,
+    MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,
+    TelemetryBatch, TelemetrySample,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
@@ -173,6 +174,38 @@ impl super::Px4Adapter {
             validated_velocity(kinematics),
         ))
     }
+}
+
+/// The heartbeat-derived FC state sample: arm reported by the FC's own
+/// telemetry, stamped under the FC-state source role.
+pub(super) fn fc_state_sample(
+    report: Option<super::ArmReport>,
+    incarnation: SourceIncarnation,
+    started_at: std::time::Instant,
+) -> Option<FcStateSample> {
+    let report = report?;
+    let acquired = report
+        .acquired_at
+        .checked_duration_since(started_at)
+        .unwrap_or_default();
+    Some(FcStateSample {
+        arm_state: if report.armed { 2 } else { 1 },
+        stamp: MeasurementStamp {
+            role: SourceRole::FcState,
+            // MAVLink frames are CRC-checked but unsigned: checksummed,
+            // never authenticated.
+            integrity: SourceIntegrity::ChecksummedOnly,
+            source_id: 1,
+            source_incarnation: incarnation,
+            // A gateway-generated attachment identity cannot observe an
+            // FC restart; a source-issued boot identity replaces this
+            // constant once the FC publishes one.
+            source_epoch: 1,
+            sequence: report.sequence,
+            acquired_at_ns: u64::try_from(acquired.as_nanos()).unwrap_or(u64::MAX),
+            clock: MeasurementClock::HostMonotonic,
+        },
+    })
 }
 
 /// The kinematics velocity as independently validated data: present

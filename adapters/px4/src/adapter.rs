@@ -20,6 +20,7 @@ use pilotage_mavlink::{AuthorizationSource, LinkConfig, LinkState, MavlinkLink};
 use crate::error::Px4AdapterError;
 use crate::uplink::Px4Uplink;
 
+mod camera;
 mod control;
 mod sampling;
 #[cfg(test)]
@@ -60,6 +61,17 @@ pub struct Px4Adapter {
     // basis for state-dependent control; there is no truth oracle).
     estimate: Option<EstimateSource>,
     uplink: Option<Px4Uplink>,
+    // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
+    // the adapter remains usable without video when it cannot spawn.
+    frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
+    _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
+    _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
+    // Latest heartbeat-reported arm state; re-acquired per heartbeat so
+    // its freshness honestly tracks the FC's liveness.
+    arm: Option<ArmReport>,
+    last_seen_heartbeat: Option<std::time::Instant>,
+    arm_incarnation: pilotage_adapter_api::SourceIncarnation,
+    started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
     // Commanded-reset latch: engaged when a sim reset is requested,
     // cleared only by a fresh estimate source epoch plus demonstrated
@@ -79,6 +91,14 @@ pub struct Px4Adapter {
 struct EstimateSource {
     state: Arc<Mutex<LinkState>>,
     _link: Option<MavlinkLink>,
+}
+
+/// The latest FC arm report derived from telemetry heartbeats.
+#[derive(Debug, Clone, Copy)]
+struct ArmReport {
+    armed: bool,
+    sequence: u32,
+    acquired_at: std::time::Instant,
 }
 
 impl Px4Adapter {
@@ -107,6 +127,7 @@ impl Px4Adapter {
                 None
             }
         };
+        let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
         Ok(Self {
             vehicle,
             estimate: Some(EstimateSource {
@@ -114,6 +135,13 @@ impl Px4Adapter {
                 _link: Some(link),
             }),
             uplink,
+            frames,
+            _camera_bridge: camera_bridge,
+            _frame_forwarder: frame_forwarder,
+            arm: None,
+            last_seen_heartbeat: None,
+            arm_incarnation: pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
+            started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
             #[cfg(test)]
@@ -129,6 +157,13 @@ impl Px4Adapter {
             vehicle,
             estimate: Some(EstimateSource { state, _link: None }),
             uplink: None,
+            frames: None,
+            _camera_bridge: None,
+            _frame_forwarder: None,
+            arm: None,
+            last_seen_heartbeat: None,
+            arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
+            started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
             reset_spawns: 0,
@@ -136,11 +171,44 @@ impl Px4Adapter {
         }
     }
 
+    /// Takes the raw-frame receiver for the host media task, if cameras
+    /// are up and it has not been taken.
+    pub fn subscribe_frames(
+        &mut self,
+    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>> {
+        self.frames.take()
+    }
+
     /// Installs a test uplink, for tests.
     #[cfg(test)]
     pub(crate) fn with_uplink(mut self, uplink: Px4Uplink) -> Self {
         self.uplink = Some(uplink);
         self
+    }
+
+    /// Folds the latest heartbeat arm flag into the arm report. Each
+    /// newly received heartbeat re-acquires the report (fresh stamp,
+    /// advanced sequence), so a silent FC honestly ages into staleness
+    /// instead of replaying the last state forever.
+    fn observe_arm_report(&mut self) {
+        let observed = self
+            .estimate
+            .as_ref()
+            .and_then(|source| source.state.lock().ok())
+            .and_then(|latest| Some((latest.heartbeat_armed?, latest.last_heartbeat?)));
+        let Some((armed, heartbeat_at)) = observed else {
+            return;
+        };
+        if self.last_seen_heartbeat == Some(heartbeat_at) {
+            return;
+        }
+        self.last_seen_heartbeat = Some(heartbeat_at);
+        let sequence = self.arm.map_or(0, |report| report.sequence.wrapping_add(1));
+        self.arm = Some(ArmReport {
+            armed,
+            sequence,
+            acquired_at: std::time::Instant::now(),
+        });
     }
 
     fn validate_flight_frame(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
@@ -262,11 +330,16 @@ impl VehicleAdapter for Px4Adapter {
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
-        let batch = self
+        self.observe_arm_report();
+        let fc_state = sampling::fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
+        let mut batch = self
             .estimate
             .as_ref()
             .map(|source| sampling::mavlink_batch(self.vehicle, &source.state))
             .unwrap_or_default();
+        for sample in &mut batch.samples {
+            sample.fc_state = fc_state;
+        }
         let telemetry_flowing = batch
             .samples
             .first()
@@ -278,7 +351,19 @@ impl VehicleAdapter for Px4Adapter {
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {
-        vec![]
+        if self._camera_bridge.is_none() {
+            return vec![];
+        }
+        vec![
+            VideoSource {
+                id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
+                description: "onboard forward camera".to_owned(),
+            },
+            VideoSource {
+                id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
+                description: "chase camera".to_owned(),
+            },
+        ]
     }
 
     fn set_link_loss_policy(

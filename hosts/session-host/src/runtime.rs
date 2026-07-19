@@ -183,20 +183,36 @@ async fn spawn_host_runtime(
             spawn_aviate_runtime(endpoint, engine_tx, engine_rx, shutdown_rx, start).await
         }
         AdapterKind::Px4 => {
-            let adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE)
+            let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE)
                 .await
                 .map_err(HostError::Px4Adapter)?;
             let engine = build_engine(&adapter);
-            Ok(tokio::spawn(run_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                None,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
+            match adapter.subscribe_frames() {
+                Some(frames) => {
+                    let (media, media_task) = media::spawn_media_task(frames, start);
+                    Ok(tokio::spawn(run_with_media_until_shutdown(
+                        endpoint,
+                        engine,
+                        adapter,
+                        media,
+                        media_task,
+                        engine_tx,
+                        engine_rx,
+                        shutdown_rx,
+                        start,
+                    )))
+                }
+                None => Ok(tokio::spawn(run_until_shutdown(
+                    endpoint,
+                    engine,
+                    adapter,
+                    None,
+                    engine_tx,
+                    engine_rx,
+                    shutdown_rx,
+                    start,
+                ))),
+            }
         }
     }
 }
