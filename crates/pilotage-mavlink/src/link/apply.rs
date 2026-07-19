@@ -32,6 +32,15 @@ fn apply_standard_status(latest: &mut LinkState, time_usec: u64, flags: u16, now
     }
 }
 
+/// MAV_RESULT_ACCEPTED = 0. A refused command must be loud: a denied
+/// disarm or mode change looks exactly like an unresponsive vehicle
+/// otherwise.
+fn note_command_ack(command: u16, result: u8) {
+    if result != 0 {
+        tracing::warn!(command, result, "FC refused a command");
+    }
+}
+
 /// Folds decoded messages into the shared cache at an explicit receive
 /// instant. Public so adapter crates can drive the cache in tests
 /// without a socket; production traffic arrives via the link task.
@@ -64,7 +73,7 @@ pub fn apply_messages_at(
                 latest.last_heartbeat = Some(now);
                 latest.heartbeat_armed = Some(armed);
             }
-            FcMessage::CommandAck { .. } => {}
+            FcMessage::CommandAck { command, result } => note_command_ack(command, result),
             FcMessage::EstimatorStatus { time_usec, flags } => {
                 apply_standard_status(&mut latest, time_usec, flags, now);
             }
