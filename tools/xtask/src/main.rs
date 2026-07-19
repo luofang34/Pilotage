@@ -36,7 +36,7 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
             print_line(cli::USAGE);
             Ok(())
         }
-        Command::Reset => session::run_reset("aviate"),
+        Command::Reset(fc) => session::run_reset(&fc),
         Command::Sim(sim) => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
