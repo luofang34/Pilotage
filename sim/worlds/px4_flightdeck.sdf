@@ -93,7 +93,7 @@
     </include>
 
     <model name="x500_camera_rig">
-      <pose>0 0 0.24 0 0 0</pose>
+      <pose>0 0 0.48 0 0 0</pose>
       <link name="rig_link">
         <inertial>
           <mass>0.01</mass>

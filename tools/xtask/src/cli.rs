@@ -57,8 +57,8 @@ pub struct SimArgs {
 pub enum Command {
     /// Launch a full SITL session and supervise it.
     Sim(SimArgs),
-    /// Reset the running simulation world and FC.
-    Reset,
+    /// Reset the running simulation world and FC of the named backend.
+    Reset(String),
     /// Print usage.
     Help,
 }
@@ -76,19 +76,35 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     };
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
-        "reset" => {
-            if let Some(extra) = rest.first() {
-                return Err(XtaskError::Usage {
-                    message: format!("reset takes no arguments (got {extra:?})"),
-                });
-            }
-            Ok(Command::Reset)
-        }
+        "reset" => Ok(Command::Reset(parse_reset(rest)?)),
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!("unknown command {other:?} (expected sim, reset, or help)"),
         }),
     }
+}
+
+fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
+    let mut fc = "aviate".to_owned();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--fc" => {
+                fc = iter
+                    .next()
+                    .ok_or_else(|| XtaskError::Usage {
+                        message: "--fc requires a value".to_owned(),
+                    })?
+                    .clone();
+            }
+            other => {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown reset argument {other:?} (expected --fc <name>)"),
+                });
+            }
+        }
+    }
+    Ok(fc)
 }
 
 fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
@@ -159,6 +175,7 @@ commands:
   sim    launch a full SITL session (simulator + FC + host + viewer),
          print the ready URL, supervise, and tear down on ctrl-c
          --fc <name>          FC backend: aviate-gz (alias aviate), px4-gz (alias px4)
+    reset [--fc <name>]      reset the named backend's world and FC (default aviate)
          --profile <p>        physical | simulation (default) | oracle-only
          --port <n>           host WebTransport port (default: 4433)
          --viewer-port <n>    static viewer port (default: 8080)

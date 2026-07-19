@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{SessionContext, SimBackend, Stage};
+use crate::cli::Profile;
 use crate::error::XtaskError;
 use crate::process::ProcessSpec;
 use crate::readiness::{Readiness, stage_log};
@@ -36,6 +37,18 @@ impl SimBackend for Px4Gz {
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
+        // The PX4 adapter implements only the simulation profile; the
+        // host would silently ignore any other selection, so refuse it
+        // here instead of launching a session that lies about its
+        // policy.
+        if ctx.profile != Profile::Simulation {
+            return Err(XtaskError::Usage {
+                message: format!(
+                    "the px4-gz backend supports only --profile simulation (got {:?})",
+                    ctx.profile
+                ),
+            });
+        }
         plan_with_px4_dir(ctx, &px4_dir(&ctx.repo_root))
     }
 
@@ -70,9 +83,12 @@ impl SimBackend for Px4Gz {
 /// `../PX4-Autopilot` next to this repository. A directory convention,
 /// never a source dependency.
 fn px4_dir(repo_root: &Path) -> PathBuf {
-    std::env::var_os("PX4_DIR")
+    let dir = std::env::var_os("PX4_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("../PX4-Autopilot"))
+        .unwrap_or_else(|| repo_root.join("../PX4-Autopilot"));
+    // Canonical, or the reset script's exact-path process match never
+    // sees the spawned binary (a literal `..` in the command line).
+    dir.canonicalize().unwrap_or(dir)
 }
 
 /// The testable core of [`Px4Gz::plan`]: validates every artifact with

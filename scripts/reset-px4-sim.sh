@@ -18,7 +18,10 @@ gz service -s "/world/${WORLD}/control" \
   --timeout 3000 --req 'reset: {all: true}'
 
 echo "restarting PX4..."
-pkill -9 -f "bin/px4" 2>/dev/null || true
+# Match ONLY this checkout's SITL binary: a bare "bin/px4" pattern
+# would kill unrelated PX4 sessions on the machine.
+PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot}"
+pkill -9 -f "${PX4_DIR}/build/px4_sitl_default/bin/px4" 2>/dev/null || true
 
 # When `cargo xtask sim` supervises the session, the supervisor restarts
 # the flight-controller stage itself; a script-spawned second px4 would
@@ -30,10 +33,10 @@ if [[ -f "${SUPERVISOR_PID_FILE}" ]] && kill -0 "$(cat "${SUPERVISOR_PID_FILE}")
   exit 0
 fi
 
-PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot}"
 ROOTFS="${PX4_DIR}/build/px4_sitl_default/rootfs"
 mkdir -p "${ROOTFS}"
 cd "${ROOTFS}"
-PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL=gz_x500 PX4_GZ_WORLD="${WORLD}" \
+PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL=gz_x500 \
+  PX4_GZ_MODEL_NAME=x500_0 PX4_GZ_WORLD="${WORLD}" \
   nohup ../bin/px4 ../etc -s etc/init.d-posix/rcS -d > /tmp/px4_manual.log 2>&1 &
 echo "done — re-arm from the browser once PX4 logs ready (~10 s)"
