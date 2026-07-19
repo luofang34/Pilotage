@@ -70,6 +70,12 @@ pub struct LinkConfig {
     pub reset_policy: ResetPolicy,
     /// Which message carries estimator authorization for this source.
     pub authorization_source: AuthorizationSource,
+    /// Longest a standard-status authorization stays current for later
+    /// numeric groups (StandardEstimatorStatus only). Must cover the
+    /// configured status interval with margin, and must not exceed the
+    /// display's status-to-numeric pairing budget or the panels flag
+    /// samples this link still authorizes.
+    pub standard_status_max_lag_ms: u32,
     /// Ceiling on a low boot clock that may seed a simulator reset
     /// candidate. Must exceed the FC's worst-case boot-to-streaming
     /// time: a rebooted FC whose clock is already above this ceiling is
@@ -105,6 +111,7 @@ impl Default for LinkConfig {
             source_id: 1,
             reset_policy: ResetPolicy::Conservative,
             authorization_source: AuthorizationSource::AviatePrivate,
+            standard_status_max_lag_ms: estimator::DEFAULT_STANDARD_STATUS_MAX_LAG_MS,
             reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
             stream_command_target: None,
             stream_interval_requests: &[],
@@ -151,6 +158,8 @@ pub struct LinkState {
     pub reset_policy: ResetPolicy,
     /// Which message carries estimator authorization for this source.
     pub authorization_source: AuthorizationSource,
+    /// Configured standard-status authorization lag ceiling.
+    pub standard_status_max_lag_ms: u32,
     /// Configured ceiling on a reset-candidate boot clock.
     pub reset_candidate_max_ms: u32,
     /// Configured epoch-wide inter-group source-clock lag bound.
@@ -205,6 +214,7 @@ impl Default for LinkState {
             source_incarnation: SourceIncarnation::new([0; 16]),
             reset_policy: ResetPolicy::Conservative,
             authorization_source: AuthorizationSource::AviatePrivate,
+            standard_status_max_lag_ms: estimator::DEFAULT_STANDARD_STATUS_MAX_LAG_MS,
             reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
             maximum_inter_group_skew_ms: 0,
             attitude: None,
@@ -238,6 +248,7 @@ impl LinkState {
             source_incarnation,
             reset_policy: config.reset_policy,
             authorization_source: config.authorization_source,
+            standard_status_max_lag_ms: config.standard_status_max_lag_ms,
             reset_candidate_max_ms: config.reset_candidate_max_ms,
             maximum_inter_group_skew_ms: config.maximum_inter_group_skew_ms,
             source_epoch: 1,

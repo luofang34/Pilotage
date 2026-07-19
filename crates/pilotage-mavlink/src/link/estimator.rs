@@ -115,11 +115,10 @@ fn fail_closed_out_of_range_status(latest: &mut LinkState) {
     invalidate_cached_authorization(latest);
 }
 
-/// Longest a standard-status authorization stays current for later
-/// numeric groups. PX4 streams ESTIMATOR_STATUS at its own (slower)
-/// rate; beyond this lag the numeric group flies unauthorized and
-/// fails closed.
-const MAX_STANDARD_STATUS_LAG_MS: u32 = 2_000;
+/// Default ceiling on how long a standard-status authorization stays
+/// current for later numeric groups; a deployment must configure a
+/// budget derived from its actual status rate.
+pub const DEFAULT_STANDARD_STATUS_MAX_LAG_MS: u32 = 2_000;
 
 pub(super) fn authorization_at(latest: &LinkState, time_boot_ms: u32) -> EstimatorAuthorization {
     let Some(status) = latest.estimator_status else {
@@ -142,7 +141,7 @@ pub(super) fn authorization_at(latest: &LinkState, time_boot_ms: u32) -> Estimat
         // of the numeric (distance in the upper half) is also current.
         super::AuthorizationSource::StandardEstimatorStatus => {
             let distance = time_boot_ms.wrapping_sub(status.time_boot_ms);
-            if distance <= MAX_STANDARD_STATUS_LAG_MS || distance > u32::MAX / 2 {
+            if distance <= latest.standard_status_max_lag_ms || distance > u32::MAX / 2 {
                 status.authorization
             } else {
                 EstimatorAuthorization::fail_closed()
