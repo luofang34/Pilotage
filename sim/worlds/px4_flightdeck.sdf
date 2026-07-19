@@ -39,12 +39,15 @@
       <elevation>0</elevation>
     </spherical_coordinates>
 
-    <!-- Pilotage: the PX4 x500 is included statically (PX4 attaches to
-         it via PX4_GZ_MODEL_NAME instead of spawning) so the Pilotage
+    <!-- Pilotage: the PX4 vehicle is included statically (PX4 attaches
+         to it via PX4_GZ_MODEL_NAME instead of spawning) so the Pilotage
          camera rig can be welded to it at world scope, publishing the
-         /camera and /chase_camera topics the gz sidecar bridges. -->
+         /camera and /chase_camera topics the gz sidecar bridges.
+         x500_gimbal merge-includes x500 plus the CGO3 3-axis gimbal
+         whose joints PX4's GZGimbal bridge drives (GIM-04), so
+         `x500_0::base_link` remains the rig attachment. -->
     <include>
-      <uri>model://x500</uri>
+      <uri>model://x500_gimbal</uri>
       <name>x500_0</name>
       <pose>0 0 0.24 0 0 0</pose>
     </include>
