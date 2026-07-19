@@ -546,6 +546,8 @@ function decodeLeaseResponse(bytes) {
   if (!bytes) return {};
   const fields = parseFields(bytes);
   return {
+    vehicleId: decodeUint64Message(firstBytes(fields, 1)),
+    scope: decodeStringMessage(firstBytes(fields, 2)),
     granted: !!firstVarint(fields, 3),
     generation: decodeUint64Message(firstBytes(fields, 4)),
     reason: firstVarint(fields, 5),

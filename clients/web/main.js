@@ -62,6 +62,14 @@ import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
 import { pressedArmInputs, risingArmEdges } from "./control-edges.js";
 import { startDatagramControl } from "./datagram-control.js";
+import {
+  PAD_GIMBAL_RESET,
+  gimbalAxesFromGamepad,
+  gimbalFramePlan,
+  gimbalMaskedView,
+  gimbalModifierHeld,
+  stickShaper,
+} from "./gimbal-input.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -80,6 +88,8 @@ const BUTTON_ARM = 0; // logical button 0: arm (adapter contract).
 const BUTTON_DISARM = 1; // logical button 1: disarm.
 const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
 const BUTTON_FPV_TOGGLE = 3; // logical button 3: camera <-> FPV mode (adapter latches).
+const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/yaw LOS rate demands, leased separately.
+const GIMBAL_BUTTON_NEUTRAL = 0; // gimbal-scope logical button 0: recenter the gimbal.
 
 const els = {
   host: document.getElementById("host"),
@@ -116,14 +126,22 @@ const state = {
   pendingFpvToggle: false,
   connected: false,
   leaseGranted: false,
+  // The gimbal scope's own lease/fencing state: independent generation and
+  // sequence, granted (or not) without affecting flight control.
+  gimbalGeneration: 0n,
+  gimbalSequence: 0,
+  gimbalLeaseGranted: false,
+  prevGimbalReset: false, // R3 rising-edge baseline
+  gimbalStreaming: false, // a release sends one trailing neutral gimbal frame
   skippedVideoFrames: 0,
+  supersededVideoFrames: 0,
   // Page-lifetime latch: wasm absence never heals without a reload (the
   // instrument module loads once at boot), so the H.264-unavailable notice
   // is worth one line, not one line per frame at stream rate.
   h264UnavailableLogged: false,
   droppedIdentityFrames: 0,
   // Latest capture-to-snapshot association verdict for an accepted frame
-  // (ADR-0020), a diagnostic surface only — no conformal overlay is drawn yet.
+  // (ADR-0020). This diagnostic does not authorize a conformal overlay.
   lastAssociation: null,
 };
 const transportSessions = new TransportSessionLifecycle();
@@ -270,7 +288,11 @@ async function connect({ manual } = { manual: true }) {
     releases: releaseTracker,
     openAndBootstrap: (leaseProbe) =>
       openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }),
-    startControl: ({ transport, token }) => startControlLoop(transport, token),
+    startControl: ({ transport, token }) => {
+      const ok = startControlLoop(transport, token);
+      if (ok) sendGimbalLeaseRequest(token);
+      return ok;
+    },
     controlUnavailable: ({ token }) => {
       transportSessions.runIfActive(token, () => {
         state.leaseGranted = false;
@@ -321,6 +343,11 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.sessionId = 0;
     state.generation = 0n;
     state.sequence = 0;
+    state.gimbalGeneration = 0n;
+    state.gimbalSequence = 0;
+    state.gimbalLeaseGranted = false;
+    state.prevGimbalReset = false;
+    state.gimbalStreaming = false;
     state.prevArmInputs = new Set();
     state.pendingReset = false;
     state.pendingFpvToggle = false;
@@ -488,11 +515,39 @@ async function sendLeaseRequest(writer, token) {
   return true;
 }
 
+/** Requests the gimbal-scope lease on the reliable session stream, AFTER
+ *  bootstrap completed: the bootstrap reader completes on the first
+ *  LeaseResponse and discards its remaining buffer, so a second request
+ *  in flight during the handshake could lose (or split) its response.
+ *  Requested only once control has started; denial is non-fatal — flight
+ *  continues, the client just never emits gimbal frames. */
+function sendGimbalLeaseRequest(token) {
+  const writer = state.sessionWriter;
+  if (!writer || !transportSessions.isActive(token)) return;
+  const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+  writer.write(lengthDelimit(request)).catch(() => {
+    // A dying reliable stream ends the session; nothing to do here.
+  });
+  log(`sent LeaseRequest for ${GIMBAL_SCOPE}`);
+}
+
 /** Sends a `LeaseRelease` for the motion scope on the reliable session
  *  stream and starts the bounded wait for the host's acknowledgement. */
 function sendLeaseRelease(token) {
   const writer = state.sessionWriter;
   if (!writer || !transportSessions.isActive(token)) return;
+  if (state.gimbalLeaseGranted) {
+    // Fire-and-forget: the gimbal scope has no motion authority, so its
+    // release rides best-effort alongside the tracked motion release
+    // (the host watchdog covers a lost one).
+    state.gimbalLeaseGranted = false;
+    const gimbalRelease = encodeLeaseReleaseEnvelope({
+      vehicleId: VEHICLE_ID,
+      scope: GIMBAL_SCOPE,
+    });
+    writer.write(lengthDelimit(gimbalRelease)).catch(() => {});
+    log("sent LeaseRelease for " + GIMBAL_SCOPE);
+  }
   if (releaseTracker.isPending()) return; // one release per loss; the ack settles it
   const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: MOTION_SCOPE });
   const settled = releaseTracker.begin();
@@ -526,8 +581,21 @@ async function runSessionStreamReader(reader, token) {
         if (Number(m.vehicleId) === VEHICLE_ID && m.scope === MOTION_SCOPE) {
           releaseTracker.acknowledge();
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
+        } else if (Number(m.vehicleId) === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
+          log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
         } else {
           log(`ignoring LeaseReleased for vehicle=${m.vehicleId} scope=${m.scope}`);
+        }
+      }
+      if (decoded.kind === "LeaseResponse" && decoded.message.scope === GIMBAL_SCOPE) {
+        // The gimbal lease is requested after bootstrap, so its response
+        // arrives here rather than in the bootstrap reader.
+        const m = decoded.message;
+        state.gimbalGeneration = BigInt(m.generation || 0);
+        state.gimbalLeaseGranted = !!m.granted;
+        log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
+        if (!m.granted) {
+          log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
         }
       }
     }
@@ -561,6 +629,13 @@ function handleBootstrapMessage(decoded, token) {
     state.sessionId = decoded.message.sessionId;
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
   } else if (decoded.kind === "LeaseResponse") {
+    // Bootstrap requests only the motion lease, but route by scope
+    // anyway: a response for any other scope must not overwrite the
+    // motion generation.
+    if (decoded.message.scope && decoded.message.scope !== MOTION_SCOPE) {
+      log(`ignoring bootstrap LeaseResponse for scope=${decoded.message.scope}`);
+      return;
+    }
     state.generation = BigInt(decoded.message.generation || 0);
     state.leaseGranted = !!decoded.message.granted;
     log(`LeaseResponse: granted=${decoded.message.granted} generation=${decoded.message.generation}`);
@@ -1039,11 +1114,7 @@ const PAD_DISARM_BUTTON = 8;
 function flightAxesFromGamepad(pad, profile, mode) {
   const rawAt = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
   const clamp = (v) => Math.max(-1, Math.min(1, v));
-  const dz = profile.deadzone ?? 0.1;
-  // Cubic expo (50%): fine authority near center, full range at the
-  // ends — half of the DJI feel; the uplink's slew limit is the other.
-  const expo = (v) => 0.35 * v * v * v + 0.65 * v;
-  const shaped = (v) => expo(clamp(Math.abs(v) < dz ? 0 : v));
+  const shaped = stickShaper(profile);
   const raw = (i) => shaped(rawAt(i));
   if (profile.standard) {
     const scheme = FLIGHT_SCHEMES[mode] ?? FLIGHT_SCHEMES["quad-pilot"];
@@ -1270,8 +1341,17 @@ async function runControlLoop(writer, token) {
           [AXIS_YAW, yaw],
         ];
       } else {
-        const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
-        updateFlightReadout(pad, f);
+        const gimbalHeld = gimbalModifierHeld(pad, profile);
+        const flightView = gimbalHeld ? gimbalMaskedView(pad) : pad;
+        const f = pad ? flightAxesFromGamepad(flightView, profile, mode) : flightAxesFromKeys();
+        if (gimbalHeld) {
+          const g = gimbalAxesFromGamepad(pad, profile);
+          els.gamepad.textContent =
+            `GIMBAL (LT held): RS pitch=${g.pitch.toFixed(2)} yaw=${g.yaw.toFixed(2)} | ` +
+            "LT descend inhibited — release LT for flight | R3 recenters";
+        } else {
+          updateFlightReadout(pad, f);
+        }
         edges = collectArmEdges(pad);
         if (state.pendingFpvToggle) {
           state.pendingFpvToggle = false;
@@ -1308,8 +1388,50 @@ async function runControlLoop(writer, token) {
       writer.write(envelope).catch((error) => {
         transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
       });
+      maybeSendGimbalFrame(writer, token, mode, pad, profile);
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+}
+
+/** Emits one gimbal-scope frame EVERY tick while the lease is held,
+ *  after the motion frame under the same publish gate: LT held streams
+ *  the right stick's LOS rates, otherwise the frame carries zero rates.
+ *  The continuous stream is the scope's liveness (ADR-0011), exactly
+ *  like motion: a gimbal holder that goes quiet between LT presses
+ *  would trip the host's holder-silence watchdog, whose link-loss
+ *  policy is per-VEHICLE and would neutralize flight. R3 fires the
+ *  recenter edge; active-demand shaping lives in `gimbalFramePlan`. */
+function maybeSendGimbalFrame(writer, token, mode, pad, profile) {
+  if (mode === "rover" || !state.gimbalLeaseGranted) return;
+  const resetHeld = !!pad?.buttons?.[PAD_GIMBAL_RESET]?.pressed;
+  const resetEdge = resetHeld && !state.prevGimbalReset;
+  state.prevGimbalReset = resetHeld;
+  const plan = gimbalFramePlan({
+    held: gimbalModifierHeld(pad, profile),
+    resetEdge,
+    streaming: state.gimbalStreaming,
+    rates: pad ? gimbalAxesFromGamepad(pad, profile) : { pitch: 0, yaw: 0 },
+  }) ?? { rates: { pitch: 0, yaw: 0 }, recenter: false, streaming: false };
+  if (plan.recenter) log("gimbal recenter requested (R3)");
+  state.gimbalSequence = (state.gimbalSequence + 1) >>> 0;
+  const envelope = encodeControlFrameEnvelope({
+    sessionId: state.sessionId,
+    vehicleId: VEHICLE_ID,
+    scope: GIMBAL_SCOPE,
+    generation: state.gimbalGeneration,
+    sequence: state.gimbalSequence,
+    sampledAtNanos: nowNanos(),
+    profileRevision: 1,
+    axes: [
+      [AXIS_PITCH, plan.rates.pitch],
+      [AXIS_YAW, plan.rates.yaw],
+    ],
+    edges: plan.recenter ? [[GIMBAL_BUTTON_NEUTRAL, BUTTON_EDGE_PRESSED]] : [],
+  });
+  writer.write(envelope).catch((error) => {
+    transportSessions.runIfActive(token, () => log(`gimbal datagram send failed: ${error}`));
+  });
+  state.gimbalStreaming = plan.streaming;
 }
 
 // ---- instrument panels (ADR-0017) -------------------------------------------
