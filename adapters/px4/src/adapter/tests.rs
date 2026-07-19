@@ -362,3 +362,127 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     let mut buf = [0u8; 128];
     fc.recv_from(&mut buf).expect("arm datagram reaches the FC");
 }
+
+fn gimbal_frame(
+    axes: Vec<(LogicalAxisId, f32)>,
+    edges: Vec<(LogicalButtonId, ButtonEdge)>,
+) -> pilotage_protocol::ScopedControlFrame {
+    let mut built = frame(axes, edges);
+    built.scope = pilotage_protocol::ScopeId::new(super::GIMBAL_SCOPE);
+    built
+}
+
+fn gimbal_control() -> (
+    crate::gimbal::Px4GimbalControl,
+    tokio::sync::mpsc::Receiver<Vec<u8>>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    (crate::gimbal::Px4GimbalControl::new(tx, 1, 1), rx)
+}
+
+fn queued_msg_id(rx: &mut tokio::sync::mpsc::Receiver<Vec<u8>>) -> u32 {
+    let buf = rx.try_recv().expect("queued frame");
+    u32::from(buf[7]) | (u32::from(buf[8]) << 8) | (u32::from(buf[9]) << 16)
+}
+
+#[test]
+fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
+    let (fc, addr) = fake_fc();
+    drop(fc);
+    let (control, _rx) = gimbal_control();
+    let adapter = Px4Adapter::from_state(VehicleId::new(1), live_state())
+        .with_uplink(uplink_to(addr))
+        .with_gimbal(control);
+    let scopes: Vec<String> = adapter.capabilities().vehicles[0]
+        .scopes
+        .iter()
+        .map(|descriptor| descriptor.scope.as_str().to_owned())
+        .collect();
+    assert_eq!(scopes, vec![super::FLIGHT_SCOPE, super::GIMBAL_SCOPE]);
+}
+
+#[test]
+fn gimbal_demands_flow_even_where_flight_control_cannot() {
+    // A bare cache: no estimator authorization, so flight frames are
+    // rejected — but pointing is not flight, and must keep working.
+    let state = Arc::new(Mutex::new(LinkState::default()));
+    let (control, mut rx) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state).with_gimbal(control);
+
+    let outcome = adapter.apply_control(&gimbal_frame(
+        vec![
+            (LogicalAxisId::new(super::PITCH_AXIS), 0.5),
+            (LogicalAxisId::new(super::YAW_AXIS), -0.25),
+        ],
+        vec![],
+    ));
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    assert_eq!(queued_msg_id(&mut rx), 76, "primary-control claim first");
+    assert_eq!(queued_msg_id(&mut rx), 282, "then the rate demand");
+}
+
+#[test]
+fn gimbal_neutral_button_recentres() {
+    let (control, mut rx) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
+    let outcome = adapter.apply_control(&gimbal_frame(
+        vec![],
+        vec![(
+            LogicalButtonId::new(super::GIMBAL_NEUTRAL_BUTTON),
+            ButtonEdge::Pressed,
+        )],
+    ));
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    assert_eq!(queued_msg_id(&mut rx), 76, "primary-control claim first");
+    let buf = rx.try_recv().expect("pitchyaw command");
+    let command = u16::from_le_bytes([buf[38], buf[39]]);
+    assert_eq!(command, 1000, "DO_GIMBAL_MANAGER_PITCHYAW recenters");
+}
+
+#[test]
+fn gimbal_frame_with_flight_axes_is_rejected() {
+    let (control, _rx) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
+    let outcome = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::ROLL_AXIS), 0.5)],
+        vec![],
+    ));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::UnknownAxis),
+        "the gimbal scope accepts pitch/yaw only"
+    );
+}
+
+#[test]
+fn fresh_claim_denial_rejects_pointing_frames_loudly() {
+    let state = live_state();
+    apply_messages_at(
+        &state,
+        &[(
+            SOURCE,
+            FcMessage::CommandAck {
+                command: 1001,
+                result: 4,
+            },
+        )],
+        0,
+        0,
+        Instant::now(),
+    );
+    let (control, _rx) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state).with_gimbal(control);
+    let outcome = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
+        vec![],
+    ));
+    assert!(
+        matches!(
+            outcome.disposition,
+            Disposition::Rejected(RejectReason::Other(_))
+        ),
+        "PX4 ignores non-primary demands silently, so a cached denial \
+         must reject loudly instead: {:?}",
+        outcome.disposition
+    );
+}

@@ -23,6 +23,7 @@ use crate::uplink::Px4Uplink;
 
 mod camera;
 mod control;
+mod pointing;
 mod sampling;
 #[cfg(test)]
 mod tests;
@@ -45,6 +46,11 @@ pub const ARM_BUTTON: u16 = 0;
 pub const DISARM_BUTTON: u16 = 1;
 /// Logical button whose press resets the simulation.
 pub const RESET_BUTTON: u16 = 2;
+/// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
+/// LOS rate demands, leased and fenced independently of flight.
+pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
+/// Gimbal-scope button whose press recenters the gimbal.
+pub const GIMBAL_NEUTRAL_BUTTON: u16 = 0;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -62,6 +68,10 @@ pub struct Px4Adapter {
     // basis for state-dependent control; there is no truth oracle).
     estimate: Option<EstimateSource>,
     uplink: Option<Px4Uplink>,
+    // Gimbal-manager command path; rides the receive link's socket
+    // because the FC's GCS instance retargets its telemetry stream to
+    // the last peer that spoke.
+    gimbal: Option<crate::gimbal::Px4GimbalControl>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
@@ -116,6 +126,11 @@ impl Px4Adapter {
         let incarnation = pilotage_adapter_api::SourceIncarnation::new(rand_incarnation());
         let link = MavlinkLink::start(link_config, incarnation).await?;
         let state = link.state();
+        let gimbal = Some(crate::gimbal::Px4GimbalControl::new(
+            link.outbound(),
+            link_config.system_id,
+            link_config.component_id,
+        ));
         let uplink = match Px4Uplink::new(config.command_endpoint) {
             Ok(mut uplink) => {
                 uplink.set_expected_source(link_config.system_id, link_config.component_id);
@@ -134,6 +149,7 @@ impl Px4Adapter {
                 _link: Some(link),
             }),
             uplink,
+            gimbal,
             frames,
             _camera_bridge: camera_bridge,
             _frame_forwarder: frame_forwarder,
@@ -156,6 +172,7 @@ impl Px4Adapter {
             vehicle,
             estimate: Some(EstimateSource { state, _link: None }),
             uplink: None,
+            gimbal: None,
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,
@@ -182,6 +199,13 @@ impl Px4Adapter {
     #[cfg(test)]
     pub(crate) fn with_uplink(mut self, uplink: Px4Uplink) -> Self {
         self.uplink = Some(uplink);
+        self
+    }
+
+    /// Installs a test gimbal control path, for tests.
+    #[cfg(test)]
+    pub(crate) fn with_gimbal(mut self, gimbal: crate::gimbal::Px4GimbalControl) -> Self {
+        self.gimbal = Some(gimbal);
         self
     }
 
@@ -253,18 +277,29 @@ impl VehicleAdapter for Px4Adapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
-                scopes: if self.uplink.is_some() {
-                    vec![ScopeDescriptor {
-                        scope: ScopeId::new(FLIGHT_SCOPE),
-                        axes: vec![
-                            LogicalAxisId::new(ROLL_AXIS),
-                            LogicalAxisId::new(PITCH_AXIS),
-                            LogicalAxisId::new(THROTTLE_AXIS),
-                            LogicalAxisId::new(YAW_AXIS),
-                        ],
-                    }]
-                } else {
-                    vec![]
+                scopes: {
+                    let mut scopes = Vec::new();
+                    if self.uplink.is_some() {
+                        scopes.push(ScopeDescriptor {
+                            scope: ScopeId::new(FLIGHT_SCOPE),
+                            axes: vec![
+                                LogicalAxisId::new(ROLL_AXIS),
+                                LogicalAxisId::new(PITCH_AXIS),
+                                LogicalAxisId::new(THROTTLE_AXIS),
+                                LogicalAxisId::new(YAW_AXIS),
+                            ],
+                        });
+                    }
+                    if self.gimbal.is_some() {
+                        scopes.push(ScopeDescriptor {
+                            scope: ScopeId::new(GIMBAL_SCOPE),
+                            axes: vec![
+                                LogicalAxisId::new(PITCH_AXIS),
+                                LogicalAxisId::new(YAW_AXIS),
+                            ],
+                        });
+                    }
+                    scopes
                 },
                 link_loss_actions: if self.uplink.is_some() {
                     vec![LinkLossPolicy::Neutralize]
@@ -278,6 +313,9 @@ impl VehicleAdapter for Px4Adapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
+        if frame.scope.as_str() == GIMBAL_SCOPE {
+            return self.apply_gimbal(frame, tick);
+        }
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
@@ -325,6 +363,9 @@ impl VehicleAdapter for Px4Adapter {
         }
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.maintain();
+        }
+        if let Some(gimbal) = self.gimbal.as_mut() {
+            gimbal.maintain();
         }
         batch
     }
