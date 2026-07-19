@@ -38,6 +38,9 @@ pub enum AuthorizationSource {
     StandardEstimatorStatus,
 }
 
+/// MAV_CMD_SET_MESSAGE_INTERVAL.
+const SET_MESSAGE_INTERVAL: u16 = 511;
+
 /// Whether an unstamped MAVLink boot-clock regression may use the simulator
 /// reset heuristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -72,6 +75,14 @@ pub struct LinkConfig {
     /// time: a rebooted FC whose clock is already above this ceiling is
     /// rejected as reordered forever instead of starting a new epoch.
     pub reset_candidate_max_ms: u32,
+    /// Where periodic message-interval requests are sent, when the
+    /// source needs them (PX4's GCS instance streams sparse defaults).
+    /// They MUST originate from the link's own socket: the instance
+    /// retargets its stream to whichever peer last spoke to it, so a
+    /// request from any other socket steals the stream.
+    pub stream_command_target: Option<SocketAddr>,
+    /// (message id, interval µs) pairs requested at the heartbeat tick.
+    pub stream_interval_requests: &'static [(u32, u32)],
     /// Largest source-clock lag admitted when a second measurement group
     /// first joins or advances behind the epoch high-water mark.
     ///
@@ -95,6 +106,8 @@ impl Default for LinkConfig {
             reset_policy: ResetPolicy::Conservative,
             authorization_source: AuthorizationSource::AviatePrivate,
             reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
+            stream_command_target: None,
+            stream_interval_requests: &[],
             maximum_inter_group_skew_ms: 0,
         }
     }
@@ -321,12 +334,7 @@ impl MavlinkLink {
             config,
             source_incarnation,
         )));
-        let task = tokio::spawn(run_link(
-            socket,
-            config.endpoint,
-            router_mode,
-            state.clone(),
-        ));
+        let task = tokio::spawn(run_link(socket, config, router_mode, state.clone()));
         Ok(Self { state, task })
     }
 
@@ -344,10 +352,11 @@ impl Drop for MavlinkLink {
 
 async fn run_link(
     socket: UdpSocket,
-    endpoint: SocketAddr,
+    config: LinkConfig,
     router_mode: bool,
     state: Arc<Mutex<LinkState>>,
 ) {
+    let endpoint = config.endpoint;
     let mut buf = vec![0u8; 2048];
     let mut messages = Vec::with_capacity(8);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
@@ -360,6 +369,21 @@ async fn run_link(
                     seq = seq.wrapping_add(1);
                     if let Err(error) = socket.send_to(&frame, endpoint).await {
                         warn!(%error, "GCS heartbeat send failed");
+                    }
+                }
+                if let Some(target) = config.stream_command_target {
+                    for &(message_id, interval_us) in config.stream_interval_requests {
+                        let frame = crate::codec::encode_command_long(
+                            seq,
+                            SET_MESSAGE_INTERVAL,
+                            [message_id as f32, interval_us as f32, 0.0, 0.0, 0.0, 0.0, 0.0],
+                            config.system_id,
+                            config.component_id,
+                        );
+                        seq = seq.wrapping_add(1);
+                        if let Err(error) = socket.send_to(&frame, target).await {
+                            warn!(%error, "stream interval request send failed");
+                        }
                     }
                 }
             }
