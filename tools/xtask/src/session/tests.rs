@@ -5,16 +5,32 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::io::Read;
+use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::{claim_supervisor, start_stages, supervise, verify_listening_port};
+use super::{claim_supervisor, resolve_manifest, start_stages, supervise, verify_listening_port};
 use crate::backend::Stage;
 use crate::error::XtaskError;
 use crate::process::{ManagedChild, ProcessSpec};
 use crate::readiness::Readiness;
 
 const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[test]
+fn runtime_manifest_wins_over_deleted_compiled_checkout() {
+    let runtime = Path::new("/active/Pilotage/tools/xtask");
+    let deleted_compiled = Path::new("/deleted/worktree/tools/xtask");
+
+    assert_eq!(resolve_manifest(Some(runtime), deleted_compiled), runtime);
+}
+
+#[test]
+fn compiled_manifest_is_the_outside_cargo_fallback() {
+    let compiled = Path::new("/compiled/Pilotage/tools/xtask");
+
+    assert_eq!(resolve_manifest(None, compiled), compiled);
+}
 
 /// A stage that opens `fifo` for writing, prints READY, and parks.
 /// The fifo is the synchronization primitive: its open is the
