@@ -516,7 +516,15 @@ export class InstrumentModule {
       const bctx = back.getContext("2d");
       bctx.fillStyle = "#000";
       bctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-      this.unknownOpcodes += interpretScene(view, bctx, this.#glyphs);
+      const unknownThisFrame = interpretScene(view, bctx, this.#glyphs);
+      this.unknownOpcodes += unknownThisFrame;
+      if (unknownThisFrame > 0) {
+        // A skipped opcode means draw commands silently dropped out of
+        // the frame — a lost clip or tape backdrop bleeds layers that
+        // must never show through. This is a scene/interpreter
+        // opcode-set mismatch; never present such a frame.
+        return { ok: false, reason: REASON.UNKNOWN_OPCODE };
+      }
     } catch {
       return { ok: false, reason: REASON.PAINT_FAILED };
     }
