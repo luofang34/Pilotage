@@ -11,8 +11,10 @@ import {
   PAD_GIMBAL_MODIFIER,
   gimbalAxesFromGamepad,
   gimbalFramePlan,
+  gimbalLeasePlan,
   gimbalMaskedView,
   gimbalModifierHeld,
+  gimbalResetEdge,
   stickShaper,
 } from "./gimbal-input.js";
 
@@ -69,8 +71,11 @@ function pad({ axes = [0, 0, 0, 0], buttons = [] } = {}) {
 
 // ---- gimbal axes: signs and shaping ----------------------------------------
 {
+  // Direct sense (owner decision after flying both): stick up = camera up.
   const up = pad({ axes: [0, 0, 0, -1] }); // stick up = browser negative
   check("stick up = camera up at full rate", gimbalAxesFromGamepad(up, STANDARD).pitch === 1);
+  const down = pad({ axes: [0, 0, 0, 1] });
+  check("stick down = camera down at full rate", gimbalAxesFromGamepad(down, STANDARD).pitch === -1);
   const right = pad({ axes: [0, 0, 1, 0] });
   check("stick right = camera right at full rate", gimbalAxesFromGamepad(right, STANDARD).yaw === 1);
   const inside = pad({ axes: [0, 0, 0.04, -0.04] });
@@ -99,6 +104,51 @@ function pad({ axes = [0, 0, 0, 0], buttons = [] } = {}) {
   check(
     "R3 recenter fires without opening a rate stream",
     recenter.recenter === true && recenter.rates.pitch === 0 && recenter.streaming === false,
+  );
+}
+
+// ---- R3 recenter edge: baseline always advances, no false edge --------------
+{
+  // A held R3 while inactive advances the baseline but fires no edge...
+  const held1 = gimbalResetEdge(true, false, false);
+  check("R3 held while inactive fires no edge", held1.edge === false);
+  check("R3 baseline advances even while inactive", held1.prevHeld === true);
+  // ...so when the gimbal path re-activates with R3 still held, no false edge.
+  const held2 = gimbalResetEdge(true, held1.prevHeld, true);
+  check("R3 held across (re)activation is NOT a fresh edge", held2.edge === false);
+  // A genuine press while active fires exactly once.
+  const press = gimbalResetEdge(true, false, true);
+  check("a fresh R3 press while active fires the edge", press.edge === true);
+  const stillHeld = gimbalResetEdge(true, press.prevHeld, true);
+  check("holding R3 does not re-fire the edge", stillHeld.edge === false);
+}
+
+// ---- gimbal lease state machine ---------------------------------------------
+{
+  const base = { granted: false, denied: false, requestedAtMs: 0, nowMs: 5000 };
+  check(
+    "flight mode with no lease requests it",
+    gimbalLeasePlan({ ...base, mode: "quad-pilot" }) === "request",
+  );
+  check(
+    "a fresh request is debounced",
+    gimbalLeasePlan({ ...base, mode: "quad-pilot", requestedAtMs: 4000 }) === "none",
+  );
+  check(
+    "a granted lease is not re-requested",
+    gimbalLeasePlan({ ...base, mode: "quad-pilot", granted: true }) === "none",
+  );
+  check(
+    "a denied scope is never re-requested",
+    gimbalLeasePlan({ ...base, mode: "quad-pilot", denied: true }) === "none",
+  );
+  check(
+    "rover mode releases a held lease",
+    gimbalLeasePlan({ ...base, mode: "rover", granted: true }) === "release",
+  );
+  check(
+    "rover mode with no lease does nothing",
+    gimbalLeasePlan({ ...base, mode: "rover" }) === "none",
   );
 }
 
