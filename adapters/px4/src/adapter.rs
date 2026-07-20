@@ -23,6 +23,8 @@ use crate::uplink::Px4Uplink;
 
 mod camera;
 mod control;
+#[cfg(test)]
+mod gimbal_tests;
 mod pointing;
 mod sampling;
 #[cfg(test)]
@@ -124,13 +126,22 @@ impl Px4Adapter {
     pub async fn start(vehicle: VehicleId, config: Px4Config) -> Result<Self, Px4AdapterError> {
         let link_config = config.link_config();
         let incarnation = pilotage_adapter_api::SourceIncarnation::new(rand_incarnation());
-        let link = MavlinkLink::start(link_config, incarnation).await?;
+        let mut link = MavlinkLink::start(link_config, incarnation).await?;
         let state = link.state();
-        let gimbal = Some(crate::gimbal::Px4GimbalControl::new(
-            link.outbound(),
-            link_config.system_id,
-            link_config.component_id,
-        ));
+        // The gimbal path is wired only when the vehicle is declared to
+        // carry one: a bare airframe advertises no `vehicle.gimbal`
+        // scope, so a client cannot lease a payload it cannot point. The
+        // rate lane is taken exactly once here, so it is always present
+        // on this first (and only) take.
+        let gimbal = match (config.gimbal, link.take_gimbal_rate_sender()) {
+            (true, Some(rates)) => Some(crate::gimbal::Px4GimbalControl::new(
+                link.command_sender(),
+                rates,
+                link_config.system_id,
+                link_config.component_id,
+            )),
+            _ => None,
+        };
         let uplink = match Px4Uplink::new(config.command_endpoint) {
             Ok(mut uplink) => {
                 uplink.set_expected_source(link_config.system_id, link_config.component_id);
@@ -353,6 +364,11 @@ impl VehicleAdapter for Px4Adapter {
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         self.observe_arm_report();
         let fc_state = sampling::fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
+        let gimbal_attitude = self
+            .gimbal
+            .is_some()
+            .then(|| self.gimbal_attitude())
+            .flatten();
         let mut batch = self
             .estimate
             .as_ref()
@@ -360,6 +376,7 @@ impl VehicleAdapter for Px4Adapter {
             .unwrap_or_default();
         for sample in &mut batch.samples {
             sample.fc_state = fc_state;
+            sample.gimbal = gimbal_attitude;
         }
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.maintain();

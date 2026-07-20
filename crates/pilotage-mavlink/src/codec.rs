@@ -51,6 +51,10 @@ pub enum FcMessage {
         command: u16,
         /// MAV_RESULT (0 = accepted).
         result: u8,
+        /// Addressed system (v2 extension; 0 when the sender omitted it).
+        target_system: u8,
+        /// Addressed component (v2 extension; 0 when omitted).
+        target_component: u8,
     },
     /// Attitude estimate (10 Hz): quaternion is body FRD → world NED,
     /// MAVLink order q1=w, q2=x, q3=y, q4=z.
@@ -139,6 +143,10 @@ pub const COMMAND_LONG_ID: u32 = 76;
 pub const SET_POSITION_TARGET_ID: u32 = 84;
 /// GIMBAL_MANAGER_SET_ATTITUDE message id (uplink: gimbal rate demands).
 pub const GIMBAL_MANAGER_SET_ATTITUDE_ID: u32 = 282;
+/// MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW (COMMAND_LONG payload).
+pub const MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW: u16 = 1000;
+/// MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE (COMMAND_LONG payload).
+pub const MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE: u16 = 1001;
 /// GIMBAL_DEVICE_ATTITUDE_STATUS message id (downlink: gimbal orientation).
 pub const GIMBAL_DEVICE_ATTITUDE_STATUS_ID: u32 = 285;
 

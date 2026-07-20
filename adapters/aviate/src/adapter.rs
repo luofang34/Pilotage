@@ -356,6 +356,7 @@ impl VehicleAdapter for AviateAdapter {
                     avionics: None,
                     sim_truth: truth,
                     fc_state,
+                    gimbal: None,
                 }],
             };
         }

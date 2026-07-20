@@ -40,6 +40,9 @@ impl SimBackend for Px4Gz {
         vec![
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
+            // This backend boots the gz_x500_gimbal airframe (4019), so
+            // the adapter advertises the vehicle.gimbal scope.
+            ("PILOTAGE_PX4_GIMBAL".to_owned(), "1".to_owned()),
         ]
     }
 
@@ -298,6 +301,20 @@ mod tests {
                 .host_env(&ctx)
                 .iter()
                 .any(|(key, value)| { key == "PILOTAGE_PX4_PROFILE" && value == "simulation" })
+        );
+    }
+
+    #[test]
+    fn host_environment_enables_the_gimbal_capability() {
+        // The gz_x500_gimbal airframe carries a gimbal; the host must
+        // advertise the scope, and no other FC backend sets this flag.
+        let backend = Px4Gz;
+        let ctx = context(PathBuf::from("unused-for-host-environment"));
+        assert!(
+            backend
+                .host_env(&ctx)
+                .iter()
+                .any(|(key, value)| key == "PILOTAGE_PX4_GIMBAL" && value == "1")
         );
     }
 

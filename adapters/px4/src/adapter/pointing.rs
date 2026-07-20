@@ -51,11 +51,15 @@ impl Px4Adapter {
                 )),
             );
         }
+        // A send that never reached the wire (a full or closed lane)
+        // must not report as applied. Track every command/demand this
+        // frame issued.
+        let mut delivered = true;
         for (button, edge) in &frame.payload.edges {
             if *edge == ButtonEdge::Pressed
                 && *button == LogicalButtonId::new(GIMBAL_NEUTRAL_BUTTON)
             {
-                gimbal.neutral();
+                delivered &= gimbal.neutral();
             }
         }
         let mut pitch = 0.0_f32;
@@ -75,7 +79,13 @@ impl Px4Adapter {
             }
         }
         if !frame.payload.axes.is_empty() {
-            gimbal.rate_demand(pitch, yaw);
+            delivered &= gimbal.rate_demand(pitch, yaw);
+        }
+        if !delivered {
+            return rejected_control(
+                tick,
+                RejectReason::Other("gimbal command lane full; demand not sent".to_owned()),
+            );
         }
         ApplyOutcome {
             tick,
@@ -88,11 +98,14 @@ impl Px4Adapter {
     }
 
     /// A recent CONFIGURE denial from the FC, if one is cached on the
-    /// receive link.
+    /// receive link. Reads the dedicated CONFIGURE ack slot so an
+    /// unrelated later ack (a periodic SET_MESSAGE_INTERVAL, MAV_CMD
+    /// 511) cannot bury a claim denial and let ignored gimbal demands
+    /// report as accepted.
     fn fresh_claim_denial(&self) -> Option<u8> {
         let source = self.estimate.as_ref()?;
         let latest = source.state.lock().ok()?;
-        let ack = latest.last_command_ack?;
+        let ack = latest.gimbal_configure_ack?;
         (ack.command == CMD_GIMBAL_CONFIGURE
             && ack.result != 0
             && ack.received_at.elapsed() < CLAIM_DENIAL_FRESHNESS)

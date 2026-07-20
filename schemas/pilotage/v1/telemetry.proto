@@ -175,6 +175,25 @@ message FcState {
   MeasurementStamp stamp = 2;
 }
 
+// Gimbal device orientation (Gimbal Protocol v2 attitude status) under its
+// own provenance stamp: payload-device state, never a vehicle estimate and
+// never an input to control validation.
+message GimbalAttitude {
+  // Orientation quaternion (w, x, y, z); vehicle-frame yaw unless the
+  // device declares an earth-frame yaw mode.
+  float quat_w = 1;
+  float quat_x = 2;
+  float quat_y = 3;
+  float quat_z = 4;
+  // Device angular velocity (rad/s); NaN encodes device-unknown.
+  float rate_x_rad_s = 5;
+  float rate_y_rad_s = 6;
+  float rate_z_rad_s = 7;
+  // Identity and acquisition of the device report. Absence makes the
+  // sample unconsumable.
+  MeasurementStamp stamp = 8;
+}
+
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
   VehicleId vehicle = 1;
@@ -192,4 +211,6 @@ message TelemetrySample {
   SimTruthState sim_truth = 7;
   // FC-owned arm/mode state with its own provenance stamp.
   FcState fc_state = 8;
+  // Gimbal payload-device orientation with its own provenance stamp.
+  GimbalAttitude gimbal = 9;
 }

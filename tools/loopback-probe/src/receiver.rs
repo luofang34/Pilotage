@@ -333,6 +333,7 @@ mod tests {
                 avionics: None,
                 sim_truth: None,
                 fc_state: None,
+                gimbal: None,
             },
         ));
         let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(5)).expect("telemetry");
@@ -381,6 +382,7 @@ mod tests {
                     arm_state: 2,
                     stamp: Some(fc_stamp),
                 })),
+                gimbal: None,
             },
         ));
         let event = decode_datagram_event(&bytes, MonoTimestamp::from_nanos(9)).expect("telemetry");

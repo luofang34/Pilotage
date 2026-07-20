@@ -158,6 +158,7 @@ mod tests {
                     )
                 }),
             })),
+            gimbal: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(9));
 

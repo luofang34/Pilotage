@@ -44,6 +44,7 @@ fn main() -> ExitCode {
     match prost_build::Config::new()
         .boxed(".pilotage.v1.TelemetrySample.sim_truth")
         .boxed(".pilotage.v1.TelemetrySample.fc_state")
+        .boxed(".pilotage.v1.TelemetrySample.gimbal")
         .compile_protos(&protos, &[schema_root])
     {
         Ok(()) => ExitCode::SUCCESS,

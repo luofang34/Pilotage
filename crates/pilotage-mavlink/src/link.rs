@@ -18,11 +18,14 @@ mod apply;
 mod error;
 pub mod estimator;
 pub mod measurement;
+mod outbound;
 mod updates;
 use apply::apply_messages;
 pub use apply::apply_messages_at;
 pub use error::LinkError;
 use estimator::EstimatorStatusUpdate;
+pub use outbound::{GimbalRateDemand, OutboundCommand};
+use outbound::{send_gimbal_rate, send_outbound_command};
 pub use updates::{AttitudeUpdate, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate};
 
 /// Which message carries the estimator authorization for cached numeric
@@ -181,6 +184,10 @@ pub struct LinkState {
     /// Latest command acknowledgement, kept so uplink senders can
     /// surface a typed denial instead of a silently dead command path.
     pub last_command_ack: Option<CommandAckReport>,
+    /// Latest gimbal CONFIGURE acknowledgement, tracked apart from
+    /// `last_command_ack` so unrelated acks cannot bury a claim denial
+    /// while the FC silently ignores gimbal demands.
+    pub gimbal_configure_ack: Option<CommandAckReport>,
     /// Receive stamp of the last FC heartbeat.
     pub last_heartbeat: Option<Instant>,
     /// Whether the last FC heartbeat reported the vehicle armed.
@@ -231,6 +238,7 @@ impl Default for LinkState {
             estimator_status: None,
             gimbal_device: None,
             last_command_ack: None,
+            gimbal_configure_ack: None,
             last_heartbeat: None,
             heartbeat_armed: None,
             decoded: 0,
@@ -279,7 +287,8 @@ impl LinkState {
 pub struct MavlinkLink {
     state: Arc<Mutex<LinkState>>,
     task: JoinHandle<()>,
-    outbound: tokio::sync::mpsc::Sender<Vec<u8>>,
+    commands: tokio::sync::mpsc::Sender<OutboundCommand>,
+    gimbal_rates: Option<tokio::sync::watch::Sender<Option<GimbalRateDemand>>>,
 }
 
 impl MavlinkLink {
@@ -319,18 +328,21 @@ impl MavlinkLink {
             config,
             source_incarnation,
         )));
-        let (outbound, outbound_rx) = tokio::sync::mpsc::channel(64);
+        let (commands, command_rx) = tokio::sync::mpsc::channel(16);
+        let (rate_tx, rate_rx) = tokio::sync::watch::channel(None);
         let task = tokio::spawn(run_link(
             socket,
             config,
             router_mode,
             state.clone(),
-            outbound_rx,
+            command_rx,
+            rate_rx,
         ));
         Ok(Self {
             state,
             task,
-            outbound,
+            commands,
+            gimbal_rates: Some(rate_tx),
         })
     }
 
@@ -339,15 +351,23 @@ impl MavlinkLink {
         self.state.clone()
     }
 
-    /// A sender whose frames leave through the link's own socket
-    /// toward the stream-command target. The FC's GCS instance
-    /// retargets its stream to whichever peer last spoke, so uplink
-    /// traffic for that instance (gimbal-manager demands, claims) must
-    /// use this path — a second socket would steal the telemetry
-    /// stream. Frames are dropped with a warning when the link has no
-    /// stream-command target.
-    pub fn outbound(&self) -> tokio::sync::mpsc::Sender<Vec<u8>> {
-        self.outbound.clone()
+    /// The ordered command lane toward the stream-command target. The
+    /// FC's GCS instance retargets its stream to whichever peer last
+    /// spoke, so uplink traffic for that instance must ride the link's
+    /// own socket — and the link task assigns the socket's single
+    /// MAVLink sequence, so callers never encode frames themselves.
+    pub fn command_sender(&self) -> tokio::sync::mpsc::Sender<OutboundCommand> {
+        self.commands.clone()
+    }
+
+    /// Takes the latest-value gimbal rate lane (single producer). Each
+    /// publication replaces the previous demand; the link task encodes
+    /// only the newest, so stale demands coalesce away under
+    /// backpressure instead of queueing behind fresh ones.
+    pub fn take_gimbal_rate_sender(
+        &mut self,
+    ) -> Option<tokio::sync::watch::Sender<Option<GimbalRateDemand>>> {
+        self.gimbal_rates.take()
     }
 }
 
@@ -362,27 +382,27 @@ async fn run_link(
     config: LinkConfig,
     router_mode: bool,
     state: Arc<Mutex<LinkState>>,
-    mut outbound_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    mut command_rx: tokio::sync::mpsc::Receiver<OutboundCommand>,
+    mut rate_rx: tokio::sync::watch::Receiver<Option<GimbalRateDemand>>,
 ) {
     let endpoint = config.endpoint;
     let mut buf = vec![0u8; 2048];
     let mut messages = Vec::with_capacity(8);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
     let mut seq: u8 = 0;
+    let mut rates_open = true;
     loop {
         tokio::select! {
-            frame = outbound_rx.recv() => {
-                match (frame, config.stream_command_target) {
-                    (Some(frame), Some(target)) => {
-                        if let Err(error) = socket.send_to(&frame, target).await {
-                            warn!(%error, "outbound uplink frame send failed");
-                        }
-                    }
-                    (Some(_), None) => {
-                        warn!("outbound uplink frame dropped: link has no stream command target");
-                    }
-                    // All senders dropped; the link is being torn down.
-                    (None, _) => {}
+            command = command_rx.recv() => {
+                send_outbound_command(&socket, &mut seq, config.stream_command_target, command).await;
+            }
+            changed = rate_rx.changed(), if rates_open => {
+                if changed.is_err() {
+                    // The demand producer dropped; stop polling the lane.
+                    rates_open = false;
+                } else {
+                    let demand = *rate_rx.borrow_and_update();
+                    send_gimbal_rate(&socket, &mut seq, config.stream_command_target, demand).await;
                 }
             }
             _ = heartbeat.tick() => {

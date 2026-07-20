@@ -261,6 +261,7 @@ fn telemetry_from_odometry(vehicle: VehicleId, odom: &BridgeOdometry) -> Telemet
         avionics: None,
         sim_truth: None,
         fc_state: None,
+        gimbal: None,
     }
 }
 

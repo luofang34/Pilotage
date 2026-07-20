@@ -11,6 +11,7 @@ const PROFILE: &str = "PILOTAGE_PX4_PROFILE";
 const TELEMETRY_ENDPOINT: &str = "PILOTAGE_PX4_ADDR";
 const STREAM_COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_GCS_ADDR";
 const COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_FC_ADDR";
+const GIMBAL: &str = "PILOTAGE_PX4_GIMBAL";
 
 pub(crate) fn from_env() -> Result<Px4Config, HostError> {
     config_from_values(
@@ -18,6 +19,7 @@ pub(crate) fn from_env() -> Result<Px4Config, HostError> {
         std::env::var(TELEMETRY_ENDPOINT),
         std::env::var(STREAM_COMMAND_ENDPOINT),
         std::env::var(COMMAND_ENDPOINT),
+        std::env::var(GIMBAL),
     )
 }
 
@@ -26,9 +28,10 @@ fn config_from_values(
     telemetry_endpoint: Result<String, VarError>,
     stream_command_endpoint: Result<String, VarError>,
     command_endpoint: Result<String, VarError>,
+    gimbal: Result<String, VarError>,
 ) -> Result<Px4Config, HostError> {
     let profile = parse_profile(profile)?;
-    let mut config = Px4Config::new(profile);
+    let mut config = Px4Config::new(profile).with_gimbal(parse_flag(gimbal));
     config.telemetry_endpoint = parse_endpoint(
         TELEMETRY_ENDPOINT,
         telemetry_endpoint,
@@ -42,6 +45,12 @@ fn config_from_values(
     config.command_endpoint =
         parse_endpoint(COMMAND_ENDPOINT, command_endpoint, config.command_endpoint)?;
     Ok(config)
+}
+
+/// A capability flag: enabled only by an explicit truthy value, so a
+/// vehicle without a gimbal never advertises the scope by accident.
+fn parse_flag(value: Result<String, VarError>) -> bool {
+    matches!(value.as_deref(), Ok("1") | Ok("true"))
 }
 
 fn parse_profile(value: Result<String, VarError>) -> Result<Px4Profile, HostError> {
@@ -88,7 +97,7 @@ mod tests {
     fn config(
         profile: Result<String, VarError>,
     ) -> Result<pilotage_adapter_px4::Px4Config, HostError> {
-        config_from_values(profile, absent(), absent(), absent())
+        config_from_values(profile, absent(), absent(), absent(), absent())
     }
 
     #[test]
@@ -138,6 +147,7 @@ mod tests {
                     Ok("not-an-address".to_owned()),
                     absent(),
                     absent(),
+                    absent(),
                 ),
             ),
             (
@@ -146,6 +156,7 @@ mod tests {
                     Ok("simulation".to_owned()),
                     absent(),
                     Ok("127.0.0.1:not-a-port".to_owned()),
+                    absent(),
                     absent(),
                 ),
             ),
@@ -156,6 +167,7 @@ mod tests {
                     absent(),
                     absent(),
                     Ok("missing-port".to_owned()),
+                    absent(),
                 ),
             ),
         ] {

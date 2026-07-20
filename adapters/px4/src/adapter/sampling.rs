@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::{
     AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcStateSample,
-    MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,
-    TelemetryBatch, TelemetrySample,
+    GimbalAttitudeSample, MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity,
+    SourceRole, TelemetryBatch, TelemetrySample,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
@@ -142,6 +142,7 @@ pub(super) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             avionics,
             sim_truth: None,
             fc_state: None,
+            gimbal: None,
         }],
     }
 }
@@ -181,6 +182,38 @@ impl super::Px4Adapter {
             kinematics.pos_ned_m,
             validated_velocity(kinematics),
         ))
+    }
+}
+
+impl super::Px4Adapter {
+    /// The latest gimbal-device orientation, withheld once stale so a
+    /// frozen value never replays as live. Stamped under the video-
+    /// capture role — payload-device state, never a vehicle estimate and
+    /// never eligible for control validation (LINK-04).
+    pub(super) fn gimbal_attitude(&mut self) -> Option<GimbalAttitudeSample> {
+        let source = self.estimate.as_ref()?;
+        let latest = source.state.lock().ok()?;
+        let device = latest
+            .gimbal_device
+            .filter(|report| report.received_at.elapsed() <= WITHHOLD_AFTER)?;
+        let acquired = device
+            .received_at
+            .checked_duration_since(self.started_at)
+            .unwrap_or_default();
+        Some(GimbalAttitudeSample {
+            quat_wxyz: device.quat_wxyz,
+            rates_rps: device.rates_rps,
+            stamp: MeasurementStamp {
+                role: SourceRole::VideoCapture,
+                integrity: SourceIntegrity::ChecksummedOnly,
+                source_id: 2,
+                source_incarnation: self.arm_incarnation,
+                source_epoch: 1,
+                sequence: device.time_boot_ms,
+                acquired_at_ns: u64::try_from(acquired.as_nanos()).unwrap_or(u64::MAX),
+                clock: MeasurementClock::HostMonotonic,
+            },
+        })
     }
 }
 

@@ -220,6 +220,7 @@ impl VehicleAdapter for ReferenceAdapter {
                 avionics: None,
                 sim_truth: None,
                 fc_state: None,
+                gimbal: None,
             }],
         }
     }

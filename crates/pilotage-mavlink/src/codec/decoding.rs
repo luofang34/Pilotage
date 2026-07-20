@@ -48,6 +48,10 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             command: u16::from(payload.first().copied().unwrap_or(0))
                 | (u16::from(payload.get(1).copied().unwrap_or(0)) << 8),
             result: payload.get(2).copied().unwrap_or(0),
+            // v2 extension fields: zero when the sender truncated them,
+            // which consumers treat as "unaddressed".
+            target_system: payload.get(8).copied().unwrap_or(0),
+            target_component: payload.get(9).copied().unwrap_or(0),
         }),
         ATTITUDE_QUATERNION_ID => Some(FcMessage::AttitudeQuaternion {
             time_boot_ms: u32_at(payload, 0),

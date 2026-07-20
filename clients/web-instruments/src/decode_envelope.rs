@@ -420,6 +420,7 @@ mod tests {
             avionics: None,
             sim_truth: None,
             fc_state: None,
+            gimbal: None,
         };
         let message = telemetry_message(sample);
         assert_eq!(message.vehicle_id, 1);
