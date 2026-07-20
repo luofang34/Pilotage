@@ -32,6 +32,12 @@ const CLAIM_PERIOD: Duration = Duration::from_secs(1);
 /// slower, so a stick release racing a dropped frame must be closed
 /// out from this side.
 const STALE_DEMAND_CUTOFF: Duration = Duration::from_millis(300);
+/// How long idle (zero-rate) demands stay suppressed after a neutral
+/// command: a rate setpoint replaces the manager's angle setpoint
+/// within one control tick, so a continuous zero-rate keepalive stream
+/// would race the one-shot recenter and usually win. Deliberate
+/// nonzero demand breaks through immediately.
+const NEUTRAL_SETTLE: Duration = Duration::from_millis(800);
 
 /// MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW.
 pub(crate) const CMD_GIMBAL_PITCHYAW: u16 = 1000;
@@ -68,6 +74,7 @@ pub struct Px4GimbalControl {
     last_claim: Option<Instant>,
     last_demand: Option<Instant>,
     streaming: bool,
+    neutral_settle_until: Option<Instant>,
     dropped_sends: u64,
     clock: GimbalClock,
 }
@@ -84,6 +91,7 @@ impl Px4GimbalControl {
             last_claim: None,
             last_demand: None,
             streaming: false,
+            neutral_settle_until: None,
             dropped_sends: 0,
             clock: GimbalClock::System,
         }
@@ -141,7 +149,17 @@ impl Px4GimbalControl {
 
     /// Converts one canonical gimbal stick frame (`[-1, 1]` pitch/yaw;
     /// pitch + = camera up, yaw + = camera right) into a rate demand.
+    /// Idle (zero) demands inside the neutral settle window are dropped
+    /// so the recenter's angle setpoint survives; real demand clears
+    /// the window and steers immediately.
     pub fn rate_demand(&mut self, pitch: f32, yaw: f32) {
+        let idle = pitch == 0.0 && yaw == 0.0;
+        if let Some(until) = self.neutral_settle_until {
+            if idle && self.clock.now() < until {
+                return;
+            }
+            self.neutral_settle_until = None;
+        }
         self.claim_if_due();
         let frame = encode_gimbal_rate_setpoint(
             self.seq,
@@ -179,6 +197,11 @@ impl Px4GimbalControl {
             self.target_component,
         );
         self.send(&frame);
+        self.neutral_settle_until = Some(self.clock.now() + NEUTRAL_SETTLE);
+        // The stale-demand cutoff would also emit a zero-rate setpoint
+        // into the settle window; the stream restarts with the next
+        // accepted demand instead.
+        self.streaming = false;
         info!("gimbal neutral commanded");
     }
 
@@ -323,5 +346,43 @@ mod tests {
             (76, Some(super::CMD_GIMBAL_CONFIGURE))
         );
         assert_eq!(queued_kind(&mut rx), (76, Some(super::CMD_GIMBAL_PITCHYAW)));
+    }
+
+    #[test]
+    fn neutral_settle_window_holds_off_idle_keepalives() {
+        let (mut control, mut rx) = control();
+        control.neutral();
+        assert_eq!(
+            queued_kind(&mut rx),
+            (76, Some(super::CMD_GIMBAL_CONFIGURE))
+        );
+        assert_eq!(queued_kind(&mut rx), (76, Some(super::CMD_GIMBAL_PITCHYAW)));
+        // Idle keepalives inside the window are dropped: a zero-rate
+        // setpoint would replace the angle target and cancel the recenter.
+        control.rate_demand(0.0, 0.0);
+        control.advance_clock(Duration::from_millis(400));
+        control.rate_demand(0.0, 0.0);
+        control.maintain();
+        assert!(rx.try_recv().is_err(), "the settle window must stay quiet");
+        // Past the window the keepalive stream resumes.
+        control.advance_clock(Duration::from_millis(500));
+        control.rate_demand(0.0, 0.0);
+        assert_eq!(queued_kind(&mut rx).0, 282);
+    }
+
+    #[test]
+    fn real_demand_breaks_through_the_settle_window() {
+        let (mut control, mut rx) = control();
+        control.neutral();
+        assert_eq!(
+            queued_kind(&mut rx),
+            (76, Some(super::CMD_GIMBAL_CONFIGURE))
+        );
+        assert_eq!(queued_kind(&mut rx), (76, Some(super::CMD_GIMBAL_PITCHYAW)));
+        control.advance_clock(Duration::from_millis(100));
+        control.rate_demand(0.5, 0.0);
+        let buf = rx.try_recv().expect("deliberate demand steers immediately");
+        let msg_id = u32::from(buf[7]) | (u32::from(buf[8]) << 8) | (u32::from(buf[9]) << 16);
+        assert_eq!(msg_id, 282);
     }
 }
