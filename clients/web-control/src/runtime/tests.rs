@@ -53,6 +53,24 @@ fn session_gen(generation: u32, mode: Mode, granted: bool) -> SessionState {
         connected: true,
         lease_granted: granted,
         lease_denied: false,
+        motion_granted: true,
+    }
+}
+
+/// A session whose MOTION lease grant is set explicitly, for driving the
+/// post-handover motion-authority reacquisition.
+fn session_motion(mode: Mode, granted: bool, motion_granted: bool) -> SessionState {
+    SessionState {
+        motion_granted,
+        ..session(mode, granted)
+    }
+}
+
+/// A session at an explicit clock, for exercising the reacquisition retry.
+fn session_at(now_ms: f64, mode: Mode, granted: bool, motion_granted: bool) -> SessionState {
+    SessionState {
+        now_ms,
+        ..session_motion(mode, granted, motion_granted)
     }
 }
 
@@ -69,7 +87,7 @@ fn with_default() -> ControlRuntime {
 fn gimbal_rate(plan: &crate::plan::ControlPlan, axis: u16) -> f32 {
     let frame = plan.gimbal.as_ref().expect("gimbal frame present");
     frame
-        .axes
+        .axes()
         .iter()
         .find(|(id, _)| *id == axis)
         .map(|(_, v)| *v)
@@ -89,7 +107,7 @@ fn lt_engages_the_quasimode_and_masks_flight() {
     // Flight sees the captured right stick as neutral (masked): roll (right x)
     // and flight pitch (right y) are zero despite the stick being full.
     let motion = plan.motion.as_ref().expect("motion frame");
-    for (id, value) in &motion.axes {
+    for (id, value) in motion.axes() {
         if *id == crate::plan::AXIS_ROLL || *id == AXIS_PITCH {
             assert_eq!(*value, 0.0, "captured axis {id} is neutral to flight");
         }
@@ -107,14 +125,14 @@ fn r3_produces_exactly_one_recenter_edge() {
     );
     let held_r3 = sample(&[0.0, 0.0, 0.0, 0.0], &[11]);
     let first = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, true));
-    let edges = &first.gimbal.as_ref().expect("gimbal").edges;
+    let edges = first.gimbal.as_ref().expect("gimbal").edges();
     assert!(
         edges.contains(&(GIMBAL_NEUTRAL_BUTTON, crate::plan::BUTTON_EDGE_PRESSED)),
         "a fresh R3 press recenters"
     );
     let second = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, true));
     assert!(
-        second.gimbal.as_ref().expect("gimbal").edges.is_empty(),
+        second.gimbal.as_ref().expect("gimbal").edges().is_empty(),
         "holding R3 does not re-fire"
     );
 }
@@ -132,7 +150,7 @@ fn a_grant_does_not_synthesize_an_r3_edge() {
     // The lease is granted with R3 still held: no fresh recenter edge.
     let granted = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, true));
     assert!(
-        granted.gimbal.as_ref().expect("gimbal").edges.is_empty(),
+        granted.gimbal.as_ref().expect("gimbal").edges().is_empty(),
         "a lease grant with R3 held is not a fresh edge"
     );
 }
@@ -219,7 +237,7 @@ fn a_button_held_across_activation_does_not_fire_a_fresh_edge() {
     // With R3 held straight through the install, no recenter edge is synthesized.
     let after = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, true));
     assert!(
-        after.gimbal.as_ref().expect("gimbal").edges.is_empty(),
+        after.gimbal.as_ref().expect("gimbal").edges().is_empty(),
         "R3 held across activation is not a fresh edge"
     );
 }
@@ -238,12 +256,17 @@ fn a_control_held_across_reconnect_fires_no_edge() {
     let reconnect = runtime.evaluate(&held, &session_gen(2, Mode::QuadPilot, true));
     assert!(!reconnect.arm, "arm held across reconnect fires no arm");
     assert!(
-        reconnect.gimbal.as_ref().expect("gimbal").edges.is_empty(),
+        reconnect
+            .gimbal
+            .as_ref()
+            .expect("gimbal")
+            .edges()
+            .is_empty(),
         "R3 held across reconnect fires no recenter"
     );
     // Still held on the next tick: still nothing.
     let holding = runtime.evaluate(&held, &session_gen(2, Mode::QuadPilot, true));
-    assert!(!holding.arm && holding.gimbal.as_ref().expect("gimbal").edges.is_empty());
+    assert!(!holding.arm && holding.gimbal.as_ref().expect("gimbal").edges().is_empty());
 
     // Release, then press again: exactly one arm and one recenter.
     runtime.evaluate(
@@ -257,7 +280,7 @@ fn a_control_held_across_reconnect_fires_no_edge() {
             .gimbal
             .as_ref()
             .expect("gimbal")
-            .edges
+            .edges()
             .contains(&(GIMBAL_NEUTRAL_BUTTON, crate::plan::BUTTON_EDGE_PRESSED)),
         "a fresh press after release recenters exactly once"
     );
@@ -328,8 +351,9 @@ fn a_profile_swap_waits_for_the_candidate_controls_to_be_neutral_too() {
         "the motion lease is cycled too"
     );
 
-    // Release: the union of both profiles' controls is neutral, so it installs
-    // and reacquires the motion lease on the resuming tick.
+    // Release: the union of both profiles' controls is neutral, so it installs.
+    // The full motion-lease reacquisition handshake has its own test below;
+    // here it is enough that the install lands.
     runtime.evaluate(
         &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
         &session(Mode::QuadPilot, true),
@@ -339,14 +363,111 @@ fn a_profile_swap_waits_for_the_candidate_controls_to_be_neutral_too() {
         2,
         "installs once the union is neutral"
     );
-    let resume = runtime.evaluate(
+}
+
+#[test]
+fn a_live_profile_switch_reacquires_motion_before_the_new_mapping_publishes() {
+    let mut runtime = with_default();
+    // Steady flight publishes motion frames on the held lease.
+    let steady = runtime.evaluate(
+        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert!(steady.motion.is_some(), "steady flight publishes motion");
+
+    // Swap profiles with controls neutral: the candidate installs at once and
+    // the handover releases the motion lease.
+    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    let install = runtime.evaluate(
         &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
         &session(Mode::QuadPilot, true),
     );
+    assert_eq!(runtime.activation_revision(), 2, "neutral controls install");
     assert_eq!(
-        resume.motion_lease,
+        install.motion_lease,
+        Some(LeaseAction::Release),
+        "the handover releases the motion lease"
+    );
+
+    // Right after install the release has not landed yet: no request is sent,
+    // and even a fully deflected stick produces NO motion frame. This is the
+    // reviewer's repro — a live command on the released generation — gated out.
+    let right_after = runtime.evaluate(
+        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert_eq!(
+        right_after.motion_lease, None,
+        "no request until the release lands"
+    );
+    assert!(
+        right_after.motion.is_none(),
+        "no motion frame publishes on the stale generation"
+    );
+
+    // The host acknowledges the release (motion no longer granted): ONLY now is
+    // the request emitted — release strictly precedes request — still gated.
+    let requesting = runtime.evaluate(
+        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
+        &session_motion(Mode::QuadPilot, true, false),
+    );
+    assert_eq!(
+        requesting.motion_lease,
         Some(LeaseAction::Request),
-        "the motion lease is reacquired on resume"
+        "requests only after the release is reflected"
+    );
+    assert!(
+        requesting.motion.is_none(),
+        "motion stays gated awaiting the fresh grant"
+    );
+
+    // The host regrants on a fresh generation: motion resumes with the new
+    // mapping and no further lease action fires.
+    let resumed = runtime.evaluate(
+        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
+        &session_motion(Mode::QuadPilot, true, true),
+    );
+    assert!(resumed.motion.is_some(), "motion resumes once regranted");
+    assert_eq!(
+        resumed.motion_lease, None,
+        "no lease action once held again"
+    );
+}
+
+#[test]
+fn a_dropped_motion_reacquire_request_is_retried() {
+    let mut runtime = with_default();
+    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    // Install at t=1000 (motion still granted): the runtime enters Releasing.
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session_at(1000.0, Mode::QuadPilot, true, true),
+    );
+    // Release lands at t=1010: the request is emitted and the clock recorded.
+    let req = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session_at(1010.0, Mode::QuadPilot, true, false),
+    );
+    assert_eq!(req.motion_lease, Some(LeaseAction::Request));
+    // 100 ms later with still no grant: inside the retry window, no re-request.
+    let quiet = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session_at(1110.0, Mode::QuadPilot, true, false),
+    );
+    assert_eq!(
+        quiet.motion_lease, None,
+        "no re-request within the retry window"
+    );
+    // Past the retry window with the grant still missing: re-emit the request,
+    // so a dropped lease write cannot wedge the reacquisition.
+    let retry = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session_at(1300.0, Mode::QuadPilot, true, false),
+    );
+    assert_eq!(
+        retry.motion_lease,
+        Some(LeaseAction::Request),
+        "a dropped reacquire request is retried"
     );
 }
 
@@ -367,7 +488,7 @@ fn lt_does_not_suppress_flight_without_a_gimbal_lease() {
     let motion = plan.motion.as_ref().expect("motion");
     let axis = |id: u16| {
         motion
-            .axes
+            .axes()
             .iter()
             .find(|(a, _)| *a == id)
             .map(|(_, v)| *v)

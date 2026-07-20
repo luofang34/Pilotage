@@ -55,7 +55,8 @@ import { loadControlShell } from "./control-shell.js";
       buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 6, value: i === 6 ? 1 : 0 })),
     };
     const plan = shell.tickFromPad(pad, {
-      mode: "quad-pilot", connected: true, leaseGranted: true, leaseDenied: false, nowMs: performance.now(),
+      mode: "quad-pilot", connected: true, leaseGranted: true, leaseDenied: false,
+      motionGranted: true, generation: 1, nowMs: performance.now(),
     });
     await fetch("/result", { method: "POST", body: JSON.stringify({
       ran: true,

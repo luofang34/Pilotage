@@ -20,14 +20,66 @@ pub const GIMBAL_NEUTRAL_BUTTON: u16 = 0;
 /// The `pressed` button-edge code carried on a control frame.
 pub const BUTTON_EDGE_PRESSED: u8 = 1;
 
+/// The most axis demands any one frame carries: the four flight axes.
+pub const MAX_FRAME_AXES: usize = 4;
+/// The most button edges any one frame carries: the gimbal recenter.
+pub const MAX_FRAME_EDGES: usize = 1;
+
 /// One scope's control frame for this tick: normalized axis demands plus any
-/// button edges. The shell stamps sequence/generation/time and encodes it.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// button edges. Fixed-capacity so a steady tick constructs one without
+/// allocating; the shell stamps sequence/generation/time and encodes it.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frame {
-    /// `(axis_id, value)` demands, values in `[-1, 1]`.
-    pub axes: Vec<(u16, f32)>,
-    /// `(button_id, edge_code)` edges fired this tick.
-    pub edges: Vec<(u16, u8)>,
+    axes: [(u16, f32); MAX_FRAME_AXES],
+    axis_len: usize,
+    edges: [(u16, u8); MAX_FRAME_EDGES],
+    edge_len: usize,
+}
+
+impl Frame {
+    /// The four flight axes in canonical roll/pitch/throttle/yaw order.
+    #[must_use]
+    pub fn motion(roll: f32, pitch: f32, throttle: f32, yaw: f32) -> Self {
+        Self {
+            axes: [
+                (AXIS_ROLL, roll),
+                (AXIS_PITCH, pitch),
+                (AXIS_THROTTLE, throttle),
+                (AXIS_YAW, yaw),
+            ],
+            axis_len: 4,
+            edges: [(0, 0); MAX_FRAME_EDGES],
+            edge_len: 0,
+        }
+    }
+
+    /// The two gimbal-rate axes, with an optional one-shot recenter edge.
+    #[must_use]
+    pub fn gimbal(pitch: f32, yaw: f32, recenter: bool) -> Self {
+        let mut edges = [(0u16, 0u8); MAX_FRAME_EDGES];
+        let edge_len = usize::from(recenter);
+        if recenter {
+            edges[0] = (GIMBAL_NEUTRAL_BUTTON, BUTTON_EDGE_PRESSED);
+        }
+        Self {
+            axes: [(AXIS_PITCH, pitch), (AXIS_YAW, yaw), (0, 0.0), (0, 0.0)],
+            axis_len: 2,
+            edges,
+            edge_len,
+        }
+    }
+
+    /// The `(axis_id, value)` demands this frame carries, in emit order.
+    #[must_use]
+    pub fn axes(&self) -> &[(u16, f32)] {
+        &self.axes[..self.axis_len]
+    }
+
+    /// The `(button_id, edge_code)` edges this frame fired.
+    #[must_use]
+    pub fn edges(&self) -> &[(u16, u8)] {
+        &self.edges[..self.edge_len]
+    }
 }
 
 /// A reliable-stream lease action for the gimbal scope.
@@ -50,9 +102,11 @@ pub struct ControlPlan {
     pub gimbal: Option<Frame>,
     /// A gimbal-lease request or release, when the plan calls for one.
     pub lease: Option<LeaseAction>,
-    /// A motion-lease request or release, cycled with the gimbal lease across a
-    /// profile activation (the scheme remaps flight, so the motion generation
-    /// must be fenced and reacquired too).
+    /// A motion-lease request or release from the post-handover reacquisition.
+    /// A live scheme swap fences the motion generation, so the runtime releases
+    /// the lease, waits for the release to register, then re-requests — and
+    /// gates all motion output (`motion` stays `None`) until the host regrants
+    /// on a fresh generation, so the new mapping never rides the old authority.
     pub motion_lease: Option<LeaseAction>,
     /// A human-readable scheme label for the DOM readout (never control).
     pub label: Option<&'static str>,

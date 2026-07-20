@@ -101,7 +101,8 @@ impl WebControl {
     /// Evaluates one control tick from the input buffer and the session
     /// scalars, writes the plan into the output buffer, and returns the plan
     /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover; `session` packs
-    /// bit0 connected, bit1 lease-granted, bit2 lease-denied.
+    /// bit0 connected, bit1 gimbal-lease-granted, bit2 gimbal-lease-denied,
+    /// bit3 motion-lease-granted.
     pub fn evaluate(
         &mut self,
         axis_count: u32,
@@ -119,6 +120,7 @@ impl WebControl {
             connected: session & 1 != 0,
             lease_granted: session & (1 << 1) != 0,
             lease_denied: session & (1 << 2) != 0,
+            motion_granted: session & (1 << 3) != 0,
         };
         let plan = self.runtime.evaluate(&self.sample, &state);
         self.store_plan(&plan)
@@ -197,7 +199,7 @@ impl WebControl {
         if let Some(gimbal) = &plan.gimbal {
             flags |= FLAG_GIMBAL;
             write_frame_axes(&mut self.output, OUT_GIMBAL, gimbal, 2);
-            if !gimbal.edges.is_empty() {
+            if !gimbal.edges().is_empty() {
                 flags |= FLAG_RECENTER;
             }
         }
@@ -229,7 +231,7 @@ fn mode_from_u32(mode: u32) -> Mode {
 /// Writes the first `count` axis values of a frame into the buffer in axis-id
 /// order (the runtime emits them already ordered).
 fn write_frame_axes(buffer: &mut [u8], offset: usize, frame: &crate::plan::Frame, count: usize) {
-    for (slot, (_, value)) in frame.axes.iter().take(count).enumerate() {
+    for (slot, (_, value)) in frame.axes().iter().take(count).enumerate() {
         write_f32(buffer, offset + slot * 4, *value);
     }
 }

@@ -101,4 +101,9 @@ pub struct SessionState {
     /// Whether the gimbal scope lease was denied this session (never
     /// re-requested once denied).
     pub lease_denied: bool,
+    /// Whether the MOTION scope lease is currently granted on the current
+    /// generation. A profile handover releases it, so this drives the runtime's
+    /// motion-authority reacquisition: no motion frame publishes until the host
+    /// regrants the lease on a fresh generation.
+    pub motion_granted: bool,
 }

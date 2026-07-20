@@ -559,6 +559,10 @@ async function runSessionStreamReader(reader, token) {
         const m = decoded.message;
         if (m.vehicleId === VEHICLE_ID && m.scope === MOTION_SCOPE) {
           releaseTracker.acknowledge();
+          // The motion lease is released (input-loss OR a profile handover):
+          // drop local authority so the runtime gates motion output and only
+          // re-requests once this release is reflected.
+          state.leaseGranted = false;
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
         } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
           log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
@@ -581,6 +585,25 @@ async function runSessionStreamReader(reader, token) {
         log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
         if (!m.granted) {
           log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
+        }
+      }
+      if (
+        decoded.kind === "LeaseResponse" &&
+        decoded.message.scope === MOTION_SCOPE &&
+        decoded.message.vehicleId === VEHICLE_ID
+      ) {
+        // A motion lease REGRANT after a profile handover (the runtime released
+        // and re-requested it). Install the fresh generation and restart the
+        // sequence before any frame publishes on it, then let the runtime
+        // resume motion output. Another vehicle's response never installs ours.
+        const m = decoded.message;
+        state.leaseGranted = !!m.granted;
+        if (m.granted) {
+          state.generation = BigInt(m.generation || 0);
+          state.sequence = 0;
+          log(`LeaseResponse[motion]: granted generation=${m.generation}`);
+        } else {
+          log(`motion lease denied (reason ${m.reason})`);
         }
       }
     }
@@ -1099,6 +1122,10 @@ async function runControlLoop(writer, token) {
         connected: state.connected,
         leaseGranted: state.gimbalLeaseGranted,
         leaseDenied: state.gimbalLeaseDenied,
+        // The MOTION lease grant: the runtime gates all motion output until it
+        // is regranted on a fresh generation after a profile handover, so a
+        // remapped scheme never publishes on the released generation.
+        motionGranted: state.leaseGranted,
         nowMs: performance.now(),
       };
       const plan = pad

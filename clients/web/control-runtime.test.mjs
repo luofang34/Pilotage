@@ -28,6 +28,9 @@ const session = (mode, granted = false, denied = false) => ({
   connected: true,
   leaseGranted: granted,
   leaseDenied: denied,
+  // The motion lease is granted in steady flight; the runtime gates motion
+  // output when it is not (a profile handover fences it — see vector 8).
+  motionGranted: true,
   nowMs: 100_000,
 });
 const pad = (axes, pressed) => ({
@@ -101,6 +104,19 @@ check("the built-in default profile activated (revision 1)", shell.activationRev
   const press = shell.tickFromPad(held, gen(101)); // press again
   check("v7 a fresh arm after release fires once", press.arm === true);
   check("v7 a fresh R3 after release recenters once", press.gimbal?.recenter === true);
+}
+
+// Vector 8: motion output is GATED whenever the motion lease is not granted, so
+// a remapped scheme can never publish a flight command on the released
+// generation during a profile handover (the round-5 safety fix). This drives
+// the session-bit-3 ABI through the real wasm: a fully deflected stick with no
+// motion grant yields NO motion frame, and motion resumes once regranted.
+{
+  const stick = pad([1, 0, 0, 0], []); // left stick hard over
+  const ungranted = { ...session("quad-pilot", true), motionGranted: false };
+  check("v8 motion is gated without a motion-lease grant", shell.tickFromPad(stick, ungranted).motion === null);
+  const granted = { ...session("quad-pilot", true), motionGranted: true };
+  check("v8 motion resumes once the motion lease is granted", shell.tickFromPad(stick, granted).motion !== null);
 }
 
 if (failures > 0) {

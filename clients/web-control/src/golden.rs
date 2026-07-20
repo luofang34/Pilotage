@@ -43,13 +43,14 @@ fn session(mode: Mode, granted: bool, denied: bool) -> SessionState {
         connected: true,
         lease_granted: granted,
         lease_denied: denied,
+        motion_granted: true,
     }
 }
 
 fn axis(frame: &Option<crate::plan::Frame>, id: u16) -> f32 {
     frame
         .as_ref()
-        .and_then(|f| f.axes.iter().find(|(a, _)| *a == id))
+        .and_then(|f| f.axes().iter().find(|(a, _)| *a == id))
         .map_or(f32::NAN, |(_, v)| *v)
 }
 
@@ -77,12 +78,12 @@ fn golden_vectors() {
     let r3 = pad(&[0.0, 0.0, 0.0, 0.0], &[11]);
     let first = rt.evaluate(&r3, &session(Mode::QuadPilot, true, false));
     assert!(
-        first.gimbal.as_ref().is_some_and(|f| !f.edges.is_empty()),
+        first.gimbal.as_ref().is_some_and(|f| !f.edges().is_empty()),
         "v2 a fresh R3 recenters"
     );
     let second = rt.evaluate(&r3, &session(Mode::QuadPilot, true, false));
     assert!(
-        second.gimbal.as_ref().is_some_and(|f| f.edges.is_empty()),
+        second.gimbal.as_ref().is_some_and(|f| f.edges().is_empty()),
         "v2 holding R3 does not re-recenter"
     );
 

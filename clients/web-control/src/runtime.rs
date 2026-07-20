@@ -9,10 +9,7 @@
 //! itself only accepts a [`CompiledProfile`]; invalid bytes never get here.
 
 use crate::flight::{Capture, flight_axes, shaped_stick};
-use crate::plan::{
-    AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ActivationPlan, BUTTON_EDGE_PRESSED,
-    ControlPlan, Frame, GIMBAL_NEUTRAL_BUTTON, LeaseAction,
-};
+use crate::plan::{ActivationPlan, ControlPlan, Frame, LeaseAction};
 use crate::profile::CompiledProfile;
 use crate::quasimode::{
     LeasePlan, frame_plan, gimbal_demand, lease_plan, modifier_held, reset_edge, reset_held,
@@ -35,16 +32,42 @@ pub struct ControlRuntime {
     last_request_ms: f64,
     prev_arm: bool,
     prev_disarm: bool,
-    // Set when a profile SWITCH installs (not the first bootstrap install): the
-    // next normal tick reacquires the motion lease that the handover released,
-    // so the host fences the old flight generation before the new mapping runs.
-    reacquire_motion: bool,
+    // Where the motion lease sits after a profile switch. A live scheme swap
+    // remaps flight, so the handover fences the motion generation and the
+    // runtime reacquires it — gating all motion output until the host regrants
+    // on a fresh generation, so the new mapping never publishes on the old
+    // authority.
+    motion_phase: MotionPhase,
+    // When the last motion release/request was emitted, so a dropped lease
+    // write is retried rather than wedging the reacquisition.
+    motion_action_ms: f64,
     // The session generation last evaluated. When the shell reports a NEW
     // generation (a fresh connect), the first tick seeds every discrete-action
     // baseline from the held state and fires no edge — a button held across a
     // disconnect/reconnect cannot become a fresh arm/disarm/recenter.
     last_generation: Option<u32>,
 }
+
+/// The motion lease's position in the reacquisition handshake after a profile
+/// switch. Steady flight sits in [`MotionPhase::Held`]; a handover walks
+/// `Held → Releasing → Reacquiring → Held`, gating motion output until the last
+/// step lands a fresh grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum MotionPhase {
+    /// Authority held on the current generation; motion frames publish.
+    #[default]
+    Held,
+    /// The handover released the motion lease; awaiting the session to reflect
+    /// the release (`motion_granted` false) before re-requesting.
+    Releasing,
+    /// Re-requested the lease; awaiting the grant on a fresh generation. Motion
+    /// output stays gated so nothing publishes on the released generation.
+    Reacquiring,
+}
+
+/// A dropped motion release/request is re-emitted after this long without the
+/// session reflecting the expected transition.
+const MOTION_LEASE_RETRY_MS: f64 = 250.0;
 
 impl ControlRuntime {
     /// A runtime with no profile yet. The first [`Self::activate`] installs
@@ -150,7 +173,7 @@ impl ControlRuntime {
         };
         self.prime_for_generation(sample, session, &active);
         let plan = if self.pending.is_some() {
-            self.evaluate_handover(sample, &active)
+            self.evaluate_handover(sample, session, &active)
         } else {
             self.evaluate_active(sample, session, &active)
         };
@@ -182,7 +205,12 @@ impl ControlRuntime {
     /// Emits the neutral handover, and installs the pending profile once the
     /// captured controls (the modifier and the gimbal sticks) read neutral, so
     /// behavior changes only after a genuine neutral transition.
-    fn evaluate_handover(&mut self, sample: &RawSample, active: &CompiledProfile) -> ControlPlan {
+    fn evaluate_handover(
+        &mut self,
+        sample: &RawSample,
+        session: &SessionState,
+        active: &CompiledProfile,
+    ) -> ControlPlan {
         // Neutral must hold across the UNION of the active AND candidate
         // controls: a profile swap remaps flight and gimbal inputs, so any
         // input deflected under EITHER profile could jump meaning at install.
@@ -195,7 +223,7 @@ impl ControlRuntime {
             self.reset_baseline = reset_held(sample, &candidate.gimbal);
             self.prev_arm = sample.pressed(usize::from(candidate.flight.arm_button));
             self.prev_disarm = sample.pressed(usize::from(candidate.flight.disarm_button));
-            self.install_after_seed(candidate);
+            self.install_after_seed(candidate, session.now_ms);
         }
         ControlPlan {
             motion: Some(neutral_motion()),
@@ -212,14 +240,18 @@ impl ControlRuntime {
     }
 
     /// Installs after the edge baselines have been seeded to the current held
-    /// state (so a held control does not fire), without re-clearing them.
-    fn install_after_seed(&mut self, candidate: CompiledProfile) {
+    /// state (so a held control does not fire), without re-clearing them. Opens
+    /// the motion-lease reacquisition: the handover released the motion lease,
+    /// so the runtime gates motion output until it is regranted on a fresh
+    /// generation.
+    fn install_after_seed(&mut self, candidate: CompiledProfile, now_ms: f64) {
         self.active = Some(candidate);
         self.pending = None;
         self.activation_revision = self.activation_revision.wrapping_add(1);
         self.streaming = false;
         self.last_request_ms = NEVER_REQUESTED_MS;
-        self.reacquire_motion = true;
+        self.motion_phase = MotionPhase::Releasing;
+        self.motion_action_ms = now_ms;
     }
 
     /// The normal tick: flight motion (masked while LT is held), the gimbal
@@ -251,31 +283,25 @@ impl ControlRuntime {
         let gimbal_frame = active_gimbal.then(|| {
             let (pitch, yaw, recenter) =
                 plan.map_or((0.0, 0.0, false), |p| (p.pitch, p.yaw, p.recenter));
-            let edges = if recenter {
-                vec![(GIMBAL_NEUTRAL_BUTTON, BUTTON_EDGE_PRESSED)]
-            } else {
-                Vec::new()
-            };
-            Frame {
-                axes: vec![(AXIS_PITCH, pitch), (AXIS_YAW, yaw)],
-                edges,
-            }
+            Frame::gimbal(pitch, yaw, recenter)
         });
 
         let motion = self.motion_frame(sample, session, active, captured);
         let lease = self.lease_action(session);
-        let motion_lease = self.reacquire_motion.then(|| {
-            self.reacquire_motion = false;
-            LeaseAction::Request
-        });
+        let motion_lease = self.advance_motion_authority(session);
+        // Gate ALL motion output until authority is held on a live grant: while
+        // reacquiring after a handover, a motion frame — even a real stick
+        // command — would ride the released, stale generation. Arm/disarm gate
+        // with it (their baselines still advance, so nothing fires on resume).
+        let publish_motion = self.motion_phase == MotionPhase::Held && session.motion_granted;
         ControlPlan {
-            motion: Some(motion.frame),
+            motion: publish_motion.then_some(motion.frame),
             gimbal: gimbal_frame,
             lease,
             motion_lease,
             label: Some(motion.label),
-            arm: motion.arm,
-            disarm: motion.disarm,
+            arm: publish_motion && motion.arm,
+            disarm: publish_motion && motion.disarm,
             capture_active: captured,
         }
     }
@@ -300,15 +326,7 @@ impl ControlRuntime {
         };
         let axes = flight_axes(sample, flight, &active.flight_stick, session.mode, capture);
         MotionOutcome {
-            frame: Frame {
-                axes: vec![
-                    (AXIS_ROLL, axes.roll),
-                    (AXIS_PITCH, axes.pitch),
-                    (AXIS_THROTTLE, axes.throttle),
-                    (AXIS_YAW, axes.yaw),
-                ],
-                edges: Vec::new(),
-            },
+            frame: Frame::motion(axes.roll, axes.pitch, axes.throttle, axes.yaw),
             label: axes.label,
             arm: self.edge_fired(sample, flight.arm_button, true),
             disarm: self.edge_fired(sample, flight.disarm_button, false),
@@ -338,6 +356,46 @@ impl ControlRuntime {
             }
             LeasePlan::Release => Some(LeaseAction::Release),
             LeasePlan::None => None,
+        }
+    }
+
+    /// Advances the motion-lease reacquisition after a profile handover and
+    /// returns any lease action to emit this tick. The sequence is strictly
+    /// `release → (session reflects release) → request → (session regrants)`:
+    /// the request is never emitted until the session confirms the release, and
+    /// a dropped release/request is re-emitted after [`MOTION_LEASE_RETRY_MS`]
+    /// so a lost write cannot wedge the handshake. Motion output stays gated
+    /// (see the `Held` check in [`Self::evaluate_active`]) for every phase but
+    /// `Held`, so no frame publishes on the released generation.
+    fn advance_motion_authority(&mut self, session: &SessionState) -> Option<LeaseAction> {
+        let stalled = session.now_ms - self.motion_action_ms >= MOTION_LEASE_RETRY_MS;
+        match self.motion_phase {
+            MotionPhase::Held => None,
+            MotionPhase::Releasing => {
+                if !session.motion_granted {
+                    // The host has released; only now request the new grant.
+                    self.motion_phase = MotionPhase::Reacquiring;
+                    self.motion_action_ms = session.now_ms;
+                    Some(LeaseAction::Request)
+                } else if stalled {
+                    self.motion_action_ms = session.now_ms;
+                    Some(LeaseAction::Release)
+                } else {
+                    None
+                }
+            }
+            MotionPhase::Reacquiring => {
+                if session.motion_granted {
+                    // Regranted on a fresh generation: resume publishing.
+                    self.motion_phase = MotionPhase::Held;
+                    None
+                } else if stalled {
+                    self.motion_action_ms = session.now_ms;
+                    Some(LeaseAction::Request)
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -381,23 +439,12 @@ struct MotionOutcome {
 
 /// An explicit all-zero motion frame for the neutral handover.
 fn neutral_motion() -> Frame {
-    Frame {
-        axes: vec![
-            (AXIS_ROLL, 0.0),
-            (AXIS_PITCH, 0.0),
-            (AXIS_THROTTLE, 0.0),
-            (AXIS_YAW, 0.0),
-        ],
-        edges: Vec::new(),
-    }
+    Frame::motion(0.0, 0.0, 0.0, 0.0)
 }
 
 /// An explicit zero-rate gimbal frame for the neutral handover.
 fn neutral_gimbal() -> Frame {
-    Frame {
-        axes: vec![(AXIS_PITCH, 0.0), (AXIS_YAW, 0.0)],
-        edges: Vec::new(),
-    }
+    Frame::gimbal(0.0, 0.0, false)
 }
 
 #[cfg(test)]
