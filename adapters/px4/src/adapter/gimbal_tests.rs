@@ -330,3 +330,57 @@ fn a_gimbal_failure_flag_reaches_telemetry() {
         "device failure is surfaced, not dropped"
     );
 }
+
+/// A gimbal (or FC) reboot regresses the device's `time_boot_ms`. The
+/// stamp must open a NEW epoch under a stable identity so acquisition
+/// time never runs backwards within one (identity, epoch) — otherwise a
+/// reboot is indistinguishable from a stale replay.
+#[test]
+fn a_gimbal_reboot_opens_a_new_epoch_instead_of_regressing_time() {
+    let state = live_state();
+    let (control, _lanes) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_gimbal(control);
+
+    let stamp_now = |adapter: &mut Px4Adapter| {
+        adapter.sample_telemetry().samples[0]
+            .gimbal
+            .expect("gimbal sample present")
+            .stamp
+    };
+
+    // One boot session: two reports with rising device boot time.
+    feed_gimbal(&state, 5_000, 0, Instant::now());
+    let first = stamp_now(&mut adapter);
+    feed_gimbal(&state, 6_000, 0, Instant::now());
+    let later = stamp_now(&mut adapter);
+    assert_eq!(
+        first.source_epoch, later.source_epoch,
+        "no reboot within one boot session"
+    );
+    assert!(
+        later.acquired_at_ns > first.acquired_at_ns,
+        "acquisition time advances within an epoch"
+    );
+
+    // Reboot: the device's boot time regresses 6000 -> 10 ms.
+    feed_gimbal(&state, 10, 0, Instant::now());
+    let after = stamp_now(&mut adapter);
+    assert_eq!(
+        after.source_epoch,
+        later.source_epoch.wrapping_add(1),
+        "a reboot opens the next epoch"
+    );
+    assert_eq!(
+        after.source_incarnation, later.source_incarnation,
+        "the same gimbal source identity spans the reboot; only the epoch turns over"
+    );
+    // The small post-reboot boot time lives under the NEW epoch, so no
+    // consumer ever sees time regress within one (identity, epoch).
+
+    // Re-sampling the same post-reboot report is not a second reboot.
+    let resample = stamp_now(&mut adapter);
+    assert_eq!(
+        resample.source_epoch, after.source_epoch,
+        "re-observing the same boot time keeps the epoch"
+    );
+}

@@ -84,6 +84,11 @@ pub struct Px4Adapter {
     arm: Option<ArmReport>,
     last_seen_heartbeat: Option<std::time::Instant>,
     arm_incarnation: pilotage_adapter_api::SourceIncarnation,
+    // Payload-device stamp discipline for the gimbal lane: a stable
+    // gimbal identity plus a reboot-aware epoch, kept apart from the FC
+    // arm incarnation so a device reboot never regresses time under a
+    // fixed identity+epoch.
+    gimbal_stamp: sampling::GimbalStamp,
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
     // Commanded-reset latch: engaged when a sim reset is requested,
@@ -167,6 +172,9 @@ impl Px4Adapter {
             arm: None,
             last_seen_heartbeat: None,
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
+            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
+                rand_incarnation(),
+            )),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
@@ -190,6 +198,9 @@ impl Px4Adapter {
             arm: None,
             last_seen_heartbeat: None,
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
+            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
+                [0x60; 16],
+            )),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
