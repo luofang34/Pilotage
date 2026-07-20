@@ -475,4 +475,6 @@ fn fold_datagram(
 }
 
 #[cfg(test)]
+mod arbiter_tests;
+#[cfg(test)]
 mod tests;
