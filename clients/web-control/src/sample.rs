@@ -106,4 +106,7 @@ pub struct SessionState {
     /// motion-authority reacquisition: no motion frame publishes until the host
     /// regrants the lease on a fresh generation.
     pub motion_granted: bool,
+    /// Whether the host DENIED the post-handover motion reacquire. Terminal: the
+    /// runtime stops re-requesting and keeps motion gated until a fresh session.
+    pub motion_denied: bool,
 }

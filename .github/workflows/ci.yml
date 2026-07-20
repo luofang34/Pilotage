@@ -186,6 +186,9 @@ jobs:
       - name: viewer input-loss gate (latched blur, no post-latch frames, held-button safety)
         run: node clients/web/control-gate.test.mjs
 
+      - name: motion-lease reacquisition (release fence, stale-grant rejection, terminal denial)
+        run: node clients/web/motion-lease.test.mjs
+
       - name: viewer explicit lease release (ack/timeout/abandon, reconnect awaits settlement)
         run: node clients/web/lease-release.test.mjs
 

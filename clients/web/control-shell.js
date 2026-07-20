@@ -182,7 +182,8 @@ export class ControlShell {
       (session.connected ? 1 : 0) |
       (session.leaseGranted ? 1 << 1 : 0) |
       (session.leaseDenied ? 1 << 2 : 0) |
-      (session.motionGranted ? 1 << 3 : 0);
+      (session.motionGranted ? 1 << 3 : 0) |
+      (session.motionDenied ? 1 << 4 : 0);
     const result = this.#control.evaluate(
       axisCount,
       buttonCount,

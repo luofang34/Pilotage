@@ -1,17 +1,18 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! Motion-lease reacquisition after a live profile switch: the runtime fences
-//! the motion generation and gates every motion frame until the host regrants
-//! on a fresh generation, so a remapped scheme never publishes on the released
-//! generation.
+//! Motion-lease reacquisition after a live profile switch. The runtime fences
+//! the motion generation, gates live output through the whole handshake, and
+//! recovers ONLY through a neutral activation burst once the operator's
+//! controls read neutral — so a remapped scheme never publishes on the released
+//! generation, and the host clears its link-loss brake before live resumes. A
+//! denied reacquire is terminal.
 
 use super::{SECOND_PROFILE, sample, session, with_default};
 use crate::plan::LeaseAction;
 use crate::profile::ProfileRuntime;
-use crate::sample::{Mode, SessionState};
+use crate::sample::{Mode, RawSample, SessionState};
 
-/// A session whose MOTION lease grant is set explicitly, for driving the
-/// post-handover motion-authority reacquisition.
+/// A session whose MOTION lease grant is set explicitly.
 fn session_motion(mode: Mode, granted: bool, motion_granted: bool) -> SessionState {
     SessionState {
         motion_granted,
@@ -27,73 +28,107 @@ fn session_at(now_ms: f64, mode: Mode, granted: bool, motion_granted: bool) -> S
     }
 }
 
+/// A session whose motion reacquire was DENIED by the host.
+fn session_denied(now_ms: f64, mode: Mode) -> SessionState {
+    SessionState {
+        now_ms,
+        motion_denied: true,
+        ..session_motion(mode, true, false)
+    }
+}
+
+fn deflected() -> RawSample {
+    sample(&[1.0, 1.0, 1.0, 1.0], &[])
+}
+
+fn neutral() -> RawSample {
+    sample(&[0.0, 0.0, 0.0, 0.0], &[])
+}
+
+/// Whether the plan carries a motion frame whose every axis reads zero.
+fn is_neutral_motion(plan: &crate::plan::ControlPlan) -> bool {
+    plan.motion
+        .as_ref()
+        .is_some_and(|frame| frame.axes().iter().all(|(_, value)| *value == 0.0))
+}
+
 #[test]
-fn a_live_profile_switch_reacquires_motion_before_the_new_mapping_publishes() {
+fn a_live_switch_recovers_only_through_a_neutral_activation_burst() {
     let mut runtime = with_default();
-    // Steady flight publishes motion frames on the held lease.
-    let steady = runtime.evaluate(
-        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
-        &session(Mode::QuadPilot, true),
+    // Steady flight publishes the live stick.
+    assert!(
+        runtime
+            .evaluate(&deflected(), &session(Mode::QuadPilot, true))
+            .motion
+            .is_some(),
+        "steady flight publishes live motion"
     );
-    assert!(steady.motion.is_some(), "steady flight publishes motion");
 
-    // Swap profiles with controls neutral: the candidate installs at once and
-    // the handover releases the motion lease.
+    // Handover installs with controls neutral, releasing the motion lease.
     runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
-    let install = runtime.evaluate(
-        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
-        &session(Mode::QuadPilot, true),
-    );
+    let install = runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
     assert_eq!(runtime.activation_revision(), 2, "neutral controls install");
-    assert_eq!(
-        install.motion_lease,
-        Some(LeaseAction::Release),
-        "the handover releases the motion lease"
-    );
+    assert_eq!(install.motion_lease, Some(LeaseAction::Release));
 
-    // Right after install the release has not landed yet: no request is sent,
-    // and even a fully deflected stick produces NO motion frame. This is the
-    // reviewer's repro — a live command on the released generation — gated out.
-    let right_after = runtime.evaluate(
-        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
-        &session(Mode::QuadPilot, true),
+    // Release lands → request; live output is gated throughout.
+    let req = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, false));
+    assert_eq!(req.motion_lease, Some(LeaseAction::Request));
+    assert!(req.motion.is_none(), "gated while reacquiring");
+
+    // Regranted, but the operator is STILL deflected: no live command, and no
+    // neutral activation while deflected — motion stays fully gated.
+    let held = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, true));
+    assert!(
+        held.motion.is_none(),
+        "gated while the operator is deflected"
     );
-    assert_eq!(
-        right_after.motion_lease, None,
-        "no request until the release lands"
+    let still = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, true));
+    assert!(still.motion.is_none(), "stays gated as long as deflected");
+
+    // The operator centers: the runtime transmits NEUTRAL activation frames
+    // (not the live stick) under the fresh generation, so the host recovers.
+    for i in 0..3 {
+        let plan = runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, true, true));
+        assert!(is_neutral_motion(&plan), "neutral activation frame {i}");
+    }
+
+    // Recovery complete: a deflection now publishes LIVE again (and the operator
+    // was neutral at the moment of resume, so nothing jumped).
+    let resumed = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, true));
+    assert!(
+        resumed.motion.is_some(),
+        "live output resumes after the burst"
     );
     assert!(
-        right_after.motion.is_none(),
-        "no motion frame publishes on the stale generation"
+        !is_neutral_motion(&resumed),
+        "the resumed frame is the live deflected stick"
     );
+}
 
-    // The host acknowledges the release (motion no longer granted): ONLY now is
-    // the request emitted — release strictly precedes request — still gated.
-    let requesting = runtime.evaluate(
-        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
-        &session_motion(Mode::QuadPilot, true, false),
+#[test]
+fn a_denied_motion_reacquire_is_terminal() {
+    let mut runtime = with_default();
+    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    // Install (Releasing) at t=1000, then the release lands → request at t=1010.
+    runtime.evaluate(&neutral(), &session_at(1000.0, Mode::QuadPilot, true, true));
+    let req = runtime.evaluate(
+        &neutral(),
+        &session_at(1010.0, Mode::QuadPilot, true, false),
     );
-    assert_eq!(
-        requesting.motion_lease,
-        Some(LeaseAction::Request),
-        "requests only after the release is reflected"
-    );
-    assert!(
-        requesting.motion.is_none(),
-        "motion stays gated awaiting the fresh grant"
-    );
+    assert_eq!(req.motion_lease, Some(LeaseAction::Request));
 
-    // The host regrants on a fresh generation: motion resumes with the new
-    // mapping and no further lease action fires.
-    let resumed = runtime.evaluate(
-        &sample(&[1.0, 0.0, 0.0, 0.0], &[]),
-        &session_motion(Mode::QuadPilot, true, true),
-    );
-    assert!(resumed.motion.is_some(), "motion resumes once regranted");
+    // The host DENIES the reacquire: terminal — no re-request, motion gated.
+    let denied = runtime.evaluate(&deflected(), &session_denied(1020.0, Mode::QuadPilot));
+    assert_eq!(denied.motion_lease, None, "a denial stops requesting");
+    assert!(denied.motion.is_none(), "denied motion is gated");
+
+    // Well past the retry window, still no request and still gated (terminal).
+    let later = runtime.evaluate(&deflected(), &session_denied(3000.0, Mode::QuadPilot));
     assert_eq!(
-        resumed.motion_lease, None,
-        "no lease action once held again"
+        later.motion_lease, None,
+        "denial is terminal — never retries"
     );
+    assert!(later.motion.is_none());
 }
 
 #[test]
@@ -101,19 +136,16 @@ fn a_dropped_motion_reacquire_request_is_retried() {
     let mut runtime = with_default();
     runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
     // Install at t=1000 (motion still granted): the runtime enters Releasing.
-    runtime.evaluate(
-        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
-        &session_at(1000.0, Mode::QuadPilot, true, true),
-    );
+    runtime.evaluate(&neutral(), &session_at(1000.0, Mode::QuadPilot, true, true));
     // Release lands at t=1010: the request is emitted and the clock recorded.
     let req = runtime.evaluate(
-        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &neutral(),
         &session_at(1010.0, Mode::QuadPilot, true, false),
     );
     assert_eq!(req.motion_lease, Some(LeaseAction::Request));
     // 100 ms later with still no grant: inside the retry window, no re-request.
     let quiet = runtime.evaluate(
-        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &neutral(),
         &session_at(1110.0, Mode::QuadPilot, true, false),
     );
     assert_eq!(
@@ -123,7 +155,7 @@ fn a_dropped_motion_reacquire_request_is_retried() {
     // Past the retry window with the grant still missing: re-emit the request,
     // so a dropped lease write cannot wedge the reacquisition.
     let retry = runtime.evaluate(
-        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &neutral(),
         &session_at(1300.0, Mode::QuadPilot, true, false),
     );
     assert_eq!(

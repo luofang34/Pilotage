@@ -31,6 +31,7 @@ const session = (mode, granted = false, denied = false) => ({
   // The motion lease is granted in steady flight; the runtime gates motion
   // output when it is not (a profile handover fences it — see vector 8).
   motionGranted: true,
+  motionDenied: false,
   nowMs: 100_000,
 });
 const pad = (axes, pressed) => ({

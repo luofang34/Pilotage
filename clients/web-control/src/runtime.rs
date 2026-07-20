@@ -16,6 +16,9 @@ use crate::quasimode::{
 };
 use crate::sample::{RawSample, SessionState};
 
+mod authority;
+use authority::{MotionOutput, MotionPhase};
+
 /// Sentinel making the first lease request fire immediately (before any real
 /// `now_ms`), rather than waiting out a debounce window from time zero.
 const NEVER_REQUESTED_MS: f64 = f64::NEG_INFINITY;
@@ -41,33 +44,16 @@ pub struct ControlRuntime {
     // When the last motion release/request was emitted, so a dropped lease
     // write is retried rather than wedging the reacquisition.
     motion_action_ms: f64,
+    // Consecutive neutral activation frames transmitted since the operator's
+    // controls returned to neutral, counting toward recovery. Reset whenever
+    // the controls deflect again, so a live command never rides out as neutral.
+    motion_neutral_frames: u8,
     // The session generation last evaluated. When the shell reports a NEW
     // generation (a fresh connect), the first tick seeds every discrete-action
     // baseline from the held state and fires no edge — a button held across a
     // disconnect/reconnect cannot become a fresh arm/disarm/recenter.
     last_generation: Option<u32>,
 }
-
-/// The motion lease's position in the reacquisition handshake after a profile
-/// switch. Steady flight sits in [`MotionPhase::Held`]; a handover walks
-/// `Held → Releasing → Reacquiring → Held`, gating motion output until the last
-/// step lands a fresh grant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum MotionPhase {
-    /// Authority held on the current generation; motion frames publish.
-    #[default]
-    Held,
-    /// The handover released the motion lease; awaiting the session to reflect
-    /// the release (`motion_granted` false) before re-requesting.
-    Releasing,
-    /// Re-requested the lease; awaiting the grant on a fresh generation. Motion
-    /// output stays gated so nothing publishes on the released generation.
-    Reacquiring,
-}
-
-/// A dropped motion release/request is re-emitted after this long without the
-/// session reflecting the expected transition.
-const MOTION_LEASE_RETRY_MS: f64 = 250.0;
 
 impl ControlRuntime {
     /// A runtime with no profile yet. The first [`Self::activate`] installs
@@ -200,6 +186,11 @@ impl ControlRuntime {
         self.prev_arm = sample.pressed(usize::from(active.flight.arm_button));
         self.prev_disarm = sample.pressed(usize::from(active.flight.disarm_button));
         self.streaming = false;
+        // A fresh session re-establishes motion authority through bootstrap, so
+        // any mid-handover or terminal-denied motion phase from the previous
+        // connection is void.
+        self.motion_phase = MotionPhase::Held;
+        self.motion_neutral_frames = 0;
     }
 
     /// Emits the neutral handover, and installs the pending profile once the
@@ -286,22 +277,27 @@ impl ControlRuntime {
             Frame::gimbal(pitch, yaw, recenter)
         });
 
-        let motion = self.motion_frame(sample, session, active, captured);
+        let outcome = self.motion_frame(sample, session, active, captured);
         let lease = self.lease_action(session);
-        let motion_lease = self.advance_motion_authority(session);
-        // Gate ALL motion output until authority is held on a live grant: while
-        // reacquiring after a handover, a motion frame — even a real stick
-        // command — would ride the released, stale generation. Arm/disarm gate
-        // with it (their baselines still advance, so nothing fires on resume).
-        let publish_motion = self.motion_phase == MotionPhase::Held && session.motion_granted;
+        let (motion_lease, output) = self.advance_motion_authority(sample, session, active);
+        // Live output only under a held, granted lease; the recovery path emits
+        // explicit neutral activation frames instead, and everything else gates.
+        // Arm/disarm fire only when live (their baselines still advance while
+        // gated, so a control held through recovery fires nothing on resume).
+        let live = output == MotionOutput::Live;
+        let motion = match output {
+            MotionOutput::Gated => None,
+            MotionOutput::Neutral => Some(neutral_motion()),
+            MotionOutput::Live => Some(outcome.frame),
+        };
         ControlPlan {
-            motion: publish_motion.then_some(motion.frame),
+            motion,
             gimbal: gimbal_frame,
             lease,
             motion_lease,
-            label: Some(motion.label),
-            arm: publish_motion && motion.arm,
-            disarm: publish_motion && motion.disarm,
+            label: Some(outcome.label),
+            arm: live && outcome.arm,
+            disarm: live && outcome.disarm,
             capture_active: captured,
         }
     }
@@ -356,46 +352,6 @@ impl ControlRuntime {
             }
             LeasePlan::Release => Some(LeaseAction::Release),
             LeasePlan::None => None,
-        }
-    }
-
-    /// Advances the motion-lease reacquisition after a profile handover and
-    /// returns any lease action to emit this tick. The sequence is strictly
-    /// `release → (session reflects release) → request → (session regrants)`:
-    /// the request is never emitted until the session confirms the release, and
-    /// a dropped release/request is re-emitted after [`MOTION_LEASE_RETRY_MS`]
-    /// so a lost write cannot wedge the handshake. Motion output stays gated
-    /// (see the `Held` check in [`Self::evaluate_active`]) for every phase but
-    /// `Held`, so no frame publishes on the released generation.
-    fn advance_motion_authority(&mut self, session: &SessionState) -> Option<LeaseAction> {
-        let stalled = session.now_ms - self.motion_action_ms >= MOTION_LEASE_RETRY_MS;
-        match self.motion_phase {
-            MotionPhase::Held => None,
-            MotionPhase::Releasing => {
-                if !session.motion_granted {
-                    // The host has released; only now request the new grant.
-                    self.motion_phase = MotionPhase::Reacquiring;
-                    self.motion_action_ms = session.now_ms;
-                    Some(LeaseAction::Request)
-                } else if stalled {
-                    self.motion_action_ms = session.now_ms;
-                    Some(LeaseAction::Release)
-                } else {
-                    None
-                }
-            }
-            MotionPhase::Reacquiring => {
-                if session.motion_granted {
-                    // Regranted on a fresh generation: resume publishing.
-                    self.motion_phase = MotionPhase::Held;
-                    None
-                } else if stalled {
-                    self.motion_action_ms = session.now_ms;
-                    Some(LeaseAction::Request)
-                } else {
-                    None
-                }
-            }
         }
     }
 }

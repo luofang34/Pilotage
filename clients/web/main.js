@@ -117,6 +117,11 @@ const state = {
   pendingFpvToggle: false,
   connected: false,
   leaseGranted: false,
+  // The generation the motion lease held when last released: a post-handover
+  // regrant must be strictly newer than this fence to be accepted.
+  motionFence: 0n,
+  // A denied motion reacquire is terminal — the runtime stops re-requesting.
+  motionDenied: false,
   // The gimbal scope's own lease/fencing state: independent generation and
   // sequence, granted (or not) without affecting flight control.
   gimbalGeneration: 0n,
@@ -335,6 +340,8 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.sessionId = 0;
     state.generation = 0n;
     state.sequence = 0;
+    state.motionFence = 0n;
+    state.motionDenied = false;
     state.gimbalGeneration = 0n;
     state.gimbalSequence = 0;
     state.gimbalLeaseGranted = false;
@@ -539,6 +546,29 @@ function sendLeaseRelease(token) {
   log("sent LeaseRelease for " + MOTION_SCOPE);
 }
 
+/** Applies a motion-scope reliable-stream message to the flat authority state
+ *  through the pure {@link advanceMotionLease} transition: it enforces the
+ *  generation fence and terminal denial, and installs a fresh generation
+ *  (restarting the sequence before any frame rides it) only when the grant
+ *  clears the fence. Returns the resulting authority for the caller to log. */
+function applyMotionLease(decoded) {
+  const before = {
+    granted: state.leaseGranted,
+    generation: state.generation,
+    fence: state.motionFence,
+    denied: state.motionDenied,
+  };
+  const after = advanceMotionLease(before, decoded);
+  state.leaseGranted = after.granted;
+  state.motionFence = after.fence;
+  state.motionDenied = after.denied;
+  if (after.generation !== before.generation) {
+    state.generation = after.generation;
+    state.sequence = 0;
+  }
+  return after;
+}
+
 /** Reads the session (bootstrap) stream after the handshake completes:
  *  the host's `LeaseReleased` acknowledgement arrives here. */
 async function runSessionStreamReader(reader, token) {
@@ -560,9 +590,9 @@ async function runSessionStreamReader(reader, token) {
         if (m.vehicleId === VEHICLE_ID && m.scope === MOTION_SCOPE) {
           releaseTracker.acknowledge();
           // The motion lease is released (input-loss OR a profile handover):
-          // drop local authority so the runtime gates motion output and only
-          // re-requests once this release is reflected.
-          state.leaseGranted = false;
+          // drop local authority and fence the released generation so the
+          // runtime gates motion output and only re-requests once reflected.
+          applyMotionLease(decoded);
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
         } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
           log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
@@ -592,18 +622,20 @@ async function runSessionStreamReader(reader, token) {
         decoded.message.scope === MOTION_SCOPE &&
         decoded.message.vehicleId === VEHICLE_ID
       ) {
-        // A motion lease REGRANT after a profile handover (the runtime released
-        // and re-requested it). Install the fresh generation and restart the
-        // sequence before any frame publishes on it, then let the runtime
-        // resume motion output. Another vehicle's response never installs ours.
+        // A motion lease response after a profile handover. The pure transition
+        // enforces the fence (a grant must be strictly newer than the released
+        // generation) and the terminal denial; a fresh grant installs the new
+        // generation and restarts the sequence BEFORE any frame rides it, so
+        // the runtime resumes only on verified authority. Another vehicle's
+        // response never installs ours (filtered above).
         const m = decoded.message;
-        state.leaseGranted = !!m.granted;
-        if (m.granted) {
-          state.generation = BigInt(m.generation || 0);
-          state.sequence = 0;
-          log(`LeaseResponse[motion]: granted generation=${m.generation}`);
+        const after = applyMotionLease(decoded);
+        if (after.stale !== undefined) {
+          log(`ignoring stale motion grant generation=${m.generation} (fence ${after.fence})`);
+        } else if (after.denied) {
+          log(`motion lease denied (reason ${m.reason}); control stays suspended`);
         } else {
-          log(`motion lease denied (reason ${m.reason})`);
+          log(`LeaseResponse[motion]: granted generation=${m.generation}`);
         }
       }
     }
@@ -1126,6 +1158,8 @@ async function runControlLoop(writer, token) {
         // is regranted on a fresh generation after a profile handover, so a
         // remapped scheme never publishes on the released generation.
         motionGranted: state.leaseGranted,
+        // A denied reacquire is terminal — the runtime stops re-requesting.
+        motionDenied: state.motionDenied,
         nowMs: performance.now(),
       };
       const plan = pad
