@@ -521,8 +521,8 @@ export class InstrumentModule {
       if (unknownThisFrame > 0) {
         // A skipped opcode means draw commands silently dropped out of
         // the frame — a lost clip or tape backdrop bleeds layers that
-        // must never show through (stale interpreter vs newer scene
-        // stream). Never present such a frame.
+        // must never show through. This is a scene/interpreter
+        // opcode-set mismatch; never present such a frame.
         return { ok: false, reason: REASON.UNKNOWN_OPCODE };
       }
     } catch {

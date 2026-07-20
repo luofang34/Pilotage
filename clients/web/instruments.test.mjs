@@ -562,7 +562,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 
 // A scene carrying an opcode this interpreter does not know must fail the
 // frame, never present it: a silently skipped clip or backdrop command
-// bleeds layers that may never show through (the stale-interpreter class).
+// bleeds layers that may never show through (a scene/interpreter opcode-set mismatch).
 {
   const withUnknown = Uint8Array.from([
     1,
