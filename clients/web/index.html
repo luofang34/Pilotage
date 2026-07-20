@@ -90,7 +90,9 @@
      visionOS/iPadOS-native layout is future work, this is only the fallback. */
   .cockpit {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 17rem;
+    /* The main slot wraps its video's own aspect (no pillarboxing), and
+       the G5 column scales with the viewport instead of a fixed width. */
+    grid-template-columns: minmax(0, 3fr) minmax(14rem, 1fr);
     gap: 0.75rem;
     align-items: start;
   }
@@ -117,10 +119,6 @@
     display: block;
     width: 100%;
     height: auto;
-  }
-  #mainSlot figure.stage canvas {
-    max-height: 70vh;
-    object-fit: contain;
   }
   .g5-column {
     display: flex;
