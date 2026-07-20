@@ -476,6 +476,70 @@ check(
   check("an fc lane with a non-FC role decodes to null", wrongMessage.fcState === null);
 }
 
+// ---- LINK-04 payload-device lane: gimbal (9) --------------------------------
+// Gimbal attitude travels as its own payload-device-stamped message: it
+// surfaces orientation, rates, flags, and failure flags, and is unconsumable
+// (null) without a payload-device-role stamp, so a mislabeled lane can never
+// drive the camera view or be mistaken for FC state.
+{
+  const gimbal = [];
+  f32Field(gimbal, 1, 1.0); // quat_w
+  f32Field(gimbal, 5, 0.25); // rate_x
+  f32Field(gimbal, 6, -0.5); // rate_y
+  f32Field(gimbal, 7, 0.75); // rate_z
+  bytesField(gimbal, 8, measurementStamp(9, 2, 5000, 5_000_000, 4, 0x33, 5)); // payload-device role
+  varint(gimbal, (9 << 3) | 0); // flags
+  varint(gimbal, 0b101);
+  varint(gimbal, (10 << 3) | 0); // failure_flags
+  varint(gimbal, 0b10);
+
+  const telemetry = [];
+  bytesField(telemetry, 1, uint64Message(1));
+  bytesField(telemetry, 9, gimbal);
+  const envelope = [];
+  varint(envelope, (1 << 3) | 0);
+  varint(envelope, SCHEMA_VERSION);
+  bytesField(envelope, 4, telemetry);
+  const message = decodeBareEnvelope(new Uint8Array(envelope)).message;
+
+  check("gimbal lane decodes orientation and rates",
+    message.gimbal?.quat?.w === 1.0 && message.gimbal?.ratesRadS?.[1] === -0.5);
+  check("gimbal lane surfaces device flags and failure flags",
+    message.gimbal?.flags === 0b101 && message.gimbal?.failureFlags === 0b10);
+  check("gimbal stamp carries the payload-device role and vehicle-boot clock",
+    message.gimbal?.stamp?.role === 5 && message.gimbal?.stamp?.clock === 4);
+
+  // Provenance-free gimbal is unconsumable, not defaulted.
+  const bare = [];
+  f32Field(bare, 1, 1.0);
+  const telemetryBare = [];
+  bytesField(telemetryBare, 1, uint64Message(1));
+  bytesField(telemetryBare, 9, bare);
+  const envelopeBare = [];
+  varint(envelopeBare, (1 << 3) | 0);
+  varint(envelopeBare, SCHEMA_VERSION);
+  bytesField(envelopeBare, 4, telemetryBare);
+  const bareMessage = decodeBareEnvelope(new Uint8Array(envelopeBare)).message;
+  check("an unstamped gimbal decodes to null", bareMessage.gimbal === null);
+
+  // A gimbal lane wearing a non-payload-device role is unconsumable.
+  const wrong = [];
+  f32Field(wrong, 1, 1.0);
+  bytesField(wrong, 8, measurementStamp(9, 2, 6, 6_000_000, 4, 0x33, 3)); // FC role
+  varint(wrong, (9 << 3) | 0);
+  varint(wrong, 0b1);
+  const telemetryWrong = [];
+  bytesField(telemetryWrong, 1, uint64Message(1));
+  bytesField(telemetryWrong, 9, wrong);
+  const envelopeWrong = [];
+  varint(envelopeWrong, (1 << 3) | 0);
+  varint(envelopeWrong, SCHEMA_VERSION);
+  bytesField(envelopeWrong, 4, telemetryWrong);
+  const wrongMessage = decodeBareEnvelope(new Uint8Array(envelopeWrong)).message;
+  check("a gimbal lane with a non-payload-device role decodes to null",
+    wrongMessage.gimbal === null);
+}
+
 // --- a fully neutral frame reports EVERY axis on the wire ---------------
 // The host's full-coverage neutral checks (link-loss recovery, reset-latch
 // clearance) require every declared axis REPORTED; proto3 default-skipping
