@@ -9,11 +9,15 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::{claim_supervisor, resolve_manifest, start_stages, supervise, verify_listening_port};
-use crate::backend::Stage;
+use super::{
+    claim_supervisor, resolve_manifest, start_stages, supervise, verify_listening_port,
+    viewer_stage,
+};
+use crate::backend::{SessionContext, Stage};
+use crate::cli::Profile;
 use crate::error::XtaskError;
 use crate::process::{ManagedChild, ProcessSpec};
-use crate::readiness::Readiness;
+use crate::readiness::{Readiness, await_ready};
 
 const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -263,4 +267,76 @@ fn listening_port_must_match_the_requested_port() {
             actual: 4434,
         })
     ));
+}
+
+/// Reserves an ephemeral port by binding then releasing it, so the
+/// spawned server can claim it. The reserve→claim window is tiny and
+/// loopback-local; a collision only reruns the test.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("an ephemeral port binds")
+        .local_addr()
+        .expect("the bound address is readable")
+        .port()
+}
+
+/// Minimal HTTP/1.0 GET returning the raw response. HTTP/1.0 makes the
+/// server close the connection at end-of-body, so the read completes on
+/// EOF without content-length parsing.
+fn http_get(port: u16, path: &str) -> String {
+    use std::io::Write;
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))
+        .expect("the viewer server accepts the request connection");
+    stream
+        .write_all(format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())
+        .expect("the request is written");
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("the response is read to EOF");
+    response
+}
+
+/// Every viewer response must carry `Cache-Control: no-store` so the
+/// browser can never present a cached client that has diverged from the
+/// working-tree source. Spawns the real `viewer_stage` process on an
+/// ephemeral port and reads the header off the wire.
+#[tokio::test]
+async fn viewer_server_sets_cache_control_no_store() {
+    let repo_root = std::env::temp_dir().join(format!("plt_xt_viewer_{}", std::process::id()));
+    let web = repo_root.join("clients/web");
+    std::fs::create_dir_all(&web).expect("temp clients/web is created");
+    std::fs::write(web.join("index.html"), "<title>viewer</title>")
+        .expect("the viewer entrypoint is written");
+
+    let ctx = SessionContext {
+        repo_root: repo_root.clone(),
+        host_port: 0,
+        viewer_port: free_port(),
+        profile: Profile::Simulation,
+        log_dir: repo_root.clone(),
+    };
+    let stage = viewer_stage(&ctx).expect("the viewer stage plans");
+    let mut child = ManagedChild::spawn(&stage.spec).expect("the viewer server spawns");
+    let ready = await_ready(&mut child, &stage.readiness).await;
+
+    // Read the header off the wire only once the server accepts, but
+    // always tear the process group down before asserting.
+    let response = ready.is_ok().then(|| http_get(ctx.viewer_port, "/"));
+    child.terminate_group();
+    std::fs::remove_dir_all(&repo_root).ok();
+
+    ready.expect("the viewer server accepts connections");
+    let headers = response
+        .unwrap_or_default()
+        .split("\r\n\r\n")
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store"),
+        "every viewer response must carry Cache-Control: no-store; got headers:\n{headers}"
+    );
 }

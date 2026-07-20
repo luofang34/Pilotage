@@ -341,17 +341,25 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
             hint: "run from the Pilotage repository root",
         });
     }
+    // Cache-Control: no-store on every response: the served client must
+    // always equal the working-tree source. The viewer is served straight
+    // from the tree, so any heuristic caching of main.js would let the
+    // browser run a client that has diverged from the source on disk;
+    // no-store holds the served client and the on-disk source identical.
+    let server = format!(
+        "import http.server\n\
+         class H(http.server.SimpleHTTPRequestHandler):\n\
+         \tdef end_headers(self):\n\
+         \t\tself.send_header('Cache-Control', 'no-store')\n\
+         \t\tsuper().end_headers()\n\
+         http.server.test(HandlerClass=H, port={port}, bind='127.0.0.1')\n",
+        port = ctx.viewer_port
+    );
     Ok(Stage {
         spec: ProcessSpec {
             name: "viewer",
             program: "python3".to_owned(),
-            args: vec![
-                "-m".to_owned(),
-                "http.server".to_owned(),
-                ctx.viewer_port.to_string(),
-                "--bind".to_owned(),
-                "127.0.0.1".to_owned(),
-            ],
+            args: vec!["-c".to_owned(), server],
             cwd: Some(viewer_dir),
             env: vec![],
             remove_env: vec![],
