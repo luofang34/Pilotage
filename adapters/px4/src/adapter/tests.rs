@@ -18,13 +18,13 @@ use pilotage_mavlink::{AuthorizationSource, LinkState};
 use super::{ARM_BUTTON, DISARM_BUTTON, Px4Adapter, RESET_BUTTON, THROTTLE_AXIS};
 use crate::uplink::Px4Uplink;
 
-const SOURCE: FrameSource = FrameSource {
+pub(super) const SOURCE: FrameSource = FrameSource {
     system_id: 1,
     component_id: 1,
     frame_sequence: 0,
 };
 
-fn live_state() -> Arc<Mutex<LinkState>> {
+pub(super) fn live_state() -> Arc<Mutex<LinkState>> {
     live_state_at(Instant::now()).0
 }
 
@@ -70,7 +70,7 @@ fn feed_at(state: &Arc<Mutex<LinkState>>, time_boot_ms: u32, now: Instant) {
     apply_messages_at(state, &messages, 0, 0, now);
 }
 
-fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
+pub(super) fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("timeout");
@@ -78,7 +78,7 @@ fn fake_fc() -> (UdpSocket, std::net::SocketAddr) {
     (fc, addr)
 }
 
-fn uplink_to(addr: std::net::SocketAddr) -> Px4Uplink {
+pub(super) fn uplink_to(addr: std::net::SocketAddr) -> Px4Uplink {
     Px4Uplink::new(addr).expect("uplink")
 }
 
@@ -155,7 +155,7 @@ fn drive_epoch_advance(state: &Arc<Mutex<LinkState>>, start: Instant) {
     apply_messages_at(state, &trio, 0, 0, start + Duration::from_millis(4_500));
 }
 
-fn frame(
+pub(super) fn frame(
     axes: Vec<(LogicalAxisId, f32)>,
     edges: Vec<(LogicalButtonId, ButtonEdge)>,
 ) -> pilotage_protocol::ScopedControlFrame {

@@ -17,12 +17,14 @@
 mod adapter;
 mod config;
 mod error;
+mod gimbal;
 mod uplink;
 
 pub use adapter::{
-    ARM_BUTTON, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, Px4Adapter, RESET_BUTTON, ROLL_AXIS,
-    THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, PITCH_AXIS,
+    Px4Adapter, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 pub use config::{Px4Config, Px4Profile};
 pub use error::Px4AdapterError;
+pub use gimbal::Px4GimbalControl;
 pub use uplink::Px4Uplink;

@@ -1,8 +1,8 @@
 //! Lossless adapter-to-wire telemetry mapping.
 
 use pilotage_adapter_api::{
-    AvionicsSample, FcStateSample, MeasurementClock, MeasurementStamp, SimTruthSample,
-    SourceIntegrity, SourceRole, TelemetrySample,
+    AvionicsSample, FcStateSample, GimbalAttitudeSample, MeasurementClock, MeasurementStamp,
+    SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
 };
 use pilotage_protocol::wire;
 use pilotage_timing::MonoTimestamp;
@@ -41,6 +41,22 @@ pub(super) fn sample_to_wire(
         fc_state: sample
             .fc_state
             .map(|state| Box::new(fc_state_to_wire(state))),
+        gimbal: sample.gimbal.map(|gimbal| Box::new(gimbal_to_wire(gimbal))),
+    }
+}
+
+fn gimbal_to_wire(sample: GimbalAttitudeSample) -> wire::GimbalAttitude {
+    wire::GimbalAttitude {
+        quat_w: sample.quat_wxyz[0],
+        quat_x: sample.quat_wxyz[1],
+        quat_y: sample.quat_wxyz[2],
+        quat_z: sample.quat_wxyz[3],
+        rate_x_rad_s: sample.rates_rps[0],
+        rate_y_rad_s: sample.rates_rps[1],
+        rate_z_rad_s: sample.rates_rps[2],
+        stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        flags: sample.flags,
+        failure_flags: sample.failure_flags,
     }
 }
 
@@ -55,6 +71,7 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
         SourceRole::SimulationTruth => wire::SourceRole::SimulationTruth,
         SourceRole::FcState => wire::SourceRole::FcState,
         SourceRole::VideoCapture => wire::SourceRole::VideoCapture,
+        SourceRole::PayloadDevice => wire::SourceRole::PayloadDevice,
     };
     let integrity = match stamp.integrity {
         SourceIntegrity::Authenticated => wire::SourceIntegrity::Authenticated,

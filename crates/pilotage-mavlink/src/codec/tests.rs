@@ -39,6 +39,7 @@ fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u8> {
         31 => 246,
         32 => 185,
         230 => 163,
+        285 => 137,
         20_000 => 171,
         other => (other & 0xff) as u8,
     };
@@ -335,4 +336,125 @@ fn truncated_tail_is_garbage_not_panic() {
     let stats = parse_datagram(&frame[..frame.len() - 3], &mut out);
     assert!(out.is_empty());
     assert!(stats.garbage_bytes > 0);
+}
+
+/// Full 49-byte GIMBAL_DEVICE_ATTITUDE_STATUS payload: base fields
+/// through the targets, then the v2 extension tail the decoder ignores.
+fn gimbal_status_payload(
+    q: [f32; 4],
+    rates: [f32; 3],
+    t: u32,
+    failure: u32,
+    flags: u16,
+) -> Vec<u8> {
+    let mut p = t.to_le_bytes().to_vec();
+    for v in q.iter().chain(rates.iter()) {
+        p.extend_from_slice(&v.to_le_bytes());
+    }
+    p.extend_from_slice(&failure.to_le_bytes());
+    p.extend_from_slice(&flags.to_le_bytes());
+    p.push(255); // target_system
+    p.push(190); // target_component
+    p.extend_from_slice(&0.25f32.to_le_bytes()); // ext: delta_yaw
+    p.extend_from_slice(&0.0f32.to_le_bytes()); // ext: delta_yaw_velocity
+    p.push(0); // ext: gimbal_device_id
+    p
+}
+
+#[test]
+fn decodes_gimbal_device_attitude_status() {
+    let q = [0.98f32, 0.0, -0.19, 0.0];
+    let rates = [0.0f32, 0.05, -0.02];
+    let frame = encode_frame(
+        super::GIMBAL_DEVICE_ATTITUDE_STATUS_ID,
+        &gimbal_status_payload(q, rates, 5_000, 0, 12),
+        false,
+    );
+    let mut out: Vec<(FrameSource, FcMessage)> = Vec::new();
+    let stats = parse_datagram(&frame, &mut out);
+    assert_eq!(stats.decoded, 1, "stats: {stats:?}");
+    assert_eq!(
+        out,
+        vec![(
+            SOURCE,
+            FcMessage::GimbalDeviceAttitudeStatus {
+                time_boot_ms: 5_000,
+                quat_wxyz: q,
+                rates_rps: rates,
+                flags: 12,
+                failure_flags: 0,
+            }
+        )]
+    );
+}
+
+#[test]
+fn gimbal_status_v2_truncated_payload_zero_extends() {
+    // Zero failure flags and zero extension tail truncate on the wire;
+    // the decoder must recover flags at their full-layout offset.
+    let q = [1.0f32, 0.0, 0.0, 0.0];
+    let frame = encode_frame(
+        super::GIMBAL_DEVICE_ATTITUDE_STATUS_ID,
+        &gimbal_status_payload(q, [0.0; 3], 7, 0, 12),
+        true,
+    );
+    let mut out: Vec<(FrameSource, FcMessage)> = Vec::new();
+    let stats = parse_datagram(&frame, &mut out);
+    assert_eq!(stats.decoded, 1, "stats: {stats:?}");
+    match out[0].1 {
+        FcMessage::GimbalDeviceAttitudeStatus {
+            time_boot_ms,
+            quat_wxyz,
+            flags,
+            failure_flags,
+            ..
+        } => {
+            assert_eq!(time_boot_ms, 7);
+            assert_eq!(quat_wxyz, q);
+            assert_eq!(flags, 12);
+            assert_eq!(failure_flags, 0);
+        }
+        other => panic!("unexpected message: {other:?}"),
+    }
+}
+
+#[test]
+fn gimbal_rate_setpoint_locks_the_wire_layout() {
+    let frame = super::encode_gimbal_rate_setpoint(9, 0.4, -0.6, 1, 1);
+    // Header: v2 magic, 35-byte payload, GCS identity, msg id 282.
+    assert_eq!(frame[0], MAGIC_V2);
+    assert_eq!(frame[1], 35);
+    assert_eq!(frame[4], 9);
+    assert_eq!(frame[5], 255);
+    assert_eq!(frame[6], 190);
+    assert_eq!(
+        u32::from(frame[7]) | (u32::from(frame[8]) << 8) | (u32::from(frame[9]) << 16),
+        super::GIMBAL_MANAGER_SET_ATTITUDE_ID
+    );
+    let payload = &frame[10..45];
+    assert_eq!(
+        &payload[0..4],
+        &12u32.to_le_bytes(),
+        "horizon + yaw-follow flags"
+    );
+    // q[0..4] and angular_velocity_x are NaN ("ignored").
+    for slot in 0..5 {
+        let at = 4 + slot * 4;
+        let bytes: [u8; 4] = payload[at..at + 4].try_into().expect("slice length");
+        assert!(
+            f32::from_le_bytes(bytes).is_nan(),
+            "slot {slot} must be NaN"
+        );
+    }
+    let pitch: [u8; 4] = payload[24..28].try_into().expect("slice length");
+    let yaw: [u8; 4] = payload[28..32].try_into().expect("slice length");
+    assert_eq!(f32::from_le_bytes(pitch), 0.4);
+    assert_eq!(f32::from_le_bytes(yaw), -0.6);
+    assert_eq!(payload[32], 1, "target system");
+    assert_eq!(payload[33], 1, "target component");
+    assert_eq!(payload[34], 0, "all gimbal devices");
+    // The CRC must verify under CRC_EXTRA 123 (checked against PX4's
+    // generated common-dialect headers).
+    let wire_crc = u16::from(frame[45]) | (u16::from(frame[46]) << 8);
+    assert_eq!(super::compute_crc(&frame[1..45], 123), wire_crc);
 }

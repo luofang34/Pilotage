@@ -16,8 +16,12 @@ use crate::readiness::{Readiness, stage_log};
 /// The gz world PX4's x500 model spawns into (PX4 ships `default.sdf`;
 /// its `<world name>` is `default` — also what the reset script targets).
 const WORLD_NAME: &str = "default";
-/// PX4 airframe autostart id for the gz x500.
-const SYS_AUTOSTART: &str = "4001";
+/// PX4 airframe autostart id for the gz x500 with the CGO3 gimbal
+/// (4019_gz_x500_gimbal): MNT_MODE_IN/OUT = MAVLink Gimbal Protocol v2,
+/// which the PX4 adapter's `vehicle.gimbal` scope drives (GIM-04).
+const SYS_AUTOSTART: &str = "4019";
+/// The matching PX4 model selector for the airframe above.
+const SIM_MODEL: &str = "gz_x500_gimbal";
 
 /// The PX4 + Gazebo SITL backend.
 #[derive(Debug)]
@@ -36,6 +40,9 @@ impl SimBackend for Px4Gz {
         vec![
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
+            // This backend boots the gz_x500_gimbal airframe (4019), so
+            // the adapter advertises the vehicle.gimbal scope.
+            ("PILOTAGE_PX4_GIMBAL".to_owned(), "1".to_owned()),
         ]
     }
 
@@ -227,7 +234,7 @@ fn px4_stage(
                 // Pilotage camera rig) instead of spawning its own.
                 ("PX4_GZ_STANDALONE".to_owned(), "1".to_owned()),
                 ("PX4_SYS_AUTOSTART".to_owned(), SYS_AUTOSTART.to_owned()),
-                ("PX4_SIM_MODEL".to_owned(), "gz_x500".to_owned()),
+                ("PX4_SIM_MODEL".to_owned(), SIM_MODEL.to_owned()),
                 ("PX4_GZ_MODEL_NAME".to_owned(), "x500_0".to_owned()),
                 ("PX4_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
             ],
@@ -294,6 +301,20 @@ mod tests {
                 .host_env(&ctx)
                 .iter()
                 .any(|(key, value)| { key == "PILOTAGE_PX4_PROFILE" && value == "simulation" })
+        );
+    }
+
+    #[test]
+    fn host_environment_enables_the_gimbal_capability() {
+        // The gz_x500_gimbal airframe carries a gimbal; the host must
+        // advertise the scope, and no other FC backend sets this flag.
+        let backend = Px4Gz;
+        let ctx = context(PathBuf::from("unused-for-host-environment"));
+        assert!(
+            backend
+                .host_env(&ctx)
+                .iter()
+                .any(|(key, value)| key == "PILOTAGE_PX4_GIMBAL" && value == "1")
         );
     }
 
@@ -402,6 +423,38 @@ mod tests {
                 .any(|(k, _)| k == "GZ_SIM_SERVER_CONFIG_PATH"),
             "gz must load PX4's sensor systems via the server config"
         );
+        assert!(
+            fc_env
+                .iter()
+                .any(|(k, v)| k == "PX4_SYS_AUTOSTART" && v == "4019")
+                && fc_env
+                    .iter()
+                    .any(|(k, v)| k == "PX4_SIM_MODEL" && v == "gz_x500_gimbal"),
+            "the FC must boot the gimbal airframe (GIM-04): 4019/gz_x500_gimbal"
+        );
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    // The airframe env above and the statically included world model
+    // must agree: PX4's GZGimbal bridge publishes joint commands under
+    // `/model/<PX4_GZ_MODEL_NAME>/…`, so a world still carrying the
+    // plain x500 would boot cleanly and then ignore every gimbal
+    // demand silently.
+    #[test]
+    fn the_px4_world_carries_the_gimbal_model_the_airframe_expects() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("repo root");
+        let world = std::fs::read_to_string(repo_root.join("sim/worlds/px4_flightdeck.sdf"))
+            .expect("px4 world");
+        assert!(
+            world.contains("<uri>model://x500_gimbal</uri>"),
+            "the px4 world must include the gimbal-bearing vehicle"
+        );
+        assert!(
+            world.contains("<name>x500_0</name>"),
+            "the included vehicle must keep the name PX4_GZ_MODEL_NAME attaches to"
+        );
     }
 }

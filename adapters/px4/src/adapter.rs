@@ -9,7 +9,7 @@ use std::time::Duration;
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
     LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame};
@@ -23,6 +23,9 @@ use crate::uplink::Px4Uplink;
 
 mod camera;
 mod control;
+#[cfg(test)]
+mod gimbal_tests;
+mod pointing;
 mod sampling;
 #[cfg(test)]
 mod tests;
@@ -45,6 +48,11 @@ pub const ARM_BUTTON: u16 = 0;
 pub const DISARM_BUTTON: u16 = 1;
 /// Logical button whose press resets the simulation.
 pub const RESET_BUTTON: u16 = 2;
+/// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
+/// LOS rate demands, leased and fenced independently of flight.
+pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
+/// Gimbal-scope button whose press recenters the gimbal.
+pub const GIMBAL_NEUTRAL_BUTTON: u16 = 0;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -62,6 +70,10 @@ pub struct Px4Adapter {
     // basis for state-dependent control; there is no truth oracle).
     estimate: Option<EstimateSource>,
     uplink: Option<Px4Uplink>,
+    // Gimbal-manager command path; rides the receive link's socket
+    // because the FC's GCS instance retargets its telemetry stream to
+    // the last peer that spoke.
+    gimbal: Option<crate::gimbal::Px4GimbalControl>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
@@ -72,6 +84,11 @@ pub struct Px4Adapter {
     arm: Option<ArmReport>,
     last_seen_heartbeat: Option<std::time::Instant>,
     arm_incarnation: pilotage_adapter_api::SourceIncarnation,
+    // Payload-device stamp discipline for the gimbal lane: a stable
+    // gimbal identity plus a reboot-aware epoch, kept apart from the FC
+    // arm incarnation so a device reboot never regresses time under a
+    // fixed identity+epoch.
+    gimbal_stamp: sampling::GimbalStamp,
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
     // Commanded-reset latch: engaged when a sim reset is requested,
@@ -114,8 +131,22 @@ impl Px4Adapter {
     pub async fn start(vehicle: VehicleId, config: Px4Config) -> Result<Self, Px4AdapterError> {
         let link_config = config.link_config();
         let incarnation = pilotage_adapter_api::SourceIncarnation::new(rand_incarnation());
-        let link = MavlinkLink::start(link_config, incarnation).await?;
+        let mut link = MavlinkLink::start(link_config, incarnation).await?;
         let state = link.state();
+        // The gimbal path is wired only when the vehicle is declared to
+        // carry one: a bare airframe advertises no `vehicle.gimbal`
+        // scope, so a client cannot lease a payload it cannot point. The
+        // rate lane is taken exactly once here, so it is always present
+        // on this first (and only) take.
+        let gimbal = match (config.gimbal, link.take_gimbal_rate_sender()) {
+            (true, Some(rates)) => Some(crate::gimbal::Px4GimbalControl::new(
+                link.command_sender(),
+                rates,
+                link_config.system_id,
+                link_config.component_id,
+            )),
+            _ => None,
+        };
         let uplink = match Px4Uplink::new(config.command_endpoint) {
             Ok(mut uplink) => {
                 uplink.set_expected_source(link_config.system_id, link_config.component_id);
@@ -134,12 +165,16 @@ impl Px4Adapter {
                 _link: Some(link),
             }),
             uplink,
+            gimbal,
             frames,
             _camera_bridge: camera_bridge,
             _frame_forwarder: frame_forwarder,
             arm: None,
             last_seen_heartbeat: None,
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new(rand_incarnation()),
+            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
+                rand_incarnation(),
+            )),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
@@ -156,12 +191,16 @@ impl Px4Adapter {
             vehicle,
             estimate: Some(EstimateSource { state, _link: None }),
             uplink: None,
+            gimbal: None,
             frames: None,
             _camera_bridge: None,
             _frame_forwarder: None,
             arm: None,
             last_seen_heartbeat: None,
             arm_incarnation: pilotage_adapter_api::SourceIncarnation::new([0; 16]),
+            gimbal_stamp: sampling::GimbalStamp::new(pilotage_adapter_api::SourceIncarnation::new(
+                [0x60; 16],
+            )),
             started_at: std::time::Instant::now(),
             last_reset: None,
             reset_latch: None,
@@ -182,6 +221,13 @@ impl Px4Adapter {
     #[cfg(test)]
     pub(crate) fn with_uplink(mut self, uplink: Px4Uplink) -> Self {
         self.uplink = Some(uplink);
+        self
+    }
+
+    /// Installs a test gimbal control path, for tests.
+    #[cfg(test)]
+    pub(crate) fn with_gimbal(mut self, gimbal: crate::gimbal::Px4GimbalControl) -> Self {
+        self.gimbal = Some(gimbal);
         self
     }
 
@@ -253,18 +299,29 @@ impl VehicleAdapter for Px4Adapter {
             },
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
-                scopes: if self.uplink.is_some() {
-                    vec![ScopeDescriptor {
-                        scope: ScopeId::new(FLIGHT_SCOPE),
-                        axes: vec![
-                            LogicalAxisId::new(ROLL_AXIS),
-                            LogicalAxisId::new(PITCH_AXIS),
-                            LogicalAxisId::new(THROTTLE_AXIS),
-                            LogicalAxisId::new(YAW_AXIS),
-                        ],
-                    }]
-                } else {
-                    vec![]
+                scopes: {
+                    let mut scopes = Vec::new();
+                    if self.uplink.is_some() {
+                        scopes.push(ScopeDescriptor {
+                            scope: ScopeId::new(FLIGHT_SCOPE),
+                            axes: vec![
+                                LogicalAxisId::new(ROLL_AXIS),
+                                LogicalAxisId::new(PITCH_AXIS),
+                                LogicalAxisId::new(THROTTLE_AXIS),
+                                LogicalAxisId::new(YAW_AXIS),
+                            ],
+                        });
+                    }
+                    if self.gimbal.is_some() {
+                        scopes.push(ScopeDescriptor {
+                            scope: ScopeId::new(GIMBAL_SCOPE),
+                            axes: vec![
+                                LogicalAxisId::new(PITCH_AXIS),
+                                LogicalAxisId::new(YAW_AXIS),
+                            ],
+                        });
+                    }
+                    scopes
                 },
                 link_loss_actions: if self.uplink.is_some() {
                     vec![LinkLossPolicy::Neutralize]
@@ -278,6 +335,9 @@ impl VehicleAdapter for Px4Adapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
+        if frame.scope.as_str() == GIMBAL_SCOPE {
+            return self.apply_gimbal(frame, tick);
+        }
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
@@ -315,16 +375,41 @@ impl VehicleAdapter for Px4Adapter {
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         self.observe_arm_report();
         let fc_state = sampling::fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
+        let gimbal_attitude = self
+            .gimbal
+            .is_some()
+            .then(|| self.gimbal_attitude())
+            .flatten();
         let mut batch = self
             .estimate
             .as_ref()
             .map(|source| sampling::mavlink_batch(self.vehicle, &source.state))
             .unwrap_or_default();
+        // When no coherent avionics group is available the batch is
+        // empty, but FC-state and gimbal-device reports are independent
+        // sources that must still reach clients: carry them on a sample
+        // even with no pose. Their own stamps drive freshness.
+        if batch.samples.is_empty() && (fc_state.is_some() || gimbal_attitude.is_some()) {
+            batch.samples.push(TelemetrySample {
+                vehicle: self.vehicle,
+                tick: self.step(StepBudget { ticks: 0 }).now,
+                pose: None,
+                speed: None,
+                avionics: None,
+                sim_truth: None,
+                fc_state: None,
+                gimbal: None,
+            });
+        }
         for sample in &mut batch.samples {
             sample.fc_state = fc_state;
+            sample.gimbal = gimbal_attitude;
         }
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.maintain();
+        }
+        if let Some(gimbal) = self.gimbal.as_mut() {
+            gimbal.maintain();
         }
         batch
     }

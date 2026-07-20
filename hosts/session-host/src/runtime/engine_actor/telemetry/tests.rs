@@ -22,15 +22,27 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
         acquired_at_ns: 1_234_567,
         clock: MeasurementClock::VehicleBoot,
     };
-    let kinematics = MeasurementStamp {
-        sequence: 19,
-        acquired_at_ns: 1_200_000,
+    let with = |sequence, acquired_at_ns| MeasurementStamp {
+        sequence,
+        acquired_at_ns,
         ..attitude
     };
-    let estimator_status = MeasurementStamp {
-        sequence: 20,
-        acquired_at_ns: 1_234_567,
-        ..attitude
+    let kinematics = with(19, 1_200_000);
+    let estimator_status = with(20, 1_234_567);
+    let avionics = AvionicsSample {
+        attitude: Some(AvionicsAttitudeSample {
+            quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+            rates_rps: [0.0; 3],
+            stamp: attitude,
+        }),
+        kinematics: Some(AvionicsKinematicsSample {
+            pos_ned_m: [0.0; 3],
+            vel_ned_mps: [0.0; 3],
+            stamp: kinematics,
+        }),
+        estimator_status_stamp: Some(estimator_status),
+        valid_flags: 0b1111,
+        quality: 0,
     };
     let sample = TelemetrySample {
         vehicle: VehicleId::new(9),
@@ -41,23 +53,10 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
             heading: 0.5,
         }),
         speed: Some(3.0),
-        avionics: Some(AvionicsSample {
-            attitude: Some(AvionicsAttitudeSample {
-                quat_wxyz: [1.0, 0.0, 0.0, 0.0],
-                rates_rps: [0.0; 3],
-                stamp: attitude,
-            }),
-            kinematics: Some(AvionicsKinematicsSample {
-                pos_ned_m: [0.0; 3],
-                vel_ned_mps: [0.0; 3],
-                stamp: kinematics,
-            }),
-            estimator_status_stamp: Some(estimator_status),
-            valid_flags: 0b1111,
-            quality: 0,
-        }),
+        avionics: Some(avionics),
         sim_truth: None,
         fc_state: None,
+        gimbal: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(9_000_000));
@@ -139,6 +138,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
         }),
         sim_truth: None,
         fc_state: None,
+        gimbal: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(1));
@@ -177,6 +177,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         }),
         sim_truth: None,
         fc_state: None,
+        gimbal: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(1));
@@ -229,6 +230,7 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
             arm_state: 2,
             stamp: fc_stamp,
         }),
+        gimbal: None,
     };
 
     let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(5));

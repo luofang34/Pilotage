@@ -163,6 +163,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             avionics,
             sim_truth: None,
             fc_state: None,
+            gimbal: None,
         }],
     }
 }

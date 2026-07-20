@@ -21,10 +21,17 @@ pub struct Px4Config {
     pub stream_command_endpoint: SocketAddr,
     /// PX4 onboard endpoint receiving offboard commands.
     pub command_endpoint: SocketAddr,
+    /// Whether this vehicle carries a MAVLink Gimbal Protocol v2 gimbal.
+    /// Off by default: a bare airframe has no gimbal, and advertising
+    /// the `vehicle.gimbal` scope on one would let a client lease a
+    /// payload the vehicle cannot point. `PILOTAGE_PX4_GIMBAL=1` (via
+    /// the launcher) or [`Px4Config::with_gimbal`] enables it.
+    pub gimbal: bool,
 }
 
 impl Px4Config {
-    /// Builds the default endpoint set for an explicit PX4 profile.
+    /// Builds the default endpoint set for an explicit PX4 profile. The
+    /// gimbal capability is off; enable it with [`Px4Config::with_gimbal`].
     #[must_use]
     pub fn new(profile: Px4Profile) -> Self {
         Self {
@@ -32,7 +39,16 @@ impl Px4Config {
             telemetry_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_550)),
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
+            gimbal: false,
         }
+    }
+
+    /// Declares that this vehicle carries a gimbal, so the adapter
+    /// advertises the `vehicle.gimbal` scope and wires its command path.
+    #[must_use]
+    pub fn with_gimbal(mut self, gimbal: bool) -> Self {
+        self.gimbal = gimbal;
+        self
     }
 
     pub(crate) fn link_config(self) -> LinkConfig {

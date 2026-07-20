@@ -565,7 +565,7 @@ function decodeLeaseReleased(bytes) {
 }
 
 // telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,
-// velocity=5, avionics=6, sim_truth=7, fc_state=8
+// velocity=5, avionics=6, sim_truth=7, fc_state=8, gimbal=9
 // Pose2d: x_m=1, y_m=2, heading_rad=3 (all float, wire type 5)
 function decodeTelemetrySample(bytes) {
   if (!bytes) return {};
@@ -586,6 +586,7 @@ function decodeTelemetrySample(bytes) {
     avionics: decodeAvionicsState(firstBytes(fields, 6)),
     simTruth: decodeSimTruthState(firstBytes(fields, 7)),
     fcState: decodeFcState(firstBytes(fields, 8)),
+    gimbal: decodeGimbalAttitude(firstBytes(fields, 9)),
   };
 }
 
@@ -632,6 +633,34 @@ function decodeFcState(bytes) {
   if (stamp === null || stamp.role !== 3) return null;
   return {
     armState: firstVarint(f, 1) ?? 0,
+    stamp,
+  };
+}
+
+// telemetry.proto GimbalAttitude: quat_w..z=1..4, rate_x/y/z_rad_s=5..7,
+// stamp=8, flags=9, failure_flags=10. Payload-device orientation under its
+// own provenance; unconsumable (null) without a payload-device stamp, so a
+// mislabeled lane can never point the camera view or be read as FC state.
+function decodeGimbalAttitude(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  const stamp = decodeMeasurementStamp(firstBytes(f, 8));
+  // Exact-role gate: the gimbal lane must carry the payload-device role.
+  if (stamp === null || stamp.role !== 5) return null;
+  return {
+    quat: {
+      w: decodeFloat32(firstBytes(f, 1)),
+      x: decodeFloat32(firstBytes(f, 2)),
+      y: decodeFloat32(firstBytes(f, 3)),
+      z: decodeFloat32(firstBytes(f, 4)),
+    },
+    ratesRadS: [
+      decodeFloat32(firstBytes(f, 5)),
+      decodeFloat32(firstBytes(f, 6)),
+      decodeFloat32(firstBytes(f, 7)),
+    ],
+    flags: firstVarint(f, 9) ?? 0,
+    failureFlags: firstVarint(f, 10) ?? 0,
     stamp,
   };
 }

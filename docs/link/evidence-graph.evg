@@ -195,45 +195,45 @@ attr outcome pass
 node RESULT-LINK-WIRE verification-result
 title host wire-mapping suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
-attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:9475d75821336825f4aba67953ba544b20aa856e
+attr source-digest git-blob:889087b7df14f59dbd4d13f67f11ae3d86632b36
 attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
-attr output-digest sha256:6c3699e4e04694149b4aebc4d274c83e9c1aff82abbed60ef10310079dcb8d2a
-attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr output-digest sha256:7acbbfa35eaf2845a455364184a37e6e2b9b3b65d3c1bfb489cfdf0ad594d6c5
+attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr outcome pass
 
 node RESULT-LINK-CAPTURE verification-result
 title loopback-probe capture projection suite — recorded pass
 attr command cargo test -p loopback-probe telemetry::
-attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:d54d1f5f5ce4cd3d65d7723ccd089a5dee0bed20
+attr source-digest git-blob:65e0988d096f01778980b542d46f777541d8bfe2
 attr artifact docs/link/evidence-artifacts/link04/capture.run.txt
-attr output-digest sha256:ebc55085be041f1f5f5339c65201233870b81efb545d4dee378979d9f7df148c
-attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr output-digest sha256:2aed2db420bf9bf0c8ac51c622044cc4ab436f74a17f58033c053cb08fd75507
+attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr outcome pass
 
 node RESULT-LINK-CAPTURE-RT verification-result
 title loopback-probe receiver round-trip suite — recorded pass
 attr command cargo test -p loopback-probe receiver::
-attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:fbc947454e43c051a94e4722cb639d317373767e
+attr source-digest git-blob:df0490b0fdcdc0cae08441c3d717cd1ff0764f57
 attr artifact docs/link/evidence-artifacts/link04/capture-rt.run.txt
-attr output-digest sha256:62b2fdb06c63262726e288c1c7fc411eed594f484b283b0a997a5453ed07a1f0
-attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr output-digest sha256:fab8e23b76f5b66c67c86398a0f5f3d2d50e2247e6c0af4a581114e205726b22
+attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr outcome pass
 
 node RESULT-LINK-CAPTURE-SINK verification-result
 title loopback-probe capture sink suite — recorded pass
 attr command cargo test -p loopback-probe capture::
-attr config-digest 5dfedb440a562919894be17e1ff199bcaae4e25c
+attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:7442d11b6f3011d51a20fd807b655c16b1c42bc3
+attr source-digest git-blob:329779834423fffad82e5ed8270a33dd92c45fb6
 attr artifact docs/link/evidence-artifacts/link04/capture-sink.run.txt
-attr output-digest sha256:071adfde6ec1bfa2609a21a99482bfcff7113984de059dc77d68bba60f790f9b
-attr run-id local:5dfedb440a562919894be17e1ff199bcaae4e25c
+attr output-digest sha256:2fd6ac86f5dc0c4ab49ef46143e2c6169019b315c827fea0f167f6397e5fee64
+attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
 attr outcome pass
 
 # --- Configuration and tool identity ---
@@ -258,8 +258,8 @@ attr tree 202df9f54fdef93e367a99d902d3f5c041b4cc5f
 node CFG-LINK-WORKTREE configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
 attr scm git
-attr commit 5dfedb440a562919894be17e1ff199bcaae4e25c
-attr tree a000c09c465aeb5a3a3b1fa35d6f90276559895a
+attr commit ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr tree fb15a5c8155c7dad37f772504025c1c529ba7f49
 
 node CFG-LINK-AUTHZ configuration-item
 title committed code baseline for the client authorization-regime result (LINK-05 lands after LINK-04, on its own commit)

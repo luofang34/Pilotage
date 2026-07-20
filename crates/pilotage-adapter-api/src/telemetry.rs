@@ -59,6 +59,10 @@ pub enum SourceRole {
     FcState,
     /// Video capture identity for camera frames.
     VideoCapture,
+    /// Payload-device orientation/state (gimbal attitude) relayed over
+    /// the FC link: never a vehicle estimate, never eligible for control
+    /// validation, carrying the device's own boot clock.
+    PayloadDevice,
 }
 
 /// Integrity classification of the path that delivered an observation.
@@ -199,6 +203,26 @@ pub struct FcStateSample {
     pub stamp: MeasurementStamp,
 }
 
+/// Gimbal payload-device orientation (Gimbal Protocol v2 attitude
+/// status) with its own provenance: device state relayed over the FC
+/// link, never a vehicle estimate and never an input to control
+/// validation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GimbalAttitudeSample {
+    /// Orientation quaternion (w, x, y, z); vehicle-frame yaw unless
+    /// the device declares an earth-frame yaw mode.
+    pub quat_wxyz: [f32; 4],
+    /// Device angular velocity (rad/s); NaN encodes device-unknown.
+    pub rates_rps: [f32; 3],
+    /// GIMBAL_DEVICE_FLAGS in effect (mode/lock bits).
+    pub flags: u32,
+    /// Non-zero reports a device failure condition; carried so a
+    /// consumer can surface a degraded payload without re-deriving it.
+    pub failure_flags: u32,
+    /// Identity and acquisition time of the device report.
+    pub stamp: MeasurementStamp,
+}
+
 /// A single vehicle's telemetry at one simulation tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySample {
@@ -221,6 +245,8 @@ pub struct TelemetrySample {
     pub sim_truth: Option<SimTruthSample>,
     /// FC-owned arm/mode state with its own provenance stamp.
     pub fc_state: Option<FcStateSample>,
+    /// Gimbal payload-device orientation with its own provenance stamp.
+    pub gimbal: Option<GimbalAttitudeSample>,
 }
 
 /// A batch of telemetry samples returned from a single `sample_telemetry`
@@ -268,6 +294,7 @@ mod tests {
             avionics: None,
             sim_truth: None,
             fc_state: None,
+            gimbal: None,
         };
         assert_eq!(sample.pose.expect("pose").x, 1.0);
         assert_eq!(sample.speed, Some(3.0));
