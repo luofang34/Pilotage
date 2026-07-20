@@ -4,7 +4,7 @@
 //! captured inputs (the right stick and the modifier trigger) read neutral to
 //! flight here, so a captured input can never be double-consumed.
 
-use pilotage_input::{AxisCalibration, AxisConfig, normalize_axis};
+use pilotage_input::{AxisConfig, normalize_axis};
 
 use crate::profile::FlightDoc;
 use crate::sample::{Mode, RawSample};
@@ -39,11 +39,12 @@ pub(crate) struct FlightAxes {
     pub(crate) label: &'static str,
 }
 
-/// Maps a masked sample to flight axes under `mode`, applying the profile's
-/// shared deadzone/expo shaping to each stick axis.
+/// Maps a masked sample to flight axes under `mode`, shaping each stick axis
+/// through the profile's precompiled stick config (no per-tick allocation).
 pub(crate) fn flight_axes(
     sample: &RawSample,
     flight: &FlightDoc,
+    stick: &AxisConfig,
     mode: Mode,
     capture: Capture,
 ) -> FlightAxes {
@@ -51,7 +52,7 @@ pub(crate) fn flight_axes(
         if capture.masks_axis(index) {
             return 0.0;
         }
-        normalize_axis(sample.axis(index), &stick_config(index, flight)).value
+        shaped_stick(sample, stick, index)
     };
     let trigger = |index: usize| -> f32 {
         if capture.masks_button(index) {
@@ -96,20 +97,8 @@ pub(crate) fn flight_axes(
     }
 }
 
-/// Builds the shared shaping config for one flight stick axis from the
-/// profile's flight deadzone/expo. Flight sticks carry no inversion of their
-/// own — the scheme applies the sign — and use the identity calibration.
-fn stick_config(index: usize, flight: &FlightDoc) -> AxisConfig {
-    AxisConfig {
-        source_index: index,
-        logical: "roll".to_string(),
-        invert: false,
-        deadzone: flight.deadzone,
-        expo: flight.expo,
-        calibration: AxisCalibration {
-            min: -1.0,
-            center: 0.0,
-            max: 1.0,
-        },
-    }
+/// The shaped value of one flight stick axis through the precompiled config,
+/// shared by the scheme mapping and the activation neutrality check.
+pub(crate) fn shaped_stick(sample: &RawSample, stick: &AxisConfig, index: usize) -> f32 {
+    normalize_axis(sample.axis(index), stick).value
 }

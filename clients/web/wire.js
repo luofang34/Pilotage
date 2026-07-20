@@ -505,6 +505,35 @@ export function decodeBareEnvelope(bytes) {
   return decodeEnvelopeBody(bytes);
 }
 
+/**
+ * Decodes a bare `ControlFrame`, mirroring `encodeControlFrameEnvelope`'s field
+ * layout. Used by the vehicle.gimbal wire round-trip test (and available to any
+ * loopback consumer) to prove a gimbal control frame survives the wire.
+ */
+export function decodeControlFrame(bytes) {
+  const f = parseFields(bytes);
+  const axes = [];
+  const edges = [];
+  const payloadBytes = firstBytes(f, 8);
+  if (payloadBytes) {
+    const payload = parseFields(payloadBytes);
+    for (const axisBytes of payload.get(1) ?? []) {
+      const a = parseFields(axisBytes);
+      axes.push([firstVarint(a, 1), decodeFloat32(firstBytes(a, 2))]);
+    }
+    for (const edgeBytes of payload.get(2) ?? []) {
+      const e = parseFields(edgeBytes);
+      edges.push([firstVarint(e, 1), firstVarint(e, 2)]);
+    }
+  }
+  return {
+    scope: decodeStringMessage(firstBytes(f, 3)),
+    profileRevision: firstVarint(f, 7),
+    axes,
+    edges,
+  };
+}
+
 function decodeEnvelopeBody(body) {
   const fields = parseFields(body);
   if (fields.has(ENVELOPE_FIELD.serverWelcome)) {
@@ -518,6 +547,9 @@ function decodeEnvelopeBody(body) {
   }
   if (fields.has(ENVELOPE_FIELD.telemetrySample)) {
     return { kind: "TelemetrySample", message: decodeTelemetrySample(firstBytes(fields, ENVELOPE_FIELD.telemetrySample)) };
+  }
+  if (fields.has(ENVELOPE_FIELD.controlFrame)) {
+    return { kind: "ControlFrame", message: decodeControlFrame(firstBytes(fields, ENVELOPE_FIELD.controlFrame)) };
   }
   if (fields.has(ENVELOPE_FIELD.pong)) {
     return { kind: "Pong", message: {} };

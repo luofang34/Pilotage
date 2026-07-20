@@ -96,3 +96,52 @@ fn an_unsupported_field_is_rejected() {
     let err = ProfileRuntime::compile(json.as_bytes()).expect_err("unsupported field");
     assert!(matches!(err, ProfileError::MalformedJson { .. }));
 }
+
+#[test]
+fn an_out_of_range_axis_index_is_rejected() {
+    // The gimbal pitch axis is index 3; move it past the 8-slot axis buffer.
+    let json = valid_json().replace("\"source_index\": 3", "\"source_index\": 9");
+    let err = ProfileRuntime::compile(json.as_bytes()).expect_err("index out of range");
+    assert!(matches!(
+        err,
+        ProfileError::IndexOutOfRange { limit: 8, .. }
+    ));
+}
+
+#[test]
+fn duplicate_flight_sticks_are_rejected() {
+    // Point right_x at the same axis as left_x (0): ambiguous.
+    let json = valid_json().replace("\"right_x\": 2", "\"right_x\": 0");
+    let err = ProfileRuntime::compile(json.as_bytes()).expect_err("duplicate stick");
+    assert!(matches!(err, ProfileError::AmbiguousBinding { .. }));
+}
+
+#[test]
+fn a_cross_action_button_collision_is_rejected() {
+    // Bind arm to the modifier's button (6): two discrete actions collide.
+    let json = valid_json().replace("\"arm_button\": 9", "\"arm_button\": 6");
+    let err = ProfileRuntime::compile(json.as_bytes()).expect_err("action collision");
+    assert!(matches!(err, ProfileError::AmbiguousBinding { .. }));
+}
+
+#[test]
+fn a_trigger_firing_a_discrete_action_is_rejected() {
+    // A trigger must not double as the disarm button (8).
+    let json = valid_json().replace("\"trigger_right\": 7", "\"trigger_right\": 8");
+    let err = ProfileRuntime::compile(json.as_bytes()).expect_err("trigger collision");
+    assert!(matches!(err, ProfileError::AmbiguousBinding { .. }));
+}
+
+#[test]
+fn an_unreasonable_deadzone_or_expo_is_rejected() {
+    let big_dz = valid_json().replace("\"deadzone\": 0.06", "\"deadzone\": 1.5");
+    assert!(matches!(
+        ProfileRuntime::compile(big_dz.as_bytes()).expect_err("deadzone >= 1"),
+        ProfileError::OutOfRange { .. }
+    ));
+    let big_expo = valid_json().replace("\"expo\": 0.35", "\"expo\": 25.0");
+    assert!(matches!(
+        ProfileRuntime::compile(big_expo.as_bytes()).expect_err("expo too large"),
+        ProfileError::OutOfRange { .. }
+    ));
+}

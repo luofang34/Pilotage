@@ -13,6 +13,7 @@ import {
   encodeControlFrameEnvelope,
   decodeBareEnvelope,
   parseVideoFrameV2,
+  BUTTON_EDGE_PRESSED,
   SCHEMA_VERSION,
 } from "./wire.js";
 
@@ -598,6 +599,46 @@ check(
   check(
     "a fully neutral frame reports all four axes on the wire",
     axisEntries.length === 4,
+  );
+}
+
+// ---- GIM-03/#167: a vehicle.gimbal control frame round-trips on the wire ----
+// The gimbal quasimode's frames must encode and decode intact: scope, profile
+// revision, the pitch/yaw rate axes, and the R3 recenter edge.
+{
+  const AXIS_PITCH = 1;
+  const AXIS_YAW = 3;
+  const GIMBAL_NEUTRAL = 0;
+  const encoded = encodeControlFrameEnvelope({
+    sessionId: 7n,
+    vehicleId: 1n,
+    scope: "vehicle.gimbal",
+    generation: 3n,
+    sequence: 42,
+    sampledAtNanos: 123_456_789n,
+    profileRevision: 3,
+    axes: [
+      [AXIS_PITCH, -0.5],
+      [AXIS_YAW, 0.25],
+    ],
+    edges: [[GIMBAL_NEUTRAL, BUTTON_EDGE_PRESSED]],
+  });
+  const decoded = decodeBareEnvelope(encoded);
+  check("gimbal frame decodes as a ControlFrame", decoded.kind === "ControlFrame");
+  const m = decoded.message;
+  check("gimbal frame scope round-trips", m.scope === "vehicle.gimbal");
+  check("gimbal frame profile_revision round-trips", m.profileRevision === 3);
+  check(
+    "gimbal pitch rate round-trips",
+    m.axes.some(([id, v]) => id === AXIS_PITCH && v === -0.5),
+  );
+  check(
+    "gimbal yaw rate round-trips",
+    m.axes.some(([id, v]) => id === AXIS_YAW && v === 0.25),
+  );
+  check(
+    "gimbal recenter (R3) edge round-trips",
+    m.edges.some(([id, edge]) => id === GIMBAL_NEUTRAL && edge === BUTTON_EDGE_PRESSED),
   );
 }
 

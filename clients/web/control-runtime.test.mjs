@@ -87,6 +87,22 @@ check("the built-in default profile activated (revision 1)", shell.activationRev
   check("v6 capture is reported at centered stick", plan.captureActive === true);
 }
 
+// Vector 7: a control held across a reconnect fires no edge — exercised through
+// the REAL wasm runtime (the production path), not a JS helper. arm=button 9,
+// R3=button 11; a fresh session generation seeds the baselines.
+{
+  const held = pad([0, 0, 0, 0], [9, 11]);
+  const gen = (g) => ({ ...session("quad-pilot", true), generation: g });
+  shell.tickFromPad(held, gen(100)); // establish generation 100 with the controls held
+  const reconnect = shell.tickFromPad(held, gen(101)); // reconnect: new generation, still held
+  check("v7 held arm across reconnect fires no arm", reconnect.arm === false);
+  check("v7 held R3 across reconnect fires no recenter", reconnect.gimbal?.recenter === false);
+  shell.tickFromPad(pad([0, 0, 0, 0], []), gen(101)); // release
+  const press = shell.tickFromPad(held, gen(101)); // press again
+  check("v7 a fresh arm after release fires once", press.arm === true);
+  check("v7 a fresh R3 after release recenters once", press.gimbal?.recenter === true);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

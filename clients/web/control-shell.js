@@ -24,7 +24,8 @@ const FLAG_RECENTER = 1 << 2;
 const FLAG_ARM = 1 << 3;
 const FLAG_DISARM = 1 << 4;
 const FLAG_CAPTURE = 1 << 5;
-const LEASE_SHIFT = 8; // bits 8..9: 0 none, 1 request, 2 release.
+const LEASE_SHIFT = 8; // bits 8..9: gimbal lease 0 none, 1 request, 2 release.
+const MOTION_LEASE_SHIFT = 10; // bits 10..11: motion lease, same encoding.
 
 const MODE_IDS = { "quad-pilot": 0, "quad-cruise": 1, fpv: 2, rover: 3 };
 
@@ -90,6 +91,13 @@ export class ControlShell {
   /** The active profile's identity string. */
   profileId() {
     return this.#control.profile_id();
+  }
+
+  /** The active profile DOCUMENT revision (ADR-0007/0009) — the value carried
+   *  on control frames as profile_revision, distinct from the activation
+   *  epoch. */
+  profileRevision() {
+    return this.#control.profile_revision();
   }
 
   /** The active profile's content digest as a lowercase hex string. */
@@ -196,13 +204,16 @@ export class ControlShell {
         ? { pitch: view.gimbal[0], yaw: view.gimbal[1], recenter: (flags & FLAG_RECENTER) !== 0 }
         : null;
     const leaseCode = (flags >>> LEASE_SHIFT) & 0b11;
+    const motionLeaseCode = (flags >>> MOTION_LEASE_SHIFT) & 0b11;
+    const leaseName = (code) => (code === 1 ? "request" : code === 2 ? "release" : null);
     return {
       motion,
       gimbal,
       arm: (flags & FLAG_ARM) !== 0,
       disarm: (flags & FLAG_DISARM) !== 0,
       captureActive: (flags & FLAG_CAPTURE) !== 0,
-      lease: leaseCode === 1 ? "request" : leaseCode === 2 ? "release" : null,
+      lease: leaseName(leaseCode),
+      motionLease: leaseName(motionLeaseCode),
     };
   }
 }

@@ -70,7 +70,29 @@ pub enum ProfileError {
         /// Which field.
         field: &'static str,
     },
+    /// A physical index exceeds the runtime's fixed input-buffer capacity, so
+    /// the runtime could never read it.
+    #[error("{field} index {index} exceeds the {limit}-slot buffer")]
+    IndexOutOfRange {
+        /// Which binding.
+        field: &'static str,
+        /// The out-of-range index.
+        index: usize,
+        /// The buffer slot count.
+        limit: usize,
+    },
+    /// A finite response-curve value was outside its supported range.
+    #[error("{field} is outside its supported range")]
+    OutOfRange {
+        /// Which field.
+        field: &'static str,
+    },
 }
+
+/// The runtime's fixed axis-buffer slot count; an axis index must fit it.
+const MAX_AXES: usize = 8;
+/// The runtime's fixed button-buffer slot count; a button index must fit it.
+const MAX_BUTTONS: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,6 +139,11 @@ pub struct CompiledProfile {
     digest: [u8; 32],
     pub(crate) gimbal: GimbalDoc,
     pub(crate) flight: FlightDoc,
+    // The flight-stick shaping config, built ONCE at compile time and reused
+    // every tick, so the hot path allocates no per-axis config. Its
+    // `source_index` is unused — `normalize_axis` shapes the raw value the
+    // caller passes — so one config serves every stick.
+    pub(crate) flight_stick: AxisConfig,
 }
 
 impl CompiledProfile {
@@ -175,6 +202,18 @@ impl ProfileRuntime {
         }
         validate(&doc)?;
         let digest: [u8; 32] = Sha256::digest(candidate).into();
+        let flight_stick = AxisConfig {
+            source_index: 0,
+            logical: String::new(),
+            invert: false,
+            deadzone: doc.flight.deadzone,
+            expo: doc.flight.expo,
+            calibration: pilotage_input::AxisCalibration {
+                min: -1.0,
+                center: 0.0,
+                max: 1.0,
+            },
+        };
         Ok(CompiledProfile {
             id: doc.id,
             schema_version: doc.schema_version,
@@ -182,20 +221,22 @@ impl ProfileRuntime {
             digest,
             gimbal: doc.gimbal,
             flight: doc.flight,
+            flight_stick,
         })
     }
 }
 
 /// Full semantic validation beyond serde's structural check: logical names,
-/// binding uniqueness, calibration sanity, and finiteness.
+/// index bounds, binding uniqueness, calibration sanity, curve ranges, and
+/// finiteness. A candidate that fails any of these is discarded whole.
 fn validate(doc: &ProfileDoc) -> Result<(), ProfileError> {
     resolve_logical(&doc.gimbal.pitch.logical)?;
     resolve_logical(&doc.gimbal.yaw.logical)?;
+    check_bounds(doc)?;
     check_unique(doc)?;
     check_axis("pitch", &doc.gimbal.pitch)?;
     check_axis("yaw", &doc.gimbal.yaw)?;
-    check_finite("flight.deadzone", doc.flight.deadzone)?;
-    check_finite("flight.expo", doc.flight.expo)?;
+    check_range("flight", doc.flight.deadzone, doc.flight.expo)?;
     Ok(())
 }
 
@@ -207,12 +248,76 @@ fn resolve_logical(name: &str) -> Result<(), ProfileError> {
         })
 }
 
-/// No two roles may bind the same physical input, or a tick could not tell
-/// which role an input drives.
+/// Every bound index must fit the runtime's fixed input buffers, or the
+/// runtime could never read that input.
+fn check_bounds(doc: &ProfileDoc) -> Result<(), ProfileError> {
+    for (field, index) in [
+        ("gimbal.pitch", doc.gimbal.pitch.source_index),
+        ("gimbal.yaw", doc.gimbal.yaw.source_index),
+        ("flight.left_x", doc.flight.left_x),
+        ("flight.left_y", doc.flight.left_y),
+        ("flight.right_x", doc.flight.right_x),
+        ("flight.right_y", doc.flight.right_y),
+    ] {
+        if index >= MAX_AXES {
+            return Err(ProfileError::IndexOutOfRange {
+                field,
+                index,
+                limit: MAX_AXES,
+            });
+        }
+    }
+    for (field, index) in [
+        (
+            "gimbal.modifier_button",
+            usize::from(doc.gimbal.modifier_button),
+        ),
+        ("gimbal.reset_button", usize::from(doc.gimbal.reset_button)),
+        ("flight.arm_button", usize::from(doc.flight.arm_button)),
+        (
+            "flight.disarm_button",
+            usize::from(doc.flight.disarm_button),
+        ),
+        ("flight.trigger_left", doc.flight.trigger_left),
+        ("flight.trigger_right", doc.flight.trigger_right),
+    ] {
+        if index >= MAX_BUTTONS {
+            return Err(ProfileError::IndexOutOfRange {
+                field,
+                index,
+                limit: MAX_BUTTONS,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// No binding collision that a tick could not resolve: the four discrete-action
+/// buttons must be mutually distinct, the four flight sticks distinct axes, and
+/// the gimbal axes distinct. A trigger MAY share the modifier's button (the L2
+/// modifier is the descend trigger, masked while captured) but must not fire a
+/// discrete action.
 fn check_unique(doc: &ProfileDoc) -> Result<(), ProfileError> {
-    if doc.gimbal.modifier_button == doc.gimbal.reset_button {
+    let actions = [
+        doc.gimbal.modifier_button,
+        doc.gimbal.reset_button,
+        doc.flight.arm_button,
+        doc.flight.disarm_button,
+    ];
+    if has_duplicate(&actions) {
         return Err(ProfileError::AmbiguousBinding {
-            detail: "gimbal modifier and reset share a button",
+            detail: "two discrete actions share a button",
+        });
+    }
+    let sticks = [
+        doc.flight.left_x,
+        doc.flight.left_y,
+        doc.flight.right_x,
+        doc.flight.right_y,
+    ];
+    if has_duplicate(&sticks) {
+        return Err(ProfileError::AmbiguousBinding {
+            detail: "two flight sticks share an axis",
         });
     }
     if doc.gimbal.pitch.source_index == doc.gimbal.yaw.source_index {
@@ -220,23 +325,51 @@ fn check_unique(doc: &ProfileDoc) -> Result<(), ProfileError> {
             detail: "gimbal pitch and yaw share an axis",
         });
     }
-    if doc.flight.arm_button == doc.flight.disarm_button {
+    if doc.flight.trigger_left == doc.flight.trigger_right {
         return Err(ProfileError::AmbiguousBinding {
-            detail: "flight arm and disarm share a button",
+            detail: "the two triggers share a button",
         });
+    }
+    let discrete = [
+        doc.gimbal.reset_button,
+        doc.flight.arm_button,
+        doc.flight.disarm_button,
+    ];
+    for trigger in [doc.flight.trigger_left, doc.flight.trigger_right] {
+        if u8::try_from(trigger).is_ok_and(|t| discrete.contains(&t)) {
+            return Err(ProfileError::AmbiguousBinding {
+                detail: "a trigger collides with a discrete action",
+            });
+        }
     }
     Ok(())
 }
 
+fn has_duplicate<T: PartialEq>(values: &[T]) -> bool {
+    values
+        .iter()
+        .enumerate()
+        .any(|(i, v)| values[i + 1..].contains(v))
+}
+
 fn check_axis(axis: &'static str, config: &AxisConfig) -> Result<(), ProfileError> {
     let cal = &config.calibration;
-    check_finite(axis, config.deadzone)?;
-    check_finite(axis, config.expo)?;
     check_finite(axis, cal.min)?;
     check_finite(axis, cal.center)?;
     check_finite(axis, cal.max)?;
     if !(cal.min < cal.center && cal.center < cal.max) {
         return Err(ProfileError::MalformedCalibration { axis });
+    }
+    check_range(axis, config.deadzone, config.expo)
+}
+
+/// A finite deadzone must lie in `[0, 1)` and a finite expo in `[-0.99, 10]` —
+/// the ranges the normalization pipeline keeps monotonic and bounded.
+fn check_range(field: &'static str, deadzone: f32, expo: f32) -> Result<(), ProfileError> {
+    check_finite(field, deadzone)?;
+    check_finite(field, expo)?;
+    if !(0.0..1.0).contains(&deadzone) || !(-0.99..=10.0).contains(&expo) {
+        return Err(ProfileError::OutOfRange { field });
     }
     Ok(())
 }

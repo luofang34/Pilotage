@@ -8,7 +8,7 @@
 //! reaches this runtime only through [`ControlRuntime::activate`], which
 //! itself only accepts a [`CompiledProfile`]; invalid bytes never get here.
 
-use crate::flight::{Capture, flight_axes};
+use crate::flight::{Capture, flight_axes, shaped_stick};
 use crate::plan::{
     AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ActivationPlan, BUTTON_EDGE_PRESSED,
     ControlPlan, Frame, GIMBAL_NEUTRAL_BUTTON, LeaseAction,
@@ -35,6 +35,10 @@ pub struct ControlRuntime {
     last_request_ms: f64,
     prev_arm: bool,
     prev_disarm: bool,
+    // Set when a profile SWITCH installs (not the first bootstrap install): the
+    // next normal tick reacquires the motion lease that the handover released,
+    // so the host fences the old flight generation before the new mapping runs.
+    reacquire_motion: bool,
     // The session generation last evaluated. When the shell reports a NEW
     // generation (a fresh connect), the first tick seeds every discrete-action
     // baseline from the held state and fires no edge — a button held across a
@@ -71,6 +75,14 @@ impl ControlRuntime {
         self.active.as_ref().map_or("", CompiledProfile::id)
     }
 
+    /// The active profile DOCUMENT revision — the ADR-0007/0009 device-profile
+    /// revision carried on control frames, distinct from the session
+    /// activation epoch ([`Self::activation_revision`]). Zero before activation.
+    #[must_use]
+    pub fn active_profile_revision(&self) -> u32 {
+        self.active.as_ref().map_or(0, CompiledProfile::revision)
+    }
+
     /// The active profile's content digest, or all-zero before activation. The
     /// shell exposes this so a host can later bind the activation revision it
     /// sees on the wire to the exact profile bytes that produced it.
@@ -96,6 +108,7 @@ impl ControlRuntime {
                 activation_revision: self.activation_revision,
                 emit_neutral: true,
                 release_gimbal_lease: false,
+                release_motion_lease: false,
             };
         }
         self.pending = Some(candidate);
@@ -104,6 +117,7 @@ impl ControlRuntime {
             activation_revision: self.activation_revision,
             emit_neutral: true,
             release_gimbal_lease: true,
+            release_motion_lease: true,
         }
     }
 
@@ -169,11 +183,15 @@ impl ControlRuntime {
     /// captured controls (the modifier and the gimbal sticks) read neutral, so
     /// behavior changes only after a genuine neutral transition.
     fn evaluate_handover(&mut self, sample: &RawSample, active: &CompiledProfile) -> ControlPlan {
-        let captured_neutral = !modifier_held(sample, &active.gimbal) && {
-            let demand = gimbal_demand(sample, &active.gimbal);
-            demand.pitch == 0.0 && demand.yaw == 0.0
-        };
-        if let Some(candidate) = captured_neutral.then(|| self.pending.take()).flatten() {
+        // Neutral must hold across the UNION of the active AND candidate
+        // controls: a profile swap remaps flight and gimbal inputs, so any
+        // input deflected under EITHER profile could jump meaning at install.
+        let union_neutral = controls_neutral(sample, active)
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|candidate| controls_neutral(sample, candidate));
+        if let Some(candidate) = union_neutral.then(|| self.pending.take()).flatten() {
             self.reset_baseline = reset_held(sample, &candidate.gimbal);
             self.prev_arm = sample.pressed(usize::from(candidate.flight.arm_button));
             self.prev_disarm = sample.pressed(usize::from(candidate.flight.disarm_button));
@@ -183,6 +201,9 @@ impl ControlRuntime {
             motion: Some(neutral_motion()),
             gimbal: Some(neutral_gimbal()),
             lease: Some(LeaseAction::Release),
+            // The scheme remaps flight too, so the motion lease is cycled with
+            // the gimbal lease and reacquired on resume.
+            motion_lease: Some(LeaseAction::Release),
             label: None,
             arm: false,
             disarm: false,
@@ -198,6 +219,7 @@ impl ControlRuntime {
         self.activation_revision = self.activation_revision.wrapping_add(1);
         self.streaming = false;
         self.last_request_ms = NEVER_REQUESTED_MS;
+        self.reacquire_motion = true;
     }
 
     /// The normal tick: flight motion (masked while LT is held), the gimbal
@@ -209,8 +231,12 @@ impl ControlRuntime {
         active: &CompiledProfile,
     ) -> ControlPlan {
         let gimbal = &active.gimbal;
-        let held = modifier_held(sample, gimbal);
         let active_gimbal = session.lease_granted && session.mode.carries_gimbal();
+        // ONE effective capture condition drives masking, gimbal routing, and
+        // the HUD: the modifier only captures when the gimbal is actually
+        // active (a lease is held). Otherwise LT would silently suppress flight
+        // while producing no gimbal output — a silent control loss.
+        let captured = modifier_held(sample, gimbal) && active_gimbal;
 
         let reset = reset_edge(
             reset_held(sample, gimbal),
@@ -219,7 +245,7 @@ impl ControlRuntime {
         );
         self.reset_baseline = reset.baseline;
         let demand = gimbal_demand(sample, gimbal);
-        let plan = frame_plan(held && active_gimbal, reset.edge, self.streaming, demand);
+        let plan = frame_plan(captured, reset.edge, self.streaming, demand);
         self.streaming = plan.is_some_and(|p| p.streaming);
 
         let gimbal_frame = active_gimbal.then(|| {
@@ -236,16 +262,21 @@ impl ControlRuntime {
             }
         });
 
-        let motion = self.motion_frame(sample, session, active, held);
+        let motion = self.motion_frame(sample, session, active, captured);
         let lease = self.lease_action(session);
+        let motion_lease = self.reacquire_motion.then(|| {
+            self.reacquire_motion = false;
+            LeaseAction::Request
+        });
         ControlPlan {
             motion: Some(motion.frame),
             gimbal: gimbal_frame,
             lease,
+            motion_lease,
             label: Some(motion.label),
             arm: motion.arm,
             disarm: motion.disarm,
-            capture_active: held && active_gimbal,
+            capture_active: captured,
         }
     }
 
@@ -267,7 +298,7 @@ impl ControlRuntime {
             yaw_axis: active.gimbal.yaw.source_index,
             modifier_button: usize::from(active.gimbal.modifier_button),
         };
-        let axes = flight_axes(sample, flight, session.mode, capture);
+        let axes = flight_axes(sample, flight, &active.flight_stick, session.mode, capture);
         MotionOutcome {
             frame: Frame {
                 axes: vec![
@@ -309,6 +340,34 @@ impl ControlRuntime {
             LeasePlan::None => None,
         }
     }
+}
+
+/// A trigger reads neutral below this analog travel.
+const TRIGGER_NEUTRAL_EPS: f32 = 0.05;
+
+/// Whether every control-relevant input of `profile` reads neutral: the gimbal
+/// modifier and axes, the four flight sticks, and the two triggers. Activation
+/// requires this across BOTH the active and candidate profiles, so a profile
+/// swap can never change a deflected input's meaning at the moment of install.
+fn controls_neutral(sample: &RawSample, profile: &CompiledProfile) -> bool {
+    if modifier_held(sample, &profile.gimbal) {
+        return false;
+    }
+    let demand = gimbal_demand(sample, &profile.gimbal);
+    if demand.pitch != 0.0 || demand.yaw != 0.0 {
+        return false;
+    }
+    let flight = &profile.flight;
+    let sticks = [flight.left_x, flight.left_y, flight.right_x, flight.right_y];
+    if sticks
+        .into_iter()
+        .any(|index| shaped_stick(sample, &profile.flight_stick, index) != 0.0)
+    {
+        return false;
+    }
+    [flight.trigger_left, flight.trigger_right]
+        .into_iter()
+        .all(|index| sample.button_value(index) <= TRIGGER_NEUTRAL_EPS)
 }
 
 /// The motion tick outcome: the frame, its readout label, and the typed

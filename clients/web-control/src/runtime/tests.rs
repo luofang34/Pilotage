@@ -302,6 +302,92 @@ fn arm_and_disarm_are_typed_and_follow_the_profile_binding() {
 }
 
 #[test]
+fn a_profile_swap_waits_for_the_candidate_controls_to_be_neutral_too() {
+    // The alternate profile's modifier is button 4 (the default's is 6). While
+    // button 4 is held, a swap must NOT install: the candidate binds button 4,
+    // so installing would change its meaning under a held control — even though
+    // button 4 is neutral for the currently-active profile.
+    let mut runtime = with_default();
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    let candidate = ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles");
+    runtime.activate(candidate);
+
+    let held_alt_modifier = sample(&[0.0, 0.0, 0.0, 0.0], &[4]);
+    let during = runtime.evaluate(&held_alt_modifier, &session(Mode::QuadPilot, true));
+    assert_eq!(
+        runtime.activation_revision(),
+        1,
+        "the candidate's own control held blocks install"
+    );
+    assert_eq!(
+        during.motion_lease,
+        Some(LeaseAction::Release),
+        "the motion lease is cycled too"
+    );
+
+    // Release: the union of both profiles' controls is neutral, so it installs
+    // and reacquires the motion lease on the resuming tick.
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert_eq!(
+        runtime.activation_revision(),
+        2,
+        "installs once the union is neutral"
+    );
+    let resume = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert_eq!(
+        resume.motion_lease,
+        Some(LeaseAction::Request),
+        "the motion lease is reacquired on resume"
+    );
+}
+
+#[test]
+fn lt_does_not_suppress_flight_without_a_gimbal_lease() {
+    let mut runtime = with_default();
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, false),
+    );
+    // LT (button 6) held with the lease DENIED, left stick forward + right
+    // stick deflected. LT must NOT capture, so flight keeps flying on both
+    // sticks and there is no gimbal frame or capture — never a silent loss.
+    let plan = runtime.evaluate(
+        &sample(&[0.0, -1.0, 1.0, 1.0], &[6]),
+        &session(Mode::QuadPilot, false),
+    );
+    let motion = plan.motion.as_ref().expect("motion");
+    let axis = |id: u16| {
+        motion
+            .axes
+            .iter()
+            .find(|(a, _)| *a == id)
+            .map(|(_, v)| *v)
+            .expect("axis")
+    };
+    assert_eq!(
+        axis(crate::plan::AXIS_THROTTLE),
+        1.0,
+        "left stick still climbs with no lease"
+    );
+    assert_eq!(
+        axis(crate::plan::AXIS_ROLL),
+        1.0,
+        "right stick still rolls (LT did not capture)"
+    );
+    assert!(plan.gimbal.is_none(), "no gimbal frame without a lease");
+    assert!(!plan.capture_active, "no capture without a lease");
+}
+
+#[test]
 fn capture_active_is_reported_even_at_centered_stick() {
     let mut runtime = with_default();
     runtime.evaluate(

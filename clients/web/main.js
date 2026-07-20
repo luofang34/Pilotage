@@ -1116,7 +1116,13 @@ async function runControlLoop(writer, token) {
         sendGimbalFrame(writer, token, plan.gimbal);
       }
       if (plan.lease) {
-        executeLeaseAction(token, plan.lease);
+        executeLeaseAction(token, plan.lease, GIMBAL_SCOPE);
+      }
+      if (plan.motionLease) {
+        // A profile switch cycles the motion lease so the host fences the old
+        // flight generation before the remapped scheme runs (distinct from the
+        // input-loss release, which drives the link-loss policy).
+        executeLeaseAction(token, plan.motionLease, MOTION_SCOPE);
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -1167,7 +1173,7 @@ function sendMotionFrame(writer, token, mode, plan) {
     generation: state.generation,
     sequence: state.sequence,
     sampledAtNanos: nowNanos(),
-    profileRevision: state.controlShell.activationRevision(),
+    profileRevision: state.controlShell.profileRevision(),
     axes,
     edges,
   });
@@ -1189,7 +1195,7 @@ function sendGimbalFrame(writer, token, gimbal) {
     generation: state.gimbalGeneration,
     sequence: state.gimbalSequence,
     sampledAtNanos: nowNanos(),
-    profileRevision: state.controlShell.activationRevision(),
+    profileRevision: state.controlShell.profileRevision(),
     axes: [
       [AXIS_PITCH, gimbal.pitch],
       [AXIS_YAW, gimbal.yaw],
@@ -1204,18 +1210,18 @@ function sendGimbalFrame(writer, token, gimbal) {
 /** Executes the runtime's gimbal-lease decision on the reliable session
  *  stream: request or release the `vehicle.gimbal` scope. The runtime owns the
  *  request debounce and the mode/grant/deny policy; this only sends. */
-function executeLeaseAction(token, action) {
+function executeLeaseAction(token, action, scope) {
   const writer = state.sessionWriter;
   if (!writer || !transportSessions.isActive(token)) return;
   if (action === "release") {
-    state.gimbalLeaseGranted = false;
-    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    if (scope === GIMBAL_SCOPE) state.gimbalLeaseGranted = false;
+    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope });
     writer.write(lengthDelimit(release)).catch(() => {});
-    log("released the gimbal lease");
+    log(`released the ${scope} lease`);
   } else if (action === "request") {
-    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope });
     writer.write(lengthDelimit(request)).catch(() => {});
-    log(`sent LeaseRequest for ${GIMBAL_SCOPE}`);
+    log(`sent LeaseRequest for ${scope}`);
   }
 }
 

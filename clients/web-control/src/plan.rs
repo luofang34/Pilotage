@@ -50,6 +50,10 @@ pub struct ControlPlan {
     pub gimbal: Option<Frame>,
     /// A gimbal-lease request or release, when the plan calls for one.
     pub lease: Option<LeaseAction>,
+    /// A motion-lease request or release, cycled with the gimbal lease across a
+    /// profile activation (the scheme remaps flight, so the motion generation
+    /// must be fenced and reacquired too).
+    pub motion_lease: Option<LeaseAction>,
     /// A human-readable scheme label for the DOM readout (never control).
     pub label: Option<&'static str>,
     /// A typed arm edge fired this tick. The shell maps it to the wire's
@@ -84,4 +88,7 @@ pub struct ActivationPlan {
     /// Whether the shell must release the gimbal lease as part of the
     /// handover (it is reacquired through normal lease planning on resume).
     pub release_gimbal_lease: bool,
+    /// Whether the shell must also release the motion lease for the handover,
+    /// because the candidate remaps flight (reacquired on resume).
+    pub release_motion_lease: bool,
 }

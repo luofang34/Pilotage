@@ -41,7 +41,8 @@ const FLAG_RECENTER: u32 = 1 << 2;
 const FLAG_ARM: u32 = 1 << 3;
 const FLAG_DISARM: u32 = 1 << 4;
 const FLAG_CAPTURE: u32 = 1 << 5;
-const LEASE_SHIFT: u32 = 8; // bits 8..9: 0 none, 1 request, 2 release.
+const LEASE_SHIFT: u32 = 8; // bits 8..9: gimbal lease 0 none, 1 request, 2 release.
+const MOTION_LEASE_SHIFT: u32 = 10; // bits 10..11: motion lease, same encoding.
 
 /// The JS-owned web-control resource. Construct it, write the built-in default
 /// profile bytes through [`WebControl::activate`], then drive ticks through
@@ -129,6 +130,13 @@ impl WebControl {
         self.runtime.active_profile_id().to_owned()
     }
 
+    /// The active profile DOCUMENT revision (ADR-0007/0009), carried on control
+    /// frames as `profile_revision`. Distinct from the activation epoch.
+    #[must_use]
+    pub fn profile_revision(&self) -> u32 {
+        self.runtime.active_profile_revision()
+    }
+
     /// The active profile's 32-byte content digest (all-zero before
     /// activation). Exposed so a host can bind the on-wire activation revision
     /// to the exact bytes that produced it.
@@ -193,13 +201,19 @@ impl WebControl {
                 flags |= FLAG_RECENTER;
             }
         }
-        flags |= match plan.lease {
-            Some(LeaseAction::Request) => 1 << LEASE_SHIFT,
-            Some(LeaseAction::Release) => 2 << LEASE_SHIFT,
-            None => 0,
-        };
+        flags |= lease_bits(plan.lease, LEASE_SHIFT);
+        flags |= lease_bits(plan.motion_lease, MOTION_LEASE_SHIFT);
         write_u32(&mut self.output, OUT_FLAGS, flags);
         flags
+    }
+}
+
+/// Packs a lease action into two bits at `shift`: 0 none, 1 request, 2 release.
+fn lease_bits(action: Option<LeaseAction>, shift: u32) -> u32 {
+    match action {
+        Some(LeaseAction::Request) => 1 << shift,
+        Some(LeaseAction::Release) => 2 << shift,
+        None => 0,
     }
 }
 
