@@ -1,7 +1,7 @@
 <!--
   Pilotage demo browser viewer (increment 1b). Not the v1 client — a minimal,
   self-contained page demonstrating command uplink, telemetry downlink, and
-  MJPEG video downlink against a real session host over WebTransport
+  video downlink against a real session host over WebTransport
   (ADR-0004 local-demo shortcut, ADR-0005).
 
   Serve statically, no build step:
@@ -11,6 +11,11 @@
   The session host prints `LISTENING <port> <cert-hash-hex>` on startup; paste
   those two values (plus the host, usually 127.0.0.1) into the boxes below, or
   pass them as URL query params: ?host=127.0.0.1&port=4433&cert=<hex>.
+
+  Layout contract: one large main view (selectable camera or PFD) beside a
+  vertically stacked G5-style PFD/HSI column. Captions, the SIM banner, and
+  every status readout live OUTSIDE the instrument/video boxes so nothing
+  overlays flight-critical pixels and any box can go fullscreen later.
 -->
 <title>Pilotage demo viewer</title>
 <meta charset="utf-8" />
@@ -25,6 +30,34 @@
   h1 {
     font-size: 1.1rem;
     font-weight: 600;
+    margin: 0;
+  }
+  .masthead {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+  /* The one simulation banner: page-scoped, outside every instrument and
+     video box. This viewer only speaks to simulator hosts today; a future
+     real-vehicle profile hides it by setting data-environment="flight" on
+     <body> from a declared non-sim source, never by hand. */
+  .sim-banner {
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid #ffbf00;
+    color: #ffdf70;
+    padding: 0.25rem 0.6rem;
+    font: 700 0.75rem monospace;
+    letter-spacing: 0.04em;
+  }
+  body[data-environment="flight"] .sim-banner {
+    display: none;
+  }
+  .hint {
+    color: #888;
+    font-size: 0.8rem;
+    margin: 0.25rem 0 0.5rem;
   }
   .bootstrap {
     display: flex;
@@ -51,60 +84,93 @@
     padding: 0.4rem 0.9rem;
     cursor: pointer;
   }
-  .stage-row {
-    display: flex;
+  /* Cockpit grid: [ main picture | G5 column ]. The main slot holds whichever
+     figure #mainView selects; the G5 column keeps the small-format PFD/HSI
+     stack. On narrow screens (tablet portrait) the columns stack — the
+     visionOS/iPadOS-native layout is future work, this is only the fallback. */
+  .cockpit {
+    display: grid;
+    /* The main slot wraps its video's own aspect (no pillarboxing), and
+       the G5 column scales with the viewport instead of a fixed width. */
+    grid-template-columns: minmax(0, 3fr) minmax(14rem, 1fr);
     gap: 0.75rem;
-    align-items: flex-start;
-    flex-wrap: wrap;
+    align-items: start;
   }
-  .stage {
+  @media (max-width: 900px) {
+    .cockpit {
+      grid-template-columns: 1fr;
+    }
+  }
+  figure.stage {
+    margin: 0;
+    min-width: 0;
+  }
+  /* The main view fits the viewport with the toolbar and status rows still
+     on screen — no scrolling to reach controls. The figure shrink-wraps its
+     canvas so the frame border hugs the video (no filler bars either side). */
+  #mainSlot figure.stage {
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+  #mainSlot figure.stage canvas {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: calc(100vh - 24rem);
+  }
+  figure.stage > figcaption {
+    font: 0.75rem monospace;
+    color: #ccc;
+    padding: 0.15rem 0.1rem;
+  }
+  figure.stage > .frame {
+    /* Positioned so the absolute DOM fault presenter (createDomFaultPresenter
+       inserts an inset:0 overlay as a sibling of the canvas) covers exactly
+       this instrument frame, never the viewport. */
     position: relative;
-    display: inline-block;
     border: 1px solid #333;
-  }
-  #video {
-    display: block;
     background: #000;
-    max-width: 100%;
+    line-height: 0;
   }
-  #chaseVideo {
+  figure.stage canvas {
     display: block;
-    background: #000;
+    width: 100%;
+    height: auto;
+  }
+  .g5-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  /* The G5 stack must never become the page's tallest element: both
+     instruments share the same viewport budget as the main view. */
+  .g5-column figure.stage canvas {
+    width: auto;
+    height: auto;
     max-width: 100%;
+    max-height: calc((100vh - 26rem) / 2);
+  }
+  /* Off-slot figures stay mounted (their canvases keep rendering) but
+     hidden; the stream-activation work decides when to stop their feeds. */
+  #stageShelf {
+    display: none;
+  }
+  .status-row {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
   }
   #overlay {
-    position: absolute;
-    top: 0.4rem;
-    left: 0.4rem;
-    background: rgba(0, 0, 0, 0.55);
-    padding: 0.25rem 0.5rem;
+    font-family: monospace;
     font-size: 0.85rem;
-    border-radius: 3px;
-  }
-  .caption {
-    position: absolute;
-    bottom: 0.4rem;
-    left: 0.4rem;
-    background: rgba(0, 0, 0, 0.55);
-    padding: 0.2rem 0.45rem;
-    font-size: 0.75rem;
-    border-radius: 3px;
-    color: #ccc;
-  }
-  .sim-label {
-    position: absolute;
-    top: 0.35rem;
-    right: 0.35rem;
-    background: rgba(0, 0, 0, 0.8);
-    border: 1px solid #ffbf00;
-    color: #ffdf70;
-    padding: 0.2rem 0.4rem;
-    font: 700 0.65rem monospace;
-    letter-spacing: 0.04em;
-    pointer-events: none;
+    color: #fc9;
+    min-height: 1.2em;
   }
   #telemetry {
-    margin-top: 0.5rem;
+    margin-top: 0.35rem;
     font-family: monospace;
     font-size: 0.9rem;
   }
@@ -114,24 +180,50 @@
     font-size: 0.8rem;
     color: #9ac;
   }
-  #status {
+  /* The session log sits in normal flow at the bottom of the page and
+     shows exactly the newest line until expanded (entries are prepended
+     newest-first). It is deliberately NOT fixed/overlaid: expanding
+     grows the dock in flow and lets the page scroll, so it can never
+     cover instrument or video pixels (DISP-05 / #171). */
+  .log-dock {
+    border-top: 1px solid #333;
     margin-top: 0.75rem;
+    padding-top: 0.4rem;
+  }
+  .log-bar {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.25rem;
+  }
+  #logToggle {
+    background: none;
+    border: 1px solid #444;
+    color: #9c9;
+    font: 0.75rem monospace;
+    padding: 0.1rem 0.5rem;
+  }
+  #status {
     white-space: pre-wrap;
     font-family: monospace;
     font-size: 0.75rem;
     color: #9c9;
-    max-height: 16rem;
     overflow-y: auto;
-    border-top: 1px solid #333;
-    padding-top: 0.5rem;
   }
-  .hint {
-    color: #888;
-    font-size: 0.8rem;
+  /* Collapsed: exactly the newest line (log entries are newest-first). */
+  #status.collapsed {
+    max-height: 1.3em;
+    overflow: hidden;
+  }
+  #status.expanded {
+    max-height: 16rem;
   }
 </style>
 
-<h1>Pilotage demo viewer</h1>
+<div class="masthead">
+  <h1>Pilotage demo viewer</h1>
+  <div class="sim-banner">SIM / NOT FOR FLIGHT</div>
+</div>
 <p class="hint">
   Drive with a connected USB gamepad (e.g. RadioMaster Pocket) if present, otherwise the
   arrow keys or WASD. Video and telemetry arrive from the real Gazebo vehicle through the
@@ -151,34 +243,52 @@
       <option value="rover">Rover (throttle/yaw)</option>
     </select>
   </label>
+  <label>main view
+    <select id="mainView">
+      <option value="stage-video" selected>FPV / onboard camera</option>
+      <option value="stage-chase">chase / 3rd person</option>
+      <option value="stage-pfd">PFD</option>
+    </select>
+  </label>
   <button id="fpvBtn">FPV mode</button><button id="resetBtn" title="Reset the simulation world and restart the FC">Reset sim</button>
 </div>
 
-<div class="stage-row">
-  <div class="stage">
-    <canvas id="video" width="320" height="240"></canvas>
-    <div id="overlay"></div>
-    <div class="sim-label">SIM / NOT FOR FLIGHT</div>
-    <div class="caption">FPV / onboard</div>
+<div class="cockpit">
+  <div id="mainSlot">
+    <figure class="stage" id="stage-video">
+      <figcaption>FPV / onboard</figcaption>
+      <div class="frame"><canvas id="video" width="320" height="240"></canvas></div>
+    </figure>
   </div>
-  <div class="stage">
-    <canvas id="chaseVideo" width="320" height="240"></canvas>
-    <div class="sim-label">SIM / NOT FOR FLIGHT</div>
-    <div class="caption">chase / 3rd person</div>
-  </div>
-  <div class="stage">
-    <canvas id="pfd" width="480" height="360"></canvas>
-    <div class="sim-label">SIM / NOT FOR FLIGHT</div>
-    <div class="caption">PFD</div>
-  </div>
-  <div class="stage">
-    <canvas id="hsi" width="480" height="360"></canvas>
-    <div class="sim-label">SIM / NOT FOR FLIGHT</div>
-    <div class="caption">HSI</div>
-  </div>
+  <aside class="g5-column" id="g5Column">
+    <figure class="stage" id="stage-pfd">
+      <figcaption>PFD</figcaption>
+      <div class="frame"><canvas id="pfd" width="480" height="360"></canvas></div>
+    </figure>
+    <figure class="stage" id="stage-hsi">
+      <figcaption>HSI</figcaption>
+      <div class="frame"><canvas id="hsi" width="480" height="360"></canvas></div>
+    </figure>
+  </aside>
+</div>
+<div id="stageShelf">
+  <figure class="stage" id="stage-chase">
+    <figcaption>chase / 3rd person</figcaption>
+    <div class="frame"><canvas id="chaseVideo" width="320" height="240"></canvas></div>
+  </figure>
+</div>
+
+<div class="status-row">
+  <div id="overlay"></div>
 </div>
 <div id="telemetry">no telemetry yet</div>
 <div id="gamepad">gamepad: none (move a stick to detect)</div>
-<div id="status"></div>
+<div class="log-dock">
+  <div class="log-bar">
+    <button id="logToggle" title="Expand or collapse the session log">▸ log</button>
+  </div>
+  <div id="status" class="collapsed"></div>
+</div>
 
+<script type="module" src="./layout.js"></script>
 <script type="module" src="./main.js"></script>

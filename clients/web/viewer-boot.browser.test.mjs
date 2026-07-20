@@ -81,6 +81,24 @@ let canvasUsable = false;
 try {
   canvasUsable = Boolean(document.getElementById("video")?.getContext("2d"));
 } catch {}
+// Layout geometry (DISP-05 / #171). The DOM fault presenter is an
+// inset:0 absolute element inserted into the instrument frame; an
+// absolute element is sized/positioned by its nearest POSITIONED
+// ancestor, so the frame carrying position:relative is exactly the
+// invariant that scopes the presenter to that frame rather than the
+// viewport. The session log must also stay in normal flow so expanding
+// it never overlays instrument pixels.
+let framePositioned = false;
+let presenterIsFrameChild = false;
+let logInFlow = false;
+try {
+  const frame = document.getElementById("pfd")?.parentElement;
+  const presenter = frame?.querySelector('div[role="alert"]');
+  framePositioned = frame ? getComputedStyle(frame).position === "relative" : false;
+  presenterIsFrameChild = Boolean(presenter && presenter.parentElement === frame);
+  const dock = document.querySelector(".log-dock");
+  logInFlow = dock ? getComputedStyle(dock).position === "static" : false;
+} catch {}
 await fetch("/boot-result", {
   method: "POST",
   body: JSON.stringify({
@@ -90,6 +108,9 @@ await fetch("/boot-result", {
     ready: statusText().includes("instrument panels ready (wasm loaded)"),
     unavailable: statusText().includes("instrument panels unavailable"),
     canvasUsable,
+    framePositioned,
+    presenterIsFrameChild,
+    logInFlow,
   }),
 });
 </script>`;
@@ -223,6 +244,19 @@ async function bootScenario({ label, serveWasm }) {
     observed.port === TEST_PORT_PARAM && observed.cert === TEST_CERT_PARAM,
   );
   check("normal boot: instrument panels ready (wasm loaded)", observed.ready === true);
+  // Layout geometry regression guards (DISP-05 / #171).
+  check(
+    "layout: instrument frame is positioned so the fault presenter anchors to it",
+    observed.framePositioned === true,
+  );
+  check(
+    "layout: the fault presenter is a child of the positioned frame (scoped to it, not the viewport)",
+    observed.framePositioned === true && observed.presenterIsFrameChild === true,
+  );
+  check(
+    "layout: the session log stays in normal flow (never overlays instrument pixels)",
+    observed.logInFlow === true,
+  );
 }
 
 // Scenario 2: the wasm fetch fails. The viewer must degrade visibly — panels
