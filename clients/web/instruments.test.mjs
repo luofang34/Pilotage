@@ -560,6 +560,30 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check("command-limit failure leaves visible target untouched", visible.log.length === 0);
 }
 
+// A scene carrying an opcode this interpreter does not know must fail the
+// frame, never present it: a silently skipped clip or backdrop command
+// bleeds layers that may never show through (the stale-interpreter class).
+{
+  const withUnknown = Uint8Array.from([
+    1,
+    ...cmd(0x23, [1, ...f32(0), ...f32(0), ...f32(10), ...f32(10)]),
+    ...cmd(0x7f, []),
+  ]);
+  const mod = new InstrumentModule(fakeExports({ sceneBytes: withUnknown }), {
+    createCanvas: recordingCanvas,
+  });
+  const visible = new RecordingCtx();
+  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
+  check(
+    "an unknown scene opcode fails the frame as UNKNOWN_OPCODE",
+    !result.ok && result.reason === REASON.UNKNOWN_OPCODE,
+  );
+  check(
+    "the partially-interpreted frame never reaches the visible target",
+    visible.log.length === 0,
+  );
+}
+
 {
   for (const reason of [
     REASON.SCENE_BUFFER_FULL,
