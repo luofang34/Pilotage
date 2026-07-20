@@ -59,6 +59,10 @@ pub enum SourceRole {
     FcState,
     /// Video capture identity for camera frames.
     VideoCapture,
+    /// Payload-device orientation/state (gimbal attitude) relayed over
+    /// the FC link: never a vehicle estimate, never eligible for control
+    /// validation, carrying the device's own boot clock.
+    PayloadDevice,
 }
 
 /// Integrity classification of the path that delivered an observation.
@@ -210,6 +214,11 @@ pub struct GimbalAttitudeSample {
     pub quat_wxyz: [f32; 4],
     /// Device angular velocity (rad/s); NaN encodes device-unknown.
     pub rates_rps: [f32; 3],
+    /// GIMBAL_DEVICE_FLAGS in effect (mode/lock bits).
+    pub flags: u32,
+    /// Non-zero reports a device failure condition; carried so a
+    /// consumer can surface a degraded payload without re-deriving it.
+    pub failure_flags: u32,
     /// Identity and acquisition time of the device report.
     pub stamp: MeasurementStamp,
 }

@@ -187,31 +187,34 @@ impl super::Px4Adapter {
 
 impl super::Px4Adapter {
     /// The latest gimbal-device orientation, withheld once stale so a
-    /// frozen value never replays as live. Stamped under the video-
-    /// capture role — payload-device state, never a vehicle estimate and
-    /// never eligible for control validation (LINK-04).
+    /// frozen value never replays as live. Stamped under the
+    /// payload-device role with the device's OWN boot clock
+    /// (`time_boot_ms`), not host receive time: it is payload-device
+    /// state, never a vehicle estimate and never eligible for control
+    /// validation (LINK-04).
     pub(super) fn gimbal_attitude(&mut self) -> Option<GimbalAttitudeSample> {
         let source = self.estimate.as_ref()?;
         let latest = source.state.lock().ok()?;
         let device = latest
             .gimbal_device
             .filter(|report| report.received_at.elapsed() <= WITHHOLD_AFTER)?;
-        let acquired = device
-            .received_at
-            .checked_duration_since(self.started_at)
-            .unwrap_or_default();
         Some(GimbalAttitudeSample {
             quat_wxyz: device.quat_wxyz,
             rates_rps: device.rates_rps,
+            flags: u32::from(device.flags),
+            failure_flags: device.failure_flags,
             stamp: MeasurementStamp {
-                role: SourceRole::VideoCapture,
+                role: SourceRole::PayloadDevice,
                 integrity: SourceIntegrity::ChecksummedOnly,
                 source_id: 2,
                 source_incarnation: self.arm_incarnation,
                 source_epoch: 1,
                 sequence: device.time_boot_ms,
-                acquired_at_ns: u64::try_from(acquired.as_nanos()).unwrap_or(u64::MAX),
-                clock: MeasurementClock::HostMonotonic,
+                // The device reports its own boot-relative time; carry it
+                // as the acquisition time under the vehicle-boot clock
+                // rather than substituting a host stamp.
+                acquired_at_ns: u64::from(device.time_boot_ms).saturating_mul(1_000_000),
+                clock: MeasurementClock::VehicleBoot,
             },
         })
     }

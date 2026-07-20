@@ -9,7 +9,7 @@ use std::time::Duration;
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
     LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame};
@@ -374,6 +374,22 @@ impl VehicleAdapter for Px4Adapter {
             .as_ref()
             .map(|source| sampling::mavlink_batch(self.vehicle, &source.state))
             .unwrap_or_default();
+        // When no coherent avionics group is available the batch is
+        // empty, but FC-state and gimbal-device reports are independent
+        // sources that must still reach clients: carry them on a sample
+        // even with no pose. Their own stamps drive freshness.
+        if batch.samples.is_empty() && (fc_state.is_some() || gimbal_attitude.is_some()) {
+            batch.samples.push(TelemetrySample {
+                vehicle: self.vehicle,
+                tick: self.step(StepBudget { ticks: 0 }).now,
+                pose: None,
+                speed: None,
+                avionics: None,
+                sim_truth: None,
+                fc_state: None,
+                gimbal: None,
+            });
+        }
         for sample in &mut batch.samples {
             sample.fc_state = fc_state;
             sample.gimbal = gimbal_attitude;

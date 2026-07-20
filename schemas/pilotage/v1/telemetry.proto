@@ -51,6 +51,10 @@ enum SourceRole {
   SOURCE_ROLE_FC_STATE = 3;
   // Video capture identity for camera frames.
   SOURCE_ROLE_VIDEO_CAPTURE = 4;
+  // Payload-device orientation/state (gimbal attitude) relayed over the
+  // FC link: not a vehicle estimate and never eligible for control
+  // validation. Carries the device's own boot clock, not host time.
+  SOURCE_ROLE_PAYLOAD_DEVICE = 5;
 }
 
 // Integrity classification of the path that delivered an observation. The
@@ -192,6 +196,10 @@ message GimbalAttitude {
   // Identity and acquisition of the device report. Absence makes the
   // sample unconsumable.
   MeasurementStamp stamp = 8;
+  // GIMBAL_DEVICE_FLAGS in effect (mode/lock bits).
+  uint32 flags = 9;
+  // Non-zero reports a device failure condition.
+  uint32 failure_flags = 10;
 }
 
 // A single best-effort telemetry sample for one vehicle.

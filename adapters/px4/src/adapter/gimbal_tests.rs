@@ -249,3 +249,84 @@ fn an_ack_addressed_to_another_endpoint_is_ignored() {
         "an ack for another endpoint must not reject our frames"
     );
 }
+
+/// Feeds a gimbal-device attitude status into the shared cache at the
+/// given receive instant, the way a live PX4 stream populates it.
+fn feed_gimbal(state: &Arc<Mutex<LinkState>>, time_boot_ms: u32, failure_flags: u32, now: Instant) {
+    apply_messages_at(
+        state,
+        &[(
+            SOURCE,
+            FcMessage::GimbalDeviceAttitudeStatus {
+                time_boot_ms,
+                quat_wxyz: [0.98, 0.0, -0.19, 0.0],
+                rates_rps: [0.0, 0.05, -0.02],
+                flags: 12,
+                failure_flags,
+            },
+        )],
+        0,
+        0,
+        now,
+    );
+}
+
+#[test]
+fn gimbal_attitude_is_stamped_as_a_payload_device_on_the_device_clock() {
+    use pilotage_adapter_api::{MeasurementClock, SourceRole};
+    let state = live_state();
+    feed_gimbal(&state, 5_000, 0, Instant::now());
+    let (control, _lanes) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state).with_gimbal(control);
+    let batch = adapter.sample_telemetry();
+    let gimbal = batch.samples[0].gimbal.expect("gimbal sample present");
+    assert_eq!(
+        gimbal.stamp.role,
+        SourceRole::PayloadDevice,
+        "not a camera frame"
+    );
+    assert_eq!(
+        gimbal.stamp.clock,
+        MeasurementClock::VehicleBoot,
+        "device boot clock"
+    );
+    // The device's own boot-relative time (ms) carried as ns, not host time.
+    assert_eq!(gimbal.stamp.acquired_at_ns, 5_000 * 1_000_000);
+    assert_eq!(gimbal.flags, 12);
+    assert_eq!(gimbal.failure_flags, 0);
+}
+
+#[test]
+fn gimbal_only_telemetry_survives_without_an_avionics_group() {
+    // A cache with a gimbal report but no attitude/kinematics: the batch
+    // would otherwise be empty and the gimbal would vanish.
+    let state = Arc::new(Mutex::new(LinkState::default()));
+    feed_gimbal(&state, 7_000, 0, Instant::now());
+    let (control, _lanes) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state).with_gimbal(control);
+    let batch = adapter.sample_telemetry();
+    assert_eq!(
+        batch.samples.len(),
+        1,
+        "a carrier sample exists for gimbal-only"
+    );
+    assert!(batch.samples[0].avionics.is_none());
+    assert!(
+        batch.samples[0].gimbal.is_some(),
+        "gimbal-only telemetry must reach clients"
+    );
+}
+
+#[test]
+fn a_gimbal_failure_flag_reaches_telemetry() {
+    let state = live_state();
+    feed_gimbal(&state, 5_000, 0b10, Instant::now());
+    let (control, _lanes) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state).with_gimbal(control);
+    let batch = adapter.sample_telemetry();
+    let gimbal = batch.samples[0].gimbal.expect("gimbal sample present");
+    assert_eq!(
+        gimbal.failure_flags, 0b10,
+        "device failure is surfaced, not dropped"
+    );
+}

@@ -200,11 +200,16 @@ impl Px4GimbalControl {
             }
             self.neutral_settle_until = None;
         }
-        let claimed = self.claim_if_due();
+        // Do not stream a rate the FC would drop: if a due claim could
+        // not be enqueued, the sender does not hold primary control, so
+        // report the demand rejected without publishing it.
+        if !self.claim_if_due() {
+            return false;
+        }
         let published = self.publish_rate(pitch * MAX_PITCH_RATE_RPS, yaw * MAX_YAW_RATE_RPS);
         self.last_demand = Some(self.clock.now());
         self.streaming = true;
-        claimed && published
+        published
     }
 
     /// Recenters the gimbal: an absolute zero-pitch/zero-yaw angle
@@ -252,9 +257,13 @@ impl Px4GimbalControl {
             .last_demand
             .is_none_or(|at| now.duration_since(at) >= STALE_DEMAND_CUTOFF)
         {
-            let _ = self.publish_rate(0.0, 0.0);
             self.streaming = false;
-            info!("gimbal demand stream cut off with a zero-rate setpoint");
+            // Only claim the cutoff succeeded if the zero-rate setpoint
+            // actually reached the lane; a closed lane means the link is
+            // gone and there is nothing left to cut off.
+            if self.publish_rate(0.0, 0.0) {
+                info!("gimbal demand stream cut off with a zero-rate setpoint");
+            }
         }
     }
 

@@ -55,6 +55,8 @@ fn gimbal_to_wire(sample: GimbalAttitudeSample) -> wire::GimbalAttitude {
         rate_y_rad_s: sample.rates_rps[1],
         rate_z_rad_s: sample.rates_rps[2],
         stamp: Some(measurement_stamp_to_wire(sample.stamp)),
+        flags: sample.flags,
+        failure_flags: sample.failure_flags,
     }
 }
 
@@ -69,6 +71,7 @@ fn measurement_stamp_to_wire(stamp: MeasurementStamp) -> wire::MeasurementStamp 
         SourceRole::SimulationTruth => wire::SourceRole::SimulationTruth,
         SourceRole::FcState => wire::SourceRole::FcState,
         SourceRole::VideoCapture => wire::SourceRole::VideoCapture,
+        SourceRole::PayloadDevice => wire::SourceRole::PayloadDevice,
     };
     let integrity = match stamp.integrity {
         SourceIntegrity::Authenticated => wire::SourceIntegrity::Authenticated,

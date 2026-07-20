@@ -393,6 +393,12 @@ async fn run_link(
     let mut rates_open = true;
     loop {
         tokio::select! {
+            // Biased: the command lane is polled before the rate lane so a
+            // queued CONFIGURE always reaches the wire before the rate
+            // setpoint enqueued after it. Without this, an unbiased select
+            // could transmit the first rate demand ahead of the claim and
+            // PX4 would drop it as non-primary (claim-before-first-setpoint).
+            biased;
             command = command_rx.recv() => {
                 send_outbound_command(&socket, &mut seq, config.stream_command_target, command).await;
             }
