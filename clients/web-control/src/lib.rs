@@ -23,6 +23,9 @@ mod sample;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
+#[cfg(test)]
+mod golden;
+
 pub use plan::{
     AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ActivationPlan, BUTTON_EDGE_PRESSED,
     ControlPlan, Frame, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, LeaseAction, MOTION_SCOPE,

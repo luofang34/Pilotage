@@ -174,8 +174,14 @@ jobs:
       - name: viewer control arm-edge detection (rising edges, hold-across-reconnect safety)
         run: node clients/web/control-edges.test.mjs
 
-      - name: viewer gimbal quasimode (capture masking, exit neutralization, one-shot recenter)
-        run: node clients/web/gimbal-input.test.mjs
+      - name: control runtime golden vectors (wasm == native plans)
+        # The wasm control runtime must produce the SAME plan as the native
+        # Rust golden_vectors test for the same raw samples and profile; this
+        # drives the real wasm artifact built above.
+        run: node clients/web/control-runtime.test.mjs
+
+      - name: control shell structural contract (main.js holds no mapping/curves)
+        run: node clients/web/control-structure.test.mjs
 
       - name: viewer input-loss gate (latched blur, no post-latch frames, held-button safety)
         run: node clients/web/control-gate.test.mjs
@@ -200,6 +206,11 @@ jobs:
         # viewer's wasm session machine and platform adapter: every frame
         # output, at the recorded dimensions, and closed by the adapter.
         run: node clients/web/video-h264.browser.test.mjs
+
+      - name: control module browser boot (real wasm, one real control tick)
+        # A real browser imports the control module, instantiates the wasm,
+        # bootstraps the default profile, and runs one evaluate() tick.
+        run: node clients/web/control-runtime.browser.test.mjs
 
       - name: viewer entrypoint boot contract (VID-04)
         # A real browser loads the unmodified index.html + main.js: module

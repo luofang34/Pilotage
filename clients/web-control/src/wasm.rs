@@ -7,9 +7,19 @@
 use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::plan::{ControlPlan, LeaseAction};
-use crate::profile::ProfileRuntime;
+use crate::profile::{DEFAULT_PROFILE_BYTES, ProfileRuntime};
 use crate::runtime::ControlRuntime;
 use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
+
+/// The built-in default profile bytes, so the shell can bootstrap through the
+/// SAME `activate` path any other source uses — never a privileged default
+/// call. The bytes are the single `include_bytes!` source; the shell just
+/// hands them back into [`WebControl::activate`].
+#[wasm_bindgen]
+#[must_use]
+pub fn default_profile() -> Vec<u8> {
+    DEFAULT_PROFILE_BYTES.to_vec()
+}
 
 const MAX_AXES: usize = 8;
 const MAX_BUTTONS: usize = 24;

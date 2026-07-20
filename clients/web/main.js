@@ -60,16 +60,8 @@ import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
-import { pressedArmInputs, risingArmEdges } from "./control-edges.js";
 import { startDatagramControl } from "./datagram-control.js";
-import {
-  PAD_GIMBAL_RESET,
-  gimbalAxesFromGamepad,
-  gimbalFramePlan,
-  gimbalMaskedView,
-  gimbalModifierHeld,
-  stickShaper,
-} from "./gimbal-input.js";
+import { loadControlShell } from "./control-shell.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -121,7 +113,6 @@ const state = {
   sequence: 0,
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   keys: new Set(),
-  prevArmInputs: new Set(),
   pendingReset: false,
   pendingFpvToggle: false,
   connected: false,
@@ -132,10 +123,9 @@ const state = {
   gimbalSequence: 0,
   gimbalLeaseGranted: false,
   gimbalLeaseDenied: false, // a denied scope is not re-requested this session
-  gimbalLeaseRequestedAtMs: 0, // request debounce
-  prevGimbalReset: false, // R3 rising-edge baseline
-  gimbalStreaming: false, // a release sends one trailing neutral gimbal frame
-  gimbalWheel: null, // latest trackpad gesture: { rates, atMs }
+  // The control runtime owns the request debounce, the R3 baseline, and the
+  // gimbal stream latch; the shell holds only the loaded runtime.
+  controlShell: null,
   skippedVideoFrames: 0,
   supersededVideoFrames: 0,
   // Page-lifetime latch: wasm absence never heals without a reload (the
@@ -346,10 +336,6 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.gimbalSequence = 0;
     state.gimbalLeaseGranted = false;
     state.gimbalLeaseDenied = false;
-    state.gimbalLeaseRequestedAtMs = 0;
-    state.prevGimbalReset = false;
-    state.gimbalStreaming = false;
-    state.prevArmInputs = new Set();
     state.pendingReset = false;
     state.pendingFpvToggle = false;
     state.connected = false;
@@ -514,41 +500,6 @@ async function sendLeaseRequest(writer, token) {
   if (!transportSessions.isActive(token)) return false;
   log(`sent LeaseRequest for ${MOTION_SCOPE}`);
   return true;
-}
-
-/** Manages the gimbal-scope lease from the control loop, AFTER bootstrap
- *  completed: the bootstrap reader completes on the first LeaseResponse
- *  and discards its remaining buffer, so a second request in flight
- *  during the handshake could lose (or split) its response.
- *
- *  A flight mode holds the lease (kept alive by the frame stream); the
- *  rover mode RELEASES it — a held-but-silent scope would trip the
- *  host's holder-silence watchdog, whose link-loss policy is
- *  per-vehicle. A denied scope (a vehicle without a gimbal) is not
- *  re-requested for the rest of the session. */
-function manageGimbalLease(token, mode) {
-  const writer = state.sessionWriter;
-  if (!writer || !transportSessions.isActive(token)) return;
-  const action = gimbalLeasePlan({
-    mode,
-    granted: state.gimbalLeaseGranted,
-    denied: state.gimbalLeaseDenied,
-    requestedAtMs: state.gimbalLeaseRequestedAtMs,
-    nowMs: performance.now(),
-  });
-  if (action === "release") {
-    state.gimbalLeaseGranted = false;
-    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
-    writer.write(lengthDelimit(release)).catch(() => {});
-    log("rover mode: released the gimbal lease");
-  } else if (action === "request") {
-    state.gimbalLeaseRequestedAtMs = performance.now();
-    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
-    writer.write(lengthDelimit(request)).catch(() => {
-      // A dying reliable stream ends the session; nothing to do here.
-    });
-    log(`sent LeaseRequest for ${GIMBAL_SCOPE}`);
-  }
 }
 
 /** Sends a `LeaseRelease` for the motion scope on the reliable session
@@ -1041,242 +992,15 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
-/** Maps current key state to [throttle, yaw] axis values in [-1.0, 1.0]. */
-function axesFromKeys() {
-  const k = (key) => (state.keys.has(key) ? 1 : 0);
-  const throttle = k("ArrowUp") + k("w") - k("ArrowDown") - k("s");
-  const yaw = k("ArrowRight") + k("d") - k("ArrowLeft") - k("a");
-  return [Math.max(-1, Math.min(1, throttle)), Math.max(-1, Math.min(1, yaw))];
-}
-
-/** Keyboard fallback for flight modes: W/S = climb/descend, A/D = yaw,
- *  arrows = forward/back + left/right translation. */
-function flightAxesFromKeys() {
-  const k = (key) => (state.keys.has(key) ? 1 : 0);
-  return {
-    roll: k("ArrowRight") - k("ArrowLeft"),
-    pitch: k("ArrowUp") - k("ArrowDown"),
-    throttle: k("w") - k("s"),
-    yaw: k("d") - k("a"),
-  };
-}
-
-// Per-controller FPV mapping profiles. EdgeTX radios (RadioMaster Pocket) output
-// the "Classic Joystick" report in AETR channel order over 8 HID axes, and
-// EdgeTX maps CH1->axis0, CH2->axis1, CH3->axis2, CH4->axis3, so:
-//   axis 0 = Aileron (roll), 1 = Elevator (pitch), 2 = Throttle, 3 = Rudder (yaw).
-// The FPV convention drives with throttle for speed and rudder for yaw (both the
-// left stick in Mode 2). Throttle does not self-center — it holds its position
-// like an aircraft throttle — so centering it stops the vehicle.
-// Field of a profile: forwardAxis/turnAxis (HID axis index), forwardSign/turnSign
-// (+1 or -1), deadzone. A `match(id)` picks the profile from the gamepad id.
-const CONTROLLER_PROFILES = [
-  {
-    name: "RadioMaster Pocket (EdgeTX, FPV AETR)",
-    match: (id) => /radiomaster|pocket|1209/i.test(id),
-    forwardAxis: 2, // throttle
-    forwardSign: 1, // stick up = forward, center = stop, down = reverse
-    turnAxis: 3, // rudder
-    turnSign: -1, // rudder right = turn right (negative yaw-rate in Gazebo)
-  },
-  {
-    // PS4 (DualShock 4) / PS5 (DualSense) map to the browser "Standard Gamepad"
-    // layout: axis 0 = left stick X, 1 = left stick Y, 2 = right stick X,
-    // 3 = right stick Y, with stick-up reported as negative. Both sticks
-    // self-center, so releasing stops the vehicle. Drive from the left stick
-    // (throttle = vertical, yaw = horizontal), matching the FPV convention.
-    name: "PS4/PS5 pad (Standard Gamepad)",
-    match: (id) => /054c|dualshock|dualsense|wireless controller|standard gamepad/i.test(id),
-    forwardAxis: 1, // left stick vertical
-    forwardSign: -1, // stick up (negative) = forward
-    turnAxis: 0, // left stick horizontal
-    turnSign: -1, // stick right (positive) = turn right (negative yaw-rate)
-    deadzone: 0.06,
-    standard: true, // W3C Standard Gamepad layout: flight schemes apply
-  },
-];
-
-// Flight-mode stick schemes for Standard Gamepad pads. Both
-// command the identical velocity control law — only stick assignment
-// differs. Browser reports stick-up as negative, hence the -1 signs.
-//   pilot  = RC Mode 2 (camera-drone default): left = climb+yaw,
-//            right = translate.
-//   cruise = game-native: left = translate, right X = yaw,
-//            R2/L2 analog triggers = climb/descend.
-// DualSense standard mapping: axes 0/1 left X/Y, 2/3 right X/Y;
-// buttons 6/7 = L2/R2 analog, 8 = create/share, 9 = options.
-const FLIGHT_SCHEMES = {
-  "quad-pilot": (raw) => ({
-    throttle: -raw(1),
-    yaw: raw(0),
-    pitch: -raw(3),
-    roll: raw(2),
-    label: "PILOT (Mode 2): L=climb/yaw R=move",
-  }),
-  "quad-cruise": (raw, buttons) => ({
-    pitch: -raw(1),
-    roll: raw(0),
-    yaw: raw(2),
-    throttle: (buttons[7]?.value ?? 0) - (buttons[6]?.value ?? 0),
-    label: "CRUISE: L=move RX=yaw R2/L2=climb",
-  }),
-  // FPV: same Mode-2 stick geometry as PILOT, but the adapter is in
-  // attitude mode — right stick commands tilt ANGLES, throttle is
-  // direct collective around hover. Toggle with the FPV button.
-  fpv: (raw) => ({
-    throttle: -raw(1),
-    yaw: raw(0),
-    pitch: -raw(3),
-    roll: raw(2),
-    label: "FPV: R=tilt angle L=thrust/yaw",
-  }),
-};
-// Gamepad buttons that fire arm/disarm edges: options (9) arms,
-// create/share (8) disarms — deliberately away from the face buttons.
-const PAD_ARM_BUTTON = 9;
-const PAD_DISARM_BUTTON = 8;
-
-/** Maps a Standard-Gamepad pad to flight axes under the given scheme;
- *  non-standard pads (EdgeTX radios) use their AETR axes directly, which
- *  is true RC Mode 2 on a real radio. */
-function flightAxesFromGamepad(pad, profile, mode) {
-  const rawAt = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
-  const clamp = (v) => Math.max(-1, Math.min(1, v));
-  const shaped = stickShaper(profile);
-  const raw = (i) => shaped(rawAt(i));
-  if (profile.standard) {
-    const scheme = FLIGHT_SCHEMES[mode] ?? FLIGHT_SCHEMES["quad-pilot"];
-    const a = scheme(raw, pad.buttons ?? []);
-    return {
-      roll: clamp(a.roll),
-      pitch: clamp(a.pitch),
-      throttle: clamp(a.throttle),
-      yaw: clamp(a.yaw),
-      label: a.label,
-    };
-  }
-  // EdgeTX AETR HID order: 0 roll, 1 pitch, 2 throttle, 3 yaw.
-  return {
-    roll: raw(0),
-    pitch: -raw(1),
-    throttle: raw(2),
-    yaw: -raw(3),
-    label: "radio AETR (Mode 2)",
-  };
-}
-
-/** The arm/disarm inputs held right now, from gamepad buttons and keys: Enter
- *  arms, Backspace disarms; pad options (9) arms, create (8) disarms. */
-function currentArmInputs(pad) {
-  return pressedArmInputs({
-    padArm: !!pad?.buttons?.[PAD_ARM_BUTTON]?.pressed,
-    padDisarm: !!pad?.buttons?.[PAD_DISARM_BUTTON]?.pressed,
-    keyArm: state.keys.has("Enter"),
-    keyDisarm: state.keys.has("Backspace"),
-  });
-}
-
-/** One-shot arm/disarm edges: only inputs newly pressed since last tick fire.
- *  `state.prevArmInputs` is primed to the held set at control start, so a
- *  button held across a reconnect does not read as a fresh command. */
-function collectArmEdges(pad) {
-  const pressedNow = currentArmInputs(pad);
-  const edges = [];
-  for (const which of risingArmEdges(pressedNow, state.prevArmInputs)) {
-    const arm = which.endsWith("-arm");
-    edges.push([arm ? BUTTON_ARM : BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
-    els.overlay.textContent = arm ? "ARM sent" : "DISARM sent";
-    log(arm ? "arm command sent" : "disarm command sent");
-  }
-  state.prevArmInputs = pressedNow;
-  return edges;
-}
-// Fallback for any other gamepad: drive from the left stick's self-centering
-// vertical/horizontal axes so the vehicle stops when the stick is released.
-const GENERIC_PROFILE = {
-  name: "generic gamepad",
-  forwardAxis: 1,
-  forwardSign: -1, // browsers report stick-up as negative
-  turnAxis: 0,
-  turnSign: -1, // stick right (positive) = turn right (negative yaw-rate in Gazebo)
-  deadzone: 0.1,
-};
-
-// User overrides for the active profile, taken from URL query params today; this
-// is the seam a future in-app remapping UI plugs into. Any of ?fwd= ?turn=
-// ?fwdsign= ?turnsign= ?deadzone= replaces the corresponding profile field.
-function overrideProfile(profile) {
-  const q = new URLSearchParams(window.location.search);
-  const intParam = (name, fallback) => {
-    const v = Number.parseInt(q.get(name) ?? "", 10);
-    return Number.isInteger(v) ? v : fallback;
-  };
-  const numParam = (name, fallback) => {
-    const v = Number.parseFloat(q.get(name) ?? "");
-    return Number.isFinite(v) ? v : fallback;
-  };
-  const signParam = (name, fallback) => (intParam(name, fallback) < 0 ? -1 : 1);
-  return {
-    name: q.has("fwd") || q.has("turn") ? `${profile.name} (overridden)` : profile.name,
-    forwardAxis: intParam("fwd", profile.forwardAxis),
-    forwardSign: signParam("fwdsign", profile.forwardSign),
-    turnAxis: intParam("turn", profile.turnAxis),
-    turnSign: signParam("turnsign", profile.turnSign),
-    deadzone: numParam("deadzone", profile.deadzone),
-    standard: profile.standard === true,
-  };
-}
-
 /** Returns the first connected gamepad that matches a known profile, else any
  *  connected gamepad, else null. A gamepad is exposed to the page only after the
  *  user moves a stick or presses a button once. */
 function activeGamepad() {
   const pads = (navigator.getGamepads && navigator.getGamepads()) || [];
-  let firstConnected = null;
   for (const pad of pads) {
-    if (!pad || !pad.connected) continue;
-    firstConnected = firstConnected || pad;
-    if (CONTROLLER_PROFILES.some((p) => p.match(pad.id))) return pad;
+    if (pad && pad.connected) return pad;
   }
-  return firstConnected;
-}
-
-/** Picks the FPV profile for a gamepad id and applies user overrides. */
-function profileFor(id) {
-  const base = CONTROLLER_PROFILES.find((p) => p.match(id)) || GENERIC_PROFILE;
-  return overrideProfile(base);
-}
-
-/** Maps a gamepad's axes to [throttle, yaw] in [-1.0, 1.0] under `profile`. */
-function axesFromGamepad(pad, profile) {
-  const raw = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
-  const clamp = (v) => Math.max(-1, Math.min(1, v));
-  const deadzone = (v) => (Math.abs(v) < profile.deadzone ? 0 : v);
-  const throttle = clamp(deadzone(profile.forwardSign * raw(profile.forwardAxis)));
-  const yaw = clamp(deadzone(profile.turnSign * raw(profile.turnAxis)));
-  return [throttle, yaw];
-}
-
-/** Updates the gamepad readout so the active profile and axis-to-control mapping
- *  are visible while driving (and easy to re-map with the ?fwd=/?turn= overrides). */
-function updateGamepadReadout(pad, profile, throttle, yaw) {
-  if (!pad) {
-    els.gamepad.textContent = "gamepad: none (move a stick to detect) — using keyboard";
-    return;
-  }
-  const axes = Array.from(pad.axes, (v) => v.toFixed(2)).join(", ");
-  els.gamepad.textContent =
-    `gamepad: ${pad.id} [${profile.name}] | axes[${axes}] | ` +
-    `throttle=${throttle.toFixed(2)} (axis ${profile.forwardAxis}) ` +
-    `yaw=${yaw.toFixed(2)} (axis ${profile.turnAxis})`;
-}
-
-/** Shows the live 4-axis flight mapping and stick values. */
-function updateFlightReadout(pad, f) {
-  const src = pad ? `${pad.id.slice(0, 24)} [${f.label}]` : "keyboard (WS=climb AD=yaw arrows=move)";
-  els.gamepad.textContent =
-    `flight: ${src} | roll=${f.roll.toFixed(2)} pitch=${f.pitch.toFixed(2)} ` +
-    `climb=${f.throttle.toFixed(2)} yaw=${f.yaw.toFixed(2)} | arm: Options/Enter, disarm: Create/Backspace`;
+  return null;
 }
 
 /** Neutral (zeroed) control axes for a flight mode: rover carries only
@@ -1318,10 +1042,8 @@ function startControlLoop(transport, token) {
 
 /** Runs the control-fast send loop with an acquired, session-owned writer. */
 async function runControlLoop(writer, token) {
-  // Prime the arm-edge baseline to whatever is held right now, so a button held
-  // down as control starts (e.g. across a reconnect) is not read as a fresh
-  // arm/disarm on the first tick.
-  state.prevArmInputs = currentArmInputs(activeGamepad());
+  // The control runtime owns every edge baseline (arm/disarm/R3), so a button
+  // held across a reconnect cannot read as a fresh edge — no priming here.
   const intervalMs = 1000 / CONTROL_HZ;
   // Self-paced async loop rather than setInterval: it awaits the writer's
   // backpressure signal (`ready`) before each send, so datagrams never queue up
@@ -1348,109 +1070,110 @@ async function runControlLoop(writer, token) {
         // client-side neutral would both violate the latch invariant and
         // refresh the very setpoint freshness the silence watchdog (the
         // independent backup) is watching.
-        state.prevArmInputs = new Set();
         sendLeaseRelease(token);
         els.gamepad.textContent =
           "control released — input lost; press Connect to resume control";
         log("input lost — control authority released (host acknowledges or watchdog covers)");
         return;
       }
-      const pad = activeGamepad();
-      const profile = pad ? profileFor(pad.id) : null;
-      let axes;
-      let edges = [];
-      if (mode === "rover") {
-        // Ground vehicles (the Gazebo yard world) accept only the
-        // throttle/yaw pair; extra axes would be rejected as unknown.
-        const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
-        updateGamepadReadout(pad, profile, throttle, yaw);
-        axes = [
-          [AXIS_THROTTLE, throttle],
-          [AXIS_YAW, yaw],
-        ];
-      } else {
-        const gimbalHeld = gimbalModifierHeld(pad, profile);
-        const flightView = gimbalHeld ? gimbalMaskedView(pad) : pad;
-        const f = pad ? flightAxesFromGamepad(flightView, profile, mode) : flightAxesFromKeys();
-        if (gimbalHeld) {
-          const g = gimbalAxesFromGamepad(pad, profile);
-          els.gamepad.textContent =
-            `GIMBAL (LT held): RS pitch=${g.pitch.toFixed(2)} yaw=${g.yaw.toFixed(2)} | ` +
-            "LT descend inhibited — release LT for flight | R3 recenters";
-        } else {
-          updateFlightReadout(pad, f);
-        }
-        edges = collectArmEdges(pad);
-        if (state.pendingFpvToggle) {
-          state.pendingFpvToggle = false;
-          edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
-        }
-        if (state.pendingReset) {
-          state.pendingReset = false;
-          edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
-          log("simulation reset requested");
-        }
-        axes = [
-          [AXIS_ROLL, f.roll],
-          [AXIS_PITCH, f.pitch],
-          [AXIS_THROTTLE, f.throttle],
-          [AXIS_YAW, f.yaw],
-        ];
+      // The control runtime maps every input; until its wasm has loaded there
+      // is no mapping to run, so idle this tick rather than send anything.
+      if (!state.controlShell) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
       }
+      // One WASM call per tick maps the raw sample (gamepad or keyboard) to
+      // the whole plan: the motion frame, the gimbal quasimode frame, and the
+      // lease action. All device mapping, curves, masking, edge detection, and
+      // lease planning live in the runtime; this shell only executes the plan.
+      const pad = activeGamepad();
+      const sessionState = {
+        mode,
+        connected: state.connected,
+        leaseGranted: state.gimbalLeaseGranted,
+        leaseDenied: state.gimbalLeaseDenied,
+        nowMs: performance.now(),
+      };
+      const plan = pad
+        ? state.controlShell.tickFromPad(pad, sessionState)
+        : state.controlShell.tickFromKeys(state.keys, sessionState);
+      updateControlReadout(pad, mode, plan);
       // Re-check the latch immediately before the write: no frame may be
       // sent under this generation once input loss latched, regardless of
       // which await the latch interleaved with.
       if (!controlGate.mayPublish()) continue;
-      state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
-      const envelope = encodeControlFrameEnvelope({
-        sessionId: state.sessionId,
-        vehicleId: VEHICLE_ID,
-        scope: MOTION_SCOPE,
-        generation: state.generation,
-        sequence: state.sequence,
-        sampledAtNanos: nowNanos(),
-        profileRevision: 1,
-        axes,
-        edges,
-      });
-      writer.write(envelope).catch((error) => {
-        transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
-      });
-      manageGimbalLease(token, mode);
-      maybeSendGimbalFrame(writer, token, mode, pad, profile);
+      if (plan.motion) {
+        sendMotionFrame(writer, token, mode, plan);
+      }
+      if (plan.gimbal) {
+        sendGimbalFrame(writer, token, plan.gimbal);
+      }
+      if (plan.lease) {
+        executeLeaseAction(token, plan.lease);
+      }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 
-/** Emits one gimbal-scope frame EVERY tick while the lease is held,
- *  after the motion frame under the same publish gate: LT held streams
- *  the right stick's LOS rates, otherwise the frame carries zero rates.
- *  The continuous stream is the scope's liveness (ADR-0011), exactly
- *  like motion: a gimbal holder that goes quiet between LT presses
- *  would trip the host's holder-silence watchdog, whose link-loss
- *  policy is per-VEHICLE and would neutralize flight. R3 fires the
- *  recenter edge; active-demand shaping lives in `gimbalFramePlan`. */
-function maybeSendGimbalFrame(writer, token, mode, pad, profile) {
-  // Track the R3 baseline UNCONDITIONALLY (inside gimbalResetEdge),
-  // before any early return: an R3 held across a lease grant, reconnect,
-  // or rover→flight switch must not read as a fresh rising edge (a false
-  // recenter) the moment the gimbal frame path re-activates.
-  const active = mode !== "rover" && state.gimbalLeaseGranted;
-  const resetHeld = !!pad?.buttons?.[PAD_GIMBAL_RESET]?.pressed;
-  const { edge: resetEdge, prevHeld } = gimbalResetEdge(
-    resetHeld,
-    state.prevGimbalReset,
-    active,
-  );
-  state.prevGimbalReset = prevHeld;
-  if (!active) return;
-  const plan = gimbalFramePlan({
-    held: gimbalModifierHeld(pad, profile),
-    resetEdge,
-    streaming: state.gimbalStreaming,
-    rates: pad ? gimbalAxesFromGamepad(pad, profile) : { pitch: 0, yaw: 0 },
-  }) ?? { rates: { pitch: 0, yaw: 0 }, recenter: false, streaming: false };
-  if (plan.recenter) log("gimbal recenter requested (R3)");
+/** Encodes and sends the runtime's motion frame on the datagram writer. The
+ *  runtime supplies arm/disarm edges (as booleans); the DOM-driven FPV-toggle
+ *  and sim-reset edges are appended here. Rover carries only throttle/yaw. */
+function sendMotionFrame(writer, token, mode, plan) {
+  const m = plan.motion;
+  const edges = [];
+  if (plan.arm) {
+    edges.push([BUTTON_ARM, BUTTON_EDGE_PRESSED]);
+    els.overlay.textContent = "ARM sent";
+    log("arm command sent");
+  }
+  if (plan.disarm) {
+    edges.push([BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
+    els.overlay.textContent = "DISARM sent";
+    log("disarm command sent");
+  }
+  if (state.pendingFpvToggle) {
+    state.pendingFpvToggle = false;
+    edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
+  }
+  if (state.pendingReset) {
+    state.pendingReset = false;
+    edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
+    log("simulation reset requested");
+  }
+  const axes =
+    mode === "rover"
+      ? [
+          [AXIS_THROTTLE, m.throttle],
+          [AXIS_YAW, m.yaw],
+        ]
+      : [
+          [AXIS_ROLL, m.roll],
+          [AXIS_PITCH, m.pitch],
+          [AXIS_THROTTLE, m.throttle],
+          [AXIS_YAW, m.yaw],
+        ];
+  state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
+  const envelope = encodeControlFrameEnvelope({
+    sessionId: state.sessionId,
+    vehicleId: VEHICLE_ID,
+    scope: MOTION_SCOPE,
+    generation: state.generation,
+    sequence: state.sequence,
+    sampledAtNanos: nowNanos(),
+    profileRevision: 1,
+    axes,
+    edges,
+  });
+  writer.write(envelope).catch((error) => {
+    transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
+  });
+}
+
+/** Encodes and sends the runtime's gimbal frame. The runtime emits one every
+ *  tick while the lease is held (zero rates when idle), so the continuous
+ *  stream is the scope's liveness (ADR-0011); R3 rides as the recenter edge. */
+function sendGimbalFrame(writer, token, gimbal) {
+  if (gimbal.recenter) log("gimbal recenter requested (R3)");
   state.gimbalSequence = (state.gimbalSequence + 1) >>> 0;
   const envelope = encodeControlFrameEnvelope({
     sessionId: state.sessionId,
@@ -1461,15 +1184,48 @@ function maybeSendGimbalFrame(writer, token, mode, pad, profile) {
     sampledAtNanos: nowNanos(),
     profileRevision: 1,
     axes: [
-      [AXIS_PITCH, plan.rates.pitch],
-      [AXIS_YAW, plan.rates.yaw],
+      [AXIS_PITCH, gimbal.pitch],
+      [AXIS_YAW, gimbal.yaw],
     ],
-    edges: plan.recenter ? [[GIMBAL_BUTTON_NEUTRAL, BUTTON_EDGE_PRESSED]] : [],
+    edges: gimbal.recenter ? [[GIMBAL_BUTTON_NEUTRAL, BUTTON_EDGE_PRESSED]] : [],
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`gimbal datagram send failed: ${error}`));
   });
-  state.gimbalStreaming = plan.streaming;
+}
+
+/** Executes the runtime's gimbal-lease decision on the reliable session
+ *  stream: request or release the `vehicle.gimbal` scope. The runtime owns the
+ *  request debounce and the mode/grant/deny policy; this only sends. */
+function executeLeaseAction(token, action) {
+  const writer = state.sessionWriter;
+  if (!writer || !transportSessions.isActive(token)) return;
+  if (action === "release") {
+    state.gimbalLeaseGranted = false;
+    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    writer.write(lengthDelimit(release)).catch(() => {});
+    log("released the gimbal lease");
+  } else if (action === "request") {
+    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    writer.write(lengthDelimit(request)).catch(() => {});
+    log(`sent LeaseRequest for ${GIMBAL_SCOPE}`);
+  }
+}
+
+/** Shows the live control mapping in the readout: the gimbal quasimode when a
+ *  gimbal frame streams, otherwise the flight axes. Display only. */
+function updateControlReadout(pad, mode, plan) {
+  const src = pad ? pad.id.slice(0, 24) : "keyboard (WS=climb AD=yaw arrows=move)";
+  if (plan.gimbal && (plan.gimbal.pitch !== 0 || plan.gimbal.yaw !== 0 || plan.gimbal.recenter)) {
+    els.gamepad.textContent =
+      `GIMBAL: pitch=${plan.gimbal.pitch.toFixed(2)} yaw=${plan.gimbal.yaw.toFixed(2)} | ` +
+      "LT captures the right stick; R3 recenters";
+    return;
+  }
+  const m = plan.motion ?? { roll: 0, pitch: 0, throttle: 0, yaw: 0 };
+  els.gamepad.textContent =
+    `flight [${mode}]: ${src} | roll=${m.roll.toFixed(2)} pitch=${m.pitch.toFixed(2)} ` +
+    `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | arm: Options/Enter disarm: Create/Backspace`;
 }
 
 // ---- instrument panels (ADR-0017) -------------------------------------------
@@ -1597,9 +1353,24 @@ async function startInstruments() {
   }
 }
 
+/** Loads the control-runtime wasm and bootstraps it: compile the built-in
+ *  default profile bytes and activate them through the normal path. The
+ *  control loop stays idle until this resolves; a failure degrades to
+ *  no-control (telemetry/video still run) rather than taking the page down. */
+async function startControl() {
+  try {
+    const wasmSource = await fetch("./control-runtime_bg.wasm", { cache: "no-cache" });
+    state.controlShell = await loadControlShell(wasmSource);
+    log(`control runtime ready (profile revision ${state.controlShell.activationRevision()})`);
+  } catch (error) {
+    log(`control runtime unavailable: ${error} (run scripts/build-web-instruments.sh)`);
+  }
+}
+
 window.addEventListener("pagehide", () => instruments.mod?.dispose(), { once: true });
 applyUrlParams();
 startInstruments();
+startControl();
 document.getElementById("fpvBtn").addEventListener("click", () => {
   state.pendingFpvToggle = true;
 });
@@ -1649,5 +1420,4 @@ window.addEventListener("blur", () => {
     sendLeaseRelease(transportSessions.active);
   }
   state.keys.clear();
-  state.prevArmInputs = new Set();
 });

@@ -17,6 +17,10 @@ clients/web/instrument-runtime.js
 clients/web/instrument-runtime.d.ts
 clients/web/instrument-runtime_bg.wasm
 clients/web/instrument-runtime_bg.wasm.d.ts
+clients/web/control-runtime.js
+clients/web/control-runtime.d.ts
+clients/web/control-runtime_bg.wasm
+clients/web/control-runtime_bg.wasm.d.ts
 
 # Generated protobuf code (generated at build time; schemas/ is the source of truth)
 **/src/generated/

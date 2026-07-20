@@ -25,3 +25,16 @@ wasm-bindgen \
 
 wasm_bytes="$(wc -c < clients/web/instrument-runtime_bg.wasm | tr -d ' ')"
 echo "built clients/web/instrument-runtime.js and instrument-runtime_bg.wasm (${wasm_bytes} bytes)"
+
+# The web-control runtime: device mapping, the gimbal quasimode, and the
+# transactional profile seam. Same toolchain, a separate generated binding.
+cargo build -p pilotage-control-web --target wasm32-unknown-unknown --release
+wasm-bindgen \
+  target/wasm32-unknown-unknown/release/pilotage_control_web.wasm \
+  --target web \
+  --out-dir clients/web \
+  --out-name control-runtime \
+  --no-typescript
+
+control_bytes="$(wc -c < clients/web/control-runtime_bg.wasm | tr -d ' ')"
+echo "built clients/web/control-runtime.js and control-runtime_bg.wasm (${control_bytes} bytes)"
