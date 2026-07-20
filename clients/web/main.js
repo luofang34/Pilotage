@@ -529,23 +529,26 @@ async function sendLeaseRequest(writer, token) {
 function manageGimbalLease(token, mode) {
   const writer = state.sessionWriter;
   if (!writer || !transportSessions.isActive(token)) return;
-  if (mode === "rover") {
-    if (!state.gimbalLeaseGranted) return;
+  const action = gimbalLeasePlan({
+    mode,
+    granted: state.gimbalLeaseGranted,
+    denied: state.gimbalLeaseDenied,
+    requestedAtMs: state.gimbalLeaseRequestedAtMs,
+    nowMs: performance.now(),
+  });
+  if (action === "release") {
     state.gimbalLeaseGranted = false;
     const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
     writer.write(lengthDelimit(release)).catch(() => {});
     log("rover mode: released the gimbal lease");
-    return;
+  } else if (action === "request") {
+    state.gimbalLeaseRequestedAtMs = performance.now();
+    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    writer.write(lengthDelimit(request)).catch(() => {
+      // A dying reliable stream ends the session; nothing to do here.
+    });
+    log(`sent LeaseRequest for ${GIMBAL_SCOPE}`);
   }
-  if (state.gimbalLeaseGranted || state.gimbalLeaseDenied) return;
-  const nowMs = performance.now();
-  if (nowMs - state.gimbalLeaseRequestedAtMs < 3000) return;
-  state.gimbalLeaseRequestedAtMs = nowMs;
-  const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
-  writer.write(lengthDelimit(request)).catch(() => {
-    // A dying reliable stream ends the session; nothing to do here.
-  });
-  log(`sent LeaseRequest for ${GIMBAL_SCOPE}`);
 }
 
 /** Sends a `LeaseRelease` for the motion scope on the reliable session
@@ -1428,10 +1431,19 @@ async function runControlLoop(writer, token) {
  *  policy is per-VEHICLE and would neutralize flight. R3 fires the
  *  recenter edge; active-demand shaping lives in `gimbalFramePlan`. */
 function maybeSendGimbalFrame(writer, token, mode, pad, profile) {
-  if (mode === "rover" || !state.gimbalLeaseGranted) return;
+  // Track the R3 baseline UNCONDITIONALLY (inside gimbalResetEdge),
+  // before any early return: an R3 held across a lease grant, reconnect,
+  // or rover→flight switch must not read as a fresh rising edge (a false
+  // recenter) the moment the gimbal frame path re-activates.
+  const active = mode !== "rover" && state.gimbalLeaseGranted;
   const resetHeld = !!pad?.buttons?.[PAD_GIMBAL_RESET]?.pressed;
-  const resetEdge = resetHeld && !state.prevGimbalReset;
-  state.prevGimbalReset = resetHeld;
+  const { edge: resetEdge, prevHeld } = gimbalResetEdge(
+    resetHeld,
+    state.prevGimbalReset,
+    active,
+  );
+  state.prevGimbalReset = prevHeld;
+  if (!active) return;
   const plan = gimbalFramePlan({
     held: gimbalModifierHeld(pad, profile),
     resetEdge,

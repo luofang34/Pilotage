@@ -53,6 +53,36 @@ export function gimbalMaskedView(pad) {
   };
 }
 
+/** One tick of R3 recenter-edge tracking. The baseline ALWAYS advances
+ *  to the current held state, so an R3 held across a lease grant,
+ *  reconnect, or rover→flight switch never reads as a fresh rising edge
+ *  the moment the gimbal path re-activates. The edge fires only on a
+ *  genuine press transition while `active`. Returns the edge verdict and
+ *  the new baseline the caller must store. */
+export function gimbalResetEdge(resetHeld, prevHeld, active) {
+  return { edge: active && resetHeld && !prevHeld, prevHeld: resetHeld };
+}
+
+/** Decides the gimbal-lease action for one control tick. Flight modes
+ *  hold the lease (re-requesting on entry, debounced against repeated
+ *  requests); rover mode RELEASES it, because a held-but-silent scope
+ *  trips the host's per-vehicle holder-silence watchdog whose link-loss
+ *  policy would neutralize flight; a denied scope is never re-requested
+ *  for the session. Returns "request" | "release" | "none". */
+export function gimbalLeasePlan({
+  mode,
+  granted,
+  denied,
+  requestedAtMs,
+  nowMs,
+  debounceMs = 3000,
+}) {
+  if (mode === "rover") return granted ? "release" : "none";
+  if (granted || denied) return "none";
+  if (nowMs - requestedAtMs < debounceMs) return "none";
+  return "request";
+}
+
 /** Decides one tick's ACTIVE gimbal demand. Returns null when there is
  *  no active demand — the caller still sends an idle zero-rate frame
  *  while the lease is held, because a continuous stream is the scope's
