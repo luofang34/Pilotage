@@ -126,6 +126,9 @@ const state = {
   // The control runtime owns the request debounce, the R3 baseline, and the
   // gimbal stream latch; the shell holds only the loaded runtime.
   controlShell: null,
+  // Advances on each fresh connect so the runtime seeds its edge baselines and
+  // a control held across a reconnect fires no edge.
+  controlGeneration: 0,
   skippedVideoFrames: 0,
   supersededVideoFrames: 0,
   // Page-lifetime latch: wasm absence never heals without a reload (the
@@ -336,6 +339,9 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.gimbalSequence = 0;
     state.gimbalLeaseGranted = false;
     state.gimbalLeaseDenied = false;
+    // A fresh session generation: the control runtime seeds its edge baselines
+    // on the first tick, so a control held across the reconnect fires no edge.
+    state.controlGeneration = (state.controlGeneration + 1) >>> 0;
     state.pendingReset = false;
     state.pendingFpvToggle = false;
     state.connected = false;
@@ -1088,6 +1094,7 @@ async function runControlLoop(writer, token) {
       // lease planning live in the runtime; this shell only executes the plan.
       const pad = activeGamepad();
       const sessionState = {
+        generation: state.controlGeneration,
         mode,
         connected: state.connected,
         leaseGranted: state.gimbalLeaseGranted,
@@ -1160,7 +1167,7 @@ function sendMotionFrame(writer, token, mode, plan) {
     generation: state.generation,
     sequence: state.sequence,
     sampledAtNanos: nowNanos(),
-    profileRevision: 1,
+    profileRevision: state.controlShell.activationRevision(),
     axes,
     edges,
   });
@@ -1182,7 +1189,7 @@ function sendGimbalFrame(writer, token, gimbal) {
     generation: state.gimbalGeneration,
     sequence: state.gimbalSequence,
     sampledAtNanos: nowNanos(),
-    profileRevision: 1,
+    profileRevision: state.controlShell.activationRevision(),
     axes: [
       [AXIS_PITCH, gimbal.pitch],
       [AXIS_YAW, gimbal.yaw],
@@ -1216,10 +1223,12 @@ function executeLeaseAction(token, action) {
  *  gimbal frame streams, otherwise the flight axes. Display only. */
 function updateControlReadout(pad, mode, plan) {
   const src = pad ? pad.id.slice(0, 24) : "keyboard (WS=climb AD=yaw arrows=move)";
-  if (plan.gimbal && (plan.gimbal.pitch !== 0 || plan.gimbal.yaw !== 0 || plan.gimbal.recenter)) {
+  // Capture is shown whenever the modifier is held, even at a centered stick,
+  // so #167's deliberate LT-descend suppression is always visible.
+  if (plan.captureActive) {
     els.gamepad.textContent =
-      `GIMBAL: pitch=${plan.gimbal.pitch.toFixed(2)} yaw=${plan.gimbal.yaw.toFixed(2)} | ` +
-      "LT captures the right stick; R3 recenters";
+      `GIMBAL (LT held): pitch=${(plan.gimbal?.pitch ?? 0).toFixed(2)} yaw=${(plan.gimbal?.yaw ?? 0).toFixed(2)} | ` +
+      "right stick captured, LT-descend inhibited; R3 recenters";
     return;
   }
   const m = plan.motion ?? { roll: 0, pitch: 0, throttle: 0, yaw: 0 };

@@ -40,6 +40,7 @@ const FLAG_GIMBAL: u32 = 1 << 1;
 const FLAG_RECENTER: u32 = 1 << 2;
 const FLAG_ARM: u32 = 1 << 3;
 const FLAG_DISARM: u32 = 1 << 4;
+const FLAG_CAPTURE: u32 = 1 << 5;
 const LEASE_SHIFT: u32 = 8; // bits 8..9: 0 none, 1 request, 2 release.
 
 /// The JS-owned web-control resource. Construct it, write the built-in default
@@ -107,9 +108,11 @@ impl WebControl {
         mode: u32,
         now_ms: f64,
         session: u32,
+        generation: u32,
     ) -> u32 {
         self.load_sample(axis_count as usize, button_count as usize);
         let state = SessionState {
+            generation,
             now_ms,
             mode: mode_from_u32(mode),
             connected: session & 1 != 0,
@@ -118,6 +121,20 @@ impl WebControl {
         };
         let plan = self.runtime.evaluate(&self.sample, &state);
         self.store_plan(&plan)
+    }
+
+    /// The active profile's identity string (empty before activation).
+    #[must_use]
+    pub fn profile_id(&self) -> String {
+        self.runtime.active_profile_id().to_owned()
+    }
+
+    /// The active profile's 32-byte content digest (all-zero before
+    /// activation). Exposed so a host can bind the on-wire activation revision
+    /// to the exact bytes that produced it.
+    #[must_use]
+    pub fn profile_digest(&self) -> Vec<u8> {
+        self.runtime.active_profile_digest().to_vec()
     }
 }
 
@@ -157,7 +174,17 @@ impl WebControl {
         if let Some(motion) = &plan.motion {
             flags |= FLAG_MOTION;
             write_frame_axes(&mut self.output, OUT_MOTION, motion, 4);
-            flags |= edge_flags(motion);
+        }
+        // Arm/disarm are TYPED, never physical button ids, so a rebound arm
+        // control cannot silently disable arming.
+        if plan.arm {
+            flags |= FLAG_ARM;
+        }
+        if plan.disarm {
+            flags |= FLAG_DISARM;
+        }
+        if plan.capture_active {
+            flags |= FLAG_CAPTURE;
         }
         if let Some(gimbal) = &plan.gimbal {
             flags |= FLAG_GIMBAL;
@@ -183,20 +210,6 @@ fn mode_from_u32(mode: u32) -> Mode {
         3 => Mode::Rover,
         _ => Mode::QuadPilot,
     }
-}
-
-/// Motion arm/disarm edges, keyed by their canonical button ids (9 arm,
-/// 8 disarm) as the runtime emits them.
-fn edge_flags(frame: &crate::plan::Frame) -> u32 {
-    let mut flags = 0;
-    for (button, _) in &frame.edges {
-        match button {
-            9 => flags |= FLAG_ARM,
-            8 => flags |= FLAG_DISARM,
-            _ => {}
-        }
-    }
-    flags
 }
 
 /// Writes the first `count` axis values of a frame into the buffer in axis-id

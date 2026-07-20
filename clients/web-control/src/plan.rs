@@ -52,6 +52,17 @@ pub struct ControlPlan {
     pub lease: Option<LeaseAction>,
     /// A human-readable scheme label for the DOM readout (never control).
     pub label: Option<&'static str>,
+    /// A typed arm edge fired this tick. The shell maps it to the wire's
+    /// LOGICAL arm button — the runtime never emits a physical button index,
+    /// so rebinding the arm control cannot silently disable arming.
+    pub arm: bool,
+    /// A typed disarm edge fired this tick.
+    pub disarm: bool,
+    /// The gimbal quasimode is capturing the right stick right now (the
+    /// modifier is held while the gimbal lease is active), so the HUD can show
+    /// capture even at a centered stick — #167's LT-descend suppression stays
+    /// visible regardless of stick deflection.
+    pub capture_active: bool,
 }
 
 /// The outcome of an [`crate::ControlRuntime::activate`] call: the immediate

@@ -37,6 +37,7 @@ fn pad(axes: &[f32], pressed: &[usize]) -> RawSample {
 
 fn session(mode: Mode, granted: bool, denied: bool) -> SessionState {
     SessionState {
+        generation: 1,
         now_ms: 100_000.0,
         mode,
         connected: true,

@@ -42,7 +42,12 @@ fn sample(axes: &[f32], pressed: &[usize]) -> RawSample {
 }
 
 fn session(mode: Mode, granted: bool) -> SessionState {
+    session_gen(1, mode, granted)
+}
+
+fn session_gen(generation: u32, mode: Mode, granted: bool) -> SessionState {
     SessionState {
+        generation,
         now_ms: 100_000.0,
         mode,
         connected: true,
@@ -94,6 +99,12 @@ fn lt_engages_the_quasimode_and_masks_flight() {
 #[test]
 fn r3_produces_exactly_one_recenter_edge() {
     let mut runtime = with_default();
+    // Prime the session generation with a neutral tick (no button held), so the
+    // baseline seeding does not swallow the genuine press under test.
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
     let held_r3 = sample(&[0.0, 0.0, 0.0, 0.0], &[11]);
     let first = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, true));
     let edges = &first.gimbal.as_ref().expect("gimbal").edges;
@@ -211,4 +222,105 @@ fn a_button_held_across_activation_does_not_fire_a_fresh_edge() {
         after.gimbal.as_ref().expect("gimbal").edges.is_empty(),
         "R3 held across activation is not a fresh edge"
     );
+}
+
+#[test]
+fn a_control_held_across_reconnect_fires_no_edge() {
+    let mut runtime = with_default();
+    // Generation 1: arm (button 9) and R3 (button 11) held; the first tick of
+    // a generation primes the baselines and fires nothing.
+    let held = sample(&[0.0, 0.0, 0.0, 0.0], &[9, 11]);
+    runtime.evaluate(&held, &session_gen(1, Mode::QuadPilot, true));
+
+    // Disconnect (no ticks evaluated while disconnected), then reconnect as a
+    // NEW generation with both controls STILL held. The first tick under the
+    // new generation must fire no arm and no recenter.
+    let reconnect = runtime.evaluate(&held, &session_gen(2, Mode::QuadPilot, true));
+    assert!(!reconnect.arm, "arm held across reconnect fires no arm");
+    assert!(
+        reconnect.gimbal.as_ref().expect("gimbal").edges.is_empty(),
+        "R3 held across reconnect fires no recenter"
+    );
+    // Still held on the next tick: still nothing.
+    let holding = runtime.evaluate(&held, &session_gen(2, Mode::QuadPilot, true));
+    assert!(!holding.arm && holding.gimbal.as_ref().expect("gimbal").edges.is_empty());
+
+    // Release, then press again: exactly one arm and one recenter.
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session_gen(2, Mode::QuadPilot, true),
+    );
+    let press = runtime.evaluate(&held, &session_gen(2, Mode::QuadPilot, true));
+    assert!(press.arm, "a fresh press after release arms exactly once");
+    assert!(
+        press
+            .gimbal
+            .as_ref()
+            .expect("gimbal")
+            .edges
+            .contains(&(GIMBAL_NEUTRAL_BUTTON, crate::plan::BUTTON_EDGE_PRESSED)),
+        "a fresh press after release recenters exactly once"
+    );
+}
+
+#[test]
+fn arm_and_disarm_are_typed_and_follow_the_profile_binding() {
+    // A profile that rebinds arm/disarm to buttons 4/5 must still fire the
+    // TYPED arm/disarm actions — the runtime never emits a physical index.
+    const REBOUND: &str = r#"{
+      "schema_version": 1, "revision": 1, "id": "test.rebind",
+      "gimbal": {
+        "modifier_button": 6, "reset_button": 11,
+        "pitch": { "source_index": 3, "logical": "pitch", "invert": true, "deadzone": 0.1, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } },
+        "yaw":   { "source_index": 2, "logical": "yaw",   "invert": false, "deadzone": 0.1, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } }
+      },
+      "flight": { "arm_button": 4, "disarm_button": 5, "left_x": 0, "left_y": 1, "right_x": 2, "right_y": 3, "trigger_left": 6, "trigger_right": 7, "deadzone": 0.06, "expo": 0.0 }
+    }"#;
+    let mut runtime = ControlRuntime::new();
+    runtime.activate(ProfileRuntime::compile(REBOUND.as_bytes()).expect("compiles"));
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    let armed = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[4]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert!(
+        armed.arm,
+        "the rebound arm button (4) fires the typed arm action"
+    );
+    assert!(!armed.disarm);
+    let disarmed = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[5]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert!(
+        disarmed.disarm,
+        "the rebound disarm button (5) fires the typed disarm action"
+    );
+}
+
+#[test]
+fn capture_active_is_reported_even_at_centered_stick() {
+    let mut runtime = with_default();
+    runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    // LT (button 6) held but the right stick centered: rates are zero, yet the
+    // quasimode IS capturing — the HUD must be able to show it.
+    let plan = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[6]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert!(
+        plan.capture_active,
+        "LT held reports capture even at centered stick"
+    );
+    let released = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
+        &session(Mode::QuadPilot, true),
+    );
+    assert!(!released.capture_active, "no capture once LT is released");
 }

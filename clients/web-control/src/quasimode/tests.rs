@@ -29,6 +29,7 @@ fn sample(axes: &[f32], pressed: &[usize]) -> RawSample {
 
 fn session(mode: Mode, granted: bool, denied: bool, now_ms: f64) -> SessionState {
     SessionState {
+        generation: 1,
         now_ms,
         mode,
         connected: true,

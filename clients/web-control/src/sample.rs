@@ -86,6 +86,10 @@ impl Mode {
 /// never reaches the network itself.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SessionState {
+    /// The session generation: the shell advances it on every fresh connect,
+    /// so the runtime can seed its edge baselines and fire no spurious edge
+    /// from a control held across a disconnect/reconnect.
+    pub generation: u32,
     /// Monotonic clock in milliseconds (the shell's `performance.now()`).
     pub now_ms: f64,
     /// The operator's selected flight-control scheme.

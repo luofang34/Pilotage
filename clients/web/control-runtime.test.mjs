@@ -23,6 +23,7 @@ function check(name, ok) {
 }
 
 const session = (mode, granted = false, denied = false) => ({
+  generation: 1,
   mode,
   connected: true,
   leaseGranted: granted,
@@ -72,10 +73,18 @@ check("the built-in default profile activated (revision 1)", shell.activationRev
   check("v4 rover releases the gimbal lease", plan.lease === "release");
 }
 
-// Vector 5: keyboard is a first-class source through the SAME runtime: W climbs.
+// Vector 5: keyboard is a first-class source through the SAME runtime, matched
+// on the shell's stored key form (event.key, letters lower-cased): W climbs.
 {
-  const plan = shell.tickFromKeys(new Set(["KeyW"]), session("quad-pilot", true));
+  const plan = shell.tickFromKeys(new Set(["w"]), session("quad-pilot", true));
   check("v5 keyboard W commands climb", plan.motion?.throttle === 1);
+}
+
+// Vector 6: LT held with a centered stick still reports capture (HUD #167).
+{
+  const pad6 = pad([0, 0, 0, 0], [6]); // LT only, stick centered
+  const plan = shell.tickFromPad(pad6, session("quad-pilot", true));
+  check("v6 capture is reported at centered stick", plan.captureActive === true);
 }
 
 if (failures > 0) {

@@ -35,6 +35,11 @@ pub struct ControlRuntime {
     last_request_ms: f64,
     prev_arm: bool,
     prev_disarm: bool,
+    // The session generation last evaluated. When the shell reports a NEW
+    // generation (a fresh connect), the first tick seeds every discrete-action
+    // baseline from the held state and fires no edge — a button held across a
+    // disconnect/reconnect cannot become a fresh arm/disarm/recenter.
+    last_generation: Option<u32>,
 }
 
 impl ControlRuntime {
@@ -58,6 +63,22 @@ impl ControlRuntime {
     #[must_use]
     pub const fn is_active(&self) -> bool {
         self.active.is_some()
+    }
+
+    /// The active profile's identity string, or empty before activation.
+    #[must_use]
+    pub fn active_profile_id(&self) -> &str {
+        self.active.as_ref().map_or("", CompiledProfile::id)
+    }
+
+    /// The active profile's content digest, or all-zero before activation. The
+    /// shell exposes this so a host can later bind the activation revision it
+    /// sees on the wire to the exact profile bytes that produced it.
+    #[must_use]
+    pub fn active_profile_digest(&self) -> [u8; 32] {
+        self.active
+            .as_ref()
+            .map_or([0u8; 32], CompiledProfile::digest)
     }
 
     /// Begins activating a compiled profile. With no profile yet, installs it
@@ -107,13 +128,41 @@ impl ControlRuntime {
         if !session.connected {
             return ControlPlan::default();
         }
-        let Some(active) = self.active.clone() else {
+        // Move the active profile out for the tick and restore it after, so the
+        // hot path borrows it without cloning; a handover that installs a new
+        // one replaces it, so we only restore when nothing was installed.
+        let Some(active) = self.active.take() else {
             return ControlPlan::default();
         };
-        if self.pending.is_some() {
-            return self.evaluate_handover(sample, &active);
+        self.prime_for_generation(sample, session, &active);
+        let plan = if self.pending.is_some() {
+            self.evaluate_handover(sample, &active)
+        } else {
+            self.evaluate_active(sample, session, &active)
+        };
+        if self.active.is_none() {
+            self.active = Some(active);
         }
-        self.evaluate_active(sample, session, &active)
+        plan
+    }
+
+    /// On the first tick of a NEW session generation, seeds every discrete
+    /// baseline to the currently held state, so a control held across a
+    /// disconnect/reconnect fires no edge. A no-op within a generation.
+    fn prime_for_generation(
+        &mut self,
+        sample: &RawSample,
+        session: &SessionState,
+        active: &CompiledProfile,
+    ) {
+        if self.last_generation == Some(session.generation) {
+            return;
+        }
+        self.last_generation = Some(session.generation);
+        self.reset_baseline = reset_held(sample, &active.gimbal);
+        self.prev_arm = sample.pressed(usize::from(active.flight.arm_button));
+        self.prev_disarm = sample.pressed(usize::from(active.flight.disarm_button));
+        self.streaming = false;
     }
 
     /// Emits the neutral handover, and installs the pending profile once the
@@ -135,6 +184,9 @@ impl ControlRuntime {
             gimbal: Some(neutral_gimbal()),
             lease: Some(LeaseAction::Release),
             label: None,
+            arm: false,
+            disarm: false,
+            capture_active: false,
         }
     }
 
@@ -187,22 +239,27 @@ impl ControlRuntime {
         let motion = self.motion_frame(sample, session, active, held);
         let lease = self.lease_action(session);
         ControlPlan {
-            motion: Some(motion.0),
+            motion: Some(motion.frame),
             gimbal: gimbal_frame,
             lease,
-            label: Some(motion.1),
+            label: Some(motion.label),
+            arm: motion.arm,
+            disarm: motion.disarm,
+            capture_active: held && active_gimbal,
         }
     }
 
-    /// Builds the flight motion frame (masking the captured inputs while LT is
-    /// held) with arm/disarm edges, and returns it with its readout label.
+    /// Builds the flight motion frame (masking the captured inputs while the
+    /// modifier is held) plus the TYPED arm/disarm edges and the readout label.
+    /// Arm/disarm are typed, not physical button ids, so a rebound arm control
+    /// cannot silently disable arming downstream.
     fn motion_frame(
         &mut self,
         sample: &RawSample,
         session: &SessionState,
         active: &CompiledProfile,
         held: bool,
-    ) -> (Frame, &'static str) {
+    ) -> MotionOutcome {
         let flight = &active.flight;
         let capture = Capture {
             active: held,
@@ -211,36 +268,33 @@ impl ControlRuntime {
             modifier_button: usize::from(active.gimbal.modifier_button),
         };
         let axes = flight_axes(sample, flight, session.mode, capture);
-        let mut edges = Vec::new();
-        self.push_edge(&mut edges, sample, flight.arm_button, true);
-        self.push_edge(&mut edges, sample, flight.disarm_button, false);
-        (
-            Frame {
+        MotionOutcome {
+            frame: Frame {
                 axes: vec![
                     (AXIS_ROLL, axes.roll),
                     (AXIS_PITCH, axes.pitch),
                     (AXIS_THROTTLE, axes.throttle),
                     (AXIS_YAW, axes.yaw),
                 ],
-                edges,
+                edges: Vec::new(),
             },
-            axes.label,
-        )
+            label: axes.label,
+            arm: self.edge_fired(sample, flight.arm_button, true),
+            disarm: self.edge_fired(sample, flight.disarm_button, false),
+        }
     }
 
-    /// Records an arm (`arm == true`) or disarm rising edge and advances its
-    /// baseline. Unrelated buttons pass through untouched by the quasimode.
-    fn push_edge(&mut self, edges: &mut Vec<(u16, u8)>, sample: &RawSample, button: u8, arm: bool) {
+    /// Whether an arm (`arm == true`) or disarm rising edge fired this tick,
+    /// advancing its baseline. Unrelated buttons pass through untouched.
+    fn edge_fired(&mut self, sample: &RawSample, button: u8, arm: bool) -> bool {
         let pressed = sample.pressed(usize::from(button));
         let prev = if arm { self.prev_arm } else { self.prev_disarm };
-        if pressed && !prev {
-            edges.push((u16::from(button), BUTTON_EDGE_PRESSED));
-        }
         if arm {
             self.prev_arm = pressed;
         } else {
             self.prev_disarm = pressed;
         }
+        pressed && !prev
     }
 
     /// Translates the lease plan into a [`LeaseAction`], recording the request
@@ -255,6 +309,15 @@ impl ControlRuntime {
             LeasePlan::None => None,
         }
     }
+}
+
+/// The motion tick outcome: the frame, its readout label, and the typed
+/// arm/disarm edges (kept out of the frame so no physical index leaks).
+struct MotionOutcome {
+    frame: Frame,
+    label: &'static str,
+    arm: bool,
+    disarm: bool,
 }
 
 /// An explicit all-zero motion frame for the neutral handover.
