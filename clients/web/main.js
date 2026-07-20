@@ -131,8 +131,11 @@ const state = {
   gimbalGeneration: 0n,
   gimbalSequence: 0,
   gimbalLeaseGranted: false,
+  gimbalLeaseDenied: false, // a denied scope is not re-requested this session
+  gimbalLeaseRequestedAtMs: 0, // request debounce
   prevGimbalReset: false, // R3 rising-edge baseline
   gimbalStreaming: false, // a release sends one trailing neutral gimbal frame
+  gimbalWheel: null, // latest trackpad gesture: { rates, atMs }
   skippedVideoFrames: 0,
   supersededVideoFrames: 0,
   // Page-lifetime latch: wasm absence never heals without a reload (the
@@ -288,11 +291,7 @@ async function connect({ manual } = { manual: true }) {
     releases: releaseTracker,
     openAndBootstrap: (leaseProbe) =>
       openTransportSession({ url, certHash, certHashHex, manual, leaseProbe }),
-    startControl: ({ transport, token }) => {
-      const ok = startControlLoop(transport, token);
-      if (ok) sendGimbalLeaseRequest(token);
-      return ok;
-    },
+    startControl: ({ transport, token }) => startControlLoop(transport, token),
     controlUnavailable: ({ token }) => {
       transportSessions.runIfActive(token, () => {
         state.leaseGranted = false;
@@ -346,6 +345,8 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.gimbalGeneration = 0n;
     state.gimbalSequence = 0;
     state.gimbalLeaseGranted = false;
+    state.gimbalLeaseDenied = false;
+    state.gimbalLeaseRequestedAtMs = 0;
     state.prevGimbalReset = false;
     state.gimbalStreaming = false;
     state.prevArmInputs = new Set();
@@ -515,15 +516,31 @@ async function sendLeaseRequest(writer, token) {
   return true;
 }
 
-/** Requests the gimbal-scope lease on the reliable session stream, AFTER
- *  bootstrap completed: the bootstrap reader completes on the first
- *  LeaseResponse and discards its remaining buffer, so a second request
- *  in flight during the handshake could lose (or split) its response.
- *  Requested only once control has started; denial is non-fatal — flight
- *  continues, the client just never emits gimbal frames. */
-function sendGimbalLeaseRequest(token) {
+/** Manages the gimbal-scope lease from the control loop, AFTER bootstrap
+ *  completed: the bootstrap reader completes on the first LeaseResponse
+ *  and discards its remaining buffer, so a second request in flight
+ *  during the handshake could lose (or split) its response.
+ *
+ *  A flight mode holds the lease (kept alive by the frame stream); the
+ *  rover mode RELEASES it — a held-but-silent scope would trip the
+ *  host's holder-silence watchdog, whose link-loss policy is
+ *  per-vehicle. A denied scope (a vehicle without a gimbal) is not
+ *  re-requested for the rest of the session. */
+function manageGimbalLease(token, mode) {
   const writer = state.sessionWriter;
   if (!writer || !transportSessions.isActive(token)) return;
+  if (mode === "rover") {
+    if (!state.gimbalLeaseGranted) return;
+    state.gimbalLeaseGranted = false;
+    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    writer.write(lengthDelimit(release)).catch(() => {});
+    log("rover mode: released the gimbal lease");
+    return;
+  }
+  if (state.gimbalLeaseGranted || state.gimbalLeaseDenied) return;
+  const nowMs = performance.now();
+  if (nowMs - state.gimbalLeaseRequestedAtMs < 3000) return;
+  state.gimbalLeaseRequestedAtMs = nowMs;
   const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
   writer.write(lengthDelimit(request)).catch(() => {
     // A dying reliable stream ends the session; nothing to do here.
@@ -577,22 +594,30 @@ async function runSessionStreamReader(reader, token) {
       if (decoded.kind === "LeaseReleased") {
         // Validate the acknowledgement before it settles anything: an
         // ack for another vehicle or scope proves nothing about ours.
+        // Wire vehicle ids decode as BigInt; comparing through Number
+        // against the BigInt constant is always false.
         const m = decoded.message;
-        if (Number(m.vehicleId) === VEHICLE_ID && m.scope === MOTION_SCOPE) {
+        if (m.vehicleId === VEHICLE_ID && m.scope === MOTION_SCOPE) {
           releaseTracker.acknowledge();
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
-        } else if (Number(m.vehicleId) === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
+        } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
           log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
         } else {
           log(`ignoring LeaseReleased for vehicle=${m.vehicleId} scope=${m.scope}`);
         }
       }
-      if (decoded.kind === "LeaseResponse" && decoded.message.scope === GIMBAL_SCOPE) {
+      if (
+        decoded.kind === "LeaseResponse" &&
+        decoded.message.scope === GIMBAL_SCOPE &&
+        decoded.message.vehicleId === VEHICLE_ID
+      ) {
         // The gimbal lease is requested after bootstrap, so its response
-        // arrives here rather than in the bootstrap reader.
+        // arrives here rather than in the bootstrap reader. Another
+        // vehicle's response must never install our generation.
         const m = decoded.message;
         state.gimbalGeneration = BigInt(m.generation || 0);
         state.gimbalLeaseGranted = !!m.granted;
+        state.gimbalLeaseDenied = !m.granted;
         log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
         if (!m.granted) {
           log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
@@ -1388,6 +1413,7 @@ async function runControlLoop(writer, token) {
       writer.write(envelope).catch((error) => {
         transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
       });
+      manageGimbalLease(token, mode);
       maybeSendGimbalFrame(writer, token, mode, pad, profile);
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
