@@ -105,6 +105,20 @@
     margin: 0;
     min-width: 0;
   }
+  /* The main view fits the viewport with the toolbar and status rows still
+     on screen — no scrolling to reach controls. The figure shrink-wraps its
+     canvas so the frame border hugs the video (no filler bars either side). */
+  #mainSlot figure.stage {
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+  #mainSlot figure.stage canvas {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: calc(100vh - 24rem);
+  }
   figure.stage > figcaption {
     font: 0.75rem monospace;
     color: #ccc;
@@ -128,6 +142,14 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+  /* The G5 stack must never become the page's tallest element: both
+     instruments share the same viewport budget as the main view. */
+  .g5-column figure.stage canvas {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: calc((100vh - 26rem) / 2);
   }
   /* Off-slot figures stay mounted (their canvases keep rendering) but
      hidden; the stream-activation work decides when to stop their feeds. */
