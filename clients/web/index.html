@@ -154,13 +154,26 @@
     font-size: 0.8rem;
     color: #9ac;
   }
+  /* The session log docks to the bottom of the page and shows exactly
+     the newest line until expanded (entries are prepended newest-first);
+     expanding grows the dock upward over the page. */
+  .log-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #111;
+    border-top: 1px solid #333;
+    padding: 0.3rem 1rem 0.4rem;
+  }
+  body {
+    padding-bottom: 3.5rem;
+  }
   .log-bar {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    border-top: 1px solid #333;
-    margin-top: 0.75rem;
-    padding-top: 0.4rem;
+    margin-bottom: 0.25rem;
   }
   #logToggle {
     background: none;
@@ -249,10 +262,12 @@
 </div>
 <div id="telemetry">no telemetry yet</div>
 <div id="gamepad">gamepad: none (move a stick to detect)</div>
-<div class="log-bar">
-  <button id="logToggle" title="Expand or collapse the session log">▸ log</button>
+<div class="log-dock">
+  <div class="log-bar">
+    <button id="logToggle" title="Expand or collapse the session log">▸ log</button>
+  </div>
+  <div id="status" class="collapsed"></div>
 </div>
-<div id="status" class="collapsed"></div>
 
 <script type="module" src="./layout.js"></script>
 <script type="module" src="./main.js"></script>
