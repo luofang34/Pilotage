@@ -1,0 +1,230 @@
+//! The wasm-bindgen surface: a JS-owned control resource with reusable input
+//! and output buffers, so one `evaluate` call per tick touches no allocation,
+//! JSON, hashing, or network. The browser writes the raw gamepad sample into
+//! the input buffer, calls `evaluate`, and reads the plan out of the output
+//! buffer — that is the entire hot path.
+
+use wasm_bindgen::prelude::wasm_bindgen;
+
+use crate::plan::{ControlPlan, LeaseAction};
+use crate::profile::ProfileRuntime;
+use crate::runtime::ControlRuntime;
+use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
+
+const MAX_AXES: usize = 8;
+const MAX_BUTTONS: usize = 24;
+// Input layout: axes f32[8] | values f32[24] | pressed-bitset u32.
+const IN_AXES: usize = 0;
+const IN_VALUES: usize = IN_AXES + MAX_AXES * 4;
+const IN_PRESSED: usize = IN_VALUES + MAX_BUTTONS * 4;
+const IN_LEN: usize = IN_PRESSED + 4;
+// Output layout: flags u32 | motion f32[4] | gimbal f32[2].
+const OUT_FLAGS: usize = 0;
+const OUT_MOTION: usize = 4;
+const OUT_GIMBAL: usize = OUT_MOTION + 4 * 4;
+const OUT_LEN: usize = OUT_GIMBAL + 2 * 4;
+
+// evaluate() return flags.
+const FLAG_MOTION: u32 = 1;
+const FLAG_GIMBAL: u32 = 1 << 1;
+const FLAG_RECENTER: u32 = 1 << 2;
+const FLAG_ARM: u32 = 1 << 3;
+const FLAG_DISARM: u32 = 1 << 4;
+const LEASE_SHIFT: u32 = 8; // bits 8..9: 0 none, 1 request, 2 release.
+
+/// The JS-owned web-control resource. Construct it, write the built-in default
+/// profile bytes through [`WebControl::activate`], then drive ticks through
+/// [`WebControl::evaluate`].
+#[wasm_bindgen]
+pub struct WebControl {
+    runtime: ControlRuntime,
+    sample: RawSample,
+    input: Vec<u8>,
+    output: Vec<u8>,
+}
+
+#[wasm_bindgen]
+impl WebControl {
+    /// A resource with an empty runtime and its fixed-capacity buffers.
+    #[wasm_bindgen(constructor)]
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            runtime: ControlRuntime::new(),
+            sample: RawSample::default(),
+            input: vec![0u8; IN_LEN],
+            output: vec![0u8; OUT_LEN],
+        }
+    }
+
+    /// Linear-memory offset of the input buffer the caller writes each tick.
+    #[must_use]
+    pub fn input_ptr(&self) -> u32 {
+        self.input.as_ptr() as u32
+    }
+
+    /// Linear-memory offset of the output buffer the caller reads each tick.
+    #[must_use]
+    pub fn output_ptr(&self) -> u32 {
+        self.output.as_ptr() as u32
+    }
+
+    /// Compiles and activates candidate profile bytes through the same
+    /// validated seam any source uses. Returns the activation revision on
+    /// success, or `0` if the candidate failed to compile (the previously
+    /// active profile, if any, stays active).
+    pub fn activate(&mut self, candidate: &[u8]) -> u32 {
+        match ProfileRuntime::compile(candidate) {
+            Ok(compiled) => self.runtime.activate(compiled).activation_revision,
+            Err(_) => 0,
+        }
+    }
+
+    /// The current session activation revision.
+    #[must_use]
+    pub fn activation_revision(&self) -> u32 {
+        self.runtime.activation_revision()
+    }
+
+    /// Evaluates one control tick from the input buffer and the session
+    /// scalars, writes the plan into the output buffer, and returns the plan
+    /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover; `session` packs
+    /// bit0 connected, bit1 lease-granted, bit2 lease-denied.
+    pub fn evaluate(
+        &mut self,
+        axis_count: u32,
+        button_count: u32,
+        mode: u32,
+        now_ms: f64,
+        session: u32,
+    ) -> u32 {
+        self.load_sample(axis_count as usize, button_count as usize);
+        let state = SessionState {
+            now_ms,
+            mode: mode_from_u32(mode),
+            connected: session & 1 != 0,
+            lease_granted: session & (1 << 1) != 0,
+            lease_denied: session & (1 << 2) != 0,
+        };
+        let plan = self.runtime.evaluate(&self.sample, &state);
+        self.store_plan(&plan)
+    }
+}
+
+impl Default for WebControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WebControl {
+    /// Refills the reusable [`RawSample`] from the input buffer, reusing the
+    /// existing Vec capacity so a steady tick allocates nothing.
+    fn load_sample(&mut self, axes: usize, buttons: usize) {
+        let axes = axes.min(MAX_AXES);
+        let buttons = buttons.min(MAX_BUTTONS);
+        let pressed = read_u32(&self.input, IN_PRESSED);
+        self.sample.axes.clear();
+        for i in 0..axes {
+            self.sample
+                .axes
+                .push(read_f32(&self.input, IN_AXES + i * 4));
+        }
+        self.sample.buttons.clear();
+        for i in 0..buttons {
+            self.sample.buttons.push(ButtonSample {
+                pressed: pressed & (1u32 << u32::try_from(i).unwrap_or(31)) != 0,
+                value: read_f32(&self.input, IN_VALUES + i * 4),
+            });
+        }
+    }
+
+    /// Encodes the plan into the output buffer and returns its flags.
+    fn store_plan(&mut self, plan: &ControlPlan) -> u32 {
+        let mut flags = 0u32;
+        write_f32x(&mut self.output, OUT_MOTION, [0.0; 4]);
+        write_f32x(&mut self.output, OUT_GIMBAL, [0.0; 2]);
+        if let Some(motion) = &plan.motion {
+            flags |= FLAG_MOTION;
+            write_frame_axes(&mut self.output, OUT_MOTION, motion, 4);
+            flags |= edge_flags(motion);
+        }
+        if let Some(gimbal) = &plan.gimbal {
+            flags |= FLAG_GIMBAL;
+            write_frame_axes(&mut self.output, OUT_GIMBAL, gimbal, 2);
+            if !gimbal.edges.is_empty() {
+                flags |= FLAG_RECENTER;
+            }
+        }
+        flags |= match plan.lease {
+            Some(LeaseAction::Request) => 1 << LEASE_SHIFT,
+            Some(LeaseAction::Release) => 2 << LEASE_SHIFT,
+            None => 0,
+        };
+        write_u32(&mut self.output, OUT_FLAGS, flags);
+        flags
+    }
+}
+
+fn mode_from_u32(mode: u32) -> Mode {
+    match mode {
+        1 => Mode::QuadCruise,
+        2 => Mode::Fpv,
+        3 => Mode::Rover,
+        _ => Mode::QuadPilot,
+    }
+}
+
+/// Motion arm/disarm edges, keyed by their canonical button ids (9 arm,
+/// 8 disarm) as the runtime emits them.
+fn edge_flags(frame: &crate::plan::Frame) -> u32 {
+    let mut flags = 0;
+    for (button, _) in &frame.edges {
+        match button {
+            9 => flags |= FLAG_ARM,
+            8 => flags |= FLAG_DISARM,
+            _ => {}
+        }
+    }
+    flags
+}
+
+/// Writes the first `count` axis values of a frame into the buffer in axis-id
+/// order (the runtime emits them already ordered).
+fn write_frame_axes(buffer: &mut [u8], offset: usize, frame: &crate::plan::Frame, count: usize) {
+    for (slot, (_, value)) in frame.axes.iter().take(count).enumerate() {
+        write_f32(buffer, offset + slot * 4, *value);
+    }
+}
+
+fn read_f32(buffer: &[u8], offset: usize) -> f32 {
+    buffer
+        .get(offset..offset + 4)
+        .and_then(|slice| slice.try_into().ok())
+        .map_or(0.0, f32::from_le_bytes)
+}
+
+fn read_u32(buffer: &[u8], offset: usize) -> u32 {
+    buffer
+        .get(offset..offset + 4)
+        .and_then(|slice| slice.try_into().ok())
+        .map_or(0, u32::from_le_bytes)
+}
+
+fn write_f32(buffer: &mut [u8], offset: usize, value: f32) {
+    if let Some(slice) = buffer.get_mut(offset..offset + 4) {
+        slice.copy_from_slice(&value.to_le_bytes());
+    }
+}
+
+fn write_f32x<const N: usize>(buffer: &mut [u8], offset: usize, values: [f32; N]) {
+    for (i, value) in values.into_iter().enumerate() {
+        write_f32(buffer, offset + i * 4, value);
+    }
+}
+
+fn write_u32(buffer: &mut [u8], offset: usize, value: u32) {
+    if let Some(slice) = buffer.get_mut(offset..offset + 4) {
+        slice.copy_from_slice(&value.to_le_bytes());
+    }
+}
