@@ -279,3 +279,39 @@ fn a_failed_clear_retries_until_it_takes_then_acks_exactly_once() {
         "retries are not re-counted as faults"
     );
 }
+
+#[test]
+fn a_re_engage_cancels_a_stale_pending_clear() {
+    let mut actor = actor();
+    let mut client = register_client(&mut actor);
+
+    // A clear is refused and held pending for retry.
+    actor.adapter.fail_enactment = true;
+    actor.enact(SessionOutcome {
+        actions: vec![clear_action(MOTION)],
+        dropped: 0,
+    });
+    assert_eq!(authority_messages(&mut client), 0);
+
+    // The SAME scope re-engages (a new holder loss) before the retry lands.
+    // The stale pending-clear must be dropped, so a later retry can neither
+    // un-latch the fresh engagement nor ack a recovery that never happened.
+    actor.adapter.fail_enactment = false;
+    actor.enact(SessionOutcome {
+        actions: vec![engage_action()],
+        dropped: 0,
+    });
+    let calls_after_reengage = actor.adapter.link_loss_calls.len();
+
+    actor.retry_pending_clears();
+    assert_eq!(
+        actor.adapter.link_loss_calls.len(),
+        calls_after_reengage,
+        "a re-engaged scope's stale clear must not be retried onto the adapter"
+    );
+    assert_eq!(
+        authority_messages(&mut client),
+        0,
+        "a re-engage cancels the stale clear's ack — no false recovery"
+    );
+}

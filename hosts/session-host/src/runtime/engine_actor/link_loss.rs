@@ -58,6 +58,12 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     "FAIL-CLOSED FAULT: link-loss policy was not enacted; \
                      the vehicle may still be executing its last command",
                 );
+                // A fresh engagement supersedes any deferred clear still
+                // pending for THIS scope: without this, a retry of that stale
+                // clear would un-latch the scope we just re-engaged (and ack a
+                // recovery that never happened).
+                self.pending_clears
+                    .retain(|pending| !(pending.vehicle == vehicle && pending.scope == scope));
             }
             SessionAction::ClearLinkLoss {
                 vehicle,
