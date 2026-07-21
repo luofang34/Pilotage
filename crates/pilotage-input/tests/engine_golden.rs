@@ -131,6 +131,7 @@ fn device_selection_prefers_the_exact_profile_then_the_generic_fallback() {
         },
         &candidates,
     )
+    .expect("the candidate list is unambiguous")
     .expect("the exact device resolves");
     assert_eq!(exact.identity().vendor_id, 0x1209);
 
@@ -141,6 +142,7 @@ fn device_selection_prefers_the_exact_profile_then_the_generic_fallback() {
         },
         &candidates,
     )
+    .expect("the candidate list is unambiguous")
     .expect("an unknown device falls back to the generic profile");
     assert_eq!(fallback.identity(), DeviceIdentity::WILDCARD);
 }
