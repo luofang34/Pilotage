@@ -14,8 +14,10 @@ impl Px4Adapter {
     /// Sets or clears one scope's link-loss policy on the adapter. Latches the
     /// scope first (an unenactable engage still suppresses that scope's
     /// frames), then, on engagement, drives that scope's own actuation to its
-    /// safe state. A refused actuation is a typed failure the host counts as a
-    /// fail-closed fault — the latch stays engaged regardless.
+    /// safe state. The latch postcondition is asymmetric (ADR-0008): an engage
+    /// records the latch BEFORE actuation, so a refused actuation returns a
+    /// typed error the host counts while the scope stays suppressed; a clear
+    /// drops the latch ONLY on the success path.
     pub(super) fn enact_link_loss_policy(
         &mut self,
         vehicle: VehicleId,

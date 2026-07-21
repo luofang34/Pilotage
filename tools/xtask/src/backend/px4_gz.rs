@@ -19,15 +19,17 @@
 //! stops ~2 s later — that stop is PX4's own timeout, not Pilotage's.
 //!
 //! Validated PX4 SHA: `6120aa53df874021639e2413a4cdecf8df8e355a`
-//! (`v1.18.0-beta1-110-g6120aa53df`). On 2026-07-21 this backend was flown with
-//! the fault injection: PX4 accepted Pilotage's primary-gimbal-control claim
-//! (`[gimbal] Configured primary gimbal control ... to 255/190`), and on holder
-//! disconnect the session host logged, reproducibly, `holder lost; engaging
-//! link-loss policy scope="vehicle.gimbal"` followed by `gimbal link-loss stop
-//! DROPPED (fault injection); relying on PX4's own timeout` — the host provably
-//! sends NO stop, so the code-verified 2 s PX4 timeout above is the sole
-//! failsafe. The physical rate-zeroing at T+2 s is not separately instrumented
-//! here; #168 tracks capturing that gz/MAVLink trace. No automated
+//! (`v1.18.0-beta1-110-g6120aa53df`). Status: fault-injection exercised; PX4
+//! outcome pending. On 2026-07-21 this backend was flown with the fault
+//! injection: PX4 accepted Pilotage's primary-gimbal-control claim (`[gimbal]
+//! Configured primary gimbal control ... to 255/190`), and on holder disconnect
+//! the session host logged, reproducibly, `holder lost; engaging link-loss
+//! policy scope="vehicle.gimbal"` followed by `gimbal link-loss stop DROPPED
+//! (fault injection); relying on PX4's own timeout`. That trace proves only the
+//! Pilotage half — the host provably sent NO stop. The PX4 half — the gimbal
+//! keeping its rate and PX4 zeroing it ~2 s later — is code-verified against
+//! `output.cpp` above but NOT yet observed on the wire; #168 tracks capturing
+//! the gz/MAVLink rate-vs-time trace that would close it. No automated
 //! PX4-in-the-loop test runs in CI.
 
 use std::path::{Path, PathBuf};

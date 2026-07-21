@@ -147,11 +147,11 @@ impl Px4Adapter {
         // on this first (and only) take.
         let gimbal = match (config.gimbal, link.take_gimbal_rate_sender()) {
             (true, Some(rates)) => {
-                // Acceptance fault injection: `PILOTAGE_PX4_DROP_GIMBAL_STOP=1`
-                // suppresses the host's gimbal link-loss stop so PX4's own
-                // setpoint-timeout is the sole failsafe under test.
-                let drop_stop =
-                    std::env::var("PILOTAGE_PX4_DROP_GIMBAL_STOP").as_deref() == Ok("1");
+                // Acceptance fault injection: suppress the host's gimbal
+                // link-loss stop so PX4's own setpoint-timeout is the sole
+                // failsafe under test. The typed config permits this ONLY under
+                // `Px4Profile::Simulation`, so a real vehicle can never withhold
+                // its safe-state command.
                 Some(
                     crate::gimbal::Px4GimbalControl::new(
                         link.command_sender(),
@@ -159,7 +159,7 @@ impl Px4Adapter {
                         link_config.system_id,
                         link_config.component_id,
                     )
-                    .with_dropped_link_loss_stop(drop_stop),
+                    .with_dropped_link_loss_stop(config.drop_gimbal_link_loss_stop()),
                 )
             }
             _ => None,

@@ -48,9 +48,10 @@ fn a_dropped_link_loss_stop_sends_nothing_so_px4_is_the_sole_failsafe() {
     assert!(primed.pitch_rps != 0.0);
 
     // Link loss with the stop DROPPED: nothing leaves the host, so PX4's own
-    // setpoint-timeout is the only thing that will stop the slew. The latch
-    // still engages (returns true), and the gimbal keeps its last rate.
-    assert!(control.queue_link_loss_stop());
+    // setpoint-timeout is the only thing that will stop the slew. The drop is
+    // reported as a failed enactment (`false`) so the host counts the fault
+    // and keeps the scope latched; the gimbal keeps its last rate.
+    assert!(!control.queue_link_loss_stop());
     assert!(
         lanes.commands.try_recv().is_err(),
         "a dropped stop sends no claim command"

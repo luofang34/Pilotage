@@ -142,6 +142,48 @@ fn a_refused_gimbal_zero_rate_is_a_typed_failure_but_still_latches() {
 }
 
 #[test]
+fn a_dropped_gimbal_stop_is_a_counted_failure_that_still_latches() {
+    // Fault injection (Simulation-only): dropping the host's zero-rate stop
+    // must NOT masquerade as a successful enactment. The engage returns a
+    // typed `ChannelRejected` — the fault the host counts — while the latch
+    // still suppresses gimbal frames, and nothing leaves the host so PX4's own
+    // setpoint-timeout is the sole failsafe under test.
+    let (control, mut lanes) = gimbal_control();
+    let control = control.with_dropped_link_loss_stop(true);
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
+
+    let result = adapter.set_link_loss_policy(
+        VehicleId::new(1),
+        &ScopeId::new(super::GIMBAL_SCOPE),
+        Some(LinkLossPolicy::Neutralize),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(pilotage_adapter_api::LinkLossEnactError::ChannelRejected { .. })
+        ),
+        "a dropped stop is a typed failure the host counts, got {result:?}"
+    );
+    assert!(
+        lanes.commands.try_recv().is_err(),
+        "a dropped stop sends no claim command"
+    );
+    assert!(
+        !lanes.rates.has_changed().expect("rate lane open"),
+        "a dropped stop publishes no zero-rate"
+    );
+    let outcome = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
+        vec![],
+    ));
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged),
+        "the latch stays engaged even though the stop was dropped"
+    );
+}
+
+#[test]
 fn motion_link_loss_latches_motion_but_leaves_the_gimbal_pointing() {
     // The converse: losing the motion scope neutralizes flight and latches
     // motion frames, while the gimbal keeps pointing — one scope's failsafe

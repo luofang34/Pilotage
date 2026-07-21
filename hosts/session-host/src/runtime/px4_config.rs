@@ -12,6 +12,10 @@ const TELEMETRY_ENDPOINT: &str = "PILOTAGE_PX4_ADDR";
 const STREAM_COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_GCS_ADDR";
 const COMMAND_ENDPOINT: &str = "PILOTAGE_PX4_FC_ADDR";
 const GIMBAL: &str = "PILOTAGE_PX4_GIMBAL";
+/// Acceptance fault injection: drop the gimbal link-loss stop so the vehicle's
+/// own failsafe is the sole mechanism under test. Honoured only under the
+/// simulation profile (enforced by [`Px4Config::with_gimbal_stop_dropped`]).
+const DROP_GIMBAL_STOP: &str = "PILOTAGE_PX4_DROP_GIMBAL_STOP";
 
 pub(crate) fn from_env() -> Result<Px4Config, HostError> {
     config_from_values(
@@ -20,6 +24,7 @@ pub(crate) fn from_env() -> Result<Px4Config, HostError> {
         std::env::var(STREAM_COMMAND_ENDPOINT),
         std::env::var(COMMAND_ENDPOINT),
         std::env::var(GIMBAL),
+        std::env::var(DROP_GIMBAL_STOP),
     )
 }
 
@@ -29,9 +34,12 @@ fn config_from_values(
     stream_command_endpoint: Result<String, VarError>,
     command_endpoint: Result<String, VarError>,
     gimbal: Result<String, VarError>,
+    drop_gimbal_stop: Result<String, VarError>,
 ) -> Result<Px4Config, HostError> {
     let profile = parse_profile(profile)?;
-    let mut config = Px4Config::new(profile).with_gimbal(parse_flag(gimbal));
+    let mut config = Px4Config::new(profile)
+        .with_gimbal(parse_flag(gimbal))
+        .with_gimbal_stop_dropped(parse_flag(drop_gimbal_stop));
     config.telemetry_endpoint = parse_endpoint(
         TELEMETRY_ENDPOINT,
         telemetry_endpoint,
@@ -97,7 +105,7 @@ mod tests {
     fn config(
         profile: Result<String, VarError>,
     ) -> Result<pilotage_adapter_px4::Px4Config, HostError> {
-        config_from_values(profile, absent(), absent(), absent(), absent())
+        config_from_values(profile, absent(), absent(), absent(), absent(), absent())
     }
 
     #[test]
@@ -148,6 +156,7 @@ mod tests {
                     absent(),
                     absent(),
                     absent(),
+                    absent(),
                 ),
             ),
             (
@@ -156,6 +165,7 @@ mod tests {
                     Ok("simulation".to_owned()),
                     absent(),
                     Ok("127.0.0.1:not-a-port".to_owned()),
+                    absent(),
                     absent(),
                     absent(),
                 ),
@@ -167,6 +177,7 @@ mod tests {
                     absent(),
                     absent(),
                     Ok("missing-port".to_owned()),
+                    absent(),
                     absent(),
                 ),
             ),

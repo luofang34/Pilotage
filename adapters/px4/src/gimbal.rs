@@ -301,9 +301,9 @@ impl Px4GimbalControl {
     /// behavior pinned at commit `841bb40`). This call sets `streaming = false`,
     /// so [`Self::maintain`]'s `STALE_DEMAND_CUTOFF` deliberately does NOT
     /// re-send afterward — the queued stop is one-shot and the FC failsafe backs
-    /// it. A `false` return (a lane full or closed) is surfaced as a typed
-    /// enactment failure so the host counts it; it never means the FC confirmed
-    /// a stop.
+    /// it. A `false` return — a lane full or closed, or the fault-injection
+    /// drop — is surfaced as a typed enactment failure so the host counts it;
+    /// it never means the FC confirmed a stop.
     pub fn queue_link_loss_stop(&mut self) -> bool {
         // Stopping the stream here means `maintain`'s `STALE_DEMAND_CUTOFF` will
         // not send a zero-rate either, so this call is the ONLY host-side stop.
@@ -312,11 +312,12 @@ impl Px4GimbalControl {
         if self.drop_link_loss_stop {
             // Fault injection: DROP the host's stop, so PX4's own setpoint
             // timeout is the sole mechanism that halts the slew (acceptance
-            // validation of the independent failsafe). The latch still engages
-            // (report "queued"), but the gimbal keeps its last nonzero rate
-            // until PX4 zeros it.
+            // validation of the independent failsafe). Returning `false`
+            // reports that nothing was queued, so the caller keeps the scope
+            // latched (fail-closed) AND counts the enactment failure. The
+            // gimbal keeps its last nonzero rate until PX4 zeros it.
             warn!("gimbal link-loss stop DROPPED (fault injection); relying on PX4's own timeout");
-            return true;
+            return false;
         }
         let claimed = self.reassert_primary_control();
         let queued = self.publish_rate(0.0, 0.0);
