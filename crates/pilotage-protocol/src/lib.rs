@@ -23,7 +23,7 @@ pub use convert::{
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 pub use intent::{
     ActionKind, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent,
-    GimbalRateIntent, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    GimbalRateIntent, IntentFamily, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
     actions_conflict,
 };
 pub use session::{

@@ -2,15 +2,21 @@
 //! vehicle (ADR-0008).
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
-    LinkLossPolicy, Pose2d, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, IntentCapability,
+    LegacyAxisRoute, LegacyCommandMap, LinkLossEnactError, LinkLossPolicy, Pose2d, RejectReason,
+    ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter,
+    VehicleDescriptor, VideoSource,
 };
-use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{
+    ControlIntent, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId, ScopedControlFrame,
+    VehicleId,
+};
 use pilotage_timing::SimTick;
 use serde::{Deserialize, Serialize};
 
-use crate::controls::{ControlState, MOTION_SCOPE, STEERING_AXIS, THROTTLE_AXIS};
+use crate::controls::{
+    ControlState, MAX_SURGE_MPS, MAX_TURN_RPS, MOTION_SCOPE, STEERING_AXIS, THROTTLE_AXIS,
+};
 use crate::scenario::initial_state_from_seed;
 use crate::skiff::SkiffState;
 
@@ -150,6 +156,32 @@ impl VehicleAdapter for ReferenceAdapter {
                         LogicalAxisId::new(THROTTLE_AXIS),
                         LogicalAxisId::new(STEERING_AXIS),
                     ],
+                    // The skiff's dynamics consume normalized surge/turn, so
+                    // the advertised envelope IS the normalized bound: a
+                    // full-scale typed command maps 1:1 onto full stick.
+                    intents: vec![IntentCapability {
+                        family: IntentFamily::Velocity,
+                        frames: vec![ReferenceFrame::BodyFrd],
+                        max_linear: MAX_SURGE_MPS,
+                        max_vertical: 0.0,
+                        max_angular: MAX_TURN_RPS,
+                    }],
+                    actions: vec![],
+                    legacy: Some(LegacyCommandMap::Velocity {
+                        vx: Some(LegacyAxisRoute {
+                            axis: THROTTLE_AXIS,
+                            sign: 1.0,
+                        }),
+                        vy: None,
+                        vz: None,
+                        yaw_rate: Some(LegacyAxisRoute {
+                            axis: STEERING_AXIS,
+                            sign: 1.0,
+                        }),
+                        arm_button: None,
+                        disarm_button: None,
+                        reset_button: None,
+                    }),
                 }],
                 link_loss_actions: vec![
                     LinkLossPolicy::Neutralize,
@@ -162,48 +194,51 @@ impl VehicleAdapter for ReferenceAdapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         if let Err(reason) = self.validate_frame(frame) {
-            return ApplyOutcome {
-                tick: self.tick,
-                disposition: Disposition::Rejected(reason),
-            };
+            return ApplyOutcome::new(self.tick, Disposition::Rejected(reason));
         }
         // The link-loss latch: `tick_link_loss` already forces the dynamics
         // to the policy state, but accepting frames while engaged would
         // store deflected controls that spring back the instant the policy
         // clears. Suppress them typed instead.
         if self.controls.policy_engaged() {
-            return ApplyOutcome {
-                tick: self.tick,
-                disposition: Disposition::Rejected(RejectReason::LinkLossEngaged),
-            };
+            return ApplyOutcome::new(
+                self.tick,
+                Disposition::Rejected(RejectReason::LinkLossEngaged),
+            );
         }
-        let mut throttle = self.controls.throttle;
-        let mut steering = self.controls.steering;
-        let mut transformed = false;
-        for (axis, value) in &frame.payload.axes {
-            // Wire decoding only guarantees finiteness, not range: a finite
-            // f32 like 1e30 would drive speed to +inf within a few ticks, and
-            // any non-finite value poisons pos/heading/speed permanently and
-            // then serializes to JSON null, breaking the snapshot/replay
-            // contract (ADR-0008, ADR-0012). SkiffState::step assumes its
-            // inputs are already in [-1, 1], so clamp here.
-            let (clamped, changed) = clamp_axis(f64::from(*value));
-            transformed |= changed;
-            if *axis == LogicalAxisId::new(THROTTLE_AXIS) {
-                throttle = clamped;
-            } else if *axis == LogicalAxisId::new(STEERING_AXIS) {
-                steering = clamped;
-            }
-        }
+        // Typed-only consumption: the session host translates any legacy
+        // payload at its compatibility boundary, so a payload reaching this
+        // adapter is a contract violation, not a fallback to honor.
+        let Some(ControlIntent::Velocity(velocity)) = frame.intent else {
+            return ApplyOutcome::new(
+                self.tick,
+                Disposition::Rejected(RejectReason::Other(
+                    "the skiff consumes typed velocity intents only".to_owned(),
+                )),
+            );
+        };
+        // The typed command is metres-per-second inside the advertised
+        // envelope; the dynamics consume normalized surge/turn, so divide by
+        // the same limits the capability advertises. Out-of-envelope values
+        // (a session bug or a direct driver) clamp rather than amplify, and
+        // any non-finite would already have failed wire decoding — but the
+        // dynamics' finiteness guarantee must not depend on the caller, so
+        // clamp defensively.
+        let (throttle, throttle_clamped) = clamp_axis(f64::from(velocity.vx / MAX_SURGE_MPS));
+        let (steering, steering_clamped) = clamp_axis(f64::from(velocity.yaw_rate / MAX_TURN_RPS));
+        // A lateral or vertical component is physically meaningless for a
+        // diff-drive skiff: constrained, not rejected, so a generic velocity
+        // sender still drives the components that exist.
+        let unsupported_component = velocity.vy != 0.0 || velocity.vz != 0.0;
         self.controls.apply(throttle, steering);
-        ApplyOutcome {
-            tick: self.tick,
-            disposition: if transformed {
-                Disposition::Transformed
+        ApplyOutcome::new(
+            self.tick,
+            if throttle_clamped || steering_clamped || unsupported_component {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
-        }
+        )
     }
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
@@ -262,19 +297,15 @@ impl VehicleAdapter for ReferenceAdapter {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{ReferenceAdapter, StepBudget, VehicleAdapter};
+    use super::{MAX_SURGE_MPS, MAX_TURN_RPS, ReferenceAdapter, StepBudget, VehicleAdapter};
     use pilotage_adapter_api::{Disposition, RejectReason};
     use pilotage_protocol::{
-        ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum,
-        SessionId, VehicleId,
+        ControlIntent, ControlPayload, Generation, LogicalAxisId, ReferenceFrame, ScopeId,
+        ScopedControlFrame, SequenceNum, SessionId, VehicleId, VelocityIntent,
     };
     use pilotage_timing::MonoTimestamp;
 
-    fn frame(
-        scope: &str,
-        axes: Vec<(LogicalAxisId, f32)>,
-        vehicle: VehicleId,
-    ) -> ScopedControlFrame {
+    fn frame(scope: &str, intent: Option<ControlIntent>, vehicle: VehicleId) -> ScopedControlFrame {
         ScopedControlFrame {
             session: SessionId::new(1),
             vehicle,
@@ -284,48 +315,58 @@ mod tests {
             sampled_at: MonoTimestamp::from_nanos(0),
             profile_revision: 1,
             activation_revision: 0,
-            payload: ControlPayload {
-                axes,
-                edges: vec![],
-            },
-            intent: None,
+            payload: ControlPayload::default(),
+            intent,
             actions: vec![],
         }
+    }
+
+    fn velocity(vx: f32, yaw_rate: f32) -> Option<ControlIntent> {
+        Some(ControlIntent::Velocity(VelocityIntent {
+            frame: ReferenceFrame::BodyFrd,
+            vx,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate,
+        }))
     }
 
     #[test]
     fn unknown_scope_is_rejected() {
         let vehicle = VehicleId::new(1);
         let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
-        let outcome = adapter.apply_control(&frame("vehicle.camera", vec![], vehicle));
+        let outcome = adapter.apply_control(&frame("vehicle.camera", velocity(0.0, 0.0), vehicle));
         assert_eq!(
             outcome.disposition,
             Disposition::Rejected(RejectReason::UnknownScope)
         );
     }
 
+    /// The typed-only contract: a legacy numeric payload reaching the adapter
+    /// is a session-boundary violation, rejected rather than interpreted.
     #[test]
-    fn unknown_axis_is_rejected() {
+    fn a_legacy_payload_frame_is_rejected() {
         let vehicle = VehicleId::new(1);
         let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
-        let outcome = adapter.apply_control(&frame(
-            "vehicle.motion",
-            vec![(LogicalAxisId::new(99), 1.0)],
-            vehicle,
-        ));
-        assert_eq!(
+        let mut legacy = frame("vehicle.motion", None, vehicle);
+        legacy.payload = ControlPayload {
+            axes: vec![(LogicalAxisId::new(2), 1.0)],
+            edges: vec![],
+        };
+        let outcome = adapter.apply_control(&legacy);
+        assert!(matches!(
             outcome.disposition,
-            Disposition::Rejected(RejectReason::UnknownAxis)
-        );
+            Disposition::Rejected(RejectReason::Other(_))
+        ));
     }
 
     #[test]
-    fn known_axes_are_accepted_and_drive_dynamics() {
+    fn a_typed_velocity_drives_the_dynamics() {
         let vehicle = VehicleId::new(1);
         let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
         let outcome = adapter.apply_control(&frame(
             "vehicle.motion",
-            vec![(LogicalAxisId::new(2), 1.0), (LogicalAxisId::new(3), 0.0)],
+            velocity(MAX_SURGE_MPS, 0.0),
             vehicle,
         ));
         assert_eq!(outcome.disposition, Disposition::Accepted);
@@ -336,20 +377,17 @@ mod tests {
     }
 
     #[test]
-    fn out_of_range_throttle_is_clamped_and_reported_transformed() {
+    fn an_out_of_envelope_velocity_is_clamped_and_reported_constrained() {
         let vehicle = VehicleId::new(1);
         let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
         let outcome = adapter.apply_control(&frame(
             "vehicle.motion",
-            vec![
-                (LogicalAxisId::new(2), 1.0e30),
-                (LogicalAxisId::new(3), 0.0),
-            ],
+            velocity(1.0e30, MAX_TURN_RPS),
             vehicle,
         ));
-        assert_eq!(outcome.disposition, Disposition::Transformed);
+        assert_eq!(outcome.disposition, Disposition::Constrained);
         // Even after many ticks the trajectory stays finite: the clamp keeps
-        // throttle at 1.0 rather than the enormous raw value.
+        // the surge command at full scale rather than the enormous raw value.
         adapter.step(StepBudget { ticks: 64 });
         let telemetry = adapter.sample_telemetry();
         let sample = &telemetry.samples[0];
@@ -360,16 +398,15 @@ mod tests {
         assert!(pose.heading.is_finite());
     }
 
+    /// Wire decoding rejects non-finite intents, but the dynamics' finiteness
+    /// guarantee must not depend on the caller being the session host.
     #[test]
-    fn nan_throttle_is_neutralized_and_snapshot_round_trips() {
+    fn a_nan_velocity_is_neutralized_and_snapshot_round_trips() {
         let vehicle = VehicleId::new(1);
         let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
-        let outcome = adapter.apply_control(&frame(
-            "vehicle.motion",
-            vec![(LogicalAxisId::new(2), f32::NAN)],
-            vehicle,
-        ));
-        assert_eq!(outcome.disposition, Disposition::Transformed);
+        let outcome =
+            adapter.apply_control(&frame("vehicle.motion", velocity(f32::NAN, 0.0), vehicle));
+        assert_eq!(outcome.disposition, Disposition::Constrained);
         adapter.step(StepBudget { ticks: 4 });
         let telemetry = adapter.sample_telemetry();
         assert!(telemetry.samples[0].speed.expect("speed").is_finite());
@@ -377,5 +414,19 @@ mod tests {
         let json = adapter.snapshot().expect("snapshot encodes");
         let restored = ReferenceAdapter::restore(&json).expect("snapshot restores");
         assert_eq!(restored, adapter);
+    }
+
+    /// A lateral component a diff-drive cannot execute is constrained (the
+    /// executable components still apply), never silently accepted as-is.
+    #[test]
+    fn an_inexecutable_lateral_component_reports_constrained() {
+        let vehicle = VehicleId::new(1);
+        let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
+        let mut intent = velocity(0.5, 0.0);
+        if let Some(ControlIntent::Velocity(ref mut v)) = intent {
+            v.vy = 0.5;
+        }
+        let outcome = adapter.apply_control(&frame("vehicle.motion", intent, vehicle));
+        assert_eq!(outcome.disposition, Disposition::Constrained);
     }
 }

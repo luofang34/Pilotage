@@ -55,6 +55,26 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
             scopes: vec![ScopeDescriptor {
                 scope: motion(),
                 axes: vec![LogicalAxisId::new(0)],
+                intents: vec![pilotage_adapter_api::IntentCapability {
+                    family: pilotage_protocol::IntentFamily::Velocity,
+                    frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
+                    max_linear: 1.0,
+                    max_vertical: 0.0,
+                    max_angular: 1.0,
+                }],
+                actions: vec![pilotage_adapter_api::ActionCapability {
+                    action: pilotage_protocol::ActionKind::Arm,
+                    mode_targets: vec![],
+                }],
+                legacy: Some(pilotage_adapter_api::LegacyCommandMap::Velocity {
+                    vx: Some(pilotage_adapter_api::LegacyAxisRoute { axis: 0, sign: 1.0 }),
+                    vy: None,
+                    vz: None,
+                    yaw_rate: None,
+                    arm_button: Some(0),
+                    disarm_button: None,
+                    reset_button: None,
+                }),
             }],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],

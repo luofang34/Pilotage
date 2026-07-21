@@ -97,9 +97,9 @@ pub enum BootstrapDecodeError {
 /// Decodes one length-delimited envelope from the front of `bytes` into a
 /// client-origin [`DomainEnvelope`] plus the unconsumed remainder.
 ///
-/// Only `ClientHello`, `LeaseRequest`, and `LeaseRelease` are legitimately
-/// received on the bootstrap stream (ADR-0005): control frames and `Ping`
-/// travel as datagrams instead.
+/// Only `ClientHello`, `LeaseRequest`, `LeaseRelease`, and
+/// `ProfileActivation` are legitimately received on the bootstrap stream
+/// (ADR-0005): control frames and `Ping` travel as datagrams instead.
 ///
 /// # Errors
 ///
@@ -126,6 +126,12 @@ pub fn decode_bootstrap_message(
         Some(wire::envelope::Payload::LeaseRelease(release)) => DomainEnvelope::Release(
             pilotage_protocol::LeaseRelease::try_from(release).map_err(DecodeError::from)?,
         ),
+        Some(wire::envelope::Payload::ProfileActivation(activation)) => {
+            DomainEnvelope::ProfileActivation(
+                pilotage_protocol::ProfileActivation::try_from(activation)
+                    .map_err(DecodeError::from)?,
+            )
+        }
         _ => return Err(BootstrapDecodeError::UnexpectedPayload),
     };
     Ok((domain, rest))
@@ -187,6 +193,9 @@ pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
             wire::envelope::Payload::LinkLossCleared(cleared.into())
         }
         OutboundMessage::Pong(pong) => wire::envelope::Payload::Pong(pong.into()),
+        OutboundMessage::ControlActionResult(result) => {
+            wire::envelope::Payload::ControlActionResult(result.into())
+        }
         OutboundMessage::Authority(effect) => {
             wire::envelope::Payload::AuthorityEvent(wire::AuthorityEvent::from(effect))
         }

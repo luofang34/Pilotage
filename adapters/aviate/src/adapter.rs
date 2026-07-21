@@ -7,12 +7,12 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, RejectReason,
-    ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossPolicy, RejectReason,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter,
+    VideoSource,
 };
 use pilotage_protocol::{
-    ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
+    ControlAction, ControlIntent, LogicalAxisId, ModeTarget, ScopeId, ScopedControlFrame, VehicleId,
 };
 use pilotage_timing::SimTick;
 
@@ -25,13 +25,14 @@ use pilotage_mavlink::link::LinkState;
 use crate::error::AviateAdapterError;
 use crate::uplink::FlightUplink;
 
+mod advertisement;
 mod camera;
 mod control;
 mod sampling;
 mod shm_sampling;
 mod sources;
 mod startup;
-use control::{normalized_flight_sticks, rejected_control};
+use control::{rejected_control, sticks_from_velocity};
 use sampling::mavlink_batch;
 use shm_sampling::ShmSource;
 use sources::{ArmReport, EstimateSource, fc_state_sample};
@@ -54,9 +55,6 @@ pub const DISARM_BUTTON: u16 = 1;
 /// Logical button whose press resets the simulation (runs the reset
 /// script; SITL-only convenience).
 pub const RESET_BUTTON: u16 = 2;
-/// Logical button toggling between camera mode (velocity sticks,
-/// brake-to-hold) and FPV mode (attitude sticks, direct thrust).
-pub const FPV_TOGGLE_BUTTON: u16 = 3;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -125,7 +123,7 @@ pub struct AviateAdapter {
     // kills any live SITL FC on the machine).
     #[cfg(test)]
     reset_spawns: u32,
-    // FPV mode latch (FPV_TOGGLE_BUTTON): attitude sticks + direct
+    // FPV mode latch (typed ModeRequest FpvDirect): attitude sticks + direct
     // thrust instead of velocity sticks + brake-to-hold.
     fpv_mode: bool,
 }
@@ -223,39 +221,57 @@ impl AviateAdapter {
     }
 }
 
+/// Disposes each typed flight action: arm fires through the caller's hook,
+/// a mode request selects camera/FPV flight (returned for the caller to
+/// latch after the loop), the gate-honored sim reset acks, and anything
+/// unsupported here reports rejected (the session gates unadvertised
+/// actions before delivery — defensive, not a reachable path).
+fn process_flight_actions(
+    actions: &[ControlAction],
+    mut send_arm: impl FnMut(f32),
+    current_yaw: f32,
+) -> (Vec<ActionResult>, Option<bool>) {
+    let mut action_results = Vec::with_capacity(actions.len());
+    let mut fpv_switch = None;
+    for action in actions {
+        match *action {
+            ControlAction::Arm => {
+                send_arm(current_yaw);
+                action_results.push(ActionResult::accepted(*action));
+            }
+            ControlAction::ModeRequest { target } => match target {
+                ModeTarget::CameraVelocity => {
+                    fpv_switch = Some(false);
+                    action_results.push(ActionResult::accepted(*action));
+                }
+                ModeTarget::FpvDirect => {
+                    fpv_switch = Some(true);
+                    action_results.push(ActionResult::accepted(*action));
+                }
+                ModeTarget::Hold | ModeTarget::Return => {
+                    action_results.push(ActionResult::rejected(
+                        *action,
+                        "mode target not supported by this vehicle",
+                    ));
+                }
+            },
+            ControlAction::SimReset => {
+                action_results.push(ActionResult::accepted(*action));
+            }
+            ControlAction::Disarm | ControlAction::GimbalRecenter => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "not supported on the flight scope",
+                ));
+            }
+        }
+    }
+    (action_results, fpv_switch)
+}
+
 impl VehicleAdapter for AviateAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            execution: ExecutionMode {
-                real_time: true,
-                render_capable: self._camera_bridge.is_some(),
-                ..ExecutionMode::default()
-            },
-            // Without a working velocity-control uplink, the adapter stays
-            // telemetry-only as required by ADR-0018.
-            vehicles: vec![VehicleDescriptor {
-                id: self.vehicle,
-                scopes: if self.uplink.is_some() {
-                    vec![ScopeDescriptor {
-                        scope: ScopeId::new(FLIGHT_SCOPE),
-                        axes: vec![
-                            LogicalAxisId::new(ROLL_AXIS),
-                            LogicalAxisId::new(PITCH_AXIS),
-                            LogicalAxisId::new(THROTTLE_AXIS),
-                            LogicalAxisId::new(YAW_AXIS),
-                        ],
-                    }]
-                } else {
-                    vec![]
-                },
-                link_loss_actions: if self.uplink.is_some() {
-                    vec![LinkLossPolicy::Neutralize]
-                } else {
-                    vec![]
-                },
-            }],
-            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        }
+        self.advertised_capabilities()
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
@@ -270,32 +286,38 @@ impl VehicleAdapter for AviateAdapter {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        for (button, edge) in &frame.payload.edges {
-            if *edge != ButtonEdge::Pressed {
-                continue;
-            }
-            if *button == LogicalButtonId::new(ARM_BUTTON) {
-                uplink.send_arm(current_yaw);
-            } else if *button == LogicalButtonId::new(FPV_TOGGLE_BUTTON) {
-                self.fpv_mode = !self.fpv_mode;
-                tracing::info!(fpv = self.fpv_mode, "flight mode toggled");
-            }
+        let (action_results, fpv_switch) = process_flight_actions(
+            &frame.actions,
+            |yaw| {
+                uplink.send_arm(yaw);
+            },
+            current_yaw,
+        );
+        if let Some(fpv) = fpv_switch
+            && self.fpv_mode != fpv
+        {
+            self.fpv_mode = fpv;
+            tracing::info!(fpv = self.fpv_mode, "flight mode switched by typed request");
         }
 
-        let (sticks, transformed) = normalized_flight_sticks(frame);
+        let Some(ControlIntent::Velocity(velocity)) = frame.intent else {
+            // An actions-only frame (arm, mode switch) carries no motion
+            // demand; the setpoint stream continues from the next frame.
+            return ApplyOutcome {
+                tick,
+                disposition: Disposition::Accepted,
+                action_results,
+            };
+        };
+        let (sticks, constrained) = sticks_from_velocity(&velocity);
         if self.fpv_mode {
-            uplink.send_fpv_frame(
-                sticks[usize::from(ROLL_AXIS)],
-                sticks[usize::from(PITCH_AXIS)],
-                sticks[usize::from(THROTTLE_AXIS)],
-                sticks[usize::from(YAW_AXIS)],
-            );
+            uplink.send_fpv_frame(sticks[0], sticks[1], sticks[2], sticks[3]);
         } else {
             uplink.send_stick_frame(
-                sticks[usize::from(ROLL_AXIS)],
-                sticks[usize::from(PITCH_AXIS)],
-                sticks[usize::from(THROTTLE_AXIS)],
-                sticks[usize::from(YAW_AXIS)],
+                sticks[0],
+                sticks[1],
+                sticks[2],
+                sticks[3],
                 current_yaw,
                 current_pos,
                 current_vel,
@@ -303,11 +325,12 @@ impl VehicleAdapter for AviateAdapter {
         }
         ApplyOutcome {
             tick,
-            disposition: if transformed {
-                Disposition::Transformed
+            disposition: if constrained {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
+            action_results,
         }
     }
 

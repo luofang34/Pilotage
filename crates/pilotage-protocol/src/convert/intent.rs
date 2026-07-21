@@ -92,6 +92,7 @@ pub(crate) fn action_to_wire(action: ControlAction) -> wire::ControlActionReques
             wire::ControlAction::GimbalRecenter,
             wire::ModeTarget::Unspecified,
         ),
+        ControlAction::SimReset => (wire::ControlAction::SimReset, wire::ModeTarget::Unspecified),
     };
     wire::ControlActionRequest {
         action: kind as i32,
@@ -129,6 +130,7 @@ pub(crate) fn action_from_wire(
         wire::ControlAction::Arm => Ok(ControlAction::Arm),
         wire::ControlAction::Disarm => Ok(ControlAction::Disarm),
         wire::ControlAction::GimbalRecenter => Ok(ControlAction::GimbalRecenter),
+        wire::ControlAction::SimReset => Ok(ControlAction::SimReset),
         // ModeRequest returned above; Unspecified/unknown rejected above. A
         // total match keeps this panic-free if the wire enum ever grows.
         wire::ControlAction::ModeRequest | wire::ControlAction::Unspecified => {

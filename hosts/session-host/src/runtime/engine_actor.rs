@@ -279,11 +279,29 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 self.send_to(client, ToConnection::Close, MessageClass::Unicast);
                 self.clients.remove(client);
             }
-            SessionAction::ApplyToAdapter { frame } => {
+            SessionAction::ApplyToAdapter { client, frame } => {
                 let apply_start = Instant::now();
                 let outcome = self.adapter.apply_control(&frame);
                 self.record_stage(Stage::Apply, apply_start.elapsed());
                 debug!(?outcome, "control frame applied to adapter");
+                // Every typed discrete action gets its explicit outcome back
+                // to the sender on the reliable session stream (CTRL-01): a
+                // press is never silently dropped.
+                for result in outcome.action_results {
+                    let envelope = pilotage_session::OutboundMessage::ControlActionResult(
+                        pilotage_protocol::ControlActionResult {
+                            vehicle: frame.vehicle,
+                            scope: frame.scope.clone(),
+                            generation: frame.generation,
+                            sequence: frame.sequence,
+                            action: result.action,
+                            accepted: result.accepted,
+                            detail: result.detail,
+                        },
+                    );
+                    let message = to_connection_message(&envelope);
+                    self.send_to(client, message, MessageClass::Unicast);
+                }
             }
             action @ (SessionAction::EngageLinkLoss { .. }
             | SessionAction::ClearLinkLoss { .. }) => {
@@ -470,7 +488,8 @@ fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConn
         }
         pilotage_session::OutboundMessage::Welcome(_)
         | pilotage_session::OutboundMessage::LeaseResponse(_)
-        | pilotage_session::OutboundMessage::LeaseReleased(_) => {
+        | pilotage_session::OutboundMessage::LeaseReleased(_)
+        | pilotage_session::OutboundMessage::ControlActionResult(_) => {
             ToConnection::BootstrapMessage(encode_envelope_message(envelope))
         }
     }

@@ -62,6 +62,9 @@ enum ControlAction {
   CONTROL_ACTION_MODE_REQUEST = 3;
   // Recenter the gimbal to its stowed/neutral orientation.
   CONTROL_ACTION_GIMBAL_RECENTER = 4;
+  // Reset the simulation (SIM-01 lifecycle, not a flight intent): advertised
+  // only by simulation adapters, never by a physical-vehicle gateway.
+  CONTROL_ACTION_SIM_RESET = 5;
 }
 
 // The explicit target of a MODE_REQUEST action (CTRL-01). Targets are typed

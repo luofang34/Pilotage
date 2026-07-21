@@ -7,14 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
-    LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossEnactError,
+    LinkLossPolicy, RejectReason, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
+    VehicleAdapter, VideoSource,
 };
 use pilotage_protocol::VehicleId;
 use std::collections::BTreeMap;
 
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame};
+use pilotage_protocol::{ActionKind, LogicalAxisId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
 use pilotage_mavlink::{LinkState, MavlinkLink};
@@ -23,6 +23,7 @@ use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
 use crate::uplink::Px4Uplink;
 
+mod advertisement;
 mod camera;
 mod control;
 #[cfg(test)]
@@ -309,45 +310,7 @@ fn rand_incarnation() -> [u8; 16] {
 
 impl VehicleAdapter for Px4Adapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            execution: ExecutionMode {
-                real_time: true,
-                ..ExecutionMode::default()
-            },
-            vehicles: vec![VehicleDescriptor {
-                id: self.vehicle,
-                scopes: {
-                    let mut scopes = Vec::new();
-                    if self.uplink.is_some() {
-                        scopes.push(ScopeDescriptor {
-                            scope: ScopeId::new(FLIGHT_SCOPE),
-                            axes: vec![
-                                LogicalAxisId::new(ROLL_AXIS),
-                                LogicalAxisId::new(PITCH_AXIS),
-                                LogicalAxisId::new(THROTTLE_AXIS),
-                                LogicalAxisId::new(YAW_AXIS),
-                            ],
-                        });
-                    }
-                    if self.gimbal.is_some() {
-                        scopes.push(ScopeDescriptor {
-                            scope: ScopeId::new(GIMBAL_SCOPE),
-                            axes: vec![
-                                LogicalAxisId::new(PITCH_AXIS),
-                                LogicalAxisId::new(YAW_AXIS),
-                            ],
-                        });
-                    }
-                    scopes
-                },
-                link_loss_actions: if self.uplink.is_some() {
-                    vec![LinkLossPolicy::Neutralize]
-                } else {
-                    vec![]
-                },
-            }],
-            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        }
+        self.advertised_capabilities()
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
@@ -371,28 +334,47 @@ impl VehicleAdapter for Px4Adapter {
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
-        for (button, edge) in &frame.payload.edges {
-            if *edge != ButtonEdge::Pressed {
-                continue;
-            }
-            if *button == LogicalButtonId::new(ARM_BUTTON) {
-                uplink.begin_arm(current_yaw);
+        let mut action_results = Vec::with_capacity(frame.actions.len());
+        for action in &frame.actions {
+            match action.kind() {
+                ActionKind::Arm => {
+                    uplink.begin_arm(current_yaw);
+                    action_results.push(ActionResult::accepted(*action));
+                }
+                // The gate already spawned the reset; report it honored.
+                ActionKind::SimReset => {
+                    action_results.push(ActionResult::accepted(*action));
+                }
+                // Disarm short-circuits inside the gate; nothing else is
+                // advertised for this scope, so the session rejects it
+                // before delivery — defensive, not a reachable path.
+                _ => {
+                    action_results.push(ActionResult::rejected(
+                        *action,
+                        "not supported on the flight scope",
+                    ));
+                }
             }
         }
-        let (sticks, transformed) = control::normalized_flight_sticks(frame);
-        uplink.send_stick_frame(
-            sticks[usize::from(ROLL_AXIS)],
-            sticks[usize::from(PITCH_AXIS)],
-            sticks[usize::from(THROTTLE_AXIS)],
-            sticks[usize::from(YAW_AXIS)],
-        );
+        let Some(pilotage_protocol::ControlIntent::Velocity(velocity)) = frame.intent else {
+            // An actions-only frame (arm) carries no motion demand; the
+            // setpoint stream continues from the next frame.
+            return ApplyOutcome {
+                tick,
+                disposition: Disposition::Accepted,
+                action_results,
+            };
+        };
+        let (sticks, constrained) = control::sticks_from_velocity(&velocity);
+        uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3]);
         ApplyOutcome {
             tick,
-            disposition: if transformed {
-                Disposition::Transformed
+            disposition: if constrained {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
+            action_results,
         }
     }
 

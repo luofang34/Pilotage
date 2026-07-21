@@ -19,6 +19,7 @@
 mod action;
 mod capabilities;
 mod clients;
+mod command_gate;
 mod config;
 mod engine;
 mod liveness;
@@ -29,6 +30,7 @@ mod outbound;
 mod tests;
 
 pub use action::{CloseReason, LinkLossTrigger, SessionAction, SessionOutcome};
+pub use command_gate::gate_frame;
 pub use config::SessionConfig;
 pub use engine::SessionEngine;
 pub use message::{ClientKey, DomainEnvelope};

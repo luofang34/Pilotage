@@ -53,9 +53,14 @@ pub enum SessionAction {
         /// Message to encode and write to that client.
         envelope: OutboundMessage,
     },
-    /// Apply a fence-verified, fresh control frame to the adapter.
+    /// Apply a fence-verified, fresh, TYPED control frame to the adapter
+    /// (the command gate has already validated it and translated any legacy
+    /// payload).
     ApplyToAdapter {
-        /// The frame the adapter should apply this tick.
+        /// The frame's sender, so the driver can return each discrete
+        /// action's explicit accepted/rejected result to it.
+        client: ClientKey,
+        /// The typed frame the adapter should apply this tick.
         frame: ScopedControlFrame,
     },
     /// Send a message to every connected client (fan-out).

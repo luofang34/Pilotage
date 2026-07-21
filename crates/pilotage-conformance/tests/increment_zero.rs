@@ -370,11 +370,16 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
             sampled_at: MonoTimestamp::from_nanos(0),
             profile_revision: 1,
             activation_revision: 0,
-            payload: ControlPayload {
-                axes: vec![(LogicalAxisId::new(2), 1.0)],
-                edges: vec![],
-            },
-            intent: None,
+            payload: ControlPayload::default(),
+            intent: Some(pilotage_protocol::ControlIntent::Velocity(
+                pilotage_protocol::VelocityIntent {
+                    frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+                    vx: 1.0,
+                    vy: 0.0,
+                    vz: 0.0,
+                    yaw_rate: 0.0,
+                },
+            )),
             actions: vec![],
         }),
         ScriptStep::Step(5),

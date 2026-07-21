@@ -155,10 +155,42 @@ fn drive_epoch_advance(state: &Arc<Mutex<LinkState>>, start: Instant) {
     apply_messages_at(state, &trio, 0, 0, start + Duration::from_millis(4_500));
 }
 
+/// Builds a TYPED flight frame from legacy-shaped stick arguments: the axis
+/// values (normalized `[-1, 1]`) scale onto the advertised velocity envelope
+/// exactly as the session's compatibility boundary would scale them, and the
+/// pressed edges become the corresponding typed actions. Keeping the legacy
+/// call shape lets every test read in stick terms while exercising the
+/// typed-only adapter contract.
 pub(super) fn frame(
     axes: Vec<(LogicalAxisId, f32)>,
     edges: Vec<(LogicalButtonId, ButtonEdge)>,
 ) -> pilotage_protocol::ScopedControlFrame {
+    let mut velocity = pilotage_protocol::VelocityIntent {
+        frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+        vx: 0.0,
+        vy: 0.0,
+        vz: 0.0,
+        yaw_rate: 0.0,
+    };
+    for (axis, value) in &axes {
+        match axis.as_u16() {
+            id if id == super::ROLL_AXIS => velocity.vy = value * 3.0,
+            id if id == super::PITCH_AXIS => velocity.vx = value * 3.0,
+            id if id == super::THROTTLE_AXIS => velocity.vz = -value * 1.5,
+            id if id == super::YAW_AXIS => velocity.yaw_rate = value * 0.9,
+            _ => {}
+        }
+    }
+    let actions = edges
+        .iter()
+        .filter(|(_, edge)| *edge == ButtonEdge::Pressed)
+        .filter_map(|(button, _)| match button.as_u16() {
+            id if id == super::ARM_BUTTON => Some(pilotage_protocol::ControlAction::Arm),
+            id if id == super::DISARM_BUTTON => Some(pilotage_protocol::ControlAction::Disarm),
+            id if id == super::RESET_BUTTON => Some(pilotage_protocol::ControlAction::SimReset),
+            _ => None,
+        })
+        .collect();
     pilotage_protocol::ScopedControlFrame {
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -168,9 +200,9 @@ pub(super) fn frame(
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
         activation_revision: 0,
-        payload: pilotage_protocol::ControlPayload { axes, edges },
-        intent: None,
-        actions: vec![],
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: Some(pilotage_protocol::ControlIntent::Velocity(velocity)),
+        actions,
     }
 }
 
@@ -342,12 +374,17 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
         Disposition::Rejected(RejectReason::ResetInProgress),
         "deflected sticks do not clear the latch"
     );
-    let empty = frame(vec![], vec![]);
-    let outcome = adapter.apply_control(&empty);
+    // A typed velocity intent is structurally total (absent = zero), so
+    // the legacy empty-payload hole cannot exist. What still demonstrates
+    // nothing is a frame WITHOUT a velocity demand.
+    let mut actions_only = frame(vec![], vec![]);
+    actions_only.intent = None;
+    actions_only.actions = vec![pilotage_protocol::ControlAction::Arm];
+    let outcome = adapter.apply_control(&actions_only);
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::ResetInProgress),
-        "an EMPTY payload must not count as a neutral demonstration"
+        "a frame without a velocity demand must not count as neutral"
     );
 
     let outcome = adapter.apply_control(&neutral());

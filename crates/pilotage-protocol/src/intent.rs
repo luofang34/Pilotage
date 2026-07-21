@@ -50,6 +50,10 @@ pub enum ControlAction {
     },
     /// Recenter the gimbal to its stowed/neutral orientation.
     GimbalRecenter,
+    /// Reset the simulation (SIM-01 lifecycle, not a flight intent):
+    /// advertised only by simulation adapters, never by a physical-vehicle
+    /// gateway.
+    SimReset,
 }
 
 /// The action kinds a scope can advertise (the capability-side view of
@@ -64,6 +68,8 @@ pub enum ActionKind {
     ModeRequest,
     /// Recenter the gimbal.
     GimbalRecenter,
+    /// Reset the simulation.
+    SimReset,
 }
 
 impl ControlAction {
@@ -75,6 +81,7 @@ impl ControlAction {
             Self::Disarm => ActionKind::Disarm,
             Self::ModeRequest { .. } => ActionKind::ModeRequest,
             Self::GimbalRecenter => ActionKind::GimbalRecenter,
+            Self::SimReset => ActionKind::SimReset,
         }
     }
 }
@@ -189,6 +196,48 @@ pub enum ControlIntent {
     BodyRate(BodyRateIntent),
     /// Gimbal pitch/yaw rate.
     GimbalRate(GimbalRateIntent),
+}
+
+/// The intent families a vehicle can advertise (the capability-side view of
+/// [`ControlIntent`], without per-command data).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntentFamily {
+    /// Linear velocity + yaw rate.
+    Velocity,
+    /// Position hold + heading.
+    PositionHold,
+    /// Attitude + collective thrust.
+    AttitudeThrust,
+    /// Body rates + collective thrust.
+    BodyRate,
+    /// Gimbal pitch/yaw rate.
+    GimbalRate,
+}
+
+impl ControlIntent {
+    /// The capability family this intent falls under.
+    #[must_use]
+    pub const fn family(&self) -> IntentFamily {
+        match self {
+            Self::Velocity(_) => IntentFamily::Velocity,
+            Self::PositionHold(_) => IntentFamily::PositionHold,
+            Self::AttitudeThrust(_) => IntentFamily::AttitudeThrust,
+            Self::BodyRate(_) => IntentFamily::BodyRate,
+            Self::GimbalRate(_) => IntentFamily::GimbalRate,
+        }
+    }
+
+    /// The reference frame this intent is expressed in, when its family
+    /// carries one (body-rate and gimbal-rate are frame-implicit).
+    #[must_use]
+    pub const fn reference_frame(&self) -> Option<ReferenceFrame> {
+        match self {
+            Self::Velocity(v) => Some(v.frame),
+            Self::PositionHold(p) => Some(p.frame),
+            Self::AttitudeThrust(a) => Some(a.frame),
+            Self::BodyRate(_) | Self::GimbalRate(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]

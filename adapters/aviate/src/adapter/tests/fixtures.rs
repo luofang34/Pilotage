@@ -88,6 +88,12 @@ pub(super) fn state_with_acquisition_skew(
     Arc::new(Mutex::new(state))
 }
 
+/// Builds a TYPED flight frame from legacy-shaped stick arguments: the axis
+/// values (normalized `[-1, 1]`) scale onto the advertised velocity envelope
+/// exactly as the session's compatibility boundary would scale them, and the
+/// pressed edges become the corresponding typed actions. Keeping the legacy
+/// call shape lets every test read in stick terms while exercising the
+/// typed-only adapter contract.
 pub(super) fn flight_frame(
     axes: Vec<(pilotage_protocol::LogicalAxisId, f32)>,
     edges: Vec<(
@@ -95,6 +101,35 @@ pub(super) fn flight_frame(
         pilotage_protocol::ButtonEdge,
     )>,
 ) -> pilotage_protocol::ScopedControlFrame {
+    use crate::adapter::{
+        ARM_BUTTON, DISARM_BUTTON, PITCH_AXIS, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    };
+    let mut velocity = pilotage_protocol::VelocityIntent {
+        frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+        vx: 0.0,
+        vy: 0.0,
+        vz: 0.0,
+        yaw_rate: 0.0,
+    };
+    for (axis, value) in &axes {
+        match axis.as_u16() {
+            id if id == ROLL_AXIS => velocity.vy = value * 3.0,
+            id if id == PITCH_AXIS => velocity.vx = value * 3.0,
+            id if id == THROTTLE_AXIS => velocity.vz = -value * 1.5,
+            id if id == YAW_AXIS => velocity.yaw_rate = value * 0.9,
+            _ => {}
+        }
+    }
+    let actions = edges
+        .iter()
+        .filter(|(_, edge)| *edge == pilotage_protocol::ButtonEdge::Pressed)
+        .filter_map(|(button, _)| match button.as_u16() {
+            id if id == ARM_BUTTON => Some(pilotage_protocol::ControlAction::Arm),
+            id if id == DISARM_BUTTON => Some(pilotage_protocol::ControlAction::Disarm),
+            id if id == RESET_BUTTON => Some(pilotage_protocol::ControlAction::SimReset),
+            _ => None,
+        })
+        .collect();
     pilotage_protocol::ScopedControlFrame {
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
@@ -104,8 +139,8 @@ pub(super) fn flight_frame(
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
         activation_revision: 0,
-        payload: pilotage_protocol::ControlPayload { axes, edges },
-        intent: None,
-        actions: vec![],
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: Some(pilotage_protocol::ControlIntent::Velocity(velocity)),
+        actions,
     }
 }

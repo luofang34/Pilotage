@@ -28,6 +28,21 @@ pub(crate) fn host_capabilities(
     }
 }
 
+/// The adapter-declared descriptor for one `(vehicle, scope)` pair, when the
+/// capabilities report it.
+pub(crate) fn scope_capability<'a>(
+    caps: &'a AdapterCapabilities,
+    vehicle: pilotage_protocol::VehicleId,
+    scope: &pilotage_protocol::ScopeId,
+) -> Option<&'a AdapterScope> {
+    caps.vehicles
+        .iter()
+        .find(|descriptor| descriptor.id == vehicle)?
+        .scopes
+        .iter()
+        .find(|descriptor| descriptor.scope == *scope)
+}
+
 /// Enumerates the `(vehicle, scope)` pairs the adapter exposes so the engine
 /// can register each with the authority engine at construction.
 pub(crate) fn scope_pairs(

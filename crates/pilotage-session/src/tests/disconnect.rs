@@ -118,6 +118,9 @@ fn many_scope_capabilities(scopes: usize) -> AdapterCapabilities {
         .map(|i| ScopeDescriptor {
             scope: ScopeId::new(format!("vehicle.motion.{i}")),
             axes: vec![LogicalAxisId::new(0)],
+            intents: vec![],
+            actions: vec![],
+            legacy: None,
         })
         .collect();
     AdapterCapabilities {

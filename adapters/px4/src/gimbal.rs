@@ -23,9 +23,9 @@ use pilotage_mavlink::codec::{GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORI
 use pilotage_mavlink::{GimbalRateDemand, OutboundCommand};
 
 /// Full-stick gimbal pitch rate (~46°/s).
-const MAX_PITCH_RATE_RPS: f32 = 0.8;
+pub(crate) const MAX_PITCH_RATE_RPS: f32 = 0.8;
 /// Full-stick gimbal yaw rate (~46°/s).
-const MAX_YAW_RATE_RPS: f32 = 0.8;
+pub(crate) const MAX_YAW_RATE_RPS: f32 = 0.8;
 /// How often the primary-control claim is re-asserted while demands
 /// flow: a claim lost to an FC restart or a competing GCS re-heals
 /// within this bound.

@@ -9,6 +9,12 @@ pub const THROTTLE_AXIS: u16 = 2;
 pub const STEERING_AXIS: u16 = 3;
 /// The only control scope the skiff exposes.
 pub const MOTION_SCOPE: &str = "vehicle.motion";
+/// Full-scale forward (surge) command of the skiff's normalized dynamics
+/// envelope. The typed velocity capability advertises this bound, so a
+/// full-scale typed command maps 1:1 onto the dynamics' full input.
+pub const MAX_SURGE_MPS: f32 = 1.0;
+/// Full-scale turn-rate command of the normalized dynamics envelope.
+pub const MAX_TURN_RPS: f32 = 1.0;
 
 /// Latest-valid-value control state plus link-loss bookkeeping for one
 /// vehicle.

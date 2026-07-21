@@ -174,6 +174,12 @@ enum FrameRejectionReason {
   // The frame's actions repeat or conflict (ARM together with DISARM); the
   // frame is rejected whole, executing neither.
   FRAME_REJECTION_REASON_CONFLICTING_ACTIONS = 10;
+  // A legacy payload omitted an axis its scope's translation routes. The
+  // typed translation is structurally total, so a partial payload would
+  // silently turn "no update" into an explicit neutral — including inside
+  // the recovery activation check. Legacy senders must report every routed
+  // axis.
+  FRAME_REJECTION_REASON_PARTIAL_COMMAND = 11;
 }
 
 // Sent back to the frame's sender (never broadcast) when a `ControlFrame`

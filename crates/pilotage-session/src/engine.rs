@@ -128,6 +128,9 @@ impl SessionEngine {
             }
             DomainEnvelope::Frame(frame) => self.on_frame(client, frame, now, &mut actions),
             DomainEnvelope::Ping(ping) => self.on_ping(client, ping, now, &mut actions),
+            DomainEnvelope::ProfileActivation(activation) => {
+                self.on_profile_activation(client, activation, &mut actions);
+            }
             DomainEnvelope::Disconnect => self.on_disconnect(client, &mut actions),
         }
         actions.into_outcome()

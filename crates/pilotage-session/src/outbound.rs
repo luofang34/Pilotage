@@ -7,7 +7,9 @@
 //! in `pilotage-protocol` and `pilotage-authority`.
 
 use pilotage_authority::AuthorityEffect;
-use pilotage_protocol::{LeaseReleased, LeaseResponse, LinkLossCleared, Pong, ServerWelcome};
+use pilotage_protocol::{
+    ControlActionResult, LeaseReleased, LeaseResponse, LinkLossCleared, Pong, ServerWelcome,
+};
 
 /// A message the engine directs at one client or at all clients.
 ///
@@ -32,6 +34,10 @@ pub enum OutboundMessage {
     LinkLossCleared(LinkLossCleared),
     /// The reply to a `Ping` (ADR-0009 RTT probe).
     Pong(Pong),
+    /// The explicit outcome of one typed discrete action (CTRL-01), sent to
+    /// the frame's sender on the reliable session stream after the adapter
+    /// disposed of it.
+    ControlActionResult(ControlActionResult),
     /// An authority event to be serialized and observed on the ordered
     /// authority stream (ADR-0006, ADR-0012). Carried as the source
     /// [`AuthorityEffect`] so the driver performs the canonical wire mapping.

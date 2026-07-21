@@ -5,8 +5,8 @@
 use pilotage_adapter_api::{LinkLossPolicy, StepBudget, VehicleAdapter};
 use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_protocol::{
-    ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VehicleId,
+    ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
+    SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use pilotage_timing::MonoTimestamp;
 
@@ -20,11 +20,14 @@ fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
         activation_revision: 0,
-        payload: ControlPayload {
-            axes: vec![(LogicalAxisId::new(2), 1.0), (LogicalAxisId::new(3), 0.0)],
-            edges: vec![],
-        },
-        intent: None,
+        payload: ControlPayload::default(),
+        intent: Some(ControlIntent::Velocity(VelocityIntent {
+            frame: ReferenceFrame::BodyFrd,
+            vx: 1.0,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate: 0.0,
+        })),
         actions: vec![],
     }
 }

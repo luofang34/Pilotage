@@ -11,10 +11,9 @@ use std::collections::BTreeMap;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, CalibrationId, CaptureClockMapping, Disposition,
-    ExecutionMode, LinkLossEnactError, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason,
-    SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, ScopeDescriptor, SourceIncarnation, StepBudget,
-    StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter, VehicleDescriptor,
-    VideoCaptureStamp, VideoSource,
+    LinkLossEnactError, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason,
+    SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, SourceIncarnation, StepBudget, StepOutcome,
+    TelemetryBatch, TelemetrySample, VehicleAdapter, VideoCaptureStamp, VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
@@ -32,6 +31,10 @@ pub const MOTION_SCOPE: &str = "vehicle.motion";
 pub const THROTTLE_AXIS: u16 = 2;
 /// Canonical logical axis carrying yaw (`angular.z`) commands.
 pub const YAW_AXIS: u16 = 3;
+/// Full-scale forward command of the unit twist envelope the bridge forwards.
+pub const MAX_LINEAR_MPS: f32 = 1.0;
+/// Full-scale turn-rate command of the unit twist envelope.
+pub const MAX_ANGULAR_RPS: f32 = 1.0;
 /// Identifier of the onboard FPV camera video source (source id 0).
 pub const FPV_SOURCE_ID: &str = "onboard-fpv";
 /// Identifier of the chase camera video source (source id 1).
@@ -214,31 +217,24 @@ impl GazeboAdapter {
     }
 }
 
-/// Maps canonical axis values in a validated frame onto a diff-drive command.
+/// Maps a typed velocity intent onto a diff-drive command.
 ///
-/// Axis values follow the `[-1.0, 1.0]` canonical convention; they are passed
-/// through as `linear.x` / `angular.z` in the vehicle's native m/s and rad/s.
-/// Absent axes hold neutral (`0.0`) rather than the last value: the host
-/// resends the full motion frame each tick under latest-valid-value semantics.
-fn control_from_frame(frame: &ScopedControlFrame) -> (BridgeControl, bool) {
-    let mut linear_x = 0.0_f64;
-    let mut angular_z = 0.0_f64;
-    let mut transformed = false;
-    for (axis, value) in &frame.payload.axes {
-        let (clamped, changed) = clamp_axis(f64::from(*value));
-        transformed |= changed;
-        if *axis == LogicalAxisId::new(THROTTLE_AXIS) {
-            linear_x = clamped;
-        } else if *axis == LogicalAxisId::new(YAW_AXIS) {
-            angular_z = clamped;
-        }
-    }
+/// The typed command arrives in metres/radians per second inside the
+/// advertised unit envelope; the bridge forwards `linear.x` / `angular.z` at
+/// the same scale, so the division by the advertised limits is the identity
+/// today and stays correct if the envelope ever widens. Values outside the
+/// envelope clamp; a lateral or vertical component a diff-drive cannot
+/// execute is reported constrained (the executable components still apply).
+fn control_from_intent(velocity: &pilotage_protocol::VelocityIntent) -> (BridgeControl, bool) {
+    let (linear_x, linear_clamped) = clamp_axis(f64::from(velocity.vx / MAX_LINEAR_MPS));
+    let (angular_z, angular_clamped) = clamp_axis(f64::from(velocity.yaw_rate / MAX_ANGULAR_RPS));
+    let inexecutable = velocity.vy != 0.0 || velocity.vz != 0.0;
     (
         BridgeControl {
             linear_x,
             angular_z,
         },
-        transformed,
+        linear_clamped || angular_clamped || inexecutable,
     )
 }
 
@@ -327,26 +323,7 @@ impl Drop for GazeboAdapter {
 
 impl VehicleAdapter for GazeboAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            execution: ExecutionMode {
-                real_time: true,
-                render_capable: true,
-                physically_embodied: false,
-                ..ExecutionMode::default()
-            },
-            vehicles: vec![VehicleDescriptor {
-                id: self.vehicle,
-                scopes: vec![ScopeDescriptor {
-                    scope: ScopeId::new(MOTION_SCOPE),
-                    axes: vec![
-                        LogicalAxisId::new(THROTTLE_AXIS),
-                        LogicalAxisId::new(YAW_AXIS),
-                    ],
-                }],
-                link_loss_actions: vec![LinkLossPolicy::Neutralize],
-            }],
-            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        }
+        self.advertised_capabilities()
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
@@ -354,6 +331,7 @@ impl VehicleAdapter for GazeboAdapter {
             return ApplyOutcome {
                 tick: self.latest_tick(),
                 disposition: Disposition::Rejected(reason),
+                action_results: Vec::new(),
             };
         }
         // The link-loss latch is per-scope: a frame is suppressed only while
@@ -365,24 +343,38 @@ impl VehicleAdapter for GazeboAdapter {
             return ApplyOutcome {
                 tick: self.latest_tick(),
                 disposition: Disposition::Rejected(RejectReason::LinkLossEngaged),
+                action_results: Vec::new(),
             };
         }
-        let (control, transformed) = control_from_frame(frame);
+        // Typed-only consumption: the session host translates any legacy
+        // payload at its compatibility boundary before delivery.
+        let Some(pilotage_protocol::ControlIntent::Velocity(velocity)) = frame.intent else {
+            return ApplyOutcome {
+                tick: self.latest_tick(),
+                disposition: Disposition::Rejected(RejectReason::Other(
+                    "the rover consumes typed velocity intents only".to_owned(),
+                )),
+                action_results: Vec::new(),
+            };
+        };
+        let (control, constrained) = control_from_intent(&velocity);
         if !self.bridge.try_send_control(control) {
             return ApplyOutcome {
                 tick: self.latest_tick(),
                 disposition: Disposition::Rejected(RejectReason::Other(
                     "sidecar bridge control link is closed".to_owned(),
                 )),
+                action_results: Vec::new(),
             };
         }
         ApplyOutcome {
             tick: self.latest_tick(),
-            disposition: if transformed {
-                Disposition::Transformed
+            disposition: if constrained {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
+            action_results: Vec::new(),
         }
     }
 
@@ -462,6 +454,8 @@ impl VehicleAdapter for GazeboAdapter {
         }
     }
 }
+
+mod advertisement;
 
 #[cfg(test)]
 mod tests;

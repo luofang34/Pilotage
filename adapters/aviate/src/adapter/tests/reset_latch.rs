@@ -224,30 +224,23 @@ fn source_epoch_counter_alone_cannot_clear_the_latch() {
 }
 
 #[test]
-fn fresh_epoch_requires_every_flight_axis() {
+fn fresh_epoch_requires_a_velocity_demand_to_clear() {
     let (mut adapter, _fc, state) = adapter_with_fake_fc();
     adapter.apply_control(&press(RESET_BUTTON));
     drive_fresh_epoch(&state);
 
-    let missing_yaw = flight_frame(
-        vec![
-            (LogicalAxisId::new(ROLL_AXIS), 0.0),
-            (LogicalAxisId::new(PITCH_AXIS), 0.0),
-            (LogicalAxisId::new(THROTTLE_AXIS), 0.0),
-        ],
-        vec![],
-    );
-    let outcome = adapter.apply_control(&missing_yaw);
+    // A typed velocity intent is structurally total (every component is
+    // present, absent means zero), so the legacy "missing declared axis"
+    // hole cannot exist. What still demonstrates nothing is a frame WITHOUT
+    // a velocity demand: an actions-only frame cannot clear the latch.
+    let mut actions_only = flight_frame(vec![], vec![]);
+    actions_only.intent = None;
+    actions_only.actions = vec![pilotage_protocol::ControlAction::Arm];
+    let outcome = adapter.apply_control(&actions_only);
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::ResetInProgress),
-        "a missing declared axis cannot clear the latch"
-    );
-    let outcome = adapter.apply_control(&flight_frame(vec![], vec![]));
-    assert_eq!(
-        outcome.disposition,
-        Disposition::Rejected(RejectReason::ResetInProgress),
-        "an empty control payload cannot clear the latch"
+        "a frame without a velocity demand cannot clear the latch"
     );
 }
 

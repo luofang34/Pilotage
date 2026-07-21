@@ -12,10 +12,13 @@ mod telemetry;
 mod vehicle_adapter;
 mod video;
 
-pub use capability::{AdapterCapabilities, ExecutionMode, ScopeDescriptor, VehicleDescriptor};
+pub use capability::{
+    ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
+    LegacyCommandMap, ScopeDescriptor, VehicleDescriptor,
+};
 pub use control::{
-    ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason,
-    payload_satisfies_neutral_activation,
+    ActionResult, ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason,
+    intent_satisfies_neutral_activation, payload_satisfies_neutral_activation,
 };
 // CAL-01 (#90): the camera calibration contract moved to
 // `pilotage-camera-calibration`; re-export it so `pilotage_adapter_api::…` paths

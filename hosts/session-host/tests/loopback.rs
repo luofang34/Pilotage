@@ -180,11 +180,19 @@ fn full_throttle_frame_bytes(
             }),
             profile_revision: 1,
             activation_revision: 0,
+            // Full coverage of every routed legacy axis: the command gate's
+            // structurally total translation rejects partial payloads.
             payload: Some(wire::ControlPayload {
-                axes: vec![wire::AxisSample {
-                    axis_id: u32::from(pilotage_adapter_reference::THROTTLE_AXIS),
-                    value: 1.0,
-                }],
+                axes: vec![
+                    wire::AxisSample {
+                        axis_id: u32::from(pilotage_adapter_reference::THROTTLE_AXIS),
+                        value: 1.0,
+                    },
+                    wire::AxisSample {
+                        axis_id: u32::from(pilotage_adapter_reference::STEERING_AXIS),
+                        value: 0.0,
+                    },
+                ],
                 edges: Vec::new(),
             }),
             intent: None,

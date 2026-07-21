@@ -176,9 +176,38 @@ fn profile(
             id: VEHICLE,
             scopes: scopes
                 .into_iter()
-                .map(|(scope, axes)| ScopeDescriptor {
-                    scope: ScopeId::new(scope),
-                    axes: axes.into_iter().map(LogicalAxisId::new).collect(),
+                .map(|(scope, axes)| {
+                    // Route the declared axes onto velocity components in
+                    // order, at unit limits, so legacy payload fixtures
+                    // exercise the command gate's translation boundary.
+                    let route = |index: usize| {
+                        axes.get(index)
+                            .map(|axis| pilotage_adapter_api::LegacyAxisRoute {
+                                axis: *axis,
+                                sign: 1.0,
+                            })
+                    };
+                    ScopeDescriptor {
+                        scope: ScopeId::new(scope),
+                        axes: axes.iter().copied().map(LogicalAxisId::new).collect(),
+                        intents: vec![pilotage_adapter_api::IntentCapability {
+                            family: pilotage_protocol::IntentFamily::Velocity,
+                            frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
+                            max_linear: 1.0,
+                            max_vertical: 0.0,
+                            max_angular: 1.0,
+                        }],
+                        actions: vec![],
+                        legacy: Some(pilotage_adapter_api::LegacyCommandMap::Velocity {
+                            vx: route(0),
+                            vy: route(1),
+                            vz: route(2),
+                            yaw_rate: route(3),
+                            arm_button: None,
+                            disarm_button: None,
+                            reset_button: None,
+                        }),
+                    }
                 })
                 .collect(),
             link_loss_actions: actions,
@@ -415,86 +444,7 @@ fn the_enacted_policy_is_configured_and_validated_never_order_based() {
 /// silence, re-granted, then a neutral activation moves it to `ClearPending`
 /// (the driver has not yet confirmed the adapter took the clear). Returns the
 /// engine and the pending generation; a tick now retries the clear.
-fn engine_with_a_pending_clear() -> (SessionEngine, Generation) {
-    let (mut engine, client, session, generation) = engaged_then_regranted();
-    let neutral = engine.handle_client_message(
-        client,
-        DomainEnvelope::Frame(neutral_frame(
-            session,
-            generation,
-            SequenceNum::new(3),
-            MonoTimestamp::from_nanos(230),
-        )),
-        MonoTimestamp::from_nanos(230),
-    );
-    assert_eq!(
-        cleared(&neutral),
-        1,
-        "the neutral activation requests the clear"
-    );
-    // While the clear is pending (unconfirmed), each tick re-emits its retry.
-    let retry = engine.handle_tick(MonoTimestamp::from_nanos(231));
-    assert_eq!(cleared(&retry), 1, "a pending clear is retried each tick");
-    (engine, generation)
-}
-
-#[test]
-fn a_committed_handover_invalidates_a_pending_clear() {
-    let (mut engine, _generation) = engine_with_a_pending_clear();
-
-    // A committed handover installs a new holder and advances the generation
-    // with NO new engagement. It must invalidate the pending clear, so the
-    // stale retry stops and the new holder has to re-demonstrate neutral
-    // activation — a clear from the old generation can never un-latch the scope
-    // for the new holder (ADR-0010).
-    let handover = engine.apply_authority_effect_for_test(
-        AuthorityEffect::ScopeTransferCommitted {
-            vehicle: VEHICLE,
-            scope: motion(),
-            from: PrincipalId::new(1),
-            to: PrincipalId::new(2),
-            generation: Generation::new(999),
-        },
-        MonoTimestamp::from_nanos(232),
-    );
-    assert_eq!(cleared(&handover), 0, "the handover itself is not a clear");
-
-    let after = engine.handle_tick(MonoTimestamp::from_nanos(233));
-    assert_eq!(
-        cleared(&after),
-        0,
-        "the handover invalidated the pending clear; no stale clear crosses the generation"
-    );
-}
-
-#[test]
-fn an_emergency_override_invalidates_a_pending_clear() {
-    let (mut engine, _generation) = engine_with_a_pending_clear();
-
-    // An emergency override seizes the scope at a new generation with no new
-    // engagement — the same race as a handover, and the same invalidation.
-    let overridden = engine.apply_authority_effect_for_test(
-        AuthorityEffect::EmergencyOverrideApplied {
-            vehicle: VEHICLE,
-            scope: motion(),
-            previous_holder: Some(PrincipalId::new(1)),
-            holder: PrincipalId::new(2),
-            authority_class: AuthorityClass::Supervisor,
-            reason: OverrideReason::new("recovery race test"),
-            generation: Generation::new(999),
-        },
-        MonoTimestamp::from_nanos(232),
-    );
-    assert_eq!(
-        cleared(&overridden),
-        0,
-        "the override itself is not a clear"
-    );
-
-    let after = engine.handle_tick(MonoTimestamp::from_nanos(233));
-    assert_eq!(
-        cleared(&after),
-        0,
-        "the override invalidated the pending clear; recovery needs fresh neutral activation"
-    );
-}
+// The generation-race invalidation tests share this module's helpers but
+// would push it past the file-size gate, so they live in a sibling
+// submodule.
+mod pending_clear;

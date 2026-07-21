@@ -193,6 +193,10 @@ pub enum FrameRejectionReason {
     /// The frame's actions repeat or conflict (arm together with disarm);
     /// the frame is rejected whole, executing neither.
     ConflictingActions,
+    /// A legacy payload omitted an axis its scope's translation routes;
+    /// the structurally total translation would turn "no update" into an
+    /// explicit neutral, so partial legacy coverage is rejected.
+    PartialCommand,
 }
 
 /// Sent back to a control frame's sender (never broadcast) when the frame

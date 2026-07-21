@@ -22,10 +22,10 @@
 //! does an unconfigured vehicle.
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, LinkLossPolicy, payload_satisfies_neutral_activation,
+    AdapterCapabilities, LinkLossPolicy, intent_satisfies_neutral_activation,
 };
 use pilotage_authority::AuthorityEffect;
-use pilotage_protocol::{ControlPayload, Generation, LogicalAxisId, ScopeId, VehicleId};
+use pilotage_protocol::{Generation, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::MonoTimestamp;
 
 use super::{Actions, SessionEngine};
@@ -292,25 +292,40 @@ impl SessionEngine {
     /// is left to the tick's retry, not re-activated here.
     pub(super) fn maybe_activate_recovery(
         &mut self,
-        vehicle: VehicleId,
-        scope: &ScopeId,
-        generation: Generation,
-        payload: &ControlPayload,
+        frame: &ScopedControlFrame,
         actions: &mut Actions,
     ) {
+        let (vehicle, scope, generation) = (frame.vehicle, &frame.scope, frame.generation);
         if !self.link_loss.is_awaiting_activation(vehicle, scope) {
             return;
         }
-        let Some(declared) = declared_axes(&self.capabilities, vehicle, scope) else {
+        let Some(descriptor) =
+            crate::capabilities::scope_capability(&self.capabilities, vehicle, scope)
+        else {
             // A scope the capabilities no longer describe cannot prove
             // anything; stay engaged (fail closed).
             return;
         };
-        if !payload_satisfies_neutral_activation(
-            payload,
-            declared,
-            self.config.activation_deadband_milli,
-        ) {
+        // The gate delivers typed-only frames, so neutral activation is a
+        // TYPED demonstration: every commanded component inside the
+        // limit-scaled deadband of its advertised capability, with no
+        // discrete action riding the frame. An actions-only frame (or a
+        // family without a neutral posture) demonstrates nothing.
+        let neutral = frame.actions.is_empty()
+            && frame.intent.as_ref().is_some_and(|intent| {
+                descriptor
+                    .intents
+                    .iter()
+                    .find(|capability| capability.family == intent.family())
+                    .is_some_and(|capability| {
+                        intent_satisfies_neutral_activation(
+                            intent,
+                            capability,
+                            self.config.activation_deadband_milli,
+                        )
+                    })
+            });
+        if !neutral {
             return;
         }
         if self
@@ -384,23 +399,6 @@ impl SessionEngine {
         );
         actions.into_outcome()
     }
-}
-
-/// The axes `scope` declares on `vehicle`, from the adapter's capability
-/// report.
-fn declared_axes<'a>(
-    capabilities: &'a AdapterCapabilities,
-    vehicle: VehicleId,
-    scope: &ScopeId,
-) -> Option<&'a [LogicalAxisId]> {
-    capabilities
-        .vehicles
-        .iter()
-        .find(|descriptor| descriptor.id == vehicle)?
-        .scopes
-        .iter()
-        .find(|descriptor| descriptor.scope == *scope)
-        .map(|descriptor| descriptor.axes.as_slice())
 }
 
 #[cfg(test)]

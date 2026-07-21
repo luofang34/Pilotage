@@ -222,7 +222,7 @@ impl SessionEngine {
             .authority
             .verify_frame(frame.vehicle, &frame.scope, frame.generation)
         {
-            FrameVerdict::Accepted => self.accept_frame(frame, sender, now, actions),
+            FrameVerdict::Accepted => self.gate_and_accept(frame, sender, client, now, actions),
             FrameVerdict::RejectedStaleGeneration { current } => {
                 actions.push(reject_frame(
                     client,
@@ -251,35 +251,91 @@ impl SessionEngine {
         }
     }
 
-    /// Books an accepted frame: refreshes setpoint freshness, runs the
-    /// recovery activation check, and forwards the frame to the adapter.
+    /// Runs a fence-verified frame through the typed-command gate (CTRL-01):
+    /// exactly one command representation, capability-validated, with any
+    /// legacy payload translated at that single boundary — the adapter only
+    /// ever sees typed commands. A gated frame proceeds to acceptance; a
+    /// rejected one is echoed to its sender with the typed reason.
+    fn gate_and_accept(
+        &mut self,
+        frame: ScopedControlFrame,
+        sender: PrincipalId,
+        client: ClientKey,
+        now: MonoTimestamp,
+        actions: &mut Actions,
+    ) {
+        let Some(descriptor) =
+            crate::capabilities::scope_capability(&self.capabilities, frame.vehicle, &frame.scope)
+        else {
+            let generation = self.frame_generation(&frame);
+            actions.push(reject_frame(
+                client,
+                &frame,
+                FrameRejectionReason::UnknownScope,
+                generation,
+            ));
+            return;
+        };
+        match crate::command_gate::gate_frame(&frame, descriptor) {
+            Ok(typed) => self.accept_frame(typed, sender, client, now, actions),
+            Err(reason) => {
+                let generation = self.frame_generation(&frame);
+                actions.push(reject_frame(client, &frame, reason, generation));
+            }
+        }
+    }
+
+    /// Books an accepted, gate-typed frame: refreshes setpoint freshness,
+    /// runs the recovery activation check, and forwards it to the adapter.
     fn accept_frame(
         &mut self,
         frame: ScopedControlFrame,
         sender: PrincipalId,
+        client: ClientKey,
         now: MonoTimestamp,
         actions: &mut Actions,
     ) {
         // The holder is actively driving; push its frame-silence deadline
         // forward so the watchdog only fires on real silence. Only an
-        // axis-bearing frame counts as setpoint freshness — discrete/
-        // edge-only traffic proves the client is alive, not that it is
-        // commanding the vehicle, and must not hold the lease of an
-        // axis-silent holder open.
-        if !frame.payload.axes.is_empty() {
+        // intent-bearing frame counts as setpoint freshness — actions-only
+        // traffic proves the client is alive, not that it is commanding the
+        // vehicle, and must not hold the lease of a setpoint-silent holder
+        // open.
+        if frame.intent.is_some() {
             self.note_frame_accepted(frame.vehicle, &frame.scope, sender, now);
         }
         // A demonstrated-neutral frame from the fenced new holder is the
         // recovery activation condition; the clear (if any) is emitted
         // before the apply so the adapter un-latches first.
-        self.maybe_activate_recovery(
-            frame.vehicle,
-            &frame.scope,
-            frame.generation,
-            &frame.payload,
-            actions,
-        );
-        actions.push(SessionAction::ApplyToAdapter { frame });
+        self.maybe_activate_recovery(&frame, actions);
+        actions.push(SessionAction::ApplyToAdapter { client, frame });
+    }
+
+    /// Records a client's control-profile activation announcement
+    /// (INPUT-01): the session-side traceability record binding the
+    /// `activation_revision` its frames carry to the profile identity,
+    /// document revision, and content digest. An announcement before the
+    /// handshake closes the connection like any other pre-welcome traffic.
+    pub(super) fn on_profile_activation(
+        &mut self,
+        client: ClientKey,
+        activation: pilotage_protocol::ProfileActivation,
+        actions: &mut Actions,
+    ) {
+        if self.welcomed_principal(client, actions).is_none() {
+            return;
+        }
+        self.clients.record_profile_activation(client, activation);
+    }
+
+    /// The client's last announced control-profile activation, if any —
+    /// the record session telemetry and evidence bind control frames to.
+    #[must_use]
+    pub fn active_profile(
+        &self,
+        client: ClientKey,
+    ) -> Option<&pilotage_protocol::ProfileActivation> {
+        self.clients.active_profile(client)
     }
 
     /// Answers a `Ping` with a `Pong` echoing the sender sample and stamping

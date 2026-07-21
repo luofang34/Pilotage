@@ -24,6 +24,10 @@ pub(crate) struct ClientState {
     pub(crate) session: SessionId,
     /// Principal identity assigned to this connection.
     pub(crate) principal: PrincipalId,
+    /// The client's last announced control-profile activation (INPUT-01):
+    /// the traceability record binding the `activation_revision` its frames
+    /// carry to the profile identity, document revision, and content digest.
+    pub(crate) active_profile: Option<pilotage_protocol::ProfileActivation>,
 }
 
 /// Registry of connected clients and the scopes each principal holds.
@@ -113,9 +117,39 @@ impl ClientRegistry {
         let principal = PrincipalId::new(self.next_principal);
         self.next_session = self.next_session.wrapping_add(1);
         self.next_principal = self.next_principal.wrapping_add(1);
-        let state = ClientState { session, principal };
+        let state = ClientState {
+            session,
+            principal,
+            active_profile: None,
+        };
         self.clients.insert(client, state.clone());
         state
+    }
+
+    /// Records the client's announced control-profile activation (INPUT-01).
+    /// Returns false when the client has not completed the handshake.
+    pub(crate) fn record_profile_activation(
+        &mut self,
+        client: ClientKey,
+        activation: pilotage_protocol::ProfileActivation,
+    ) -> bool {
+        match self.clients.get_mut(&client) {
+            Some(state) => {
+                state.active_profile = Some(activation);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The client's last announced control-profile activation, if any.
+    pub(crate) fn active_profile(
+        &self,
+        client: ClientKey,
+    ) -> Option<&pilotage_protocol::ProfileActivation> {
+        self.clients
+            .get(&client)
+            .and_then(|state| state.active_profile.as_ref())
     }
 
     /// Removes a client on disconnect, returning the scopes its principal still

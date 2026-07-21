@@ -1,25 +1,17 @@
-//! Flight-control input helpers, control gating, and reset handling.
+//! Flight-control gating (typed commands), reset handling, and the
+//! velocity-envelope stick conversion.
 
 use std::time::{Duration, Instant};
 
-use pilotage_adapter_api::{
-    ApplyOutcome, Disposition, RejectReason, payload_satisfies_neutral_activation,
-};
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
+use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
+use pilotage_protocol::{ActionKind, ControlIntent, ScopedControlFrame, VelocityIntent};
 use pilotage_timing::SimTick;
 
-use super::{
-    AviateAdapter, DISARM_BUTTON, PITCH_AXIS, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
-};
+use super::AviateAdapter;
+use crate::uplink::{MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS};
 
-/// Reset clearance uses the same 5%-of-full-stick scale as host recovery.
-const RESET_CLEAR_DEADBAND_MILLI: u32 = 50;
-const FLIGHT_AXES: [LogicalAxisId; 4] = [
-    LogicalAxisId::new(ROLL_AXIS),
-    LogicalAxisId::new(PITCH_AXIS),
-    LogicalAxisId::new(THROTTLE_AXIS),
-    LogicalAxisId::new(YAW_AXIS),
-];
+/// Reset clearance uses the same 5%-of-full-envelope scale as host recovery.
+const RESET_CLEAR_DEADBAND: f32 = 0.05;
 
 /// The engaged commanded-reset latch: the estimate stream's source epoch
 /// observed at engagement. `engaged_epoch` is `None` when no estimate
@@ -31,37 +23,66 @@ pub(super) struct ResetLatch {
     engaged_epoch: Option<u32>,
 }
 
-/// Reset clearance uses the canonical full-coverage neutral activation.
+/// Reset clearance: every velocity component inside the envelope-scaled
+/// deadband and no discrete action riding the frame. A frame without a
+/// velocity intent demonstrates nothing.
 fn frame_is_neutral(frame: &ScopedControlFrame) -> bool {
-    payload_satisfies_neutral_activation(&frame.payload, &FLIGHT_AXES, RESET_CLEAR_DEADBAND_MILLI)
+    let Some(ControlIntent::Velocity(v)) = frame.intent else {
+        return false;
+    };
+    frame.actions.is_empty()
+        && v.vx.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
+        && v.vy.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
+        && v.vz.abs() <= MAX_VERTICAL_MPS * RESET_CLEAR_DEADBAND
+        && v.yaw_rate.abs() <= MAX_YAW_RATE_RPS * RESET_CLEAR_DEADBAND
 }
 
-pub(super) fn flight_button_pressed(frame: &ScopedControlFrame, button: u16) -> bool {
-    frame.payload.edges.iter().any(|(candidate, edge)| {
-        *edge == ButtonEdge::Pressed && *candidate == LogicalButtonId::new(button)
-    })
+/// Whether the frame carries an action of `kind`.
+pub(super) fn has_action(frame: &ScopedControlFrame, kind: ActionKind) -> bool {
+    frame.actions.iter().any(|action| action.kind() == kind)
 }
 
 pub(super) fn rejected_control(tick: SimTick, reason: RejectReason) -> ApplyOutcome {
-    ApplyOutcome {
-        tick,
-        disposition: Disposition::Rejected(reason),
+    ApplyOutcome::new(tick, Disposition::Rejected(reason))
+}
+
+/// Per-action results for a frame whose disarm short-circuits it: the disarm
+/// (and a sim reset that already spawned) report accepted; anything else the
+/// frame carried is not executed this frame.
+fn action_result_for_disarm_frame(
+    action: pilotage_protocol::ControlAction,
+) -> pilotage_adapter_api::ActionResult {
+    match action.kind() {
+        ActionKind::Disarm | ActionKind::SimReset => {
+            pilotage_adapter_api::ActionResult::accepted(action)
+        }
+        _ => pilotage_adapter_api::ActionResult::rejected(
+            action,
+            "not executed: the frame's disarm short-circuits it",
+        ),
     }
 }
 
-pub(super) fn normalized_flight_sticks(frame: &ScopedControlFrame) -> ([f32; 4], bool) {
-    let mut sticks = [0.0_f32; 4];
-    let mut transformed = false;
-    for (axis, value) in &frame.payload.axes {
-        let clamped = if value.is_nan() {
+/// Converts a typed velocity (m/s, rad/s in the advertised envelope) back to
+/// the normalized sticks the uplink's setpoint shaping consumes: the exact
+/// inverse of the envelope scaling a client applies, so a full-envelope
+/// command flies exactly like full stick. Out-of-envelope values clamp.
+pub(super) fn sticks_from_velocity(velocity: &VelocityIntent) -> ([f32; 4], bool) {
+    let normalize = |value: f32, limit: f32| {
+        let normalized = value / limit;
+        let clamped = if normalized.is_nan() {
             0.0
         } else {
-            value.clamp(-1.0, 1.0)
+            normalized.clamp(-1.0, 1.0)
         };
-        transformed |= clamped != *value;
-        sticks[usize::from(axis.as_u16().min(3))] = clamped;
-    }
-    (sticks, transformed)
+        (clamped, clamped != normalized)
+    };
+    let (roll, c0) = normalize(velocity.vy, MAX_HORIZONTAL_MPS);
+    let (pitch, c1) = normalize(velocity.vx, MAX_HORIZONTAL_MPS);
+    // + throttle stick = climb; body-FRD +z is down.
+    let (throttle, c2) = normalize(-velocity.vz, MAX_VERTICAL_MPS);
+    let (yaw, c3) = normalize(velocity.yaw_rate, MAX_YAW_RATE_RPS);
+    ([roll, pitch, throttle, yaw], c0 || c1 || c2 || c3)
 }
 
 impl AviateAdapter {
@@ -96,10 +117,11 @@ impl AviateAdapter {
         run_reset_command();
     }
 
-    /// The pre-pose gate chain for one flight frame: structural checks,
-    /// the link-loss latch, reset/disarm button handling, and the
-    /// commanded-reset latch. `Some` is the early outcome; `None` lets
-    /// the caller proceed to measurement-dependent control.
+    /// The pre-pose gate chain for one flight frame: the typed-only
+    /// contract, structural checks, the link-loss latch, reset/disarm
+    /// action handling, and the commanded-reset latch. `Some` is the early
+    /// outcome; `None` lets the caller proceed to measurement-dependent
+    /// control.
     pub(super) fn gated_flight_outcome(
         &mut self,
         frame: &ScopedControlFrame,
@@ -111,6 +133,14 @@ impl AviateAdapter {
         if let Err(reason) = self.validate_flight_frame(frame) {
             return Some(rejected_control(tick, reason));
         }
+        // Typed-only consumption: the session host translates any legacy
+        // payload at its compatibility boundary before delivery.
+        if frame.carries_payload() || !frame.carries_typed() {
+            return Some(rejected_control(
+                tick,
+                RejectReason::Other("the flight scope consumes typed commands only".to_owned()),
+            ));
+        }
         // The link-loss latch: while a policy is engaged the FC holds its
         // policy state (braked hover) and ordinary frames are suppressed,
         // so a newly granted holder with deflected sticks cannot fly the
@@ -119,12 +149,12 @@ impl AviateAdapter {
         if self.link_loss_policy.contains_key(&frame.scope) {
             return Some(rejected_control(tick, RejectReason::LinkLossEngaged));
         }
-        if flight_button_pressed(frame, RESET_BUTTON) {
+        if has_action(frame, ActionKind::SimReset) {
             self.spawn_reset();
         }
-        // Disarm is checked BEFORE the reset latch: surrendering
+        // Disarm is handled BEFORE the reset latch: surrendering
         // authority must never be blocked, and it needs no measurement.
-        if flight_button_pressed(frame, DISARM_BUTTON) {
+        if has_action(frame, ActionKind::Disarm) {
             let Some(uplink) = self.uplink.as_mut() else {
                 return Some(rejected_control(tick, RejectReason::UnknownScope));
             };
@@ -132,6 +162,11 @@ impl AviateAdapter {
             return Some(ApplyOutcome {
                 tick,
                 disposition: Disposition::Accepted,
+                action_results: frame
+                    .actions
+                    .iter()
+                    .map(|action| self::action_result_for_disarm_frame(*action))
+                    .collect(),
             });
         }
         // The commanded-reset latch: cached measurements inside the
