@@ -642,6 +642,28 @@ check(
   );
 }
 
+// ---- LinkLossCleared (recovery ack, envelope field 15) decodes correctly ----
+// The host broadcasts this on the reliable authority stream; the client must
+// read vehicle/scope/generation to correlate its motion recovery.
+{
+  const stringMessage = (str) => {
+    const out = [];
+    bytesField(out, 1, new TextEncoder().encode(str));
+    return out;
+  };
+  const cleared = [];
+  bytesField(cleared, 1, uint64Message(7)); // vehicle
+  bytesField(cleared, 2, stringMessage("vehicle.motion")); // scope
+  bytesField(cleared, 3, uint64Message(42)); // generation
+  const envelope = [];
+  bytesField(envelope, 15, cleared); // link_loss_cleared
+  const decoded = decodeBareEnvelope(new Uint8Array(envelope));
+  check("link-loss-cleared decodes as LinkLossCleared", decoded.kind === "LinkLossCleared");
+  check("link-loss-cleared vehicle round-trips", decoded.message.vehicleId === 7n);
+  check("link-loss-cleared scope round-trips", decoded.message.scope === "vehicle.motion");
+  check("link-loss-cleared generation round-trips", decoded.message.generation === 42n);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);

@@ -461,7 +461,11 @@ fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConn
             class: DatagramClass::Pong,
             bytes: encode_pong_datagram(pong),
         },
-        pilotage_session::OutboundMessage::Authority(_) => {
+        // The link-loss-cleared notice is a reliable broadcast; it rides the
+        // dedicated authority-events stream alongside authority events so a
+        // bulk/bootstrap transfer cannot head-of-line-block a recovery ack.
+        pilotage_session::OutboundMessage::Authority(_)
+        | pilotage_session::OutboundMessage::LinkLossCleared(_) => {
             ToConnection::AuthorityMessage(encode_envelope_message(envelope))
         }
         pilotage_session::OutboundMessage::Welcome(_)

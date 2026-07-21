@@ -103,6 +103,19 @@ message LeaseReleased {
   Generation generation = 4;
 }
 
+// A reliable notice that the host has CLEARED its link-loss latch for one
+// scope of a vehicle: the accepted neutral frame on `generation` satisfied the
+// recovery activation condition, so the neutralize/brake policy is lifted. The
+// controlling client correlates by vehicle/scope/generation to know its
+// recovery landed rather than trusting that a best-effort control datagram
+// arrived (ADR-0012).
+message LinkLossCleared {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  // The fresh generation whose accepted neutral frame cleared the latch.
+  Generation generation = 3;
+}
+
 // An RTT/offset probe carrying the sender's local transport-time sample.
 // `nonce` correlates a `Ping` with its `Pong`; it carries no ordering or
 // uniqueness guarantee beyond what the sender chooses.

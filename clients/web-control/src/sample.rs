@@ -109,4 +109,10 @@ pub struct SessionState {
     /// Whether the host DENIED the post-handover motion reacquire. Terminal: the
     /// runtime stops re-requesting and keeps motion gated until a fresh session.
     pub motion_denied: bool,
+    /// Whether the host has CONFIRMED it cleared the vehicle's link-loss latch
+    /// on the current fresh generation (the shell correlates the recovery notice
+    /// by vehicle/scope/generation). The runtime keeps transmitting neutral
+    /// activation frames until this is true, then resumes live — so recovery
+    /// never rests on the hope that a best-effort datagram reached the host.
+    pub motion_recovered: bool,
 }

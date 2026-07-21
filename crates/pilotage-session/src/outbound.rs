@@ -7,7 +7,7 @@
 //! in `pilotage-protocol` and `pilotage-authority`.
 
 use pilotage_authority::AuthorityEffect;
-use pilotage_protocol::{LeaseReleased, LeaseResponse, Pong, ServerWelcome};
+use pilotage_protocol::{LeaseReleased, LeaseResponse, LinkLossCleared, Pong, ServerWelcome};
 
 /// A message the engine directs at one client or at all clients.
 ///
@@ -26,6 +26,10 @@ pub enum OutboundMessage {
     /// The acknowledgement of a `LeaseRelease` (ADR-0006): the sender may
     /// treat its authority as relinquished on receipt.
     LeaseReleased(LeaseReleased),
+    /// The reliable notice that the host cleared its link-loss latch for one
+    /// scope of a vehicle on a fresh generation (ADR-0012): the recovering
+    /// client resumes live control only once it correlates this.
+    LinkLossCleared(LinkLossCleared),
     /// The reply to a `Ping` (ADR-0009 RTT probe).
     Pong(Pong),
     /// An authority event to be serialized and observed on the ordered

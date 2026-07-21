@@ -131,6 +131,23 @@ fn a_neutral_frame_clears_once_and_orders_before_the_apply() {
         .expect("apply present");
     assert!(clear_index < apply_index, "clear must precede the apply");
 
+    // The clear also BROADCASTS a LinkLossCleared correlated to the recovered
+    // generation, so the recovering client resumes on confirmation rather than
+    // trusting its best-effort neutral datagram arrived.
+    let confirmed = neutral.actions.iter().any(|a| {
+        matches!(
+            a,
+            SessionAction::Broadcast {
+                envelope: OutboundMessage::LinkLossCleared(cleared),
+            } if cleared.generation == generation
+        )
+    });
+    assert!(
+        confirmed,
+        "recovery broadcasts a LinkLossCleared for the generation: {:?}",
+        neutral.actions
+    );
+
     // Recovery is complete; further neutral frames do not re-clear.
     let again = engine.handle_client_message(
         client,

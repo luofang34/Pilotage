@@ -255,6 +255,32 @@ fn frame_rejected_roundtrips() {
     assert_eq!(back, rejected);
 }
 
+fn sample_link_loss_cleared() -> LinkLossCleared {
+    LinkLossCleared {
+        vehicle: VehicleId::new(1),
+        scope: ScopeId::new("vehicle.motion"),
+        generation: Generation::new(9),
+    }
+}
+
+#[test]
+fn link_loss_cleared_roundtrips() {
+    let cleared = sample_link_loss_cleared();
+    let wire_cleared: wire::LinkLossCleared = (&cleared).into();
+    let back = LinkLossCleared::try_from(wire_cleared).expect("valid conversion");
+    assert_eq!(back, cleared);
+}
+
+#[test]
+fn link_loss_cleared_conversion_fails_on_missing_generation() {
+    let mut wire_cleared: wire::LinkLossCleared = (&sample_link_loss_cleared()).into();
+    wire_cleared.generation = None;
+    assert!(matches!(
+        LinkLossCleared::try_from(wire_cleared),
+        Err(ConvertError::MissingField { .. })
+    ));
+}
+
 #[test]
 fn frame_rejected_conversion_fails_on_unspecified_reason() {
     let mut wire_rejected: wire::FrameRejected = (&sample_frame_rejected()).into();

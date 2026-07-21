@@ -54,27 +54,26 @@ pub(super) enum MotionOutput {
 /// session reflecting the expected transition.
 const MOTION_LEASE_RETRY_MS: f64 = 250.0;
 
-/// Consecutive neutral activation frames transmitted (once the operator is
-/// neutral) before live output resumes. A burst, not a single datagram, so the
-/// host's link-loss recovery survives packet loss on the control channel.
-const NEUTRAL_ACTIVATION_FRAMES: u8 = 3;
-
 impl ControlRuntime {
     /// Advances the motion-lease reacquisition after a profile handover and
     /// returns any lease action to emit plus what to do with motion output. The
     /// full handshake is
     /// `release → (session reflects release) → request → (fresh grant) →
-    /// (operator neutral) → neutral activation burst → live`:
+    /// (operator neutral) → neutral activation (retransmitted) → (host confirms
+    /// recovery) → live`:
     ///
     /// - the request is never emitted until the session confirms the release,
     ///   and a dropped release/request is re-emitted after
     ///   [`MOTION_LEASE_RETRY_MS`] so a lost write cannot wedge the handshake;
     /// - a denied reacquire is terminal — no more requests;
     /// - on a fresh grant, live output stays gated until the operator's controls
-    ///   read neutral, then the runtime transmits [`NEUTRAL_ACTIVATION_FRAMES`]
-    ///   neutral frames under the fresh generation (the activation the host
-    ///   needs to clear its link-loss brake) before resuming live, so no live
-    ///   command ever rides the released generation or jumps at recovery.
+    ///   read neutral, then the runtime transmits neutral frames under the fresh
+    ///   generation EVERY tick (retransmitted, so a dropped datagram cannot
+    ///   wedge recovery) and stays neutralizing until the host CONFIRMS it
+    ///   cleared the vehicle's link-loss latch (`motion_recovered`). Only then
+    ///   does live resume — never on the released generation, never onto a
+    ///   deflection, and never on the mere hope that a best-effort datagram
+    ///   arrived.
     pub(super) fn advance_motion_authority(
         &mut self,
         sample: &RawSample,
@@ -109,7 +108,6 @@ impl ControlRuntime {
                     // Fresh grant (the shell verified the generation exceeds the
                     // fence): begin the neutral-activation recovery.
                     self.motion_phase = MotionPhase::Neutralizing;
-                    self.motion_neutral_frames = 0;
                     (None, MotionOutput::Gated)
                 } else if stalled {
                     self.motion_action_ms = session.now_ms;
@@ -119,19 +117,20 @@ impl ControlRuntime {
                 }
             }
             MotionPhase::Neutralizing => {
-                if controls_neutral(sample, active) {
-                    // Transmit neutral activation frames under the fresh
-                    // generation; a burst rides out control-channel packet loss
-                    // before live output resumes.
-                    self.motion_neutral_frames = self.motion_neutral_frames.saturating_add(1);
-                    if self.motion_neutral_frames >= NEUTRAL_ACTIVATION_FRAMES {
-                        self.motion_phase = MotionPhase::Held;
-                    }
+                if session.motion_recovered {
+                    // The host CONFIRMED it cleared the vehicle's link-loss latch
+                    // on this fresh generation: recovery is complete. One final
+                    // neutral this tick, then live resumes.
+                    self.motion_phase = MotionPhase::Held;
+                    (None, MotionOutput::Neutral)
+                } else if controls_neutral(sample, active) {
+                    // Transmit a neutral activation frame under the fresh
+                    // generation, EVERY tick, so a dropped datagram is
+                    // retransmitted until the host confirms recovery.
                     (None, MotionOutput::Neutral)
                 } else {
                     // The operator is still commanding: never resume onto a live
-                    // deflection and never count a non-neutral frame. Wait.
-                    self.motion_neutral_frames = 0;
+                    // deflection. Wait for physical neutral before activating.
                     (None, MotionOutput::Gated)
                 }
             }

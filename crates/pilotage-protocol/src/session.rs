@@ -85,6 +85,22 @@ pub struct LeaseReleased {
     pub generation: Generation,
 }
 
+/// The host's reliable notice that it CLEARED its link-loss latch for one scope
+/// of a vehicle: the accepted neutral frame on [`Self::generation`] satisfied
+/// the recovery activation condition, so the neutralize/brake policy is lifted.
+/// The controlling client correlates by vehicle/scope/generation to confirm its
+/// recovery landed rather than trusting a best-effort control datagram arrived
+/// (ADR-0012).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkLossCleared {
+    /// Vehicle whose link-loss latch cleared.
+    pub vehicle: VehicleId,
+    /// The scope that recovered.
+    pub scope: ScopeId,
+    /// The fresh generation whose accepted neutral frame cleared the latch.
+    pub generation: Generation,
+}
+
 /// Why a `LeaseRequest` was denied (ADR-0006, ADR-0010).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaseDenialReason {

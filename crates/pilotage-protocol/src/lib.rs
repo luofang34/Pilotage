@@ -22,7 +22,8 @@ pub use convert::{
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 pub use session::{
     ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRelease,
-    LeaseReleased, LeaseRequest, LeaseResponse, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
+    LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared, Ping, Pong, ScopeHolderSnapshot,
+    ServerWelcome,
 };
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,

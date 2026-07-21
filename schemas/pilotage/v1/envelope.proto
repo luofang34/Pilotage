@@ -32,5 +32,6 @@ message Envelope {
     FrameRejected frame_rejected = 12;
     LeaseRelease lease_release = 13;
     LeaseReleased lease_released = 14;
+    LinkLossCleared link_loss_cleared = 15;
   }
 }

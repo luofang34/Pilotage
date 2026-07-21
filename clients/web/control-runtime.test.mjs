@@ -32,6 +32,7 @@ const session = (mode, granted = false, denied = false) => ({
   // output when it is not (a profile handover fences it — see vector 8).
   motionGranted: true,
   motionDenied: false,
+  motionRecovered: true,
   nowMs: 100_000,
 });
 const pad = (axes, pressed) => ({

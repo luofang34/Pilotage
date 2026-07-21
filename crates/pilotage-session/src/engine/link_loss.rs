@@ -23,8 +23,12 @@ use pilotage_adapter_api::{
     AdapterCapabilities, LinkLossPolicy, payload_satisfies_neutral_activation,
 };
 use pilotage_authority::AuthorityEffect;
-use pilotage_protocol::{ControlPayload, LogicalAxisId, ScopeId, VehicleId};
+use pilotage_protocol::{
+    ControlPayload, Generation, LinkLossCleared, LogicalAxisId, ScopeId, VehicleId,
+};
 use pilotage_timing::MonoTimestamp;
+
+use crate::outbound::OutboundMessage;
 
 use super::{Actions, SessionEngine};
 use crate::action::{LinkLossTrigger, SessionAction};
@@ -192,6 +196,7 @@ impl SessionEngine {
         &mut self,
         vehicle: VehicleId,
         scope: &ScopeId,
+        generation: Generation,
         payload: &ControlPayload,
         actions: &mut Actions,
     ) {
@@ -211,6 +216,18 @@ impl SessionEngine {
             return;
         }
         self.link_loss.clear_scope(vehicle, scope);
+        // Confirm the per-scope recovery to the client on the reliable stream,
+        // correlated by vehicle/scope/generation, so the recovering client
+        // resumes live control instead of trusting a best-effort datagram. This
+        // is safety-critical (a dropped notice would strand the client
+        // neutralizing forever), so it is never dropped behind the action cap.
+        actions.push_safety(SessionAction::Broadcast {
+            envelope: OutboundMessage::LinkLossCleared(LinkLossCleared {
+                vehicle,
+                scope: scope.clone(),
+                generation,
+            }),
+        });
         if !self.link_loss.vehicle_engaged(vehicle) {
             actions.push(SessionAction::ClearLinkLoss { vehicle });
         }

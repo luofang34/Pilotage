@@ -59,6 +59,7 @@ fn session_gen(generation: u32, mode: Mode, granted: bool) -> SessionState {
         lease_denied: false,
         motion_granted: true,
         motion_denied: false,
+        motion_recovered: true,
     }
 }
 

@@ -6,7 +6,8 @@ use crate::convert::ConvertError;
 use crate::ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 use crate::session::{
     ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRelease,
-    LeaseReleased, LeaseRequest, LeaseResponse, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
+    LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared, Ping, Pong, ScopeHolderSnapshot,
+    ServerWelcome,
 };
 use crate::wire;
 use pilotage_timing::MonoTimestamp;
@@ -204,6 +205,41 @@ impl TryFrom<wire::LeaseReleased> for LeaseReleased {
             vehicle: VehicleId::new(vehicle.value),
             scope: ScopeId::new(scope.value),
             released: released.released,
+            generation: Generation::new(generation.value),
+        })
+    }
+}
+
+impl From<&LinkLossCleared> for wire::LinkLossCleared {
+    fn from(cleared: &LinkLossCleared) -> Self {
+        wire::LinkLossCleared {
+            vehicle: Some(wire::VehicleId {
+                value: cleared.vehicle.as_u64(),
+            }),
+            scope: Some(wire::ScopeId {
+                value: cleared.scope.as_str().to_owned(),
+            }),
+            generation: Some(wire::Generation {
+                value: cleared.generation.as_u64(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<wire::LinkLossCleared> for LinkLossCleared {
+    type Error = ConvertError;
+
+    fn try_from(cleared: wire::LinkLossCleared) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.LinkLossCleared",
+            field,
+        };
+        let vehicle = cleared.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = cleared.scope.ok_or_else(|| missing("scope"))?;
+        let generation = cleared.generation.ok_or_else(|| missing("generation"))?;
+        Ok(LinkLossCleared {
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
             generation: Generation::new(generation.value),
         })
     }

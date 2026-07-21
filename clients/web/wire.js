@@ -265,6 +265,7 @@ const ENVELOPE_FIELD = {
   frameRejected: 12,
   leaseRelease: 13,
   leaseReleased: 14,
+  linkLossCleared: 15,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
@@ -560,6 +561,9 @@ function decodeEnvelopeBody(body) {
   if (fields.has(ENVELOPE_FIELD.leaseReleased)) {
     return { kind: "LeaseReleased", message: decodeLeaseReleased(firstBytes(fields, ENVELOPE_FIELD.leaseReleased)) };
   }
+  if (fields.has(ENVELOPE_FIELD.linkLossCleared)) {
+    return { kind: "LinkLossCleared", message: decodeLinkLossCleared(firstBytes(fields, ENVELOPE_FIELD.linkLossCleared)) };
+  }
   return { kind: "unknown", message: {} };
 }
 
@@ -595,6 +599,17 @@ function decodeLeaseReleased(bytes) {
     scope: decodeStringMessage(firstBytes(fields, 2)),
     released: !!firstVarint(fields, 3),
     generation: decodeUint64Message(firstBytes(fields, 4)),
+  };
+}
+
+// session.proto LinkLossCleared: vehicle=1, scope=2, generation=3
+function decodeLinkLossCleared(bytes) {
+  if (!bytes) return {};
+  const fields = parseFields(bytes);
+  return {
+    vehicleId: decodeUint64Message(firstBytes(fields, 1)),
+    scope: decodeStringMessage(firstBytes(fields, 2)),
+    generation: decodeUint64Message(firstBytes(fields, 3)),
   };
 }
 

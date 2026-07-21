@@ -56,7 +56,7 @@ import { loadControlShell } from "./control-shell.js";
     };
     const plan = shell.tickFromPad(pad, {
       mode: "quad-pilot", connected: true, leaseGranted: true, leaseDenied: false,
-      motionGranted: true, generation: 1, nowMs: performance.now(),
+      motionGranted: true, motionDenied: false, motionRecovered: true, generation: 1, nowMs: performance.now(),
     });
     await fetch("/result", { method: "POST", body: JSON.stringify({
       ran: true,

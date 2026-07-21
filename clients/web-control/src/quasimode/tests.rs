@@ -37,6 +37,7 @@ fn session(mode: Mode, granted: bool, denied: bool, now_ms: f64) -> SessionState
         lease_denied: denied,
         motion_granted: true,
         motion_denied: false,
+        motion_recovered: true,
     }
 }
 

@@ -2,10 +2,10 @@
 
 //! Motion-lease reacquisition after a live profile switch. The runtime fences
 //! the motion generation, gates live output through the whole handshake, and
-//! recovers ONLY through a neutral activation burst once the operator's
-//! controls read neutral — so a remapped scheme never publishes on the released
-//! generation, and the host clears its link-loss brake before live resumes. A
-//! denied reacquire is terminal.
+//! recovers ONLY once the operator's controls read neutral AND the host
+//! confirms it cleared the vehicle's link-loss latch — so a remapped scheme
+//! never publishes on the released generation and never resumes on the hope a
+//! best-effort datagram arrived. A denied reacquire is terminal.
 
 use super::{SECOND_PROFILE, sample, session, with_default};
 use crate::plan::LeaseAction;
@@ -37,6 +37,16 @@ fn session_denied(now_ms: f64, mode: Mode) -> SessionState {
     }
 }
 
+/// A session mid-recovery: the motion lease is granted, with the host's
+/// link-loss-cleared confirmation (`motion_recovered`) set explicitly.
+fn recovering(motion_granted: bool, motion_recovered: bool) -> SessionState {
+    SessionState {
+        motion_granted,
+        motion_recovered,
+        ..session(Mode::QuadPilot, true)
+    }
+}
+
 fn deflected() -> RawSample {
     sample(&[1.0, 1.0, 1.0, 1.0], &[])
 }
@@ -53,7 +63,7 @@ fn is_neutral_motion(plan: &crate::plan::ControlPlan) -> bool {
 }
 
 #[test]
-fn a_live_switch_recovers_only_through_a_neutral_activation_burst() {
+fn a_live_switch_recovers_only_when_the_host_confirms() {
     let mut runtime = with_default();
     // Steady flight publishes the live stick.
     assert!(
@@ -75,29 +85,46 @@ fn a_live_switch_recovers_only_through_a_neutral_activation_burst() {
     assert_eq!(req.motion_lease, Some(LeaseAction::Request));
     assert!(req.motion.is_none(), "gated while reacquiring");
 
-    // Regranted, but the operator is STILL deflected: no live command, and no
-    // neutral activation while deflected — motion stays fully gated.
-    let held = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, true));
+    // Regranted, but the operator is STILL deflected: motion stays fully gated
+    // (no live command, no neutral activation while deflected).
     assert!(
-        held.motion.is_none(),
+        runtime
+            .evaluate(&deflected(), &recovering(true, false))
+            .motion
+            .is_none(),
         "gated while the operator is deflected"
     );
-    let still = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, true));
-    assert!(still.motion.is_none(), "stays gated as long as deflected");
 
-    // The operator centers: the runtime transmits NEUTRAL activation frames
-    // (not the live stick) under the fresh generation, so the host recovers.
-    for i in 0..3 {
-        let plan = runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, true, true));
-        assert!(is_neutral_motion(&plan), "neutral activation frame {i}");
+    // The operator centers but the host has NOT confirmed recovery: the runtime
+    // retransmits neutral activation frames EVERY tick — indefinitely — and
+    // never resumes live on the mere hope a datagram arrived.
+    for i in 0..6 {
+        let plan = runtime.evaluate(&neutral(), &recovering(true, false));
+        assert!(
+            is_neutral_motion(&plan),
+            "neutral activation retransmit {i}"
+        );
     }
+    // Even a later deflection, still unconfirmed, does NOT go live.
+    assert!(
+        runtime
+            .evaluate(&deflected(), &recovering(true, false))
+            .motion
+            .is_none(),
+        "unconfirmed recovery never resumes live, however many neutral frames were sent"
+    );
 
-    // Recovery complete: a deflection now publishes LIVE again (and the operator
-    // was neutral at the moment of resume, so nothing jumped).
-    let resumed = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, true));
+    // The host CONFIRMS it cleared the vehicle's link-loss latch: a final
+    // neutral this tick, then live resumes with the operator already neutral.
+    let confirmed = runtime.evaluate(&neutral(), &recovering(true, true));
+    assert!(
+        is_neutral_motion(&confirmed),
+        "a final neutral on confirmation"
+    );
+    let resumed = runtime.evaluate(&deflected(), &recovering(true, true));
     assert!(
         resumed.motion.is_some(),
-        "live output resumes after the burst"
+        "live resumes once the host confirms"
     );
     assert!(
         !is_neutral_motion(&resumed),

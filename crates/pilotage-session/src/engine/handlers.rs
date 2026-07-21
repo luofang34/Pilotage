@@ -272,7 +272,13 @@ impl SessionEngine {
         // A demonstrated-neutral frame from the fenced new holder is the
         // recovery activation condition; the clear (if any) is emitted
         // before the apply so the adapter un-latches first.
-        self.maybe_activate_recovery(frame.vehicle, &frame.scope, &frame.payload, actions);
+        self.maybe_activate_recovery(
+            frame.vehicle,
+            &frame.scope,
+            frame.generation,
+            &frame.payload,
+            actions,
+        );
         actions.push(SessionAction::ApplyToAdapter { frame });
     }
 

@@ -102,7 +102,7 @@ impl WebControl {
     /// scalars, writes the plan into the output buffer, and returns the plan
     /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover; `session` packs
     /// bit0 connected, bit1 gimbal-lease-granted, bit2 gimbal-lease-denied,
-    /// bit3 motion-lease-granted, bit4 motion-lease-denied.
+    /// bit3 motion-lease-granted, bit4 motion-lease-denied, bit5 motion-recovered.
     pub fn evaluate(
         &mut self,
         axis_count: u32,
@@ -122,6 +122,7 @@ impl WebControl {
             lease_denied: session & (1 << 2) != 0,
             motion_granted: session & (1 << 3) != 0,
             motion_denied: session & (1 << 4) != 0,
+            motion_recovered: session & (1 << 5) != 0,
         };
         let plan = self.runtime.evaluate(&self.sample, &state);
         self.store_plan(&plan)

@@ -122,6 +122,12 @@ const state = {
   motionFence: 0n,
   // A denied motion reacquire is terminal — the runtime stops re-requesting.
   motionDenied: false,
+  // Whether the host has confirmed (via LinkLossCleared) it cleared the
+  // vehicle's link-loss latch on the current generation. The runtime keeps
+  // neutralizing until this is true, so recovery never rests on a best-effort
+  // datagram. Irrelevant in steady flight; reset false when a release starts a
+  // new recovery cycle.
+  motionRecovered: true,
   // The gimbal scope's own lease/fencing state: independent generation and
   // sequence, granted (or not) without affecting flight control.
   gimbalGeneration: 0n,
@@ -342,6 +348,7 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.sequence = 0;
     state.motionFence = 0n;
     state.motionDenied = false;
+    state.motionRecovered = true;
     state.gimbalGeneration = 0n;
     state.gimbalSequence = 0;
     state.gimbalLeaseGranted = false;
@@ -591,8 +598,11 @@ async function runSessionStreamReader(reader, token) {
           releaseTracker.acknowledge();
           // The motion lease is released (input-loss OR a profile handover):
           // drop local authority and fence the released generation so the
-          // runtime gates motion output and only re-requests once reflected.
+          // runtime gates motion output and only re-requests once reflected. A
+          // release opens a new recovery cycle, so the host's prior
+          // confirmation no longer applies until it clears the fresh generation.
           applyMotionLease(decoded);
+          state.motionRecovered = false;
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
         } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
           log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
@@ -771,6 +781,21 @@ function dispatchAuthorityStream(body, token) {
     if (decoded.kind === "AuthorityEvent") {
       els.overlay.textContent = `authority: ${decoded.message.arm}`;
       log(`authority event: ${decoded.message.arm}`);
+    }
+  }
+  if (decoded.kind === "LinkLossCleared") {
+    // The host confirmed it cleared the vehicle's link-loss latch. Correlate by
+    // vehicle + MOTION scope + the CURRENT fresh generation: only then does the
+    // runtime resume live control (a notice for another vehicle/scope, or a
+    // stale generation, proves nothing about our recovery).
+    const m = decoded.message;
+    if (
+      m.vehicleId === VEHICLE_ID &&
+      m.scope === MOTION_SCOPE &&
+      m.generation === state.generation
+    ) {
+      state.motionRecovered = true;
+      log(`LinkLossCleared[motion]: recovery confirmed on generation=${m.generation}`);
     }
   }
 }
@@ -1160,6 +1185,9 @@ async function runControlLoop(writer, token) {
         motionGranted: state.leaseGranted,
         // A denied reacquire is terminal — the runtime stops re-requesting.
         motionDenied: state.motionDenied,
+        // The runtime stays neutralizing after a handover until the host
+        // confirms it cleared the vehicle's link-loss latch on this generation.
+        motionRecovered: state.motionRecovered,
         nowMs: performance.now(),
       };
       const plan = pad

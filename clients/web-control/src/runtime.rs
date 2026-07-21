@@ -44,10 +44,6 @@ pub struct ControlRuntime {
     // When the last motion release/request was emitted, so a dropped lease
     // write is retried rather than wedging the reacquisition.
     motion_action_ms: f64,
-    // Consecutive neutral activation frames transmitted since the operator's
-    // controls returned to neutral, counting toward recovery. Reset whenever
-    // the controls deflect again, so a live command never rides out as neutral.
-    motion_neutral_frames: u8,
     // The session generation last evaluated. When the shell reports a NEW
     // generation (a fresh connect), the first tick seeds every discrete-action
     // baseline from the held state and fires no edge — a button held across a
@@ -190,7 +186,6 @@ impl ControlRuntime {
         // any mid-handover or terminal-denied motion phase from the previous
         // connection is void.
         self.motion_phase = MotionPhase::Held;
-        self.motion_neutral_frames = 0;
     }
 
     /// Emits the neutral handover, and installs the pending profile once the

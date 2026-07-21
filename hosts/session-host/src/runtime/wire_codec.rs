@@ -183,6 +183,9 @@ pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
         OutboundMessage::LeaseReleased(released) => {
             wire::envelope::Payload::LeaseReleased(released.into())
         }
+        OutboundMessage::LinkLossCleared(cleared) => {
+            wire::envelope::Payload::LinkLossCleared(cleared.into())
+        }
         OutboundMessage::Pong(pong) => wire::envelope::Payload::Pong(pong.into()),
         OutboundMessage::Authority(effect) => {
             wire::envelope::Payload::AuthorityEvent(wire::AuthorityEvent::from(effect))
