@@ -62,6 +62,8 @@ import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
 import { startDatagramControl } from "./datagram-control.js";
 import { loadControlShell } from "./control-shell.js";
+import { advanceMotionLease, isMotionRecoveryConfirmation } from "./motion-lease.js";
+import { drainAuthorityEnvelopes } from "./authority-stream.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -746,23 +748,34 @@ async function readOneUniStream(stream, token) {
   const reader = stream.getReader();
   if (!transportSessions.trackReader(token, reader)) return;
   let buf = new Uint8Array(0);
+  let kind = null;
   try {
     for (;;) {
       const { value, done } = await reader.read();
       if (!transportSessions.isActive(token)) return;
       if (value) buf = appendBytes(buf, value);
+      // The one-byte kind tag leads the stream; peel it once it arrives.
+      if (kind === null && buf.length >= 1) {
+        kind = buf[0];
+        buf = buf.subarray(1);
+      }
+      // The authority stream is LONG-LIVED: decode and dispatch every complete
+      // envelope as it arrives, so a recovery ack is acted on live rather than
+      // buffered until the stream closes (which for this stream is never).
+      if (kind === STREAM_KIND_AUTHORITY) {
+        buf = drainAuthorityEnvelopes(buf, decodeLengthDelimitedEnvelope, (decoded) =>
+          dispatchAuthorityEnvelope(decoded, token),
+        );
+      }
       if (done) break;
     }
-    if (buf.length === 0) return;
-    const kind = buf[0];
-    const body = buf.subarray(1);
-    if (kind === STREAM_KIND_AUTHORITY) {
-      dispatchAuthorityStream(body, token);
-    } else if (kind === STREAM_KIND_VIDEO_V2) {
-      await renderVideoFrameV2(body, token);
+    // Video streams are per-frame: the whole body is one frame, rendered at
+    // close. (Authority already dispatched incrementally above.)
+    if (kind === STREAM_KIND_VIDEO_V2) {
+      await renderVideoFrameV2(buf, token);
     } else if (kind === STREAM_KIND_VIDEO) {
-      await renderVideoFrame(body, token);
-    } else {
+      await renderVideoFrame(buf, token);
+    } else if (kind !== null && kind !== STREAM_KIND_AUTHORITY) {
       log(`unrecognized uni stream kind tag 0x${kind.toString(16)}`);
     }
   } finally {
@@ -771,29 +784,18 @@ async function readOneUniStream(stream, token) {
 }
 
 /** The dedicated authority-events stream is opened once at connection start and may carry several length-delimited envelopes over the stream's lifetime; decode every complete one buffered. */
-function dispatchAuthorityStream(body, token) {
+/** Handles one authority-stream envelope, decoded live as it arrives. */
+function dispatchAuthorityEnvelope(decoded, token) {
   if (!transportSessions.isActive(token)) return;
-  let pending = body;
-  for (;;) {
-    const decoded = decodeLengthDelimitedEnvelope(pending);
-    if (!decoded) return;
-    pending = pending.subarray(decoded.consumed);
-    if (decoded.kind === "AuthorityEvent") {
-      els.overlay.textContent = `authority: ${decoded.message.arm}`;
-      log(`authority event: ${decoded.message.arm}`);
-    }
-  }
-  if (decoded.kind === "LinkLossCleared") {
-    // The host confirmed it cleared the vehicle's link-loss latch. Correlate by
-    // vehicle + MOTION scope + the CURRENT fresh generation: only then does the
-    // runtime resume live control (a notice for another vehicle/scope, or a
-    // stale generation, proves nothing about our recovery).
+  if (decoded.kind === "AuthorityEvent") {
+    els.overlay.textContent = `authority: ${decoded.message.arm}`;
+    log(`authority event: ${decoded.message.arm}`);
+  } else if (decoded.kind === "LinkLossCleared") {
+    // The host confirmed it cleared the vehicle's link-loss latch. Resume live
+    // control only when it correlates to OUR pending recovery (vehicle + motion
+    // scope + the current fresh generation).
     const m = decoded.message;
-    if (
-      m.vehicleId === VEHICLE_ID &&
-      m.scope === MOTION_SCOPE &&
-      m.generation === state.generation
-    ) {
+    if (isMotionRecoveryConfirmation(m, VEHICLE_ID, MOTION_SCOPE, state.generation)) {
       state.motionRecovered = true;
       log(`LinkLossCleared[motion]: recovery confirmed on generation=${m.generation}`);
     }
