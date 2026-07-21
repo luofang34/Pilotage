@@ -12,6 +12,7 @@
 //! [`DeviceProfile`] produced by [`merge_layers`].
 
 mod button_tracker;
+mod digest;
 mod logical;
 mod normalize;
 mod profile;
@@ -19,6 +20,7 @@ mod registry;
 mod sample;
 
 pub use button_tracker::ButtonTracker;
+pub use digest::{DIGEST_LEN, content_digest};
 pub use logical::{axis_id_for_name, button_id_for_name};
 pub use normalize::{NormalizedAxis, normalize_axis};
 pub use profile::{
@@ -27,6 +29,6 @@ pub use profile::{
 };
 pub use registry::{
     GENERIC_GAMEPAD_JSON, LayeredProfile, ProfileLayer, layered, load_builtin_generic_gamepad,
-    load_profile_bytes, load_profile_str, merge_layers,
+    load_profile_bytes, load_profile_str, merge_layers, select_by_identity,
 };
 pub use sample::RawDeviceSample;
