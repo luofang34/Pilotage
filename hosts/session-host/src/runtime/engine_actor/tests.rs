@@ -223,3 +223,59 @@ fn a_failed_clear_emits_no_ack_and_counts_the_fault() {
         "a refused clear is a counted fail-closed fault, never silent"
     );
 }
+
+#[test]
+fn a_failed_clear_retries_until_it_takes_then_acks_exactly_once() {
+    let mut actor = actor();
+    let mut client = register_client(&mut actor);
+
+    // First attempt is refused: no ack, the fault is counted once, and the
+    // clear is held pending — the engine already dropped the engaged marker,
+    // so nothing else will re-emit it.
+    actor.adapter.fail_enactment = true;
+    actor.enact(SessionOutcome {
+        actions: vec![clear_action(MOTION)],
+        dropped: 0,
+    });
+    assert_eq!(
+        authority_messages(&mut client),
+        0,
+        "a refused clear does not ack"
+    );
+    assert_eq!(
+        actor.link_loss_enact_failures, 1,
+        "the refusal is counted once"
+    );
+
+    // The adapter recovers; the next retry tick takes and acks — exactly once.
+    actor.adapter.fail_enactment = false;
+    actor.retry_pending_clears();
+    assert_eq!(
+        authority_messages(&mut client),
+        1,
+        "the deferred clear acks on the first acceptance"
+    );
+
+    // Further retries neither re-ack nor re-clear: the pending entry is gone.
+    actor.retry_pending_clears();
+    assert_eq!(
+        authority_messages(&mut client),
+        0,
+        "exactly one ack across the whole recovery"
+    );
+
+    // One refused attempt then one accepted retry both reached the adapter as
+    // scope-clears, and the retry was not re-counted as a fault.
+    assert_eq!(
+        actor.adapter.link_loss_calls,
+        vec![
+            (VEHICLE, ScopeId::new(MOTION), None),
+            (VEHICLE, ScopeId::new(MOTION), None),
+        ],
+        "a failed clear then a successful retry, both scope-clears"
+    );
+    assert_eq!(
+        actor.link_loss_enact_failures, 1,
+        "retries are not re-counted as faults"
+    );
+}

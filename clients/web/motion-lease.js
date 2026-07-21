@@ -88,3 +88,18 @@ export function isMotionRecoveryConfirmation(message, vehicleId, motionScope, cu
     message.generation === currentGeneration
   );
 }
+
+/** The motion-recovery state transition for one decoded authority envelope: a
+ *  `LinkLossCleared` confirming OUR pending recovery (vehicle + motion scope +
+ *  the current fresh generation) latches `state.motionRecovered`. Returns
+ *  whether it confirmed, so the caller can log it. Pure over `state` so the
+ *  production dispatch and its test drive the SAME transition — a stale
+ *  generation or an unrelated scope leaves the latch untouched. */
+export function applyMotionRecovery(decoded, state, vehicleId, motionScope) {
+  if (decoded.kind !== "LinkLossCleared") return false;
+  if (!isMotionRecoveryConfirmation(decoded.message, vehicleId, motionScope, state.generation)) {
+    return false;
+  }
+  state.motionRecovered = true;
+  return true;
+}

@@ -62,8 +62,8 @@ import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
 import { startDatagramControl } from "./datagram-control.js";
 import { loadControlShell } from "./control-shell.js";
-import { advanceMotionLease, isMotionRecoveryConfirmation } from "./motion-lease.js";
-import { drainAuthorityEnvelopes } from "./authority-stream.js";
+import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
+import { readUniStream } from "./uni-stream.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -742,39 +742,27 @@ async function acceptIncomingUniStreams(transport, token) {
   });
 }
 
-/** Drains one uni stream to completion, buffering bytes, reading the kind tag, then dispatching. */
+/** Drains one uni stream to completion via the shared {@link readUniStream}
+ *  core (kind tag + live authority dispatch), then renders a video body at
+ *  close. */
 async function readOneUniStream(stream, token) {
   if (!transportSessions.isActive(token)) return;
   const reader = stream.getReader();
   if (!transportSessions.trackReader(token, reader)) return;
-  let buf = new Uint8Array(0);
-  let kind = null;
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (!transportSessions.isActive(token)) return;
-      if (value) buf = appendBytes(buf, value);
-      // The one-byte kind tag leads the stream; peel it once it arrives.
-      if (kind === null && buf.length >= 1) {
-        kind = buf[0];
-        buf = buf.subarray(1);
-      }
-      // The authority stream is LONG-LIVED: decode and dispatch every complete
-      // envelope as it arrives, so a recovery ack is acted on live rather than
-      // buffered until the stream closes (which for this stream is never).
-      if (kind === STREAM_KIND_AUTHORITY) {
-        buf = drainAuthorityEnvelopes(buf, decodeLengthDelimitedEnvelope, (decoded) =>
-          dispatchAuthorityEnvelope(decoded, token),
-        );
-      }
-      if (done) break;
-    }
+    const { kind, tail, aborted } = await readUniStream(reader, {
+      authorityKind: STREAM_KIND_AUTHORITY,
+      decode: decodeLengthDelimitedEnvelope,
+      onAuthorityEnvelope: (decoded) => dispatchAuthorityEnvelope(decoded, token),
+      shouldContinue: () => transportSessions.isActive(token),
+    });
+    if (aborted) return;
     // Video streams are per-frame: the whole body is one frame, rendered at
-    // close. (Authority already dispatched incrementally above.)
+    // close. (Authority already dispatched incrementally inside readUniStream.)
     if (kind === STREAM_KIND_VIDEO_V2) {
-      await renderVideoFrameV2(buf, token);
+      await renderVideoFrameV2(tail, token);
     } else if (kind === STREAM_KIND_VIDEO) {
-      await renderVideoFrame(buf, token);
+      await renderVideoFrame(tail, token);
     } else if (kind !== null && kind !== STREAM_KIND_AUTHORITY) {
       log(`unrecognized uni stream kind tag 0x${kind.toString(16)}`);
     }
@@ -793,11 +781,10 @@ function dispatchAuthorityEnvelope(decoded, token) {
   } else if (decoded.kind === "LinkLossCleared") {
     // The host confirmed it cleared the vehicle's link-loss latch. Resume live
     // control only when it correlates to OUR pending recovery (vehicle + motion
-    // scope + the current fresh generation).
-    const m = decoded.message;
-    if (isMotionRecoveryConfirmation(m, VEHICLE_ID, MOTION_SCOPE, state.generation)) {
-      state.motionRecovered = true;
-      log(`LinkLossCleared[motion]: recovery confirmed on generation=${m.generation}`);
+    // scope + the current fresh generation) — the shared transition the
+    // uni-stream test drives.
+    if (applyMotionRecovery(decoded, state, VEHICLE_ID, MOTION_SCOPE)) {
+      log(`LinkLossCleared[motion]: recovery confirmed on generation=${decoded.message.generation}`);
     }
   }
 }

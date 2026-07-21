@@ -13,11 +13,21 @@
 //! clear the vehicle never enacted.
 
 use pilotage_adapter_api::{LinkLossPolicy, VehicleAdapter};
-use pilotage_protocol::{LinkLossCleared, ScopeId, VehicleId};
+use pilotage_protocol::{Generation, LinkLossCleared, ScopeId, VehicleId};
 use pilotage_session::{OutboundMessage, SessionAction};
 use tracing::{debug, error, warn};
 
 use super::{EngineActor, MessageClass, to_connection_message};
+
+/// A recovery clear the engine already un-engaged but whose adapter
+/// enactment was refused, held for the actor to retry until it takes.
+#[derive(Debug, Clone)]
+pub(super) struct PendingClear {
+    vehicle: VehicleId,
+    scope: ScopeId,
+    /// The recovered generation the eventual `LinkLossCleared` ack must echo.
+    generation: Generation,
+}
 
 impl<A: VehicleAdapter> EngineActor<A> {
     /// Enacts one `EngageLinkLoss` / `ClearLinkLoss` action on the adapter.
@@ -69,24 +79,83 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     None,
                     "link-loss policy clear failed; vehicle remains neutralized",
                 );
-                // ONLY after the adapter confirms the clear do we tell the
-                // client its scope recovered, so it never resumes live control
-                // on a clear the vehicle never actually enacted. A failed clear
-                // broadcasts nothing — the client keeps neutralizing.
+                // A fresh recovery supersedes any earlier deferred retry for
+                // this scope.
+                self.pending_clears
+                    .retain(|pending| !(pending.vehicle == vehicle && pending.scope == scope));
                 if cleared {
-                    let envelope = OutboundMessage::LinkLossCleared(LinkLossCleared {
+                    // ONLY after the adapter confirms the clear do we tell the
+                    // client its scope recovered, so it never resumes on a clear
+                    // the vehicle never enacted.
+                    self.broadcast_link_loss_cleared(vehicle, scope, generation);
+                } else {
+                    // The engine already dropped the engaged marker, so no
+                    // later neutral frame will re-emit this clear. Hold it and
+                    // retry every tick until the adapter accepts it, THEN ack
+                    // exactly once — a refused clear must not strand recovery.
+                    self.pending_clears.push(PendingClear {
                         vehicle,
                         scope,
                         generation,
                     });
-                    self.broadcast(
-                        to_connection_message(&envelope),
-                        MessageClass::AuthorityBroadcast,
-                    );
                 }
             }
             _ => {}
         }
+    }
+
+    /// Retries every deferred recovery clear once. The FIRST acceptance of a
+    /// scope's clear broadcasts its `LinkLossCleared` ack and drops it; a
+    /// still-refused clear stays pending (the vehicle remains neutralized —
+    /// fail-closed — and the client keeps neutralizing). Retries are not
+    /// re-counted as faults: the refusal was already counted when the clear
+    /// was first attempted.
+    pub(super) fn retry_pending_clears(&mut self) {
+        if self.pending_clears.is_empty() {
+            return;
+        }
+        let mut still_pending = Vec::with_capacity(self.pending_clears.len());
+        for pending in std::mem::take(&mut self.pending_clears) {
+            match self
+                .adapter
+                .set_link_loss_policy(pending.vehicle, &pending.scope, None)
+            {
+                Ok(()) => self.broadcast_link_loss_cleared(
+                    pending.vehicle,
+                    pending.scope.clone(),
+                    pending.generation,
+                ),
+                Err(error) => {
+                    debug!(
+                        vehicle = pending.vehicle.as_u64(),
+                        scope = pending.scope.as_str(),
+                        %error,
+                        "deferred link-loss clear still refused; will retry next tick"
+                    );
+                    still_pending.push(pending);
+                }
+            }
+        }
+        self.pending_clears = still_pending;
+    }
+
+    /// Broadcasts a scope's `LinkLossCleared` recovery ack on the reliable
+    /// authority stream — the signal that lets the recovering client resume.
+    fn broadcast_link_loss_cleared(
+        &mut self,
+        vehicle: VehicleId,
+        scope: ScopeId,
+        generation: Generation,
+    ) {
+        let envelope = OutboundMessage::LinkLossCleared(LinkLossCleared {
+            vehicle,
+            scope,
+            generation,
+        });
+        self.broadcast(
+            to_connection_message(&envelope),
+            MessageClass::AuthorityBroadcast,
+        );
     }
 
     /// Drives a per-scope link-loss policy change to the adapter, counting and

@@ -61,9 +61,21 @@ events; and never depend on the displaced holder's acknowledgement.
 
 ### Link loss
 
-Link-loss behavior is configured per vehicle instance (vehicle class MAY supply a
+Link-loss behavior is *selected* per vehicle instance (vehicle class MAY supply a
 default). The adapter publishes its supported actions (neutralize, brake, hold
 briefly, pause, engage automation mode); the platform prescribes no universal action.
+
+Link-loss is **engaged, cleared, and enacted PER SCOPE**, not vehicle-wide. Losing
+(or releasing) one scope's holder engages that scope's policy on its own — it MUST
+NOT drive any other scope of the same vehicle to failover, so dropping
+`vehicle.gimbal` never brakes `vehicle.motion`. Each scope recovers independently:
+a scope's engaged policy clears only after a fresh fenced generation installs a new
+holder AND that holder demonstrates the scope's neutral activation condition ON THAT
+SCOPE. The recovering client resumes only on the host's per-scope `LinkLossCleared`
+acknowledgement, which the host emits only after the adapter CONFIRMS it cleared
+that scope's latch (a refused clear is retried, keeping the scope neutralized until
+it takes). The per-vehicle selection is the menu each scope draws its one policy
+from; the enactment boundary is [ADR-0008](0008-engine-independent-adapter-boundary.md#amendments).
 
 ## Consequences
 

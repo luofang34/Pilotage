@@ -244,6 +244,23 @@ impl Px4GimbalControl {
         claimed && sent
     }
 
+    /// Link-loss failsafe: drives a VERIFIED zero-rate setpoint NOW so an
+    /// in-flight slew stops immediately rather than waiting out the
+    /// `STALE_DEMAND_CUTOFF`. Re-asserts primary control first (PX4 drops a
+    /// rate setpoint from a non-primary sender), and reports whether both the
+    /// claim and the zero-rate reached their lanes so the adapter surfaces a
+    /// refused send as an enactment failure. Unlike [`Self::neutral`] it holds
+    /// the current pointing (zero RATE) rather than recentering — a failsafe
+    /// stops the camera where it is, it does not slew it to level.
+    pub fn link_loss_stop(&mut self) -> bool {
+        let claimed = self.claim_if_due();
+        self.streaming = false;
+        self.last_demand = None;
+        let stopped = self.publish_rate(0.0, 0.0);
+        info!(claimed, stopped, "gimbal link-loss zero-rate commanded");
+        claimed && stopped
+    }
+
     /// Closes out a silent demand stream: one zero-rate setpoint when no
     /// demand has arrived within the cutoff, so a released stick or
     /// dropped control frame cannot leave the gimbal slewing. Call at

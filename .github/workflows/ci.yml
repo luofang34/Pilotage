@@ -192,6 +192,9 @@ jobs:
       - name: authority stream live decode (fragmented LinkLossCleared, generation correlation)
         run: node clients/web/authority-stream.test.mjs
 
+      - name: uni-stream reader (0x01 tag + fragmented open stream + live recovery transition)
+        run: node clients/web/uni-stream.test.mjs
+
       - name: viewer explicit lease release (ack/timeout/abandon, reconnect awaits settlement)
         run: node clients/web/lease-release.test.mjs
 

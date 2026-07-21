@@ -27,7 +27,13 @@ trait VehicleAdapter {
     fn apply_control(&mut self, frame: ScopedControlFrame) -> ApplyOutcome;
     fn sample_telemetry(&mut self) -> TelemetryBatch;
     fn video_sources(&self) -> Vec<VideoSource>;
-    fn set_link_loss_policy(&mut self, vehicle: VehicleId, policy: LinkLossPolicy);
+    // Link-loss is enacted PER SCOPE and is fallible — see Amendments below.
+    fn set_link_loss_policy(
+        &mut self,
+        vehicle: VehicleId,
+        scope: &ScopeId,
+        policy: Option<LinkLossPolicy>,
+    ) -> Result<(), LinkLossEnactError>;
     /// Stepped execution for deterministic and accelerated modes (ADR-0013).
     fn step(&mut self, budget: StepBudget) -> StepOutcome;
 }
@@ -57,3 +63,35 @@ render-capable, physically embodied); adapter and schema versions.
   (ADR-0009) and replay (ADR-0012).
 - Real vehicles advertise that stepping, reset, snapshot, or deterministic replay are
   unsupported rather than being forced into simulator semantics.
+
+## Amendments
+
+### 2026-07-21 — Link-loss enactment is per-scope and fallible
+
+The original `set_link_loss_policy(vehicle, policy)` was vehicle-wide: any
+scope's holder loss drove the whole vehicle to one failover state. That is
+unsafe once a vehicle carries independently-leased scopes (e.g. `vehicle.motion`
+and `vehicle.gimbal`): losing or releasing the gimbal would brake the aircraft.
+
+The contract is now **per scope**:
+
+- `set_link_loss_policy(vehicle, scope, policy)` engages (`Some`) or clears
+  (`None`) the policy for **one scope only**. While a scope's policy is engaged
+  the adapter MUST reject that scope's ordinary control frames
+  (`RejectReason::LinkLossEngaged`) and MUST drive **only that scope's** actuation
+  to its safe state — motion neutralizes the flight setpoint, the gimbal drives a
+  verified zero-rate stop, and neither reaches the other. `None` is the only path
+  back to normal control for that scope.
+- The call is **fallible** (`Result<(), LinkLossEnactError>`): authority is
+  already fenced when it runs, so a refused enactment is a counted fail-closed
+  fault, never a silent no-op. The engaged/cleared latch is recorded regardless
+  of whether the actuation reached the vehicle, so a scope whose safe-state send
+  was refused still stays suppressed.
+- The **supported-actions menu remains per vehicle** (see ADR-0010): configuration
+  selects one policy per vehicle from the menu it advertises; that selected policy
+  is what each of the vehicle's scopes engages independently on its own holder loss.
+
+Evidence: per-scope suppression and the verified gimbal zero-rate stop are covered
+by the PX4 adapter's `gimbal_link_loss_tests`; the host-side per-scope engage/clear,
+the ack-after-confirmed-clear, and the retry of a refused clear are covered in
+`session-host`'s `engine_actor` tests.

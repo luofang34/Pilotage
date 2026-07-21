@@ -26,7 +26,10 @@ use crate::uplink::Px4Uplink;
 mod camera;
 mod control;
 #[cfg(test)]
+mod gimbal_link_loss_tests;
+#[cfg(test)]
 mod gimbal_tests;
+mod link_loss;
 mod pointing;
 mod sampling;
 #[cfg(test)]
@@ -447,36 +450,7 @@ impl VehicleAdapter for Px4Adapter {
         scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
-        if vehicle != self.vehicle {
-            return Err(LinkLossEnactError::UnknownVehicle { vehicle });
-        }
-        // Latch per-scope first: even an unenactable engage suppresses that
-        // scope's frames, and another scope's latch is untouched.
-        match &policy {
-            Some(policy) => {
-                self.link_loss_policy.insert(scope.clone(), *policy);
-            }
-            None => {
-                self.link_loss_policy.remove(scope);
-            }
-        }
-        // Only the MOTION scope drives the FC velocity setpoint, so only its
-        // engagement neutralizes flight; a gimbal-scope failsafe latches (and
-        // suppresses gimbal frames) without ever braking the vehicle.
-        if policy.is_none() || scope.as_str() != FLIGHT_SCOPE {
-            return Ok(());
-        }
-        let Some(uplink) = self.uplink.as_mut() else {
-            return Err(LinkLossEnactError::NoActuationChannel);
-        };
-        let failures_before = uplink.send_failures();
-        uplink.neutralize();
-        if uplink.send_failures() != failures_before {
-            return Err(LinkLossEnactError::ChannelRejected {
-                detail: "the neutral setpoint send was refused".to_owned(),
-            });
-        }
-        Ok(())
+        self.enact_link_loss_policy(vehicle, scope, policy)
     }
 
     fn step(&mut self, _budget: StepBudget) -> StepOutcome {
