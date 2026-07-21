@@ -56,11 +56,35 @@ enum ControlAction {
   CONTROL_ACTION_UNSPECIFIED = 0;
   CONTROL_ACTION_ARM = 1;
   CONTROL_ACTION_DISARM = 2;
-  // A request to change the vehicle's flight mode; the concrete target mode is
-  // out of band (the scheme decides), so this is the one-shot trigger.
+  // A request to change the vehicle's flight mode. The concrete target is the
+  // `ControlActionRequest.mode_target` carried alongside — a mode request
+  // with an unspecified target is rejected, never guessed.
   CONTROL_ACTION_MODE_REQUEST = 3;
   // Recenter the gimbal to its stowed/neutral orientation.
   CONTROL_ACTION_GIMBAL_RECENTER = 4;
+}
+
+// The explicit target of a MODE_REQUEST action (CTRL-01). Targets are typed
+// vehicle meanings, not scheme-local numbers; a vehicle advertises the ones
+// it accepts via `ActionCapability.mode_targets`.
+enum ModeTarget {
+  MODE_TARGET_UNSPECIFIED = 0;
+  // Camera flight: velocity sticks with brake-to-hold on release.
+  MODE_TARGET_CAMERA_VELOCITY = 1;
+  // FPV/direct flight: attitude sticks with direct collective thrust.
+  MODE_TARGET_FPV_DIRECT = 2;
+  // Hold the current position.
+  MODE_TARGET_HOLD = 3;
+  // Return to the launch/home position.
+  MODE_TARGET_RETURN = 4;
+}
+
+// One typed discrete action carried by a control frame. `mode_target` is
+// meaningful only for `CONTROL_ACTION_MODE_REQUEST` (required there,
+// rejected as unspecified otherwise-populated).
+message ControlActionRequest {
+  ControlAction action = 1;
+  ModeTarget mode_target = 2;
 }
 
 // Linear velocity plus yaw rate, the family the browser scheme produces today.
@@ -136,12 +160,33 @@ message ControlFrame {
   SequenceNum sequence = 5;
   MonoTimestamp sampled_at = 6;
   uint32 profile_revision = 7;
-  // The legacy untyped logical-axis/button payload (ADR-0007). Retained while
-  // adapters migrate to `intent`; a frame carries one or the other.
+  // The legacy untyped logical-axis/button payload (ADR-0007). A frame
+  // carries EXACTLY ONE command representation: this payload OR the typed
+  // `intent`/`actions` — both present or both absent is rejected.
   ControlPayload payload = 8;
-  // The typed control intent this frame commands (CTRL-01). Present when the
-  // vehicle advertises the matching intent family; supersedes `payload`.
+  // The typed control intent this frame commands (CTRL-01). Must belong to a
+  // family the vehicle advertises for `scope`.
   ControlIntent intent = 9;
-  // Typed discrete actions carried by this frame, as one-shot events.
-  repeated ControlAction actions = 10;
+  // Typed discrete actions carried by this frame, as one-shot events. No
+  // action may repeat within a frame, and conflicting actions (ARM together
+  // with DISARM) are rejected whole.
+  repeated ControlActionRequest actions = 10;
+  // The sender's monotonic profile ACTIVATION revision (advances on every
+  // profile install), binding each frame to the exact activation announced
+  // via `ProfileActivation` — distinct from the profile document's own
+  // `profile_revision`.
+  uint32 activation_revision = 11;
+}
+
+// Announces the sender's newly activated control profile on the reliable
+// session stream, binding the activation revision its frames will carry to
+// the profile's identity, document revision, and exact content digest — the
+// traceability record for control evidence (INPUT-01).
+message ProfileActivation {
+  SessionId session = 1;
+  string profile_id = 2;
+  uint32 profile_revision = 3;
+  uint32 activation_revision = 4;
+  // SHA-256 content digest of the exact profile bytes that compiled.
+  bytes digest = 5;
 }

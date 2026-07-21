@@ -43,15 +43,25 @@ enum IntentFamily {
 
 // One intent family a vehicle accepts, with the reference frames it admits and
 // its magnitude limits, so a client negotiates typed capability rather than
-// discovering limits by rejection. `max_linear` bounds the linear term (m/s for
-// velocity, m for position hold); `max_angular` bounds the angular term (rad/s
-// for rates, rad for headings). A zero limit means "unspecified / no bound
-// advertised", not "zero allowed".
+// discovering limits by rejection. `max_linear` bounds the horizontal linear
+// term (m/s for velocity, m for position hold); `max_vertical` bounds the
+// vertical linear term when the vehicle's vertical envelope is tighter (falls
+// back to `max_linear` when zero); `max_angular` bounds the angular term
+// (rad/s for rates, rad for headings). A zero limit means "unspecified / no
+// bound advertised", not "zero allowed".
 message IntentCapability {
   IntentFamily family = 1;
   repeated ReferenceFrame frames = 2;
   float max_linear = 3;
   float max_angular = 4;
+  float max_vertical = 5;
+}
+
+// One typed discrete action a scope accepts, with the mode targets it admits
+// for a MODE_REQUEST (empty for actions that carry no target).
+message ActionCapability {
+  ControlAction action = 1;
+  repeated ModeTarget mode_targets = 2;
 }
 
 // A single independently assignable control scope published by a host for
@@ -64,7 +74,7 @@ message ScopeDescriptor {
   // that still takes only the legacy numeric axis payload.
   repeated IntentCapability intents = 4;
   // The typed discrete actions this scope accepts (CTRL-01).
-  repeated ControlAction actions = 5;
+  repeated ActionCapability actions = 5;
 }
 
 // Describes one vehicle a host can offer for control.

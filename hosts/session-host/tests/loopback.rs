@@ -179,6 +179,7 @@ fn full_throttle_frame_bytes(
                 nanos: sampled_at_nanos,
             }),
             profile_revision: 1,
+            activation_revision: 0,
             payload: Some(wire::ControlPayload {
                 axes: vec![wire::AxisSample {
                     axis_id: u32::from(pilotage_adapter_reference::THROTTLE_AXIS),

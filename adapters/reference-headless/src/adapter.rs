@@ -283,6 +283,7 @@ mod tests {
             sequence: SequenceNum::new(1),
             sampled_at: MonoTimestamp::from_nanos(0),
             profile_revision: 1,
+            activation_revision: 0,
             payload: ControlPayload {
                 axes,
                 edges: vec![],

@@ -98,6 +98,7 @@ fn motion_frame(
         sequence: SequenceNum::new(sequence),
         sampled_at: MonoTimestamp::from_nanos(u64::from(sequence) * 1_000),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![
                 (LogicalAxisId::new(THROTTLE_AXIS), throttle),

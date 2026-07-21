@@ -303,6 +303,7 @@ fn control_frames_are_rejected_at_the_boundary() {
         sequence: pilotage_protocol::SequenceNum::new(1),
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: pilotage_protocol::ControlPayload {
             axes: vec![],
             edges: vec![],

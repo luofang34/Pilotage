@@ -19,6 +19,7 @@ fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(2), 1.0), (LogicalAxisId::new(3), 0.0)],
             edges: vec![],

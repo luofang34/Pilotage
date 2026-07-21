@@ -25,6 +25,7 @@ fn control_frame(vehicle: VehicleId, throttle: f32, steering: f32) -> ScopedCont
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![
                 (LogicalAxisId::new(THROTTLE_AXIS), throttle),

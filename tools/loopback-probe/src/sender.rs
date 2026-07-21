@@ -162,6 +162,7 @@ fn send_one_frame(
         sequence: state.sequence,
         sampled_at,
         profile_revision,
+        activation_revision: 0,
         payload,
         intent: None,
         actions: vec![],

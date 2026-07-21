@@ -33,5 +33,7 @@ message Envelope {
     LeaseRelease lease_release = 13;
     LeaseReleased lease_released = 14;
     LinkLossCleared link_loss_cleared = 15;
+    ProfileActivation profile_activation = 16;
+    ControlActionResult control_action_result = 17;
   }
 }

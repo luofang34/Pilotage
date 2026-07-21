@@ -22,13 +22,14 @@ pub use convert::{
 };
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 pub use intent::{
-    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, GimbalRateIntent,
-    PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    ActionKind, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent,
+    GimbalRateIntent, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    actions_conflict,
 };
 pub use session::{
-    ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRelease,
-    LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared, Ping, Pong, ScopeHolderSnapshot,
-    ServerWelcome,
+    ClientHello, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseDenialReason,
+    LeaseRelease, LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared, Ping, Pong,
+    ProfileActivation, ScopeHolderSnapshot, ServerWelcome,
 };
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,

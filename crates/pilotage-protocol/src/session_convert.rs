@@ -395,6 +395,18 @@ impl From<FrameRejectionReason> for wire::FrameRejectionReason {
             FrameRejectionReason::NoHolder => wire::FrameRejectionReason::NoHolder,
             FrameRejectionReason::UnknownScope => wire::FrameRejectionReason::UnknownScope,
             FrameRejectionReason::TooOld => wire::FrameRejectionReason::TooOld,
+            FrameRejectionReason::EmptyCommand => wire::FrameRejectionReason::EmptyCommand,
+            FrameRejectionReason::DualCommand => wire::FrameRejectionReason::DualCommand,
+            FrameRejectionReason::UnsupportedIntent => {
+                wire::FrameRejectionReason::UnsupportedIntent
+            }
+            FrameRejectionReason::UnsupportedAction => {
+                wire::FrameRejectionReason::UnsupportedAction
+            }
+            FrameRejectionReason::LimitExceeded => wire::FrameRejectionReason::LimitExceeded,
+            FrameRejectionReason::ConflictingActions => {
+                wire::FrameRejectionReason::ConflictingActions
+            }
         }
     }
 }
@@ -410,6 +422,18 @@ impl TryFrom<wire::FrameRejectionReason> for FrameRejectionReason {
             wire::FrameRejectionReason::NoHolder => Ok(FrameRejectionReason::NoHolder),
             wire::FrameRejectionReason::UnknownScope => Ok(FrameRejectionReason::UnknownScope),
             wire::FrameRejectionReason::TooOld => Ok(FrameRejectionReason::TooOld),
+            wire::FrameRejectionReason::EmptyCommand => Ok(FrameRejectionReason::EmptyCommand),
+            wire::FrameRejectionReason::DualCommand => Ok(FrameRejectionReason::DualCommand),
+            wire::FrameRejectionReason::UnsupportedIntent => {
+                Ok(FrameRejectionReason::UnsupportedIntent)
+            }
+            wire::FrameRejectionReason::UnsupportedAction => {
+                Ok(FrameRejectionReason::UnsupportedAction)
+            }
+            wire::FrameRejectionReason::LimitExceeded => Ok(FrameRejectionReason::LimitExceeded),
+            wire::FrameRejectionReason::ConflictingActions => {
+                Ok(FrameRejectionReason::ConflictingActions)
+            }
             wire::FrameRejectionReason::Unspecified => Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.FrameRejectionReason",
                 value: reason as i32,
@@ -467,6 +491,8 @@ impl TryFrom<wire::FrameRejected> for FrameRejected {
         })
     }
 }
+
+mod control_results;
 
 #[cfg(test)]
 mod tests;

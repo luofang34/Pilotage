@@ -114,6 +114,7 @@ pub(crate) fn frame(
         sequence,
         sampled_at,
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(0), 0.25)],
             edges: Vec::new(),

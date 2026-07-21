@@ -17,6 +17,10 @@ use pilotage_timing::MonoTimestamp;
 
 mod intent;
 
+pub(crate) use intent::{
+    action_from_wire as action_request_from_wire, action_to_wire as action_request_to_wire,
+};
+
 /// Errors converting a decoded wire message into its domain equivalent.
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ConvertError {
@@ -64,6 +68,22 @@ pub enum ConvertError {
     NonFiniteIntentValue {
         /// The intent field that carried the non-finite value.
         field: &'static str,
+    },
+    /// A typed intent field was outside its documented range (a thrust must
+    /// lie in `[0, 1]`), so it cannot represent a physical command.
+    #[error("control intent field `{field}` value {value} is outside its documented range")]
+    IntentOutOfRange {
+        /// The out-of-range intent field.
+        field: &'static str,
+        /// The raw value found on the wire.
+        value: f32,
+    },
+    /// An attitude intent's quaternion was not a unit rotation (within
+    /// tolerance), so it cannot represent an orientation.
+    #[error("attitude quaternion norm {norm} is not a unit rotation")]
+    InvalidQuaternion {
+        /// The quaternion's Euclidean norm as found on the wire.
+        norm: f32,
     },
     /// The envelope's `schema_version` is not one this build knows how to
     /// interpret (ADR-0014).
@@ -210,12 +230,17 @@ impl From<&ScopedControlFrame> for wire::ControlFrame {
                 nanos: frame.sampled_at.as_nanos(),
             }),
             profile_revision: frame.profile_revision,
-            payload: Some(payload_to_wire(&frame.payload)),
+            activation_revision: frame.activation_revision,
+            // A typed-only frame omits the payload field entirely; presence
+            // on the wire is decided by content, never by an empty message.
+            payload: frame
+                .carries_payload()
+                .then(|| payload_to_wire(&frame.payload)),
             intent: frame.intent.as_ref().map(intent::intent_to_wire),
             actions: frame
                 .actions
                 .iter()
-                .map(|action| intent::action_to_wire(*action) as i32)
+                .map(|action| intent::action_to_wire(*action))
                 .collect(),
         }
     }
@@ -235,7 +260,14 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
         let generation = frame.generation.ok_or_else(|| missing("generation"))?;
         let sequence = frame.sequence.ok_or_else(|| missing("sequence"))?;
         let sampled_at = frame.sampled_at.ok_or_else(|| missing("sampled_at"))?;
-        let payload = frame.payload.ok_or_else(|| missing("payload"))?;
+        // A typed-only frame legitimately carries no payload field; an absent
+        // payload decodes as the empty payload, and the session host's
+        // exactly-one-representation rule judges the CONTENT.
+        let payload = frame
+            .payload
+            .map(payload_from_wire)
+            .transpose()?
+            .unwrap_or_default();
         let control_intent = frame.intent.map(intent::intent_from_wire).transpose()?;
         let actions = frame
             .actions
@@ -251,7 +283,8 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
             sequence: SequenceNum::new(sequence.value),
             sampled_at: MonoTimestamp::from_nanos(sampled_at.nanos),
             profile_revision: frame.profile_revision,
-            payload: payload_from_wire(payload)?,
+            activation_revision: frame.activation_revision,
+            payload,
             intent: control_intent,
             actions,
         })

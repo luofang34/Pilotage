@@ -87,14 +87,37 @@ pub struct ScopedControlFrame {
     pub sampled_at: MonoTimestamp,
     /// Revision of the device profile used to normalize this frame.
     pub profile_revision: u32,
-    /// The legacy untyped logical input state (ADR-0007). Retained while
-    /// adapters migrate to typed intents; a frame carries this or `intent`.
+    /// The sender's monotonic profile ACTIVATION revision (advances on every
+    /// profile install), binding this frame to the activation announced via
+    /// `ProfileActivation` — distinct from the profile document's own
+    /// `profile_revision`.
+    pub activation_revision: u32,
+    /// The legacy untyped logical input state (ADR-0007). A frame carries
+    /// EXACTLY ONE command representation: a non-empty payload OR the typed
+    /// `intent`/`actions`; both or neither is rejected by the session host.
     pub payload: ControlPayload,
-    /// The typed control intent this frame commands (CTRL-01), when the vehicle
-    /// advertises the matching family. Supersedes `payload` when present.
+    /// The typed control intent this frame commands (CTRL-01). Must belong to
+    /// a family the vehicle advertises for `scope`.
     pub intent: Option<ControlIntent>,
     /// Typed discrete actions carried by this frame, as one-shot events.
     pub actions: Vec<ControlAction>,
+}
+
+impl ScopedControlFrame {
+    /// Whether this frame carries the legacy numeric representation (any
+    /// axis or edge). Presence is decided by CONTENT, not wire-field
+    /// presence, so different encoders cannot disagree about it.
+    #[must_use]
+    pub fn carries_payload(&self) -> bool {
+        !self.payload.axes.is_empty() || !self.payload.edges.is_empty()
+    }
+
+    /// Whether this frame carries the typed representation (an intent or at
+    /// least one action).
+    #[must_use]
+    pub fn carries_typed(&self) -> bool {
+        self.intent.is_some() || !self.actions.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +149,7 @@ mod tests {
             sequence: SequenceNum::new(4),
             sampled_at: MonoTimestamp::from_nanos(5),
             profile_revision: 6,
+            activation_revision: 0,
             payload: payload.clone(),
             intent: None,
             actions: vec![],

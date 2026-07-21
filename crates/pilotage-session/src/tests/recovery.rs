@@ -204,6 +204,7 @@ fn scoped_frame(
         sequence: SequenceNum::new(sequence),
         sampled_at: MonoTimestamp::from_nanos(at),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: axes
                 .into_iter()

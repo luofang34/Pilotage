@@ -161,6 +161,7 @@ fn motion_frame(session: SessionId, generation: Generation, sequence: u32) -> Sc
         sequence: SequenceNum::new(sequence),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(0), 0.0)],
             edges: Vec::new(),

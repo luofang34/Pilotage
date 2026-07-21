@@ -311,6 +311,7 @@ fn staleness_policy_rejects_an_artificially_aged_frame() {
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(2), 1.0)],
             edges: vec![],
@@ -368,6 +369,7 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
             sequence: SequenceNum::new(1),
             sampled_at: MonoTimestamp::from_nanos(0),
             profile_revision: 1,
+            activation_revision: 0,
             payload: ControlPayload {
                 axes: vec![(LogicalAxisId::new(2), 1.0)],
                 edges: vec![],

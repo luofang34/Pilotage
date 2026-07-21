@@ -161,7 +161,7 @@ pub struct Pong {
 }
 
 /// Why the host rejected an inbound control frame without applying it
-/// (ADR-0009 rejection rules).
+/// (ADR-0009 rejection rules, CTRL-01 typed-command validation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameRejectionReason {
     /// The frame's generation is older than the scope's current
@@ -175,6 +175,24 @@ pub enum FrameRejectionReason {
     /// The frame's sampled-at timestamp is older than the configured
     /// maximum control age.
     TooOld,
+    /// The frame carried NO command representation: no legacy payload, no
+    /// typed intent, and no actions.
+    EmptyCommand,
+    /// The frame carried BOTH the legacy payload and a typed
+    /// intent/actions; exactly one representation is allowed.
+    DualCommand,
+    /// The typed intent's family or reference frame is not advertised for
+    /// the frame's scope.
+    UnsupportedIntent,
+    /// A typed action (or its mode target) is not advertised for the
+    /// frame's scope.
+    UnsupportedAction,
+    /// A typed intent component exceeds the scope's advertised magnitude
+    /// limit.
+    LimitExceeded,
+    /// The frame's actions repeat or conflict (arm together with disarm);
+    /// the frame is rejected whole, executing neither.
+    ConflictingActions,
 }
 
 /// Sent back to a control frame's sender (never broadcast) when the frame
@@ -191,4 +209,45 @@ pub struct FrameRejected {
     pub reason: FrameRejectionReason,
     /// The scope's fencing generation at the time of rejection.
     pub current_generation: Generation,
+}
+
+/// The explicit outcome of ONE typed discrete action, sent to the frame's
+/// sender on the reliable session stream after the adapter disposed of it —
+/// every accepted frame's action gets exactly one result, so an operator can
+/// distinguish "arm honored" from "arm silently dropped" (CTRL-01).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlActionResult {
+    /// Vehicle the action targeted.
+    pub vehicle: VehicleId,
+    /// Control scope the action arrived under.
+    pub scope: ScopeId,
+    /// Fencing generation of the frame that carried the action.
+    pub generation: Generation,
+    /// Sequence number of the frame that carried the action, correlating
+    /// the result to the exact press.
+    pub sequence: SequenceNum,
+    /// The action this result answers.
+    pub action: crate::intent::ControlAction,
+    /// Whether the adapter accepted (executed or queued) the action.
+    pub accepted: bool,
+    /// Adapter-supplied reason when not accepted; empty on acceptance.
+    pub detail: String,
+}
+
+/// Announces the sender's newly activated control profile on the reliable
+/// session stream, binding the activation revision its frames will carry to
+/// the profile's identity, document revision, and exact content digest — the
+/// traceability record for control evidence (INPUT-01).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileActivation {
+    /// The session announcing the activation.
+    pub session: crate::ids::SessionId,
+    /// The profile's stable identity string.
+    pub profile_id: String,
+    /// The profile document's own revision.
+    pub profile_revision: u32,
+    /// The sender's monotonic activation revision; frames carry this value.
+    pub activation_revision: u32,
+    /// SHA-256 content digest of the exact profile bytes that compiled.
+    pub digest: [u8; 32],
 }

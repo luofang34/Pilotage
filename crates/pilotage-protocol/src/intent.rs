@@ -19,19 +19,88 @@ pub enum ReferenceFrame {
     Gimbal,
 }
 
+/// The explicit target of a mode-request action. Targets are typed vehicle
+/// meanings, never scheme-local numbers; a vehicle advertises the targets it
+/// accepts, and a request without one is rejected rather than guessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModeTarget {
+    /// Camera flight: velocity sticks with brake-to-hold on release.
+    CameraVelocity,
+    /// FPV/direct flight: attitude sticks with direct collective thrust.
+    FpvDirect,
+    /// Hold the current position.
+    Hold,
+    /// Return to the launch/home position.
+    Return,
+}
+
 /// A typed discrete control action. An adapter reads `Arm`, never "button 9",
 /// so a rebound control cannot change what a press means at the vehicle
-/// boundary.
+/// boundary. A mode request carries its explicit typed target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ControlAction {
     /// Arm the vehicle.
     Arm,
     /// Disarm the vehicle.
     Disarm,
-    /// Request a flight-mode change (the target mode is decided by the scheme).
-    ModeRequest,
+    /// Request a flight-mode change to an explicit typed target.
+    ModeRequest {
+        /// The mode being requested.
+        target: ModeTarget,
+    },
     /// Recenter the gimbal to its stowed/neutral orientation.
     GimbalRecenter,
+}
+
+/// The action kinds a scope can advertise (the capability-side view of
+/// [`ControlAction`], without per-command data).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActionKind {
+    /// Arm the vehicle.
+    Arm,
+    /// Disarm the vehicle.
+    Disarm,
+    /// Request a flight-mode change.
+    ModeRequest,
+    /// Recenter the gimbal.
+    GimbalRecenter,
+}
+
+impl ControlAction {
+    /// The capability kind this action falls under.
+    #[must_use]
+    pub const fn kind(&self) -> ActionKind {
+        match self {
+            Self::Arm => ActionKind::Arm,
+            Self::Disarm => ActionKind::Disarm,
+            Self::ModeRequest { .. } => ActionKind::ModeRequest,
+            Self::GimbalRecenter => ActionKind::GimbalRecenter,
+        }
+    }
+}
+
+/// Whether a frame's action set is self-contradictory: any action kind
+/// repeated (two mode requests with different targets are still one kind —
+/// ambiguous, not a sequence), or `Arm` together with `Disarm`. A frame
+/// carrying such a set is rejected whole, executing none of it.
+#[must_use]
+pub fn actions_conflict(actions: &[ControlAction]) -> bool {
+    let mut arm = false;
+    let mut disarm = false;
+    for (index, action) in actions.iter().enumerate() {
+        match action.kind() {
+            ActionKind::Arm => arm = true,
+            ActionKind::Disarm => disarm = true,
+            _ => {}
+        }
+        if actions[index + 1..]
+            .iter()
+            .any(|later| later.kind() == action.kind())
+        {
+            return true;
+        }
+    }
+    arm && disarm
 }
 
 /// Linear velocity (metres per second) plus yaw rate (radians per second) in a
@@ -125,7 +194,9 @@ pub enum ControlIntent {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{ControlIntent, ReferenceFrame, VelocityIntent};
+    use super::{
+        ControlAction, ControlIntent, ModeTarget, ReferenceFrame, VelocityIntent, actions_conflict,
+    };
 
     #[test]
     fn a_velocity_intent_carries_its_frame_and_components() {
@@ -141,5 +212,33 @@ mod tests {
         };
         assert_eq!(velocity.frame, ReferenceFrame::BodyFrd);
         assert_eq!(velocity.vx, 1.0);
+    }
+
+    #[test]
+    fn conflicting_and_duplicate_action_sets_are_detected() {
+        assert!(!actions_conflict(&[]));
+        assert!(!actions_conflict(&[
+            ControlAction::Arm,
+            ControlAction::GimbalRecenter
+        ]));
+        assert!(
+            actions_conflict(&[ControlAction::Arm, ControlAction::Disarm]),
+            "arm+disarm conflicts"
+        );
+        assert!(
+            actions_conflict(&[ControlAction::Arm, ControlAction::Arm]),
+            "a repeated kind is a duplicate"
+        );
+        assert!(
+            actions_conflict(&[
+                ControlAction::ModeRequest {
+                    target: ModeTarget::Hold
+                },
+                ControlAction::ModeRequest {
+                    target: ModeTarget::Return
+                },
+            ]),
+            "two mode requests are one repeated kind, not a sequence"
+        );
     }
 }

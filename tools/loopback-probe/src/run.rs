@@ -162,6 +162,7 @@ async fn send_stale_generation_probe(
         sequence: stale_sequence,
         sampled_at: crate::control_source::elapsed_to_timestamp(run_start.elapsed()),
         profile_revision: 0,
+        activation_revision: 0,
         payload: pilotage_protocol::ControlPayload::default(),
         intent: None,
         actions: vec![],

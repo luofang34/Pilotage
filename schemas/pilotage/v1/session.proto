@@ -7,6 +7,7 @@ package pilotage.v1;
 
 import "pilotage/v1/capability.proto";
 import "pilotage/v1/common.proto";
+import "pilotage/v1/control.proto";
 
 // The first message a client sends after the WebTransport session is
 // established, before any host state has been shared (ADR-0005: session
@@ -156,6 +157,23 @@ enum FrameRejectionReason {
   // The frame's sampled-at timestamp is older than the configured maximum
   // control age.
   FRAME_REJECTION_REASON_TOO_OLD = 4;
+  // The frame carried NO command representation: no legacy payload, no typed
+  // intent, and no actions.
+  FRAME_REJECTION_REASON_EMPTY_COMMAND = 5;
+  // The frame carried BOTH the legacy payload and a typed intent/actions;
+  // exactly one representation is allowed.
+  FRAME_REJECTION_REASON_DUAL_COMMAND = 6;
+  // The typed intent's family or reference frame is not advertised for the
+  // frame's scope.
+  FRAME_REJECTION_REASON_UNSUPPORTED_INTENT = 7;
+  // A typed action (or its mode target) is not advertised for the frame's
+  // scope.
+  FRAME_REJECTION_REASON_UNSUPPORTED_ACTION = 8;
+  // A typed intent component exceeds the scope's advertised magnitude limit.
+  FRAME_REJECTION_REASON_LIMIT_EXCEEDED = 9;
+  // The frame's actions repeat or conflict (ARM together with DISARM); the
+  // frame is rejected whole, executing neither.
+  FRAME_REJECTION_REASON_CONFLICTING_ACTIONS = 10;
 }
 
 // Sent back to the frame's sender (never broadcast) when a `ControlFrame`
@@ -169,4 +187,23 @@ message FrameRejected {
   // The scope's fencing generation at the time of rejection, so the sender
   // can decide whether to resynchronize before retrying.
   Generation current_generation = 5;
+}
+
+// The explicit outcome of ONE typed discrete action, sent to the frame's
+// sender on the reliable session stream after the adapter disposed of it —
+// every accepted frame's action gets exactly one result, so an operator can
+// distinguish "arm honored" from "arm silently dropped" (CTRL-01).
+message ControlActionResult {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  // The fencing generation and sequence of the frame that carried the
+  // action, correlating the result to the exact press.
+  Generation generation = 3;
+  SequenceNum sequence = 4;
+  ControlAction action = 5;
+  // Echoed target for a MODE_REQUEST; unspecified otherwise.
+  ModeTarget mode_target = 6;
+  bool accepted = 7;
+  // Adapter-supplied reason when not accepted; empty on acceptance.
+  string detail = 8;
 }
