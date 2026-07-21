@@ -123,6 +123,12 @@ pub enum SessionAction {
         /// The driver echoes it in the client-facing `LinkLossCleared` notice
         /// it broadcasts ONLY after the adapter confirms the clear.
         generation: Generation,
+        /// `false` for the first clear a neutral activation requests; `true`
+        /// for a tick-driven re-emission of a still-unconfirmed clear. The
+        /// driver counts and error-logs a refused clear only on the first
+        /// (`false`) attempt, so a persistently-refused clear retried every
+        /// tick does not become a fault-counter / log storm.
+        retry: bool,
     },
 }
 

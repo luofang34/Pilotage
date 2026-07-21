@@ -278,12 +278,15 @@ impl Px4GimbalControl {
     /// The return value reports whether BOTH the claim and the zero-rate
     /// reached their local lanes — NOT whether the FC accepted them. There is
     /// no `MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE` acknowledgement or gimbal-status
-    /// readback here, so the DECLARED safety net is independent of this queue:
-    /// the FC/gimbal-manager's own setpoint-timeout failsafe ages an
-    /// unrefreshed setpoint, and the host's `STALE_DEMAND_CUTOFF` re-sends a
-    /// zero-rate. A `false` return (a lane full or closed) is surfaced as a
-    /// typed enactment failure so the host counts it; it never means the FC
-    /// confirmed a stop.
+    /// readback here, so the DECLARED independent safety net is the
+    /// FC/gimbal-manager's OWN setpoint-timeout failsafe, which zeroes a nonzero
+    /// angular rate after ~2 s (PX4-Autopilot `src/modules/gimbal/output.cpp`,
+    /// behavior pinned at commit `841bb40`). This call sets `streaming = false`,
+    /// so [`Self::maintain`]'s `STALE_DEMAND_CUTOFF` deliberately does NOT
+    /// re-send afterward — the queued stop is one-shot and the FC failsafe backs
+    /// it. A `false` return (a lane full or closed) is surfaced as a typed
+    /// enactment failure so the host counts it; it never means the FC confirmed
+    /// a stop.
     pub fn queue_link_loss_stop(&mut self) -> bool {
         let claimed = self.reassert_primary_control();
         self.streaming = false;

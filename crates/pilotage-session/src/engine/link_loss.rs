@@ -328,6 +328,7 @@ impl SessionEngine {
                 vehicle,
                 scope: scope.clone(),
                 generation,
+                retry: false,
             });
         }
     }
@@ -344,6 +345,7 @@ impl SessionEngine {
                 vehicle,
                 scope,
                 generation,
+                retry: true,
             });
         }
     }

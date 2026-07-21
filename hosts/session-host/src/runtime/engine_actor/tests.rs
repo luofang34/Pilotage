@@ -6,8 +6,8 @@
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
-    LinkLossPolicy, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
-    VehicleDescriptor, VideoSource,
+    LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
+    VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ClientHello, ControlPayload, Generation, LeaseRelease, LeaseRequest, LogicalAxisId, ScopeId,
@@ -47,13 +47,15 @@ fn capabilities() -> AdapterCapabilities {
     }
 }
 
-/// A vehicle adapter that records only its `set_link_loss_policy` calls; every
-/// other trait method is an inert stub, since the enactment path under test
-/// touches only the link-loss policy. With `fail_enactment` set it refuses
-/// every policy change, exercising the fail-closed fault path.
+/// A STATEFUL vehicle adapter honoring the ADR-0008 latch postcondition: an
+/// engage records the latch even when the actuation is refused, a clear removes
+/// it ONLY on success, and `apply_control` rejects a latched scope (so a test
+/// observes suppression). `fail_enactment` refuses every policy change.
 #[derive(Default)]
 struct RecordingAdapter {
     link_loss_calls: Vec<(VehicleId, ScopeId, Option<LinkLossPolicy>)>,
+    /// Scopes whose latch is currently engaged (suppressing control).
+    latched: Vec<ScopeId>,
     fail_enactment: bool,
 }
 
@@ -62,10 +64,15 @@ impl VehicleAdapter for RecordingAdapter {
         capabilities()
     }
 
-    fn apply_control(&mut self, _frame: &ScopedControlFrame) -> ApplyOutcome {
+    fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
+        let disposition = if self.latched.contains(&frame.scope) {
+            Disposition::Rejected(RejectReason::LinkLossEngaged)
+        } else {
+            Disposition::Accepted
+        };
         ApplyOutcome {
             tick: SimTick::new(0),
-            disposition: Disposition::Accepted,
+            disposition,
         }
     }
 
@@ -86,8 +93,23 @@ impl VehicleAdapter for RecordingAdapter {
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
         self.link_loss_calls.push((vehicle, scope.clone(), policy));
-        if self.fail_enactment {
-            return Err(LinkLossEnactError::NoActuationChannel);
+        match policy {
+            // Engage records the latch REGARDLESS of the actuation result.
+            Some(_) => {
+                if !self.latched.contains(scope) {
+                    self.latched.push(scope.clone());
+                }
+                if self.fail_enactment {
+                    return Err(LinkLossEnactError::NoActuationChannel);
+                }
+            }
+            // Clear drops the latch ONLY on success (ADR-0008).
+            None => {
+                if self.fail_enactment {
+                    return Err(LinkLossEnactError::NoActuationChannel);
+                }
+                self.latched.retain(|latched| latched != scope);
+            }
         }
         Ok(())
     }
@@ -124,19 +146,36 @@ fn clear_action(scope: &str) -> SessionAction {
         vehicle: VEHICLE,
         scope: ScopeId::new(scope),
         generation: Generation::new(3),
+        retry: false,
+    }
+}
+
+/// A raw motion control frame, for driving `apply_control` directly.
+fn motion_control_frame() -> ScopedControlFrame {
+    ScopedControlFrame {
+        session: SessionId::new(1),
+        vehicle: VEHICLE,
+        scope: ScopeId::new(MOTION),
+        generation: Generation::new(1),
+        sequence: SequenceNum::new(1),
+        sampled_at: MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        payload: ControlPayload {
+            axes: vec![(LogicalAxisId::new(0), 0.0)],
+            edges: Vec::new(),
+        },
     }
 }
 
 /// Registers one client and returns its outbound receiver, so a test can
-/// observe what the actor broadcasts (the recovery ack rides this channel).
+/// observe what the actor broadcasts.
 fn register_client(actor: &mut EngineActor<RecordingAdapter>) -> mpsc::Receiver<ToConnection> {
     let (sender, receiver) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
     actor.clients.insert(ClientKey::new(1), sender);
     receiver
 }
 
-/// The recovery ack travels on the reliable authority stream; count only those
-/// broadcasts so unrelated traffic never masquerades as an ack.
+/// Counts the reliable authority-stream broadcasts (the ack rides one).
 fn authority_messages(receiver: &mut mpsc::Receiver<ToConnection>) -> usize {
     let mut count = 0;
     while let Ok(message) = receiver.try_recv() {
@@ -169,8 +208,7 @@ fn release() -> DomainEnvelope {
     })
 }
 
-/// A full-coverage neutral motion frame at `generation` — the recovery
-/// activation the host requires to clear the scope's latch.
+/// A full-coverage neutral motion frame — the host's recovery activation.
 fn neutral_frame(session: SessionId, generation: Generation, sequence: u32) -> DomainEnvelope {
     DomainEnvelope::Frame(ScopedControlFrame {
         session,
@@ -215,12 +253,10 @@ fn grant_generation(outcome: &SessionOutcome) -> Generation {
         .expect("a granted lease")
 }
 
-/// Drives `actor`'s engine to a fresh holder pending recovery — welcome, grant,
-/// release (which engages link-loss and latches the adapter), re-grant —
-/// enacting every outcome. Returns the session and re-granted generation so the
-/// caller can send the neutral activation and observe the recovery ack. The
-/// recovering client is always `ClientKey::new(1)` (the one `register_client`
-/// registers), so a broadcast ack reaches its receiver.
+/// Drives `actor`'s engine to a fresh holder pending recovery (welcome, grant,
+/// release — which latches the adapter — re-grant), enacting every outcome. The
+/// client is always `ClientKey::new(1)` (the `register_client` one) so a
+/// broadcast ack reaches its receiver.
 fn drive_to_regranted(actor: &mut EngineActor<RecordingAdapter>) -> (SessionId, Generation) {
     let client = ClientKey::new(1);
     let now = MonoTimestamp::from_nanos(0);
@@ -271,6 +307,57 @@ fn a_failed_enactment_is_a_counted_fault() {
 }
 
 #[test]
+fn a_failed_clear_leaves_the_scope_suppressed() {
+    let mut actor = actor();
+
+    // Even a REFUSED engage records the latch, so the scope is suppressed
+    // (ADR-0008 fail-closed): apply_control rejects it.
+    actor.adapter.fail_enactment = true;
+    actor.enact(SessionOutcome {
+        actions: vec![engage_action()],
+        dropped: 0,
+    });
+    assert_eq!(
+        actor
+            .adapter
+            .apply_control(&motion_control_frame())
+            .disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged),
+        "a fenced engage suppresses control even when its actuation was refused"
+    );
+
+    // A clear the adapter REFUSES must NOT return the scope to control — the
+    // latch drops only on Ok.
+    actor.enact(SessionOutcome {
+        actions: vec![clear_action(MOTION)],
+        dropped: 0,
+    });
+    assert_eq!(
+        actor
+            .adapter
+            .apply_control(&motion_control_frame())
+            .disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged),
+        "a refused clear leaves the scope suppressed"
+    );
+
+    // A clear the adapter ACCEPTS returns the scope to normal control.
+    actor.adapter.fail_enactment = false;
+    actor.enact(SessionOutcome {
+        actions: vec![clear_action(MOTION)],
+        dropped: 0,
+    });
+    assert_eq!(
+        actor
+            .adapter
+            .apply_control(&motion_control_frame())
+            .disposition,
+        Disposition::Accepted,
+        "a successful clear returns the scope to control"
+    );
+}
+
+#[test]
 fn clear_link_loss_returns_the_scope_to_normal_control() {
     let mut actor = actor();
     actor.enact(SessionOutcome {
@@ -289,9 +376,7 @@ fn recovery_acks_once_when_the_adapter_confirms_the_clear() {
     let mut actor = actor();
     let mut client = register_client(&mut actor);
     let (session, generation) = drive_to_regranted(&mut actor);
-    // Drop the grant/release/re-grant authority broadcasts; only the recovery
-    // ack should follow.
-    let _ = authority_messages(&mut client);
+    let _ = authority_messages(&mut client); // drop grant/release/re-grant broadcasts
 
     let recovered = actor.engine.handle_client_message(
         ClientKey::new(1),
@@ -340,9 +425,8 @@ fn a_refused_clear_is_retried_by_the_engine_and_acks_once_when_it_takes() {
     let (session, generation) = drive_to_regranted(&mut actor);
     let _ = authority_messages(&mut client);
 
-    // The neutral activation requests the clear, but the adapter refuses it: no
-    // ack, and the engine holds the scope pending (fail-closed) rather than
-    // dropping it — so recovery is not stranded.
+    // The clear is refused: no ack, and the engine holds the scope pending
+    // (fail-closed) rather than dropping it, so recovery is not stranded.
     actor.adapter.fail_enactment = true;
     let recovered = actor.engine.handle_client_message(
         ClientKey::new(1),
@@ -375,5 +459,42 @@ fn a_refused_clear_is_retried_by_the_engine_and_acks_once_when_it_takes() {
         authority_messages(&mut client),
         0,
         "exactly one ack across the whole recovery"
+    );
+}
+
+#[test]
+fn a_persistently_refused_clear_is_counted_once_not_per_tick() {
+    let mut actor = actor();
+    let mut client = register_client(&mut actor);
+    let (session, generation) = drive_to_regranted(&mut actor);
+    let _ = authority_messages(&mut client);
+
+    // The first (non-retry) clear attempt is refused: counted once.
+    actor.adapter.fail_enactment = true;
+    let recovered = actor.engine.handle_client_message(
+        ClientKey::new(1),
+        neutral_frame(session, generation, 1),
+        MonoTimestamp::from_nanos(0),
+    );
+    actor.enact(recovered);
+    assert_eq!(
+        actor.link_loss_enact_failures, 1,
+        "the first refusal is counted once"
+    );
+
+    // The engine re-emits the clear every tick; 50 refused RETRIES must add no
+    // further faults (no 100 Hz counter/log storm).
+    for tick_at in 1..=50 {
+        let tick = actor.engine.handle_tick(MonoTimestamp::from_nanos(tick_at));
+        actor.enact(tick);
+    }
+    assert_eq!(
+        actor.link_loss_enact_failures, 1,
+        "50 refused retries add no faults — counted once, not per tick"
+    );
+    assert_eq!(
+        authority_messages(&mut client),
+        0,
+        "still no ack while the clear stays refused"
     );
 }

@@ -4,6 +4,15 @@
 //! mode so it attaches to that server and spawns the x500 model. The
 //! adapter side is FDM-agnostic — swapping gz for JSBSim or FlightGear
 //! is a new backend planning different stages, not a new adapter.
+//!
+//! Gimbal link-loss acceptance (MANUAL): the host's gimbal failsafe
+//! (`queue_link_loss_stop`) is a best-effort queued zero-rate; its declared
+//! independent backstop is PX4's own gimbal-manager setpoint-timeout, which
+//! zeroes a nonzero angular rate after ~2 s (`src/modules/gimbal/output.cpp`,
+//! behavior pinned at commit `841bb40`). This is verified by flying this
+//! backend and confirming a slewing gimbal stops within ~2 s of link loss;
+//! no automated PX4-in-the-loop test runs in CI. Use a PX4 checkout at or
+//! after that commit so the fallback is present.
 
 use std::path::{Path, PathBuf};
 

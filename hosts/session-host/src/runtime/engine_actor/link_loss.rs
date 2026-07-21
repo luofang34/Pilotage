@@ -55,37 +55,51 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 vehicle,
                 scope,
                 generation,
-            } => {
-                // A neutral activation requested this scope's clear (or the tick
-                // is retrying a refused one); return the SCOPE to normal control
-                // (ADR-0008's only path back). A failed clear leaves the vehicle
-                // neutralized — safe but stuck; the engine keeps it pending and
-                // re-emits it, so it is counted the same way but not stranded.
-                debug!(
-                    vehicle = vehicle.as_u64(),
-                    scope = scope.as_str(),
-                    "recovery conditions met; clearing link-loss policy"
-                );
-                if self.set_policy_counting_failure(
-                    vehicle,
-                    &scope,
-                    None,
-                    "link-loss policy clear failed; vehicle remains neutralized",
-                ) {
-                    // The adapter took the clear. Report it to the engine, which
-                    // drops the pending state and answers whether this matched a
-                    // still-pending clear at this generation — so a clear whose
-                    // pending a holder change invalidated does NOT ack a recovery
-                    // that no longer holds. The ack fires exactly when it does.
-                    if self
-                        .engine
-                        .confirm_link_loss_cleared(vehicle, &scope, generation)
-                    {
-                        self.broadcast_link_loss_cleared(vehicle, scope, generation);
-                    }
+                retry,
+            } => self.enact_clear_link_loss(vehicle, scope, generation, retry),
+            _ => {}
+        }
+    }
+
+    /// Enacts one `ClearLinkLoss`: returns the SCOPE to normal control
+    /// (ADR-0008's only path back — the latch drops only on `Ok`). On success
+    /// it confirms to the engine and acks exactly when a still-pending clear at
+    /// this generation matched. A refused clear leaves the scope neutralized;
+    /// the engine retries every tick, so only the FIRST (non-`retry`) refusal
+    /// is counted and error-logged — a retried refusal would otherwise be a
+    /// 100 Hz storm.
+    fn enact_clear_link_loss(
+        &mut self,
+        vehicle: VehicleId,
+        scope: ScopeId,
+        generation: Generation,
+        retry: bool,
+    ) {
+        match self.adapter.set_link_loss_policy(vehicle, &scope, None) {
+            Ok(()) => {
+                if self
+                    .engine
+                    .confirm_link_loss_cleared(vehicle, &scope, generation)
+                {
+                    self.broadcast_link_loss_cleared(vehicle, scope, generation);
                 }
             }
-            _ => {}
+            Err(error) if retry => debug!(
+                vehicle = vehicle.as_u64(),
+                scope = scope.as_str(),
+                %error,
+                "link-loss clear still refused; the engine will retry"
+            ),
+            Err(error) => {
+                self.link_loss_enact_failures = self.link_loss_enact_failures.wrapping_add(1);
+                error!(
+                    vehicle = vehicle.as_u64(),
+                    scope = scope.as_str(),
+                    %error,
+                    failures = self.link_loss_enact_failures,
+                    "link-loss clear refused; vehicle remains neutralized, retrying"
+                );
+            }
         }
     }
 

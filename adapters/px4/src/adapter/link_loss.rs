@@ -24,24 +24,20 @@ impl Px4Adapter {
         if vehicle != self.vehicle {
             return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
-        // Latch per-scope first: even an unenactable engage suppresses that
-        // scope's frames, and another scope's latch is untouched.
-        match &policy {
-            Some(policy) => {
-                self.link_loss_policy.insert(scope.clone(), *policy);
-            }
-            None => {
-                self.link_loss_policy.remove(scope);
-            }
-        }
-        // Clearing only removes the latch — the returning holder resumes
-        // control. Engagement must actively drive THIS scope's actuation to
-        // its safe state, and only its own: neutralizing motion brakes the
-        // FC, neutralizing the gimbal stops the slew, and neither reaches the
-        // other.
-        if policy.is_none() {
+        // Clearing (`None`) returns the scope to normal control; it has no
+        // actuation to fail. Per ADR-0008 a scope is un-suppressed ONLY by a
+        // clear the adapter accepted, so the latch is dropped on the success
+        // path — never before an actuation that could still fail.
+        let Some(policy) = policy else {
+            self.link_loss_policy.remove(scope);
             return Ok(());
-        }
+        };
+        // Engagement records the latch FIRST — even an unenactable engage MUST
+        // keep this scope's frames suppressed (fail-closed), and only its own
+        // scope's — then drives that scope's actuation to its safe state:
+        // neutralizing motion brakes the FC, stopping the gimbal ends the slew,
+        // and neither reaches the other.
+        self.link_loss_policy.insert(scope.clone(), policy);
         match scope.as_str() {
             FLIGHT_SCOPE => {
                 let Some(uplink) = self.uplink.as_mut() else {
