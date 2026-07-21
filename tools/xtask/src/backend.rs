@@ -53,6 +53,21 @@ pub trait SimBackend {
     /// Returns [`XtaskError::MissingArtifact`] with an actionable hint
     /// when a required tool or build product is absent.
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError>;
+    /// Builds this backend's own gitignored artifacts so a fresh checkout
+    /// runs out of the box. Best-effort by contract: a backend whose extra
+    /// artifact only enriches the session (e.g. camera video that degrades to
+    /// no-video) must warn and return `Ok` when its toolchain is absent, so a
+    /// missing optional dependency never blocks the flight. The default is a
+    /// no-op for backends with nothing extra to build.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed [`XtaskError`] only for a failure that must abort the
+    /// session; recoverable/optional build failures are logged, not returned.
+    fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
+        let _ = ctx;
+        Ok(())
+    }
     /// `pgrep -f` patterns that mark a stale session of this backend.
     fn stale_process_patterns(&self) -> Vec<&'static str>;
     /// Resets the running simulation world and FC.

@@ -27,6 +27,31 @@ and fencing generations) enforced on every frame. A C++ gz-transport sidecar bri
 Gazebo to the Rust adapter; a deterministic headless adapter stands in when Gazebo is
 not present. Runs over loopback or LAN.
 
+## Run a PX4 SITL session
+
+One command launches a PX4 + Gazebo software-in-the-loop session and opens the
+browser viewer:
+
+```sh
+cargo xtask sim --fc px4-gz
+```
+
+The launcher builds what a fresh checkout is missing before it starts: the
+release session host and the viewer's generated wasm runtime are built
+automatically on the first run, and the C++ gz camera sidecar is built
+best-effort (the session still flies without it — you just get no video).
+
+You provide the pieces git does not vendor:
+
+- A **PX4-Autopilot** SITL checkout, built once (`make px4_sitl`), at
+  `../PX4-Autopilot` or the path in `PX4_DIR`. The launcher fails with the
+  exact missing path when it is absent.
+- **Gazebo Harmonic** (`gz`) on `PATH`.
+- Toolchains for the auto-built artifacts: `wasm-bindgen-cli` 0.2.126 plus the
+  `wasm32-unknown-unknown` target (viewer, required), and `protobuf` + the
+  Gazebo dev libraries (camera sidecar, optional). Each build script prints its
+  own install hint on failure.
+
 ## What the architecture protects
 
 - **Portable sans-IO core.** All protocol, authority, input, timing, and replay logic

@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use super::preflight::{WEB_RUNTIME_ARTIFACTS, prepare_web_assets};
 use super::{
     claim_supervisor, resolve_manifest, start_stages, supervise, verify_listening_port,
     viewer_stage,
@@ -255,6 +256,47 @@ fn marker_write_failure_tears_down_the_session() {
     assert!(outcome.is_err(), "the marker path cannot be written");
     assert!(children.is_empty(), "teardown drains every child");
     expect_event(&watch, "eof", "holder group dies");
+}
+
+/// A checkout that already has every generated web-runtime file is left
+/// untouched: the preflight short-circuits without invoking any build. The
+/// temp root has no `scripts/`, so an attempted build would fail loudly —
+/// `Ok` proves nothing ran.
+#[test]
+fn web_assets_preflight_skips_when_every_artifact_is_present() {
+    let root = std::env::temp_dir().join(format!("plt_xt_web_ok_{}", std::process::id()));
+    for rel in WEB_RUNTIME_ARTIFACTS {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().expect("artifact has a parent"))
+            .expect("artifact dir is created");
+        std::fs::write(&path, b"generated").expect("artifact is written");
+    }
+
+    let outcome = prepare_web_assets(&root);
+    std::fs::remove_dir_all(&root).ok();
+
+    assert!(
+        outcome.is_ok(),
+        "a checkout with every web-runtime artifact needs no build, got {outcome:?}"
+    );
+}
+
+/// A checkout missing the generated web runtime triggers a build. With no
+/// `scripts/build-web-instruments.sh` under the temp root the build cannot
+/// run, and the failure is surfaced as a typed fault — never silently served
+/// as a dead viewer.
+#[test]
+fn web_assets_preflight_builds_and_surfaces_failure_when_absent() {
+    let root = std::env::temp_dir().join(format!("plt_xt_web_missing_{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("temp root is created");
+
+    let outcome = prepare_web_assets(&root);
+    std::fs::remove_dir_all(&root).ok();
+
+    assert!(
+        matches!(outcome, Err(XtaskError::CommandFailed { .. })),
+        "a missing web runtime must trigger a build whose failure is typed, got {outcome:?}"
+    );
 }
 
 #[test]

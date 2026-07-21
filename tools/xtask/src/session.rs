@@ -13,6 +13,9 @@ use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::{ManagedChild, ProcessSpec};
 use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log, viewer_url};
+use preflight::{build_host, prepare_web_assets};
+
+mod preflight;
 
 /// How often the supervisor re-checks stage health.
 const SUPERVISE_INTERVAL: Duration = Duration::from_millis(500);
@@ -53,6 +56,12 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     ));
     print_line("building session host (release)...");
     build_host(&repo_root)?;
+    // Out-of-the-box preflight: the viewer's generated wasm runtime is
+    // gitignored, so a fresh checkout has none and the viewer loads dead.
+    // Build it before serving. Backend-specific gitignored artifacts (the
+    // px4 camera sidecar) are the backend's own best-effort `prepare`.
+    prepare_web_assets(&repo_root)?;
+    backend.prepare(&ctx)?;
 
     let mut stages = backend.plan(&ctx)?;
     stages.push(host_stage(
@@ -275,25 +284,6 @@ fn refuse_stale_session(mut patterns: Vec<&'static str>) -> Result<(), XtaskErro
     } else {
         Err(XtaskError::StaleSession {
             listing: listing.trim_end().to_owned(),
-        })
-    }
-}
-
-fn build_host(repo_root: &std::path::Path) -> Result<(), XtaskError> {
-    let status = Command::new("cargo")
-        .args(["build", "--release", "-p", "pilotage-session-host"])
-        .current_dir(repo_root)
-        .status()
-        .map_err(|source| XtaskError::Io {
-            context: "building the session host",
-            source,
-        })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(XtaskError::CommandFailed {
-            context: "cargo build --release -p pilotage-session-host",
-            status: status.to_string(),
         })
     }
 }
