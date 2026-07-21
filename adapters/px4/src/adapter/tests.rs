@@ -402,3 +402,37 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     let mut buf = [0u8; 128];
     fc.recv_from(&mut buf).expect("arm datagram reaches the FC");
 }
+
+/// A gimbal-capable px4 configuration advertises all three video sources;
+/// a gimbal-less one advertises FPV + chase only — never a payload feed
+/// that cannot paint.
+#[test]
+fn video_sources_follow_the_gimbal_configuration() {
+    let with_gimbal = super::advertised_video_sources(true, true);
+    assert_eq!(
+        with_gimbal
+            .iter()
+            .map(|source| source.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            pilotage_adapter_gazebo::FPV_SOURCE_ID,
+            pilotage_adapter_gazebo::CHASE_SOURCE_ID,
+            pilotage_adapter_gazebo::GIMBAL_SOURCE_ID,
+        ],
+    );
+    let gimbal_less = super::advertised_video_sources(true, false);
+    assert_eq!(
+        gimbal_less
+            .iter()
+            .map(|source| source.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            pilotage_adapter_gazebo::FPV_SOURCE_ID,
+            pilotage_adapter_gazebo::CHASE_SOURCE_ID,
+        ],
+    );
+    assert!(
+        super::advertised_video_sources(false, true).is_empty(),
+        "no camera bridge, no sources"
+    );
+}

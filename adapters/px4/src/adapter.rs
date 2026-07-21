@@ -175,7 +175,8 @@ impl Px4Adapter {
                 None
             }
         };
-        let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
+        let (frames, camera_bridge, frame_forwarder) =
+            camera::spawn_camera_bridge(config.gimbal).await;
         Ok(Self {
             vehicle,
             estimate: Some(EstimateSource {
@@ -294,6 +295,33 @@ impl Px4Adapter {
         }
         Ok(())
     }
+}
+
+/// The video sources this adapter advertises: nothing without a camera
+/// bridge, FPV + chase with one, and the gimbal payload feed ONLY when the
+/// vehicle is configured with a gimbal — a gimbal-less vehicle must not
+/// advertise a source that never paints.
+fn advertised_video_sources(bridge_up: bool, gimbal: bool) -> Vec<VideoSource> {
+    if !bridge_up {
+        return vec![];
+    }
+    let mut sources = vec![
+        VideoSource {
+            id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
+            description: "onboard forward camera".to_owned(),
+        },
+        VideoSource {
+            id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
+            description: "chase camera".to_owned(),
+        },
+    ];
+    if gimbal {
+        sources.push(VideoSource {
+            id: pilotage_adapter_gazebo::GIMBAL_SOURCE_ID.to_owned(),
+            description: "gimbal payload camera".to_owned(),
+        });
+    }
+    sources
 }
 
 /// A random attachment identity; each adapter start is a distinct
@@ -421,23 +449,7 @@ impl VehicleAdapter for Px4Adapter {
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {
-        if self._camera_bridge.is_none() {
-            return vec![];
-        }
-        vec![
-            VideoSource {
-                id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
-                description: "onboard forward camera".to_owned(),
-            },
-            VideoSource {
-                id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
-                description: "chase camera".to_owned(),
-            },
-            VideoSource {
-                id: pilotage_adapter_gazebo::GIMBAL_SOURCE_ID.to_owned(),
-                description: "gimbal payload camera".to_owned(),
-            },
-        ]
+        advertised_video_sources(self._camera_bridge.is_some(), self.gimbal.is_some())
     }
 
     fn set_link_loss_policy(

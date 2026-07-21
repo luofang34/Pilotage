@@ -15,7 +15,7 @@ use crate::process::{ManagedChild, ProcessSpec};
 use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log, viewer_url};
 use preflight::{build_host, prepare_web_assets};
 
-mod preflight;
+pub(crate) mod preflight;
 
 /// How often the supervisor re-checks stage health.
 const SUPERVISE_INTERVAL: Duration = Duration::from_millis(500);

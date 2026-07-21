@@ -126,22 +126,50 @@ fn camera_bridge_bin(repo_root: &Path) -> PathBuf {
     repo_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge")
 }
 
+/// Where the camera sidecar's content stamp lives (gitignored build tree).
+const CAMERA_BRIDGE_STAMP: &str = "target/xtask-stamps/gz-bridge.stamp";
+
+/// The source inputs whose working-tree content decides whether the sidecar
+/// is stale: the C++ bridge tree and its build script.
+const CAMERA_BRIDGE_SOURCES: [&str; 2] = ["adapters/gazebo/bridge", "scripts/build-gz-bridge.sh"];
+
 /// Best-effort build of the camera sidecar so a fresh checkout shows video
-/// out of the box. It is DELIBERATELY non-fatal: the px4 adapter's camera
+/// out of the box, skipped only when the binary exists AND its content
+/// stamp (bridge sources + gz toolchain version) matches the last
+/// successful build — an edited bridge source rebuilds instead of flying a
+/// stale sidecar. It is DELIBERATELY non-fatal: the px4 adapter's camera
 /// path degrades to no-video when the binary is absent, so a missing C++
 /// toolchain (gz-transport, protoc) must not block the flight — it only
-/// costs the camera. A present binary is left untouched.
+/// costs the camera.
 fn ensure_camera_bridge(repo_root: &Path) {
-    if camera_bridge_bin(repo_root).is_file() {
+    use crate::session::preflight::stamp;
+    let exists = camera_bridge_bin(repo_root).is_file();
+    let current = stamp::source_stamp(
+        repo_root,
+        &CAMERA_BRIDGE_SOURCES,
+        &[&["pkg-config", "--modversion", "gz-transport13"]],
+    );
+    let stamp_path = repo_root.join(CAMERA_BRIDGE_STAMP);
+    let stored = stamp::read_stamp(&stamp_path);
+    if stamp::artifact_is_fresh(exists, stored.as_deref(), current.as_deref()) {
         return;
     }
-    print_line("building the gz camera sidecar (first run)...");
+    print_line(if exists {
+        "gz camera sidecar is stale (source or toolchain changed); rebuilding..."
+    } else {
+        "building the gz camera sidecar (first run)..."
+    });
     let built = std::process::Command::new("bash")
         .arg(repo_root.join("scripts/build-gz-bridge.sh"))
         .current_dir(repo_root)
         .status();
     match built {
-        Ok(status) if status.success() => print_line("gz camera sidecar built"),
+        Ok(status) if status.success() => {
+            if let Some(current) = current {
+                stamp::write_stamp(&stamp_path, &current);
+            }
+            print_line("gz camera sidecar built");
+        }
         Ok(_) | Err(_) => print_line(
             "gz camera sidecar unavailable (see build-gz-bridge output); \
              continuing without video",

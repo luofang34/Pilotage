@@ -258,13 +258,25 @@ fn marker_write_failure_tears_down_the_session() {
     expect_event(&watch, "eof", "holder group dies");
 }
 
-/// A checkout that already has every generated web-runtime file is left
-/// untouched: the preflight short-circuits without invoking any build. The
-/// temp root has no `scripts/`, so an attempted build would fail loudly —
-/// `Ok` proves nothing ran.
+/// Artifacts alone no longer short-circuit the preflight: without a
+/// recorded content stamp the build reruns (fail closed toward rebuilding),
+/// and only a stamp matching the current sources + toolchain skips it. The
+/// temp root has no `scripts/`, so an attempted build fails loudly — `Ok`
+/// proves nothing ran.
 #[test]
-fn web_assets_preflight_skips_when_every_artifact_is_present() {
+fn web_assets_preflight_skips_only_with_a_matching_content_stamp() {
     let root = std::env::temp_dir().join(format!("plt_xt_web_ok_{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("temp root is created");
+    // A real (empty) git repository, so the content stamp is computable.
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status()
+            .expect("git init runs")
+            .success(),
+        "git init succeeds"
+    );
     for rel in WEB_RUNTIME_ARTIFACTS {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().expect("artifact has a parent"))
@@ -272,12 +284,31 @@ fn web_assets_preflight_skips_when_every_artifact_is_present() {
         std::fs::write(&path, b"generated").expect("artifact is written");
     }
 
+    // Present artifacts WITHOUT a stamp rebuild — and the missing build
+    // script surfaces that as a typed failure.
+    let unstamped = prepare_web_assets(&root);
+    assert!(
+        matches!(unstamped, Err(XtaskError::CommandFailed { .. })),
+        "artifacts without a stamp must rebuild, got {unstamped:?}"
+    );
+
+    // Recording the CURRENT stamp makes the same checkout skip the build.
+    let current = crate::session::preflight::stamp::source_stamp(
+        &root,
+        &crate::session::preflight::WEB_RUNTIME_SOURCES,
+        &[&["rustc", "--version"], &["wasm-bindgen", "--version"]],
+    )
+    .expect("stamp computes inside a git repository");
+    crate::session::preflight::stamp::write_stamp(
+        &root.join("target/xtask-stamps/web-runtime.stamp"),
+        &current,
+    );
     let outcome = prepare_web_assets(&root);
     std::fs::remove_dir_all(&root).ok();
 
     assert!(
         outcome.is_ok(),
-        "a checkout with every web-runtime artifact needs no build, got {outcome:?}"
+        "a matching content stamp skips the build, got {outcome:?}"
     );
 }
 
