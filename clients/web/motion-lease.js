@@ -76,3 +76,15 @@ export function advanceMotionLease(motion, decoded) {
   }
   return motion;
 }
+
+/** Whether a `LinkLossCleared` message confirms the recovery the client is
+ *  waiting on: the same vehicle, the motion scope, and the CURRENT fresh
+ *  generation. A notice for another vehicle/scope, or a stale generation
+ *  (e.g. the pre-handover one), proves nothing and must NOT resume control. */
+export function isMotionRecoveryConfirmation(message, vehicleId, motionScope, currentGeneration) {
+  return (
+    message.vehicleId === vehicleId &&
+    message.scope === motionScope &&
+    message.generation === currentGeneration
+  );
+}

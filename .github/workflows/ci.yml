@@ -189,6 +189,9 @@ jobs:
       - name: motion-lease reacquisition (release fence, stale-grant rejection, terminal denial)
         run: node clients/web/motion-lease.test.mjs
 
+      - name: authority stream live decode (fragmented LinkLossCleared, generation correlation)
+        run: node clients/web/authority-stream.test.mjs
+
       - name: viewer explicit lease release (ack/timeout/abandon, reconnect awaits settlement)
         run: node clients/web/lease-release.test.mjs
 
