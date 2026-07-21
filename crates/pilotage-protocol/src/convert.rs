@@ -15,6 +15,8 @@ use crate::ids::{Generation, ScopeId, SequenceNum, SessionId, VehicleId};
 use crate::wire;
 use pilotage_timing::MonoTimestamp;
 
+mod intent;
+
 /// Errors converting a decoded wire message into its domain equivalent.
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ConvertError {
@@ -55,6 +57,13 @@ pub enum ConvertError {
         axis_id: u32,
         /// The raw, non-finite value found on the wire.
         value: f32,
+    },
+    /// A wire `f32` field of a typed control intent was NaN or infinite, which
+    /// cannot represent a physical velocity, rate, orientation, or thrust.
+    #[error("control intent field `{field}` is not finite")]
+    NonFiniteIntentValue {
+        /// The intent field that carried the non-finite value.
+        field: &'static str,
     },
     /// The envelope's `schema_version` is not one this build knows how to
     /// interpret (ADR-0014).
@@ -202,6 +211,12 @@ impl From<&ScopedControlFrame> for wire::ControlFrame {
             }),
             profile_revision: frame.profile_revision,
             payload: Some(payload_to_wire(&frame.payload)),
+            intent: frame.intent.as_ref().map(intent::intent_to_wire),
+            actions: frame
+                .actions
+                .iter()
+                .map(|action| intent::action_to_wire(*action) as i32)
+                .collect(),
         }
     }
 }
@@ -221,6 +236,12 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
         let sequence = frame.sequence.ok_or_else(|| missing("sequence"))?;
         let sampled_at = frame.sampled_at.ok_or_else(|| missing("sampled_at"))?;
         let payload = frame.payload.ok_or_else(|| missing("payload"))?;
+        let control_intent = frame.intent.map(intent::intent_from_wire).transpose()?;
+        let actions = frame
+            .actions
+            .into_iter()
+            .map(intent::action_from_wire)
+            .collect::<Result<_, ConvertError>>()?;
 
         Ok(ScopedControlFrame {
             session: SessionId::new(session.value),
@@ -231,6 +252,8 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
             sampled_at: MonoTimestamp::from_nanos(sampled_at.nanos),
             profile_revision: frame.profile_revision,
             payload: payload_from_wire(payload)?,
+            intent: control_intent,
+            actions,
         })
     }
 }

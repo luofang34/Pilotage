@@ -287,6 +287,8 @@ mod tests {
                 axes,
                 edges: vec![],
             },
+            intent: None,
+            actions: vec![],
         }
     }
 

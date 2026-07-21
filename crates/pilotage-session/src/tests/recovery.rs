@@ -1,8 +1,6 @@
-//! Recovery activation gate (ADR-0008): after a link-loss policy engages,
-//! a fresh fenced generation alone must not clear it — the new holder must
-//! additionally demonstrate neutral input with an accepted frame, so a
-//! client reconnecting with deflected sticks cannot revive motion. The
-//! engaged policy itself is selected from the vehicle's declared profile.
+//! Recovery activation gate (ADR-0008): after a link-loss policy engages, a
+//! fresh fenced generation alone must not clear it — the new holder must also
+//! land an accepted neutral frame, so deflected sticks on reconnect cannot revive motion.
 
 use core::time::Duration;
 
@@ -163,8 +161,7 @@ fn a_neutral_frame_clears_once_and_orders_before_the_apply() {
     assert_eq!(cleared(&again), 0, "recovery already complete");
 }
 
-/// A capability report for one vehicle with the given scopes (each with
-/// its axes) and declared link-loss menu.
+/// A capability report for one vehicle with the given scopes and link-loss menu.
 fn profile(
     scopes: Vec<(&'static str, Vec<u16>)>,
     actions: Vec<LinkLossPolicy>,
@@ -210,10 +207,12 @@ fn scoped_frame(
         payload: ControlPayload {
             axes: axes
                 .into_iter()
-                .map(|(axis, value)| (LogicalAxisId::new(axis), value))
+                .map(|(a, v)| (LogicalAxisId::new(a), v))
                 .collect(),
             edges: Vec::new(),
         },
+        intent: None,
+        actions: vec![],
     }
 }
 

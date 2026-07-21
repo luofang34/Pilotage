@@ -35,6 +35,96 @@ message ControlPayload {
   repeated ButtonEdgeSample edges = 2;
 }
 
+// The reference frame a typed control intent is expressed in (CTRL-01). Frames
+// are negotiated: a vehicle advertises the ones it accepts per intent family
+// (see `IntentCapability`), so a client never sends a frame the vehicle cannot
+// interpret. Room is left for full 6-DoF frames without a schema break.
+enum ReferenceFrame {
+  REFERENCE_FRAME_UNSPECIFIED = 0;
+  // Body axes, forward-right-down: +x forward, +y right, +z down.
+  REFERENCE_FRAME_BODY_FRD = 1;
+  // Local tangent plane, north-east-down, origin at the vehicle.
+  REFERENCE_FRAME_LOCAL_NED = 2;
+  // The gimbal payload's own frame (pitch/yaw about its mount).
+  REFERENCE_FRAME_GIMBAL = 3;
+}
+
+// A typed discrete control action (CTRL-01). Actions carry MEANING, not a raw
+// button number: an adapter reads `ARM`, never "button 9", so a rebound
+// control cannot silently change what a press does at the vehicle boundary.
+enum ControlAction {
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  CONTROL_ACTION_ARM = 1;
+  CONTROL_ACTION_DISARM = 2;
+  // A request to change the vehicle's flight mode; the concrete target mode is
+  // out of band (the scheme decides), so this is the one-shot trigger.
+  CONTROL_ACTION_MODE_REQUEST = 3;
+  // Recenter the gimbal to its stowed/neutral orientation.
+  CONTROL_ACTION_GIMBAL_RECENTER = 4;
+}
+
+// Linear velocity plus yaw rate, the family the browser scheme produces today.
+// `vx/vy/vz` are metres per second in `frame`; `yaw_rate` is radians per second
+// (right-handed about the frame's down axis).
+message VelocityIntent {
+  ReferenceFrame frame = 1;
+  float vx = 2;
+  float vy = 3;
+  float vz = 4;
+  float yaw_rate = 5;
+}
+
+// Hold a position offset (metres in `frame`) and heading (radians). Defined now
+// so a position-hold-capable vehicle needs no schema break to accept it.
+message PositionHoldIntent {
+  ReferenceFrame frame = 1;
+  float x = 2;
+  float y = 3;
+  float z = 4;
+  float heading = 5;
+}
+
+// Orientation (unit quaternion, `frame`→body) plus normalized collective
+// thrust in `[0, 1]`. For attitude-controlled airframes.
+message AttitudeThrustIntent {
+  ReferenceFrame frame = 1;
+  float qw = 2;
+  float qx = 3;
+  float qy = 4;
+  float qz = 5;
+  float thrust = 6;
+}
+
+// Body angular rates (radians per second) plus normalized thrust in `[0, 1]`.
+// For the innermost rate-control loop (e.g. acro / manual rate flight).
+message BodyRateIntent {
+  float roll_rate = 1;
+  float pitch_rate = 2;
+  float yaw_rate = 3;
+  float thrust = 4;
+}
+
+// Gimbal angular rate (radians per second) about the payload's pitch and yaw.
+message GimbalRateIntent {
+  float pitch_rate = 1;
+  float yaw_rate = 2;
+}
+
+// Exactly one typed control-intent family. The `oneof` makes the families
+// mutually exclusive on the wire: a frame commands velocity OR attitude OR body
+// rate, never an ambiguous mix, so a velocity-to-attitude transition is a
+// distinct intent (and, per CTRL-01, a distinct scope) rather than a
+// reinterpretation of the same numbers.
+message ControlIntent {
+  oneof family {
+    VelocityIntent velocity = 1;
+    PositionHoldIntent position_hold = 2;
+    AttitudeThrustIntent attitude_thrust = 3;
+    BodyRateIntent body_rate = 4;
+    GimbalRateIntent gimbal_rate = 5;
+  }
+}
+
 // A control frame scoped to a single session, vehicle, and control scope,
 // carrying the fencing metadata the session host uses to accept or reject
 // it (ADR-0006, ADR-0009).
@@ -46,5 +136,12 @@ message ControlFrame {
   SequenceNum sequence = 5;
   MonoTimestamp sampled_at = 6;
   uint32 profile_revision = 7;
+  // The legacy untyped logical-axis/button payload (ADR-0007). Retained while
+  // adapters migrate to `intent`; a frame carries one or the other.
   ControlPayload payload = 8;
+  // The typed control intent this frame commands (CTRL-01). Present when the
+  // vehicle advertises the matching intent family; supersedes `payload`.
+  ControlIntent intent = 9;
+  // Typed discrete actions carried by this frame, as one-shot events.
+  repeated ControlAction actions = 10;
 }

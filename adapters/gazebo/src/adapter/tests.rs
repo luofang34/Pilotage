@@ -35,6 +35,8 @@ fn frame(scope: &str, axes: Vec<(LogicalAxisId, f32)>, vehicle: VehicleId) -> Sc
             axes,
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     }
 }
 

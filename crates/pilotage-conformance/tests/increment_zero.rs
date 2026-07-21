@@ -315,6 +315,8 @@ fn staleness_policy_rejects_an_artificially_aged_frame() {
             axes: vec![(LogicalAxisId::new(2), 1.0)],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     };
 
     let fresh_now = MonoTimestamp::from_nanos(40_000_000);
@@ -370,6 +372,8 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
                 axes: vec![(LogicalAxisId::new(2), 1.0)],
                 edges: vec![],
             },
+            intent: None,
+            actions: vec![],
         }),
         ScriptStep::Step(5),
     ];

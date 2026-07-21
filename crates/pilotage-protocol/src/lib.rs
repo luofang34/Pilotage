@@ -8,6 +8,7 @@ mod control;
 mod convert;
 pub mod h264;
 mod ids;
+mod intent;
 mod session;
 mod session_convert;
 pub mod video_frame;
@@ -20,6 +21,10 @@ pub use convert::{
     encode_envelope_length_delimited,
 };
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
+pub use intent::{
+    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, GimbalRateIntent,
+    PositionHoldIntent, ReferenceFrame, VelocityIntent,
+};
 pub use session::{
     ClientHello, FrameRejected, FrameRejectionReason, LeaseDenialReason, LeaseRelease,
     LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared, Ping, Pong, ScopeHolderSnapshot,

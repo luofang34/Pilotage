@@ -307,6 +307,8 @@ fn control_frames_are_rejected_at_the_boundary() {
             axes: vec![],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     };
     let outcome = adapter.apply_control(&frame);
     assert_eq!(

@@ -32,6 +32,8 @@ fn control_frame(vehicle: VehicleId, throttle: f32, steering: f32) -> ScopedCont
             ],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     }
 }
 

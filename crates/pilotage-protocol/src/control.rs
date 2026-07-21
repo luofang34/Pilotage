@@ -3,6 +3,7 @@
 use pilotage_timing::MonoTimestamp;
 
 use crate::ids::{Generation, ScopeId, SequenceNum, SessionId, VehicleId};
+use crate::intent::{ControlAction, ControlIntent};
 
 /// Identifies a logical continuous axis (e.g. throttle, steering) in the
 /// canonical input model, independent of any physical device layout.
@@ -86,8 +87,14 @@ pub struct ScopedControlFrame {
     pub sampled_at: MonoTimestamp,
     /// Revision of the device profile used to normalize this frame.
     pub profile_revision: u32,
-    /// The logical input state for this frame.
+    /// The legacy untyped logical input state (ADR-0007). Retained while
+    /// adapters migrate to typed intents; a frame carries this or `intent`.
     pub payload: ControlPayload,
+    /// The typed control intent this frame commands (CTRL-01), when the vehicle
+    /// advertises the matching family. Supersedes `payload` when present.
+    pub intent: Option<ControlIntent>,
+    /// Typed discrete actions carried by this frame, as one-shot events.
+    pub actions: Vec<ControlAction>,
 }
 
 #[cfg(test)]
@@ -120,6 +127,8 @@ mod tests {
             sampled_at: MonoTimestamp::from_nanos(5),
             profile_revision: 6,
             payload: payload.clone(),
+            intent: None,
+            actions: vec![],
         };
         assert_eq!(frame.session.as_u64(), 1);
         assert_eq!(frame.payload, payload);

@@ -150,21 +150,29 @@ fn clear_action(scope: &str) -> SessionAction {
     }
 }
 
-/// A raw motion control frame, for driving `apply_control` directly.
-fn motion_control_frame() -> ScopedControlFrame {
+/// A full-coverage neutral motion frame for the given fencing metadata; the
+/// single builder both the raw-frame and recovery-activation helpers use.
+fn motion_frame(session: SessionId, generation: Generation, sequence: u32) -> ScopedControlFrame {
     ScopedControlFrame {
-        session: SessionId::new(1),
+        session,
         vehicle: VEHICLE,
         scope: ScopeId::new(MOTION),
-        generation: Generation::new(1),
-        sequence: SequenceNum::new(1),
+        generation,
+        sequence: SequenceNum::new(sequence),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(0), 0.0)],
             edges: Vec::new(),
         },
+        intent: None,
+        actions: vec![],
     }
+}
+
+/// A raw motion control frame, for driving `apply_control` directly.
+fn motion_control_frame() -> ScopedControlFrame {
+    motion_frame(SessionId::new(1), Generation::new(1), 1)
 }
 
 /// Registers one client and returns its outbound receiver, so a test can
@@ -210,19 +218,7 @@ fn release() -> DomainEnvelope {
 
 /// A full-coverage neutral motion frame — the host's recovery activation.
 fn neutral_frame(session: SessionId, generation: Generation, sequence: u32) -> DomainEnvelope {
-    DomainEnvelope::Frame(ScopedControlFrame {
-        session,
-        vehicle: VEHICLE,
-        scope: ScopeId::new(MOTION),
-        generation,
-        sequence: SequenceNum::new(sequence),
-        sampled_at: MonoTimestamp::from_nanos(0),
-        profile_revision: 1,
-        payload: ControlPayload {
-            axes: vec![(LogicalAxisId::new(0), 0.0)],
-            edges: Vec::new(),
-        },
-    })
+    DomainEnvelope::Frame(motion_frame(session, generation, sequence))
 }
 
 fn welcome_session(outcome: &SessionOutcome) -> SessionId {

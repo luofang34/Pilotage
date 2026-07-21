@@ -71,6 +71,11 @@ fn scope_descriptor(
         }),
         display_name: String::new(),
         link_loss_action: link_loss as i32,
+        // Typed intent/action capability advertisement (CTRL-01) is populated as
+        // adapters declare the families they accept; empty means this scope
+        // still takes only the legacy numeric axis payload.
+        intents: Vec::new(),
+        actions: Vec::new(),
     }
 }
 

@@ -24,6 +24,8 @@ fn control_frame(vehicle: VehicleId) -> ScopedControlFrame {
             axes: vec![(LogicalAxisId::new(2), 0.8), (LogicalAxisId::new(3), -0.4)],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     }
 }
 

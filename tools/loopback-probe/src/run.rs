@@ -163,6 +163,8 @@ async fn send_stale_generation_probe(
         sampled_at: crate::control_source::elapsed_to_timestamp(run_start.elapsed()),
         profile_revision: 0,
         payload: pilotage_protocol::ControlPayload::default(),
+        intent: None,
+        actions: vec![],
     };
     let bytes = pilotage_protocol::encode_control_frame_envelope(&frame);
     if let Err(source) = connection.send_datagram(bytes) {

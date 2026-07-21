@@ -186,6 +186,8 @@ fn full_throttle_frame_bytes(
                 }],
                 edges: Vec::new(),
             }),
+            intent: None,
+            actions: Vec::new(),
         })),
     };
     envelope.encode_to_vec()

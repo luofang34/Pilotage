@@ -168,6 +168,8 @@ pub(super) fn frame(
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
         payload: pilotage_protocol::ControlPayload { axes, edges },
+        intent: None,
+        actions: vec![],
     }
 }
 

@@ -23,6 +23,8 @@ fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
             axes: vec![(LogicalAxisId::new(2), 1.0), (LogicalAxisId::new(3), 0.0)],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     }
 }
 

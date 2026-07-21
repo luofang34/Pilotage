@@ -26,6 +26,8 @@ pub(super) fn sample_frame(payload: ControlPayload) -> ScopedControlFrame {
         sampled_at: MonoTimestamp::from_nanos(5),
         profile_revision: 6,
         payload,
+        intent: None,
+        actions: vec![],
     }
 }
 
@@ -187,6 +189,8 @@ fn envelope_roundtrips_for_host_capabilities_arm() {
                 }),
                 display_name: "Motion".to_owned(),
                 link_loss_action: wire::LinkLossAction::Stop as i32,
+                intents: vec![],
+                actions: vec![],
             }],
             supported_modes: vec![wire::ExecutionMode::Realtime as i32],
         }],
@@ -471,6 +475,8 @@ mod proptests {
                         sampled_at: MonoTimestamp::from_nanos(sampled_at),
                         profile_revision,
                         payload,
+                        intent: None,
+                        actions: vec![],
                     }
                 },
             )

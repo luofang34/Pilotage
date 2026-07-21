@@ -105,6 +105,8 @@ fn motion_frame(
             ],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     }
 }
 

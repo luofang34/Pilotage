@@ -163,6 +163,8 @@ fn send_one_frame(
         sampled_at,
         profile_revision,
         payload,
+        intent: None,
+        actions: vec![],
     };
     let bytes = pilotage_protocol::encode_control_frame_envelope(&frame);
     connection

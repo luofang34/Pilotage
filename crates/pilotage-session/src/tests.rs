@@ -118,6 +118,8 @@ pub(crate) fn frame(
             axes: vec![(LogicalAxisId::new(0), 0.25)],
             edges: Vec::new(),
         },
+        intent: None,
+        actions: vec![],
     }
 }
 
