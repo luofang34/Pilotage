@@ -25,7 +25,9 @@ use telemetry::sample_to_wire;
 #[cfg(test)]
 mod tests;
 
+mod drops;
 mod link_loss;
+use drops::{DropCounters, MessageClass};
 
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
@@ -40,40 +42,6 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Capacity of the per-stage latency ring buffer dumped at shutdown.
 const LATENCY_LOG_CAPACITY: usize = 4096;
-
-/// The ADR-0011 message classes the engine actor fans messages out as, for
-/// per-class drop accounting (ADR-0009: "drops are counted, never silent";
-/// ADR-0011: "drops are counted per class").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MessageClass {
-    /// A unicast reply to one client (bootstrap/session state or `Pong`).
-    Unicast,
-    /// A reliable, ordered authority/mode-change broadcast.
-    AuthorityBroadcast,
-    /// Best-effort telemetry, fanned out at tick cadence.
-    Telemetry,
-}
-
-/// Wrapping per-class counters for messages dropped because a client's
-/// outbound queue could not accept them without blocking the actor task.
-#[derive(Debug, Default)]
-struct DropCounters {
-    unicast: u64,
-    authority_broadcast: u64,
-    telemetry: u64,
-}
-
-impl DropCounters {
-    fn record(&mut self, class: MessageClass) -> u64 {
-        let counter = match class {
-            MessageClass::Unicast => &mut self.unicast,
-            MessageClass::AuthorityBroadcast => &mut self.authority_broadcast,
-            MessageClass::Telemetry => &mut self.telemetry,
-        };
-        *counter = counter.wrapping_add(1);
-        *counter
-    }
-}
 
 /// One command a connection task submits to the engine actor.
 #[derive(Debug)]
@@ -200,6 +168,19 @@ impl<A: VehicleAdapter> EngineActor<A> {
     ) {
         let validate_start = Instant::now();
         let is_disconnect = matches!(message, DomainEnvelope::Disconnect);
+        if let DomainEnvelope::ProfileActivation(activation) = &message {
+            // The traceability record for control evidence (INPUT-01): the
+            // digest and monotonic activation revision every subsequent
+            // frame's `activation_revision` binds to.
+            info!(
+                client = client.as_u64(),
+                profile = %activation.profile_id,
+                profile_revision = activation.profile_revision,
+                activation_revision = activation.activation_revision,
+                digest = %hex_digest(&activation.digest),
+                "control profile activation announced"
+            );
+        }
         let outcome = self.engine.handle_client_message(client, message, now);
         self.record_stage(Stage::Validate, validate_start.elapsed());
         if is_disconnect {
@@ -493,4 +474,9 @@ fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConn
             ToConnection::BootstrapMessage(encode_envelope_message(envelope))
         }
     }
+}
+
+/// Lowercase-hex rendering of a profile content digest for the evidence log.
+fn hex_digest(digest: &[u8; 32]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }

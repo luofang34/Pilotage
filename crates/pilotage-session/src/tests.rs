@@ -254,3 +254,70 @@ pub(crate) fn edge_only_frame(
     };
     f
 }
+
+/// The profile-activation traceability record (INPUT-01): an announced
+/// activation is retrievable against the session for telemetry/evidence,
+/// a re-announcement replaces it, and a pre-handshake announcement closes
+/// the connection like any other pre-welcome traffic.
+#[test]
+fn profile_activation_is_recorded_for_evidence() {
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    assert!(engine.active_profile(client).is_none());
+
+    // Announcing before the handshake closes the connection.
+    let premature = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session: SessionId::new(0),
+            profile_id: "builtin.gimbal.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: 1,
+            digest: [0xAB; 32],
+        }),
+        MonoTimestamp::from_nanos(1),
+    );
+    assert!(
+        premature
+            .actions
+            .iter()
+            .any(|action| matches!(action, SessionAction::CloseClient { .. })),
+        "pre-welcome activation closes: {:?}",
+        premature.actions
+    );
+
+    let session = welcome(&mut engine, client);
+    let announced = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "builtin.gimbal.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: 1,
+            digest: [0xAB; 32],
+        }),
+        MonoTimestamp::from_nanos(2),
+    );
+    assert!(announced.actions.is_empty(), "recording needs no reply");
+    let recorded = engine.active_profile(client).expect("activation recorded");
+    assert_eq!(recorded.profile_id, "builtin.gimbal.default");
+    assert_eq!(recorded.activation_revision, 1);
+    assert_eq!(recorded.digest, [0xAB; 32]);
+
+    // A later activation (profile switch) replaces the record.
+    let switched = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "user.custom".to_owned(),
+            profile_revision: 9,
+            activation_revision: 2,
+            digest: [0xCD; 32],
+        }),
+        MonoTimestamp::from_nanos(3),
+    );
+    assert!(switched.actions.is_empty());
+    let replaced = engine.active_profile(client).expect("record replaced");
+    assert_eq!(replaced.activation_revision, 2);
+    assert_eq!(replaced.digest, [0xCD; 32]);
+}
