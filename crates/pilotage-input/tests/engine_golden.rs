@@ -1,12 +1,15 @@
 //! Engine-layer golden vectors: fixed raw sample + profile → exact normalized
 //! axes and button edges (INPUT-01, ADR-0007).
 //!
-//! These pin the normalization pipeline and edge detector so a change to either
-//! is a deliberate, visible edit — not a silent drift. They are the SHARED
-//! reference the browser WASM engine must reproduce bit-for-bit: the same
-//! vectors are asserted against `pilotage-input` here and against the compiled
-//! wasm in `clients/web/control-runtime.test.mjs`, so native and browser output
-//! can never diverge unnoticed.
+//! These pin the normalization pipeline, edge detector, selector, and digest
+//! at the ENGINE layer, so a change to any of them is a deliberate, visible
+//! edit — not a silent drift. The browser is held to the same engine through
+//! a different seam: `clients/web-control/golden-vectors.json` drives the
+//! compiled wasm (whose device stage and scheme call this crate's
+//! `normalize_axis`/`select_by_identity`) and the native runtime from ONE
+//! fixture, so a native/wasm divergence reddens exactly one suite. These
+//! raw-level vectors are not re-executed inside the wasm ABI — the engine
+//! has no direct wasm export; it is only reachable through the runtime.
 //!
 //! Every vector lands on `{-1, 0, 1}` (or inside a deadzone, so exactly `0`) to
 //! stay independent of `powf` last-bit differences across platform libms.
