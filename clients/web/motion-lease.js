@@ -15,6 +15,19 @@ export function initialMotionLease() {
   return { granted: false, generation: 0n, fence: 0n, denied: false };
 }
 
+const U64 = 1n << 64n;
+const U64_HALF = 1n << 63n;
+
+/** Whether `candidate` is a strictly-newer generation than `fence` under u64
+ *  modular ordering, so a wrap (`u64::MAX → 0`) still reads as an advance. Only
+ *  the forward half-window is accepted; the exact half and any backward delta
+ *  are rejected — fail closed, never resume on an ambiguous or older generation
+ *  (generations are u64 and wrap; a raw `>` would mis-order a wrap). */
+export function isFreshGeneration(candidate, fence) {
+  const delta = (((candidate - fence) % U64) + U64) % U64;
+  return delta > 0n && delta < U64_HALF;
+}
+
 /** Applies a decoded reliable-stream message — already filtered to this vehicle
  *  and the motion scope — to the motion-lease authority, returning the next
  *  state. Unrelated message kinds return the state unchanged.
@@ -24,14 +37,17 @@ export function initialMotionLease() {
  *  `stale` field with the offending generation. A denial sets `denied` (with
  *  `denialReason`) and is terminal. */
 export function advanceMotionLease(motion, decoded) {
+  // A denial is TERMINAL for the transport session: once denied, every further
+  // response is ignored (a later grant must NOT restore authority) until a new
+  // session resets the authority via initialMotionLease / the reconnect path.
+  if (motion.denied) {
+    return motion;
+  }
   if (decoded.kind === "LeaseReleased") {
-    // Fence the generation we held; the next grant must strictly exceed it.
-    return {
-      granted: false,
-      generation: motion.generation,
-      fence: motion.generation,
-      denied: motion.denied,
-    };
+    // Fence the host's ACKNOWLEDGED generation — the protocol's current fencing
+    // generation — not our locally-held one; the next grant must exceed it.
+    const fence = BigInt(decoded.message.generation ?? motion.generation);
+    return { granted: false, generation: motion.generation, fence, denied: false };
   }
   if (decoded.kind === "LeaseResponse") {
     const message = decoded.message;
@@ -45,13 +61,14 @@ export function advanceMotionLease(motion, decoded) {
       };
     }
     const generation = BigInt(message.generation ?? 0);
-    if (generation <= motion.fence) {
-      // A grant at or below the fence is stale/replayed: never resume on it.
+    if (!isFreshGeneration(generation, motion.fence)) {
+      // A grant not strictly newer than the fence is stale/replayed (or an
+      // ambiguous wrap): never resume on it.
       return {
         granted: false,
         generation: motion.generation,
         fence: motion.fence,
-        denied: motion.denied,
+        denied: false,
         stale: generation,
       };
     }
