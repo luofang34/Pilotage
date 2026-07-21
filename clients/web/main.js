@@ -440,6 +440,9 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     // at transport.ready (which precedes bootstrap).
     reconnect.notifyBootstrapComplete();
     state.sessionWriter = writer;
+    // The writer exists only now, so the activation announcement (INPUT-01
+    // traceability) follows bootstrap completion rather than the welcome.
+    announceProfileActivation();
     runSessionStreamReader(reader, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`session stream reader stopped: ${error}`));
     });
@@ -602,6 +605,13 @@ async function runSessionStreamReader(reader, token) {
       const decoded = decodeLengthDelimitedEnvelope(pending);
       if (!decoded) break;
       pending = pending.subarray(decoded.consumed);
+      if (decoded.kind === "ControlActionResult") {
+        // The explicit per-action outcome (CTRL-01): a press is never
+        // silently dropped, and a rejection is loud.
+        const m = decoded.message;
+        const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;
+        log(`action result [${m.scope} seq=${m.sequence}] action=${m.action} ${verdict}`);
+      }
       if (decoded.kind === "LeaseReleased") {
         // Validate the acknowledgement before it settles anything: an
         // ack for another vehicle or scope proves nothing about ours.
@@ -700,7 +710,6 @@ function handleBootstrapMessage(decoded, token) {
     if (!velocityCapabilityFor(MOTION_SCOPE)) {
       log("vehicle advertises no velocity intent for vehicle.motion; motion control disabled");
     }
-    announceProfileActivation();
   } else if (decoded.kind === "ControlActionResult") {
     const m = decoded.message;
     const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;

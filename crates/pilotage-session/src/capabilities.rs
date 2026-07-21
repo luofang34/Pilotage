@@ -86,11 +86,77 @@ fn scope_descriptor(
         }),
         display_name: String::new(),
         link_loss_action: link_loss as i32,
-        // Typed intent/action capability advertisement (CTRL-01) is populated as
-        // adapters declare the families they accept; empty means this scope
-        // still takes only the legacy numeric axis payload.
-        intents: Vec::new(),
-        actions: Vec::new(),
+        intents: scope.intents.iter().map(intent_capability).collect(),
+        actions: scope.actions.iter().map(action_capability).collect(),
+    }
+}
+
+/// Projects one adapter-declared intent capability onto the wire, so a
+/// client scales its typed commands by the REAL envelope the adapter
+/// enforces (CTRL-01).
+fn intent_capability(intent: &pilotage_adapter_api::IntentCapability) -> wire::IntentCapability {
+    wire::IntentCapability {
+        family: intent_family(intent.family) as i32,
+        frames: intent
+            .frames
+            .iter()
+            .map(|frame| reference_frame(*frame) as i32)
+            .collect(),
+        max_linear: intent.max_linear,
+        max_angular: intent.max_angular,
+        max_vertical: intent.max_vertical,
+    }
+}
+
+fn action_capability(action: &pilotage_adapter_api::ActionCapability) -> wire::ActionCapability {
+    wire::ActionCapability {
+        action: action_kind(action.action) as i32,
+        mode_targets: action
+            .mode_targets
+            .iter()
+            .map(|target| mode_target(*target) as i32)
+            .collect(),
+    }
+}
+
+fn intent_family(family: pilotage_protocol::IntentFamily) -> wire::IntentFamily {
+    use pilotage_protocol::IntentFamily as Domain;
+    match family {
+        Domain::Velocity => wire::IntentFamily::Velocity,
+        Domain::PositionHold => wire::IntentFamily::PositionHold,
+        Domain::AttitudeThrust => wire::IntentFamily::AttitudeThrust,
+        Domain::BodyRate => wire::IntentFamily::BodyRate,
+        Domain::GimbalRate => wire::IntentFamily::GimbalRate,
+    }
+}
+
+fn reference_frame(frame: pilotage_protocol::ReferenceFrame) -> wire::ReferenceFrame {
+    use pilotage_protocol::ReferenceFrame as Domain;
+    match frame {
+        Domain::BodyFrd => wire::ReferenceFrame::BodyFrd,
+        Domain::LocalNed => wire::ReferenceFrame::LocalNed,
+        Domain::Gimbal => wire::ReferenceFrame::Gimbal,
+    }
+}
+
+fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
+    use pilotage_protocol::ActionKind as Domain;
+    match kind {
+        Domain::Arm => wire::ControlAction::Arm,
+        Domain::Disarm => wire::ControlAction::Disarm,
+        Domain::ModeRequest => wire::ControlAction::ModeRequest,
+        Domain::GimbalRecenter => wire::ControlAction::GimbalRecenter,
+        Domain::SimReset => wire::ControlAction::SimReset,
+    }
+}
+
+fn mode_target(target: pilotage_protocol::ModeTarget) -> wire::ModeTarget {
+    use pilotage_protocol::ModeTarget as Domain;
+    match target {
+        Domain::CameraVelocity => wire::ModeTarget::CameraVelocity,
+        Domain::FpvDirect => wire::ModeTarget::FpvDirect,
+        Domain::Hold => wire::ModeTarget::Hold,
+        Domain::Return => wire::ModeTarget::Return,
     }
 }
 

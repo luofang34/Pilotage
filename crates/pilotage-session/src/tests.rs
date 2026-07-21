@@ -321,3 +321,50 @@ fn profile_activation_is_recorded_for_evidence() {
     assert_eq!(replaced.activation_revision, 2);
     assert_eq!(replaced.digest, [0xCD; 32]);
 }
+
+/// The ServerWelcome advertisement carries the adapter's typed capability
+/// (CTRL-01): a client can only scale by the advertised envelope if the
+/// projection actually forwards it — an empty advertisement silently
+/// disables typed control (the client fails closed).
+#[test]
+fn welcome_advertises_the_typed_capability() {
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    let outcome = engine.handle_client_message(
+        client,
+        DomainEnvelope::Hello(pilotage_protocol::ClientHello {
+            protocol_version: 1,
+            client_name: "test".to_owned(),
+            join_token: vec![],
+        }),
+        MonoTimestamp::from_nanos(0),
+    );
+    let welcome = outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::Welcome(welcome),
+                ..
+            } => Some(welcome),
+            _ => None,
+        })
+        .expect("welcome sent");
+    let scope = &welcome.host_capabilities.vehicles[0].scopes[0];
+    let intent = scope.intents.first().expect("velocity intent advertised");
+    assert_eq!(
+        intent.family,
+        pilotage_protocol::wire::IntentFamily::Velocity as i32
+    );
+    assert_eq!(intent.max_linear, 1.0);
+    assert_eq!(intent.max_angular, 1.0);
+    assert_eq!(
+        intent.frames,
+        vec![pilotage_protocol::wire::ReferenceFrame::BodyFrd as i32]
+    );
+    let action = scope.actions.first().expect("arm action advertised");
+    assert_eq!(
+        action.action,
+        pilotage_protocol::wire::ControlAction::Arm as i32
+    );
+}
