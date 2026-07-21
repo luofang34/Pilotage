@@ -46,6 +46,9 @@ pub struct BridgeConfig {
     /// own default (`/camera`); worlds where the onboard view is a moving
     /// gimbal camera on a scoped topic set it explicitly.
     pub camera_topic: Option<String>,
+    /// Gimbal payload (`camera_id = 2`) gz image topic. `None` when the vehicle
+    /// carries no gimbal, so the bridge subscribes no third camera.
+    pub gimbal_camera_topic: Option<String>,
     /// Bounded depth of the raw-frame channel.
     pub frame_channel_depth: usize,
 }
@@ -60,6 +63,7 @@ impl BridgeConfig {
             bridge_bin,
             vehicle_name: vehicle_name.into(),
             camera_topic: None,
+            gimbal_camera_topic: None,
             frame_channel_depth: DEFAULT_FRAME_CHANNEL_DEPTH,
         }
     }
@@ -70,6 +74,15 @@ impl BridgeConfig {
     #[must_use]
     pub fn with_camera_topic(mut self, topic: impl Into<String>) -> Self {
         self.camera_topic = Some(topic.into());
+        self
+    }
+
+    /// Adds the gimbal payload camera (`camera_id = 2`, the bridge's
+    /// `--gimbal-camera-topic`) as a third video source, distinct from the FPV
+    /// and chase views, so the gimbal's own pannable view has its own feed.
+    #[must_use]
+    pub fn with_gimbal_camera_topic(mut self, topic: impl Into<String>) -> Self {
+        self.gimbal_camera_topic = Some(topic.into());
         self
     }
 }
@@ -191,6 +204,11 @@ impl BridgeClient {
             .arg(&config.vehicle_name);
         if let Some(camera_topic) = &config.camera_topic {
             command.arg("--camera-topic").arg(camera_topic);
+        }
+        if let Some(gimbal_camera_topic) = &config.gimbal_camera_topic {
+            command
+                .arg("--gimbal-camera-topic")
+                .arg(gimbal_camera_topic);
         }
         command
     }
@@ -414,6 +432,26 @@ mod tests {
             .iter()
             .position(|arg| arg == "--camera-topic")
             .expect("--camera-topic present");
+        assert_eq!(args.get(idx + 1).map(String::as_str), Some(topic));
+    }
+
+    #[test]
+    fn a_gimbal_camera_topic_adds_the_third_camera_flag() {
+        let base = BridgeConfig::new("x500", PathBuf::from("/nonexistent/pilotage-gz-bridge"));
+        // No gimbal camera by default: a bare airframe subscribes no third feed.
+        assert!(
+            !bridge_args(&base)
+                .iter()
+                .any(|arg| arg == "--gimbal-camera-topic"),
+            "no --gimbal-camera-topic by default"
+        );
+
+        let topic = "/world/default/model/x500_0/link/camera_link/sensor/camera/image";
+        let args = bridge_args(&base.with_gimbal_camera_topic(topic));
+        let idx = args
+            .iter()
+            .position(|arg| arg == "--gimbal-camera-topic")
+            .expect("--gimbal-camera-topic present");
         assert_eq!(args.get(idx + 1).map(String::as_str), Some(topic));
     }
 }

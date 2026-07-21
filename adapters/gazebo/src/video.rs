@@ -74,9 +74,9 @@ impl FrameStamper {
     #[must_use]
     pub fn stamp(&mut self, frame: BridgeFrame) -> RawVideoFrame {
         // The sidecar camera_id is a u32 for wire headroom, but only ids 0
-        // (FPV) / 1 (chase) are assigned; an out-of-range id saturates to
-        // u8::MAX so a reader routes it to no known source rather than
-        // aliasing onto a valid one.
+        // (FPV) / 1 (chase) / 2 (gimbal payload) are assigned; an out-of-range
+        // id saturates to u8::MAX so a reader routes it to no known source
+        // rather than aliasing onto a valid one.
         let source_id = u8::try_from(frame.camera_id).unwrap_or(u8::MAX);
         let sequence = self.take_sequence(source_id);
         let stamp = MeasurementStamp {
@@ -166,6 +166,7 @@ mod tests {
         let mut stamper = stamper();
         let fpv0 = stamper.stamp(bridge_frame(0, 100));
         let chase0 = stamper.stamp(bridge_frame(1, 110));
+        let gimbal0 = stamper.stamp(bridge_frame(2, 115));
         let fpv1 = stamper.stamp(bridge_frame(0, 120));
         assert_eq!(fpv0.capture.stamp.sequence, 0);
         assert_eq!(fpv1.capture.stamp.sequence, 1, "FPV advances independently");
@@ -173,8 +174,13 @@ mod tests {
             chase0.capture.stamp.sequence, 0,
             "chase starts its own count"
         );
+        assert_eq!(gimbal0.capture.stamp.sequence, 0, "gimbal starts its own");
         assert_eq!(fpv0.source_id, 0);
         assert_eq!(chase0.source_id, 1);
+        assert_eq!(
+            gimbal0.source_id, 2,
+            "camera_id 2 maps to the gimbal source"
+        );
     }
 
     #[test]

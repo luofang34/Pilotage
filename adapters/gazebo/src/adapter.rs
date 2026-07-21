@@ -36,10 +36,14 @@ pub const YAW_AXIS: u16 = 3;
 pub const FPV_SOURCE_ID: &str = "onboard-fpv";
 /// Identifier of the chase camera video source (source id 1).
 pub const CHASE_SOURCE_ID: &str = "chase";
+/// Identifier of the gimbal payload camera video source (source id 2).
+pub const GIMBAL_SOURCE_ID: &str = "gimbal";
 /// Wire source id of the onboard FPV camera.
 pub const FPV_CAMERA: u8 = 0;
 /// Wire source id of the chase camera.
 pub const CHASE_CAMERA: u8 = 1;
+/// Wire source id of the gimbal payload camera.
+pub const GIMBAL_CAMERA: u8 = 2;
 
 /// A decoded raw camera frame from the sidecar bridge, carrying the capture
 /// identity and clock mapping needed to trace it back to the aircraft state

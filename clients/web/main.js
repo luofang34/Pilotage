@@ -96,12 +96,14 @@ const els = {
   gamepad: document.getElementById("gamepad"),
   canvas: document.getElementById("video"),
   chaseCanvas: document.getElementById("chaseVideo"),
+  gimbalCanvas: document.getElementById("gimbalVideo"),
   pfd: document.getElementById("pfd"),
   hsi: document.getElementById("hsi"),
   flightMode: document.getElementById("flightMode"),
 };
 const ctx = els.canvas.getContext("2d");
 const chaseCtx = els.chaseCanvas.getContext("2d");
+const gimbalCtx = els.gimbalCanvas.getContext("2d");
 const pfdCtx = els.pfd.getContext("2d");
 const hsiCtx = els.hsi.getContext("2d");
 const pfdFaultPresenter = createDomFaultPresenter(els.pfd);
@@ -789,16 +791,19 @@ function dispatchAuthorityEnvelope(decoded, token) {
   }
 }
 
-// The source_id (0 = onboard FPV, 1 = chase) routes a frame to its canvas. An
-// unknown source_id is counted and logged, never a hard failure, so a host
-// streaming a source this viewer lacks degrades gracefully. Codec dispatch is
+// The source_id (0 = onboard FPV, 1 = chase, 2 = gimbal payload) routes a frame
+// to its canvas. An unknown source_id is counted and logged, never a hard
+// failure, so a host streaming a source this viewer lacks degrades
+// gracefully. Codec dispatch is
 // separate: "MJPG" paints via createImageBitmap; "H264" routes to WebCodecs.
 const FOURCC_MJPEG = "MJPG";
 const SOURCE_FPV = 0;
 const SOURCE_CHASE = 1;
+const SOURCE_GIMBAL = 2;
 const VIDEO_TARGETS = {
   [SOURCE_FPV]: { canvas: els.canvas, ctx },
   [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
+  [SOURCE_GIMBAL]: { canvas: els.gimbalCanvas, ctx: gimbalCtx },
 };
 
 // Per-source H.264 decoders, each bound to the transport session that built it

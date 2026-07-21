@@ -246,6 +246,7 @@
   <label>main view
     <select id="mainView">
       <option value="stage-video" selected>FPV / onboard camera</option>
+      <option value="stage-gimbal">gimbal / payload</option>
       <option value="stage-chase">chase / 3rd person</option>
       <option value="stage-pfd">PFD</option>
     </select>
@@ -272,6 +273,10 @@
   </aside>
 </div>
 <div id="stageShelf">
+  <figure class="stage" id="stage-gimbal">
+    <figcaption>gimbal / payload</figcaption>
+    <div class="frame"><canvas id="gimbalVideo" width="320" height="240"></canvas></div>
+  </figure>
   <figure class="stage" id="stage-chase">
     <figcaption>chase / 3rd person</figcaption>
     <div class="frame"><canvas id="chaseVideo" width="320" height="240"></canvas></div>

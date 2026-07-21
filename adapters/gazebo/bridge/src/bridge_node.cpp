@@ -80,6 +80,15 @@ bool BridgeNode::Start(std::string &error_out) {
     return false;
   }
 
+  // The gimbal payload camera is optional: a vehicle without a gimbal leaves
+  // the topic empty and the bridge subscribes no third camera.
+  if (!config_.gimbal_camera_topic.empty() &&
+      !node_.Subscribe(config_.gimbal_camera_topic, &BridgeNode::OnGimbalImage,
+                       this)) {
+    error_out = "failed to subscribe " + config_.gimbal_camera_topic;
+    return false;
+  }
+
   return true;
 }
 
@@ -106,6 +115,8 @@ void BridgeNode::OnOdometry(const gz::msgs::Odometry &msg) {
 void BridgeNode::OnFpvImage(const gz::msgs::Image &msg) { OnImage(msg, 0); }
 
 void BridgeNode::OnChaseImage(const gz::msgs::Image &msg) { OnImage(msg, 1); }
+
+void BridgeNode::OnGimbalImage(const gz::msgs::Image &msg) { OnImage(msg, 2); }
 
 void BridgeNode::OnImage(const gz::msgs::Image &msg, std::uint32_t camera_id) {
   pilotage::bridge::v1::BridgeEnvelope envelope;

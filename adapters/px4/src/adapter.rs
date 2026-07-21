@@ -451,6 +451,10 @@ impl VehicleAdapter for Px4Adapter {
                 id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
                 description: "chase camera".to_owned(),
             },
+            VideoSource {
+                id: pilotage_adapter_gazebo::GIMBAL_SOURCE_ID.to_owned(),
+                description: "gimbal payload camera".to_owned(),
+            },
         ]
     }
 
