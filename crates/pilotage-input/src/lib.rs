@@ -25,7 +25,7 @@ pub use logical::{axis_id_for_name, button_id_for_name};
 pub use normalize::{NormalizedAxis, normalize_axis};
 pub use profile::{
     AxisCalibration, AxisConfig, ButtonConfig, DeviceIdentity, DeviceInfo, DeviceProfile,
-    ProfileError, SCHEMA_VERSION, parse_profile_bytes, parse_profile_str,
+    ProfileError, SCHEMA_VERSION, parse_profile_bytes, parse_profile_str, validate_axis_config,
 };
 pub use registry::{
     GENERIC_GAMEPAD_JSON, LayeredProfile, ProfileLayer, layered, load_builtin_generic_gamepad,

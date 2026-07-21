@@ -14,6 +14,9 @@ pub use axis::{AxisCalibration, AxisConfig};
 pub use button::ButtonConfig;
 pub use device::{DeviceIdentity, DeviceInfo, DeviceProfile, SCHEMA_VERSION};
 pub use error::{EntryKind, ProfileError};
+pub use validate::validate_axis_config;
+
+mod validate;
 
 use crate::logical::{axis_id_for_name, button_id_for_name};
 use std::collections::HashSet;
@@ -78,16 +81,7 @@ fn validate_profile(profile: &DeviceProfile) -> Result<(), ProfileError> {
                 name: axis.logical.clone(),
             });
         }
-        let calibration = &axis.calibration;
-        let ordered = calibration.min < calibration.center && calibration.center < calibration.max;
-        if !ordered {
-            return Err(ProfileError::DegenerateCalibration {
-                source_index: axis.source_index,
-                min: calibration.min,
-                center: calibration.center,
-                max: calibration.max,
-            });
-        }
+        validate::validate_axis_config(axis)?;
     }
     let mut button_sources = HashSet::new();
     let mut button_names = HashSet::new();

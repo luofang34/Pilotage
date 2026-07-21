@@ -79,6 +79,37 @@ pub enum ProfileError {
         /// The repeated logical name.
         name: String,
     },
+
+    /// An axis `deadzone` was outside `[0.0, 1.0)`, the range over which the
+    /// normalization pipeline stays monotonic (a deadzone `>= 1.0` would clamp
+    /// every input to zero; a negative one is meaningless).
+    #[error("device profile axis {source_index} deadzone {value} is outside [0.0, 1.0)")]
+    DeadzoneOutOfRange {
+        /// Source index of the offending axis.
+        source_index: usize,
+        /// The out-of-range deadzone value.
+        value: f32,
+    },
+
+    /// An axis `expo` was outside `[-0.99, 10.0]`, the range over which the
+    /// response curve stays bounded and single-valued.
+    #[error("device profile axis {source_index} expo {value} is outside [-0.99, 10.0]")]
+    ExpoOutOfRange {
+        /// Source index of the offending axis.
+        source_index: usize,
+        /// The out-of-range expo value.
+        value: f32,
+    },
+
+    /// An axis response-curve field (`deadzone` or `expo`) was `NaN` or
+    /// infinite, so it could never define a usable curve.
+    #[error("device profile axis {source_index} has a non-finite {field}")]
+    NonFiniteAxisValue {
+        /// Source index of the offending axis.
+        source_index: usize,
+        /// Which response-curve field was non-finite.
+        field: &'static str,
+    },
 }
 
 /// Distinguishes axis entries from button entries in duplicate-entry errors.
