@@ -2,10 +2,11 @@
 //!
 //! The browser owns only Gamepad API sampling, DOM, WebTransport, and the
 //! execution of returned actions. This crate owns everything else: device
-//! mapping, deadzone/expo/inversion, the gimbal quasimode (modifier capture,
-//! flight-input masking, R3 edge detection, entry/exit neutralization), lease
-//! planning, and the runtime state — behind one [`ControlRuntime::evaluate`]
-//! call per control tick.
+//! identity resolution and per-device routing (the [`device`] stage, driven
+//! by shared-engine profile data), deadzone/expo/inversion, the gimbal
+//! quasimode (modifier capture, flight-input masking, R3 edge detection,
+//! entry/exit neutralization), lease planning, and the runtime state —
+//! behind one [`ControlRuntime::evaluate`] call per control tick.
 //!
 //! Mappings enter through one validated seam: [`ProfileRuntime::compile`]
 //! turns candidate bytes (built-in, imported, cached, or restored — the core
@@ -13,6 +14,7 @@
 //! swaps it in through a neutral, transactional handover. There is no
 //! privileged default path.
 
+mod device;
 mod flight;
 mod plan;
 mod profile;
@@ -26,6 +28,7 @@ mod wasm;
 #[cfg(test)]
 mod golden;
 
+pub use device::{DeviceStage, MAX_AXES, MAX_BUTTONS, SelectOutcome, parse_gamepad_identity};
 pub use plan::{
     AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ActivationPlan, BUTTON_EDGE_PRESSED,
     ControlPlan, Frame, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, LeaseAction, MOTION_SCOPE,

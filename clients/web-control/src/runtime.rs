@@ -49,6 +49,12 @@ pub struct ControlRuntime {
     // baseline from the held state and fires no edge — a button held across a
     // disconnect/reconnect cannot become a fresh arm/disarm/recenter.
     last_generation: Option<u32>,
+    // Set when the DEVICE mapping changed (a pad swap or re-selection): the
+    // next tick re-seeds the discrete edge baselines from the held state, so
+    // a button already pressed on the newly mapped device cannot fire as a
+    // fresh arm/disarm/recenter. Unlike a generation change this does NOT
+    // touch the motion-authority phase — a terminal denial stays terminal.
+    reseed_edges: bool,
 }
 
 impl ControlRuntime {
@@ -72,6 +78,13 @@ impl ControlRuntime {
     #[must_use]
     pub const fn is_active(&self) -> bool {
         self.active.is_some()
+    }
+
+    /// Marks the discrete edge baselines for a re-seed on the next tick —
+    /// called when the DEVICE mapping changes, so an input already held on
+    /// the newly mapped device cannot fire as a fresh edge.
+    pub fn reseed_edge_baselines(&mut self) {
+        self.reseed_edges = true;
     }
 
     /// The active profile's identity string, or empty before activation.
@@ -154,6 +167,12 @@ impl ControlRuntime {
             return ControlPlan::default();
         };
         self.prime_for_generation(sample, session, &active);
+        if self.reseed_edges {
+            self.reseed_edges = false;
+            self.reset_baseline = reset_held(sample, &active.gimbal);
+            self.prev_arm = sample.pressed(usize::from(active.flight.arm_button));
+            self.prev_disarm = sample.pressed(usize::from(active.flight.disarm_button));
+        }
         let plan = if self.pending.is_some() {
             self.evaluate_handover(sample, session, &active)
         } else {

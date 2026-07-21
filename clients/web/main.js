@@ -116,7 +116,10 @@ const state = {
   generation: 0n,
   sequence: 0,
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
-  keys: new Set(),
+  // The runtime owns key bindings AND the held-key state; the shell only
+  // forwards transitions. This records which Gamepad.id the runtime last
+  // resolved, so selection re-runs only when the device actually changes.
+  selectedPadId: null,
   pendingReset: false,
   pendingFpvToggle: false,
   connected: false,
@@ -1037,40 +1040,21 @@ async function readTelemetryDatagrams(transport, token) {
 
 // ---- keyboard -> control frame datagrams -----------------------------------
 
-const DRIVE_KEYS = new Set([
-  "ArrowUp",
-  "ArrowDown",
-  "ArrowLeft",
-  "ArrowRight",
-  "w",
-  "a",
-  "s",
-  "d",
-  "W",
-  "A",
-  "S",
-  "D",
-  "Enter",
-  "Backspace",
-]);
-
-// Keys are stored raw (letters lower-cased) so rover and flight modes can
-// map WASD and the arrows independently.
+// Which keys the page captures is a device-profile question, answered by the
+// runtime's keyboard profile data (boundKey) — no key list lives here. Keys
+// are canonicalized (letters lower-cased) so the profile speaks one form.
 function canonicalKey(key) {
   return key.length === 1 ? key.toLowerCase() : key;
 }
-window.addEventListener("keydown", (event) => {
-  if (DRIVE_KEYS.has(event.key)) {
-    state.keys.add(canonicalKey(event.key));
-    event.preventDefault();
-  }
-});
-window.addEventListener("keyup", (event) => {
-  if (DRIVE_KEYS.has(event.key)) {
-    state.keys.delete(canonicalKey(event.key));
-    event.preventDefault();
-  }
-});
+function forwardKey(event, pressed) {
+  if (!state.controlShell) return;
+  const key = canonicalKey(event.key);
+  if (!state.controlShell.boundKey(key)) return;
+  state.controlShell.keyEvent(key, pressed);
+  event.preventDefault();
+}
+window.addEventListener("keydown", (event) => forwardKey(event, true));
+window.addEventListener("keyup", (event) => forwardKey(event, false));
 
 /** Returns the first connected gamepad that matches a known profile, else any
  *  connected gamepad, else null. A gamepad is exposed to the page only after the
@@ -1167,6 +1151,18 @@ async function runControlLoop(writer, token) {
       // lease action. All device mapping, curves, masking, edge detection, and
       // lease planning live in the runtime; this shell only executes the plan.
       const pad = activeGamepad();
+      // Resolve the pad's profile through the runtime's shared selector the
+      // moment its identity changes. A refused selection (ambiguous registry)
+      // keeps NO device map: those ticks sample empty and drive nothing.
+      if (pad && pad.id !== state.selectedPadId) {
+        state.selectedPadId = pad.id;
+        const outcome = state.controlShell.selectDevice(pad.id);
+        if (outcome === null) {
+          log(`gamepad REFUSED (ambiguous device-profile registry): ${pad.id}`);
+        } else {
+          log(`gamepad mapped (${outcome}): ${state.controlShell.deviceLabel()}`);
+        }
+      }
       const sessionState = {
         generation: state.controlGeneration,
         mode,
@@ -1186,7 +1182,7 @@ async function runControlLoop(writer, token) {
       };
       const plan = pad
         ? state.controlShell.tickFromPad(pad, sessionState)
-        : state.controlShell.tickFromKeys(state.keys, sessionState);
+        : state.controlShell.tickFromKeys(sessionState);
       updateControlReadout(pad, mode, plan);
       // Re-check the latch immediately before the write: no frame may be
       // sent under this generation once input loss latched, regardless of
@@ -1311,7 +1307,11 @@ function executeLeaseAction(token, action, scope) {
 /** Shows the live control mapping in the readout: the gimbal quasimode when a
  *  gimbal frame streams, otherwise the flight axes. Display only. */
 function updateControlReadout(pad, mode, plan) {
-  const src = pad ? pad.id.slice(0, 24) : "keyboard (WS=climb AD=yaw arrows=move)";
+  // The selected-profile label comes from the runtime (visible identity,
+  // ADR-0007); an empty label means the pad's selection was refused.
+  const src = pad
+    ? state.controlShell.deviceLabel() || "pad refused (ambiguous profiles)"
+    : "keyboard (WS=climb AD=yaw arrows=move)";
   // Capture is shown whenever the modifier is held, even at a centered stick,
   // so #167's deliberate LT-descend suppression is always visible.
   if (plan.captureActive) {
@@ -1517,5 +1517,5 @@ window.addEventListener("blur", () => {
   if (state.leaseGranted && transportSessions.active !== null) {
     sendLeaseRelease(transportSessions.active);
   }
-  state.keys.clear();
+  state.controlShell?.clearKeys();
 });

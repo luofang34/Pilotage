@@ -1,0 +1,27 @@
+{
+    "schema_version": 1,
+    "revision": 1,
+    "device": { "vendor_id": 4617, "product_id": 20308, "product": "RadioMaster Pocket" },
+    "description": "RadioMaster Pocket (EdgeTX joystick mode, USB VID 0x1209 / PID 0x4F54) as the browser Gamepad API exposes it: a non-standard mapping whose axes follow the EdgeTX AETR channel order (0 = aileron/roll on the right-stick X gimbal, 1 = elevator/pitch on the right-stick Y gimbal, 2 = throttle on the left-stick Y gimbal, 3 = rudder/yaw on the left-stick X gimbal, Mode 2). Routing turns that into canonical slots: slot0 <- rudder, slot1 <- throttle (inverted: a raised throttle gimbal reads +1 from the browser, while canonical left-stick-up is -1), slot2 <- aileron, slot3 <- elevator (inverted for the same reason). The AETR order is carried over from the shared registry's HID capture, whose stick assignment was inferred from resting values, not verified stick-by-stick; a physical-unit pass must confirm it before this profile is relied on for flight.",
+    "axes": [
+        { "source_index": 3, "logical": "slot0", "invert": false, "deadzone": 0.0, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } },
+        { "source_index": 2, "logical": "slot1", "invert": true, "deadzone": 0.0, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } },
+        { "source_index": 0, "logical": "slot2", "invert": false, "deadzone": 0.0, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } },
+        { "source_index": 1, "logical": "slot3", "invert": true, "deadzone": 0.0, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } }
+    ],
+    "buttons": [
+        { "source_index": 0, "logical": "button0" },
+        { "source_index": 1, "logical": "button1" },
+        { "source_index": 2, "logical": "button2" },
+        { "source_index": 3, "logical": "button3" },
+        { "source_index": 4, "logical": "button4" },
+        { "source_index": 5, "logical": "button5" },
+        { "source_index": 6, "logical": "button6" },
+        { "source_index": 7, "logical": "button7" },
+        { "source_index": 8, "logical": "button8" },
+        { "source_index": 9, "logical": "button9" },
+        { "source_index": 10, "logical": "button10" },
+        { "source_index": 11, "logical": "button11" }
+    ],
+    "keys": []
+}

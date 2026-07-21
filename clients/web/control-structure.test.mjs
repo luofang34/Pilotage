@@ -1,25 +1,58 @@
-// Structural guard: main.js must stay a thin shell. It may sample the Gamepad
-// API, touch the DOM and WebTransport, and execute the runtime's plan — but it
-// must hold NO device mapping table, controller-index mapping, response curve
-// (deadzone/expo), or gimbal state machine. Those live in the Rust/WASM
-// runtime behind one evaluate() call. If any reappears here, future profile
+// Structural guard: no first-party browser module may hold input-mapping
+// logic. Device mapping (keyboard AND gamepad), controller identity tables,
+// response curves (deadzone/expo), and the gimbal state machine live in the
+// Rust/WASM runtime behind one evaluate() call, sourced from device-profile
+// DATA — if any table reappears in shell JavaScript, future profile
 // restoration would again mean an architectural rewrite instead of a source
-// change; this test fails closed so that regression is loud.
+// change. This scans EVERY module in clients/web (not only main.js), so a
+// mapping table cannot dodge the guard by moving files.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
-const main = readFileSync(new URL("./main.js", import.meta.url), "utf8");
+// Generated wasm bindings are build artifacts, not first-party shell code.
+const GENERATED = new Set(["control-runtime.js", "instrument-runtime.js"]);
+
+const dir = new URL("./", import.meta.url);
+const modules = readdirSync(dir)
+  .filter((name) => name.endsWith(".js") && !GENERATED.has(name))
+  .sort();
 
 let failures = 0;
-function forbid(label, pattern) {
-  const match = main.match(pattern);
+function forbid(name, source, label, pattern) {
+  const match = source.match(pattern);
   if (match) {
     failures += 1;
-    console.error(`FAIL - main.js must not contain ${label} (found ${JSON.stringify(match[0])})`);
-  } else {
-    console.log(`ok   - main.js holds no ${label}`);
+    console.error(`FAIL - ${name} must not contain ${label} (found ${JSON.stringify(match[0])})`);
   }
 }
+
+// Patterns any first-party module is banned from holding.
+const BANNED = [
+  ["a deadzone", /\bdeadzone\b/i],
+  ["an expo curve", /\bexpo\b/],
+  ["a key mapping table", /KEY_AXES|KEY_BUTTONS|DRIVE_KEYS/],
+  ["a key-to-axis binding literal", /key:\s*"[^"]+",\s*(axis|button):/],
+  ["a flight-scheme mapping table", /FLIGHT_SCHEMES/],
+  ["a stick shaper", /stickShaper/],
+  ["a controller-profile mapping table", /CONTROLLER_PROFILES|forwardAxis|turnAxis/],
+  ["gamepad identity parsing", /parseGamepadId|vendorId\s*=/],
+  [
+    "a retired gimbal mapping function",
+    /gimbal(AxesFromGamepad|MaskedView|ModifierHeld|FramePlan|ResetEdge|LeasePlan|WheelRates)/,
+  ],
+  ["an import from the retired gimbal-input module", /gimbal-input/],
+];
+
+for (const name of modules) {
+  const source = readFileSync(new URL(`./${name}`, dir), "utf8");
+  for (const [label, pattern] of BANNED) {
+    forbid(name, source, label, pattern);
+  }
+}
+console.log(`scanned ${modules.length} modules for mapping logic`);
+
+// And the shell must still drive the runtime through the one seam.
+const main = readFileSync(new URL("./main.js", dir), "utf8");
 function require(label, pattern) {
   if (pattern.test(main)) {
     console.log(`ok   - main.js ${label}`);
@@ -28,29 +61,13 @@ function require(label, pattern) {
     console.error(`FAIL - main.js must ${label}`);
   }
 }
-
-// Response curves belong to the runtime, never the shell.
-forbid("a deadzone", /\bdeadzone\b/);
-forbid("an expo curve", /\bexpo\b/);
-// Per-mode / per-device mapping tables belong to the runtime.
-forbid("a flight-scheme mapping table", /FLIGHT_SCHEMES/);
-forbid("a stick shaper", /stickShaper/);
-forbid("a controller-profile mapping table", /CONTROLLER_PROFILES|forwardAxis|turnAxis/);
-// The gimbal quasimode / mapping is the runtime's, not the shell's. (Network
-// lease STATE like gimbalLeaseGranted is fine — the runtime plans, the shell
-// only tracks the grant and executes; the retired mapping FUNCTIONS are not.)
-forbid(
-  "a retired gimbal mapping function",
-  /gimbal(AxesFromGamepad|MaskedView|ModifierHeld|FramePlan|ResetEdge|LeasePlan|WheelRates)/,
-);
-forbid("an import from the retired gimbal-input module", /gimbal-input/);
-
-// And it must drive the runtime through the one seam.
 require("imports the control shell", /from "\.\/control-shell\.js"/);
 require("evaluates one tick through the runtime", /tickFromPad|tickFromKeys/);
+require("resolves pad identity through the runtime selector", /selectDevice/);
+require("forwards key transitions to the runtime", /keyEvent/);
 
 if (failures > 0) {
   console.error(`${failures} structural violation(s)`);
   process.exit(1);
 }
-console.log("main.js structural contract passed");
+console.log("browser control structural contract passed");

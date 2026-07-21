@@ -1,10 +1,10 @@
 // The thin JS half of the control vertical slice. It owns ONLY Gamepad/keyboard
 // sampling and the wasm plumbing: it copies a raw device sample into the
 // control-runtime's input buffer, calls evaluate() once, and reads a semantic
-// plan back out. All mapping, response curves, the gimbal quasimode, masking,
-// edge detection, lease planning, and runtime state live in the Rust/WASM
-// runtime (pilotage-control-web) behind that one call — there is no mapping
-// table, controller index, deadzone, or expo here.
+// plan back out. All device mapping, response curves, the gimbal quasimode,
+// masking, edge detection, lease planning, and runtime state live in the
+// Rust/WASM runtime (pilotage-control-web) behind that one call — this file
+// holds no mapping table, controller index, or response-curve constant.
 
 // Input buffer layout (must match clients/web-control/src/wasm.rs):
 //   axes f32[8] | button values f32[24] | pressed-bitset u32.
@@ -29,25 +29,13 @@ const MOTION_LEASE_SHIFT = 10; // bits 10..11: motion lease, same encoding.
 
 const MODE_IDS = { "quad-pilot": 0, "quad-cruise": 1, fpv: 2, rover: 3 };
 
-// Keyboard is a first-class raw source, not a second mapping: each key sets a
-// Standard-Gamepad axis/button position, and the SAME wasm runtime maps it.
-// Keys are matched against the shell's stored key set, which holds
-// event.key with letters lower-cased (canonicalKey in main.js) — so WASD is
-// "w"/"a"/"s"/"d", not the KeyW/KeyA event.code form.
-const KEY_AXES = [
-  { key: "s", axis: 1, value: 1 },
-  { key: "w", axis: 1, value: -1 },
-  { key: "d", axis: 0, value: 1 },
-  { key: "a", axis: 0, value: -1 },
-  { key: "ArrowDown", axis: 3, value: 1 },
-  { key: "ArrowUp", axis: 3, value: -1 },
-  { key: "ArrowRight", axis: 2, value: 1 },
-  { key: "ArrowLeft", axis: 2, value: -1 },
-];
-const KEY_BUTTONS = [
-  { key: "Enter", button: 9 }, // arm
-  { key: "Backspace", button: 8 }, // disarm
-];
+// Raw-sample source selector for evaluate(): pad reads the input buffer
+// through the selected device profile; keys synthesize from the held-key
+// state the runtime tracks. There is NO key or axis table here — keyboard
+// and gamepad mappings are device-profile DATA inside the runtime, and the
+// shell forwards Gamepad.id strings and key events verbatim.
+const SOURCE_PAD = 0;
+const SOURCE_KEYS = 1;
 
 /** Loads the control-runtime wasm and bootstraps it through the normal
  *  activation path: compile the built-in default profile bytes, then activate.
@@ -114,16 +102,46 @@ export class ControlShell {
     return this.#control.activate(candidateBytes);
   }
 
+  /** Resolves a Gamepad.id through the runtime's shared device selector.
+   *  Returns "exact", "fallback", or null when refused (an ambiguous
+   *  registry fails closed: that pad's ticks drive nothing). */
+  selectDevice(gamepadId) {
+    const outcome = this.#control.select_device(gamepadId ?? "");
+    return outcome === 1 ? "exact" : outcome === 2 ? "fallback" : null;
+  }
+
+  /** The selected pad profile's human-readable label (empty when refused). */
+  deviceLabel() {
+    return this.#control.device_label();
+  }
+
+  /** Forwards one canonical key transition (letters lower-cased) to the
+   *  runtime's held-key state. */
+  keyEvent(key, pressed) {
+    this.#control.key_event(key, pressed);
+  }
+
+  /** Whether the keyboard profile binds this canonical key — the shell's
+   *  capture filter, answered from profile data. */
+  boundKey(key) {
+    return this.#control.key_is_bound(key);
+  }
+
+  /** Drops every held key (window blur or session teardown). */
+  clearKeys() {
+    this.#control.clear_keys();
+  }
+
   /** Evaluates one tick from a connected gamepad. */
   tickFromPad(pad, session) {
     const axisCount = this.#writePad(pad);
-    return this.#evaluate(axisCount, MAX_BUTTONS, session);
+    return this.#evaluate(axisCount, MAX_BUTTONS, session, SOURCE_PAD);
   }
 
-  /** Evaluates one tick from the keyboard fallback (no gamepad present). */
-  tickFromKeys(keySet, session) {
-    const buttonCount = this.#writeKeys(keySet);
-    return this.#evaluate(4, buttonCount, session);
+  /** Evaluates one tick from the keyboard (no gamepad present); the sample
+   *  synthesizes inside the runtime from its held-key state. */
+  tickFromKeys(session) {
+    return this.#evaluate(0, 0, session, SOURCE_KEYS);
   }
 
   #memoryViews() {
@@ -158,25 +176,7 @@ export class ControlShell {
     return axisCount;
   }
 
-  #writeKeys(keySet) {
-    const view = this.#memoryViews();
-    view.axes.fill(0);
-    view.values.fill(0);
-    let bits = 0;
-    for (const { key, axis, value } of KEY_AXES) {
-      if (keySet.has(key)) view.axes[axis] = value;
-    }
-    for (const { key, button } of KEY_BUTTONS) {
-      if (keySet.has(key)) {
-        view.values[button] = 1;
-        bits |= 1 << button;
-      }
-    }
-    view.pressed[0] = bits >>> 0;
-    return 10;
-  }
-
-  #evaluate(axisCount, buttonCount, session) {
+  #evaluate(axisCount, buttonCount, session, source) {
     const mode = MODE_IDS[session.mode] ?? 0;
     const flags =
       (session.connected ? 1 : 0) |
@@ -192,6 +192,7 @@ export class ControlShell {
       session.nowMs,
       flags,
       session.generation >>> 0,
+      source,
     );
     return this.#readPlan(result);
   }

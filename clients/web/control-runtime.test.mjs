@@ -78,11 +78,18 @@ check("the built-in default profile activated (revision 1)", shell.activationRev
   check("v4 rover releases the gimbal lease", plan.lease === "release");
 }
 
-// Vector 5: keyboard is a first-class source through the SAME runtime, matched
-// on the shell's stored key form (event.key, letters lower-cased): W climbs.
+// Vector 5: keyboard is a first-class source through the SAME runtime. The
+// binding lives in the keyboard device PROFILE (not a shell table): the shell
+// forwards canonical key transitions and the runtime synthesizes the sample.
 {
-  const plan = shell.tickFromKeys(new Set(["w"]), session("quad-pilot", true));
+  check("v5 the keyboard profile binds w", shell.boundKey("w") === true);
+  check("v5 the keyboard profile does not bind x", shell.boundKey("x") === false);
+  shell.keyEvent("w", true);
+  const plan = shell.tickFromKeys(session("quad-pilot", true));
   check("v5 keyboard W commands climb", plan.motion?.throttle === 1);
+  shell.clearKeys();
+  const cleared = shell.tickFromKeys(session("quad-pilot", true));
+  check("v5 clearing held keys reads neutral", cleared.motion?.throttle === 0);
 }
 
 // Vector 6: LT held with a centered stick still reports capture (HUD #167).
@@ -119,6 +126,34 @@ check("the built-in default profile activated (revision 1)", shell.activationRev
   check("v8 motion is gated without a motion-lease grant", shell.tickFromPad(stick, ungranted).motion === null);
   const granted = { ...session("quad-pilot", true), motionGranted: true };
   check("v8 motion resumes once the motion lease is granted", shell.tickFromPad(stick, granted).motion !== null);
+}
+
+// Vector 9: device identity resolves through the shared selector, and a
+// remapping profile (RadioMaster Pocket, AETR order) actually reroutes the
+// raw sample before the scheme — all through the real wasm ABI.
+{
+  const exact = shell.selectDevice(
+    "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)",
+  );
+  check("v9 a known pad selects its exact profile", exact === "exact");
+  check("v9 the selected profile identity is visible", shell.deviceLabel() === "Sony DualSense");
+
+  const rm = shell.selectDevice("1209-4f54-RadioMaster Pocket");
+  check("v9 the RadioMaster resolves exactly (Firefox id form)", rm === "exact");
+  // Device throttle (AETR index 2) raised: routes to canonical left-stick Y,
+  // inverted, so quad-pilot reads a full climb — same meaning as keyboard W.
+  const plan = shell.tickFromPad(pad([0, 0, 1, 0], []), session("quad-pilot", true));
+  check("v9 AETR throttle reroutes to climb", plan.motion?.throttle === 1);
+
+  const fallback = shell.selectDevice("Mystery Pad (Vendor: dead Product: beef)");
+  check("v9 an unknown pad falls back to the generic profile", fallback === "fallback");
+
+  // A pad swap re-seeds the edge baselines: a button already pressed on the
+  // newly selected device cannot fire as a fresh arm.
+  shell.tickFromPad(pad([0, 0, 0, 0], []), session("quad-pilot", true));
+  shell.selectDevice("Second Pad (Vendor: 1111 Product: 2222)");
+  const swapped = shell.tickFromPad(pad([0, 0, 0, 0], [9]), session("quad-pilot", true));
+  check("v9 arm held through a device swap fires no edge", swapped.arm === false);
 }
 
 if (failures > 0) {

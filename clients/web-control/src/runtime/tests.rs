@@ -414,3 +414,19 @@ fn capture_active_is_reported_even_at_centered_stick() {
     );
     assert!(!released.capture_active, "no capture once LT is released");
 }
+
+#[test]
+fn a_device_reselect_reseeds_edge_baselines() {
+    let mut runtime = with_default();
+    // Settle a released arm baseline under the running generation.
+    runtime.evaluate(&sample(&[0.0; 4], &[]), &session(Mode::QuadPilot, true));
+    // The device mapping changed (pad swap): the next tick seeds baselines
+    // from the held state, so an already-pressed arm fires nothing.
+    runtime.reseed_edge_baselines();
+    let held = runtime.evaluate(&sample(&[0.0; 4], &[9]), &session(Mode::QuadPilot, true));
+    assert!(!held.arm, "arm held through a device swap fires no edge");
+    // A genuine release-then-press on the same mapping still fires once.
+    runtime.evaluate(&sample(&[0.0; 4], &[]), &session(Mode::QuadPilot, true));
+    let pressed = runtime.evaluate(&sample(&[0.0; 4], &[9]), &session(Mode::QuadPilot, true));
+    assert!(pressed.arm, "a fresh arm after release fires once");
+}

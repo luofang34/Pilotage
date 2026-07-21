@@ -6,6 +6,7 @@
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
+use crate::device::{DeviceStage, SelectOutcome};
 use crate::plan::{ControlPlan, LeaseAction};
 use crate::profile::{DEFAULT_PROFILE_BYTES, ProfileRuntime};
 use crate::runtime::ControlRuntime;
@@ -21,8 +22,13 @@ pub fn default_profile() -> Vec<u8> {
     DEFAULT_PROFILE_BYTES.to_vec()
 }
 
-const MAX_AXES: usize = 8;
-const MAX_BUTTONS: usize = 24;
+use crate::device::{MAX_AXES, MAX_BUTTONS};
+
+/// Raw-sample source selector for [`WebControl::evaluate`]: `0` reads the
+/// input buffer as a pad sample routed through the selected device profile;
+/// `1` ignores the buffer and synthesizes from held keys via the keyboard
+/// profile.
+const SOURCE_KEYS: u32 = 1;
 // Input layout: axes f32[8] | values f32[24] | pressed-bitset u32.
 const IN_AXES: usize = 0;
 const IN_VALUES: usize = IN_AXES + MAX_AXES * 4;
@@ -50,6 +56,7 @@ const MOTION_LEASE_SHIFT: u32 = 10; // bits 10..11: motion lease, same encoding.
 #[wasm_bindgen]
 pub struct WebControl {
     runtime: ControlRuntime,
+    stage: DeviceStage,
     sample: RawSample,
     input: Vec<u8>,
     output: Vec<u8>,
@@ -63,6 +70,7 @@ impl WebControl {
     pub fn new() -> Self {
         Self {
             runtime: ControlRuntime::new(),
+            stage: DeviceStage::new(),
             sample: RawSample::default(),
             input: vec![0u8; IN_LEN],
             output: vec![0u8; OUT_LEN],
@@ -103,6 +111,9 @@ impl WebControl {
     /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover; `session` packs
     /// bit0 connected, bit1 gimbal-lease-granted, bit2 gimbal-lease-denied,
     /// bit3 motion-lease-granted, bit4 motion-lease-denied, bit5 motion-recovered.
+    /// `source` is `0` for a pad sample in the input buffer, `1` for the
+    /// held-key state (the input buffer is ignored).
+    #[allow(clippy::too_many_arguments)]
     pub fn evaluate(
         &mut self,
         axis_count: u32,
@@ -111,8 +122,9 @@ impl WebControl {
         now_ms: f64,
         session: u32,
         generation: u32,
+        source: u32,
     ) -> u32 {
-        self.load_sample(axis_count as usize, button_count as usize);
+        self.load_sample(axis_count as usize, button_count as usize, source);
         let state = SessionState {
             generation,
             now_ms,
@@ -148,6 +160,48 @@ impl WebControl {
     pub fn profile_digest(&self) -> Vec<u8> {
         self.runtime.active_profile_digest().to_vec()
     }
+
+    /// Resolves a `Gamepad.id` string to a device profile through the shared
+    /// selector. Returns `1` for an exact vendor/product match, `2` for the
+    /// generic fallback, `0` when refused (an ambiguous registry fails
+    /// closed: subsequent pad ticks read an empty sample and drive nothing).
+    /// Any selection re-seeds the discrete edge baselines, so a button held
+    /// on the newly mapped device cannot fire as a fresh edge.
+    pub fn select_device(&mut self, gamepad_id: &str) -> u32 {
+        let outcome = self.stage.select_pad(gamepad_id);
+        self.runtime.reseed_edge_baselines();
+        match outcome {
+            SelectOutcome::Refused => 0,
+            SelectOutcome::Exact => 1,
+            SelectOutcome::Fallback => 2,
+        }
+    }
+
+    /// The selected pad profile's human-readable label (empty when refused).
+    #[must_use]
+    pub fn device_label(&self) -> String {
+        self.stage.pad_label().to_owned()
+    }
+
+    /// Records one keyboard transition. `key` is the canonical
+    /// `KeyboardEvent.key` value with single letters lower-cased — the
+    /// convention the keyboard profile data speaks.
+    pub fn key_event(&mut self, key: &str, pressed: bool) {
+        self.stage.key_event(key, pressed);
+    }
+
+    /// Drops every held key (window blur or session teardown), so a key
+    /// released while the page was blurred cannot remain a phantom hold.
+    pub fn clear_keys(&mut self) {
+        self.stage.clear_keys();
+    }
+
+    /// Whether the keyboard profile binds `key`, so the shell knows which
+    /// keys to capture without holding any key list of its own.
+    #[must_use]
+    pub fn key_is_bound(&self, key: &str) -> bool {
+        self.stage.key_is_bound(key)
+    }
 }
 
 impl Default for WebControl {
@@ -157,25 +211,32 @@ impl Default for WebControl {
 }
 
 impl WebControl {
-    /// Refills the reusable [`RawSample`] from the input buffer, reusing the
-    /// existing Vec capacity so a steady tick allocates nothing.
-    fn load_sample(&mut self, axes: usize, buttons: usize) {
+    /// Refills the reusable [`RawSample`] for the tick: a pad source reads
+    /// the raw input buffer and routes it through the selected device
+    /// profile; the key source ignores the buffer and synthesizes from held
+    /// keys via the keyboard profile. Fixed scratch arrays keep the steady
+    /// tick allocation-free.
+    fn load_sample(&mut self, axes: usize, buttons: usize, source: u32) {
+        if source == SOURCE_KEYS {
+            self.stage.key_sample(&mut self.sample);
+            return;
+        }
         let axes = axes.min(MAX_AXES);
         let buttons = buttons.min(MAX_BUTTONS);
         let pressed = read_u32(&self.input, IN_PRESSED);
-        self.sample.axes.clear();
-        for i in 0..axes {
-            self.sample
-                .axes
-                .push(read_f32(&self.input, IN_AXES + i * 4));
+        let mut raw_axes = [0.0f32; MAX_AXES];
+        for (i, slot) in raw_axes.iter_mut().take(axes).enumerate() {
+            *slot = read_f32(&self.input, IN_AXES + i * 4);
         }
-        self.sample.buttons.clear();
-        for i in 0..buttons {
-            self.sample.buttons.push(ButtonSample {
+        let mut raw_buttons = [ButtonSample::default(); MAX_BUTTONS];
+        for (i, slot) in raw_buttons.iter_mut().take(buttons).enumerate() {
+            *slot = ButtonSample {
                 pressed: pressed & (1u32 << u32::try_from(i).unwrap_or(31)) != 0,
                 value: read_f32(&self.input, IN_VALUES + i * 4),
-            });
+            };
         }
+        self.stage
+            .pad_sample(&raw_axes[..axes], &raw_buttons[..buttons], &mut self.sample);
     }
 
     /// Encodes the plan into the output buffer and returns its flags.
