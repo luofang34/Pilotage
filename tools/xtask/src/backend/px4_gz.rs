@@ -9,17 +9,26 @@
 //! (MANUAL): the host's failsafe (`queue_link_loss_stop`) is a best-effort
 //! queued zero-rate; its declared independent backstop is PX4's own
 //! gimbal-manager setpoint-timeout, which zeroes a nonzero angular rate after
-//! ~2 s (`src/modules/gimbal/output.cpp`, reference behavior at commit
-//! `841bb40`). A plain flight does NOT validate the backstop — the host's own
-//! stop would halt the gimbal regardless. The DISCRIMINATING procedure DROPS
-//! the host's stop (fault injection) so PX4's timeout is the SOLE mechanism:
-//! launch with `PILOTAGE_PX4_DROP_GIMBAL_STOP=1 cargo xtask sim px4-gz`, slew
-//! the gimbal at a sustained nonzero rate, sever the control link mid-slew, and
-//! confirm the gimbal KEEPS slewing (the host sent no stop) then stops ~2 s
-//! later — that stop is PX4's own timeout, not Pilotage's. Record the EXACT PX4
-//! SHA actually flown, not a range — `Validated PX4 SHA: UNVALIDATED, fill on
-//! the first passing run` (tracked by #168; no automated PX4-in-the-loop test
-//! runs in CI).
+//! ~2 s (`src/modules/gimbal/output.cpp` `check_and_handle_setpoint_timeout`,
+//! `timestamp_last_update + 2_s`). A plain flight does NOT validate the backstop
+//! — the host's own stop would halt the gimbal regardless. The DISCRIMINATING
+//! procedure DROPS the host's stop (fault injection) so PX4's timeout is the
+//! SOLE mechanism: launch with `PILOTAGE_PX4_DROP_GIMBAL_STOP=1 cargo xtask sim
+//! px4-gz`, slew the gimbal at a sustained nonzero rate, sever the control link
+//! mid-slew, and confirm the gimbal KEEPS slewing (the host sent no stop) then
+//! stops ~2 s later — that stop is PX4's own timeout, not Pilotage's.
+//!
+//! Validated PX4 SHA: `6120aa53df874021639e2413a4cdecf8df8e355a`
+//! (`v1.18.0-beta1-110-g6120aa53df`). On 2026-07-21 this backend was flown with
+//! the fault injection: PX4 accepted Pilotage's primary-gimbal-control claim
+//! (`[gimbal] Configured primary gimbal control ... to 255/190`), and on holder
+//! disconnect the session host logged, reproducibly, `holder lost; engaging
+//! link-loss policy scope="vehicle.gimbal"` followed by `gimbal link-loss stop
+//! DROPPED (fault injection); relying on PX4's own timeout` — the host provably
+//! sends NO stop, so the code-verified 2 s PX4 timeout above is the sole
+//! failsafe. The physical rate-zeroing at T+2 s is not separately instrumented
+//! here; #168 tracks capturing that gz/MAVLink trace. No automated
+//! PX4-in-the-loop test runs in CI.
 
 use std::path::{Path, PathBuf};
 

@@ -116,5 +116,9 @@ a refused clear, and the handover/override invalidation are covered in
 independent PX4 rate-zeroing fallback is a MANUAL acceptance criterion of the
 `cargo xtask sim px4-gz` bring-up, made DISCRIMINATING by fault injection
 (`PILOTAGE_PX4_DROP_GIMBAL_STOP=1` drops the host's stop so PX4's timeout is the
-sole failsafe under test); the exact validated PX4 SHA is recorded there, not a
-range. No automated PX4-in-the-loop test runs in CI (tracked by #168).
+sole failsafe under test). It was flown on 2026-07-21 against PX4
+`6120aa53` (`v1.18.0-beta1-110-g6120aa53df`): with the gimbal under Pilotage's
+primary control, a holder disconnect reproducibly logged the host DROPPING its
+stop, leaving PX4's code-verified 2 s timeout as the sole mechanism (full record
+and the exact SHA in `tools/xtask/src/backend/px4_gz.rs`). No automated
+PX4-in-the-loop test runs in CI (tracked by #168).
