@@ -9,13 +9,13 @@
 //! so an invalid profile disables itself before it can emit control.
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
-use pilotage_input::{AxisConfig, axis_id_for_name};
+use pilotage_input::{AxisConfig, axis_id_for_name, content_digest, validate_axis_config};
 
-/// Schema version this runtime compiles. A candidate declaring any other
-/// version is rejected before it can affect control.
-pub const SCHEMA_VERSION: u32 = 1;
+/// The schema version this runtime compiles, single-sourced from the shared
+/// engine so the browser and the native host never disagree on it. A candidate
+/// declaring any other version is rejected before it can affect control.
+pub use pilotage_input::SCHEMA_VERSION;
 
 /// The built-in default mapping (the current LT+RStick behavior). It is
 /// bytes like any other candidate: bootstrap compiles and activates it
@@ -201,19 +201,8 @@ impl ProfileRuntime {
             });
         }
         validate(&doc)?;
-        let digest: [u8; 32] = Sha256::digest(candidate).into();
-        let flight_stick = AxisConfig {
-            source_index: 0,
-            logical: String::new(),
-            invert: false,
-            deadzone: doc.flight.deadzone,
-            expo: doc.flight.expo,
-            calibration: pilotage_input::AxisCalibration {
-                min: -1.0,
-                center: 0.0,
-                max: 1.0,
-            },
-        };
+        let digest = content_digest(candidate);
+        let flight_stick = flight_stick_config(doc.flight.deadzone, doc.flight.expo);
         Ok(CompiledProfile {
             id: doc.id,
             schema_version: doc.schema_version,
@@ -226,18 +215,61 @@ impl ProfileRuntime {
     }
 }
 
-/// Full semantic validation beyond serde's structural check: logical names,
-/// index bounds, binding uniqueness, calibration sanity, curve ranges, and
-/// finiteness. A candidate that fails any of these is discarded whole.
+/// Full semantic validation beyond serde's structural check: logical names and
+/// binding uniqueness (this runtime's scheme concerns) plus each bound axis's
+/// calibration and response curve (delegated to the shared engine's
+/// [`validate_axis_config`], so the browser and native host agree). A candidate
+/// that fails any of these is discarded whole.
 fn validate(doc: &ProfileDoc) -> Result<(), ProfileError> {
     resolve_logical(&doc.gimbal.pitch.logical)?;
     resolve_logical(&doc.gimbal.yaw.logical)?;
     check_bounds(doc)?;
     check_unique(doc)?;
-    check_axis("pitch", &doc.gimbal.pitch)?;
-    check_axis("yaw", &doc.gimbal.yaw)?;
-    check_range("flight", doc.flight.deadzone, doc.flight.expo)?;
+    validate_axis("pitch", &doc.gimbal.pitch)?;
+    validate_axis("yaw", &doc.gimbal.yaw)?;
+    validate_axis(
+        "flight",
+        &flight_stick_config(doc.flight.deadzone, doc.flight.expo),
+    )?;
     Ok(())
+}
+
+/// The flight-stick shaping config: one config (the flight deadzone/expo over a
+/// `[-1, 0, 1]` calibration) reused for every flight stick, built here so
+/// compilation and validation shape the sticks identically.
+fn flight_stick_config(deadzone: f32, expo: f32) -> AxisConfig {
+    AxisConfig {
+        source_index: 0,
+        logical: String::new(),
+        invert: false,
+        deadzone,
+        expo,
+        calibration: pilotage_input::AxisCalibration {
+            min: -1.0,
+            center: 0.0,
+            max: 1.0,
+        },
+    }
+}
+
+/// Validates one bound axis through the shared engine, mapping its typed
+/// failure onto this runtime's `axis`-labelled error surface.
+fn validate_axis(axis: &'static str, config: &AxisConfig) -> Result<(), ProfileError> {
+    validate_axis_config(config).map_err(|error| map_axis_error(axis, error))
+}
+
+/// Maps a shared-engine axis failure onto this runtime's error variants.
+fn map_axis_error(axis: &'static str, error: pilotage_input::ProfileError) -> ProfileError {
+    use pilotage_input::ProfileError as Engine;
+    match error {
+        Engine::NonFiniteAxisValue { .. } => ProfileError::NonFinite { field: axis },
+        Engine::DeadzoneOutOfRange { .. } | Engine::ExpoOutOfRange { .. } => {
+            ProfileError::OutOfRange { field: axis }
+        }
+        // validate_axis_config only reports the axis failures above and a
+        // degenerate calibration; anything else is a calibration fault too.
+        _ => ProfileError::MalformedCalibration { axis },
+    }
 }
 
 fn resolve_logical(name: &str) -> Result<(), ProfileError> {
@@ -350,36 +382,6 @@ fn has_duplicate<T: PartialEq>(values: &[T]) -> bool {
         .iter()
         .enumerate()
         .any(|(i, v)| values[i + 1..].contains(v))
-}
-
-fn check_axis(axis: &'static str, config: &AxisConfig) -> Result<(), ProfileError> {
-    let cal = &config.calibration;
-    check_finite(axis, cal.min)?;
-    check_finite(axis, cal.center)?;
-    check_finite(axis, cal.max)?;
-    if !(cal.min < cal.center && cal.center < cal.max) {
-        return Err(ProfileError::MalformedCalibration { axis });
-    }
-    check_range(axis, config.deadzone, config.expo)
-}
-
-/// A finite deadzone must lie in `[0, 1)` and a finite expo in `[-0.99, 10]` —
-/// the ranges the normalization pipeline keeps monotonic and bounded.
-fn check_range(field: &'static str, deadzone: f32, expo: f32) -> Result<(), ProfileError> {
-    check_finite(field, deadzone)?;
-    check_finite(field, expo)?;
-    if !(0.0..1.0).contains(&deadzone) || !(-0.99..=10.0).contains(&expo) {
-        return Err(ProfileError::OutOfRange { field });
-    }
-    Ok(())
-}
-
-fn check_finite(field: &'static str, value: f32) -> Result<(), ProfileError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(ProfileError::NonFinite { field })
-    }
 }
 
 #[cfg(test)]
