@@ -1,0 +1,57 @@
+{
+  "comment": "Shared typed-control wire fixture. The hex envelope is produced by the REAL browser chain (keyboard w through the compiled wasm runtime, scaled by the advertised 3.0/1.5/0.9 velocity envelope, encoded by wire.js). clients/web/typed-command.test.mjs proves the browser produces exactly these bytes; crates/pilotage-session/tests/typed_wire_e2e.rs decodes the SAME bytes and drives them through the session engine's command gate to the adapter boundary.",
+  "envelopeHex": "080112420a020807120208011a100a0e76656869636c652e6d6f74696f6e220208042a02082a320508959aef3a38034a090a070801250000c0bf520208015204080310025801",
+  "expected": {
+    "sessionId": 7,
+    "vehicleId": 1,
+    "scope": "vehicle.motion",
+    "generation": 4,
+    "sequence": 42,
+    "sampledAtNanos": 123456789,
+    "profileRevision": 3,
+    "activationRevision": 1,
+    "velocity": {
+      "frame": 1,
+      "vx": 0,
+      "vy": 0,
+      "vz": -1.5,
+      "yawRate": 0
+    },
+    "actions": [
+      {
+        "action": 1
+      },
+      {
+        "action": 3,
+        "modeTarget": 2
+      }
+    ]
+  },
+  "keyboardPlanMotion": {
+    "roll": 0,
+    "pitch": 0,
+    "throttle": 1,
+    "yaw": 0
+  },
+  "gamepadPlanMotion": {
+    "roll": 0,
+    "pitch": 0,
+    "throttle": 0,
+    "yaw": 1
+  },
+  "gamepadVelocity": {
+    "vx": 0,
+    "vy": 0,
+    "vz": 0,
+    "yawRate": 0.9
+  },
+  "capability": {
+    "family": 1,
+    "frames": [
+      1
+    ],
+    "maxLinear": 3,
+    "maxVertical": 1.5,
+    "maxAngular": 0.9
+  }
+}

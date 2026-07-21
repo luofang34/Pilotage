@@ -95,6 +95,11 @@ export class ControlShell {
     ).join("");
   }
 
+  /** The active profile's raw 32-byte content digest (for the wire). */
+  profileDigestBytes() {
+    return this.#control.profile_digest();
+  }
+
   /** Compiles and activates candidate profile bytes through the same seam the
    *  bootstrap uses. Returns the new revision, or 0 if the candidate was
    *  rejected (the currently active profile stays active). */

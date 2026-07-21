@@ -1262,6 +1262,7 @@ dependencies = [
  "pilotage-authority",
  "pilotage-protocol",
  "pilotage-timing",
+ "serde_json",
 ]
 
 [[package]]

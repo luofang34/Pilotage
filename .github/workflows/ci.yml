@@ -180,8 +180,11 @@ jobs:
         # drives the real wasm artifact built above.
         run: node clients/web/control-runtime.test.mjs
 
-      - name: control shell structural contract (main.js holds no mapping/curves)
+      - name: control shell structural contract (no browser module holds mapping logic)
         run: node clients/web/control-structure.test.mjs
+
+      - name: typed-command chain (real wasm -> advertised envelope -> shared wire fixture)
+        run: node clients/web/typed-command.test.mjs
 
       - name: viewer input-loss gate (latched blur, no post-latch frames, held-button safety)
         run: node clients/web/control-gate.test.mjs

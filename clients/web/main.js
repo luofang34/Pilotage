@@ -21,11 +21,13 @@ import {
   encodeLeaseRequestEnvelope,
   encodeLeaseReleaseEnvelope,
   encodeControlFrameEnvelope,
+  encodeProfileActivationEnvelope,
   decodeLengthDelimitedEnvelope,
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
   STREAM_KIND_VIDEO_V2,
-  BUTTON_EDGE_PRESSED,
+  CONTROL_ACTION,
+  MODE_TARGET,
 } from "./wire.js";
 // Real-time wire decode compiles from the host's own Rust definitions
 // (ADR-0014, ADR-0020): the v2 video body (parsed and validated against the
@@ -63,6 +65,13 @@ import { createReconnectController } from "./reconnect.js";
 import { startDatagramControl } from "./datagram-control.js";
 import { loadControlShell } from "./control-shell.js";
 import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
+import {
+  INTENT_FAMILY_VELOCITY,
+  INTENT_FAMILY_GIMBAL_RATE,
+  intentCapabilityFor as capabilityFor,
+  buildVelocityIntent,
+  buildGimbalRateIntent,
+} from "./typed-command.js";
 import { readUniStream } from "./uni-stream.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
@@ -74,16 +83,7 @@ const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never fir
 const SIM_COHERENCE_LIMIT_NS = 300_000_000n;
 const MOTION_SCOPE = "vehicle.motion";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
-const AXIS_ROLL = 0; // pilotage-input logical axis table: roll = 0 (lateral velocity, + right).
-const AXIS_PITCH = 1; // pitch = 1 (forward velocity, + forward).
-const AXIS_THROTTLE = 2; // throttle = 2 (rover: forward speed; quad: climb rate).
-const AXIS_YAW = 3; // yaw = 3 (yaw rate, + clockwise).
-const BUTTON_ARM = 0; // logical button 0: arm (adapter contract).
-const BUTTON_DISARM = 1; // logical button 1: disarm.
-const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
-const BUTTON_FPV_TOGGLE = 3; // logical button 3: camera <-> FPV mode (adapter latches).
 const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/yaw LOS rate demands, leased separately.
-const GIMBAL_BUTTON_NEUTRAL = 0; // gimbal-scope logical button 0: recenter the gimbal.
 
 const els = {
   host: document.getElementById("host"),
@@ -122,6 +122,13 @@ const state = {
   selectedPadId: null,
   pendingReset: false,
   pendingFpvToggle: false,
+  // Camera-velocity vs FPV/direct flight, tracked here so the DOM toggle
+  // sends an explicit typed ModeRequest TARGET, never a stateless flip.
+  fpvActive: false,
+  // The typed capability negotiation from ServerWelcome: every advertised
+  // scope with its intent families, limits, and actions. Control fails
+  // closed (no motion frames) until the motion scope advertises velocity.
+  advertisedScopes: [],
   connected: false,
   leaseGranted: false,
   // The generation the motion lease held when last released: a post-handover
@@ -684,7 +691,20 @@ function handleBootstrapMessage(decoded, token) {
   if (!transportSessions.isActive(token)) return;
   if (decoded.kind === "ServerWelcome") {
     state.sessionId = decoded.message.sessionId;
+    state.advertisedScopes = decoded.message.advertisedScopes ?? [];
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
+    for (const scope of state.advertisedScopes) {
+      const families = scope.intents.map((i) => i.family).join(",");
+      log(`capability: ${scope.scope} intents=[${families}] actions=${scope.actions.length}`);
+    }
+    if (!velocityCapabilityFor(MOTION_SCOPE)) {
+      log("vehicle advertises no velocity intent for vehicle.motion; motion control disabled");
+    }
+    announceProfileActivation();
+  } else if (decoded.kind === "ControlActionResult") {
+    const m = decoded.message;
+    const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;
+    log(`action result [${m.scope} seq=${m.sequence}] action=${m.action} ${verdict}`);
   } else if (decoded.kind === "LeaseResponse") {
     // Bootstrap requests only the motion lease, but route by scope
     // anyway: a response for any other scope must not overwrite the
@@ -1067,22 +1087,6 @@ function activeGamepad() {
   return null;
 }
 
-/** Neutral (zeroed) control axes for a flight mode: rover carries only
- *  throttle/yaw, the flight modes carry roll/pitch/throttle/yaw. */
-function neutralAxesFor(mode) {
-  return mode === "rover"
-    ? [
-        [AXIS_THROTTLE, 0],
-        [AXIS_YAW, 0],
-      ]
-    : [
-        [AXIS_ROLL, 0],
-        [AXIS_PITCH, 0],
-        [AXIS_THROTTLE, 0],
-        [AXIS_YAW, 0],
-      ];
-}
-
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
 function startControlLoop(transport, token) {
   const started = startDatagramControl({
@@ -1207,43 +1211,68 @@ async function runControlLoop(writer, token) {
   }
 }
 
-/** Encodes and sends the runtime's motion frame on the datagram writer. The
- *  runtime supplies arm/disarm edges (as booleans); the DOM-driven FPV-toggle
- *  and sim-reset edges are appended here. Rover carries only throttle/yaw. */
+function velocityCapabilityFor(scope) {
+  return capabilityFor(state.advertisedScopes, scope, INTENT_FAMILY_VELOCITY);
+}
+
+/** Announces the active control profile on the reliable session stream:
+ *  identity, document revision, monotonic activation revision, and content
+ *  digest — the traceability record the host binds control frames to
+ *  (INPUT-01). Sent after every welcome (the activation predates connect). */
+function announceProfileActivation() {
+  const writer = state.sessionWriter;
+  if (!writer || !state.controlShell) return;
+  const shell = state.controlShell;
+  const activation = encodeProfileActivationEnvelope({
+    sessionId: state.sessionId,
+    profileId: shell.profileId(),
+    profileRevision: shell.profileRevision(),
+    activationRevision: shell.activationRevision(),
+    digest: shell.profileDigestBytes(),
+  });
+  writer.write(lengthDelimit(activation)).catch(() => {});
+  log(
+    `announced profile ${shell.profileId()} rev=${shell.profileRevision()} ` +
+      `activation=${shell.activationRevision()} digest=${shell.profileDigest().slice(0, 16)}...`,
+  );
+}
+
+/** Encodes and sends the runtime's motion frame as a TYPED velocity intent:
+ *  the plan's normalized demands scale by the scope's ADVERTISED envelope
+ *  (CTRL-01), so full stick commands exactly what the vehicle advertises.
+ *  The runtime supplies typed arm/disarm; the DOM-driven mode-request and
+ *  sim-reset actions are appended here. Fails closed (no frame) when the
+ *  vehicle does not advertise a velocity intent. */
 function sendMotionFrame(writer, token, mode, plan) {
+  const capability = velocityCapabilityFor(MOTION_SCOPE);
+  if (!capability) return;
   const m = plan.motion;
-  const edges = [];
+  const actions = [];
   if (plan.arm) {
-    edges.push([BUTTON_ARM, BUTTON_EDGE_PRESSED]);
+    actions.push({ action: CONTROL_ACTION.arm });
     els.overlay.textContent = "ARM sent";
     log("arm command sent");
   }
   if (plan.disarm) {
-    edges.push([BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
+    actions.push({ action: CONTROL_ACTION.disarm });
     els.overlay.textContent = "DISARM sent";
     log("disarm command sent");
   }
   if (state.pendingFpvToggle) {
     state.pendingFpvToggle = false;
-    edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
+    // The toggle resolves HERE to an explicit typed target; the adapter
+    // never interprets a stateless flip.
+    const target = state.fpvActive ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
+    state.fpvActive = !state.fpvActive;
+    actions.push({ action: CONTROL_ACTION.modeRequest, modeTarget: target });
+    log(`mode request sent: target=${target === MODE_TARGET.fpvDirect ? "fpv-direct" : "camera-velocity"}`);
   }
   if (state.pendingReset) {
     state.pendingReset = false;
-    edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
+    actions.push({ action: CONTROL_ACTION.simReset });
     log("simulation reset requested");
   }
-  const axes =
-    mode === "rover"
-      ? [
-          [AXIS_THROTTLE, m.throttle],
-          [AXIS_YAW, m.yaw],
-        ]
-      : [
-          [AXIS_ROLL, m.roll],
-          [AXIS_PITCH, m.pitch],
-          [AXIS_THROTTLE, m.throttle],
-          [AXIS_YAW, m.yaw],
-        ];
+  const velocity = buildVelocityIntent(m, mode, capability);
   state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
   const envelope = encodeControlFrameEnvelope({
     sessionId: state.sessionId,
@@ -1253,8 +1282,9 @@ function sendMotionFrame(writer, token, mode, plan) {
     sequence: state.sequence,
     sampledAtNanos: nowNanos(),
     profileRevision: state.controlShell.profileRevision(),
-    axes,
-    edges,
+    activationRevision: state.controlShell.activationRevision(),
+    velocity,
+    actions,
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
@@ -1265,6 +1295,8 @@ function sendMotionFrame(writer, token, mode, plan) {
  *  tick while the lease is held (zero rates when idle), so the continuous
  *  stream is the scope's liveness (ADR-0011); R3 rides as the recenter edge. */
 function sendGimbalFrame(writer, token, gimbal) {
+  const capability = capabilityFor(state.advertisedScopes, GIMBAL_SCOPE, INTENT_FAMILY_GIMBAL_RATE);
+  if (!capability) return;
   if (gimbal.recenter) log("gimbal recenter requested (R3)");
   state.gimbalSequence = (state.gimbalSequence + 1) >>> 0;
   const envelope = encodeControlFrameEnvelope({
@@ -1275,11 +1307,11 @@ function sendGimbalFrame(writer, token, gimbal) {
     sequence: state.gimbalSequence,
     sampledAtNanos: nowNanos(),
     profileRevision: state.controlShell.profileRevision(),
-    axes: [
-      [AXIS_PITCH, gimbal.pitch],
-      [AXIS_YAW, gimbal.yaw],
-    ],
-    edges: gimbal.recenter ? [[GIMBAL_BUTTON_NEUTRAL, BUTTON_EDGE_PRESSED]] : [],
+    activationRevision: state.controlShell.activationRevision(),
+    // The plan's normalized LOS rates scale by the ADVERTISED angular
+    // envelope, so full deflection slews exactly what the vehicle allows.
+    gimbalRate: buildGimbalRateIntent(gimbal, capability),
+    actions: gimbal.recenter ? [{ action: CONTROL_ACTION.gimbalRecenter }] : [],
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`gimbal datagram send failed: ${error}`));

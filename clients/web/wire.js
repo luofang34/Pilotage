@@ -266,6 +266,8 @@ const ENVELOPE_FIELD = {
   leaseRelease: 13,
   leaseReleased: 14,
   linkLossCleared: 15,
+  profileActivation: 16,
+  controlActionResult: 17,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
@@ -344,13 +346,67 @@ function encodeButtonEdgeSample(buttonId, edge) {
   return bytes;
 }
 
+// control.proto typed-command enums (CTRL-01).
+export const REFERENCE_FRAME_BODY_FRD = 1;
+export const CONTROL_ACTION = {
+  arm: 1,
+  disarm: 2,
+  modeRequest: 3,
+  gimbalRecenter: 4,
+  simReset: 5,
+};
+export const MODE_TARGET = {
+  cameraVelocity: 1,
+  fpvDirect: 2,
+  hold: 3,
+  return: 4,
+};
+
+// ControlIntent { oneof family: velocity=1 ... gimbal_rate=5 }
+// VelocityIntent { frame=1, vx=2, vy=3, vz=4, yaw_rate=5 }
+function encodeVelocityIntent({ vx, vy, vz, yawRate }) {
+  const bytes = [];
+  fieldVarint(bytes, 1, REFERENCE_FRAME_BODY_FRD);
+  fieldFloat(bytes, 2, vx);
+  fieldFloat(bytes, 3, vy);
+  fieldFloat(bytes, 4, vz);
+  fieldFloat(bytes, 5, yawRate);
+  return bytes;
+}
+
+// GimbalRateIntent { pitch_rate=1, yaw_rate=2 }
+function encodeGimbalRateIntent({ pitchRate, yawRate }) {
+  const bytes = [];
+  fieldFloat(bytes, 1, pitchRate);
+  fieldFloat(bytes, 2, yawRate);
+  return bytes;
+}
+
+function encodeControlIntent({ velocity, gimbalRate }) {
+  const bytes = [];
+  if (velocity) fieldMessage(bytes, 1, encodeVelocityIntent(velocity));
+  if (gimbalRate) fieldMessage(bytes, 5, encodeGimbalRateIntent(gimbalRate));
+  return bytes;
+}
+
+// ControlActionRequest { action=1, mode_target=2 }
+function encodeControlActionRequest({ action, modeTarget }) {
+  const bytes = [];
+  fieldVarint(bytes, 1, action);
+  if (modeTarget) fieldVarint(bytes, 2, modeTarget);
+  return bytes;
+}
+
 /**
  * Encodes one `ControlFrame` wrapped in an `Envelope`, ready to send as a
  * single control-fast datagram (bare envelope, no length prefix, ADR-0005).
  *
- * `axes` is an array of `[axisId, value]` pairs, value in [-1.0, 1.0];
- * `edges` (optional) is an array of `[buttonId, edgeEnum]` one-shot
- * button events.
+ * A frame carries EXACTLY ONE command representation: the typed
+ * `velocity`/`gimbalRate` intent (physical units inside the advertised
+ * envelope) plus typed `actions`, OR the legacy `axes`/`edges` payload —
+ * the host rejects both-or-neither. Production frames are typed; the
+ * legacy parameters remain for wire round-trip tests of the host's
+ * compatibility boundary.
  */
 export function encodeControlFrameEnvelope({
   sessionId,
@@ -360,6 +416,10 @@ export function encodeControlFrameEnvelope({
   sequence,
   sampledAtNanos,
   profileRevision,
+  activationRevision,
+  velocity,
+  gimbalRate,
+  actions,
   axes,
   edges,
 }) {
@@ -374,8 +434,38 @@ export function encodeControlFrameEnvelope({
   fieldMessage(frame, 5, encodeSequenceNum(sequence));
   fieldMessage(frame, 6, encodeMonoTimestamp(sampledAtNanos));
   fieldVarint(frame, 7, profileRevision);
-  fieldMessage(frame, 8, encodeControlPayload(axes, edges));
+  if (axes?.length || edges?.length) {
+    fieldMessage(frame, 8, encodeControlPayload(axes ?? [], edges ?? []));
+  }
+  if (velocity || gimbalRate) {
+    fieldMessage(frame, 9, encodeControlIntent({ velocity, gimbalRate }));
+  }
+  for (const action of actions ?? []) {
+    fieldMessage(frame, 10, encodeControlActionRequest(action));
+  }
+  if (activationRevision) fieldVarint(frame, 11, activationRevision);
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.controlFrame, frame));
+}
+
+/**
+ * Encodes a `ProfileActivation` announcement (reliable session stream):
+ * binds the activation revision this client's frames carry to the profile
+ * identity, document revision, and SHA-256 content digest (INPUT-01).
+ */
+export function encodeProfileActivationEnvelope({
+  sessionId,
+  profileId,
+  profileRevision,
+  activationRevision,
+  digest,
+}) {
+  const bytes = [];
+  fieldMessage(bytes, 1, encodeSessionId(sessionId));
+  fieldString(bytes, 2, profileId ?? "");
+  fieldVarint(bytes, 3, profileRevision);
+  fieldVarint(bytes, 4, activationRevision);
+  fieldBytes(bytes, 5, Array.from(digest ?? []));
+  return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.profileActivation, bytes));
 }
 
 function encodeSessionId(value) {
@@ -527,11 +617,44 @@ export function decodeControlFrame(bytes) {
       edges.push([firstVarint(e, 1), firstVarint(e, 2)]);
     }
   }
+  let velocity = null;
+  let gimbalRate = null;
+  const intentBytes = firstBytes(f, 9);
+  if (intentBytes) {
+    const intent = parseFields(intentBytes);
+    const velocityBytes = firstBytes(intent, 1);
+    if (velocityBytes) {
+      const v = parseFields(velocityBytes);
+      velocity = {
+        frame: firstVarint(v, 1),
+        vx: decodeFloat32(firstBytes(v, 2)) ?? 0,
+        vy: decodeFloat32(firstBytes(v, 3)) ?? 0,
+        vz: decodeFloat32(firstBytes(v, 4)) ?? 0,
+        yawRate: decodeFloat32(firstBytes(v, 5)) ?? 0,
+      };
+    }
+    const gimbalBytes = firstBytes(intent, 5);
+    if (gimbalBytes) {
+      const g = parseFields(gimbalBytes);
+      gimbalRate = {
+        pitchRate: decodeFloat32(firstBytes(g, 1)) ?? 0,
+        yawRate: decodeFloat32(firstBytes(g, 2)) ?? 0,
+      };
+    }
+  }
+  const actions = (f.get(10) ?? []).map((actionBytes) => {
+    const a = parseFields(actionBytes);
+    return { action: firstVarint(a, 1), modeTarget: firstVarint(a, 2) };
+  });
   return {
     scope: decodeStringMessage(firstBytes(f, 3)),
     profileRevision: firstVarint(f, 7),
+    activationRevision: firstVarint(f, 11),
     axes,
     edges,
+    velocity,
+    gimbalRate,
+    actions,
   };
 }
 
@@ -564,6 +687,12 @@ function decodeEnvelopeBody(body) {
   if (fields.has(ENVELOPE_FIELD.linkLossCleared)) {
     return { kind: "LinkLossCleared", message: decodeLinkLossCleared(firstBytes(fields, ENVELOPE_FIELD.linkLossCleared)) };
   }
+  if (fields.has(ENVELOPE_FIELD.controlActionResult)) {
+    return {
+      kind: "ControlActionResult",
+      message: decodeControlActionResult(firstBytes(fields, ENVELOPE_FIELD.controlActionResult)),
+    };
+  }
   return { kind: "unknown", message: {} };
 }
 
@@ -574,6 +703,10 @@ function decodeServerWelcome(bytes) {
   return {
     sessionId: decodeUint64Message(firstBytes(fields, 1)),
     principalId: decodeUint64Message(firstBytes(fields, 2)),
+    // The typed capability negotiation (CTRL-01): every advertised scope
+    // with its intent families, limits, and actions, so the control path
+    // scales by the vehicle's REAL envelope and fails closed without one.
+    advertisedScopes: decodeAdvertisedScopes(firstBytes(fields, 3)),
   };
 }
 
@@ -611,6 +744,73 @@ function decodeLinkLossCleared(bytes) {
     scope: decodeStringMessage(firstBytes(fields, 2)),
     generation: decodeUint64Message(firstBytes(fields, 3)),
   };
+}
+
+// session.proto ControlActionResult: vehicle=1, scope=2, generation=3,
+// sequence=4, action=5, mode_target=6, accepted=7, detail=8
+function decodeControlActionResult(bytes) {
+  if (!bytes) return {};
+  const fields = parseFields(bytes);
+  return {
+    vehicleId: decodeUint64Message(firstBytes(fields, 1)),
+    scope: decodeStringMessage(firstBytes(fields, 2)),
+    generation: decodeUint64Message(firstBytes(fields, 3)),
+    sequence: decodeUint64Message(firstBytes(fields, 4)),
+    action: firstVarint(fields, 5),
+    modeTarget: firstVarint(fields, 6),
+    accepted: !!firstVarint(fields, 7),
+    detail: firstBytes(fields, 8) ? new TextDecoder().decode(firstBytes(fields, 8)) : "",
+  };
+}
+
+// capability.proto IntentCapability: family=1, frames=2 (repeated varint),
+// max_linear=3, max_angular=4, max_vertical=5
+function decodeIntentCapability(bytes) {
+  const fields = parseFields(bytes);
+  return {
+    family: firstVarint(fields, 1),
+    frames: (fields.get(2) ?? []).map(Number),
+    maxLinear: decodeFloat32(firstBytes(fields, 3)) ?? 0,
+    maxAngular: decodeFloat32(firstBytes(fields, 4)) ?? 0,
+    maxVertical: decodeFloat32(firstBytes(fields, 5)) ?? 0,
+  };
+}
+
+// capability.proto ActionCapability: action=1, mode_targets=2 (repeated varint)
+function decodeActionCapability(bytes) {
+  const fields = parseFields(bytes);
+  return {
+    action: firstVarint(fields, 1),
+    modeTargets: (fields.get(2) ?? []).map(Number),
+  };
+}
+
+// capability.proto ScopeDescriptor: scope=1, display_name=2,
+// link_loss_action=3, intents=4, actions=5
+function decodeScopeDescriptor(bytes) {
+  const fields = parseFields(bytes);
+  return {
+    scope: decodeStringMessage(firstBytes(fields, 1)),
+    intents: (fields.get(4) ?? []).map(decodeIntentCapability),
+    actions: (fields.get(5) ?? []).map(decodeActionCapability),
+  };
+}
+
+// capability.proto: HostCapabilities.vehicles=2; VehicleDescriptor.vehicle=1,
+// scopes=3. Extracts the typed capability negotiation the control path
+// scales by (CTRL-01) — one flat list of per-vehicle scope descriptors.
+function decodeAdvertisedScopes(hostCapabilitiesBytes) {
+  if (!hostCapabilitiesBytes) return [];
+  const caps = parseFields(hostCapabilitiesBytes);
+  const scopes = [];
+  for (const vehicleBytes of caps.get(2) ?? []) {
+    const vehicle = parseFields(vehicleBytes);
+    const vehicleId = decodeUint64Message(firstBytes(vehicle, 1));
+    for (const scopeBytes of vehicle.get(3) ?? []) {
+      scopes.push({ vehicleId, ...decodeScopeDescriptor(scopeBytes) });
+    }
+  }
+  return scopes;
 }
 
 // telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,
