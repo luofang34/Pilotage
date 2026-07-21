@@ -29,7 +29,15 @@ pub(crate) async fn spawn_camera_bridge() -> (
         .and_then(std::path::Path::parent)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
     let bin = workspace_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge");
-    let config = pilotage_adapter_gazebo::BridgeConfig::new("x500", bin);
+    // The onboard/FPV view is the CGO3 gimbal's own camera (on the moving
+    // `camera_link` of the `x500_0` gimbal model), so the video pans and tilts
+    // with the gimbal. The bridge's `/camera` default is the world's FIXED
+    // camera rig, which never moves — pointing FPV at the fixed rig is why the
+    // gimbal camera "did not work". `/chase_camera` (source 1) stays the rig's
+    // 3rd-person view. World name and model instance are fixed by
+    // `sim/worlds/px4_flightdeck.sdf` (`default` / `x500_0`).
+    let config = pilotage_adapter_gazebo::BridgeConfig::new("x500", bin)
+        .with_camera_topic("/world/default/model/x500_0/link/camera_link/sensor/camera/image");
     match pilotage_adapter_gazebo::BridgeClient::spawn_and_connect(config).await {
         Ok(mut bridge) => {
             let (tx, rx) = tokio::sync::mpsc::channel(4);

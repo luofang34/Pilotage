@@ -42,6 +42,10 @@ pub struct BridgeConfig {
     pub bridge_bin: PathBuf,
     /// Gazebo model name passed to the bridge as `--vehicle`.
     pub vehicle_name: String,
+    /// FPV (`camera_id = 0`) gz image topic. `None` leaves the bridge on its
+    /// own default (`/camera`); worlds where the onboard view is a moving
+    /// gimbal camera on a scoped topic set it explicitly.
+    pub camera_topic: Option<String>,
     /// Bounded depth of the raw-frame channel.
     pub frame_channel_depth: usize,
 }
@@ -55,8 +59,18 @@ impl BridgeConfig {
         Self {
             bridge_bin,
             vehicle_name: vehicle_name.into(),
+            camera_topic: None,
             frame_channel_depth: DEFAULT_FRAME_CHANNEL_DEPTH,
         }
+    }
+
+    /// Overrides the FPV camera gz topic (the bridge's `--camera-topic`), so
+    /// the onboard view can be sourced from a moving gimbal camera rather than
+    /// the bridge's fixed `/camera` default.
+    #[must_use]
+    pub fn with_camera_topic(mut self, topic: impl Into<String>) -> Self {
+        self.camera_topic = Some(topic.into());
+        self
     }
 }
 
@@ -164,12 +178,25 @@ impl BridgeClient {
         }
     }
 
-    fn spawn_child(config: &BridgeConfig, port: u16) -> Result<Child, GazeboAdapterError> {
-        Command::new(&config.bridge_bin)
+    /// Builds the sidecar bridge command line for `config` on `port`. Split out
+    /// from [`Self::spawn_child`] so the argument list — notably the optional
+    /// `--camera-topic` override that points FPV at a moving gimbal camera — is
+    /// unit-testable without spawning a process.
+    fn bridge_command(config: &BridgeConfig, port: u16) -> Command {
+        let mut command = Command::new(&config.bridge_bin);
+        command
             .arg("--port")
             .arg(port.to_string())
             .arg("--vehicle")
-            .arg(&config.vehicle_name)
+            .arg(&config.vehicle_name);
+        if let Some(camera_topic) = &config.camera_topic {
+            command.arg("--camera-topic").arg(camera_topic);
+        }
+        command
+    }
+
+    fn spawn_child(config: &BridgeConfig, port: u16) -> Result<Child, GazeboAdapterError> {
+        Self::bridge_command(config, port)
             .stdin(Stdio::null())
             .kill_on_drop(true)
             .spawn()
@@ -353,5 +380,40 @@ async fn writer_loop(
             warn!(error = %err, "sidecar bridge write failed; stopping writer");
             return;
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{BridgeClient, BridgeConfig};
+
+    fn bridge_args(config: &BridgeConfig) -> Vec<String> {
+        BridgeClient::bridge_command(config, 1234)
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn camera_topic_override_points_fpv_at_the_gimbal_camera() {
+        let base = BridgeConfig::new("x500", PathBuf::from("/nonexistent/pilotage-gz-bridge"));
+        // By default the bridge keeps its own `/camera` topic (no override).
+        assert!(
+            !bridge_args(&base).iter().any(|arg| arg == "--camera-topic"),
+            "no --camera-topic by default"
+        );
+
+        // With an override, the exact gimbal-camera topic is passed through.
+        let topic = "/world/default/model/x500_0/link/camera_link/sensor/camera/image";
+        let args = bridge_args(&base.with_camera_topic(topic));
+        let idx = args
+            .iter()
+            .position(|arg| arg == "--camera-topic")
+            .expect("--camera-topic present");
+        assert_eq!(args.get(idx + 1).map(String::as_str), Some(topic));
     }
 }
