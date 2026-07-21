@@ -113,6 +113,7 @@ mod tests {
             description: None,
             axes: vec![],
             buttons: vec![],
+            keys: vec![],
         }
     }
 

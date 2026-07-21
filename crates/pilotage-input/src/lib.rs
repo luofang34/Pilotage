@@ -21,11 +21,13 @@ mod sample;
 
 pub use button_tracker::ButtonTracker;
 pub use digest::{DIGEST_LEN, content_digest};
+pub use logical::{SLOT_AXIS_BASE, SLOT_AXIS_COUNT};
 pub use logical::{axis_id_for_name, button_id_for_name};
 pub use normalize::{NormalizedAxis, normalize_axis};
 pub use profile::{
     AxisCalibration, AxisConfig, ButtonConfig, DeviceIdentity, DeviceInfo, DeviceProfile,
-    ProfileError, SCHEMA_VERSION, parse_profile_bytes, parse_profile_str, validate_axis_config,
+    KeyAxisBinding, KeyBinding, ProfileError, SCHEMA_VERSION, parse_profile_bytes,
+    parse_profile_str, validate_axis_config,
 };
 pub use registry::{
     GENERIC_GAMEPAD_JSON, LayeredProfile, ProfileLayer, SelectError, layered,

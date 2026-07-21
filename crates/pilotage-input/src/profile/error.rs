@@ -110,6 +110,25 @@ pub enum ProfileError {
         /// Which response-curve field was non-finite.
         field: &'static str,
     },
+
+    /// A key binding did not declare exactly one target, or its axis
+    /// deflection was unusable (non-finite, out of `[-1, 1]`, or zero — a
+    /// held key must command a real deflection).
+    #[error("device profile key {key:?} binding is malformed: {detail}")]
+    MalformedKeyBinding {
+        /// The key whose binding is malformed.
+        key: String,
+        /// What made the binding unusable.
+        detail: &'static str,
+    },
+
+    /// One key was bound more than once, which would make two targets race
+    /// for a single physical key.
+    #[error("device profile binds key {key:?} more than once")]
+    DuplicateKeyBinding {
+        /// The repeated key.
+        key: String,
+    },
 }
 
 /// Distinguishes axis entries from button entries in duplicate-entry errors.

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::axis::AxisConfig;
 use super::button::ButtonConfig;
+use super::key::KeyBinding;
 
 /// The schema version this crate parses. Profiles declaring any other
 /// `schema_version` are rejected with a typed error at load time.
@@ -30,8 +31,10 @@ pub struct DeviceInfo {
 }
 
 /// A versioned device profile: schema-v1 JSON mapping a physical device's
-/// axes and buttons onto the canonical logical input model (ADR-0007).
+/// axes, buttons, and (for keyboard-class devices) keys onto the canonical
+/// logical input model (ADR-0007).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceProfile {
     /// Schema version this profile was authored against. Must equal
     /// [`SCHEMA_VERSION`] to load successfully.
@@ -48,6 +51,10 @@ pub struct DeviceProfile {
     pub axes: Vec<AxisConfig>,
     /// Per-button configuration.
     pub buttons: Vec<ButtonConfig>,
+    /// Key bindings for keyboard-class devices; empty for devices whose
+    /// input arrives as axes and buttons.
+    #[serde(default)]
+    pub keys: Vec<KeyBinding>,
 }
 
 impl DeviceProfile {
@@ -80,6 +87,7 @@ mod tests {
             description: None,
             axes: vec![],
             buttons: vec![],
+            keys: vec![],
         };
         assert_eq!(
             profile.identity(),

@@ -56,6 +56,7 @@ fn golden_profile() -> DeviceProfile {
             axis(2, "yaw", true, 0.0),
         ],
         buttons: vec![],
+        keys: vec![],
     }
 }
 
