@@ -76,11 +76,12 @@ fn gimbal_link_loss_latches_gimbal_but_leaves_motion_flying() {
 }
 
 #[test]
-fn gimbal_link_loss_engage_publishes_a_verified_zero_rate() {
+fn gimbal_link_loss_engage_queues_a_zero_rate_and_reasserts_the_claim() {
     // Engaging must actively STOP the slew, not merely latch: a nonzero rate
-    // in flight would otherwise coast until the far slower stale-demand
-    // cutoff. The failsafe re-asserts the primary-control claim (PX4 drops a
-    // rate from a non-primary sender) and drives a verified zero-rate.
+    // in flight would otherwise coast until the far slower stale-demand cutoff.
+    // The failsafe re-asserts the primary-control claim (PX4 drops a rate from a
+    // non-primary sender) and QUEUES a zero-rate to the FC's lanes — best-effort
+    // (not FC-confirmed), so the test observes the queued lane traffic.
     let (control, mut lanes) = gimbal_control();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
 
@@ -104,7 +105,7 @@ fn gimbal_link_loss_engage_publishes_a_verified_zero_rate() {
     assert_eq!(
         (rate.pitch_rps, rate.yaw_rps),
         (0.0, 0.0),
-        "the failsafe drives a zero-rate setpoint"
+        "the failsafe queues a zero-rate setpoint"
     );
 }
 

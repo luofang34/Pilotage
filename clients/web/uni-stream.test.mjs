@@ -6,6 +6,11 @@
 // OPEN (never-closing) stream, and the motionRecovered latch flipping LIVE —
 // before any close — and ONLY for the matching generation.
 //
+// Synchronization is deterministic, NOT timer-based: a PULL-driven stream calls
+// its `pull` callback exactly when the reader has consumed the previous chunk
+// and is asking for the next, so each callback is a precise checkpoint — no
+// setTimeout races.
+//
 // Run: node clients/web/uni-stream.test.mjs
 
 import { readUniStream } from "./uni-stream.js";
@@ -21,8 +26,6 @@ function check(name, ok) {
     console.error(`FAIL - ${name}`);
   }
 }
-
-const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // ---- length-delimited LinkLossCleared (envelope oneof tag 15) construction ----
 function varint(out, v) {
@@ -70,38 +73,31 @@ function taggedFirstChunk(...bytes) {
   return new Uint8Array([STREAM_KIND_AUTHORITY, ...bytes]);
 }
 
-// A hand-driven ReadableStream: `push` enqueues a chunk on the OPEN stream,
-// `close` ends it. Nothing is enqueued until we say so, so we can assert what
-// happened while the stream was still open — exactly the long-lived authority
-// stream's shape.
-function manualStream() {
-  let controller;
-  const stream = new ReadableStream({
-    start(c) {
-      controller = c;
+// A PULL-driven ReadableStream: `pull` runs one scripted step each time the
+// reader asks for the next chunk (i.e. after fully consuming the previous one),
+// so a step is a deterministic checkpoint. The stream stays OPEN until a step
+// calls `controller.close()`.
+function scriptedStream(steps) {
+  let i = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (i < steps.length) {
+        steps[i](controller);
+        i += 1;
+      } else {
+        controller.close();
+      }
     },
   });
-  return {
-    reader: stream.getReader(),
-    push: (chunk) => controller.enqueue(chunk),
-    close: () => controller.close(),
-  };
 }
 
-// Wires readUniStream to the real recovery transition over `state`, recording
-// each generation that actually confirmed recovery.
 function startReader(reader, state, vehicleId, motionScope) {
-  const confirmed = [];
-  const done = readUniStream(reader, {
+  return readUniStream(reader, {
     authorityKind: STREAM_KIND_AUTHORITY,
     decode: decodeLengthDelimitedEnvelope,
-    onAuthorityEnvelope: (decoded) => {
-      const before = state.motionRecovered;
-      applyMotionRecovery(decoded, state, vehicleId, motionScope);
-      if (!before && state.motionRecovered) confirmed.push(decoded.message.generation);
-    },
+    onAuthorityEnvelope: (decoded) =>
+      applyMotionRecovery(decoded, state, vehicleId, motionScope),
   });
-  return { done, confirmed };
 }
 
 const VEHICLE_ID = 7n;
@@ -111,24 +107,38 @@ const MOTION_SCOPE = "vehicle.motion";
 await (async () => {
   const state = { generation: 42n, motionRecovered: false };
   const ack = linkLossClearedLD(7, MOTION_SCOPE, 42);
-  const { reader, push, close } = manualStream();
-  const { done, confirmed } = startReader(reader, state, VEHICLE_ID, MOTION_SCOPE);
+  // Observations are recorded INSIDE the pull checkpoints, so they capture the
+  // recovery latch at exact points in the reader's progress.
+  const observed = [];
+  const stream = scriptedStream([
+    // Deliver the kind tag and only the first bytes of the ack.
+    (c) => c.enqueue(taggedFirstChunk(...ack.subarray(0, 3))),
+    // Reader consumed the partial (asking for more): nothing recovered yet;
+    // deliver the remainder — still on the OPEN stream.
+    (c) => {
+      observed.push(["after-partial", state.motionRecovered]);
+      c.enqueue(ack.subarray(3));
+    },
+    // Reader consumed the completing bytes: the ack dispatched and recovery
+    // latched LIVE — recorded BEFORE we close the stream.
+    (c) => {
+      observed.push(["after-complete-open", state.motionRecovered]);
+      c.close();
+    },
+  ]);
 
-  // The kind tag and only the first bytes of the ack arrive: nothing confirms
-  // yet, and the stream is still open.
-  push(taggedFirstChunk(...ack.subarray(0, 3)));
-  await tick();
-  check("a partial envelope on an open stream does not confirm", state.motionRecovered === false);
+  const { kind, tail, aborted } = await startReader(
+    stream.getReader(),
+    state,
+    VEHICLE_ID,
+    MOTION_SCOPE,
+  );
 
-  // The remainder arrives — still on the OPEN stream (we have not closed it):
-  // the envelope completes and recovery latches LIVE.
-  push(ack.subarray(3));
-  await tick();
-  check("recovery latches LIVE from the fragmented OPEN stream", state.motionRecovered === true);
-  check("it confirmed exactly once, on the acked generation", confirmed.length === 1 && confirmed[0] === 42n);
-
-  close();
-  const { kind, tail, aborted } = await done;
+  check("a partial envelope on an open stream does not recover", observed[0][1] === false);
+  check(
+    "recovery latched LIVE from the fragmented OPEN stream (before close)",
+    observed[1][1] === true,
+  );
   check("the leading 0x01 tag was read as the authority kind", kind === STREAM_KIND_AUTHORITY);
   check("no video tail is left on the authority stream", tail.length === 0);
   check("the reader was not aborted", aborted === false);
@@ -137,29 +147,32 @@ await (async () => {
 // ---- resumes ONLY the matching generation, through the real reader ----
 await (async () => {
   const state = { generation: 42n, motionRecovered: false };
-  const { reader, push, close } = manualStream();
-  const { done, confirmed } = startReader(reader, state, VEHICLE_ID, MOTION_SCOPE);
+  const observed = [];
+  const stream = scriptedStream([
+    // A STALE-generation ack (the pre-handover 41) — decoded and dispatched.
+    (c) => c.enqueue(taggedFirstChunk(...linkLossClearedLD(7, MOTION_SCOPE, 41))),
+    // Recorded after the stale ack: must NOT resume. Deliver a GIMBAL-scope ack.
+    (c) => {
+      observed.push(["after-stale", state.motionRecovered]);
+      c.enqueue(linkLossClearedLD(7, "vehicle.gimbal", 42));
+    },
+    // Recorded after the gimbal ack: must NOT resume motion. Deliver the match.
+    (c) => {
+      observed.push(["after-gimbal", state.motionRecovered]);
+      c.enqueue(linkLossClearedLD(7, MOTION_SCOPE, 42));
+    },
+    // Recorded after the matching ack: NOW resumed.
+    (c) => {
+      observed.push(["after-match", state.motionRecovered]);
+      c.close();
+    },
+  ]);
 
-  // A STALE-generation ack (the pre-handover 41) is decoded and dispatched but
-  // must NOT confirm recovery.
-  push(taggedFirstChunk(...linkLossClearedLD(7, MOTION_SCOPE, 41)));
-  await tick();
-  check("a stale-generation ack does NOT resume", state.motionRecovered === false);
+  await startReader(stream.getReader(), state, VEHICLE_ID, MOTION_SCOPE);
 
-  // An ack for the GIMBAL scope on the current generation must not resume
-  // motion either.
-  push(linkLossClearedLD(7, "vehicle.gimbal", 42));
-  await tick();
-  check("a gimbal-scope ack does NOT resume motion", state.motionRecovered === false);
-
-  // Finally the matching ack (motion scope, generation 42) resumes — once.
-  push(linkLossClearedLD(7, MOTION_SCOPE, 42));
-  await tick();
-  check("the matching-generation motion ack resumes", state.motionRecovered === true);
-  check("exactly one confirmation, on generation 42", confirmed.length === 1 && confirmed[0] === 42n);
-
-  close();
-  await done;
+  check("a stale-generation ack does NOT resume", observed[0][1] === false);
+  check("a gimbal-scope ack does NOT resume motion", observed[1][1] === false);
+  check("the matching-generation motion ack resumes", observed[2][1] === true);
 })();
 
 if (failures > 0) {

@@ -57,18 +57,21 @@ impl Px4Adapter {
                 Ok(())
             }
             GIMBAL_SCOPE => {
-                // A gimbal failsafe stops the slew NOW with a verified
-                // zero-rate command, without ever touching flight — an
-                // existing nonzero rate must not coast on until the far
-                // slower stale-demand cutoff.
+                // A gimbal failsafe QUEUES a zero-rate stop NOW, without ever
+                // touching flight — an existing nonzero rate must not coast on
+                // until the far slower stale-demand cutoff. This is best-effort:
+                // `Ok` means the claim and zero-rate reached their lanes, not
+                // that the FC confirmed a stop (the declared safety net is the
+                // FC's own setpoint-timeout failsafe). A lane full/closed is a
+                // typed fault the host counts.
                 let Some(gimbal) = self.gimbal.as_mut() else {
                     return Err(LinkLossEnactError::NoActuationChannel);
                 };
-                if gimbal.link_loss_stop() {
+                if gimbal.queue_link_loss_stop() {
                     Ok(())
                 } else {
                     Err(LinkLossEnactError::ChannelRejected {
-                        detail: "the zero-rate gimbal setpoint send was refused".to_owned(),
+                        detail: "the zero-rate gimbal setpoint could not be queued".to_owned(),
                     })
                 }
             }

@@ -122,13 +122,6 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// was already fenced, so an unenacted policy means the vehicle may
     /// still be executing its last command with nobody in control.
     link_loss_enact_failures: u64,
-    /// Recovery clears the engine un-engaged but whose adapter enactment was
-    /// refused. Each tick retries them; the first acceptance broadcasts the
-    /// scope's `LinkLossCleared` ack exactly once. Until then the vehicle
-    /// stays neutralized (fail-closed) and the client keeps neutralizing —
-    /// a failed clear must never strand recovery just because the engine
-    /// already dropped the engaged marker.
-    pending_clears: Vec<link_loss::PendingClear>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -153,7 +146,6 @@ impl<A: VehicleAdapter> EngineActor<A> {
             latency: BoundedLatencyLog::new(),
             drops: DropCounters::default(),
             link_loss_enact_failures: 0,
-            pending_clears: Vec::new(),
             start,
         }
     }
@@ -220,10 +212,6 @@ impl<A: VehicleAdapter> EngineActor<A> {
         let now = MonoTimestamp::from_nanos(u64_nanos_since(self.start));
         let outcome = self.engine.handle_tick(now);
         self.enact(outcome);
-        // A clear the engine already un-engaged but the adapter refused is
-        // retried here until it takes, then acked once (ADR-0008 recovery
-        // must not strand on one refused enactment).
-        self.retry_pending_clears();
 
         let apply_start = Instant::now();
         let step_outcome = self.adapter.step(StepBudget { ticks: 1 });

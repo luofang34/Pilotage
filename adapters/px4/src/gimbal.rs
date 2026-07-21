@@ -244,21 +244,56 @@ impl Px4GimbalControl {
         claimed && sent
     }
 
-    /// Link-loss failsafe: drives a VERIFIED zero-rate setpoint NOW so an
-    /// in-flight slew stops immediately rather than waiting out the
-    /// `STALE_DEMAND_CUTOFF`. Re-asserts primary control first (PX4 drops a
-    /// rate setpoint from a non-primary sender), and reports whether both the
-    /// claim and the zero-rate reached their lanes so the adapter surfaces a
-    /// refused send as an enactment failure. Unlike [`Self::neutral`] it holds
-    /// the current pointing (zero RATE) rather than recentering — a failsafe
-    /// stops the camera where it is, it does not slew it to level.
-    pub fn link_loss_stop(&mut self) -> bool {
-        let claimed = self.claim_if_due();
+    /// Sends a primary-control claim UNCONDITIONALLY (not debounced by
+    /// [`Self::claim_if_due`]), so a link-loss stop re-asserts control even if a
+    /// claim went out moments ago. Returns false when the command lane could not
+    /// take it.
+    fn reassert_primary_control(&mut self) -> bool {
+        let now = self.clock.now();
+        let sent = self.send_command(
+            CMD_GIMBAL_CONFIGURE,
+            [
+                f32::from(GCS_SYSTEM_ID),
+                f32::from(GCS_COMPONENT_ID),
+                -1.0,
+                -1.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+        );
+        if sent {
+            self.last_claim = Some(now);
+        }
+        sent
+    }
+
+    /// Link-loss failsafe (BEST-EFFORT, queued — NOT FC-confirmed): re-asserts
+    /// primary control and QUEUES a zero-rate setpoint to the FC's lanes, so a
+    /// slew stops as promptly as the link allows instead of coasting to the
+    /// `STALE_DEMAND_CUTOFF`. Unlike [`Self::neutral`] it holds the current
+    /// pointing (zero RATE) rather than recentering — a failsafe stops the
+    /// camera where it is, it does not slew it to level.
+    ///
+    /// The return value reports whether BOTH the claim and the zero-rate
+    /// reached their local lanes — NOT whether the FC accepted them. There is
+    /// no `MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE` acknowledgement or gimbal-status
+    /// readback here, so the DECLARED safety net is independent of this queue:
+    /// the FC/gimbal-manager's own setpoint-timeout failsafe ages an
+    /// unrefreshed setpoint, and the host's `STALE_DEMAND_CUTOFF` re-sends a
+    /// zero-rate. A `false` return (a lane full or closed) is surfaced as a
+    /// typed enactment failure so the host counts it; it never means the FC
+    /// confirmed a stop.
+    pub fn queue_link_loss_stop(&mut self) -> bool {
+        let claimed = self.reassert_primary_control();
         self.streaming = false;
         self.last_demand = None;
-        let stopped = self.publish_rate(0.0, 0.0);
-        info!(claimed, stopped, "gimbal link-loss zero-rate commanded");
-        claimed && stopped
+        let queued = self.publish_rate(0.0, 0.0);
+        info!(
+            claimed,
+            queued, "gimbal link-loss zero-rate queued (best-effort)"
+        );
+        claimed && queued
     }
 
     /// Closes out a silent demand stream: one zero-rate setpoint when no

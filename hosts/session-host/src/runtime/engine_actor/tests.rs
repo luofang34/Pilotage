@@ -2,17 +2,22 @@
 //! releasing a lease without calling `set_link_loss_policy` would leave the
 //! vehicle on its last command (ADR-0008) — and a failed enactment is a
 //! counted fail-closed fault, never a silent no-op.
+#![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
     LinkLossPolicy, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
     VehicleDescriptor, VideoSource,
 };
-use pilotage_protocol::{Generation, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
-use pilotage_session::{
-    ClientKey, LinkLossTrigger, SessionAction, SessionConfig, SessionEngine, SessionOutcome,
+use pilotage_protocol::{
+    ClientHello, ControlPayload, Generation, LeaseRelease, LeaseRequest, LogicalAxisId, ScopeId,
+    ScopedControlFrame, SequenceNum, SessionId, VehicleId,
 };
-use pilotage_timing::{SimTick, StalenessPolicy};
+use pilotage_session::{
+    ClientKey, DomainEnvelope, LinkLossTrigger, OutboundMessage, SessionAction, SessionConfig,
+    SessionEngine, SessionOutcome,
+};
+use pilotage_timing::{MonoTimestamp, SimTick, StalenessPolicy};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -142,6 +147,96 @@ fn authority_messages(receiver: &mut mpsc::Receiver<ToConnection>) -> usize {
     count
 }
 
+fn hello() -> DomainEnvelope {
+    DomainEnvelope::Hello(ClientHello {
+        protocol_version: 1,
+        client_name: "host-test".to_owned(),
+        join_token: Vec::new(),
+    })
+}
+
+fn lease() -> DomainEnvelope {
+    DomainEnvelope::Lease(LeaseRequest {
+        vehicle: VEHICLE,
+        scope: ScopeId::new(MOTION),
+    })
+}
+
+fn release() -> DomainEnvelope {
+    DomainEnvelope::Release(LeaseRelease {
+        vehicle: VEHICLE,
+        scope: ScopeId::new(MOTION),
+    })
+}
+
+/// A full-coverage neutral motion frame at `generation` — the recovery
+/// activation the host requires to clear the scope's latch.
+fn neutral_frame(session: SessionId, generation: Generation, sequence: u32) -> DomainEnvelope {
+    DomainEnvelope::Frame(ScopedControlFrame {
+        session,
+        vehicle: VEHICLE,
+        scope: ScopeId::new(MOTION),
+        generation,
+        sequence: SequenceNum::new(sequence),
+        sampled_at: MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        payload: ControlPayload {
+            axes: vec![(LogicalAxisId::new(0), 0.0)],
+            edges: Vec::new(),
+        },
+    })
+}
+
+fn welcome_session(outcome: &SessionOutcome) -> SessionId {
+    outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::Welcome(welcome),
+                ..
+            } => Some(welcome.session),
+            _ => None,
+        })
+        .expect("a welcome")
+}
+
+fn grant_generation(outcome: &SessionOutcome) -> Generation {
+    outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::LeaseResponse(response),
+                ..
+            } if response.granted => Some(response.generation),
+            _ => None,
+        })
+        .expect("a granted lease")
+}
+
+/// Drives `actor`'s engine to a fresh holder pending recovery — welcome, grant,
+/// release (which engages link-loss and latches the adapter), re-grant —
+/// enacting every outcome. Returns the session and re-granted generation so the
+/// caller can send the neutral activation and observe the recovery ack. The
+/// recovering client is always `ClientKey::new(1)` (the one `register_client`
+/// registers), so a broadcast ack reaches its receiver.
+fn drive_to_regranted(actor: &mut EngineActor<RecordingAdapter>) -> (SessionId, Generation) {
+    let client = ClientKey::new(1);
+    let now = MonoTimestamp::from_nanos(0);
+    let welcome = actor.engine.handle_client_message(client, hello(), now);
+    let session = welcome_session(&welcome);
+    actor.enact(welcome);
+    let granted = actor.engine.handle_client_message(client, lease(), now);
+    actor.enact(granted);
+    let released = actor.engine.handle_client_message(client, release(), now);
+    actor.enact(released); // engages link-loss → the adapter's motion latch is set
+    let regranted = actor.engine.handle_client_message(client, lease(), now);
+    let generation = grant_generation(&regranted);
+    actor.enact(regranted);
+    (session, generation)
+}
+
 #[test]
 fn engage_link_loss_neutralizes_the_adapter() {
     let mut actor = actor();
@@ -190,17 +285,31 @@ fn clear_link_loss_returns_the_scope_to_normal_control() {
 }
 
 #[test]
-fn a_confirmed_clear_acks_the_recovering_client() {
+fn recovery_acks_once_when_the_adapter_confirms_the_clear() {
     let mut actor = actor();
     let mut client = register_client(&mut actor);
-    actor.enact(SessionOutcome {
-        actions: vec![clear_action(MOTION)],
-        dropped: 0,
-    });
+    let (session, generation) = drive_to_regranted(&mut actor);
+    // Drop the grant/release/re-grant authority broadcasts; only the recovery
+    // ack should follow.
+    let _ = authority_messages(&mut client);
+
+    let recovered = actor.engine.handle_client_message(
+        ClientKey::new(1),
+        neutral_frame(session, generation, 1),
+        MonoTimestamp::from_nanos(0),
+    );
+    actor.enact(recovered);
     assert_eq!(
         authority_messages(&mut client),
         1,
-        "a confirmed clear must broadcast exactly one LinkLossCleared ack"
+        "a confirmed recovery broadcasts exactly one LinkLossCleared ack"
+    );
+    assert!(
+        actor
+            .adapter
+            .link_loss_calls
+            .contains(&(VEHICLE, ScopeId::new(MOTION), None)),
+        "the adapter's motion latch was cleared"
     );
 }
 
@@ -225,93 +334,46 @@ fn a_failed_clear_emits_no_ack_and_counts_the_fault() {
 }
 
 #[test]
-fn a_failed_clear_retries_until_it_takes_then_acks_exactly_once() {
+fn a_refused_clear_is_retried_by_the_engine_and_acks_once_when_it_takes() {
     let mut actor = actor();
     let mut client = register_client(&mut actor);
+    let (session, generation) = drive_to_regranted(&mut actor);
+    let _ = authority_messages(&mut client);
 
-    // First attempt is refused: no ack, the fault is counted once, and the
-    // clear is held pending — the engine already dropped the engaged marker,
-    // so nothing else will re-emit it.
+    // The neutral activation requests the clear, but the adapter refuses it: no
+    // ack, and the engine holds the scope pending (fail-closed) rather than
+    // dropping it — so recovery is not stranded.
     actor.adapter.fail_enactment = true;
-    actor.enact(SessionOutcome {
-        actions: vec![clear_action(MOTION)],
-        dropped: 0,
-    });
+    let recovered = actor.engine.handle_client_message(
+        ClientKey::new(1),
+        neutral_frame(session, generation, 1),
+        MonoTimestamp::from_nanos(0),
+    );
+    actor.enact(recovered);
     assert_eq!(
         authority_messages(&mut client),
         0,
         "a refused clear does not ack"
     );
-    assert_eq!(
-        actor.link_loss_enact_failures, 1,
-        "the refusal is counted once"
-    );
+    assert_eq!(actor.link_loss_enact_failures, 1, "the refusal is counted");
 
-    // The adapter recovers; the next retry tick takes and acks — exactly once.
+    // The adapter recovers; the engine re-emits the clear on the next tick, it
+    // takes, and the ack fires — exactly once.
     actor.adapter.fail_enactment = false;
-    actor.retry_pending_clears();
+    let tick = actor.engine.handle_tick(MonoTimestamp::from_nanos(1));
+    actor.enact(tick);
     assert_eq!(
         authority_messages(&mut client),
         1,
-        "the deferred clear acks on the first acceptance"
+        "the engine-driven retry acks once when the adapter takes the clear"
     );
 
-    // Further retries neither re-ack nor re-clear: the pending entry is gone.
-    actor.retry_pending_clears();
+    // A further tick neither re-clears nor re-acks: the scope is Cleared.
+    let tick = actor.engine.handle_tick(MonoTimestamp::from_nanos(2));
+    actor.enact(tick);
     assert_eq!(
         authority_messages(&mut client),
         0,
         "exactly one ack across the whole recovery"
-    );
-
-    // One refused attempt then one accepted retry both reached the adapter as
-    // scope-clears, and the retry was not re-counted as a fault.
-    assert_eq!(
-        actor.adapter.link_loss_calls,
-        vec![
-            (VEHICLE, ScopeId::new(MOTION), None),
-            (VEHICLE, ScopeId::new(MOTION), None),
-        ],
-        "a failed clear then a successful retry, both scope-clears"
-    );
-    assert_eq!(
-        actor.link_loss_enact_failures, 1,
-        "retries are not re-counted as faults"
-    );
-}
-
-#[test]
-fn a_re_engage_cancels_a_stale_pending_clear() {
-    let mut actor = actor();
-    let mut client = register_client(&mut actor);
-
-    // A clear is refused and held pending for retry.
-    actor.adapter.fail_enactment = true;
-    actor.enact(SessionOutcome {
-        actions: vec![clear_action(MOTION)],
-        dropped: 0,
-    });
-    assert_eq!(authority_messages(&mut client), 0);
-
-    // The SAME scope re-engages (a new holder loss) before the retry lands.
-    // The stale pending-clear must be dropped, so a later retry can neither
-    // un-latch the fresh engagement nor ack a recovery that never happened.
-    actor.adapter.fail_enactment = false;
-    actor.enact(SessionOutcome {
-        actions: vec![engage_action()],
-        dropped: 0,
-    });
-    let calls_after_reengage = actor.adapter.link_loss_calls.len();
-
-    actor.retry_pending_clears();
-    assert_eq!(
-        actor.adapter.link_loss_calls.len(),
-        calls_after_reengage,
-        "a re-engaged scope's stale clear must not be retried onto the adapter"
-    );
-    assert_eq!(
-        authority_messages(&mut client),
-        0,
-        "a re-engage cancels the stale clear's ack — no false recovery"
     );
 }

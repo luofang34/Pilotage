@@ -174,6 +174,11 @@ impl SessionEngine {
             self.fan_out_authority(effects, now, LinkLossTrigger::HolderSilence, &mut actions);
         }
         self.expired_scratch = expired;
+        // Re-drive any scope whose clear the adapter refused, so recovery is not
+        // stranded on one failed enactment. Generation-gated inside: a holder
+        // change already reverted the pending, so this never crosses a
+        // generation (ADR-0010 neutral-activation stays required).
+        self.retry_pending_clears(&mut actions);
         actions.into_outcome()
     }
 

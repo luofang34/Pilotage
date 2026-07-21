@@ -31,16 +31,32 @@ use pilotage_timing::MonoTimestamp;
 use super::{Actions, SessionEngine};
 use crate::action::{LinkLossTrigger, SessionAction};
 
-/// Per-vehicle configured policy plus which scopes currently have their
-/// vehicle's policy engaged. Both vectors are bounded by the capability
+/// One scope's link-loss lifecycle (ADR-0010). Recovery is a two-step
+/// handshake because clearing the adapter latch is fallible: a neutral
+/// activation moves the scope to `ClearPending`, and it returns to normal
+/// control only once the adapter confirms the clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopeLinkLoss {
+    /// Holder lost; the policy is engaged and the scope awaits a new holder's
+    /// neutral-activation frame.
+    Engaged,
+    /// A neutral activation at `generation` requested the clear, not yet
+    /// confirmed by the adapter; retried at THIS generation only. A holder
+    /// change reverts it to `Engaged` (the new holder must re-demonstrate
+    /// neutral activation), so a stale clear can never cross a generation.
+    ClearPending { generation: Generation },
+}
+
+/// Per-vehicle configured policy plus the link-loss lifecycle of every scope
+/// whose holder was lost. Both vectors are bounded by the capability
 /// declaration and sized at construction.
 #[derive(Debug)]
 pub(crate) struct LinkLossState {
     /// The policy configured and validated for each vehicle.
     selected: Vec<(VehicleId, LinkLossPolicy)>,
-    /// Scopes whose holder loss engaged (or would keep engaged) their
-    /// vehicle's policy, each awaiting scope-specific recovery activation.
-    engaged: Vec<(VehicleId, ScopeId)>,
+    /// The link-loss lifecycle of each scope whose holder loss engaged its
+    /// vehicle's policy, keyed by `(vehicle, scope)`.
+    engaged: Vec<(VehicleId, ScopeId, ScopeLinkLoss)>,
 }
 
 impl LinkLossState {
@@ -83,23 +99,105 @@ impl LinkLossState {
             .unwrap_or(LinkLossPolicy::Neutralize)
     }
 
-    /// Records the loss of `scope` on `vehicle`. Idempotent.
+    /// Records (or re-records) the loss of `scope`, resetting it to `Engaged`.
+    /// A re-engagement discards any pending clear: the new loss must recover
+    /// through a fresh neutral activation. Idempotent for an engaged scope.
     fn engage_scope(&mut self, vehicle: VehicleId, scope: &ScopeId) {
-        if !self.is_scope_engaged(vehicle, scope) {
-            self.engaged.push((vehicle, scope.clone()));
+        match self.entry_mut(vehicle, scope) {
+            Some(state) => *state = ScopeLinkLoss::Engaged,
+            None => self
+                .engaged
+                .push((vehicle, scope.clone(), ScopeLinkLoss::Engaged)),
         }
     }
 
-    /// Whether this exact scope's loss is awaiting recovery activation.
-    fn is_scope_engaged(&self, vehicle: VehicleId, scope: &ScopeId) -> bool {
-        self.engaged
-            .iter()
-            .any(|(v, s)| *v == vehicle && s == scope)
+    /// Whether `scope` is engaged and still awaiting its recovery activation —
+    /// i.e. not already pending an adapter clear. A neutral frame recovers only
+    /// a scope in this state.
+    fn is_awaiting_activation(&self, vehicle: VehicleId, scope: &ScopeId) -> bool {
+        matches!(self.state(vehicle, scope), Some(ScopeLinkLoss::Engaged))
     }
 
-    /// Clears one scope's engagement marker. Idempotent.
-    fn clear_scope(&mut self, vehicle: VehicleId, scope: &ScopeId) {
-        self.engaged.retain(|(v, s)| !(*v == vehicle && s == scope));
+    /// Transitions an `Engaged` scope to `ClearPending { generation }`. Returns
+    /// `true` on the transition (the caller emits one `ClearLinkLoss`); `false`
+    /// when the scope is already pending or not engaged.
+    fn begin_clear_pending(
+        &mut self,
+        vehicle: VehicleId,
+        scope: &ScopeId,
+        generation: Generation,
+    ) -> bool {
+        let Some(state) = self.entry_mut(vehicle, scope) else {
+            return false;
+        };
+        if matches!(state, ScopeLinkLoss::Engaged) {
+            *state = ScopeLinkLoss::ClearPending { generation };
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Invalidates a pending clear on a holder change: reverts `ClearPending`
+    /// to `Engaged`, so the new holder must re-demonstrate neutral activation.
+    /// No-op for an `Engaged` or untracked scope.
+    fn invalidate_pending(&mut self, vehicle: VehicleId, scope: &ScopeId) {
+        let Some(state) = self.entry_mut(vehicle, scope) else {
+            return;
+        };
+        if matches!(state, ScopeLinkLoss::ClearPending { .. }) {
+            *state = ScopeLinkLoss::Engaged;
+        }
+    }
+
+    /// The adapter confirmed the clear at `generation`: drops the scope when it
+    /// is still `ClearPending { generation }`. Returns `true` when it removed a
+    /// matching pending clear (the caller acks exactly once); `false` when the
+    /// pending was already invalidated, superseded, or at a different
+    /// generation (the ack is suppressed).
+    fn confirm_cleared(
+        &mut self,
+        vehicle: VehicleId,
+        scope: &ScopeId,
+        generation: Generation,
+    ) -> bool {
+        let matched = matches!(
+            self.state(vehicle, scope),
+            Some(ScopeLinkLoss::ClearPending { generation: g }) if *g == generation
+        );
+        if matched {
+            self.engaged
+                .retain(|(v, s, _)| !(*v == vehicle && s == scope));
+        }
+        matched
+    }
+
+    /// Every scope currently pending an adapter clear, so the tick can re-emit
+    /// each one's retry `ClearLinkLoss` until the adapter accepts it.
+    fn pending_clears(&self) -> Vec<(VehicleId, ScopeId, Generation)> {
+        self.engaged
+            .iter()
+            .filter_map(|(vehicle, scope, state)| match state {
+                ScopeLinkLoss::ClearPending { generation } => {
+                    Some((*vehicle, scope.clone(), *generation))
+                }
+                ScopeLinkLoss::Engaged => None,
+            })
+            .collect()
+    }
+
+    fn state(&self, vehicle: VehicleId, scope: &ScopeId) -> Option<&ScopeLinkLoss> {
+        self.engaged
+            .iter()
+            .find(|(v, s, _)| *v == vehicle && s == scope)
+            .map(|(_, _, state)| state)
+    }
+
+    fn entry_mut(&mut self, vehicle: VehicleId, scope: &ScopeId) -> Option<&mut ScopeLinkLoss> {
+        self.engaged
+            .iter_mut()
+            .find(|(v, s, _)| *v == vehicle && s == scope)
+            .map(|(_, _, state)| state)
     }
 }
 
@@ -111,11 +209,15 @@ impl SessionEngine {
     /// starts that scope's silence deadline but does NOT clear an engaged
     /// policy — recovery additionally requires the new holder's activation
     /// frame on the lost scope (see
-    /// [`SessionEngine::maybe_activate_recovery`]). An effect that clears
-    /// the holder (release, revoke, link-lost) stops the watchdog, records
-    /// the scope as engaged, and emits that SCOPE's engagement (link-loss is
-    /// per-scope, so every lost scope engages independently); the fencing
-    /// generation has already advanced, so this is neutralize-after-fence.
+    /// [`SessionEngine::maybe_activate_recovery`]). It DOES invalidate any
+    /// clear still pending for that scope: a handover or override advances the
+    /// generation with no new engagement, so a stale pending clear must not
+    /// un-latch the scope for the new holder before it demonstrates neutral
+    /// activation. An effect that clears the holder (release, revoke,
+    /// link-lost) stops the watchdog, records the scope as engaged, and emits
+    /// that SCOPE's engagement (link-loss is per-scope, so every lost scope
+    /// engages independently); the fencing generation has already advanced, so
+    /// this is neutralize-after-fence.
     pub(super) fn holder_transition_action(
         &mut self,
         effect: &AuthorityEffect,
@@ -136,6 +238,7 @@ impl SessionEngine {
                 holder,
                 ..
             } => {
+                self.link_loss.invalidate_pending(*vehicle, scope);
                 self.liveness
                     .mark_active((*vehicle, scope.clone()), *holder, silence_deadline);
                 None
@@ -143,6 +246,7 @@ impl SessionEngine {
             AuthorityEffect::ScopeTransferCommitted {
                 vehicle, scope, to, ..
             } => {
+                self.link_loss.invalidate_pending(*vehicle, scope);
                 self.liveness
                     .mark_active((*vehicle, scope.clone()), *to, silence_deadline);
                 None
@@ -177,12 +281,15 @@ impl SessionEngine {
         }
     }
 
-    /// Clears one scope's engagement when the accepted frame satisfies the
-    /// recovery activation condition ON THAT SCOPE; called from the
-    /// frame-accept path, so the fenced-generation and holder-identity
-    /// checks have already passed. The vehicle's `ClearLinkLoss` is emitted
-    /// only when its LAST engaged scope recovers, ordered before the
-    /// frame's `ApplyToAdapter` so the adapter un-latches first.
+    /// Moves one scope from `Engaged` to `ClearPending` when the accepted frame
+    /// satisfies the recovery activation condition ON THAT SCOPE; called from
+    /// the frame-accept path, so the fenced-generation and holder-identity
+    /// checks have already passed. It emits ONE `ClearLinkLoss` (ordered before
+    /// the frame's `ApplyToAdapter` so the adapter un-latches first) but does
+    /// NOT remove the engagement marker: the scope stays engaged-pending until
+    /// the driver reports the adapter confirmed the clear
+    /// ([`SessionEngine::confirm_link_loss_cleared`]). A scope already pending
+    /// is left to the tick's retry, not re-activated here.
     pub(super) fn maybe_activate_recovery(
         &mut self,
         vehicle: VehicleId,
@@ -191,7 +298,7 @@ impl SessionEngine {
         payload: &ControlPayload,
         actions: &mut Actions,
     ) {
-        if !self.link_loss.is_scope_engaged(vehicle, scope) {
+        if !self.link_loss.is_awaiting_activation(vehicle, scope) {
             return;
         }
         let Some(declared) = declared_axes(&self.capabilities, vehicle, scope) else {
@@ -206,19 +313,74 @@ impl SessionEngine {
         ) {
             return;
         }
-        self.link_loss.clear_scope(vehicle, scope);
-        // Clear THIS scope's adapter latch (link-loss is per-scope, so clearing
-        // vehicle.gimbal never returns vehicle.motion to control). The
-        // client-facing LinkLossCleared ack is deliberately NOT emitted here:
-        // the driver broadcasts it only AFTER the adapter confirms the clear
-        // succeeded (this action is fallible), so the recovering client never
-        // resumes on a clear the vehicle never actually enacted. Safety
-        // critical, so it is never dropped behind the action cap.
-        actions.push_safety(SessionAction::ClearLinkLoss {
-            vehicle,
-            scope: scope.clone(),
-            generation,
-        });
+        if self
+            .link_loss
+            .begin_clear_pending(vehicle, scope, generation)
+        {
+            // Request THIS scope's adapter latch cleared (link-loss is
+            // per-scope, so clearing vehicle.gimbal never returns
+            // vehicle.motion to control). The engagement marker STAYS until the
+            // driver confirms the adapter took the clear, and the client-facing
+            // LinkLossCleared ack is emitted by the driver only then — so the
+            // recovering client never resumes on a clear the vehicle never
+            // enacted. Safety critical, so it is never dropped behind the cap.
+            actions.push_safety(SessionAction::ClearLinkLoss {
+                vehicle,
+                scope: scope.clone(),
+                generation,
+            });
+        }
+    }
+
+    /// Re-emits a retry `ClearLinkLoss` for every scope still pending an adapter
+    /// clear (ADR-0008 recovery must not strand on one refused enactment).
+    /// Called each tick: a clear the adapter took is confirmed and dropped
+    /// before the next tick, so this fires only for a genuinely-refused clear,
+    /// and only at the pending generation — a holder change already reverted it
+    /// to `Engaged`, so a stale clear can never cross a generation.
+    pub(super) fn retry_pending_clears(&mut self, actions: &mut Actions) {
+        for (vehicle, scope, generation) in self.link_loss.pending_clears() {
+            actions.push_safety(SessionAction::ClearLinkLoss {
+                vehicle,
+                scope,
+                generation,
+            });
+        }
+    }
+
+    /// The driver reports the adapter confirmed a scope's clear at `generation`.
+    /// Returns whether it matched a still-pending clear at that generation — the
+    /// driver broadcasts the `LinkLossCleared` ack exactly when it does, and
+    /// suppresses it otherwise (a clear whose pending was invalidated by a
+    /// holder change, or superseded, must not ack a recovery that did not hold).
+    pub fn confirm_link_loss_cleared(
+        &mut self,
+        vehicle: VehicleId,
+        scope: &ScopeId,
+        generation: Generation,
+    ) -> bool {
+        self.link_loss.confirm_cleared(vehicle, scope, generation)
+    }
+
+    /// Test-only: drives one authority effect through the real fan-out path
+    /// (holder-transition + link-loss handling) and returns the resulting
+    /// actions. The session's client API cannot yet trigger a committed
+    /// handover or an emergency override (increment-0), so their link-loss
+    /// races are exercised by feeding the effect the authority engine emits.
+    #[cfg(test)]
+    pub(crate) fn apply_authority_effect_for_test(
+        &mut self,
+        effect: AuthorityEffect,
+        now: MonoTimestamp,
+    ) -> crate::SessionOutcome {
+        let mut actions = super::Actions::new(self.config.max_actions_per_call);
+        self.fan_out_authority(
+            vec![effect],
+            now,
+            LinkLossTrigger::AuthorityRevoked,
+            &mut actions,
+        );
+        actions.into_outcome()
     }
 }
 
@@ -238,3 +400,6 @@ fn declared_axes<'a>(
         .find(|descriptor| descriptor.scope == *scope)
         .map(|descriptor| descriptor.axes.as_slice())
 }
+
+#[cfg(test)]
+mod tests;

@@ -79,9 +79,15 @@ The contract is now **per scope**:
   (`None`) the policy for **one scope only**. While a scope's policy is engaged
   the adapter MUST reject that scope's ordinary control frames
   (`RejectReason::LinkLossEngaged`) and MUST drive **only that scope's** actuation
-  to its safe state — motion neutralizes the flight setpoint, the gimbal drives a
-  verified zero-rate stop, and neither reaches the other. `None` is the only path
-  back to normal control for that scope.
+  toward its safe state — motion neutralizes the flight setpoint, the gimbal
+  queues a zero-rate stop, and neither reaches the other. `None` is the only path
+  back to normal control for that scope. Actuation is **best-effort at the link
+  boundary**: an `Ok` return means the safe-state command reached the vehicle
+  link, not that the vehicle confirmed it (e.g. the PX4 gimbal stop is queued
+  without waiting for a `CONFIGURE` acknowledgement, and relies on the FC's own
+  setpoint-timeout failsafe as the independent safety net). Adapters that CAN
+  confirm (a real gateway tracking device acknowledgement) SHOULD keep the scope
+  engaged/faulted until the vehicle confirms the safe state.
 - The call is **fallible** (`Result<(), LinkLossEnactError>`): authority is
   already fenced when it runs, so a refused enactment is a counted fail-closed
   fault, never a silent no-op. The engaged/cleared latch is recorded regardless
