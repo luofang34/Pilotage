@@ -1,0 +1,148 @@
+{
+    "comment": "Shared control-runtime golden vectors. BOTH harnesses execute this exact file — clients/web-control/src/golden.rs natively and clients/web/control-runtime.test.mjs through the compiled wasm — so the vectors cannot drift apart. Every expected value lands on {-1, 0, 1} (or inside a deadzone, so exactly 0) to stay independent of powf last-bit differences across libms. Each group runs on a fresh runtime bootstrapped through the built-in default profile; steps run in order; a step ticks only when it carries a session.",
+    "groups": [
+        {
+            "name": "gimbal capture masks flight and edges fire once",
+            "steps": [
+                {
+                    "pad": { "axes": [0.0, 0.0, 1.0, 1.0], "pressed": [6] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": {
+                        "gimbalPitch": -1.0,
+                        "gimbalYaw": 1.0,
+                        "motionRoll": 0.0,
+                        "motionPitch": 0.0,
+                        "lease": "none",
+                        "capture": true
+                    }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [11] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "recenter": true }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [11] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "recenter": false }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [6] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "capture": true }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "capture": false }
+                }
+            ]
+        },
+        {
+            "name": "lease planning requests and releases",
+            "steps": [
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": false },
+                    "expect": { "lease": "request", "gimbalNull": true }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "rover", "gimbalGranted": true },
+                    "expect": { "lease": "release" }
+                }
+            ]
+        },
+        {
+            "name": "keyboard drives through the device profile",
+            "steps": [
+                { "expectBound": { "w": true, "x": false } },
+                {
+                    "keyEvents": [["w", true]],
+                    "source": "keys",
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "motionThrottle": 1.0 }
+                },
+                {
+                    "clearKeys": true,
+                    "source": "keys",
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "motionThrottle": 0.0 }
+                }
+            ]
+        },
+        {
+            "name": "held controls across a reconnect fire no edge",
+            "steps": [
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [9, 11] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true, "generation": 100 }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [9, 11] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true, "generation": 101 },
+                    "expect": { "arm": false, "recenter": false }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true, "generation": 101 }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [9, 11] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true, "generation": 101 },
+                    "expect": { "arm": true, "recenter": true }
+                }
+            ]
+        },
+        {
+            "name": "motion output gates on the motion lease",
+            "steps": [
+                {
+                    "pad": { "axes": [1.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true, "motionGranted": false },
+                    "expect": { "motionGated": true }
+                },
+                {
+                    "pad": { "axes": [1.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true, "motionGranted": true },
+                    "expect": { "motionLive": true }
+                }
+            ]
+        },
+        {
+            "name": "device identity selects, reroutes, and reseeds edges",
+            "steps": [
+                {
+                    "selectDevice": "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)",
+                    "expect": { "select": "exact", "label": "Sony DualSense" }
+                },
+                {
+                    "selectDevice": "1209-4f54-RadioMaster Pocket",
+                    "expect": { "select": "exact" }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 1.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "motionThrottle": 1.0 }
+                },
+                {
+                    "selectDevice": "Mystery Pad (Vendor: dead Product: beef)",
+                    "expect": { "select": "fallback" }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true }
+                },
+                {
+                    "selectDevice": "Second Pad (Vendor: 1111 Product: 2222)",
+                    "expect": { "select": "fallback" }
+                },
+                {
+                    "pad": { "axes": [0.0, 0.0, 0.0, 0.0], "pressed": [9] },
+                    "session": { "mode": "quad-pilot", "gimbalGranted": true },
+                    "expect": { "arm": false }
+                }
+            ]
+        }
+    ]
+}
