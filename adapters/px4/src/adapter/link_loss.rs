@@ -1,8 +1,9 @@
 //! Per-scope link-loss enactment (ADR-0008): latch the scope, then drive ONLY
-//! that scope's actuation to its safe state. Motion neutralizes the FC velocity
-//! setpoint; the gimbal stops its slew with a verified zero-rate. Neither scope
-//! reaches the other, so a gimbal failsafe never brakes the aircraft and a
-//! flight failsafe never freezes the camera.
+//! that scope's actuation toward its safe state. Motion neutralizes the FC
+//! velocity setpoint; the gimbal queues a best-effort zero-rate stop (backed by
+//! PX4's own setpoint-timeout failsafe, not confirmed by this call). Neither
+//! scope reaches the other, so a gimbal failsafe never brakes the aircraft and
+//! a flight failsafe never freezes the camera.
 
 use pilotage_adapter_api::{LinkLossEnactError, LinkLossPolicy};
 use pilotage_protocol::{ScopeId, VehicleId};

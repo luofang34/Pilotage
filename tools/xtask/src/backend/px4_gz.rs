@@ -5,14 +5,21 @@
 //! adapter side is FDM-agnostic — swapping gz for JSBSim or FlightGear
 //! is a new backend planning different stages, not a new adapter.
 //!
-//! Gimbal link-loss acceptance (MANUAL): the host's gimbal failsafe
-//! (`queue_link_loss_stop`) is a best-effort queued zero-rate; its declared
-//! independent backstop is PX4's own gimbal-manager setpoint-timeout, which
-//! zeroes a nonzero angular rate after ~2 s (`src/modules/gimbal/output.cpp`,
-//! behavior pinned at commit `841bb40`). This is verified by flying this
-//! backend and confirming a slewing gimbal stops within ~2 s of link loss;
-//! no automated PX4-in-the-loop test runs in CI. Use a PX4 checkout at or
-//! after that commit so the fallback is present.
+//! Gimbal link-loss acceptance — validating PX4's INDEPENDENT failsafe
+//! (MANUAL): the host's failsafe (`queue_link_loss_stop`) is a best-effort
+//! queued zero-rate; its declared independent backstop is PX4's own
+//! gimbal-manager setpoint-timeout, which zeroes a nonzero angular rate after
+//! ~2 s (`src/modules/gimbal/output.cpp`, reference behavior at commit
+//! `841bb40`). A plain flight does NOT validate the backstop — the host's own
+//! stop would halt the gimbal regardless. The DISCRIMINATING procedure DROPS
+//! the host's stop (fault injection) so PX4's timeout is the SOLE mechanism:
+//! launch with `PILOTAGE_PX4_DROP_GIMBAL_STOP=1 cargo xtask sim px4-gz`, slew
+//! the gimbal at a sustained nonzero rate, sever the control link mid-slew, and
+//! confirm the gimbal KEEPS slewing (the host sent no stop) then stops ~2 s
+//! later — that stop is PX4's own timeout, not Pilotage's. Record the EXACT PX4
+//! SHA actually flown, not a range — `Validated PX4 SHA: UNVALIDATED, fill on
+//! the first passing run` (tracked by #168; no automated PX4-in-the-loop test
+//! runs in CI).
 
 use std::path::{Path, PathBuf};
 

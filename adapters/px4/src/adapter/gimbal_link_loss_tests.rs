@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 //! Per-scope link-loss behavior at the PX4 adapter boundary: a gimbal-scope
-//! failsafe stops the slew with a verified zero-rate WITHOUT touching flight, a
+//! failsafe queues a best-effort zero-rate stop WITHOUT touching flight, a
 //! motion-scope failsafe neutralizes flight without freezing the gimbal, and a
 //! refused enactment is a typed fault that still latches its scope.
 

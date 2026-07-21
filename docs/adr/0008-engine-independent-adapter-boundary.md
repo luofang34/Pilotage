@@ -114,4 +114,7 @@ per-scope engage/clear, the ack-after-confirmed-clear, the generation-gated retr
 a refused clear, and the handover/override invalidation are covered in
 `session-host`'s `engine_actor` and `pilotage-session`'s `recovery` tests. The
 independent PX4 rate-zeroing fallback is a MANUAL acceptance criterion of the
-`cargo xtask sim px4-gz` bring-up (no automated PX4-in-the-loop test runs in CI).
+`cargo xtask sim px4-gz` bring-up, made DISCRIMINATING by fault injection
+(`PILOTAGE_PX4_DROP_GIMBAL_STOP=1` drops the host's stop so PX4's timeout is the
+sole failsafe under test); the exact validated PX4 SHA is recorded there, not a
+range. No automated PX4-in-the-loop test runs in CI (tracked by #168).

@@ -146,12 +146,22 @@ impl Px4Adapter {
         // rate lane is taken exactly once here, so it is always present
         // on this first (and only) take.
         let gimbal = match (config.gimbal, link.take_gimbal_rate_sender()) {
-            (true, Some(rates)) => Some(crate::gimbal::Px4GimbalControl::new(
-                link.command_sender(),
-                rates,
-                link_config.system_id,
-                link_config.component_id,
-            )),
+            (true, Some(rates)) => {
+                // Acceptance fault injection: `PILOTAGE_PX4_DROP_GIMBAL_STOP=1`
+                // suppresses the host's gimbal link-loss stop so PX4's own
+                // setpoint-timeout is the sole failsafe under test.
+                let drop_stop =
+                    std::env::var("PILOTAGE_PX4_DROP_GIMBAL_STOP").as_deref() == Ok("1");
+                Some(
+                    crate::gimbal::Px4GimbalControl::new(
+                        link.command_sender(),
+                        rates,
+                        link_config.system_id,
+                        link_config.component_id,
+                    )
+                    .with_dropped_link_loss_stop(drop_stop),
+                )
+            }
             _ => None,
         };
         let uplink = match Px4Uplink::new(config.command_endpoint) {

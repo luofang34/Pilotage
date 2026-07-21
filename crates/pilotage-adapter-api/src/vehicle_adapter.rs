@@ -44,6 +44,22 @@ pub trait VehicleAdapter {
     /// the scope to normal control, the only API-level path back once a scope's
     /// policy has been engaged (ADR-0008).
     ///
+    /// # Latch postcondition (asymmetric, always fail-closed)
+    ///
+    /// - **Engage (`Some`)**: the latch is recorded and the scope stays
+    ///   suppressed **even if the actuation is refused** (`Err`) — a fenced
+    ///   scope must never be left drivable, so a failed engage still rejects
+    ///   that scope's control.
+    /// - **Clear (`None`)**: the latch is removed and the scope returns to
+    ///   normal control **only on `Ok`**. On `Err` the latch **stays engaged**
+    ///   (the scope keeps rejecting control) for the caller to retry. A scope is
+    ///   un-suppressed only by a clear the adapter accepted, never speculatively.
+    ///
+    /// Actuation is best-effort at the link boundary: `Ok` means the safe-state
+    /// command reached the vehicle link, not that the vehicle confirmed it. An
+    /// adapter that CAN confirm SHOULD keep the scope engaged/faulted until the
+    /// vehicle confirms the safe state.
+    ///
     /// # Errors
     ///
     /// Returns the typed enactment failure when the policy change could not

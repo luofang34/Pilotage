@@ -17,7 +17,7 @@
 use pilotage_adapter_api::{LinkLossPolicy, VehicleAdapter};
 use pilotage_protocol::{Generation, LinkLossCleared, ScopeId, VehicleId};
 use pilotage_session::{OutboundMessage, SessionAction};
-use tracing::{debug, error, warn};
+use tracing::{error, info, warn};
 
 use super::{EngineActor, MessageClass, to_connection_message};
 
@@ -65,9 +65,12 @@ impl<A: VehicleAdapter> EngineActor<A> {
     /// (ADR-0008's only path back — the latch drops only on `Ok`). On success
     /// it confirms to the engine and acks exactly when a still-pending clear at
     /// this generation matched. A refused clear leaves the scope neutralized;
-    /// the engine retries every tick, so only the FIRST (non-`retry`) refusal
-    /// is counted and error-logged — a retried refusal would otherwise be a
-    /// 100 Hz storm.
+    /// the engine retries every tick.
+    ///
+    /// Logging is transition-only, never per-tick (the engine re-emits at the
+    /// tick rate): the FIRST (non-`retry`) refusal is counted and `error!`-ed,
+    /// a `retry` that finally succeeds is `info!`-ed as the recovery, and a
+    /// still-refused `retry` is silent — otherwise it would be a 100 Hz storm.
     fn enact_clear_link_loss(
         &mut self,
         vehicle: VehicleId,
@@ -77,6 +80,13 @@ impl<A: VehicleAdapter> EngineActor<A> {
     ) {
         match self.adapter.set_link_loss_policy(vehicle, &scope, None) {
             Ok(()) => {
+                if retry {
+                    info!(
+                        vehicle = vehicle.as_u64(),
+                        scope = scope.as_str(),
+                        "link-loss clear recovered: the adapter accepted a retried clear"
+                    );
+                }
                 if self
                     .engine
                     .confirm_link_loss_cleared(vehicle, &scope, generation)
@@ -84,12 +94,9 @@ impl<A: VehicleAdapter> EngineActor<A> {
                     self.broadcast_link_loss_cleared(vehicle, scope, generation);
                 }
             }
-            Err(error) if retry => debug!(
-                vehicle = vehicle.as_u64(),
-                scope = scope.as_str(),
-                %error,
-                "link-loss clear still refused; the engine will retry"
-            ),
+            // A still-refused retry is silent: only the initial failure and the
+            // recovery are logged.
+            Err(_) if retry => {}
             Err(error) => {
                 self.link_loss_enact_failures = self.link_loss_enact_failures.wrapping_add(1);
                 error!(
