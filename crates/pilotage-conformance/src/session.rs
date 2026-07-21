@@ -15,7 +15,7 @@ use core::time::Duration;
 use pilotage_adapter_api::{LinkLossPolicy, StepBudget, VehicleAdapter};
 use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_authority::{AuthorityCommand, AuthorityEngine, FrameVerdict};
-use pilotage_protocol::{ScopedControlFrame, VehicleId};
+use pilotage_protocol::{ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::MonoTimestamp;
 
 use crate::event::{FrameOutcome, SessionEvent};
@@ -173,8 +173,10 @@ impl ScriptedSession {
     fn apply_link_loss_policy(&mut self, vehicle: VehicleId, policy: Option<LinkLossPolicy>) {
         // A refused enactment must be visible in the comparable event log —
         // an adapter that cannot drive its declared policy is a conformance
-        // divergence, not a silent no-op.
-        let enacted = self.adapter.set_link_loss_policy(vehicle, policy);
+        // divergence, not a silent no-op. The reference adapter declares only
+        // the motion scope, so a link-loss step targets it.
+        let scope = ScopeId::new("vehicle.motion");
+        let enacted = self.adapter.set_link_loss_policy(vehicle, &scope, policy);
         self.events.push(SessionEvent::LinkLossPolicyEngaged {
             vehicle,
             policy: if enacted.is_ok() {

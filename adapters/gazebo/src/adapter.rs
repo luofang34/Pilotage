@@ -83,7 +83,10 @@ pub struct GazeboAdapter {
     bridge: BridgeClient,
     frame_rx: Option<mpsc::Receiver<RawVideoFrame>>,
     frame_forwarder: Option<JoinHandle<()>>,
-    link_loss_policy: Option<LinkLossPolicy>,
+    // The link-loss latch is PER SCOPE: engaging one scope neither suppresses
+    // nor neutralizes another. A diff-drive only actuates motion, so only the
+    // motion scope's engagement stops the wheels.
+    link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
 }
 
 impl GazeboAdapter {
@@ -117,7 +120,7 @@ impl GazeboAdapter {
             bridge,
             frame_rx: Some(raw_rx),
             frame_forwarder,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         })
     }
 
@@ -139,7 +142,7 @@ impl GazeboAdapter {
             bridge,
             frame_rx: Some(raw_rx),
             frame_forwarder,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         }
     }
 
@@ -349,11 +352,12 @@ impl VehicleAdapter for GazeboAdapter {
                 disposition: Disposition::Rejected(reason),
             };
         }
-        // The link-loss latch: while a policy is engaged the wheels stay
-        // stopped and ordinary frames are suppressed, so a newly granted
-        // holder with deflected sticks cannot drive the vehicle out of its
-        // policy state before the host clears the latch.
-        if self.link_loss_policy.is_some() {
+        // The link-loss latch is per-scope: a frame is suppressed only while
+        // THIS frame's scope has a policy engaged, so a newly granted holder
+        // with deflected sticks cannot drive that scope out of its policy state
+        // before the host clears the latch — and another scope's engagement
+        // never suppresses this one.
+        if self.link_loss_policy.contains_key(&frame.scope) {
             return ApplyOutcome {
                 tick: self.latest_tick(),
                 disposition: Disposition::Rejected(RejectReason::LinkLossEngaged),
@@ -410,20 +414,28 @@ impl VehicleAdapter for GazeboAdapter {
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
         if vehicle != self.vehicle {
             return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
-        self.link_loss_policy = policy;
-        // On link loss, halt the vehicle immediately. Only `Neutralize` is
-        // advertised (a diff-drive without onboard automation has no richer
-        // safe action), so any engaged policy stops the wheels; clearing the
-        // policy (`None`, link recovery) leaves the last operator command in
-        // effect. The bridge also stops the vehicle on its own timeout when
-        // the control link is closed, but a refused stop is still a fault
-        // the caller must count — the latch is engaged either way.
+        match &policy {
+            Some(policy) => {
+                self.link_loss_policy.insert(scope.clone(), *policy);
+            }
+            None => {
+                self.link_loss_policy.remove(scope);
+            }
+        }
+        // Only the MOTION scope actuates the wheels, so only its engagement
+        // halts them — engaging some other scope's policy must not stop a
+        // diff-drive. Only `Neutralize` is advertised, so any engaged motion
+        // policy stops the wheels; clearing (`None`, recovery) leaves the last
+        // operator command in effect. The bridge also stops on its own timeout,
+        // but a refused stop is still a fault the caller must count.
         if policy.is_some()
+            && scope.as_str() == MOTION_SCOPE
             && !self.bridge.try_send_control(BridgeControl {
                 linear_x: 0.0,
                 angular_z: 0.0,

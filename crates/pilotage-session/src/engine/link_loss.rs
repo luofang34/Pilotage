@@ -1,10 +1,12 @@
 //! Link-loss policy selection, engagement, and recovery activation
 //! (ADR-0008, ADR-0010).
 //!
-//! The engine engages a vehicle's link-loss policy when a scope's holder is
-//! lost and clears it only after EVERY lost scope has recovered: for each,
-//! a fresh fenced authority generation installed a new holder AND that
-//! holder demonstrated the activation condition on THAT scope — an accepted
+//! Link-loss is PER SCOPE: the engine engages a scope's policy when THAT
+//! scope's holder is lost and clears THAT scope independently — engaging or
+//! clearing `vehicle.gimbal` never touches `vehicle.motion` on the same
+//! vehicle. A scope clears only after a fresh fenced authority generation
+//! installed a new holder AND that holder demonstrated the activation
+//! condition on THAT scope — an accepted
 //! frame reporting every axis the scope declares, all inside the neutral
 //! deadband, with no pressed edges. Scope-specificity matters twice over: a
 //! neutral frame on an unrelated scope proves nothing about the lost one,
@@ -23,12 +25,8 @@ use pilotage_adapter_api::{
     AdapterCapabilities, LinkLossPolicy, payload_satisfies_neutral_activation,
 };
 use pilotage_authority::AuthorityEffect;
-use pilotage_protocol::{
-    ControlPayload, Generation, LinkLossCleared, LogicalAxisId, ScopeId, VehicleId,
-};
+use pilotage_protocol::{ControlPayload, Generation, LogicalAxisId, ScopeId, VehicleId};
 use pilotage_timing::MonoTimestamp;
-
-use crate::outbound::OutboundMessage;
 
 use super::{Actions, SessionEngine};
 use crate::action::{LinkLossTrigger, SessionAction};
@@ -99,11 +97,6 @@ impl LinkLossState {
             .any(|(v, s)| *v == vehicle && s == scope)
     }
 
-    /// Whether any scope keeps `vehicle`'s policy engaged.
-    fn vehicle_engaged(&self, vehicle: VehicleId) -> bool {
-        self.engaged.iter().any(|(v, _)| *v == vehicle)
-    }
-
     /// Clears one scope's engagement marker. Idempotent.
     fn clear_scope(&mut self, vehicle: VehicleId, scope: &ScopeId) {
         self.engaged.retain(|(v, s)| !(*v == vehicle && s == scope));
@@ -120,11 +113,9 @@ impl SessionEngine {
     /// frame on the lost scope (see
     /// [`SessionEngine::maybe_activate_recovery`]). An effect that clears
     /// the holder (release, revoke, link-lost) stops the watchdog, records
-    /// the scope as engaged, and — on the vehicle's FIRST engaged scope —
-    /// emits the engagement; the fencing generation has already advanced,
-    /// so this is neutralize-after-fence. Later scope losses on an
-    /// already-engaged vehicle record their scope without re-emitting (the
-    /// adapter is already in its policy state).
+    /// the scope as engaged, and emits that SCOPE's engagement (link-loss is
+    /// per-scope, so every lost scope engages independently); the fencing
+    /// generation has already advanced, so this is neutralize-after-fence.
     pub(super) fn holder_transition_action(
         &mut self,
         effect: &AuthorityEffect,
@@ -169,11 +160,11 @@ impl SessionEngine {
                 ..
             } => {
                 self.liveness.clear(&(*vehicle, scope.clone()));
-                let first = !self.link_loss.vehicle_engaged(*vehicle);
+                // Link-loss is PER SCOPE: engage this scope and emit ITS
+                // engagement, so losing one scope's holder (e.g. releasing
+                // vehicle.gimbal) never engages or neutralizes another scope
+                // (vehicle.motion) on the same vehicle.
                 self.link_loss.engage_scope(*vehicle, scope);
-                if !first {
-                    return None;
-                }
                 Some(SessionAction::EngageLinkLoss {
                     vehicle: *vehicle,
                     scope: scope.clone(),
@@ -216,21 +207,18 @@ impl SessionEngine {
             return;
         }
         self.link_loss.clear_scope(vehicle, scope);
-        // Confirm the per-scope recovery to the client on the reliable stream,
-        // correlated by vehicle/scope/generation, so the recovering client
-        // resumes live control instead of trusting a best-effort datagram. This
-        // is safety-critical (a dropped notice would strand the client
-        // neutralizing forever), so it is never dropped behind the action cap.
-        actions.push_safety(SessionAction::Broadcast {
-            envelope: OutboundMessage::LinkLossCleared(LinkLossCleared {
-                vehicle,
-                scope: scope.clone(),
-                generation,
-            }),
+        // Clear THIS scope's adapter latch (link-loss is per-scope, so clearing
+        // vehicle.gimbal never returns vehicle.motion to control). The
+        // client-facing LinkLossCleared ack is deliberately NOT emitted here:
+        // the driver broadcasts it only AFTER the adapter confirms the clear
+        // succeeded (this action is fallible), so the recovering client never
+        // resumes on a clear the vehicle never actually enacted. Safety
+        // critical, so it is never dropped behind the action cap.
+        actions.push_safety(SessionAction::ClearLinkLoss {
+            vehicle,
+            scope: scope.clone(),
+            generation,
         });
-        if !self.link_loss.vehicle_engaged(vehicle) {
-            actions.push(SessionAction::ClearLinkLoss { vehicle });
-        }
     }
 }
 

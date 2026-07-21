@@ -111,12 +111,8 @@ impl Px4Adapter {
         if let Err(reason) = self.validate_flight_frame(frame) {
             return Some(rejected_control(tick, reason));
         }
-        // While a link-loss policy is engaged, ordinary frames are
-        // suppressed so a newly granted holder with deflected sticks
-        // cannot fly the vehicle out of its failsafe state.
-        if self.link_loss_policy.is_some() {
-            return Some(rejected_control(tick, RejectReason::LinkLossEngaged));
-        }
+        // The link-loss latch is checked per-scope in `apply_control` before
+        // routing, so a gimbal failsafe never suppresses motion.
         if flight_button_pressed(frame, RESET_BUTTON) {
             self.spawn_reset();
         }

@@ -131,20 +131,20 @@ fn a_neutral_frame_clears_once_and_orders_before_the_apply() {
         .expect("apply present");
     assert!(clear_index < apply_index, "clear must precede the apply");
 
-    // The clear also BROADCASTS a LinkLossCleared correlated to the recovered
-    // generation, so the recovering client resumes on confirmation rather than
-    // trusting its best-effort neutral datagram arrived.
-    let confirmed = neutral.actions.iter().any(|a| {
+    // The engine defers the client-facing ack to the driver: it emits a
+    // ClearLinkLoss carrying the recovered generation, and the driver
+    // broadcasts LinkLossCleared only AFTER the adapter confirms the clear
+    // (a failed clear must NOT ack — see the engine-actor tests). Here we
+    // assert the engine hands the driver the exact generation to echo.
+    let carries_generation = neutral.actions.iter().any(|a| {
         matches!(
             a,
-            SessionAction::Broadcast {
-                envelope: OutboundMessage::LinkLossCleared(cleared),
-            } if cleared.generation == generation
+            SessionAction::ClearLinkLoss { generation: g, .. } if *g == generation
         )
     });
     assert!(
-        confirmed,
-        "recovery broadcasts a LinkLossCleared for the generation: {:?}",
+        carries_generation,
+        "ClearLinkLoss must carry the recovered generation for the ack: {:?}",
         neutral.actions
     );
 

@@ -116,7 +116,7 @@ impl AviateAdapter {
         // so a newly granted holder with deflected sticks cannot fly the
         // vehicle out of it. The host clears the latch only after the
         // holder demonstrates neutral input.
-        if self.link_loss_policy.is_some() {
+        if self.link_loss_policy.contains_key(&frame.scope) {
             return Some(rejected_control(tick, RejectReason::LinkLossEngaged));
         }
         if flight_button_pressed(frame, RESET_BUTTON) {

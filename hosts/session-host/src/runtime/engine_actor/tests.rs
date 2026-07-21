@@ -10,14 +10,18 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{Generation, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_session::{
-    LinkLossTrigger, SessionAction, SessionConfig, SessionEngine, SessionOutcome,
+    ClientKey, LinkLossTrigger, SessionAction, SessionConfig, SessionEngine, SessionOutcome,
 };
 use pilotage_timing::{SimTick, StalenessPolicy};
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::EngineActor;
+use crate::runtime::connection::ToConnection;
+use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 
 const VEHICLE: VehicleId = VehicleId::new(1);
+const MOTION: &str = "vehicle.motion";
 
 fn capabilities() -> AdapterCapabilities {
     AdapterCapabilities {
@@ -44,7 +48,7 @@ fn capabilities() -> AdapterCapabilities {
 /// every policy change, exercising the fail-closed fault path.
 #[derive(Default)]
 struct RecordingAdapter {
-    link_loss_calls: Vec<(VehicleId, Option<LinkLossPolicy>)>,
+    link_loss_calls: Vec<(VehicleId, ScopeId, Option<LinkLossPolicy>)>,
     fail_enactment: bool,
 }
 
@@ -73,9 +77,10 @@ impl VehicleAdapter for RecordingAdapter {
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
-        self.link_loss_calls.push((vehicle, policy));
+        self.link_loss_calls.push((vehicle, scope.clone(), policy));
         if self.fail_enactment {
             return Err(LinkLossEnactError::NoActuationChannel);
         }
@@ -102,11 +107,39 @@ fn actor() -> EngineActor<RecordingAdapter> {
 fn engage_action() -> SessionAction {
     SessionAction::EngageLinkLoss {
         vehicle: VEHICLE,
-        scope: ScopeId::new("vehicle.motion"),
+        scope: ScopeId::new(MOTION),
         generation: Generation::new(2),
         trigger: LinkLossTrigger::HolderSilence,
         policy: LinkLossPolicy::Neutralize,
     }
+}
+
+fn clear_action(scope: &str) -> SessionAction {
+    SessionAction::ClearLinkLoss {
+        vehicle: VEHICLE,
+        scope: ScopeId::new(scope),
+        generation: Generation::new(3),
+    }
+}
+
+/// Registers one client and returns its outbound receiver, so a test can
+/// observe what the actor broadcasts (the recovery ack rides this channel).
+fn register_client(actor: &mut EngineActor<RecordingAdapter>) -> mpsc::Receiver<ToConnection> {
+    let (sender, receiver) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
+    actor.clients.insert(ClientKey::new(1), sender);
+    receiver
+}
+
+/// The recovery ack travels on the reliable authority stream; count only those
+/// broadcasts so unrelated traffic never masquerades as an ack.
+fn authority_messages(receiver: &mut mpsc::Receiver<ToConnection>) -> usize {
+    let mut count = 0;
+    while let Ok(message) = receiver.try_recv() {
+        if matches!(message, ToConnection::AuthorityMessage(_)) {
+            count += 1;
+        }
+    }
+    count
 }
 
 #[test]
@@ -118,8 +151,12 @@ fn engage_link_loss_neutralizes_the_adapter() {
     });
     assert_eq!(
         actor.adapter.link_loss_calls,
-        vec![(VEHICLE, Some(LinkLossPolicy::Neutralize))],
-        "EngageLinkLoss must call set_link_loss_policy(Some(Neutralize))"
+        vec![(
+            VEHICLE,
+            ScopeId::new(MOTION),
+            Some(LinkLossPolicy::Neutralize)
+        )],
+        "EngageLinkLoss must call set_link_loss_policy(scope, Some(Neutralize))"
     );
     assert_eq!(actor.link_loss_enact_failures, 0);
 }
@@ -139,15 +176,50 @@ fn a_failed_enactment_is_a_counted_fault() {
 }
 
 #[test]
-fn clear_link_loss_returns_the_adapter_to_normal_control() {
+fn clear_link_loss_returns_the_scope_to_normal_control() {
     let mut actor = actor();
     actor.enact(SessionOutcome {
-        actions: vec![SessionAction::ClearLinkLoss { vehicle: VEHICLE }],
+        actions: vec![clear_action(MOTION)],
         dropped: 0,
     });
     assert_eq!(
         actor.adapter.link_loss_calls,
-        vec![(VEHICLE, None)],
-        "ClearLinkLoss must call set_link_loss_policy(None)"
+        vec![(VEHICLE, ScopeId::new(MOTION), None)],
+        "ClearLinkLoss must call set_link_loss_policy(scope, None)"
+    );
+}
+
+#[test]
+fn a_confirmed_clear_acks_the_recovering_client() {
+    let mut actor = actor();
+    let mut client = register_client(&mut actor);
+    actor.enact(SessionOutcome {
+        actions: vec![clear_action(MOTION)],
+        dropped: 0,
+    });
+    assert_eq!(
+        authority_messages(&mut client),
+        1,
+        "a confirmed clear must broadcast exactly one LinkLossCleared ack"
+    );
+}
+
+#[test]
+fn a_failed_clear_emits_no_ack_and_counts_the_fault() {
+    let mut actor = actor();
+    actor.adapter.fail_enactment = true;
+    let mut client = register_client(&mut actor);
+    actor.enact(SessionOutcome {
+        actions: vec![clear_action(MOTION)],
+        dropped: 0,
+    });
+    assert_eq!(
+        authority_messages(&mut client),
+        0,
+        "a clear the adapter refused must NOT ack — the client keeps neutralizing"
+    );
+    assert_eq!(
+        actor.link_loss_enact_failures, 1,
+        "a refused clear is a counted fail-closed fault, never silent"
     );
 }

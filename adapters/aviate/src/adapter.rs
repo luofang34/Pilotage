@@ -3,6 +3,7 @@
 //! operational estimate, the co-located shm block carries simulation
 //! truth, and the uplink socket carries FC-owned state reports.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
@@ -111,7 +112,9 @@ pub struct AviateAdapter {
     // Zero point of the host-monotonic acquisition clock.
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
-    link_loss_policy: Option<LinkLossPolicy>,
+    // Per-scope link-loss latch (ADR-0008): a gimbal-scope policy must not
+    // suppress or neutralize motion, so the latch is keyed by scope.
+    link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
     // Commanded-reset latch: engaged when a sim reset is requested,
     // cleared only by a fresh estimate source epoch plus demonstrated
     // neutral input (control::ResetLatch). While engaged, everything
@@ -163,7 +166,7 @@ impl AviateAdapter {
             reset_latch: None,
             reset_spawns: 0,
             fpv_mode: false,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         }
     }
 
@@ -382,18 +385,33 @@ impl VehicleAdapter for AviateAdapter {
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), pilotage_adapter_api::LinkLossEnactError> {
         if vehicle != self.vehicle {
             return Err(pilotage_adapter_api::LinkLossEnactError::UnknownVehicle { vehicle });
         }
-        // Latch first, fail after: even an unenactable engage suppresses
-        // ordinary control frames. Any link-loss transition also
-        // invalidates the captured position-hold context — a hold point
-        // captured under the lost lease is obsolete, and letting it
-        // survive would command recovery back toward it the instant
-        // control resumes.
-        self.link_loss_policy = policy;
+        // Latch first, fail after: even an unenactable engage suppresses this
+        // scope's control frames. The latch is per-scope so another scope's
+        // link-loss never suppresses this one.
+        match &policy {
+            Some(policy) => {
+                self.link_loss_policy.insert(scope.clone(), *policy);
+            }
+            None => {
+                self.link_loss_policy.remove(scope);
+            }
+        }
+        // Only the MOTION scope actuates flight: a gimbal-scope link-loss must
+        // NOT touch the FC or the motion hold context, so the neutralize and
+        // the hold-invalidation below are gated on the motion scope.
+        if scope.as_str() != FLIGHT_SCOPE {
+            return Ok(());
+        }
+        // Any motion link-loss transition invalidates the captured
+        // position-hold context — a hold point captured under the lost lease
+        // is obsolete, and letting it survive would command recovery back
+        // toward it the instant control resumes.
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.clear_hold_state();
         }

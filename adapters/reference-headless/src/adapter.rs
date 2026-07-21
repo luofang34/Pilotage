@@ -232,12 +232,17 @@ impl VehicleAdapter for ReferenceAdapter {
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
         if vehicle != self.vehicle {
             return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
-        self.controls.set_policy(policy);
+        // The skiff exposes only the motion scope, so only a motion-scope policy
+        // touches its actuation; any other scope's link-loss is a no-op here.
+        if scope.as_str() == MOTION_SCOPE {
+            self.controls.set_policy(policy);
+        }
         Ok(())
     }
 

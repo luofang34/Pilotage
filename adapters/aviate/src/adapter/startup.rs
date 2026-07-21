@@ -1,6 +1,8 @@
 //! Adapter construction: binding the profile's source roles, the flight
 //! uplink, and the camera bridge into a ready [`AviateAdapter`].
 
+use std::collections::BTreeMap;
+
 use pilotage_protocol::VehicleId;
 
 use super::{AviateAdapter, AviateProfile, camera, sources::bind_sources};
@@ -80,7 +82,7 @@ impl AviateAdapter {
             #[cfg(test)]
             reset_spawns: 0,
             fpv_mode: false,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         })
     }
 }

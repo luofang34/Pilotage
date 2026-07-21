@@ -65,7 +65,11 @@ fn snapshot_round_trip_preserves_link_loss_hold_countdown() {
     let mut adapter = ReferenceAdapter::from_seed(vehicle, 5);
     adapter.apply_control(&control_frame(vehicle));
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 3 }))
+        .set_link_loss_policy(
+            vehicle,
+            &ScopeId::new("vehicle.motion"),
+            Some(LinkLossPolicy::HoldBrief { ticks: 3 }),
+        )
         .expect("policy enacted");
     adapter.step(StepBudget { ticks: 1 });
 

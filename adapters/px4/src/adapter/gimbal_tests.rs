@@ -8,8 +8,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
+use pilotage_adapter_api::{Disposition, LinkLossPolicy, RejectReason, VehicleAdapter};
+use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, VehicleId};
 
 use pilotage_mavlink::LinkState;
 use pilotage_mavlink::codec::FcMessage;
@@ -104,6 +104,112 @@ fn gimbal_demands_flow_even_where_flight_control_cannot() {
     assert!(
         rate.is_some(),
         "then the rate demand on the latest-value lane"
+    );
+}
+
+/// A full-coverage neutral flight frame (every declared axis reported at
+/// zero), so a live adapter accepts it as ordinary motion control.
+fn neutral_flight_frame() -> pilotage_protocol::ScopedControlFrame {
+    frame(
+        vec![
+            (LogicalAxisId::new(super::ROLL_AXIS), 0.0),
+            (LogicalAxisId::new(super::PITCH_AXIS), 0.0),
+            (LogicalAxisId::new(super::THROTTLE_AXIS), 0.0),
+            (LogicalAxisId::new(super::YAW_AXIS), 0.0),
+        ],
+        vec![],
+    )
+}
+
+#[test]
+fn gimbal_link_loss_latches_gimbal_but_leaves_motion_flying() {
+    // The scope-specific link-loss contract (ADR-0008): losing the gimbal
+    // scope fails closed on gimbal frames WITHOUT ever neutralizing the FC
+    // or suppressing motion. Engaging the gimbal scope must not engage the
+    // vehicle-wide flight policy.
+    let (fc, addr) = fake_fc();
+    fc.set_read_timeout(Some(std::time::Duration::from_millis(200)))
+        .expect("timeout");
+    let (control, _lanes) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state())
+        .with_uplink(uplink_to(addr))
+        .with_gimbal(control);
+
+    adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &ScopeId::new(super::GIMBAL_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
+        .expect("a gimbal-scope engage never actuates the FC, so it cannot fail");
+
+    // The gimbal scope's own latch suppresses gimbal frames...
+    let gimbal = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
+        vec![],
+    ));
+    assert_eq!(
+        gimbal.disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged),
+        "the gimbal latch suppresses gimbal frames"
+    );
+
+    // ...but motion is untouched: a neutral flight frame still flies.
+    let motion = adapter.apply_control(&neutral_flight_frame());
+    assert_eq!(
+        motion.disposition,
+        Disposition::Accepted,
+        "a gimbal failsafe must never suppress motion"
+    );
+
+    // And engaging the gimbal scope never sent a neutral to the FC.
+    let mut buf = [0u8; 128];
+    assert!(
+        fc.recv_from(&mut buf).is_err(),
+        "engaging the gimbal scope must not neutralize the FC"
+    );
+}
+
+#[test]
+fn motion_link_loss_latches_motion_but_leaves_the_gimbal_pointing() {
+    // The converse: losing the motion scope neutralizes flight and latches
+    // motion frames, while the gimbal keeps pointing — one scope's failsafe
+    // never reaches the other.
+    let (_fc, addr) = fake_fc();
+    let (control, mut lanes) = gimbal_control();
+    let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state())
+        .with_uplink(uplink_to(addr))
+        .with_gimbal(control);
+
+    adapter
+        .set_link_loss_policy(
+            VehicleId::new(1),
+            &ScopeId::new(super::FLIGHT_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
+        .expect("motion engage neutralizes the reachable FC");
+
+    // The motion scope's latch suppresses motion frames...
+    let motion = adapter.apply_control(&neutral_flight_frame());
+    assert_eq!(
+        motion.disposition,
+        Disposition::Rejected(RejectReason::LinkLossEngaged),
+        "the motion latch suppresses motion frames"
+    );
+
+    // ...but the gimbal keeps pointing.
+    let gimbal = adapter.apply_control(&gimbal_frame(
+        vec![(LogicalAxisId::new(super::PITCH_AXIS), 0.5)],
+        vec![],
+    ));
+    assert_eq!(
+        gimbal.disposition,
+        Disposition::Accepted,
+        "a motion failsafe must never suppress the gimbal"
+    );
+    assert!(
+        lanes.commands.try_recv().is_ok(),
+        "the gimbal still emits its claim/demand while motion is latched"
     );
 }
 

@@ -114,8 +114,15 @@ pub enum SessionAction {
     /// neutral-axes frame, so a client reconnecting with deflected sticks
     /// cannot revive motion.
     ClearLinkLoss {
-        /// Vehicle returning to normal control under a new holder.
+        /// Vehicle whose scope is returning to normal control.
         vehicle: VehicleId,
+        /// The specific scope recovering — link-loss is per-scope, so clearing
+        /// one scope never returns another to control.
+        scope: ScopeId,
+        /// The fresh generation whose accepted neutral frame cleared the latch.
+        /// The driver echoes it in the client-facing `LinkLossCleared` notice
+        /// it broadcasts ONLY after the adapter confirms the clear.
+        generation: Generation,
     },
 }
 

@@ -183,7 +183,7 @@ pub(crate) fn cleared(outcome: &SessionOutcome) -> usize {
         .actions
         .iter()
         .filter(
-            |action| matches!(action, SessionAction::ClearLinkLoss { vehicle } if *vehicle == VEHICLE),
+            |action| matches!(action, SessionAction::ClearLinkLoss { vehicle, .. } if *vehicle == VEHICLE),
         )
         .count()
 }

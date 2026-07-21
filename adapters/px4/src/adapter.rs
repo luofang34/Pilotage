@@ -12,6 +12,8 @@ use pilotage_adapter_api::{
     TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::VehicleId;
+use std::collections::BTreeMap;
+
 use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
@@ -100,7 +102,9 @@ pub struct Px4Adapter {
     // press the reset button without touching a live simulator.
     #[cfg(test)]
     reset_spawns: u32,
-    link_loss_policy: Option<LinkLossPolicy>,
+    // Per-scope link-loss latch (ADR-0008): engaging the gimbal scope must
+    // not suppress or neutralize motion, and vice versa.
+    link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
 }
 
 /// The MAVLink estimate source: the shared cache plus the link task
@@ -180,7 +184,7 @@ impl Px4Adapter {
             reset_latch: None,
             #[cfg(test)]
             reset_spawns: 0,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         })
     }
 
@@ -205,7 +209,7 @@ impl Px4Adapter {
             last_reset: None,
             reset_latch: None,
             reset_spawns: 0,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         }
     }
 
@@ -335,6 +339,13 @@ impl VehicleAdapter for Px4Adapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
+        // Per-scope link-loss latch: a frame is suppressed only while ITS scope
+        // has a policy engaged, so a gimbal-scope failsafe never suppresses
+        // motion frames and vice versa. Applied to both the motion and gimbal
+        // routes below.
+        if self.link_loss_policy.contains_key(&frame.scope) {
+            return rejected_control(tick, RejectReason::LinkLossEngaged);
+        }
         if frame.scope.as_str() == GIMBAL_SCOPE {
             return self.apply_gimbal(frame, tick);
         }
@@ -433,33 +444,39 @@ impl VehicleAdapter for Px4Adapter {
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
         if vehicle != self.vehicle {
             return Err(LinkLossEnactError::UnknownVehicle { vehicle });
         }
-        match policy {
-            Some(_) => {
-                let Some(uplink) = self.uplink.as_mut() else {
-                    self.link_loss_policy = policy;
-                    return Err(LinkLossEnactError::NoActuationChannel);
-                };
-                let failures_before = uplink.send_failures();
-                uplink.neutralize();
-                let refused = uplink.send_failures() != failures_before;
-                self.link_loss_policy = policy;
-                if refused {
-                    return Err(LinkLossEnactError::ChannelRejected {
-                        detail: "the neutral setpoint send was refused".to_owned(),
-                    });
-                }
-                Ok(())
+        // Latch per-scope first: even an unenactable engage suppresses that
+        // scope's frames, and another scope's latch is untouched.
+        match &policy {
+            Some(policy) => {
+                self.link_loss_policy.insert(scope.clone(), *policy);
             }
             None => {
-                self.link_loss_policy = None;
-                Ok(())
+                self.link_loss_policy.remove(scope);
             }
         }
+        // Only the MOTION scope drives the FC velocity setpoint, so only its
+        // engagement neutralizes flight; a gimbal-scope failsafe latches (and
+        // suppresses gimbal frames) without ever braking the vehicle.
+        if policy.is_none() || scope.as_str() != FLIGHT_SCOPE {
+            return Ok(());
+        }
+        let Some(uplink) = self.uplink.as_mut() else {
+            return Err(LinkLossEnactError::NoActuationChannel);
+        };
+        let failures_before = uplink.send_failures();
+        uplink.neutralize();
+        if uplink.send_failures() != failures_before {
+            return Err(LinkLossEnactError::ChannelRejected {
+                detail: "the neutral setpoint send was refused".to_owned(),
+            });
+        }
+        Ok(())
     }
 
     fn step(&mut self, _budget: StepBudget) -> StepOutcome {

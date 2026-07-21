@@ -324,7 +324,11 @@ async fn set_link_loss_policy_sends_stop() {
         GazeboAdapter::from_bridge(vehicle, BridgeClient::connect_stream_for_test(host_side));
 
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize))
+        .set_link_loss_policy(
+            vehicle,
+            &ScopeId::new(MOTION_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
         .expect("policy enacted");
     let received = read_envelope(&mut bridge_side)
         .await
