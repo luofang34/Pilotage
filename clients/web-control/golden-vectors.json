@@ -494,6 +494,31 @@
       "name": "a session-layer override merges over the built-in and swaps transactionally",
       "steps": [
         {
+          "selectDevice": "",
+          "expect": {
+            "select": "exact"
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot"
+          },
+          "expect": {
+            "motionLease": "release",
+            "activationRevision": 2,
+            "label": "Generic Gamepad (standard mapping)"
+          }
+        },
+        {
           "addDeviceProfile": {
             "layer": "session",
             "profile": {
@@ -524,7 +549,7 @@
           },
           "expect": {
             "added": true,
-            "activationRevision": 1
+            "activationRevision": 2
           }
         },
         {
@@ -541,8 +566,7 @@
             "mode": "quad-pilot"
           },
           "expect": {
-            "motionLease": "release",
-            "activationRevision": 2,
+            "activationRevision": 3,
             "label": "Session Override"
           }
         },

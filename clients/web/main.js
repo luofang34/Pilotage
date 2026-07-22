@@ -1224,6 +1224,20 @@ function forwardKey(event, pressed) {
 window.addEventListener("keydown", (event) => forwardKey(event, true));
 window.addEventListener("keyup", (event) => forwardKey(event, false));
 
+// A pad disconnect — including the disconnect half of a same-model
+// replacement — returns control to the keyboard TRANSACTIONALLY and
+// re-announces the keyboard's real identity. The reconnect (or the
+// replacement's connect half) re-selects through the same path, so a new
+// physical unit is always a fresh activation.
+window.addEventListener("gamepaddisconnected", (event) => {
+  if (!state.controlShell) return;
+  if (state.selectedPadId !== null && event.gamepad?.id === state.selectedPadId) {
+    state.selectedPadId = null;
+    state.controlShell.deselectDevice();
+    log(`gamepad disconnected: ${event.gamepad.id}; control returns to the keyboard`);
+  }
+});
+
 /** Returns the first connected gamepad that matches a known profile, else any
  *  connected gamepad, else null. A gamepad is exposed to the page only after the
  *  user moves a stick or presses a button once. */
@@ -1312,8 +1326,13 @@ async function runControlLoop(writer, token) {
         if (outcome === null) {
           log(`gamepad REFUSED (ambiguous device-profile registry): ${pad.id}`);
         } else {
-          log(`gamepad mapped (${outcome}): ${state.controlShell.deviceLabel()}`);
+          log(`gamepad selected (${outcome}): ${pad.id}`);
         }
+      } else if (!pad && state.selectedPadId !== null) {
+        // Poll-level backstop for a disconnect whose DOM event was missed.
+        state.selectedPadId = null;
+        state.controlShell.deselectDevice();
+        log("gamepad gone; control returns to the keyboard");
       }
       const sessionState = {
         generation: state.controlGeneration,

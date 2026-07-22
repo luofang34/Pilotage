@@ -101,20 +101,64 @@ fn a_device_change_swaps_transactionally_and_gates_the_deflection() {
 #[test]
 fn an_unchanged_selection_does_not_cycle_authority() {
     let mut coordinator = with_scheme();
-    let before = coordinator.activation_revision();
-    // Same identity, same effective mapping: reconnecting the pad must not
-    // fence flight.
+    // The FIRST selection is a source switch (keyboard → pad): a
+    // transaction. Complete it, then re-select the same identity.
     coordinator.select_device("");
     let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    let before = coordinator.activation_revision();
+    assert_eq!(before, 2, "the source switch installed");
+    // Same identity, same source, same effective mapping: reconnecting the
+    // pad must not fence flight.
+    coordinator.select_device("");
     let plan = coordinator.evaluate(&neutral, &session(true, true));
     assert!(plan.motion_lease.is_none(), "no lease cycle on a no-op");
     assert_eq!(coordinator.activation_revision(), before);
 }
 
 #[test]
+fn the_boot_source_is_the_keyboard_and_a_disconnect_returns_to_it() {
+    let mut coordinator = with_scheme();
+    // Before any pad selection the announcement names the KEYBOARD — never
+    // a pad profile the operator is not driving with.
+    assert_eq!(coordinator.device_label(), "Keyboard");
+    assert!(coordinator.device_digest().is_some());
+    let keyboard_digest = coordinator.device_digest();
+
+    coordinator.select_device(DUALSENSE_ID);
+    let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(coordinator.device_label(), "Sony DualSense");
+    assert_ne!(coordinator.device_digest(), keyboard_digest);
+
+    // Disconnect: control returns to the keyboard through the SAME
+    // transactional path — revision advances, identity flips back.
+    coordinator.deselect_device();
+    assert_eq!(
+        coordinator.device_label(),
+        "Sony DualSense",
+        "the swap is pending, not instant"
+    );
+    coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(coordinator.activation_revision(), 3);
+    assert_eq!(coordinator.device_label(), "Keyboard");
+    assert_eq!(coordinator.device_digest(), keyboard_digest);
+}
+
+#[test]
 fn a_layer_override_takes_the_transactional_path() {
     let mut coordinator = with_scheme();
-    // A session-layer override for the CURRENT (wildcard) identity: swaps
+    // Drive with the (generic) pad first, so the pad is the active source.
+    coordinator.select_device("");
+    let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(coordinator.activation_revision(), 2);
+    let keyboard_digest_before = {
+        let stage = coordinator.stage();
+        stage.keyboard_digest()
+    };
+
+    // A session-layer override for the wildcard PAD identity: swaps
     // throttle onto slot 3 instead of slot 2.
     let override_json = br#"{
       "schema_version": 1,
@@ -130,18 +174,21 @@ fn a_layer_override_takes_the_transactional_path() {
     assert!(coordinator.add_device_profile(ProfileLayer::Session, override_json));
     assert_eq!(
         coordinator.activation_revision(),
-        1,
+        2,
         "the override is pending its handover, not live"
     );
-    let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
     coordinator.evaluate(&neutral, &session(true, true));
-    assert_eq!(coordinator.activation_revision(), 2);
+    assert_eq!(coordinator.activation_revision(), 3);
     assert_eq!(coordinator.device_label(), "Session Override");
     assert_eq!(coordinator.device_revision(), 5);
-    assert!(coordinator.device_digest().is_some());
-    // The merged map now routes physical axis 3 to canonical slot 2.
+    // The merged map now routes physical axis 3 to canonical slot 2 — and
+    // the WILDCARD pad override never bled into the keyboard's bindings.
     let swapped = pad_sample(&coordinator, &[0.0, 0.0, 0.0, 1.0], &[]);
     assert_eq!(swapped.axes.get(2).copied(), Some(1.0));
+    assert_eq!(
+        coordinator.stage().keyboard_digest(),
+        keyboard_digest_before
+    );
 }
 
 #[test]

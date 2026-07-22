@@ -183,6 +183,14 @@ impl WebControl {
         }
     }
 
+    /// The selected pad is gone (disconnect, or a replacement's disconnect
+    /// half): control returns to the layered keyboard profile through the
+    /// SAME transactional handover a selection takes, and the announcement
+    /// flips to the keyboard's real identity, revision, and digest.
+    pub fn deselect_device(&mut self) {
+        self.coordinator.deselect_device();
+    }
+
     /// Adds a device profile to a registry layer (`1` organization, `2`
     /// user, `3` vehicle, `4` session; the built-in layer is fixed at
     /// build time), then re-resolves the current pad so an override takes

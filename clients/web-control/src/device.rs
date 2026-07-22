@@ -30,6 +30,15 @@ pub const MAX_BUTTONS: usize = 24;
 /// Built-in browser device profiles, embedded like the default scheme so a
 /// fresh viewer maps devices with no privileged path or network fetch.
 const KEYBOARD_JSON: &[u8] = include_bytes!("profiles/devices/keyboard.json");
+/// The keyboard's reserved registry identity (`keyboard.json` declares it):
+/// keyboard resolution runs through the SAME layered registry as pads —
+/// select per layer, merge across layers — so an org/user/session layer can
+/// override key bindings, and the keyboard's own revision and digest are
+/// announced when it is the active source.
+pub const KEYBOARD_IDENTITY: DeviceIdentity = DeviceIdentity {
+    vendor_id: 0,
+    product_id: 1,
+};
 const GENERIC_PAD_JSON: &[u8] = include_bytes!("profiles/devices/generic-pad.json");
 const DUALSENSE_JSON: &[u8] = include_bytes!("profiles/devices/dualsense.json");
 const RADIOMASTER_POCKET_JSON: &[u8] = include_bytes!("profiles/devices/radiomaster-pocket.json");
@@ -66,18 +75,56 @@ impl DeviceStage {
     /// path.
     pub fn new() -> Self {
         let mut stage = Self {
-            keyboard: CompiledDevice::compile(KEYBOARD_JSON).ok(),
-            layers: [GENERIC_PAD_JSON, DUALSENSE_JSON, RADIOMASTER_POCKET_JSON]
-                .iter()
-                .filter_map(|bytes| parse_profile_bytes(bytes).ok())
-                .map(|profile| layered(ProfileLayer::BuiltIn, profile))
-                .collect(),
+            layers: [
+                KEYBOARD_JSON,
+                GENERIC_PAD_JSON,
+                DUALSENSE_JSON,
+                RADIOMASTER_POCKET_JSON,
+            ]
+            .iter()
+            .filter_map(|bytes| parse_profile_bytes(bytes).ok())
+            .map(|profile| layered(ProfileLayer::BuiltIn, profile))
+            .collect(),
             ..Self::default()
         };
+        stage.keyboard = stage.resolve_keyboard();
         // A pad connected before any identity arrives maps like today's raw
         // pass-through: the wildcard standard-mapping profile.
         stage.select_pad("");
         stage
+    }
+
+    /// Resolves the keyboard through the layered registry by its reserved
+    /// identity — the same per-layer selection and cross-layer merge a pad
+    /// takes, so overrides land through one path.
+    pub(crate) fn resolve_keyboard(&self) -> Option<CompiledDevice> {
+        let (device, _) = self.resolve_identity(KEYBOARD_IDENTITY, false);
+        device
+    }
+
+    /// Installs a freshly resolved keyboard map (a registry-layer change);
+    /// the coordinator calls this only at a transaction boundary.
+    pub(crate) fn install_keyboard(&mut self, keyboard: Option<CompiledDevice>) {
+        self.keyboard = keyboard;
+    }
+
+    /// The keyboard profile's human-readable label (empty if the embedded
+    /// set failed to compile — a build-integrity backstop).
+    #[must_use]
+    pub fn keyboard_label(&self) -> &str {
+        self.keyboard.as_ref().map_or("", |device| device.label())
+    }
+
+    /// The keyboard profile's document revision.
+    #[must_use]
+    pub fn keyboard_revision(&self) -> u32 {
+        self.keyboard.as_ref().map_or(0, CompiledDevice::revision)
+    }
+
+    /// The keyboard profile's effective-content digest.
+    #[must_use]
+    pub fn keyboard_digest(&self) -> Option<[u8; 32]> {
+        self.keyboard.as_ref().map(CompiledDevice::digest)
     }
 
     /// Adds a profile to `layer`. The current selection is NOT re-run here —
@@ -100,7 +147,18 @@ impl DeviceStage {
     /// the per-layer winners merge in precedence order into the effective
     /// profile.
     pub(crate) fn resolve_pad(&self, gamepad_id: &str) -> (Option<CompiledDevice>, SelectOutcome) {
-        let identity = parse_gamepad_identity(gamepad_id);
+        self.resolve_identity(parse_gamepad_identity(gamepad_id), true)
+    }
+
+    /// Layered resolution for any registry identity. `allow_wildcard`
+    /// admits the generic fallback path (pads); the keyboard resolves
+    /// EXACTLY — a wildcard pad override must never bleed into key
+    /// bindings.
+    fn resolve_identity(
+        &self,
+        identity: DeviceIdentity,
+        allow_wildcard: bool,
+    ) -> (Option<CompiledDevice>, SelectOutcome) {
         let mut contributions: Vec<LayeredProfile<DeviceProfile>> = Vec::new();
         let mut exact = false;
         for layer in [
@@ -114,6 +172,7 @@ impl DeviceStage {
                 .layers
                 .iter()
                 .filter(|entry| entry.layer == layer)
+                .filter(|entry| allow_wildcard || entry.profile.identity() == identity)
                 .map(|entry| entry.profile.clone())
                 .collect();
             if candidates.is_empty() {

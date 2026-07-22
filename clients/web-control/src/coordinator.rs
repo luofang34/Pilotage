@@ -9,6 +9,25 @@
 use pilotage_input::ProfileLayer;
 
 use crate::device::{CompiledDevice, DeviceStage, SelectOutcome};
+
+/// Which physical source currently drives control — the identity the
+/// activation announcement names. Keyboard is the boot source; a pad
+/// becomes active only through a completed selection transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputSource {
+    /// The layered keyboard profile.
+    Keyboard,
+    /// The selected pad profile.
+    Pad,
+}
+
+/// The parts a pending swap installs at its transaction boundary. `None`
+/// leaves that part untouched.
+struct PendingSwap {
+    pad: Option<(Option<CompiledDevice>, SelectOutcome)>,
+    keyboard: Option<Option<CompiledDevice>>,
+    source: Option<InputSource>,
+}
 use crate::plan::ControlPlan;
 use crate::profile::ProfileRuntime;
 use crate::runtime::ControlRuntime;
@@ -19,10 +38,13 @@ use crate::sample::{ButtonSample, RawSample, SessionState};
 pub struct ControlCoordinator {
     runtime: ControlRuntime,
     stage: DeviceStage,
-    /// A resolved device selection waiting for the runtime's handover to
-    /// complete; installed on the tick the activation revision advances,
-    /// while motion output is still gated behind the lease reacquisition.
-    pending_pad: Option<(Option<CompiledDevice>, SelectOutcome)>,
+    /// A resolved swap (pad map, keyboard map, and/or active source)
+    /// waiting for the runtime's handover to complete; installed on the
+    /// tick the activation revision advances, while motion output is still
+    /// gated behind the lease reacquisition.
+    pending: Option<PendingSwap>,
+    /// The source whose profile identity the announcement names.
+    active_source: InputSource,
     /// The activation revision last observed by [`Self::evaluate`], so a
     /// revision advance (the handover completing) is detectable.
     seen_revision: u32,
@@ -38,7 +60,8 @@ impl ControlCoordinator {
         Self {
             runtime: ControlRuntime::new(),
             stage: DeviceStage::new(),
-            pending_pad: None,
+            pending: None,
+            active_source: InputSource::Keyboard,
             seen_revision: 0,
             last_pad_id: String::new(),
         }
@@ -74,33 +97,93 @@ impl ControlCoordinator {
     pub fn select_device(&mut self, gamepad_id: &str) -> SelectOutcome {
         self.last_pad_id = gamepad_id.to_owned();
         let (candidate, outcome) = self.stage.resolve_pad(gamepad_id);
-        let changed = candidate.as_ref().map(CompiledDevice::digest) != self.stage.pad_digest();
+        let changed = candidate.as_ref().map(CompiledDevice::digest) != self.stage.pad_digest()
+            || self.active_source != InputSource::Pad;
         if !changed {
             self.stage.install_pad(candidate, outcome);
             self.runtime.reseed_edge_baselines();
             return outcome;
         }
-        if self.runtime.reactivate() {
-            self.pending_pad = Some((candidate, outcome));
-        } else {
-            // No scheme active yet: there is no authority to fence and no
-            // revision to advance until one installs.
-            self.stage.install_pad(candidate, outcome);
-            self.runtime.reseed_edge_baselines();
-        }
+        self.swap(PendingSwap {
+            pad: Some((candidate, outcome)),
+            keyboard: None,
+            source: Some(InputSource::Pad),
+        });
         outcome
     }
 
-    /// Adds a device profile to a registry layer, then re-resolves the
-    /// current pad so an override takes the same transactional path a
-    /// physical swap takes. Returns false when the bytes fail shared-engine
-    /// validation.
+    /// The selected pad is gone (disconnect, or a physical replacement's
+    /// disconnect half): control returns to the keyboard TRANSACTIONALLY —
+    /// the switch changes what physical input means, so it takes the same
+    /// neutral handover, lease cycle, revision advance, and re-announcement
+    /// a pad selection takes.
+    pub fn deselect_device(&mut self) {
+        self.last_pad_id = String::new();
+        if self.active_source == InputSource::Keyboard && self.stage.pad_digest().is_none() {
+            return;
+        }
+        self.swap(PendingSwap {
+            pad: Some((None, SelectOutcome::Refused)),
+            keyboard: None,
+            source: Some(InputSource::Keyboard),
+        });
+    }
+
+    /// Opens the swap transaction (or applies it immediately before the
+    /// first scheme activation, when there is no authority to fence).
+    fn swap(&mut self, incoming: PendingSwap) {
+        if self.runtime.reactivate() {
+            // A second swap opening before the first installs merges into
+            // it: the transaction boundary applies the LATEST resolution of
+            // every part.
+            let merged = match self.pending.take() {
+                Some(previous) => PendingSwap {
+                    pad: incoming.pad.or(previous.pad),
+                    keyboard: incoming.keyboard.or(previous.keyboard),
+                    source: incoming.source.or(previous.source),
+                },
+                None => incoming,
+            };
+            self.pending = Some(merged);
+        } else {
+            self.install_swap(incoming);
+            self.runtime.reseed_edge_baselines();
+        }
+    }
+
+    fn install_swap(&mut self, swap: PendingSwap) {
+        if let Some((pad, outcome)) = swap.pad {
+            self.stage.install_pad(pad, outcome);
+        }
+        if let Some(keyboard) = swap.keyboard {
+            self.stage.install_keyboard(keyboard);
+        }
+        if let Some(source) = swap.source {
+            self.active_source = source;
+        }
+    }
+
+    /// Adds a device profile to a registry layer, then re-resolves BOTH the
+    /// current pad and the keyboard so an override takes the same
+    /// transactional path a physical swap takes. Returns false when the
+    /// bytes fail shared-engine validation.
     pub fn add_device_profile(&mut self, layer: ProfileLayer, bytes: &[u8]) -> bool {
         if !self.stage.add_profile(layer, bytes) {
             return false;
         }
-        let last = self.last_pad_id.clone();
-        self.select_device(&last);
+        let keyboard = self.stage.resolve_keyboard();
+        let keyboard_changed =
+            keyboard.as_ref().map(CompiledDevice::digest) != self.stage.keyboard_digest();
+        let (pad, outcome) = self.stage.resolve_pad(&self.last_pad_id.clone());
+        let pad_changed = pad.as_ref().map(CompiledDevice::digest) != self.stage.pad_digest();
+        if !keyboard_changed && !pad_changed {
+            return true;
+        }
+        self.swap(PendingSwap {
+            pad: pad_changed.then_some((pad, outcome)),
+            keyboard: keyboard_changed.then_some(keyboard),
+            source: None,
+        });
         true
     }
 
@@ -113,8 +196,8 @@ impl ControlCoordinator {
         let plan = self.runtime.evaluate(sample, session);
         if self.runtime.activation_revision() != self.seen_revision {
             self.seen_revision = self.runtime.activation_revision();
-            if let Some((pad, outcome)) = self.pending_pad.take() {
-                self.stage.install_pad(pad, outcome);
+            if let Some(swap) = self.pending.take() {
+                self.install_swap(swap);
                 // The next tick re-seeds discrete baselines through the NEW
                 // map, so a button held across the swap fires no edge.
                 self.runtime.reseed_edge_baselines();
@@ -147,23 +230,39 @@ impl ControlCoordinator {
         self.runtime.active_profile_digest()
     }
 
-    /// The INSTALLED pad profile's label (empty while refused or pending).
+    /// The ACTIVE SOURCE's installed profile label: the keyboard's until a
+    /// pad selection transaction completes, the pad's after — so the
+    /// activation announcement always names the device actually driving.
     #[must_use]
     pub fn device_label(&self) -> &str {
-        self.stage.pad_label()
+        match self.active_source {
+            InputSource::Keyboard => self.stage.keyboard_label(),
+            InputSource::Pad => self.stage.pad_label(),
+        }
     }
 
-    /// The installed pad profile's document revision (zero when none).
+    /// The active source's profile document revision.
     #[must_use]
     pub fn device_revision(&self) -> u32 {
-        self.stage.pad_revision()
+        match self.active_source {
+            InputSource::Keyboard => self.stage.keyboard_revision(),
+            InputSource::Pad => self.stage.pad_revision(),
+        }
     }
 
-    /// The installed pad profile's effective-content digest (None when no
-    /// pad map is installed).
+    /// The active source's effective-content digest.
     #[must_use]
     pub fn device_digest(&self) -> Option<[u8; 32]> {
-        self.stage.pad_digest()
+        match self.active_source {
+            InputSource::Keyboard => self.stage.keyboard_digest(),
+            InputSource::Pad => self.stage.pad_digest(),
+        }
+    }
+
+    /// The source whose profile the announcement names.
+    #[must_use]
+    pub fn active_source(&self) -> InputSource {
+        self.active_source
     }
 
     /// Read access for sample building.

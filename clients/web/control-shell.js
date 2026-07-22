@@ -128,9 +128,15 @@ export class ControlShell {
     return outcome === 1 ? "exact" : outcome === 2 ? "fallback" : null;
   }
 
-  /** The INSTALLED pad profile's human-readable label (empty when refused
-   *  or while a swap is pending its handover). Doubles as the device
-   *  profile identity in the activation announcement. */
+  /** The selected pad is gone: control returns to the layered keyboard
+   *  profile through the same transactional handover a selection takes. */
+  deselectDevice() {
+    this.#control.deselect_device();
+  }
+
+  /** The ACTIVE SOURCE's installed profile label (the keyboard's until a
+   *  pad selection transaction completes). Names the device identity in
+   *  the activation announcement. */
   deviceLabel() {
     return this.#control.device_label();
   }

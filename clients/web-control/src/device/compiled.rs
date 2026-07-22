@@ -60,12 +60,6 @@ pub(crate) enum DeviceCompileError {
 }
 
 impl CompiledDevice {
-    pub(crate) fn compile(bytes: &[u8]) -> Result<Self, DeviceCompileError> {
-        let profile =
-            pilotage_input::parse_profile_bytes(bytes).map_err(|_| DeviceCompileError::Rejected)?;
-        Self::from_profile(&profile)
-    }
-
     pub(crate) fn from_profile(profile: &DeviceProfile) -> Result<Self, DeviceCompileError> {
         let mut axes: Vec<Option<AxisRoute>> = vec![None; MAX_AXES];
         let mut buttons: Vec<Option<usize>> = vec![None; MAX_BUTTONS];

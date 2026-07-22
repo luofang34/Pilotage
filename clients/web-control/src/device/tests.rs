@@ -28,8 +28,8 @@ fn the_embedded_device_set_compiles() {
     assert!(stage.keyboard.is_some(), "keyboard map present");
     assert_eq!(
         stage.layers.len(),
-        3,
-        "gamepad candidate set (built-in layer)"
+        4,
+        "built-in layer: keyboard + three gamepad profiles"
     );
     assert!(stage.pad.is_some(), "wildcard pad map pre-selected");
 }
