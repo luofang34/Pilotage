@@ -17,6 +17,43 @@ export function acquireDatagramWriter(datagrams) {
   }
 }
 
+function releaseWriterLock(writer) {
+  try {
+    writer.releaseLock();
+  } catch {
+    // Session teardown may have invalidated the writer before the run ended.
+  }
+}
+
+/** Interrupts one pending backpressure wait without closing the send stream. */
+export function createDatagramRunStop() {
+  let stopped = false;
+  let wake = null;
+  return {
+    stop() {
+      stopped = true;
+      wake?.(false);
+    },
+    waitFor(writerReady) {
+      if (stopped) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (ready) => {
+          if (settled) return;
+          settled = true;
+          wake = null;
+          resolve(ready);
+        };
+        wake = finish;
+        Promise.resolve(writerReady).then(
+          () => finish(true),
+          () => finish(false),
+        );
+      });
+    },
+  };
+}
+
 /**
  * Acquires and registers one control writer, then runs it under the session
  * lifecycle so replacement or teardown aborts the writer before authority can
@@ -27,6 +64,7 @@ export function startDatagramControl({ datagrams, lifecycle, token, run, onError
   if (!acquired.ok) return acquired;
   const { writer } = acquired;
   if (!lifecycle.trackWriter(token, writer)) {
+    releaseWriterLock(writer);
     return { ok: false, reason: "inactive-session" };
   }
   const completion = Promise.resolve()
@@ -34,6 +72,9 @@ export function startDatagramControl({ datagrams, lifecycle, token, run, onError
     .catch((error) => {
       if (lifecycle.isActive(token)) onError(error);
     })
-    .finally(() => lifecycle.untrackWriter(token, writer));
+    .finally(() => {
+      lifecycle.untrackWriter(token, writer);
+      releaseWriterLock(writer);
+    });
   return { ok: true, completion };
 }

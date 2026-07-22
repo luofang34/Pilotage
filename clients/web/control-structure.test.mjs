@@ -65,6 +65,13 @@ require("imports the control shell", /from "\.\/control-shell\.js"/);
 require("evaluates one tick through the runtime", /tickFromPad|tickFromKeys/);
 require("resolves pad identity through the runtime selector", /selectDevice/);
 require("forwards key transitions to the runtime", /keyEvent/);
+// A same-session resume must hand the runtime a FRESH session generation
+// before its loop restarts: the generation prime is what re-seeds the
+// discrete edge baselines and re-enters neutral-activation recovery.
+require(
+  "advances the control generation before a resumed loop starts",
+  /function completePendingResume[\s\S]*?controlGeneration \+ 1[\s\S]*?startControlLoop/,
+);
 
 if (failures > 0) {
   console.error(`${failures} structural violation(s)`);

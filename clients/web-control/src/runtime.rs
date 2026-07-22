@@ -177,7 +177,18 @@ impl ControlRuntime {
         // moot too (bootstrap re-leases the boot scope), so a still-pending
         // install completes as a mapping change on the held bootstrap
         // authority instead of releasing the fresh session's lease.
-        self.motion_phase = MotionPhase::Held;
+        //
+        // A generation that arrives UNRECOVERED — the host has not confirmed
+        // clearing the vehicle's link-loss latch — re-enters the
+        // neutral-activation recovery instead of publishing live: authority
+        // regained after an input-loss release must not publish a held
+        // deflection, and live output waits for the host's confirmation
+        // exactly as a scope transfer's reacquisition does.
+        self.motion_phase = if session.motion_recovered {
+            MotionPhase::Held
+        } else {
+            MotionPhase::Neutralizing
+        };
         if reconnect {
             self.handover_releases_motion = false;
             self.mapping_neutral_pending = false;

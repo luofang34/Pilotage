@@ -1,8 +1,8 @@
-// Tracks one in-flight explicit lease release and its acknowledgement
-// (CTRL-04, #147): the client treats authority as relinquished when the
-// host's `LeaseReleased` arrives, and an immediate reconnect waits —
-// bounded — for that settlement so a fresh `LeaseRequest` cannot race the
-// release into an `AlreadyHeld` denial. The host's silence watchdog
+// Tracks one in-flight explicit lease release and its acknowledgement: the
+// client treats authority as relinquished when the host's `LeaseReleased`
+// arrives, and the next authority attempt waits — bounded — for settlement so
+// a fresh `LeaseRequest` cannot race the release into an `AlreadyHeld` denial.
+// The host's silence watchdog
 // remains the independent backup: the bounded wait means a lost
 // acknowledgement degrades to the watchdog path instead of hanging the
 // reconnect.
@@ -58,7 +58,7 @@ export function createReleaseTracker({
     },
     /**
      * Resolves once any in-flight release settles ("idle" immediately when
-     * none is): the reconnect path awaits this before requesting a lease.
+     * none is): the next explicit authority attempt awaits this before a lease.
      */
     settled() {
       return pending ? pending.promise : Promise.resolve("idle");
