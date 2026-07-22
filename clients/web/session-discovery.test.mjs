@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   applySessionConfig,
+  launcherSessionOver,
   validSessionConfig,
   whenVisible,
 } from "./session-discovery.js";
@@ -78,3 +79,17 @@ function testAutoconnectWaitsForVisibility() {
 }
 testAutoconnectWaitsForVisibility();
 console.log("ok - testAutoconnectWaitsForVisibility");
+
+function testSessionOverNeedsBothLauncherContextAndAGoneManifest() {
+  // A gone manifest proves the session ended ONLY in a launcher context;
+  // a viewer served without the launcher never had one, and silence is
+  // correct there.
+  assert.equal(launcherSessionOver(true, "missing"), true, "launcher deleted the manifest");
+  assert.equal(launcherSessionOver(true, "unreachable"), true, "the launcher's server is gone");
+  assert.equal(launcherSessionOver(false, "missing"), false, "no manifest was ever promised");
+  assert.equal(launcherSessionOver(false, "unreachable"), false);
+  // A fetched (or merely invalid) manifest is never "over".
+  assert.equal(launcherSessionOver(true, "fetched"), false);
+}
+testSessionOverNeedsBothLauncherContextAndAGoneManifest();
+console.log("ok - testSessionOverNeedsBothLauncherContextAndAGoneManifest");

@@ -52,7 +52,7 @@ pub(super) enum MotionOutput {
 
 /// A dropped motion release/request is re-emitted after this long without the
 /// session reflecting the expected transition.
-const MOTION_LEASE_RETRY_MS: f64 = 250.0;
+pub(super) const MOTION_LEASE_RETRY_MS: f64 = 250.0;
 
 impl ControlRuntime {
     /// Advances the motion-lease reacquisition after a profile handover and

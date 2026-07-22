@@ -17,7 +17,7 @@ use crate::quasimode::{
 use crate::sample::{RawSample, SessionState};
 
 mod authority;
-use authority::{MotionOutput, MotionPhase};
+use authority::{MOTION_LEASE_RETRY_MS, MotionOutput, MotionPhase};
 
 /// Sentinel making the first lease request fire immediately (before any real
 /// `now_ms`), rather than waiting out a debounce window from time zero.
@@ -130,6 +130,10 @@ impl ControlRuntime {
             };
         }
         self.pending = Some(candidate);
+        // A fresh handover has emitted no motion release yet: reset the retry
+        // clock so the first handover tick releases immediately instead of
+        // waiting out a window left over from earlier lease traffic.
+        self.motion_action_ms = NEVER_REQUESTED_MS;
         ActivationPlan {
             installed: false,
             activation_revision: self.activation_revision,
@@ -226,12 +230,28 @@ impl ControlRuntime {
     /// Emits the neutral handover, and installs the pending profile once the
     /// captured controls (the modifier and the gimbal sticks) read neutral, so
     /// behavior changes only after a genuine neutral transition.
+    ///
+    /// Each scope's release — and its neutral frame — is emitted only while
+    /// the session still shows that lease granted. Once the release is
+    /// reflected the scope has no holder: another release would draw a
+    /// `released: false` acknowledgement and any frame a NoHolder rejection,
+    /// each raising a host warning, at tick rate for as long as the operator
+    /// stays deflected. The motion release re-emits after
+    /// [`MOTION_LEASE_RETRY_MS`] without the session reflecting it (a lost
+    /// write must not wedge the handover); the shell drops the gimbal grant
+    /// the moment it executes that release, which bounds it to one emission,
+    /// and the host's holder-silence watchdog covers a lost gimbal release.
     fn evaluate_handover(
         &mut self,
         sample: &RawSample,
         session: &SessionState,
         active: &CompiledProfile,
     ) -> ControlPlan {
+        let release_motion = session.motion_granted
+            && session.now_ms - self.motion_action_ms >= MOTION_LEASE_RETRY_MS;
+        if release_motion {
+            self.motion_action_ms = session.now_ms;
+        }
         // Neutral must hold across the UNION of the active AND candidate
         // controls: a profile swap remaps flight and gimbal inputs, so any
         // input deflected under EITHER profile could jump meaning at install.
@@ -247,12 +267,14 @@ impl ControlRuntime {
             self.install_after_seed(candidate, session.now_ms);
         }
         ControlPlan {
-            motion: Some(neutral_motion()),
-            gimbal: Some(neutral_gimbal()),
-            lease: Some(LeaseAction::Release),
+            // The neutrals keep each still-held scope's liveness until its
+            // release lands, then stop: no frame rides a released lease.
+            motion: session.motion_granted.then(neutral_motion),
+            gimbal: session.lease_granted.then(neutral_gimbal),
+            lease: session.lease_granted.then_some(LeaseAction::Release),
             // The scheme remaps flight too, so the motion lease is cycled with
             // the gimbal lease and reacquired on resume.
-            motion_lease: Some(LeaseAction::Release),
+            motion_lease: release_motion.then_some(LeaseAction::Release),
             label: None,
             arm: false,
             disarm: false,
