@@ -131,6 +131,7 @@ pub(super) fn flight_frame(
         })
         .collect();
     pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: pilotage_protocol::ScopeId::new(crate::adapter::FLIGHT_SCOPE),

@@ -31,6 +31,7 @@ const MOTION: &str = "vehicle.motion";
 // Shared fixtures live in a sibling submodule to stay under the file-size
 // gate; a child module reads this parent's imports via `use super::*`.
 mod fixtures;
+mod reliable_actions;
 use fixtures::*;
 
 #[test]

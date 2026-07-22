@@ -12,6 +12,7 @@ use pilotage_timing::MonoTimestamp;
 
 fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new("vehicle.motion"),

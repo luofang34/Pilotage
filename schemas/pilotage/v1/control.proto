@@ -88,6 +88,12 @@ enum ModeTarget {
 message ControlActionRequest {
   ControlAction action = 1;
   ModeTarget mode_target = 2;
+  // Sender-assigned correlation identity for reliable delivery over the
+  // droppable control-datagram channel: the sender retransmits the action on
+  // successive frames until the matching `ControlActionResult` echoes this
+  // id, and the host deduplicates repeats so the vehicle executes the press
+  // exactly once. Zero means "no correlation" (legacy translation).
+  uint32 action_id = 3;
 }
 
 // Linear velocity plus yaw rate, the family the browser scheme produces today.
@@ -190,6 +196,15 @@ message ProfileActivation {
   string profile_id = 2;
   uint32 profile_revision = 3;
   uint32 activation_revision = 4;
-  // SHA-256 content digest of the exact profile bytes that compiled.
+  // SHA-256 content digest of the exact scheme-profile bytes that compiled.
   bytes digest = 5;
+  // The selected DEVICE profile completing the effective mapping (INPUT-01):
+  // a device selection changes what physical input means, so it advances the
+  // activation revision and re-announces with these fields. Empty when no
+  // pad profile is selected (keyboard-only, whose profile is a fixed
+  // built-in of the client binary).
+  string device_profile_id = 6;
+  uint32 device_profile_revision = 7;
+  // SHA-256 content digest of the exact device-profile bytes.
+  bytes device_digest = 8;
 }

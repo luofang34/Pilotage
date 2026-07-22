@@ -101,6 +101,11 @@ pub struct ScopedControlFrame {
     pub intent: Option<ControlIntent>,
     /// Typed discrete actions carried by this frame, as one-shot events.
     pub actions: Vec<ControlAction>,
+    /// Sender-assigned correlation ids aligned 1:1 with `actions` (reliable
+    /// delivery over the droppable datagram channel: retransmit until the
+    /// matching result echoes the id; the host deduplicates). Empty when the
+    /// sender correlates nothing (legacy translation).
+    pub action_ids: Vec<u32>,
 }
 
 impl ScopedControlFrame {
@@ -153,6 +158,7 @@ mod tests {
             payload: payload.clone(),
             intent: None,
             actions: vec![],
+            action_ids: vec![],
         };
         assert_eq!(frame.session.as_u64(), 1);
         assert_eq!(frame.payload, payload);

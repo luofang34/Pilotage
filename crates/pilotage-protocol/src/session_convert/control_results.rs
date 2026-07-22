@@ -10,7 +10,7 @@ use crate::wire;
 
 impl From<&ControlActionResult> for wire::ControlActionResult {
     fn from(result: &ControlActionResult) -> Self {
-        let request = crate::convert::action_request_to_wire(result.action);
+        let request = crate::convert::action_request_to_wire(result.action, result.action_id);
         wire::ControlActionResult {
             vehicle: Some(wire::VehicleId {
                 value: result.vehicle.as_u64(),
@@ -28,6 +28,7 @@ impl From<&ControlActionResult> for wire::ControlActionResult {
             mode_target: request.mode_target,
             accepted: result.accepted,
             detail: result.detail.clone(),
+            action_id: result.action_id,
         }
     }
 }
@@ -44,10 +45,11 @@ impl TryFrom<wire::ControlActionResult> for ControlActionResult {
         let scope = result.scope.ok_or_else(|| missing("scope"))?;
         let generation = result.generation.ok_or_else(|| missing("generation"))?;
         let sequence = result.sequence.ok_or_else(|| missing("sequence"))?;
-        let action: ControlAction =
+        let (action, _): (ControlAction, u32) =
             crate::convert::action_request_from_wire(wire::ControlActionRequest {
                 action: result.action,
                 mode_target: result.mode_target,
+                action_id: result.action_id,
             })?;
         Ok(ControlActionResult {
             vehicle: VehicleId::new(vehicle.value),
@@ -57,6 +59,7 @@ impl TryFrom<wire::ControlActionResult> for ControlActionResult {
             action,
             accepted: result.accepted,
             detail: result.detail,
+            action_id: result.action_id,
         })
     }
 }
@@ -71,6 +74,13 @@ impl From<&ProfileActivation> for wire::ProfileActivation {
             profile_revision: activation.profile_revision,
             activation_revision: activation.activation_revision,
             digest: activation.digest.to_vec(),
+            device_profile_id: activation.device_profile_id.clone(),
+            device_profile_revision: activation.device_profile_revision,
+            device_digest: if activation.device_profile_id.is_empty() {
+                Vec::new()
+            } else {
+                activation.device_digest.to_vec()
+            },
         }
     }
 }
@@ -92,12 +102,29 @@ impl TryFrom<wire::ProfileActivation> for ProfileActivation {
                     message: "pilotage.v1.ProfileActivation",
                     field: "digest (must be exactly 32 bytes)",
                 })?;
+        // An absent device digest (keyboard-only sender) decodes as zeros;
+        // a present one must be exactly 32 bytes like the scheme digest.
+        let device_digest: [u8; 32] = if activation.device_digest.is_empty() {
+            [0u8; 32]
+        } else {
+            activation
+                .device_digest
+                .as_slice()
+                .try_into()
+                .map_err(|_| ConvertError::MissingField {
+                    message: "pilotage.v1.ProfileActivation",
+                    field: "device_digest (must be exactly 32 bytes)",
+                })?
+        };
         Ok(ProfileActivation {
             session: SessionId::new(session.value),
             profile_id: activation.profile_id,
             profile_revision: activation.profile_revision,
             activation_revision: activation.activation_revision,
             digest,
+            device_profile_id: activation.device_profile_id,
+            device_profile_revision: activation.device_profile_revision,
+            device_digest,
         })
     }
 }
@@ -120,6 +147,7 @@ mod tests {
             },
             accepted: false,
             detail: "mode not supported while disarmed".to_owned(),
+            action_id: 42,
         };
         let wire_result = wire::ControlActionResult::from(&result);
         assert_eq!(
@@ -136,6 +164,9 @@ mod tests {
             profile_revision: 3,
             activation_revision: 2,
             digest: [0xAB; 32],
+            device_profile_id: "Sony DualSense".to_owned(),
+            device_profile_revision: 1,
+            device_digest: [0xEE; 32],
         };
         let wire_activation = wire::ProfileActivation::from(&activation);
         assert_eq!(

@@ -89,6 +89,7 @@ fn motion_frame(
     steering: f32,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SESSION,
         vehicle: VEHICLE,
         scope: motion(),

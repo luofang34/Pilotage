@@ -139,6 +139,22 @@ impl ControlRuntime {
         }
     }
 
+    /// Re-opens the activation transaction for the ALREADY-active scheme: a
+    /// device selection changed the effective physical mapping, and any
+    /// mapping change is a new activation (INPUT-01) — the same neutral
+    /// handover, lease cycle, and activation-revision advance a scheme
+    /// change takes. Returns false (a no-op) before the first activation:
+    /// there is no authority to fence and no revision to advance yet.
+    pub fn reactivate(&mut self) -> bool {
+        match self.active.clone() {
+            Some(active) => {
+                self.activate(active);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Installs a candidate as the active profile and advances the activation
     /// revision, re-seeding every edge baseline so nothing held fires.
     fn install(&mut self, candidate: CompiledProfile) {

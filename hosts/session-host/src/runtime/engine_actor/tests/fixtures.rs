@@ -50,6 +50,9 @@ pub(super) struct RecordingAdapter {
     /// Scopes whose latch is currently engaged (suppressing control).
     pub(super) latched: Vec<ScopeId>,
     pub(super) fail_enactment: bool,
+    /// The discrete actions of every `apply_control` call, in call order —
+    /// the exactly-once observable for the dedup tests.
+    pub(super) applied_actions: Vec<Vec<pilotage_protocol::ControlAction>>,
 }
 
 impl VehicleAdapter for RecordingAdapter {
@@ -58,6 +61,7 @@ impl VehicleAdapter for RecordingAdapter {
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
+        self.applied_actions.push(frame.actions.clone());
         let disposition = if self.latched.contains(&frame.scope) {
             Disposition::Rejected(RejectReason::LinkLossEngaged)
         } else {
@@ -66,7 +70,15 @@ impl VehicleAdapter for RecordingAdapter {
         ApplyOutcome {
             tick: SimTick::new(0),
             disposition,
-            action_results: Vec::new(),
+            action_results: frame
+                .actions
+                .iter()
+                .map(|action| pilotage_adapter_api::ActionResult {
+                    action: *action,
+                    accepted: true,
+                    detail: String::new(),
+                })
+                .collect(),
         }
     }
 
@@ -152,6 +164,7 @@ pub(super) fn motion_frame(
     sequence: u32,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: VEHICLE,
         scope: ScopeId::new(MOTION),

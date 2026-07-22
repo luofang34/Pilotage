@@ -180,6 +180,10 @@ enum FrameRejectionReason {
   // the recovery activation check. Legacy senders must report every routed
   // axis.
   FRAME_REJECTION_REASON_PARTIAL_COMMAND = 11;
+  // A typed frame's `activation_revision` does not match the sender's
+  // announced `ProfileActivation` (or nothing was announced): the host
+  // cannot bind the frame to profile evidence, so it is not applied.
+  FRAME_REJECTION_REASON_PROFILE_MISMATCH = 12;
 }
 
 // Sent back to the frame's sender (never broadcast) when a `ControlFrame`
@@ -212,4 +216,8 @@ message ControlActionResult {
   bool accepted = 7;
   // Adapter-supplied reason when not accepted; empty on acceptance.
   string detail = 8;
+  // Echoes the request's correlation id, so a retransmitting sender can
+  // resolve exactly the press this result answers. Zero when the request
+  // carried none.
+  uint32 action_id = 9;
 }

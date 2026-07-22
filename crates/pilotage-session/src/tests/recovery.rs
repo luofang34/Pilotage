@@ -226,6 +226,7 @@ fn scoped_frame(
     axes: Vec<(u16, f32)>,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: VEHICLE,
         scope: ScopeId::new(scope),

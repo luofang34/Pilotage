@@ -240,7 +240,13 @@ impl From<&ScopedControlFrame> for wire::ControlFrame {
             actions: frame
                 .actions
                 .iter()
-                .map(|action| intent::action_to_wire(*action))
+                .enumerate()
+                .map(|(index, action)| {
+                    intent::action_to_wire(
+                        *action,
+                        frame.action_ids.get(index).copied().unwrap_or(0),
+                    )
+                })
                 .collect(),
         }
     }
@@ -269,11 +275,13 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
             .transpose()?
             .unwrap_or_default();
         let control_intent = frame.intent.map(intent::intent_from_wire).transpose()?;
-        let actions = frame
-            .actions
-            .into_iter()
-            .map(intent::action_from_wire)
-            .collect::<Result<_, ConvertError>>()?;
+        let mut actions = Vec::with_capacity(frame.actions.len());
+        let mut action_ids = Vec::with_capacity(frame.actions.len());
+        for request in frame.actions {
+            let (action, action_id) = intent::action_from_wire(request)?;
+            actions.push(action);
+            action_ids.push(action_id);
+        }
 
         Ok(ScopedControlFrame {
             session: SessionId::new(session.value),
@@ -287,6 +295,7 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
             payload,
             intent: control_intent,
             actions,
+            action_ids,
         })
     }
 }

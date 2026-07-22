@@ -389,11 +389,15 @@ function encodeControlIntent({ velocity, gimbalRate }) {
   return bytes;
 }
 
-// ControlActionRequest { action=1, mode_target=2 }
-function encodeControlActionRequest({ action, modeTarget }) {
+// ControlActionRequest { action=1, mode_target=2, action_id=3 }. The id is
+// the reliable-delivery correlation: the sender repeats the action on
+// successive frames until a ControlActionResult echoes the id, and the host
+// deduplicates repeats. Zero (omitted) means "no correlation".
+function encodeControlActionRequest({ action, modeTarget, actionId }) {
   const bytes = [];
   fieldVarint(bytes, 1, action);
   if (modeTarget) fieldVarint(bytes, 2, modeTarget);
+  if (actionId) fieldVarint(bytes, 3, actionId);
   return bytes;
 }
 
@@ -458,6 +462,9 @@ export function encodeProfileActivationEnvelope({
   profileRevision,
   activationRevision,
   digest,
+  deviceProfileId,
+  deviceProfileRevision,
+  deviceDigest,
 }) {
   const bytes = [];
   fieldMessage(bytes, 1, encodeSessionId(sessionId));
@@ -465,6 +472,13 @@ export function encodeProfileActivationEnvelope({
   fieldVarint(bytes, 3, profileRevision);
   fieldVarint(bytes, 4, activationRevision);
   fieldBytes(bytes, 5, Array.from(digest ?? []));
+  // The composite mapping is scheme + device: a device selection changes
+  // what physical input means, so the announcement names both documents.
+  if (deviceProfileId) {
+    fieldString(bytes, 6, deviceProfileId);
+    fieldVarint(bytes, 7, deviceProfileRevision ?? 0);
+    fieldBytes(bytes, 8, Array.from(deviceDigest ?? []));
+  }
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.profileActivation, bytes));
 }
 
@@ -644,7 +658,7 @@ export function decodeControlFrame(bytes) {
   }
   const actions = (f.get(10) ?? []).map((actionBytes) => {
     const a = parseFields(actionBytes);
-    return { action: firstVarint(a, 1), modeTarget: firstVarint(a, 2) };
+    return { action: firstVarint(a, 1), modeTarget: firstVarint(a, 2), actionId: firstVarint(a, 3) };
   });
   return {
     scope: decodeStringMessage(firstBytes(f, 3)),
@@ -747,7 +761,7 @@ function decodeLinkLossCleared(bytes) {
 }
 
 // session.proto ControlActionResult: vehicle=1, scope=2, generation=3,
-// sequence=4, action=5, mode_target=6, accepted=7, detail=8
+// sequence=4, action=5, mode_target=6, accepted=7, detail=8, action_id=9
 function decodeControlActionResult(bytes) {
   if (!bytes) return {};
   const fields = parseFields(bytes);
@@ -760,7 +774,29 @@ function decodeControlActionResult(bytes) {
     modeTarget: firstVarint(fields, 6),
     accepted: !!firstVarint(fields, 7),
     detail: firstBytes(fields, 8) ? new TextDecoder().decode(firstBytes(fields, 8)) : "",
+    actionId: firstVarint(fields, 9) ?? 0,
   };
+}
+
+/** Every value of a repeated varint field, handling BOTH encodings proto3
+ * permits: PACKED (one length-delimited blob of varints — prost's default
+ * for repeated enums) and unpacked (one varint entry per element). A naive
+ * `Number(blob)` turns a multi-value packed blob into NaN. */
+function repeatedVarints(fields, fieldNumber) {
+  const values = [];
+  for (const entry of fields.get(fieldNumber) ?? []) {
+    if (entry instanceof Uint8Array) {
+      let offset = 0;
+      while (offset < entry.length) {
+        const [value, next] = readVarint(entry, offset);
+        values.push(Number(value));
+        offset = next;
+      }
+    } else {
+      values.push(Number(entry));
+    }
+  }
+  return values;
 }
 
 // capability.proto IntentCapability: family=1, frames=2 (repeated varint),
@@ -769,7 +805,7 @@ function decodeIntentCapability(bytes) {
   const fields = parseFields(bytes);
   return {
     family: firstVarint(fields, 1),
-    frames: (fields.get(2) ?? []).map(Number),
+    frames: repeatedVarints(fields, 2),
     maxLinear: decodeFloat32(firstBytes(fields, 3)) ?? 0,
     maxAngular: decodeFloat32(firstBytes(fields, 4)) ?? 0,
     maxVertical: decodeFloat32(firstBytes(fields, 5)) ?? 0,
@@ -781,7 +817,7 @@ function decodeActionCapability(bytes) {
   const fields = parseFields(bytes);
   return {
     action: firstVarint(fields, 1),
-    modeTargets: (fields.get(2) ?? []).map(Number),
+    modeTargets: repeatedVarints(fields, 2),
   };
 }
 

@@ -13,6 +13,7 @@ mod frame;
 mod handshake;
 mod lease;
 mod ping;
+mod profile_binding;
 mod recovery;
 mod release;
 mod watchdog;
@@ -127,6 +128,7 @@ pub(crate) fn frame(
     sampled_at: MonoTimestamp,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: VEHICLE,
         scope: motion(),
@@ -274,6 +276,9 @@ fn profile_activation_is_recorded_for_evidence() {
             profile_revision: 3,
             activation_revision: 1,
             digest: [0xAB; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
         }),
         MonoTimestamp::from_nanos(1),
     );
@@ -295,6 +300,9 @@ fn profile_activation_is_recorded_for_evidence() {
             profile_revision: 3,
             activation_revision: 1,
             digest: [0xAB; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
         }),
         MonoTimestamp::from_nanos(2),
     );
@@ -313,6 +321,9 @@ fn profile_activation_is_recorded_for_evidence() {
             profile_revision: 9,
             activation_revision: 2,
             digest: [0xCD; 32],
+            device_profile_id: "Sony DualSense".to_owned(),
+            device_profile_revision: 1,
+            device_digest: [0xEE; 32],
         }),
         MonoTimestamp::from_nanos(3),
     );

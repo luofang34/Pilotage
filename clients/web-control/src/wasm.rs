@@ -6,11 +6,13 @@
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::device::{DeviceStage, SelectOutcome};
+use crate::coordinator::ControlCoordinator;
+use crate::device::SelectOutcome;
 use crate::plan::{ControlPlan, LeaseAction};
-use crate::profile::{DEFAULT_PROFILE_BYTES, ProfileRuntime};
-use crate::runtime::ControlRuntime;
+use crate::profile::DEFAULT_PROFILE_BYTES;
 use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
+
+use pilotage_input::ProfileLayer;
 
 /// The built-in default profile bytes, so the shell can bootstrap through the
 /// SAME `activate` path any other source uses — never a privileged default
@@ -55,8 +57,7 @@ const MOTION_LEASE_SHIFT: u32 = 10; // bits 10..11: motion lease, same encoding.
 /// [`WebControl::evaluate`].
 #[wasm_bindgen]
 pub struct WebControl {
-    runtime: ControlRuntime,
-    stage: DeviceStage,
+    coordinator: ControlCoordinator,
     sample: RawSample,
     input: Vec<u8>,
     output: Vec<u8>,
@@ -69,8 +70,7 @@ impl WebControl {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            runtime: ControlRuntime::new(),
-            stage: DeviceStage::new(),
+            coordinator: ControlCoordinator::new(),
             sample: RawSample::default(),
             input: vec![0u8; IN_LEN],
             output: vec![0u8; OUT_LEN],
@@ -94,16 +94,13 @@ impl WebControl {
     /// success, or `0` if the candidate failed to compile (the previously
     /// active profile, if any, stays active).
     pub fn activate(&mut self, candidate: &[u8]) -> u32 {
-        match ProfileRuntime::compile(candidate) {
-            Ok(compiled) => self.runtime.activate(compiled).activation_revision,
-            Err(_) => 0,
-        }
+        self.coordinator.activate_scheme(candidate)
     }
 
     /// The current session activation revision.
     #[must_use]
     pub fn activation_revision(&self) -> u32 {
-        self.runtime.activation_revision()
+        self.coordinator.activation_revision()
     }
 
     /// Evaluates one control tick from the input buffer and the session
@@ -136,21 +133,21 @@ impl WebControl {
             motion_denied: session & (1 << 4) != 0,
             motion_recovered: session & (1 << 5) != 0,
         };
-        let plan = self.runtime.evaluate(&self.sample, &state);
+        let plan = self.coordinator.evaluate(&self.sample, &state);
         self.store_plan(&plan)
     }
 
     /// The active profile's identity string (empty before activation).
     #[must_use]
     pub fn profile_id(&self) -> String {
-        self.runtime.active_profile_id().to_owned()
+        self.coordinator.profile_id().to_owned()
     }
 
     /// The active profile DOCUMENT revision (ADR-0007/0009), carried on control
     /// frames as `profile_revision`. Distinct from the activation epoch.
     #[must_use]
     pub fn profile_revision(&self) -> u32 {
-        self.runtime.active_profile_revision()
+        self.coordinator.profile_revision()
     }
 
     /// The active profile's 32-byte content digest (all-zero before
@@ -158,49 +155,85 @@ impl WebControl {
     /// to the exact bytes that produced it.
     #[must_use]
     pub fn profile_digest(&self) -> Vec<u8> {
-        self.runtime.active_profile_digest().to_vec()
+        self.coordinator.profile_digest().to_vec()
     }
 
-    /// Resolves a `Gamepad.id` string to a device profile through the shared
-    /// selector. Returns `1` for an exact vendor/product match, `2` for the
-    /// generic fallback, `0` when refused (an ambiguous registry fails
-    /// closed: subsequent pad ticks read an empty sample and drive nothing).
-    /// Any selection re-seeds the discrete edge baselines, so a button held
-    /// on the newly mapped device cannot fire as a fresh edge.
+    /// Resolves a `Gamepad.id` string through the shared layered registry.
+    /// Returns `1` for an exact vendor/product match, `2` for the generic
+    /// fallback, `0` when refused (an ambiguous layer fails closed:
+    /// subsequent pad ticks read an empty sample and drive nothing). A
+    /// selection that changes the effective mapping swaps TRANSACTIONALLY:
+    /// the runtime cycles the gimbal + motion leases through a neutral
+    /// handover, the map installs only when the handover completes, and the
+    /// activation revision advances — so the shell re-announces and a
+    /// deflected input on the new pad can never drive the old authority.
     pub fn select_device(&mut self, gamepad_id: &str) -> u32 {
-        let outcome = self.stage.select_pad(gamepad_id);
-        self.runtime.reseed_edge_baselines();
-        match outcome {
+        match self.coordinator.select_device(gamepad_id) {
             SelectOutcome::Refused => 0,
             SelectOutcome::Exact => 1,
             SelectOutcome::Fallback => 2,
         }
     }
 
-    /// The selected pad profile's human-readable label (empty when refused).
+    /// Adds a device profile to a registry layer (`1` organization, `2`
+    /// user, `3` vehicle, `4` session; the built-in layer is fixed at
+    /// build time), then re-resolves the current pad so an override takes
+    /// the same transactional path a physical swap takes. Returns false
+    /// when the bytes fail shared-engine validation or the layer code is
+    /// unknown.
+    pub fn add_device_profile(&mut self, layer: u32, bytes: &[u8]) -> bool {
+        let layer = match layer {
+            1 => ProfileLayer::Organization,
+            2 => ProfileLayer::User,
+            3 => ProfileLayer::Vehicle,
+            4 => ProfileLayer::Session,
+            _ => return false,
+        };
+        self.coordinator.add_device_profile(layer, bytes)
+    }
+
+    /// The INSTALLED pad profile's human-readable label (empty when refused
+    /// or while a swap is still pending its handover). Doubles as the
+    /// device profile identity in the activation announcement.
     #[must_use]
     pub fn device_label(&self) -> String {
-        self.stage.pad_label().to_owned()
+        self.coordinator.device_label().to_owned()
+    }
+
+    /// The installed pad profile's document revision (zero when none).
+    #[must_use]
+    pub fn device_revision(&self) -> u32 {
+        self.coordinator.device_revision()
+    }
+
+    /// The installed pad profile's effective-content digest (empty when no
+    /// pad map is installed), binding the announcement to the exact merged
+    /// document that routes physical input.
+    #[must_use]
+    pub fn device_digest(&self) -> Vec<u8> {
+        self.coordinator
+            .device_digest()
+            .map_or_else(Vec::new, |digest| digest.to_vec())
     }
 
     /// Records one keyboard transition. `key` is the canonical
     /// `KeyboardEvent.key` value with single letters lower-cased — the
     /// convention the keyboard profile data speaks.
     pub fn key_event(&mut self, key: &str, pressed: bool) {
-        self.stage.key_event(key, pressed);
+        self.coordinator.key_event(key, pressed);
     }
 
     /// Drops every held key (window blur or session teardown), so a key
     /// released while the page was blurred cannot remain a phantom hold.
     pub fn clear_keys(&mut self) {
-        self.stage.clear_keys();
+        self.coordinator.clear_keys();
     }
 
     /// Whether the keyboard profile binds `key`, so the shell knows which
     /// keys to capture without holding any key list of its own.
     #[must_use]
     pub fn key_is_bound(&self, key: &str) -> bool {
-        self.stage.key_is_bound(key)
+        self.coordinator.stage().key_is_bound(key)
     }
 }
 
@@ -218,7 +251,7 @@ impl WebControl {
     /// tick allocation-free.
     fn load_sample(&mut self, axes: usize, buttons: usize, source: u32) {
         if source == SOURCE_KEYS {
-            self.stage.key_sample(&mut self.sample);
+            self.coordinator.key_sample(&mut self.sample);
             return;
         }
         let axes = axes.min(MAX_AXES);
@@ -235,7 +268,7 @@ impl WebControl {
                 value: read_f32(&self.input, IN_VALUES + i * 4),
             };
         }
-        self.stage
+        self.coordinator
             .pad_sample(&raw_axes[..axes], &raw_buttons[..buttons], &mut self.sample);
     }
 

@@ -192,6 +192,7 @@ pub(super) fn frame(
         })
         .collect();
     pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: pilotage_protocol::ScopeId::new(super::FLIGHT_SCOPE),

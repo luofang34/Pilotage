@@ -13,6 +13,7 @@ use pilotage_timing::MonoTimestamp;
 
 fn control_frame(vehicle: VehicleId) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new("vehicle.motion"),

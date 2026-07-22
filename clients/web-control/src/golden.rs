@@ -10,10 +10,9 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::DEFAULT_PROFILE_BYTES;
-use crate::device::{DeviceStage, SelectOutcome};
+use crate::coordinator::ControlCoordinator;
+use crate::device::SelectOutcome;
 use crate::plan::{AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ControlPlan, LeaseAction};
-use crate::profile::ProfileRuntime;
-use crate::runtime::ControlRuntime;
 use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
 
 const VECTORS: &str = include_str!("../golden-vectors.json");
@@ -39,6 +38,7 @@ struct Group {
 #[serde(default, rename_all = "camelCase")]
 struct Step {
     select_device: Option<String>,
+    add_device_profile: Option<AddDeviceProfile>,
     key_events: Vec<(String, bool)>,
     clear_keys: bool,
     pad: Option<Pad>,
@@ -46,6 +46,13 @@ struct Step {
     session: Option<Session>,
     expect: Option<Expect>,
     expect_bound: Option<BTreeMap<String, bool>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddDeviceProfile {
+    layer: String,
+    profile: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -98,30 +105,26 @@ struct Expect {
     disarm: Option<bool>,
     select: Option<String>,
     label: Option<String>,
+    motion_lease: Option<String>,
+    activation_revision: Option<u32>,
+    added: Option<bool>,
 }
 
 struct Harness {
-    stage: DeviceStage,
-    runtime: ControlRuntime,
+    coordinator: ControlCoordinator,
 }
 
 impl Harness {
     fn fresh() -> Self {
-        let mut runtime = ControlRuntime::new();
-        let profile = ProfileRuntime::compile(DEFAULT_PROFILE_BYTES).expect("default compiles");
-        let plan = runtime.activate(profile);
-        assert_eq!(plan.activation_revision, 1, "default activates at rev 1");
-        Self {
-            stage: DeviceStage::new(),
-            runtime,
-        }
+        let mut coordinator = ControlCoordinator::new();
+        let revision = coordinator.activate_scheme(DEFAULT_PROFILE_BYTES);
+        assert_eq!(revision, 1, "default activates at rev 1");
+        Self { coordinator }
     }
 
-    /// Mirrors the wasm `select_device`: selection re-seeds edge baselines.
+    /// Mirrors the wasm `select_device`: the TRANSACTIONAL path.
     fn select(&mut self, id: &str) -> SelectOutcome {
-        let outcome = self.stage.select_pad(id);
-        self.runtime.reseed_edge_baselines();
-        outcome
+        self.coordinator.select_device(id)
     }
 
     fn tick(&mut self, step: &Step, session: &Session, ctx: &str) -> ControlPlan {
@@ -133,10 +136,11 @@ impl Harness {
                     value: if pad.pressed.contains(&i) { 1.0 } else { 0.0 },
                 })
                 .collect();
-            self.stage.pad_sample(&pad.axes, &buttons, &mut sample);
+            self.coordinator
+                .pad_sample(&pad.axes, &buttons, &mut sample);
         } else {
             assert_eq!(step.source.as_deref(), Some("keys"), "{ctx}: tick source");
-            self.stage.key_sample(&mut sample);
+            self.coordinator.key_sample(&mut sample);
         }
         let state = SessionState {
             generation: session.generation,
@@ -149,7 +153,17 @@ impl Harness {
             motion_denied: session.motion_denied,
             motion_recovered: session.motion_recovered,
         };
-        self.runtime.evaluate(&sample, &state)
+        self.coordinator.evaluate(&sample, &state)
+    }
+}
+
+fn profile_layer(name: &str) -> pilotage_input::ProfileLayer {
+    match name {
+        "organization" => pilotage_input::ProfileLayer::Organization,
+        "user" => pilotage_input::ProfileLayer::User,
+        "vehicle" => pilotage_input::ProfileLayer::Vehicle,
+        "session" => pilotage_input::ProfileLayer::Session,
+        other => panic!("unknown profile layer {other}"),
     }
 }
 
@@ -216,6 +230,14 @@ fn check_plan(expect: &Expect, plan: &ControlPlan, ctx: &str) {
     if let Some(want) = expect.disarm {
         assert_eq!(plan.disarm, want, "{ctx}: disarm edge");
     }
+    if let Some(want) = &expect.motion_lease {
+        let got = match plan.motion_lease {
+            Some(LeaseAction::Request) => "request",
+            Some(LeaseAction::Release) => "release",
+            None => "none",
+        };
+        assert_eq!(got, want, "{ctx}: motion lease action");
+    }
 }
 
 fn run_step(harness: &mut Harness, step: &Step, ctx: &str) {
@@ -229,30 +251,52 @@ fn run_step(harness: &mut Harness, step: &Step, ctx: &str) {
         if let Some(want) = expect.and_then(|e| e.select.as_ref()) {
             assert_eq!(got, want, "{ctx}: selection outcome");
         }
-        if let Some(want) = expect.and_then(|e| e.label.as_ref()) {
-            assert_eq!(harness.stage.pad_label(), want, "{ctx}: selected label");
+    }
+    if let Some(add) = &step.add_device_profile {
+        let bytes = serde_json::to_vec(&add.profile).expect("profile serializes");
+        let added = harness
+            .coordinator
+            .add_device_profile(profile_layer(&add.layer), &bytes);
+        if let Some(want) = expect.and_then(|e| e.added) {
+            assert_eq!(added, want, "{ctx}: profile added");
         }
     }
     if let Some(bound) = &step.expect_bound {
         for (key, want) in bound {
             assert_eq!(
-                harness.stage.key_is_bound(key),
+                harness.coordinator.stage().key_is_bound(key),
                 *want,
                 "{ctx}: key {key} bound"
             );
         }
     }
     for (key, pressed) in &step.key_events {
-        harness.stage.key_event(key, *pressed);
+        harness.coordinator.key_event(key, *pressed);
     }
     if step.clear_keys {
-        harness.stage.clear_keys();
+        harness.coordinator.clear_keys();
     }
     if let Some(session) = &step.session {
         let plan = harness.tick(step, session, ctx);
         if let Some(expect) = expect {
             check_plan(expect, &plan, ctx);
         }
+    }
+    // Label and revision reflect the INSTALLED state, so they are checked
+    // after any tick this step ran (a pending swap installs mid-tick).
+    if let Some(want) = expect.and_then(|e| e.label.as_ref()) {
+        assert_eq!(
+            harness.coordinator.device_label(),
+            want,
+            "{ctx}: device label"
+        );
+    }
+    if let Some(want) = expect.and_then(|e| e.activation_revision) {
+        assert_eq!(
+            harness.coordinator.activation_revision(),
+            want,
+            "{ctx}: activation revision"
+        );
     }
 }
 

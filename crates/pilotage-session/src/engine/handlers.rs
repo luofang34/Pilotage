@@ -264,6 +264,28 @@ impl SessionEngine {
         now: MonoTimestamp,
         actions: &mut Actions,
     ) {
+        // A typed frame binds to profile evidence through its activation
+        // revision (INPUT-01): it must equal the sender's announced
+        // activation, or the frame cannot be traced to the mapping that
+        // produced it. Legacy payload frames predate profiles (the loopback
+        // probe) and are exempt — they are already confined to the single
+        // translation boundary.
+        if !frame.carries_payload() {
+            let bound = self
+                .clients
+                .active_profile(client)
+                .is_some_and(|active| active.activation_revision == frame.activation_revision);
+            if !bound {
+                let generation = self.frame_generation(&frame);
+                actions.push(reject_frame(
+                    client,
+                    &frame,
+                    FrameRejectionReason::ProfileMismatch,
+                    generation,
+                ));
+                return;
+            }
+        }
         let Some(descriptor) =
             crate::capabilities::scope_capability(&self.capabilities, frame.vehicle, &frame.scope)
         else {
@@ -314,8 +336,11 @@ impl SessionEngine {
     /// Records a client's control-profile activation announcement
     /// (INPUT-01): the session-side traceability record binding the
     /// `activation_revision` its frames carry to the profile identity,
-    /// document revision, and content digest. An announcement before the
-    /// handshake closes the connection like any other pre-welcome traffic.
+    /// document revision, and content digests of both the scheme and the
+    /// selected device profile. An announcement before the handshake closes
+    /// the connection like any other pre-welcome traffic; one naming a
+    /// foreign session, or regressing the monotonic activation revision,
+    /// closes it too — a corrupted traceability record is worse than none.
     pub(super) fn on_profile_activation(
         &mut self,
         client: ClientKey,
@@ -324,6 +349,36 @@ impl SessionEngine {
     ) {
         if self.welcomed_principal(client, actions).is_none() {
             return;
+        }
+        let Some(state) = self.clients.get(client) else {
+            return;
+        };
+        if activation.session != state.session {
+            actions.push(SessionAction::CloseClient {
+                client,
+                reason: CloseReason::ProfileSessionMismatch {
+                    announced: activation.session,
+                    expected: state.session,
+                },
+            });
+            return;
+        }
+        if let Some(previous) = self.clients.active_profile(client) {
+            // Wrapping forward distance: the new revision must advance, and
+            // a jump past the half-range reads as a regression, not a leap.
+            let advance = activation
+                .activation_revision
+                .wrapping_sub(previous.activation_revision);
+            if advance == 0 || advance > u32::MAX / 2 {
+                actions.push(SessionAction::CloseClient {
+                    client,
+                    reason: CloseReason::NonMonotonicActivation {
+                        previous: previous.activation_revision,
+                        announced: activation.activation_revision,
+                    },
+                });
+                return;
+            }
         }
         self.clients.record_profile_activation(client, activation);
     }

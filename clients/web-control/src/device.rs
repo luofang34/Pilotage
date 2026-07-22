@@ -4,18 +4,23 @@
 //!
 //! Every mapping decision here is DATA: which physical axis feeds which
 //! canonical slot, which key drives which slot or button, and which profile a
-//! connected pad resolves to (via the shared `select_by_identity`, so the
-//! browser and a native host make identical selections, including the
-//! fail-closed ambiguity rejection). No key list, axis index, or controller
-//! table lives in shell JavaScript — the shell passes `Gamepad.id` strings,
-//! raw samples, and key events through verbatim.
+//! connected pad resolves to. Resolution runs through the shared layered
+//! registry — per-layer `select_by_identity` (so the browser and a native
+//! host make identical selections, including the fail-closed ambiguity
+//! rejection) followed by `merge_layers` across the built-in < organization
+//! < user < vehicle < session precedence chain. No key list, axis index, or
+//! controller table lives in shell JavaScript — the shell passes
+//! `Gamepad.id` strings, raw samples, and key events through verbatim.
 
 use pilotage_input::{
-    AxisConfig, DeviceIdentity, DeviceProfile, SLOT_AXIS_BASE, axis_id_for_name,
-    button_id_for_name, normalize_axis, parse_profile_bytes, select_by_identity,
+    DeviceIdentity, DeviceProfile, LayeredProfile, ProfileLayer, layered, merge_layers,
+    parse_profile_bytes, select_by_identity,
 };
 
 use crate::sample::{ButtonSample, RawSample};
+
+mod compiled;
+pub(crate) use compiled::CompiledDevice;
 
 /// Canonical pad slot counts — the fixed geometry the scheme binds against.
 pub const MAX_AXES: usize = 8;
@@ -29,234 +34,43 @@ const GENERIC_PAD_JSON: &[u8] = include_bytes!("profiles/devices/generic-pad.jso
 const DUALSENSE_JSON: &[u8] = include_bytes!("profiles/devices/dualsense.json");
 const RADIOMASTER_POCKET_JSON: &[u8] = include_bytes!("profiles/devices/radiomaster-pocket.json");
 
-/// One canonical axis slot's route from a device axis, shaped by the shared
-/// engine's `normalize_axis` with the profile's declared calibration.
-#[derive(Debug, Clone)]
-struct AxisRoute {
-    source: usize,
-    config: AxisConfig,
-}
-
-/// A key binding compiled to its canonical target.
-#[derive(Debug, Clone)]
-enum KeyTarget {
-    Axis { slot: usize, value: f32 },
-    Button { slot: usize },
-}
-
-#[derive(Debug, Clone)]
-struct CompiledKey {
-    key: String,
-    target: KeyTarget,
-}
-
-/// A device profile compiled to fixed-slot routing tables, so per-tick
-/// translation indexes arrays and never re-resolves names.
-#[derive(Debug, Clone)]
-pub(crate) struct CompiledDevice {
-    label: String,
-    axes: Vec<Option<AxisRoute>>,
-    buttons: Vec<Option<usize>>,
-    keys: Vec<CompiledKey>,
-    /// Synthesized sample lengths: one past the highest mapped slot, so a
-    /// keyboard tick reports the same axis/button counts as the table it
-    /// replaced and goldens stay byte-identical.
-    axis_len: usize,
-    button_len: usize,
-}
-
-/// Why a device profile could not serve as a browser device map.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum DeviceCompileError {
-    /// The profile bytes failed shared-engine parsing/validation.
-    Rejected,
-    /// An axis or key targeted a semantic name instead of a canonical slot.
-    /// A semantic-fixed device (an RC transmitter binding `roll` directly)
-    /// bypasses the scheme's mode permutation, which this stage does not do.
-    NotSlotTargeted,
-}
-
-impl CompiledDevice {
-    fn compile(bytes: &[u8]) -> Result<Self, DeviceCompileError> {
-        let profile = parse_profile_bytes(bytes).map_err(|_| DeviceCompileError::Rejected)?;
-        Self::from_profile(&profile)
-    }
-
-    fn from_profile(profile: &DeviceProfile) -> Result<Self, DeviceCompileError> {
-        let mut axes: Vec<Option<AxisRoute>> = vec![None; MAX_AXES];
-        let mut buttons: Vec<Option<usize>> = vec![None; MAX_BUTTONS];
-        let mut axis_len = 0usize;
-        let mut button_len = 0usize;
-        for axis in &profile.axes {
-            let slot = slot_for_axis_name(&axis.logical)?;
-            axes[slot] = Some(AxisRoute {
-                source: axis.source_index,
-                config: axis.clone(),
-            });
-            axis_len = axis_len.max(slot + 1);
-        }
-        for button in &profile.buttons {
-            let slot = slot_for_button_name(&button.logical)?;
-            buttons[slot] = Some(usize::from(button.source_index));
-            button_len = button_len.max(slot + 1);
-        }
-        let mut keys = Vec::with_capacity(profile.keys.len());
-        for binding in &profile.keys {
-            let target = match (&binding.axis, &binding.button) {
-                (Some(axis), None) => {
-                    let slot = slot_for_axis_name(&axis.logical)?;
-                    axis_len = axis_len.max(slot + 1);
-                    KeyTarget::Axis {
-                        slot,
-                        value: axis.value,
-                    }
-                }
-                (None, Some(button)) => {
-                    let slot = slot_for_button_name(button)?;
-                    button_len = button_len.max(slot + 1);
-                    KeyTarget::Button { slot }
-                }
-                // parse_profile_bytes already rejected any other shape.
-                _ => return Err(DeviceCompileError::Rejected),
-            };
-            keys.push(CompiledKey {
-                key: binding.key.clone(),
-                target,
-            });
-        }
-        let label = profile
-            .device
-            .product
-            .clone()
-            .unwrap_or_else(|| profile_identity_label(profile));
-        Ok(Self {
-            label,
-            axes,
-            buttons,
-            keys,
-            axis_len,
-            button_len,
-        })
-    }
-
-    /// Translates a raw pad sample into the canonical layout: every mapped
-    /// slot reads its routed, engine-normalized device axis or button; every
-    /// unmapped slot reads neutral.
-    fn translate_pad(&self, axes: &[f32], buttons: &[ButtonSample], out: &mut RawSample) {
-        out.axes.clear();
-        for route in self.axes.iter().take(MAX_AXES) {
-            out.axes.push(route.as_ref().map_or(0.0, |route| {
-                let raw = axes.get(route.source).copied().unwrap_or(0.0);
-                normalize_axis(raw, &route.config).value
-            }));
-        }
-        out.buttons.clear();
-        for source in self.buttons.iter().take(MAX_BUTTONS) {
-            out.buttons.push(
-                source
-                    .and_then(|source| buttons.get(source).copied())
-                    .unwrap_or_default(),
-            );
-        }
-    }
-
-    /// Synthesizes the canonical sample from the held-key set. Bindings apply
-    /// in profile order, so of two held keys driving one slot the later entry
-    /// wins — the documented tie rule.
-    fn synthesize_keys(&self, held: &[String], out: &mut RawSample) {
-        out.axes.clear();
-        out.axes.resize(self.axis_len, 0.0);
-        out.buttons.clear();
-        out.buttons.resize(self.button_len, ButtonSample::default());
-        for binding in &self.keys {
-            if !held.iter().any(|key| key == &binding.key) {
-                continue;
-            }
-            match binding.target {
-                KeyTarget::Axis { slot, value } => {
-                    if let Some(axis) = out.axes.get_mut(slot) {
-                        *axis = value;
-                    }
-                }
-                KeyTarget::Button { slot } => {
-                    if let Some(button) = out.buttons.get_mut(slot) {
-                        *button = ButtonSample {
-                            pressed: true,
-                            value: 1.0,
-                        };
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn profile_identity_label(profile: &DeviceProfile) -> String {
-    format!(
-        "{:04x}:{:04x}",
-        profile.device.vendor_id, profile.device.product_id
-    )
-}
-
-/// Resolves an axis logical name to its canonical slot, rejecting semantic
-/// names (this stage routes positions; the scheme owns meaning).
-fn slot_for_axis_name(name: &str) -> Result<usize, DeviceCompileError> {
-    let id = axis_id_for_name(name)
-        .map_err(|_| DeviceCompileError::Rejected)?
-        .as_u16();
-    let slot = id
-        .checked_sub(SLOT_AXIS_BASE)
-        .ok_or(DeviceCompileError::NotSlotTargeted)?;
-    if usize::from(slot) >= MAX_AXES {
-        return Err(DeviceCompileError::NotSlotTargeted);
-    }
-    Ok(usize::from(slot))
-}
-
-fn slot_for_button_name(name: &str) -> Result<usize, DeviceCompileError> {
-    let id = button_id_for_name(name)
-        .map_err(|_| DeviceCompileError::Rejected)?
-        .as_u16();
-    if usize::from(id) >= MAX_BUTTONS {
-        return Err(DeviceCompileError::NotSlotTargeted);
-    }
-    Ok(usize::from(id))
-}
-
 /// How a pad selection resolved, mirrored to the shell as a plain code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectOutcome {
-    /// No usable profile: the registry was ambiguous for this identity, or a
-    /// built-in failed to compile. The stage keeps NO pad map — fail closed.
+    /// No usable profile: a layer was ambiguous for this identity, no layer
+    /// matched, or the merged profile failed to compile. The stage keeps NO
+    /// pad map — fail closed.
     Refused,
-    /// An exact vendor/product profile matched.
+    /// An exact vendor/product profile matched (in at least one layer).
     Exact,
-    /// The generic wildcard profile was selected.
+    /// Only wildcard profiles contributed — the generic fallback path.
     Fallback,
 }
 
-/// The stateful device stage: the selected pad map, the keyboard map, and the
-/// held-key set, all sourced from embedded profile data.
+/// The stateful device stage: the selected pad map, the keyboard map, the
+/// held-key set, and the layered profile registry.
 #[derive(Debug, Default)]
 pub struct DeviceStage {
     pad: Option<CompiledDevice>,
     pad_outcome: Option<SelectOutcome>,
     keyboard: Option<CompiledDevice>,
-    candidates: Vec<DeviceProfile>,
+    layers: Vec<LayeredProfile<DeviceProfile>>,
     held: Vec<String>,
 }
 
 impl DeviceStage {
-    /// Builds the stage from the embedded profile set. A built-in that fails
-    /// to parse leaves its map empty (that input source emits nothing) — the
-    /// Rust test suite proves the embedded set compiles, so this is a
-    /// build-integrity backstop, not an expected path.
+    /// Builds the stage from the embedded profile set (all in the built-in
+    /// layer). A built-in that fails to parse leaves its map empty (that
+    /// input source emits nothing) — the Rust test suite proves the embedded
+    /// set compiles, so this is a build-integrity backstop, not an expected
+    /// path.
     pub fn new() -> Self {
         let mut stage = Self {
             keyboard: CompiledDevice::compile(KEYBOARD_JSON).ok(),
-            candidates: [GENERIC_PAD_JSON, DUALSENSE_JSON, RADIOMASTER_POCKET_JSON]
+            layers: [GENERIC_PAD_JSON, DUALSENSE_JSON, RADIOMASTER_POCKET_JSON]
                 .iter()
                 .filter_map(|bytes| parse_profile_bytes(bytes).ok())
+                .map(|profile| layered(ProfileLayer::BuiltIn, profile))
                 .collect(),
             ..Self::default()
         };
@@ -266,39 +80,102 @@ impl DeviceStage {
         stage
     }
 
-    /// Resolves a `Gamepad.id` string to a device profile through the shared
-    /// selector. An ambiguous registry refuses the pad entirely (no map, no
-    /// control) rather than guessing.
-    pub fn select_pad(&mut self, gamepad_id: &str) -> SelectOutcome {
-        let identity = parse_gamepad_identity(gamepad_id);
-        let outcome = match select_by_identity(identity, &self.candidates) {
-            Err(_) | Ok(None) => {
-                self.pad = None;
-                SelectOutcome::Refused
+    /// Adds a profile to `layer`. The current selection is NOT re-run here —
+    /// the caller re-resolves so the change takes the same transactional
+    /// handover a physical pad swap takes.
+    pub fn add_profile(&mut self, layer: ProfileLayer, bytes: &[u8]) -> bool {
+        match parse_profile_bytes(bytes) {
+            Ok(profile) => {
+                self.layers.push(layered(layer, profile));
+                true
             }
-            Ok(Some(profile)) => match CompiledDevice::from_profile(profile) {
-                Ok(compiled) => {
-                    let exact = profile.identity() == identity;
-                    self.pad = Some(compiled);
-                    if exact {
-                        SelectOutcome::Exact
-                    } else {
-                        SelectOutcome::Fallback
-                    }
+            Err(_) => false,
+        }
+    }
+
+    /// Resolves a `Gamepad.id` string through the layered registry WITHOUT
+    /// installing the result: each layer selects independently through the
+    /// shared `select_by_identity` (an ambiguity within any layer refuses
+    /// the pad outright — no map, no control — rather than guessing), then
+    /// the per-layer winners merge in precedence order into the effective
+    /// profile.
+    pub(crate) fn resolve_pad(&self, gamepad_id: &str) -> (Option<CompiledDevice>, SelectOutcome) {
+        let identity = parse_gamepad_identity(gamepad_id);
+        let mut contributions: Vec<LayeredProfile<DeviceProfile>> = Vec::new();
+        let mut exact = false;
+        for layer in [
+            ProfileLayer::BuiltIn,
+            ProfileLayer::Organization,
+            ProfileLayer::User,
+            ProfileLayer::Vehicle,
+            ProfileLayer::Session,
+        ] {
+            let candidates: Vec<DeviceProfile> = self
+                .layers
+                .iter()
+                .filter(|entry| entry.layer == layer)
+                .map(|entry| entry.profile.clone())
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            match select_by_identity(identity, &candidates) {
+                Err(_) => return (None, SelectOutcome::Refused),
+                Ok(None) => {}
+                Ok(Some(profile)) => {
+                    exact = exact || profile.identity() == identity;
+                    contributions.push(layered(layer, profile.clone()));
                 }
-                Err(_) => {
-                    self.pad = None;
-                    SelectOutcome::Refused
-                }
-            },
+            }
+        }
+        let Some(merged) = merge_layers(contributions) else {
+            return (None, SelectOutcome::Refused);
         };
+        match CompiledDevice::from_profile(&merged) {
+            Ok(device) => {
+                let outcome = if exact {
+                    SelectOutcome::Exact
+                } else {
+                    SelectOutcome::Fallback
+                };
+                (Some(device), outcome)
+            }
+            Err(_) => (None, SelectOutcome::Refused),
+        }
+    }
+
+    /// Installs a resolved pad map. The coordinator calls this only at a
+    /// transaction boundary (or when nothing changed), never mid-hold.
+    pub(crate) fn install_pad(&mut self, pad: Option<CompiledDevice>, outcome: SelectOutcome) {
+        self.pad = pad;
         self.pad_outcome = Some(outcome);
+    }
+
+    /// Resolves and installs in one step — the pre-transactional seam kept
+    /// for stage-level tests; production selection goes through the
+    /// coordinator's handover.
+    pub fn select_pad(&mut self, gamepad_id: &str) -> SelectOutcome {
+        let (pad, outcome) = self.resolve_pad(gamepad_id);
+        self.install_pad(pad, outcome);
         outcome
     }
 
     /// The selected pad profile's human-readable label, empty when refused.
     pub fn pad_label(&self) -> &str {
-        self.pad.as_ref().map_or("", |pad| pad.label.as_str())
+        self.pad.as_ref().map_or("", |pad| pad.label())
+    }
+
+    /// The selected pad profile's document revision, zero when refused.
+    #[must_use]
+    pub fn pad_revision(&self) -> u32 {
+        self.pad.as_ref().map_or(0, CompiledDevice::revision)
+    }
+
+    /// The selected pad profile's effective-content digest, or `None` when
+    /// no pad map is installed.
+    #[must_use]
+    pub fn pad_digest(&self) -> Option<[u8; 32]> {
+        self.pad.as_ref().map(CompiledDevice::digest)
     }
 
     /// Records one key transition. Keys arrive canonical from the shell
@@ -326,7 +203,7 @@ impl DeviceStage {
     pub fn key_is_bound(&self, key: &str) -> bool {
         self.keyboard
             .as_ref()
-            .is_some_and(|keyboard| keyboard.keys.iter().any(|binding| binding.key == key))
+            .is_some_and(|keyboard| keyboard.binds_key(key))
     }
 
     /// Translates a raw pad sample through the selected pad map into `out`,

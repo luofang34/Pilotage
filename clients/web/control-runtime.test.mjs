@@ -93,6 +93,10 @@ function checkPlan(expect, plan, ctx) {
   if (expect.disarm !== undefined) {
     check(`${ctx}: disarm edge`, plan.disarm === expect.disarm, plan.disarm);
   }
+  if (expect.motionLease !== undefined) {
+    const got = plan.motionLease ?? "none";
+    check(`${ctx}: motion lease action`, got === expect.motionLease, got);
+  }
 }
 
 function runStep(shell, step, ctx) {
@@ -102,9 +106,12 @@ function runStep(shell, step, ctx) {
     if (expect.select !== undefined) {
       check(`${ctx}: selection outcome`, got === expect.select, got);
     }
-    if (expect.label !== undefined) {
-      const label = shell.deviceLabel();
-      check(`${ctx}: selected label`, label === expect.label, label);
+  }
+  if (step.addDeviceProfile !== undefined) {
+    const bytes = new TextEncoder().encode(JSON.stringify(step.addDeviceProfile.profile));
+    const added = shell.addDeviceProfile(step.addDeviceProfile.layer, bytes);
+    if (expect.added !== undefined) {
+      check(`${ctx}: profile added`, added === expect.added, added);
     }
   }
   if (step.expectBound) {
@@ -123,6 +130,16 @@ function runStep(shell, step, ctx) {
       ? shell.tickFromPad(toPad(step.pad), session)
       : shell.tickFromKeys(session);
     if (step.expect) checkPlan(step.expect, plan, ctx);
+  }
+  // Label and revision reflect the INSTALLED state, so they are checked
+  // after any tick this step ran (a pending swap installs mid-tick).
+  if (expect.label !== undefined) {
+    const label = shell.deviceLabel();
+    check(`${ctx}: device label`, label === expect.label, label);
+  }
+  if (expect.activationRevision !== undefined) {
+    const revision = shell.activationRevision();
+    check(`${ctx}: activation revision`, revision === expect.activationRevision, revision);
   }
 }
 

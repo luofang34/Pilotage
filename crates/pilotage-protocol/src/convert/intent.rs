@@ -80,7 +80,7 @@ pub(super) fn mode_target_from_wire(value: i32) -> Result<ModeTarget, ConvertErr
     }
 }
 
-pub(crate) fn action_to_wire(action: ControlAction) -> wire::ControlActionRequest {
+pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::ControlActionRequest {
     let (kind, target) = match action {
         ControlAction::Arm => (wire::ControlAction::Arm, wire::ModeTarget::Unspecified),
         ControlAction::Disarm => (wire::ControlAction::Disarm, wire::ModeTarget::Unspecified),
@@ -97,6 +97,7 @@ pub(crate) fn action_to_wire(action: ControlAction) -> wire::ControlActionReques
     wire::ControlActionRequest {
         action: kind as i32,
         mode_target: target as i32,
+        action_id,
     }
 }
 
@@ -105,7 +106,7 @@ pub(crate) fn action_to_wire(action: ControlAction) -> wire::ControlActionReques
 /// disagreement about meaning, which fails closed.
 pub(crate) fn action_from_wire(
     request: wire::ControlActionRequest,
-) -> Result<ControlAction, ConvertError> {
+) -> Result<(ControlAction, u32), ConvertError> {
     let kind = match wire::ControlAction::try_from(request.action) {
         Ok(wire::ControlAction::Unspecified) | Err(_) => {
             return Err(ConvertError::UnknownEnum {
@@ -116,9 +117,12 @@ pub(crate) fn action_from_wire(
         Ok(kind) => kind,
     };
     if kind == wire::ControlAction::ModeRequest {
-        return Ok(ControlAction::ModeRequest {
-            target: mode_target_from_wire(request.mode_target)?,
-        });
+        return Ok((
+            ControlAction::ModeRequest {
+                target: mode_target_from_wire(request.mode_target)?,
+            },
+            request.action_id,
+        ));
     }
     if request.mode_target != wire::ModeTarget::Unspecified as i32 {
         return Err(ConvertError::UnknownEnum {
@@ -127,10 +131,12 @@ pub(crate) fn action_from_wire(
         });
     }
     match kind {
-        wire::ControlAction::Arm => Ok(ControlAction::Arm),
-        wire::ControlAction::Disarm => Ok(ControlAction::Disarm),
-        wire::ControlAction::GimbalRecenter => Ok(ControlAction::GimbalRecenter),
-        wire::ControlAction::SimReset => Ok(ControlAction::SimReset),
+        wire::ControlAction::Arm => Ok((ControlAction::Arm, request.action_id)),
+        wire::ControlAction::Disarm => Ok((ControlAction::Disarm, request.action_id)),
+        wire::ControlAction::GimbalRecenter => {
+            Ok((ControlAction::GimbalRecenter, request.action_id))
+        }
+        wire::ControlAction::SimReset => Ok((ControlAction::SimReset, request.action_id)),
         // ModeRequest returned above; Unspecified/unknown rejected above. A
         // total match keeps this panic-free if the wire enum ever grows.
         wire::ControlAction::ModeRequest | wire::ControlAction::Unspecified => {
@@ -334,13 +340,16 @@ mod tests {
             },
             ControlAction::GimbalRecenter,
         ] {
-            let request = action_to_wire(action);
-            assert_eq!(action_from_wire(request).expect("round-trips"), action);
+            let request = action_to_wire(action, 7);
+            let (round, id) = action_from_wire(request).expect("round-trips");
+            assert_eq!(round, action);
+            assert_eq!(id, 7, "the correlation id survives the wire");
         }
         assert!(matches!(
             action_from_wire(wire::ControlActionRequest {
                 action: wire::ControlAction::Unspecified as i32,
                 mode_target: 0,
+                action_id: 0,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ControlAction",
@@ -355,6 +364,7 @@ mod tests {
             action_from_wire(wire::ControlActionRequest {
                 action: wire::ControlAction::ModeRequest as i32,
                 mode_target: wire::ModeTarget::Unspecified as i32,
+                action_id: 0,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ModeTarget",
@@ -369,6 +379,7 @@ mod tests {
             action_from_wire(wire::ControlActionRequest {
                 action: wire::ControlAction::Arm as i32,
                 mode_target: wire::ModeTarget::Hold as i32,
+                action_id: 0,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ControlActionRequest.mode_target",

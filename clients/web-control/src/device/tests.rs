@@ -26,7 +26,11 @@ fn the_embedded_device_set_compiles() {
     }
     let stage = DeviceStage::new();
     assert!(stage.keyboard.is_some(), "keyboard map present");
-    assert_eq!(stage.candidates.len(), 3, "gamepad candidate set");
+    assert_eq!(
+        stage.layers.len(),
+        3,
+        "gamepad candidate set (built-in layer)"
+    );
     assert!(stage.pad.is_some(), "wildcard pad map pre-selected");
 }
 
@@ -82,8 +86,9 @@ fn an_unknown_pad_falls_back_to_the_generic_profile() {
 #[test]
 fn an_ambiguous_registry_refuses_the_pad() {
     let mut stage = DeviceStage::new();
-    let duplicate = parse_profile_bytes(DUALSENSE_JSON).expect("dualsense parses");
-    stage.candidates.push(duplicate);
+    // A duplicate claim WITHIN one layer is ambiguous; layered precedence
+    // only arbitrates ACROSS layers.
+    assert!(stage.add_profile(pilotage_input::ProfileLayer::BuiltIn, DUALSENSE_JSON));
     let outcome = stage
         .select_pad("DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)");
     assert_eq!(outcome, SelectOutcome::Refused);

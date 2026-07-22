@@ -18,6 +18,7 @@ use prost::Message;
 
 pub(super) fn sample_frame(payload: ControlPayload) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle: VehicleId::new(2),
         scope: ScopeId::new("vehicle.motion"),
@@ -468,6 +469,7 @@ mod proptests {
                     payload,
                 )| {
                     ScopedControlFrame {
+                        action_ids: vec![],
                         session: SessionId::new(session),
                         vehicle: VehicleId::new(vehicle),
                         scope: ScopeId::new("vehicle.motion"),

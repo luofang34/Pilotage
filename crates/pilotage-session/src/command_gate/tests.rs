@@ -79,6 +79,7 @@ fn gimbal_scope() -> ScopeDescriptor {
 
 fn base_frame() -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: ScopeId::new("vehicle.motion"),

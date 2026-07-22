@@ -296,6 +296,7 @@ fn control_frames_are_rejected_at_the_boundary() {
     );
 
     let frame = pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: pilotage_protocol::ScopeId::new("vehicle.motion"),

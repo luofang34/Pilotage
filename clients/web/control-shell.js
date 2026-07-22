@@ -29,6 +29,10 @@ const MOTION_LEASE_SHIFT = 10; // bits 10..11: motion lease, same encoding.
 
 const MODE_IDS = { "quad-pilot": 0, "quad-cruise": 1, fpv: 2, rover: 3 };
 
+// Registry layer codes for addDeviceProfile (must match wasm.rs; the
+// built-in layer is fixed at build time and cannot be written).
+const LAYER_IDS = { organization: 1, user: 2, vehicle: 3, session: 4 };
+
 // Raw-sample source selector for evaluate(): pad reads the input buffer
 // through the selected device profile; keys synthesize from the held-key
 // state the runtime tracks. There is NO key or axis table here — keyboard
@@ -115,9 +119,32 @@ export class ControlShell {
     return outcome === 1 ? "exact" : outcome === 2 ? "fallback" : null;
   }
 
-  /** The selected pad profile's human-readable label (empty when refused). */
+  /** The INSTALLED pad profile's human-readable label (empty when refused
+   *  or while a swap is pending its handover). Doubles as the device
+   *  profile identity in the activation announcement. */
   deviceLabel() {
     return this.#control.device_label();
+  }
+
+  /** The installed pad profile's document revision (0 when none). */
+  deviceRevision() {
+    return this.#control.device_revision();
+  }
+
+  /** The installed pad profile's effective-content digest bytes (empty
+   *  when no pad map is installed). */
+  deviceDigestBytes() {
+    return this.#control.device_digest();
+  }
+
+  /** Adds device-profile JSON bytes to a registry layer ("organization",
+   *  "user", "vehicle", or "session"); an override that changes the
+   *  effective mapping takes the same transactional handover a physical
+   *  pad swap takes. Returns false when the bytes are rejected. */
+  addDeviceProfile(layer, bytes) {
+    const code = LAYER_IDS[layer];
+    if (code === undefined) return false;
+    return this.#control.add_device_profile(code, bytes);
   }
 
   /** Forwards one canonical key transition (letters lower-cased) to the

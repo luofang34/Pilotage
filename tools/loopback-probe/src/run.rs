@@ -155,6 +155,7 @@ async fn send_stale_generation_probe(
         pilotage_protocol::Generation::new(current_generation.as_u64().wrapping_sub(1));
     let stale_sequence = last_sequence.next();
     let frame = ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: PROBE_VEHICLE,
         scope: pilotage_protocol::ScopeId::new("vehicle.motion"),

@@ -25,9 +25,12 @@ use telemetry::sample_to_wire;
 #[cfg(test)]
 mod tests;
 
+mod action_dedup;
 mod drops;
 mod link_loss;
+use action_dedup::ActionDedup;
 use drops::{DropCounters, MessageClass};
+use pilotage_protocol::ScopedControlFrame;
 
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
@@ -85,6 +88,7 @@ pub struct EngineActor<A: VehicleAdapter> {
     clients: ClientRegistry,
     latency: BoundedLatencyLog<LATENCY_LOG_CAPACITY>,
     drops: DropCounters,
+    action_dedup: ActionDedup,
     /// Wrapping count of link-loss policy changes the adapter failed to
     /// enact. A non-zero value is a fail-closed fault, not noise: authority
     /// was already fenced, so an unenacted policy means the vehicle may
@@ -113,6 +117,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             clients: ClientRegistry::new(),
             latency: BoundedLatencyLog::new(),
             drops: DropCounters::default(),
+            action_dedup: ActionDedup::default(),
             link_loss_enact_failures: 0,
             start,
         }
@@ -178,6 +183,9 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 profile_revision = activation.profile_revision,
                 activation_revision = activation.activation_revision,
                 digest = %hex_digest(&activation.digest),
+                device_profile = %activation.device_profile_id,
+                device_profile_revision = activation.device_profile_revision,
+                device_digest = %hex_digest(&activation.device_digest),
                 "control profile activation announced"
             );
         }
@@ -185,6 +193,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         self.record_stage(Stage::Validate, validate_start.elapsed());
         if is_disconnect {
             self.clients.remove(client);
+            self.action_dedup.forget(client);
         }
         self.enact(outcome);
     }
@@ -259,35 +268,62 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 );
                 self.send_to(client, ToConnection::Close, MessageClass::Unicast);
                 self.clients.remove(client);
+                self.action_dedup.forget(client);
             }
             SessionAction::ApplyToAdapter { client, frame } => {
-                let apply_start = Instant::now();
-                let outcome = self.adapter.apply_control(&frame);
-                self.record_stage(Stage::Apply, apply_start.elapsed());
-                debug!(?outcome, "control frame applied to adapter");
-                // Every typed discrete action gets its explicit outcome back
-                // to the sender on the reliable session stream (CTRL-01): a
-                // press is never silently dropped.
-                for result in outcome.action_results {
-                    let envelope = pilotage_session::OutboundMessage::ControlActionResult(
-                        pilotage_protocol::ControlActionResult {
-                            vehicle: frame.vehicle,
-                            scope: frame.scope.clone(),
-                            generation: frame.generation,
-                            sequence: frame.sequence,
-                            action: result.action,
-                            accepted: result.accepted,
-                            detail: result.detail,
-                        },
-                    );
-                    let message = to_connection_message(&envelope);
-                    self.send_to(client, message, MessageClass::Unicast);
-                }
+                self.apply_to_adapter(client, frame);
             }
             action @ (SessionAction::EngageLinkLoss { .. }
             | SessionAction::ClearLinkLoss { .. }) => {
                 self.enact_link_loss(action);
             }
+        }
+    }
+
+    /// Applies a gated frame to the adapter with exactly-once semantics for
+    /// its correlated actions (CTRL-01): retransmitted actions the adapter
+    /// already answered are stripped and their recorded results replayed,
+    /// and every action the adapter processes gets its explicit outcome back
+    /// on the reliable session stream — a press is never silently dropped.
+    fn apply_to_adapter(&mut self, client: ClientKey, mut frame: ScopedControlFrame) {
+        for replay in self.action_dedup.strip_answered(client, &mut frame) {
+            let envelope = pilotage_session::OutboundMessage::ControlActionResult(replay);
+            let message = to_connection_message(&envelope);
+            self.send_to(client, message, MessageClass::Unicast);
+        }
+        // Stripping can drain the frame entirely (a pure retransmission of
+        // answered presses); an empty command has nothing for the adapter.
+        if frame.intent.is_none() && frame.actions.is_empty() && !frame.carries_payload() {
+            return;
+        }
+        let apply_start = Instant::now();
+        let outcome = self.adapter.apply_control(&frame);
+        self.record_stage(Stage::Apply, apply_start.elapsed());
+        debug!(?outcome, "control frame applied to adapter");
+        for result in outcome.action_results {
+            // Actions cannot repeat within a gated frame, so the action
+            // itself keys its correlation id.
+            let action_id = frame
+                .actions
+                .iter()
+                .position(|action| *action == result.action)
+                .and_then(|index| frame.action_ids.get(index))
+                .copied()
+                .unwrap_or(0);
+            let full = pilotage_protocol::ControlActionResult {
+                vehicle: frame.vehicle,
+                scope: frame.scope.clone(),
+                generation: frame.generation,
+                sequence: frame.sequence,
+                action: result.action,
+                accepted: result.accepted,
+                detail: result.detail,
+                action_id,
+            };
+            self.action_dedup.record(client, full.clone());
+            let envelope = pilotage_session::OutboundMessage::ControlActionResult(full);
+            let message = to_connection_message(&envelope);
+            self.send_to(client, message, MessageClass::Unicast);
         }
     }
 
@@ -332,6 +368,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             }
             Err(TrySendError::Closed(_)) => {
                 self.clients.remove(client);
+                self.action_dedup.forget(client);
             }
         }
     }
@@ -345,6 +382,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             sender.try_send(ToConnection::Close).ok();
         }
         self.clients.remove(client);
+        self.action_dedup.forget(client);
     }
 
     fn broadcast_datagram(&mut self, bytes: Vec<u8>) {
@@ -405,6 +443,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         }
         for client in closed {
             self.clients.remove(client);
+            self.action_dedup.forget(client);
         }
     }
 

@@ -56,6 +56,14 @@ import { TransportSessionLifecycle } from "./transport-session.js";
 import { runBootstrapReader } from "./bootstrap.js";
 import { createControlGate } from "./control-gate.js";
 import { createReleaseTracker } from "./lease-release.js";
+import {
+  ACTION_TIMEOUT_MS,
+  createActionTracker,
+  enqueueAction,
+  frameActions,
+  pendingModeTarget,
+  resolveAction,
+} from "./action-tracker.js";
 import { negotiateSessionAuthority } from "./connect-authority.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
@@ -69,6 +77,7 @@ import {
   INTENT_FAMILY_VELOCITY,
   INTENT_FAMILY_GIMBAL_RATE,
   intentCapabilityFor as capabilityFor,
+  actionAdvertised,
   buildVelocityIntent,
   buildGimbalRateIntent,
 } from "./typed-command.js";
@@ -124,7 +133,16 @@ const state = {
   pendingFpvToggle: false,
   // Camera-velocity vs FPV/direct flight, tracked here so the DOM toggle
   // sends an explicit typed ModeRequest TARGET, never a stateless flip.
+  // Flips ONLY on the host's accepted mode ack (reliable delivery), never
+  // optimistically on send.
   fpvActive: false,
+  // Pending discrete presses awaiting their ControlActionResult; each rides
+  // every outgoing frame for its scope until acked or timed out.
+  actionTracker: createActionTracker(),
+  // The activation revision last announced on THIS session's reliable
+  // stream, so a device swap (which advances the revision) re-announces
+  // before frames carry the new value. Null until the first announcement.
+  announcedActivationRevision: null,
   // The typed capability negotiation from ServerWelcome: every advertised
   // scope with its intent families, limits, and actions. Control fails
   // closed (no motion frames) until the motion scope advertises velocity.
@@ -411,7 +429,14 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
       // emission: a blur latched during ANY await of this connect
       // suppresses the request entirely.
       requestLease: leaseProbe,
-      sendLeaseRequest: () => sendLeaseRequest(writer, token),
+      sendLeaseRequest: () => {
+        // The activation announcement precedes the LeaseRequest on the SAME
+        // ordered stream: the host records the profile before it can grant
+        // the lease, so no accepted frame ever precedes its traceability
+        // record (INPUT-01).
+        announceProfileActivation(writer);
+        return sendLeaseRequest(writer, token);
+      },
     });
     if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
     if (!bootstrap.completed) {
@@ -440,9 +465,10 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     // at transport.ready (which precedes bootstrap).
     reconnect.notifyBootstrapComplete();
     state.sessionWriter = writer;
-    // The writer exists only now, so the activation announcement (INPUT-01
-    // traceability) follows bootstrap completion rather than the welcome.
-    announceProfileActivation();
+    // An auto-reconnect skips the lease path (and its announcement); the
+    // session still needs the traceability record before any later manual
+    // lease request.
+    maybeAnnounceProfileActivation();
     runSessionStreamReader(reader, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`session stream reader stopped: ${error}`));
     });
@@ -606,11 +632,7 @@ async function runSessionStreamReader(reader, token) {
       if (!decoded) break;
       pending = pending.subarray(decoded.consumed);
       if (decoded.kind === "ControlActionResult") {
-        // The explicit per-action outcome (CTRL-01): a press is never
-        // silently dropped, and a rejection is loud.
-        const m = decoded.message;
-        const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;
-        log(`action result [${m.scope} seq=${m.sequence}] action=${m.action} ${verdict}`);
+        handleActionResult(decoded.message);
       }
       if (decoded.kind === "LeaseReleased") {
         // Validate the acknowledgement before it settles anything: an
@@ -702,6 +724,11 @@ function handleBootstrapMessage(decoded, token) {
   if (decoded.kind === "ServerWelcome") {
     state.sessionId = decoded.message.sessionId;
     state.advertisedScopes = decoded.message.advertisedScopes ?? [];
+    // Correlation ids are per-connection; presses from a dead session must
+    // not retransmit into a new one, and the new session has announced
+    // nothing yet.
+    state.actionTracker = createActionTracker();
+    state.announcedActivationRevision = null;
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
     for (const scope of state.advertisedScopes) {
       const families = scope.intents.map((i) => i.family).join(",");
@@ -711,9 +738,7 @@ function handleBootstrapMessage(decoded, token) {
       log("vehicle advertises no velocity intent for vehicle.motion; motion control disabled");
     }
   } else if (decoded.kind === "ControlActionResult") {
-    const m = decoded.message;
-    const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;
-    log(`action result [${m.scope} seq=${m.sequence}] action=${m.action} ${verdict}`);
+    handleActionResult(decoded.message);
   } else if (decoded.kind === "LeaseResponse") {
     // Bootstrap requests only the motion lease, but route by scope
     // anyway: a response for any other scope must not overwrite the
@@ -1197,6 +1222,11 @@ async function runControlLoop(writer, token) {
         ? state.controlShell.tickFromPad(pad, sessionState)
         : state.controlShell.tickFromKeys(sessionState);
       updateControlReadout(pad, mode, plan);
+      // A completed device-swap handover advances the activation revision;
+      // the re-announcement must ride the reliable stream before the swap's
+      // lease reacquisition (queued below via plan.motionLease) so frames
+      // never carry an unannounced revision.
+      maybeAnnounceProfileActivation();
       // Re-check the latch immediately before the write: no frame may be
       // sent under this generation once input loss latched, regardless of
       // which await the latch interleaved with.
@@ -1221,15 +1251,59 @@ async function runControlLoop(writer, token) {
 }
 
 function velocityCapabilityFor(scope) {
-  return capabilityFor(state.advertisedScopes, scope, INTENT_FAMILY_VELOCITY);
+  return capabilityFor(state.advertisedScopes, VEHICLE_ID, scope, INTENT_FAMILY_VELOCITY);
+}
+
+/** Gates a press on the vehicle's advertisement (CTRL-01: nothing sends
+ *  without a matching capability — a suppressed press is logged so the
+ *  operator sees WHY nothing fired), then enqueues it for reliable
+ *  delivery: it rides every outgoing frame for `scope` until acked. */
+function requestAction(scope, action, modeTarget, cancels = []) {
+  if (!actionAdvertised(state.advertisedScopes, VEHICLE_ID, scope, action, modeTarget)) {
+    log(`action ${action} not advertised for ${scope}; not sent`);
+    return false;
+  }
+  enqueueAction(state.actionTracker, scope, action, performance.now(), { modeTarget, cancels });
+  return true;
+}
+
+/** The explicit per-action outcome (CTRL-01): a press is never silently
+ *  dropped, a rejection is loud, and local mode state changes ONLY here —
+ *  on the host's acceptance — never optimistically on send. */
+function handleActionResult(m) {
+  const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;
+  const id = m.actionId ? ` id=${m.actionId}` : "";
+  log(`action result [${m.scope} seq=${m.sequence}] action=${m.action}${id} ${verdict}`);
+  if (!m.actionId) return;
+  const entry = resolveAction(state.actionTracker, m.actionId);
+  if (!entry) return; // a replay of an already-settled press
+  if (entry.action === CONTROL_ACTION.modeRequest && m.accepted) {
+    state.fpvActive = entry.modeTarget === MODE_TARGET.fpvDirect;
+    els.overlay.textContent = state.fpvActive ? "FPV mode engaged" : "camera mode engaged";
+    log(`mode ack: ${state.fpvActive ? "fpv-direct" : "camera-velocity"} engaged`);
+  }
+}
+
+/** Removes expired presses for `scope`, reporting each loudly, and returns
+ *  the still-pending actions to attach to this frame. */
+function collectFrameActions(scope) {
+  const { actions, expired } = frameActions(state.actionTracker, scope, performance.now());
+  for (const gone of expired) {
+    log(
+      `action ${gone.action} (id ${gone.actionId}) got no result within ` +
+        `${ACTION_TIMEOUT_MS} ms; giving up`,
+    );
+  }
+  return actions;
 }
 
 /** Announces the active control profile on the reliable session stream:
- *  identity, document revision, monotonic activation revision, and content
- *  digest — the traceability record the host binds control frames to
- *  (INPUT-01). Sent after every welcome (the activation predates connect). */
-function announceProfileActivation() {
-  const writer = state.sessionWriter;
+ *  scheme identity, document revision, monotonic activation revision, and
+ *  the content digests of BOTH the scheme and the selected device profile —
+ *  the composite traceability record the host validates every typed frame
+ *  against (INPUT-01). Ordered BEFORE the LeaseRequest on the same stream,
+ *  so the host records the activation before any frame can be accepted. */
+function announceProfileActivation(writer = state.sessionWriter) {
   if (!writer || !state.controlShell) return;
   const shell = state.controlShell;
   const activation = encodeProfileActivationEnvelope({
@@ -1238,12 +1312,29 @@ function announceProfileActivation() {
     profileRevision: shell.profileRevision(),
     activationRevision: shell.activationRevision(),
     digest: shell.profileDigestBytes(),
+    deviceProfileId: shell.deviceLabel(),
+    deviceProfileRevision: shell.deviceRevision(),
+    deviceDigest: shell.deviceDigestBytes(),
   });
   writer.write(lengthDelimit(activation)).catch(() => {});
+  state.announcedActivationRevision = shell.activationRevision();
+  const device = shell.deviceLabel() || "(keyboard only)";
   log(
     `announced profile ${shell.profileId()} rev=${shell.profileRevision()} ` +
-      `activation=${shell.activationRevision()} digest=${shell.profileDigest().slice(0, 16)}...`,
+      `activation=${shell.activationRevision()} digest=${shell.profileDigest().slice(0, 16)}... ` +
+      `device=${device}`,
   );
+}
+
+/** Re-announces when the activation revision advanced past the announced
+ *  one (a device swap or profile install completed its handover), so the
+ *  host learns the new composite mapping before frames carry its revision —
+ *  the swap's lease reacquisition rides the same ordered stream AFTER this
+ *  write, and frames only flow once that lease is regranted. */
+function maybeAnnounceProfileActivation() {
+  if (!state.sessionWriter || !state.controlShell) return;
+  if (state.controlShell.activationRevision() === state.announcedActivationRevision) return;
+  announceProfileActivation();
 }
 
 /** Encodes and sends the runtime's motion frame as a TYPED velocity intent:
@@ -1256,31 +1347,39 @@ function sendMotionFrame(writer, token, mode, plan) {
   const capability = velocityCapabilityFor(MOTION_SCOPE);
   if (!capability) return;
   const m = plan.motion;
-  const actions = [];
-  if (plan.arm) {
-    actions.push({ action: CONTROL_ACTION.arm });
+  if (plan.arm && requestAction(MOTION_SCOPE, CONTROL_ACTION.arm, undefined, [CONTROL_ACTION.disarm])) {
     els.overlay.textContent = "ARM sent";
     log("arm command sent");
   }
-  if (plan.disarm) {
-    actions.push({ action: CONTROL_ACTION.disarm });
+  if (plan.disarm && requestAction(MOTION_SCOPE, CONTROL_ACTION.disarm, undefined, [CONTROL_ACTION.arm])) {
     els.overlay.textContent = "DISARM sent";
     log("disarm command sent");
   }
   if (state.pendingFpvToggle) {
     state.pendingFpvToggle = false;
     // The toggle resolves HERE to an explicit typed target; the adapter
-    // never interprets a stateless flip.
-    const target = state.fpvActive ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
-    state.fpvActive = !state.fpvActive;
-    actions.push({ action: CONTROL_ACTION.modeRequest, modeTarget: target });
-    log(`mode request sent: target=${target === MODE_TARGET.fpvDirect ? "fpv-direct" : "camera-velocity"}`);
+    // never interprets a stateless flip. A repeat press before the first
+    // ack flips from the PENDING target (superseding it), not from the
+    // confirmed state — and `fpvActive` itself only changes on the ack.
+    const pendingTarget = pendingModeTarget(
+      state.actionTracker,
+      MOTION_SCOPE,
+      CONTROL_ACTION.modeRequest,
+    );
+    const fpvBase =
+      pendingTarget !== undefined ? pendingTarget === MODE_TARGET.fpvDirect : state.fpvActive;
+    const target = fpvBase ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
+    if (requestAction(MOTION_SCOPE, CONTROL_ACTION.modeRequest, target, [CONTROL_ACTION.modeRequest])) {
+      log(`mode request sent: target=${target === MODE_TARGET.fpvDirect ? "fpv-direct" : "camera-velocity"}`);
+    }
   }
   if (state.pendingReset) {
     state.pendingReset = false;
-    actions.push({ action: CONTROL_ACTION.simReset });
-    log("simulation reset requested");
+    if (requestAction(MOTION_SCOPE, CONTROL_ACTION.simReset)) {
+      log("simulation reset requested");
+    }
   }
+  const actions = collectFrameActions(MOTION_SCOPE);
   const velocity = buildVelocityIntent(m, mode, capability);
   state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
   const envelope = encodeControlFrameEnvelope({
@@ -1304,9 +1403,19 @@ function sendMotionFrame(writer, token, mode, plan) {
  *  tick while the lease is held (zero rates when idle), so the continuous
  *  stream is the scope's liveness (ADR-0011); R3 rides as the recenter edge. */
 function sendGimbalFrame(writer, token, gimbal) {
-  const capability = capabilityFor(state.advertisedScopes, GIMBAL_SCOPE, INTENT_FAMILY_GIMBAL_RATE);
+  const capability = capabilityFor(
+    state.advertisedScopes,
+    VEHICLE_ID,
+    GIMBAL_SCOPE,
+    INTENT_FAMILY_GIMBAL_RATE,
+  );
   if (!capability) return;
-  if (gimbal.recenter) log("gimbal recenter requested (R3)");
+  if (
+    gimbal.recenter &&
+    requestAction(GIMBAL_SCOPE, CONTROL_ACTION.gimbalRecenter)
+  ) {
+    log("gimbal recenter requested (R3)");
+  }
   state.gimbalSequence = (state.gimbalSequence + 1) >>> 0;
   const envelope = encodeControlFrameEnvelope({
     sessionId: state.sessionId,
@@ -1320,7 +1429,7 @@ function sendGimbalFrame(writer, token, gimbal) {
     // The plan's normalized LOS rates scale by the ADVERTISED angular
     // envelope, so full deflection slews exactly what the vehicle allows.
     gimbalRate: buildGimbalRateIntent(gimbal, capability),
-    actions: gimbal.recenter ? [{ action: CONTROL_ACTION.gimbalRecenter }] : [],
+    actions: collectFrameActions(GIMBAL_SCOPE),
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`gimbal datagram send failed: ${error}`));

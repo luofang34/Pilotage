@@ -8,7 +8,9 @@
 //! [`SessionEngine`]: crate::SessionEngine
 
 use pilotage_adapter_api::LinkLossPolicy;
-use pilotage_protocol::{FrameRejected, Generation, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{
+    FrameRejected, Generation, ScopeId, ScopedControlFrame, SessionId, VehicleId,
+};
 
 use crate::message::ClientKey;
 use crate::outbound::OutboundMessage;
@@ -173,4 +175,24 @@ pub enum CloseReason {
     DuplicateHello,
     /// The client sent a domain message before completing the handshake.
     HandshakeNotComplete,
+    /// The client announced a profile activation naming a session other than
+    /// its own. The announcement is the traceability record binding that
+    /// client's frames to profile evidence (INPUT-01); one that misidentifies
+    /// its own session is broken or forged and cannot be recorded.
+    ProfileSessionMismatch {
+        /// The session the announcement named.
+        announced: SessionId,
+        /// The session the connection actually holds.
+        expected: SessionId,
+    },
+    /// The client's profile activation revision failed to advance over its
+    /// previous announcement. Frames bind to activations through this
+    /// monotonic counter; a regression would let old frames alias a new
+    /// activation, so the binding is unusable.
+    NonMonotonicActivation {
+        /// The revision previously on record.
+        previous: u32,
+        /// The non-advancing revision just announced.
+        announced: u32,
+    },
 }

@@ -72,8 +72,10 @@ fn capabilities() -> AdapterCapabilities {
     }
 }
 
-/// Welcomes a client and grants it the fixture's scope, returning the
-/// granted generation.
+/// Welcomes a client, announces the fixture's profile activation (typed
+/// frames are rejected as `ProfileMismatch` without a matching
+/// announcement), and grants it the fixture's scope, returning the granted
+/// generation.
 fn welcome_and_grant(
     engine: &mut SessionEngine,
     client: ClientKey,
@@ -88,7 +90,32 @@ fn welcome_and_grant(
         }),
         MonoTimestamp::from_nanos(0),
     );
-    assert!(!welcomed.actions.is_empty());
+    let session = welcomed
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::Welcome(welcome),
+                ..
+            } => Some(welcome.session),
+            _ => None,
+        })
+        .expect("welcomed");
+    let announced = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "builtin.flight.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: frame.activation_revision,
+            digest: [0x11; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
+        }),
+        MonoTimestamp::from_nanos(0),
+    );
+    assert!(announced.actions.is_empty(), "announcement is recorded");
     let lease = engine.handle_client_message(
         client,
         DomainEnvelope::Lease(LeaseRequest {

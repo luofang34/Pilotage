@@ -307,6 +307,7 @@ mod tests {
 
     fn frame(scope: &str, intent: Option<ControlIntent>, vehicle: VehicleId) -> ScopedControlFrame {
         ScopedControlFrame {
+            action_ids: vec![],
             session: SessionId::new(1),
             vehicle,
             scope: ScopeId::new(scope),

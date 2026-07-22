@@ -193,6 +193,10 @@ pub enum FrameRejectionReason {
     /// The frame's actions repeat or conflict (arm together with disarm);
     /// the frame is rejected whole, executing neither.
     ConflictingActions,
+    /// A typed frame's activation revision does not match the sender's
+    /// announced profile activation (or nothing was announced): the frame
+    /// cannot be bound to profile evidence, so it is not applied.
+    ProfileMismatch,
     /// A legacy payload omitted an axis its scope's translation routes;
     /// the structurally total translation would turn "no update" into an
     /// explicit neutral, so partial legacy coverage is rejected.
@@ -236,6 +240,9 @@ pub struct ControlActionResult {
     pub accepted: bool,
     /// Adapter-supplied reason when not accepted; empty on acceptance.
     pub detail: String,
+    /// Echoes the request's correlation id (zero when it carried none), so a
+    /// retransmitting sender resolves exactly the press this answers.
+    pub action_id: u32,
 }
 
 /// Announces the sender's newly activated control profile on the reliable
@@ -252,6 +259,13 @@ pub struct ProfileActivation {
     pub profile_revision: u32,
     /// The sender's monotonic activation revision; frames carry this value.
     pub activation_revision: u32,
-    /// SHA-256 content digest of the exact profile bytes that compiled.
+    /// SHA-256 content digest of the exact scheme-profile bytes.
     pub digest: [u8; 32],
+    /// The selected DEVICE profile completing the effective mapping; empty
+    /// id (with a zero digest) when no pad profile is selected.
+    pub device_profile_id: String,
+    /// The device profile document's own revision.
+    pub device_profile_revision: u32,
+    /// SHA-256 content digest of the exact device-profile bytes.
+    pub device_digest: [u8; 32],
 }

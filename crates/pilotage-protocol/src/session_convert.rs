@@ -408,6 +408,7 @@ impl From<FrameRejectionReason> for wire::FrameRejectionReason {
                 wire::FrameRejectionReason::ConflictingActions
             }
             FrameRejectionReason::PartialCommand => wire::FrameRejectionReason::PartialCommand,
+            FrameRejectionReason::ProfileMismatch => wire::FrameRejectionReason::ProfileMismatch,
         }
     }
 }
@@ -436,6 +437,9 @@ impl TryFrom<wire::FrameRejectionReason> for FrameRejectionReason {
                 Ok(FrameRejectionReason::ConflictingActions)
             }
             wire::FrameRejectionReason::PartialCommand => Ok(FrameRejectionReason::PartialCommand),
+            wire::FrameRejectionReason::ProfileMismatch => {
+                Ok(FrameRejectionReason::ProfileMismatch)
+            }
             wire::FrameRejectionReason::Unspecified => Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.FrameRejectionReason",
                 value: reason as i32,

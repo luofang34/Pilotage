@@ -15,6 +15,7 @@ use pilotage_timing::MonoTimestamp;
 const SEED: u64 = 42;
 fn control_frame(vehicle: VehicleId, throttle: f32, steering: f32) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new("vehicle.motion"),
