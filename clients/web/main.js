@@ -80,6 +80,7 @@ import { createDatagramRunStop, startDatagramControl } from "./datagram-control.
 import { resumeGrantDecision, resumeRefusalReason, resumeSessionControl } from "./resume-control.js";
 import { loadControlShell } from "./control-shell.js";
 import { writeLeaseAction } from "./lease-executor.js";
+import { applyAuthorityTransition } from "./authority-transition.js";
 import {
   INTENT_FAMILY_VELOCITY,
   INTENT_FAMILY_ATTITUDE_THRUST,
@@ -161,6 +162,7 @@ const hsiFaultPresenter = createDomFaultPresenter(els.hsi);
 const state = {
   transport: null,
   sessionId: 0,
+  principalId: 0n,
   sequence: 0,
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   // The runtime owns key bindings AND the held-key state; the shell only
@@ -802,10 +804,12 @@ async function resumeControlInPlace() {
 
 function applyLeaseResponse(scope, message) {
   const slot = authoritySlot(scope);
-  const disposition = state.controlShell?.authorityEvent(
+  const disposition = applyAuthorityTransition(
+    state.controlShell,
+    log,
     slot,
     message.granted ? "grant" : "denial",
-    { generation: message.generation },
+    { generation: message.generation, reason: message.reason },
   );
   if (disposition === "applied" && message.granted) {
     if (slot === "motion") state.sequence = 0;
@@ -875,10 +879,9 @@ async function runSessionStreamReader(reader, token) {
         const m = decoded.message;
         if (m.vehicleId === VEHICLE_ID && m.scope === state.motionScope) {
           releaseTracker.acknowledge();
-          state.controlShell?.authorityEvent("motion", "release", {
+          applyAuthorityTransition(state.controlShell, log, "motion", "release", {
             generation: m.generation,
           });
-          log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
           if (state.pendingMotionScope) {
             // The scope handover's release boundary: flight moves to the
             // sibling scope. Both siblings share ONE authority group on the
@@ -895,15 +898,13 @@ async function runSessionStreamReader(reader, token) {
             log(`motion scope is now ${state.motionScope}`);
           }
         } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
-          state.controlShell?.authorityEvent("gimbal", "release", {
+          applyAuthorityTransition(state.controlShell, log, "gimbal", "release", {
             generation: m.generation,
           });
-          log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
         } else if (m.vehicleId === VEHICLE_ID && m.scope === SIM_LIFECYCLE_SCOPE) {
-          state.controlShell?.authorityEvent("lifecycle", "release", {
+          applyAuthorityTransition(state.controlShell, log, "lifecycle", "release", {
             generation: m.generation,
           });
-          log(`LeaseReleased[lifecycle]: released=${m.released} generation=${m.generation}`);
         } else {
           log(`ignoring LeaseReleased for vehicle=${m.vehicleId} scope=${m.scope}`);
         }
@@ -918,7 +919,6 @@ async function runSessionStreamReader(reader, token) {
         // vehicle's response must never install our generation.
         const m = decoded.message;
         const after = applyLeaseResponse(GIMBAL_SCOPE, m);
-        log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
         if (
           after.granted &&
           (controlGate.isLatched() ||
@@ -928,9 +928,7 @@ async function runSessionStreamReader(reader, token) {
           if (action) void executeLeaseAction(token, action, GIMBAL_SCOPE);
           log("input loss raced the gimbal grant; surrendered immediately");
         } else if (after.denied) {
-          log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
-        } else if (after.disposition === "stale") {
-          log(`ignoring stale gimbal grant generation=${m.generation}`);
+          els.overlay.textContent = "gimbal lease denied; flight control is unaffected";
         }
       }
       if (
@@ -940,7 +938,6 @@ async function runSessionStreamReader(reader, token) {
       ) {
         const m = decoded.message;
         const after = applyLeaseResponse(SIM_LIFECYCLE_SCOPE, m);
-        log(`LeaseResponse[lifecycle]: granted=${m.granted} generation=${m.generation}`);
         if (after.granted && state.lifecycle.pendingPress) {
           state.lifecycle.pendingPress = false;
           if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
@@ -948,9 +945,8 @@ async function runSessionStreamReader(reader, token) {
           }
         } else if (after.denied) {
           state.lifecycle.pendingPress = false;
-          log(`sim reset authorization denied (reason ${m.reason})`);
+          els.overlay.textContent = "simulation reset authorization denied";
         } else if (after.disposition === "stale") {
-          log(`ignoring stale lifecycle grant generation=${m.generation}`);
           const action = state.controlShell?.planAuthority("lifecycle", true);
           if (action) void executeLeaseAction(token, action, SIM_LIFECYCLE_SCOPE);
         }
@@ -968,18 +964,15 @@ async function runSessionStreamReader(reader, token) {
         // response never installs ours (filtered above).
         const m = decoded.message;
         const after = applyLeaseResponse(state.motionScope, m);
-        if (after.disposition === "stale") {
-          log(`ignoring stale motion grant generation=${m.generation}`);
-        } else if (after.denied) {
-          log(`motion lease denied (reason ${m.reason}); control stays suspended`);
-        } else {
+        if (after.denied) {
+          els.overlay.textContent = "motion lease denied; control stays suspended";
+        } else if (after.disposition !== "stale") {
           // Direct-flight state follows the GRANTED scope, never a local
           // optimistic flip.
           state.fpvActive = state.motionScope === DIRECT_SCOPE;
           els.overlay.textContent = state.fpvActive
             ? "direct (FPV) flight scope granted"
             : "camera flight scope granted";
-          log(`LeaseResponse[motion:${state.motionScope}]: granted generation=${m.generation}`);
         }
         if (after.disposition !== "stale") {
           completePendingResume(token, after.granted);
@@ -1014,6 +1007,7 @@ function handleBootstrapMessage(decoded, token) {
   if (!transportSessions.isActive(token)) return;
   if (decoded.kind === "ServerWelcome") {
     state.sessionId = decoded.message.sessionId;
+    state.principalId = decoded.message.principalId;
     state.advertisedScopes = decoded.message.advertisedScopes ?? [];
     // Correlation ids are per-connection; presses from a dead session must
     // not retransmit into a new one, and the new session has announced
@@ -1043,7 +1037,6 @@ function handleBootstrapMessage(decoded, token) {
       return;
     }
     applyLeaseResponse(MOTION_SCOPE, decoded.message);
-    log(`LeaseResponse: granted=${decoded.message.granted} generation=${decoded.message.generation}`);
     if (!decoded.message.granted) {
       els.overlay.textContent = `lease denied (reason ${decoded.message.reason})`;
     }
@@ -1124,23 +1117,34 @@ async function readOneUniStream(stream, token) {
   }
 }
 
-/** The dedicated authority-events stream is opened once at connection start and may carry several length-delimited envelopes over the stream's lifetime; decode every complete one buffered. */
 /** Handles one authority-stream envelope, decoded live as it arrives. */
 function dispatchAuthorityEnvelope(decoded, token) {
   if (!transportSessions.isActive(token)) return;
   if (decoded.kind === "AuthorityEvent") {
     els.overlay.textContent = `authority: ${decoded.message.arm}`;
-    log(`authority event: ${decoded.message.arm}`);
+    const message = decoded.message;
+    const slot = message.scope === GIMBAL_SCOPE ? "gimbal"
+      : message.scope === SIM_LIFECYCLE_SCOPE ? "lifecycle"
+        : motionGroup(message.scope) === motionGroup(state.motionScope) ? "motion" : null;
+    if (
+      slot &&
+      message.vehicleId === VEHICLE_ID &&
+      message.principalId === state.principalId &&
+      message.kind
+    ) {
+      applyAuthorityTransition(state.controlShell, log, slot, message.kind, {
+        generation: message.generation,
+      });
+    }
   } else if (decoded.kind === "LinkLossCleared") {
     const message = decoded.message;
     if (
       message.vehicleId === VEHICLE_ID &&
-      message.scope === motionGroup(state.motionScope) &&
-      state.controlShell?.authorityEvent("motion", "recovery", {
-        generation: message.generation,
-      }) === "applied"
+      message.scope === motionGroup(state.motionScope)
     ) {
-      log(`LinkLossCleared[motion]: recovery confirmed on generation=${decoded.message.generation}`);
+      applyAuthorityTransition(state.controlShell, log, "motion", "recovery", {
+        generation: message.generation,
+      });
     }
   }
 }
@@ -1357,28 +1361,26 @@ function handleFrameRejected(r) {
     r.reason === FRAME_REJECTION_UPLINK_IDLE &&
     motionGroup(r.scope) === motionGroup(state.motionScope)
   ) {
-    state.controlShell?.authorityEvent("motion", "uplinkIdle", {
+    applyAuthorityTransition(state.controlShell, log, "motion", "uplinkIdle", {
       generation: r.currentGeneration,
     });
     if (firstNotice) {
       els.overlay.textContent = "motion uplink idle — press arm to start control";
-      log("motion authority is granted but the vehicle uplink needs arm");
     }
   }
   if (
     (r.reason === 1 || r.reason === 2) &&
     r.scope === GIMBAL_SCOPE
   ) {
-    state.controlShell?.authorityEvent("gimbal", "revocation", {
+    applyAuthorityTransition(state.controlShell, log, "gimbal", "revocation", {
       generation: r.currentGeneration,
     });
-    log("host fenced our gimbal authority; the lease planner will re-request");
   }
   if (
     (r.reason === 1 || r.reason === 2) &&
     motionGroup(r.scope) === motionGroup(state.motionScope)
   ) {
-    state.controlShell?.authorityEvent("motion", "revocation", {
+    applyAuthorityTransition(state.controlShell, log, "motion", "revocation", {
       generation: r.currentGeneration,
     });
     const action = state.controlShell?.planAuthority("motion", true);
@@ -1388,7 +1390,6 @@ function handleFrameRejected(r) {
         action,
         state.motionScope,
       );
-      log("host fenced our motion authority; reacquiring the lease");
     }
   }
 }
@@ -1749,14 +1750,13 @@ function handleActionResult(m) {
   if (!entry) return; // a replay of an already-settled press
   if (motionGroup(entry.scope) === motionGroup(state.motionScope)) {
     const before = authorityFor(state.motionScope);
-    state.controlShell?.authorityEvent("motion", "actionResult", {
+    applyAuthorityTransition(state.controlShell, log, "motion", "actionResult", {
       detail: entry.action,
       accepted: m.accepted,
     });
     if (before.needsArm && !authorityFor(state.motionScope).needsArm) {
       state.lastFrameRejectionLogged = null;
       els.overlay.textContent = "arm sequence accepted — motion uplink active";
-      log("accepted arm result restored motion enactment");
     }
   }
   if (entry.scope === SIM_LIFECYCLE_SCOPE) {

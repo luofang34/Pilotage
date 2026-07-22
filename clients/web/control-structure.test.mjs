@@ -15,6 +15,7 @@ const GENERATED = new Set(["control-runtime.js", "instrument-runtime.js"]);
 const SIZE_CAPS = {
   "action-tracker.js": 90,
   "authority-stream.js": 17,
+  "authority-transition.js": 22,
   "bootstrap.js": 88,
   "calibration.js": 285,
   "connect-authority.js": 63,
@@ -101,6 +102,16 @@ if (leaseRequestOwners.join(",") !== "lease-executor.js") {
   failures += 1;
   console.error(
     `FAIL - lease requests must have one encoder owner (got ${leaseRequestOwners.join(",")})`,
+  );
+}
+
+const authorityApplyOwners = modules.filter((name) =>
+  readFileSync(new URL(`./${name}`, dir), "utf8").includes(".authorityEvent("),
+);
+if (authorityApplyOwners.join(",") !== "authority-transition.js") {
+  failures += 1;
+  console.error(
+    `FAIL - authority transitions must have one logging owner (got ${authorityApplyOwners.join(",")})`,
   );
 }
 

@@ -7,6 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { loadControlShell } from "./control-shell.js";
+import { applyAuthorityTransition } from "./authority-transition.js";
 
 const wasmBytes = readFileSync(new URL("./control-runtime_bg.wasm", import.meta.url));
 const vectors = JSON.parse(
@@ -316,6 +317,36 @@ for (const group of vectors.groups) {
   );
   shell.authorityEvent("motion", "actionResult", { detail: 2, accepted: true });
   check("authority table: accepted disarm restores needs-arm", shell.authority("motion").needsArm);
+}
+
+// The unicast response and broadcast stream report the same host transition.
+// Only the table-confirmed first arrival is operator-visible.
+{
+  const shell = await loadControlShell(wasmBytes);
+  const lines = [];
+  const apply = (kind, generation) =>
+    applyAuthorityTransition(shell, (line) => lines.push(line), "motion", kind, { generation });
+  shell.beginSession();
+  apply("grant", 11n);
+  apply("grant", 11n);
+  check(
+    "authority logging: a unicast and broadcast grant produce one line",
+    lines.filter((line) => line === "authority[motion]: granted gen=11").length === 1,
+    lines,
+  );
+  apply("release", 12n);
+  apply("revocation", 12n);
+  check(
+    "authority logging: a release and revocation replay produce one line",
+    lines.filter((line) => line.includes("fence=12")).length === 1,
+    lines,
+  );
+  apply("grant", 12n);
+  check(
+    "authority logging: a stale grant is loud",
+    lines.at(-1) === "authority[motion]: STALE grant gen=12",
+    lines.at(-1),
+  );
 }
 
 // Operator-facing arm/disarm hints come from profile data, renamed by the
