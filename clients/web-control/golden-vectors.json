@@ -343,8 +343,8 @@
             "mode": "quad-pilot"
           },
           "expect": {
-            "motionThrottle": 0.0,
-            "motionLease": "release",
+            "motionGated": true,
+            "motionLease": "none",
             "activationRevision": 2,
             "label": "Sony DualSense"
           }
@@ -362,12 +362,11 @@
             ]
           },
           "session": {
-            "mode": "quad-pilot",
-            "motionGranted": false
+            "mode": "quad-pilot"
           },
           "expect": {
             "motionGated": true,
-            "motionLease": "request",
+            "motionLease": "none",
             "arm": false
           }
         },
@@ -513,7 +512,7 @@
             "mode": "quad-pilot"
           },
           "expect": {
-            "motionLease": "release",
+            "motionLease": "none",
             "activationRevision": 2,
             "label": "Generic Gamepad (standard mapping)"
           }
@@ -567,7 +566,8 @@
           },
           "expect": {
             "activationRevision": 3,
-            "label": "Session Override"
+            "label": "Session Override",
+            "motionLease": "none"
           }
         },
         {
@@ -581,11 +581,11 @@
             "pressed": []
           },
           "session": {
-            "mode": "quad-pilot",
-            "motionGranted": false
+            "mode": "quad-pilot"
           },
           "expect": {
-            "motionLease": "request"
+            "motionThrottle": 0.0,
+            "motionLease": "none"
           }
         },
         {
@@ -603,7 +603,7 @@
             "motionRecovered": false
           },
           "expect": {
-            "motionGated": true
+            "motionThrottle": 0.0
           }
         },
         {

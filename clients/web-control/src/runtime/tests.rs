@@ -169,7 +169,8 @@ fn a_second_profile_takes_effect_only_after_a_neutral_transaction() {
         !activation.installed,
         "handover deferred while controls held"
     );
-    assert!(activation.release_gimbal_lease);
+    assert!(!activation.release_gimbal_lease);
+    assert!(!activation.release_motion_lease);
 
     // While controls stay held the runtime emits ONLY the neutral handover —
     // neither the old rates nor the new binding takes effect.
@@ -179,7 +180,11 @@ fn a_second_profile_takes_effect_only_after_a_neutral_transaction() {
         0.0,
         "output is neutral mid-handover"
     );
-    assert_eq!(during.lease, Some(LeaseAction::Release));
+    assert_eq!(during.lease, None, "same-scope activation retains gimbal");
+    assert_eq!(
+        during.motion_lease, None,
+        "same-scope activation retains motion"
+    );
     assert_eq!(runtime.activation_revision(), 1, "not installed yet");
 
     // Release everything: the captured controls are neutral, so the candidate
@@ -335,9 +340,8 @@ fn a_profile_swap_waits_for_the_candidate_controls_to_be_neutral_too() {
         "the candidate's own control held blocks install"
     );
     assert_eq!(
-        during.motion_lease,
-        Some(LeaseAction::Release),
-        "the motion lease is cycled too"
+        during.motion_lease, None,
+        "same-scope activation retains the motion lease"
     );
 
     // Release: the union of both profiles' controls is neutral, so it installs.

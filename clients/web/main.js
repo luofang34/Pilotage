@@ -1447,10 +1447,12 @@ async function runControlLoop(writer, token) {
         state.pendingReset = false;
         requestSimReset();
       }
-      // A completed device-swap handover advances the activation revision;
-      // the re-announcement must ride the reliable stream before the swap's
-      // lease reacquisition (queued below via plan.motionLease) so frames
-      // never carry an unannounced revision.
+      // A completed activation handover advances the revision; the
+      // re-announcement must reach the host before any frame carries it.
+      // The runtime emits no frames on the install tick (frames are
+      // datagrams and could beat this ordered-stream write), and a
+      // transfer's lease reacquisition is queued below, after this write,
+      // on the same ordered stream.
       maybeAnnounceProfileActivation();
       // Re-check the latch immediately before the write: no frame may be
       // sent under this generation once input loss latched, regardless of
@@ -1466,10 +1468,11 @@ async function runControlLoop(writer, token) {
         executeLeaseAction(token, plan.lease, GIMBAL_SCOPE);
       }
       if (plan.motionLease) {
-        // A profile switch (or scope handover) cycles the motion lease so
-        // the host fences the old flight generation before the remapped
-        // scheme runs (distinct from the input-loss release, which drives
-        // the link-loss policy).
+        // Only a scope-member transfer cycles the motion lease (the host
+        // fences the old flight generation before the new member runs);
+        // a same-scope mapping swap retains authority and emits no
+        // action. Distinct from the input-loss release, which drives the
+        // vehicle's link-loss policy.
         executeLeaseAction(token, plan.motionLease, state.motionScope);
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));

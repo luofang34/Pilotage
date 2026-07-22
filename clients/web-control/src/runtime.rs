@@ -9,19 +9,20 @@
 //! itself only accepts a [`CompiledProfile`]; invalid bytes never get here.
 
 use crate::flight::{Capture, flight_axes, shaped_stick};
-use crate::plan::{ActivationPlan, ControlPlan, Frame, LeaseAction};
+use crate::plan::{ControlPlan, Frame, LeaseAction};
 use crate::profile::CompiledProfile;
 use crate::quasimode::{
     LeasePlan, frame_plan, gimbal_demand, lease_plan, modifier_held, reset_edge, reset_held,
 };
 use crate::sample::{RawSample, SessionState};
 
+mod activation;
 mod authority;
-use authority::{MOTION_LEASE_RETRY_MS, MotionOutput, MotionPhase};
+use authority::{MotionOutput, MotionPhase};
 
 /// Sentinel making the first lease request fire immediately (before any real
 /// `now_ms`), rather than waiting out a debounce window from time zero.
-const NEVER_REQUESTED_MS: f64 = f64::NEG_INFINITY;
+pub(super) const NEVER_REQUESTED_MS: f64 = f64::NEG_INFINITY;
 
 /// The stateful web-control runtime. Construct it, then activate a compiled
 /// profile before evaluating ticks.
@@ -35,11 +36,9 @@ pub struct ControlRuntime {
     last_request_ms: f64,
     prev_arm: bool,
     prev_disarm: bool,
-    // Where the motion lease sits after a profile switch. A live scheme swap
-    // remaps flight, so the handover fences the motion generation and the
-    // runtime reacquires it — gating all motion output until the host regrants
-    // on a fresh generation, so the new mapping never publishes on the old
-    // authority.
+    // Where the motion lease sits during a real scope-member transfer. A
+    // same-scope mapping activation retains authority and uses
+    // `mapping_neutral_pending` instead.
     motion_phase: MotionPhase,
     // When the last motion release/request was emitted, so a dropped lease
     // write is retried rather than wedging the reacquisition.
@@ -55,6 +54,14 @@ pub struct ControlRuntime {
     // fresh arm/disarm/recenter. Unlike a generation change this does NOT
     // touch the motion-authority phase — a terminal denial stays terminal.
     reseed_edges: bool,
+    // A same-scope activation retains its lease, but live output stays gated
+    // until one neutral tick has been evaluated through the installed mapping.
+    // This covers a non-standard incoming device map whose deflection is not
+    // visible through the outgoing map used to decide the install boundary.
+    mapping_neutral_pending: bool,
+    // A pending activation releases motion only for a real scope-member
+    // transfer. Mapping and scheme changes remain on the held generation.
+    handover_releases_motion: bool,
 }
 
 impl ControlRuntime {
@@ -111,67 +118,6 @@ impl ControlRuntime {
             .map_or([0u8; 32], CompiledProfile::digest)
     }
 
-    /// Begins activating a compiled profile. With no profile yet, installs it
-    /// immediately. Otherwise opens a transaction: the current profile stays
-    /// active while the shell emits neutral and releases the gimbal lease, and
-    /// the candidate installs on the first tick that finds the captured
-    /// controls neutral. Edge and quasimode state is cleared now, so a control
-    /// held across the handover cannot fire a fresh edge on resume.
-    pub fn activate(&mut self, candidate: CompiledProfile) -> ActivationPlan {
-        self.streaming = false;
-        if self.active.is_none() {
-            self.install(candidate);
-            return ActivationPlan {
-                installed: true,
-                activation_revision: self.activation_revision,
-                emit_neutral: true,
-                release_gimbal_lease: false,
-                release_motion_lease: false,
-            };
-        }
-        self.pending = Some(candidate);
-        // A fresh handover has emitted no motion release yet: reset the retry
-        // clock so the first handover tick releases immediately instead of
-        // waiting out a window left over from earlier lease traffic.
-        self.motion_action_ms = NEVER_REQUESTED_MS;
-        ActivationPlan {
-            installed: false,
-            activation_revision: self.activation_revision,
-            emit_neutral: true,
-            release_gimbal_lease: true,
-            release_motion_lease: true,
-        }
-    }
-
-    /// Re-opens the activation transaction for the ALREADY-active scheme: a
-    /// device selection changed the effective physical mapping, and any
-    /// mapping change is a new activation (INPUT-01) — the same neutral
-    /// handover, lease cycle, and activation-revision advance a scheme
-    /// change takes. Returns false (a no-op) before the first activation:
-    /// there is no authority to fence and no revision to advance yet.
-    pub fn reactivate(&mut self) -> bool {
-        match self.active.clone() {
-            Some(active) => {
-                self.activate(active);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// Installs a candidate as the active profile and advances the activation
-    /// revision, re-seeding every edge baseline so nothing held fires.
-    fn install(&mut self, candidate: CompiledProfile) {
-        self.active = Some(candidate);
-        self.pending = None;
-        self.activation_revision = self.activation_revision.wrapping_add(1);
-        self.reset_baseline = false;
-        self.streaming = false;
-        self.last_request_ms = NEVER_REQUESTED_MS;
-        self.prev_arm = false;
-        self.prev_disarm = false;
-    }
-
     /// Evaluates one control tick. A dead session emits nothing; a pending
     /// activation emits the neutral handover until captured controls are
     /// neutral; otherwise the active profile drives flight and the gimbal
@@ -216,6 +162,10 @@ impl ControlRuntime {
         if self.last_generation == Some(session.generation) {
             return;
         }
+        // Only a generation CHANGE is a reconnect; the first observation is
+        // ordinary startup and must not void a transfer opened before the
+        // first tick.
+        let reconnect = self.last_generation.is_some();
         self.last_generation = Some(session.generation);
         self.reset_baseline = reset_held(sample, &active.gimbal);
         self.prev_arm = sample.pressed(usize::from(active.flight.arm_button));
@@ -223,83 +173,15 @@ impl ControlRuntime {
         self.streaming = false;
         // A fresh session re-establishes motion authority through bootstrap, so
         // any mid-handover or terminal-denied motion phase from the previous
-        // connection is void.
+        // connection is void. A scope transfer interrupted by the reconnect is
+        // moot too (bootstrap re-leases the boot scope), so a still-pending
+        // install completes as a mapping change on the held bootstrap
+        // authority instead of releasing the fresh session's lease.
         self.motion_phase = MotionPhase::Held;
-    }
-
-    /// Emits the neutral handover, and installs the pending profile once the
-    /// captured controls (the modifier and the gimbal sticks) read neutral, so
-    /// behavior changes only after a genuine neutral transition.
-    ///
-    /// Each scope's release — and its neutral frame — is emitted only while
-    /// the session still shows that lease granted. Once the release is
-    /// reflected the scope has no holder: another release would draw a
-    /// `released: false` acknowledgement and any frame a NoHolder rejection,
-    /// each raising a host warning, at tick rate for as long as the operator
-    /// stays deflected. The motion release re-emits after
-    /// [`MOTION_LEASE_RETRY_MS`] without the session reflecting it (a lost
-    /// write must not wedge the handover); the shell drops the gimbal grant
-    /// the moment it executes that release, which bounds it to one emission,
-    /// and the host's holder-silence watchdog covers a lost gimbal release.
-    fn evaluate_handover(
-        &mut self,
-        sample: &RawSample,
-        session: &SessionState,
-        active: &CompiledProfile,
-    ) -> ControlPlan {
-        let release_motion = session.motion_granted
-            && session.now_ms - self.motion_action_ms >= MOTION_LEASE_RETRY_MS;
-        if release_motion {
-            self.motion_action_ms = session.now_ms;
+        if reconnect {
+            self.handover_releases_motion = false;
+            self.mapping_neutral_pending = false;
         }
-        // Neutral must hold across the UNION of the active AND candidate
-        // controls: a profile swap remaps flight and gimbal inputs, so any
-        // input deflected under EITHER profile could jump meaning at install.
-        let union_neutral = controls_neutral(sample, active)
-            && self
-                .pending
-                .as_ref()
-                .is_some_and(|candidate| controls_neutral(sample, candidate));
-        if let Some(candidate) = union_neutral.then(|| self.pending.take()).flatten() {
-            self.reset_baseline = reset_held(sample, &candidate.gimbal);
-            self.prev_arm = sample.pressed(usize::from(candidate.flight.arm_button));
-            self.prev_disarm = sample.pressed(usize::from(candidate.flight.disarm_button));
-            self.install_after_seed(candidate, session.now_ms);
-        }
-        ControlPlan {
-            // The neutrals keep each still-held scope's liveness until its
-            // release lands, then stop: no frame rides a released lease.
-            motion: session.motion_granted.then(neutral_motion),
-            gimbal: session.lease_granted.then(neutral_gimbal),
-            lease: session.lease_granted.then_some(LeaseAction::Release),
-            // The scheme remaps flight too, so the motion lease is cycled with
-            // the gimbal lease and reacquired on resume.
-            motion_lease: release_motion.then_some(LeaseAction::Release),
-            label: None,
-            arm: false,
-            disarm: false,
-            // The handover computes no edges (baselines re-seed at install so a
-            // held control cannot fire on resume), so there is nothing to
-            // suppress-report either.
-            arm_suppressed: false,
-            disarm_suppressed: false,
-            capture_active: false,
-        }
-    }
-
-    /// Installs after the edge baselines have been seeded to the current held
-    /// state (so a held control does not fire), without re-clearing them. Opens
-    /// the motion-lease reacquisition: the handover released the motion lease,
-    /// so the runtime gates motion output until it is regranted on a fresh
-    /// generation.
-    fn install_after_seed(&mut self, candidate: CompiledProfile, now_ms: f64) {
-        self.active = Some(candidate);
-        self.pending = None;
-        self.activation_revision = self.activation_revision.wrapping_add(1);
-        self.streaming = false;
-        self.last_request_ms = NEVER_REQUESTED_MS;
-        self.motion_phase = MotionPhase::Releasing;
-        self.motion_action_ms = now_ms;
     }
 
     /// The normal tick: flight motion (masked while LT is held), the gimbal
@@ -336,7 +218,9 @@ impl ControlRuntime {
 
         let outcome = self.motion_frame(sample, session, active, captured);
         let lease = self.lease_action(session);
-        let (motion_lease, output) = self.advance_motion_authority(sample, session, active);
+        let (motion_lease, authority_output) =
+            self.advance_motion_authority(sample, session, active);
+        let output = self.apply_mapping_neutral_gate(sample, active, authority_output);
         // Live output only under a held, granted lease; the recovery path emits
         // explicit neutral activation frames instead, and everything else gates.
         // Arm/disarm fire only when live (their baselines still advance while
@@ -361,6 +245,39 @@ impl ControlRuntime {
             arm_suppressed: !live && outcome.arm,
             disarm_suppressed: !live && outcome.disarm,
             capture_active: captured,
+        }
+    }
+
+    /// Holds a same-scope activation behind the installed mapping's own
+    /// neutral sample: a deflection visible only through the incoming map
+    /// must center once before anything publishes. Authority is never
+    /// released on this path, so this is client-side hygiene, not host
+    /// recovery — the single neutral emitted on satisfaction is a
+    /// conservative first frame under the advanced revision, not a recovery
+    /// proof. A gated authority cannot satisfy the gate: its tick publishes
+    /// nothing, so nothing has demonstrated the centered state downstream.
+    fn apply_mapping_neutral_gate(
+        &mut self,
+        sample: &RawSample,
+        active: &CompiledProfile,
+        authority_output: MotionOutput,
+    ) -> MotionOutput {
+        if !self.mapping_neutral_pending {
+            return authority_output;
+        }
+        if !controls_neutral(sample, active) {
+            return MotionOutput::Gated;
+        }
+        match authority_output {
+            MotionOutput::Gated => MotionOutput::Gated,
+            MotionOutput::Neutral => {
+                self.mapping_neutral_pending = false;
+                MotionOutput::Neutral
+            }
+            MotionOutput::Live => {
+                self.mapping_neutral_pending = false;
+                MotionOutput::Neutral
+            }
         }
     }
 

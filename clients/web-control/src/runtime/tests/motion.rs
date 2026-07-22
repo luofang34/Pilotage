@@ -1,13 +1,13 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-//! Motion-lease reacquisition after a live profile switch. The runtime fences
+//! Motion-lease reacquisition after a live scope-member transfer. The runtime fences
 //! the motion generation, gates live output through the whole handshake, and
 //! recovers ONLY once the operator's controls read neutral AND the host
 //! confirms it cleared the vehicle's link-loss latch — so a remapped scheme
 //! never publishes on the released generation and never resumes on the hope a
 //! best-effort datagram arrived. A denied reacquire is terminal.
 
-use super::{SECOND_PROFILE, sample, session, with_default};
+use super::{SECOND_PROFILE, sample, session, session_gen, with_default};
 use crate::plan::LeaseAction;
 use crate::profile::ProfileRuntime;
 use crate::sample::{Mode, RawSample, SessionState};
@@ -63,6 +63,78 @@ fn is_neutral_motion(plan: &crate::plan::ControlPlan) -> bool {
 }
 
 #[test]
+fn a_same_scope_activation_retains_authority_and_requires_installed_neutral() {
+    let mut runtime = with_default();
+    let candidate = ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles");
+    let activation = runtime.activate(candidate);
+    assert!(!activation.release_motion_lease);
+    assert!(!activation.release_gimbal_lease);
+
+    let pending = runtime.evaluate(&deflected(), &session(Mode::QuadPilot, true));
+    assert!(is_neutral_motion(&pending));
+    assert_eq!(pending.motion_lease, None);
+    assert_eq!(pending.lease, None);
+    assert_eq!(runtime.activation_revision(), 1);
+
+    let installed = runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
+    assert!(
+        installed.motion.is_none() && installed.gimbal.is_none(),
+        "the install tick emits no frames: the re-announcement must reach \
+         the host before any datagram carries the advanced revision"
+    );
+    assert_eq!(runtime.activation_revision(), 2);
+    assert_eq!(installed.motion_lease, None);
+    assert_eq!(installed.lease, None);
+
+    let gated = runtime.evaluate(&deflected(), &session(Mode::QuadPilot, true));
+    assert!(
+        gated.motion.is_none(),
+        "the installed mapping must read neutral"
+    );
+    assert_eq!(gated.motion_lease, None, "authority remains held");
+
+    let proof = runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
+    assert!(is_neutral_motion(&proof), "neutral proof reaches the host");
+    let resumed = runtime.evaluate(&deflected(), &session(Mode::QuadPilot, true));
+    assert!(resumed.motion.is_some());
+    assert!(!is_neutral_motion(&resumed));
+}
+
+#[test]
+fn a_fresh_session_voids_a_pending_transfer_release() {
+    let mut runtime = with_default();
+    // Steady flight on generation 1, then a scope transfer opens — but the
+    // transport dies before its release lands. Bootstrap re-leases the boot
+    // scope, so the transfer is moot: the reconnect must not release the
+    // fresh session's lease on its behalf.
+    runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
+    assert!(runtime.reactivate());
+
+    let installed = runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
+    assert_eq!(
+        installed.motion_lease, None,
+        "no release rides the fresh session"
+    );
+    assert_eq!(
+        runtime.activation_revision(),
+        2,
+        "the pending install completes as a mapping change"
+    );
+
+    let proof = runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
+    assert!(
+        is_neutral_motion(&proof),
+        "one conservative neutral follows the install"
+    );
+    let live = runtime.evaluate(&deflected(), &session_gen(2, Mode::QuadPilot, true));
+    assert!(
+        live.motion.is_some() && !is_neutral_motion(&live),
+        "live resumes on the held bootstrap authority"
+    );
+    assert_eq!(live.motion_lease, None, "the lease was never cycled");
+}
+
+#[test]
 fn a_live_switch_recovers_only_when_the_host_confirms() {
     let mut runtime = with_default();
     // Steady flight publishes the live stick.
@@ -75,7 +147,7 @@ fn a_live_switch_recovers_only_when_the_host_confirms() {
     );
 
     // Handover installs with controls neutral, releasing the motion lease.
-    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    assert!(runtime.reactivate());
     let install = runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
     assert_eq!(runtime.activation_revision(), 2, "neutral controls install");
     assert_eq!(install.motion_lease, Some(LeaseAction::Release));
@@ -135,7 +207,7 @@ fn a_live_switch_recovers_only_when_the_host_confirms() {
 #[test]
 fn a_denied_motion_reacquire_is_terminal() {
     let mut runtime = with_default();
-    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    assert!(runtime.reactivate());
     // Install (Releasing) at t=1000, then the release lands → request at t=1010.
     runtime.evaluate(&neutral(), &session_at(1000.0, Mode::QuadPilot, true, true));
     let req = runtime.evaluate(
@@ -161,7 +233,7 @@ fn a_denied_motion_reacquire_is_terminal() {
 #[test]
 fn a_dropped_motion_reacquire_request_is_retried() {
     let mut runtime = with_default();
-    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    assert!(runtime.reactivate());
     // Install at t=1000 (motion still granted): the runtime enters Releasing.
     runtime.evaluate(&neutral(), &session_at(1000.0, Mode::QuadPilot, true, true));
     // Release lands at t=1010: the request is emitted and the clock recorded.
@@ -193,18 +265,18 @@ fn a_dropped_motion_reacquire_request_is_retried() {
 }
 
 #[test]
-fn a_deflected_handover_waits_in_silence_once_the_releases_land() {
+fn a_deflected_scope_transfer_waits_after_the_motion_release_lands() {
     let mut runtime = with_default();
-    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    assert!(runtime.reactivate());
 
-    // First handover tick, both leases still granted: one release per scope,
-    // with the neutrals still streaming liveness under the held generation.
+    // A motion member transfer releases only that scope. Gimbal authority is
+    // independent and keeps its neutral liveness stream.
     let first = runtime.evaluate(
         &deflected(),
         &session_at(1000.0, Mode::QuadPilot, true, true),
     );
     assert_eq!(first.motion_lease, Some(LeaseAction::Release));
-    assert_eq!(first.lease, Some(LeaseAction::Release));
+    assert_eq!(first.lease, None);
     assert!(first.motion.is_some() && first.gimbal.is_some());
 
     // Next tick, acknowledgements still in flight (grants unchanged): the
@@ -215,18 +287,17 @@ fn a_deflected_handover_waits_in_silence_once_the_releases_land() {
     );
     assert_eq!(inflight.motion_lease, None, "no duplicate release per tick");
 
-    // Both releases reflected, operator still deflected: the handover waits
-    // in SILENCE — a release now would draw `released: false` and a frame a
-    // NoHolder rejection, each a host warning, every tick until neutral.
+    // Once the motion release is reflected, motion waits silently while the
+    // independent gimbal scope continues its neutral stream.
     for now_ms in [1066.0, 1100.0, 2000.0, 30_000.0] {
         let waiting = runtime.evaluate(
             &deflected(),
-            &session_at(now_ms, Mode::QuadPilot, false, false),
+            &session_at(now_ms, Mode::QuadPilot, true, false),
         );
         assert_eq!(waiting.motion_lease, None, "no release without a grant");
-        assert_eq!(waiting.lease, None, "no gimbal release without a grant");
+        assert_eq!(waiting.lease, None, "gimbal authority is retained");
         assert!(waiting.motion.is_none(), "no frame rides a released lease");
-        assert!(waiting.gimbal.is_none(), "no frame rides a released lease");
+        assert!(waiting.gimbal.is_some(), "gimbal liveness remains neutral");
     }
     assert_eq!(
         runtime.activation_revision(),
@@ -238,7 +309,7 @@ fn a_deflected_handover_waits_in_silence_once_the_releases_land() {
 #[test]
 fn a_lost_handover_release_is_retried_on_the_window_not_per_tick() {
     let mut runtime = with_default();
-    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    assert!(runtime.reactivate());
     let first = runtime.evaluate(
         &deflected(),
         &session_at(1000.0, Mode::QuadPilot, true, true),
