@@ -191,6 +191,51 @@ title browser-encoded typed frame reaches the adapter boundary intact
 locator crates/pilotage-session/tests/typed_wire_e2e.rs
 attr test browser_encoded_typed_frame_reaches_the_adapter_boundary_intact
 
+node CASE-CTRL-MEMBER-FRAME verification-case
+title a frame on the unleased sibling scope is rejected
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test a_frame_on_the_unleased_sibling_scope_is_rejected
+
+node CASE-CTRL-MEMBER-ACTION verification-case
+title an action command on the unleased sibling is rejected
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test an_action_command_on_the_unleased_sibling_is_rejected
+
+node CASE-CTRL-MEMBER-SWITCH verification-case
+title switching members requires release and lands a fresh generation
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test switching_members_requires_release_and_lands_a_fresh_generation
+
+node CASE-CTRL-RESULT-GUARANTEE verification-case
+title an early adapter rejection still answers every correlated action
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test an_early_adapter_rejection_still_answers_every_correlated_action
+
+node CASE-CTRL-ANTIREPLAY verification-case
+title an evicted id stays stale and never executes again
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test an_evicted_id_stays_stale_and_never_executes_again
+
+node CASE-CTRL-WATERMARK-WRAP verification-case
+title the watermark wraps at u32 without stalling fresh ids
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test the_watermark_wraps_at_u32_without_stalling_fresh_ids
+
+node CASE-CTRL-ACCEPT-EVENT verification-case
+title acceptance is an explicit event and a rejected duplicate emits none
+locator crates/pilotage-session/src/tests/profile_binding.rs
+attr test acceptance_is_an_explicit_event_and_a_rejected_duplicate_emits_none
+
+node CASE-CTRL-LIFE-PHYSICAL verification-case
+title a physical profile neither advertises nor accepts lifecycle commands
+locator adapters/aviate/src/adapter/tests/direct_flight.rs
+attr test a_physical_profile_neither_advertises_nor_accepts_lifecycle_commands
+
+node CASE-CTRL-LIFE-ABSENT verification-case
+title an unadvertised lifecycle scope is structurally absent
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test an_unadvertised_lifecycle_scope_is_structurally_absent
+
 node CASE-CTRL-BROWSER-COMMAND verification-case
 title browser-encoded action command reaches the adapter with its binding
 locator crates/pilotage-session/tests/typed_wire_e2e.rs
@@ -201,72 +246,83 @@ attr test browser_encoded_action_command_reaches_the_adapter_with_its_binding
 node RESULT-CTRL-ENGINE-ACTIONS verification-result
 title reliable action-command engine suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::action_command
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:441ea76ef1f6f92e4b33dd8459b4838248d5065e
+attr source-digest git-blob:eb2fe718203f2c7db451a47f2ea46189d4d4d6b0
 attr artifact docs/control/evidence-artifacts/ctrl01/engine-actions.run.txt
-attr output-digest sha256:3330d5c4f85d6c5732adc58ad028ccadab413433bf08b8b7bee135b1c41ad4e2
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:dd0db749fa86b5432ea891260306b06b0453dfce610ad811da5c9a24bc0931d9
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 node RESULT-CTRL-BINDING verification-result
 title profile-binding enforcement suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::profile_binding
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:53dcad107f87fa479685840dc90fddae3aa3e55c
+attr source-digest git-blob:71e2840379186fa0796b1f04d0d33c29965d129e
 attr artifact docs/control/evidence-artifacts/ctrl01/profile-binding.run.txt
-attr output-digest sha256:0df9de74d9c5c9ce5a602b411e73630c4764e2ac35e6f2a2f9701acd946c989e
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:2ec1bd28e1da16f4b1de2e304e4e79f747359ed1e71654a654690941b03706e8
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:7f3954ba8a22fb48d9f28e9aab5bbe02dd811bca
+attr source-digest git-blob:1d7b646167cd010a3dd5014aebef2ab5847e7832
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:7573bcf1aa42bb1d302c9afc2d700d2812d01f16511aa0207cb23c2a4a506f7a
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:cf6a7d7d7f925720d3d91f81ba4f27663aae9aed249eb64926214f3542131227
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::tests::reliable_actions
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:34e72409cac3cd160ab81a2d5054baa3e0e68c8a
+attr source-digest git-blob:1fbf6b07d02b5597e0138ee4fe1c7a95a5683ede
 attr artifact docs/control/evidence-artifacts/ctrl01/actor-dedup.run.txt
-attr output-digest sha256:14ccda60c4c50ea51c6d89b1b2ce99f0f74776e266548616bfd71e3940e5e57e
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:d39ea6cc41db3036c9350d46017ec7bf534ba00edf1809797d66aa753a07e9f6
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 node RESULT-CTRL-WIRE verification-result
 title reliable action chain over the real transport — recorded pass
 attr command cargo test -p pilotage-session-host --test reliable_actions_wire
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:57b14b52b87593c59296b9d6e0132ededf48069d
 attr artifact docs/control/evidence-artifacts/ctrl01/wire-chain.run.txt
-attr output-digest sha256:ce8ffc983dc98c8193a3de3ccee4eab005fe193a62a2a30e8df0ed8a14ea4b1e
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:88212f697f9a1da0125bb947baaba96cd0e7cf408e4101b30dddb1a80f2b1992
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
 attr command cargo test -p pilotage-control-web --lib coordinator
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:b2fb617c8e28ca4df0fd7131dae863d0680fdf8e
 attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
-attr output-digest sha256:02afbc373bb38268c210d4fb2f49c34fd24e3326f0d68d8980738963c91b23cb
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:6c2c0ecb9752affa36605b62a9ffafc06d075c66c2351c8207bd5195eea1be4e
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:2ce8d0ea7070c53cd966ddea3cb47f513b2e2ff5
+attr source-digest git-blob:137fee9fb8bc41b167d1a3fdcc414a0236594521
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:a999f4a8981d93e14bb97b290b78c87bd3a1bd85bdf43ef7244da6c3df78a50e
-attr run-id local:2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
+attr output-digest sha256:6d707e654f8aa5eb729cc0483c89394411934cd705554f8cff939d5cfad167f3
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr outcome pass
+
+node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
+title aviate direct-flight and lifecycle-profile suite — recorded pass
+attr command cargo test -p pilotage-adapter-aviate --lib adapter::tests::direct_flight
+attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:0f17f792fd6c02af64c4b79b3be91dc65aaa83f7
+attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-profile.run.txt
+attr output-digest sha256:bf9d3ffffd0ff4a1e75d0fb8c135a4e3f0fd13f59ce5b2689fdab142bb9f85f4
+attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 
 # --- Configuration and tool identity ---
@@ -274,8 +330,8 @@ attr outcome pass
 node CFG-CTRL01 configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
 attr scm git
-attr commit 2766d3fcf6fd624f8ec133706d29d0e2c4cf984a
-attr tree 30f5d1dc1b5e60d1c1b99bf492a6118f17f81e9c
+attr commit 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr tree 825bbc9c1444f94f7a0caa6fd713f6a1d247520a
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
@@ -318,6 +374,8 @@ edge DESIGN-LIFECYCLE-SCOPE implemented-by IMPL-LIFECYCLE-DESCRIPTOR
 
 edge CTRL-BIND-001 verified-by CASE-CTRL-UNANNOUNCED
 edge CTRL-BIND-001 verified-by CASE-CTRL-NONMONOTONIC
+edge CTRL-BIND-001 verified-by CASE-CTRL-ACCEPT-EVENT
+edge CASE-CTRL-ACCEPT-EVENT covers CTRL-BIND-001
 edge CTRL-BIND-001 verified-by CASE-CTRL-BROWSER-FRAME
 edge CASE-CTRL-UNANNOUNCED covers CTRL-BIND-001
 edge CASE-CTRL-NONMONOTONIC covers CTRL-BIND-001
@@ -329,6 +387,12 @@ edge CTRL-CHAN-002 verified-by CASE-CTRL-ZERO-ID
 edge CTRL-CHAN-002 verified-by CASE-CTRL-DATAGRAM-ACTION
 edge CTRL-CHAN-002 verified-by CASE-CTRL-ID-REUSE
 edge CTRL-CHAN-002 verified-by CASE-CTRL-WIRE-CHAIN
+edge CTRL-CHAN-002 verified-by CASE-CTRL-RESULT-GUARANTEE
+edge CTRL-CHAN-002 verified-by CASE-CTRL-ANTIREPLAY
+edge CTRL-CHAN-002 verified-by CASE-CTRL-WATERMARK-WRAP
+edge CASE-CTRL-RESULT-GUARANTEE covers CTRL-CHAN-002
+edge CASE-CTRL-ANTIREPLAY covers CTRL-CHAN-002
+edge CASE-CTRL-WATERMARK-WRAP covers CTRL-CHAN-002
 edge CTRL-CHAN-002 verified-by CASE-CTRL-BROWSER-COMMAND
 edge CASE-CTRL-DELAYED-ARM covers CTRL-CHAN-002
 edge CASE-CTRL-BOUND-COMMAND covers CTRL-CHAN-002
@@ -338,6 +402,12 @@ edge CASE-CTRL-ID-REUSE covers CTRL-CHAN-002
 edge CASE-CTRL-WIRE-CHAIN covers CTRL-CHAN-002
 edge CASE-CTRL-BROWSER-COMMAND covers CTRL-CHAN-002
 
+edge CTRL-GROUP-003 verified-by CASE-CTRL-MEMBER-FRAME
+edge CTRL-GROUP-003 verified-by CASE-CTRL-MEMBER-ACTION
+edge CTRL-GROUP-003 verified-by CASE-CTRL-MEMBER-SWITCH
+edge CASE-CTRL-MEMBER-FRAME covers CTRL-GROUP-003
+edge CASE-CTRL-MEMBER-ACTION covers CTRL-GROUP-003
+edge CASE-CTRL-MEMBER-SWITCH covers CTRL-GROUP-003
 edge CTRL-GROUP-003 verified-by CASE-CTRL-GROUP-EXCL
 edge CTRL-GROUP-003 verified-by CASE-CTRL-GROUP-GEN
 edge CTRL-GROUP-003 verified-by CASE-CTRL-GROUP-LATCH
@@ -351,7 +421,11 @@ edge CASE-CTRL-SOURCE-BOOT covers INPUT-SRC-004
 edge CASE-CTRL-SWAP-GATED covers INPUT-SRC-004
 
 edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFECYCLE
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-PHYSICAL
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-ABSENT
 edge CASE-CTRL-LIFECYCLE covers CTRL-LIFE-005
+edge CASE-CTRL-LIFE-PHYSICAL covers CTRL-LIFE-005
+edge CASE-CTRL-LIFE-ABSENT covers CTRL-LIFE-005
 
 # --- Results: result -> executed case, covered requirement, baseline, tool ---
 
@@ -400,6 +474,20 @@ edge RESULT-CTRL-FIXTURE covers CTRL-BIND-001
 edge RESULT-CTRL-FIXTURE covers CTRL-CHAN-002
 edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL01
 edge RESULT-CTRL-FIXTURE justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-LIFECYCLE-PROFILE result-of CASE-CTRL-LIFE-PHYSICAL
+edge RESULT-CTRL-LIFECYCLE-PROFILE covers CTRL-LIFE-005
+edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by CFG-CTRL01
+edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-LIFE-ABSENT
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-MEMBER-FRAME
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-MEMBER-ACTION
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-MEMBER-SWITCH
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-RESULT-GUARANTEE
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ANTIREPLAY
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-WATERMARK-WRAP
+edge RESULT-CTRL-BINDING result-of CASE-CTRL-ACCEPT-EVENT
 
 # --- Review coverage ---
 
