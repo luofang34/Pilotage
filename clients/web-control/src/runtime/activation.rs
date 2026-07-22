@@ -1,8 +1,9 @@
 //! Profile activation and neutral handover transactions.
 
-use super::authority::{MOTION_LEASE_RETRY_MS, MotionPhase};
-use super::{ControlRuntime, NEVER_REQUESTED_MS, controls_neutral, neutral_gimbal, neutral_motion};
-use crate::plan::{ActivationPlan, ControlPlan, LeaseAction};
+use super::authority::MotionPhase;
+use super::{ControlRuntime, controls_neutral, neutral_gimbal, neutral_motion};
+use crate::authority::AuthorityScope;
+use crate::plan::{ActivationPlan, ControlPlan};
 use crate::profile::CompiledProfile;
 use crate::quasimode::reset_held;
 use crate::sample::{RawSample, SessionState};
@@ -56,10 +57,6 @@ impl ControlRuntime {
         } else {
             releases_motion
         };
-        if releases_motion {
-            // A scope transfer has emitted no motion release yet.
-            self.motion_action_ms = NEVER_REQUESTED_MS;
-        }
         ActivationPlan {
             installed: false,
             activation_revision: self.activation_revision,
@@ -76,7 +73,6 @@ impl ControlRuntime {
         self.activation_revision = self.activation_revision.wrapping_add(1);
         self.reset_baseline = false;
         self.streaming = false;
-        self.last_request_ms = NEVER_REQUESTED_MS;
         self.prev_arm = false;
         self.prev_disarm = false;
         self.mapping_neutral_pending = false;
@@ -86,8 +82,8 @@ impl ControlRuntime {
     /// Emits neutral until every control used by either profile is centered:
     /// a swap remaps flight and gimbal inputs, so any input deflected under
     /// EITHER profile could jump meaning at install. On the transfer path the
-    /// motion release is emitted only while the session still shows the lease
-    /// granted, and re-emitted on [`MOTION_LEASE_RETRY_MS`] — a lost write
+    /// motion release is emitted only while authority is still granted and
+    /// re-emitted on the authority planner's retry window — a lost write
     /// must not wedge the handover, while a release per tick would draw a
     /// `released: false` acknowledgement (a host warning) for as long as the
     /// operator stays deflected.
@@ -98,12 +94,10 @@ impl ControlRuntime {
         active: &CompiledProfile,
     ) -> ControlPlan {
         let releases_motion = self.handover_releases_motion;
-        let release_motion = releases_motion
-            && session.motion_granted
-            && session.now_ms - self.motion_action_ms >= MOTION_LEASE_RETRY_MS;
-        if release_motion {
-            self.motion_action_ms = session.now_ms;
-        }
+        let motion_lease = releases_motion.then(|| {
+            self.authority
+                .plan(AuthorityScope::Motion, false, session.now_ms)
+        });
         let union_neutral = controls_neutral(sample, active)
             && self
                 .pending
@@ -128,10 +122,12 @@ impl ControlRuntime {
             // tolerates. On the transfer path everything after this tick is
             // gated behind the regrant, which the ordered stream necessarily
             // delivers after the announcement.
-            motion: (!installed && session.motion_granted).then(neutral_motion),
-            gimbal: (!installed && session.lease_granted).then(neutral_gimbal),
+            motion: (!installed && self.authority.state(AuthorityScope::Motion).granted())
+                .then(neutral_motion),
+            gimbal: (!installed && self.authority.state(AuthorityScope::Gimbal).granted())
+                .then(neutral_gimbal),
             lease: None,
-            motion_lease: release_motion.then_some(LeaseAction::Release),
+            motion_lease: motion_lease.flatten(),
             label: None,
             arm: false,
             disarm: false,
@@ -151,11 +147,10 @@ impl ControlRuntime {
         self.pending = None;
         self.activation_revision = self.activation_revision.wrapping_add(1);
         self.streaming = false;
-        self.last_request_ms = NEVER_REQUESTED_MS;
         self.handover_releases_motion = false;
         if releases_motion {
             self.motion_phase = MotionPhase::Releasing;
-            self.motion_action_ms = now_ms;
+            self.authority.plan(AuthorityScope::Motion, false, now_ms);
         } else {
             // The incoming physical map may expose deflection the outgoing map
             // could not observe at the installation boundary.

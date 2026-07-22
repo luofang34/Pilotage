@@ -29,6 +29,10 @@ const fixture = JSON.parse(
 );
 const wasmBytes = readFileSync(new URL("./control-runtime_bg.wasm", import.meta.url));
 const shell = await loadControlShell(wasmBytes);
+shell.beginSession();
+shell.authorityEvent("motion", "grant", { generation: 1n });
+shell.authorityEvent("gimbal", "grant", { generation: 1n });
+shell.beginControlRun();
 
 let failures = 0;
 function check(name, ok, got) {
@@ -41,14 +45,8 @@ function check(name, ok, got) {
 }
 
 const session = {
-  generation: 1,
   mode: "quad-pilot",
   connected: true,
-  leaseGranted: true,
-  leaseDenied: false,
-  motionGranted: true,
-  motionDenied: false,
-  motionRecovered: true,
   nowMs: 100_000,
 };
 const capability = fixture.capability;

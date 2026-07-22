@@ -8,21 +8,18 @@
 //! reaches this runtime only through [`ControlRuntime::activate`], which
 //! itself only accepts a [`CompiledProfile`]; invalid bytes never get here.
 
+use crate::authority::{
+    AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState, AuthorityTable,
+};
 use crate::flight::{Capture, flight_axes, shaped_stick};
 use crate::plan::{ControlPlan, Frame, LeaseAction};
 use crate::profile::CompiledProfile;
-use crate::quasimode::{
-    LeasePlan, frame_plan, gimbal_demand, lease_plan, modifier_held, reset_edge, reset_held,
-};
+use crate::quasimode::{frame_plan, gimbal_demand, modifier_held, reset_edge, reset_held};
 use crate::sample::{RawSample, SessionState};
 
 mod activation;
 mod authority;
 use authority::{MotionOutput, MotionPhase};
-
-/// Sentinel making the first lease request fire immediately (before any real
-/// `now_ms`), rather than waiting out a debounce window from time zero.
-pub(super) const NEVER_REQUESTED_MS: f64 = f64::NEG_INFINITY;
 
 /// The stateful web-control runtime. Construct it, then activate a compiled
 /// profile before evaluating ticks.
@@ -33,21 +30,15 @@ pub struct ControlRuntime {
     activation_revision: u32,
     reset_baseline: bool,
     streaming: bool,
-    last_request_ms: f64,
     prev_arm: bool,
     prev_disarm: bool,
     // Where the motion lease sits during a real scope-member transfer. A
     // same-scope mapping activation retains authority and uses
     // `mapping_neutral_pending` instead.
     motion_phase: MotionPhase,
-    // When the last motion release/request was emitted, so a dropped lease
-    // write is retried rather than wedging the reacquisition.
-    motion_action_ms: f64,
-    // The session generation last evaluated. When the shell reports a NEW
-    // generation (a fresh connect), the first tick seeds every discrete-action
-    // baseline from the held state and fires no edge — a button held across a
-    // disconnect/reconnect cannot become a fresh arm/disarm/recenter.
-    last_generation: Option<u32>,
+    // Every scope's reliable-stream authority and lease planner. JS feeds
+    // events and executes returned actions; it holds no grant/fence policy.
+    authority: AuthorityTable,
     // Set when the DEVICE mapping changed (a pad swap or re-selection): the
     // next tick re-seeds the discrete edge baselines from the held state, so
     // a button already pressed on the newly mapped device cannot fire as a
@@ -69,10 +60,58 @@ impl ControlRuntime {
     /// one immediately (there is nothing to neutrally hand over from).
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            last_request_ms: NEVER_REQUESTED_MS,
-            ..Self::default()
-        }
+        Self::default()
+    }
+
+    /// Starts a fresh transport session, clearing every scope slot and
+    /// re-seeding discrete controls on the next tick.
+    pub fn begin_session(&mut self) {
+        self.authority.begin_session();
+        self.motion_phase = MotionPhase::Held;
+        self.reseed_edges = true;
+        self.streaming = false;
+        self.handover_releases_motion = false;
+        self.mapping_neutral_pending = false;
+    }
+
+    /// Re-seeds discrete controls before a datagram run starts on a live
+    /// session. An unrecovered regrant enters neutral activation recovery.
+    pub fn begin_control_run(&mut self) {
+        self.reseed_edges = true;
+        self.streaming = false;
+        let motion = self.authority.state(AuthorityScope::Motion);
+        self.motion_phase = if motion.denied() {
+            MotionPhase::Denied
+        } else if motion.recovered() {
+            MotionPhase::Held
+        } else {
+            MotionPhase::Neutralizing
+        };
+    }
+
+    /// Applies one filtered reliable-stream authority event.
+    pub fn authority_event(
+        &mut self,
+        scope: AuthorityScope,
+        event: AuthorityEvent,
+    ) -> AuthorityDisposition {
+        self.authority.apply(scope, event)
+    }
+
+    /// Returns the authoritative state of one scope.
+    #[must_use]
+    pub fn authority_state(&self, scope: AuthorityScope) -> AuthorityState {
+        self.authority.state(scope)
+    }
+
+    /// Plans an explicit lease intent from orchestration outside the tick loop.
+    pub fn plan_authority(
+        &mut self,
+        scope: AuthorityScope,
+        desired: bool,
+        now_ms: f64,
+    ) -> Option<LeaseAction> {
+        self.authority.plan_explicit(scope, desired, now_ms)
     }
 
     /// The current session activation revision (advances on each install).
@@ -142,7 +181,6 @@ impl ControlRuntime {
         let Some(active) = self.active.take() else {
             return ControlPlan::default();
         };
-        self.prime_for_generation(sample, session, &active);
         if self.reseed_edges {
             self.reseed_edges = false;
             self.reset_baseline = reset_held(sample, &active.gimbal);
@@ -160,51 +198,6 @@ impl ControlRuntime {
         plan
     }
 
-    /// On the first tick of a NEW session generation, seeds every discrete
-    /// baseline to the currently held state, so a control held across a
-    /// disconnect/reconnect fires no edge. A no-op within a generation.
-    fn prime_for_generation(
-        &mut self,
-        sample: &RawSample,
-        session: &SessionState,
-        active: &CompiledProfile,
-    ) {
-        if self.last_generation == Some(session.generation) {
-            return;
-        }
-        // Only a generation CHANGE is a reconnect; the first observation is
-        // ordinary startup and must not void a transfer opened before the
-        // first tick.
-        let reconnect = self.last_generation.is_some();
-        self.last_generation = Some(session.generation);
-        self.reset_baseline = reset_held(sample, &active.gimbal);
-        self.prev_arm = sample.pressed(usize::from(active.flight.arm_button));
-        self.prev_disarm = sample.pressed(usize::from(active.flight.disarm_button));
-        self.streaming = false;
-        // A fresh session re-establishes motion authority through bootstrap, so
-        // any mid-handover or terminal-denied motion phase from the previous
-        // connection is void. A scope transfer interrupted by the reconnect is
-        // moot too (bootstrap re-leases the boot scope), so a still-pending
-        // install completes as a mapping change on the held bootstrap
-        // authority instead of releasing the fresh session's lease.
-        //
-        // A generation that arrives UNRECOVERED — the host has not confirmed
-        // clearing the vehicle's link-loss latch — re-enters the
-        // neutral-activation recovery instead of publishing live: authority
-        // regained after an input-loss release must not publish a held
-        // deflection, and live output waits for the host's confirmation
-        // exactly as a scope transfer's reacquisition does.
-        self.motion_phase = if session.motion_recovered {
-            MotionPhase::Held
-        } else {
-            MotionPhase::Neutralizing
-        };
-        if reconnect {
-            self.handover_releases_motion = false;
-            self.mapping_neutral_pending = false;
-        }
-    }
-
     /// The normal tick: flight motion (masked while LT is held), the gimbal
     /// quasimode frame, and the lease action.
     fn evaluate_active(
@@ -214,7 +207,8 @@ impl ControlRuntime {
         active: &CompiledProfile,
     ) -> ControlPlan {
         let gimbal = &active.gimbal;
-        let active_gimbal = session.lease_granted && session.mode.carries_gimbal();
+        let active_gimbal =
+            self.authority.state(AuthorityScope::Gimbal).granted() && session.mode.carries_gimbal();
         // ONE effective capture condition drives masking, gimbal routing, and
         // the HUD: the modifier only captures when the gimbal is actually
         // active (a lease is held). Otherwise LT would silently suppress flight
@@ -238,7 +232,11 @@ impl ControlRuntime {
         });
 
         let outcome = self.motion_frame(sample, session, active, captured);
-        let lease = self.lease_action(session);
+        let lease = self.authority.plan(
+            AuthorityScope::Gimbal,
+            session.mode.carries_gimbal(),
+            session.now_ms,
+        );
         let (motion_lease, authority_output) =
             self.advance_motion_authority(sample, session, active);
         let output = self.apply_mapping_neutral_gate(sample, active, authority_output);
@@ -340,19 +338,6 @@ impl ControlRuntime {
             self.prev_disarm = pressed;
         }
         pressed && !prev
-    }
-
-    /// Translates the lease plan into a [`LeaseAction`], recording the request
-    /// time so repeated requests debounce.
-    fn lease_action(&mut self, session: &SessionState) -> Option<LeaseAction> {
-        match lease_plan(session, self.last_request_ms) {
-            LeasePlan::Request => {
-                self.last_request_ms = session.now_ms;
-                Some(LeaseAction::Request)
-            }
-            LeasePlan::Release => Some(LeaseAction::Release),
-            LeasePlan::None => None,
-        }
     }
 }
 

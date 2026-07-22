@@ -14,6 +14,7 @@
 //! swaps it in through a neutral, transactional handover. There is no
 //! privileged default path.
 
+mod authority;
 mod coordinator;
 mod device;
 mod flight;
@@ -29,6 +30,9 @@ mod wasm;
 #[cfg(test)]
 mod golden;
 
+pub use authority::{
+    AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState, is_fresh_generation,
+};
 pub use coordinator::ControlCoordinator;
 pub use device::{DeviceStage, MAX_AXES, MAX_BUTTONS, SelectOutcome, parse_gamepad_identity};
 pub use plan::{

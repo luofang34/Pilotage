@@ -1,10 +1,8 @@
 // The live authority-stream path: a LinkLossCleared recovery ack arrives
 // FRAGMENTED while the stream is still open, must be decoded and dispatched the
-// instant it completes (never buffered until close), and must resume ONLY the
-// matching generation.
+// instant it completes (never buffered until close).
 
 import { drainAuthorityEnvelopes } from "./authority-stream.js";
-import { isMotionRecoveryConfirmation } from "./motion-lease.js";
 import { decodeLengthDelimitedEnvelope } from "./wire.js";
 
 let failures = 0;
@@ -95,15 +93,6 @@ function linkLossClearedLD(vehicle, scope, generation) {
   const buf = drainAuthorityEnvelopes(appendChunk(a, b), decodeLengthDelimitedEnvelope, (d) => dispatched.push(d));
   check("two coalesced envelopes both dispatch", dispatched.length === 2);
   check("no leftover after two complete envelopes", buf.length === 0);
-}
-
-// ---- resumes ONLY the matching generation ----
-{
-  const m = { vehicleId: 7n, scope: "vehicle.motion", generation: 42n };
-  check("matching vehicle+scope+generation confirms", isMotionRecoveryConfirmation(m, 7n, "vehicle.motion", 42n) === true);
-  check("a STALE generation does NOT confirm", isMotionRecoveryConfirmation(m, 7n, "vehicle.motion", 41n) === false);
-  check("another scope does NOT confirm", isMotionRecoveryConfirmation({ ...m, scope: "vehicle.gimbal" }, 7n, "vehicle.motion", 42n) === false);
-  check("another vehicle does NOT confirm", isMotionRecoveryConfirmation({ ...m, vehicleId: 8n }, 7n, "vehicle.motion", 42n) === false);
 }
 
 if (failures > 0) {

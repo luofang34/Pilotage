@@ -12,6 +12,41 @@ import { readFileSync, readdirSync } from "node:fs";
 // Generated wasm bindings are build artifacts, not first-party shell code.
 const GENERATED = new Set(["control-runtime.js", "instrument-runtime.js"]);
 
+const SIZE_CAPS = {
+  "action-tracker.js": 90,
+  "authority-stream.js": 17,
+  "bootstrap.js": 88,
+  "calibration.js": 285,
+  "connect-authority.js": 63,
+  "control-edges.js": 31,
+  "control-gate.js": 39,
+  "control-shell.js": 341,
+  "datagram-control.js": 80,
+  "instrument-health.js": 395,
+  "instruments.js": 761,
+  "layout.js": 55,
+  "lease-executor.js": 14,
+  "lease-release.js": 67,
+  "main.js": 2290,
+  "reconnect.js": 150,
+  "resume-control.js": 59,
+  "session-discovery.js": 68,
+  "snapshot-association.js": 266,
+  "telemetry-display.js": 75,
+  "telemetry-ingress.js": 689,
+  "transport-session.js": 120,
+  "turn-derivation.js": 101,
+  "typed-command.js": 131,
+  "uni-stream-accept.js": 78,
+  "uni-stream.js": 58,
+  "video-diagnostics.js": 29,
+  "video-h264.js": 226,
+  "video-identity.js": 291,
+  "video-routing.js": 37,
+  "wire-bounds.js": 120,
+  "wire.js": 1143,
+};
+
 const dir = new URL("./", import.meta.url);
 const modules = readdirSync(dir)
   .filter((name) => name.endsWith(".js") && !GENERATED.has(name))
@@ -49,8 +84,25 @@ for (const name of modules) {
   for (const [label, pattern] of BANNED) {
     forbid(name, source, label, pattern);
   }
+  const lines = source.match(/\n/g)?.length ?? 0;
+  if (SIZE_CAPS[name] === undefined || lines > SIZE_CAPS[name]) {
+    failures += 1;
+    console.error(`FAIL - ${name} has ${lines} lines (cap ${SIZE_CAPS[name] ?? "missing"})`);
+  }
 }
 console.log(`scanned ${modules.length} modules for mapping logic`);
+
+const leaseRequestOwners = modules.filter(
+  (name) =>
+    name !== "wire.js" &&
+    readFileSync(new URL(`./${name}`, dir), "utf8").includes("encodeLeaseRequestEnvelope"),
+);
+if (leaseRequestOwners.join(",") !== "lease-executor.js") {
+  failures += 1;
+  console.error(
+    `FAIL - lease requests must have one encoder owner (got ${leaseRequestOwners.join(",")})`,
+  );
+}
 
 // And the shell must still drive the runtime through the one seam.
 const main = readFileSync(new URL("./main.js", dir), "utf8");
@@ -66,12 +118,11 @@ require("imports the control shell", /from "\.\/control-shell\.js"/);
 require("evaluates one tick through the runtime", /tickFromPad|tickFromKeys/);
 require("resolves pad identity through the runtime selector", /selectDevice/);
 require("forwards key transitions to the runtime", /keyEvent/);
-// A same-session resume must hand the runtime a FRESH session generation
-// before its loop restarts: the generation prime is what re-seeds the
-// discrete edge baselines and re-enters neutral-activation recovery.
+// Every datagram run re-seeds discrete edges and derives recovery from the
+// runtime-owned authority table before its loop starts.
 require(
-  "advances the control generation before a resumed loop starts",
-  /function completePendingResume[\s\S]*?controlGeneration \+ 1[\s\S]*?startControlLoop/,
+  "begins a control run through the runtime",
+  /function startControlLoop[\s\S]*?beginControlRun\(\)/,
 );
 // Operator-facing arm/disarm names come from the runtime (profile data),
 // so a rebound control or a different device renames its own hint.

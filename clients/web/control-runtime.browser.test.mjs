@@ -49,14 +49,17 @@ import { loadControlShell } from "./control-shell.js";
 (async () => {
   try {
     const shell = await loadControlShell("./control-runtime_bg.wasm");
+    shell.beginSession();
+    shell.authorityEvent("motion", "grant", { generation: 1n });
+    shell.authorityEvent("gimbal", "grant", { generation: 1n });
+    shell.beginControlRun();
     // LT (button 6) held + right stick full: expect a gimbal frame with yaw=+1.
     const pad = {
       axes: [0, 0, 1, 1],
       buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 6, value: i === 6 ? 1 : 0 })),
     };
     const plan = shell.tickFromPad(pad, {
-      mode: "quad-pilot", connected: true, leaseGranted: true, leaseDenied: false,
-      motionGranted: true, motionDenied: false, motionRecovered: true, generation: 1, nowMs: performance.now(),
+      mode: "quad-pilot", connected: true, nowMs: performance.now(),
     });
     await fetch("/result", { method: "POST", body: JSON.stringify({
       ran: true,

@@ -310,6 +310,65 @@
           "session": {
             "mode": "quad-pilot",
             "gimbalGranted": true,
+            "motionGranted": true,
+            "motionRecovered": false
+          },
+          "expect": {
+            "motionGated": true
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "gimbalGranted": true,
+            "motionGranted": true,
+            "motionRecovered": false
+          },
+          "expect": {
+            "motionThrottle": 0.0
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "gimbalGranted": true,
+            "motionGranted": true
+          },
+          "expect": {
+            "motionThrottle": 0.0
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "gimbalGranted": true,
             "motionGranted": true
           },
           "expect": {
@@ -741,6 +800,62 @@
           },
           "expect": {
             "armSuppressed": false
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": true,
+            "motionRecovered": false
+          },
+          "expect": {
+            "motionGated": true
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": true,
+            "motionRecovered": false
+          },
+          "expect": {
+            "motionThrottle": 0.0
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": true
+          },
+          "expect": {
+            "motionThrottle": 0.0
           }
         },
         {

@@ -11,7 +11,7 @@ import { negotiateSessionAuthority } from "./connect-authority.js";
 import { runBootstrapReader } from "./bootstrap.js";
 import { createControlGate } from "./control-gate.js";
 import { createReleaseTracker } from "./lease-release.js";
-import { resumeGrantDecision, resumeSessionControl } from "./resume-control.js";
+import { resumeGrantDecision, resumeRefusalReason, resumeSessionControl } from "./resume-control.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -235,6 +235,49 @@ async function drive({ gate, tracker, steps, controlStarts = true }) {
   check("resume re-announces before its request", announcements === 1);
   check("clean same-session resume does not surrender", surrenders === 0);
   check("the transport identity never changes", activeTransport === liveTransport);
+}
+
+// --- an unplannable resume request fails loudly and surrenders --------------
+// The authority table refuses to plan (terminal denial, or a release whose
+// acknowledgement never landed): the resume must rethrow the refusal —
+// never wait for a response that cannot come — and surrender the attempt.
+{
+  const gate = createControlGate({ isFocused: () => true });
+  gate.latchInputLoss();
+  const tracker = createReleaseTracker();
+  let surrenders = 0;
+  const outcome = await resumeSessionControl({
+    gate,
+    releases: tracker,
+    controlSettled: () => Promise.resolve(),
+    isSessionLive: () => true,
+    announceActivation: () => {},
+    requestLeases: () => {
+      throw new Error("release unacknowledged; press Connect for a fresh session");
+    },
+    surrender: () => {
+      surrenders += 1;
+    },
+  }).then(
+    () => "resolved",
+    (error) => `rethrown: ${error.message}`,
+  );
+  check(
+    "an unplannable request rethrows its reason",
+    outcome === "rethrown: release unacknowledged; press Connect for a fresh session",
+    outcome,
+  );
+  check("the failed request is surrendered exactly once", surrenders === 1);
+  check(
+    "terminal denial names itself",
+    resumeRefusalReason({ granted: false, denied: true }).startsWith(
+      "motion lease denied this session",
+    ),
+  );
+  check(
+    "a still-granted slot names the lost acknowledgement",
+    resumeRefusalReason({ granted: true, denied: false }).startsWith("release unacknowledged"),
+  );
 }
 
 // --- a blur during same-session release settlement aborts the request -------

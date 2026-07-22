@@ -1,9 +1,9 @@
 // The PRODUCTION long-lived uni-stream reader — `readUniStream`, the core of
 // main.js's `readOneUniStream` — driven end to end against a REAL
-// ReadableStream, together with the real recovery-state transition
-// (`applyMotionRecovery`). This exercises what the helper-only test cannot: the
+// ReadableStream, together with the real wasm authority transition. This
+// exercises what the helper-only test cannot: the
 // leading 0x01 authority kind tag, a LinkLossCleared arriving FRAGMENTED on an
-// OPEN (never-closing) stream, and the motionRecovered latch flipping LIVE —
+// OPEN (never-closing) stream, and the recovered authority flag flipping LIVE —
 // before any close — and ONLY for the matching generation.
 //
 // Synchronization is deterministic, NOT timer-based: a PULL-driven stream calls
@@ -13,8 +13,9 @@
 //
 // Run: node clients/web/uni-stream.test.mjs
 
+import { readFileSync } from "node:fs";
+import { loadControlShell } from "./control-shell.js";
 import { readUniStream } from "./uni-stream.js";
-import { applyMotionRecovery } from "./motion-lease.js";
 import { decodeLengthDelimitedEnvelope, STREAM_KIND_AUTHORITY } from "./wire.js";
 
 let failures = 0;
@@ -91,13 +92,33 @@ function scriptedStream(steps) {
   });
 }
 
-function startReader(reader, state, vehicleId, motionScope) {
+function startReader(reader, shell, vehicleId, motionScope) {
   return readUniStream(reader, {
     authorityKind: STREAM_KIND_AUTHORITY,
     decode: decodeLengthDelimitedEnvelope,
-    onAuthorityEnvelope: (decoded) =>
-      applyMotionRecovery(decoded, state, vehicleId, motionScope),
+    onAuthorityEnvelope: (decoded) => {
+      if (
+        decoded.kind === "LinkLossCleared" &&
+        decoded.message.vehicleId === vehicleId &&
+        decoded.message.scope === motionScope
+      ) {
+        shell.authorityEvent("motion", "recovery", {
+          generation: decoded.message.generation,
+        });
+      }
+    },
   });
+}
+
+const wasmBytes = readFileSync(new URL("./control-runtime_bg.wasm", import.meta.url));
+
+async function recoveringShell() {
+  const shell = await loadControlShell(wasmBytes);
+  shell.beginSession();
+  shell.authorityEvent("motion", "grant", { generation: 41n });
+  shell.authorityEvent("motion", "release", { generation: 41n });
+  shell.authorityEvent("motion", "grant", { generation: 42n });
+  return shell;
 }
 
 const VEHICLE_ID = 7n;
@@ -105,7 +126,7 @@ const MOTION_SCOPE = "vehicle.motion";
 
 // ---- 0x01 tag + fragmented OPEN stream + LIVE recovery transition ----
 await (async () => {
-  const state = { generation: 42n, motionRecovered: false };
+  const shell = await recoveringShell();
   const ack = linkLossClearedLD(7, MOTION_SCOPE, 42);
   // Observations are recorded INSIDE the pull checkpoints, so they capture the
   // recovery latch at exact points in the reader's progress.
@@ -116,20 +137,20 @@ await (async () => {
     // Reader consumed the partial (asking for more): nothing recovered yet;
     // deliver the remainder — still on the OPEN stream.
     (c) => {
-      observed.push(["after-partial", state.motionRecovered]);
+      observed.push(["after-partial", shell.authority("motion").recovered]);
       c.enqueue(ack.subarray(3));
     },
     // Reader consumed the completing bytes: the ack dispatched and recovery
     // latched LIVE — recorded BEFORE we close the stream.
     (c) => {
-      observed.push(["after-complete-open", state.motionRecovered]);
+      observed.push(["after-complete-open", shell.authority("motion").recovered]);
       c.close();
     },
   ]);
 
   const { kind, tail, aborted } = await startReader(
     stream.getReader(),
-    state,
+    shell,
     VEHICLE_ID,
     MOTION_SCOPE,
   );
@@ -146,29 +167,29 @@ await (async () => {
 
 // ---- resumes ONLY the matching generation, through the real reader ----
 await (async () => {
-  const state = { generation: 42n, motionRecovered: false };
+  const shell = await recoveringShell();
   const observed = [];
   const stream = scriptedStream([
     // A STALE-generation ack (the pre-handover 41) — decoded and dispatched.
     (c) => c.enqueue(taggedFirstChunk(...linkLossClearedLD(7, MOTION_SCOPE, 41))),
     // Recorded after the stale ack: must NOT resume. Deliver a GIMBAL-scope ack.
     (c) => {
-      observed.push(["after-stale", state.motionRecovered]);
+      observed.push(["after-stale", shell.authority("motion").recovered]);
       c.enqueue(linkLossClearedLD(7, "vehicle.gimbal", 42));
     },
     // Recorded after the gimbal ack: must NOT resume motion. Deliver the match.
     (c) => {
-      observed.push(["after-gimbal", state.motionRecovered]);
+      observed.push(["after-gimbal", shell.authority("motion").recovered]);
       c.enqueue(linkLossClearedLD(7, MOTION_SCOPE, 42));
     },
     // Recorded after the matching ack: NOW resumed.
     (c) => {
-      observed.push(["after-match", state.motionRecovered]);
+      observed.push(["after-match", shell.authority("motion").recovered]);
       c.close();
     },
   ]);
 
-  await startReader(stream.getReader(), state, VEHICLE_ID, MOTION_SCOPE);
+  await startReader(stream.getReader(), shell, VEHICLE_ID, MOTION_SCOPE);
 
   check("a stale-generation ack does NOT resume", observed[0][1] === false);
   check("a gimbal-scope ack does NOT resume motion", observed[1][1] === false);

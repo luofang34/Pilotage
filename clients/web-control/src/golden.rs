@@ -10,6 +10,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::DEFAULT_PROFILE_BYTES;
+use crate::authority::{AuthorityEvent, AuthorityScope, is_fresh_generation};
 use crate::coordinator::ControlCoordinator;
 use crate::device::SelectOutcome;
 use crate::plan::{AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ControlPlan, LeaseAction};
@@ -114,6 +115,7 @@ struct Expect {
 
 struct Harness {
     coordinator: ControlCoordinator,
+    session_generation: Option<u32>,
 }
 
 impl Harness {
@@ -121,7 +123,10 @@ impl Harness {
         let mut coordinator = ControlCoordinator::new();
         let revision = coordinator.activate_scheme(DEFAULT_PROFILE_BYTES);
         assert_eq!(revision, 1, "default activates at rev 1");
-        Self { coordinator }
+        Self {
+            coordinator,
+            session_generation: None,
+        }
     }
 
     /// Mirrors the wasm `select_device`: the TRANSACTIONAL path.
@@ -130,6 +135,7 @@ impl Harness {
     }
 
     fn tick(&mut self, step: &Step, session: &Session, ctx: &str) -> ControlPlan {
+        self.sync_authority(session);
         let mut sample = RawSample::default();
         if let Some(pad) = &step.pad {
             let buttons: Vec<ButtonSample> = (0..PAD_BUTTONS)
@@ -145,17 +151,73 @@ impl Harness {
             self.coordinator.key_sample(&mut sample);
         }
         let state = SessionState {
-            generation: session.generation,
             now_ms: 100_000.0,
             mode: Mode::from_str_or_pilot(&session.mode),
             connected: true,
-            lease_granted: session.gimbal_granted,
-            lease_denied: session.gimbal_denied,
-            motion_granted: session.motion_granted,
-            motion_denied: session.motion_denied,
-            motion_recovered: session.motion_recovered,
         };
         self.coordinator.evaluate(&sample, &state)
+    }
+
+    fn sync_authority(&mut self, session: &Session) {
+        let fresh_session = self.session_generation != Some(session.generation);
+        if fresh_session {
+            self.coordinator.begin_session();
+            self.session_generation = Some(session.generation);
+        }
+        self.sync_scope(
+            AuthorityScope::Motion,
+            session.motion_granted,
+            session.motion_denied,
+            u64::from(session.generation),
+        );
+        self.sync_scope(
+            AuthorityScope::Gimbal,
+            session.gimbal_granted,
+            session.gimbal_denied,
+            u64::from(session.generation),
+        );
+        let motion = self.coordinator.authority_state(AuthorityScope::Motion);
+        if session.motion_recovered && motion.granted() && !motion.recovered() {
+            self.coordinator.authority_event(
+                AuthorityScope::Motion,
+                AuthorityEvent::LinkLossCleared {
+                    generation: motion.generation(),
+                },
+            );
+        }
+        if fresh_session {
+            self.coordinator.begin_control_run();
+        }
+    }
+
+    fn sync_scope(
+        &mut self,
+        scope: AuthorityScope,
+        granted: bool,
+        denied: bool,
+        requested_generation: u64,
+    ) {
+        let state = self.coordinator.authority_state(scope);
+        if denied && !state.denied() {
+            self.coordinator
+                .authority_event(scope, AuthorityEvent::LeaseDenied);
+        } else if granted && !state.granted() && !state.denied() {
+            let generation =
+                if state.fence() == 0 || is_fresh_generation(requested_generation, state.fence()) {
+                    requested_generation
+                } else {
+                    state.fence().wrapping_add(1)
+                };
+            self.coordinator
+                .authority_event(scope, AuthorityEvent::LeaseGranted { generation });
+        } else if !granted && state.granted() {
+            self.coordinator.authority_event(
+                scope,
+                AuthorityEvent::LeaseReleased {
+                    generation: state.generation(),
+                },
+            );
+        }
     }
 }
 

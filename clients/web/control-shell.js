@@ -43,6 +43,18 @@ const LAYER_IDS = { organization: 1, user: 2, vehicle: 3, session: 4 };
 const SOURCE_PAD = 0;
 const SOURCE_KEYS = 1;
 
+const AUTHORITY_SCOPE = { motion: 0, gimbal: 1, lifecycle: 2 };
+const AUTHORITY_EVENT = {
+  grant: 1,
+  denial: 2,
+  release: 3,
+  revocation: 4,
+  recovery: 5,
+  uplinkIdle: 6,
+  actionResult: 7,
+};
+const AUTHORITY_FLAG = { granted: 1, denied: 1 << 1, recovered: 1 << 2, needsArm: 1 << 3 };
+
 /** Loads the control-runtime wasm and bootstraps it through the normal
  *  activation path: compile the built-in default profile bytes, then activate.
  *  There is no privileged default entry point. */
@@ -120,6 +132,55 @@ export class ControlShell {
    *  switch. Returns false before the first activation. */
   reactivate() {
     return this.#control.reactivate();
+  }
+
+  /** Clears every scope slot for a fresh transport session. */
+  beginSession() {
+    this.#control.begin_session();
+  }
+
+  /** Re-seeds discrete controls before a datagram run starts. */
+  beginControlRun() {
+    this.#control.begin_control_run();
+  }
+
+  /** Applies one filtered reliable-stream transition to the Rust table. */
+  authorityEvent(scope, kind, { generation = 0n, detail = 0, accepted = false } = {}) {
+    const scopeId = AUTHORITY_SCOPE[scope];
+    const eventId = AUTHORITY_EVENT[kind];
+    if (scopeId === undefined || eventId === undefined) return "ignored";
+    const result = this.#control.authority_event(
+      scopeId,
+      eventId,
+      BigInt(generation),
+      detail >>> 0,
+      accepted,
+    );
+    return result === 1 ? "applied" : result === 2 ? "stale" : "ignored";
+  }
+
+  /** Returns one scope's fenced authority state. */
+  authority(scope) {
+    const scopeId = AUTHORITY_SCOPE[scope];
+    if (scopeId === undefined) {
+      return { generation: 0n, granted: false, denied: false, recovered: false, needsArm: false };
+    }
+    const flags = this.#control.authority_flags(scopeId);
+    return {
+      generation: this.#control.authority_generation(scopeId),
+      granted: (flags & AUTHORITY_FLAG.granted) !== 0,
+      denied: (flags & AUTHORITY_FLAG.denied) !== 0,
+      recovered: (flags & AUTHORITY_FLAG.recovered) !== 0,
+      needsArm: (flags & AUTHORITY_FLAG.needsArm) !== 0,
+    };
+  }
+
+  /** Plans one orchestration-owned lease intent through the shared planner. */
+  planAuthority(scope, desired, nowMs = performance.now()) {
+    const scopeId = AUTHORITY_SCOPE[scope];
+    if (scopeId === undefined) return null;
+    const action = this.#control.plan_authority(scopeId, desired, nowMs);
+    return action === 1 ? "request" : action === 2 ? "release" : null;
   }
 
   /** Resolves a Gamepad.id through the runtime's shared device selector.
@@ -239,20 +300,12 @@ export class ControlShell {
 
   #evaluate(axisCount, buttonCount, session, source) {
     const mode = MODE_IDS[session.mode] ?? 0;
-    const flags =
-      (session.connected ? 1 : 0) |
-      (session.leaseGranted ? 1 << 1 : 0) |
-      (session.leaseDenied ? 1 << 2 : 0) |
-      (session.motionGranted ? 1 << 3 : 0) |
-      (session.motionDenied ? 1 << 4 : 0) |
-      (session.motionRecovered ? 1 << 5 : 0);
     const result = this.#control.evaluate(
       axisCount,
       buttonCount,
       mode,
       session.nowMs,
-      flags,
-      session.generation >>> 0,
+      session.connected,
       source,
     );
     return this.#readPlan(result);

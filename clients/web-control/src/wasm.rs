@@ -6,6 +6,7 @@
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
+use crate::authority::{AuthorityDisposition, AuthorityEvent, AuthorityScope};
 use crate::coordinator::ControlCoordinator;
 use crate::device::SelectOutcome;
 use crate::plan::{ControlPlan, LeaseAction};
@@ -113,11 +114,63 @@ impl WebControl {
         self.coordinator.reactivate()
     }
 
+    /// Starts a fresh transport session and clears every authority slot.
+    pub fn begin_session(&mut self) {
+        self.coordinator.begin_session();
+    }
+
+    /// Re-seeds discrete controls before a live datagram run starts.
+    pub fn begin_control_run(&mut self) {
+        self.coordinator.begin_control_run();
+    }
+
+    /// Applies one reliable-stream authority event. Scope codes are motion=0,
+    /// gimbal=1, lifecycle=2. Event codes are grant=1, denial=2, release=3,
+    /// revocation=4, recovery=5, uplink-idle=6, action-result=7. The return is
+    /// ignored=0, applied=1, stale-grant=2.
+    pub fn authority_event(
+        &mut self,
+        scope: u32,
+        kind: u32,
+        generation: u64,
+        detail: u32,
+        accepted: bool,
+    ) -> u32 {
+        let Some(scope) = AuthorityScope::from_code(scope) else {
+            return AuthorityDisposition::Ignored.code();
+        };
+        let Some(event) = authority_event_from_abi(kind, generation, detail, accepted) else {
+            return AuthorityDisposition::Ignored.code();
+        };
+        self.coordinator.authority_event(scope, event).code()
+    }
+
+    /// Returns one scope's generation as a JavaScript `BigInt`.
+    #[must_use]
+    pub fn authority_generation(&self, scope: u32) -> u64 {
+        AuthorityScope::from_code(scope).map_or(0, |scope| {
+            self.coordinator.authority_state(scope).generation()
+        })
+    }
+
+    /// Returns one scope's flags: bit0 granted, bit1 terminal denial, bit2
+    /// recovered, bit3 needs-arm.
+    #[must_use]
+    pub fn authority_flags(&self, scope: u32) -> u32 {
+        AuthorityScope::from_code(scope)
+            .map_or(0, |scope| self.coordinator.authority_state(scope).flags())
+    }
+
+    /// Plans an explicit lease intent and returns none=0, request=1, release=2.
+    pub fn plan_authority(&mut self, scope: u32, desired: bool, now_ms: f64) -> u32 {
+        AuthorityScope::from_code(scope).map_or(0, |scope| {
+            lease_code(self.coordinator.plan_authority(scope, desired, now_ms))
+        })
+    }
+
     /// Evaluates one control tick from the input buffer and the session
     /// scalars, writes the plan into the output buffer, and returns the plan
-    /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover; `session` packs
-    /// bit0 connected, bit1 gimbal-lease-granted, bit2 gimbal-lease-denied,
-    /// bit3 motion-lease-granted, bit4 motion-lease-denied, bit5 motion-recovered.
+    /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover.
     /// `source` is `0` for a pad sample in the input buffer, `1` for the
     /// held-key state (the input buffer is ignored).
     #[allow(clippy::too_many_arguments)]
@@ -127,21 +180,14 @@ impl WebControl {
         button_count: u32,
         mode: u32,
         now_ms: f64,
-        session: u32,
-        generation: u32,
+        connected: bool,
         source: u32,
     ) -> u32 {
         self.load_sample(axis_count as usize, button_count as usize, source);
         let state = SessionState {
-            generation,
             now_ms,
             mode: mode_from_u32(mode),
-            connected: session & 1 != 0,
-            lease_granted: session & (1 << 1) != 0,
-            lease_denied: session & (1 << 2) != 0,
-            motion_granted: session & (1 << 3) != 0,
-            motion_denied: session & (1 << 4) != 0,
-            motion_recovered: session & (1 << 5) != 0,
+            connected,
         };
         let plan = self.coordinator.evaluate(&self.sample, &state);
         self.store_plan(&plan)
@@ -349,6 +395,35 @@ fn lease_bits(action: Option<LeaseAction>, shift: u32) -> u32 {
         Some(LeaseAction::Request) => 1 << shift,
         Some(LeaseAction::Release) => 2 << shift,
         None => 0,
+    }
+}
+
+fn lease_code(action: Option<LeaseAction>) -> u32 {
+    match action {
+        Some(LeaseAction::Request) => 1,
+        Some(LeaseAction::Release) => 2,
+        None => 0,
+    }
+}
+
+fn authority_event_from_abi(
+    kind: u32,
+    generation: u64,
+    detail: u32,
+    accepted: bool,
+) -> Option<AuthorityEvent> {
+    match kind {
+        1 => Some(AuthorityEvent::LeaseGranted { generation }),
+        2 => Some(AuthorityEvent::LeaseDenied),
+        3 => Some(AuthorityEvent::LeaseReleased { generation }),
+        4 => Some(AuthorityEvent::Revoked { generation }),
+        5 => Some(AuthorityEvent::LinkLossCleared { generation }),
+        6 => Some(AuthorityEvent::UplinkIdle),
+        7 => Some(AuthorityEvent::ActionResult {
+            action: detail,
+            accepted,
+        }),
+        _ => None,
     }
 }
 

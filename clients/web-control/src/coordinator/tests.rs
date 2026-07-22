@@ -9,6 +9,7 @@ use super::ControlCoordinator;
 use pilotage_input::ProfileLayer;
 
 use crate::DEFAULT_PROFILE_BYTES;
+use crate::authority::{AuthorityEvent, AuthorityScope};
 use crate::plan::AXIS_THROTTLE;
 use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
 
@@ -27,23 +28,22 @@ fn pad_sample(coordinator: &ControlCoordinator, axes: &[f32], pressed: &[usize])
     out
 }
 
-fn session(motion_granted: bool, motion_recovered: bool) -> SessionState {
+fn session(_motion_granted: bool, _motion_recovered: bool) -> SessionState {
     SessionState {
-        generation: 1,
         now_ms: 100_000.0,
         mode: Mode::QuadPilot,
         connected: true,
-        lease_granted: false,
-        lease_denied: false,
-        motion_granted,
-        motion_denied: false,
-        motion_recovered,
     }
 }
 
 fn with_scheme() -> ControlCoordinator {
     let mut coordinator = ControlCoordinator::new();
     assert_eq!(coordinator.activate_scheme(DEFAULT_PROFILE_BYTES), 1);
+    coordinator.begin_session();
+    coordinator.authority_event(
+        AuthorityScope::Motion,
+        AuthorityEvent::LeaseGranted { generation: 1 },
+    );
     coordinator
 }
 
