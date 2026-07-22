@@ -191,3 +191,45 @@ fn a_dropped_motion_reacquire_request_is_retried() {
         "a dropped reacquire request is retried"
     );
 }
+
+#[test]
+fn a_gated_arm_press_is_reported_suppressed_not_silent() {
+    let mut runtime = with_default();
+    // Prime the generation's edge baselines with nothing held, ungranted.
+    runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, false, false));
+    // A fresh arm press while gated: no arm action, but a suppression report —
+    // a swallowed safety press must never be indistinguishable from a dead key.
+    let press = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[9]),
+        &session_motion(Mode::QuadPilot, false, false),
+    );
+    assert!(press.motion.is_none(), "motion stays gated");
+    assert!(!press.arm, "no arm action rides absent authority");
+    assert!(press.arm_suppressed, "the swallowed press is reported");
+    // Held: the baseline advanced, so neither an action nor a report re-fires.
+    let held = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[9]),
+        &session_motion(Mode::QuadPilot, false, false),
+    );
+    assert!(
+        !held.arm && !held.arm_suppressed,
+        "a held press reports once"
+    );
+    // Release, regrant, press again: the arm fires live with no report.
+    runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, false, true));
+    let live = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[9]),
+        &session_motion(Mode::QuadPilot, false, true),
+    );
+    assert!(
+        live.arm && !live.arm_suppressed,
+        "a granted press arms live"
+    );
+    // Disarm mirrors the same contract.
+    runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, false, false));
+    let disarm = runtime.evaluate(
+        &sample(&[0.0, 0.0, 0.0, 0.0], &[8]),
+        &session_motion(Mode::QuadPilot, false, false),
+    );
+    assert!(!disarm.disarm && disarm.disarm_suppressed);
+}

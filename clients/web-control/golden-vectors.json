@@ -660,6 +660,170 @@
           }
         }
       ]
+    },
+    {
+      "name": "a gated arm or disarm press reports suppression, never silence",
+      "steps": [
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": false
+          },
+          "expect": {
+            "motionGated": true
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": [
+              9
+            ]
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": false
+          },
+          "expect": {
+            "arm": false,
+            "armSuppressed": true,
+            "motionGated": true
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": [
+              9
+            ]
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": false
+          },
+          "expect": {
+            "arm": false,
+            "armSuppressed": false
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": false
+          },
+          "expect": {
+            "armSuppressed": false
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": [
+              9
+            ]
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": true
+          },
+          "expect": {
+            "arm": true,
+            "armSuppressed": false,
+            "motionLive": true
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": []
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": true
+          },
+          "expect": {}
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": [
+              8
+            ]
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": false
+          },
+          "expect": {
+            "disarm": false,
+            "disarmSuppressed": true,
+            "motionGated": true
+          }
+        },
+        {
+          "pad": {
+            "axes": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "pressed": [
+              8
+            ]
+          },
+          "session": {
+            "mode": "quad-pilot",
+            "motionGranted": false
+          },
+          "expect": {
+            "disarmSuppressed": false
+          }
+        }
+      ]
     }
   ]
 }

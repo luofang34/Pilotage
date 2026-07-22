@@ -116,6 +116,14 @@ pub struct ControlPlan {
     pub arm: bool,
     /// A typed disarm edge fired this tick.
     pub disarm: bool,
+    /// An arm edge fired while motion output was gated (no live authority).
+    /// The press is consumed — its baseline advances — never deferred, so the
+    /// shell MUST surface it: a swallowed safety press that stays silent is
+    /// indistinguishable from a dead control.
+    pub arm_suppressed: bool,
+    /// A disarm edge fired while motion output was gated; same surfacing
+    /// obligation as [`Self::arm_suppressed`].
+    pub disarm_suppressed: bool,
     /// The gimbal quasimode is capturing the right stick right now (the
     /// modifier is held while the gimbal lease is active), so the HUD can show
     /// capture even at a centered stick — #167's LT-descend suppression stays

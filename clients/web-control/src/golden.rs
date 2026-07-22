@@ -103,6 +103,8 @@ struct Expect {
     capture: Option<bool>,
     arm: Option<bool>,
     disarm: Option<bool>,
+    arm_suppressed: Option<bool>,
+    disarm_suppressed: Option<bool>,
     select: Option<String>,
     label: Option<String>,
     motion_lease: Option<String>,
@@ -229,6 +231,12 @@ fn check_plan(expect: &Expect, plan: &ControlPlan, ctx: &str) {
     }
     if let Some(want) = expect.disarm {
         assert_eq!(plan.disarm, want, "{ctx}: disarm edge");
+    }
+    if let Some(want) = expect.arm_suppressed {
+        assert_eq!(plan.arm_suppressed, want, "{ctx}: arm suppressed");
+    }
+    if let Some(want) = expect.disarm_suppressed {
+        assert_eq!(plan.disarm_suppressed, want, "{ctx}: disarm suppressed");
     }
     if let Some(want) = &expect.motion_lease {
         let got = match plan.motion_lease {

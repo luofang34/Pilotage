@@ -93,6 +93,16 @@ function checkPlan(expect, plan, ctx) {
   if (expect.disarm !== undefined) {
     check(`${ctx}: disarm edge`, plan.disarm === expect.disarm, plan.disarm);
   }
+  if (expect.armSuppressed !== undefined) {
+    check(`${ctx}: arm suppressed`, plan.armSuppressed === expect.armSuppressed, plan.armSuppressed);
+  }
+  if (expect.disarmSuppressed !== undefined) {
+    check(
+      `${ctx}: disarm suppressed`,
+      plan.disarmSuppressed === expect.disarmSuppressed,
+      plan.disarmSuppressed,
+    );
+  }
   if (expect.motionLease !== undefined) {
     const got = plan.motionLease ?? "none";
     check(`${ctx}: motion lease action`, got === expect.motionLease, got);

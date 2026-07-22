@@ -374,12 +374,17 @@ async function connect({ manual } = { manual: true }) {
       });
     },
     telemetryOnly: (_session, wasManual) => {
+      // The overlay carries this state too: buried in the collapsed log,
+      // a lease-less session is indistinguishable from a healthy wait for
+      // telemetry, and every arm press would then vanish behind it (#180).
       if (wasManual) {
         // A telemetry-only vehicle (e.g. the Aviate adapter, ADR-0018)
         // advertises no controllable scopes; sending control frames
         // anyway would only generate a 30 Hz stream of rejections.
+        els.overlay.textContent = "no control lease — telemetry/video only; press Connect to take control";
         log("no control lease granted; viewer is telemetry/video only");
       } else {
+        els.overlay.textContent = "reconnected without control; press Connect to resume";
         log("reconnected (telemetry/video); press Connect to resume control");
       }
     },
@@ -1355,6 +1360,7 @@ async function runControlLoop(writer, token) {
         ? state.controlShell.tickFromPad(pad, sessionState)
         : state.controlShell.tickFromKeys(sessionState);
       updateControlReadout(pad, mode, plan);
+      reportSuppressedPresses(plan);
       reportExpiredActions();
       if (state.pendingReset) {
         state.pendingReset = false;
@@ -1722,9 +1728,42 @@ function updateControlReadout(pad, mode, plan) {
     return;
   }
   const m = plan.motion ?? { roll: 0, pitch: 0, throttle: 0, yaw: 0 };
+  // Three honest states: "gated" (no frames — presses are suppressed),
+  // "recovering" (neutral recovery frames flow but live authority has not
+  // been confirmed, so presses are still suppressed), "streaming" (live).
+  // The distinction keeps the pre-press indicator from overstating
+  // authority during the post-revocation neutral-activation burst.
+  const motionState = !plan.motion
+    ? "gated"
+    : state.motionRecovered
+      ? "streaming"
+      : "recovering";
   els.gamepad.textContent =
     `flight [${mode}]: ${src} | roll=${m.roll.toFixed(2)} pitch=${m.pitch.toFixed(2)} ` +
-    `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | arm: Options/Enter disarm: Create/Backspace`;
+    `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | motion: ${motionState} | ` +
+    "arm: Options/Enter disarm: Create/Backspace";
+}
+
+/** The reason a gated tick refuses arm/disarm presses, for the operator. */
+function motionGateReason() {
+  if (state.motionDenied) return "motion lease denied; reconnect to retry";
+  if (!state.leaseGranted) return "no motion lease; press Connect to take control";
+  return "motion authority recovering";
+}
+
+/** Surfaces every runtime-suppressed arm/disarm press (CTRL-01 feedback,
+ *  #180): the press was consumed while motion output was gated, and a
+ *  swallowed safety press must never look like a dead key. */
+function reportSuppressedPresses(plan) {
+  for (const [suppressed, press] of [
+    [plan.armSuppressed, "arm"],
+    [plan.disarmSuppressed, "disarm"],
+  ]) {
+    if (!suppressed) continue;
+    const reason = motionGateReason();
+    els.overlay.textContent = `${press} press suppressed — ${reason}`;
+    log(`${press} press suppressed: ${reason}`);
+  }
 }
 
 // ---- instrument panels (ADR-0017) -------------------------------------------

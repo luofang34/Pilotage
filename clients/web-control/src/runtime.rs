@@ -256,6 +256,11 @@ impl ControlRuntime {
             label: None,
             arm: false,
             disarm: false,
+            // The handover computes no edges (baselines re-seed at install so a
+            // held control cannot fire on resume), so there is nothing to
+            // suppress-report either.
+            arm_suppressed: false,
+            disarm_suppressed: false,
             capture_active: false,
         }
     }
@@ -328,6 +333,11 @@ impl ControlRuntime {
             label: Some(outcome.label),
             arm: live && outcome.arm,
             disarm: live && outcome.disarm,
+            // A press while gated is consumed (the edge baseline advanced), so
+            // report it: the shell owes the operator an explanation for a
+            // safety press that fired nothing.
+            arm_suppressed: !live && outcome.arm,
+            disarm_suppressed: !live && outcome.disarm,
             capture_active: captured,
         }
     }

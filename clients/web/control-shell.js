@@ -24,6 +24,8 @@ const FLAG_RECENTER = 1 << 2;
 const FLAG_ARM = 1 << 3;
 const FLAG_DISARM = 1 << 4;
 const FLAG_CAPTURE = 1 << 5;
+const FLAG_ARM_SUPPRESSED = 1 << 6;
+const FLAG_DISARM_SUPPRESSED = 1 << 7;
 const LEASE_SHIFT = 8; // bits 8..9: gimbal lease 0 none, 1 request, 2 release.
 const MOTION_LEASE_SHIFT = 10; // bits 10..11: motion lease, same encoding.
 
@@ -262,6 +264,10 @@ export class ControlShell {
       gimbal,
       arm: (flags & FLAG_ARM) !== 0,
       disarm: (flags & FLAG_DISARM) !== 0,
+      // A press the runtime consumed while motion output was gated: the
+      // caller owes the operator a visible explanation (never a silent drop).
+      armSuppressed: (flags & FLAG_ARM_SUPPRESSED) !== 0,
+      disarmSuppressed: (flags & FLAG_DISARM_SUPPRESSED) !== 0,
       captureActive: (flags & FLAG_CAPTURE) !== 0,
       lease: leaseName(leaseCode),
       motionLease: leaseName(motionLeaseCode),
