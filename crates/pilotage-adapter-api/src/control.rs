@@ -68,6 +68,10 @@ pub enum RejectReason {
     /// FC while its estimator is unconverged. Disarm is exempt:
     /// surrendering authority is never blocked.
     ResetInProgress,
+    /// The vehicle uplink has no active command sequence, so the frame could
+    /// not be queued even though session authority admitted it. The operator
+    /// must explicitly arm to begin the enacted stream.
+    UplinkIdle,
     /// The adapter rejected the frame for a reason not covered above.
     Other(String),
 }

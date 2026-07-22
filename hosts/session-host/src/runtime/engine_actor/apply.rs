@@ -1,7 +1,8 @@
 //! Adapter delivery for gated control frames: exactly-once execution of
 //! correlated discrete actions and the per-action result echo (CTRL-01).
 
-use pilotage_adapter_api::Disposition;
+use pilotage_adapter_api::{Disposition, RejectReason};
+use pilotage_protocol::{FrameRejected, FrameRejectionReason};
 
 use super::*;
 
@@ -15,7 +16,9 @@ impl<A: VehicleAdapter> EngineActor<A> {
     /// unavailable, reset in progress, unsupported scope) returns before
     /// per-action disposal — is answered HERE with the rejection's reason,
     /// so a press is never silently dropped and a valid command always
-    /// yields exactly one correlated result.
+    /// yields exactly one correlated result. A rejected intent-only frame
+    /// also returns a reliable frame-level notice, transition-deduplicated so
+    /// a steady refusal cannot flood the session stream.
     pub(super) fn apply_to_adapter(&mut self, client: ClientKey, mut frame: ScopedControlFrame) {
         for replay in self.action_dedup.strip_answered(client, &mut frame) {
             let envelope = pilotage_session::OutboundMessage::ControlActionResult(replay);
@@ -31,6 +34,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         let outcome = self.adapter.apply_control(&frame);
         self.record_stage(Stage::Apply, apply_start.elapsed());
         debug!(?outcome, "control frame applied to adapter");
+        self.report_adapter_rejection(client, &frame, &outcome.disposition);
         let mut answered = vec![false; frame.actions.len()];
         for result in outcome.action_results {
             // Actions cannot repeat within a gated frame, so the action
@@ -70,6 +74,39 @@ impl<A: VehicleAdapter> EngineActor<A> {
         }
     }
 
+    fn report_adapter_rejection(
+        &mut self,
+        client: ClientKey,
+        frame: &ScopedControlFrame,
+        disposition: &Disposition,
+    ) {
+        let Disposition::Rejected(reason) = disposition else {
+            self.adapter_rejection_dedup
+                .observe_enacted(client, frame.vehicle, &frame.scope);
+            return;
+        };
+        let reason = adapter_rejection_reason(reason);
+        if !self.adapter_rejection_dedup.should_notify(
+            client,
+            frame.vehicle,
+            &frame.scope,
+            frame.generation,
+            reason,
+        ) {
+            return;
+        }
+        let rejection = FrameRejected {
+            vehicle: frame.vehicle,
+            scope: frame.scope.clone(),
+            sequence: frame.sequence,
+            reason,
+            current_generation: frame.generation,
+        };
+        let envelope = pilotage_session::OutboundMessage::FrameRejected(rejection);
+        let message = to_connection_message(&envelope);
+        self.send_to(client, message, MessageClass::Unicast);
+    }
+
     /// Sends one correlated result on the reliable stream and records it
     /// for replay dedup.
     fn answer_action(
@@ -95,5 +132,26 @@ impl<A: VehicleAdapter> EngineActor<A> {
         let envelope = pilotage_session::OutboundMessage::ControlActionResult(full);
         let message = to_connection_message(&envelope);
         self.send_to(client, message, MessageClass::Unicast);
+    }
+}
+
+/// Maps an adapter-boundary refusal to its wire reason. Exhaustive on
+/// purpose: a new [`RejectReason`] variant must decide its wire mapping here
+/// rather than silently degrading to the generic reason. `Fenced` and
+/// `LinkLossEngaged` deliberately stay generic — the wire's stale-generation
+/// and no-holder reasons make the client drop its grant and reacquire, a
+/// recovery that must only ever be driven by the SESSION's authority state,
+/// never by adapter-internal bookkeeping downstream of an admitted frame.
+fn adapter_rejection_reason(reason: &RejectReason) -> FrameRejectionReason {
+    match reason {
+        RejectReason::UnknownScope => FrameRejectionReason::UnknownScope,
+        RejectReason::UplinkIdle => FrameRejectionReason::UplinkIdle,
+        RejectReason::UnknownAxis
+        | RejectReason::UnknownVehicle
+        | RejectReason::Fenced
+        | RejectReason::MeasurementUnavailable
+        | RejectReason::LinkLossEngaged
+        | RejectReason::ResetInProgress
+        | RejectReason::Other(_) => FrameRejectionReason::AdapterRejected,
     }
 }

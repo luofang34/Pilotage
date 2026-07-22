@@ -160,8 +160,8 @@ pub struct Pong {
     pub responder_sent_at: MonoTimestamp,
 }
 
-/// Why the host rejected an inbound control frame without applying it
-/// (ADR-0009 rejection rules, CTRL-01 typed-command validation).
+/// Why an admitted control frame was not enacted at ingress or at the
+/// vehicle-adapter boundary (ADR-0009, CTRL-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameRejectionReason {
     /// The frame's generation is older than the scope's current
@@ -215,10 +215,16 @@ pub enum FrameRejectionReason {
     /// the structurally total translation would turn "no update" into an
     /// explicit neutral, so partial legacy coverage is rejected.
     PartialCommand,
+    /// The adapter rejected the frame for a reason without a more specific
+    /// wire representation.
+    AdapterRejected,
+    /// The vehicle uplink has no active command sequence. Authority remains
+    /// held, but the operator must arm before frames enact.
+    UplinkIdle,
 }
 
-/// Sent back to a control frame's sender (never broadcast) when the frame
-/// is well-formed but not honored (ADR-0009, ADR-0012).
+/// Sent back to a control frame's sender (never broadcast) when the frame is
+/// well-formed but not honored at ingress or enactment (ADR-0009, ADR-0012).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrameRejected {
     /// Vehicle the rejected frame targeted.

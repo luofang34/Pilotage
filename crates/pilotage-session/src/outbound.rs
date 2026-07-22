@@ -8,7 +8,8 @@
 
 use pilotage_authority::AuthorityEffect;
 use pilotage_protocol::{
-    ControlActionResult, LeaseReleased, LeaseResponse, LinkLossCleared, Pong, ServerWelcome,
+    ControlActionResult, FrameRejected, LeaseReleased, LeaseResponse, LinkLossCleared, Pong,
+    ServerWelcome,
 };
 
 /// A message the engine directs at one client or at all clients.
@@ -38,6 +39,9 @@ pub enum OutboundMessage {
     /// the frame's sender on the reliable session stream after the adapter
     /// disposed of it.
     ControlActionResult(ControlActionResult),
+    /// A reliable adapter-boundary rejection returned after session ingress
+    /// admitted the frame but vehicle enactment refused it (CTRL-11).
+    FrameRejected(FrameRejected),
     /// An authority event to be serialized and observed on the ordered
     /// authority stream (ADR-0006, ADR-0012). Carried as the source
     /// [`AuthorityEffect`] so the driver performs the canonical wire mapping.
