@@ -1,9 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 //! The transactional device-swap discipline (INPUT-01): a selection that
-//! changes the effective mapping cycles authority through the runtime's
+//! changes the effective mapping retains authority through the runtime's
 //! neutral handover and installs only at the boundary, so a deflected input
-//! on the new pad can never drive the old lease.
+//! on the new pad can never drive the live session.
 
 use super::ControlCoordinator;
 use pilotage_input::ProfileLayer;
@@ -72,10 +72,8 @@ fn a_device_change_swaps_transactionally_and_gates_the_deflection() {
     let deflected = pad_sample(&coordinator, &[0.0, -1.0, 0.0, 0.0], &[]);
     let plan = coordinator.evaluate(&deflected, &session(true, true));
     assert_eq!(throttle(&plan), Some(0.0), "the handover emits neutral");
-    assert!(
-        plan.motion_lease.is_some(),
-        "the handover cycles the motion lease"
-    );
+    assert_eq!(plan.motion_lease, None, "the motion lease stays held");
+    assert_eq!(plan.lease, None, "the gimbal lease stays held");
     assert_eq!(
         coordinator.activation_revision(),
         1,
@@ -83,19 +81,24 @@ fn a_device_change_swaps_transactionally_and_gates_the_deflection() {
     );
 
     // Only a genuine neutral completes the handover; the new map installs
-    // and the activation revision advances, while motion output is still
-    // gated behind the lease reacquisition.
+    // and the activation revision advances. The installed mapping must then
+    // supply its own neutral proof before live output resumes.
     let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
     coordinator.evaluate(&neutral, &session(true, true));
     assert_eq!(coordinator.activation_revision(), 2, "install advances");
     assert_eq!(coordinator.device_label(), "Sony DualSense");
     let deflected = pad_sample(&coordinator, &[0.0, -1.0, 0.0, 0.0], &[]);
-    let plan = coordinator.evaluate(&deflected, &session(false, false));
+    let plan = coordinator.evaluate(&deflected, &session(true, true));
     assert_eq!(
         throttle(&plan),
         None,
-        "the new map cannot drive until the lease is regranted"
+        "the installed map cannot drive before its neutral proof"
     );
+    assert_eq!(plan.motion_lease, None, "authority remains held");
+    let proof = coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(throttle(&proof), Some(0.0));
+    let resumed = coordinator.evaluate(&deflected, &session(true, true));
+    assert_eq!(throttle(&resumed), Some(1.0), "live resumes in place");
 }
 
 #[test]
@@ -189,6 +192,55 @@ fn a_layer_override_takes_the_transactional_path() {
         coordinator.stage().keyboard_digest(),
         keyboard_digest_before
     );
+}
+
+#[test]
+fn an_incoming_map_deflection_must_center_before_it_can_publish() {
+    let mut coordinator = with_scheme();
+    coordinator.select_device("");
+    let neutral = pad_sample(&coordinator, &[0.0; 5], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    coordinator.evaluate(&neutral, &session(true, true));
+
+    // Physical axis 4 is irrelevant under the outgoing map, but the incoming
+    // map routes it to the scheme's throttle slot.
+    let override_json = br#"{
+      "schema_version": 1,
+      "revision": 6,
+      "device": { "vendor_id": 0, "product_id": 0, "product": "Shifted Throttle" },
+      "axes": [
+        { "source_index": 4, "logical": "slot1", "invert": false, "deadzone": 0.0, "expo": 0.0,
+          "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } }
+      ],
+      "buttons": [],
+      "keys": []
+    }"#;
+    assert!(coordinator.add_device_profile(ProfileLayer::Session, override_json));
+
+    let hidden_deflection = pad_sample(&coordinator, &[0.0, 0.0, 0.0, 0.0, -1.0], &[]);
+    let installed = coordinator.evaluate(&hidden_deflection, &session(true, true));
+    assert_eq!(
+        throttle(&installed),
+        None,
+        "the install tick emits no frames (announcement head start)"
+    );
+    assert_eq!(coordinator.activation_revision(), 3);
+    assert_eq!(installed.motion_lease, None);
+
+    let visible_deflection = pad_sample(&coordinator, &[0.0, 0.0, 0.0, 0.0, -1.0], &[]);
+    let gated = coordinator.evaluate(&visible_deflection, &session(true, true));
+    assert_eq!(
+        throttle(&gated),
+        None,
+        "the incoming map exposes deflection"
+    );
+    assert_eq!(gated.motion_lease, None, "the lease was never cycled");
+
+    let centered = pad_sample(&coordinator, &[0.0; 5], &[]);
+    let proof = coordinator.evaluate(&centered, &session(true, true));
+    assert_eq!(throttle(&proof), Some(0.0));
+    let resumed = coordinator.evaluate(&visible_deflection, &session(true, true));
+    assert!(throttle(&resumed).is_some(), "live resumes after neutral");
 }
 
 #[test]

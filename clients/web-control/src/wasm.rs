@@ -106,8 +106,8 @@ impl WebControl {
     }
 
     /// Re-opens the activation transaction for the current mapping (neutral
-    /// handover, gimbal + motion lease cycle, revision advance on install)
-    /// without changing it — the shell's seam for a motion-scope handover.
+    /// handover, motion authority cycle, revision advance on install) without
+    /// changing it — the shell's seam for a motion-scope-member handover.
     /// Returns false before the first activation.
     pub fn reactivate(&mut self) -> bool {
         self.coordinator.reactivate()
@@ -173,10 +173,9 @@ impl WebControl {
     /// fallback, `0` when refused (an ambiguous layer fails closed:
     /// subsequent pad ticks read an empty sample and drive nothing). A
     /// selection that changes the effective mapping swaps TRANSACTIONALLY:
-    /// the runtime cycles the gimbal + motion leases through a neutral
-    /// handover, the map installs only when the handover completes, and the
-    /// activation revision advances — so the shell re-announces and a
-    /// deflected input on the new pad can never drive the old authority.
+    /// the runtime retains both leases through a neutral handover, the map
+    /// installs only when the handover completes, and the activation revision
+    /// advances. Live output resumes only after the installed map reads neutral.
     pub fn select_device(&mut self, gamepad_id: &str) -> u32 {
         match self.coordinator.select_device(gamepad_id) {
             SelectOutcome::Refused => 0,

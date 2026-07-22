@@ -114,8 +114,8 @@ export class ControlShell {
   }
 
   /** Re-opens the activation transaction for the CURRENT mapping — neutral
-   *  handover, gimbal + motion lease cycle, revision advance on install —
-   *  without changing it. The seam a motion-scope handover (entering or
+   *  handover, motion authority cycle, revision advance on install — without
+   *  changing it. The seam a motion-scope-member handover (entering or
    *  leaving direct flight) uses so sticks are neutral-fenced across the
    *  switch. Returns false before the first activation. */
   reactivate() {

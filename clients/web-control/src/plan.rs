@@ -102,11 +102,8 @@ pub struct ControlPlan {
     pub gimbal: Option<Frame>,
     /// A gimbal-lease request or release, when the plan calls for one.
     pub lease: Option<LeaseAction>,
-    /// A motion-lease request or release from the post-handover reacquisition.
-    /// A live scheme swap fences the motion generation, so the runtime releases
-    /// the lease, waits for the release to register, then re-requests — and
-    /// gates all motion output (`motion` stays `None`) until the host regrants
-    /// on a fresh generation, so the new mapping never rides the old authority.
+    /// A motion-lease request or release from a scope-member transfer. A
+    /// same-scope mapping activation retains the lease and emits no action.
     pub motion_lease: Option<LeaseAction>,
     /// A human-readable scheme label for the DOM readout (never control).
     pub label: Option<&'static str>,
@@ -148,9 +145,9 @@ pub struct ActivationPlan {
     /// part of the handover.
     pub emit_neutral: bool,
     /// Whether the shell must release the gimbal lease as part of the
-    /// handover (it is reacquired through normal lease planning on resume).
+    /// handover. Same-scope activations leave this false.
     pub release_gimbal_lease: bool,
-    /// Whether the shell must also release the motion lease for the handover,
-    /// because the candidate remaps flight (reacquired on resume).
+    /// Whether the shell must release motion for a real scope-member transfer.
+    /// Same-scope mapping changes leave this false.
     pub release_motion_lease: bool,
 }
