@@ -12,10 +12,13 @@
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use pilotage_adapter_api::FcCommandAck;
 use tracing::{info, warn};
 
 use pilotage_mavlink::codec::{
-    encode_arm_command, encode_command_long, encode_gcs_heartbeat, encode_velocity_setpoint,
+    FcMessage, FrameSource, GCS_COMPONENT_ID, GCS_SYSTEM_ID, MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_SET_MODE, encode_arm_command, encode_command_long, encode_gcs_heartbeat,
+    encode_velocity_setpoint, parse_datagram,
 };
 
 /// Full-stick horizontal velocity demand. Demand scaling is operator
@@ -44,8 +47,6 @@ const OFFBOARD_WARMUP: Duration = Duration::from_millis(300);
 /// trip between control frames.
 const STREAM_KEEPALIVE: Duration = Duration::from_millis(50);
 
-/// MAV_CMD_DO_SET_MODE.
-const CMD_DO_SET_MODE: u16 = 176;
 /// MAV_MODE_FLAG_CUSTOM_MODE_ENABLED.
 const BASE_MODE_CUSTOM: f32 = 1.0;
 /// PX4 custom main mode OFFBOARD.
@@ -92,6 +93,11 @@ pub struct Px4Uplink {
     last_vel_ned: [f32; 3],
     arm_phase: ArmPhase,
     warmup_since: Option<Instant>,
+    // Which command the next MAV_CMD_COMPONENT_ARM_DISARM ack answers
+    // (COMMAND_ACK carries only the command id, and arm and disarm share
+    // one), and the FC's verdict once it arrives on this socket.
+    last_sent_arm: Option<bool>,
+    last_arm_ack: Option<FcCommandAck>,
     last_heartbeat: Option<Instant>,
     started: Instant,
     clock: UplinkClock,
@@ -120,6 +126,8 @@ impl Px4Uplink {
             last_vel_ned: [0.0; 3],
             arm_phase: ArmPhase::Idle,
             warmup_since: None,
+            last_sent_arm: None,
+            last_arm_ack: None,
             last_heartbeat: None,
             started: Instant::now(),
             clock: UplinkClock::System,
@@ -174,6 +182,7 @@ impl Px4Uplink {
     /// FC retargets a stream to the last peer that spoke on that link).
     /// Call at telemetry-sampling cadence.
     pub fn maintain(&mut self) {
+        self.drain_fc_replies();
         let now = self.clock.now();
         if self
             .last_heartbeat
@@ -215,7 +224,7 @@ impl Px4Uplink {
     fn command_offboard_and_arm(&mut self) {
         let mode = encode_command_long(
             self.seq,
-            CMD_DO_SET_MODE,
+            MAV_CMD_DO_SET_MODE,
             [
                 BASE_MODE_CUSTOM,
                 PX4_MAIN_MODE_OFFBOARD,
@@ -237,7 +246,85 @@ impl Px4Uplink {
         );
         self.send(&arm);
         self.arm_phase = ArmPhase::Commanded;
+        // A fresh command opens a fresh verdict: the ack lane reports the
+        // LATEST arm/disarm, never a stale answer to an earlier one.
+        self.last_sent_arm = Some(true);
+        self.last_arm_ack = None;
         info!("offboard arm sequence: OFFBOARD and arm commanded");
+    }
+
+    /// The FC's answer to the most recent arm/disarm command, once its
+    /// COMMAND_ACK has arrived on this socket. `None` while unanswered.
+    #[must_use]
+    pub fn last_arm_ack(&self) -> Option<FcCommandAck> {
+        self.last_arm_ack
+    }
+
+    /// Drains FC replies off the command socket. PX4 acknowledges a
+    /// COMMAND_LONG to the endpoint that sent it, so the arm/disarm
+    /// verdict arrives HERE, not on the telemetry link. Non-blocking.
+    fn drain_fc_replies(&mut self) {
+        let mut buf = [0u8; 512];
+        let mut messages: Vec<(FrameSource, FcMessage)> = Vec::new();
+        while let Ok((len, _)) = self.socket.recv_from(&mut buf) {
+            messages.clear();
+            parse_datagram(buf.get(..len).unwrap_or(&[]), &mut messages);
+            for (source, message) in &messages {
+                if source.system_id != self.expected_system_id
+                    || source.component_id != self.expected_component_id
+                {
+                    continue;
+                }
+                self.apply_fc_reply(message);
+            }
+        }
+    }
+
+    /// Applies one FC reply: a MAV_CMD_COMPONENT_ARM_DISARM ack pairs
+    /// with the most recent arm or disarm this uplink sent (the ack
+    /// carries only the command id); a refused OFFBOARD mode command is
+    /// logged so a wedged arm sequence is diagnosable.
+    ///
+    /// Known limit: COMMAND_ACK has no per-instance correlation, so an
+    /// ack still in flight when the NEXT arm/disarm goes out is
+    /// attributed to that newer command, and with UDP reordering a stale
+    /// ack could mask a fresher verdict. Closing this needs a protocol
+    /// with correlated acks; the heartbeat-derived arm state remains the
+    /// ground truth either way.
+    fn apply_fc_reply(&mut self, message: &FcMessage) {
+        let FcMessage::CommandAck {
+            command,
+            result,
+            target_system,
+            target_component,
+        } = *message
+        else {
+            return;
+        };
+        let addressed_to_us = (target_system == 0 && target_component == 0)
+            || (target_system == GCS_SYSTEM_ID && target_component == GCS_COMPONENT_ID);
+        if !addressed_to_us {
+            return;
+        }
+        if command == MAV_CMD_DO_SET_MODE && result != 0 {
+            warn!(result, "PX4 refused the OFFBOARD mode command");
+        }
+        if command != MAV_CMD_COMPONENT_ARM_DISARM {
+            return;
+        }
+        // Unsolicited: no arm/disarm of ours awaits a verdict.
+        let Some(arm) = self.last_sent_arm else {
+            return;
+        };
+        if result == 0 {
+            info!(arm, "FC acknowledged the arm/disarm command");
+        } else {
+            warn!(arm, result, "FC REFUSED the arm/disarm command");
+        }
+        self.last_arm_ack = Some(FcCommandAck {
+            arm,
+            result: u32::from(result),
+        });
     }
 
     /// Disarms and stops the setpoint stream.
@@ -252,6 +339,8 @@ impl Px4Uplink {
         self.arm_phase = ArmPhase::Idle;
         self.warmup_since = None;
         self.last_vel_ned = [0.0; 3];
+        self.last_sent_arm = Some(false);
+        self.last_arm_ack = None;
         info!("disarm sent; setpoint stream stopped");
     }
 

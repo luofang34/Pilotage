@@ -629,6 +629,7 @@ export class FcStateTracker {
       const stamp = fcState.stamp;
       this.last = {
         armState: fcState.armState >>> 0,
+        lastCommand: sanitizeFcCommand(fcState.lastCommand),
         sourceId: stamp.sourceId,
         sourceIncarnation: stamp.sourceIncarnation,
         sourceEpoch: stamp.sourceEpoch,
@@ -670,8 +671,19 @@ export class FcStateTracker {
     const ageMs = nowMs - this.last.firstSeenMs;
     return {
       armState: this.last.armState,
+      lastCommand: this.last.lastCommand,
       ageMs,
       stale: ageMs > this.staleAfterMs,
     };
   }
+}
+
+// The FC's arm/disarm COMMAND_ACK verdict riding the fc-state lane. A
+// malformed verdict degrades to null (no verdict) rather than rejecting
+// the whole report: the arm state itself is still valid and fresh.
+function sanitizeFcCommand(lastCommand) {
+  if (!lastCommand || typeof lastCommand.arm !== "boolean") return null;
+  const result = lastCommand.result;
+  if (!Number.isInteger(result) || result < 0) return null;
+  return { arm: lastCommand.arm, result };
 }

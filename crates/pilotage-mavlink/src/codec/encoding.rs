@@ -2,7 +2,7 @@
 //! offboard setpoints, and gimbal-manager demands.
 
 use super::{
-    COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID, MAGIC_V2,
+    COMMAND_ACK_ID, COMMAND_LONG_ID, GIMBAL_MANAGER_SET_ATTITUDE_ID, HEARTBEAT_ID, MAGIC_V2,
     SET_POSITION_TARGET_ID, compute_crc,
 };
 
@@ -17,6 +17,30 @@ pub const GCS_COMPONENT_ID: u8 = 190;
 /// around `payload` into `out`, returning the frame length. `out` must
 /// hold `10 + payload.len() + 2` bytes; a too-small buffer returns 0.
 fn encode_frame_v2(seq: u8, msg_id: u32, payload: &[u8], extra: u8, out: &mut [u8]) -> usize {
+    encode_frame_v2_from(
+        seq,
+        msg_id,
+        payload,
+        extra,
+        GCS_SYSTEM_ID,
+        GCS_COMPONENT_ID,
+        out,
+    )
+}
+
+/// Writes a MAVLink 2.0 frame under an explicit SOURCE identity — the
+/// FC-side encoder for messages an autopilot originates (a fake FC in a
+/// test, a gateway loopback).
+#[allow(clippy::too_many_arguments)]
+fn encode_frame_v2_from(
+    seq: u8,
+    msg_id: u32,
+    payload: &[u8],
+    extra: u8,
+    system_id: u8,
+    component_id: u8,
+    out: &mut [u8],
+) -> usize {
     let total = 10 + payload.len() + 2;
     if out.len() < total || payload.len() > 255 {
         return 0;
@@ -26,8 +50,8 @@ fn encode_frame_v2(seq: u8, msg_id: u32, payload: &[u8], extra: u8, out: &mut [u
     out[2] = 0;
     out[3] = 0;
     out[4] = seq;
-    out[5] = GCS_SYSTEM_ID;
-    out[6] = GCS_COMPONENT_ID;
+    out[5] = system_id;
+    out[6] = component_id;
     out[7] = (msg_id & 0xff) as u8;
     out[8] = ((msg_id >> 8) & 0xff) as u8;
     out[9] = ((msg_id >> 16) & 0xff) as u8;
@@ -36,6 +60,37 @@ fn encode_frame_v2(seq: u8, msg_id: u32, payload: &[u8], extra: u8, out: &mut [u
     out[10 + payload.len()] = (crc & 0xff) as u8;
     out[10 + payload.len() + 1] = (crc >> 8) as u8;
     total
+}
+
+/// Serializes an FC-sourced COMMAND_ACK frame addressed to the GCS
+/// identity this codec commands under — the acknowledgement an autopilot
+/// returns for a COMMAND_LONG (fake FCs in tests, gateway loopback).
+///
+/// Wire order (10 bytes): command u16 @0, result u8 @2, progress u8 @3,
+/// result_param2 i32 @4, target_system @8, target_component @9.
+pub fn encode_command_ack(
+    seq: u8,
+    command: u16,
+    result: u8,
+    system_id: u8,
+    component_id: u8,
+) -> [u8; 22] {
+    let mut payload = [0u8; 10];
+    payload[0..2].copy_from_slice(&command.to_le_bytes());
+    payload[2] = result;
+    payload[8] = GCS_SYSTEM_ID;
+    payload[9] = GCS_COMPONENT_ID;
+    let mut frame = [0u8; 22];
+    encode_frame_v2_from(
+        seq,
+        COMMAND_ACK_ID,
+        &payload,
+        143,
+        system_id,
+        component_id,
+        &mut frame,
+    );
+    frame
 }
 
 /// Serializes a GCS heartbeat frame, used to register this endpoint with

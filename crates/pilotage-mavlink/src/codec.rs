@@ -14,8 +14,9 @@ mod encoding;
 use decoding::decode_known;
 pub use encoding::{
     AttitudeTarget, GCS_COMPONENT_ID, GCS_SYSTEM_ID, GIMBAL_FLAGS_HORIZON_YAW_FOLLOW,
-    encode_arm_command, encode_attitude_setpoint, encode_command_long, encode_gcs_heartbeat,
-    encode_gimbal_rate_setpoint, encode_position_setpoint, encode_velocity_setpoint,
+    encode_arm_command, encode_attitude_setpoint, encode_command_ack, encode_command_long,
+    encode_gcs_heartbeat, encode_gimbal_rate_setpoint, encode_position_setpoint,
+    encode_velocity_setpoint,
 };
 
 /// MAVLink 2.0 start-of-frame marker.
@@ -143,6 +144,10 @@ pub const COMMAND_LONG_ID: u32 = 76;
 pub const SET_POSITION_TARGET_ID: u32 = 84;
 /// GIMBAL_MANAGER_SET_ATTITUDE message id (uplink: gimbal rate demands).
 pub const GIMBAL_MANAGER_SET_ATTITUDE_ID: u32 = 282;
+/// MAV_CMD_COMPONENT_ARM_DISARM (COMMAND_LONG payload).
+pub const MAV_CMD_COMPONENT_ARM_DISARM: u16 = 400;
+/// MAV_CMD_DO_SET_MODE (COMMAND_LONG payload).
+pub const MAV_CMD_DO_SET_MODE: u16 = 176;
 /// MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW (COMMAND_LONG payload).
 pub const MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW: u16 = 1000;
 /// MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE (COMMAND_LONG payload).

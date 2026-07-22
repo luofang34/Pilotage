@@ -381,6 +381,7 @@ mod tests {
                 fc_state: Some(Box::new(wire::FcState {
                     arm_state: 2,
                     stamp: Some(fc_stamp),
+                    ..Default::default()
                 })),
                 gimbal: None,
             },

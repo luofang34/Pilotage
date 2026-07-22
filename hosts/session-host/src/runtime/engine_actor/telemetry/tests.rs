@@ -228,6 +228,7 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
         }),
         fc_state: Some(FcStateSample {
             arm_state: 2,
+            last_command: None,
             stamp: fc_stamp,
         }),
         gimbal: None,
@@ -267,4 +268,40 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
         truth_wire_stamp.source_incarnation, fc_wire_stamp.source_incarnation,
         "roles carry independent identities"
     );
+}
+
+#[test]
+fn the_fc_command_verdict_crosses_the_wire() {
+    let stamp = MeasurementStamp {
+        role: SourceRole::FcState,
+        integrity: SourceIntegrity::ChecksummedOnly,
+        source_id: 1,
+        source_incarnation: SourceIncarnation::new([0x22; 16]),
+        source_epoch: 1,
+        sequence: 3,
+        acquired_at_ns: 77,
+        clock: MeasurementClock::HostMonotonic,
+    };
+    // A refused arm: kind 1 with the raw MAV_RESULT.
+    let refused = super::fc_state_to_wire(FcStateSample {
+        arm_state: 1,
+        last_command: Some(pilotage_adapter_api::FcCommandAck {
+            arm: true,
+            result: 4,
+        }),
+        stamp,
+    });
+    assert_eq!(
+        refused.last_command_kind, 1,
+        "an arm verdict maps to kind 1"
+    );
+    assert_eq!(refused.last_command_result, 4, "the raw MAV_RESULT crosses");
+    // No verdict observed: the lane stays at kind 0.
+    let none = super::fc_state_to_wire(FcStateSample {
+        arm_state: 2,
+        last_command: None,
+        stamp,
+    });
+    assert_eq!(none.last_command_kind, 0);
+    assert_eq!(none.last_command_result, 0);
 }

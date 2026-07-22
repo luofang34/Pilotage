@@ -103,6 +103,10 @@ pub(super) fn fc_state_sample(
         .unwrap_or_default();
     Some(FcStateSample {
         arm_state: if report.armed { 2 } else { 1 },
+        // The Aviate uplink logs COMMAND_ACKs but does not yet pair them
+        // with the command they answer; the enactment lane stays empty
+        // rather than carrying an unpaired verdict.
+        last_command: None,
         stamp: MeasurementStamp {
             // Role is the discriminator; the id carries the configured
             // FC identity: (system id << 8) | component id.

@@ -439,7 +439,32 @@ check(
   check("fc lane decodes arm state under the FC role and host clock",
     message.fcState?.armState === 2 && message.fcState?.stamp?.role === 3
     && message.fcState?.stamp?.clock === 3);
+  check("fc lane without a verdict decodes lastCommand null",
+    message.fcState?.lastCommand === null);
   check("no estimate lane is synthesized alongside truth", message.avionics === null);
+
+  // The FC's COMMAND_ACK verdict lane: kind (1 arm / 2 disarm) plus the
+  // raw MAV_RESULT survive decode — the enactment truth for a refusal.
+  const refused = [];
+  varint(refused, (1 << 3) | 0); // arm_state
+  varint(refused, 1); // DISARMED
+  bytesField(refused, 2, measurementStamp(1, 1, 4, 78, 3, 0x22, 3));
+  varint(refused, (3 << 3) | 0); // last_command_kind
+  varint(refused, 1); // the refused command was an ARM
+  varint(refused, (4 << 3) | 0); // last_command_result
+  varint(refused, 4); // MAV_RESULT_TEMPORARILY_REJECTED
+  const refusedTelemetry = [];
+  bytesField(refusedTelemetry, 1, uint64Message(1));
+  bytesField(refusedTelemetry, 2, uint64Message(43));
+  bytesField(refusedTelemetry, 8, refused);
+  const refusedEnvelope = [];
+  varint(refusedEnvelope, (1 << 3) | 0);
+  varint(refusedEnvelope, SCHEMA_VERSION);
+  bytesField(refusedEnvelope, 4, refusedTelemetry);
+  const refusedMessage = decodeBareEnvelope(new Uint8Array(refusedEnvelope)).message;
+  check("fc lane surfaces the FC's arm refusal verdict",
+    refusedMessage.fcState?.lastCommand?.arm === true
+    && refusedMessage.fcState?.lastCommand?.result === 4);
 
   // Provenance-free lanes are unconsumable, not defaulted.
   const bare = [];

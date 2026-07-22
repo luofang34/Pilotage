@@ -191,6 +191,18 @@ pub struct SimTruthSample {
     pub stamp: MeasurementStamp,
 }
 
+/// The FC's acknowledgement of the most recent commanded arm or disarm
+/// (COMMAND_ACK) — enactment truth for the operator. It rides FC-state
+/// provenance, so the verdict ages with the report that carried it; the
+/// action-result path's command-acceptance semantics are unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FcCommandAck {
+    /// True when the acknowledged command was an arm, false for a disarm.
+    pub arm: bool,
+    /// The raw MAV_RESULT the FC returned (0 = accepted).
+    pub result: u32,
+}
+
 /// FC-owned vehicle state (arm today; mode/failsafe belong here as they
 /// arrive) with its own provenance: the FC is the only author, and the
 /// stamp records which link observation reported it — it is never merged
@@ -199,6 +211,10 @@ pub struct SimTruthSample {
 pub struct FcStateSample {
     /// Arm state as the FC reports it: 0 unknown, 1 disarmed, 2 armed.
     pub arm_state: u32,
+    /// The FC's answer to the most recent commanded arm/disarm, when one
+    /// has been observed. A refusal here is the only signal that turns
+    /// "the command was taken" into "the FC did not do it".
+    pub last_command: Option<FcCommandAck>,
     /// Identity and acquisition time of the FC report carrying this state.
     pub stamp: MeasurementStamp,
 }

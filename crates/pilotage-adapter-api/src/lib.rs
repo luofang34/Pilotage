@@ -36,7 +36,7 @@ pub use pilotage_camera_calibration::{
 };
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcStateSample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcCommandAck, FcStateSample,
     GimbalAttitudeSample, MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample,
     SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
 };

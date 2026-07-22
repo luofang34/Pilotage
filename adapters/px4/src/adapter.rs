@@ -405,7 +405,12 @@ impl VehicleAdapter for Px4Adapter {
 
     fn sample_telemetry(&mut self) -> TelemetryBatch {
         self.observe_arm_report();
-        let fc_state = sampling::fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
+        let fc_state = sampling::fc_state_sample(
+            self.arm,
+            self.uplink.as_ref().and_then(Px4Uplink::last_arm_ack),
+            self.arm_incarnation,
+            self.started_at,
+        );
         let gimbal_attitude = self
             .gimbal
             .is_some()
