@@ -238,6 +238,7 @@ mod tests {
                     wire::SourceRole::FcState,
                     wire::SourceIntegrity::ChecksummedOnly,
                 )),
+                ..Default::default()
             })),
             gimbal: None,
         };
@@ -276,6 +277,7 @@ mod tests {
             fc_state: Some(Box::new(wire::FcState {
                 arm_state: 2,
                 stamp: None,
+                ..Default::default()
             })),
             gimbal: None,
         };

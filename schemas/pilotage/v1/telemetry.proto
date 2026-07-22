@@ -177,6 +177,14 @@ message FcState {
   // Identity and acquisition of the FC report carrying this state.
   // Absence makes the sample unconsumable.
   MeasurementStamp stamp = 2;
+  // The FC's acknowledgement (COMMAND_ACK) of the most recent commanded
+  // arm or disarm: 0 none observed, 1 the command was an arm, 2 a disarm.
+  // Enactment truth for the operator — the action-result path's
+  // command-acceptance semantics are unchanged by this lane.
+  uint32 last_command_kind = 3;
+  // Raw MAV_RESULT for that command (0 = accepted); meaningful only when
+  // last_command_kind is non-zero.
+  uint32 last_command_result = 4;
 }
 
 // Gimbal device orientation (Gimbal Protocol v2 attitude status) under its

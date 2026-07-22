@@ -27,6 +27,13 @@ export function formatTelemetrySummary(sample, fcView = null) {
     arm = fcView.stale
       ? "arm: stale"
       : ({ 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[fcView.armState] ?? "arm: invalid");
+    // Enactment truth: the FC refused the most recent commanded
+    // arm/disarm. Without this marker, "command accepted" and a stubborn
+    // DISARMED readout are indistinguishable from a dead control.
+    const verdict = fcView.lastCommand;
+    if (!fcView.stale && verdict && verdict.result !== 0) {
+      arm += ` (FC refused ${verdict.arm ? "arm" : "disarm"}: result ${verdict.result})`;
+    }
   }
   let pose = "pose Missing";
   if (sample.pose !== null && sample.pose !== undefined) {

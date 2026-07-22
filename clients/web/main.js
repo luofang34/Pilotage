@@ -145,6 +145,9 @@ const state = {
   selectedPadId: null,
   pendingReset: false,
   pendingFpvToggle: false,
+  // The FC arm/disarm verdict (kind:result) last logged, so each verdict
+  // is announced exactly once however many samples repeat it.
+  lastFcVerdictLogged: null,
   // Camera-velocity vs FPV/direct flight, tracked here so the DOM toggle
   // sends an explicit typed ModeRequest TARGET, never a stateless flip.
   // Flips ONLY on the host's accepted mode ack (reliable delivery), never
@@ -425,6 +428,7 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.controlGeneration = (state.controlGeneration + 1) >>> 0;
     state.pendingReset = false;
     state.pendingFpvToggle = false;
+    state.lastFcVerdictLogged = null;
     state.connected = false;
     state.leaseGranted = false;
     state.skippedVideoFrames = 0;
@@ -1151,10 +1155,9 @@ async function readTelemetryDatagrams(transport, token) {
           }
         }
         if (t.vehicleId !== VEHICLE_ID) continue;
-        els.telemetry.textContent = formatTelemetrySummary(
-          t,
-          instruments.fcState.observe(t.fcState ?? null, performance.now()),
-        );
+        const fcView = instruments.fcState.observe(t.fcState ?? null, performance.now());
+        logFcCommandVerdict(fcView);
+        els.telemetry.textContent = formatTelemetrySummary(t, fcView);
       } else if (decoded.kind === "Pong") {
         // RTT probing is out of scope for this demo viewer; ignored.
       } else if (decoded.kind === "FrameRejected") {
@@ -1742,6 +1745,21 @@ function updateControlReadout(pad, mode, plan) {
     `flight [${mode}]: ${src} | roll=${m.roll.toFixed(2)} pitch=${m.pitch.toFixed(2)} ` +
     `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | motion: ${motionState} | ` +
     "arm: Options/Enter disarm: Create/Backspace";
+}
+
+/** Logs each NEW FC arm/disarm verdict once (enactment truth): a refusal
+ *  is loud on the overlay and log; an acceptance just clears the memory,
+ *  since the arm-state readout already reflects success. */
+function logFcCommandVerdict(fcView) {
+  const verdict = fcView?.lastCommand ?? null;
+  const key = verdict ? `${verdict.arm ? "arm" : "disarm"}:${verdict.result}` : null;
+  if (key === state.lastFcVerdictLogged) return;
+  state.lastFcVerdictLogged = key;
+  if (verdict && verdict.result !== 0) {
+    const which = verdict.arm ? "arm" : "disarm";
+    els.overlay.textContent = `FC refused ${which} (result ${verdict.result})`;
+    log(`FC refused the ${which} command (MAV_RESULT ${verdict.result})`);
+  }
 }
 
 /** The reason a gated tick refuses arm/disarm presses, for the operator. */

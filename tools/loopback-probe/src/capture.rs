@@ -157,6 +157,7 @@ mod tests {
                         wire::SourceIntegrity::ChecksummedOnly,
                     )
                 }),
+                ..Default::default()
             })),
             gimbal: None,
         };

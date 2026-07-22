@@ -738,3 +738,26 @@ function testEstimateStampsRequireKnownIntegrity() {
 }
 testEstimateStampsRequireKnownIntegrity();
 console.log("ok - testEstimateStampsRequireKnownIntegrity");
+
+function testFcVerdictLaneIsCarriedAndSanitized() {
+  const tracker = new FcStateTracker(3000);
+  // A well-formed COMMAND_ACK verdict rides the accepted report into the view.
+  let view = tracker.observe(
+    { ...fcReport(1, 1), lastCommand: { arm: true, result: 4 } },
+    1000,
+  );
+  assert.deepEqual(view.lastCommand, { arm: true, result: 4 });
+  // A malformed verdict degrades to null (no verdict) WITHOUT rejecting the
+  // report: the arm state itself is still valid and refreshes normally.
+  view = tracker.observe(
+    { ...fcReport(2, 2), lastCommand: { arm: "yes", result: -1 } },
+    1100,
+  );
+  assert.equal(view.armState, 2, "the malformed verdict does not reject the report");
+  assert.equal(view.lastCommand, null);
+  // A report without the lane clears the remembered verdict.
+  view = tracker.observe(fcReport(3, 2), 1200);
+  assert.equal(view.lastCommand, null);
+}
+testFcVerdictLaneIsCarriedAndSanitized();
+console.log("ok - testFcVerdictLaneIsCarriedAndSanitized");

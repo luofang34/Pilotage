@@ -4,6 +4,8 @@
 //! the wire, sampling authorization from the standard status, and the
 //! same gate discipline the Aviate adapter carries.
 
+mod uplink_ack;
+
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

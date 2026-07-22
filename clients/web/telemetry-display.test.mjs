@@ -128,3 +128,33 @@ function testTruthGatesOnValidityIntegrityAndRole() {
 }
 testTruthGatesOnValidityIntegrityAndRole();
 console.log("ok - testTruthGatesOnValidityIntegrityAndRole");
+
+function testFcRefusalVerdictSurfacesInTheArmReadout() {
+  // A refused arm marks the readout: the enactment truth that separates
+  // "command accepted" from "the FC armed".
+  assert.equal(
+    formatTelemetrySummary(
+      { pose: null, velocity: null },
+      { armState: 1, ageMs: 100, stale: false, lastCommand: { arm: true, result: 4 } },
+    ),
+    "DISARMED (FC refused arm: result 4) | pose Missing | velocity Missing",
+  );
+  // An accepted verdict adds nothing: the arm state already shows it.
+  assert.equal(
+    formatTelemetrySummary(
+      { pose: null, velocity: null },
+      { armState: 2, ageMs: 100, stale: false, lastCommand: { arm: true, result: 0 } },
+    ),
+    "ARMED | pose Missing | velocity Missing",
+  );
+  // A stale report suppresses the verdict along with the arm state.
+  assert.equal(
+    formatTelemetrySummary(
+      { pose: null, velocity: null },
+      { armState: 1, ageMs: 9000, stale: true, lastCommand: { arm: true, result: 4 } },
+    ),
+    "arm: stale | pose Missing | velocity Missing",
+  );
+}
+testFcRefusalVerdictSurfacesInTheArmReadout();
+console.log("ok - testFcRefusalVerdictSurfacesInTheArmReadout");
