@@ -103,8 +103,8 @@ fn build_engine<A: VehicleAdapter>(adapter: &A, options: RuntimeOptions) -> Sess
 }
 
 /// Starts the session host bound to `127.0.0.1:port` (`0` for an OS-assigned
-/// ephemeral port), prints the `LISTENING` line, and returns a handle for
-/// shutdown.
+/// ephemeral port), prints the `LISTENING` line once the runtime is accepting
+/// connections, and returns a handle for shutdown.
 ///
 /// `adapter` selects the embedded vehicle adapter: [`AdapterKind::Reference`]
 /// (default, 1a behavior, no video) or [`AdapterKind::Gazebo`] (real Gazebo
@@ -141,12 +141,6 @@ pub async fn start_with_options(
     let endpoint = Endpoint::server(config).map_err(HostError::Endpoint)?;
     let local_addr = endpoint.local_addr().map_err(HostError::LocalAddr)?;
 
-    print_line(&format!(
-        "LISTENING {} {}",
-        local_addr.port(),
-        cert_hash_hex
-    ));
-
     let (engine_tx, engine_rx) = mpsc::channel::<ToEngine>(ENGINE_QUEUE_CAPACITY);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
@@ -159,6 +153,16 @@ pub async fn start_with_options(
         shutdown_rx,
     )
     .await?;
+
+    // The LISTENING line is the startup contract launchers gate on (the
+    // browser opens against it), so it must not print until the adapter is
+    // built and the accept loop is spawned: a bound-but-not-accepting
+    // window would hand an autoconnecting page a dead session.
+    print_line(&format!(
+        "LISTENING {} {}",
+        local_addr.port(),
+        cert_hash_hex
+    ));
 
     Ok(RunningHost {
         local_addr,

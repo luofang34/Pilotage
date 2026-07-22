@@ -72,6 +72,11 @@ import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.j
 import { bindVideoTargets, resolveVideoTarget } from "./video-routing.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
+import {
+  applySessionConfig,
+  validSessionConfig,
+  whenVisible,
+} from "./session-discovery.js";
 import { startDatagramControl } from "./datagram-control.js";
 import { loadControlShell } from "./control-shell.js";
 import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
@@ -313,6 +318,30 @@ function applyUrlParams() {
   if (params.has("cert")) els.certHash.value = params.get("cert");
 }
 
+/** Re-reads the launcher-served session manifest and updates the connect
+ *  inputs, so a stale tab (its URL pins an older session's certificate)
+ *  converges on the CURRENT session at its next attempt instead of
+ *  retrying a dead hash forever. A missing manifest (viewer served
+ *  without the launcher) is silent — there is nothing to converge to. */
+async function refreshSessionConfig() {
+  let fetched;
+  try {
+    const response = await fetch("./session.json", { cache: "no-cache" });
+    if (!response.ok) return;
+    fetched = await response.json();
+  } catch {
+    return;
+  }
+  const config = validSessionConfig(fetched);
+  if (!config) return;
+  if (applySessionConfig(els, config)) {
+    log(
+      `session discovery: connect target updated to ${config.host}:${config.port} ` +
+        `(cert ${config.certHash.slice(0, 16)}...)`,
+    );
+  }
+}
+
 /** Decodes a lowercase-hex cert hash string into a Uint8Array digest. */
 function hexToBytes(hex) {
   const clean = hex.trim().toLowerCase();
@@ -392,6 +421,13 @@ async function connect({ manual } = { manual: true }) {
       }
     },
   });
+  // A failed attempt may mean this tab belongs to an older session (its
+  // pinned certificate no longer matches the host on this port): re-read
+  // the launcher manifest so the NEXT attempt targets the live session.
+  // Config errors are excluded — they need the user, not a retry target.
+  if (!session.result.ok && session.result.failure?.phase !== "construct") {
+    void refreshSessionConfig();
+  }
   return session.result;
 }
 
@@ -550,6 +586,11 @@ function handleTransportClosed(token, error) {
   retireSessionPresentation(error === null ? "disconnected" : "failed");
   log(error === null ? "WebTransport session closed" : `WebTransport session errored: ${error}`);
   transportSessions.retire(token);
+  // Every transport death funnels through here — including a handshake
+  // failure, whose `closed` rejection retires the token BEFORE connect()'s
+  // own catch can see a live session. Re-read the launcher manifest so the
+  // scheduled retry targets the CURRENT session, not a dead certificate.
+  void refreshSessionConfig();
   // The drop was not user-initiated (there is no disconnect control); recover
   // the transport if the user still wants a session. A clean or errored close
   // is treated as a transient transport drop — retried with capped, jittered
@@ -1925,7 +1966,7 @@ async function startControl() {
 
 window.addEventListener("pagehide", () => instruments.mod?.dispose(), { once: true });
 applyUrlParams();
-startInstruments();
+const instrumentsStarted = startInstruments();
 startControl();
 document.getElementById("fpvBtn").addEventListener("click", () => {
   state.pendingFpvToggle = true;
@@ -1939,10 +1980,17 @@ els.connectBtn.addEventListener("click", () => {
   reconnect.requestConnect();
 });
 // A launcher-pinned URL (host + port + cert all present, autoconnect=1)
-// connects on load through the SAME explicit path as the button — the URL
-// already states everything the click would add. Anything less than a
-// fully pinned URL still requires the click. Runs after all wiring so the
-// full connect stack (control gate, reconnect controller) is in place.
+// connects through the SAME explicit path as the button — the URL already
+// states everything the click would add. Anything less than a fully
+// pinned URL still requires the click. Runs after all wiring so the full
+// connect stack (control gate, reconnect controller) is in place.
+//
+// Deferred to VISIBILITY: a launcher-opened tab can load hidden behind
+// other windows, where throttled timers starve the 30 Hz control loop
+// into watchdog revoke/regrant churn and an unfocused lease probe would
+// silently skip motion authority. The instrument wasm is awaited first
+// so the panels are ready when the first telemetry arrives (a failed
+// wasm load still connects — telemetry and video degrade visibly).
 {
   const params = new URLSearchParams(window.location.search);
   if (
@@ -1951,7 +1999,9 @@ els.connectBtn.addEventListener("click", () => {
     els.port.value &&
     els.certHash.value
   ) {
-    reconnect.requestConnect();
+    whenVisible(document, () => {
+      instrumentsStarted.finally(() => reconnect.requestConnect());
+    });
   }
 }
 
