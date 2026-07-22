@@ -64,6 +64,22 @@ function linkLossClearedLD(vehicle, scope, generation) {
   return new Uint8Array(ld);
 }
 
+function leaseGrantedLD(principal, vehicle, scope, generation) {
+  const granted = [];
+  bytesField(granted, 1, uint64Message(principal));
+  bytesField(granted, 2, uint64Message(vehicle));
+  bytesField(granted, 3, stringMessage(scope));
+  bytesField(granted, 4, uint64Message(generation));
+  const event = [];
+  bytesField(event, 1, granted);
+  const envelope = [];
+  bytesField(envelope, 3, event);
+  const ld = [];
+  varint(ld, envelope.length);
+  ld.push(...envelope);
+  return new Uint8Array(ld);
+}
+
 // ---- fragmented arrival on an OPEN stream ----
 {
   const bytes = linkLossClearedLD(7, "vehicle.motion", 42);
@@ -83,6 +99,18 @@ function linkLossClearedLD(vehicle, scope, generation) {
   check("it decoded as LinkLossCleared", dispatched[0]?.kind === "LinkLossCleared");
   check("no leftover after a complete envelope", buf.length === 0);
   check("the generation round-tripped", dispatched[0]?.message.generation === 42n);
+}
+
+// ---- broadcast grants carry the identity needed for table dedup ----------
+{
+  const decoded = decodeLengthDelimitedEnvelope(
+    leaseGrantedLD(5, 7, "vehicle.motion", 42),
+  );
+  check("a grant exposes its authority kind", decoded?.message.kind === "grant");
+  check("a grant exposes its principal", decoded?.message.principalId === 5n);
+  check("a grant exposes its vehicle", decoded?.message.vehicleId === 7n);
+  check("a grant exposes its scope", decoded?.message.scope === "vehicle.motion");
+  check("a grant exposes its generation", decoded?.message.generation === 42n);
 }
 
 // ---- two back-to-back envelopes in one chunk both dispatch ----

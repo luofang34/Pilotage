@@ -154,3 +154,73 @@ fn recovery_requires_the_current_granted_motion_generation() {
     );
     assert!(table.state(motion).recovered());
 }
+
+#[test]
+fn duplicate_state_transitions_are_ignored() {
+    let mut table = AuthorityTable::default();
+    let motion = AuthorityScope::Motion;
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LeaseGranted { generation: 11 }),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LeaseGranted { generation: 11 }),
+        AuthorityDisposition::Ignored
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LeaseReleased { generation: 12 }),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::Revoked { generation: 12 }),
+        AuthorityDisposition::Ignored
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LeaseGranted { generation: 13 }),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LinkLossCleared { generation: 13 }),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LinkLossCleared { generation: 13 }),
+        AuthorityDisposition::Ignored
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::UplinkIdle),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::UplinkIdle),
+        AuthorityDisposition::Ignored
+    );
+    assert_eq!(
+        table.apply(
+            motion,
+            AuthorityEvent::ActionResult {
+                action: 1,
+                accepted: true,
+            }
+        ),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(
+            motion,
+            AuthorityEvent::ActionResult {
+                action: 1,
+                accepted: true,
+            }
+        ),
+        AuthorityDisposition::Ignored
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LeaseDenied),
+        AuthorityDisposition::Applied
+    );
+    assert_eq!(
+        table.apply(motion, AuthorityEvent::LeaseDenied),
+        AuthorityDisposition::Ignored
+    );
+}
