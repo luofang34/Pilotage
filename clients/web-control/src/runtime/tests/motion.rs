@@ -193,6 +193,77 @@ fn a_dropped_motion_reacquire_request_is_retried() {
 }
 
 #[test]
+fn a_deflected_handover_waits_in_silence_once_the_releases_land() {
+    let mut runtime = with_default();
+    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+
+    // First handover tick, both leases still granted: one release per scope,
+    // with the neutrals still streaming liveness under the held generation.
+    let first = runtime.evaluate(
+        &deflected(),
+        &session_at(1000.0, Mode::QuadPilot, true, true),
+    );
+    assert_eq!(first.motion_lease, Some(LeaseAction::Release));
+    assert_eq!(first.lease, Some(LeaseAction::Release));
+    assert!(first.motion.is_some() && first.gimbal.is_some());
+
+    // Next tick, acknowledgements still in flight (grants unchanged): the
+    // motion release is NOT re-sent at tick rate.
+    let inflight = runtime.evaluate(
+        &deflected(),
+        &session_at(1033.0, Mode::QuadPilot, true, true),
+    );
+    assert_eq!(inflight.motion_lease, None, "no duplicate release per tick");
+
+    // Both releases reflected, operator still deflected: the handover waits
+    // in SILENCE — a release now would draw `released: false` and a frame a
+    // NoHolder rejection, each a host warning, every tick until neutral.
+    for now_ms in [1066.0, 1100.0, 2000.0, 30_000.0] {
+        let waiting = runtime.evaluate(
+            &deflected(),
+            &session_at(now_ms, Mode::QuadPilot, false, false),
+        );
+        assert_eq!(waiting.motion_lease, None, "no release without a grant");
+        assert_eq!(waiting.lease, None, "no gimbal release without a grant");
+        assert!(waiting.motion.is_none(), "no frame rides a released lease");
+        assert!(waiting.gimbal.is_none(), "no frame rides a released lease");
+    }
+    assert_eq!(
+        runtime.activation_revision(),
+        1,
+        "still pending while deflected"
+    );
+}
+
+#[test]
+fn a_lost_handover_release_is_retried_on_the_window_not_per_tick() {
+    let mut runtime = with_default();
+    runtime.activate(ProfileRuntime::compile(SECOND_PROFILE.as_bytes()).expect("compiles"));
+    let first = runtime.evaluate(
+        &deflected(),
+        &session_at(1000.0, Mode::QuadPilot, true, true),
+    );
+    assert_eq!(first.motion_lease, Some(LeaseAction::Release));
+
+    // The session still shows the grant well past the retry window — the
+    // release write was lost. Quiet inside the window, one re-emit after it.
+    let quiet = runtime.evaluate(
+        &deflected(),
+        &session_at(1100.0, Mode::QuadPilot, true, true),
+    );
+    assert_eq!(quiet.motion_lease, None, "quiet inside the retry window");
+    let retry = runtime.evaluate(
+        &deflected(),
+        &session_at(1300.0, Mode::QuadPilot, true, true),
+    );
+    assert_eq!(
+        retry.motion_lease,
+        Some(LeaseAction::Release),
+        "a lost release is retried once the window elapses"
+    );
+}
+
+#[test]
 fn a_gated_arm_press_is_reported_suppressed_not_silent() {
     let mut runtime = with_default();
     // Prime the generation's edge baselines with nothing held, ungranted.
