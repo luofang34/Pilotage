@@ -18,23 +18,28 @@ export function setTelemetrySessionState(elements, phase) {
   elements.overlay.textContent = copy[1];
 }
 
-export function formatTelemetrySummary(sample, fcView = null) {
-  // Arm state is FC-owned and arrives as its own stamped report,
-  // aged by the FC-state tracker: missing before any report, stale
-  // after heartbeat loss, and never refreshed by duplicate reports.
-  let arm = "arm: missing";
-  if (fcView !== null) {
-    arm = fcView.stale
-      ? "arm: stale"
-      : ({ 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[fcView.armState] ?? "arm: invalid");
-    // Enactment truth: the FC refused the most recent commanded
-    // arm/disarm. Without this marker, "command accepted" and a stubborn
-    // DISARMED readout are indistinguishable from a dead control.
-    const verdict = fcView.lastCommand;
-    if (!fcView.stale && verdict && verdict.result !== 0) {
-      arm += ` (FC refused ${verdict.arm ? "arm" : "disarm"}: result ${verdict.result})`;
-    }
+/** The FC-owned arm state as one readout token — shared by the telemetry
+ *  line and the control readout so the two can never disagree. Arm state
+ *  arrives as its own stamped report, aged by the FC-state tracker:
+ *  missing before any report, stale after heartbeat loss, and never
+ *  refreshed by duplicate reports. */
+export function fcArmToken(fcView) {
+  if (fcView === null || fcView === undefined) return "arm: missing";
+  let arm = fcView.stale
+    ? "arm: stale"
+    : ({ 0: "arm: unknown", 1: "DISARMED", 2: "ARMED" }[fcView.armState] ?? "arm: invalid");
+  // Enactment truth: the FC refused the most recent commanded
+  // arm/disarm. Without this marker, "command accepted" and a stubborn
+  // DISARMED readout are indistinguishable from a dead control.
+  const verdict = fcView.lastCommand;
+  if (!fcView.stale && verdict && verdict.result !== 0) {
+    arm += ` (FC refused ${verdict.arm ? "arm" : "disarm"}: result ${verdict.result})`;
   }
+  return arm;
+}
+
+export function formatTelemetrySummary(sample, fcView = null) {
+  const arm = fcArmToken(fcView);
   let pose = "pose Missing";
   if (sample.pose !== null && sample.pose !== undefined) {
     pose = finiteFields(sample.pose, ["xM", "yM", "headingRad"])

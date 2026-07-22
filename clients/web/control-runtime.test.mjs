@@ -235,6 +235,25 @@ for (const group of vectors.groups) {
   );
 }
 
+// Operator-facing arm/disarm hints come from profile data, renamed by the
+// active source: the keyboard names its bound keys, a pad its printed
+// buttons — never a hardcoded string in the shell.
+{
+  const shell = await loadControlShell(wasmBytes);
+  check(
+    "control hints: the keyboard names its bound keys",
+    shell.armHint() === "Enter" && shell.disarmHint() === "Backspace",
+    `${shell.armHint()}/${shell.disarmHint()}`,
+  );
+  shell.selectDevice("DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)");
+  shell.tickFromKeys(toSession({ mode: "quad-pilot" }));
+  check(
+    "control hints: the selected pad names its printed buttons",
+    shell.armHint() === "Options" && shell.disarmHint() === "Create",
+    `${shell.armHint()}/${shell.disarmHint()}`,
+  );
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

@@ -10,6 +10,11 @@ pub struct ButtonConfig {
     pub source_index: u8,
     /// Well-known logical button name (resolved via `crate::logical`).
     pub logical: String,
+    /// The device's own printed name for this button ("Options", "Menu"),
+    /// for operator-facing hints. Absent means the device has no better
+    /// name than its index; consumers fall back to the logical name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[cfg(test)]
@@ -22,6 +27,7 @@ mod tests {
         let config = ButtonConfig {
             source_index: 3,
             logical: "button3".to_string(),
+            label: Some("Square".to_string()),
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let back: ButtonConfig = serde_json::from_str(&json).expect("deserialize");

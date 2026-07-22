@@ -265,6 +265,38 @@ impl ControlCoordinator {
         self.active_source
     }
 
+    /// The operator-facing name of the ACTIVE source's arm control, from
+    /// profile data: the key the keyboard binds to the scheme's arm button,
+    /// or the pad's own printed button name, falling back to the canonical
+    /// index. Empty before the first activation.
+    #[must_use]
+    pub fn arm_hint(&self) -> String {
+        self.control_hint(|buttons| buttons.0)
+    }
+
+    /// The operator-facing name of the active source's disarm control.
+    #[must_use]
+    pub fn disarm_hint(&self) -> String {
+        self.control_hint(|buttons| buttons.1)
+    }
+
+    fn control_hint(&self, pick: fn((u8, u8)) -> u8) -> String {
+        let Some(buttons) = self.runtime.active_flight_buttons() else {
+            return String::new();
+        };
+        let slot = usize::from(pick(buttons));
+        match self.active_source {
+            InputSource::Keyboard => self
+                .stage
+                .keyboard_key_for_button(slot)
+                .map_or_else(|| "unbound".to_owned(), str::to_owned),
+            InputSource::Pad => self
+                .stage
+                .pad_button_label(slot)
+                .map_or_else(|| format!("button {slot}"), str::to_owned),
+        }
+    }
+
     /// Read access for sample building.
     #[must_use]
     pub fn stage(&self) -> &DeviceStage {

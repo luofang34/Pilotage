@@ -265,6 +265,18 @@ impl DeviceStage {
             .is_some_and(|keyboard| keyboard.binds_key(key))
     }
 
+    /// The keyboard map's key bound to a canonical button slot, if any.
+    #[must_use]
+    pub fn keyboard_key_for_button(&self, slot: usize) -> Option<&str> {
+        self.keyboard.as_ref()?.key_for_button(slot)
+    }
+
+    /// The installed pad map's printed name for a canonical button slot.
+    #[must_use]
+    pub fn pad_button_label(&self, slot: usize) -> Option<&str> {
+        self.pad.as_ref()?.button_label(slot)
+    }
+
     /// Translates a raw pad sample through the selected pad map into `out`,
     /// returning the canonical axis/button counts. With no usable map
     /// (refused selection) the sample is empty and nothing can drive control.

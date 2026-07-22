@@ -108,6 +108,16 @@ impl ControlRuntime {
         self.active.as_ref().map_or(0, CompiledProfile::revision)
     }
 
+    /// The active scheme's flight arm and disarm button slots, or `None`
+    /// before activation — the slots operator-facing hints resolve through
+    /// the device stage, so a rebound arm control renames its own hint.
+    #[must_use]
+    pub fn active_flight_buttons(&self) -> Option<(u8, u8)> {
+        self.active
+            .as_ref()
+            .map(|active| (active.flight.arm_button, active.flight.disarm_button))
+    }
+
     /// The active profile's content digest, or all-zero before activation. The
     /// shell exposes this so a host can later bind the activation revision it
     /// sees on the wire to the exact profile bytes that produced it.

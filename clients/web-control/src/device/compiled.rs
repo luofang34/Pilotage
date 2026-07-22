@@ -40,6 +40,9 @@ pub(crate) struct CompiledDevice {
     digest: [u8; 32],
     axes: Vec<Option<AxisRoute>>,
     buttons: Vec<Option<usize>>,
+    /// The device's own printed name per canonical button slot, for
+    /// operator-facing hints (profile `label` data; never control routing).
+    button_labels: Vec<Option<String>>,
     pub(crate) keys: Vec<CompiledKey>,
     /// Synthesized sample lengths: one past the highest mapped slot, so a
     /// keyboard tick reports the same axis/button counts as the table it
@@ -63,6 +66,7 @@ impl CompiledDevice {
     pub(crate) fn from_profile(profile: &DeviceProfile) -> Result<Self, DeviceCompileError> {
         let mut axes: Vec<Option<AxisRoute>> = vec![None; MAX_AXES];
         let mut buttons: Vec<Option<usize>> = vec![None; MAX_BUTTONS];
+        let mut button_labels: Vec<Option<String>> = vec![None; MAX_BUTTONS];
         let mut axis_len = 0usize;
         let mut button_len = 0usize;
         for axis in &profile.axes {
@@ -76,6 +80,7 @@ impl CompiledDevice {
         for button in &profile.buttons {
             let slot = slot_for_button_name(&button.logical)?;
             buttons[slot] = Some(usize::from(button.source_index));
+            button_labels[slot] = button.label.clone();
             button_len = button_len.max(slot + 1);
         }
         let mut keys = Vec::with_capacity(profile.keys.len());
@@ -117,6 +122,7 @@ impl CompiledDevice {
             digest: content_digest(&serialized),
             axes,
             buttons,
+            button_labels,
             keys,
             axis_len,
             button_len,
@@ -137,6 +143,25 @@ impl CompiledDevice {
 
     pub(crate) fn binds_key(&self, key: &str) -> bool {
         self.keys.iter().any(|binding| binding.key == key)
+    }
+
+    /// The device's printed name for a canonical button slot, if the
+    /// profile declares one.
+    pub(crate) fn button_label(&self, slot: usize) -> Option<&str> {
+        self.button_labels.get(slot)?.as_deref()
+    }
+
+    /// The key bound to a canonical button slot. Bindings apply in profile
+    /// order with later entries overriding, so the LAST binding names the
+    /// key that actually drives the slot.
+    pub(crate) fn key_for_button(&self, slot: usize) -> Option<&str> {
+        self.keys
+            .iter()
+            .rev()
+            .find_map(|binding| match binding.target {
+                KeyTarget::Button { slot: bound } if bound == slot => Some(binding.key.as_str()),
+                _ => None,
+            })
     }
 
     /// Translates a raw pad sample into the canonical layout: every mapped

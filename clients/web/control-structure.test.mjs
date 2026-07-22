@@ -36,6 +36,7 @@ const BANNED = [
   ["a stick shaper", /stickShaper/],
   ["a controller-profile mapping table", /CONTROLLER_PROFILES|forwardAxis|turnAxis/],
   ["gamepad identity parsing", /parseGamepadId|vendorId\s*=/],
+  ["a hardcoded arm-control naming", /Options\/Enter|Create\/Backspace/],
   [
     "a retired gimbal mapping function",
     /gimbal(AxesFromGamepad|MaskedView|ModifierHeld|FramePlan|ResetEdge|LeasePlan|WheelRates)/,
@@ -72,6 +73,12 @@ require(
   "advances the control generation before a resumed loop starts",
   /function completePendingResume[\s\S]*?controlGeneration \+ 1[\s\S]*?startControlLoop/,
 );
+// Operator-facing arm/disarm names come from the runtime (profile data),
+// so a rebound control or a different device renames its own hint.
+require("derives the arm/disarm hint from the runtime", /armHint\(\)/);
+// While a live session has no control run, input still evaluates through
+// the runtime so every press answers loudly instead of vanishing.
+require("watches suspended input through the runtime", /startSuspendedPressWatch\(/);
 
 if (failures > 0) {
   console.error(`${failures} structural violation(s)`);

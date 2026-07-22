@@ -244,6 +244,42 @@ fn an_incoming_map_deflection_must_center_before_it_can_publish() {
 }
 
 #[test]
+fn control_hints_name_the_active_sources_real_controls() {
+    let unactivated = ControlCoordinator::new();
+    assert_eq!(unactivated.arm_hint(), "", "no hint before activation");
+
+    let mut coordinator = with_scheme();
+    // The keyboard drives at boot: the hint is the KEY the profile binds to
+    // the scheme's arm button, from profile data.
+    assert_eq!(coordinator.arm_hint(), "Enter");
+    assert_eq!(coordinator.disarm_hint(), "Backspace");
+
+    // A completed pad selection renames the hints to the pad's own printed
+    // button names.
+    coordinator.select_device(DUALSENSE_ID);
+    let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(coordinator.device_label(), "Sony DualSense");
+    assert_eq!(coordinator.arm_hint(), "Options");
+    assert_eq!(coordinator.disarm_hint(), "Create");
+
+    // A pad profile with no printed name falls back to the canonical index,
+    // never to another device's naming.
+    coordinator.select_device("RadioMaster Pocket (Vendor: 1209 Product: 4f54)");
+    let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(coordinator.device_label(), "RadioMaster Pocket");
+    assert_eq!(coordinator.arm_hint(), "button 9");
+    assert_eq!(coordinator.disarm_hint(), "button 8");
+
+    // A disconnect returns the hints to the keyboard with the swap.
+    coordinator.deselect_device();
+    let neutral = pad_sample(&coordinator, &[0.0; 4], &[]);
+    coordinator.evaluate(&neutral, &session(true, true));
+    assert_eq!(coordinator.arm_hint(), "Enter");
+}
+
+#[test]
 fn rejected_override_bytes_change_nothing() {
     let mut coordinator = with_scheme();
     let digest = coordinator.device_digest();
