@@ -37,6 +37,7 @@ fn capabilities() -> AdapterCapabilities {
             id: VehicleId::new(1),
             scopes: vec![
                 ScopeDescriptor {
+                    authority_group: None,
                     scope: ScopeId::new("vehicle.motion"),
                     axes: vec![LogicalAxisId::new(0), LogicalAxisId::new(1)],
                     intents: vec![IntentCapability {
@@ -71,6 +72,7 @@ fn capabilities() -> AdapterCapabilities {
                     }),
                 },
                 ScopeDescriptor {
+                    authority_group: None,
                     scope: ScopeId::new("vehicle.motion.direct"),
                     axes: vec![],
                     intents: vec![IntentCapability {

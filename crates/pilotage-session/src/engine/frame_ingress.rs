@@ -49,7 +49,9 @@ impl SessionEngine {
         // in-generation frame. Only the recorded holder may drive the scope. An
         // unregistered scope has no holder and is left to `verify_frame` so the
         // sender still learns the scope is unknown rather than merely unheld.
-        let pair = (frame.vehicle, frame.scope.clone());
+        let pair = self
+            .authority_pair(frame.vehicle, &frame.scope)
+            .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
         if self.clients.is_registered(&pair) && self.clients.holder_of(&pair) != Some(sender) {
             let generation = self.frame_generation(&frame);
             actions.push(reject_frame(
@@ -62,7 +64,7 @@ impl SessionEngine {
         }
         match self
             .authority
-            .verify_frame(frame.vehicle, &frame.scope, frame.generation)
+            .verify_frame(pair.0, &pair.1, frame.generation)
         {
             FrameVerdict::Accepted => self.gate_and_accept(frame, sender, client, now, actions),
             FrameVerdict::RejectedStaleGeneration { current } => {
@@ -191,7 +193,10 @@ impl SessionEngine {
         // vehicle, and must not hold the lease of a setpoint-silent holder
         // open.
         if frame.intent.is_some() {
-            self.note_frame_accepted(frame.vehicle, &frame.scope, sender, now);
+            let pair = self
+                .authority_pair(frame.vehicle, &frame.scope)
+                .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
+            self.note_frame_accepted(pair.0, &pair.1, sender, now);
         }
         // A demonstrated-neutral frame from the fenced new holder is the
         // recovery activation condition; the clear (if any) is emitted

@@ -189,8 +189,11 @@ impl AviateAdapter {
         // policy state (braked hover) and ordinary frames are suppressed,
         // so a newly granted holder with deflected sticks cannot fly the
         // vehicle out of it. The host clears the latch only after the
-        // holder demonstrates neutral input.
-        if self.link_loss_policy.contains_key(&frame.scope) {
+        // holder demonstrates neutral input. BOTH flight scopes drive one
+        // FC, so they share ONE latch keyed by the motion authority group —
+        // a direct-scope frame can never fly around a motion-group latch.
+        let latch_key = pilotage_protocol::ScopeId::new(super::FLIGHT_SCOPE);
+        if self.link_loss_policy.contains_key(&latch_key) {
             return Some(rejected_control(tick, RejectReason::LinkLossEngaged));
         }
         // Disarm is handled BEFORE the reset latch: surrendering

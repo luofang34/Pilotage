@@ -14,6 +14,7 @@ pub(super) fn capabilities() -> AdapterCapabilities {
         vehicles: vec![VehicleDescriptor {
             id: VEHICLE,
             scopes: vec![ScopeDescriptor {
+                authority_group: None,
                 scope: ScopeId::new("vehicle.motion"),
                 axes: vec![LogicalAxisId::new(0)],
                 intents: vec![pilotage_adapter_api::IntentCapability {

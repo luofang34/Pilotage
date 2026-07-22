@@ -13,7 +13,6 @@ use pilotage_timing::MonoTimestamp;
 
 use crate::action::{CloseReason, LinkLossTrigger, SessionAction};
 use crate::capabilities::host_capabilities;
-use crate::clients::ScopePair;
 use crate::engine::{Actions, SessionEngine};
 use crate::message::ClientKey;
 use crate::outbound::OutboundMessage;
@@ -67,8 +66,9 @@ impl SessionEngine {
         let Some(principal) = self.welcomed_principal(client, actions) else {
             return;
         };
-        let pair: ScopePair = (request.vehicle, request.scope.clone());
-        if !self.clients.is_registered(&pair) {
+        // Leasing operates on the scope's exclusive-authority GROUP: sibling
+        // scopes drive the same actuator and can never be held apart.
+        let Some(pair) = self.authority_pair(request.vehicle, &request.scope) else {
             actions.send(
                 client,
                 OutboundMessage::LeaseResponse(lease_denied(
@@ -78,7 +78,7 @@ impl SessionEngine {
                 )),
             );
             return;
-        }
+        };
         if let Some(current) = self.clients.holder_of(&pair) {
             let generation = self
                 .clients
@@ -96,8 +96,8 @@ impl SessionEngine {
         }
         let effects = self.authority.handle(
             AuthorityCommand::Grant {
-                vehicle: request.vehicle,
-                scope: request.scope.clone(),
+                vehicle: pair.0,
+                scope: pair.1.clone(),
                 to: principal,
             },
             now,
@@ -147,11 +147,16 @@ impl SessionEngine {
         let Some(principal) = self.welcomed_principal(client, actions) else {
             return;
         };
-        let pair: ScopePair = (release.vehicle, release.scope.clone());
+        // Releases resolve through the same exclusive-authority group the
+        // grant used; an undeclared scope releases nothing (`released:
+        // false` below tells the sender so).
+        let pair = self
+            .authority_pair(release.vehicle, &release.scope)
+            .unwrap_or_else(|| (release.vehicle, release.scope.clone()));
         let effects = self.authority.handle(
             AuthorityCommand::Release {
-                vehicle: release.vehicle,
-                scope: release.scope.clone(),
+                vehicle: pair.0,
+                scope: pair.1.clone(),
                 by: principal,
             },
             now,
@@ -284,8 +289,11 @@ impl SessionEngine {
     /// Looks up the current generation for a frame's scope, defaulting to zero
     /// for an unknown scope.
     pub(super) fn frame_generation(&self, frame: &ScopedControlFrame) -> Generation {
+        let pair = self
+            .authority_pair(frame.vehicle, &frame.scope)
+            .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
         self.clients
-            .generation_of(&(frame.vehicle, frame.scope.clone()))
+            .generation_of(&pair)
             .unwrap_or_else(|| Generation::new(0))
     }
 }

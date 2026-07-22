@@ -16,6 +16,7 @@ use super::gate_frame;
 
 fn motion_scope() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: None,
         scope: ScopeId::new("vehicle.motion"),
         axes: vec![],
         intents: vec![IntentCapability {
@@ -56,6 +57,7 @@ fn motion_scope() -> ScopeDescriptor {
 
 fn gimbal_scope() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: None,
         scope: ScopeId::new("vehicle.gimbal"),
         axes: vec![],
         intents: vec![IntentCapability {
@@ -83,6 +85,7 @@ fn gimbal_scope() -> ScopeDescriptor {
 /// reinterpreting velocity numbers.
 fn direct_scope() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: None,
         scope: ScopeId::new("vehicle.motion.direct"),
         axes: vec![],
         intents: vec![IntentCapability {

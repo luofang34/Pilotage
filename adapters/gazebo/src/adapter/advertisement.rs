@@ -26,6 +26,7 @@ impl GazeboAdapter {
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: vec![ScopeDescriptor {
+                    authority_group: None,
                     scope: ScopeId::new(MOTION_SCOPE),
                     axes: vec![
                         LogicalAxisId::new(THROTTLE_AXIS),

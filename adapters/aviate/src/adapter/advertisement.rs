@@ -76,6 +76,9 @@ fn flight_actions() -> Vec<ActionCapability> {
 /// flight.
 fn direct_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        // One FC, one authority: velocity and direct flight can never be
+        // held at once, and share generation, latch, and recovery.
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(DIRECT_SCOPE),
         axes: vec![],
         intents: vec![IntentCapability {
@@ -93,6 +96,7 @@ fn direct_scope_descriptor() -> ScopeDescriptor {
 
 fn flight_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(FLIGHT_SCOPE),
         axes: vec![
             LogicalAxisId::new(ROLL_AXIS),

@@ -43,19 +43,6 @@ pub(crate) fn scope_capability<'a>(
         .find(|descriptor| descriptor.scope == *scope)
 }
 
-/// Enumerates the `(vehicle, scope)` pairs the adapter exposes so the engine
-/// can register each with the authority engine at construction.
-pub(crate) fn scope_pairs(
-    caps: &AdapterCapabilities,
-) -> impl Iterator<Item = (pilotage_protocol::VehicleId, pilotage_protocol::ScopeId)> + '_ {
-    caps.vehicles.iter().flat_map(|vehicle| {
-        vehicle
-            .scopes
-            .iter()
-            .map(move |scope| (vehicle.id, scope.scope.clone()))
-    })
-}
-
 fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
     let link_loss = vehicle
         .link_loss_actions

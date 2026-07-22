@@ -40,6 +40,7 @@ pub const SIM_LIFECYCLE_SCOPE: &str = "sim.lifecycle";
 #[must_use]
 pub fn sim_lifecycle_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: None,
         scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
         axes: vec![],
         intents: vec![],
@@ -155,6 +156,14 @@ pub enum LegacyCommandMap {
 /// string-backed `ScopeId` rather than a fixed enum.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeDescriptor {
+    /// The exclusive-authority group this scope belongs to (`None` = the
+    /// scope is its own group). Scopes sharing a group drive the SAME
+    /// actuator: the session engine leases, fences, watches, latches, and
+    /// recovers them as ONE authority — they can never be held
+    /// simultaneously (by anyone), share one generation domain, and a
+    /// link-loss on the group latches every member, so a scope handover can
+    /// never leave an orphaned sibling latch.
+    pub authority_group: Option<String>,
     /// The control scope identifier (e.g. `"vehicle.motion"`).
     pub scope: ScopeId,
     /// Logical axes this scope accepts on the legacy numeric payload.
@@ -222,6 +231,7 @@ mod tests {
             vehicles: vec![VehicleDescriptor {
                 id: VehicleId::new(1),
                 scopes: vec![ScopeDescriptor {
+                    authority_group: None,
                     scope: ScopeId::new("vehicle.motion"),
                     axes: vec![LogicalAxisId::new(2), LogicalAxisId::new(3)],
                     intents: vec![],

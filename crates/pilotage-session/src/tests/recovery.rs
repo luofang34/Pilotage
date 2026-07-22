@@ -188,6 +188,7 @@ fn profile(
                             })
                     };
                     ScopeDescriptor {
+                        authority_group: None,
                         scope: ScopeId::new(scope),
                         axes: axes.iter().copied().map(LogicalAxisId::new).collect(),
                         intents: vec![pilotage_adapter_api::IntentCapability {

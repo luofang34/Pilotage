@@ -106,6 +106,13 @@ const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/
 // nor implies it, and a live/RF host never advertises it.
 const SIM_LIFECYCLE_SCOPE = "sim.lifecycle";
 
+/** The exclusive-authority group a motion-family scope belongs to: both
+ *  flight scopes drive one FC and are one authority on the host, whose
+ *  link-loss recovery ack names the GROUP key. */
+function motionGroup(scope) {
+  return scope === DIRECT_SCOPE ? MOTION_SCOPE : scope;
+}
+
 const els = {
   host: document.getElementById("host"),
   port: document.getElementById("port"),
@@ -161,10 +168,7 @@ const state = {
   motionScope: MOTION_SCOPE,
   // The scope the in-flight handover switches to when the release acks.
   pendingMotionScope: null,
-  // Motion scopes released at least once this session: reacquiring one of
-  // these waits for the host's link-loss recovery ack; a scope never
-  // released has no latch to recover from.
-  releasedMotionScopes: new Set(),
+
   // The client-integrated direct-flight heading setpoint (rad, local NED),
   // seeded from telemetry at scope entry; the client OWNS the heading on
   // the direct scope.
@@ -682,19 +686,15 @@ async function runSessionStreamReader(reader, token) {
           // confirmation no longer applies until it clears the fresh generation.
           applyMotionLease(decoded);
           state.motionRecovered = false;
-          if (m.released) state.releasedMotionScopes.add(m.scope);
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
           if (state.pendingMotionScope) {
             // The scope handover's release boundary: flight moves to the
-            // other scope, which fences its OWN generation domain (the old
-            // fence would wrongly gate the new scope's first grant). A
-            // scope never released this session has no link-loss latch, so
-            // there is no recovery ack to wait for.
+            // sibling scope. Both siblings share ONE authority group on the
+            // host — one generation domain (the fence carries over) and one
+            // link-loss latch, so recovery is ALWAYS required and its ack
+            // names the group.
             state.motionScope = state.pendingMotionScope;
             state.pendingMotionScope = null;
-            state.motionFence = 0n;
-            state.motionDenied = false;
-            state.motionRecovered = !state.releasedMotionScopes.has(state.motionScope);
             if (state.motionScope === DIRECT_SCOPE) {
               const heading = currentTelemetryHeading();
               state.fpvHeading = heading ?? 0;
@@ -808,7 +808,6 @@ function handleBootstrapMessage(decoded, token) {
     state.announcedActivationRevision = null;
     state.motionScope = MOTION_SCOPE;
     state.pendingMotionScope = null;
-    state.releasedMotionScopes = new Set();
     state.fpvActive = false;
     state.lifecycle = { granted: false, generation: 0n, pendingPress: false };
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
@@ -924,7 +923,7 @@ function dispatchAuthorityEnvelope(decoded, token) {
     // control only when it correlates to OUR pending recovery (vehicle + motion
     // scope + the current fresh generation) — the shared transition the
     // uni-stream test drives.
-    if (applyMotionRecovery(decoded, state, VEHICLE_ID, state.motionScope)) {
+    if (applyMotionRecovery(decoded, state, VEHICLE_ID, motionGroup(state.motionScope))) {
       log(`LinkLossCleared[motion]: recovery confirmed on generation=${decoded.message.generation}`);
     }
   }
@@ -1169,10 +1168,37 @@ async function readTelemetryDatagrams(transport, token) {
         const r = decoded.message;
         log(
           `control frame rejected (reason ${r.reason}) scope=${r.scope} ` +
-            `seq=${r.sequence} hostGen=${r.currentGeneration} ` +
-            `ourGen=${r.scope === state.motionScope ? state.generation : state.gimbalGeneration} ` +
-            `granted=${r.scope === state.motionScope ? state.leaseGranted : state.gimbalLeaseGranted}`,
+            `seq=${r.sequence} hostGen=${r.currentGeneration}`,
         );
+        // Reasons 1 (stale generation) and 2 (no holder) on the motion
+        // group while we believe we hold it mean the host fenced us out —
+        // typically the silence watchdog revoked during a stall. Drop the
+        // local grant and re-request (debounced), instead of streaming
+        // rejected frames forever.
+        if (
+          (r.reason === 1 || r.reason === 2) &&
+          motionGroup(r.scope) === motionGroup(state.motionScope) &&
+          state.leaseGranted
+        ) {
+          state.leaseGranted = false;
+          state.motionRecovered = false;
+          if (typeof r.currentGeneration === "bigint") {
+            state.motionFence = r.currentGeneration;
+          }
+          const nowMs = performance.now();
+          if (nowMs - (state.lastAuthorityReacquireMs ?? 0) > 500) {
+            state.lastAuthorityReacquireMs = nowMs;
+            const writer = state.sessionWriter;
+            if (writer) {
+              const request = encodeLeaseRequestEnvelope({
+                vehicleId: VEHICLE_ID,
+                scope: state.motionScope,
+              });
+              writer.write(lengthDelimit(request)).catch(() => {});
+              log("host fenced our motion authority; reacquiring the lease");
+            }
+          }
+        }
       }
     }
   } finally {

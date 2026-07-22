@@ -8,6 +8,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 mod action_command;
+mod authority_group;
 mod deadline;
 mod disconnect;
 mod frame;
@@ -55,6 +56,7 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
         vehicles: vec![VehicleDescriptor {
             id: VEHICLE,
             scopes: vec![ScopeDescriptor {
+                authority_group: None,
                 scope: motion(),
                 axes: vec![LogicalAxisId::new(0)],
                 intents: vec![pilotage_adapter_api::IntentCapability {

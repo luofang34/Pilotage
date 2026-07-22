@@ -21,7 +21,6 @@ use pilotage_authority::{AuthorityCommand, AuthorityEffect, AuthorityEngine, Lin
 use pilotage_timing::{MonoTimestamp, StalenessPolicy};
 
 use crate::action::{LinkLossTrigger, SessionAction, SessionOutcome};
-use crate::capabilities::scope_pairs;
 use crate::clients::ClientRegistry;
 use crate::config::SessionConfig;
 use crate::liveness::{ExpiredHolder, HolderLiveness};
@@ -55,6 +54,12 @@ use link_loss::LinkLossState;
 #[derive(Debug)]
 pub struct SessionEngine {
     authority: AuthorityEngine,
+    /// Concrete scope → its exclusive-authority group key. Leases,
+    /// generations, the silence watchdog, the link-loss latch, and recovery
+    /// all operate on GROUP pairs — scopes sharing a group drive one
+    /// actuator and are one authority. A scope without a declared group is
+    /// its own.
+    groups: std::collections::HashMap<crate::clients::ScopePair, pilotage_protocol::ScopeId>,
     capabilities: AdapterCapabilities,
     staleness: StalenessPolicy,
     config: SessionConfig,
@@ -88,16 +93,35 @@ impl SessionEngine {
         // stamp keeps construction free of a clock, per ADR-0002.
         let now = MonoTimestamp::from_nanos(0);
         let mut scope_count: usize = 0;
-        for (vehicle, scope) in scope_pairs(&capabilities) {
-            clients.register_scope((vehicle, scope.clone()));
-            let effects = authority.handle(AuthorityCommand::RegisterScope { vehicle, scope }, now);
-            drop(effects);
-            scope_count = scope_count.saturating_add(1);
+        let mut groups = std::collections::HashMap::new();
+        let mut registered = std::collections::HashSet::new();
+        for vehicle in &capabilities.vehicles {
+            for descriptor in &vehicle.scopes {
+                let group = descriptor.authority_group.as_ref().map_or_else(
+                    || descriptor.scope.clone(),
+                    |name| pilotage_protocol::ScopeId::new(name.clone()),
+                );
+                groups.insert((vehicle.id, descriptor.scope.clone()), group.clone());
+                if !registered.insert((vehicle.id, group.clone())) {
+                    continue;
+                }
+                clients.register_scope((vehicle.id, group.clone()));
+                let effects = authority.handle(
+                    AuthorityCommand::RegisterScope {
+                        vehicle: vehicle.id,
+                        scope: group,
+                    },
+                    now,
+                );
+                drop(effects);
+                scope_count = scope_count.saturating_add(1);
+            }
         }
         let link_loss =
             LinkLossState::from_capabilities(&capabilities, &config.link_loss_overrides);
         Self {
             authority,
+            groups,
             capabilities,
             staleness,
             config,
@@ -235,6 +259,19 @@ impl SessionEngine {
     /// axis-bearing frame; called from the on-frame accept path. Refresh is
     /// in place (no allocation) and only for the recorded holder — a frame
     /// can never create or resurrect a watchdog entry.
+    /// The exclusive-authority pair a concrete scope belongs to: the group
+    /// key when the scope is grouped, itself otherwise, `None` for a scope
+    /// the capabilities never declared.
+    pub(crate) fn authority_pair(
+        &self,
+        vehicle: pilotage_protocol::VehicleId,
+        scope: &pilotage_protocol::ScopeId,
+    ) -> Option<crate::clients::ScopePair> {
+        self.groups
+            .get(&(vehicle, scope.clone()))
+            .map(|group| (vehicle, group.clone()))
+    }
+
     pub(crate) fn note_frame_accepted(
         &mut self,
         vehicle: pilotage_protocol::VehicleId,

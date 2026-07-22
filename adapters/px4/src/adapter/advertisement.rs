@@ -51,6 +51,7 @@ impl Px4Adapter {
 
 fn flight_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: None,
         scope: ScopeId::new(FLIGHT_SCOPE),
         axes: vec![
             LogicalAxisId::new(ROLL_AXIS),
@@ -105,6 +106,7 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
 
 fn gimbal_scope_descriptor() -> ScopeDescriptor {
     ScopeDescriptor {
+        authority_group: None,
         scope: ScopeId::new(GIMBAL_SCOPE),
         axes: vec![LogicalAxisId::new(PITCH_AXIS), LogicalAxisId::new(YAW_AXIS)],
         intents: vec![IntentCapability {

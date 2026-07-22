@@ -295,12 +295,21 @@ impl SessionEngine {
         frame: &ScopedControlFrame,
         actions: &mut Actions,
     ) {
-        let (vehicle, scope, generation) = (frame.vehicle, &frame.scope, frame.generation);
-        if !self.link_loss.is_awaiting_activation(vehicle, scope) {
+        let (vehicle, generation) = (frame.vehicle, frame.generation);
+        // The latch and its recovery live at the GROUP level: a neutral
+        // demonstration on whichever member scope the holder acquired
+        // clears the one shared latch — a handover to a sibling scope can
+        // never leave the old member orphaned-engaged.
+        let group = self
+            .authority_pair(vehicle, &frame.scope)
+            .map_or_else(|| frame.scope.clone(), |(_, group)| group);
+        if !self.link_loss.is_awaiting_activation(vehicle, &group) {
             return;
         }
+        // Neutrality is judged against the CONCRETE scope's own
+        // advertisement — the family the frame actually speaks.
         let Some(descriptor) =
-            crate::capabilities::scope_capability(&self.capabilities, vehicle, scope)
+            crate::capabilities::scope_capability(&self.capabilities, vehicle, &frame.scope)
         else {
             // A scope the capabilities no longer describe cannot prove
             // anything; stay engaged (fail closed).
@@ -330,18 +339,18 @@ impl SessionEngine {
         }
         if self
             .link_loss
-            .begin_clear_pending(vehicle, scope, generation)
+            .begin_clear_pending(vehicle, &group, generation)
         {
-            // Request THIS scope's adapter latch cleared (link-loss is
-            // per-scope, so clearing vehicle.gimbal never returns
-            // vehicle.motion to control). The engagement marker STAYS until the
+            // Request the GROUP latch cleared (link-loss is per authority
+            // group, so clearing vehicle.gimbal never returns the motion
+            // group to control). The engagement marker STAYS until the
             // driver confirms the adapter took the clear, and the client-facing
             // LinkLossCleared ack is emitted by the driver only then — so the
             // recovering client never resumes on a clear the vehicle never
             // enacted. Safety critical, so it is never dropped behind the cap.
             actions.push_safety(SessionAction::ClearLinkLoss {
                 vehicle,
-                scope: scope.clone(),
+                scope: group.clone(),
                 generation,
                 retry: false,
             });

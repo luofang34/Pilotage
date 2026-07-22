@@ -13,7 +13,6 @@ use pilotage_protocol::{
 use pilotage_timing::MonoTimestamp;
 
 use crate::action::{CloseReason, SessionAction};
-use crate::clients::ScopePair;
 use crate::engine::{Actions, SessionEngine};
 use crate::message::ClientKey;
 use crate::outbound::OutboundMessage;
@@ -83,7 +82,9 @@ impl SessionEngine {
         if command.action_id == 0 {
             return Err("action commands need a nonzero correlation id");
         }
-        let pair: ScopePair = (command.vehicle, command.scope.clone());
+        let Some(pair) = self.authority_pair(command.vehicle, &command.scope) else {
+            return Err("unknown scope");
+        };
         if !self.clients.is_registered(&pair) {
             return Err("unknown scope");
         }

@@ -116,6 +116,7 @@ fn scope_is_grantable_again_after_holder_disconnects() {
 fn many_scope_capabilities(scopes: usize) -> AdapterCapabilities {
     let scope_descriptors = (0..scopes)
         .map(|i| ScopeDescriptor {
+            authority_group: None,
             scope: ScopeId::new(format!("vehicle.motion.{i}")),
             axes: vec![LogicalAxisId::new(0)],
             intents: vec![],
