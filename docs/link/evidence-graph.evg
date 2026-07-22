@@ -195,45 +195,45 @@ attr outcome pass
 node RESULT-LINK-WIRE verification-result
 title host wire-mapping suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::telemetry
-attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr config-digest f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:889087b7df14f59dbd4d13f67f11ae3d86632b36
+attr source-digest git-blob:f8de90fe18e5ed843e14f8819c039f6b1a01240a
 attr artifact docs/link/evidence-artifacts/link04/host-wire.run.txt
-attr output-digest sha256:7acbbfa35eaf2845a455364184a37e6e2b9b3b65d3c1bfb489cfdf0ad594d6c5
-attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr output-digest sha256:6a78076e7d8bb2d263dc2d5f3993ed248e13a70ef96288c671266be44f7895d7
+attr run-id local:f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr outcome pass
 
 node RESULT-LINK-CAPTURE verification-result
 title loopback-probe capture projection suite — recorded pass
 attr command cargo test -p loopback-probe telemetry::
-attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr config-digest f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:65e0988d096f01778980b542d46f777541d8bfe2
+attr source-digest git-blob:4cc1cc78aea89d713d4e7c12fd770e0cbc173267
 attr artifact docs/link/evidence-artifacts/link04/capture.run.txt
-attr output-digest sha256:2aed2db420bf9bf0c8ac51c622044cc4ab436f74a17f58033c053cb08fd75507
-attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr output-digest sha256:f08379106c9914561729e90c046d090cb7b9717f184c0f8e46961a6f0c049f90
+attr run-id local:f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr outcome pass
 
 node RESULT-LINK-CAPTURE-RT verification-result
 title loopback-probe receiver round-trip suite — recorded pass
 attr command cargo test -p loopback-probe receiver::
-attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr config-digest f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:df0490b0fdcdc0cae08441c3d717cd1ff0764f57
+attr source-digest git-blob:22c8f6e33ee12ecfa1075d017a73b5e77ebc0828
 attr artifact docs/link/evidence-artifacts/link04/capture-rt.run.txt
-attr output-digest sha256:fab8e23b76f5b66c67c86398a0f5f3d2d50e2247e6c0af4a581114e205726b22
-attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr output-digest sha256:3c2b1962e64c629567607d5287764942711070b46cbe1083663dbc9005cc1afe
+attr run-id local:f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr outcome pass
 
 node RESULT-LINK-CAPTURE-SINK verification-result
 title loopback-probe capture sink suite — recorded pass
 attr command cargo test -p loopback-probe capture::
-attr config-digest ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr config-digest f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:329779834423fffad82e5ed8270a33dd92c45fb6
+attr source-digest git-blob:fab4a30681c88e02875c7892bec1d7c4f094facb
 attr artifact docs/link/evidence-artifacts/link04/capture-sink.run.txt
-attr output-digest sha256:2fd6ac86f5dc0c4ab49ef46143e2c6169019b315c827fea0f167f6397e5fee64
-attr run-id local:ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
+attr output-digest sha256:72db92aa7f96ca6e0b8f7d8dc6f42f10cc0a4617dec4459e25e86446971b655f
+attr run-id local:f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr outcome pass
 
 # --- Configuration and tool identity ---
@@ -241,12 +241,12 @@ attr outcome pass
 node RESULT-LINK-AUTHZ verification-result
 title browser authorization-regime suite — recorded pass
 attr command node clients/web/telemetry-ingress.test.mjs
-attr config-digest 211406836a102c64c0e0065a796e238a8af16f3a
+attr config-digest f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr tool-version node v26.5.0
-attr source-digest git-blob:0a5eca31635fd49bca87459c43b7ac0439259bef
+attr source-digest git-blob:5debe53552fbab04c08f9d8cff891541f3cf9c13
 attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
-attr output-digest sha256:064e32f9b8cc9b78472dcf7de91e20b35b76a7b4263208bfccc3bab45418ad67
-attr run-id local:211406836a102c64c0e0065a796e238a8af16f3a
+attr output-digest sha256:c41a448821b4654cabecc501fadb180266bc5a78156d299870ccbc55eee82567
+attr run-id local:f75f99d46eed66cae2384b303029e6b84b5f9ed7
 attr outcome pass
 
 node CFG-LINK-EXTRACTION configuration-item
@@ -258,14 +258,14 @@ attr tree 202df9f54fdef93e367a99d902d3f5c041b4cc5f
 node CFG-LINK-WORKTREE configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
 attr scm git
-attr commit ccf58cb4a32642cbaaad7c5e4ee353382e9cc96a
-attr tree fb15a5c8155c7dad37f772504025c1c529ba7f49
+attr commit f75f99d46eed66cae2384b303029e6b84b5f9ed7
+attr tree 9b6e82ce4092a7fa8190e159d9626492462642e4
 
 node CFG-LINK-AUTHZ configuration-item
 title committed code baseline for the client authorization-regime result (LINK-05 lands after LINK-04, on its own commit)
 attr scm git
-attr commit 211406836a102c64c0e0065a796e238a8af16f3a
-attr tree 9cf15bb9b43f4202e55c314aef7f495dd3c20082
+attr commit f75f99d46eed66cae2384b303029e6b84b5f9ed7
+attr tree 9b6e82ce4092a7fa8190e159d9626492462642e4
 
 node TOOL-LINK-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
