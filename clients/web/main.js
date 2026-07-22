@@ -1170,6 +1170,18 @@ async function readTelemetryDatagrams(transport, token) {
           `control frame rejected (reason ${r.reason}) scope=${r.scope} ` +
             `seq=${r.sequence} hostGen=${r.currentGeneration}`,
         );
+        // A fenced rejection on the GIMBAL scope while we think we hold it:
+        // the host revoked (e.g. the silence watchdog during a stall). Drop
+        // the local grant so the quasimode's lease planner re-requests,
+        // instead of streaming rejected frames forever.
+        if (
+          (r.reason === 1 || r.reason === 2) &&
+          r.scope === GIMBAL_SCOPE &&
+          state.gimbalLeaseGranted
+        ) {
+          state.gimbalLeaseGranted = false;
+          log("host fenced our gimbal authority; the lease planner will re-request");
+        }
         // Reasons 1 (stale generation) and 2 (no holder) on the motion
         // group while we believe we hold it mean the host fenced us out —
         // typically the silence watchdog revoked during a stall. Drop the
@@ -1182,8 +1194,8 @@ async function readTelemetryDatagrams(transport, token) {
         ) {
           state.leaseGranted = false;
           state.motionRecovered = false;
-          if (typeof r.currentGeneration === "bigint") {
-            state.motionFence = r.currentGeneration;
+          if (r.currentGeneration !== undefined) {
+            state.motionFence = BigInt(r.currentGeneration);
           }
           const nowMs = performance.now();
           if (nowMs - (state.lastAuthorityReacquireMs ?? 0) > 500) {
