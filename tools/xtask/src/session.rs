@@ -12,7 +12,9 @@ use crate::cli::SimArgs;
 use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::{ManagedChild, ProcessSpec};
-use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log, viewer_url};
+use crate::readiness::{
+    Readiness, ReadySignal, await_ready, session_manifest, stage_log, viewer_url,
+};
 use preflight::{build_host, prepare_web_assets};
 
 pub(crate) mod preflight;
@@ -98,18 +100,43 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     let pid_file = log_dir.join("supervisor.pid");
     claim_supervisor(&pid_file, &mut children)?;
 
-    let url = viewer_url(args.viewer_port, actual_port, &certificate);
+    write_session_manifest(&ctx, actual_port, &certificate);
+    announce_ready(args, actual_port, &certificate);
+
+    let outcome = supervise(&mut children, &stages, &mut cancel).await;
+    std::fs::remove_file(&pid_file).ok();
+    // The manifest describes a session that no longer exists past this
+    // point; leaving it behind would let a later failed connect clobber
+    // hand-typed connect inputs with a dead target.
+    std::fs::remove_file(ctx.repo_root.join("clients/web/session.json")).ok();
+    teardown(&mut children);
+    outcome
+}
+
+/// Prints the ready URL and opens it in the default browser when asked.
+fn announce_ready(args: &SimArgs, actual_port: u16, certificate: &str) {
+    let url = viewer_url(args.viewer_port, actual_port, certificate);
     print_line("");
     print_line(&format!("session ready: {url}"));
     print_line("press ctrl-c to stop the session");
     if args.open {
         open_in_browser(&url);
     }
+}
 
-    let outcome = supervise(&mut children, &stages, &mut cancel).await;
-    std::fs::remove_file(&pid_file).ok();
-    teardown(&mut children);
-    outcome
+/// Writes the served session manifest (`clients/web/session.json`): any
+/// viewer tab — including one whose URL pins an older session's
+/// certificate — re-reads it after a failed connect and converges on
+/// THIS session. Best-effort: a failed write only loses stale-tab
+/// convergence, never the session.
+fn write_session_manifest(ctx: &SessionContext, port: u16, certificate: &str) {
+    let path = ctx.repo_root.join("clients/web/session.json");
+    if let Err(error) = std::fs::write(&path, session_manifest(port, certificate)) {
+        print_line(&format!(
+            "warning: could not write {}: {error}",
+            path.display()
+        ));
+    }
 }
 
 /// Registers the SIGINT handler and returns a receiver that flips to

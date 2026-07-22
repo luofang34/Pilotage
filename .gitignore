@@ -47,3 +47,4 @@ adapters/**/bridge/build/
 * 2.*
 *.bak
 *.orig
+clients/web/session.json
