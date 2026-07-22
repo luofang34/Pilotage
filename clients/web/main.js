@@ -74,6 +74,7 @@ import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
 import {
   applySessionConfig,
+  launcherSessionOver,
   validSessionConfig,
   whenVisible,
 } from "./session-discovery.js";
@@ -318,26 +319,62 @@ function applyUrlParams() {
   if (params.has("cert")) els.certHash.value = params.get("cert");
 }
 
+// The manifest-discovery context: whether this page came from the launcher
+// (a launcher-pinned URL, or a manifest served earlier), and whether the
+// session's end has already been reported (re-armed by the next manifest,
+// so a NEW session's later teardown reports again).
+const discovery = {
+  launcherPinned: new URLSearchParams(window.location.search).get("autoconnect") === "1",
+  manifestSeen: false,
+  endReported: false,
+};
+
 /** Re-reads the launcher-served session manifest and updates the connect
  *  inputs, so a stale tab (its URL pins an older session's certificate)
  *  converges on the CURRENT session at its next attempt instead of
- *  retrying a dead hash forever. A missing manifest (viewer served
- *  without the launcher) is silent — there is nothing to converge to. */
+ *  retrying a dead hash forever. A missing manifest on a page served
+ *  without the launcher is silent — there is nothing to converge to. In a
+ *  launcher context, a manifest that is now GONE means the launcher
+ *  session ended (it deletes `session.json` at teardown): that is said
+ *  once, so the retry loop — kept running, because it converges onto the
+ *  next session's manifest by itself — is never mistaken for a live host. */
 async function refreshSessionConfig() {
-  let fetched;
+  let response = null;
+  let outcome;
   try {
-    const response = await fetch("./session.json", { cache: "no-cache" });
-    if (!response.ok) return;
-    fetched = await response.json();
+    response = await fetch("./session.json", { cache: "no-cache" });
+    outcome = response.ok ? "fetched" : "missing";
   } catch {
+    outcome = "unreachable";
+  }
+  if (outcome === "fetched") {
+    // A served-but-malformed manifest is an invalid config, not a dead
+    // launcher: stay silent like any other unusable manifest.
+    let fetched = null;
+    try {
+      fetched = await response.json();
+    } catch {
+      return;
+    }
+    const config = validSessionConfig(fetched);
+    if (!config) return;
+    discovery.manifestSeen = true;
+    discovery.endReported = false;
+    if (applySessionConfig(els, config)) {
+      log(
+        `session discovery: connect target updated to ${config.host}:${config.port} ` +
+          `(cert ${config.certHash.slice(0, 16)}...)`,
+      );
+    }
     return;
   }
-  const config = validSessionConfig(fetched);
-  if (!config) return;
-  if (applySessionConfig(els, config)) {
+  const context = discovery.launcherPinned || discovery.manifestSeen;
+  if (launcherSessionOver(context, outcome) && !discovery.endReported) {
+    discovery.endReported = true;
     log(
-      `session discovery: connect target updated to ${config.host}:${config.port} ` +
-        `(cert ${config.certHash.slice(0, 16)}...)`,
+      "the launcher session is over (its manifest is gone) — reconnect attempts " +
+        "cannot succeed until a new session starts (cargo xtask sim); " +
+        "auto-reconnect keeps watching for one",
     );
   }
 }

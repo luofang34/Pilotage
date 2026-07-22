@@ -37,6 +37,18 @@ export function applySessionConfig(els, config) {
   return changed;
 }
 
+/** Whether a failed manifest re-read proves the LAUNCHER session is over,
+ *  rather than the manifest merely never having existed (a viewer served
+ *  without the launcher has none, and silence is correct there). The
+ *  launcher deletes `session.json` when its session ends and its static
+ *  server dies with it, so in a launcher context — the URL was
+ *  launcher-pinned, or a manifest WAS served earlier — a manifest that is
+ *  now absent (`"missing"`) or unfetchable (`"unreachable"`) means no
+ *  reconnect can succeed until a NEW session writes a fresh manifest. */
+export function launcherSessionOver(launcherContext, outcome) {
+  return launcherContext && (outcome === "missing" || outcome === "unreachable");
+}
+
 /** Runs `begin` once `doc` is visible — immediately when it already is,
  *  otherwise on the first visibilitychange that lands visible. A hidden
  *  launcher-opened tab must not autoconnect: its throttled timers starve
