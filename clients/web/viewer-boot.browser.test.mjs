@@ -91,6 +91,8 @@ try {
 let framePositioned = false;
 let presenterIsFrameChild = false;
 let logInFlow = false;
+let gimbalRouteRegistered = false;
+let gimbalOptionPresent = false;
 try {
   const frame = document.getElementById("pfd")?.parentElement;
   const presenter = frame?.querySelector('div[role="alert"]');
@@ -98,6 +100,12 @@ try {
   presenterIsFrameChild = Boolean(presenter && presenter.parentElement === frame);
   const dock = document.querySelector(".log-dock");
   logInFlow = dock ? getComputedStyle(dock).position === "static" : false;
+  const gimbalCanvas = document.getElementById("gimbalVideo");
+  gimbalRouteRegistered =
+    Boolean(gimbalCanvas?.getContext("2d")) && gimbalCanvas?.dataset.videoSourceId === "2";
+  gimbalOptionPresent = Boolean(
+    document.querySelector('#mainView option[value="stage-gimbal"]'),
+  );
 } catch {}
 await fetch("/boot-result", {
   method: "POST",
@@ -111,6 +119,8 @@ await fetch("/boot-result", {
     framePositioned,
     presenterIsFrameChild,
     logInFlow,
+    gimbalRouteRegistered,
+    gimbalOptionPresent,
   }),
 });
 </script>`;
@@ -256,6 +266,10 @@ async function bootScenario({ label, serveWasm }) {
   check(
     "layout: the session log stays in normal flow (never overlays instrument pixels)",
     observed.logInFlow === true,
+  );
+  check(
+    "video: the payload option and registered source-2 canvas exist together",
+    observed.gimbalOptionPresent === true && observed.gimbalRouteRegistered === true,
   );
 }
 
