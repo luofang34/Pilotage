@@ -370,12 +370,12 @@ attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
 attr command cargo test -p pilotage-control-web --lib coordinator
-attr config-digest fed8d7845176b056d5de53ada125b01117742d7d
+attr config-digest 655630c24e6e6a1167cc7662a4ee878f00344935
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:253e38e50ca0bfc1c85b864b37847c3a7f67e2dc
+attr source-digest git-blob:d1d9b319c28be95ee84202948d2315dc9be31ed6
 attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
-attr output-digest sha256:2c423c71efe784b9a76fc59af82a5dbfb66eb2280207fda0f580f5793e600ab3
-attr run-id local:fed8d7845176b056d5de53ada125b01117742d7d
+attr output-digest sha256:127818308dc7777bea5f81f9c69bcf5a859769159070494b1639038bc4bf5426
+attr run-id local:655630c24e6e6a1167cc7662a4ee878f00344935
 attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
@@ -432,8 +432,8 @@ attr tree a5d55f59813d313df367c12e3d3fdedeffe18f4d
 node CFG-CTRL-SOURCE configuration-item
 title committed input-source coordinator verification baseline
 attr scm git
-attr commit fed8d7845176b056d5de53ada125b01117742d7d
-attr tree 0f581a45bdd187bc1a924b8699e16f28df2e138c
+attr commit 655630c24e6e6a1167cc7662a4ee878f00344935
+attr tree cc529ab568435856f6d389effc240a46350d1fa9
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
