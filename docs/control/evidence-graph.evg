@@ -320,105 +320,105 @@ attr test the_reset_release_re_lease_cycle_stays_repeatable
 node RESULT-CTRL-ENGINE-ACTIONS verification-result
 title reliable action-command engine suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::action_command
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:eb2fe718203f2c7db451a47f2ea46189d4d4d6b0
 attr artifact docs/control/evidence-artifacts/ctrl01/engine-actions.run.txt
-attr output-digest sha256:dd0db749fa86b5432ea891260306b06b0453dfce610ad811da5c9a24bc0931d9
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:8ef3b3e1995662b51d00df955fb8326edb60027f16aa814e8e9c524f626fd85f
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 node RESULT-CTRL-BINDING verification-result
 title profile-binding enforcement suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::profile_binding
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:71e2840379186fa0796b1f04d0d33c29965d129e
 attr artifact docs/control/evidence-artifacts/ctrl01/profile-binding.run.txt
-attr output-digest sha256:2ec1bd28e1da16f4b1de2e304e4e79f747359ed1e71654a654690941b03706e8
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:ab128b5e1e14342ac56dda7ccd382e595559b205a8052d9c32e52cf816100895
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:1d7b646167cd010a3dd5014aebef2ab5847e7832
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:cf6a7d7d7f925720d3d91f81ba4f27663aae9aed249eb64926214f3542131227
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:ee5bb8609c86397c7b0917b211f7cb1a3b88752569774f6188cb133837c612d4
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
 attr command cargo test -p pilotage-session-host --lib engine_actor::tests::reliable_actions
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:1fbf6b07d02b5597e0138ee4fe1c7a95a5683ede
 attr artifact docs/control/evidence-artifacts/ctrl01/actor-dedup.run.txt
-attr output-digest sha256:d39ea6cc41db3036c9350d46017ec7bf534ba00edf1809797d66aa753a07e9f6
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:c4d015348db1cd89a9b04cb8f869e9274f1399d52eb91016a7257fd15a361eb6
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 node RESULT-CTRL-WIRE verification-result
 title reliable action chain over the real transport — recorded pass
 attr command cargo test -p pilotage-session-host --test reliable_actions_wire
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:57b14b52b87593c59296b9d6e0132ededf48069d
 attr artifact docs/control/evidence-artifacts/ctrl01/wire-chain.run.txt
-attr output-digest sha256:88212f697f9a1da0125bb947baaba96cd0e7cf408e4101b30dddb1a80f2b1992
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:4f4a1854d44e446b22d8298f05c383db0492c0ae12213fd2fab0772d8d819a5e
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
 attr command cargo test -p pilotage-control-web --lib coordinator
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:b2fb617c8e28ca4df0fd7131dae863d0680fdf8e
 attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
-attr output-digest sha256:6c2c0ecb9752affa36605b62a9ffafc06d075c66c2351c8207bd5195eea1be4e
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:acebed7c3c10d24fab98473fd97adc6ff767656b5a8efd47f671d1e14dba99a3
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:137fee9fb8bc41b167d1a3fdcc414a0236594521
+attr source-digest git-blob:42287a2da1941328e08374ffc8a033f25b19cde8
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:6d707e654f8aa5eb729cc0483c89394411934cd705554f8cff939d5cfad167f3
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:d33d173559d31ba5fa821381a39277955697ed2ee1399541a371aea246f5f892
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 
 node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
 title aviate direct-flight and lifecycle-profile suite — recorded pass
 attr command cargo test -p pilotage-adapter-aviate --lib adapter::tests::direct_flight
-attr config-digest 8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
 attr source-digest git-blob:0f17f792fd6c02af64c4b79b3be91dc65aaa83f7
 attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-profile.run.txt
-attr output-digest sha256:bf9d3ffffd0ff4a1e75d0fb8c135a4e3f0fd13f59ce5b2689fdab142bb9f85f4
-attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+attr output-digest sha256:876f9ad081ff41aba750603d63facaf2e08f7e1d78f7a88d77f406913753ebc3
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 
 node RESULT-CTRL-INGRESS verification-result
 title datagram ingress hardening suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::ingress_hardening
-attr config-digest PENDING
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:PENDING
+attr source-digest git-blob:9fc4e19d925c0335b8871103fedc28c6c395c550
 attr artifact docs/control/evidence-artifacts/ctrl01/ingress-hardening.run.txt
-attr output-digest sha256:PENDING
-attr run-id local:PENDING
+attr output-digest sha256:ce861a83f3c9631a12e2d24f357945530d633e1429d799604ae2675991eab616
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 
 node RESULT-CTRL-LIFE-CYCLE verification-result
 title command-only lifecycle cycle suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::lifecycle
-attr config-digest PENDING
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:PENDING
+attr source-digest git-blob:58e798b63d9d23d5b4bd00a6df5e70c31bd5722b
 attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-cycle.run.txt
-attr output-digest sha256:PENDING
-attr run-id local:PENDING
+attr output-digest sha256:1649b4cfc1356c01d30b1fe803334b09b62db4e97e8d7cd6912485b6ae8b7516
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr outcome pass
 
 # --- Configuration and tool identity ---
@@ -426,8 +426,8 @@ attr outcome pass
 node CFG-CTRL01 configuration-item
 title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
 attr scm git
-attr commit 8d1955c58377e8d4355b984027bf2b7e290f2e50
-attr tree 825bbc9c1444f94f7a0caa6fd713f6a1d247520a
+attr commit 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tree a5d55f59813d313df367c12e3d3fdedeffe18f4d
 
 node TOOL-CTRL-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified

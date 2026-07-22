@@ -2,9 +2,9 @@ Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
 scope: CTRL-01
 suite: reliable action chain over the real transport
 command: cargo test -p pilotage-session-host --test reliable_actions_wire
-config-digest: 8d1955c58377e8d4355b984027bf2b7e290f2e50
+config-digest: 967ed8a16d39148eeb7ea6dda426664e9404c9be
 tool-version: rustc 1.95.0 (59807616e 2026-04-14)
-run-id: local:8d1955c58377e8d4355b984027bf2b7e290f2e50
+run-id: local:967ed8a16d39148eeb7ea6dda426664e9404c9be
 outcome: pass
 summary:
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
