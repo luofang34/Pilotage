@@ -145,3 +145,39 @@ pub(super) fn flight_frame(
         actions,
     }
 }
+
+/// A typed direct-flight frame on `vehicle.motion.direct`: attitude built
+/// from ZYX Euler angles (the client's construction) plus the linear
+/// normalized collective.
+pub(super) fn direct_frame(
+    roll_rad: f32,
+    pitch_rad: f32,
+    yaw_rad: f32,
+    thrust: f32,
+) -> pilotage_protocol::ScopedControlFrame {
+    let (sr, cr) = (roll_rad * 0.5).sin_cos();
+    let (sp, cp) = (pitch_rad * 0.5).sin_cos();
+    let (sy, cy) = (yaw_rad * 0.5).sin_cos();
+    let attitude = pilotage_protocol::AttitudeThrustIntent {
+        frame: pilotage_protocol::ReferenceFrame::LocalNed,
+        qw: cr * cp * cy + sr * sp * sy,
+        qx: sr * cp * cy - cr * sp * sy,
+        qy: cr * sp * cy + sr * cp * sy,
+        qz: cr * cp * sy - sr * sp * cy,
+        thrust,
+    };
+    pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
+        session: pilotage_protocol::SessionId::new(1),
+        vehicle: VehicleId::new(1),
+        scope: pilotage_protocol::ScopeId::new(crate::adapter::DIRECT_SCOPE),
+        generation: pilotage_protocol::Generation::new(1),
+        sequence: pilotage_protocol::SequenceNum::new(1),
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: Some(pilotage_protocol::ControlIntent::AttitudeThrust(attitude)),
+        actions: vec![],
+    }
+}

@@ -55,6 +55,15 @@ impl ControlCoordinator {
         }
     }
 
+    /// Re-opens the activation transaction for the CURRENT mapping without
+    /// changing it — the seam a scope handover (e.g. entering direct
+    /// flight) uses to get the same neutral fencing, lease cycle, and
+    /// revision advance a mapping change gets. Returns false before the
+    /// first activation.
+    pub fn reactivate(&mut self) -> bool {
+        self.runtime.reactivate()
+    }
+
     /// Resolves a `Gamepad.id` through the layered registry and, when the
     /// EFFECTIVE mapping changes, swaps it transactionally: the runtime
     /// re-opens its activation handover (neutral output, lease cycle,

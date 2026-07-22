@@ -10,9 +10,12 @@
 import { readFileSync } from "node:fs";
 import { loadControlShell } from "./control-shell.js";
 import {
+  buildAttitudeThrustIntent,
   buildGimbalRateIntent,
   buildVelocityIntent,
+  integrateHeading,
   intentCapabilityFor,
+  wrapHeading,
 } from "./typed-command.js";
 import { CONTROL_ACTION, MODE_TARGET, encodeControlFrameEnvelope } from "./wire.js";
 
@@ -90,7 +93,21 @@ check(
 );
 check(
   "capability lookup misses an unadvertised scope",
-  intentCapabilityFor([{ scope: "vehicle.motion", intents: [] }], "vehicle.motion", 1) === null,
+  intentCapabilityFor(
+    [{ vehicleId: 1n, scope: "vehicle.motion", intents: [] }],
+    1n,
+    "vehicle.motion",
+    1,
+  ) === null,
+);
+check(
+  "capability lookup is vehicle-scoped: another vehicle's scope never matches",
+  intentCapabilityFor(
+    [{ vehicleId: 2n, scope: "vehicle.motion", intents: [{ family: 1 }] }],
+    1n,
+    "vehicle.motion",
+    1,
+  ) === null,
 );
 
 // Gimbal rates scale by the advertised angular envelope.
@@ -99,6 +116,43 @@ check(
   "gimbal rates scale by the advertised envelope",
   gimbalRate.pitchRate === -0.8 && gimbalRate.yawRate === 0.4,
   gimbalRate,
+);
+
+// Direct flight (CTRL-01 vehicle.motion.direct): tilt scales by the
+// advertised bound, heading is the client-integrated setpoint, and the
+// collective is the linear normalization with hover at 0.5.
+const attitudeCapability = { maxAngular: 0.6, maxYawRate: 0.9 };
+const level = buildAttitudeThrustIntent(
+  { roll: 0, pitch: 0, throttle: 0, yaw: 0 },
+  0,
+  attitudeCapability,
+);
+check(
+  "neutral sticks build the identity attitude at hover collective",
+  level.qw === 1 && level.qx === 0 && level.qy === 0 && level.qz === 0 && level.thrust === 0.5,
+  level,
+);
+const tilted = buildAttitudeThrustIntent(
+  { roll: 1, pitch: 0, throttle: 1, yaw: 0 },
+  0,
+  attitudeCapability,
+);
+const rollBack = 2 * Math.atan2(tilted.qx, tilted.qw);
+check(
+  "full right stick commands exactly the advertised tilt bound",
+  Math.abs(rollBack - 0.6) < 1e-6 && tilted.thrust === 1,
+  { rollBack, thrust: tilted.thrust },
+);
+check(
+  "no attitude advertisement yields no intent",
+  buildAttitudeThrustIntent({ roll: 1, pitch: 0, throttle: 0, yaw: 0 }, 0, null) === null,
+);
+const slewed = integrateHeading(0, 1, attitudeCapability, 0.5);
+check("the yaw stick slews the heading at the advertised rate", Math.abs(slewed - 0.45) < 1e-6, slewed);
+check(
+  "the heading setpoint wraps at pi",
+  Math.abs(wrapHeading(Math.PI + 0.1) - (-Math.PI + 0.1)) < 1e-6,
+  wrapHeading(Math.PI + 0.1),
 );
 
 if (failures > 0) {

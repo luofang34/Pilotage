@@ -111,6 +111,15 @@ export class ControlShell {
     return this.#control.activate(candidateBytes);
   }
 
+  /** Re-opens the activation transaction for the CURRENT mapping — neutral
+   *  handover, gimbal + motion lease cycle, revision advance on install —
+   *  without changing it. The seam a motion-scope handover (entering or
+   *  leaving direct flight) uses so sticks are neutral-fenced across the
+   *  switch. Returns false before the first activation. */
+  reactivate() {
+    return this.#control.reactivate();
+  }
+
   /** Resolves a Gamepad.id through the runtime's shared device selector.
    *  Returns "exact", "fallback", or null when refused (an ambiguous
    *  registry fails closed: that pad's ticks drive nothing). */

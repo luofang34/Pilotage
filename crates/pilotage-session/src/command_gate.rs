@@ -114,9 +114,13 @@ fn check_limits(
             within(g.pitch_rate, capability.max_angular)
                 && within(g.yaw_rate, capability.max_angular)
         }
-        // Thrust bounds and quaternion unity are decode guarantees; the
-        // frame set alone bounds an attitude command.
-        ControlIntent::AttitudeThrust(_) => true,
+        // Thrust bounds and quaternion unity are decode guarantees;
+        // `max_angular` bounds the commanded TILT angle (yaw is a heading
+        // setpoint, not a rate, and carries no advertised bound).
+        ControlIntent::AttitudeThrust(a) => {
+            let (roll, pitch, _) = pilotage_adapter_api::attitude_euler(a);
+            within(roll, capability.max_angular) && within(pitch, capability.max_angular)
+        }
     };
     if ok {
         Ok(())

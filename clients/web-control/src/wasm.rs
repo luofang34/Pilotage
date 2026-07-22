@@ -103,6 +103,14 @@ impl WebControl {
         self.coordinator.activation_revision()
     }
 
+    /// Re-opens the activation transaction for the current mapping (neutral
+    /// handover, gimbal + motion lease cycle, revision advance on install)
+    /// without changing it — the shell's seam for a motion-scope handover.
+    /// Returns false before the first activation.
+    pub fn reactivate(&mut self) -> bool {
+        self.coordinator.reactivate()
+    }
+
     /// Evaluates one control tick from the input buffer and the session
     /// scalars, writes the plan into the output buffer, and returns the plan
     /// flags. `mode` is 0 pilot, 1 cruise, 2 fpv, 3 rover; `session` packs

@@ -17,6 +17,7 @@ pub(super) fn capabilities() -> AdapterCapabilities {
                 scope: ScopeId::new("vehicle.motion"),
                 axes: vec![LogicalAxisId::new(0)],
                 intents: vec![pilotage_adapter_api::IntentCapability {
+                    max_yaw_rate: 0.0,
                     family: pilotage_protocol::IntentFamily::Velocity,
                     frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
                     max_linear: 1.0,

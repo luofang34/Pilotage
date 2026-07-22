@@ -25,7 +25,7 @@ mod fc_replies;
 /// Full-stick horizontal velocity demand.
 pub(crate) const MAX_HORIZONTAL_MPS: f32 = 3.0;
 /// FPV mode: full-stick roll/pitch attitude demand (~35°).
-const FPV_MAX_TILT_RAD: f32 = 0.6;
+pub(crate) const FPV_MAX_TILT_RAD: f32 = 0.6;
 /// FPV mode: thrust at centered throttle stick. Full up commands 1.0,
 /// full down 0.30 (enough authority to descend briskly while keeping
 /// the props spinning well clear of the mixer floor).
@@ -204,12 +204,20 @@ impl FlightUplink {
         info!(arm, "sent arm command to FC");
     }
 
-    /// Converts one canonical stick frame into an FPV attitude
-    /// setpoint: roll/pitch sticks command angles, the yaw stick integrates
-    /// a heading setpoint exactly like camera mode, and throttle maps directly
-    /// to collective thrust around the hover point — altitude is the
-    /// pilot's axis in FPV.
-    pub fn send_fpv_frame(&mut self, roll: f32, pitch: f32, throttle: f32, yaw: f32) {
+    /// Sends one direct-flight attitude setpoint (CTRL-01 `vehicle.motion.direct`):
+    /// absolute roll/pitch tilt and heading in radians (the CLIENT owns the
+    /// heading integration on the direct scope), plus the pilot's collective
+    /// demand as the linear normalization `thrust = (stick + 1) / 2` — the
+    /// exact inverse recovers the stick, which then maps onto this
+    /// airframe's hover-anchored collective curve. Altitude is the pilot's
+    /// axis in direct flight, so no position hold survives it.
+    pub fn send_attitude_frame(
+        &mut self,
+        roll_rad: f32,
+        pitch_rad: f32,
+        yaw_rad: f32,
+        thrust_norm: f32,
+    ) {
         let now = self.clock.now();
         if let Some(quiet) = self.quiet_until {
             if now < quiet {
@@ -217,20 +225,17 @@ impl FlightUplink {
             }
             self.quiet_until = None;
         }
+        let throttle = (thrust_norm.clamp(0.0, 1.0) * 2.0 - 1.0).clamp(-1.0, 1.0);
         if !self.airborne {
             if throttle <= TAKEOFF_STICK {
                 return; // motors idle until the first climb input
             }
             self.airborne = true;
-            info!("takeoff (FPV): climb input opens the setpoint stream");
+            info!("takeoff (direct): climb input opens the setpoint stream");
         }
-        let dt = self
-            .last_frame
-            .map_or(0.0, |t| now.duration_since(t).as_secs_f32())
-            .clamp(0.0, MAX_DT_S);
         self.last_frame = Some(now);
         self.hold_pos_ned = None;
-        self.heading_sp_rad = wrap_pi(self.heading_sp_rad + yaw * MAX_YAW_RATE_RPS * dt);
+        self.heading_sp_rad = wrap_pi(yaw_rad);
         let thrust = if throttle >= 0.0 {
             FPV_HOVER_THRUST + throttle * (1.0 - FPV_HOVER_THRUST)
         } else {
@@ -243,8 +248,8 @@ impl FlightUplink {
                 .saturating_duration_since(self.started)
                 .as_millis() as u32,
             pilotage_mavlink::codec::AttitudeTarget {
-                roll_rad: roll * FPV_MAX_TILT_RAD,
-                pitch_rad: pitch * FPV_MAX_TILT_RAD,
+                roll_rad: roll_rad.clamp(-FPV_MAX_TILT_RAD, FPV_MAX_TILT_RAD),
+                pitch_rad: pitch_rad.clamp(-FPV_MAX_TILT_RAD, FPV_MAX_TILT_RAD),
                 yaw_rad: self.heading_sp_rad,
                 thrust,
                 system_id: self.expected_system_id,

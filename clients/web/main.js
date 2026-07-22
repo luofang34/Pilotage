@@ -75,11 +75,14 @@ import { loadControlShell } from "./control-shell.js";
 import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
 import {
   INTENT_FAMILY_VELOCITY,
+  INTENT_FAMILY_ATTITUDE_THRUST,
   INTENT_FAMILY_GIMBAL_RATE,
   intentCapabilityFor as capabilityFor,
   actionAdvertised,
   buildVelocityIntent,
+  buildAttitudeThrustIntent,
   buildGimbalRateIntent,
+  integrateHeading,
 } from "./typed-command.js";
 import { readUniStream } from "./uni-stream.js";
 
@@ -91,6 +94,10 @@ const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never fir
 // budget bounds status-to-numeric authorization pairing in the ingress.
 const SIM_COHERENCE_LIMIT_NS = 300_000_000n;
 const MOTION_SCOPE = "vehicle.motion";
+// The direct-flight scope (CTRL-01): attitude + collective under its OWN
+// lease and generation. The FPV toggle is a SCOPE HANDOVER when a vehicle
+// advertises it — never a mode flip reinterpreting velocity numbers.
+const DIRECT_SCOPE = "vehicle.motion.direct";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
 const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/yaw LOS rate demands, leased separately.
 
@@ -143,6 +150,21 @@ const state = {
   // stream, so a device swap (which advances the revision) re-announces
   // before frames carry the new value. Null until the first announcement.
   announcedActivationRevision: null,
+  // Which scope currently carries flight: vehicle.motion (velocity) or
+  // vehicle.motion.direct (attitude + collective). Swapped only at the
+  // release boundary of a scope handover.
+  motionScope: MOTION_SCOPE,
+  // The scope the in-flight handover switches to when the release acks.
+  pendingMotionScope: null,
+  // Motion scopes released at least once this session: reacquiring one of
+  // these waits for the host's link-loss recovery ack; a scope never
+  // released has no latch to recover from.
+  releasedMotionScopes: new Set(),
+  // The client-integrated direct-flight heading setpoint (rad, local NED),
+  // seeded from telemetry at scope entry; the client OWNS the heading on
+  // the direct scope.
+  fpvHeading: 0,
+  lastDirectFrameMs: 0,
   // The typed capability negotiation from ServerWelcome: every advertised
   // scope with its intent families, limits, and actions. Control fails
   // closed (no motion frames) until the motion scope advertises velocity.
@@ -583,7 +605,9 @@ function sendLeaseRelease(token) {
     log("sent LeaseRelease for " + GIMBAL_SCOPE);
   }
   if (releaseTracker.isPending()) return; // one release per loss; the ack settles it
-  const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: MOTION_SCOPE });
+  // Input loss releases whichever scope currently carries flight.
+  const scope = state.motionScope;
+  const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope });
   const settled = releaseTracker.begin();
   settled.then((outcome) => {
     transportSessions.runIfActive(token, () => log(`lease release ${outcome}`));
@@ -593,7 +617,7 @@ function sendLeaseRelease(token) {
     // the host watchdog will do the release.
     releaseTracker.abandon();
   });
-  log("sent LeaseRelease for " + MOTION_SCOPE);
+  log("sent LeaseRelease for " + scope);
 }
 
 /** Applies a motion-scope reliable-stream message to the flat authority state
@@ -640,7 +664,7 @@ async function runSessionStreamReader(reader, token) {
         // Wire vehicle ids decode as BigInt; comparing through Number
         // against the BigInt constant is always false.
         const m = decoded.message;
-        if (m.vehicleId === VEHICLE_ID && m.scope === MOTION_SCOPE) {
+        if (m.vehicleId === VEHICLE_ID && m.scope === state.motionScope) {
           releaseTracker.acknowledge();
           // The motion lease is released (input-loss OR a profile handover):
           // drop local authority and fence the released generation so the
@@ -649,7 +673,26 @@ async function runSessionStreamReader(reader, token) {
           // confirmation no longer applies until it clears the fresh generation.
           applyMotionLease(decoded);
           state.motionRecovered = false;
+          if (m.released) state.releasedMotionScopes.add(m.scope);
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
+          if (state.pendingMotionScope) {
+            // The scope handover's release boundary: flight moves to the
+            // other scope, which fences its OWN generation domain (the old
+            // fence would wrongly gate the new scope's first grant). A
+            // scope never released this session has no link-loss latch, so
+            // there is no recovery ack to wait for.
+            state.motionScope = state.pendingMotionScope;
+            state.pendingMotionScope = null;
+            state.motionFence = 0n;
+            state.motionDenied = false;
+            state.motionRecovered = !state.releasedMotionScopes.has(state.motionScope);
+            if (state.motionScope === DIRECT_SCOPE) {
+              const heading = currentTelemetryHeading();
+              state.fpvHeading = heading ?? 0;
+              state.lastDirectFrameMs = 0;
+            }
+            log(`motion scope is now ${state.motionScope}`);
+          }
         } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
           log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
         } else {
@@ -675,7 +718,7 @@ async function runSessionStreamReader(reader, token) {
       }
       if (
         decoded.kind === "LeaseResponse" &&
-        decoded.message.scope === MOTION_SCOPE &&
+        decoded.message.scope === state.motionScope &&
         decoded.message.vehicleId === VEHICLE_ID
       ) {
         // A motion lease response after a profile handover. The pure transition
@@ -691,7 +734,13 @@ async function runSessionStreamReader(reader, token) {
         } else if (after.denied) {
           log(`motion lease denied (reason ${m.reason}); control stays suspended`);
         } else {
-          log(`LeaseResponse[motion]: granted generation=${m.generation}`);
+          // Direct-flight state follows the GRANTED scope, never a local
+          // optimistic flip.
+          state.fpvActive = state.motionScope === DIRECT_SCOPE;
+          els.overlay.textContent = state.fpvActive
+            ? "direct (FPV) flight scope granted"
+            : "camera flight scope granted";
+          log(`LeaseResponse[motion:${state.motionScope}]: granted generation=${m.generation}`);
         }
       }
     }
@@ -726,9 +775,13 @@ function handleBootstrapMessage(decoded, token) {
     state.advertisedScopes = decoded.message.advertisedScopes ?? [];
     // Correlation ids are per-connection; presses from a dead session must
     // not retransmit into a new one, and the new session has announced
-    // nothing yet.
+    // nothing yet. Flight restarts on the velocity scope.
     state.actionTracker = createActionTracker();
     state.announcedActivationRevision = null;
+    state.motionScope = MOTION_SCOPE;
+    state.pendingMotionScope = null;
+    state.releasedMotionScopes = new Set();
+    state.fpvActive = false;
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
     for (const scope of state.advertisedScopes) {
       const families = scope.intents.map((i) => i.family).join(",");
@@ -842,7 +895,7 @@ function dispatchAuthorityEnvelope(decoded, token) {
     // control only when it correlates to OUR pending recovery (vehicle + motion
     // scope + the current fresh generation) — the shared transition the
     // uni-stream test drives.
-    if (applyMotionRecovery(decoded, state, VEHICLE_ID, MOTION_SCOPE)) {
+    if (applyMotionRecovery(decoded, state, VEHICLE_ID, state.motionScope)) {
       log(`LinkLossCleared[motion]: recovery confirmed on generation=${decoded.message.generation}`);
     }
   }
@@ -1241,10 +1294,11 @@ async function runControlLoop(writer, token) {
         executeLeaseAction(token, plan.lease, GIMBAL_SCOPE);
       }
       if (plan.motionLease) {
-        // A profile switch cycles the motion lease so the host fences the old
-        // flight generation before the remapped scheme runs (distinct from the
-        // input-loss release, which drives the link-loss policy).
-        executeLeaseAction(token, plan.motionLease, MOTION_SCOPE);
+        // A profile switch (or scope handover) cycles the motion lease so
+        // the host fences the old flight generation before the remapped
+        // scheme runs (distinct from the input-loss release, which drives
+        // the link-loss policy).
+        executeLeaseAction(token, plan.motionLease, state.motionScope);
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -1344,59 +1398,114 @@ function maybeAnnounceProfileActivation() {
  *  sim-reset actions are appended here. Fails closed (no frame) when the
  *  vehicle does not advertise a velocity intent. */
 function sendMotionFrame(writer, token, mode, plan) {
-  const capability = velocityCapabilityFor(MOTION_SCOPE);
+  const direct = state.motionScope === DIRECT_SCOPE;
+  const capability = direct
+    ? capabilityFor(state.advertisedScopes, VEHICLE_ID, DIRECT_SCOPE, INTENT_FAMILY_ATTITUDE_THRUST)
+    : velocityCapabilityFor(state.motionScope);
   if (!capability) return;
   const m = plan.motion;
-  if (plan.arm && requestAction(MOTION_SCOPE, CONTROL_ACTION.arm, undefined, [CONTROL_ACTION.disarm])) {
+  if (plan.arm && requestAction(state.motionScope, CONTROL_ACTION.arm, undefined, [CONTROL_ACTION.disarm])) {
     els.overlay.textContent = "ARM sent";
     log("arm command sent");
   }
-  if (plan.disarm && requestAction(MOTION_SCOPE, CONTROL_ACTION.disarm, undefined, [CONTROL_ACTION.arm])) {
+  if (plan.disarm && requestAction(state.motionScope, CONTROL_ACTION.disarm, undefined, [CONTROL_ACTION.arm])) {
     els.overlay.textContent = "DISARM sent";
     log("disarm command sent");
   }
   if (state.pendingFpvToggle) {
     state.pendingFpvToggle = false;
-    // The toggle resolves HERE to an explicit typed target; the adapter
-    // never interprets a stateless flip. A repeat press before the first
-    // ack flips from the PENDING target (superseding it), not from the
-    // confirmed state — and `fpvActive` itself only changes on the ack.
-    const pendingTarget = pendingModeTarget(
-      state.actionTracker,
-      MOTION_SCOPE,
-      CONTROL_ACTION.modeRequest,
-    );
-    const fpvBase =
-      pendingTarget !== undefined ? pendingTarget === MODE_TARGET.fpvDirect : state.fpvActive;
-    const target = fpvBase ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
-    if (requestAction(MOTION_SCOPE, CONTROL_ACTION.modeRequest, target, [CONTROL_ACTION.modeRequest])) {
-      log(`mode request sent: target=${target === MODE_TARGET.fpvDirect ? "fpv-direct" : "camera-velocity"}`);
-    }
+    requestFlightModeSwitch();
   }
   if (state.pendingReset) {
     state.pendingReset = false;
-    if (requestAction(MOTION_SCOPE, CONTROL_ACTION.simReset)) {
+    if (requestAction(state.motionScope, CONTROL_ACTION.simReset)) {
       log("simulation reset requested");
     }
   }
-  const actions = collectFrameActions(MOTION_SCOPE);
-  const velocity = buildVelocityIntent(m, mode, capability);
+  const actions = collectFrameActions(state.motionScope);
+  let velocity;
+  let attitudeThrust;
+  if (direct) {
+    // The client OWNS the direct-flight heading: the yaw stick slews the
+    // integrated setpoint at the ADVERTISED rate, and tilt scales by the
+    // advertised bound — the vehicle executes exactly this attitude,
+    // reinterpreting nothing.
+    const nowMs = performance.now();
+    const dt = state.lastDirectFrameMs
+      ? Math.min((nowMs - state.lastDirectFrameMs) / 1000, 0.1)
+      : 0;
+    state.lastDirectFrameMs = nowMs;
+    state.fpvHeading = integrateHeading(state.fpvHeading, m.yaw, capability, dt);
+    attitudeThrust = buildAttitudeThrustIntent(m, state.fpvHeading, capability);
+  } else {
+    velocity = buildVelocityIntent(m, mode, capability);
+  }
   state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
   const envelope = encodeControlFrameEnvelope({
     sessionId: state.sessionId,
     vehicleId: VEHICLE_ID,
-    scope: MOTION_SCOPE,
+    scope: state.motionScope,
     generation: state.generation,
     sequence: state.sequence,
     sampledAtNanos: nowNanos(),
     profileRevision: state.controlShell.profileRevision(),
     activationRevision: state.controlShell.activationRevision(),
     velocity,
+    attitudeThrust,
     actions,
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
   });
+}
+
+/** The latest declared sim heading (rad, local NED), or null without an
+ *  attitude estimate — the direct-flight heading integrator's seed. */
+function currentTelemetryHeading() {
+  const snapshot = instruments.ingress?.snapshot(performance.now());
+  const heading = declaredSimHeading(snapshot?.attitude);
+  return heading === null ? null : heading.rad;
+}
+
+/** The FPV/camera flight toggle. When the vehicle advertises the
+ *  direct-flight scope (AttitudeThrust under vehicle.motion.direct), the
+ *  switch is a SCOPE HANDOVER — the runtime's transactional reactivation
+ *  neutral-fences the sticks, releases the current motion lease, and the
+ *  reacquisition targets the other scope under a fresh generation. The
+ *  typed ModeRequest remains only for vehicles that advertise one; with
+ *  neither advertised the press is suppressed loudly. */
+function requestFlightModeSwitch() {
+  const target = state.motionScope === DIRECT_SCOPE ? MOTION_SCOPE : DIRECT_SCOPE;
+  const family =
+    target === DIRECT_SCOPE ? INTENT_FAMILY_ATTITUDE_THRUST : INTENT_FAMILY_VELOCITY;
+  if (capabilityFor(state.advertisedScopes, VEHICLE_ID, target, family)) {
+    if (state.pendingMotionScope) return; // a handover is already in flight
+    if (target === DIRECT_SCOPE && currentTelemetryHeading() === null) {
+      log("no heading telemetry yet; cannot enter direct flight");
+      return;
+    }
+    state.pendingMotionScope = target;
+    state.controlShell.reactivate();
+    log(`flight-scope handover to ${target}: neutral fence + lease cycle opened`);
+    return;
+  }
+  const pendingTarget = pendingModeTarget(
+    state.actionTracker,
+    state.motionScope,
+    CONTROL_ACTION.modeRequest,
+  );
+  const fpvBase =
+    pendingTarget !== undefined ? pendingTarget === MODE_TARGET.fpvDirect : state.fpvActive;
+  const modeTarget = fpvBase ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
+  if (
+    requestAction(state.motionScope, CONTROL_ACTION.modeRequest, modeTarget, [
+      CONTROL_ACTION.modeRequest,
+    ])
+  ) {
+    log(
+      `mode request sent: target=${modeTarget === MODE_TARGET.fpvDirect ? "fpv-direct" : "camera-velocity"}`,
+    );
+  }
 }
 
 /** Encodes and sends the runtime's gimbal frame. The runtime emits one every

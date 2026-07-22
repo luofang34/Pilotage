@@ -45,9 +45,12 @@ pub struct IntentCapability {
     /// Bound on the vertical linear term when the vehicle's vertical
     /// envelope is tighter; zero falls back to `max_linear`.
     pub max_vertical: f32,
-    /// Bound on the angular term (rad/s for rates, rad for headings).
-    /// Zero means no bound advertised.
+    /// Bound on the angular term (rad/s for rates, rad for headings; the
+    /// tilt angle for attitude-thrust). Zero means no bound advertised.
     pub max_angular: f32,
+    /// For attitude-thrust only: the heading-setpoint slew rate (rad/s) a
+    /// direct-flight client integrates its yaw stick at. Zero elsewhere.
+    pub max_yaw_rate: f32,
 }
 
 impl IntentCapability {

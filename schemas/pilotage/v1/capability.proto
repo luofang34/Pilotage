@@ -55,6 +55,10 @@ message IntentCapability {
   float max_linear = 3;
   float max_angular = 4;
   float max_vertical = 5;
+  // For ATTITUDE_THRUST, where `max_angular` bounds the tilt ANGLE (rad),
+  // this bounds the heading-setpoint slew rate (rad/s) a direct-flight
+  // client integrates its yaw stick at. Zero elsewhere.
+  float max_yaw_rate = 6;
 }
 
 // One typed discrete action a scope accepts, with the mode targets it admits

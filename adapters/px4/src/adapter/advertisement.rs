@@ -56,6 +56,7 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
         ],
         // The REAL flight envelope the uplink enforces.
         intents: vec![IntentCapability {
+            max_yaw_rate: 0.0,
             family: IntentFamily::Velocity,
             frames: vec![ReferenceFrame::BodyFrd],
             max_linear: crate::uplink::MAX_HORIZONTAL_MPS,
@@ -106,6 +107,7 @@ fn gimbal_scope_descriptor() -> ScopeDescriptor {
         scope: ScopeId::new(GIMBAL_SCOPE),
         axes: vec![LogicalAxisId::new(PITCH_AXIS), LogicalAxisId::new(YAW_AXIS)],
         intents: vec![IntentCapability {
+            max_yaw_rate: 0.0,
             family: IntentFamily::GimbalRate,
             frames: vec![],
             max_linear: 0.0,

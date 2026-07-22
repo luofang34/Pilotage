@@ -1,6 +1,8 @@
 //! Control-application outcomes and link-loss policy vocabulary (ADR-0008).
 
-use pilotage_protocol::{ButtonEdge, ControlAction, ControlIntent, ControlPayload, LogicalAxisId};
+use pilotage_protocol::{
+    AttitudeThrustIntent, ButtonEdge, ControlAction, ControlIntent, ControlPayload, LogicalAxisId,
+};
 use pilotage_timing::SimTick;
 use serde::{Deserialize, Serialize};
 
@@ -174,10 +176,33 @@ pub fn intent_satisfies_neutral_activation(
             let angular = capability.max_angular * fraction;
             g.pitch_rate.abs() <= angular && g.yaw_rate.abs() <= angular
         }
-        ControlIntent::PositionHold(_)
-        | ControlIntent::AttitudeThrust(_)
-        | ControlIntent::BodyRate(_) => false,
+        // Level attitude at the mid collective is the direct-flight hover
+        // posture: tilt inside the max_angular-scaled deadband and thrust at
+        // the linear normalization's hover midpoint (0.5). Yaw is a heading
+        // setpoint, not motion, and does not bear on neutrality.
+        ControlIntent::AttitudeThrust(a) => {
+            let angular = capability.max_angular * fraction;
+            let (roll, pitch, _) = attitude_euler(a);
+            roll.abs() <= angular
+                && pitch.abs() <= angular
+                && (a.thrust - 0.5).abs() <= 0.5 * fraction
+        }
+        ControlIntent::PositionHold(_) | ControlIntent::BodyRate(_) => false,
     }
+}
+
+/// Extracts the ZYX Euler angles (roll, pitch, yaw; radians, right-handed
+/// NED) from an attitude intent's unit quaternion — the shared conversion
+/// the command gate bounds tilt with and an attitude-consuming adapter
+/// decodes setpoints with. The wire decode already enforced unit norm; a
+/// gimbal-lock pitch clamps the asin argument instead of going NaN.
+#[must_use]
+pub fn attitude_euler(intent: &AttitudeThrustIntent) -> (f32, f32, f32) {
+    let (w, x, y, z) = (intent.qw, intent.qx, intent.qy, intent.qz);
+    let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
+    let pitch = (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin();
+    let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z));
+    (roll, pitch, yaw)
 }
 
 /// What an adapter does to a vehicle when its control link is judged lost.

@@ -81,7 +81,6 @@ impl AviateAdapter {
             reset_latch: None,
             #[cfg(test)]
             reset_spawns: 0,
-            fpv_mode: false,
             link_loss_policy: BTreeMap::new(),
         })
     }

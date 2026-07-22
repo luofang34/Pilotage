@@ -104,6 +104,7 @@ fn intent_capability(intent: &pilotage_adapter_api::IntentCapability) -> wire::I
             .collect(),
         max_linear: intent.max_linear,
         max_angular: intent.max_angular,
+        max_yaw_rate: intent.max_yaw_rate,
         max_vertical: intent.max_vertical,
     }
 }

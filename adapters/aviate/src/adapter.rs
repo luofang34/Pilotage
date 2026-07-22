@@ -12,7 +12,7 @@ use pilotage_adapter_api::{
     VideoSource,
 };
 use pilotage_protocol::{
-    ControlAction, ControlIntent, LogicalAxisId, ModeTarget, ScopeId, ScopedControlFrame, VehicleId,
+    ControlAction, ControlIntent, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId,
 };
 use pilotage_timing::SimTick;
 
@@ -40,6 +40,10 @@ use sources::{ArmReport, EstimateSource, fc_state_sample};
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+/// The direct-flight scope (CTRL-01): attitude + collective thrust under its
+/// OWN lease and authority generation — never a reinterpretation of the
+/// velocity scope's numbers.
+pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.
@@ -123,9 +127,6 @@ pub struct AviateAdapter {
     // kills any live SITL FC on the machine).
     #[cfg(test)]
     reset_spawns: u32,
-    // FPV mode latch (typed ModeRequest FpvDirect): attitude sticks + direct
-    // thrust instead of velocity sticks + brake-to-hold.
-    fpv_mode: bool,
 }
 
 impl AviateAdapter {
@@ -163,7 +164,6 @@ impl AviateAdapter {
             last_reset: None,
             reset_latch: None,
             reset_spawns: 0,
-            fpv_mode: false,
             link_loss_policy: BTreeMap::new(),
         }
     }
@@ -203,7 +203,7 @@ impl AviateAdapter {
         if frame.vehicle != self.vehicle {
             return Err(RejectReason::UnknownVehicle);
         }
-        if frame.scope.as_str() != FLIGHT_SCOPE {
+        if frame.scope.as_str() != FLIGHT_SCOPE && frame.scope.as_str() != DIRECT_SCOPE {
             return Err(RejectReason::UnknownScope);
         }
         let known = [
@@ -222,39 +222,29 @@ impl AviateAdapter {
 }
 
 /// Disposes each typed flight action: arm fires through the caller's hook,
-/// a mode request selects camera/FPV flight (returned for the caller to
-/// latch after the loop), the gate-honored sim reset acks, and anything
-/// unsupported here reports rejected (the session gates unadvertised
-/// actions before delivery — defensive, not a reachable path).
+/// the gate-honored sim reset acks, and anything unsupported here reports
+/// rejected (the session gates unadvertised actions before delivery —
+/// defensive, not a reachable path). Mode requests are unsupported: direct
+/// flight is its OWN scope with its own lease, never a mode flip that
+/// reinterprets this scope's numbers.
 fn process_flight_actions(
     actions: &[ControlAction],
     mut send_arm: impl FnMut(f32),
     current_yaw: f32,
-) -> (Vec<ActionResult>, Option<bool>) {
+) -> Vec<ActionResult> {
     let mut action_results = Vec::with_capacity(actions.len());
-    let mut fpv_switch = None;
     for action in actions {
         match *action {
             ControlAction::Arm => {
                 send_arm(current_yaw);
                 action_results.push(ActionResult::accepted(*action));
             }
-            ControlAction::ModeRequest { target } => match target {
-                ModeTarget::CameraVelocity => {
-                    fpv_switch = Some(false);
-                    action_results.push(ActionResult::accepted(*action));
-                }
-                ModeTarget::FpvDirect => {
-                    fpv_switch = Some(true);
-                    action_results.push(ActionResult::accepted(*action));
-                }
-                ModeTarget::Hold | ModeTarget::Return => {
-                    action_results.push(ActionResult::rejected(
-                        *action,
-                        "mode target not supported by this vehicle",
-                    ));
-                }
-            },
+            ControlAction::ModeRequest { .. } => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "no mode requests: direct flight is the vehicle.motion.direct scope",
+                ));
+            }
             ControlAction::SimReset => {
                 action_results.push(ActionResult::accepted(*action));
             }
@@ -266,7 +256,7 @@ fn process_flight_actions(
             }
         }
     }
-    (action_results, fpv_switch)
+    action_results
 }
 
 impl VehicleAdapter for AviateAdapter {
@@ -286,43 +276,53 @@ impl VehicleAdapter for AviateAdapter {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        let (action_results, fpv_switch) = process_flight_actions(
+        let action_results = process_flight_actions(
             &frame.actions,
             |yaw| {
                 uplink.send_arm(yaw);
             },
             current_yaw,
         );
-        if let Some(fpv) = fpv_switch
-            && self.fpv_mode != fpv
-        {
-            self.fpv_mode = fpv;
-            tracing::info!(fpv = self.fpv_mode, "flight mode switched by typed request");
-        }
 
-        let Some(ControlIntent::Velocity(velocity)) = frame.intent else {
-            // An actions-only frame (arm, mode switch) carries no motion
-            // demand; the setpoint stream continues from the next frame.
-            return ApplyOutcome {
-                tick,
-                disposition: Disposition::Accepted,
-                action_results,
-            };
+        // Each scope consumes ITS OWN intent family — the gate already
+        // rejected any other family against the advertisement, so these
+        // rejections are defensive, not reachable paths.
+        let constrained = match (frame.scope.as_str(), frame.intent) {
+            (_, None) => {
+                // An actions-only frame (arm) carries no motion demand; the
+                // setpoint stream continues from the next frame.
+                return ApplyOutcome {
+                    tick,
+                    disposition: Disposition::Accepted,
+                    action_results,
+                };
+            }
+            (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
+                let (sticks, constrained) = sticks_from_velocity(&velocity);
+                uplink.send_stick_frame(
+                    sticks[0],
+                    sticks[1],
+                    sticks[2],
+                    sticks[3],
+                    current_yaw,
+                    current_pos,
+                    current_vel,
+                );
+                constrained
+            }
+            (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
+                let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);
+                let tilt_limit = crate::uplink::FPV_MAX_TILT_RAD;
+                uplink.send_attitude_frame(roll, pitch, yaw, attitude.thrust);
+                roll.abs() > tilt_limit || pitch.abs() > tilt_limit
+            }
+            _ => {
+                return rejected_control(
+                    tick,
+                    RejectReason::Other("intent family does not belong to this scope".to_owned()),
+                );
+            }
         };
-        let (sticks, constrained) = sticks_from_velocity(&velocity);
-        if self.fpv_mode {
-            uplink.send_fpv_frame(sticks[0], sticks[1], sticks[2], sticks[3]);
-        } else {
-            uplink.send_stick_frame(
-                sticks[0],
-                sticks[1],
-                sticks[2],
-                sticks[3],
-                current_yaw,
-                current_pos,
-                current_vel,
-            );
-        }
         ApplyOutcome {
             tick,
             disposition: if constrained {
@@ -425,10 +425,10 @@ impl VehicleAdapter for AviateAdapter {
                 self.link_loss_policy.remove(scope);
             }
         }
-        // Only the MOTION scope actuates flight: a gimbal-scope link-loss must
-        // NOT touch the FC or the motion hold context, so the neutralize and
-        // the hold-invalidation below are gated on the motion scope.
-        if scope.as_str() != FLIGHT_SCOPE {
+        // Only the MOTION scopes actuate flight: a gimbal-scope link-loss
+        // must NOT touch the FC or the motion hold context, so the
+        // neutralize and the hold-invalidation below are gated on them.
+        if scope.as_str() != FLIGHT_SCOPE && scope.as_str() != DIRECT_SCOPE {
             return Ok(());
         }
         // Any motion link-loss transition invalidates the captured

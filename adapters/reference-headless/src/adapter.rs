@@ -160,6 +160,7 @@ impl VehicleAdapter for ReferenceAdapter {
                     // the advertised envelope IS the normalized bound: a
                     // full-scale typed command maps 1:1 onto full stick.
                     intents: vec![IntentCapability {
+                        max_yaw_rate: 0.0,
                         family: IntentFamily::Velocity,
                         frames: vec![ReferenceFrame::BodyFrd],
                         max_linear: MAX_SURGE_MPS,

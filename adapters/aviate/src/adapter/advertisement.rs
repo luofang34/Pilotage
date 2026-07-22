@@ -7,13 +7,11 @@ use pilotage_adapter_api::{
     ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
     LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
-use pilotage_protocol::{
-    ActionKind, IntentFamily, LogicalAxisId, ModeTarget, ReferenceFrame, ScopeId,
-};
+use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
 use super::{
-    ARM_BUTTON, AviateAdapter, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, RESET_BUTTON, ROLL_AXIS,
-    THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, AviateAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, RESET_BUTTON,
+    ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 
 impl AviateAdapter {
@@ -30,7 +28,7 @@ impl AviateAdapter {
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: if self.uplink.is_some() {
-                    vec![flight_scope_descriptor()]
+                    vec![flight_scope_descriptor(), direct_scope_descriptor()]
                 } else {
                     vec![]
                 },
@@ -42,6 +40,49 @@ impl AviateAdapter {
             }],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
         }
+    }
+}
+
+/// Both flight scopes take the same discrete actions. There is NO mode
+/// request: direct flight is its own scope with its own lease and authority
+/// generation, never a mode flip that reinterprets velocity numbers.
+fn flight_actions() -> Vec<ActionCapability> {
+    vec![
+        ActionCapability {
+            action: ActionKind::Arm,
+            mode_targets: vec![],
+        },
+        ActionCapability {
+            action: ActionKind::Disarm,
+            mode_targets: vec![],
+        },
+        ActionCapability {
+            action: ActionKind::SimReset,
+            mode_targets: vec![],
+        },
+    ]
+}
+
+/// The direct-flight scope: attitude + collective thrust, typed-only (no
+/// legacy translation admits numeric payloads here). `max_angular` is the
+/// tilt-angle bound the uplink clamps at; `max_yaw_rate` is the heading
+/// slew the CLIENT integrates its yaw stick with, matching the velocity
+/// scope's yaw envelope so direct flight turns no faster than camera
+/// flight.
+fn direct_scope_descriptor() -> ScopeDescriptor {
+    ScopeDescriptor {
+        scope: ScopeId::new(DIRECT_SCOPE),
+        axes: vec![],
+        intents: vec![IntentCapability {
+            family: IntentFamily::AttitudeThrust,
+            frames: vec![ReferenceFrame::LocalNed],
+            max_linear: 0.0,
+            max_vertical: 0.0,
+            max_angular: crate::uplink::FPV_MAX_TILT_RAD,
+            max_yaw_rate: crate::uplink::MAX_YAW_RATE_RPS,
+        }],
+        actions: flight_actions(),
+        legacy: None,
     }
 }
 
@@ -58,30 +99,14 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
         // client scaling sticks by these limits commands
         // exactly what full stick flies today.
         intents: vec![IntentCapability {
+            max_yaw_rate: 0.0,
             family: IntentFamily::Velocity,
             frames: vec![ReferenceFrame::BodyFrd],
             max_linear: crate::uplink::MAX_HORIZONTAL_MPS,
             max_vertical: crate::uplink::MAX_VERTICAL_MPS,
             max_angular: crate::uplink::MAX_YAW_RATE_RPS,
         }],
-        actions: vec![
-            ActionCapability {
-                action: ActionKind::Arm,
-                mode_targets: vec![],
-            },
-            ActionCapability {
-                action: ActionKind::Disarm,
-                mode_targets: vec![],
-            },
-            ActionCapability {
-                action: ActionKind::SimReset,
-                mode_targets: vec![],
-            },
-            ActionCapability {
-                action: ActionKind::ModeRequest,
-                mode_targets: vec![ModeTarget::CameraVelocity, ModeTarget::FpvDirect],
-            },
-        ],
+        actions: flight_actions(),
         legacy: Some(LegacyCommandMap::Velocity {
             vx: Some(LegacyAxisRoute {
                 axis: PITCH_AXIS,

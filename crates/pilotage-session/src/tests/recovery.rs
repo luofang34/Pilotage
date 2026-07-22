@@ -191,6 +191,7 @@ fn profile(
                         scope: ScopeId::new(scope),
                         axes: axes.iter().copied().map(LogicalAxisId::new).collect(),
                         intents: vec![pilotage_adapter_api::IntentCapability {
+                            max_yaw_rate: 0.0,
                             family: pilotage_protocol::IntentFamily::Velocity,
                             frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
                             max_linear: 1.0,

@@ -348,6 +348,8 @@ function encodeButtonEdgeSample(buttonId, edge) {
 
 // control.proto typed-command enums (CTRL-01).
 export const REFERENCE_FRAME_BODY_FRD = 1;
+/** ReferenceFrame LOCAL_NED (control.proto): the direct-flight attitude frame. */
+export const REFERENCE_FRAME_LOCAL_NED = 2;
 export const CONTROL_ACTION = {
   arm: 1,
   disarm: 2,
@@ -374,6 +376,18 @@ function encodeVelocityIntent({ vx, vy, vz, yawRate }) {
   return bytes;
 }
 
+// AttitudeThrustIntent { frame=1, qw=2, qx=3, qy=4, qz=5, thrust=6 }
+function encodeAttitudeThrustIntent({ frame, qw, qx, qy, qz, thrust }) {
+  const bytes = [];
+  fieldVarint(bytes, 1, frame ?? REFERENCE_FRAME_LOCAL_NED);
+  fieldFloat(bytes, 2, qw);
+  fieldFloat(bytes, 3, qx);
+  fieldFloat(bytes, 4, qy);
+  fieldFloat(bytes, 5, qz);
+  fieldFloat(bytes, 6, thrust);
+  return bytes;
+}
+
 // GimbalRateIntent { pitch_rate=1, yaw_rate=2 }
 function encodeGimbalRateIntent({ pitchRate, yawRate }) {
   const bytes = [];
@@ -382,9 +396,10 @@ function encodeGimbalRateIntent({ pitchRate, yawRate }) {
   return bytes;
 }
 
-function encodeControlIntent({ velocity, gimbalRate }) {
+function encodeControlIntent({ velocity, attitudeThrust, gimbalRate }) {
   const bytes = [];
   if (velocity) fieldMessage(bytes, 1, encodeVelocityIntent(velocity));
+  if (attitudeThrust) fieldMessage(bytes, 3, encodeAttitudeThrustIntent(attitudeThrust));
   if (gimbalRate) fieldMessage(bytes, 5, encodeGimbalRateIntent(gimbalRate));
   return bytes;
 }
@@ -422,6 +437,7 @@ export function encodeControlFrameEnvelope({
   profileRevision,
   activationRevision,
   velocity,
+  attitudeThrust,
   gimbalRate,
   actions,
   axes,
@@ -441,8 +457,8 @@ export function encodeControlFrameEnvelope({
   if (axes?.length || edges?.length) {
     fieldMessage(frame, 8, encodeControlPayload(axes ?? [], edges ?? []));
   }
-  if (velocity || gimbalRate) {
-    fieldMessage(frame, 9, encodeControlIntent({ velocity, gimbalRate }));
+  if (velocity || attitudeThrust || gimbalRate) {
+    fieldMessage(frame, 9, encodeControlIntent({ velocity, attitudeThrust, gimbalRate }));
   }
   for (const action of actions ?? []) {
     fieldMessage(frame, 10, encodeControlActionRequest(action));
@@ -800,7 +816,7 @@ function repeatedVarints(fields, fieldNumber) {
 }
 
 // capability.proto IntentCapability: family=1, frames=2 (repeated varint),
-// max_linear=3, max_angular=4, max_vertical=5
+// max_linear=3, max_angular=4, max_vertical=5, max_yaw_rate=6
 function decodeIntentCapability(bytes) {
   const fields = parseFields(bytes);
   return {
@@ -809,6 +825,7 @@ function decodeIntentCapability(bytes) {
     maxLinear: decodeFloat32(firstBytes(fields, 3)) ?? 0,
     maxAngular: decodeFloat32(firstBytes(fields, 4)) ?? 0,
     maxVertical: decodeFloat32(firstBytes(fields, 5)) ?? 0,
+    maxYawRate: decodeFloat32(firstBytes(fields, 6)) ?? 0,
   };
 }
 

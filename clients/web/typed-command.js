@@ -6,6 +6,8 @@
 
 // Wire IntentFamily values (capability.proto).
 export const INTENT_FAMILY_VELOCITY = 1;
+// Wire ReferenceFrame LOCAL_NED (control.proto).
+export const REFERENCE_FRAME_LOCAL_NED = 2;
 export const INTENT_FAMILY_ATTITUDE_THRUST = 3;
 export const INTENT_FAMILY_GIMBAL_RATE = 5;
 
@@ -67,6 +69,53 @@ export function buildVelocityIntent(motion, mode, capability) {
         vz: -motion.throttle * maxVertical,
         yawRate: motion.yaw * capability.maxAngular,
       };
+}
+
+/** Wraps a heading into (-PI, PI], the local-NED yaw convention. */
+export function wrapHeading(rad) {
+  let wrapped = rad % (2 * Math.PI);
+  if (wrapped > Math.PI) wrapped -= 2 * Math.PI;
+  if (wrapped <= -Math.PI) wrapped += 2 * Math.PI;
+  return wrapped;
+}
+
+/** Advances the direct-flight heading setpoint: the yaw stick slews it at
+ * the ADVERTISED `maxYawRate`, integrated client-side — the client owns
+ * the heading on the direct scope, so the vehicle never reinterprets a
+ * stick as a rate. */
+export function integrateHeading(headingRad, yawStick, capability, dtSeconds) {
+  const rate = capability?.maxYawRate ?? 0;
+  return wrapHeading(headingRad + yawStick * rate * dtSeconds);
+}
+
+/**
+ * Builds the typed attitude-thrust intent for the direct-flight scope:
+ * roll/pitch sticks command TILT angles scaled by the advertised
+ * `maxAngular` bound, `headingRad` is the client-integrated heading
+ * setpoint, and throttle maps linearly onto the normalized collective
+ * (`thrust = (stick + 1) / 2`, so mid collective 0.5 is the hover
+ * posture). The quaternion is the ZYX Euler composition in local-NED.
+ * Returns null without an attitude-thrust advertisement — the caller must
+ * not send.
+ */
+export function buildAttitudeThrustIntent(motion, headingRad, capability) {
+  if (!capability) return null;
+  const roll = motion.roll * capability.maxAngular;
+  const pitch = motion.pitch * capability.maxAngular;
+  const sr = Math.sin(roll / 2);
+  const cr = Math.cos(roll / 2);
+  const sp = Math.sin(pitch / 2);
+  const cp = Math.cos(pitch / 2);
+  const sy = Math.sin(headingRad / 2);
+  const cy = Math.cos(headingRad / 2);
+  return {
+    frame: REFERENCE_FRAME_LOCAL_NED,
+    qw: cr * cp * cy + sr * sp * sy,
+    qx: sr * cp * cy - cr * sp * sy,
+    qy: cr * sp * cy + sr * cp * sy,
+    qz: cr * cp * sy - sr * sp * cy,
+    thrust: (motion.throttle + 1) / 2,
+  };
 }
 
 /**

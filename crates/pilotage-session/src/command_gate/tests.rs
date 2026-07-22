@@ -19,6 +19,7 @@ fn motion_scope() -> ScopeDescriptor {
         scope: ScopeId::new("vehicle.motion"),
         axes: vec![],
         intents: vec![IntentCapability {
+            max_yaw_rate: 0.0,
             family: IntentFamily::Velocity,
             frames: vec![ReferenceFrame::BodyFrd],
             max_linear: 3.0,
@@ -59,6 +60,7 @@ fn gimbal_scope() -> ScopeDescriptor {
         scope: ScopeId::new("vehicle.gimbal"),
         axes: vec![],
         intents: vec![IntentCapability {
+            max_yaw_rate: 0.0,
             family: IntentFamily::GimbalRate,
             frames: vec![],
             max_linear: 0.0,
@@ -75,6 +77,42 @@ fn gimbal_scope() -> ScopeDescriptor {
             recenter_button: Some(0),
         }),
     }
+}
+
+/// A direct-flight scope: AttitudeThrust only, typed only — the CTRL-01
+/// scope model where attitude flight is its own scope, never a mode flip
+/// reinterpreting velocity numbers.
+fn direct_scope() -> ScopeDescriptor {
+    ScopeDescriptor {
+        scope: ScopeId::new("vehicle.motion.direct"),
+        axes: vec![],
+        intents: vec![IntentCapability {
+            family: IntentFamily::AttitudeThrust,
+            frames: vec![ReferenceFrame::LocalNed],
+            max_linear: 0.0,
+            max_vertical: 0.0,
+            max_angular: 0.6,
+            max_yaw_rate: 0.9,
+        }],
+        actions: vec![],
+        legacy: None,
+    }
+}
+
+/// An attitude intent from ZYX Euler angles, as a direct-flight client
+/// builds it.
+fn attitude(roll: f32, pitch: f32, yaw: f32, thrust: f32) -> ControlIntent {
+    let (sr, cr) = (roll * 0.5).sin_cos();
+    let (sp, cp) = (pitch * 0.5).sin_cos();
+    let (sy, cy) = (yaw * 0.5).sin_cos();
+    ControlIntent::AttitudeThrust(pilotage_protocol::AttitudeThrustIntent {
+        frame: ReferenceFrame::LocalNed,
+        qw: cr * cp * cy + sr * sp * sy,
+        qx: sr * cp * cy - cr * sp * sy,
+        qy: cr * sp * cy + sr * cp * sy,
+        qz: cr * cp * sy - sr * sp * cy,
+        thrust,
+    })
 }
 
 fn base_frame() -> ScopedControlFrame {
@@ -324,5 +362,34 @@ fn a_partial_legacy_payload_is_rejected() {
     assert_eq!(
         gate_frame(&frame, &motion_scope()),
         Err(FrameRejectionReason::PartialCommand)
+    );
+}
+
+#[test]
+fn a_velocity_intent_on_the_direct_scope_is_rejected_before_the_adapter() {
+    // The reviewer's scope-model requirement: the direct scope advertises
+    // ONLY AttitudeThrust, so a velocity frame is refused at the gate —
+    // the adapter never sees a family that could be "reinterpreted".
+    let mut frame = base_frame();
+    frame.scope = ScopeId::new("vehicle.motion.direct");
+    frame.intent = Some(velocity(1.0, 0.0, 0.0, 0.0));
+    assert_eq!(
+        gate_frame(&frame, &direct_scope()),
+        Err(FrameRejectionReason::UnsupportedIntent)
+    );
+}
+
+#[test]
+fn an_attitude_within_the_tilt_bound_passes_and_beyond_it_is_rejected() {
+    let mut frame = base_frame();
+    frame.scope = ScopeId::new("vehicle.motion.direct");
+    frame.intent = Some(attitude(0.5, -0.3, 2.0, 0.8));
+    assert!(gate_frame(&frame, &direct_scope()).is_ok());
+
+    // Yaw is a heading setpoint, unbounded; TILT beyond max_angular is not.
+    frame.intent = Some(attitude(0.9, 0.0, 0.0, 0.8));
+    assert_eq!(
+        gate_frame(&frame, &direct_scope()),
+        Err(FrameRejectionReason::LimitExceeded)
     );
 }

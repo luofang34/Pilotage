@@ -48,6 +48,7 @@ fn capabilities() -> AdapterCapabilities {
                 scope: ScopeId::new("vehicle.motion"),
                 axes: vec![LogicalAxisId::new(0)],
                 intents: vec![IntentCapability {
+                    max_yaw_rate: 0.0,
                     family: IntentFamily::Velocity,
                     frames: vec![ReferenceFrame::BodyFrd],
                     max_linear: 3.0,

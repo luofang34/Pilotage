@@ -118,7 +118,9 @@ fn a_typed_frame_matching_the_announced_activation_is_applied() {
     let mut engine = engine();
     let client = ClientKey::new(1);
     let session = welcomed_holder(&mut engine, client);
-    engine.handle_client_message(client, activation(session, 3), MonoTimestamp::from_nanos(2));
+    let announced =
+        engine.handle_client_message(client, activation(session, 3), MonoTimestamp::from_nanos(2));
+    assert!(announced.actions.is_empty());
     let actions = submit(&mut engine, client, typed_frame(session, 3));
     assert!(
         matches!(actions.as_slice(), [SessionAction::ApplyToAdapter { .. }]),
@@ -174,7 +176,9 @@ fn a_non_advancing_activation_revision_closes_the_client() {
     let mut engine = engine();
     let client = ClientKey::new(1);
     let session = welcome(&mut engine, client);
-    engine.handle_client_message(client, activation(session, 5), MonoTimestamp::from_nanos(2));
+    let announced =
+        engine.handle_client_message(client, activation(session, 5), MonoTimestamp::from_nanos(2));
+    assert!(announced.actions.is_empty());
     for stale in [5u32, 4u32] {
         let outcome = engine.handle_client_message(
             client,
@@ -200,11 +204,12 @@ fn the_activation_revision_advances_across_the_u32_wrap() {
     let mut engine = engine();
     let client = ClientKey::new(1);
     let session = welcome(&mut engine, client);
-    engine.handle_client_message(
+    let announced = engine.handle_client_message(
         client,
         activation(session, u32::MAX),
         MonoTimestamp::from_nanos(2),
     );
+    assert!(announced.actions.is_empty());
     // u32::MAX → 0 is a forward step of 1 under wrapping arithmetic; a
     // long-lived sender must not be closed for surviving the wrap.
     let outcome =

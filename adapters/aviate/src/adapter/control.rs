@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
 use pilotage_protocol::{ActionKind, ControlIntent, ScopedControlFrame, VelocityIntent};
+
+use crate::uplink::FPV_MAX_TILT_RAD;
 use pilotage_timing::SimTick;
 
 use super::AviateAdapter;
@@ -23,18 +25,29 @@ pub(super) struct ResetLatch {
     engaged_epoch: Option<u32>,
 }
 
-/// Reset clearance: every velocity component inside the envelope-scaled
-/// deadband and no discrete action riding the frame. A frame without a
-/// velocity intent demonstrates nothing.
+/// Reset clearance: the frame demonstrates the scope's neutral posture with
+/// no discrete action riding it — every velocity component inside the
+/// envelope-scaled deadband, or (direct flight) level tilt at the mid
+/// collective. A frame without an intent demonstrates nothing.
 fn frame_is_neutral(frame: &ScopedControlFrame) -> bool {
-    let Some(ControlIntent::Velocity(v)) = frame.intent else {
+    if !frame.actions.is_empty() {
         return false;
-    };
-    frame.actions.is_empty()
-        && v.vx.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
-        && v.vy.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
-        && v.vz.abs() <= MAX_VERTICAL_MPS * RESET_CLEAR_DEADBAND
-        && v.yaw_rate.abs() <= MAX_YAW_RATE_RPS * RESET_CLEAR_DEADBAND
+    }
+    match &frame.intent {
+        Some(ControlIntent::Velocity(v)) => {
+            v.vx.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
+                && v.vy.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
+                && v.vz.abs() <= MAX_VERTICAL_MPS * RESET_CLEAR_DEADBAND
+                && v.yaw_rate.abs() <= MAX_YAW_RATE_RPS * RESET_CLEAR_DEADBAND
+        }
+        Some(ControlIntent::AttitudeThrust(a)) => {
+            let (roll, pitch, _) = pilotage_adapter_api::attitude_euler(a);
+            roll.abs() <= FPV_MAX_TILT_RAD * RESET_CLEAR_DEADBAND
+                && pitch.abs() <= FPV_MAX_TILT_RAD * RESET_CLEAR_DEADBAND
+                && (a.thrust - 0.5).abs() <= 0.5 * RESET_CLEAR_DEADBAND
+        }
+        _ => false,
+    }
 }
 
 /// Whether the frame carries an action of `kind`.

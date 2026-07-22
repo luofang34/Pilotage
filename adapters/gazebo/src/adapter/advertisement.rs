@@ -34,6 +34,7 @@ impl GazeboAdapter {
                     // The bridge forwards linear.x / angular.z at unit scale,
                     // so the advertised envelope is the unit twist bound.
                     intents: vec![IntentCapability {
+                        max_yaw_rate: 0.0,
                         family: IntentFamily::Velocity,
                         frames: vec![ReferenceFrame::BodyFrd],
                         max_linear: MAX_LINEAR_MPS,
