@@ -1,6 +1,6 @@
 //! The per-tick inputs the runtime evaluates: the raw device sample the JS
 //! shell reads from the Gamepad API, and the session state it reads from the
-//! DOM, the clock, and the network (lease grants). Neither is owned by the
+//! DOM and the clock. Neither is owned by the
 //! runtime; both are handed in each tick.
 
 /// One physical button as the Standard Gamepad reports it: a pressed flag
@@ -80,39 +80,14 @@ impl Mode {
     }
 }
 
-/// The session context for one tick: the clock, the mode, connection, and
-/// the network-observed gimbal lease state. Lease grant/deny is ingested by
-/// the shell from the reliable session stream and handed in — the runtime
-/// never reaches the network itself.
+/// The raw session facts for one tick. Reliable-stream authority events enter
+/// through the runtime's event API instead of being mirrored on every tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SessionState {
-    /// The session generation: the shell advances it on every fresh connect,
-    /// so the runtime can seed its edge baselines and fire no spurious edge
-    /// from a control held across a disconnect/reconnect.
-    pub generation: u32,
     /// Monotonic clock in milliseconds (the shell's `performance.now()`).
     pub now_ms: f64,
     /// The operator's selected flight-control scheme.
     pub mode: Mode,
     /// Whether a transport session is live; a dead session emits nothing.
     pub connected: bool,
-    /// Whether the gimbal scope lease is currently granted.
-    pub lease_granted: bool,
-    /// Whether the gimbal scope lease was denied this session (never
-    /// re-requested once denied).
-    pub lease_denied: bool,
-    /// Whether the MOTION scope lease is currently granted on the current
-    /// generation. A profile handover releases it, so this drives the runtime's
-    /// motion-authority reacquisition: no motion frame publishes until the host
-    /// regrants the lease on a fresh generation.
-    pub motion_granted: bool,
-    /// Whether the host DENIED the post-handover motion reacquire. Terminal: the
-    /// runtime stops re-requesting and keeps motion gated until a fresh session.
-    pub motion_denied: bool,
-    /// Whether the host has CONFIRMED it cleared the vehicle's link-loss latch
-    /// on the current fresh generation (the shell correlates the recovery notice
-    /// by vehicle/scope/generation). The runtime keeps transmitting neutral
-    /// activation frames until this is true, then resumes live — so recovery
-    /// never rests on the hope that a best-effort datagram reached the host.
-    pub motion_recovered: bool,
 }

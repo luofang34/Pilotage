@@ -7,7 +7,7 @@
 use pilotage_input::normalize_axis;
 
 use crate::profile::GimbalDoc;
-use crate::sample::{RawSample, SessionState};
+use crate::sample::RawSample;
 
 /// The gimbal line-of-sight rate demand: pitch and yaw in `[-1, 1]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -94,41 +94,6 @@ pub(crate) fn frame_plan(
         recenter: reset_edge,
         streaming: held,
     })
-}
-
-/// The gimbal-lease action for one tick. Flight modes hold the lease
-/// (re-requesting on entry, debounced against repeated requests); rover mode
-/// releases it, because a held-but-silent scope trips the host's per-vehicle
-/// holder-silence watchdog whose link-loss policy would neutralize flight; a
-/// denied scope is never re-requested for the session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LeasePlan {
-    Request,
-    Release,
-    None,
-}
-
-/// Debounce window between repeated lease requests.
-pub(crate) const LEASE_DEBOUNCE_MS: f64 = 3000.0;
-
-/// Plans the lease action from the mode, current lease state, and the
-/// debounce clock. `last_request_ms` is the runtime's own record of when it
-/// last asked; `now_ms` comes from the session.
-pub(crate) fn lease_plan(session: &SessionState, last_request_ms: f64) -> LeasePlan {
-    if !session.mode.carries_gimbal() {
-        return if session.lease_granted {
-            LeasePlan::Release
-        } else {
-            LeasePlan::None
-        };
-    }
-    if session.lease_granted || session.lease_denied {
-        return LeasePlan::None;
-    }
-    if session.now_ms - last_request_ms < LEASE_DEBOUNCE_MS {
-        return LeasePlan::None;
-    }
-    LeasePlan::Request
 }
 
 #[cfg(test)]

@@ -18,8 +18,6 @@
 
 import {
   encodeClientHelloEnvelope,
-  encodeLeaseRequestEnvelope,
-  encodeLeaseReleaseEnvelope,
   encodeControlFrameEnvelope,
   encodeControlActionCommandEnvelope,
   encodeProfileActivationEnvelope,
@@ -79,14 +77,9 @@ import {
   whenVisible,
 } from "./session-discovery.js";
 import { createDatagramRunStop, startDatagramControl } from "./datagram-control.js";
-import { resumeGrantDecision, resumeSessionControl } from "./resume-control.js";
+import { resumeGrantDecision, resumeRefusalReason, resumeSessionControl } from "./resume-control.js";
 import { loadControlShell } from "./control-shell.js";
-import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
-import {
-  FRAME_REJECTION_UPLINK_IDLE,
-  motionReadoutState,
-  updateNeedsArm,
-} from "./control-enactment.js";
+import { writeLeaseAction } from "./lease-executor.js";
 import {
   INTENT_FAMILY_VELOCITY,
   INTENT_FAMILY_ATTITUDE_THRUST,
@@ -118,12 +111,31 @@ const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/
 // here — under its own on-demand lease. Flight authority neither grants
 // nor implies it, and a live/RF host never advertises it.
 const SIM_LIFECYCLE_SCOPE = "sim.lifecycle";
+const FRAME_REJECTION_UPLINK_IDLE = 18;
 
 /** The exclusive-authority group a motion-family scope belongs to: both
  *  flight scopes drive one FC and are one authority on the host, whose
  *  link-loss recovery ack names the GROUP key. */
 function motionGroup(scope) {
   return scope === DIRECT_SCOPE ? MOTION_SCOPE : scope;
+}
+
+function authoritySlot(scope) {
+  if (scope === GIMBAL_SCOPE) return "gimbal";
+  if (scope === SIM_LIFECYCLE_SCOPE) return "lifecycle";
+  return "motion";
+}
+
+function authorityFor(scope) {
+  return (
+    state.controlShell?.authority(authoritySlot(scope)) ?? {
+      generation: 0n,
+      granted: false,
+      denied: false,
+      recovered: false,
+      needsArm: false,
+    }
+  );
 }
 
 const els = {
@@ -149,7 +161,6 @@ const hsiFaultPresenter = createDomFaultPresenter(els.hsi);
 const state = {
   transport: null,
   sessionId: 0,
-  generation: 0n,
   sequence: 0,
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
   // The runtime owns key bindings AND the held-key state; the shell only
@@ -194,13 +205,12 @@ const state = {
   // The sim-lifecycle scope's on-demand authority: leased just long enough
   // to command a reset, released when the result lands (a held-but-silent
   // scope would only feed the host's silence watchdog).
-  lifecycle: { granted: false, generation: 0n, pendingPress: false },
+  lifecycle: { pendingPress: false },
   // The typed capability negotiation from ServerWelcome: every advertised
   // scope with its intent families, limits, and actions. Control fails
   // closed (no motion frames) until the motion scope advertises velocity.
   advertisedScopes: [],
   connected: false,
-  leaseGranted: false,
   // The current datagram run must finish and release its writer lock before a
   // same-session resume can acquire the stream again.
   controlCompletion: null,
@@ -210,33 +220,11 @@ const state = {
   // Input loss remembers whether the independent gimbal lease was held so the
   // explicit resume restores the same authority set.
   resumeGimbalLease: false,
-  // The generation the motion lease held when last released: a post-handover
-  // regrant must be strictly newer than this fence to be accepted.
-  motionFence: 0n,
-  // A denied motion reacquire is terminal — the runtime stops re-requesting.
-  motionDenied: false,
-  // Whether the host has confirmed (via LinkLossCleared) it cleared the
-  // vehicle's link-loss latch on the current generation. The runtime keeps
-  // neutralizing until this is true, so recovery never rests on a best-effort
-  // datagram. Irrelevant in steady flight; reset false when a release starts a
-  // new recovery cycle.
-  motionRecovered: true,
-  // Session authority is not enactment truth: an adapter rejection latches
-  // this until the reliable accepted Arm result proves the uplink restarted.
-  motionNeedsArm: false,
   lastFrameRejectionLogged: null,
-  // The gimbal scope's own lease/fencing state: independent generation and
-  // sequence, granted (or not) without affecting flight control.
-  gimbalGeneration: 0n,
   gimbalSequence: 0,
-  gimbalLeaseGranted: false,
-  gimbalLeaseDenied: false, // a denied scope is not re-requested this session
   // The control runtime owns the request debounce, the R3 baseline, and the
   // gimbal stream latch; the shell holds only the loaded runtime.
   controlShell: null,
-  // Advances on each fresh connect so the runtime seeds its edge baselines and
-  // a control held across a reconnect fires no edge.
-  controlGeneration: 0,
   skippedVideoFrames: 0,
   supersededVideoFrames: 0,
   // Page-lifetime latch: wasm absence never heals without a reload (the
@@ -455,14 +443,12 @@ async function connect({ manual } = { manual: true }) {
     startControl: ({ transport, token }) => startControlLoop(transport, token),
     controlUnavailable: ({ token }) => {
       transportSessions.runIfActive(token, () => {
-        state.leaseGranted = false;
         sendLeaseRelease(token);
         startSuspendedPressWatch(token);
       });
     },
     releaseLease: ({ token }) => {
       transportSessions.runIfActive(token, () => {
-        state.leaseGranted = false;
         sendLeaseRelease(token);
         els.gamepad.textContent =
           "control released — input lost during connect; press Connect to resume";
@@ -516,26 +502,15 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.transport = transport;
     state.sessionWriter = null;
     state.sessionId = 0;
-    state.generation = 0n;
     state.sequence = 0;
-    state.motionFence = 0n;
-    state.motionDenied = false;
-    state.motionRecovered = true;
-    state.motionNeedsArm = false;
     state.lastFrameRejectionLogged = null;
-    state.gimbalGeneration = 0n;
     state.gimbalSequence = 0;
-    state.gimbalLeaseGranted = false;
-    state.gimbalLeaseDenied = false;
-    // A fresh session generation: the control runtime seeds its edge baselines
-    // on the first tick, so a control held across the reconnect fires no edge.
-    state.controlGeneration = (state.controlGeneration + 1) >>> 0;
+    state.controlShell?.beginSession();
     state.pendingReset = false;
     state.pendingFpvToggle = false;
     state.lastFcVerdictLogged = null;
     state.lastFcView = null;
     state.connected = false;
-    state.leaseGranted = false;
     state.controlCompletion = null;
     state.stopControlRun = null;
     state.resumePendingToken = null;
@@ -629,7 +604,7 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     });
     return {
       completed: true,
-      leaseGranted: state.leaseGranted,
+      leaseGranted: authorityFor(MOTION_SCOPE).granted,
       transport,
       token,
       result: { ok: true },
@@ -714,9 +689,11 @@ async function sendClientHello(writer, token) {
 
 /** Writes a length-delimited `LeaseRequest` for the motion scope. */
 async function sendLeaseRequest(writer, token) {
+  await controlStarted;
   if (!transportSessions.isActive(token)) return false;
-  const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: MOTION_SCOPE });
-  await writer.write(lengthDelimit(request));
+  const action = state.controlShell?.planAuthority("motion", true);
+  if (action !== "request") return authorityFor(MOTION_SCOPE).granted;
+  if (!(await executeLeaseAction(token, action, MOTION_SCOPE, writer))) return false;
   if (!transportSessions.isActive(token)) return false;
   log(`sent LeaseRequest for ${MOTION_SCOPE}`);
   return true;
@@ -727,30 +704,24 @@ async function sendLeaseRequest(writer, token) {
 function sendLeaseRelease(token) {
   const writer = state.sessionWriter;
   if (!writer || !transportSessions.isActive(token)) return;
-  if (state.gimbalLeaseGranted) {
+  if (authorityFor(GIMBAL_SCOPE).granted) {
     // Fire-and-forget: the gimbal scope has no motion authority, so its
     // release rides best-effort alongside the tracked motion release
     // (the host watchdog covers a lost one).
-    state.gimbalLeaseGranted = false;
-    const gimbalRelease = encodeLeaseReleaseEnvelope({
-      vehicleId: VEHICLE_ID,
-      scope: GIMBAL_SCOPE,
-    });
-    writer.write(lengthDelimit(gimbalRelease)).catch(() => {});
-    log("sent LeaseRelease for " + GIMBAL_SCOPE);
+    const action = state.controlShell?.planAuthority("gimbal", false);
+    if (action) void executeLeaseAction(token, action, GIMBAL_SCOPE, writer);
   }
   if (releaseTracker.isPending()) return; // one release per loss; the ack settles it
   // Input loss releases whichever scope currently carries flight.
   const scope = state.motionScope;
-  const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope });
+  const action = state.controlShell?.planAuthority("motion", false);
+  if (action !== "release") return;
   const settled = releaseTracker.begin();
   settled.then((outcome) => {
     transportSessions.runIfActive(token, () => log(`lease release ${outcome}`));
   });
-  writer.write(lengthDelimit(release)).catch(() => {
-    // The reliable stream refused the write: the transport is dying, and
-    // the host watchdog will do the release.
-    releaseTracker.abandon();
+  void executeLeaseAction(token, action, scope, writer).then((written) => {
+    if (!written) releaseTracker.abandon();
   });
   log("sent LeaseRelease for " + scope);
 }
@@ -758,12 +729,9 @@ function sendLeaseRelease(token) {
 /** Relinquishes local authority synchronously with the input-loss latch. */
 function suspendControlForInputLoss(token) {
   state.stopControlRun?.stop();
-  const releaseNeeded = state.leaseGranted || state.resumePendingToken === token;
-  state.resumeGimbalLease ||= state.gimbalLeaseGranted;
+  const releaseNeeded = authorityFor(state.motionScope).granted || state.resumePendingToken === token;
+  state.resumeGimbalLease ||= authorityFor(GIMBAL_SCOPE).granted;
   if (releaseNeeded) sendLeaseRelease(token);
-  state.motionFence = state.generation;
-  state.leaseGranted = false;
-  state.motionRecovered = false;
 }
 
 function showResumeAffordance() {
@@ -784,13 +752,12 @@ async function requestResumeLeases(token) {
   if (!writer || !transportSessions.isActive(token)) {
     throw new Error("the live session stream is unavailable");
   }
-  const motion = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: state.motionScope });
-  await writer.write(lengthDelimit(motion));
-  log(`sent same-session LeaseRequest for ${state.motionScope}`);
+  const motion = state.controlShell?.planAuthority("motion", true);
+  if (!motion) throw new Error(resumeRefusalReason(authorityFor(state.motionScope)));
+  await executeLeaseAction(token, motion, state.motionScope, writer);
   if (state.resumeGimbalLease) {
-    const gimbal = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
-    await writer.write(lengthDelimit(gimbal));
-    log(`sent same-session LeaseRequest for ${GIMBAL_SCOPE}`);
+    const gimbal = state.controlShell?.planAuthority("gimbal", true);
+    if (gimbal) await executeLeaseAction(token, gimbal, GIMBAL_SCOPE, writer);
   }
 }
 
@@ -833,27 +800,18 @@ async function resumeControlInPlace() {
   }
 }
 
-/** Applies a motion-scope reliable-stream message to the flat authority state
- *  through the pure {@link advanceMotionLease} transition: it enforces the
- *  generation fence and terminal denial, and installs a fresh generation
- *  (restarting the sequence before any frame rides it) only when the grant
- *  clears the fence. Returns the resulting authority for the caller to log. */
-function applyMotionLease(decoded) {
-  const before = {
-    granted: state.leaseGranted,
-    generation: state.generation,
-    fence: state.motionFence,
-    denied: state.motionDenied,
-  };
-  const after = advanceMotionLease(before, decoded);
-  state.leaseGranted = after.granted;
-  state.motionFence = after.fence;
-  state.motionDenied = after.denied;
-  if (after.generation !== before.generation) {
-    state.generation = after.generation;
-    state.sequence = 0;
+function applyLeaseResponse(scope, message) {
+  const slot = authoritySlot(scope);
+  const disposition = state.controlShell?.authorityEvent(
+    slot,
+    message.granted ? "grant" : "denial",
+    { generation: message.generation },
+  );
+  if (disposition === "applied" && message.granted) {
+    if (slot === "motion") state.sequence = 0;
+    if (slot === "gimbal") state.gimbalSequence = 0;
   }
-  return after;
+  return { disposition, ...authorityFor(scope) };
 }
 
 function completePendingResume(token, granted) {
@@ -872,17 +830,14 @@ function completePendingResume(token, granted) {
   }
   state.resumePendingToken = null;
   if (decision === "denied") {
-    state.motionDenied = true;
-    if (state.gimbalLeaseGranted) executeLeaseAction(token, "release", GIMBAL_SCOPE);
+    if (authorityFor(GIMBAL_SCOPE).granted) {
+      const action = state.controlShell?.planAuthority("gimbal", false);
+      if (action) void executeLeaseAction(token, action, GIMBAL_SCOPE);
+    }
     els.overlay.textContent = "same-session resume denied — press Connect to retry";
     return;
   }
   state.resumeGimbalLease = false;
-  // A fresh wasm session generation: the runtime re-seeds every discrete
-  // edge baseline (a button pressed while control was suspended cannot fire
-  // on resume) and, arriving unrecovered, re-enters the neutral-activation
-  // recovery before any live output.
-  state.controlGeneration = (state.controlGeneration + 1) >>> 0;
   if (startControlLoop(state.transport, token)) {
     els.resumeBtn.hidden = true;
     els.overlay.textContent = "control resumed — center inputs for neutral recovery";
@@ -920,13 +875,9 @@ async function runSessionStreamReader(reader, token) {
         const m = decoded.message;
         if (m.vehicleId === VEHICLE_ID && m.scope === state.motionScope) {
           releaseTracker.acknowledge();
-          // The motion lease is released (input-loss OR a profile handover):
-          // drop local authority and fence the released generation so the
-          // runtime gates motion output and only re-requests once reflected. A
-          // release opens a new recovery cycle, so the host's prior
-          // confirmation no longer applies until it clears the fresh generation.
-          applyMotionLease(decoded);
-          state.motionRecovered = false;
+          state.controlShell?.authorityEvent("motion", "release", {
+            generation: m.generation,
+          });
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
           if (state.pendingMotionScope) {
             // The scope handover's release boundary: flight moves to the
@@ -944,7 +895,15 @@ async function runSessionStreamReader(reader, token) {
             log(`motion scope is now ${state.motionScope}`);
           }
         } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
+          state.controlShell?.authorityEvent("gimbal", "release", {
+            generation: m.generation,
+          });
           log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
+        } else if (m.vehicleId === VEHICLE_ID && m.scope === SIM_LIFECYCLE_SCOPE) {
+          state.controlShell?.authorityEvent("lifecycle", "release", {
+            generation: m.generation,
+          });
+          log(`LeaseReleased[lifecycle]: released=${m.released} generation=${m.generation}`);
         } else {
           log(`ignoring LeaseReleased for vehicle=${m.vehicleId} scope=${m.scope}`);
         }
@@ -958,18 +917,20 @@ async function runSessionStreamReader(reader, token) {
         // arrives here rather than in the bootstrap reader. Another
         // vehicle's response must never install our generation.
         const m = decoded.message;
-        state.gimbalGeneration = BigInt(m.generation || 0);
-        state.gimbalLeaseGranted = !!m.granted;
-        state.gimbalLeaseDenied = !m.granted;
+        const after = applyLeaseResponse(GIMBAL_SCOPE, m);
         log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
         if (
-          m.granted &&
-          (!controlGate.mayPublish() || (state.resumeGimbalLease && state.motionDenied))
+          after.granted &&
+          (controlGate.isLatched() ||
+            (state.resumeGimbalLease && authorityFor(state.motionScope).denied))
         ) {
-          executeLeaseAction(token, "release", GIMBAL_SCOPE);
+          const action = state.controlShell?.planAuthority("gimbal", false);
+          if (action) void executeLeaseAction(token, action, GIMBAL_SCOPE);
           log("input loss raced the gimbal grant; surrendered immediately");
-        } else if (!m.granted) {
+        } else if (after.denied) {
           log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
+        } else if (after.disposition === "stale") {
+          log(`ignoring stale gimbal grant generation=${m.generation}`);
         }
       }
       if (
@@ -978,17 +939,20 @@ async function runSessionStreamReader(reader, token) {
         decoded.message.vehicleId === VEHICLE_ID
       ) {
         const m = decoded.message;
-        state.lifecycle.granted = !!m.granted;
-        state.lifecycle.generation = BigInt(m.generation || 0);
+        const after = applyLeaseResponse(SIM_LIFECYCLE_SCOPE, m);
         log(`LeaseResponse[lifecycle]: granted=${m.granted} generation=${m.generation}`);
-        if (m.granted && state.lifecycle.pendingPress) {
+        if (after.granted && state.lifecycle.pendingPress) {
           state.lifecycle.pendingPress = false;
           if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
             log("simulation reset requested");
           }
-        } else if (!m.granted) {
+        } else if (after.denied) {
           state.lifecycle.pendingPress = false;
           log(`sim reset authorization denied (reason ${m.reason})`);
+        } else if (after.disposition === "stale") {
+          log(`ignoring stale lifecycle grant generation=${m.generation}`);
+          const action = state.controlShell?.planAuthority("lifecycle", true);
+          if (action) void executeLeaseAction(token, action, SIM_LIFECYCLE_SCOPE);
         }
       }
       if (
@@ -996,16 +960,16 @@ async function runSessionStreamReader(reader, token) {
         decoded.message.scope === state.motionScope &&
         decoded.message.vehicleId === VEHICLE_ID
       ) {
-        // A motion lease response after a profile handover. The pure transition
+        // A motion lease response after a profile handover. The runtime table
         // enforces the fence (a grant must be strictly newer than the released
         // generation) and the terminal denial; a fresh grant installs the new
         // generation and restarts the sequence BEFORE any frame rides it, so
         // the runtime resumes only on verified authority. Another vehicle's
         // response never installs ours (filtered above).
         const m = decoded.message;
-        const after = applyMotionLease(decoded);
-        if (after.stale !== undefined) {
-          log(`ignoring stale motion grant generation=${m.generation} (fence ${after.fence})`);
+        const after = applyLeaseResponse(state.motionScope, m);
+        if (after.disposition === "stale") {
+          log(`ignoring stale motion grant generation=${m.generation}`);
         } else if (after.denied) {
           log(`motion lease denied (reason ${m.reason}); control stays suspended`);
         } else {
@@ -1017,7 +981,9 @@ async function runSessionStreamReader(reader, token) {
             : "camera flight scope granted";
           log(`LeaseResponse[motion:${state.motionScope}]: granted generation=${m.generation}`);
         }
-        completePendingResume(token, after.granted);
+        if (after.disposition !== "stale") {
+          completePendingResume(token, after.granted);
+        }
       }
     }
   }
@@ -1057,7 +1023,7 @@ function handleBootstrapMessage(decoded, token) {
     state.motionScope = MOTION_SCOPE;
     state.pendingMotionScope = null;
     state.fpvActive = false;
-    state.lifecycle = { granted: false, generation: 0n, pendingPress: false };
+    state.lifecycle = { pendingPress: false };
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
     for (const scope of state.advertisedScopes) {
       const families = scope.intents.map((i) => i.family).join(",");
@@ -1076,8 +1042,7 @@ function handleBootstrapMessage(decoded, token) {
       log(`ignoring bootstrap LeaseResponse for scope=${decoded.message.scope}`);
       return;
     }
-    state.generation = BigInt(decoded.message.generation || 0);
-    state.leaseGranted = !!decoded.message.granted;
+    applyLeaseResponse(MOTION_SCOPE, decoded.message);
     log(`LeaseResponse: granted=${decoded.message.granted} generation=${decoded.message.generation}`);
     if (!decoded.message.granted) {
       els.overlay.textContent = `lease denied (reason ${decoded.message.reason})`;
@@ -1167,11 +1132,14 @@ function dispatchAuthorityEnvelope(decoded, token) {
     els.overlay.textContent = `authority: ${decoded.message.arm}`;
     log(`authority event: ${decoded.message.arm}`);
   } else if (decoded.kind === "LinkLossCleared") {
-    // The host confirmed it cleared the vehicle's link-loss latch. Resume live
-    // control only when it correlates to OUR pending recovery (vehicle + motion
-    // scope + the current fresh generation) — the shared transition the
-    // uni-stream test drives.
-    if (applyMotionRecovery(decoded, state, VEHICLE_ID, motionGroup(state.motionScope))) {
+    const message = decoded.message;
+    if (
+      message.vehicleId === VEHICLE_ID &&
+      message.scope === motionGroup(state.motionScope) &&
+      state.controlShell?.authorityEvent("motion", "recovery", {
+        generation: message.generation,
+      }) === "applied"
+    ) {
       log(`LinkLossCleared[motion]: recovery confirmed on generation=${decoded.message.generation}`);
     }
   }
@@ -1389,9 +1357,8 @@ function handleFrameRejected(r) {
     r.reason === FRAME_REJECTION_UPLINK_IDLE &&
     motionGroup(r.scope) === motionGroup(state.motionScope)
   ) {
-    state.motionNeedsArm = updateNeedsArm(state.motionNeedsArm, {
-      kind: "FrameRejected",
-      reason: r.reason,
+    state.controlShell?.authorityEvent("motion", "uplinkIdle", {
+      generation: r.currentGeneration,
     });
     if (firstNotice) {
       els.overlay.textContent = "motion uplink idle — press arm to start control";
@@ -1400,34 +1367,28 @@ function handleFrameRejected(r) {
   }
   if (
     (r.reason === 1 || r.reason === 2) &&
-    r.scope === GIMBAL_SCOPE &&
-    state.gimbalLeaseGranted
+    r.scope === GIMBAL_SCOPE
   ) {
-    state.gimbalLeaseGranted = false;
+    state.controlShell?.authorityEvent("gimbal", "revocation", {
+      generation: r.currentGeneration,
+    });
     log("host fenced our gimbal authority; the lease planner will re-request");
   }
   if (
     (r.reason === 1 || r.reason === 2) &&
-    motionGroup(r.scope) === motionGroup(state.motionScope) &&
-    state.leaseGranted
+    motionGroup(r.scope) === motionGroup(state.motionScope)
   ) {
-    state.leaseGranted = false;
-    state.motionRecovered = false;
-    if (r.currentGeneration !== undefined) {
-      state.motionFence = BigInt(r.currentGeneration);
-    }
-    const nowMs = performance.now();
-    if (nowMs - (state.lastAuthorityReacquireMs ?? 0) > 500) {
-      state.lastAuthorityReacquireMs = nowMs;
-      const writer = state.sessionWriter;
-      if (writer) {
-        const request = encodeLeaseRequestEnvelope({
-          vehicleId: VEHICLE_ID,
-          scope: state.motionScope,
-        });
-        writer.write(lengthDelimit(request)).catch(() => {});
-        log("host fenced our motion authority; reacquiring the lease");
-      }
+    state.controlShell?.authorityEvent("motion", "revocation", {
+      generation: r.currentGeneration,
+    });
+    const action = state.controlShell?.planAuthority("motion", true);
+    if (action) {
+      void executeLeaseAction(
+        transportSessions.currentToken(),
+        action,
+        state.motionScope,
+      );
+      log("host fenced our motion authority; reacquiring the lease");
     }
   }
 }
@@ -1518,6 +1479,7 @@ function activeGamepad() {
 
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
 function startControlLoop(transport, token) {
+  state.controlShell?.beginControlRun();
   const runStop = createDatagramRunStop();
   const started = startDatagramControl({
     datagrams: transport.datagrams,
@@ -1584,20 +1546,8 @@ function evaluateInputTick(mode) {
     log("gamepad gone; control returns to the keyboard");
   }
   const sessionState = {
-    generation: state.controlGeneration,
     mode,
     connected: state.connected,
-    leaseGranted: state.gimbalLeaseGranted,
-    leaseDenied: state.gimbalLeaseDenied,
-    // The MOTION lease grant: the runtime gates all motion output until it
-    // is regranted on a fresh generation after a profile handover, so a
-    // remapped scheme never publishes on the released generation.
-    motionGranted: state.leaseGranted,
-    // A denied reacquire is terminal — the runtime stops re-requesting.
-    motionDenied: state.motionDenied,
-    // The runtime stays neutralizing after a handover until the host
-    // confirms it cleared the vehicle's link-loss latch on this generation.
-    motionRecovered: state.motionRecovered,
     nowMs: performance.now(),
   };
   const plan = pad
@@ -1723,9 +1673,7 @@ function motionCapabilityFor(scope) {
 /** The fencing generation the client holds `scope` at — the binding every
  *  action command carries. */
 function generationForScope(scope) {
-  if (scope === GIMBAL_SCOPE) return state.gimbalGeneration;
-  if (scope === SIM_LIFECYCLE_SCOPE) return state.lifecycle.generation;
-  return state.generation;
+  return authorityFor(scope).generation;
 }
 
 /** The reset press: a LIFECYCLE action under its own lease (SIM-01), never
@@ -1736,18 +1684,21 @@ function requestSimReset() {
     log("sim reset not advertised (not a simulator host); not sent");
     return;
   }
-  if (state.lifecycle.granted) {
+  if (authorityFor(SIM_LIFECYCLE_SCOPE).granted) {
     if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
       log("simulation reset requested");
     }
     return;
   }
   state.lifecycle.pendingPress = true;
-  const writer = state.sessionWriter;
-  if (!writer) return;
-  const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: SIM_LIFECYCLE_SCOPE });
-  writer.write(lengthDelimit(request)).catch(() => {});
-  log(`sent LeaseRequest for ${SIM_LIFECYCLE_SCOPE} (reset authorization)`);
+  const action = state.controlShell?.planAuthority("lifecycle", true);
+  if (action) {
+    void executeLeaseAction(
+      transportSessions.currentToken(),
+      action,
+      SIM_LIFECYCLE_SCOPE,
+    );
+  }
 }
 
 /** Gates a press on the vehicle's advertisement (CTRL-01: nothing sends
@@ -1797,13 +1748,12 @@ function handleActionResult(m) {
   const entry = resolveAction(state.actionTracker, m.actionId);
   if (!entry) return; // a replay of an already-settled press
   if (motionGroup(entry.scope) === motionGroup(state.motionScope)) {
-    const wasNeedsArm = state.motionNeedsArm;
-    state.motionNeedsArm = updateNeedsArm(state.motionNeedsArm, {
-      kind: "ControlActionResult",
-      action: entry.action,
+    const before = authorityFor(state.motionScope);
+    state.controlShell?.authorityEvent("motion", "actionResult", {
+      detail: entry.action,
       accepted: m.accepted,
     });
-    if (wasNeedsArm && !state.motionNeedsArm) {
+    if (before.needsArm && !authorityFor(state.motionScope).needsArm) {
       state.lastFrameRejectionLogged = null;
       els.overlay.textContent = "arm sequence accepted — motion uplink active";
       log("accepted arm result restored motion enactment");
@@ -1812,15 +1762,13 @@ function handleActionResult(m) {
   if (entry.scope === SIM_LIFECYCLE_SCOPE) {
     // The lifecycle lease exists only for this press: release it so the
     // silence watchdog never has a held-but-frameless scope to revoke.
-    state.lifecycle.granted = false;
-    const writer = state.sessionWriter;
-    if (writer) {
-      const release = encodeLeaseReleaseEnvelope({
-        vehicleId: VEHICLE_ID,
-        scope: SIM_LIFECYCLE_SCOPE,
-      });
-      writer.write(lengthDelimit(release)).catch(() => {});
-      log(`released the ${SIM_LIFECYCLE_SCOPE} lease`);
+    const action = state.controlShell?.planAuthority("lifecycle", false);
+    if (action) {
+      void executeLeaseAction(
+        transportSessions.currentToken(),
+        action,
+        SIM_LIFECYCLE_SCOPE,
+      );
     }
   }
   if (entry.action === CONTROL_ACTION.modeRequest && m.accepted) {
@@ -1927,7 +1875,7 @@ function sendMotionFrame(writer, token, mode, plan) {
     sessionId: state.sessionId,
     vehicleId: VEHICLE_ID,
     scope: state.motionScope,
-    generation: state.generation,
+    generation: authorityFor(state.motionScope).generation,
     sequence: state.sequence,
     sampledAtNanos: nowNanos(),
     profileRevision: state.controlShell.profileRevision(),
@@ -2011,7 +1959,7 @@ function sendGimbalFrame(writer, token, gimbal) {
     sessionId: state.sessionId,
     vehicleId: VEHICLE_ID,
     scope: GIMBAL_SCOPE,
-    generation: state.gimbalGeneration,
+    generation: authorityFor(GIMBAL_SCOPE).generation,
     sequence: state.gimbalSequence,
     sampledAtNanos: nowNanos(),
     profileRevision: state.controlShell.profileRevision(),
@@ -2028,19 +1976,26 @@ function sendGimbalFrame(writer, token, gimbal) {
 /** Executes the runtime's gimbal-lease decision on the reliable session
  *  stream: request or release the `vehicle.gimbal` scope. The runtime owns the
  *  request debounce and the mode/grant/deny policy; this only sends. */
-function executeLeaseAction(token, action, scope) {
-  const writer = state.sessionWriter;
-  if (!writer || !transportSessions.isActive(token)) return;
-  if (action === "release") {
-    if (scope === GIMBAL_SCOPE) state.gimbalLeaseGranted = false;
-    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope });
-    writer.write(lengthDelimit(release)).catch(() => {});
-    log(`released the ${scope} lease`);
-  } else if (action === "request") {
-    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope });
-    writer.write(lengthDelimit(request)).catch(() => {});
-    log(`sent LeaseRequest for ${scope}`);
+function executeLeaseAction(token, action, scope, writer = state.sessionWriter) {
+  if (!writer || !token || !transportSessions.isActive(token)) {
+    return Promise.resolve(false);
   }
+  const write = writeLeaseAction({
+    writer,
+    action,
+    vehicleId: VEHICLE_ID,
+    scope,
+    frame: lengthDelimit,
+  });
+  if (!write) return Promise.resolve(false);
+  const verb = action === "release" ? "released" : "requested";
+  return write.then(
+    () => {
+      log(`${verb} the ${scope} lease`);
+      return true;
+    },
+    () => false,
+  );
 }
 
 /** Shows the live control mapping in the readout: the gimbal quasimode when a
@@ -2062,10 +2017,14 @@ function updateControlReadout(pad, mode, plan) {
   const m = plan.motion ?? { roll: 0, pitch: 0, throttle: 0, yaw: 0 };
   // Authority and enactment are separate: an idle adapter uplink stays
   // "needs arm" even while the lease is held and frames leave the browser.
-  const motionState = motionReadoutState(plan, {
-    motionRecovered: state.motionRecovered,
-    needsArm: state.motionNeedsArm,
-  });
+  const motionAuthority = authorityFor(state.motionScope);
+  const motionState = motionAuthority.needsArm
+    ? "needs arm"
+    : !plan.motion
+      ? "gated"
+      : motionAuthority.recovered
+        ? "streaming"
+        : "recovering";
   // The arm/disarm hint names the ACTIVE device's real controls, from
   // profile data (a rebound arm control renames its own hint); the FC arm
   // token sits beside the motion state it explains.
@@ -2097,8 +2056,9 @@ function motionGateReason() {
   // The latch is the most specific state: it names the one action (Resume)
   // that ends it, before the lease-level explanations apply.
   if (controlGate.isLatched()) return "control suspended — press Resume control";
-  if (state.motionDenied) return "motion lease denied; reconnect to retry";
-  if (!state.leaseGranted) return "no motion lease; press Connect to take control";
+  const authority = authorityFor(state.motionScope);
+  if (authority.denied) return "motion lease denied; reconnect to retry";
+  if (!authority.granted) return "no motion lease; press Connect to take control";
   return "motion authority recovering";
 }
 
@@ -2107,8 +2067,8 @@ function motionGateReason() {
  *  swallowed safety press must never look like a dead key. */
 function reportSuppressedPresses(plan) {
   for (const [suppressed, press] of [
-    [plan.armSuppressed, "arm"],
-    [plan.disarmSuppressed, "disarm"],
+    [plan.armSuppressed || (controlGate.isLatched() && plan.arm), "arm"],
+    [plan.disarmSuppressed || (controlGate.isLatched() && plan.disarm), "disarm"],
   ]) {
     if (!suppressed) continue;
     const reason = motionGateReason();
@@ -2250,6 +2210,7 @@ async function startControl() {
   try {
     const wasmSource = await fetch("./control-runtime_bg.wasm", { cache: "no-cache" });
     state.controlShell = await loadControlShell(wasmSource);
+    if (transportSessions.active !== null) state.controlShell.beginSession();
     log(`control runtime ready (profile revision ${state.controlShell.activationRevision()})`);
   } catch (error) {
     log(`control runtime unavailable: ${error} (run scripts/build-web-instruments.sh)`);
@@ -2259,7 +2220,7 @@ async function startControl() {
 window.addEventListener("pagehide", () => instruments.mod?.dispose(), { once: true });
 applyUrlParams();
 const instrumentsStarted = startInstruments();
-startControl();
+const controlStarted = startControl();
 document.getElementById("fpvBtn").addEventListener("click", () => {
   state.pendingFpvToggle = true;
 });

@@ -2,6 +2,7 @@
 
 use super::ControlRuntime;
 use crate::DEFAULT_PROFILE_BYTES;
+use crate::authority::{AuthorityEvent, AuthorityScope};
 use crate::plan::{AXIS_PITCH, AXIS_YAW, GIMBAL_NEUTRAL_BUTTON, LeaseAction};
 use crate::profile::ProfileRuntime;
 use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
@@ -45,22 +46,20 @@ fn sample(axes: &[f32], pressed: &[usize]) -> RawSample {
     }
 }
 
-fn session(mode: Mode, granted: bool) -> SessionState {
-    session_gen(1, mode, granted)
+fn session(mode: Mode, _granted: bool) -> SessionState {
+    session_gen(1, mode, false)
 }
 
-fn session_gen(generation: u32, mode: Mode, granted: bool) -> SessionState {
+fn session_gen(_generation: u32, mode: Mode, _granted: bool) -> SessionState {
     SessionState {
-        generation,
         now_ms: 100_000.0,
         mode,
         connected: true,
-        lease_granted: granted,
-        lease_denied: false,
-        motion_granted: true,
-        motion_denied: false,
-        motion_recovered: true,
     }
+}
+
+fn grant(runtime: &mut ControlRuntime, scope: AuthorityScope, generation: u64) {
+    runtime.authority_event(scope, AuthorityEvent::LeaseGranted { generation });
 }
 
 fn with_default() -> ControlRuntime {
@@ -70,6 +69,9 @@ fn with_default() -> ControlRuntime {
     assert!(plan.installed, "first activation installs immediately");
     assert_eq!(plan.activation_revision, 1);
     assert!(runtime.is_active());
+    runtime.begin_session();
+    grant(&mut runtime, AuthorityScope::Motion, 1);
+    grant(&mut runtime, AuthorityScope::Gimbal, 1);
     runtime
 }
 
@@ -131,12 +133,17 @@ fn a_grant_does_not_synthesize_an_r3_edge() {
     let mut runtime = with_default();
     let held_r3 = sample(&[0.0, 0.0, 0.0, 0.0], &[11]);
     // R3 held while the lease is not yet granted: baseline advances, no frame.
+    runtime.authority_event(
+        AuthorityScope::Gimbal,
+        AuthorityEvent::LeaseReleased { generation: 1 },
+    );
     let ungranted = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, false));
     assert!(
         ungranted.gimbal.is_none(),
         "no gimbal frame without a lease"
     );
     // The lease is granted with R3 still held: no fresh recenter edge.
+    grant(&mut runtime, AuthorityScope::Gimbal, 2);
     let granted = runtime.evaluate(&held_r3, &session(Mode::QuadPilot, true));
     assert!(
         granted.gimbal.as_ref().expect("gimbal").edges().is_empty(),
@@ -148,8 +155,13 @@ fn a_grant_does_not_synthesize_an_r3_edge() {
 fn flight_requests_the_lease_and_rover_releases_it() {
     let mut runtime = with_default();
     let neutral = sample(&[0.0, 0.0, 0.0, 0.0], &[]);
+    runtime.authority_event(
+        AuthorityScope::Gimbal,
+        AuthorityEvent::LeaseReleased { generation: 1 },
+    );
     let request = runtime.evaluate(&neutral, &session(Mode::QuadPilot, false));
     assert_eq!(request.lease, Some(LeaseAction::Request));
+    grant(&mut runtime, AuthorityScope::Gimbal, 2);
     let rover = runtime.evaluate(&neutral, &session(Mode::Rover, true));
     assert_eq!(rover.lease, Some(LeaseAction::Release));
 }
@@ -239,14 +251,18 @@ fn a_button_held_across_activation_does_not_fire_a_fresh_edge() {
 #[test]
 fn a_control_held_across_reconnect_fires_no_edge() {
     let mut runtime = with_default();
-    // Generation 1: arm (button 9) and R3 (button 11) held; the first tick of
-    // a generation primes the baselines and fires nothing.
+    // Arm (button 9) and R3 (button 11) are held when the run seeds its
+    // baselines, so neither fires.
     let held = sample(&[0.0, 0.0, 0.0, 0.0], &[9, 11]);
     runtime.evaluate(&held, &session_gen(1, Mode::QuadPilot, true));
 
     // Disconnect (no ticks evaluated while disconnected), then reconnect as a
     // NEW generation with both controls STILL held. The first tick under the
     // new generation must fire no arm and no recenter.
+    runtime.begin_session();
+    grant(&mut runtime, AuthorityScope::Motion, 2);
+    grant(&mut runtime, AuthorityScope::Gimbal, 2);
+    runtime.begin_control_run();
     let reconnect = runtime.evaluate(&held, &session_gen(2, Mode::QuadPilot, true));
     assert!(!reconnect.arm, "arm held across reconnect fires no arm");
     assert!(
@@ -295,6 +311,9 @@ fn arm_and_disarm_are_typed_and_follow_the_profile_binding() {
     }"#;
     let mut runtime = ControlRuntime::new();
     runtime.activate(ProfileRuntime::compile(REBOUND.as_bytes()).expect("compiles"));
+    runtime.begin_session();
+    grant(&mut runtime, AuthorityScope::Motion, 1);
+    grant(&mut runtime, AuthorityScope::Gimbal, 1);
     runtime.evaluate(
         &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
         &session(Mode::QuadPilot, true),
@@ -361,6 +380,10 @@ fn a_profile_swap_waits_for_the_candidate_controls_to_be_neutral_too() {
 #[test]
 fn lt_does_not_suppress_flight_without_a_gimbal_lease() {
     let mut runtime = with_default();
+    runtime.authority_event(
+        AuthorityScope::Gimbal,
+        AuthorityEvent::LeaseReleased { generation: 1 },
+    );
     runtime.evaluate(
         &sample(&[0.0, 0.0, 0.0, 0.0], &[]),
         &session(Mode::QuadPilot, false),

@@ -3,6 +3,7 @@
 //! activation burst, so the host clears its link-loss brake before a live
 //! command resumes and nothing publishes on the released generation.
 
+use crate::authority::AuthorityScope;
 use crate::plan::LeaseAction;
 use crate::profile::CompiledProfile;
 use crate::sample::{RawSample, SessionState};
@@ -50,10 +51,6 @@ pub(super) enum MotionOutput {
     Live,
 }
 
-/// A dropped motion release/request is re-emitted after this long without the
-/// session reflecting the expected transition.
-pub(super) const MOTION_LEASE_RETRY_MS: f64 = 250.0;
-
 impl ControlRuntime {
     /// Advances motion-lease reacquisition after a scope-member transfer and
     /// returns any lease action to emit plus what to do with motion output. The
@@ -80,44 +77,57 @@ impl ControlRuntime {
         session: &SessionState,
         active: &CompiledProfile,
     ) -> (Option<LeaseAction>, MotionOutput) {
-        let stalled = session.now_ms - self.motion_action_ms >= MOTION_LEASE_RETRY_MS;
+        let motion = self.authority.state(AuthorityScope::Motion);
         match self.motion_phase {
             // Belt-and-suspenders: even Held never publishes live without a
             // current grant, so a motion frame can never ride an ungranted lease.
-            MotionPhase::Held if session.motion_granted => (None, MotionOutput::Live),
-            MotionPhase::Held | MotionPhase::Denied => (None, MotionOutput::Gated),
+            MotionPhase::Held if motion.granted() => (None, MotionOutput::Live),
+            MotionPhase::Held if motion.denied() => {
+                self.motion_phase = MotionPhase::Denied;
+                (None, MotionOutput::Gated)
+            }
+            MotionPhase::Held => {
+                self.motion_phase = MotionPhase::Reacquiring;
+                let action = self
+                    .authority
+                    .plan(AuthorityScope::Motion, true, session.now_ms);
+                (action, MotionOutput::Gated)
+            }
+            MotionPhase::Denied => (None, MotionOutput::Gated),
             MotionPhase::Releasing => {
-                if !session.motion_granted {
+                if !motion.granted() {
                     // The host has released; only now request the new grant.
                     self.motion_phase = MotionPhase::Reacquiring;
-                    self.motion_action_ms = session.now_ms;
-                    (Some(LeaseAction::Request), MotionOutput::Gated)
-                } else if stalled {
-                    self.motion_action_ms = session.now_ms;
-                    (Some(LeaseAction::Release), MotionOutput::Gated)
+                    let action = self
+                        .authority
+                        .plan(AuthorityScope::Motion, true, session.now_ms);
+                    (action, MotionOutput::Gated)
                 } else {
-                    (None, MotionOutput::Gated)
+                    let action = self
+                        .authority
+                        .plan(AuthorityScope::Motion, false, session.now_ms);
+                    (action, MotionOutput::Gated)
                 }
             }
             MotionPhase::Reacquiring => {
-                if session.motion_denied {
+                if motion.denied() {
                     // A denied reacquire is terminal: stop requesting.
                     self.motion_phase = MotionPhase::Denied;
                     (None, MotionOutput::Gated)
-                } else if session.motion_granted {
+                } else if motion.granted() {
                     // Fresh grant (the shell verified the generation exceeds the
                     // fence): begin the neutral-activation recovery.
                     self.motion_phase = MotionPhase::Neutralizing;
                     (None, MotionOutput::Gated)
-                } else if stalled {
-                    self.motion_action_ms = session.now_ms;
-                    (Some(LeaseAction::Request), MotionOutput::Gated)
                 } else {
-                    (None, MotionOutput::Gated)
+                    let action = self
+                        .authority
+                        .plan(AuthorityScope::Motion, true, session.now_ms);
+                    (action, MotionOutput::Gated)
                 }
             }
             MotionPhase::Neutralizing => {
-                if session.motion_recovered {
+                if motion.recovered() {
                     // The host CONFIRMED it cleared the vehicle's link-loss latch
                     // on this fresh generation: recovery is complete. One final
                     // neutral this tick, then live resumes.

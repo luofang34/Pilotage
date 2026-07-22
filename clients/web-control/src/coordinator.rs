@@ -9,6 +9,7 @@
 
 use pilotage_input::ProfileLayer;
 
+use crate::authority::{AuthorityDisposition, AuthorityEvent, AuthorityScope, AuthorityState};
 use crate::device::{CompiledDevice, DeviceStage, SelectOutcome};
 
 /// Which physical source currently drives control — the identity the
@@ -66,6 +67,41 @@ impl ControlCoordinator {
             seen_revision: 0,
             last_pad_id: String::new(),
         }
+    }
+
+    /// Starts a fresh transport session and clears every authority slot.
+    pub fn begin_session(&mut self) {
+        self.runtime.begin_session();
+    }
+
+    /// Re-seeds discrete controls before a live datagram run starts.
+    pub fn begin_control_run(&mut self) {
+        self.runtime.begin_control_run();
+    }
+
+    /// Applies one filtered reliable-stream authority event.
+    pub fn authority_event(
+        &mut self,
+        scope: AuthorityScope,
+        event: AuthorityEvent,
+    ) -> AuthorityDisposition {
+        self.runtime.authority_event(scope, event)
+    }
+
+    /// Returns the authoritative state of one scope.
+    #[must_use]
+    pub fn authority_state(&self, scope: AuthorityScope) -> AuthorityState {
+        self.runtime.authority_state(scope)
+    }
+
+    /// Plans an explicit lease intent outside the per-tick input loop.
+    pub fn plan_authority(
+        &mut self,
+        scope: AuthorityScope,
+        desired: bool,
+        now_ms: f64,
+    ) -> Option<crate::plan::LeaseAction> {
+        self.runtime.plan_authority(scope, desired, now_ms)
     }
 
     /// Compiles and activates candidate scheme bytes through the same

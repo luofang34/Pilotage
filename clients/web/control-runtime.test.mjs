@@ -29,16 +29,52 @@ function check(name, ok, got) {
 
 function toSession(session) {
   return {
-    generation: session.generation ?? 1,
     mode: session.mode,
     connected: true,
-    leaseGranted: session.gimbalGranted ?? false,
-    leaseDenied: session.gimbalDenied ?? false,
-    motionGranted: session.motionGranted ?? true,
-    motionDenied: session.motionDenied ?? false,
-    motionRecovered: session.motionRecovered ?? true,
     nowMs: 100_000,
   };
+}
+
+function syncScope(shell, scope, granted, denied, generation) {
+  const current = shell.authority(scope);
+  if (denied && !current.denied) {
+    shell.authorityEvent(scope, "denial");
+  } else if (granted && !current.granted && !current.denied) {
+    const result = shell.authorityEvent(scope, "grant", { generation });
+    if (result === "stale") {
+      shell.authorityEvent(scope, "grant", { generation: current.generation + 1n });
+    }
+  } else if (!granted && current.granted) {
+    shell.authorityEvent(scope, "release", { generation: current.generation });
+  }
+}
+
+function syncAuthority(shell, session, tracker) {
+  const generation = BigInt(session.generation ?? 1);
+  const freshSession = tracker.generation !== generation;
+  if (freshSession) {
+    shell.beginSession();
+    tracker.generation = generation;
+  }
+  syncScope(
+    shell,
+    "motion",
+    session.motionGranted ?? true,
+    session.motionDenied ?? false,
+    generation,
+  );
+  syncScope(
+    shell,
+    "gimbal",
+    session.gimbalGranted ?? false,
+    session.gimbalDenied ?? false,
+    generation,
+  );
+  const motion = shell.authority("motion");
+  if ((session.motionRecovered ?? true) && motion.granted && !motion.recovered) {
+    shell.authorityEvent("motion", "recovery", { generation: motion.generation });
+  }
+  if (freshSession) shell.beginControlRun();
 }
 
 function toPad(pad) {
@@ -109,7 +145,7 @@ function checkPlan(expect, plan, ctx) {
   }
 }
 
-function runStep(shell, step, ctx) {
+function runStep(shell, step, ctx, authorityTracker) {
   const expect = step.expect ?? {};
   if (step.selectDevice !== undefined) {
     const got = shell.selectDevice(step.selectDevice) ?? "refused";
@@ -135,6 +171,7 @@ function runStep(shell, step, ctx) {
   }
   if (step.clearKeys) shell.clearKeys();
   if (step.session) {
+    syncAuthority(shell, step.session, authorityTracker);
     const session = toSession(step.session);
     const plan = step.pad
       ? shell.tickFromPad(toPad(step.pad), session)
@@ -158,8 +195,9 @@ for (const group of vectors.groups) {
   // profile — the same reset rule the native harness applies.
   const shell = await loadControlShell(wasmBytes);
   check(`${group.name}: default profile activated`, shell.activationRevision() === 1);
+  const authorityTracker = { generation: null };
   group.steps.forEach((step, index) => {
-    runStep(shell, step, `${group.name} / step ${index + 1}`);
+    runStep(shell, step, `${group.name} / step ${index + 1}`, authorityTracker);
   });
 }
 
@@ -174,7 +212,10 @@ for (const group of vectors.groups) {
     motion !== null && Object.values(motion).some((value) => value !== 0);
   const isNeutral = (motion) =>
     motion !== null && Object.values(motion).every((value) => value === 0);
-  const live = toSession({ mode: "quad-pilot", generation: 1, motionRecovered: true });
+  const live = toSession({ mode: "quad-pilot" });
+  shell.beginSession();
+  shell.authorityEvent("motion", "grant", { generation: 1n });
+  shell.beginControlRun();
   shell.tickFromKeys(live);
   shell.keyEvent("ArrowUp", true);
   check(
@@ -182,21 +223,15 @@ for (const group of vectors.groups) {
     deflects(shell.tickFromKeys(live).motion),
   );
 
-  const suspended = toSession({
-    mode: "quad-pilot",
-    generation: 1,
-    motionGranted: false,
-    motionRecovered: false,
-  });
+  shell.authorityEvent("motion", "release", { generation: 1n });
+  const suspended = toSession({ mode: "quad-pilot" });
   check("same-session resume: suspension gates motion", shell.tickFromKeys(suspended).motion === null);
   // The arm key goes down while control is suspended (no ticks run).
   shell.keyEvent("Enter", true);
 
-  const regranted = toSession({
-    mode: "quad-pilot",
-    generation: 2,
-    motionRecovered: false,
-  });
+  shell.authorityEvent("motion", "grant", { generation: 2n });
+  shell.beginControlRun();
+  const regranted = toSession({ mode: "quad-pilot" });
   const primed = shell.tickFromKeys(regranted);
   check(
     "same-session resume: a held deflection cannot publish on regrant",
@@ -218,7 +253,8 @@ for (const group of vectors.groups) {
     shell.tickFromKeys(regranted).motion === null,
   );
 
-  const confirmed = toSession({ mode: "quad-pilot", generation: 2, motionRecovered: true });
+  shell.authorityEvent("motion", "recovery", { generation: 2n });
+  const confirmed = toSession({ mode: "quad-pilot" });
   check(
     "same-session resume: confirmation completes with one final neutral",
     isNeutral(shell.tickFromKeys(confirmed).motion),
@@ -233,6 +269,53 @@ for (const group of vectors.groups) {
     "same-session resume: a fresh arm press after recovery arms (positive control)",
     shell.tickFromKeys(confirmed).arm === true,
   );
+}
+
+// The wasm seam mirrors the native table guardrails: every scope fences,
+// denial is terminal, modular wrap is fresh, and enactment truth latches.
+{
+  const shell = await loadControlShell(wasmBytes);
+  for (const scope of ["motion", "gimbal", "lifecycle"]) {
+    shell.beginSession();
+    shell.authorityEvent(scope, "grant", { generation: 7n });
+    shell.authorityEvent(scope, "release", { generation: 9n });
+    check(
+      `authority table: ${scope} rejects its fenced generation`,
+      shell.authorityEvent(scope, "grant", { generation: 9n }) === "stale" &&
+        shell.authority(scope).granted === false,
+    );
+    shell.authorityEvent(scope, "grant", { generation: 10n });
+    check(
+      `authority table: ${scope} ignores a delayed older fence`,
+      shell.authorityEvent(scope, "release", { generation: 9n }) === "ignored" &&
+        shell.authority(scope).generation === 10n,
+    );
+  }
+
+  shell.beginSession();
+  shell.authorityEvent("motion", "grant", { generation: (1n << 64n) - 1n });
+  shell.authorityEvent("motion", "release", { generation: (1n << 64n) - 1n });
+  check(
+    "authority table: generation wrap is accepted",
+    shell.authorityEvent("motion", "grant", { generation: 0n }) === "applied",
+  );
+  shell.authorityEvent("motion", "denial");
+  check(
+    "authority table: denial is terminal for the session",
+    shell.authorityEvent("motion", "grant", { generation: 1n }) === "ignored" &&
+      shell.authority("motion").denied,
+  );
+
+  shell.beginSession();
+  shell.authorityEvent("motion", "uplinkIdle");
+  check("authority table: idle uplink needs arm", shell.authority("motion").needsArm);
+  shell.authorityEvent("motion", "actionResult", { detail: 1, accepted: true });
+  check(
+    "authority table: accepted arm clears needs-arm",
+    shell.authority("motion").needsArm === false,
+  );
+  shell.authorityEvent("motion", "actionResult", { detail: 2, accepted: true });
+  check("authority table: accepted disarm restores needs-arm", shell.authority("motion").needsArm);
 }
 
 // Operator-facing arm/disarm hints come from profile data, renamed by the

@@ -7,44 +7,47 @@
 //! never publishes on the released generation and never resumes on the hope a
 //! best-effort datagram arrived. A denied reacquire is terminal.
 
-use super::{SECOND_PROFILE, sample, session, session_gen, with_default};
+use super::{SECOND_PROFILE, grant, sample, session, session_gen, with_default};
+use crate::authority::{AuthorityEvent, AuthorityScope};
 use crate::plan::LeaseAction;
 use crate::profile::ProfileRuntime;
 use crate::sample::{Mode, RawSample, SessionState};
 
 /// A session whose MOTION lease grant is set explicitly.
-fn session_motion(mode: Mode, granted: bool, motion_granted: bool) -> SessionState {
-    SessionState {
-        motion_granted,
-        ..session(mode, granted)
-    }
+fn session_motion(mode: Mode, granted: bool, _motion_granted: bool) -> SessionState {
+    session(mode, granted)
 }
 
 /// A session at an explicit clock, for exercising the reacquisition retry.
 fn session_at(now_ms: f64, mode: Mode, granted: bool, motion_granted: bool) -> SessionState {
-    SessionState {
-        now_ms,
-        ..session_motion(mode, granted, motion_granted)
-    }
+    let mut state = session_motion(mode, granted, motion_granted);
+    state.now_ms = now_ms;
+    state
 }
 
 /// A session whose motion reacquire was DENIED by the host.
 fn session_denied(now_ms: f64, mode: Mode) -> SessionState {
-    SessionState {
-        now_ms,
-        motion_denied: true,
-        ..session_motion(mode, true, false)
-    }
+    session_at(now_ms, mode, true, false)
 }
 
 /// A session mid-recovery: the motion lease is granted, with the host's
 /// link-loss-cleared confirmation (`motion_recovered`) set explicitly.
-fn recovering(motion_granted: bool, motion_recovered: bool) -> SessionState {
-    SessionState {
-        motion_granted,
-        motion_recovered,
-        ..session(Mode::QuadPilot, true)
-    }
+fn recovering(_motion_granted: bool, _motion_recovered: bool) -> SessionState {
+    session(Mode::QuadPilot, true)
+}
+
+fn release_motion(runtime: &mut super::ControlRuntime, generation: u64) {
+    runtime.authority_event(
+        AuthorityScope::Motion,
+        AuthorityEvent::LeaseReleased { generation },
+    );
+}
+
+fn recover_motion(runtime: &mut super::ControlRuntime, generation: u64) {
+    runtime.authority_event(
+        AuthorityScope::Motion,
+        AuthorityEvent::LinkLossCleared { generation },
+    );
 }
 
 fn deflected() -> RawSample {
@@ -104,10 +107,10 @@ fn a_same_scope_activation_retains_authority_and_requires_installed_neutral() {
 fn an_unrecovered_fresh_generation_reenters_neutral_activation_recovery() {
     let mut runtime = with_default();
     runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
-    let unrecovered = SessionState {
-        motion_recovered: false,
-        ..session_gen(2, Mode::QuadPilot, true)
-    };
+    release_motion(&mut runtime, 1);
+    grant(&mut runtime, AuthorityScope::Motion, 2);
+    runtime.begin_control_run();
+    let unrecovered = session_gen(2, Mode::QuadPilot, true);
 
     // The regrant after an input-loss suspension arrives on a fresh
     // generation with the link-loss clearance still outstanding: a held
@@ -126,6 +129,7 @@ fn an_unrecovered_fresh_generation_reenters_neutral_activation_recovery() {
     );
 
     // Host confirmation: one final neutral, then live publishes.
+    recover_motion(&mut runtime, 2);
     let confirmed = runtime.evaluate(&deflected(), &session_gen(2, Mode::QuadPilot, true));
     assert!(
         is_neutral_motion(&confirmed),
@@ -142,15 +146,15 @@ fn an_unrecovered_fresh_generation_reenters_neutral_activation_recovery() {
 fn a_button_pressed_while_suspended_fires_no_edge_on_the_fresh_generation() {
     let mut runtime = with_default();
     runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
+    release_motion(&mut runtime, 1);
+    grant(&mut runtime, AuthorityScope::Motion, 2);
+    runtime.begin_control_run();
 
     // The arm button (9) went down while control was suspended (no ticks).
     // The fresh generation's first tick seeds the baseline from the held
     // state, so the press cannot fire; recovery gates it regardless.
     let arm_held = sample(&[0.0; 4], &[9]);
-    let unrecovered = SessionState {
-        motion_recovered: false,
-        ..session_gen(2, Mode::QuadPilot, true)
-    };
+    let unrecovered = session_gen(2, Mode::QuadPilot, true);
     let primed = runtime.evaluate(&arm_held, &unrecovered);
     assert!(
         !primed.arm,
@@ -163,6 +167,7 @@ fn a_button_pressed_while_suspended_fires_no_edge_on_the_fresh_generation() {
 
     // Released and pressed again after the host confirmed: a genuine edge.
     runtime.evaluate(&neutral(), &unrecovered);
+    recover_motion(&mut runtime, 2);
     runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
     runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
     let fresh_press = runtime.evaluate(&arm_held, &session_gen(2, Mode::QuadPilot, true));
@@ -178,6 +183,10 @@ fn a_fresh_session_voids_a_pending_transfer_release() {
     // fresh session's lease on its behalf.
     runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
     assert!(runtime.reactivate());
+    runtime.begin_session();
+    grant(&mut runtime, AuthorityScope::Motion, 2);
+    grant(&mut runtime, AuthorityScope::Gimbal, 2);
+    runtime.begin_control_run();
 
     let installed = runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
     assert_eq!(
@@ -222,12 +231,14 @@ fn a_live_switch_recovers_only_when_the_host_confirms() {
     assert_eq!(install.motion_lease, Some(LeaseAction::Release));
 
     // Release lands → request; live output is gated throughout.
+    release_motion(&mut runtime, 1);
     let req = runtime.evaluate(&deflected(), &session_motion(Mode::QuadPilot, true, false));
     assert_eq!(req.motion_lease, Some(LeaseAction::Request));
     assert!(req.motion.is_none(), "gated while reacquiring");
 
     // Regranted, but the operator is STILL deflected: motion stays fully gated
     // (no live command, no neutral activation while deflected).
+    grant(&mut runtime, AuthorityScope::Motion, 2);
     assert!(
         runtime
             .evaluate(&deflected(), &recovering(true, false))
@@ -257,6 +268,7 @@ fn a_live_switch_recovers_only_when_the_host_confirms() {
 
     // The host CONFIRMS it cleared the vehicle's link-loss latch: a final
     // neutral this tick, then live resumes with the operator already neutral.
+    recover_motion(&mut runtime, 2);
     let confirmed = runtime.evaluate(&neutral(), &recovering(true, true));
     assert!(
         is_neutral_motion(&confirmed),
@@ -279,6 +291,7 @@ fn a_denied_motion_reacquire_is_terminal() {
     assert!(runtime.reactivate());
     // Install (Releasing) at t=1000, then the release lands → request at t=1010.
     runtime.evaluate(&neutral(), &session_at(1000.0, Mode::QuadPilot, true, true));
+    release_motion(&mut runtime, 1);
     let req = runtime.evaluate(
         &neutral(),
         &session_at(1010.0, Mode::QuadPilot, true, false),
@@ -286,6 +299,7 @@ fn a_denied_motion_reacquire_is_terminal() {
     assert_eq!(req.motion_lease, Some(LeaseAction::Request));
 
     // The host DENIES the reacquire: terminal — no re-request, motion gated.
+    runtime.authority_event(AuthorityScope::Motion, AuthorityEvent::LeaseDenied);
     let denied = runtime.evaluate(&deflected(), &session_denied(1020.0, Mode::QuadPilot));
     assert_eq!(denied.motion_lease, None, "a denial stops requesting");
     assert!(denied.motion.is_none(), "denied motion is gated");
@@ -306,6 +320,7 @@ fn a_dropped_motion_reacquire_request_is_retried() {
     // Install at t=1000 (motion still granted): the runtime enters Releasing.
     runtime.evaluate(&neutral(), &session_at(1000.0, Mode::QuadPilot, true, true));
     // Release lands at t=1010: the request is emitted and the clock recorded.
+    release_motion(&mut runtime, 1);
     let req = runtime.evaluate(
         &neutral(),
         &session_at(1010.0, Mode::QuadPilot, true, false),
@@ -358,6 +373,7 @@ fn a_deflected_scope_transfer_waits_after_the_motion_release_lands() {
 
     // Once the motion release is reflected, motion waits silently while the
     // independent gimbal scope continues its neutral stream.
+    release_motion(&mut runtime, 1);
     for now_ms in [1066.0, 1100.0, 2000.0, 30_000.0] {
         let waiting = runtime.evaluate(
             &deflected(),
@@ -406,6 +422,7 @@ fn a_lost_handover_release_is_retried_on_the_window_not_per_tick() {
 #[test]
 fn a_gated_arm_press_is_reported_suppressed_not_silent() {
     let mut runtime = with_default();
+    runtime.begin_session();
     // Prime the generation's edge baselines with nothing held, ungranted.
     runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, false, false));
     // A fresh arm press while gated: no arm action, but a suppression report —
@@ -427,6 +444,8 @@ fn a_gated_arm_press_is_reported_suppressed_not_silent() {
         "a held press reports once"
     );
     // Release, regrant, press again: the arm fires live with no report.
+    grant(&mut runtime, AuthorityScope::Motion, 1);
+    runtime.begin_control_run();
     runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, false, true));
     let live = runtime.evaluate(
         &sample(&[0.0, 0.0, 0.0, 0.0], &[9]),
@@ -437,6 +456,10 @@ fn a_gated_arm_press_is_reported_suppressed_not_silent() {
         "a granted press arms live"
     );
     // Disarm mirrors the same contract.
+    runtime.authority_event(
+        AuthorityScope::Motion,
+        AuthorityEvent::Revoked { generation: 1 },
+    );
     runtime.evaluate(&neutral(), &session_motion(Mode::QuadPilot, false, false));
     let disarm = runtime.evaluate(
         &sample(&[0.0, 0.0, 0.0, 0.0], &[8]),

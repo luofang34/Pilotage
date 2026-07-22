@@ -1,12 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::{
-    GimbalDemand, LEASE_DEBOUNCE_MS, LeasePlan, frame_plan, gimbal_demand, lease_plan,
-    modifier_held, reset_edge,
-};
+use super::{GimbalDemand, frame_plan, gimbal_demand, modifier_held, reset_edge};
 use crate::DEFAULT_PROFILE_BYTES;
 use crate::profile::{CompiledProfile, ProfileRuntime};
-use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
+use crate::sample::{ButtonSample, RawSample};
 
 fn profile() -> CompiledProfile {
     ProfileRuntime::compile(DEFAULT_PROFILE_BYTES).expect("default compiles")
@@ -24,20 +21,6 @@ fn sample(axes: &[f32], pressed: &[usize]) -> RawSample {
     RawSample {
         axes: axes.to_vec(),
         buttons,
-    }
-}
-
-fn session(mode: Mode, granted: bool, denied: bool, now_ms: f64) -> SessionState {
-    SessionState {
-        generation: 1,
-        now_ms,
-        mode,
-        connected: true,
-        lease_granted: granted,
-        lease_denied: denied,
-        motion_granted: true,
-        motion_denied: false,
-        motion_recovered: true,
     }
 }
 
@@ -124,53 +107,4 @@ fn the_frame_plan_streams_holds_and_exits_neutral() {
     // A recenter edge alone produces a neutral frame carrying the recenter.
     let recenter = frame_plan(false, true, false, GimbalDemand::default()).expect("recenter");
     assert!(recenter.recenter);
-}
-
-#[test]
-fn the_lease_plan_requests_debounces_and_releases() {
-    let p_request = lease_plan(
-        &session(Mode::QuadPilot, false, false, 5000.0),
-        f64::NEG_INFINITY,
-    );
-    assert_eq!(p_request, LeasePlan::Request, "a flight mode requests");
-    // A request one millisecond inside the debounce window is suppressed;
-    // one just outside it is allowed.
-    let inside = lease_plan(
-        &session(Mode::QuadPilot, false, false, 5000.0),
-        5000.0 - LEASE_DEBOUNCE_MS + 1.0,
-    );
-    assert_eq!(inside, LeasePlan::None, "a fresh request debounces");
-    let outside = lease_plan(
-        &session(Mode::QuadPilot, false, false, 5000.0),
-        5000.0 - LEASE_DEBOUNCE_MS - 1.0,
-    );
-    assert_eq!(
-        outside,
-        LeasePlan::Request,
-        "past the debounce window it re-requests"
-    );
-    assert_eq!(
-        lease_plan(
-            &session(Mode::QuadPilot, true, false, 5000.0),
-            f64::NEG_INFINITY
-        ),
-        LeasePlan::None,
-        "a granted lease is not re-requested"
-    );
-    assert_eq!(
-        lease_plan(
-            &session(Mode::QuadPilot, false, true, 5000.0),
-            f64::NEG_INFINITY
-        ),
-        LeasePlan::None,
-        "a denied scope is never re-requested"
-    );
-    assert_eq!(
-        lease_plan(
-            &session(Mode::Rover, true, false, 5000.0),
-            f64::NEG_INFINITY
-        ),
-        LeasePlan::Release,
-        "rover releases a held lease"
-    );
 }

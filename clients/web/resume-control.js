@@ -36,6 +36,20 @@ export async function resumeSessionControl({
   return { requested: true, interrupted: false };
 }
 
+/** Why the authority table refused to plan the resume's motion request.
+ *  Denial is terminal for the session, and a still-granted slot means the
+ *  release acknowledgement never landed (the host watchdog covers the lost
+ *  ack host-side). Neither resolves in place, so the resume fails loudly
+ *  with this reason instead of waiting for a response that cannot come. */
+export function resumeRefusalReason({ granted, denied }) {
+  const reason = denied
+    ? "motion lease denied this session"
+    : granted
+      ? "release unacknowledged"
+      : "no motion request plannable";
+  return `${reason}; press Connect for a fresh session`;
+}
+
 /** Decides how a mid-session motion grant completes a pending resume. */
 export function resumeGrantDecision({ pending, granted, sessionLive, mayPublish }) {
   if (!pending) return "unrelated";
