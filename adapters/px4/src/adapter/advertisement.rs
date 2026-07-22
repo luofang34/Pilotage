@@ -11,7 +11,7 @@ use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame,
 
 use super::{
     ARM_BUTTON, DISARM_BUTTON, FLIGHT_SCOPE, GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE, PITCH_AXIS,
-    Px4Adapter, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    Px4Adapter, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
 
 impl Px4Adapter {
@@ -28,6 +28,10 @@ impl Px4Adapter {
                     let mut scopes = Vec::new();
                     if self.uplink.is_some() {
                         scopes.push(flight_scope_descriptor());
+                        // This adapter implements only the SIMULATION
+                        // profile today; a physical-vehicle profile must
+                        // NOT advertise the lifecycle scope (SIM-01).
+                        scopes.push(pilotage_adapter_api::sim_lifecycle_descriptor());
                     }
                     if self.gimbal.is_some() {
                         scopes.push(gimbal_scope_descriptor());
@@ -63,6 +67,8 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             max_vertical: crate::uplink::MAX_VERTICAL_MPS,
             max_angular: crate::uplink::MAX_YAW_RATE_RPS,
         }],
+        // No sim reset here: a lifecycle action under the separately
+        // leased `sim.lifecycle` scope, never flight authority.
         actions: vec![
             ActionCapability {
                 action: ActionKind::Arm,
@@ -70,10 +76,6 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             },
             ActionCapability {
                 action: ActionKind::Disarm,
-                mode_targets: vec![],
-            },
-            ActionCapability {
-                action: ActionKind::SimReset,
                 mode_targets: vec![],
             },
         ],
@@ -97,7 +99,6 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             }),
             arm_button: Some(ARM_BUTTON),
             disarm_button: Some(DISARM_BUTTON),
-            reset_button: Some(RESET_BUTTON),
         }),
     }
 }

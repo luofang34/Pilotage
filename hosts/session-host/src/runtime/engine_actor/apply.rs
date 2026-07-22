@@ -44,7 +44,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 detail: result.detail,
                 action_id,
             };
-            self.action_dedup.record(client, full.clone());
+            self.action_dedup.record(client, &frame, full.clone());
             let envelope = pilotage_session::OutboundMessage::ControlActionResult(full);
             let message = to_connection_message(&envelope);
             self.send_to(client, message, MessageClass::Unicast);

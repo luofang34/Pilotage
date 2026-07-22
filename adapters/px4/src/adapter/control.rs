@@ -140,11 +140,6 @@ impl Px4Adapter {
                 RejectReason::Other("the flight scope consumes typed commands only".to_owned()),
             ));
         }
-        // The link-loss latch is checked per-scope in `apply_control` before
-        // routing, so a gimbal failsafe never suppresses motion.
-        if has_action(frame, ActionKind::SimReset) {
-            self.spawn_reset();
-        }
         // Disarm is handled before the commanded-reset latch, but only
         // after the link-loss gate above has admitted the frame.
         if has_action(frame, ActionKind::Disarm) {
@@ -213,5 +208,36 @@ fn run_reset_command() {
     tracing::info!(%script, "simulation reset requested from the viewer");
     if let Err(error) = std::process::Command::new(&script).spawn() {
         tracing::warn!(%error, %script, "reset script failed to spawn");
+    }
+}
+
+impl super::Px4Adapter {
+    /// The simulator lifecycle scope: `SimReset` under its OWN lease
+    /// (SIM-01) — flight authority neither grants nor implies it. Only a
+    /// simulation-profile adapter advertises this scope; anything but a
+    /// reset is refused defensively.
+    pub(super) fn apply_sim_lifecycle(
+        &mut self,
+        frame: &pilotage_protocol::ScopedControlFrame,
+        tick: pilotage_timing::SimTick,
+    ) -> pilotage_adapter_api::ApplyOutcome {
+        let mut action_results = Vec::with_capacity(frame.actions.len());
+        for action in &frame.actions {
+            match action.kind() {
+                pilotage_protocol::ActionKind::SimReset => {
+                    self.spawn_reset();
+                    action_results.push(pilotage_adapter_api::ActionResult::accepted(*action));
+                }
+                _ => action_results.push(pilotage_adapter_api::ActionResult::rejected(
+                    *action,
+                    "only sim reset lives on the lifecycle scope",
+                )),
+            }
+        }
+        pilotage_adapter_api::ApplyOutcome {
+            tick,
+            disposition: pilotage_adapter_api::Disposition::Accepted,
+            action_results,
+        }
     }
 }

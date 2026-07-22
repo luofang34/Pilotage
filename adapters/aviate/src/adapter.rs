@@ -56,9 +56,6 @@ pub const YAW_AXIS: u16 = 3;
 pub const ARM_BUTTON: u16 = 0;
 /// Logical button whose press disarms the vehicle.
 pub const DISARM_BUTTON: u16 = 1;
-/// Logical button whose press resets the simulation (runs the reset
-/// script; SITL-only convenience).
-pub const RESET_BUTTON: u16 = 2;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -245,10 +242,7 @@ fn process_flight_actions(
                     "no mode requests: direct flight is the vehicle.motion.direct scope",
                 ));
             }
-            ControlAction::SimReset => {
-                action_results.push(ActionResult::accepted(*action));
-            }
-            ControlAction::Disarm | ControlAction::GimbalRecenter => {
+            ControlAction::SimReset | ControlAction::Disarm | ControlAction::GimbalRecenter => {
                 action_results.push(ActionResult::rejected(
                     *action,
                     "not supported on the flight scope",
@@ -266,6 +260,9 @@ impl VehicleAdapter for AviateAdapter {
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
+        if frame.scope.as_str() == pilotage_adapter_api::SIM_LIFECYCLE_SCOPE {
+            return self.apply_sim_lifecycle(frame, tick);
+        }
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }

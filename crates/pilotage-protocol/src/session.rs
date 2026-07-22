@@ -197,6 +197,10 @@ pub enum FrameRejectionReason {
     /// announced profile activation (or nothing was announced): the frame
     /// cannot be bound to profile evidence, so it is not applied.
     ProfileMismatch,
+    /// A datagram frame carried typed discrete actions. Actions ride ONLY
+    /// the reliable ordered session stream — a dropped or reordered edge
+    /// changes meaning, so the droppable channel refuses them whole.
+    ActionOnDatagram,
     /// A legacy payload omitted an axis its scope's translation routes;
     /// the structurally total translation would turn "no update" into an
     /// explicit neutral, so partial legacy coverage is rejected.
@@ -242,6 +246,29 @@ pub struct ControlActionResult {
     pub detail: String,
     /// Echoes the request's correlation id (zero when it carried none), so a
     /// retransmitting sender resolves exactly the press this answers.
+    pub action_id: u32,
+}
+
+/// A typed discrete action on the RELIABLE ordered session stream
+/// (CTRL-01): actions never ride droppable datagrams — loss, duplication,
+/// or reordering changes their meaning. The full authority binding travels
+/// with the request and the host validates every field against its own
+/// records before the adapter sees the action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlActionCommand {
+    /// The sender's session, validated against the connection's own.
+    pub session: crate::ids::SessionId,
+    /// The vehicle addressed.
+    pub vehicle: VehicleId,
+    /// The control scope the sender must hold.
+    pub scope: ScopeId,
+    /// The fencing generation the sender holds the scope at.
+    pub generation: Generation,
+    /// The sender's announced activation revision (INPUT-01 binding).
+    pub activation_revision: u32,
+    /// The action commanded.
+    pub action: crate::intent::ControlAction,
+    /// Nonzero correlation id echoed by the answering result.
     pub action_id: u32,
 }
 

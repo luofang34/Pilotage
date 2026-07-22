@@ -21,6 +21,7 @@ import {
   encodeLeaseRequestEnvelope,
   encodeLeaseReleaseEnvelope,
   encodeControlFrameEnvelope,
+  encodeControlActionCommandEnvelope,
   encodeProfileActivationEnvelope,
   decodeLengthDelimitedEnvelope,
   STREAM_KIND_AUTHORITY,
@@ -60,7 +61,7 @@ import {
   ACTION_TIMEOUT_MS,
   createActionTracker,
   enqueueAction,
-  frameActions,
+  expirePending,
   pendingModeTarget,
   resolveAction,
 } from "./action-tracker.js";
@@ -100,6 +101,10 @@ const MOTION_SCOPE = "vehicle.motion";
 const DIRECT_SCOPE = "vehicle.motion.direct";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
 const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/yaw LOS rate demands, leased separately.
+// The simulator lifecycle scope (SIM-01): SimReset lives here — and only
+// here — under its own on-demand lease. Flight authority neither grants
+// nor implies it, and a live/RF host never advertises it.
+const SIM_LIFECYCLE_SCOPE = "sim.lifecycle";
 
 const els = {
   host: document.getElementById("host"),
@@ -165,6 +170,10 @@ const state = {
   // the direct scope.
   fpvHeading: 0,
   lastDirectFrameMs: 0,
+  // The sim-lifecycle scope's on-demand authority: leased just long enough
+  // to command a reset, released when the result lands (a held-but-silent
+  // scope would only feed the host's silence watchdog).
+  lifecycle: { granted: false, generation: 0n, pendingPress: false },
   // The typed capability negotiation from ServerWelcome: every advertised
   // scope with its intent families, limits, and actions. Control fails
   // closed (no motion frames) until the motion scope advertises velocity.
@@ -718,6 +727,25 @@ async function runSessionStreamReader(reader, token) {
       }
       if (
         decoded.kind === "LeaseResponse" &&
+        decoded.message.scope === SIM_LIFECYCLE_SCOPE &&
+        decoded.message.vehicleId === VEHICLE_ID
+      ) {
+        const m = decoded.message;
+        state.lifecycle.granted = !!m.granted;
+        state.lifecycle.generation = BigInt(m.generation || 0);
+        log(`LeaseResponse[lifecycle]: granted=${m.granted} generation=${m.generation}`);
+        if (m.granted && state.lifecycle.pendingPress) {
+          state.lifecycle.pendingPress = false;
+          if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
+            log("simulation reset requested");
+          }
+        } else if (!m.granted) {
+          state.lifecycle.pendingPress = false;
+          log(`sim reset authorization denied (reason ${m.reason})`);
+        }
+      }
+      if (
+        decoded.kind === "LeaseResponse" &&
         decoded.message.scope === state.motionScope &&
         decoded.message.vehicleId === VEHICLE_ID
       ) {
@@ -782,6 +810,7 @@ function handleBootstrapMessage(decoded, token) {
     state.pendingMotionScope = null;
     state.releasedMotionScopes = new Set();
     state.fpvActive = false;
+    state.lifecycle = { granted: false, generation: 0n, pendingPress: false };
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
     for (const scope of state.advertisedScopes) {
       const families = scope.intents.map((i) => i.family).join(",");
@@ -1137,7 +1166,13 @@ async function readTelemetryDatagrams(transport, token) {
       } else if (decoded.kind === "Pong") {
         // RTT probing is out of scope for this demo viewer; ignored.
       } else if (decoded.kind === "FrameRejected") {
-        log(`control frame rejected (reason ${decoded.message.reason})`);
+        const r = decoded.message;
+        log(
+          `control frame rejected (reason ${r.reason}) scope=${r.scope} ` +
+            `seq=${r.sequence} hostGen=${r.currentGeneration} ` +
+            `ourGen=${r.scope === state.motionScope ? state.generation : state.gimbalGeneration} ` +
+            `granted=${r.scope === state.motionScope ? state.leaseGranted : state.gimbalLeaseGranted}`,
+        );
       }
     }
   } finally {
@@ -1275,6 +1310,11 @@ async function runControlLoop(writer, token) {
         ? state.controlShell.tickFromPad(pad, sessionState)
         : state.controlShell.tickFromKeys(sessionState);
       updateControlReadout(pad, mode, plan);
+      reportExpiredActions();
+      if (state.pendingReset) {
+        state.pendingReset = false;
+        requestSimReset();
+      }
       // A completed device-swap handover advances the activation revision;
       // the re-announcement must ride the reliable stream before the swap's
       // lease reacquisition (queued below via plan.motionLease) so frames
@@ -1308,16 +1348,69 @@ function velocityCapabilityFor(scope) {
   return capabilityFor(state.advertisedScopes, VEHICLE_ID, scope, INTENT_FAMILY_VELOCITY);
 }
 
+/** The fencing generation the client holds `scope` at — the binding every
+ *  action command carries. */
+function generationForScope(scope) {
+  if (scope === GIMBAL_SCOPE) return state.gimbalGeneration;
+  if (scope === SIM_LIFECYCLE_SCOPE) return state.lifecycle.generation;
+  return state.generation;
+}
+
+/** The reset press: a LIFECYCLE action under its own lease (SIM-01), never
+ *  flight authority. Leases the scope on demand, sends the reset once
+ *  granted, and releases when the result lands. */
+function requestSimReset() {
+  if (!actionAdvertised(state.advertisedScopes, VEHICLE_ID, SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
+    log("sim reset not advertised (not a simulator host); not sent");
+    return;
+  }
+  if (state.lifecycle.granted) {
+    if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
+      log("simulation reset requested");
+    }
+    return;
+  }
+  state.lifecycle.pendingPress = true;
+  const writer = state.sessionWriter;
+  if (!writer) return;
+  const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: SIM_LIFECYCLE_SCOPE });
+  writer.write(lengthDelimit(request)).catch(() => {});
+  log(`sent LeaseRequest for ${SIM_LIFECYCLE_SCOPE} (reset authorization)`);
+}
+
 /** Gates a press on the vehicle's advertisement (CTRL-01: nothing sends
  *  without a matching capability — a suppressed press is logged so the
- *  operator sees WHY nothing fired), then enqueues it for reliable
- *  delivery: it rides every outgoing frame for `scope` until acked. */
+ *  operator sees WHY nothing fired), then sends it ONCE as a
+ *  `ControlActionCommand` on the RELIABLE ordered session stream, bound to
+ *  the session, vehicle, scope, held generation, and announced activation
+ *  revision. The press stays pending until its result echoes the id. */
 function requestAction(scope, action, modeTarget, cancels = []) {
   if (!actionAdvertised(state.advertisedScopes, VEHICLE_ID, scope, action, modeTarget)) {
     log(`action ${action} not advertised for ${scope}; not sent`);
     return false;
   }
-  enqueueAction(state.actionTracker, scope, action, performance.now(), { modeTarget, cancels });
+  const writer = state.sessionWriter;
+  if (!writer) {
+    log(`action ${action}: no session stream; not sent`);
+    return false;
+  }
+  const actionId = enqueueAction(state.actionTracker, scope, action, performance.now(), {
+    modeTarget,
+    cancels,
+  });
+  const command = encodeControlActionCommandEnvelope({
+    sessionId: state.sessionId,
+    vehicleId: VEHICLE_ID,
+    scope,
+    generation: generationForScope(scope),
+    activationRevision: state.controlShell.activationRevision(),
+    action,
+    modeTarget,
+    actionId,
+  });
+  writer.write(lengthDelimit(command)).catch(() => {
+    log(`action ${action} (id ${actionId}): session stream write failed`);
+  });
   return true;
 }
 
@@ -1331,6 +1424,20 @@ function handleActionResult(m) {
   if (!m.actionId) return;
   const entry = resolveAction(state.actionTracker, m.actionId);
   if (!entry) return; // a replay of an already-settled press
+  if (entry.scope === SIM_LIFECYCLE_SCOPE) {
+    // The lifecycle lease exists only for this press: release it so the
+    // silence watchdog never has a held-but-frameless scope to revoke.
+    state.lifecycle.granted = false;
+    const writer = state.sessionWriter;
+    if (writer) {
+      const release = encodeLeaseReleaseEnvelope({
+        vehicleId: VEHICLE_ID,
+        scope: SIM_LIFECYCLE_SCOPE,
+      });
+      writer.write(lengthDelimit(release)).catch(() => {});
+      log(`released the ${SIM_LIFECYCLE_SCOPE} lease`);
+    }
+  }
   if (entry.action === CONTROL_ACTION.modeRequest && m.accepted) {
     state.fpvActive = entry.modeTarget === MODE_TARGET.fpvDirect;
     els.overlay.textContent = state.fpvActive ? "FPV mode engaged" : "camera mode engaged";
@@ -1338,17 +1445,15 @@ function handleActionResult(m) {
   }
 }
 
-/** Removes expired presses for `scope`, reporting each loudly, and returns
- *  the still-pending actions to attach to this frame. */
-function collectFrameActions(scope) {
-  const { actions, expired } = frameActions(state.actionTracker, scope, performance.now());
-  for (const gone of expired) {
+/** Reports every press whose answer window expired — on the reliable
+ *  channel that means the transport died or the host never answered. */
+function reportExpiredActions() {
+  for (const gone of expirePending(state.actionTracker, performance.now())) {
     log(
       `action ${gone.action} (id ${gone.actionId}) got no result within ` +
-        `${ACTION_TIMEOUT_MS} ms; giving up`,
+        `${ACTION_TIMEOUT_MS} ms; the session stream may be dead`,
     );
   }
-  return actions;
 }
 
 /** Announces the active control profile on the reliable session stream:
@@ -1416,13 +1521,7 @@ function sendMotionFrame(writer, token, mode, plan) {
     state.pendingFpvToggle = false;
     requestFlightModeSwitch();
   }
-  if (state.pendingReset) {
-    state.pendingReset = false;
-    if (requestAction(state.motionScope, CONTROL_ACTION.simReset)) {
-      log("simulation reset requested");
-    }
-  }
-  const actions = collectFrameActions(state.motionScope);
+
   let velocity;
   let attitudeThrust;
   if (direct) {
@@ -1452,7 +1551,6 @@ function sendMotionFrame(writer, token, mode, plan) {
     activationRevision: state.controlShell.activationRevision(),
     velocity,
     attitudeThrust,
-    actions,
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
@@ -1538,7 +1636,6 @@ function sendGimbalFrame(writer, token, gimbal) {
     // The plan's normalized LOS rates scale by the ADVERTISED angular
     // envelope, so full deflection slews exactly what the vehicle allows.
     gimbalRate: buildGimbalRateIntent(gimbal, capability),
-    actions: collectFrameActions(GIMBAL_SCOPE),
   });
   writer.write(envelope).catch((error) => {
     transportSessions.runIfActive(token, () => log(`gimbal datagram send failed: ${error}`));

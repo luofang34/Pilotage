@@ -69,6 +69,11 @@ pub enum DomainEnvelope {
     /// `activation_revision` values are traceable to the exact profile
     /// identity, document revision, and content digest.
     ProfileActivation(pilotage_protocol::ProfileActivation),
+    /// A typed discrete action on the RELIABLE ordered session stream
+    /// (CTRL-01): validated against the sender's session, scope hold,
+    /// fencing generation, and announced activation revision, answered with
+    /// a `ControlActionResult`, and only then delivered to the adapter.
+    ActionCommand(pilotage_protocol::ControlActionCommand),
     /// The driver observed the client's transport link drop; the engine
     /// releases every scope the client held via the authority engine's
     /// link-loss path.

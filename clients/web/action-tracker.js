@@ -1,14 +1,15 @@
-// Reliable delivery for typed discrete actions (CTRL-01): control frames
-// ride droppable datagrams, so each press takes a correlation id and rides
-// EVERY outgoing frame for its scope until the host's ControlActionResult
-// echoes the id (the host deduplicates repeats, so the vehicle executes the
-// press exactly once) or the retry window expires. Local mode state changes
-// only on acceptance, never optimistically. Pure state-transition helpers,
-// unit tested off the DOM.
+// Pending-press bookkeeping for typed discrete actions (CTRL-01): each
+// press takes a nonzero correlation id and is sent ONCE on the reliable
+// ordered session stream (`ControlActionCommand`); the entry stays pending
+// until the host's ControlActionResult echoes the id or the answer window
+// expires (transport death — the reliable channel otherwise always
+// answers). Local mode state changes only on acceptance, never
+// optimistically. Pure state-transition helpers, unit tested off the DOM.
 
-/** How long a press keeps retransmitting before the client gives up and
- * reports the failure. Generous against RTT + one lease hiccup, short
- * enough that a dead scope surfaces within two seconds. */
+/** How long a press may stay unanswered before the client reports the
+ * failure. The reliable stream always answers unless the transport died;
+ * generous against RTT, short enough that a dead session surfaces within
+ * two seconds. */
 export const ACTION_TIMEOUT_MS = 1500;
 
 /** Fresh tracker: no pending presses, ids start at 1 (0 on the wire means
@@ -50,27 +51,20 @@ export function enqueueAction(tracker, scope, action, nowMs, options = {}) {
 }
 
 /**
- * The actions to attach to the next outgoing frame for `scope` — every
- * still-pending press, each carrying its correlation id — plus the presses
- * whose retry window expired this tick (removed; the caller reports them).
+ * Removes and returns every pending press (any scope) whose answer window
+ * expired — the caller reports each loudly. On the reliable channel an
+ * expiry means the transport died or the host never answered, never a
+ * dropped datagram.
  */
-export function frameActions(tracker, scope, nowMs) {
-  const actions = [];
+export function expirePending(tracker, nowMs) {
   const expired = [];
   for (const [id, entry] of tracker.pending) {
-    if (entry.scope !== scope) continue;
     if (nowMs - entry.enqueuedAtMs > ACTION_TIMEOUT_MS) {
       tracker.pending.delete(id);
       expired.push({ ...entry, actionId: id });
-      continue;
     }
-    actions.push(
-      entry.modeTarget === undefined
-        ? { action: entry.action, actionId: id }
-        : { action: entry.action, modeTarget: entry.modeTarget, actionId: id },
-    );
   }
-  return { actions, expired };
+  return expired;
 }
 
 /**

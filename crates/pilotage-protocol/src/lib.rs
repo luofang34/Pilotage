@@ -16,8 +16,8 @@ pub mod wire;
 
 pub use control::{ButtonEdge, ControlPayload, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
 pub use convert::{
-    ConvertError, DecodeError, SCHEMA_VERSION, decode_control_frame_envelope,
-    decode_envelope_length_delimited, encode_control_frame_envelope,
+    ConvertError, DecodeError, SCHEMA_VERSION, decode_action_command_envelope,
+    decode_control_frame_envelope, decode_envelope_length_delimited, encode_control_frame_envelope,
     encode_envelope_length_delimited,
 };
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
@@ -27,9 +27,9 @@ pub use intent::{
     actions_conflict,
 };
 pub use session::{
-    ClientHello, ControlActionResult, FrameRejected, FrameRejectionReason, LeaseDenialReason,
-    LeaseRelease, LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared, Ping, Pong,
-    ProfileActivation, ScopeHolderSnapshot, ServerWelcome,
+    ClientHello, ControlActionCommand, ControlActionResult, FrameRejected, FrameRejectionReason,
+    LeaseDenialReason, LeaseRelease, LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared,
+    Ping, Pong, ProfileActivation, ScopeHolderSnapshot, ServerWelcome,
 };
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,

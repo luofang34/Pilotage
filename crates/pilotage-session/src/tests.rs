@@ -7,6 +7,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod action_command;
 mod deadline;
 mod disconnect;
 mod frame;
@@ -64,10 +65,16 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
                     max_vertical: 0.0,
                     max_angular: 1.0,
                 }],
-                actions: vec![pilotage_adapter_api::ActionCapability {
-                    action: pilotage_protocol::ActionKind::Arm,
-                    mode_targets: vec![],
-                }],
+                actions: vec![
+                    pilotage_adapter_api::ActionCapability {
+                        action: pilotage_protocol::ActionKind::Arm,
+                        mode_targets: vec![],
+                    },
+                    pilotage_adapter_api::ActionCapability {
+                        action: pilotage_protocol::ActionKind::Disarm,
+                        mode_targets: vec![],
+                    },
+                ],
                 legacy: Some(pilotage_adapter_api::LegacyCommandMap::Velocity {
                     vx: Some(pilotage_adapter_api::LegacyAxisRoute { axis: 0, sign: 1.0 }),
                     vy: None,
@@ -75,7 +82,6 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
                     yaw_rate: None,
                     arm_button: Some(0),
                     disarm_button: None,
-                    reset_button: None,
                 }),
             }],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],

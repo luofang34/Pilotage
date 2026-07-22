@@ -128,8 +128,8 @@ fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
     let caps = adapter.capabilities();
     assert_eq!(
         caps.vehicles[0].scopes.len(),
-        2,
-        "velocity + direct flight scopes advertised"
+        3,
+        "velocity + direct flight + sim lifecycle scopes advertised"
     );
     assert_eq!(caps.vehicles[0].scopes[0].axes.len(), 4);
 

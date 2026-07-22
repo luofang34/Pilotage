@@ -27,6 +27,7 @@ impl From<FrameRejectionReason> for wire::FrameRejectionReason {
             }
             FrameRejectionReason::PartialCommand => wire::FrameRejectionReason::PartialCommand,
             FrameRejectionReason::ProfileMismatch => wire::FrameRejectionReason::ProfileMismatch,
+            FrameRejectionReason::ActionOnDatagram => wire::FrameRejectionReason::ActionOnDatagram,
         }
     }
 }
@@ -57,6 +58,9 @@ impl TryFrom<wire::FrameRejectionReason> for FrameRejectionReason {
             wire::FrameRejectionReason::PartialCommand => Ok(FrameRejectionReason::PartialCommand),
             wire::FrameRejectionReason::ProfileMismatch => {
                 Ok(FrameRejectionReason::ProfileMismatch)
+            }
+            wire::FrameRejectionReason::ActionOnDatagram => {
+                Ok(FrameRejectionReason::ActionOnDatagram)
             }
             wire::FrameRejectionReason::Unspecified => Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.FrameRejectionReason",

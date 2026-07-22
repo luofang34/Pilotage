@@ -115,3 +115,22 @@ fn a_disconnect_forgets_the_cache_so_a_new_session_can_reuse_ids() {
         "ids are per-connection, not global"
     );
 }
+
+#[test]
+fn a_correlation_id_reused_with_different_content_is_refused() {
+    let mut actor = actor();
+    let _receiver = register_client(&mut actor);
+    let client = ClientKey::new(1);
+
+    actor.apply_to_adapter(client, arm_frame(7));
+    // The same id now arrives carrying a DIFFERENT action: never executed,
+    // never answered with the cached "accepted" for the original press.
+    let mut reused = arm_frame(7);
+    reused.actions = vec![pilotage_protocol::ControlAction::Disarm];
+    actor.apply_to_adapter(client, reused);
+    assert_eq!(
+        actor.adapter.applied_actions.len(),
+        1,
+        "the smuggled action must not reach the adapter"
+    );
+}

@@ -52,18 +52,7 @@ fn validate_typed(
         return Err(FrameRejectionReason::ConflictingActions);
     }
     for action in &frame.actions {
-        let Some(capability) = scope
-            .actions
-            .iter()
-            .find(|capability| capability.action == action.kind())
-        else {
-            return Err(FrameRejectionReason::UnsupportedAction);
-        };
-        if let ControlAction::ModeRequest { target } = action
-            && !capability.mode_targets.contains(target)
-        {
-            return Err(FrameRejectionReason::UnsupportedAction);
-        }
+        validate_action(*action, scope)?;
     }
     if let Some(intent) = &frame.intent {
         let Some(capability) = scope
@@ -129,6 +118,29 @@ fn check_limits(
     }
 }
 
+/// Validates one typed action against the scope's OWN advertisement: the
+/// action kind must be advertised, and a mode request's target must be one
+/// the vehicle listed. Shared by the frame gate and the reliable
+/// action-command path (CTRL-01).
+pub(crate) fn validate_action(
+    action: ControlAction,
+    scope: &ScopeDescriptor,
+) -> Result<(), FrameRejectionReason> {
+    let Some(capability) = scope
+        .actions
+        .iter()
+        .find(|capability| capability.action == action.kind())
+    else {
+        return Err(FrameRejectionReason::UnsupportedAction);
+    };
+    if let ControlAction::ModeRequest { target } = action
+        && !capability.mode_targets.contains(&target)
+    {
+        return Err(FrameRejectionReason::UnsupportedAction);
+    }
+    Ok(())
+}
+
 /// The single legacy compatibility boundary: interprets a numeric payload
 /// through the scope's adapter-declared map into the typed command a typed
 /// client would have sent, then validates the result through the SAME gate.
@@ -174,7 +186,6 @@ fn translate_velocity(
         yaw_rate,
         arm_button,
         disarm_button,
-        reset_button,
     } = map
     else {
         return Err(FrameRejectionReason::UnsupportedIntent);
@@ -206,8 +217,6 @@ fn translate_velocity(
                 Some(ControlAction::Arm)
             } else if Some(id) == *disarm_button {
                 Some(ControlAction::Disarm)
-            } else if Some(id) == *reset_button {
-                Some(ControlAction::SimReset)
             } else {
                 None
             }

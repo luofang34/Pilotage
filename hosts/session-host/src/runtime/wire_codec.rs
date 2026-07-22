@@ -97,9 +97,10 @@ pub enum BootstrapDecodeError {
 /// Decodes one length-delimited envelope from the front of `bytes` into a
 /// client-origin [`DomainEnvelope`] plus the unconsumed remainder.
 ///
-/// Only `ClientHello`, `LeaseRequest`, `LeaseRelease`, and
-/// `ProfileActivation` are legitimately received on the bootstrap stream
-/// (ADR-0005): control frames and `Ping` travel as datagrams instead.
+/// Only `ClientHello`, `LeaseRequest`, `LeaseRelease`, `ProfileActivation`,
+/// and `ControlActionCommand` are legitimately received on the bootstrap
+/// stream (ADR-0005): control frames and `Ping` travel as datagrams —
+/// discrete actions deliberately do NOT (CTRL-01 reliable delivery).
 ///
 /// # Errors
 ///
@@ -129,6 +130,12 @@ pub fn decode_bootstrap_message(
         Some(wire::envelope::Payload::ProfileActivation(activation)) => {
             DomainEnvelope::ProfileActivation(
                 pilotage_protocol::ProfileActivation::try_from(activation)
+                    .map_err(DecodeError::from)?,
+            )
+        }
+        Some(wire::envelope::Payload::ControlActionCommand(command)) => {
+            DomainEnvelope::ActionCommand(
+                pilotage_protocol::ControlActionCommand::try_from(command)
                     .map_err(DecodeError::from)?,
             )
         }

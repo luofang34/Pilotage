@@ -352,6 +352,44 @@ pub fn decode_control_frame_envelope(bytes: &[u8]) -> Result<ScopedControlFrame,
     }
 }
 
+/// Decodes a bare `Envelope` into the reliable-stream action command it
+/// carries (CTRL-01), mirroring [`decode_control_frame_envelope`].
+///
+/// # Errors
+///
+/// Returns [`DecodeError`] when the bytes are not a valid envelope, the
+/// schema version is unsupported, or the payload is not a
+/// `ControlActionCommand`.
+pub fn decode_action_command_envelope(
+    bytes: &[u8],
+) -> Result<crate::session::ControlActionCommand, DecodeError> {
+    let envelope = wire::Envelope::decode(bytes).map_err(|source| DecodeError::Prost {
+        message: "pilotage.v1.Envelope",
+        source,
+    })?;
+    if envelope.schema_version != SCHEMA_VERSION {
+        return Err(ConvertError::UnsupportedSchemaVersion {
+            expected: SCHEMA_VERSION,
+            found: envelope.schema_version,
+        }
+        .into());
+    }
+    let payload = envelope.payload.ok_or(ConvertError::MissingField {
+        message: "pilotage.v1.Envelope",
+        field: "payload",
+    })?;
+    match payload {
+        wire::envelope::Payload::ControlActionCommand(command) => {
+            Ok(crate::session::ControlActionCommand::try_from(command)?)
+        }
+        _ => Err(ConvertError::MissingField {
+            message: "pilotage.v1.Envelope",
+            field: "control_action_command",
+        }
+        .into()),
+    }
+}
+
 /// Encodes an [`wire::Envelope`] with a length-delimited prefix, for framing
 /// on a reliable stream where multiple envelopes are concatenated
 /// (ADR-0014).

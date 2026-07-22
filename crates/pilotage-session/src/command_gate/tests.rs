@@ -50,7 +50,6 @@ fn motion_scope() -> ScopeDescriptor {
             yaw_rate: Some(LegacyAxisRoute { axis: 3, sign: 1.0 }),
             arm_button: Some(0),
             disarm_button: Some(1),
-            reset_button: None,
         }),
     }
 }

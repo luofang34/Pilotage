@@ -102,7 +102,7 @@ pub(super) fn flight_frame(
     )>,
 ) -> pilotage_protocol::ScopedControlFrame {
     use crate::adapter::{
-        ARM_BUTTON, DISARM_BUTTON, PITCH_AXIS, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+        ARM_BUTTON, DISARM_BUTTON, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
     };
     let mut velocity = pilotage_protocol::VelocityIntent {
         frame: pilotage_protocol::ReferenceFrame::BodyFrd,
@@ -126,7 +126,6 @@ pub(super) fn flight_frame(
         .filter_map(|(button, _)| match button.as_u16() {
             id if id == ARM_BUTTON => Some(pilotage_protocol::ControlAction::Arm),
             id if id == DISARM_BUTTON => Some(pilotage_protocol::ControlAction::Disarm),
-            id if id == RESET_BUTTON => Some(pilotage_protocol::ControlAction::SimReset),
             _ => None,
         })
         .collect();
@@ -179,5 +178,24 @@ pub(super) fn direct_frame(
         payload: pilotage_protocol::ControlPayload::default(),
         intent: Some(pilotage_protocol::ControlIntent::AttitudeThrust(attitude)),
         actions: vec![],
+    }
+}
+
+/// A `SimReset` press on the separately leased lifecycle scope (SIM-01):
+/// the ONLY place a reset can arrive from.
+pub(super) fn lifecycle_reset_frame() -> pilotage_protocol::ScopedControlFrame {
+    pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![1],
+        session: pilotage_protocol::SessionId::new(1),
+        vehicle: VehicleId::new(1),
+        scope: pilotage_protocol::ScopeId::new(pilotage_adapter_api::SIM_LIFECYCLE_SCOPE),
+        generation: pilotage_protocol::Generation::new(1),
+        sequence: pilotage_protocol::SequenceNum::new(0),
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: None,
+        actions: vec![pilotage_protocol::ControlAction::SimReset],
     }
 }

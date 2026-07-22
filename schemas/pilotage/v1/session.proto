@@ -184,6 +184,10 @@ enum FrameRejectionReason {
   // announced `ProfileActivation` (or nothing was announced): the host
   // cannot bind the frame to profile evidence, so it is not applied.
   FRAME_REJECTION_REASON_PROFILE_MISMATCH = 12;
+  // The datagram frame carried typed discrete actions. Actions ride ONLY the
+  // reliable ordered session stream (ControlActionCommand) — a dropped or
+  // reordered edge changes meaning, so the droppable channel refuses them.
+  FRAME_REJECTION_REASON_ACTION_ON_DATAGRAM = 13;
 }
 
 // Sent back to the frame's sender (never broadcast) when a `ControlFrame`

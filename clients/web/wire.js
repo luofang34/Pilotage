@@ -268,6 +268,7 @@ const ENVELOPE_FIELD = {
   linkLossCleared: 15,
   profileActivation: 16,
   controlActionResult: 17,
+  controlActionCommand: 18,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
@@ -465,6 +466,32 @@ export function encodeControlFrameEnvelope({
   }
   if (activationRevision) fieldVarint(frame, 11, activationRevision);
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.controlFrame, frame));
+}
+
+/**
+ * Encodes a `ControlActionCommand` for the RELIABLE ordered session stream
+ * (CTRL-01): a discrete action never rides droppable datagrams — loss,
+ * duplication, or reordering changes its meaning. The full authority
+ * binding travels with the press; `actionId` must be nonzero.
+ */
+export function encodeControlActionCommandEnvelope({
+  sessionId,
+  vehicleId,
+  scope,
+  generation,
+  activationRevision,
+  action,
+  modeTarget,
+  actionId,
+}) {
+  const bytes = [];
+  fieldMessage(bytes, 1, encodeSessionId(sessionId));
+  fieldMessage(bytes, 2, encodeVehicleId(vehicleId));
+  fieldMessage(bytes, 3, encodeScopeId(scope));
+  fieldMessage(bytes, 4, encodeGeneration(generation));
+  if (activationRevision) fieldVarint(bytes, 5, activationRevision);
+  fieldMessage(bytes, 6, encodeControlActionRequest({ action, modeTarget, actionId }));
+  return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.controlActionCommand, bytes));
 }
 
 /**
@@ -1097,5 +1124,11 @@ function decodeAuthorityEvent(bytes) {
 function decodeFrameRejected(bytes) {
   if (!bytes) return {};
   const fields = parseFields(bytes);
-  return { reason: firstVarint(fields, 4) };
+  return {
+    vehicleId: decodeUint64Message(firstBytes(fields, 1)),
+    scope: decodeStringMessage(firstBytes(fields, 2)),
+    sequence: decodeUint64Message(firstBytes(fields, 3)),
+    reason: firstVarint(fields, 4),
+    currentGeneration: decodeUint64Message(firstBytes(fields, 5)),
+  };
 }

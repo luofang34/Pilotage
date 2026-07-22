@@ -14,7 +14,8 @@ mod video;
 
 pub use capability::{
     ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
-    LegacyCommandMap, ScopeDescriptor, VehicleDescriptor,
+    LegacyCommandMap, SIM_LIFECYCLE_SCOPE, ScopeDescriptor, VehicleDescriptor,
+    sim_lifecycle_descriptor,
 };
 pub use control::{
     ActionResult, ApplyOutcome, Disposition, LinkLossEnactError, LinkLossPolicy, RejectReason,

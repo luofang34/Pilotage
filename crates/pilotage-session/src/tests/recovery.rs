@@ -206,7 +206,6 @@ fn profile(
                             yaw_rate: route(3),
                             arm_button: None,
                             disarm_button: None,
-                            reset_button: None,
                         }),
                     }
                 })

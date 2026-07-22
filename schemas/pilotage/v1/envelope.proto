@@ -35,5 +35,6 @@ message Envelope {
     LinkLossCleared link_loss_cleared = 15;
     ProfileActivation profile_activation = 16;
     ControlActionResult control_action_result = 17;
+    ControlActionCommand control_action_command = 18;
   }
 }

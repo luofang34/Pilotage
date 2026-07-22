@@ -59,6 +59,37 @@ pub(super) fn rejected_control(tick: SimTick, reason: RejectReason) -> ApplyOutc
     ApplyOutcome::new(tick, Disposition::Rejected(reason))
 }
 
+impl AviateAdapter {
+    /// The simulator lifecycle scope: `SimReset` under its OWN lease
+    /// (SIM-01) — flight authority neither grants nor implies it. The
+    /// session validates the lease and the advertisement before delivery;
+    /// anything but a reset is refused defensively.
+    pub(super) fn apply_sim_lifecycle(
+        &mut self,
+        frame: &ScopedControlFrame,
+        tick: SimTick,
+    ) -> ApplyOutcome {
+        let mut action_results = Vec::with_capacity(frame.actions.len());
+        for action in &frame.actions {
+            match action.kind() {
+                ActionKind::SimReset => {
+                    self.spawn_reset();
+                    action_results.push(pilotage_adapter_api::ActionResult::accepted(*action));
+                }
+                _ => action_results.push(pilotage_adapter_api::ActionResult::rejected(
+                    *action,
+                    "only sim reset lives on the lifecycle scope",
+                )),
+            }
+        }
+        ApplyOutcome {
+            tick,
+            disposition: Disposition::Accepted,
+            action_results,
+        }
+    }
+}
+
 /// Per-action results for a frame whose disarm short-circuits it: the disarm
 /// (and a sim reset that already spawned) report accepted; anything else the
 /// frame carried is not executed this frame.
@@ -161,9 +192,6 @@ impl AviateAdapter {
         // holder demonstrates neutral input.
         if self.link_loss_policy.contains_key(&frame.scope) {
             return Some(rejected_control(tick, RejectReason::LinkLossEngaged));
-        }
-        if has_action(frame, ActionKind::SimReset) {
-            self.spawn_reset();
         }
         // Disarm is handled BEFORE the reset latch: surrendering
         // authority must never be blocked, and it needs no measurement.

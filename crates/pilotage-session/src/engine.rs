@@ -11,6 +11,8 @@
 //! the host `now`: a documented loopback-only simplification for increment 0.
 //! See [`SessionEngine`] for the full caveat and the RTT/offset follow-up.
 
+mod action_command;
+mod frame_ingress;
 mod handlers;
 mod link_loss;
 
@@ -130,6 +132,9 @@ impl SessionEngine {
             DomainEnvelope::Ping(ping) => self.on_ping(client, ping, now, &mut actions),
             DomainEnvelope::ProfileActivation(activation) => {
                 self.on_profile_activation(client, activation, &mut actions);
+            }
+            DomainEnvelope::ActionCommand(command) => {
+                self.on_action_command(client, command, now, &mut actions);
             }
             DomainEnvelope::Disconnect => self.on_disconnect(client, &mut actions),
         }

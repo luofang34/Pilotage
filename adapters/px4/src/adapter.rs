@@ -52,8 +52,6 @@ pub const YAW_AXIS: u16 = 3;
 pub const ARM_BUTTON: u16 = 0;
 /// Logical button whose press disarms the vehicle.
 pub const DISARM_BUTTON: u16 = 1;
-/// Logical button whose press resets the simulation.
-pub const RESET_BUTTON: u16 = 2;
 /// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
 /// LOS rate demands, leased and fenced independently of flight.
 pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
@@ -353,6 +351,9 @@ impl VehicleAdapter for Px4Adapter {
         if frame.scope.as_str() == GIMBAL_SCOPE {
             return self.apply_gimbal(frame, tick);
         }
+        if frame.scope.as_str() == pilotage_adapter_api::SIM_LIFECYCLE_SCOPE {
+            return self.apply_sim_lifecycle(frame, tick);
+        }
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
@@ -369,12 +370,8 @@ impl VehicleAdapter for Px4Adapter {
                     uplink.begin_arm(current_yaw);
                     action_results.push(ActionResult::accepted(*action));
                 }
-                // The gate already spawned the reset; report it honored.
-                ActionKind::SimReset => {
-                    action_results.push(ActionResult::accepted(*action));
-                }
-                // Disarm short-circuits inside the gate; nothing else is
-                // advertised for this scope, so the session rejects it
+                // Nothing else is advertised for this scope (sim reset
+                // lives on the lifecycle scope), so the session rejects it
                 // before delivery — defensive, not a reachable path.
                 _ => {
                     action_results.push(ActionResult::rejected(

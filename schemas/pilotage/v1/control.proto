@@ -187,6 +187,25 @@ message ControlFrame {
   uint32 activation_revision = 11;
 }
 
+// A typed discrete action on the RELIABLE ordered session stream (CTRL-01).
+// Actions are edge-triggered commands whose loss, duplication, or reordering
+// changes meaning (a re-delivered ARM after a DISARM re-arms the vehicle), so
+// they never ride droppable control datagrams. The full authority binding
+// travels with the request — session, vehicle, scope, fencing generation,
+// and the sender's announced activation revision — and the host validates
+// every field against its own records before the adapter sees the action.
+message ControlActionCommand {
+  SessionId session = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+  uint32 activation_revision = 5;
+  // The action itself. `action_id` MUST be nonzero: the reliable channel
+  // still answers every command with a `ControlActionResult` correlated by
+  // id, and an uncorrelated command is rejected rather than guessed at.
+  ControlActionRequest request = 6;
+}
+
 // Announces the sender's newly activated control profile on the reliable
 // session stream, binding the activation revision its frames will carry to
 // the profile's identity, document revision, and exact content digest — the

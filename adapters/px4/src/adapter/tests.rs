@@ -15,7 +15,7 @@ use pilotage_mavlink::codec::{FcMessage, FrameSource};
 use pilotage_mavlink::link::apply_messages_at;
 use pilotage_mavlink::{AuthorizationSource, LinkState};
 
-use super::{ARM_BUTTON, DISARM_BUTTON, Px4Adapter, RESET_BUTTON, THROTTLE_AXIS};
+use super::{ARM_BUTTON, DISARM_BUTTON, Px4Adapter, THROTTLE_AXIS};
 use crate::uplink::Px4Uplink;
 
 pub(super) const SOURCE: FrameSource = FrameSource {
@@ -187,7 +187,6 @@ pub(super) fn frame(
         .filter_map(|(button, _)| match button.as_u16() {
             id if id == super::ARM_BUTTON => Some(pilotage_protocol::ControlAction::Arm),
             id if id == super::DISARM_BUTTON => Some(pilotage_protocol::ControlAction::Disarm),
-            id if id == super::RESET_BUTTON => Some(pilotage_protocol::ControlAction::SimReset),
             _ => None,
         })
         .collect();
@@ -314,17 +313,36 @@ fn sampled_telemetry_authorizes_from_the_standard_status() {
     assert!((pose.x - 1.0).abs() < 1e-9 && (pose.y - 2.0).abs() < 1e-9);
 }
 
+/// A `SimReset` press on the separately leased lifecycle scope (SIM-01):
+/// the ONLY place a reset can arrive from.
+fn lifecycle_reset_frame() -> pilotage_protocol::ScopedControlFrame {
+    pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![1],
+        session: pilotage_protocol::SessionId::new(1),
+        vehicle: VehicleId::new(1),
+        scope: pilotage_protocol::ScopeId::new(pilotage_adapter_api::SIM_LIFECYCLE_SCOPE),
+        generation: pilotage_protocol::Generation::new(1),
+        sequence: pilotage_protocol::SequenceNum::new(0),
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: None,
+        actions: vec![pilotage_protocol::ControlAction::SimReset],
+    }
+}
+
 #[test]
 fn reset_press_latches_and_disarm_bypasses() {
     let (fc, addr) = fake_fc();
     let state = live_state();
     let mut adapter =
         Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink_to(addr));
-    let outcome = adapter.apply_control(&press(RESET_BUTTON));
-    assert_eq!(
-        outcome.disposition,
-        Disposition::Rejected(RejectReason::ResetInProgress)
-    );
+    // The reset arrives on ITS OWN scope (SIM-01): acknowledged there,
+    // while the latch it engages suppresses flight.
+    let outcome = adapter.apply_control(&lifecycle_reset_frame());
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    assert!(outcome.action_results.iter().all(|result| result.accepted));
     assert_eq!(adapter.reset_spawns, 1);
 
     let outcome = adapter.apply_control(&press(ARM_BUTTON));
@@ -352,7 +370,7 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
         .expect("timeout");
     let uplink = Px4Uplink::new(fc.local_addr().expect("addr")).expect("uplink");
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink);
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
 
     // The restarted PX4's stream is what advances the epoch — driven
     // through the production message path, never by poking counters.

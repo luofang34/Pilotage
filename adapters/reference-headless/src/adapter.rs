@@ -181,7 +181,6 @@ impl VehicleAdapter for ReferenceAdapter {
                         }),
                         arm_button: None,
                         disarm_button: None,
-                        reset_button: None,
                     }),
                 }],
                 link_loss_actions: vec![

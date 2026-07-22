@@ -1,6 +1,7 @@
-// Reliable-delivery discipline for typed discrete actions (CTRL-01):
-// correlation ids, frame-riding retransmission, dedup-preserving repeats,
-// conflict cancellation, timeout expiry, and ack resolution.
+// Pending-press discipline for typed discrete actions (CTRL-01): nonzero
+// correlation ids, dedup-preserving repeats, conflict cancellation, answer
+// timeout, and ack resolution — presses ride the reliable session stream
+// exactly once.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +9,7 @@ import {
   ACTION_TIMEOUT_MS,
   createActionTracker,
   enqueueAction,
-  frameActions,
+  expirePending,
   pendingModeTarget,
   resolveAction,
 } from "./action-tracker.js";
@@ -20,19 +21,14 @@ const FPV = 2;
 const CAMERA = 1;
 const SCOPE = "vehicle.motion";
 
-test("a press rides every frame until its ack settles it", () => {
+test("a press stays pending until its ack settles it", () => {
   const tracker = createActionTracker();
   const id = enqueueAction(tracker, SCOPE, ARM, 0);
-  assert.ok(id >= 1);
-  // Two successive frames both carry the still-unacked press.
-  for (const now of [10, 43]) {
-    const { actions, expired } = frameActions(tracker, SCOPE, now);
-    assert.deepEqual(actions, [{ action: ARM, actionId: id }]);
-    assert.deepEqual(expired, []);
-  }
+  assert.ok(id >= 1, "ids are nonzero — zero means no correlation on the wire");
+  assert.deepEqual(expirePending(tracker, 43), [], "still inside the answer window");
   const entry = resolveAction(tracker, id);
   assert.equal(entry.action, ARM);
-  assert.deepEqual(frameActions(tracker, SCOPE, 50).actions, []);
+  assert.equal(tracker.pending.size, 0);
 });
 
 test("a repeated identical press keeps the original id", () => {
@@ -42,16 +38,16 @@ test("a repeated identical press keeps the original id", () => {
   const first = enqueueAction(tracker, SCOPE, ARM, 0);
   const second = enqueueAction(tracker, SCOPE, ARM, 5);
   assert.equal(second, first);
-  assert.equal(frameActions(tracker, SCOPE, 10).actions.length, 1);
+  assert.equal(tracker.pending.size, 1);
 });
 
 test("arm and disarm cancel each other", () => {
-  // The host rejects a frame carrying both, so the newer press supersedes.
+  // The newer press supersedes its inverse: only the disarm stays pending.
   const tracker = createActionTracker();
   enqueueAction(tracker, SCOPE, ARM, 0);
   const disarmId = enqueueAction(tracker, SCOPE, DISARM, 5, { cancels: [ARM] });
-  const { actions } = frameActions(tracker, SCOPE, 10);
-  assert.deepEqual(actions, [{ action: DISARM, actionId: disarmId }]);
+  assert.deepEqual([...tracker.pending.keys()], [disarmId]);
+  assert.equal(tracker.pending.get(disarmId).action, DISARM);
 });
 
 test("a new mode request supersedes the pending one", () => {
@@ -59,29 +55,28 @@ test("a new mode request supersedes the pending one", () => {
   enqueueAction(tracker, SCOPE, MODE_REQUEST, 0, { modeTarget: FPV, cancels: [MODE_REQUEST] });
   assert.equal(pendingModeTarget(tracker, SCOPE, MODE_REQUEST), FPV);
   enqueueAction(tracker, SCOPE, MODE_REQUEST, 5, { modeTarget: CAMERA, cancels: [MODE_REQUEST] });
-  const { actions } = frameActions(tracker, SCOPE, 10);
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0].modeTarget, CAMERA);
+  assert.equal(pendingModeTarget(tracker, SCOPE, MODE_REQUEST), CAMERA);
+  assert.equal(tracker.pending.size, 1);
 });
 
-test("an unanswered press expires after the retry window", () => {
+test("an unanswered press expires after the answer window", () => {
   const tracker = createActionTracker();
   const id = enqueueAction(tracker, SCOPE, ARM, 0);
-  const { actions, expired } = frameActions(tracker, SCOPE, ACTION_TIMEOUT_MS + 1);
-  assert.deepEqual(actions, []);
+  const expired = expirePending(tracker, ACTION_TIMEOUT_MS + 1);
   assert.equal(expired.length, 1);
   assert.equal(expired[0].actionId, id);
-  // Expired means gone: no zombie retransmission on the next frame.
-  assert.deepEqual(frameActions(tracker, SCOPE, ACTION_TIMEOUT_MS + 2).actions, []);
+  // Expired means gone: a late ack resolves nothing.
+  assert.equal(resolveAction(tracker, id), null);
 });
 
 test("scopes are independent", () => {
   const tracker = createActionTracker();
-  enqueueAction(tracker, SCOPE, ARM, 0);
+  const armId = enqueueAction(tracker, SCOPE, ARM, 0);
   const gimbalId = enqueueAction(tracker, "vehicle.gimbal", 4, 0);
-  const { actions } = frameActions(tracker, "vehicle.gimbal", 10);
-  assert.deepEqual(actions, [{ action: 4, actionId: gimbalId }]);
-  assert.equal(frameActions(tracker, SCOPE, 10).actions.length, 1);
+  assert.notEqual(armId, gimbalId);
+  // Cancellation is scope-local: a gimbal press cannot cancel a motion one.
+  enqueueAction(tracker, "vehicle.gimbal", DISARM, 1, { cancels: [ARM] });
+  assert.ok(tracker.pending.has(armId), "the motion arm stays pending");
 });
 
 test("resolving an unknown id is a harmless replay", () => {

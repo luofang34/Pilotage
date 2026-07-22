@@ -17,7 +17,12 @@ import {
   intentCapabilityFor,
   wrapHeading,
 } from "./typed-command.js";
-import { CONTROL_ACTION, MODE_TARGET, encodeControlFrameEnvelope } from "./wire.js";
+import {
+  CONTROL_ACTION,
+  MODE_TARGET,
+  encodeControlActionCommandEnvelope,
+  encodeControlFrameEnvelope,
+} from "./wire.js";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../web-control/typed-frame-fixture.json", import.meta.url), "utf8"),
@@ -55,6 +60,8 @@ const keyVelocity = buildVelocityIntent(keyPlan.motion, "quad-pilot", capability
 shell.clearKeys();
 check("keyboard W commands full climb in the advertised envelope", keyVelocity.vz === -1.5, keyVelocity);
 
+// Setpoint frames carry the intent ONLY: discrete actions ride the
+// reliable session stream as ControlActionCommand, never datagrams.
 const bytes = encodeControlFrameEnvelope({
   sessionId: 7,
   vehicleId: 1n,
@@ -65,13 +72,28 @@ const bytes = encodeControlFrameEnvelope({
   profileRevision: shell.profileRevision(),
   activationRevision: shell.activationRevision(),
   velocity: keyVelocity,
-  actions: [
-    { action: CONTROL_ACTION.arm },
-    { action: CONTROL_ACTION.modeRequest, modeTarget: MODE_TARGET.fpvDirect },
-  ],
 });
 const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 check("the typed envelope matches the shared fixture byte for byte", hex === fixture.envelopeHex, hex);
+
+// The reliable action command for the same session: Arm bound to the full
+// authority (session, vehicle, scope, generation, activation revision) with
+// a nonzero correlation id.
+const commandBytes = encodeControlActionCommandEnvelope({
+  sessionId: 7,
+  vehicleId: 1n,
+  scope: "vehicle.motion",
+  generation: 4n,
+  activationRevision: shell.activationRevision(),
+  action: CONTROL_ACTION.arm,
+  actionId: 1,
+});
+const commandHex = Array.from(commandBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+check(
+  "the action command matches the shared fixture byte for byte",
+  commandHex === fixture.actionCommandHex,
+  commandHex,
+);
 
 // Gamepad chain: left stick hard right = full yaw rate in the pilot scheme.
 const pad = {

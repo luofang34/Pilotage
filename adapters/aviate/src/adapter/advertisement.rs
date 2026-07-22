@@ -10,8 +10,8 @@ use pilotage_adapter_api::{
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
 use super::{
-    ARM_BUTTON, AviateAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, RESET_BUTTON,
-    ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    ARM_BUTTON, AviateAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
+    THROTTLE_AXIS, YAW_AXIS,
 };
 
 impl AviateAdapter {
@@ -28,7 +28,14 @@ impl AviateAdapter {
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: if self.uplink.is_some() {
-                    vec![flight_scope_descriptor(), direct_scope_descriptor()]
+                    vec![
+                        flight_scope_descriptor(),
+                        direct_scope_descriptor(),
+                        // SITL only: this adapter IS a simulator gateway. A
+                        // live-vehicle adapter must never advertise the
+                        // lifecycle scope (SIM-01).
+                        pilotage_adapter_api::sim_lifecycle_descriptor(),
+                    ]
                 } else {
                     vec![]
                 },
@@ -44,8 +51,10 @@ impl AviateAdapter {
 }
 
 /// Both flight scopes take the same discrete actions. There is NO mode
-/// request: direct flight is its own scope with its own lease and authority
-/// generation, never a mode flip that reinterprets velocity numbers.
+/// request (direct flight is its own scope with its own lease, never a mode
+/// flip reinterpreting velocity numbers) and NO sim reset (a lifecycle
+/// action under the separately leased `sim.lifecycle` scope, never flight
+/// authority).
 fn flight_actions() -> Vec<ActionCapability> {
     vec![
         ActionCapability {
@@ -54,10 +63,6 @@ fn flight_actions() -> Vec<ActionCapability> {
         },
         ActionCapability {
             action: ActionKind::Disarm,
-            mode_targets: vec![],
-        },
-        ActionCapability {
-            action: ActionKind::SimReset,
             mode_targets: vec![],
         },
     ]
@@ -127,7 +132,6 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             }),
             arm_button: Some(ARM_BUTTON),
             disarm_button: Some(DISARM_BUTTON),
-            reset_button: Some(RESET_BUTTON),
         }),
     }
 }

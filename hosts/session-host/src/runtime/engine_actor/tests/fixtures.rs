@@ -32,7 +32,6 @@ pub(super) fn capabilities() -> AdapterCapabilities {
                     yaw_rate: None,
                     arm_button: None,
                     disarm_button: None,
-                    reset_button: None,
                 }),
             }],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],

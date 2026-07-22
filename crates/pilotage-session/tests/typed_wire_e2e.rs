@@ -18,6 +18,7 @@ use pilotage_protocol::{
     ModeTarget, ReferenceFrame, ScopeId, ScopedControlFrame, VehicleId,
     decode_control_frame_envelope,
 };
+
 use pilotage_session::{
     ClientKey, DomainEnvelope, OutboundMessage, SessionAction, SessionConfig, SessionEngine,
 };
@@ -25,9 +26,9 @@ use pilotage_timing::{MonoTimestamp, StalenessPolicy};
 
 const FIXTURE: &str = include_str!("../../../clients/web-control/typed-frame-fixture.json");
 
-fn fixture_frame_bytes() -> Vec<u8> {
+fn fixture_bytes(field: &str) -> Vec<u8> {
     let fixture: serde_json::Value = serde_json::from_str(FIXTURE).expect("fixture parses");
-    let hex = fixture["envelopeHex"].as_str().expect("hex present");
+    let hex = fixture[field].as_str().expect("hex present");
     (0..hex.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("valid hex"))
@@ -140,8 +141,10 @@ fn welcome_and_grant(
 
 #[test]
 fn browser_encoded_typed_frame_reaches_the_adapter_boundary_intact() {
-    // 1. The browser-produced bytes decode as a typed-ONLY frame.
-    let bytes = fixture_frame_bytes();
+    // 1. The browser-produced bytes decode as a typed-ONLY setpoint frame:
+    //    intent, no payload, and NO actions — those ride the reliable
+    //    stream (CTRL-01).
+    let bytes = fixture_bytes("envelopeHex");
     let frame: ScopedControlFrame =
         decode_control_frame_envelope(&bytes).expect("typed-only frame decodes");
     assert!(!frame.carries_payload(), "no numeric payload on the wire");
@@ -153,16 +156,7 @@ fn browser_encoded_typed_frame_reaches_the_adapter_boundary_intact() {
     assert_eq!(velocity.vx, 0.0);
     assert_eq!(velocity.vy, 0.0);
     assert_eq!(velocity.yaw_rate, 0.0);
-    assert_eq!(
-        frame.actions,
-        vec![
-            ControlAction::Arm,
-            ControlAction::ModeRequest {
-                target: ModeTarget::FpvDirect
-            },
-        ],
-        "typed actions with the explicit mode target"
-    );
+    assert!(frame.actions.is_empty(), "setpoint frames carry no actions");
 
     // 2. The engine's welcome/lease/gate path forwards it to the adapter
     //    boundary unchanged.
@@ -195,6 +189,49 @@ fn browser_encoded_typed_frame_reaches_the_adapter_boundary_intact() {
         Some(ControlIntent::Velocity(velocity)),
         "the adapter receives the exact typed velocity the browser encoded"
     );
-    assert_eq!(applied.actions.len(), 2);
     assert!(!applied.carries_payload());
+}
+
+#[test]
+fn browser_encoded_action_command_reaches_the_adapter_with_its_binding() {
+    // The SAME bytes the browser test pinned: an Arm command on the
+    // reliable stream, bound to session/vehicle/scope/generation/activation
+    // revision with a nonzero correlation id.
+    let bytes = fixture_bytes("actionCommandHex");
+    let frame_bytes = fixture_bytes("envelopeHex");
+    let frame: ScopedControlFrame =
+        decode_control_frame_envelope(&frame_bytes).expect("frame decodes");
+
+    let mut engine = SessionEngine::new(
+        capabilities(),
+        StalenessPolicy::new(core::time::Duration::from_secs(1)),
+        SessionConfig::new(1, "typed-e2e"),
+    );
+    let client = ClientKey::new(1);
+    let generation = welcome_and_grant(&mut engine, client, &frame);
+    assert_eq!(generation.as_u64(), 1, "fixture command binds generation 1");
+
+    let mut command = pilotage_protocol::decode_action_command_envelope(&bytes)
+        .expect("action command envelope decodes");
+    assert_eq!(command.action, ControlAction::Arm);
+    assert_eq!(command.action_id, 1, "nonzero correlation id");
+    // The fixture was minted against generation 4; rebind to the granted
+    // generation so only the generation differs from the wire bytes.
+    command.generation = generation;
+
+    // But the browser session id (7) is not this engine's session: the
+    // engine must CLOSE the connection for a forged session binding.
+    let forged = engine.handle_client_message(
+        client,
+        DomainEnvelope::ActionCommand(command.clone()),
+        MonoTimestamp::from_nanos(200_000_000),
+    );
+    assert!(
+        forged
+            .actions
+            .iter()
+            .any(|action| matches!(action, SessionAction::CloseClient { .. })),
+        "a foreign session binding closes: {:?}",
+        forged.actions
+    );
 }

@@ -5,8 +5,58 @@
 use crate::convert::ConvertError;
 use crate::ids::{Generation, ScopeId, SequenceNum, SessionId, VehicleId};
 use crate::intent::ControlAction;
-use crate::session::{ControlActionResult, ProfileActivation};
+use crate::session::{ControlActionCommand, ControlActionResult, ProfileActivation};
 use crate::wire;
+
+impl From<&ControlActionCommand> for wire::ControlActionCommand {
+    fn from(command: &ControlActionCommand) -> Self {
+        wire::ControlActionCommand {
+            session: Some(wire::SessionId {
+                value: command.session.as_u64(),
+            }),
+            vehicle: Some(wire::VehicleId {
+                value: command.vehicle.as_u64(),
+            }),
+            scope: Some(wire::ScopeId {
+                value: command.scope.as_str().to_owned(),
+            }),
+            generation: Some(wire::Generation {
+                value: command.generation.as_u64(),
+            }),
+            activation_revision: command.activation_revision,
+            request: Some(crate::convert::action_request_to_wire(
+                command.action,
+                command.action_id,
+            )),
+        }
+    }
+}
+
+impl TryFrom<wire::ControlActionCommand> for ControlActionCommand {
+    type Error = ConvertError;
+
+    fn try_from(command: wire::ControlActionCommand) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.ControlActionCommand",
+            field,
+        };
+        let session = command.session.ok_or_else(|| missing("session"))?;
+        let vehicle = command.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = command.scope.ok_or_else(|| missing("scope"))?;
+        let generation = command.generation.ok_or_else(|| missing("generation"))?;
+        let request = command.request.ok_or_else(|| missing("request"))?;
+        let (action, action_id) = crate::convert::action_request_from_wire(request)?;
+        Ok(ControlActionCommand {
+            session: SessionId::new(session.value),
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
+            generation: Generation::new(generation.value),
+            activation_revision: command.activation_revision,
+            action,
+            action_id,
+        })
+    }
+}
 
 impl From<&ControlActionResult> for wire::ControlActionResult {
     fn from(result: &ControlActionResult) -> Self {
@@ -177,5 +227,32 @@ mod tests {
         let mut short = wire::ProfileActivation::from(&activation);
         short.digest.truncate(31);
         assert!(ProfileActivation::try_from(short).is_err());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod command_tests {
+    use super::*;
+    use crate::intent::ModeTarget;
+
+    #[test]
+    fn a_control_action_command_round_trips() {
+        let command = ControlActionCommand {
+            session: SessionId::new(4),
+            vehicle: VehicleId::new(1),
+            scope: ScopeId::new("vehicle.motion"),
+            generation: Generation::new(9),
+            activation_revision: 3,
+            action: ControlAction::ModeRequest {
+                target: ModeTarget::Hold,
+            },
+            action_id: 17,
+        };
+        let wire_command = wire::ControlActionCommand::from(&command);
+        assert_eq!(
+            ControlActionCommand::try_from(wire_command).expect("round-trips"),
+            command
+        );
     }
 }

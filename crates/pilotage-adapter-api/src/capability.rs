@@ -28,6 +28,29 @@ pub struct ExecutionMode {
     pub physically_embodied: bool,
 }
 
+/// The simulator lifecycle scope (SIM-01): `SIM_RESET` lives here — and
+/// ONLY here — under its own lease, never on a flight scope or in a legacy
+/// flight mapping. Advertised exclusively by SIMULATION adapters; a
+/// live-vehicle or RF gateway must never publish it.
+pub const SIM_LIFECYCLE_SCOPE: &str = "sim.lifecycle";
+
+/// The lifecycle scope's descriptor: the one `SIM_RESET` action, no
+/// intents, no legacy translation. A client must hold this scope's own
+/// lease to command a reset — flight authority does not imply it.
+#[must_use]
+pub fn sim_lifecycle_descriptor() -> ScopeDescriptor {
+    ScopeDescriptor {
+        scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
+        axes: vec![],
+        intents: vec![],
+        actions: vec![ActionCapability {
+            action: pilotage_protocol::ActionKind::SimReset,
+            mode_targets: vec![],
+        }],
+        legacy: None,
+    }
+}
+
 /// One typed intent family a scope accepts, with the reference frames it
 /// admits and its REAL magnitude limits — the numbers the adapter itself
 /// enforces, so a client scaling sticks by these limits commands exactly the
@@ -108,10 +131,10 @@ pub enum LegacyCommandMap {
         yaw_rate: Option<LegacyAxisRoute>,
         /// Button whose pressed edge becomes `Arm`.
         arm_button: Option<u16>,
-        /// Button whose pressed edge becomes `Disarm`.
+        /// Button whose pressed edge becomes `Disarm`. There is NO reset
+        /// button: `SimReset` is not a flight action — it lives solely on
+        /// the separately leased [`SIM_LIFECYCLE_SCOPE`].
         disarm_button: Option<u16>,
-        /// Button whose pressed edge becomes `SimReset`.
-        reset_button: Option<u16>,
     },
     /// The scope's numeric axes command a gimbal rate: pitch/yaw scaled by
     /// the advertised angular limit, and the mapped button recenters.

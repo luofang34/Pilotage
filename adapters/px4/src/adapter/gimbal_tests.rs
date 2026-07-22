@@ -90,7 +90,14 @@ fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
         .iter()
         .map(|descriptor| descriptor.scope.as_str().to_owned())
         .collect();
-    assert_eq!(scopes, vec![super::FLIGHT_SCOPE, super::GIMBAL_SCOPE]);
+    assert_eq!(
+        scopes,
+        vec![
+            super::FLIGHT_SCOPE.to_owned(),
+            pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
+            super::GIMBAL_SCOPE.to_owned(),
+        ]
+    );
 }
 
 #[test]
@@ -104,7 +111,14 @@ fn a_vehicle_without_a_gimbal_advertises_no_gimbal_scope() {
         .iter()
         .map(|descriptor| descriptor.scope.as_str().to_owned())
         .collect();
-    assert_eq!(scopes, vec![super::FLIGHT_SCOPE], "no gimbal, no scope");
+    assert_eq!(
+        scopes,
+        vec![
+            super::FLIGHT_SCOPE.to_owned(),
+            pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
+        ],
+        "no gimbal, no gimbal scope — the sim lifecycle scope remains"
+    );
 }
 
 #[test]
