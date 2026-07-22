@@ -184,10 +184,7 @@ pub fn decode_datagram_envelope(bytes: &[u8]) -> JsValue {
             kind: "FrameRejected",
             message: FrameRejectedMessage {
                 reason: rejection.reason,
-                scope: rejection
-                    .scope
-                    .map(|scope| scope.value)
-                    .unwrap_or_default(),
+                scope: rejection.scope.map(|scope| scope.value).unwrap_or_default(),
                 sequence: rejection.sequence.map_or(0, |sequence| sequence.value),
                 current_generation: rejection
                     .current_generation
