@@ -1,4 +1,4 @@
-// The connect/transport lifecycle under a racing blur (CTRL-04, #147),
+// The connect/transport lifecycle under a racing blur (CTRL-04),
 // executing the PRODUCTION orchestration: `negotiateSessionAuthority` —
 // the exact module main.js runs — over the real bootstrap reader loop,
 // the real control gate, and the real release tracker. A regression in
@@ -11,6 +11,7 @@ import { negotiateSessionAuthority } from "./connect-authority.js";
 import { runBootstrapReader } from "./bootstrap.js";
 import { createControlGate } from "./control-gate.js";
 import { createReleaseTracker } from "./lease-release.js";
+import { resumeGrantDecision, resumeSessionControl } from "./resume-control.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -43,6 +44,14 @@ function reader(steps) {
       return { value: Uint8Array.from(step.bytes), done: false };
     },
   };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 // Drives the PRODUCTION orchestration over the real bootstrap loop, the
@@ -185,6 +194,105 @@ async function drive({ gate, tracker, steps, controlStarts = true }) {
   });
   check("an explicit connect re-arms a stale latch", leaseRequests === 1);
   check("control starts after the re-arm", events.join(",") === "start-control");
+}
+
+// --- same-session resume waits for release and writer settlement ------------
+{
+  const gate = createControlGate({ isFocused: () => true });
+  gate.latchInputLoss();
+  const tracker = createReleaseTracker();
+  const release = tracker.begin();
+  const stopped = deferred();
+  const liveTransport = Object.freeze({ id: "same-transport" });
+  let activeTransport = liveTransport;
+  let requests = 0;
+  let announcements = 0;
+  let surrenders = 0;
+  const resume = resumeSessionControl({
+    gate,
+    releases: tracker,
+    controlSettled: () => stopped.promise,
+    isSessionLive: () => activeTransport === liveTransport,
+    announceActivation: () => {
+      announcements += 1;
+    },
+    requestLeases: () => {
+      requests += 1;
+    },
+    surrender: () => {
+      surrenders += 1;
+    },
+  });
+  await Promise.resolve();
+  check("resume waits for the release acknowledgement", requests === 0);
+  tracker.acknowledge();
+  await release;
+  await Promise.resolve();
+  check("resume also waits for the prior datagram run", requests === 0);
+  stopped.resolve();
+  const result = await resume;
+  check("resume requests authority on the existing transport", result.requested && requests === 1);
+  check("resume re-announces before its request", announcements === 1);
+  check("clean same-session resume does not surrender", surrenders === 0);
+  check("the transport identity never changes", activeTransport === liveTransport);
+}
+
+// --- a blur during same-session release settlement aborts the request -------
+{
+  const gate = createControlGate({ isFocused: () => true });
+  gate.latchInputLoss();
+  const tracker = createReleaseTracker();
+  const release = tracker.begin();
+  let requests = 0;
+  const resume = resumeSessionControl({
+    gate,
+    releases: tracker,
+    controlSettled: () => Promise.resolve(),
+    isSessionLive: () => true,
+    announceActivation: () => {},
+    requestLeases: () => {
+      requests += 1;
+    },
+    surrender: () => {},
+  });
+  queueMicrotask(() => {
+    gate.latchInputLoss();
+    tracker.acknowledge();
+  });
+  await release;
+  const result = await resume;
+  check("a blur during release settlement leaves the gate latched", gate.isLatched());
+  check("a raced blur sends no same-session request", !result.requested && requests === 0);
+}
+
+// --- a blur after the request surrenders any raced grant --------------------
+{
+  const gate = createControlGate({ isFocused: () => true });
+  gate.latchInputLoss();
+  const tracker = createReleaseTracker();
+  let surrenders = 0;
+  const result = await resumeSessionControl({
+    gate,
+    releases: tracker,
+    controlSettled: () => Promise.resolve(),
+    isSessionLive: () => true,
+    announceActivation: () => {},
+    requestLeases: () => gate.latchInputLoss(),
+    surrender: () => {
+      surrenders += 1;
+    },
+  });
+  check("a post-request blur is detected", result.requested && result.interrupted);
+  check("the interrupted request is surrendered", surrenders === 1);
+  check(
+    "a raced grant cannot start control",
+    resumeGrantDecision({
+      pending: true,
+      granted: true,
+      sessionLive: true,
+      mayPublish: gate.mayPublish(),
+    }) === "surrender",
+  );
 }
 
 if (failures > 0) {

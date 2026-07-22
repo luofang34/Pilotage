@@ -101,6 +101,75 @@ fn a_same_scope_activation_retains_authority_and_requires_installed_neutral() {
 }
 
 #[test]
+fn an_unrecovered_fresh_generation_reenters_neutral_activation_recovery() {
+    let mut runtime = with_default();
+    runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
+    let unrecovered = SessionState {
+        motion_recovered: false,
+        ..session_gen(2, Mode::QuadPilot, true)
+    };
+
+    // The regrant after an input-loss suspension arrives on a fresh
+    // generation with the link-loss clearance still outstanding: a held
+    // deflection stays gated, never published.
+    let held = runtime.evaluate(&deflected(), &unrecovered);
+    assert!(held.motion.is_none(), "a held deflection cannot publish");
+    let centered = runtime.evaluate(&neutral(), &unrecovered);
+    assert!(
+        is_neutral_motion(&centered),
+        "centered controls retransmit the neutral activation"
+    );
+    let deflected_again = runtime.evaluate(&deflected(), &unrecovered);
+    assert!(
+        deflected_again.motion.is_none(),
+        "re-deflecting mid-recovery gates again"
+    );
+
+    // Host confirmation: one final neutral, then live publishes.
+    let confirmed = runtime.evaluate(&deflected(), &session_gen(2, Mode::QuadPilot, true));
+    assert!(
+        is_neutral_motion(&confirmed),
+        "confirmation completes with one final neutral"
+    );
+    let live = runtime.evaluate(&deflected(), &session_gen(2, Mode::QuadPilot, true));
+    assert!(
+        live.motion.is_some() && !is_neutral_motion(&live),
+        "live output resumes only after the host confirmed"
+    );
+}
+
+#[test]
+fn a_button_pressed_while_suspended_fires_no_edge_on_the_fresh_generation() {
+    let mut runtime = with_default();
+    runtime.evaluate(&neutral(), &session(Mode::QuadPilot, true));
+
+    // The arm button (9) went down while control was suspended (no ticks).
+    // The fresh generation's first tick seeds the baseline from the held
+    // state, so the press cannot fire; recovery gates it regardless.
+    let arm_held = sample(&[0.0; 4], &[9]);
+    let unrecovered = SessionState {
+        motion_recovered: false,
+        ..session_gen(2, Mode::QuadPilot, true)
+    };
+    let primed = runtime.evaluate(&arm_held, &unrecovered);
+    assert!(
+        !primed.arm,
+        "a press held across the suspension fires no edge"
+    );
+    assert!(
+        !primed.arm_suppressed,
+        "a seeded baseline is not a suppression"
+    );
+
+    // Released and pressed again after the host confirmed: a genuine edge.
+    runtime.evaluate(&neutral(), &unrecovered);
+    runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
+    runtime.evaluate(&neutral(), &session_gen(2, Mode::QuadPilot, true));
+    let fresh_press = runtime.evaluate(&arm_held, &session_gen(2, Mode::QuadPilot, true));
+    assert!(fresh_press.arm, "a fresh press after recovery arms");
+}
+
+#[test]
 fn a_fresh_session_voids_a_pending_transfer_release() {
     let mut runtime = with_default();
     // Steady flight on generation 1, then a scope transfer opens — but the

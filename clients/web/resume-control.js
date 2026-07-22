@@ -1,0 +1,45 @@
+// Same-session control resumption after the input-loss latch relinquishes
+// authority. The gate re-arm and every live probe stay in this module so the
+// browser lifecycle and its race tests execute the same ordering.
+
+/**
+ * Re-arms control, waits for the release and writer to settle, then requests
+ * fresh authority without replacing the live transport.
+ */
+export async function resumeSessionControl({
+  gate,
+  releases,
+  controlSettled,
+  isSessionLive,
+  announceActivation,
+  requestLeases,
+  surrender,
+}) {
+  gate.reset();
+  await releases.settled();
+  await controlSettled();
+  if (!isSessionLive() || !gate.mayPublish()) {
+    return { requested: false, interrupted: true };
+  }
+
+  announceActivation();
+  try {
+    await requestLeases();
+  } catch (error) {
+    surrender();
+    throw error;
+  }
+  if (!isSessionLive() || !gate.mayPublish()) {
+    surrender();
+    return { requested: true, interrupted: true };
+  }
+  return { requested: true, interrupted: false };
+}
+
+/** Decides how a mid-session motion grant completes a pending resume. */
+export function resumeGrantDecision({ pending, granted, sessionLive, mayPublish }) {
+  if (!pending) return "unrelated";
+  if (!granted) return "denied";
+  if (!sessionLive || !mayPublish) return "surrender";
+  return "start";
+}

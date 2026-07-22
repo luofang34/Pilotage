@@ -163,6 +163,78 @@ for (const group of vectors.groups) {
   });
 }
 
+// Same-session resume rides the authority-recovery contract: the regrant's
+// fresh generation gates a held deflection, retransmits neutral once
+// centered, and goes live only after the host confirms link-loss clearance.
+// Every negative check has a positive control on the SAME key, so a dud key
+// name cannot make the suite pass vacuously.
+{
+  const shell = await loadControlShell(wasmBytes);
+  const deflects = (motion) =>
+    motion !== null && Object.values(motion).some((value) => value !== 0);
+  const isNeutral = (motion) =>
+    motion !== null && Object.values(motion).every((value) => value === 0);
+  const live = toSession({ mode: "quad-pilot", generation: 1, motionRecovered: true });
+  shell.tickFromKeys(live);
+  shell.keyEvent("ArrowUp", true);
+  check(
+    "same-session resume: the bound key deflects while live (positive control)",
+    deflects(shell.tickFromKeys(live).motion),
+  );
+
+  const suspended = toSession({
+    mode: "quad-pilot",
+    generation: 1,
+    motionGranted: false,
+    motionRecovered: false,
+  });
+  check("same-session resume: suspension gates motion", shell.tickFromKeys(suspended).motion === null);
+  // The arm key goes down while control is suspended (no ticks run).
+  shell.keyEvent("Enter", true);
+
+  const regranted = toSession({
+    mode: "quad-pilot",
+    generation: 2,
+    motionRecovered: false,
+  });
+  const primed = shell.tickFromKeys(regranted);
+  check(
+    "same-session resume: a held deflection cannot publish on regrant",
+    primed.motion === null,
+    primed.motion,
+  );
+  check(
+    "same-session resume: an arm pressed while suspended fires no edge",
+    primed.arm === false,
+  );
+  shell.clearKeys();
+  check(
+    "same-session resume: centered controls retransmit the neutral activation",
+    isNeutral(shell.tickFromKeys(regranted).motion),
+  );
+  shell.keyEvent("ArrowUp", true);
+  check(
+    "same-session resume: re-deflecting mid-recovery gates again",
+    shell.tickFromKeys(regranted).motion === null,
+  );
+
+  const confirmed = toSession({ mode: "quad-pilot", generation: 2, motionRecovered: true });
+  check(
+    "same-session resume: confirmation completes with one final neutral",
+    isNeutral(shell.tickFromKeys(confirmed).motion),
+  );
+  check(
+    "same-session resume: live resumes after confirmation (positive control)",
+    deflects(shell.tickFromKeys(confirmed).motion),
+  );
+  shell.keyEvent("Enter", false);
+  shell.keyEvent("Enter", true);
+  check(
+    "same-session resume: a fresh arm press after recovery arms (positive control)",
+    shell.tickFromKeys(confirmed).arm === true,
+  );
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

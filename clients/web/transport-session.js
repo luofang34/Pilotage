@@ -60,6 +60,10 @@ export class TransportSessionLifecycle {
     return this.active?.token === token;
   }
 
+  currentToken() {
+    return this.active?.token ?? null;
+  }
+
   runIfActive(token, action) {
     if (!this.isActive(token)) return false;
     action();

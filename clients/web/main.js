@@ -78,7 +78,8 @@ import {
   validSessionConfig,
   whenVisible,
 } from "./session-discovery.js";
-import { startDatagramControl } from "./datagram-control.js";
+import { createDatagramRunStop, startDatagramControl } from "./datagram-control.js";
+import { resumeGrantDecision, resumeSessionControl } from "./resume-control.js";
 import { loadControlShell } from "./control-shell.js";
 import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
 import {
@@ -130,6 +131,7 @@ const els = {
   port: document.getElementById("port"),
   certHash: document.getElementById("certHash"),
   connectBtn: document.getElementById("connectBtn"),
+  resumeBtn: document.getElementById("resumeBtn"),
   status: document.getElementById("status"),
   overlay: document.getElementById("overlay"),
   telemetry: document.getElementById("telemetry"),
@@ -193,6 +195,15 @@ const state = {
   advertisedScopes: [],
   connected: false,
   leaseGranted: false,
+  // The current datagram run must finish and release its writer lock before a
+  // same-session resume can acquire the stream again.
+  controlCompletion: null,
+  stopControlRun: null,
+  // A live session token while a resume LeaseRequest awaits its response.
+  resumePendingToken: null,
+  // Input loss remembers whether the independent gimbal lease was held so the
+  // explicit resume restores the same authority set.
+  resumeGimbalLease: false,
   // The generation the motion lease held when last released: a post-handover
   // regrant must be strictly newer than this fence to be accepted.
   motionFence: 0n,
@@ -515,6 +526,11 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.lastFcVerdictLogged = null;
     state.connected = false;
     state.leaseGranted = false;
+    state.controlCompletion = null;
+    state.stopControlRun = null;
+    state.resumePendingToken = null;
+    state.resumeGimbalLease = false;
+    els.resumeBtn.hidden = true;
     state.skippedVideoFrames = 0;
     resetVideoDiagnostics();
     retireSessionPresentation("connecting");
@@ -628,6 +644,9 @@ function handleTransportClosed(token, error) {
   state.connected = false;
   state.transport = null;
   state.sessionWriter = null;
+  state.resumePendingToken = null;
+  state.resumeGimbalLease = false;
+  els.resumeBtn.hidden = true;
   // An unacknowledged release rides down with the transport; the host
   // watchdog covers it from here.
   releaseTracker.abandon();
@@ -726,6 +745,84 @@ function sendLeaseRelease(token) {
   log("sent LeaseRelease for " + scope);
 }
 
+/** Relinquishes local authority synchronously with the input-loss latch. */
+function suspendControlForInputLoss(token) {
+  state.stopControlRun?.stop();
+  const releaseNeeded = state.leaseGranted || state.resumePendingToken === token;
+  state.resumeGimbalLease ||= state.gimbalLeaseGranted;
+  if (releaseNeeded) sendLeaseRelease(token);
+  state.motionFence = state.generation;
+  state.leaseGranted = false;
+  state.motionRecovered = false;
+}
+
+function showResumeAffordance() {
+  const token = transportSessions.currentToken();
+  const available =
+    token !== null &&
+    state.connected &&
+    controlGate.isLatched() &&
+    motionCapabilityFor(state.motionScope);
+  els.resumeBtn.hidden = !available;
+  if (available) {
+    els.overlay.textContent = "control suspended — press Resume control";
+  }
+}
+
+async function requestResumeLeases(token) {
+  const writer = state.sessionWriter;
+  if (!writer || !transportSessions.isActive(token)) {
+    throw new Error("the live session stream is unavailable");
+  }
+  const motion = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: state.motionScope });
+  await writer.write(lengthDelimit(motion));
+  log(`sent same-session LeaseRequest for ${state.motionScope}`);
+  if (state.resumeGimbalLease) {
+    const gimbal = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: GIMBAL_SCOPE });
+    await writer.write(lengthDelimit(gimbal));
+    log(`sent same-session LeaseRequest for ${GIMBAL_SCOPE}`);
+  }
+}
+
+/** Explicitly resumes authority and the datagram run on the current session. */
+async function resumeControlInPlace() {
+  const token = transportSessions.currentToken();
+  if (!token || !state.connected) {
+    els.resumeBtn.hidden = true;
+    reconnect.requestConnect();
+    return;
+  }
+  els.resumeBtn.disabled = true;
+  try {
+    const result = await resumeSessionControl({
+      gate: controlGate,
+      releases: releaseTracker,
+      controlSettled: () => state.controlCompletion ?? Promise.resolve(),
+      isSessionLive: () => transportSessions.isActive(token) && state.connected,
+      announceActivation: () => maybeAnnounceProfileActivation(),
+      requestLeases: async () => {
+        state.resumePendingToken = token;
+        await requestResumeLeases(token);
+      },
+      surrender: () => sendLeaseRelease(token),
+    });
+    if (!result.requested) {
+      showResumeAffordance();
+      return;
+    }
+    els.overlay.textContent = result.interrupted
+      ? "resume interrupted by input loss"
+      : "resume requested — waiting for fresh motion authority";
+  } catch (error) {
+    state.resumePendingToken = null;
+    controlGate.latchInputLoss();
+    log(`same-session resume failed: ${error}`);
+    showResumeAffordance();
+  } finally {
+    els.resumeBtn.disabled = false;
+  }
+}
+
 /** Applies a motion-scope reliable-stream message to the flat authority state
  *  through the pure {@link advanceMotionLease} transition: it enforces the
  *  generation fence and terminal denial, and installs a fresh generation
@@ -747,6 +844,44 @@ function applyMotionLease(decoded) {
     state.sequence = 0;
   }
   return after;
+}
+
+function completePendingResume(token, granted) {
+  const decision = resumeGrantDecision({
+    pending: state.resumePendingToken === token,
+    granted,
+    sessionLive: transportSessions.isActive(token) && state.connected,
+    mayPublish: controlGate.mayPublish(),
+  });
+  if (decision === "unrelated") return;
+  if (decision === "surrender") {
+    suspendControlForInputLoss(token);
+    state.resumePendingToken = null;
+    showResumeAffordance();
+    return;
+  }
+  state.resumePendingToken = null;
+  if (decision === "denied") {
+    state.motionDenied = true;
+    if (state.gimbalLeaseGranted) executeLeaseAction(token, "release", GIMBAL_SCOPE);
+    els.overlay.textContent = "same-session resume denied — press Connect to retry";
+    return;
+  }
+  state.resumeGimbalLease = false;
+  // A fresh wasm session generation: the runtime re-seeds every discrete
+  // edge baseline (a button pressed while control was suspended cannot fire
+  // on resume) and, arriving unrecovered, re-enters the neutral-activation
+  // recovery before any live output.
+  state.controlGeneration = (state.controlGeneration + 1) >>> 0;
+  if (startControlLoop(state.transport, token)) {
+    els.resumeBtn.hidden = true;
+    els.overlay.textContent = "control resumed — center inputs for neutral recovery";
+    log("same-session control resumed on fresh authority");
+  } else {
+    controlGate.latchInputLoss();
+    suspendControlForInputLoss(token);
+    showResumeAffordance();
+  }
 }
 
 /** Reads the session (bootstrap) stream after the handshake completes:
@@ -817,7 +952,13 @@ async function runSessionStreamReader(reader, token) {
         state.gimbalLeaseGranted = !!m.granted;
         state.gimbalLeaseDenied = !m.granted;
         log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
-        if (!m.granted) {
+        if (
+          m.granted &&
+          (!controlGate.mayPublish() || (state.resumeGimbalLease && state.motionDenied))
+        ) {
+          executeLeaseAction(token, "release", GIMBAL_SCOPE);
+          log("input loss raced the gimbal grant; surrendered immediately");
+        } else if (!m.granted) {
           log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
         }
       }
@@ -866,6 +1007,7 @@ async function runSessionStreamReader(reader, token) {
             : "camera flight scope granted";
           log(`LeaseResponse[motion:${state.motionScope}]: granted generation=${m.generation}`);
         }
+        completePendingResume(token, after.granted);
       }
     }
   }
@@ -1365,11 +1507,12 @@ function activeGamepad() {
 
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
 function startControlLoop(transport, token) {
+  const runStop = createDatagramRunStop();
   const started = startDatagramControl({
     datagrams: transport.datagrams,
     lifecycle: transportSessions,
     token,
-    run: (writer) => runControlLoop(writer, token),
+    run: (writer) => runControlLoop(writer, token, runStop),
     onError: (error) => log(`control loop stopped: ${error}`),
   });
   if (!started.ok) {
@@ -1380,12 +1523,24 @@ function startControlLoop(transport, token) {
     els.gamepad.textContent = `control unavailable — ${detail}`;
     els.overlay.textContent = "control unavailable";
     log(`control unavailable: ${detail}`);
+  } else {
+    const completion = started.completion;
+    state.controlCompletion = completion;
+    state.stopControlRun = runStop;
+    completion
+      .finally(() => {
+        if (state.controlCompletion === completion) {
+          state.controlCompletion = null;
+          state.stopControlRun = null;
+        }
+      })
+      .catch(() => {});
   }
   return started.ok;
 }
 
 /** Runs the control-fast send loop with an acquired, session-owned writer. */
-async function runControlLoop(writer, token) {
+async function runControlLoop(writer, token, runStop) {
   // The control runtime owns every edge baseline (arm/disarm/R3), so a button
   // held across a reconnect cannot read as a fresh edge — no priming here.
   const intervalMs = 1000 / CONTROL_HZ;
@@ -1395,11 +1550,8 @@ async function runControlLoop(writer, token) {
   // (which the host rejects as too old, ADR-0009). `sampled_at` is stamped right
   // before the write, after `ready`, so it reflects the real send moment.
   while (transportSessions.isActive(token) && state.connected) {
-      try {
-        await writer.ready;
-      } catch {
-        return; // writer closed (session ended)
-      }
+      const ready = await runStop.waitFor(writer.ready);
+      if (!ready) return;
       if (!transportSessions.isActive(token) || !state.connected) return;
       // A connected gamepad drives under its profile; the keyboard is the
       // fallback when none is present. The readout shows the live mapping.
@@ -1414,10 +1566,11 @@ async function runControlLoop(writer, token) {
         // client-side neutral would both violate the latch invariant and
         // refresh the very setpoint freshness the silence watchdog (the
         // independent backup) is watching.
-        sendLeaseRelease(token);
+        suspendControlForInputLoss(token);
         els.gamepad.textContent =
-          "control released — input lost; press Connect to resume control";
+          "control released — input lost; press Resume control";
         log("input lost — control authority released (host acknowledges or watchdog covers)");
+        showResumeAffordance();
         return;
       }
       // The control runtime maps every input; until its wasm has loaded there
@@ -1509,6 +1662,11 @@ async function runControlLoop(writer, token) {
 
 function velocityCapabilityFor(scope) {
   return capabilityFor(state.advertisedScopes, VEHICLE_ID, scope, INTENT_FAMILY_VELOCITY);
+}
+
+function motionCapabilityFor(scope) {
+  const family = scope === DIRECT_SCOPE ? INTENT_FAMILY_ATTITUDE_THRUST : INTENT_FAMILY_VELOCITY;
+  return capabilityFor(state.advertisedScopes, VEHICLE_ID, scope, family);
 }
 
 /** The fencing generation the client holds `scope` at — the binding every
@@ -1680,9 +1838,7 @@ function maybeAnnounceProfileActivation() {
  *  vehicle does not advertise a velocity intent. */
 function sendMotionFrame(writer, token, mode, plan) {
   const direct = state.motionScope === DIRECT_SCOPE;
-  const capability = direct
-    ? capabilityFor(state.advertisedScopes, VEHICLE_ID, DIRECT_SCOPE, INTENT_FAMILY_ATTITUDE_THRUST)
-    : velocityCapabilityFor(state.motionScope);
+  const capability = motionCapabilityFor(state.motionScope);
   if (!capability) return;
   const m = plan.motion;
   if (plan.arm && requestAction(state.motionScope, CONTROL_ACTION.arm, undefined, [CONTROL_ACTION.disarm])) {
@@ -2056,6 +2212,9 @@ els.connectBtn.addEventListener("click", () => {
   // only path that requests control.
   reconnect.requestConnect();
 });
+els.resumeBtn.addEventListener("click", () => {
+  void resumeControlInPlace();
+});
 // A launcher-pinned URL (host + port + cert all present, autoconnect=1)
 // connects through the SAME explicit path as the button — the URL already
 // states everything the click would add. Anything less than a fully
@@ -2086,8 +2245,13 @@ els.connectBtn.addEventListener("click", () => {
 // session likely idle-dropped while away, and only now can a reconnect succeed
 // (a hidden tab would just drop again).
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") reconnect.notifyVisible();
+  if (document.visibilityState === "visible") {
+    reconnect.notifyVisible();
+    showResumeAffordance();
+  }
 });
+
+window.addEventListener("focus", showResumeAffordance);
 
 // Losing window focus can swallow keyup events, leaving keys "stuck". Clear the
 // keyboard and arm-edge state immediately on blur so input released off-window
@@ -2097,10 +2261,10 @@ window.addEventListener("blur", () => {
   // await, and a refocus before its next tick must not un-happen the
   // loss. Frames under the current generation end here — and the
   // explicit release starts HERE too, not at the loop's next tick, so a
-  // Connect click racing the blur always finds the release in flight.
+  // resume action racing the blur always finds the release in flight.
   controlGate.latchInputLoss();
-  if (state.leaseGranted && transportSessions.active !== null) {
-    sendLeaseRelease(transportSessions.active);
-  }
+  const token = transportSessions.currentToken();
+  if (token) suspendControlForInputLoss(token);
   state.controlShell?.clearKeys();
+  showResumeAffordance();
 });
