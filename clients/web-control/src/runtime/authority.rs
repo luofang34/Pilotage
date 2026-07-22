@@ -1,4 +1,4 @@
-//! The motion-lease reacquisition state machine. On a live profile switch the
+//! The motion-lease reacquisition state machine. On a scope-member transfer the
 //! runtime fences the motion generation and recovers only through a neutral
 //! activation burst, so the host clears its link-loss brake before a live
 //! command resumes and nothing publishes on the released generation.
@@ -9,8 +9,8 @@ use crate::sample::{RawSample, SessionState};
 
 use super::{ControlRuntime, controls_neutral};
 
-/// The motion lease's position in the reacquisition handshake after a profile
-/// switch. Steady flight sits in [`MotionPhase::Held`]; a handover walks
+/// The motion lease's position in the reacquisition handshake after a scope
+/// transfer. Steady flight sits in [`MotionPhase::Held`]; a handover walks
 /// `Held → Releasing → Reacquiring → Neutralizing → Held`, gating live motion
 /// output the whole way and recovering only through a neutral activation burst
 /// so the host clears its link-loss brake before a live command resumes.
@@ -55,7 +55,7 @@ pub(super) enum MotionOutput {
 pub(super) const MOTION_LEASE_RETRY_MS: f64 = 250.0;
 
 impl ControlRuntime {
-    /// Advances the motion-lease reacquisition after a profile handover and
+    /// Advances motion-lease reacquisition after a scope-member transfer and
     /// returns any lease action to emit plus what to do with motion output. The
     /// full handshake is
     /// `release → (session reflects release) → request → (fresh grant) →

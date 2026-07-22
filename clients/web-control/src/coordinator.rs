@@ -1,9 +1,10 @@
 //! Coordinates the device stage and the control runtime as ONE activation
 //! authority (INPUT-01): any effective-mapping change — new scheme bytes OR
 //! a device selection that changes what physical input means — takes the
-//! same transactional path: neutral output, gimbal + motion lease cycle,
+//! same transactional path: neutral output, retained same-scope authority,
 //! and an advanced activation revision that the announcement and every
-//! subsequent frame carry. The wasm shell and the native golden harness
+//! subsequent frame carry. Real scope-member transfers use the runtime's
+//! separate authority-cycle path. The wasm shell and native golden harness
 //! both drive this type, so their transaction semantics cannot drift.
 
 use pilotage_input::ProfileLayer;
@@ -80,20 +81,19 @@ impl ControlCoordinator {
 
     /// Re-opens the activation transaction for the CURRENT mapping without
     /// changing it — the seam a scope handover (e.g. entering direct
-    /// flight) uses to get the same neutral fencing, lease cycle, and
-    /// revision advance a mapping change gets. Returns false before the
-    /// first activation.
+    /// flight) uses to get neutral fencing, a fresh motion generation, and a
+    /// revision advance. Returns false before the first activation.
     pub fn reactivate(&mut self) -> bool {
         self.runtime.reactivate()
     }
 
     /// Resolves a `Gamepad.id` through the layered registry and, when the
     /// EFFECTIVE mapping changes, swaps it transactionally: the runtime
-    /// re-opens its activation handover (neutral output, lease cycle,
+    /// re-opens its activation handover (neutral output, retained leases,
     /// revision advance) and the new map installs only when that handover
-    /// completes — a deflected input on the new pad cannot drive the
-    /// existing lease for even one tick. An unchanged resolution only
-    /// re-seeds the discrete edge baselines.
+    /// completes — a deflected input on the new pad cannot drive live output
+    /// until the installed map itself reads neutral. An unchanged resolution
+    /// only re-seeds the discrete edge baselines.
     pub fn select_device(&mut self, gamepad_id: &str) -> SelectOutcome {
         self.last_pad_id = gamepad_id.to_owned();
         let (candidate, outcome) = self.stage.resolve_pad(gamepad_id);
@@ -115,8 +115,8 @@ impl ControlCoordinator {
     /// The selected pad is gone (disconnect, or a physical replacement's
     /// disconnect half): control returns to the keyboard TRANSACTIONALLY —
     /// the switch changes what physical input means, so it takes the same
-    /// neutral handover, lease cycle, revision advance, and re-announcement
-    /// a pad selection takes.
+    /// neutral handover, retained authority, revision advance, and
+    /// re-announcement a pad selection takes.
     pub fn deselect_device(&mut self) {
         self.last_pad_id = String::new();
         if self.active_source == InputSource::Keyboard && self.stage.pad_digest().is_none() {
@@ -132,7 +132,7 @@ impl ControlCoordinator {
     /// Opens the swap transaction (or applies it immediately before the
     /// first scheme activation, when there is no authority to fence).
     fn swap(&mut self, incoming: PendingSwap) {
-        if self.runtime.reactivate() {
+        if self.runtime.reactivate_mapping() {
             // A second swap opening before the first installs merges into
             // it: the transaction boundary applies the LATEST resolution of
             // every part.
@@ -189,9 +189,9 @@ impl ControlCoordinator {
 
     /// Evaluates one control tick, and lands any pending device swap the
     /// moment the runtime's handover completes (the activation revision
-    /// advances): motion output is still gated behind the motion-lease
-    /// reacquisition at that point, so the remapped pad never publishes on
-    /// the old authority.
+    /// advances): motion output remains gated until the newly installed map
+    /// itself reads neutral, so an incoming-map deflection that the outgoing
+    /// map could not see never publishes.
     pub fn evaluate(&mut self, sample: &RawSample, session: &SessionState) -> ControlPlan {
         let plan = self.runtime.evaluate(sample, session);
         if self.runtime.activation_revision() != self.seen_revision {
