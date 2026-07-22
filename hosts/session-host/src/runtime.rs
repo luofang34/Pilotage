@@ -14,6 +14,9 @@ mod registry;
 mod shutdown;
 mod stream_tag;
 mod wire_codec;
+// The envelope encoder is exported for the wire-fixture test: the committed
+// browser fixture must be THIS host's bytes, not a hand-maintained copy.
+pub use wire_codec::encode_envelope_message;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};

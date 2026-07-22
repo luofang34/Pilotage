@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::convert::{ConvertError, SCHEMA_VERSION};
-use crate::session::{FrameRejected, FrameRejectionReason};
 use crate::ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
+use crate::session::{FrameRejected, FrameRejectionReason};
 use crate::wire;
 use pilotage_timing::MonoTimestamp;
 use prost::Message;

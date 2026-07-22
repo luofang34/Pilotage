@@ -9,9 +9,11 @@
 // rejects the datagram as unrecognized. These checks pin the invariant that the
 // required fields are emitted even when their ids are zero.
 
+import { readFileSync } from "node:fs";
 import {
   encodeControlFrameEnvelope,
   decodeBareEnvelope,
+  decodeLengthDelimitedEnvelope,
   parseVideoFrameV2,
   BUTTON_EDGE_PRESSED,
   SCHEMA_VERSION,
@@ -662,6 +664,60 @@ check(
   check("link-loss-cleared vehicle round-trips", decoded.message.vehicleId === 7n);
   check("link-loss-cleared scope round-trips", decoded.message.scope === "vehicle.motion");
   check("link-loss-cleared generation round-trips", decoded.message.generation === 42n);
+}
+
+// --- Capability negotiation against the HOST-encoded ServerWelcome fixture ---
+// The bytes come from the real session host (see
+// hosts/session-host/tests/welcome_fixture.rs); they deliberately carry
+// multi-value PACKED repeated enum lists (reference frames, mode targets),
+// the encoding a naive per-entry varint decode turns to NaN.
+{
+  const fixture = JSON.parse(
+    readFileSync(new URL("../web-control/server-welcome-fixture.json", import.meta.url), "utf8"),
+  );
+  const hex = fixture.envelopeHex;
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  const decoded = decodeLengthDelimitedEnvelope(bytes);
+  check("welcome fixture decodes fully", decoded !== null && decoded.consumed === bytes.length);
+  check("welcome fixture is a ServerWelcome", decoded.kind === "ServerWelcome");
+  const message = decoded.message;
+  const expected = fixture.expected;
+  check("welcome session id decodes", Number(message.sessionId) === expected.sessionId);
+  const scopes = message.advertisedScopes ?? [];
+  check("both scopes decode", scopes.length === expected.scopes.length);
+  const motion = scopes.find((scope) => scope.scope === "vehicle.motion");
+  const velocity = motion?.intents.find((intent) => intent.family === expected.scopes[0].velocity.family);
+  const wantVelocity = expected.scopes[0].velocity;
+  // Limits ride the wire as f32; compare through fround.
+  check("velocity limits decode", velocity?.maxLinear === Math.fround(wantVelocity.maxLinear)
+    && velocity?.maxVertical === Math.fround(wantVelocity.maxVertical)
+    && velocity?.maxAngular === Math.fround(wantVelocity.maxAngular));
+  check(
+    "PACKED reference frames decode as every value, none NaN",
+    JSON.stringify(velocity?.frames) === JSON.stringify(wantVelocity.frames),
+  );
+  const modeRequest = motion?.actions.find((action) => action.modeTargets.length > 0);
+  check(
+    "PACKED mode targets decode as every value, none NaN",
+    JSON.stringify(modeRequest?.modeTargets) === JSON.stringify(expected.scopes[0].modeTargets),
+  );
+  const direct = scopes.find((scope) => scope.scope === "vehicle.motion.direct");
+  const attitude = direct?.intents.find(
+    (intent) => intent.family === expected.scopes[1].attitudeThrust.family,
+  );
+  const wantAttitude = expected.scopes[1].attitudeThrust;
+  check(
+    "the attitude scope's tilt bound and heading slew decode",
+    Math.abs(attitude?.maxAngular - wantAttitude.maxAngular) < 1e-6
+      && Math.abs(attitude?.maxYawRate - wantAttitude.maxYawRate) < 1e-6,
+  );
+  check(
+    "the attitude frame list decodes",
+    JSON.stringify(attitude?.frames) === JSON.stringify(wantAttitude.frames),
+  );
 }
 
 if (failures > 0) {

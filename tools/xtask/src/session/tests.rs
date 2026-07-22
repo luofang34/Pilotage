@@ -293,9 +293,11 @@ fn web_assets_preflight_skips_only_with_a_matching_content_stamp() {
     );
 
     // Recording the CURRENT stamp makes the same checkout skip the build.
+    let sources = crate::session::preflight::web_runtime_sources(&root);
+    let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
     let current = crate::session::preflight::stamp::source_stamp(
         &root,
-        &crate::session::preflight::WEB_RUNTIME_SOURCES,
+        &source_refs,
         &[&["rustc", "--version"], &["wasm-bindgen", "--version"]],
     )
     .expect("stamp computes inside a git repository");
@@ -412,4 +414,30 @@ async fn viewer_server_sets_cache_control_no_store() {
             .contains("cache-control: no-store"),
         "every viewer response must carry Cache-Control: no-store; got headers:\n{headers}"
     );
+}
+
+/// The wasm stamp's input set must be the DERIVED dependency closure, not a
+/// hand-maintained list: the shared protocol and input engines (transitive
+/// dependencies of the wasm crates) and the workspace manifests are all
+/// inputs — a change to any of them without a rebuild would serve stale
+/// wasm whose bytes disagree with the host.
+#[test]
+fn the_web_runtime_stamp_covers_the_transitive_dependency_closure() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("xtask sits two levels under the repo root");
+    let sources = crate::session::preflight::web_runtime_sources(repo_root);
+    for required in [
+        "Cargo.lock",
+        "Cargo.toml",
+        "clients/web-control",
+        "crates/pilotage-input",
+        "crates/pilotage-protocol",
+    ] {
+        assert!(
+            sources.iter().any(|source| source == required),
+            "the wasm stamp closure must cover {required}; got {sources:?}"
+        );
+    }
 }

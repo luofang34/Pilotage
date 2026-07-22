@@ -14,16 +14,87 @@ pub(crate) mod stamp;
 /// Where preflight stamps live (under the gitignored build tree).
 const WEB_RUNTIME_STAMP: &str = "target/xtask-stamps/web-runtime.stamp";
 
-/// The source inputs whose working-tree content decides whether the viewer
-/// wasm runtime is stale: the two wasm crates, their engine dependency, and
-/// the build script itself.
-pub(crate) const WEB_RUNTIME_SOURCES: [&str; 5] = [
+/// The FLOOR of the wasm runtime's source inputs: the wasm crates, the
+/// build script, and the workspace manifests (a lockfile pin or profile
+/// change rebuilds). The full input set is [`web_runtime_sources`], which
+/// unions this floor with the DERIVED transitive workspace dependency
+/// closure — a hand-maintained crate list rots the moment a dependency is
+/// added, silently serving stale wasm.
+const WEB_RUNTIME_SOURCE_FLOOR: [&str; 5] = [
+    "Cargo.lock",
+    "Cargo.toml",
     "clients/web-control",
     "clients/web-instruments",
-    "crates/pilotage-input",
-    "crates/pilotage-instrument-panels",
     "scripts/build-web-instruments.sh",
 ];
+
+/// The wasm crates whose dependency closure decides staleness.
+const WEB_RUNTIME_ROOT_CRATES: [&str; 2] = ["pilotage-control-web", "pilotage-instruments-web"];
+
+/// Every source input of the viewer wasm build: the floor plus every
+/// WORKSPACE crate the wasm crates transitively depend on, derived from
+/// `cargo tree` at stamp time. When cargo is unavailable the derived part
+/// degrades to the floor alone — and the floor includes the lockfile, so a
+/// dependency-graph change still rebuilds through the pinned versions.
+pub(crate) fn web_runtime_sources(repo_root: &std::path::Path) -> Vec<String> {
+    let mut sources: std::collections::BTreeSet<String> = WEB_RUNTIME_SOURCE_FLOOR
+        .iter()
+        .map(|source| (*source).to_owned())
+        .collect();
+    sources.extend(workspace_dependency_closure(repo_root));
+    sources.into_iter().collect()
+}
+
+/// The repo-relative directories of every workspace crate in the wasm
+/// build's transitive dependency graph (normal + build edges). Empty when
+/// `cargo tree` cannot run.
+fn workspace_dependency_closure(repo_root: &std::path::Path) -> Vec<String> {
+    let mut args = vec![
+        "tree",
+        "-e",
+        "normal,build",
+        "--prefix",
+        "none",
+        "--format",
+        "{p}",
+    ];
+    for root_crate in WEB_RUNTIME_ROOT_CRATES {
+        args.push("-p");
+        args.push(root_crate);
+    }
+    let Ok(output) = Command::new("cargo")
+        .args(&args)
+        .current_dir(repo_root)
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(canonical_root) = repo_root.canonicalize() else {
+        return Vec::new();
+    };
+    let mut members = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        // Workspace members print as `name vX.Y.Z (/abs/path)`; registry
+        // dependencies carry no path and are covered by the lockfile pin.
+        let Some(open) = line.find("(/") else {
+            continue;
+        };
+        let Some(close) = line[open..].find(')') else {
+            continue;
+        };
+        let path = &line[open + 1..open + close];
+        let Ok(canonical) = std::path::Path::new(path).canonicalize() else {
+            continue;
+        };
+        if let Ok(relative) = canonical.strip_prefix(&canonical_root) {
+            members.push(relative.display().to_string());
+        }
+    }
+    members
+}
 
 /// Builds the session host in release, the binary every session runs.
 ///
@@ -76,9 +147,11 @@ pub(super) fn prepare_web_assets(repo_root: &std::path::Path) -> Result<(), Xtas
     let artifacts_exist = WEB_RUNTIME_ARTIFACTS
         .iter()
         .all(|rel| repo_root.join(rel).is_file());
+    let sources = web_runtime_sources(repo_root);
+    let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
     let current = stamp::source_stamp(
         repo_root,
-        &WEB_RUNTIME_SOURCES,
+        &source_refs,
         &[&["rustc", "--version"], &["wasm-bindgen", "--version"]],
     );
     let stamp_path = repo_root.join(WEB_RUNTIME_STAMP);

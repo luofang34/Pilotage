@@ -1280,6 +1280,7 @@ dependencies = [
  "pilotage-session",
  "pilotage-timing",
  "prost",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",
