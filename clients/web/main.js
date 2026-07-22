@@ -69,6 +69,7 @@ import { negotiateSessionAuthority } from "./connect-authority.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
+import { bindVideoTargets, resolveVideoTarget } from "./video-routing.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
 import { startDatagramControl } from "./datagram-control.js";
@@ -122,16 +123,10 @@ const els = {
   overlay: document.getElementById("overlay"),
   telemetry: document.getElementById("telemetry"),
   gamepad: document.getElementById("gamepad"),
-  canvas: document.getElementById("video"),
-  chaseCanvas: document.getElementById("chaseVideo"),
-  gimbalCanvas: document.getElementById("gimbalVideo"),
   pfd: document.getElementById("pfd"),
   hsi: document.getElementById("hsi"),
   flightMode: document.getElementById("flightMode"),
 };
-const ctx = els.canvas.getContext("2d");
-const chaseCtx = els.chaseCanvas.getContext("2d");
-const gimbalCtx = els.gimbalCanvas.getContext("2d");
 const pfdCtx = els.pfd.getContext("2d");
 const hsiCtx = els.hsi.getContext("2d");
 const pfdFaultPresenter = createDomFaultPresenter(els.pfd);
@@ -935,14 +930,7 @@ function dispatchAuthorityEnvelope(decoded, token) {
 // gracefully. Codec dispatch is
 // separate: "MJPG" paints via createImageBitmap; "H264" routes to WebCodecs.
 const FOURCC_MJPEG = "MJPG";
-const SOURCE_FPV = 0;
-const SOURCE_CHASE = 1;
-const SOURCE_GIMBAL = 2;
-const VIDEO_TARGETS = {
-  [SOURCE_FPV]: { canvas: els.canvas, ctx },
-  [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
-  [SOURCE_GIMBAL]: { canvas: els.gimbalCanvas, ctx: gimbalCtx },
-};
+const VIDEO_TARGETS = bindVideoTargets(document);
 
 // Per-source H.264 decoders, each bound to the transport session that built it
 // (H264DecoderRegistry owns that lifetime — see video-h264.js). A source that
@@ -1010,13 +998,13 @@ async function paintByCodec(fourcc, payload, sourceId, target, token) {
 /** Resolves a frame's canvas target by source id, counting/logging a skip for
  *  an unknown source. Returns the target, or `null` to skip. */
 function videoTargetFor(sourceId) {
-  const target = VIDEO_TARGETS[sourceId];
-  if (!target) {
+  return resolveVideoTarget(VIDEO_TARGETS, sourceId, (unknownSourceId) => {
     state.skippedVideoFrames += 1;
-    log(`unknown video source_id ${sourceId}; skipping frame (${state.skippedVideoFrames} skipped total)`);
-    return null;
-  }
-  return target;
+    log(
+      `unknown video source_id ${unknownSourceId}; skipping frame ` +
+        `(${state.skippedVideoFrames} skipped total)`,
+    );
+  });
 }
 
 // v1 video body `[source_id][fourcc][u32 LE len][payload]` (ADR-0016), retained

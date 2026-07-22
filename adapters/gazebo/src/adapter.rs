@@ -59,9 +59,10 @@ pub const GIMBAL_CAMERA: u8 = 2;
 /// [`FrameStamper`], so its [`capture`](Self::capture) is always fully formed.
 #[derive(Debug, Clone)]
 pub struct RawVideoFrame {
-    /// Video source this frame came from: 0 = onboard FPV, 1 = chase. Carried
-    /// end to end so the host media pipeline and every reader can route each
-    /// frame to the right video source (the wire `source_id` byte).
+    /// Video source this frame came from: 0 = onboard FPV, 1 = chase, 2 =
+    /// gimbal payload. Carried end to end so the host media pipeline and every
+    /// reader can route each frame to the right video source (the wire
+    /// `source_id` byte).
     pub source_id: u8,
     /// Frame width in pixels.
     pub width: u32,

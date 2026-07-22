@@ -162,6 +162,9 @@ jobs:
       - name: viewer video-diagnostics decision logic (readiness dedup + read-failure coalescing)
         run: node clients/web/video-diagnostics.test.mjs
 
+      - name: viewer video-source routing (FPV + chase + gimbal payload)
+        run: node clients/web/video-routing.test.mjs
+
       - name: viewer incoming-uni-stream accept-loop lifecycle (stream isolation + terminal collection)
         run: node clients/web/uni-stream-accept.test.mjs
 
