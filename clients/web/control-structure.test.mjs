@@ -18,9 +18,11 @@ const SIZE_CAPS = {
   "authority-transition.js": 22,
   "bootstrap.js": 88,
   "calibration.js": 285,
+  "cockpit-readout.js": 565,
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
+  "control-loop.js": 807,
   "control-shell.js": 341,
   "datagram-control.js": 80,
   "instrument-health.js": 395,
@@ -28,10 +30,12 @@ const SIZE_CAPS = {
   "layout.js": 55,
   "lease-executor.js": 14,
   "lease-release.js": 67,
-  "main.js": 2290,
+  "main.js": 190,
   "reconnect.js": 150,
   "resume-control.js": 59,
   "session-discovery.js": 68,
+  "session-bootstrap.js": 135,
+  "session-transport.js": 285,
   "snapshot-association.js": 266,
   "telemetry-display.js": 75,
   "telemetry-ingress.js": 689,
@@ -125,14 +129,39 @@ if (mayPublishCalls !== 1) {
   console.error(`FAIL - mayPublish must guard only the datagram write (got ${mayPublishCalls})`);
 }
 
-// And the shell must still drive the runtime through the one seam.
+// And the control loop must still drive the runtime through the one seam.
+const controlLoop = readFileSync(new URL("./control-loop.js", dir), "utf8");
+const controlModules =
+  controlLoop + readFileSync(new URL("./cockpit-readout.js", dir), "utf8");
 const main = readFileSync(new URL("./main.js", dir), "utf8");
+if (/^(?:async )?function /m.test(main)) {
+  failures += 1;
+  console.error("FAIL - main.js must contain wiring and listener registration only");
+}
+for (const name of [
+  "cockpit-readout.js",
+  "control-loop.js",
+  "session-bootstrap.js",
+  "session-transport.js",
+]) {
+  if (readFileSync(new URL(`./${name}`, dir), "utf8").includes("addEventListener(")) {
+    failures += 1;
+    console.error(`FAIL - ${name} must leave event-listener registration in main.js`);
+  }
+}
+for (const name of ["control-loop.js", "session-bootstrap.js", "session-transport.js"]) {
+  const source = readFileSync(new URL(`./${name}`, dir), "utf8");
+  if (/els\.(?:overlay|gamepad|telemetry)\.textContent/.test(source)) {
+    failures += 1;
+    console.error(`FAIL - ${name} must route operator readout through cockpit-readout.js`);
+  }
+}
 function require(label, pattern) {
-  if (pattern.test(main)) {
-    console.log(`ok   - main.js ${label}`);
+  if (pattern.test(controlModules)) {
+    console.log(`ok   - control modules ${label}`);
   } else {
     failures += 1;
-    console.error(`FAIL - main.js must ${label}`);
+    console.error(`FAIL - control modules must ${label}`);
   }
 }
 require("imports the control shell", /from "\.\/control-shell\.js"/);
