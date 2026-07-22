@@ -239,16 +239,20 @@ impl SessionEngine {
                 ..
             } => {
                 self.link_loss.invalidate_pending(*vehicle, scope);
-                self.liveness
-                    .mark_active((*vehicle, scope.clone()), *holder, silence_deadline);
+                if !self.command_only.contains(&(*vehicle, scope.clone())) {
+                    self.liveness
+                        .mark_active((*vehicle, scope.clone()), *holder, silence_deadline);
+                }
                 None
             }
             AuthorityEffect::ScopeTransferCommitted {
                 vehicle, scope, to, ..
             } => {
                 self.link_loss.invalidate_pending(*vehicle, scope);
-                self.liveness
-                    .mark_active((*vehicle, scope.clone()), *to, silence_deadline);
+                if !self.command_only.contains(&(*vehicle, scope.clone())) {
+                    self.liveness
+                        .mark_active((*vehicle, scope.clone()), *to, silence_deadline);
+                }
                 None
             }
             AuthorityEffect::ScopeLeaseRevoked {
@@ -264,10 +268,17 @@ impl SessionEngine {
                 ..
             } => {
                 self.liveness.clear(&(*vehicle, scope.clone()));
-                // Link-loss is PER SCOPE: engage this scope and emit ITS
-                // engagement, so losing one scope's holder (e.g. releasing
-                // vehicle.gimbal) never engages or neutralizes another scope
-                // (vehicle.motion) on the same vehicle.
+                // A COMMAND-ONLY authority (no intent stream) has nothing
+                // to neutralize and no neutral demonstration that could
+                // ever clear a latch: releasing it engages nothing, so a
+                // reset -> release -> re-lease cycle stays repeatable.
+                if self.command_only.contains(&(*vehicle, scope.clone())) {
+                    return None;
+                }
+                // Link-loss is PER GROUP: engage this authority and emit
+                // ITS engagement, so losing one authority's holder (e.g.
+                // releasing vehicle.gimbal) never engages or neutralizes
+                // another (the motion group) on the same vehicle.
                 self.link_loss.engage_scope(*vehicle, scope);
                 Some(SessionAction::EngageLinkLoss {
                     vehicle: *vehicle,
@@ -407,6 +418,36 @@ impl SessionEngine {
             &mut actions,
         );
         actions.into_outcome()
+    }
+
+    /// Expires due authority offers and overdue silent holders as of `now`.
+    ///
+    /// Runs from the tick AND from the front of every client message: a
+    /// deadline that has passed is passed — a frame arriving after it but
+    /// before the next scheduled tick must find its authority already
+    /// revoked, never refresh the expired deadline and resurrect it.
+    pub(super) fn expire_overdue(&mut self, now: MonoTimestamp, actions: &mut super::Actions) {
+        let effects = self.authority.expire_due(now);
+        self.fan_out_authority(effects, now, LinkLossTrigger::AuthorityRevoked, actions);
+        // A holder that stopped sending frames while its connection stayed open
+        // (a frozen client the QUIC keepalive holds up) is released here. The
+        // expiry list reuses the engine's scratch buffer (taken and restored
+        // around the loop so the borrow does not pin `self`).
+        let mut expired = core::mem::take(&mut self.expired_scratch);
+        self.liveness.expire_into(now, &mut expired);
+        for holder in expired.drain(..) {
+            let effects = self.authority.handle(
+                pilotage_authority::AuthorityCommand::HolderLinkChanged {
+                    vehicle: holder.vehicle,
+                    scope: holder.scope,
+                    principal: holder.principal,
+                    state: pilotage_authority::LinkState::Lost,
+                },
+                now,
+            );
+            self.fan_out_authority(effects, now, LinkLossTrigger::HolderSilence, actions);
+        }
+        self.expired_scratch = expired;
     }
 }
 

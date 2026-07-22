@@ -28,6 +28,12 @@ pub(crate) struct ClientState {
     /// the traceability record binding the `activation_revision` its frames
     /// carry to the profile identity, document revision, and content digest.
     pub(crate) active_profile: Option<pilotage_protocol::ProfileActivation>,
+    /// The minimum observed `host_receive - client_sample` delta in
+    /// nanoseconds: the client-to-host clock correlation floor. The two
+    /// clocks share no epoch, so raw subtraction is meaningless — the
+    /// floor (offset plus minimum path delay) is the reference against
+    /// which a frame's EXTRA delay, the actual staleness, is measured.
+    pub(crate) clock_floor_nanos: Option<i64>,
 }
 
 /// Registry of connected clients and the scopes each principal holds.
@@ -127,6 +133,7 @@ impl ClientRegistry {
             session,
             principal,
             active_profile: None,
+            clock_floor_nanos: None,
         };
         self.clients.insert(client, state.clone());
         state
@@ -146,6 +153,36 @@ impl ClientRegistry {
             }
             None => false,
         }
+    }
+
+    /// Correlates one client-stamped sample against the host clock and
+    /// returns its estimated age: the delta past the smallest delta ever
+    /// observed from this client (the offset-plus-minimum-path floor).
+    /// Self-calibrating — the first sample defines the floor and reads as
+    /// fresh; only EXTRA delay beyond the floor counts as staleness.
+    pub(crate) fn correlated_age(
+        &mut self,
+        client: ClientKey,
+        now: pilotage_timing::MonoTimestamp,
+        sampled_at: pilotage_timing::MonoTimestamp,
+    ) -> core::time::Duration {
+        let Some(state) = self.clients.get_mut(&client) else {
+            return core::time::Duration::ZERO;
+        };
+        let delta = i64::try_from(i128::from(now.as_nanos()) - i128::from(sampled_at.as_nanos()))
+            .unwrap_or(i64::MAX);
+        let floor = match state.clock_floor_nanos {
+            Some(floor) if floor <= delta => floor,
+            _ => {
+                state.clock_floor_nanos = Some(delta);
+                delta
+            }
+        };
+        pilotage_timing::estimated_age(
+            now,
+            sampled_at,
+            pilotage_timing::ClockOffset::from_nanos(floor),
+        )
     }
 
     /// The client's last announced control-profile activation, if any.

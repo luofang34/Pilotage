@@ -9,6 +9,7 @@ mod connection;
 mod engine_actor;
 mod gazebo_launch;
 mod media;
+mod options;
 mod px4_config;
 mod registry;
 mod shutdown;
@@ -16,6 +17,7 @@ mod stream_tag;
 mod wire_codec;
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.
+pub use options::RuntimeOptions;
 pub use wire_codec::encode_envelope_message;
 
 use std::net::SocketAddr;
@@ -79,18 +81,24 @@ impl RunningHost {
 
 /// Builds the embedded [`SessionEngine`] and [`ReferenceAdapter`] pair this
 /// increment's host serves.
-fn build_reference() -> (SessionEngine, ReferenceAdapter) {
+fn build_reference(options: RuntimeOptions) -> (SessionEngine, ReferenceAdapter) {
     let adapter = ReferenceAdapter::from_seed(HOST_VEHICLE, ADAPTER_SEED);
-    let engine = build_engine(&adapter);
+    let engine = build_engine(&adapter, options);
     (engine, adapter)
 }
 
 /// Builds the session engine from an adapter's advertised capabilities and
 /// this host's staleness/config policy, shared by every adapter path.
-fn build_engine<A: VehicleAdapter>(adapter: &A) -> SessionEngine {
+fn build_engine<A: VehicleAdapter>(adapter: &A, options: RuntimeOptions) -> SessionEngine {
     let capabilities = adapter.capabilities();
     let staleness = StalenessPolicy::new(MAX_CONTROL_AGE);
-    let config = SessionConfig::new(pilotage_protocol::SCHEMA_VERSION, env!("CARGO_PKG_VERSION"));
+    if options.legacy_compatibility {
+        tracing::warn!(
+            "SIMULATION legacy-compatibility mode enabled: numeric payload frames are admitted"
+        );
+    }
+    let config = SessionConfig::new(pilotage_protocol::SCHEMA_VERSION, env!("CARGO_PKG_VERSION"))
+        .with_legacy_compatibility(options.legacy_compatibility);
     SessionEngine::new(capabilities, staleness, config)
 }
 
@@ -108,6 +116,19 @@ fn build_engine<A: VehicleAdapter>(adapter: &A) -> SessionEngine {
 /// WebTransport endpoint cannot bind, or the Gazebo sidecar bridge cannot be
 /// spawned and connected.
 pub async fn start(port: u16, adapter: AdapterKind) -> Result<RunningHost, HostError> {
+    start_with_options(port, adapter, RuntimeOptions::from_env()).await
+}
+
+/// [`start`] with explicit [`RuntimeOptions`] instead of the environment.
+///
+/// # Errors
+///
+/// Same failure modes as [`start`].
+pub async fn start_with_options(
+    port: u16,
+    adapter: AdapterKind,
+    options: RuntimeOptions,
+) -> Result<RunningHost, HostError> {
     let dev_identity = build_dev_identity()?;
     let identity: Identity = dev_identity.identity;
     let cert_hash_hex = dev_identity.cert_hash_hex.clone();
@@ -129,7 +150,15 @@ pub async fn start(port: u16, adapter: AdapterKind) -> Result<RunningHost, HostE
     let (engine_tx, engine_rx) = mpsc::channel::<ToEngine>(ENGINE_QUEUE_CAPACITY);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    let join = spawn_host_runtime(adapter, endpoint, engine_tx, engine_rx, shutdown_rx).await?;
+    let join = spawn_host_runtime(
+        adapter,
+        options,
+        endpoint,
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+    )
+    .await?;
 
     Ok(RunningHost {
         local_addr,
@@ -143,6 +172,7 @@ pub async fn start(port: u16, adapter: AdapterKind) -> Result<RunningHost, HostE
 /// per-adapter `run_until_shutdown` task.
 async fn spawn_host_runtime(
     adapter: AdapterKind,
+    options: RuntimeOptions,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
@@ -155,7 +185,7 @@ async fn spawn_host_runtime(
     let start = tokio::time::Instant::now();
     match adapter {
         AdapterKind::Reference => {
-            let (engine, adapter) = build_reference();
+            let (engine, adapter) = build_reference(options);
             Ok(tokio::spawn(run_until_shutdown(
                 endpoint,
                 engine,
@@ -184,41 +214,54 @@ async fn spawn_host_runtime(
             )))
         }
         AdapterKind::Aviate => {
-            spawn_aviate_runtime(endpoint, engine_tx, engine_rx, shutdown_rx, start).await
+            spawn_aviate_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
         }
         AdapterKind::Px4 => {
-            let config = px4_config::from_env()?;
-            let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
-                .await
-                .map_err(HostError::Px4Adapter)?;
-            let engine = build_engine(&adapter);
-            match adapter.subscribe_frames() {
-                Some(frames) => {
-                    let (media, media_task) = media::spawn_media_task(frames, start);
-                    Ok(tokio::spawn(run_with_media_until_shutdown(
-                        endpoint,
-                        engine,
-                        adapter,
-                        media,
-                        media_task,
-                        engine_tx,
-                        engine_rx,
-                        shutdown_rx,
-                        start,
-                    )))
-                }
-                None => Ok(tokio::spawn(run_until_shutdown(
-                    endpoint,
-                    engine,
-                    adapter,
-                    None,
-                    engine_tx,
-                    engine_rx,
-                    shutdown_rx,
-                    start,
-                ))),
-            }
+            spawn_px4_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
         }
+    }
+}
+
+/// Builds the PX4 adapter and spawns its runtime, wiring the media task only
+/// when the adapter exposes a video frame source.
+async fn spawn_px4_runtime(
+    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    options: RuntimeOptions,
+    engine_tx: mpsc::Sender<ToEngine>,
+    engine_rx: mpsc::Receiver<ToEngine>,
+    shutdown_rx: oneshot::Receiver<()>,
+    start: tokio::time::Instant,
+) -> Result<tokio::task::JoinHandle<()>, HostError> {
+    let config = px4_config::from_env()?;
+    let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
+        .await
+        .map_err(HostError::Px4Adapter)?;
+    let engine = build_engine(&adapter, options);
+    match adapter.subscribe_frames() {
+        Some(frames) => {
+            let (media, media_task) = media::spawn_media_task(frames, start);
+            Ok(tokio::spawn(run_with_media_until_shutdown(
+                endpoint,
+                engine,
+                adapter,
+                media,
+                media_task,
+                engine_tx,
+                engine_rx,
+                shutdown_rx,
+                start,
+            )))
+        }
+        None => Ok(tokio::spawn(run_until_shutdown(
+            endpoint,
+            engine,
+            adapter,
+            None,
+            engine_tx,
+            engine_rx,
+            shutdown_rx,
+            start,
+        ))),
     }
 }
 
@@ -226,6 +269,7 @@ async fn spawn_host_runtime(
 /// when the adapter exposes a video frame source.
 async fn spawn_aviate_runtime(
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
+    options: RuntimeOptions,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
     shutdown_rx: oneshot::Receiver<()>,
@@ -245,7 +289,7 @@ async fn spawn_aviate_runtime(
     )
     .await
     .map_err(HostError::AviateAdapter)?;
-    let engine = build_engine(&adapter);
+    let engine = build_engine(&adapter, options);
     match adapter.subscribe_frames() {
         Some(frames) => {
             let (media, media_task) = media::spawn_media_task(frames, start);

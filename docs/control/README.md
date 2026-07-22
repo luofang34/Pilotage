@@ -19,7 +19,9 @@ command (setpoint or discrete action) that executes under an authority
 epoch, input mapping, or channel it was not bound to: a delayed ARM
 re-arming after a DISARM, a frame produced by an unannounced mapping, a
 sibling scope escaping a link-loss brake, keyboard input attributed to a
-gamepad profile, or a simulation reset fired from flight authority.
+gamepad profile, a simulation reset fired from flight authority, or a
+duplicated or late datagram refreshing liveness it no longer holds and
+resurrecting an expired lease.
 
 ## Requirements
 
@@ -79,4 +81,25 @@ only on the `sim.lifecycle` scope of simulation-profile adapters — never
 on a flight scope, never in a legacy flight mapping, and never on a
 physical/RF profile, which neither advertises nor executes lifecycle
 commands regardless of its uplink — and commanding it requires that
-scope's own lease.
+scope's own lease. The lifecycle scope is COMMAND-ONLY: it carries no
+continuous setpoints, arms no frame-silence watchdog, and its release
+engages no link-loss latch — the scope has no neutral intent capable of
+clearing one, so the reset → release → re-lease cycle must stay
+repeatable.
+
+### CTRL-INGRESS-006 {#ctrl-ingress-006}
+
+Datagram ingress admits only what it can attribute and order. A control
+frame binds to the sender's OWN session; a foreign session id is refused
+before any sender record is read. Within one fencing generation the frame
+sequence must strictly advance (wrap-aware); duplicated and reordered
+datagrams are refused BEFORE they can refresh holder liveness or clear
+recovery, and a fresh generation restarts the sequence domain. Staleness
+is judged on correlated age — the delay beyond the smallest clock delta
+the sender has ever shown — never on a raw cross-clock subtraction.
+Authority deadlines are judged BEFORE the message that follows them: a
+frame arriving after its holder's silence deadline finds the authority
+already revoked and can never refresh the deadline it missed. Typed-only
+control is the production default; legacy numeric payloads are admitted
+at their single translation boundary only under the explicit SIMULATION
+compatibility mode.

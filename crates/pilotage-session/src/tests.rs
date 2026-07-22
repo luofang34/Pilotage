@@ -13,7 +13,9 @@ mod deadline;
 mod disconnect;
 mod frame;
 mod handshake;
+mod ingress_hardening;
 mod lease;
+mod lifecycle;
 mod ping;
 mod profile_binding;
 mod recovery;
@@ -97,12 +99,15 @@ pub(crate) fn staleness() -> StalenessPolicy {
     StalenessPolicy::new(Duration::from_millis(50))
 }
 
-/// A fresh engine over [`capabilities`] with protocol floor 1.
+/// A fresh engine over [`capabilities`] with protocol floor 1, in the
+/// SIMULATION legacy-compatibility mode (many fixtures drive the numeric
+/// payload boundary). Production default is typed-only; see
+/// `typed_only_is_the_production_default`.
 pub(crate) fn engine() -> SessionEngine {
     SessionEngine::new(
         capabilities(),
         staleness(),
-        SessionConfig::new(1, "host-test"),
+        SessionConfig::new(1, "host-test").with_legacy_compatibility(true),
     )
 }
 
@@ -161,7 +166,9 @@ pub(crate) fn engine_with_silence(silence: Duration) -> SessionEngine {
     SessionEngine::new(
         capabilities(),
         staleness(),
-        SessionConfig::new(1, "host-test").with_holder_silence(silence),
+        SessionConfig::new(1, "host-test")
+            .with_holder_silence(silence)
+            .with_legacy_compatibility(true),
     )
 }
 

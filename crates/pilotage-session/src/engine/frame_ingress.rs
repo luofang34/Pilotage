@@ -29,18 +29,7 @@ impl SessionEngine {
         if !self.frame_channel_admits(client, &frame, actions) {
             return;
         }
-        // LOOPBACK-ONLY: `sampled_at` and `now` are treated as one monotonic
-        // clock (see the crate/engine module docs). A networked host must route
-        // this through `pilotage_timing::estimated_age` instead.
-        let age = now.saturating_duration_since(frame.sampled_at);
-        if let Freshness::Stale { .. } = self.staleness.check(age) {
-            let generation = self.frame_generation(&frame);
-            actions.push(reject_frame(
-                client,
-                &frame,
-                FrameRejectionReason::TooOld,
-                generation,
-            ));
+        if self.frame_attribution_rejects(client, &frame, now, actions) {
             return;
         }
         // Fence on the sender's identity, not just on generation. `verify_frame`
@@ -93,6 +82,67 @@ impl SessionEngine {
                 ));
             }
         }
+    }
+
+    /// Session attribution, the typed-only production default, and
+    /// correlated staleness — everything judged before the frame may touch
+    /// holder, liveness, or sequence state. Returns whether the frame was
+    /// rejected.
+    fn frame_attribution_rejects(
+        &mut self,
+        client: ClientKey,
+        frame: &ScopedControlFrame,
+        now: MonoTimestamp,
+        actions: &mut Actions,
+    ) -> bool {
+        // A frame naming a foreign session cannot be attributed to this
+        // sender's records (activation binding, sequence state): refused
+        // before anything else reads it.
+        let session_matches = self
+            .clients
+            .get(client)
+            .is_some_and(|state| state.session == frame.session);
+        if !session_matches {
+            let generation = self.frame_generation(frame);
+            actions.push(reject_frame(
+                client,
+                frame,
+                FrameRejectionReason::SessionMismatch,
+                generation,
+            ));
+            return true;
+        }
+        // Typed-only is the production default: legacy numeric payloads
+        // bypass profile-activation binding and translate edges into
+        // uncorrelated actions, so they are admitted only under the
+        // explicit SIMULATION compatibility mode.
+        if frame.carries_payload() && !self.config.legacy_compatibility {
+            let generation = self.frame_generation(frame);
+            actions.push(reject_frame(
+                client,
+                frame,
+                FrameRejectionReason::LegacyDisabled,
+                generation,
+            ));
+            return true;
+        }
+        // The client's sample clock shares no epoch with the host clock, so
+        // staleness is judged on CORRELATED age: delay beyond the smallest
+        // delta this client has ever shown (offset + minimum path), via
+        // `pilotage_timing::estimated_age` — never a raw cross-clock
+        // subtraction.
+        let age = self.clients.correlated_age(client, now, frame.sampled_at);
+        if let Freshness::Stale { .. } = self.staleness.check(age) {
+            let generation = self.frame_generation(frame);
+            actions.push(reject_frame(
+                client,
+                frame,
+                FrameRejectionReason::TooOld,
+                generation,
+            ));
+            return true;
+        }
+        false
     }
 
     /// Whether the registered pair is NOT held by `sender` FOR `member`:
@@ -208,10 +258,24 @@ impl SessionEngine {
         // traffic proves the client is alive, not that it is commanding the
         // vehicle, and must not hold the lease of a setpoint-silent holder
         // open.
+        let pair = self
+            .authority_pair(frame.vehicle, &frame.scope)
+            .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
+        // Duplicate and reordered datagrams are refused BEFORE they can
+        // refresh liveness or clear recovery: within one generation the
+        // sequence must strictly advance (wrap-aware); a fresh generation
+        // restarts the domain.
+        if !self.sequence_admits(&pair, frame.generation, frame.sequence) {
+            let generation = self.frame_generation(&frame);
+            actions.push(reject_frame(
+                client,
+                &frame,
+                FrameRejectionReason::StaleSequence,
+                generation,
+            ));
+            return;
+        }
         if frame.intent.is_some() {
-            let pair = self
-                .authority_pair(frame.vehicle, &frame.scope)
-                .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
             self.note_frame_accepted(pair.0, &pair.1, sender, now);
         }
         // A demonstrated-neutral frame from the fenced new holder is the
@@ -219,6 +283,32 @@ impl SessionEngine {
         // before the apply so the adapter un-latches first.
         self.maybe_activate_recovery(&frame, actions);
         actions.push(SessionAction::ApplyToAdapter { client, frame });
+    }
+
+    /// Admits `sequence` for `pair` at `generation` iff it strictly
+    /// advances (wrap-aware) past the last accepted one under the same
+    /// generation, recording it; a new generation restarts the domain.
+    pub(crate) fn sequence_admits(
+        &mut self,
+        pair: &crate::clients::ScopePair,
+        generation: pilotage_protocol::Generation,
+        sequence: pilotage_protocol::SequenceNum,
+    ) -> bool {
+        let sequence = sequence.as_u32();
+        match self.sequences.get_mut(pair) {
+            Some((held_generation, last)) if *held_generation == generation => {
+                let distance = sequence.wrapping_sub(*last);
+                if distance == 0 || distance > u32::MAX / 2 {
+                    return false;
+                }
+                *last = sequence;
+                true
+            }
+            _ => {
+                self.sequences.insert(pair.clone(), (generation, sequence));
+                true
+            }
+        }
     }
 }
 

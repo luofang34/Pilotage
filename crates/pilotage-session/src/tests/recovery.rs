@@ -278,7 +278,9 @@ fn recovery_is_scope_specific_not_vehicle_wide() {
             vec![LinkLossPolicy::Neutralize],
         ),
         staleness(),
-        SessionConfig::new(1, "host-test").with_holder_silence(Duration::from_nanos(100)),
+        SessionConfig::new(1, "host-test")
+            .with_holder_silence(Duration::from_nanos(100))
+            .with_legacy_compatibility(true),
     );
     let (c1, c2) = (ClientKey::new(1), ClientKey::new(2));
     let s1 = welcome(&mut engine, c1);
@@ -343,7 +345,9 @@ fn partial_axis_coverage_cannot_activate_recovery() {
             vec![LinkLossPolicy::Neutralize],
         ),
         staleness(),
-        SessionConfig::new(1, "host-test").with_holder_silence(Duration::from_nanos(100)),
+        SessionConfig::new(1, "host-test")
+            .with_holder_silence(Duration::from_nanos(100))
+            .with_legacy_compatibility(true),
     );
     let client = ClientKey::new(1);
     let session = welcome(&mut engine, client);
@@ -420,8 +424,9 @@ fn the_enacted_policy_is_configured_and_validated_never_order_based() {
         ),
     ];
     for (declared, configured, expected) in cases {
-        let mut config =
-            SessionConfig::new(1, "host-test").with_holder_silence(Duration::from_nanos(100));
+        let mut config = SessionConfig::new(1, "host-test")
+            .with_holder_silence(Duration::from_nanos(100))
+            .with_legacy_compatibility(true);
         if let Some(policy) = configured {
             config = config.with_link_loss_policy(VEHICLE, policy);
         }

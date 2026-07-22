@@ -188,6 +188,15 @@ enum FrameRejectionReason {
   // reliable ordered session stream (ControlActionCommand) — a dropped or
   // reordered edge changes meaning, so the droppable channel refuses them.
   FRAME_REJECTION_REASON_ACTION_ON_DATAGRAM = 13;
+  // The frame's session id is not the sender's own session.
+  FRAME_REJECTION_REASON_SESSION_MISMATCH = 14;
+  // The frame's sequence does not advance past the last accepted one for
+  // its authority at this generation (a duplicate or reordered datagram).
+  FRAME_REJECTION_REASON_STALE_SEQUENCE = 15;
+  // The frame carried a legacy numeric payload but this host runs
+  // typed-only (the production default); legacy translation exists only
+  // behind the explicit simulation compatibility mode.
+  FRAME_REJECTION_REASON_LEGACY_DISABLED = 16;
 }
 
 // Sent back to the frame's sender (never broadcast) when a `ControlFrame`

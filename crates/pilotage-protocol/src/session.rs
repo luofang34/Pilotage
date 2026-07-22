@@ -201,6 +201,16 @@ pub enum FrameRejectionReason {
     /// the reliable ordered session stream — a dropped or reordered edge
     /// changes meaning, so the droppable channel refuses them whole.
     ActionOnDatagram,
+    /// The frame's session id is not the sender's own session.
+    SessionMismatch,
+    /// The frame's sequence does not advance past the last accepted one
+    /// for its authority at this generation: a duplicate or reordered
+    /// datagram, refused before it can refresh liveness or clear recovery.
+    StaleSequence,
+    /// The frame carried a legacy numeric payload on a typed-only host
+    /// (the production default); legacy translation exists only behind the
+    /// explicit simulation compatibility mode.
+    LegacyDisabled,
     /// A legacy payload omitted an axis its scope's translation routes;
     /// the structurally total translation would turn "no update" into an
     /// explicit neutral, so partial legacy coverage is rejected.

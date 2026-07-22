@@ -249,11 +249,24 @@ async fn await_frame_rejected(connection: &Connection) -> wire::FrameRejected {
     .expect("a FrameRejected datagram arrives before the test timeout")
 }
 
+/// Starts the reference host under the explicit SIMULATION compatibility
+/// mode: the reference adapter is legacy-only (numeric payload frames),
+/// while the production default is typed-only.
+async fn start_sim_compat_host() -> runtime::RunningHost {
+    runtime::start_with_options(
+        0,
+        AdapterKind::Reference,
+        runtime::RuntimeOptions {
+            legacy_compatibility: true,
+        },
+    )
+    .await
+    .expect("host starts on an ephemeral port")
+}
+
 #[tokio::test]
 async fn hello_lease_frame_and_stale_generation_rejection() {
-    let host = runtime::start(0, AdapterKind::Reference)
-        .await
-        .expect("host starts on an ephemeral port");
+    let host = start_sim_compat_host().await;
     let addr = host.local_addr;
 
     let connection = connect_client(addr).await;

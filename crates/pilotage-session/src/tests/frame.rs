@@ -80,18 +80,20 @@ fn frame_after_holder_release_is_rejected_no_holder() {
     let mut engine = engine();
     let holder = ClientKey::new(1);
     let observer = ClientKey::new(2);
-    let session = welcomed_holder(&mut engine, holder);
+    let _session = welcomed_holder(&mut engine, holder);
     // A second client sends the late frame so the engine still knows it (the
     // holder itself is gone after disconnect). Both frames target the same
-    // scope, now unassigned with an advanced generation.
-    welcome(&mut engine, observer);
+    // scope, now unassigned with an advanced generation. The observer sends
+    // under ITS OWN session — a foreign session id would be refused before
+    // the holder check.
+    let observer_session = welcome(&mut engine, observer);
     let _released = engine.handle_client_message(
         holder,
         DomainEnvelope::Disconnect,
         MonoTimestamp::from_nanos(2_000),
     );
     let frame = frame(
-        session,
+        observer_session,
         Generation::new(2),
         SequenceNum::new(0),
         MonoTimestamp::from_nanos(2_000),
@@ -115,13 +117,14 @@ fn non_holder_in_generation_frame_is_fenced() {
     let mut engine = engine();
     let holder = ClientKey::new(1);
     let forger = ClientKey::new(2);
-    let session = welcomed_holder(&mut engine, holder);
+    let _session = welcomed_holder(&mut engine, holder);
     // The forger completed the handshake but never leased the scope. It knows
-    // the current generation (grants are broadcast) and forges an in-generation
-    // frame. Fencing on identity must reject it rather than apply it.
-    welcome(&mut engine, forger);
+    // the current generation (grants are broadcast) and forges an
+    // in-generation frame UNDER ITS OWN SESSION (a foreign session id would
+    // be refused earlier). Fencing on identity must reject it.
+    let forger_session = welcome(&mut engine, forger);
     let frame = frame(
-        session,
+        forger_session,
         Generation::new(1),
         SequenceNum::new(0),
         MonoTimestamp::from_nanos(1_000),
@@ -161,15 +164,34 @@ fn stale_age_frame_is_rejected_too_old() {
     let mut engine = engine();
     let client = ClientKey::new(1);
     let session = welcomed_holder(&mut engine, client);
-    let frame = frame(
+    // The client's sample clock shares no epoch with the host clock, so a
+    // FIRST frame establishes the correlation floor and reads fresh...
+    let fresh = frame(
         session,
         Generation::new(1),
-        SequenceNum::new(0),
-        MonoTimestamp::from_nanos(0),
+        SequenceNum::new(1),
+        MonoTimestamp::from_nanos(1_000),
     );
-    // 60 ms elapsed against a 50 ms policy: stale, rejected before fencing.
-    let now = MonoTimestamp::from_nanos(60_000_000);
-    let actions = submit(&mut engine, client, frame, now);
+    let accepted = submit(
+        &mut engine,
+        client,
+        fresh,
+        MonoTimestamp::from_nanos(11_000),
+    );
+    assert!(
+        matches!(accepted.as_slice(), [SessionAction::ApplyToAdapter { .. }]),
+        "the floor-defining frame is fresh by definition: {accepted:?}"
+    );
+    // ...and a later frame 60 ms PAST that floor (against a 50 ms policy)
+    // is stale on CORRELATED age, not raw cross-clock subtraction.
+    let stale = frame(
+        session,
+        Generation::new(1),
+        SequenceNum::new(2),
+        MonoTimestamp::from_nanos(2_000),
+    );
+    let now = MonoTimestamp::from_nanos(60_000_000 + 12_000);
+    let actions = submit(&mut engine, client, stale, now);
     match actions.as_slice() {
         [SessionAction::RejectFrame { rejection, .. }] => {
             assert_eq!(rejection.reason, FrameRejectionReason::TooOld);

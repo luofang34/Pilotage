@@ -54,6 +54,13 @@ use link_loss::LinkLossState;
 #[derive(Debug)]
 pub struct SessionEngine {
     authority: AuthorityEngine,
+    /// Group pairs that are COMMAND-ONLY: every member advertises no
+    /// intent families, so there is no setpoint stream to watch for
+    /// silence and nothing to neutralize on release — the silence
+    /// watchdog and the link-loss latch do not apply. `sim.lifecycle` is
+    /// the motivating case: a release must never engage a latch that no
+    /// frame could ever clear (no intent means no neutral demonstration).
+    command_only: std::collections::HashSet<crate::clients::ScopePair>,
     /// Concrete scope → its exclusive-authority group key. Leases,
     /// generations, the silence watchdog, the link-loss latch, and recovery
     /// all operate on GROUP pairs — scopes sharing a group drive one
@@ -72,6 +79,11 @@ pub struct SessionEngine {
     /// currently have a policy engaged (awaiting the recovery activation
     /// condition).
     link_loss: LinkLossState,
+    /// Last accepted datagram sequence per authority pair, keyed to the
+    /// generation it was observed under: wrap-aware duplicate/reorder
+    /// refusal (a fresh generation restarts the domain).
+    sequences:
+        std::collections::HashMap<crate::clients::ScopePair, (pilotage_protocol::Generation, u32)>,
     /// Reusable buffer for the watchdog's expiry pass, so the steady-state
     /// tick allocates nothing.
     expired_scratch: Vec<ExpiredHolder>,
@@ -95,6 +107,7 @@ impl SessionEngine {
         let mut scope_count: usize = 0;
         let mut groups = std::collections::HashMap::new();
         let mut registered = std::collections::HashSet::new();
+        let mut command_only = std::collections::HashSet::new();
         for vehicle in &capabilities.vehicles {
             for descriptor in &vehicle.scopes {
                 let group = descriptor.authority_group.as_ref().map_or_else(
@@ -102,6 +115,17 @@ impl SessionEngine {
                     |name| pilotage_protocol::ScopeId::new(name.clone()),
                 );
                 groups.insert((vehicle.id, descriptor.scope.clone()), group.clone());
+                let continuous = !descriptor.intents.is_empty()
+                    || descriptor.legacy.is_some()
+                    || !descriptor.axes.is_empty();
+                if continuous {
+                    // Any continuous-control member (typed intents, a
+                    // legacy translation, or routed axes) makes the whole
+                    // group a continuous authority.
+                    command_only.remove(&(vehicle.id, group.clone()));
+                } else if !registered.contains(&(vehicle.id, group.clone())) {
+                    command_only.insert((vehicle.id, group.clone()));
+                }
                 if !registered.insert((vehicle.id, group.clone())) {
                     continue;
                 }
@@ -122,11 +146,13 @@ impl SessionEngine {
         Self {
             authority,
             groups,
+            command_only,
             capabilities,
             staleness,
             config,
             clients,
             liveness: HolderLiveness::with_scope_capacity(scope_count),
+            sequences: std::collections::HashMap::new(),
             link_loss,
             expired_scratch: Vec::with_capacity(scope_count),
         }
@@ -146,6 +172,9 @@ impl SessionEngine {
         now: MonoTimestamp,
     ) -> SessionOutcome {
         let mut actions = Actions::new(self.config.max_actions_per_call);
+        // Deadlines are judged BEFORE the message: a late frame must find
+        // its authority already expired, not refresh the overdue deadline.
+        self.expire_overdue(now, &mut actions);
         match msg {
             DomainEnvelope::Hello(hello) => self.on_hello(client, hello, &mut actions),
             DomainEnvelope::Lease(request) => self.on_lease(client, request, now, &mut actions),
@@ -180,32 +209,7 @@ impl SessionEngine {
     #[must_use]
     pub fn handle_tick(&mut self, now: MonoTimestamp) -> SessionOutcome {
         let mut actions = Actions::new(self.config.max_actions_per_call);
-        let effects = self.authority.expire_due(now);
-        self.fan_out_authority(
-            effects,
-            now,
-            LinkLossTrigger::AuthorityRevoked,
-            &mut actions,
-        );
-        // A holder that stopped sending frames while its connection stayed open
-        // (a frozen client the QUIC keepalive holds up) is released here. The
-        // expiry list reuses the engine's scratch buffer (taken and restored
-        // around the loop so the borrow does not pin `self`).
-        let mut expired = core::mem::take(&mut self.expired_scratch);
-        self.liveness.expire_into(now, &mut expired);
-        for holder in expired.drain(..) {
-            let effects = self.authority.handle(
-                AuthorityCommand::HolderLinkChanged {
-                    vehicle: holder.vehicle,
-                    scope: holder.scope,
-                    principal: holder.principal,
-                    state: LinkState::Lost,
-                },
-                now,
-            );
-            self.fan_out_authority(effects, now, LinkLossTrigger::HolderSilence, &mut actions);
-        }
-        self.expired_scratch = expired;
+        self.expire_overdue(now, &mut actions);
         // Re-drive any scope whose clear the adapter refused, so recovery is not
         // stranded on one failed enactment. Generation-gated inside: a holder
         // change already reverted the pending, so this never crosses a

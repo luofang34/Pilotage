@@ -133,7 +133,8 @@ pub(super) fn actor() -> EngineActor<RecordingAdapter> {
     let engine = SessionEngine::new(
         capabilities(),
         StalenessPolicy::new(std::time::Duration::from_millis(250)),
-        SessionConfig::new(1, "host-test"),
+        // The recovery fixtures drive the legacy translation boundary.
+        SessionConfig::new(1, "host-test").with_legacy_compatibility(true),
     );
     EngineActor::new(engine, RecordingAdapter::default(), Instant::now())
 }

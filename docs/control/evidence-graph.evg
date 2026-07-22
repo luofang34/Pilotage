@@ -25,6 +25,7 @@ scope-requirement CTRL-CHAN-002
 scope-requirement CTRL-GROUP-003
 scope-requirement INPUT-SRC-004
 scope-requirement CTRL-LIFE-005
+scope-requirement CTRL-INGRESS-006
 
 # --- Intended function ---
 
@@ -57,8 +58,12 @@ title The activation announcement names the input source actually driving; sourc
 locator docs/control/README.md#input-src-004
 
 node CTRL-LIFE-005 safety-requirement
-title Simulation reset is a separately leased, simulator-only lifecycle capability, absent from flight scopes and legacy flight mappings
+title Simulation reset is a separately leased, simulator-only, COMMAND-ONLY lifecycle capability, absent from flight scopes and legacy flight mappings, repeatable across release cycles
 locator docs/control/README.md#ctrl-life-005
+
+node CTRL-INGRESS-006 safety-requirement
+title Datagram ingress admits only what it can attribute and order: own-session binding, wrap-aware strictly-advancing sequences ahead of liveness and recovery, correlated staleness, deadlines judged before messages, typed-only by default
+locator docs/control/README.md#ctrl-ingress-006
 
 # --- Design ---
 
@@ -79,8 +84,12 @@ title The input-source coordinator — layered keyboard and pad profiles, transa
 locator clients/web-control/src/coordinator.rs
 
 node DESIGN-LIFECYCLE-SCOPE design
-title The sim.lifecycle scope — reset as a separately leased simulator-only capability
+title The sim.lifecycle scope — reset as a separately leased, command-only, simulator-only capability
 locator crates/pilotage-adapter-api/src/capability.rs
+
+node DESIGN-INGRESS-ORDER design
+title Datagram ingress attribution and ordering — session check, typed-only default, correlated staleness, sequence watermark ahead of liveness/recovery, message-front expiry
+locator crates/pilotage-session/src/engine/frame_ingress.rs
 
 # --- Implementation ---
 
@@ -113,6 +122,26 @@ node IMPL-LIFECYCLE-DESCRIPTOR implementation
 title sim_lifecycle_descriptor — the lifecycle scope's advertisement
 locator crates/pilotage-adapter-api/src/capability.rs
 attr symbol sim_lifecycle_descriptor
+
+node IMPL-FRAME-ATTRIBUTION implementation
+title SessionEngine::frame_attribution_rejects — session binding, the typed-only default, correlated staleness
+locator crates/pilotage-session/src/engine/frame_ingress.rs
+attr symbol frame_attribution_rejects
+
+node IMPL-SEQUENCE-ADMITS implementation
+title SessionEngine::sequence_admits — the wrap-aware per-generation sequence watermark
+locator crates/pilotage-session/src/engine/frame_ingress.rs
+attr symbol sequence_admits
+
+node IMPL-EXPIRE-OVERDUE implementation
+title SessionEngine::expire_overdue — deadlines judged at the front of every client message
+locator crates/pilotage-session/src/engine/link_loss.rs
+attr symbol expire_overdue
+
+node IMPL-CORRELATED-AGE implementation
+title ClientRegistry::correlated_age — per-client minimum-delta clock correlation
+locator crates/pilotage-session/src/clients.rs
+attr symbol correlated_age
 
 # --- Verification cases ---
 
@@ -241,6 +270,51 @@ title browser-encoded action command reaches the adapter with its binding
 locator crates/pilotage-session/tests/typed_wire_e2e.rs
 attr test browser_encoded_action_command_reaches_the_adapter_with_its_binding
 
+node CASE-CTRL-TYPED-DEFAULT verification-case
+title typed only is the production default
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test typed_only_is_the_production_default
+
+node CASE-CTRL-SESSION-MISMATCH verification-case
+title a frame naming a foreign session is rejected
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_frame_naming_a_foreign_session_is_rejected
+
+node CASE-CTRL-SEQ-DUP verification-case
+title a duplicate sequence is rejected and does not refresh liveness
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_duplicate_sequence_is_rejected_and_does_not_refresh_liveness
+
+node CASE-CTRL-SEQ-REORDER verification-case
+title an out-of-order sequence is rejected
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test an_out_of_order_sequence_is_rejected
+
+node CASE-CTRL-SEQ-WRAP verification-case
+title a sequence wrap forward is admitted
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_sequence_wrap_forward_is_admitted
+
+node CASE-CTRL-SEQ-DOMAIN verification-case
+title a new generation opens a fresh sequence domain
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_new_generation_opens_a_fresh_sequence_domain
+
+node CASE-CTRL-LATE-FRAME verification-case
+title a late frame after the deadline cannot resurrect authority
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_late_frame_after_the_deadline_cannot_resurrect_authority
+
+node CASE-CTRL-CLOCK-SKEW verification-case
+title a skewed client clock is correlated not rejected
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_skewed_client_clock_is_correlated_not_rejected
+
+node CASE-CTRL-LIFE-CYCLE verification-case
+title the reset release re-lease cycle stays repeatable
+locator crates/pilotage-session/src/tests/lifecycle.rs
+attr test the_reset_release_re_lease_cycle_stays_repeatable
+
 # --- Verification results ---
 
 node RESULT-CTRL-ENGINE-ACTIONS verification-result
@@ -325,6 +399,28 @@ attr output-digest sha256:bf9d3ffffd0ff4a1e75d0fb8c135a4e3f0fd13f59ce5b2689fdab1
 attr run-id local:8d1955c58377e8d4355b984027bf2b7e290f2e50
 attr outcome pass
 
+node RESULT-CTRL-INGRESS verification-result
+title datagram ingress hardening suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::ingress_hardening
+attr config-digest PENDING
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:PENDING
+attr artifact docs/control/evidence-artifacts/ctrl01/ingress-hardening.run.txt
+attr output-digest sha256:PENDING
+attr run-id local:PENDING
+attr outcome pass
+
+node RESULT-CTRL-LIFE-CYCLE verification-result
+title command-only lifecycle cycle suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::lifecycle
+attr config-digest PENDING
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:PENDING
+attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-cycle.run.txt
+attr output-digest sha256:PENDING
+attr run-id local:PENDING
+attr outcome pass
+
 # --- Configuration and tool identity ---
 
 node CFG-CTRL01 configuration-item
@@ -354,6 +450,7 @@ edge CTRL-CHAN-002 mitigates CTRL-HAZ-01
 edge CTRL-GROUP-003 mitigates CTRL-HAZ-01
 edge INPUT-SRC-004 mitigates CTRL-HAZ-01
 edge CTRL-LIFE-005 mitigates CTRL-HAZ-01
+edge CTRL-INGRESS-006 mitigates CTRL-HAZ-01
 
 # --- Allocation: requirement -> design -> implementation ---
 
@@ -362,6 +459,7 @@ edge CTRL-CHAN-002 allocated-to DESIGN-ACTION-CHANNEL
 edge CTRL-GROUP-003 allocated-to DESIGN-AUTH-GROUP
 edge INPUT-SRC-004 allocated-to DESIGN-SOURCE-COORDINATOR
 edge CTRL-LIFE-005 allocated-to DESIGN-LIFECYCLE-SCOPE
+edge CTRL-INGRESS-006 allocated-to DESIGN-INGRESS-ORDER
 
 edge DESIGN-PROFILE-BINDING implemented-by IMPL-ON-PROFILE-ACTIVATION
 edge DESIGN-ACTION-CHANNEL implemented-by IMPL-ON-ACTION-COMMAND
@@ -369,6 +467,10 @@ edge DESIGN-ACTION-CHANNEL implemented-by IMPL-ACTION-DEDUP
 edge DESIGN-AUTH-GROUP implemented-by IMPL-AUTHORITY-PAIR
 edge DESIGN-SOURCE-COORDINATOR implemented-by IMPL-SELECT-DEVICE
 edge DESIGN-LIFECYCLE-SCOPE implemented-by IMPL-LIFECYCLE-DESCRIPTOR
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-FRAME-ATTRIBUTION
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-SEQUENCE-ADMITS
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-EXPIRE-OVERDUE
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-CORRELATED-AGE
 
 # --- Verification: requirement <-> case ---
 
@@ -426,6 +528,25 @@ edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-ABSENT
 edge CASE-CTRL-LIFECYCLE covers CTRL-LIFE-005
 edge CASE-CTRL-LIFE-PHYSICAL covers CTRL-LIFE-005
 edge CASE-CTRL-LIFE-ABSENT covers CTRL-LIFE-005
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-CYCLE
+edge CASE-CTRL-LIFE-CYCLE covers CTRL-LIFE-005
+
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-TYPED-DEFAULT
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SESSION-MISMATCH
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-DUP
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-REORDER
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-WRAP
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-DOMAIN
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-LATE-FRAME
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-CLOCK-SKEW
+edge CASE-CTRL-TYPED-DEFAULT covers CTRL-INGRESS-006
+edge CASE-CTRL-SESSION-MISMATCH covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-DUP covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-REORDER covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-WRAP covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-DOMAIN covers CTRL-INGRESS-006
+edge CASE-CTRL-LATE-FRAME covers CTRL-INGRESS-006
+edge CASE-CTRL-CLOCK-SKEW covers CTRL-INGRESS-006
 
 # --- Results: result -> executed case, covered requirement, baseline, tool ---
 
@@ -489,6 +610,23 @@ edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ANTIREPLAY
 edge RESULT-CTRL-DEDUP result-of CASE-CTRL-WATERMARK-WRAP
 edge RESULT-CTRL-BINDING result-of CASE-CTRL-ACCEPT-EVENT
 
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-TYPED-DEFAULT
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SESSION-MISMATCH
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-DUP
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-REORDER
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-WRAP
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-DOMAIN
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-LATE-FRAME
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-CLOCK-SKEW
+edge RESULT-CTRL-INGRESS covers CTRL-INGRESS-006
+edge RESULT-CTRL-INGRESS justified-by CFG-CTRL01
+edge RESULT-CTRL-INGRESS justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-LIFE-CYCLE result-of CASE-CTRL-LIFE-CYCLE
+edge RESULT-CTRL-LIFE-CYCLE covers CTRL-LIFE-005
+edge RESULT-CTRL-LIFE-CYCLE justified-by CFG-CTRL01
+edge RESULT-CTRL-LIFE-CYCLE justified-by TOOL-CTRL-CARGO
+
 # --- Review coverage ---
 
 edge REVIEW-CTRL01 reviews CTRL-BIND-001
@@ -496,3 +634,4 @@ edge REVIEW-CTRL01 reviews CTRL-CHAN-002
 edge REVIEW-CTRL01 reviews CTRL-GROUP-003
 edge REVIEW-CTRL01 reviews INPUT-SRC-004
 edge REVIEW-CTRL01 reviews CTRL-LIFE-005
+edge REVIEW-CTRL01 reviews CTRL-INGRESS-006

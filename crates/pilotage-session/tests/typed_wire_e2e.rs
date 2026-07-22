@@ -83,7 +83,7 @@ fn welcome_and_grant(
     engine: &mut SessionEngine,
     client: ClientKey,
     frame: &ScopedControlFrame,
-) -> pilotage_protocol::Generation {
+) -> (pilotage_protocol::SessionId, pilotage_protocol::Generation) {
     let welcomed = engine.handle_client_message(
         client,
         DomainEnvelope::Hello(ClientHello {
@@ -134,7 +134,7 @@ fn welcome_and_grant(
         }),
         MonoTimestamp::from_nanos(1),
     );
-    lease
+    let generation = lease
         .actions
         .iter()
         .find_map(|action| match action {
@@ -144,7 +144,8 @@ fn welcome_and_grant(
             } if response.granted => Some(response.generation),
             _ => None,
         })
-        .expect("lease granted")
+        .expect("lease granted");
+    (session, generation)
 }
 
 #[test]
@@ -174,9 +175,12 @@ fn browser_encoded_typed_frame_reaches_the_adapter_boundary_intact() {
         SessionConfig::new(1, "typed-e2e"),
     );
     let client = ClientKey::new(1);
-    let generation = welcome_and_grant(&mut engine, client, &frame);
+    let (session, generation) = welcome_and_grant(&mut engine, client, &frame);
 
     let mut fenced = frame.clone();
+    // The fixture bytes carry the browser test's session and generation;
+    // rebind both to THIS engine's grant (the ingress verifies them).
+    fenced.session = session;
     fenced.generation = generation;
     let outcome = engine.handle_client_message(
         client,
@@ -216,7 +220,7 @@ fn browser_encoded_action_command_reaches_the_adapter_with_its_binding() {
         SessionConfig::new(1, "typed-e2e"),
     );
     let client = ClientKey::new(1);
-    let generation = welcome_and_grant(&mut engine, client, &frame);
+    let (session, generation) = welcome_and_grant(&mut engine, client, &frame);
     assert_eq!(generation.as_u64(), 1, "fixture command binds generation 1");
 
     let mut command = pilotage_protocol::decode_action_command_envelope(&bytes)
@@ -226,9 +230,13 @@ fn browser_encoded_action_command_reaches_the_adapter_with_its_binding() {
     // The fixture was minted against generation 4; rebind to the granted
     // generation so only the generation differs from the wire bytes.
     command.generation = generation;
+    assert_ne!(
+        command.session, session,
+        "the fixture's browser session is foreign to this engine"
+    );
 
-    // But the browser session id (7) is not this engine's session: the
-    // engine must CLOSE the connection for a forged session binding.
+    // The browser session id (7) is not this engine's session: the engine
+    // must CLOSE the connection for a forged session binding.
     let forged = engine.handle_client_message(
         client,
         DomainEnvelope::ActionCommand(command.clone()),
