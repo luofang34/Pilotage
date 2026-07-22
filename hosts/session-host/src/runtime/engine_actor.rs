@@ -174,41 +174,23 @@ impl<A: VehicleAdapter> EngineActor<A> {
     ) {
         let validate_start = Instant::now();
         let is_disconnect = matches!(message, DomainEnvelope::Disconnect);
-        let announced = match &message {
-            DomainEnvelope::ProfileActivation(activation) => Some(activation.clone()),
-            _ => None,
-        };
+        let rejected_announcement = matches!(&message, DomainEnvelope::ProfileActivation(_));
         let outcome = self.engine.handle_client_message(client, message, now);
         self.record_stage(Stage::Validate, validate_start.elapsed());
-        if let Some(activation) = announced {
-            // Evidence records ACCEPTED activations only: the engine has
-            // validated the session binding and the monotonic revision, and
-            // the record it now holds IS this announcement. A rejected
-            // announcement is a fault line, never a traceability record.
-            let accepted = self.engine.active_profile(client).is_some_and(|active| {
-                active.activation_revision == activation.activation_revision
-                    && active.digest == activation.digest
-            });
-            if accepted {
-                info!(
-                    client = client.as_u64(),
-                    profile = %activation.profile_id,
-                    profile_revision = activation.profile_revision,
-                    activation_revision = activation.activation_revision,
-                    digest = %hex_digest(&activation.digest),
-                    device_profile = %activation.device_profile_id,
-                    device_profile_revision = activation.device_profile_revision,
-                    device_digest = %hex_digest(&activation.device_digest),
-                    "control profile activation accepted"
-                );
-            } else {
-                warn!(
-                    client = client.as_u64(),
-                    profile = %activation.profile_id,
-                    activation_revision = activation.activation_revision,
-                    "control profile activation REJECTED (session or revision binding failed)"
-                );
-            }
+        // Evidence derives from the engine's EXPLICIT acceptance event
+        // (enacted below); an announcement whose outcome carries none was
+        // rejected — comparing engine state here could misreport a
+        // rejected duplicate or foreign-session announcement as accepted.
+        if rejected_announcement
+            && !outcome
+                .actions
+                .iter()
+                .any(|action| matches!(action, SessionAction::ActivationAccepted { .. }))
+        {
+            warn!(
+                client = client.as_u64(),
+                "control profile activation REJECTED (session or revision binding failed)"
+            );
         }
         if is_disconnect {
             self.clients.remove(client);
@@ -288,6 +270,21 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 self.send_to(client, ToConnection::Close, MessageClass::Unicast);
                 self.clients.remove(client);
                 self.action_dedup.forget(client);
+            }
+            SessionAction::ActivationAccepted { client, activation } => {
+                // The traceability record for control evidence (INPUT-01):
+                // emitted only on the engine's explicit acceptance.
+                info!(
+                    client = client.as_u64(),
+                    profile = %activation.profile_id,
+                    profile_revision = activation.profile_revision,
+                    activation_revision = activation.activation_revision,
+                    digest = %hex_digest(&activation.digest),
+                    device_profile = %activation.device_profile_id,
+                    device_profile_revision = activation.device_profile_revision,
+                    device_digest = %hex_digest(&activation.device_digest),
+                    "control profile activation accepted"
+                );
             }
             SessionAction::ApplyToAdapter { client, frame } => {
                 self.apply_to_adapter(client, frame);

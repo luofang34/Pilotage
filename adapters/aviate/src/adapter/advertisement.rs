@@ -28,14 +28,15 @@ impl AviateAdapter {
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
                 scopes: if self.uplink.is_some() {
-                    vec![
-                        flight_scope_descriptor(),
-                        direct_scope_descriptor(),
-                        // SITL only: this adapter IS a simulator gateway. A
-                        // live-vehicle adapter must never advertise the
-                        // lifecycle scope (SIM-01).
-                        pilotage_adapter_api::sim_lifecycle_descriptor(),
-                    ]
+                    let mut scopes = vec![flight_scope_descriptor(), direct_scope_descriptor()];
+                    // STRUCTURALLY simulation-only (SIM-01): the lifecycle
+                    // scope exists only under the Simulation profile — a
+                    // physical/RF vehicle neither advertises nor accepts
+                    // it, uplink or no uplink.
+                    if self.profile == super::AviateProfile::Simulation {
+                        scopes.push(pilotage_adapter_api::sim_lifecycle_descriptor());
+                    }
+                    scopes
                 } else {
                     vec![]
                 },

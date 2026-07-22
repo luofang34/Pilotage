@@ -134,3 +134,92 @@ fn a_correlation_id_reused_with_different_content_is_refused() {
         "the smuggled action must not reach the adapter"
     );
 }
+
+/// Collects the correlation id of every ControlActionResult queued for the
+/// client.
+fn drain_result_ids(receiver: &mut mpsc::Receiver<ToConnection>) -> Vec<u32> {
+    let mut ids = Vec::new();
+    while let Ok(message) = receiver.try_recv() {
+        let ToConnection::BootstrapMessage(bytes) = message else {
+            continue;
+        };
+        let Ok(envelope) =
+            <pilotage_protocol::wire::Envelope as prost::Message>::decode_length_delimited(
+                bytes.as_slice(),
+            )
+        else {
+            continue;
+        };
+        if let Some(pilotage_protocol::wire::envelope::Payload::ControlActionResult(result)) =
+            envelope.payload
+        {
+            ids.push(result.action_id);
+        }
+    }
+    ids
+}
+
+#[test]
+fn an_early_adapter_rejection_still_answers_every_correlated_action() {
+    // The result guarantee: the recording adapter's link-loss latch makes
+    // apply_control reject the whole frame BEFORE per-action disposal —
+    // the actor must synthesize the correlated rejection itself, or the
+    // sender times out on a press the host actually consumed.
+    let mut actor = actor();
+    let mut receiver = register_client(&mut actor);
+    let client = ClientKey::new(1);
+    actor
+        .adapter
+        .latched
+        .push(pilotage_protocol::ScopeId::new(MOTION));
+
+    actor.apply_to_adapter(client, arm_frame(3));
+    let ids = drain_result_ids(&mut receiver);
+    assert_eq!(ids, vec![3], "exactly one correlated result: {ids:?}");
+}
+
+#[test]
+fn an_evicted_id_stays_stale_and_never_executes_again() {
+    // Anti-replay must survive cache eviction: push more than the cache
+    // bound of fresh ids, then replay the very first — it must be REFUSED
+    // (an answer still arrives) and must NOT reach the adapter.
+    let mut actor = actor();
+    let mut receiver = register_client(&mut actor);
+    let client = ClientKey::new(1);
+    for id in 1..=80u32 {
+        actor.apply_to_adapter(client, arm_frame(id));
+    }
+    let executed = actor.adapter.applied_actions.len();
+    assert_eq!(executed, 80, "eighty distinct presses executed");
+    drain_result_ids(&mut receiver);
+
+    // Id 1 was evicted from the bounded cache long ago.
+    actor.apply_to_adapter(client, arm_frame(1));
+    assert_eq!(
+        actor.adapter.applied_actions.len(),
+        executed,
+        "the stale id must never execute again"
+    );
+    let ids = drain_result_ids(&mut receiver);
+    assert_eq!(ids, vec![1], "the stale replay is still answered: {ids:?}");
+}
+
+#[test]
+fn the_watermark_wraps_at_u32_without_stalling_fresh_ids() {
+    let mut actor = actor();
+    let _receiver = register_client(&mut actor);
+    let client = ClientKey::new(1);
+    actor.apply_to_adapter(client, arm_frame(u32::MAX - 1));
+    actor.apply_to_adapter(client, arm_frame(u32::MAX));
+    // The sender's counter wraps past zero (0 is never minted): 1 is a
+    // legitimate forward advance, not a stale replay.
+    actor.apply_to_adapter(client, arm_frame(1));
+    assert_eq!(
+        actor.adapter.applied_actions.len(),
+        3,
+        "the wrap advance executes"
+    );
+    // ...and the pre-wrap id is now stale.
+    actor.apply_to_adapter(client, arm_frame(u32::MAX - 1));
+    assert_eq!(actor.adapter.applied_actions.len(), 3);
+}

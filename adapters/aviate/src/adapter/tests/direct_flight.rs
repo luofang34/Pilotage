@@ -146,3 +146,38 @@ fn a_hover_posture_attitude_satisfies_neutral_activation() {
         "a tilt demand is not neutral"
     );
 }
+
+/// The physical/RF profile: the lifecycle capability is STRUCTURALLY
+/// absent — never advertised, never executed — even though the vehicle
+/// has a live uplink (SIM-01).
+#[test]
+fn a_physical_profile_neither_advertises_nor_accepts_lifecycle_commands() {
+    use super::super::AviateProfile;
+    use super::fixtures::lifecycle_reset_frame;
+
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind fake FC");
+    let mut adapter = flying_adapter(&fc).with_profile(AviateProfile::Physical);
+
+    let caps = adapter.capabilities();
+    assert!(
+        caps.vehicles[0]
+            .scopes
+            .iter()
+            .all(|scope| scope.scope.as_str() != pilotage_adapter_api::SIM_LIFECYCLE_SCOPE),
+        "a physical vehicle must not advertise the lifecycle scope"
+    );
+    // Both flight scopes remain: physical vehicles still fly.
+    assert_eq!(caps.vehicles[0].scopes.len(), 2);
+
+    // A forged lifecycle frame is refused whole and spawns nothing.
+    let outcome = adapter.apply_control(&lifecycle_reset_frame());
+    assert!(
+        matches!(
+            outcome.disposition,
+            Disposition::Rejected(pilotage_adapter_api::RejectReason::Other(_))
+        ),
+        "got {:?}",
+        outcome.disposition
+    );
+    assert_eq!(adapter.reset_spawns, 0, "the reset script never spawns");
+}

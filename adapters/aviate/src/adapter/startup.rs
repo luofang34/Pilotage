@@ -68,6 +68,7 @@ impl AviateAdapter {
         let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
         Ok(Self {
             vehicle,
+            profile,
             estimate,
             truth,
             uplink,

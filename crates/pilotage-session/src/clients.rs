@@ -41,6 +41,12 @@ pub(crate) struct ClientRegistry {
     clients: BTreeMap<ClientKey, ClientState>,
     held: BTreeMap<PrincipalId, BTreeSet<ScopePair>>,
     holders: BTreeMap<ScopePair, HolderRecord>,
+    /// The CONCRETE member scope each group lease was acquired for. A
+    /// holder commands only the member it leased — group authority is
+    /// exclusive across siblings, never a license to drive them all.
+    /// Cleared by every holder-changing effect (fail closed) and set only
+    /// by the lease path that knows the requested scope.
+    members: BTreeMap<ScopePair, ScopeId>,
     next_session: u64,
     next_principal: u64,
 }
@@ -165,7 +171,9 @@ impl ClientRegistry {
     }
 
     /// Records that `holder` now holds `pair` at `generation`, clearing any
-    /// prior holder of the same pair.
+    /// prior holder of the same pair. The leased MEMBER is cleared here
+    /// (fail closed): only the lease path knows the requested concrete
+    /// scope and re-binds it after the grant's effects apply.
     pub(crate) fn record_hold(
         &mut self,
         holder: PrincipalId,
@@ -173,6 +181,7 @@ impl ClientRegistry {
         generation: Generation,
     ) {
         self.detach_pair(&pair);
+        self.members.remove(&pair);
         self.held.entry(holder).or_default().insert(pair.clone());
         self.holders.insert(
             pair,
@@ -183,9 +192,22 @@ impl ClientRegistry {
         );
     }
 
+    /// Binds the group lease to the concrete member scope it was acquired
+    /// for; frames and actions on any sibling are refused.
+    pub(crate) fn set_held_member(&mut self, pair: ScopePair, member: ScopeId) {
+        self.members.insert(pair, member);
+    }
+
+    /// The concrete member scope the group's current lease was acquired
+    /// for, if a lease named one.
+    pub(crate) fn held_member(&self, pair: &ScopePair) -> Option<&ScopeId> {
+        self.members.get(pair)
+    }
+
     /// Records that `pair` is no longer held by anyone, at `generation`.
     pub(crate) fn clear_pair(&mut self, pair: &ScopePair, generation: Generation) {
         self.detach_pair(pair);
+        self.members.remove(pair);
         self.holders.insert(
             pair.clone(),
             HolderRecord {

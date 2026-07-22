@@ -27,7 +27,14 @@ fn announce(engine: &mut SessionEngine, client: ClientKey, session: SessionId, r
         }),
         MonoTimestamp::from_nanos(1),
     );
-    assert!(outcome.actions.is_empty(), "announcement records silently");
+    assert!(
+        matches!(
+            outcome.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "the engine emits its explicit acceptance event: {:?}",
+        outcome.actions
+    );
 }
 
 fn grant_motion(engine: &mut SessionEngine, client: ClientKey) -> Generation {
@@ -346,4 +353,31 @@ fn a_sim_reset_needs_the_lifecycle_scopes_own_lease() {
         "got {:?}",
         delivered.actions
     );
+}
+
+/// A host whose adapter does not advertise the lifecycle scope (a
+/// physical/RF profile) has NO lifecycle authority to lease or command:
+/// the scope is structurally absent from the session, not merely refused.
+#[test]
+fn an_unadvertised_lifecycle_scope_is_structurally_absent() {
+    use pilotage_adapter_api::SIM_LIFECYCLE_SCOPE;
+
+    let mut engine = engine(); // the default capabilities carry no lifecycle scope
+    let client = ClientKey::new(1);
+    let session = welcome(&mut engine, client);
+    announce(&mut engine, client, session, 1);
+    let outcome = engine.handle_client_message(
+        client,
+        DomainEnvelope::ActionCommand(ControlActionCommand {
+            session,
+            vehicle: VEHICLE,
+            scope: pilotage_protocol::ScopeId::new(SIM_LIFECYCLE_SCOPE),
+            generation: Generation::new(1),
+            activation_revision: 1,
+            action: ControlAction::SimReset,
+            action_id: 11,
+        }),
+        MonoTimestamp::from_nanos(10),
+    );
+    assert!(rejected_detail(&outcome).contains("unknown scope"));
 }

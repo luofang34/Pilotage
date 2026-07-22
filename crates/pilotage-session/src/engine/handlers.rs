@@ -13,6 +13,7 @@ use pilotage_timing::MonoTimestamp;
 
 use crate::action::{CloseReason, LinkLossTrigger, SessionAction};
 use crate::capabilities::host_capabilities;
+use crate::clients::ScopePair;
 use crate::engine::{Actions, SessionEngine};
 use crate::message::ClientKey;
 use crate::outbound::OutboundMessage;
@@ -80,17 +81,7 @@ impl SessionEngine {
             return;
         };
         if let Some(current) = self.clients.holder_of(&pair) {
-            let generation = self
-                .clients
-                .generation_of(&pair)
-                .unwrap_or_else(|| Generation::new(0));
-            // A principal already holding the scope re-requesting it is not an
-            // error; reply with the standing grant rather than a denial.
-            let response = if current == principal {
-                lease_granted(&request, generation)
-            } else {
-                lease_denied(&request, generation, LeaseDenialReason::AlreadyHeld)
-            };
+            let response = self.standing_holder_response(&pair, current, principal, &request);
             actions.send(client, OutboundMessage::LeaseResponse(response));
             return;
         }
@@ -122,9 +113,41 @@ impl SessionEngine {
         let response = if rejected {
             lease_denied(&request, current_generation, LeaseDenialReason::AlreadyHeld)
         } else {
+            // Bind the group lease to the CONCRETE member scope it was
+            // acquired for: the holder commands that member and only that
+            // member. (The grant's effects cleared any previous binding.)
+            self.clients
+                .set_held_member(pair.clone(), request.scope.clone());
             lease_granted(&request, current_generation)
         };
         actions.send(client, OutboundMessage::LeaseResponse(response));
+    }
+
+    /// The reply to a lease request on an already-held group: a principal
+    /// re-requesting the MEMBER it leased gets the standing grant.
+    /// Requesting a SIBLING while holding is a scope switch and must go
+    /// release-first — neutralize, re-fence, fresh generation — so it is
+    /// denied like any other conflicting claim on the group.
+    fn standing_holder_response(
+        &self,
+        pair: &ScopePair,
+        current: pilotage_protocol::PrincipalId,
+        principal: pilotage_protocol::PrincipalId,
+        request: &LeaseRequest,
+    ) -> pilotage_protocol::LeaseResponse {
+        let generation = self
+            .clients
+            .generation_of(pair)
+            .unwrap_or_else(|| Generation::new(0));
+        let same_member = self
+            .clients
+            .held_member(pair)
+            .is_some_and(|member| *member == request.scope);
+        if current == principal && same_member {
+            lease_granted(request, generation)
+        } else {
+            lease_denied(request, generation, LeaseDenialReason::AlreadyHeld)
+        }
     }
 
     /// Routes a voluntary scope release through the authority engine and
@@ -227,7 +250,9 @@ impl SessionEngine {
                 return;
             }
         }
-        self.clients.record_profile_activation(client, activation);
+        self.clients
+            .record_profile_activation(client, activation.clone());
+        actions.push(SessionAction::ActivationAccepted { client, activation });
     }
 
     /// The client's last announced control-profile activation, if any —

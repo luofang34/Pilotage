@@ -52,7 +52,7 @@ impl SessionEngine {
         let pair = self
             .authority_pair(frame.vehicle, &frame.scope)
             .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
-        if self.clients.is_registered(&pair) && self.clients.holder_of(&pair) != Some(sender) {
+        if self.sender_lacks_member_hold(&pair, sender, &frame.scope) {
             let generation = self.frame_generation(&frame);
             actions.push(reject_frame(
                 client,
@@ -93,6 +93,22 @@ impl SessionEngine {
                 ));
             }
         }
+    }
+
+    /// Whether the registered pair is NOT held by `sender` FOR `member`:
+    /// the holder commands the member scope it leased and only that member
+    /// — group authority is exclusive across siblings, never a license to
+    /// drive them all, so a frame on the unleased sibling is a
+    /// non-holder's frame.
+    fn sender_lacks_member_hold(
+        &self,
+        pair: &crate::clients::ScopePair,
+        sender: PrincipalId,
+        member: &pilotage_protocol::ScopeId,
+    ) -> bool {
+        self.clients.is_registered(pair)
+            && (self.clients.holder_of(pair) != Some(sender)
+                || self.clients.held_member(pair) != Some(member))
     }
 
     /// Typed discrete actions ride ONLY the reliable ordered session

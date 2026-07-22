@@ -90,6 +90,10 @@ pub enum AviateProfile {
 #[derive(Debug)]
 pub struct AviateAdapter {
     vehicle: VehicleId,
+    // The session profile this adapter was constructed for (LINK-04):
+    // lifecycle capability is STRUCTURAL — a physical/RF profile neither
+    // advertises nor executes simulator lifecycle commands.
+    profile: AviateProfile,
     // Source roles are structural (LINK-04): the MAVLink link only ever
     // produces the FC operational estimate and the shm link only ever
     // produces the simulation-truth oracle. Neither substitutes for the
@@ -149,6 +153,7 @@ impl AviateAdapter {
     pub(crate) fn from_state(vehicle: VehicleId, state: Arc<Mutex<LinkState>>) -> Self {
         Self {
             vehicle,
+            profile: AviateProfile::Simulation,
             estimate: Some(EstimateSource { state, _link: None }),
             truth: None,
             uplink: None,
@@ -181,6 +186,14 @@ impl AviateAdapter {
         self.uplink
             .as_ref()
             .is_some_and(crate::uplink::FlightUplink::hold_captured)
+    }
+
+    /// Overrides the constructed profile, for tests exercising the
+    /// physical/RF shape.
+    #[cfg(test)]
+    pub(crate) fn with_profile(mut self, profile: AviateProfile) -> Self {
+        self.profile = profile;
+        self
     }
 
     /// Installs a test uplink, for tests.

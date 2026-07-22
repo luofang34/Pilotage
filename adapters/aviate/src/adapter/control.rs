@@ -69,6 +69,18 @@ impl AviateAdapter {
         frame: &ScopedControlFrame,
         tick: SimTick,
     ) -> ApplyOutcome {
+        // Structural, not situational: a physical/RF profile has no
+        // simulator lifecycle. The session never advertises the scope for
+        // this profile, so nothing legitimate can reach here — refuse the
+        // whole frame defensively.
+        if self.profile != super::AviateProfile::Simulation {
+            return rejected_control(
+                tick,
+                RejectReason::Other(
+                    "lifecycle commands are structurally absent on a physical vehicle".to_owned(),
+                ),
+            );
+        }
         let mut action_results = Vec::with_capacity(frame.actions.len());
         for action in &frame.actions {
             match action.kind() {

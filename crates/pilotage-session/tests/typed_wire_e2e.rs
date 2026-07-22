@@ -118,7 +118,14 @@ fn welcome_and_grant(
         }),
         MonoTimestamp::from_nanos(0),
     );
-    assert!(announced.actions.is_empty(), "announcement is recorded");
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "the engine emits its explicit acceptance event: {:?}",
+        announced.actions
+    );
     let lease = engine.handle_client_message(
         client,
         DomainEnvelope::Lease(LeaseRequest {

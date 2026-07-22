@@ -91,6 +91,9 @@ impl SessionEngine {
         if self.clients.holder_of(&pair) != Some(sender) {
             return Err("sender does not hold the scope");
         }
+        if self.clients.held_member(&pair) != Some(&command.scope) {
+            return Err("the lease names a different member scope");
+        }
         if self.clients.generation_of(&pair) != Some(command.generation) {
             return Err("stale generation: authority was re-fenced since this press");
         }

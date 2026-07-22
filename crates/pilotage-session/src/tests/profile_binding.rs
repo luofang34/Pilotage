@@ -101,7 +101,14 @@ fn a_typed_frame_with_a_stale_activation_revision_is_rejected() {
     let session = welcomed_holder(&mut engine, client);
     let announced =
         engine.handle_client_message(client, activation(session, 2), MonoTimestamp::from_nanos(2));
-    assert!(announced.actions.is_empty());
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "the engine emits its explicit acceptance event: {:?}",
+        announced.actions
+    );
     // A frame still stamped with the PREVIOUS activation revision cannot be
     // traced to the mapping now in effect.
     let actions = submit(&mut engine, client, typed_frame(session, 1));
@@ -120,7 +127,14 @@ fn a_typed_frame_matching_the_announced_activation_is_applied() {
     let session = welcomed_holder(&mut engine, client);
     let announced =
         engine.handle_client_message(client, activation(session, 3), MonoTimestamp::from_nanos(2));
-    assert!(announced.actions.is_empty());
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "the engine emits its explicit acceptance event: {:?}",
+        announced.actions
+    );
     let actions = submit(&mut engine, client, typed_frame(session, 3));
     assert!(
         matches!(actions.as_slice(), [SessionAction::ApplyToAdapter { .. }]),
@@ -178,7 +192,14 @@ fn a_non_advancing_activation_revision_closes_the_client() {
     let session = welcome(&mut engine, client);
     let announced =
         engine.handle_client_message(client, activation(session, 5), MonoTimestamp::from_nanos(2));
-    assert!(announced.actions.is_empty());
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "the engine emits its explicit acceptance event: {:?}",
+        announced.actions
+    );
     for stale in [5u32, 4u32] {
         let outcome = engine.handle_client_message(
             client,
@@ -209,16 +230,60 @@ fn the_activation_revision_advances_across_the_u32_wrap() {
         activation(session, u32::MAX),
         MonoTimestamp::from_nanos(2),
     );
-    assert!(announced.actions.is_empty());
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "the engine emits its explicit acceptance event: {:?}",
+        announced.actions
+    );
     // u32::MAX → 0 is a forward step of 1 under wrapping arithmetic; a
     // long-lived sender must not be closed for surviving the wrap.
     let outcome =
         engine.handle_client_message(client, activation(session, 0), MonoTimestamp::from_nanos(3));
     assert!(
-        outcome.actions.is_empty(),
+        matches!(
+            outcome.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
         "the wrap advance is recorded, got {:?}",
         outcome.actions
     );
     let recorded = engine.active_profile(client).expect("recorded");
     assert_eq!(recorded.activation_revision, 0);
+}
+
+#[test]
+fn acceptance_is_an_explicit_event_and_a_rejected_duplicate_emits_none() {
+    // Evidence derives from the engine's explicit acceptance event. A
+    // duplicate (non-advancing) announcement is REJECTED — it closes the
+    // client and must not emit an acceptance, even though the standing
+    // record still carries the same revision (the state comparison an
+    // actor must never fall back to).
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    let session = welcome(&mut engine, client);
+    let first =
+        engine.handle_client_message(client, activation(session, 1), MonoTimestamp::from_nanos(2));
+    assert!(matches!(
+        first.actions.as_slice(),
+        [SessionAction::ActivationAccepted { .. }]
+    ));
+    let duplicate =
+        engine.handle_client_message(client, activation(session, 1), MonoTimestamp::from_nanos(3));
+    assert!(
+        !duplicate
+            .actions
+            .iter()
+            .any(|action| matches!(action, SessionAction::ActivationAccepted { .. })),
+        "a rejected duplicate must never look accepted: {:?}",
+        duplicate.actions
+    );
+    assert!(
+        duplicate
+            .actions
+            .iter()
+            .any(|action| matches!(action, SessionAction::CloseClient { .. }))
+    );
 }

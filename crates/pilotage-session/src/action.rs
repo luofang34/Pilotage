@@ -55,6 +55,19 @@ pub enum SessionAction {
         /// Message to encode and write to that client.
         envelope: OutboundMessage,
     },
+    /// The engine ACCEPTED a profile activation announcement after
+    /// validating its session binding and monotonic revision: the driver
+    /// records it as control-traceability evidence (INPUT-01). Emitted
+    /// exactly once per accepted announcement and NEVER for a rejected one
+    /// — evidence derives from this explicit event, not from comparing
+    /// engine state after the fact (a rejected duplicate would alias the
+    /// standing record).
+    ActivationAccepted {
+        /// The announcing client.
+        client: ClientKey,
+        /// The validated announcement, exactly as recorded.
+        activation: pilotage_protocol::ProfileActivation,
+    },
     /// Apply a fence-verified, fresh, TYPED control frame to the adapter
     /// (the command gate has already validated it and translated any legacy
     /// payload).

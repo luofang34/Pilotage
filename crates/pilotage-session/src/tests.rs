@@ -315,13 +315,43 @@ fn profile_activation_is_recorded_for_evidence() {
         }),
         MonoTimestamp::from_nanos(2),
     );
-    assert!(announced.actions.is_empty(), "recording needs no reply");
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [crate::SessionAction::ActivationAccepted { activation, .. }]
+                if activation.activation_revision == 1
+        ),
+        "acceptance is an explicit engine event: {:?}",
+        announced.actions
+    );
     let recorded = engine.active_profile(client).expect("activation recorded");
     assert_eq!(recorded.profile_id, "builtin.gimbal.default");
     assert_eq!(recorded.activation_revision, 1);
     assert_eq!(recorded.digest, [0xAB; 32]);
+}
 
-    // A later activation (profile switch) replaces the record.
+/// A later activation (profile switch) replaces the record and emits its
+/// own acceptance event.
+#[test]
+fn a_profile_switch_replaces_the_activation_record() {
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    let session = welcome(&mut engine, client);
+    let first = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "builtin.gimbal.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: 1,
+            digest: [0xAB; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
+        }),
+        MonoTimestamp::from_nanos(2),
+    );
+    assert_eq!(first.actions.len(), 1, "the first activation is accepted");
     let switched = engine.handle_client_message(
         client,
         DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
@@ -336,7 +366,15 @@ fn profile_activation_is_recorded_for_evidence() {
         }),
         MonoTimestamp::from_nanos(3),
     );
-    assert!(switched.actions.is_empty());
+    assert!(
+        matches!(
+            switched.actions.as_slice(),
+            [crate::SessionAction::ActivationAccepted { activation, .. }]
+                if activation.activation_revision == 2
+        ),
+        "got {:?}",
+        switched.actions
+    );
     let replaced = engine.active_profile(client).expect("record replaced");
     assert_eq!(replaced.activation_revision, 2);
     assert_eq!(replaced.digest, [0xCD; 32]);

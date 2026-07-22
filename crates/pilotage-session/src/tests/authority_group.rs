@@ -38,7 +38,10 @@ fn grouped_engine() -> SessionEngine {
             max_angular: 1.0,
             max_yaw_rate: 0.0,
         }],
-        actions: vec![],
+        actions: vec![pilotage_adapter_api::ActionCapability {
+            action: pilotage_protocol::ActionKind::Arm,
+            mode_targets: vec![],
+        }],
         legacy: None,
     };
     let capabilities = AdapterCapabilities {
@@ -76,7 +79,14 @@ fn announce(engine: &mut SessionEngine, client: ClientKey, session: SessionId) {
         }),
         MonoTimestamp::from_nanos(1),
     );
-    assert!(outcome.actions.is_empty());
+    assert!(
+        matches!(
+            outcome.actions.as_slice(),
+            [SessionAction::ActivationAccepted { .. }]
+        ),
+        "got {:?}",
+        outcome.actions
+    );
 }
 
 fn lease(
@@ -225,10 +235,11 @@ fn a_scope_handover_leaves_no_orphaned_sibling_latch() {
 }
 
 #[test]
-fn the_group_holder_may_drive_through_either_member_scope() {
-    // The group IS the authority: the gate still types each member's
-    // commands by that member's own advertisement, but holder identity and
-    // fencing resolve at the group.
+fn a_frame_on_the_unleased_sibling_scope_is_rejected() {
+    // Group authority is exclusive across siblings, never a license to
+    // drive them all: the holder leased the DIRECT member, so a frame on
+    // vehicle.motion — even under the shared generation — is a
+    // non-holder's frame.
     let mut engine = grouped_engine();
     let client = ClientKey::new(1);
     let session = welcome(&mut engine, client);
@@ -239,12 +250,83 @@ fn the_group_holder_may_drive_through_either_member_scope() {
         DomainEnvelope::Frame(neutral_typed_frame(session, MOTION, generation, 0, 3)),
         MonoTimestamp::from_nanos(4),
     );
+    match outcome.actions.as_slice() {
+        [SessionAction::RejectFrame { rejection, .. }] => {
+            assert_eq!(
+                rejection.reason,
+                pilotage_protocol::FrameRejectionReason::NoHolder
+            );
+        }
+        other => panic!("expected a no-holder rejection on the sibling, got {other:?}"),
+    }
+    // The LEASED member still commands.
+    let accepted = engine.handle_client_message(
+        client,
+        DomainEnvelope::Frame(neutral_typed_frame(session, DIRECT, generation, 1, 5)),
+        MonoTimestamp::from_nanos(6),
+    );
     assert!(
-        outcome
+        accepted
             .actions
             .iter()
             .any(|action| matches!(action, SessionAction::ApplyToAdapter { .. })),
         "got {:?}",
-        outcome.actions
+        accepted.actions
     );
+}
+
+#[test]
+fn an_action_command_on_the_unleased_sibling_is_rejected() {
+    let mut engine = grouped_engine();
+    let client = ClientKey::new(1);
+    let session = welcome(&mut engine, client);
+    announce(&mut engine, client, session);
+    let generation = lease(&mut engine, client, DIRECT, 2).expect("granted");
+    let outcome = engine.handle_client_message(
+        client,
+        DomainEnvelope::ActionCommand(pilotage_protocol::ControlActionCommand {
+            session,
+            vehicle: VEHICLE,
+            scope: ScopeId::new(MOTION),
+            generation,
+            activation_revision: 1,
+            action: pilotage_protocol::ControlAction::Arm,
+            action_id: 4,
+        }),
+        MonoTimestamp::from_nanos(4),
+    );
+    match outcome.actions.as_slice() {
+        [
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::ControlActionResult(result),
+                ..
+            },
+        ] => {
+            assert!(!result.accepted);
+            assert!(
+                result.detail.contains("member"),
+                "the refusal names the member binding: {}",
+                result.detail
+            );
+        }
+        other => panic!("expected a rejected result, got {other:?}"),
+    }
+}
+
+#[test]
+fn switching_members_requires_release_and_lands_a_fresh_generation() {
+    // The scope switch is release-first: requesting the sibling while
+    // holding is denied, and only after the release (neutral fence, group
+    // latch engaged) does the sibling grant land — strictly newer in the
+    // shared generation domain.
+    let mut engine = grouped_engine();
+    let client = ClientKey::new(1);
+    welcome(&mut engine, client);
+    let motion_generation = lease(&mut engine, client, MOTION, 2).expect("granted");
+    let denied = lease(&mut engine, client, DIRECT, 3)
+        .expect_err("the sibling is not leasable while the group is held");
+    assert_eq!(denied, LeaseDenialReason::AlreadyHeld);
+    release(&mut engine, client, MOTION, 4);
+    let direct_generation = lease(&mut engine, client, DIRECT, 5).expect("granted after release");
+    assert!(direct_generation > motion_generation, "fresh fence");
 }
