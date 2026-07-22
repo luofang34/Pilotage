@@ -1,8 +1,12 @@
 //! Control-application outcomes and link-loss policy vocabulary (ADR-0008).
 
-use pilotage_protocol::{ButtonEdge, ControlPayload, LogicalAxisId};
+use pilotage_protocol::{
+    AttitudeThrustIntent, ButtonEdge, ControlAction, ControlIntent, ControlPayload, LogicalAxisId,
+};
 use pilotage_timing::SimTick;
 use serde::{Deserialize, Serialize};
+
+use crate::capability::IntentCapability;
 
 /// Whether a control payload proves neutral activation for every axis a
 /// scope declares.
@@ -83,14 +87,122 @@ pub enum Disposition {
     Rejected(RejectReason),
 }
 
+/// The explicit outcome of ONE typed discrete action an adapter disposed of:
+/// the session host forwards each as a `ControlActionResult` to the sender,
+/// so a press is never silently dropped (CTRL-01).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionResult {
+    /// The action this result answers.
+    pub action: ControlAction,
+    /// Whether the adapter executed (or queued to the vehicle link) the
+    /// action.
+    pub accepted: bool,
+    /// Adapter-supplied reason when not accepted; empty on acceptance.
+    pub detail: String,
+}
+
+impl ActionResult {
+    /// An accepted action.
+    #[must_use]
+    pub const fn accepted(action: ControlAction) -> Self {
+        Self {
+            action,
+            accepted: true,
+            detail: String::new(),
+        }
+    }
+
+    /// A rejected action with its reason.
+    #[must_use]
+    pub fn rejected(action: ControlAction, detail: impl Into<String>) -> Self {
+        Self {
+            action,
+            accepted: false,
+            detail: detail.into(),
+        }
+    }
+}
+
 /// The result of applying a single control frame (ADR-0008): the simulation
-/// tick the outcome corresponds to, and how the frame was disposed of.
+/// tick the outcome corresponds to, how the frame was disposed of, and the
+/// per-action outcomes for every typed discrete action it carried.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplyOutcome {
     /// Simulation tick this outcome corresponds to.
     pub tick: SimTick,
     /// How the frame was disposed of.
     pub disposition: Disposition,
+    /// One explicit result per typed discrete action the frame carried
+    /// (empty for a frame without actions, or one rejected whole — the
+    /// host answers a rejected frame with `FrameRejected` instead).
+    pub action_results: Vec<ActionResult>,
+}
+
+impl ApplyOutcome {
+    /// An outcome with no per-action results.
+    #[must_use]
+    pub const fn new(tick: SimTick, disposition: Disposition) -> Self {
+        Self {
+            tick,
+            disposition,
+            action_results: Vec::new(),
+        }
+    }
+}
+
+/// Whether a typed intent proves neutral activation against its advertised
+/// capability: every velocity or rate component must sit inside the
+/// limit-scaled deadband. Families without a meaningful neutral posture
+/// (attitude, position hold, body rate) never satisfy it — recovery
+/// activation stays fail-closed for them.
+#[must_use]
+pub fn intent_satisfies_neutral_activation(
+    intent: &ControlIntent,
+    capability: &IntentCapability,
+    deadband_milli: u32,
+) -> bool {
+    let fraction = deadband_milli as f32 / 1000.0;
+    match intent {
+        ControlIntent::Velocity(v) => {
+            let linear = capability.max_linear * fraction;
+            let vertical = capability.effective_vertical() * fraction;
+            let angular = capability.max_angular * fraction;
+            v.vx.abs() <= linear
+                && v.vy.abs() <= linear
+                && v.vz.abs() <= vertical
+                && v.yaw_rate.abs() <= angular
+        }
+        ControlIntent::GimbalRate(g) => {
+            let angular = capability.max_angular * fraction;
+            g.pitch_rate.abs() <= angular && g.yaw_rate.abs() <= angular
+        }
+        // Level attitude at the mid collective is the direct-flight hover
+        // posture: tilt inside the max_angular-scaled deadband and thrust at
+        // the linear normalization's hover midpoint (0.5). Yaw is a heading
+        // setpoint, not motion, and does not bear on neutrality.
+        ControlIntent::AttitudeThrust(a) => {
+            let angular = capability.max_angular * fraction;
+            let (roll, pitch, _) = attitude_euler(a);
+            roll.abs() <= angular
+                && pitch.abs() <= angular
+                && (a.thrust - 0.5).abs() <= 0.5 * fraction
+        }
+        ControlIntent::PositionHold(_) | ControlIntent::BodyRate(_) => false,
+    }
+}
+
+/// Extracts the ZYX Euler angles (roll, pitch, yaw; radians, right-handed
+/// NED) from an attitude intent's unit quaternion — the shared conversion
+/// the command gate bounds tilt with and an attitude-consuming adapter
+/// decodes setpoints with. The wire decode already enforced unit norm; a
+/// gimbal-lock pitch clamps the asin argument instead of going NaN.
+#[must_use]
+pub fn attitude_euler(intent: &AttitudeThrustIntent) -> (f32, f32, f32) {
+    let (w, x, y, z) = (intent.qw, intent.qx, intent.qy, intent.qz);
+    let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
+    let pitch = (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin();
+    let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z));
+    (roll, pitch, yaw)
 }
 
 /// What an adapter does to a vehicle when its control link is judged lost.
@@ -146,12 +258,10 @@ mod tests {
 
     #[test]
     fn apply_outcome_holds_tick_and_disposition() {
-        let outcome = ApplyOutcome {
-            tick: SimTick::new(7),
-            disposition: Disposition::Accepted,
-        };
+        let outcome = ApplyOutcome::new(SimTick::new(7), Disposition::Accepted);
         assert_eq!(outcome.tick.as_u64(), 7);
         assert_eq!(outcome.disposition, Disposition::Accepted);
+        assert!(outcome.action_results.is_empty());
     }
 
     #[test]

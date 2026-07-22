@@ -155,6 +155,7 @@ async fn send_stale_generation_probe(
         pilotage_protocol::Generation::new(current_generation.as_u64().wrapping_sub(1));
     let stale_sequence = last_sequence.next();
     let frame = ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: PROBE_VEHICLE,
         scope: pilotage_protocol::ScopeId::new("vehicle.motion"),
@@ -162,7 +163,10 @@ async fn send_stale_generation_probe(
         sequence: stale_sequence,
         sampled_at: crate::control_source::elapsed_to_timestamp(run_start.elapsed()),
         profile_revision: 0,
+        activation_revision: 0,
         payload: pilotage_protocol::ControlPayload::default(),
+        intent: None,
+        actions: vec![],
     };
     let bytes = pilotage_protocol::encode_control_frame_envelope(&frame);
     if let Err(source) = connection.send_datagram(bytes) {

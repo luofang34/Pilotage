@@ -12,6 +12,7 @@
 //! [`DeviceProfile`] produced by [`merge_layers`].
 
 mod button_tracker;
+mod digest;
 mod logical;
 mod normalize;
 mod profile;
@@ -19,14 +20,18 @@ mod registry;
 mod sample;
 
 pub use button_tracker::ButtonTracker;
+pub use digest::{DIGEST_LEN, content_digest};
+pub use logical::{SLOT_AXIS_BASE, SLOT_AXIS_COUNT};
 pub use logical::{axis_id_for_name, button_id_for_name};
 pub use normalize::{NormalizedAxis, normalize_axis};
 pub use profile::{
     AxisCalibration, AxisConfig, ButtonConfig, DeviceIdentity, DeviceInfo, DeviceProfile,
-    ProfileError, SCHEMA_VERSION, parse_profile_bytes, parse_profile_str,
+    KeyAxisBinding, KeyBinding, ProfileError, SCHEMA_VERSION, parse_profile_bytes,
+    parse_profile_str, validate_axis_config,
 };
 pub use registry::{
-    GENERIC_GAMEPAD_JSON, LayeredProfile, ProfileLayer, layered, load_builtin_generic_gamepad,
-    load_profile_bytes, load_profile_str, merge_layers,
+    GENERIC_GAMEPAD_JSON, LayeredProfile, ProfileLayer, SelectError, layered,
+    load_builtin_generic_gamepad, load_profile_bytes, load_profile_str, merge_layers,
+    select_by_identity,
 };
 pub use sample::RawDeviceSample;

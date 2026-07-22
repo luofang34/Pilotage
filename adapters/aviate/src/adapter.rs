@@ -3,15 +3,16 @@
 //! operational estimate, the co-located shm block carries simulation
 //! truth, and the uplink socket carries FC-owned state reports.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossPolicy, RejectReason,
-    ScopeDescriptor, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossPolicy, RejectReason,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter,
+    VideoSource,
 };
 use pilotage_protocol::{
-    ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame, VehicleId,
+    ControlAction, ControlIntent, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId,
 };
 use pilotage_timing::SimTick;
 
@@ -24,13 +25,14 @@ use pilotage_mavlink::link::LinkState;
 use crate::error::AviateAdapterError;
 use crate::uplink::FlightUplink;
 
+mod advertisement;
 mod camera;
 mod control;
 mod sampling;
 mod shm_sampling;
 mod sources;
 mod startup;
-use control::{normalized_flight_sticks, rejected_control};
+use control::{rejected_control, sticks_from_velocity};
 use sampling::mavlink_batch;
 use shm_sampling::ShmSource;
 use sources::{ArmReport, EstimateSource, fc_state_sample};
@@ -38,6 +40,10 @@ use sources::{ArmReport, EstimateSource, fc_state_sample};
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
 pub const FLIGHT_SCOPE: &str = "vehicle.motion";
+/// The direct-flight scope (CTRL-01): attitude + collective thrust under its
+/// OWN lease and authority generation — never a reinterpretation of the
+/// velocity scope's numbers.
+pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.
@@ -50,12 +56,6 @@ pub const YAW_AXIS: u16 = 3;
 pub const ARM_BUTTON: u16 = 0;
 /// Logical button whose press disarms the vehicle.
 pub const DISARM_BUTTON: u16 = 1;
-/// Logical button whose press resets the simulation (runs the reset
-/// script; SITL-only convenience).
-pub const RESET_BUTTON: u16 = 2;
-/// Logical button toggling between camera mode (velocity sticks,
-/// brake-to-hold) and FPV mode (attitude sticks, direct thrust).
-pub const FPV_TOGGLE_BUTTON: u16 = 3;
 
 /// Data older than this is withheld from telemetry entirely, so
 /// downstream freshness models see the group's age grow instead of a
@@ -90,6 +90,10 @@ pub enum AviateProfile {
 #[derive(Debug)]
 pub struct AviateAdapter {
     vehicle: VehicleId,
+    // The session profile this adapter was constructed for (LINK-04):
+    // lifecycle capability is STRUCTURAL — a physical/RF profile neither
+    // advertises nor executes simulator lifecycle commands.
+    profile: AviateProfile,
     // Source roles are structural (LINK-04): the MAVLink link only ever
     // produces the FC operational estimate and the shm link only ever
     // produces the simulation-truth oracle. Neither substitutes for the
@@ -111,7 +115,9 @@ pub struct AviateAdapter {
     // Zero point of the host-monotonic acquisition clock.
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
-    link_loss_policy: Option<LinkLossPolicy>,
+    // Per-scope link-loss latch (ADR-0008): a gimbal-scope policy must not
+    // suppress or neutralize motion, so the latch is keyed by scope.
+    link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
     // Commanded-reset latch: engaged when a sim reset is requested,
     // cleared only by a fresh estimate source epoch plus demonstrated
     // neutral input (control::ResetLatch). While engaged, everything
@@ -122,9 +128,6 @@ pub struct AviateAdapter {
     // kills any live SITL FC on the machine).
     #[cfg(test)]
     reset_spawns: u32,
-    // FPV mode latch (FPV_TOGGLE_BUTTON): attitude sticks + direct
-    // thrust instead of velocity sticks + brake-to-hold.
-    fpv_mode: bool,
 }
 
 impl AviateAdapter {
@@ -150,6 +153,7 @@ impl AviateAdapter {
     pub(crate) fn from_state(vehicle: VehicleId, state: Arc<Mutex<LinkState>>) -> Self {
         Self {
             vehicle,
+            profile: AviateProfile::Simulation,
             estimate: Some(EstimateSource { state, _link: None }),
             truth: None,
             uplink: None,
@@ -162,8 +166,7 @@ impl AviateAdapter {
             last_reset: None,
             reset_latch: None,
             reset_spawns: 0,
-            fpv_mode: false,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         }
     }
 
@@ -185,6 +188,14 @@ impl AviateAdapter {
             .is_some_and(crate::uplink::FlightUplink::hold_captured)
     }
 
+    /// Overrides the constructed profile, for tests exercising the
+    /// physical/RF shape.
+    #[cfg(test)]
+    pub(crate) fn with_profile(mut self, profile: AviateProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+
     /// Installs a test uplink, for tests.
     #[cfg(test)]
     pub(crate) fn with_uplink(mut self, uplink: FlightUplink) -> Self {
@@ -202,7 +213,7 @@ impl AviateAdapter {
         if frame.vehicle != self.vehicle {
             return Err(RejectReason::UnknownVehicle);
         }
-        if frame.scope.as_str() != FLIGHT_SCOPE {
+        if frame.scope.as_str() != FLIGHT_SCOPE && frame.scope.as_str() != DIRECT_SCOPE {
             return Err(RejectReason::UnknownScope);
         }
         let known = [
@@ -220,43 +231,51 @@ impl AviateAdapter {
     }
 }
 
+/// Disposes each typed flight action: arm fires through the caller's hook,
+/// the gate-honored sim reset acks, and anything unsupported here reports
+/// rejected (the session gates unadvertised actions before delivery —
+/// defensive, not a reachable path). Mode requests are unsupported: direct
+/// flight is its OWN scope with its own lease, never a mode flip that
+/// reinterprets this scope's numbers.
+fn process_flight_actions(
+    actions: &[ControlAction],
+    mut send_arm: impl FnMut(f32),
+    current_yaw: f32,
+) -> Vec<ActionResult> {
+    let mut action_results = Vec::with_capacity(actions.len());
+    for action in actions {
+        match *action {
+            ControlAction::Arm => {
+                send_arm(current_yaw);
+                action_results.push(ActionResult::accepted(*action));
+            }
+            ControlAction::ModeRequest { .. } => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "no mode requests: direct flight is the vehicle.motion.direct scope",
+                ));
+            }
+            ControlAction::SimReset | ControlAction::Disarm | ControlAction::GimbalRecenter => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "not supported on the flight scope",
+                ));
+            }
+        }
+    }
+    action_results
+}
+
 impl VehicleAdapter for AviateAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            execution: ExecutionMode {
-                real_time: true,
-                render_capable: self._camera_bridge.is_some(),
-                ..ExecutionMode::default()
-            },
-            // Without a working velocity-control uplink, the adapter stays
-            // telemetry-only as required by ADR-0018.
-            vehicles: vec![VehicleDescriptor {
-                id: self.vehicle,
-                scopes: if self.uplink.is_some() {
-                    vec![ScopeDescriptor {
-                        scope: ScopeId::new(FLIGHT_SCOPE),
-                        axes: vec![
-                            LogicalAxisId::new(ROLL_AXIS),
-                            LogicalAxisId::new(PITCH_AXIS),
-                            LogicalAxisId::new(THROTTLE_AXIS),
-                            LogicalAxisId::new(YAW_AXIS),
-                        ],
-                    }]
-                } else {
-                    vec![]
-                },
-                link_loss_actions: if self.uplink.is_some() {
-                    vec![LinkLossPolicy::Neutralize]
-                } else {
-                    vec![]
-                },
-            }],
-            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        }
+        self.advertised_capabilities()
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
+        if frame.scope.as_str() == pilotage_adapter_api::SIM_LIFECYCLE_SCOPE {
+            return self.apply_sim_lifecycle(frame, tick);
+        }
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
@@ -267,44 +286,61 @@ impl VehicleAdapter for AviateAdapter {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        for (button, edge) in &frame.payload.edges {
-            if *edge != ButtonEdge::Pressed {
-                continue;
-            }
-            if *button == LogicalButtonId::new(ARM_BUTTON) {
-                uplink.send_arm(current_yaw);
-            } else if *button == LogicalButtonId::new(FPV_TOGGLE_BUTTON) {
-                self.fpv_mode = !self.fpv_mode;
-                tracing::info!(fpv = self.fpv_mode, "flight mode toggled");
-            }
-        }
+        let action_results = process_flight_actions(
+            &frame.actions,
+            |yaw| {
+                uplink.send_arm(yaw);
+            },
+            current_yaw,
+        );
 
-        let (sticks, transformed) = normalized_flight_sticks(frame);
-        if self.fpv_mode {
-            uplink.send_fpv_frame(
-                sticks[usize::from(ROLL_AXIS)],
-                sticks[usize::from(PITCH_AXIS)],
-                sticks[usize::from(THROTTLE_AXIS)],
-                sticks[usize::from(YAW_AXIS)],
-            );
-        } else {
-            uplink.send_stick_frame(
-                sticks[usize::from(ROLL_AXIS)],
-                sticks[usize::from(PITCH_AXIS)],
-                sticks[usize::from(THROTTLE_AXIS)],
-                sticks[usize::from(YAW_AXIS)],
-                current_yaw,
-                current_pos,
-                current_vel,
-            );
-        }
+        // Each scope consumes ITS OWN intent family — the gate already
+        // rejected any other family against the advertisement, so these
+        // rejections are defensive, not reachable paths.
+        let constrained = match (frame.scope.as_str(), frame.intent) {
+            (_, None) => {
+                // An actions-only frame (arm) carries no motion demand; the
+                // setpoint stream continues from the next frame.
+                return ApplyOutcome {
+                    tick,
+                    disposition: Disposition::Accepted,
+                    action_results,
+                };
+            }
+            (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
+                let (sticks, constrained) = sticks_from_velocity(&velocity);
+                uplink.send_stick_frame(
+                    sticks[0],
+                    sticks[1],
+                    sticks[2],
+                    sticks[3],
+                    current_yaw,
+                    current_pos,
+                    current_vel,
+                );
+                constrained
+            }
+            (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
+                let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);
+                let tilt_limit = crate::uplink::FPV_MAX_TILT_RAD;
+                uplink.send_attitude_frame(roll, pitch, yaw, attitude.thrust);
+                roll.abs() > tilt_limit || pitch.abs() > tilt_limit
+            }
+            _ => {
+                return rejected_control(
+                    tick,
+                    RejectReason::Other("intent family does not belong to this scope".to_owned()),
+                );
+            }
+        };
         ApplyOutcome {
             tick,
-            disposition: if transformed {
-                Disposition::Transformed
+            disposition: if constrained {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
+            action_results,
         }
     }
 
@@ -382,18 +418,33 @@ impl VehicleAdapter for AviateAdapter {
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), pilotage_adapter_api::LinkLossEnactError> {
         if vehicle != self.vehicle {
             return Err(pilotage_adapter_api::LinkLossEnactError::UnknownVehicle { vehicle });
         }
-        // Latch first, fail after: even an unenactable engage suppresses
-        // ordinary control frames. Any link-loss transition also
-        // invalidates the captured position-hold context — a hold point
-        // captured under the lost lease is obsolete, and letting it
-        // survive would command recovery back toward it the instant
-        // control resumes.
-        self.link_loss_policy = policy;
+        // Latch first, fail after: even an unenactable engage suppresses this
+        // scope's control frames. The latch is per-scope so another scope's
+        // link-loss never suppresses this one.
+        match &policy {
+            Some(policy) => {
+                self.link_loss_policy.insert(scope.clone(), *policy);
+            }
+            None => {
+                self.link_loss_policy.remove(scope);
+            }
+        }
+        // Only the MOTION scopes actuate flight: a gimbal-scope link-loss
+        // must NOT touch the FC or the motion hold context, so the
+        // neutralize and the hold-invalidation below are gated on them.
+        if scope.as_str() != FLIGHT_SCOPE && scope.as_str() != DIRECT_SCOPE {
+            return Ok(());
+        }
+        // Any motion link-loss transition invalidates the captured
+        // position-hold context — a hold point captured under the lost lease
+        // is obsolete, and letting it survive would command recovery back
+        // toward it the instant control resumes.
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.clear_hold_state();
         }

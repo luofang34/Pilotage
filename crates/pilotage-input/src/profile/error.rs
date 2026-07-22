@@ -79,6 +79,56 @@ pub enum ProfileError {
         /// The repeated logical name.
         name: String,
     },
+
+    /// An axis `deadzone` was outside `[0.0, 1.0)`, the range over which the
+    /// normalization pipeline stays monotonic (a deadzone `>= 1.0` would clamp
+    /// every input to zero; a negative one is meaningless).
+    #[error("device profile axis {source_index} deadzone {value} is outside [0.0, 1.0)")]
+    DeadzoneOutOfRange {
+        /// Source index of the offending axis.
+        source_index: usize,
+        /// The out-of-range deadzone value.
+        value: f32,
+    },
+
+    /// An axis `expo` was outside `[-0.99, 10.0]`, the range over which the
+    /// response curve stays bounded and single-valued.
+    #[error("device profile axis {source_index} expo {value} is outside [-0.99, 10.0]")]
+    ExpoOutOfRange {
+        /// Source index of the offending axis.
+        source_index: usize,
+        /// The out-of-range expo value.
+        value: f32,
+    },
+
+    /// An axis response-curve field (`deadzone` or `expo`) was `NaN` or
+    /// infinite, so it could never define a usable curve.
+    #[error("device profile axis {source_index} has a non-finite {field}")]
+    NonFiniteAxisValue {
+        /// Source index of the offending axis.
+        source_index: usize,
+        /// Which response-curve field was non-finite.
+        field: &'static str,
+    },
+
+    /// A key binding did not declare exactly one target, or its axis
+    /// deflection was unusable (non-finite, out of `[-1, 1]`, or zero — a
+    /// held key must command a real deflection).
+    #[error("device profile key {key:?} binding is malformed: {detail}")]
+    MalformedKeyBinding {
+        /// The key whose binding is malformed.
+        key: String,
+        /// What made the binding unusable.
+        detail: &'static str,
+    },
+
+    /// One key was bound more than once, which would make two targets race
+    /// for a single physical key.
+    #[error("device profile binds key {key:?} more than once")]
+    DuplicateKeyBinding {
+        /// The repeated key.
+        key: String,
+    },
 }
 
 /// Distinguishes axis entries from button entries in duplicate-entry errors.

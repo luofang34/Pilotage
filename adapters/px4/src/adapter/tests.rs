@@ -15,7 +15,7 @@ use pilotage_mavlink::codec::{FcMessage, FrameSource};
 use pilotage_mavlink::link::apply_messages_at;
 use pilotage_mavlink::{AuthorizationSource, LinkState};
 
-use super::{ARM_BUTTON, DISARM_BUTTON, Px4Adapter, RESET_BUTTON, THROTTLE_AXIS};
+use super::{ARM_BUTTON, DISARM_BUTTON, Px4Adapter, THROTTLE_AXIS};
 use crate::uplink::Px4Uplink;
 
 pub(super) const SOURCE: FrameSource = FrameSource {
@@ -155,11 +155,43 @@ fn drive_epoch_advance(state: &Arc<Mutex<LinkState>>, start: Instant) {
     apply_messages_at(state, &trio, 0, 0, start + Duration::from_millis(4_500));
 }
 
+/// Builds a TYPED flight frame from legacy-shaped stick arguments: the axis
+/// values (normalized `[-1, 1]`) scale onto the advertised velocity envelope
+/// exactly as the session's compatibility boundary would scale them, and the
+/// pressed edges become the corresponding typed actions. Keeping the legacy
+/// call shape lets every test read in stick terms while exercising the
+/// typed-only adapter contract.
 pub(super) fn frame(
     axes: Vec<(LogicalAxisId, f32)>,
     edges: Vec<(LogicalButtonId, ButtonEdge)>,
 ) -> pilotage_protocol::ScopedControlFrame {
+    let mut velocity = pilotage_protocol::VelocityIntent {
+        frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+        vx: 0.0,
+        vy: 0.0,
+        vz: 0.0,
+        yaw_rate: 0.0,
+    };
+    for (axis, value) in &axes {
+        match axis.as_u16() {
+            id if id == super::ROLL_AXIS => velocity.vy = value * 3.0,
+            id if id == super::PITCH_AXIS => velocity.vx = value * 3.0,
+            id if id == super::THROTTLE_AXIS => velocity.vz = -value * 1.5,
+            id if id == super::YAW_AXIS => velocity.yaw_rate = value * 0.9,
+            _ => {}
+        }
+    }
+    let actions = edges
+        .iter()
+        .filter(|(_, edge)| *edge == ButtonEdge::Pressed)
+        .filter_map(|(button, _)| match button.as_u16() {
+            id if id == super::ARM_BUTTON => Some(pilotage_protocol::ControlAction::Arm),
+            id if id == super::DISARM_BUTTON => Some(pilotage_protocol::ControlAction::Disarm),
+            _ => None,
+        })
+        .collect();
     pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: pilotage_protocol::ScopeId::new(super::FLIGHT_SCOPE),
@@ -167,7 +199,10 @@ pub(super) fn frame(
         sequence: pilotage_protocol::SequenceNum::new(1),
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
-        payload: pilotage_protocol::ControlPayload { axes, edges },
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: Some(pilotage_protocol::ControlIntent::Velocity(velocity)),
+        actions,
     }
 }
 
@@ -278,17 +313,36 @@ fn sampled_telemetry_authorizes_from_the_standard_status() {
     assert!((pose.x - 1.0).abs() < 1e-9 && (pose.y - 2.0).abs() < 1e-9);
 }
 
+/// A `SimReset` press on the separately leased lifecycle scope (SIM-01):
+/// the ONLY place a reset can arrive from.
+fn lifecycle_reset_frame() -> pilotage_protocol::ScopedControlFrame {
+    pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![1],
+        session: pilotage_protocol::SessionId::new(1),
+        vehicle: VehicleId::new(1),
+        scope: pilotage_protocol::ScopeId::new(pilotage_adapter_api::SIM_LIFECYCLE_SCOPE),
+        generation: pilotage_protocol::Generation::new(1),
+        sequence: pilotage_protocol::SequenceNum::new(0),
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: None,
+        actions: vec![pilotage_protocol::ControlAction::SimReset],
+    }
+}
+
 #[test]
 fn reset_press_latches_and_disarm_bypasses() {
     let (fc, addr) = fake_fc();
     let state = live_state();
     let mut adapter =
         Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink_to(addr));
-    let outcome = adapter.apply_control(&press(RESET_BUTTON));
-    assert_eq!(
-        outcome.disposition,
-        Disposition::Rejected(RejectReason::ResetInProgress)
-    );
+    // The reset arrives on ITS OWN scope (SIM-01): acknowledged there,
+    // while the latch it engages suppresses flight.
+    let outcome = adapter.apply_control(&lifecycle_reset_frame());
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    assert!(outcome.action_results.iter().all(|result| result.accepted));
     assert_eq!(adapter.reset_spawns, 1);
 
     let outcome = adapter.apply_control(&press(ARM_BUTTON));
@@ -316,7 +370,7 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
         .expect("timeout");
     let uplink = Px4Uplink::new(fc.local_addr().expect("addr")).expect("uplink");
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink);
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
 
     // The restarted PX4's stream is what advances the epoch — driven
     // through the production message path, never by poking counters.
@@ -339,12 +393,17 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
         Disposition::Rejected(RejectReason::ResetInProgress),
         "deflected sticks do not clear the latch"
     );
-    let empty = frame(vec![], vec![]);
-    let outcome = adapter.apply_control(&empty);
+    // A typed velocity intent is structurally total (absent = zero), so
+    // the legacy empty-payload hole cannot exist. What still demonstrates
+    // nothing is a frame WITHOUT a velocity demand.
+    let mut actions_only = frame(vec![], vec![]);
+    actions_only.intent = None;
+    actions_only.actions = vec![pilotage_protocol::ControlAction::Arm];
+    let outcome = adapter.apply_control(&actions_only);
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::ResetInProgress),
-        "an EMPTY payload must not count as a neutral demonstration"
+        "a frame without a velocity demand must not count as neutral"
     );
 
     let outcome = adapter.apply_control(&neutral());
@@ -361,4 +420,38 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     );
     let mut buf = [0u8; 128];
     fc.recv_from(&mut buf).expect("arm datagram reaches the FC");
+}
+
+/// A gimbal-capable px4 configuration advertises all three video sources;
+/// a gimbal-less one advertises FPV + chase only — never a payload feed
+/// that cannot paint.
+#[test]
+fn video_sources_follow_the_gimbal_configuration() {
+    let with_gimbal = super::advertised_video_sources(true, true);
+    assert_eq!(
+        with_gimbal
+            .iter()
+            .map(|source| source.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            pilotage_adapter_gazebo::FPV_SOURCE_ID,
+            pilotage_adapter_gazebo::CHASE_SOURCE_ID,
+            pilotage_adapter_gazebo::GIMBAL_SOURCE_ID,
+        ],
+    );
+    let gimbal_less = super::advertised_video_sources(true, false);
+    assert_eq!(
+        gimbal_less
+            .iter()
+            .map(|source| source.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            pilotage_adapter_gazebo::FPV_SOURCE_ID,
+            pilotage_adapter_gazebo::CHASE_SOURCE_ID,
+        ],
+    );
+    assert!(
+        super::advertised_video_sources(false, true).is_empty(),
+        "no camera bridge, no sources"
+    );
 }

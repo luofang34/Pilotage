@@ -9,9 +9,11 @@
 mod layer;
 mod loader;
 mod merge;
+mod select;
 
 pub use layer::{LayeredProfile, ProfileLayer};
 pub use loader::{
     GENERIC_GAMEPAD_JSON, load_builtin_generic_gamepad, load_profile_bytes, load_profile_str,
 };
 pub use merge::{layered, merge_layers};
+pub use select::{SelectError, select_by_identity};

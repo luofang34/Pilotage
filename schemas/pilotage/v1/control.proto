@@ -35,6 +35,129 @@ message ControlPayload {
   repeated ButtonEdgeSample edges = 2;
 }
 
+// The reference frame a typed control intent is expressed in (CTRL-01). Frames
+// are negotiated: a vehicle advertises the ones it accepts per intent family
+// (see `IntentCapability`), so a client never sends a frame the vehicle cannot
+// interpret. Room is left for full 6-DoF frames without a schema break.
+enum ReferenceFrame {
+  REFERENCE_FRAME_UNSPECIFIED = 0;
+  // Body axes, forward-right-down: +x forward, +y right, +z down.
+  REFERENCE_FRAME_BODY_FRD = 1;
+  // Local tangent plane, north-east-down, origin at the vehicle.
+  REFERENCE_FRAME_LOCAL_NED = 2;
+  // The gimbal payload's own frame (pitch/yaw about its mount).
+  REFERENCE_FRAME_GIMBAL = 3;
+}
+
+// A typed discrete control action (CTRL-01). Actions carry MEANING, not a raw
+// button number: an adapter reads `ARM`, never "button 9", so a rebound
+// control cannot silently change what a press does at the vehicle boundary.
+enum ControlAction {
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  CONTROL_ACTION_ARM = 1;
+  CONTROL_ACTION_DISARM = 2;
+  // A request to change the vehicle's flight mode. The concrete target is the
+  // `ControlActionRequest.mode_target` carried alongside — a mode request
+  // with an unspecified target is rejected, never guessed.
+  CONTROL_ACTION_MODE_REQUEST = 3;
+  // Recenter the gimbal to its stowed/neutral orientation.
+  CONTROL_ACTION_GIMBAL_RECENTER = 4;
+  // Reset the simulation (SIM-01 lifecycle, not a flight intent): advertised
+  // only by simulation adapters, never by a physical-vehicle gateway.
+  CONTROL_ACTION_SIM_RESET = 5;
+}
+
+// The explicit target of a MODE_REQUEST action (CTRL-01). Targets are typed
+// vehicle meanings, not scheme-local numbers; a vehicle advertises the ones
+// it accepts via `ActionCapability.mode_targets`.
+enum ModeTarget {
+  MODE_TARGET_UNSPECIFIED = 0;
+  // Camera flight: velocity sticks with brake-to-hold on release.
+  MODE_TARGET_CAMERA_VELOCITY = 1;
+  // FPV/direct flight: attitude sticks with direct collective thrust.
+  MODE_TARGET_FPV_DIRECT = 2;
+  // Hold the current position.
+  MODE_TARGET_HOLD = 3;
+  // Return to the launch/home position.
+  MODE_TARGET_RETURN = 4;
+}
+
+// One typed discrete action carried by a control frame. `mode_target` is
+// meaningful only for `CONTROL_ACTION_MODE_REQUEST` (required there,
+// rejected as unspecified otherwise-populated).
+message ControlActionRequest {
+  ControlAction action = 1;
+  ModeTarget mode_target = 2;
+  // Sender-assigned correlation identity for reliable delivery over the
+  // droppable control-datagram channel: the sender retransmits the action on
+  // successive frames until the matching `ControlActionResult` echoes this
+  // id, and the host deduplicates repeats so the vehicle executes the press
+  // exactly once. Zero means "no correlation" (legacy translation).
+  uint32 action_id = 3;
+}
+
+// Linear velocity plus yaw rate, the family the browser scheme produces today.
+// `vx/vy/vz` are metres per second in `frame`; `yaw_rate` is radians per second
+// (right-handed about the frame's down axis).
+message VelocityIntent {
+  ReferenceFrame frame = 1;
+  float vx = 2;
+  float vy = 3;
+  float vz = 4;
+  float yaw_rate = 5;
+}
+
+// Hold a position offset (metres in `frame`) and heading (radians). Defined now
+// so a position-hold-capable vehicle needs no schema break to accept it.
+message PositionHoldIntent {
+  ReferenceFrame frame = 1;
+  float x = 2;
+  float y = 3;
+  float z = 4;
+  float heading = 5;
+}
+
+// Orientation (unit quaternion, `frame`→body) plus normalized collective
+// thrust in `[0, 1]`. For attitude-controlled airframes.
+message AttitudeThrustIntent {
+  ReferenceFrame frame = 1;
+  float qw = 2;
+  float qx = 3;
+  float qy = 4;
+  float qz = 5;
+  float thrust = 6;
+}
+
+// Body angular rates (radians per second) plus normalized thrust in `[0, 1]`.
+// For the innermost rate-control loop (e.g. acro / manual rate flight).
+message BodyRateIntent {
+  float roll_rate = 1;
+  float pitch_rate = 2;
+  float yaw_rate = 3;
+  float thrust = 4;
+}
+
+// Gimbal angular rate (radians per second) about the payload's pitch and yaw.
+message GimbalRateIntent {
+  float pitch_rate = 1;
+  float yaw_rate = 2;
+}
+
+// Exactly one typed control-intent family. The `oneof` makes the families
+// mutually exclusive on the wire: a frame commands velocity OR attitude OR body
+// rate, never an ambiguous mix, so a velocity-to-attitude transition is a
+// distinct intent (and, per CTRL-01, a distinct scope) rather than a
+// reinterpretation of the same numbers.
+message ControlIntent {
+  oneof family {
+    VelocityIntent velocity = 1;
+    PositionHoldIntent position_hold = 2;
+    AttitudeThrustIntent attitude_thrust = 3;
+    BodyRateIntent body_rate = 4;
+    GimbalRateIntent gimbal_rate = 5;
+  }
+}
+
 // A control frame scoped to a single session, vehicle, and control scope,
 // carrying the fencing metadata the session host uses to accept or reject
 // it (ADR-0006, ADR-0009).
@@ -46,5 +169,61 @@ message ControlFrame {
   SequenceNum sequence = 5;
   MonoTimestamp sampled_at = 6;
   uint32 profile_revision = 7;
+  // The legacy untyped logical-axis/button payload (ADR-0007). A frame
+  // carries EXACTLY ONE command representation: this payload OR the typed
+  // `intent`/`actions` — both present or both absent is rejected.
   ControlPayload payload = 8;
+  // The typed control intent this frame commands (CTRL-01). Must belong to a
+  // family the vehicle advertises for `scope`.
+  ControlIntent intent = 9;
+  // Typed discrete actions carried by this frame, as one-shot events. No
+  // action may repeat within a frame, and conflicting actions (ARM together
+  // with DISARM) are rejected whole.
+  repeated ControlActionRequest actions = 10;
+  // The sender's monotonic profile ACTIVATION revision (advances on every
+  // profile install), binding each frame to the exact activation announced
+  // via `ProfileActivation` — distinct from the profile document's own
+  // `profile_revision`.
+  uint32 activation_revision = 11;
+}
+
+// A typed discrete action on the RELIABLE ordered session stream (CTRL-01).
+// Actions are edge-triggered commands whose loss, duplication, or reordering
+// changes meaning (a re-delivered ARM after a DISARM re-arms the vehicle), so
+// they never ride droppable control datagrams. The full authority binding
+// travels with the request — session, vehicle, scope, fencing generation,
+// and the sender's announced activation revision — and the host validates
+// every field against its own records before the adapter sees the action.
+message ControlActionCommand {
+  SessionId session = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+  Generation generation = 4;
+  uint32 activation_revision = 5;
+  // The action itself. `action_id` MUST be nonzero: the reliable channel
+  // still answers every command with a `ControlActionResult` correlated by
+  // id, and an uncorrelated command is rejected rather than guessed at.
+  ControlActionRequest request = 6;
+}
+
+// Announces the sender's newly activated control profile on the reliable
+// session stream, binding the activation revision its frames will carry to
+// the profile's identity, document revision, and exact content digest — the
+// traceability record for control evidence (INPUT-01).
+message ProfileActivation {
+  SessionId session = 1;
+  string profile_id = 2;
+  uint32 profile_revision = 3;
+  uint32 activation_revision = 4;
+  // SHA-256 content digest of the exact scheme-profile bytes that compiled.
+  bytes digest = 5;
+  // The selected DEVICE profile completing the effective mapping (INPUT-01):
+  // a device selection changes what physical input means, so it advances the
+  // activation revision and re-announces with these fields. Empty when no
+  // pad profile is selected (keyboard-only, whose profile is a fixed
+  // built-in of the client binary).
+  string device_profile_id = 6;
+  uint32 device_profile_revision = 7;
+  // SHA-256 content digest of the exact device-profile bytes.
+  bytes device_digest = 8;
 }

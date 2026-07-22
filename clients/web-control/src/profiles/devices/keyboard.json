@@ -1,0 +1,20 @@
+{
+    "schema_version": 1,
+    "revision": 1,
+    "device": { "vendor_id": 0, "product_id": 1, "product": "Keyboard" },
+    "description": "Built-in keyboard device profile. Keys are canonical DOM KeyboardEvent.key values with single letters lower-cased; each held key drives a canonical pad slot (slot0 = left-stick X, slot1 = left-stick Y, slot2 = right-stick X, slot3 = right-stick Y) or a canonical pad button, so the control scheme's response curves and mode permutations apply to keyboard input unchanged. Later entries override earlier ones when both keys are held (w beats s on the same slot). Selected explicitly for keyboard input, never by USB identity; the vendor/product pair is a non-wildcard placeholder outside the gamepad candidate list.",
+    "axes": [],
+    "buttons": [],
+    "keys": [
+        { "key": "s", "axis": { "logical": "slot1", "value": 1.0 } },
+        { "key": "w", "axis": { "logical": "slot1", "value": -1.0 } },
+        { "key": "d", "axis": { "logical": "slot0", "value": 1.0 } },
+        { "key": "a", "axis": { "logical": "slot0", "value": -1.0 } },
+        { "key": "ArrowDown", "axis": { "logical": "slot3", "value": 1.0 } },
+        { "key": "ArrowUp", "axis": { "logical": "slot3", "value": -1.0 } },
+        { "key": "ArrowRight", "axis": { "logical": "slot2", "value": 1.0 } },
+        { "key": "ArrowLeft", "axis": { "logical": "slot2", "value": -1.0 } },
+        { "key": "Enter", "button": "button9" },
+        { "key": "Backspace", "button": "button8" }
+    ]
+}

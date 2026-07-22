@@ -9,10 +9,13 @@
 // rejects the datagram as unrecognized. These checks pin the invariant that the
 // required fields are emitted even when their ids are zero.
 
+import { readFileSync } from "node:fs";
 import {
   encodeControlFrameEnvelope,
   decodeBareEnvelope,
+  decodeLengthDelimitedEnvelope,
   parseVideoFrameV2,
+  BUTTON_EDGE_PRESSED,
   SCHEMA_VERSION,
 } from "./wire.js";
 
@@ -598,6 +601,122 @@ check(
   check(
     "a fully neutral frame reports all four axes on the wire",
     axisEntries.length === 4,
+  );
+}
+
+// ---- GIM-03/#167: a vehicle.gimbal control frame round-trips on the wire ----
+// The gimbal quasimode's frames must encode and decode intact: scope, profile
+// revision, the pitch/yaw rate axes, and the R3 recenter edge.
+{
+  const AXIS_PITCH = 1;
+  const AXIS_YAW = 3;
+  const GIMBAL_NEUTRAL = 0;
+  const encoded = encodeControlFrameEnvelope({
+    sessionId: 7n,
+    vehicleId: 1n,
+    scope: "vehicle.gimbal",
+    generation: 3n,
+    sequence: 42,
+    sampledAtNanos: 123_456_789n,
+    profileRevision: 3,
+    axes: [
+      [AXIS_PITCH, -0.5],
+      [AXIS_YAW, 0.25],
+    ],
+    edges: [[GIMBAL_NEUTRAL, BUTTON_EDGE_PRESSED]],
+  });
+  const decoded = decodeBareEnvelope(encoded);
+  check("gimbal frame decodes as a ControlFrame", decoded.kind === "ControlFrame");
+  const m = decoded.message;
+  check("gimbal frame scope round-trips", m.scope === "vehicle.gimbal");
+  check("gimbal frame profile_revision round-trips", m.profileRevision === 3);
+  check(
+    "gimbal pitch rate round-trips",
+    m.axes.some(([id, v]) => id === AXIS_PITCH && v === -0.5),
+  );
+  check(
+    "gimbal yaw rate round-trips",
+    m.axes.some(([id, v]) => id === AXIS_YAW && v === 0.25),
+  );
+  check(
+    "gimbal recenter (R3) edge round-trips",
+    m.edges.some(([id, edge]) => id === GIMBAL_NEUTRAL && edge === BUTTON_EDGE_PRESSED),
+  );
+}
+
+// ---- LinkLossCleared (recovery ack, envelope field 15) decodes correctly ----
+// The host broadcasts this on the reliable authority stream; the client must
+// read vehicle/scope/generation to correlate its motion recovery.
+{
+  const stringMessage = (str) => {
+    const out = [];
+    bytesField(out, 1, new TextEncoder().encode(str));
+    return out;
+  };
+  const cleared = [];
+  bytesField(cleared, 1, uint64Message(7)); // vehicle
+  bytesField(cleared, 2, stringMessage("vehicle.motion")); // scope
+  bytesField(cleared, 3, uint64Message(42)); // generation
+  const envelope = [];
+  bytesField(envelope, 15, cleared); // link_loss_cleared
+  const decoded = decodeBareEnvelope(new Uint8Array(envelope));
+  check("link-loss-cleared decodes as LinkLossCleared", decoded.kind === "LinkLossCleared");
+  check("link-loss-cleared vehicle round-trips", decoded.message.vehicleId === 7n);
+  check("link-loss-cleared scope round-trips", decoded.message.scope === "vehicle.motion");
+  check("link-loss-cleared generation round-trips", decoded.message.generation === 42n);
+}
+
+// --- Capability negotiation against the HOST-encoded ServerWelcome fixture ---
+// The bytes come from the real session host (see
+// hosts/session-host/tests/welcome_fixture.rs); they deliberately carry
+// multi-value PACKED repeated enum lists (reference frames, mode targets),
+// the encoding a naive per-entry varint decode turns to NaN.
+{
+  const fixture = JSON.parse(
+    readFileSync(new URL("../web-control/server-welcome-fixture.json", import.meta.url), "utf8"),
+  );
+  const hex = fixture.envelopeHex;
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  const decoded = decodeLengthDelimitedEnvelope(bytes);
+  check("welcome fixture decodes fully", decoded !== null && decoded.consumed === bytes.length);
+  check("welcome fixture is a ServerWelcome", decoded.kind === "ServerWelcome");
+  const message = decoded.message;
+  const expected = fixture.expected;
+  check("welcome session id decodes", Number(message.sessionId) === expected.sessionId);
+  const scopes = message.advertisedScopes ?? [];
+  check("both scopes decode", scopes.length === expected.scopes.length);
+  const motion = scopes.find((scope) => scope.scope === "vehicle.motion");
+  const velocity = motion?.intents.find((intent) => intent.family === expected.scopes[0].velocity.family);
+  const wantVelocity = expected.scopes[0].velocity;
+  // Limits ride the wire as f32; compare through fround.
+  check("velocity limits decode", velocity?.maxLinear === Math.fround(wantVelocity.maxLinear)
+    && velocity?.maxVertical === Math.fround(wantVelocity.maxVertical)
+    && velocity?.maxAngular === Math.fround(wantVelocity.maxAngular));
+  check(
+    "PACKED reference frames decode as every value, none NaN",
+    JSON.stringify(velocity?.frames) === JSON.stringify(wantVelocity.frames),
+  );
+  const modeRequest = motion?.actions.find((action) => action.modeTargets.length > 0);
+  check(
+    "PACKED mode targets decode as every value, none NaN",
+    JSON.stringify(modeRequest?.modeTargets) === JSON.stringify(expected.scopes[0].modeTargets),
+  );
+  const direct = scopes.find((scope) => scope.scope === "vehicle.motion.direct");
+  const attitude = direct?.intents.find(
+    (intent) => intent.family === expected.scopes[1].attitudeThrust.family,
+  );
+  const wantAttitude = expected.scopes[1].attitudeThrust;
+  check(
+    "the attitude scope's tilt bound and heading slew decode",
+    Math.abs(attitude?.maxAngular - wantAttitude.maxAngular) < 1e-6
+      && Math.abs(attitude?.maxYawRate - wantAttitude.maxYawRate) < 1e-6,
+  );
+  check(
+    "the attitude frame list decodes",
+    JSON.stringify(attitude?.frames) === JSON.stringify(wantAttitude.frames),
   );
 }
 

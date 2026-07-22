@@ -6,13 +6,14 @@
 use pilotage_adapter_api::{StepBudget, VehicleAdapter};
 use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_protocol::{
-    ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VehicleId,
+    ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
+    SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use pilotage_timing::MonoTimestamp;
 
 fn control_frame(vehicle: VehicleId) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new("vehicle.motion"),
@@ -20,10 +21,16 @@ fn control_frame(vehicle: VehicleId) -> ScopedControlFrame {
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
-        payload: ControlPayload {
-            axes: vec![(LogicalAxisId::new(2), 0.8), (LogicalAxisId::new(3), -0.4)],
-            edges: vec![],
-        },
+        activation_revision: 0,
+        payload: ControlPayload::default(),
+        intent: Some(ControlIntent::Velocity(VelocityIntent {
+            frame: ReferenceFrame::BodyFrd,
+            vx: 0.8,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate: -0.4,
+        })),
+        actions: vec![],
     }
 }
 
@@ -65,7 +72,11 @@ fn snapshot_round_trip_preserves_link_loss_hold_countdown() {
     let mut adapter = ReferenceAdapter::from_seed(vehicle, 5);
     adapter.apply_control(&control_frame(vehicle));
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 3 }))
+        .set_link_loss_policy(
+            vehicle,
+            &ScopeId::new("vehicle.motion"),
+            Some(LinkLossPolicy::HoldBrief { ticks: 3 }),
+        )
         .expect("policy enacted");
     adapter.step(StepBudget { ticks: 1 });
 

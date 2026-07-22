@@ -1,0 +1,637 @@
+# Pilotage lifecycle evidence graph — CTRL-01 typed control-authority slice
+# format: pilotage-evidence graph v1 (see crates/pilotage-evidence)
+#
+# SIM / NOT FOR FLIGHT. This is the maintained engineering trace record for
+# the typed control-authority behavior slice (INPUT-01 / CTRL-01): profile
+# binding, the reliable discrete-action channel, exclusive authority
+# groups, input-source identity, and the simulator lifecycle capability. It
+# establishes NO DO-178C, ISO 26262, ECSS, ARP4754A/4761, TSO, or ASIL
+# claim and is not tool qualification (DO-330). It records that the
+# declared engineering trace is internally complete and resolvable in both
+# directions — nothing more. The review below is PENDING; the graph records
+# that a review artifact slot exists, not that anything is approved.
+#
+# Results are recorded against the committed code baseline CFG-CTRL01.
+# MERGE/REBASE RULE (ASSURE-04): a declared config-digest must name a
+# commit REACHABLE from merged history; if this branch is rebased or
+# squashed after recording, re-record against the durable commit BEFORE
+# merge — `--require-resolvable` enforces this.
+
+evidence-graph 1
+scope CTRL-01
+scope-title typed control-authority traceability slice (issues 108/109 / INPUT-01 / CTRL-01)
+scope-requirement CTRL-BIND-001
+scope-requirement CTRL-CHAN-002
+scope-requirement CTRL-GROUP-003
+scope-requirement INPUT-SRC-004
+scope-requirement CTRL-LIFE-005
+scope-requirement CTRL-INGRESS-006
+
+# --- Intended function ---
+
+node CTRL-IF intended-function
+title Typed browser control plane — capability-negotiated intents and actions attributable to their mapping and authority epoch
+locator docs/control/README.md
+
+# --- Hazard ---
+
+node CTRL-HAZ-01 hazard
+title Unattributable or replayed control authority — a command executing under an epoch, mapping, or channel it was not bound to
+locator docs/control/README.md
+
+# --- Requirements ---
+
+node CTRL-BIND-001 safety-requirement
+title Typed control binds to the announced composite profile activation; unbound or mismatched frames are refused and only accepted announcements become evidence
+locator docs/control/README.md#ctrl-bind-001
+
+node CTRL-CHAN-002 safety-requirement
+title Discrete actions ride only the reliable ordered stream, fully bound with nonzero correlation ids, answered and deduplicated by id plus immutable fingerprint; superseded bindings are refused
+locator docs/control/README.md#ctrl-chan-002
+
+node CTRL-GROUP-003 safety-requirement
+title Scopes driving one actuator are one exclusive authority group: one holder, one generation domain, one link-loss latch and recovery
+locator docs/control/README.md#ctrl-group-003
+
+node INPUT-SRC-004 safety-requirement
+title The activation announcement names the input source actually driving; source changes are neutral-fenced transactions
+locator docs/control/README.md#input-src-004
+
+node CTRL-LIFE-005 safety-requirement
+title Simulation reset is a separately leased, simulator-only, COMMAND-ONLY lifecycle capability, absent from flight scopes and legacy flight mappings, repeatable across release cycles
+locator docs/control/README.md#ctrl-life-005
+
+node CTRL-INGRESS-006 safety-requirement
+title Datagram ingress admits only what it can attribute and order: own-session binding, wrap-aware strictly-advancing sequences ahead of liveness and recovery, correlated staleness, deadlines judged before messages, typed-only by default
+locator docs/control/README.md#ctrl-ingress-006
+
+# --- Design ---
+
+node DESIGN-ACTION-CHANNEL design
+title The reliable action-command path — full authority binding validated against the engine's own records, answered on the same stream
+locator crates/pilotage-session/src/engine/action_command.rs
+
+node DESIGN-PROFILE-BINDING design
+title Composite profile activation — session-validated, monotonic revision, frame-level PROFILE_MISMATCH refusal
+locator crates/pilotage-session/src/engine/handlers.rs
+
+node DESIGN-AUTH-GROUP design
+title Exclusive authority groups — group-keyed leases, generations, watchdog, latch, and recovery
+locator crates/pilotage-session/src/engine.rs
+
+node DESIGN-SOURCE-COORDINATOR design
+title The input-source coordinator — layered keyboard and pad profiles, transactional source switches, source-true announcements
+locator clients/web-control/src/coordinator.rs
+
+node DESIGN-LIFECYCLE-SCOPE design
+title The sim.lifecycle scope — reset as a separately leased, command-only, simulator-only capability
+locator crates/pilotage-adapter-api/src/capability.rs
+
+node DESIGN-INGRESS-ORDER design
+title Datagram ingress attribution and ordering — session check, typed-only default, correlated staleness, sequence watermark ahead of liveness/recovery, message-front expiry
+locator crates/pilotage-session/src/engine/frame_ingress.rs
+
+# --- Implementation ---
+
+node IMPL-ON-ACTION-COMMAND implementation
+title SessionEngine::on_action_command — the binding ladder and adapter delivery
+locator crates/pilotage-session/src/engine/action_command.rs
+attr symbol on_action_command
+
+node IMPL-ACTION-DEDUP implementation
+title ActionDedup::strip_answered — id + fingerprint dedup, replay re-answer, reuse refusal
+locator hosts/session-host/src/runtime/engine_actor/action_dedup.rs
+attr symbol strip_answered
+
+node IMPL-AUTHORITY-PAIR implementation
+title SessionEngine::authority_pair — concrete scope to exclusive-group resolution
+locator crates/pilotage-session/src/engine.rs
+attr symbol authority_pair
+
+node IMPL-ON-PROFILE-ACTIVATION implementation
+title SessionEngine::on_profile_activation — session and monotonic-revision validation
+locator crates/pilotage-session/src/engine/handlers.rs
+attr symbol on_profile_activation
+
+node IMPL-SELECT-DEVICE implementation
+title ControlCoordinator::select_device — transactional source and mapping swaps
+locator clients/web-control/src/coordinator.rs
+attr symbol select_device
+
+node IMPL-LIFECYCLE-DESCRIPTOR implementation
+title sim_lifecycle_descriptor — the lifecycle scope's advertisement
+locator crates/pilotage-adapter-api/src/capability.rs
+attr symbol sim_lifecycle_descriptor
+
+node IMPL-FRAME-ATTRIBUTION implementation
+title SessionEngine::frame_attribution_rejects — session binding, the typed-only default, correlated staleness
+locator crates/pilotage-session/src/engine/frame_ingress.rs
+attr symbol frame_attribution_rejects
+
+node IMPL-SEQUENCE-ADMITS implementation
+title SessionEngine::sequence_admits — the wrap-aware per-generation sequence watermark
+locator crates/pilotage-session/src/engine/frame_ingress.rs
+attr symbol sequence_admits
+
+node IMPL-EXPIRE-OVERDUE implementation
+title SessionEngine::expire_overdue — deadlines judged at the front of every client message
+locator crates/pilotage-session/src/engine/link_loss.rs
+attr symbol expire_overdue
+
+node IMPL-CORRELATED-AGE implementation
+title ClientRegistry::correlated_age — per-client minimum-delta clock correlation
+locator crates/pilotage-session/src/clients.rs
+attr symbol correlated_age
+
+# --- Verification cases ---
+
+node CASE-CTRL-DELAYED-ARM verification-case
+title a delayed arm bound to a superseded generation cannot re-arm
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test a_delayed_arm_bound_to_a_superseded_generation_cannot_re_arm
+
+node CASE-CTRL-BOUND-COMMAND verification-case
+title a fully bound command reaches the adapter with its correlation id
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test a_fully_bound_command_reaches_the_adapter_with_its_correlation_id
+
+node CASE-CTRL-ZERO-ID verification-case
+title a zero correlation id is rejected
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test a_zero_correlation_id_is_rejected
+
+node CASE-CTRL-DATAGRAM-ACTION verification-case
+title a datagram frame carrying typed actions is rejected whole
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test a_datagram_frame_carrying_typed_actions_is_rejected_whole
+
+node CASE-CTRL-LIFECYCLE verification-case
+title a sim reset needs the lifecycle scope's own lease
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test a_sim_reset_needs_the_lifecycle_scopes_own_lease
+
+node CASE-CTRL-UNANNOUNCED verification-case
+title an unannounced typed frame is rejected as profile mismatch
+locator crates/pilotage-session/src/tests/profile_binding.rs
+attr test an_unannounced_typed_frame_is_rejected_as_profile_mismatch
+
+node CASE-CTRL-NONMONOTONIC verification-case
+title a non-advancing activation revision closes the client
+locator crates/pilotage-session/src/tests/profile_binding.rs
+attr test a_non_advancing_activation_revision_closes_the_client
+
+node CASE-CTRL-GROUP-EXCL verification-case
+title sibling scopes are never held by different clients
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test sibling_scopes_are_never_held_by_different_clients
+
+node CASE-CTRL-GROUP-GEN verification-case
+title the group shares one generation domain across a handover
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test the_group_shares_one_generation_domain_across_a_handover
+
+node CASE-CTRL-GROUP-LATCH verification-case
+title a scope handover leaves no orphaned sibling latch
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test a_scope_handover_leaves_no_orphaned_sibling_latch
+
+node CASE-CTRL-ID-REUSE verification-case
+title a correlation id reused with different content is refused
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test a_correlation_id_reused_with_different_content_is_refused
+
+node CASE-CTRL-WIRE-CHAIN verification-case
+title the reliable action chain holds over the real transport
+locator hosts/session-host/tests/reliable_actions_wire.rs
+attr test the_reliable_action_chain_holds_over_the_real_transport
+
+node CASE-CTRL-SOURCE-BOOT verification-case
+title the boot source is the keyboard and a disconnect returns to it
+locator clients/web-control/src/coordinator/tests.rs
+attr test the_boot_source_is_the_keyboard_and_a_disconnect_returns_to_it
+
+node CASE-CTRL-SWAP-GATED verification-case
+title a device change swaps transactionally and gates the deflection
+locator clients/web-control/src/coordinator/tests.rs
+attr test a_device_change_swaps_transactionally_and_gates_the_deflection
+
+node CASE-CTRL-BROWSER-FRAME verification-case
+title browser-encoded typed frame reaches the adapter boundary intact
+locator crates/pilotage-session/tests/typed_wire_e2e.rs
+attr test browser_encoded_typed_frame_reaches_the_adapter_boundary_intact
+
+node CASE-CTRL-MEMBER-FRAME verification-case
+title a frame on the unleased sibling scope is rejected
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test a_frame_on_the_unleased_sibling_scope_is_rejected
+
+node CASE-CTRL-MEMBER-ACTION verification-case
+title an action command on the unleased sibling is rejected
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test an_action_command_on_the_unleased_sibling_is_rejected
+
+node CASE-CTRL-MEMBER-SWITCH verification-case
+title switching members requires release and lands a fresh generation
+locator crates/pilotage-session/src/tests/authority_group.rs
+attr test switching_members_requires_release_and_lands_a_fresh_generation
+
+node CASE-CTRL-RESULT-GUARANTEE verification-case
+title an early adapter rejection still answers every correlated action
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test an_early_adapter_rejection_still_answers_every_correlated_action
+
+node CASE-CTRL-ANTIREPLAY verification-case
+title an evicted id stays stale and never executes again
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test an_evicted_id_stays_stale_and_never_executes_again
+
+node CASE-CTRL-WATERMARK-WRAP verification-case
+title the watermark wraps at u32 without stalling fresh ids
+locator hosts/session-host/src/runtime/engine_actor/tests/reliable_actions.rs
+attr test the_watermark_wraps_at_u32_without_stalling_fresh_ids
+
+node CASE-CTRL-ACCEPT-EVENT verification-case
+title acceptance is an explicit event and a rejected duplicate emits none
+locator crates/pilotage-session/src/tests/profile_binding.rs
+attr test acceptance_is_an_explicit_event_and_a_rejected_duplicate_emits_none
+
+node CASE-CTRL-LIFE-PHYSICAL verification-case
+title a physical profile neither advertises nor accepts lifecycle commands
+locator adapters/aviate/src/adapter/tests/direct_flight.rs
+attr test a_physical_profile_neither_advertises_nor_accepts_lifecycle_commands
+
+node CASE-CTRL-LIFE-ABSENT verification-case
+title an unadvertised lifecycle scope is structurally absent
+locator crates/pilotage-session/src/tests/action_command.rs
+attr test an_unadvertised_lifecycle_scope_is_structurally_absent
+
+node CASE-CTRL-BROWSER-COMMAND verification-case
+title browser-encoded action command reaches the adapter with its binding
+locator crates/pilotage-session/tests/typed_wire_e2e.rs
+attr test browser_encoded_action_command_reaches_the_adapter_with_its_binding
+
+node CASE-CTRL-TYPED-DEFAULT verification-case
+title typed only is the production default
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test typed_only_is_the_production_default
+
+node CASE-CTRL-SESSION-MISMATCH verification-case
+title a frame naming a foreign session is rejected
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_frame_naming_a_foreign_session_is_rejected
+
+node CASE-CTRL-SEQ-DUP verification-case
+title a duplicate sequence is rejected and does not refresh liveness
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_duplicate_sequence_is_rejected_and_does_not_refresh_liveness
+
+node CASE-CTRL-SEQ-REORDER verification-case
+title an out-of-order sequence is rejected
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test an_out_of_order_sequence_is_rejected
+
+node CASE-CTRL-SEQ-WRAP verification-case
+title a sequence wrap forward is admitted
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_sequence_wrap_forward_is_admitted
+
+node CASE-CTRL-SEQ-DOMAIN verification-case
+title a new generation opens a fresh sequence domain
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_new_generation_opens_a_fresh_sequence_domain
+
+node CASE-CTRL-LATE-FRAME verification-case
+title a late frame after the deadline cannot resurrect authority
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_late_frame_after_the_deadline_cannot_resurrect_authority
+
+node CASE-CTRL-CLOCK-SKEW verification-case
+title a skewed client clock is correlated not rejected
+locator crates/pilotage-session/src/tests/ingress_hardening.rs
+attr test a_skewed_client_clock_is_correlated_not_rejected
+
+node CASE-CTRL-LIFE-CYCLE verification-case
+title the reset release re-lease cycle stays repeatable
+locator crates/pilotage-session/src/tests/lifecycle.rs
+attr test the_reset_release_re_lease_cycle_stays_repeatable
+
+# --- Verification results ---
+
+node RESULT-CTRL-ENGINE-ACTIONS verification-result
+title reliable action-command engine suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::action_command
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:eb2fe718203f2c7db451a47f2ea46189d4d4d6b0
+attr artifact docs/control/evidence-artifacts/ctrl01/engine-actions.run.txt
+attr output-digest sha256:8ef3b3e1995662b51d00df955fb8326edb60027f16aa814e8e9c524f626fd85f
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+node RESULT-CTRL-BINDING verification-result
+title profile-binding enforcement suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::profile_binding
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:71e2840379186fa0796b1f04d0d33c29965d129e
+attr artifact docs/control/evidence-artifacts/ctrl01/profile-binding.run.txt
+attr output-digest sha256:ab128b5e1e14342ac56dda7ccd382e595559b205a8052d9c32e52cf816100895
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+node RESULT-CTRL-GROUP verification-result
+title exclusive authority-group suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::authority_group
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:1d7b646167cd010a3dd5014aebef2ab5847e7832
+attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
+attr output-digest sha256:ee5bb8609c86397c7b0917b211f7cb1a3b88752569774f6188cb133837c612d4
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+node RESULT-CTRL-DEDUP verification-result
+title actor exactly-once dedup suite — recorded pass
+attr command cargo test -p pilotage-session-host --lib engine_actor::tests::reliable_actions
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:1fbf6b07d02b5597e0138ee4fe1c7a95a5683ede
+attr artifact docs/control/evidence-artifacts/ctrl01/actor-dedup.run.txt
+attr output-digest sha256:c4d015348db1cd89a9b04cb8f869e9274f1399d52eb91016a7257fd15a361eb6
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+node RESULT-CTRL-WIRE verification-result
+title reliable action chain over the real transport — recorded pass
+attr command cargo test -p pilotage-session-host --test reliable_actions_wire
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:57b14b52b87593c59296b9d6e0132ededf48069d
+attr artifact docs/control/evidence-artifacts/ctrl01/wire-chain.run.txt
+attr output-digest sha256:4f4a1854d44e446b22d8298f05c383db0492c0ae12213fd2fab0772d8d819a5e
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+node RESULT-CTRL-SOURCE verification-result
+title input-source coordinator suite — recorded pass
+attr command cargo test -p pilotage-control-web --lib coordinator
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:b2fb617c8e28ca4df0fd7131dae863d0680fdf8e
+attr artifact docs/control/evidence-artifacts/ctrl01/source-coordinator.run.txt
+attr output-digest sha256:acebed7c3c10d24fab98473fd97adc6ff767656b5a8efd47f671d1e14dba99a3
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+node RESULT-CTRL-FIXTURE verification-result
+title browser-encoded wire fixture suite — recorded pass
+attr command cargo test -p pilotage-session --test typed_wire_e2e
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:42287a2da1941328e08374ffc8a033f25b19cde8
+attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
+attr output-digest sha256:d33d173559d31ba5fa821381a39277955697ed2ee1399541a371aea246f5f892
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+
+node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
+title aviate direct-flight and lifecycle-profile suite — recorded pass
+attr command cargo test -p pilotage-adapter-aviate --lib adapter::tests::direct_flight
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:0f17f792fd6c02af64c4b79b3be91dc65aaa83f7
+attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-profile.run.txt
+attr output-digest sha256:876f9ad081ff41aba750603d63facaf2e08f7e1d78f7a88d77f406913753ebc3
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+
+node RESULT-CTRL-INGRESS verification-result
+title datagram ingress hardening suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::ingress_hardening
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:9fc4e19d925c0335b8871103fedc28c6c395c550
+attr artifact docs/control/evidence-artifacts/ctrl01/ingress-hardening.run.txt
+attr output-digest sha256:ce861a83f3c9631a12e2d24f357945530d633e1429d799604ae2675991eab616
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+
+node RESULT-CTRL-LIFE-CYCLE verification-result
+title command-only lifecycle cycle suite — recorded pass
+attr command cargo test -p pilotage-session --lib tests::lifecycle
+attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
+attr source-digest git-blob:58e798b63d9d23d5b4bd00a6df5e70c31bd5722b
+attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-cycle.run.txt
+attr output-digest sha256:1649b4cfc1356c01d30b1fe803334b09b62db4e97e8d7cd6912485b6ae8b7516
+attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr outcome pass
+
+# --- Configuration and tool identity ---
+
+node CFG-CTRL01 configuration-item
+title committed code baseline the recorded results were produced against (engineering SCM, not certified SCM)
+attr scm git
+attr commit 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr tree a5d55f59813d313df367c12e3d3fdedeffe18f4d
+
+node TOOL-CTRL-CARGO tool
+title cargo test on Rust stable — not DO-330 tool-qualified
+attr toolchain rust stable channel
+attr version rustc 1.95.0 (59807616e 2026-04-14)
+
+# --- Review (records that a review slot exists; it is PENDING) ---
+
+node REVIEW-CTRL01 review
+title CTRL-01 typed control-authority slice review record
+locator docs/control/README.md
+attr status pending
+attr independent yes
+
+# --- Upstream: requirement -> hazard -> intended function ---
+
+edge CTRL-HAZ-01 derives-from CTRL-IF
+edge CTRL-BIND-001 mitigates CTRL-HAZ-01
+edge CTRL-CHAN-002 mitigates CTRL-HAZ-01
+edge CTRL-GROUP-003 mitigates CTRL-HAZ-01
+edge INPUT-SRC-004 mitigates CTRL-HAZ-01
+edge CTRL-LIFE-005 mitigates CTRL-HAZ-01
+edge CTRL-INGRESS-006 mitigates CTRL-HAZ-01
+
+# --- Allocation: requirement -> design -> implementation ---
+
+edge CTRL-BIND-001 allocated-to DESIGN-PROFILE-BINDING
+edge CTRL-CHAN-002 allocated-to DESIGN-ACTION-CHANNEL
+edge CTRL-GROUP-003 allocated-to DESIGN-AUTH-GROUP
+edge INPUT-SRC-004 allocated-to DESIGN-SOURCE-COORDINATOR
+edge CTRL-LIFE-005 allocated-to DESIGN-LIFECYCLE-SCOPE
+edge CTRL-INGRESS-006 allocated-to DESIGN-INGRESS-ORDER
+
+edge DESIGN-PROFILE-BINDING implemented-by IMPL-ON-PROFILE-ACTIVATION
+edge DESIGN-ACTION-CHANNEL implemented-by IMPL-ON-ACTION-COMMAND
+edge DESIGN-ACTION-CHANNEL implemented-by IMPL-ACTION-DEDUP
+edge DESIGN-AUTH-GROUP implemented-by IMPL-AUTHORITY-PAIR
+edge DESIGN-SOURCE-COORDINATOR implemented-by IMPL-SELECT-DEVICE
+edge DESIGN-LIFECYCLE-SCOPE implemented-by IMPL-LIFECYCLE-DESCRIPTOR
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-FRAME-ATTRIBUTION
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-SEQUENCE-ADMITS
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-EXPIRE-OVERDUE
+edge DESIGN-INGRESS-ORDER implemented-by IMPL-CORRELATED-AGE
+
+# --- Verification: requirement <-> case ---
+
+edge CTRL-BIND-001 verified-by CASE-CTRL-UNANNOUNCED
+edge CTRL-BIND-001 verified-by CASE-CTRL-NONMONOTONIC
+edge CTRL-BIND-001 verified-by CASE-CTRL-ACCEPT-EVENT
+edge CASE-CTRL-ACCEPT-EVENT covers CTRL-BIND-001
+edge CTRL-BIND-001 verified-by CASE-CTRL-BROWSER-FRAME
+edge CASE-CTRL-UNANNOUNCED covers CTRL-BIND-001
+edge CASE-CTRL-NONMONOTONIC covers CTRL-BIND-001
+edge CASE-CTRL-BROWSER-FRAME covers CTRL-BIND-001
+
+edge CTRL-CHAN-002 verified-by CASE-CTRL-DELAYED-ARM
+edge CTRL-CHAN-002 verified-by CASE-CTRL-BOUND-COMMAND
+edge CTRL-CHAN-002 verified-by CASE-CTRL-ZERO-ID
+edge CTRL-CHAN-002 verified-by CASE-CTRL-DATAGRAM-ACTION
+edge CTRL-CHAN-002 verified-by CASE-CTRL-ID-REUSE
+edge CTRL-CHAN-002 verified-by CASE-CTRL-WIRE-CHAIN
+edge CTRL-CHAN-002 verified-by CASE-CTRL-RESULT-GUARANTEE
+edge CTRL-CHAN-002 verified-by CASE-CTRL-ANTIREPLAY
+edge CTRL-CHAN-002 verified-by CASE-CTRL-WATERMARK-WRAP
+edge CASE-CTRL-RESULT-GUARANTEE covers CTRL-CHAN-002
+edge CASE-CTRL-ANTIREPLAY covers CTRL-CHAN-002
+edge CASE-CTRL-WATERMARK-WRAP covers CTRL-CHAN-002
+edge CTRL-CHAN-002 verified-by CASE-CTRL-BROWSER-COMMAND
+edge CASE-CTRL-DELAYED-ARM covers CTRL-CHAN-002
+edge CASE-CTRL-BOUND-COMMAND covers CTRL-CHAN-002
+edge CASE-CTRL-ZERO-ID covers CTRL-CHAN-002
+edge CASE-CTRL-DATAGRAM-ACTION covers CTRL-CHAN-002
+edge CASE-CTRL-ID-REUSE covers CTRL-CHAN-002
+edge CASE-CTRL-WIRE-CHAIN covers CTRL-CHAN-002
+edge CASE-CTRL-BROWSER-COMMAND covers CTRL-CHAN-002
+
+edge CTRL-GROUP-003 verified-by CASE-CTRL-MEMBER-FRAME
+edge CTRL-GROUP-003 verified-by CASE-CTRL-MEMBER-ACTION
+edge CTRL-GROUP-003 verified-by CASE-CTRL-MEMBER-SWITCH
+edge CASE-CTRL-MEMBER-FRAME covers CTRL-GROUP-003
+edge CASE-CTRL-MEMBER-ACTION covers CTRL-GROUP-003
+edge CASE-CTRL-MEMBER-SWITCH covers CTRL-GROUP-003
+edge CTRL-GROUP-003 verified-by CASE-CTRL-GROUP-EXCL
+edge CTRL-GROUP-003 verified-by CASE-CTRL-GROUP-GEN
+edge CTRL-GROUP-003 verified-by CASE-CTRL-GROUP-LATCH
+edge CASE-CTRL-GROUP-EXCL covers CTRL-GROUP-003
+edge CASE-CTRL-GROUP-GEN covers CTRL-GROUP-003
+edge CASE-CTRL-GROUP-LATCH covers CTRL-GROUP-003
+
+edge INPUT-SRC-004 verified-by CASE-CTRL-SOURCE-BOOT
+edge INPUT-SRC-004 verified-by CASE-CTRL-SWAP-GATED
+edge CASE-CTRL-SOURCE-BOOT covers INPUT-SRC-004
+edge CASE-CTRL-SWAP-GATED covers INPUT-SRC-004
+
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFECYCLE
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-PHYSICAL
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-ABSENT
+edge CASE-CTRL-LIFECYCLE covers CTRL-LIFE-005
+edge CASE-CTRL-LIFE-PHYSICAL covers CTRL-LIFE-005
+edge CASE-CTRL-LIFE-ABSENT covers CTRL-LIFE-005
+edge CTRL-LIFE-005 verified-by CASE-CTRL-LIFE-CYCLE
+edge CASE-CTRL-LIFE-CYCLE covers CTRL-LIFE-005
+
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-TYPED-DEFAULT
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SESSION-MISMATCH
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-DUP
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-REORDER
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-WRAP
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-SEQ-DOMAIN
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-LATE-FRAME
+edge CTRL-INGRESS-006 verified-by CASE-CTRL-CLOCK-SKEW
+edge CASE-CTRL-TYPED-DEFAULT covers CTRL-INGRESS-006
+edge CASE-CTRL-SESSION-MISMATCH covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-DUP covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-REORDER covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-WRAP covers CTRL-INGRESS-006
+edge CASE-CTRL-SEQ-DOMAIN covers CTRL-INGRESS-006
+edge CASE-CTRL-LATE-FRAME covers CTRL-INGRESS-006
+edge CASE-CTRL-CLOCK-SKEW covers CTRL-INGRESS-006
+
+# --- Results: result -> executed case, covered requirement, baseline, tool ---
+
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-DELAYED-ARM
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-BOUND-COMMAND
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-ZERO-ID
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-DATAGRAM-ACTION
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-LIFECYCLE
+edge RESULT-CTRL-ENGINE-ACTIONS covers CTRL-CHAN-002
+edge RESULT-CTRL-ENGINE-ACTIONS covers CTRL-LIFE-005
+edge RESULT-CTRL-ENGINE-ACTIONS justified-by CFG-CTRL01
+edge RESULT-CTRL-ENGINE-ACTIONS justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-BINDING result-of CASE-CTRL-UNANNOUNCED
+edge RESULT-CTRL-BINDING result-of CASE-CTRL-NONMONOTONIC
+edge RESULT-CTRL-BINDING covers CTRL-BIND-001
+edge RESULT-CTRL-BINDING justified-by CFG-CTRL01
+edge RESULT-CTRL-BINDING justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-EXCL
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-GEN
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-LATCH
+edge RESULT-CTRL-GROUP covers CTRL-GROUP-003
+edge RESULT-CTRL-GROUP justified-by CFG-CTRL01
+edge RESULT-CTRL-GROUP justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ID-REUSE
+edge RESULT-CTRL-DEDUP covers CTRL-CHAN-002
+edge RESULT-CTRL-DEDUP justified-by CFG-CTRL01
+edge RESULT-CTRL-DEDUP justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-WIRE result-of CASE-CTRL-WIRE-CHAIN
+edge RESULT-CTRL-WIRE covers CTRL-CHAN-002
+edge RESULT-CTRL-WIRE justified-by CFG-CTRL01
+edge RESULT-CTRL-WIRE justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-SOURCE result-of CASE-CTRL-SOURCE-BOOT
+edge RESULT-CTRL-SOURCE result-of CASE-CTRL-SWAP-GATED
+edge RESULT-CTRL-SOURCE covers INPUT-SRC-004
+edge RESULT-CTRL-SOURCE justified-by CFG-CTRL01
+edge RESULT-CTRL-SOURCE justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-FRAME
+edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-COMMAND
+edge RESULT-CTRL-FIXTURE covers CTRL-BIND-001
+edge RESULT-CTRL-FIXTURE covers CTRL-CHAN-002
+edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL01
+edge RESULT-CTRL-FIXTURE justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-LIFECYCLE-PROFILE result-of CASE-CTRL-LIFE-PHYSICAL
+edge RESULT-CTRL-LIFECYCLE-PROFILE covers CTRL-LIFE-005
+edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by CFG-CTRL01
+edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-LIFE-ABSENT
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-MEMBER-FRAME
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-MEMBER-ACTION
+edge RESULT-CTRL-GROUP result-of CASE-CTRL-MEMBER-SWITCH
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-RESULT-GUARANTEE
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ANTIREPLAY
+edge RESULT-CTRL-DEDUP result-of CASE-CTRL-WATERMARK-WRAP
+edge RESULT-CTRL-BINDING result-of CASE-CTRL-ACCEPT-EVENT
+
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-TYPED-DEFAULT
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SESSION-MISMATCH
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-DUP
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-REORDER
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-WRAP
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-SEQ-DOMAIN
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-LATE-FRAME
+edge RESULT-CTRL-INGRESS result-of CASE-CTRL-CLOCK-SKEW
+edge RESULT-CTRL-INGRESS covers CTRL-INGRESS-006
+edge RESULT-CTRL-INGRESS justified-by CFG-CTRL01
+edge RESULT-CTRL-INGRESS justified-by TOOL-CTRL-CARGO
+
+edge RESULT-CTRL-LIFE-CYCLE result-of CASE-CTRL-LIFE-CYCLE
+edge RESULT-CTRL-LIFE-CYCLE covers CTRL-LIFE-005
+edge RESULT-CTRL-LIFE-CYCLE justified-by CFG-CTRL01
+edge RESULT-CTRL-LIFE-CYCLE justified-by TOOL-CTRL-CARGO
+
+# --- Review coverage ---
+
+edge REVIEW-CTRL01 reviews CTRL-BIND-001
+edge REVIEW-CTRL01 reviews CTRL-CHAN-002
+edge REVIEW-CTRL01 reviews CTRL-GROUP-003
+edge REVIEW-CTRL01 reviews INPUT-SRC-004
+edge REVIEW-CTRL01 reviews CTRL-LIFE-005
+edge REVIEW-CTRL01 reviews CTRL-INGRESS-006

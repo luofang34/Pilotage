@@ -3,20 +3,20 @@
 
 use std::collections::BTreeMap;
 
-use crate::profile::{AxisConfig, ButtonConfig, DeviceProfile};
+use crate::profile::{AxisConfig, ButtonConfig, DeviceProfile, KeyBinding};
 
 use super::layer::{LayeredProfile, ProfileLayer};
 
 /// Merges profiles from multiple layers into one effective profile.
 ///
 /// Layers are applied in ascending [`ProfileLayer`] order regardless of the
-/// order they appear in `layers`: for a given `source_index`, the entry from
-/// the highest-precedence layer that configures it replaces entries from
-/// every lower layer entirely (whole-entry replacement, not per-field
-/// merging). `schema_version`, `device`, and `description` are taken from
-/// the highest-precedence layer present; `revision` is also taken from the
-/// highest-precedence layer, since a merged profile is itself one
-/// evaluable revision.
+/// order they appear in `layers`: for a given `source_index` (or key, for
+/// key bindings), the entry from the highest-precedence layer that
+/// configures it replaces entries from every lower layer entirely
+/// (whole-entry replacement, not per-field merging). `schema_version`,
+/// `device`, and `description` are taken from the highest-precedence layer
+/// present; `revision` is also taken from the highest-precedence layer,
+/// since a merged profile is itself one evaluable revision.
 ///
 /// Returns `None` if `layers` is empty.
 #[must_use]
@@ -25,6 +25,7 @@ pub fn merge_layers(mut layers: Vec<LayeredProfile<DeviceProfile>>) -> Option<De
 
     let mut axes: BTreeMap<usize, AxisConfig> = BTreeMap::new();
     let mut buttons: BTreeMap<u8, ButtonConfig> = BTreeMap::new();
+    let mut keys: BTreeMap<String, KeyBinding> = BTreeMap::new();
     let mut base: Option<DeviceProfile> = None;
 
     for entry in layers {
@@ -33,6 +34,9 @@ pub fn merge_layers(mut layers: Vec<LayeredProfile<DeviceProfile>>) -> Option<De
         }
         for button in entry.profile.buttons.iter().cloned() {
             buttons.insert(button.source_index, button);
+        }
+        for key in entry.profile.keys.iter().cloned() {
+            keys.insert(key.key.clone(), key);
         }
         base = Some(entry.profile);
     }
@@ -45,6 +49,7 @@ pub fn merge_layers(mut layers: Vec<LayeredProfile<DeviceProfile>>) -> Option<De
         description: base.description,
         axes: axes.into_values().collect(),
         buttons: buttons.into_values().collect(),
+        keys: keys.into_values().collect(),
     })
 }
 
@@ -77,6 +82,7 @@ mod tests {
             description: None,
             axes,
             buttons,
+            keys: vec![],
         }
     }
 

@@ -18,22 +18,50 @@ use pilotage_mavlink::link::apply_messages_at;
 use super::Px4Adapter;
 use super::tests::{SOURCE, fake_fc, frame, live_state, uplink_to};
 
-/// A gimbal-scope control frame (overrides the flight-scope default).
-fn gimbal_frame(
+/// A TYPED gimbal-scope control frame from legacy-shaped rate arguments:
+/// normalized pitch/yaw scale onto the advertised angular envelope, a
+/// pressed neutral button becomes the typed recenter action, and an empty
+/// axis list carries no rate intent (a recenter-only frame). Shared with
+/// the sibling [`super::gimbal_link_loss_tests`] module.
+pub(super) fn gimbal_frame(
     axes: Vec<(LogicalAxisId, f32)>,
     edges: Vec<(LogicalButtonId, ButtonEdge)>,
 ) -> pilotage_protocol::ScopedControlFrame {
-    let mut built = frame(axes, edges);
+    let mut built = frame(vec![], vec![]);
     built.scope = pilotage_protocol::ScopeId::new(super::GIMBAL_SCOPE);
+    built.intent = if axes.is_empty() {
+        None
+    } else {
+        let mut rate = pilotage_protocol::GimbalRateIntent {
+            pitch_rate: 0.0,
+            yaw_rate: 0.0,
+        };
+        for (axis, value) in &axes {
+            match axis.as_u16() {
+                id if id == super::PITCH_AXIS => rate.pitch_rate = value * 0.8,
+                id if id == super::YAW_AXIS => rate.yaw_rate = value * 0.8,
+                _ => {}
+            }
+        }
+        Some(pilotage_protocol::ControlIntent::GimbalRate(rate))
+    };
+    built.actions = edges
+        .iter()
+        .filter(|(_, edge)| *edge == ButtonEdge::Pressed)
+        .filter_map(|(button, _)| {
+            (button.as_u16() == super::GIMBAL_NEUTRAL_BUTTON)
+                .then_some(pilotage_protocol::ControlAction::GimbalRecenter)
+        })
+        .collect();
     built
 }
 
-struct GimbalLanes {
-    commands: tokio::sync::mpsc::Receiver<pilotage_mavlink::OutboundCommand>,
-    rates: tokio::sync::watch::Receiver<Option<pilotage_mavlink::GimbalRateDemand>>,
+pub(super) struct GimbalLanes {
+    pub(super) commands: tokio::sync::mpsc::Receiver<pilotage_mavlink::OutboundCommand>,
+    pub(super) rates: tokio::sync::watch::Receiver<Option<pilotage_mavlink::GimbalRateDemand>>,
 }
 
-fn gimbal_control() -> (crate::gimbal::Px4GimbalControl, GimbalLanes) {
+pub(super) fn gimbal_control() -> (crate::gimbal::Px4GimbalControl, GimbalLanes) {
     let (command_tx, command_rx) = tokio::sync::mpsc::channel(16);
     let (rate_tx, rate_rx) = tokio::sync::watch::channel(None);
     (
@@ -45,7 +73,7 @@ fn gimbal_control() -> (crate::gimbal::Px4GimbalControl, GimbalLanes) {
     )
 }
 
-fn next_command(lanes: &mut GimbalLanes) -> u16 {
+pub(super) fn next_command(lanes: &mut GimbalLanes) -> u16 {
     lanes.commands.try_recv().expect("queued command").command
 }
 
@@ -62,7 +90,14 @@ fn capabilities_advertise_the_gimbal_scope_alongside_flight() {
         .iter()
         .map(|descriptor| descriptor.scope.as_str().to_owned())
         .collect();
-    assert_eq!(scopes, vec![super::FLIGHT_SCOPE, super::GIMBAL_SCOPE]);
+    assert_eq!(
+        scopes,
+        vec![
+            super::FLIGHT_SCOPE.to_owned(),
+            pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
+            super::GIMBAL_SCOPE.to_owned(),
+        ]
+    );
 }
 
 #[test]
@@ -76,7 +111,14 @@ fn a_vehicle_without_a_gimbal_advertises_no_gimbal_scope() {
         .iter()
         .map(|descriptor| descriptor.scope.as_str().to_owned())
         .collect();
-    assert_eq!(scopes, vec![super::FLIGHT_SCOPE], "no gimbal, no scope");
+    assert_eq!(
+        scopes,
+        vec![
+            super::FLIGHT_SCOPE.to_owned(),
+            pilotage_adapter_api::SIM_LIFECYCLE_SCOPE.to_owned(),
+        ],
+        "no gimbal, no gimbal scope — the sim lifecycle scope remains"
+    );
 }
 
 #[test]
@@ -132,17 +174,26 @@ fn gimbal_neutral_button_recentres() {
 }
 
 #[test]
-fn gimbal_frame_with_flight_axes_is_rejected() {
+fn a_velocity_intent_on_the_gimbal_scope_is_rejected() {
     let (control, _lanes) = gimbal_control();
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state()).with_gimbal(control);
-    let outcome = adapter.apply_control(&gimbal_frame(
-        vec![(LogicalAxisId::new(super::ROLL_AXIS), 0.5)],
-        vec![],
+    let mut wrong_family = gimbal_frame(vec![], vec![]);
+    wrong_family.intent = Some(pilotage_protocol::ControlIntent::Velocity(
+        pilotage_protocol::VelocityIntent {
+            frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+            vx: 0.5,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate: 0.0,
+        },
     ));
-    assert_eq!(
-        outcome.disposition,
-        Disposition::Rejected(RejectReason::UnknownAxis),
-        "the gimbal scope accepts pitch/yaw only"
+    let outcome = adapter.apply_control(&wrong_family);
+    assert!(
+        matches!(
+            outcome.disposition,
+            Disposition::Rejected(RejectReason::Other(_))
+        ),
+        "the gimbal scope consumes gimbal-rate intents only"
     );
 }
 

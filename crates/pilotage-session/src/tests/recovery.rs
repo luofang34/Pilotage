@@ -1,17 +1,16 @@
-//! Recovery activation gate (ADR-0008): after a link-loss policy engages,
-//! a fresh fenced generation alone must not clear it — the new holder must
-//! additionally demonstrate neutral input with an accepted frame, so a
-//! client reconnecting with deflected sticks cannot revive motion. The
-//! engaged policy itself is selected from the vehicle's declared profile.
+//! Recovery activation gate (ADR-0008): after a link-loss policy engages, a
+//! fresh fenced generation alone must not clear it — the new holder must also
+//! land an accepted neutral frame, so deflected sticks on reconnect cannot revive motion.
 
 use core::time::Duration;
 
 use pilotage_adapter_api::{
     AdapterCapabilities, ExecutionMode, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
+use pilotage_authority::{AuthorityClass, AuthorityEffect, OverrideReason};
 use pilotage_protocol::{
-    ControlPayload, Generation, LeaseRequest, LogicalAxisId, ScopeId, ScopedControlFrame,
-    SequenceNum, SessionId,
+    ControlPayload, Generation, LeaseRequest, LogicalAxisId, PrincipalId, ScopeId,
+    ScopedControlFrame, SequenceNum, SessionId,
 };
 use pilotage_timing::MonoTimestamp;
 
@@ -131,6 +130,23 @@ fn a_neutral_frame_clears_once_and_orders_before_the_apply() {
         .expect("apply present");
     assert!(clear_index < apply_index, "clear must precede the apply");
 
+    // The engine defers the client-facing ack to the driver: it emits a
+    // ClearLinkLoss carrying the recovered generation, and the driver
+    // broadcasts LinkLossCleared only AFTER the adapter confirms the clear
+    // (a failed clear must NOT ack — see the engine-actor tests). Here we
+    // assert the engine hands the driver the exact generation to echo.
+    let carries_generation = neutral.actions.iter().any(|a| {
+        matches!(
+            a,
+            SessionAction::ClearLinkLoss { generation: g, .. } if *g == generation
+        )
+    });
+    assert!(
+        carries_generation,
+        "ClearLinkLoss must carry the recovered generation for the ack: {:?}",
+        neutral.actions
+    );
+
     // Recovery is complete; further neutral frames do not re-clear.
     let again = engine.handle_client_message(
         client,
@@ -145,8 +161,7 @@ fn a_neutral_frame_clears_once_and_orders_before_the_apply() {
     assert_eq!(cleared(&again), 0, "recovery already complete");
 }
 
-/// A capability report for one vehicle with the given scopes (each with
-/// its axes) and declared link-loss menu.
+/// A capability report for one vehicle with the given scopes and link-loss menu.
 fn profile(
     scopes: Vec<(&'static str, Vec<u16>)>,
     actions: Vec<LinkLossPolicy>,
@@ -161,9 +176,39 @@ fn profile(
             id: VEHICLE,
             scopes: scopes
                 .into_iter()
-                .map(|(scope, axes)| ScopeDescriptor {
-                    scope: ScopeId::new(scope),
-                    axes: axes.into_iter().map(LogicalAxisId::new).collect(),
+                .map(|(scope, axes)| {
+                    // Route the declared axes onto velocity components in
+                    // order, at unit limits, so legacy payload fixtures
+                    // exercise the command gate's translation boundary.
+                    let route = |index: usize| {
+                        axes.get(index)
+                            .map(|axis| pilotage_adapter_api::LegacyAxisRoute {
+                                axis: *axis,
+                                sign: 1.0,
+                            })
+                    };
+                    ScopeDescriptor {
+                        authority_group: None,
+                        scope: ScopeId::new(scope),
+                        axes: axes.iter().copied().map(LogicalAxisId::new).collect(),
+                        intents: vec![pilotage_adapter_api::IntentCapability {
+                            max_yaw_rate: 0.0,
+                            family: pilotage_protocol::IntentFamily::Velocity,
+                            frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
+                            max_linear: 1.0,
+                            max_vertical: 0.0,
+                            max_angular: 1.0,
+                        }],
+                        actions: vec![],
+                        legacy: Some(pilotage_adapter_api::LegacyCommandMap::Velocity {
+                            vx: route(0),
+                            vy: route(1),
+                            vz: route(2),
+                            yaw_rate: route(3),
+                            arm_button: None,
+                            disarm_button: None,
+                        }),
+                    }
                 })
                 .collect(),
             link_loss_actions: actions,
@@ -182,6 +227,7 @@ fn scoped_frame(
     axes: Vec<(u16, f32)>,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: VEHICLE,
         scope: ScopeId::new(scope),
@@ -189,13 +235,16 @@ fn scoped_frame(
         sequence: SequenceNum::new(sequence),
         sampled_at: MonoTimestamp::from_nanos(at),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: axes
                 .into_iter()
-                .map(|(axis, value)| (LogicalAxisId::new(axis), value))
+                .map(|(a, v)| (LogicalAxisId::new(a), v))
                 .collect(),
             edges: Vec::new(),
         },
+        intent: None,
+        actions: vec![],
     }
 }
 
@@ -229,7 +278,9 @@ fn recovery_is_scope_specific_not_vehicle_wide() {
             vec![LinkLossPolicy::Neutralize],
         ),
         staleness(),
-        SessionConfig::new(1, "host-test").with_holder_silence(Duration::from_nanos(100)),
+        SessionConfig::new(1, "host-test")
+            .with_holder_silence(Duration::from_nanos(100))
+            .with_legacy_compatibility(true),
     );
     let (c1, c2) = (ClientKey::new(1), ClientKey::new(2));
     let s1 = welcome(&mut engine, c1);
@@ -294,7 +345,9 @@ fn partial_axis_coverage_cannot_activate_recovery() {
             vec![LinkLossPolicy::Neutralize],
         ),
         staleness(),
-        SessionConfig::new(1, "host-test").with_holder_silence(Duration::from_nanos(100)),
+        SessionConfig::new(1, "host-test")
+            .with_holder_silence(Duration::from_nanos(100))
+            .with_legacy_compatibility(true),
     );
     let client = ClientKey::new(1);
     let session = welcome(&mut engine, client);
@@ -371,8 +424,9 @@ fn the_enacted_policy_is_configured_and_validated_never_order_based() {
         ),
     ];
     for (declared, configured, expected) in cases {
-        let mut config =
-            SessionConfig::new(1, "host-test").with_holder_silence(Duration::from_nanos(100));
+        let mut config = SessionConfig::new(1, "host-test")
+            .with_holder_silence(Duration::from_nanos(100))
+            .with_legacy_compatibility(true);
         if let Some(policy) = configured {
             config = config.with_link_loss_policy(VEHICLE, policy);
         }
@@ -392,3 +446,12 @@ fn the_enacted_policy_is_configured_and_validated_never_order_based() {
         assert_eq!(policy, Some(expected), "configured {configured:?}");
     }
 }
+
+/// Drives the shared fixture to a scope PENDING an adapter clear: engaged after
+/// silence, re-granted, then a neutral activation moves it to `ClearPending`
+/// (the driver has not yet confirmed the adapter took the clear). Returns the
+/// engine and the pending generation; a tick now retries the clear.
+// The generation-race invalidation tests share this module's helpers but
+// would push it past the file-size gate, so they live in a sibling
+// submodule.
+mod pending_clear;

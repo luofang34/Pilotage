@@ -179,13 +179,24 @@ fn full_throttle_frame_bytes(
                 nanos: sampled_at_nanos,
             }),
             profile_revision: 1,
+            activation_revision: 0,
+            // Full coverage of every routed legacy axis: the command gate's
+            // structurally total translation rejects partial payloads.
             payload: Some(wire::ControlPayload {
-                axes: vec![wire::AxisSample {
-                    axis_id: u32::from(pilotage_adapter_reference::THROTTLE_AXIS),
-                    value: 1.0,
-                }],
+                axes: vec![
+                    wire::AxisSample {
+                        axis_id: u32::from(pilotage_adapter_reference::THROTTLE_AXIS),
+                        value: 1.0,
+                    },
+                    wire::AxisSample {
+                        axis_id: u32::from(pilotage_adapter_reference::STEERING_AXIS),
+                        value: 0.0,
+                    },
+                ],
                 edges: Vec::new(),
             }),
+            intent: None,
+            actions: Vec::new(),
         })),
     };
     envelope.encode_to_vec()
@@ -238,11 +249,24 @@ async fn await_frame_rejected(connection: &Connection) -> wire::FrameRejected {
     .expect("a FrameRejected datagram arrives before the test timeout")
 }
 
+/// Starts the reference host under the explicit SIMULATION compatibility
+/// mode: the reference adapter is legacy-only (numeric payload frames),
+/// while the production default is typed-only.
+async fn start_sim_compat_host() -> runtime::RunningHost {
+    runtime::start_with_options(
+        0,
+        AdapterKind::Reference,
+        runtime::RuntimeOptions {
+            legacy_compatibility: true,
+        },
+    )
+    .await
+    .expect("host starts on an ephemeral port")
+}
+
 #[tokio::test]
 async fn hello_lease_frame_and_stale_generation_rejection() {
-    let host = runtime::start(0, AdapterKind::Reference)
-        .await
-        .expect("host starts on an ephemeral port");
+    let host = start_sim_compat_host().await;
     let addr = host.local_addr;
 
     let connection = connect_client(addr).await;

@@ -9,11 +9,16 @@ mod axis;
 mod button;
 mod device;
 mod error;
+mod key;
 
 pub use axis::{AxisCalibration, AxisConfig};
 pub use button::ButtonConfig;
 pub use device::{DeviceIdentity, DeviceInfo, DeviceProfile, SCHEMA_VERSION};
 pub use error::{EntryKind, ProfileError};
+pub use key::{KeyAxisBinding, KeyBinding};
+pub use validate::validate_axis_config;
+
+mod validate;
 
 use crate::logical::{axis_id_for_name, button_id_for_name};
 use std::collections::HashSet;
@@ -78,16 +83,7 @@ fn validate_profile(profile: &DeviceProfile) -> Result<(), ProfileError> {
                 name: axis.logical.clone(),
             });
         }
-        let calibration = &axis.calibration;
-        let ordered = calibration.min < calibration.center && calibration.center < calibration.max;
-        if !ordered {
-            return Err(ProfileError::DegenerateCalibration {
-                source_index: axis.source_index,
-                min: calibration.min,
-                center: calibration.center,
-                max: calibration.max,
-            });
-        }
+        validate::validate_axis_config(axis)?;
     }
     let mut button_sources = HashSet::new();
     let mut button_names = HashSet::new();
@@ -104,6 +100,41 @@ fn validate_profile(profile: &DeviceProfile) -> Result<(), ProfileError> {
                 kind: EntryKind::Button,
                 name: button.logical.clone(),
             });
+        }
+    }
+    validate_keys(profile)
+}
+
+/// Validates key bindings: each key bound at most once, exactly one target
+/// per binding, resolvable logical names, and a real (finite, in-range,
+/// non-zero) axis deflection — a held key must command something.
+fn validate_keys(profile: &DeviceProfile) -> Result<(), ProfileError> {
+    let mut keys = HashSet::new();
+    for binding in &profile.keys {
+        if !keys.insert(binding.key.as_str()) {
+            return Err(ProfileError::DuplicateKeyBinding {
+                key: binding.key.clone(),
+            });
+        }
+        match (&binding.axis, &binding.button) {
+            (Some(axis), None) => {
+                axis_id_for_name(&axis.logical)?;
+                if !axis.value.is_finite() || axis.value == 0.0 || axis.value.abs() > 1.0 {
+                    return Err(ProfileError::MalformedKeyBinding {
+                        key: binding.key.clone(),
+                        detail: "axis value must be finite, non-zero, and within [-1, 1]",
+                    });
+                }
+            }
+            (None, Some(button)) => {
+                button_id_for_name(button)?;
+            }
+            _ => {
+                return Err(ProfileError::MalformedKeyBinding {
+                    key: binding.key.clone(),
+                    detail: "exactly one of axis/button must be set",
+                });
+            }
         }
     }
     Ok(())
@@ -214,7 +245,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_json() {
-        let err = parse_profile_str("{ not json").expect_err("should fail");
+        let err = parse_profile_str("not json at all").expect_err("should fail");
         assert!(matches!(err, ProfileError::MalformedJson { .. }));
     }
 
@@ -288,5 +319,79 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn keyed_profile(keys_json: &str) -> String {
+        GOLDEN.replace(
+            r#""buttons": ["#,
+            &format!(r#""keys": {keys_json}, "buttons": ["#),
+        )
+    }
+
+    #[test]
+    fn parses_key_bindings() {
+        let profile = parse_profile_str(&keyed_profile(
+            r#"[
+                { "key": "w", "axis": { "logical": "slot1", "value": -1.0 } },
+                { "key": "Enter", "button": "button9" }
+            ]"#,
+        ))
+        .expect("keyed profile parses");
+        assert_eq!(profile.keys.len(), 2);
+    }
+
+    #[test]
+    fn rejects_a_key_bound_twice() {
+        let err = parse_profile_str(&keyed_profile(
+            r#"[
+                { "key": "w", "axis": { "logical": "slot1", "value": -1.0 } },
+                { "key": "w", "button": "button9" }
+            ]"#,
+        ))
+        .expect_err("should fail");
+        assert!(matches!(err, ProfileError::DuplicateKeyBinding { .. }));
+    }
+
+    #[test]
+    fn rejects_a_key_binding_with_no_target_or_two_targets() {
+        let none = parse_profile_str(&keyed_profile(r#"[ { "key": "w" } ]"#))
+            .expect_err("no target should fail");
+        assert!(matches!(none, ProfileError::MalformedKeyBinding { .. }));
+
+        let both = parse_profile_str(&keyed_profile(
+            r#"[ { "key": "w", "axis": { "logical": "slot1", "value": 1.0 }, "button": "button9" } ]"#,
+        ))
+        .expect_err("two targets should fail");
+        assert!(matches!(both, ProfileError::MalformedKeyBinding { .. }));
+    }
+
+    #[test]
+    fn rejects_an_unusable_key_axis_deflection() {
+        for value in ["0.0", "1.5", "-2.0"] {
+            let err = parse_profile_str(&keyed_profile(&format!(
+                r#"[ {{ "key": "w", "axis": {{ "logical": "slot1", "value": {value} }} }} ]"#
+            )))
+            .expect_err("unusable deflection should fail");
+            assert!(matches!(err, ProfileError::MalformedKeyBinding { .. }));
+        }
+    }
+
+    #[test]
+    fn rejects_a_key_binding_with_an_unknown_logical_name() {
+        let err = parse_profile_str(&keyed_profile(
+            r#"[ { "key": "w", "axis": { "logical": "slot9", "value": 1.0 } } ]"#,
+        ))
+        .expect_err("should fail");
+        assert!(matches!(err, ProfileError::UnknownAxisName { .. }));
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_fields() {
+        let json = GOLDEN.replace(
+            r#""description""#,
+            r#""scopes": ["vehicle.motion"], "description""#,
+        );
+        let err = parse_profile_str(&json).expect_err("should fail");
+        assert!(matches!(err, ProfileError::MalformedJson { .. }));
     }
 }

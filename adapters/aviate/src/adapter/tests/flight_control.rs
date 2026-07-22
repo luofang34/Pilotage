@@ -126,7 +126,11 @@ fn stick_frame_reaches_the_fc_as_a_velocity_setpoint() {
     let (mut adapter, _state) = flying_adapter(&fc);
 
     let caps = adapter.capabilities();
-    assert_eq!(caps.vehicles[0].scopes.len(), 1, "flight scope advertised");
+    assert_eq!(
+        caps.vehicles[0].scopes.len(),
+        3,
+        "velocity + direct flight + sim lifecycle scopes advertised"
+    );
     assert_eq!(caps.vehicles[0].scopes[0].axes.len(), 4);
 
     let mut buf = [0u8; 128];

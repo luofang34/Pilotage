@@ -7,17 +7,15 @@
 use pilotage_adapter_api::{StepBudget, VehicleAdapter};
 use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_protocol::{
-    ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VehicleId,
+    ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
+    SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use pilotage_timing::MonoTimestamp;
 
 const SEED: u64 = 42;
-const THROTTLE_AXIS: u16 = 2;
-const STEERING_AXIS: u16 = 3;
-
 fn control_frame(vehicle: VehicleId, throttle: f32, steering: f32) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new("vehicle.motion"),
@@ -25,13 +23,19 @@ fn control_frame(vehicle: VehicleId, throttle: f32, steering: f32) -> ScopedCont
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
-        payload: ControlPayload {
-            axes: vec![
-                (LogicalAxisId::new(THROTTLE_AXIS), throttle),
-                (LogicalAxisId::new(STEERING_AXIS), steering),
-            ],
-            edges: vec![],
-        },
+        activation_revision: 0,
+        payload: ControlPayload::default(),
+        // The typed command in the skiff's normalized envelope: full stick
+        // maps 1:1 onto full surge/turn, so the pinned trajectory is
+        // unchanged from the legacy fixture that produced it.
+        intent: Some(ControlIntent::Velocity(VelocityIntent {
+            frame: ReferenceFrame::BodyFrd,
+            vx: throttle,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate: steering,
+        })),
+        actions: vec![],
     }
 }
 

@@ -1117,6 +1117,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-control-web"
+version = "0.1.0"
+dependencies = [
+ "pilotage-input",
+ "pilotage-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "pilotage-evidence"
 version = "0.1.0"
 dependencies = [
@@ -1151,6 +1163,7 @@ dependencies = [
  "pilotage-timing",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror",
 ]
 
@@ -1249,6 +1262,7 @@ dependencies = [
  "pilotage-authority",
  "pilotage-protocol",
  "pilotage-timing",
+ "serde_json",
 ]
 
 [[package]]
@@ -1266,6 +1280,7 @@ dependencies = [
  "pilotage-session",
  "pilotage-timing",
  "prost",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

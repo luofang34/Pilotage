@@ -25,7 +25,13 @@ use telemetry::sample_to_wire;
 #[cfg(test)]
 mod tests;
 
+mod action_dedup;
+mod apply;
+mod drops;
 mod link_loss;
+use action_dedup::ActionDedup;
+use drops::{DropCounters, MessageClass};
+use pilotage_protocol::ScopedControlFrame;
 
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
@@ -40,40 +46,6 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Capacity of the per-stage latency ring buffer dumped at shutdown.
 const LATENCY_LOG_CAPACITY: usize = 4096;
-
-/// The ADR-0011 message classes the engine actor fans messages out as, for
-/// per-class drop accounting (ADR-0009: "drops are counted, never silent";
-/// ADR-0011: "drops are counted per class").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MessageClass {
-    /// A unicast reply to one client (bootstrap/session state or `Pong`).
-    Unicast,
-    /// A reliable, ordered authority/mode-change broadcast.
-    AuthorityBroadcast,
-    /// Best-effort telemetry, fanned out at tick cadence.
-    Telemetry,
-}
-
-/// Wrapping per-class counters for messages dropped because a client's
-/// outbound queue could not accept them without blocking the actor task.
-#[derive(Debug, Default)]
-struct DropCounters {
-    unicast: u64,
-    authority_broadcast: u64,
-    telemetry: u64,
-}
-
-impl DropCounters {
-    fn record(&mut self, class: MessageClass) -> u64 {
-        let counter = match class {
-            MessageClass::Unicast => &mut self.unicast,
-            MessageClass::AuthorityBroadcast => &mut self.authority_broadcast,
-            MessageClass::Telemetry => &mut self.telemetry,
-        };
-        *counter = counter.wrapping_add(1);
-        *counter
-    }
-}
 
 /// One command a connection task submits to the engine actor.
 #[derive(Debug)]
@@ -117,6 +89,7 @@ pub struct EngineActor<A: VehicleAdapter> {
     clients: ClientRegistry,
     latency: BoundedLatencyLog<LATENCY_LOG_CAPACITY>,
     drops: DropCounters,
+    action_dedup: ActionDedup,
     /// Wrapping count of link-loss policy changes the adapter failed to
     /// enact. A non-zero value is a fail-closed fault, not noise: authority
     /// was already fenced, so an unenacted policy means the vehicle may
@@ -145,6 +118,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             clients: ClientRegistry::new(),
             latency: BoundedLatencyLog::new(),
             drops: DropCounters::default(),
+            action_dedup: ActionDedup::default(),
             link_loss_enact_failures: 0,
             start,
         }
@@ -200,10 +174,27 @@ impl<A: VehicleAdapter> EngineActor<A> {
     ) {
         let validate_start = Instant::now();
         let is_disconnect = matches!(message, DomainEnvelope::Disconnect);
+        let rejected_announcement = matches!(&message, DomainEnvelope::ProfileActivation(_));
         let outcome = self.engine.handle_client_message(client, message, now);
         self.record_stage(Stage::Validate, validate_start.elapsed());
+        // Evidence derives from the engine's EXPLICIT acceptance event
+        // (enacted below); an announcement whose outcome carries none was
+        // rejected — comparing engine state here could misreport a
+        // rejected duplicate or foreign-session announcement as accepted.
+        if rejected_announcement
+            && !outcome
+                .actions
+                .iter()
+                .any(|action| matches!(action, SessionAction::ActivationAccepted { .. }))
+        {
+            warn!(
+                client = client.as_u64(),
+                "control profile activation REJECTED (session or revision binding failed)"
+            );
+        }
         if is_disconnect {
             self.clients.remove(client);
+            self.action_dedup.forget(client);
         }
         self.enact(outcome);
     }
@@ -278,12 +269,25 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 );
                 self.send_to(client, ToConnection::Close, MessageClass::Unicast);
                 self.clients.remove(client);
+                self.action_dedup.forget(client);
             }
-            SessionAction::ApplyToAdapter { frame } => {
-                let apply_start = Instant::now();
-                let outcome = self.adapter.apply_control(&frame);
-                self.record_stage(Stage::Apply, apply_start.elapsed());
-                debug!(?outcome, "control frame applied to adapter");
+            SessionAction::ActivationAccepted { client, activation } => {
+                // The traceability record for control evidence (INPUT-01):
+                // emitted only on the engine's explicit acceptance.
+                info!(
+                    client = client.as_u64(),
+                    profile = %activation.profile_id,
+                    profile_revision = activation.profile_revision,
+                    activation_revision = activation.activation_revision,
+                    digest = %hex_digest(&activation.digest),
+                    device_profile = %activation.device_profile_id,
+                    device_profile_revision = activation.device_profile_revision,
+                    device_digest = %hex_digest(&activation.device_digest),
+                    "control profile activation accepted"
+                );
+            }
+            SessionAction::ApplyToAdapter { client, frame } => {
+                self.apply_to_adapter(client, frame);
             }
             action @ (SessionAction::EngageLinkLoss { .. }
             | SessionAction::ClearLinkLoss { .. }) => {
@@ -333,6 +337,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             }
             Err(TrySendError::Closed(_)) => {
                 self.clients.remove(client);
+                self.action_dedup.forget(client);
             }
         }
     }
@@ -346,6 +351,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             sender.try_send(ToConnection::Close).ok();
         }
         self.clients.remove(client);
+        self.action_dedup.forget(client);
     }
 
     fn broadcast_datagram(&mut self, bytes: Vec<u8>) {
@@ -406,6 +412,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         }
         for client in closed {
             self.clients.remove(client);
+            self.action_dedup.forget(client);
         }
     }
 
@@ -461,13 +468,23 @@ fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConn
             class: DatagramClass::Pong,
             bytes: encode_pong_datagram(pong),
         },
-        pilotage_session::OutboundMessage::Authority(_) => {
+        // The link-loss-cleared notice is a reliable broadcast; it rides the
+        // dedicated authority-events stream alongside authority events so a
+        // bulk/bootstrap transfer cannot head-of-line-block a recovery ack.
+        pilotage_session::OutboundMessage::Authority(_)
+        | pilotage_session::OutboundMessage::LinkLossCleared(_) => {
             ToConnection::AuthorityMessage(encode_envelope_message(envelope))
         }
         pilotage_session::OutboundMessage::Welcome(_)
         | pilotage_session::OutboundMessage::LeaseResponse(_)
-        | pilotage_session::OutboundMessage::LeaseReleased(_) => {
+        | pilotage_session::OutboundMessage::LeaseReleased(_)
+        | pilotage_session::OutboundMessage::ControlActionResult(_) => {
             ToConnection::BootstrapMessage(encode_envelope_message(envelope))
         }
     }
+}
+
+/// Lowercase-hex rendering of a profile content digest for the evidence log.
+fn hex_digest(digest: &[u8; 32]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }

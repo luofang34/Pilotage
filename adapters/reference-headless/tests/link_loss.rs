@@ -5,13 +5,14 @@
 use pilotage_adapter_api::{LinkLossPolicy, StepBudget, VehicleAdapter};
 use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_protocol::{
-    ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VehicleId,
+    ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
+    SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use pilotage_timing::MonoTimestamp;
 
 fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new("vehicle.motion"),
@@ -19,11 +20,21 @@ fn full_throttle_frame(vehicle: VehicleId) -> ScopedControlFrame {
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
-        payload: ControlPayload {
-            axes: vec![(LogicalAxisId::new(2), 1.0), (LogicalAxisId::new(3), 0.0)],
-            edges: vec![],
-        },
+        activation_revision: 0,
+        payload: ControlPayload::default(),
+        intent: Some(ControlIntent::Velocity(VelocityIntent {
+            frame: ReferenceFrame::BodyFrd,
+            vx: 1.0,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate: 0.0,
+        })),
+        actions: vec![],
     }
+}
+
+fn motion_scope() -> ScopeId {
+    ScopeId::new("vehicle.motion")
 }
 
 fn measured_speed(adapter: &mut ReferenceAdapter) -> f64 {
@@ -46,7 +57,7 @@ fn neutralize_zeroes_controls_and_speed_decays_via_drag() {
     assert!(speed_before_loss > 0.0);
 
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize))
+        .set_link_loss_policy(vehicle, &motion_scope(), Some(LinkLossPolicy::Neutralize))
         .expect("policy enacted");
     adapter.step(StepBudget { ticks: 1 });
     let speed_after_one_tick = measured_speed(&mut adapter);
@@ -69,7 +80,7 @@ fn clearing_link_loss_policy_restores_normal_control() {
     adapter.apply_control(&full_throttle_frame(vehicle));
 
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize))
+        .set_link_loss_policy(vehicle, &motion_scope(), Some(LinkLossPolicy::Neutralize))
         .expect("policy enacted");
     adapter.step(StepBudget { ticks: 1 });
     let speed_while_neutralized = measured_speed(&mut adapter);
@@ -77,7 +88,7 @@ fn clearing_link_loss_policy_restores_normal_control() {
     // Link recovery: clearing the policy and re-applying full throttle must
     // resume acceleration rather than staying neutralized permanently.
     adapter
-        .set_link_loss_policy(vehicle, None)
+        .set_link_loss_policy(vehicle, &motion_scope(), None)
         .expect("policy enacted");
     adapter.apply_control(&full_throttle_frame(vehicle));
     for _ in 0..50u32 {
@@ -94,7 +105,11 @@ fn hold_brief_holds_controls_then_neutralizes() {
     adapter.apply_control(&full_throttle_frame(vehicle));
 
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 3 }))
+        .set_link_loss_policy(
+            vehicle,
+            &motion_scope(),
+            Some(LinkLossPolicy::HoldBrief { ticks: 3 }),
+        )
         .expect("policy enacted");
 
     // While held, throttle keeps applying: speed should still be climbing
@@ -127,7 +142,11 @@ fn hold_brief_expiry_is_not_undone_by_a_later_apply_control() {
     let mut adapter = ReferenceAdapter::from_seed(vehicle, 1);
     adapter.apply_control(&full_throttle_frame(vehicle));
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::HoldBrief { ticks: 1 }))
+        .set_link_loss_policy(
+            vehicle,
+            &motion_scope(),
+            Some(LinkLossPolicy::HoldBrief { ticks: 1 }),
+        )
         .expect("policy enacted");
 
     // Run past the hold window so the policy has neutralized.

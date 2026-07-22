@@ -27,6 +27,12 @@ pub struct Px4Config {
     /// payload the vehicle cannot point. `PILOTAGE_PX4_GIMBAL=1` (via
     /// the launcher) or [`Px4Config::with_gimbal`] enables it.
     pub gimbal: bool,
+    /// Acceptance fault injection: drop the gimbal link-loss stop instead of
+    /// sending it, so the vehicle's own failsafe is the sole mechanism under
+    /// test. Permitted ONLY under [`Px4Profile::Simulation`] — a real vehicle
+    /// must never withhold its safe-state command — and enforced by
+    /// [`Px4Config::with_gimbal_stop_dropped`].
+    drop_gimbal_link_loss_stop: bool,
 }
 
 impl Px4Config {
@@ -40,6 +46,7 @@ impl Px4Config {
             stream_command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 18_570)),
             command_endpoint: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 14_580)),
             gimbal: false,
+            drop_gimbal_link_loss_stop: false,
         }
     }
 
@@ -49,6 +56,23 @@ impl Px4Config {
     pub fn with_gimbal(mut self, gimbal: bool) -> Self {
         self.gimbal = gimbal;
         self
+    }
+
+    /// Enables the gimbal link-loss-stop fault injection (acceptance testing of
+    /// the vehicle's own failsafe). Enforced fail-safe: it takes effect ONLY
+    /// under [`Px4Profile::Simulation`], so a real vehicle can never be
+    /// configured to withhold its safe-state command.
+    #[must_use]
+    pub fn with_gimbal_stop_dropped(mut self, drop: bool) -> Self {
+        self.drop_gimbal_link_loss_stop = drop && self.profile == Px4Profile::Simulation;
+        self
+    }
+
+    /// Whether the gimbal link-loss stop is dropped (Simulation-only fault
+    /// injection). Always `false` outside `Simulation`.
+    #[must_use]
+    pub(crate) fn drop_gimbal_link_loss_stop(&self) -> bool {
+        self.drop_gimbal_link_loss_stop
     }
 
     pub(crate) fn link_config(self) -> LinkConfig {

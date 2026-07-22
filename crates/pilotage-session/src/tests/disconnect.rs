@@ -116,8 +116,12 @@ fn scope_is_grantable_again_after_holder_disconnects() {
 fn many_scope_capabilities(scopes: usize) -> AdapterCapabilities {
     let scope_descriptors = (0..scopes)
         .map(|i| ScopeDescriptor {
+            authority_group: None,
             scope: ScopeId::new(format!("vehicle.motion.{i}")),
             axes: vec![LogicalAxisId::new(0)],
+            intents: vec![],
+            actions: vec![],
+            legacy: None,
         })
         .collect();
     AdapterCapabilities {
@@ -167,15 +171,15 @@ fn disconnect_dropping_link_lost_broadcasts_is_reported_not_silent() {
         MonoTimestamp::from_nanos(5),
     );
     // The cap truncated the ordinary actions (broadcasts), while the safety
-    // lane still delivered the vehicle's single link-loss engagement above
-    // the cap — a safety enactment is never droppable behind the broadcast
-    // cap.
+    // lane still delivered EVERY lost scope's link-loss engagement above the
+    // cap — link-loss is per-scope (each scope fails closed independently),
+    // and a safety enactment is never droppable behind the broadcast cap.
     let engagements = outcome
         .actions
         .iter()
         .filter(|a| matches!(a, SessionAction::EngageLinkLoss { .. }))
         .count();
-    assert_eq!(engagements, 1, "one engagement per vehicle loss");
+    assert_eq!(engagements, scopes, "each lost scope engages independently");
     assert_eq!(
         outcome.actions.len(),
         cap + engagements,

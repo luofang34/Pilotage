@@ -7,12 +7,17 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod action_command;
+mod authority_group;
 mod deadline;
 mod disconnect;
 mod frame;
 mod handshake;
+mod ingress_hardening;
 mod lease;
+mod lifecycle;
 mod ping;
+mod profile_binding;
 mod recovery;
 mod release;
 mod watchdog;
@@ -53,8 +58,35 @@ pub(crate) fn capabilities() -> AdapterCapabilities {
         vehicles: vec![VehicleDescriptor {
             id: VEHICLE,
             scopes: vec![ScopeDescriptor {
+                authority_group: None,
                 scope: motion(),
                 axes: vec![LogicalAxisId::new(0)],
+                intents: vec![pilotage_adapter_api::IntentCapability {
+                    max_yaw_rate: 0.0,
+                    family: pilotage_protocol::IntentFamily::Velocity,
+                    frames: vec![pilotage_protocol::ReferenceFrame::BodyFrd],
+                    max_linear: 1.0,
+                    max_vertical: 0.0,
+                    max_angular: 1.0,
+                }],
+                actions: vec![
+                    pilotage_adapter_api::ActionCapability {
+                        action: pilotage_protocol::ActionKind::Arm,
+                        mode_targets: vec![],
+                    },
+                    pilotage_adapter_api::ActionCapability {
+                        action: pilotage_protocol::ActionKind::Disarm,
+                        mode_targets: vec![],
+                    },
+                ],
+                legacy: Some(pilotage_adapter_api::LegacyCommandMap::Velocity {
+                    vx: Some(pilotage_adapter_api::LegacyAxisRoute { axis: 0, sign: 1.0 }),
+                    vy: None,
+                    vz: None,
+                    yaw_rate: None,
+                    arm_button: Some(0),
+                    disarm_button: None,
+                }),
             }],
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],
@@ -67,12 +99,15 @@ pub(crate) fn staleness() -> StalenessPolicy {
     StalenessPolicy::new(Duration::from_millis(50))
 }
 
-/// A fresh engine over [`capabilities`] with protocol floor 1.
+/// A fresh engine over [`capabilities`] with protocol floor 1, in the
+/// SIMULATION legacy-compatibility mode (many fixtures drive the numeric
+/// payload boundary). Production default is typed-only; see
+/// `typed_only_is_the_production_default`.
 pub(crate) fn engine() -> SessionEngine {
     SessionEngine::new(
         capabilities(),
         staleness(),
-        SessionConfig::new(1, "host-test"),
+        SessionConfig::new(1, "host-test").with_legacy_compatibility(true),
     )
 }
 
@@ -107,6 +142,7 @@ pub(crate) fn frame(
     sampled_at: MonoTimestamp,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session,
         vehicle: VEHICLE,
         scope: motion(),
@@ -114,10 +150,13 @@ pub(crate) fn frame(
         sequence,
         sampled_at,
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(0), 0.25)],
             edges: Vec::new(),
         },
+        intent: None,
+        actions: vec![],
     }
 }
 
@@ -127,7 +166,9 @@ pub(crate) fn engine_with_silence(silence: Duration) -> SessionEngine {
     SessionEngine::new(
         capabilities(),
         staleness(),
-        SessionConfig::new(1, "host-test").with_holder_silence(silence),
+        SessionConfig::new(1, "host-test")
+            .with_holder_silence(silence)
+            .with_legacy_compatibility(true),
     )
 }
 
@@ -183,7 +224,7 @@ pub(crate) fn cleared(outcome: &SessionOutcome) -> usize {
         .actions
         .iter()
         .filter(
-            |action| matches!(action, SessionAction::ClearLinkLoss { vehicle } if *vehicle == VEHICLE),
+            |action| matches!(action, SessionAction::ClearLinkLoss { vehicle, .. } if *vehicle == VEHICLE),
         )
         .count()
 }
@@ -230,4 +271,165 @@ pub(crate) fn edge_only_frame(
         edges: vec![(LogicalButtonId::new(0), ButtonEdge::Pressed)],
     };
     f
+}
+
+/// The profile-activation traceability record (INPUT-01): an announced
+/// activation is retrievable against the session for telemetry/evidence,
+/// a re-announcement replaces it, and a pre-handshake announcement closes
+/// the connection like any other pre-welcome traffic.
+#[test]
+fn profile_activation_is_recorded_for_evidence() {
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    assert!(engine.active_profile(client).is_none());
+
+    // Announcing before the handshake closes the connection.
+    let premature = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session: SessionId::new(0),
+            profile_id: "builtin.gimbal.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: 1,
+            digest: [0xAB; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
+        }),
+        MonoTimestamp::from_nanos(1),
+    );
+    assert!(
+        premature
+            .actions
+            .iter()
+            .any(|action| matches!(action, SessionAction::CloseClient { .. })),
+        "pre-welcome activation closes: {:?}",
+        premature.actions
+    );
+
+    let session = welcome(&mut engine, client);
+    let announced = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "builtin.gimbal.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: 1,
+            digest: [0xAB; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
+        }),
+        MonoTimestamp::from_nanos(2),
+    );
+    assert!(
+        matches!(
+            announced.actions.as_slice(),
+            [crate::SessionAction::ActivationAccepted { activation, .. }]
+                if activation.activation_revision == 1
+        ),
+        "acceptance is an explicit engine event: {:?}",
+        announced.actions
+    );
+    let recorded = engine.active_profile(client).expect("activation recorded");
+    assert_eq!(recorded.profile_id, "builtin.gimbal.default");
+    assert_eq!(recorded.activation_revision, 1);
+    assert_eq!(recorded.digest, [0xAB; 32]);
+}
+
+/// A later activation (profile switch) replaces the record and emits its
+/// own acceptance event.
+#[test]
+fn a_profile_switch_replaces_the_activation_record() {
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    let session = welcome(&mut engine, client);
+    let first = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "builtin.gimbal.default".to_owned(),
+            profile_revision: 3,
+            activation_revision: 1,
+            digest: [0xAB; 32],
+            device_profile_id: String::new(),
+            device_profile_revision: 0,
+            device_digest: [0; 32],
+        }),
+        MonoTimestamp::from_nanos(2),
+    );
+    assert_eq!(first.actions.len(), 1, "the first activation is accepted");
+    let switched = engine.handle_client_message(
+        client,
+        DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
+            session,
+            profile_id: "user.custom".to_owned(),
+            profile_revision: 9,
+            activation_revision: 2,
+            digest: [0xCD; 32],
+            device_profile_id: "Sony DualSense".to_owned(),
+            device_profile_revision: 1,
+            device_digest: [0xEE; 32],
+        }),
+        MonoTimestamp::from_nanos(3),
+    );
+    assert!(
+        matches!(
+            switched.actions.as_slice(),
+            [crate::SessionAction::ActivationAccepted { activation, .. }]
+                if activation.activation_revision == 2
+        ),
+        "got {:?}",
+        switched.actions
+    );
+    let replaced = engine.active_profile(client).expect("record replaced");
+    assert_eq!(replaced.activation_revision, 2);
+    assert_eq!(replaced.digest, [0xCD; 32]);
+}
+
+/// The ServerWelcome advertisement carries the adapter's typed capability
+/// (CTRL-01): a client can only scale by the advertised envelope if the
+/// projection actually forwards it — an empty advertisement silently
+/// disables typed control (the client fails closed).
+#[test]
+fn welcome_advertises_the_typed_capability() {
+    let mut engine = engine();
+    let client = ClientKey::new(1);
+    let outcome = engine.handle_client_message(
+        client,
+        DomainEnvelope::Hello(pilotage_protocol::ClientHello {
+            protocol_version: 1,
+            client_name: "test".to_owned(),
+            join_token: vec![],
+        }),
+        MonoTimestamp::from_nanos(0),
+    );
+    let welcome = outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            SessionAction::SendToClient {
+                envelope: OutboundMessage::Welcome(welcome),
+                ..
+            } => Some(welcome),
+            _ => None,
+        })
+        .expect("welcome sent");
+    let scope = &welcome.host_capabilities.vehicles[0].scopes[0];
+    let intent = scope.intents.first().expect("velocity intent advertised");
+    assert_eq!(
+        intent.family,
+        pilotage_protocol::wire::IntentFamily::Velocity as i32
+    );
+    assert_eq!(intent.max_linear, 1.0);
+    assert_eq!(intent.max_angular, 1.0);
+    assert_eq!(
+        intent.frames,
+        vec![pilotage_protocol::wire::ReferenceFrame::BodyFrd as i32]
+    );
+    let action = scope.actions.first().expect("arm action advertised");
+    assert_eq!(
+        action.action,
+        pilotage_protocol::wire::ControlAction::Arm as i32
+    );
 }

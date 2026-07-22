@@ -7,6 +7,7 @@ package pilotage.v1;
 
 import "pilotage/v1/capability.proto";
 import "pilotage/v1/common.proto";
+import "pilotage/v1/control.proto";
 
 // The first message a client sends after the WebTransport session is
 // established, before any host state has been shared (ADR-0005: session
@@ -103,6 +104,19 @@ message LeaseReleased {
   Generation generation = 4;
 }
 
+// A reliable notice that the host has CLEARED its link-loss latch for one
+// scope of a vehicle: the accepted neutral frame on `generation` satisfied the
+// recovery activation condition, so the neutralize/brake policy is lifted. The
+// controlling client correlates by vehicle/scope/generation to know its
+// recovery landed rather than trusting that a best-effort control datagram
+// arrived (ADR-0012).
+message LinkLossCleared {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  // The fresh generation whose accepted neutral frame cleared the latch.
+  Generation generation = 3;
+}
+
 // An RTT/offset probe carrying the sender's local transport-time sample.
 // `nonce` correlates a `Ping` with its `Pong`; it carries no ordering or
 // uniqueness guarantee beyond what the sender chooses.
@@ -143,6 +157,46 @@ enum FrameRejectionReason {
   // The frame's sampled-at timestamp is older than the configured maximum
   // control age.
   FRAME_REJECTION_REASON_TOO_OLD = 4;
+  // The frame carried NO command representation: no legacy payload, no typed
+  // intent, and no actions.
+  FRAME_REJECTION_REASON_EMPTY_COMMAND = 5;
+  // The frame carried BOTH the legacy payload and a typed intent/actions;
+  // exactly one representation is allowed.
+  FRAME_REJECTION_REASON_DUAL_COMMAND = 6;
+  // The typed intent's family or reference frame is not advertised for the
+  // frame's scope.
+  FRAME_REJECTION_REASON_UNSUPPORTED_INTENT = 7;
+  // A typed action (or its mode target) is not advertised for the frame's
+  // scope.
+  FRAME_REJECTION_REASON_UNSUPPORTED_ACTION = 8;
+  // A typed intent component exceeds the scope's advertised magnitude limit.
+  FRAME_REJECTION_REASON_LIMIT_EXCEEDED = 9;
+  // The frame's actions repeat or conflict (ARM together with DISARM); the
+  // frame is rejected whole, executing neither.
+  FRAME_REJECTION_REASON_CONFLICTING_ACTIONS = 10;
+  // A legacy payload omitted an axis its scope's translation routes. The
+  // typed translation is structurally total, so a partial payload would
+  // silently turn "no update" into an explicit neutral — including inside
+  // the recovery activation check. Legacy senders must report every routed
+  // axis.
+  FRAME_REJECTION_REASON_PARTIAL_COMMAND = 11;
+  // A typed frame's `activation_revision` does not match the sender's
+  // announced `ProfileActivation` (or nothing was announced): the host
+  // cannot bind the frame to profile evidence, so it is not applied.
+  FRAME_REJECTION_REASON_PROFILE_MISMATCH = 12;
+  // The datagram frame carried typed discrete actions. Actions ride ONLY the
+  // reliable ordered session stream (ControlActionCommand) — a dropped or
+  // reordered edge changes meaning, so the droppable channel refuses them.
+  FRAME_REJECTION_REASON_ACTION_ON_DATAGRAM = 13;
+  // The frame's session id is not the sender's own session.
+  FRAME_REJECTION_REASON_SESSION_MISMATCH = 14;
+  // The frame's sequence does not advance past the last accepted one for
+  // its authority at this generation (a duplicate or reordered datagram).
+  FRAME_REJECTION_REASON_STALE_SEQUENCE = 15;
+  // The frame carried a legacy numeric payload but this host runs
+  // typed-only (the production default); legacy translation exists only
+  // behind the explicit simulation compatibility mode.
+  FRAME_REJECTION_REASON_LEGACY_DISABLED = 16;
 }
 
 // Sent back to the frame's sender (never broadcast) when a `ControlFrame`
@@ -156,4 +210,27 @@ message FrameRejected {
   // The scope's fencing generation at the time of rejection, so the sender
   // can decide whether to resynchronize before retrying.
   Generation current_generation = 5;
+}
+
+// The explicit outcome of ONE typed discrete action, sent to the frame's
+// sender on the reliable session stream after the adapter disposed of it —
+// every accepted frame's action gets exactly one result, so an operator can
+// distinguish "arm honored" from "arm silently dropped" (CTRL-01).
+message ControlActionResult {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  // The fencing generation and sequence of the frame that carried the
+  // action, correlating the result to the exact press.
+  Generation generation = 3;
+  SequenceNum sequence = 4;
+  ControlAction action = 5;
+  // Echoed target for a MODE_REQUEST; unspecified otherwise.
+  ModeTarget mode_target = 6;
+  bool accepted = 7;
+  // Adapter-supplied reason when not accepted; empty on acceptance.
+  string detail = 8;
+  // Echoes the request's correlation id, so a retransmitting sender can
+  // resolve exactly the press this result answers. Zero when the request
+  // carried none.
+  uint32 action_id = 9;
 }

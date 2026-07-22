@@ -10,6 +10,7 @@ use pilotage_protocol::{ButtonEdge, LogicalButtonId, VehicleId};
 
 use pilotage_mavlink::link::KinematicsUpdate;
 
+mod direct_flight;
 mod fixtures;
 mod flight_control;
 mod source_roles;
@@ -296,6 +297,7 @@ fn control_frames_are_rejected_at_the_boundary() {
     );
 
     let frame = pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: pilotage_protocol::ScopeId::new("vehicle.motion"),
@@ -303,10 +305,13 @@ fn control_frames_are_rejected_at_the_boundary() {
         sequence: pilotage_protocol::SequenceNum::new(1),
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: pilotage_protocol::ControlPayload {
             axes: vec![],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     };
     let outcome = adapter.apply_control(&frame);
     assert_eq!(

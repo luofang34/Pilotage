@@ -25,6 +25,12 @@ pub struct SessionConfig {
     /// Human-readable host version echoed into `HostCapabilities.host_version`
     /// (ADR-0008), for compatibility negotiation and diagnostics only.
     pub host_version: String,
+    /// Whether legacy numeric payload frames are admitted (the SIMULATION
+    /// compatibility mode). OFF by default: production control is
+    /// typed-only — legacy payloads bypass profile-activation binding and
+    /// translate button edges into uncorrelated actions, so they exist
+    /// only where a simulation harness explicitly opts in.
+    pub legacy_compatibility: bool,
     /// Hard cap on the number of [`SessionAction`]s a single
     /// `handle_client_message` or `handle_tick` call may emit.
     ///
@@ -106,6 +112,7 @@ impl SessionConfig {
     #[must_use]
     pub fn new(required_protocol_version: u32, host_version: impl Into<String>) -> Self {
         Self {
+            legacy_compatibility: false,
             required_protocol_version,
             host_version: host_version.into(),
             max_actions_per_call: Self::DEFAULT_MAX_ACTIONS_PER_CALL,
@@ -119,6 +126,15 @@ impl SessionConfig {
     #[must_use]
     pub fn with_max_actions_per_call(mut self, cap: usize) -> Self {
         self.max_actions_per_call = cap;
+        self
+    }
+
+    /// Enables the SIMULATION legacy-compatibility mode: legacy numeric
+    /// payload frames are admitted and translated at the single
+    /// compatibility boundary. Never the production default.
+    #[must_use]
+    pub fn with_legacy_compatibility(mut self, enabled: bool) -> Self {
+        self.legacy_compatibility = enabled;
         self
     }
 

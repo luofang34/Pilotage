@@ -8,7 +8,9 @@
 //! [`SessionEngine`]: crate::SessionEngine
 
 use pilotage_adapter_api::LinkLossPolicy;
-use pilotage_protocol::{FrameRejected, Generation, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{
+    FrameRejected, Generation, ScopeId, ScopedControlFrame, SessionId, VehicleId,
+};
 
 use crate::message::ClientKey;
 use crate::outbound::OutboundMessage;
@@ -53,9 +55,27 @@ pub enum SessionAction {
         /// Message to encode and write to that client.
         envelope: OutboundMessage,
     },
-    /// Apply a fence-verified, fresh control frame to the adapter.
+    /// The engine ACCEPTED a profile activation announcement after
+    /// validating its session binding and monotonic revision: the driver
+    /// records it as control-traceability evidence (INPUT-01). Emitted
+    /// exactly once per accepted announcement and NEVER for a rejected one
+    /// — evidence derives from this explicit event, not from comparing
+    /// engine state after the fact (a rejected duplicate would alias the
+    /// standing record).
+    ActivationAccepted {
+        /// The announcing client.
+        client: ClientKey,
+        /// The validated announcement, exactly as recorded.
+        activation: pilotage_protocol::ProfileActivation,
+    },
+    /// Apply a fence-verified, fresh, TYPED control frame to the adapter
+    /// (the command gate has already validated it and translated any legacy
+    /// payload).
     ApplyToAdapter {
-        /// The frame the adapter should apply this tick.
+        /// The frame's sender, so the driver can return each discrete
+        /// action's explicit accepted/rejected result to it.
+        client: ClientKey,
+        /// The typed frame the adapter should apply this tick.
         frame: ScopedControlFrame,
     },
     /// Send a message to every connected client (fan-out).
@@ -114,8 +134,21 @@ pub enum SessionAction {
     /// neutral-axes frame, so a client reconnecting with deflected sticks
     /// cannot revive motion.
     ClearLinkLoss {
-        /// Vehicle returning to normal control under a new holder.
+        /// Vehicle whose scope is returning to normal control.
         vehicle: VehicleId,
+        /// The specific scope recovering — link-loss is per-scope, so clearing
+        /// one scope never returns another to control.
+        scope: ScopeId,
+        /// The fresh generation whose accepted neutral frame cleared the latch.
+        /// The driver echoes it in the client-facing `LinkLossCleared` notice
+        /// it broadcasts ONLY after the adapter confirms the clear.
+        generation: Generation,
+        /// `false` for the first clear a neutral activation requests; `true`
+        /// for a tick-driven re-emission of a still-unconfirmed clear. The
+        /// driver counts and error-logs a refused clear only on the first
+        /// (`false`) attempt, so a persistently-refused clear retried every
+        /// tick does not become a fault-counter / log storm.
+        retry: bool,
     },
 }
 
@@ -155,4 +188,24 @@ pub enum CloseReason {
     DuplicateHello,
     /// The client sent a domain message before completing the handshake.
     HandshakeNotComplete,
+    /// The client announced a profile activation naming a session other than
+    /// its own. The announcement is the traceability record binding that
+    /// client's frames to profile evidence (INPUT-01); one that misidentifies
+    /// its own session is broken or forged and cannot be recorded.
+    ProfileSessionMismatch {
+        /// The session the announcement named.
+        announced: SessionId,
+        /// The session the connection actually holds.
+        expected: SessionId,
+    },
+    /// The client's profile activation revision failed to advance over its
+    /// previous announcement. Frames bind to activations through this
+    /// monotonic counter; a regression would let old frames alias a new
+    /// activation, so the binding is unusable.
+    NonMonotonicActivation {
+        /// The revision previously on record.
+        previous: u32,
+        /// The non-advancing revision just announced.
+        announced: u32,
+    },
 }

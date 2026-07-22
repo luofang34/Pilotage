@@ -7,10 +7,15 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, VehicleId};
+use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, VehicleId};
 
 use super::super::AviateAdapter;
 use super::fixtures::{flight_frame, state_with};
+
+/// The only scope this adapter drives; every link-loss enactment targets it.
+fn flight_scope() -> ScopeId {
+    ScopeId::new(super::super::FLIGHT_SCOPE)
+}
 
 #[test]
 fn link_loss_enactment_reports_refused_sends_and_proves_sent_ones() {
@@ -25,6 +30,7 @@ fn link_loss_enactment_reports_refused_sends_and_proves_sent_ones() {
     .with_uplink(refused);
     let result = adapter.set_link_loss_policy(
         VehicleId::new(1),
+        &flight_scope(),
         Some(pilotage_adapter_api::LinkLossPolicy::Neutralize),
     );
     assert!(
@@ -56,6 +62,7 @@ fn link_loss_enactment_reports_refused_sends_and_proves_sent_ones() {
     adapter
         .set_link_loss_policy(
             VehicleId::new(1),
+            &flight_scope(),
             Some(pilotage_adapter_api::LinkLossPolicy::Neutralize),
         )
         .expect("neutral datagram accepted by the socket");
@@ -82,6 +89,7 @@ fn link_loss_transitions_invalidate_the_captured_hold_point() {
     adapter
         .set_link_loss_policy(
             VehicleId::new(1),
+            &flight_scope(),
             Some(pilotage_adapter_api::LinkLossPolicy::Neutralize),
         )
         .expect("engage");
@@ -91,7 +99,7 @@ fn link_loss_transitions_invalidate_the_captured_hold_point() {
     );
 
     adapter
-        .set_link_loss_policy(VehicleId::new(1), None)
+        .set_link_loss_policy(VehicleId::new(1), &flight_scope(), None)
         .expect("clear");
     assert!(
         !adapter.uplink_hold_captured(),
@@ -188,13 +196,14 @@ fn a_hold_captured_before_link_loss_never_commands_recovery_to_it() {
     adapter
         .set_link_loss_policy(
             VehicleId::new(1),
+            &flight_scope(),
             Some(pilotage_adapter_api::LinkLossPolicy::Neutralize),
         )
         .expect("engage");
     fc.recv_from(&mut buf).expect("link-loss neutral frame");
     set_still_at(&state, [50.0, 60.0, -30.0]);
     adapter
-        .set_link_loss_policy(VehicleId::new(1), None)
+        .set_link_loss_policy(VehicleId::new(1), &flight_scope(), None)
         .expect("clear");
 
     // First centered frame after recovery: the hold captures at the

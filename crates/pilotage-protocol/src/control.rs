@@ -3,6 +3,7 @@
 use pilotage_timing::MonoTimestamp;
 
 use crate::ids::{Generation, ScopeId, SequenceNum, SessionId, VehicleId};
+use crate::intent::{ControlAction, ControlIntent};
 
 /// Identifies a logical continuous axis (e.g. throttle, steering) in the
 /// canonical input model, independent of any physical device layout.
@@ -86,8 +87,42 @@ pub struct ScopedControlFrame {
     pub sampled_at: MonoTimestamp,
     /// Revision of the device profile used to normalize this frame.
     pub profile_revision: u32,
-    /// The logical input state for this frame.
+    /// The sender's monotonic profile ACTIVATION revision (advances on every
+    /// profile install), binding this frame to the activation announced via
+    /// `ProfileActivation` — distinct from the profile document's own
+    /// `profile_revision`.
+    pub activation_revision: u32,
+    /// The legacy untyped logical input state (ADR-0007). A frame carries
+    /// EXACTLY ONE command representation: a non-empty payload OR the typed
+    /// `intent`/`actions`; both or neither is rejected by the session host.
     pub payload: ControlPayload,
+    /// The typed control intent this frame commands (CTRL-01). Must belong to
+    /// a family the vehicle advertises for `scope`.
+    pub intent: Option<ControlIntent>,
+    /// Typed discrete actions carried by this frame, as one-shot events.
+    pub actions: Vec<ControlAction>,
+    /// Sender-assigned correlation ids aligned 1:1 with `actions` (reliable
+    /// delivery over the droppable datagram channel: retransmit until the
+    /// matching result echoes the id; the host deduplicates). Empty when the
+    /// sender correlates nothing (legacy translation).
+    pub action_ids: Vec<u32>,
+}
+
+impl ScopedControlFrame {
+    /// Whether this frame carries the legacy numeric representation (any
+    /// axis or edge). Presence is decided by CONTENT, not wire-field
+    /// presence, so different encoders cannot disagree about it.
+    #[must_use]
+    pub fn carries_payload(&self) -> bool {
+        !self.payload.axes.is_empty() || !self.payload.edges.is_empty()
+    }
+
+    /// Whether this frame carries the typed representation (an intent or at
+    /// least one action).
+    #[must_use]
+    pub fn carries_typed(&self) -> bool {
+        self.intent.is_some() || !self.actions.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -119,7 +154,11 @@ mod tests {
             sequence: SequenceNum::new(4),
             sampled_at: MonoTimestamp::from_nanos(5),
             profile_revision: 6,
+            activation_revision: 0,
             payload: payload.clone(),
+            intent: None,
+            actions: vec![],
+            action_ids: vec![],
         };
         assert_eq!(frame.session.as_u64(), 1);
         assert_eq!(frame.payload, payload);

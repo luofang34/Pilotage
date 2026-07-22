@@ -304,6 +304,7 @@ fn staleness_policy_rejects_an_artificially_aged_frame() {
     // if it arrives older than the policy's maximum control age (ADR-0009).
     let policy = StalenessPolicy::new(Duration::from_millis(50));
     let frame = ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(7),
         vehicle: VehicleId::new(1),
         scope: motion(),
@@ -311,10 +312,13 @@ fn staleness_policy_rejects_an_artificially_aged_frame() {
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
+        activation_revision: 0,
         payload: ControlPayload {
             axes: vec![(LogicalAxisId::new(2), 1.0)],
             edges: vec![],
         },
+        intent: None,
+        actions: vec![],
     };
 
     let fresh_now = MonoTimestamp::from_nanos(40_000_000);
@@ -359,6 +363,7 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
             to: OPERATOR_A,
         }),
         ScriptStep::Frame(ScopedControlFrame {
+            action_ids: vec![],
             session: SessionId::new(1),
             vehicle: VEHICLE,
             scope: motion(),
@@ -366,10 +371,18 @@ fn harness_runs_a_minimal_grant_and_drive_script() {
             sequence: SequenceNum::new(1),
             sampled_at: MonoTimestamp::from_nanos(0),
             profile_revision: 1,
-            payload: ControlPayload {
-                axes: vec![(LogicalAxisId::new(2), 1.0)],
-                edges: vec![],
-            },
+            activation_revision: 0,
+            payload: ControlPayload::default(),
+            intent: Some(pilotage_protocol::ControlIntent::Velocity(
+                pilotage_protocol::VelocityIntent {
+                    frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+                    vx: 1.0,
+                    vy: 0.0,
+                    vz: 0.0,
+                    yaw_rate: 0.0,
+                },
+            )),
+            actions: vec![],
         }),
         ScriptStep::Step(5),
     ];

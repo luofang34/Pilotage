@@ -17,10 +17,9 @@ use pilotage_mavlink::link::apply_messages_at;
 use pilotage_mavlink::{LinkState, ResetPolicy};
 
 use super::super::{
-    ARM_BUTTON, AviateAdapter, DISARM_BUTTON, PITCH_AXIS, RESET_BUTTON, ROLL_AXIS, THROTTLE_AXIS,
-    YAW_AXIS,
+    ARM_BUTTON, AviateAdapter, DISARM_BUTTON, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
 };
-use super::fixtures::{flight_frame, state_with};
+use super::fixtures::{flight_frame, lifecycle_reset_frame, state_with};
 
 const SOURCE: FrameSource = FrameSource {
     system_id: 1,
@@ -132,18 +131,23 @@ fn drive_fresh_epoch(state: &Arc<Mutex<LinkState>>) {
 #[test]
 fn reset_press_engages_the_latch_and_debounces_the_script() {
     let (mut adapter, _fc, _state) = adapter_with_fake_fc();
-    let outcome = adapter.apply_control(&press(RESET_BUTTON));
+    // The reset arrives on ITS OWN scope (SIM-01): the lifecycle press is
+    // acknowledged there, and the latch it engages suppresses FLIGHT.
+    let outcome = adapter.apply_control(&lifecycle_reset_frame());
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    assert!(
+        outcome.action_results.iter().all(|result| result.accepted),
+        "the lifecycle press is acknowledged: {:?}",
+        outcome.action_results
+    );
+    assert_eq!(adapter.reset_spawns, 1, "one script spawn recorded");
+    let outcome = adapter.apply_control(&press(ARM_BUTTON));
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::ResetInProgress),
-        "the reset press itself carries no control authority"
+        "flight authority is suppressed while the latch is engaged"
     );
-    assert_eq!(adapter.reset_spawns, 1, "one script spawn recorded");
-    let outcome = adapter.apply_control(&press(RESET_BUTTON));
-    assert_eq!(
-        outcome.disposition,
-        Disposition::Rejected(RejectReason::ResetInProgress)
-    );
+    adapter.apply_control(&lifecycle_reset_frame());
     assert_eq!(
         adapter.reset_spawns, 1,
         "a second press inside the debounce window does not respawn"
@@ -156,7 +160,7 @@ fn stale_epoch_measurements_cannot_revalidate_arm_or_motion() {
     // moments ago) but belongs to the pre-reset FC — the source epoch
     // has not advanced. Arm and motion must stay rejected.
     let (mut adapter, _fc, _state) = adapter_with_fake_fc();
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
     let outcome = adapter.apply_control(&press(ARM_BUTTON));
     assert_eq!(
         outcome.disposition,
@@ -175,7 +179,7 @@ fn stale_epoch_measurements_cannot_revalidate_arm_or_motion() {
 #[test]
 fn disarm_bypasses_the_latch() {
     let (mut adapter, fc, _state) = adapter_with_fake_fc();
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
     let outcome = adapter.apply_control(&press(DISARM_BUTTON));
     assert_eq!(
         outcome.disposition,
@@ -190,7 +194,7 @@ fn disarm_bypasses_the_latch() {
 #[test]
 fn fresh_epoch_plus_neutral_input_clears_the_latch() {
     let (mut adapter, fc, state) = adapter_with_fake_fc();
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
     drive_fresh_epoch(&state);
 
     let outcome = adapter.apply_control(&neutral());
@@ -212,7 +216,7 @@ fn fresh_epoch_plus_neutral_input_clears_the_latch() {
 #[test]
 fn source_epoch_counter_alone_cannot_clear_the_latch() {
     let (mut adapter, _fc, state) = adapter_with_fake_fc();
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
     state.lock().expect("state").source_epoch = 2;
 
     let outcome = adapter.apply_control(&neutral());
@@ -224,37 +228,30 @@ fn source_epoch_counter_alone_cannot_clear_the_latch() {
 }
 
 #[test]
-fn fresh_epoch_requires_every_flight_axis() {
+fn fresh_epoch_requires_a_velocity_demand_to_clear() {
     let (mut adapter, _fc, state) = adapter_with_fake_fc();
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
     drive_fresh_epoch(&state);
 
-    let missing_yaw = flight_frame(
-        vec![
-            (LogicalAxisId::new(ROLL_AXIS), 0.0),
-            (LogicalAxisId::new(PITCH_AXIS), 0.0),
-            (LogicalAxisId::new(THROTTLE_AXIS), 0.0),
-        ],
-        vec![],
-    );
-    let outcome = adapter.apply_control(&missing_yaw);
+    // A typed velocity intent is structurally total (every component is
+    // present, absent means zero), so the legacy "missing declared axis"
+    // hole cannot exist. What still demonstrates nothing is a frame WITHOUT
+    // a velocity demand: an actions-only frame cannot clear the latch.
+    let mut actions_only = flight_frame(vec![], vec![]);
+    actions_only.intent = None;
+    actions_only.actions = vec![pilotage_protocol::ControlAction::Arm];
+    let outcome = adapter.apply_control(&actions_only);
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::ResetInProgress),
-        "a missing declared axis cannot clear the latch"
-    );
-    let outcome = adapter.apply_control(&flight_frame(vec![], vec![]));
-    assert_eq!(
-        outcome.disposition,
-        Disposition::Rejected(RejectReason::ResetInProgress),
-        "an empty control payload cannot clear the latch"
+        "a frame without a velocity demand cannot clear the latch"
     );
 }
 
 #[test]
 fn fresh_epoch_with_active_input_stays_latched() {
     let (mut adapter, _fc, state) = adapter_with_fake_fc();
-    adapter.apply_control(&press(RESET_BUTTON));
+    adapter.apply_control(&lifecycle_reset_frame());
     drive_fresh_epoch(&state);
 
     // An arm edge is not neutral: clearing on it would let the very

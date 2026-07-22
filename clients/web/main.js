@@ -21,11 +21,14 @@ import {
   encodeLeaseRequestEnvelope,
   encodeLeaseReleaseEnvelope,
   encodeControlFrameEnvelope,
+  encodeControlActionCommandEnvelope,
+  encodeProfileActivationEnvelope,
   decodeLengthDelimitedEnvelope,
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
   STREAM_KIND_VIDEO_V2,
-  BUTTON_EDGE_PRESSED,
+  CONTROL_ACTION,
+  MODE_TARGET,
 } from "./wire.js";
 // Real-time wire decode compiles from the host's own Rust definitions
 // (ADR-0014, ADR-0020): the v2 video body (parsed and validated against the
@@ -54,14 +57,35 @@ import { TransportSessionLifecycle } from "./transport-session.js";
 import { runBootstrapReader } from "./bootstrap.js";
 import { createControlGate } from "./control-gate.js";
 import { createReleaseTracker } from "./lease-release.js";
+import {
+  ACTION_TIMEOUT_MS,
+  createActionTracker,
+  enqueueAction,
+  expirePending,
+  pendingModeTarget,
+  resolveAction,
+} from "./action-tracker.js";
 import { negotiateSessionAuthority } from "./connect-authority.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
 import { createReconnectController } from "./reconnect.js";
-import { pressedArmInputs, risingArmEdges } from "./control-edges.js";
 import { startDatagramControl } from "./datagram-control.js";
+import { loadControlShell } from "./control-shell.js";
+import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
+import {
+  INTENT_FAMILY_VELOCITY,
+  INTENT_FAMILY_ATTITUDE_THRUST,
+  INTENT_FAMILY_GIMBAL_RATE,
+  intentCapabilityFor as capabilityFor,
+  actionAdvertised,
+  buildVelocityIntent,
+  buildAttitudeThrustIntent,
+  buildGimbalRateIntent,
+  integrateHeading,
+} from "./typed-command.js";
+import { readUniStream } from "./uni-stream.js";
 
 const VEHICLE_ID = 1n; // demo fixture: the single Gazebo vehicle this host serves.
 const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never first-packet selection.
@@ -71,15 +95,23 @@ const INSTRUMENT_SOURCE_ID = 1n; // explicit simulator adapter source; never fir
 // budget bounds status-to-numeric authorization pairing in the ingress.
 const SIM_COHERENCE_LIMIT_NS = 300_000_000n;
 const MOTION_SCOPE = "vehicle.motion";
+// The direct-flight scope (CTRL-01): attitude + collective under its OWN
+// lease and generation. The FPV toggle is a SCOPE HANDOVER when a vehicle
+// advertises it — never a mode flip reinterpreting velocity numbers.
+const DIRECT_SCOPE = "vehicle.motion.direct";
 const CONTROL_HZ = 30; // continuous control send rate; superseded samples are droppable (ADR-0011).
-const AXIS_ROLL = 0; // pilotage-input logical axis table: roll = 0 (lateral velocity, + right).
-const AXIS_PITCH = 1; // pitch = 1 (forward velocity, + forward).
-const AXIS_THROTTLE = 2; // throttle = 2 (rover: forward speed; quad: climb rate).
-const AXIS_YAW = 3; // yaw = 3 (yaw rate, + clockwise).
-const BUTTON_ARM = 0; // logical button 0: arm (adapter contract).
-const BUTTON_DISARM = 1; // logical button 1: disarm.
-const BUTTON_RESET = 2; // logical button 2: reset the simulation (adapter runs the reset script).
-const BUTTON_FPV_TOGGLE = 3; // logical button 3: camera <-> FPV mode (adapter latches).
+const GIMBAL_SCOPE = "vehicle.gimbal"; // gimbal pointing scope (GIM-01): pitch/yaw LOS rate demands, leased separately.
+// The simulator lifecycle scope (SIM-01): SimReset lives here — and only
+// here — under its own on-demand lease. Flight authority neither grants
+// nor implies it, and a live/RF host never advertises it.
+const SIM_LIFECYCLE_SCOPE = "sim.lifecycle";
+
+/** The exclusive-authority group a motion-family scope belongs to: both
+ *  flight scopes drive one FC and are one authority on the host, whose
+ *  link-loss recovery ack names the GROUP key. */
+function motionGroup(scope) {
+  return scope === DIRECT_SCOPE ? MOTION_SCOPE : scope;
+}
 
 const els = {
   host: document.getElementById("host"),
@@ -92,12 +124,14 @@ const els = {
   gamepad: document.getElementById("gamepad"),
   canvas: document.getElementById("video"),
   chaseCanvas: document.getElementById("chaseVideo"),
+  gimbalCanvas: document.getElementById("gimbalVideo"),
   pfd: document.getElementById("pfd"),
   hsi: document.getElementById("hsi"),
   flightMode: document.getElementById("flightMode"),
 };
 const ctx = els.canvas.getContext("2d");
 const chaseCtx = els.chaseCanvas.getContext("2d");
+const gimbalCtx = els.gimbalCanvas.getContext("2d");
 const pfdCtx = els.pfd.getContext("2d");
 const hsiCtx = els.hsi.getContext("2d");
 const pfdFaultPresenter = createDomFaultPresenter(els.pfd);
@@ -110,20 +144,78 @@ const state = {
   generation: 0n,
   sequence: 0,
   startNanos: BigInt(Date.now()) * 1_000_000n, // arbitrary local monotonic-ish origin for sampled_at (ADR-0009: endpoint-local, never compared raw across endpoints).
-  keys: new Set(),
-  prevArmInputs: new Set(),
+  // The runtime owns key bindings AND the held-key state; the shell only
+  // forwards transitions. This records which Gamepad.id the runtime last
+  // resolved, so selection re-runs only when the device actually changes.
+  selectedPadId: null,
   pendingReset: false,
   pendingFpvToggle: false,
+  // Camera-velocity vs FPV/direct flight, tracked here so the DOM toggle
+  // sends an explicit typed ModeRequest TARGET, never a stateless flip.
+  // Flips ONLY on the host's accepted mode ack (reliable delivery), never
+  // optimistically on send.
+  fpvActive: false,
+  // Pending discrete presses awaiting their ControlActionResult; each rides
+  // every outgoing frame for its scope until acked or timed out.
+  actionTracker: createActionTracker(),
+  // The activation revision last announced on THIS session's reliable
+  // stream, so a device swap (which advances the revision) re-announces
+  // before frames carry the new value. Null until the first announcement.
+  announcedActivationRevision: null,
+  // Which scope currently carries flight: vehicle.motion (velocity) or
+  // vehicle.motion.direct (attitude + collective). Swapped only at the
+  // release boundary of a scope handover.
+  motionScope: MOTION_SCOPE,
+  // The scope the in-flight handover switches to when the release acks.
+  pendingMotionScope: null,
+
+  // The client-integrated direct-flight heading setpoint (rad, local NED),
+  // seeded from telemetry at scope entry; the client OWNS the heading on
+  // the direct scope.
+  fpvHeading: 0,
+  lastDirectFrameMs: 0,
+  // The sim-lifecycle scope's on-demand authority: leased just long enough
+  // to command a reset, released when the result lands (a held-but-silent
+  // scope would only feed the host's silence watchdog).
+  lifecycle: { granted: false, generation: 0n, pendingPress: false },
+  // The typed capability negotiation from ServerWelcome: every advertised
+  // scope with its intent families, limits, and actions. Control fails
+  // closed (no motion frames) until the motion scope advertises velocity.
+  advertisedScopes: [],
   connected: false,
   leaseGranted: false,
+  // The generation the motion lease held when last released: a post-handover
+  // regrant must be strictly newer than this fence to be accepted.
+  motionFence: 0n,
+  // A denied motion reacquire is terminal — the runtime stops re-requesting.
+  motionDenied: false,
+  // Whether the host has confirmed (via LinkLossCleared) it cleared the
+  // vehicle's link-loss latch on the current generation. The runtime keeps
+  // neutralizing until this is true, so recovery never rests on a best-effort
+  // datagram. Irrelevant in steady flight; reset false when a release starts a
+  // new recovery cycle.
+  motionRecovered: true,
+  // The gimbal scope's own lease/fencing state: independent generation and
+  // sequence, granted (or not) without affecting flight control.
+  gimbalGeneration: 0n,
+  gimbalSequence: 0,
+  gimbalLeaseGranted: false,
+  gimbalLeaseDenied: false, // a denied scope is not re-requested this session
+  // The control runtime owns the request debounce, the R3 baseline, and the
+  // gimbal stream latch; the shell holds only the loaded runtime.
+  controlShell: null,
+  // Advances on each fresh connect so the runtime seeds its edge baselines and
+  // a control held across a reconnect fires no edge.
+  controlGeneration: 0,
   skippedVideoFrames: 0,
+  supersededVideoFrames: 0,
   // Page-lifetime latch: wasm absence never heals without a reload (the
   // instrument module loads once at boot), so the H.264-unavailable notice
   // is worth one line, not one line per frame at stream rate.
   h264UnavailableLogged: false,
   droppedIdentityFrames: 0,
   // Latest capture-to-snapshot association verdict for an accepted frame
-  // (ADR-0020), a diagnostic surface only — no conformal overlay is drawn yet.
+  // (ADR-0020). This diagnostic does not authorize a conformal overlay.
   lastAssociation: null,
 };
 const transportSessions = new TransportSessionLifecycle();
@@ -321,7 +413,16 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.sessionId = 0;
     state.generation = 0n;
     state.sequence = 0;
-    state.prevArmInputs = new Set();
+    state.motionFence = 0n;
+    state.motionDenied = false;
+    state.motionRecovered = true;
+    state.gimbalGeneration = 0n;
+    state.gimbalSequence = 0;
+    state.gimbalLeaseGranted = false;
+    state.gimbalLeaseDenied = false;
+    // A fresh session generation: the control runtime seeds its edge baselines
+    // on the first tick, so a control held across the reconnect fires no edge.
+    state.controlGeneration = (state.controlGeneration + 1) >>> 0;
     state.pendingReset = false;
     state.pendingFpvToggle = false;
     state.connected = false;
@@ -363,7 +464,14 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
       // emission: a blur latched during ANY await of this connect
       // suppresses the request entirely.
       requestLease: leaseProbe,
-      sendLeaseRequest: () => sendLeaseRequest(writer, token),
+      sendLeaseRequest: () => {
+        // The activation announcement precedes the LeaseRequest on the SAME
+        // ordered stream: the host records the profile before it can grant
+        // the lease, so no accepted frame ever precedes its traceability
+        // record (INPUT-01).
+        announceProfileActivation(writer);
+        return sendLeaseRequest(writer, token);
+      },
     });
     if (!transportSessions.isActive(token)) return { completed: false, result: SUPERSEDED };
     if (!bootstrap.completed) {
@@ -392,6 +500,10 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     // at transport.ready (which precedes bootstrap).
     reconnect.notifyBootstrapComplete();
     state.sessionWriter = writer;
+    // An auto-reconnect skips the lease path (and its announcement); the
+    // session still needs the traceability record before any later manual
+    // lease request.
+    maybeAnnounceProfileActivation();
     runSessionStreamReader(reader, token).catch((error) => {
       transportSessions.runIfActive(token, () => log(`session stream reader stopped: ${error}`));
     });
@@ -493,8 +605,22 @@ async function sendLeaseRequest(writer, token) {
 function sendLeaseRelease(token) {
   const writer = state.sessionWriter;
   if (!writer || !transportSessions.isActive(token)) return;
+  if (state.gimbalLeaseGranted) {
+    // Fire-and-forget: the gimbal scope has no motion authority, so its
+    // release rides best-effort alongside the tracked motion release
+    // (the host watchdog covers a lost one).
+    state.gimbalLeaseGranted = false;
+    const gimbalRelease = encodeLeaseReleaseEnvelope({
+      vehicleId: VEHICLE_ID,
+      scope: GIMBAL_SCOPE,
+    });
+    writer.write(lengthDelimit(gimbalRelease)).catch(() => {});
+    log("sent LeaseRelease for " + GIMBAL_SCOPE);
+  }
   if (releaseTracker.isPending()) return; // one release per loss; the ack settles it
-  const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope: MOTION_SCOPE });
+  // Input loss releases whichever scope currently carries flight.
+  const scope = state.motionScope;
+  const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope });
   const settled = releaseTracker.begin();
   settled.then((outcome) => {
     transportSessions.runIfActive(token, () => log(`lease release ${outcome}`));
@@ -504,7 +630,30 @@ function sendLeaseRelease(token) {
     // the host watchdog will do the release.
     releaseTracker.abandon();
   });
-  log("sent LeaseRelease for " + MOTION_SCOPE);
+  log("sent LeaseRelease for " + scope);
+}
+
+/** Applies a motion-scope reliable-stream message to the flat authority state
+ *  through the pure {@link advanceMotionLease} transition: it enforces the
+ *  generation fence and terminal denial, and installs a fresh generation
+ *  (restarting the sequence before any frame rides it) only when the grant
+ *  clears the fence. Returns the resulting authority for the caller to log. */
+function applyMotionLease(decoded) {
+  const before = {
+    granted: state.leaseGranted,
+    generation: state.generation,
+    fence: state.motionFence,
+    denied: state.motionDenied,
+  };
+  const after = advanceMotionLease(before, decoded);
+  state.leaseGranted = after.granted;
+  state.motionFence = after.fence;
+  state.motionDenied = after.denied;
+  if (after.generation !== before.generation) {
+    state.generation = after.generation;
+    state.sequence = 0;
+  }
+  return after;
 }
 
 /** Reads the session (bootstrap) stream after the handshake completes:
@@ -519,15 +668,107 @@ async function runSessionStreamReader(reader, token) {
       const decoded = decodeLengthDelimitedEnvelope(pending);
       if (!decoded) break;
       pending = pending.subarray(decoded.consumed);
+      if (decoded.kind === "ControlActionResult") {
+        handleActionResult(decoded.message);
+      }
       if (decoded.kind === "LeaseReleased") {
         // Validate the acknowledgement before it settles anything: an
         // ack for another vehicle or scope proves nothing about ours.
+        // Wire vehicle ids decode as BigInt; comparing through Number
+        // against the BigInt constant is always false.
         const m = decoded.message;
-        if (Number(m.vehicleId) === VEHICLE_ID && m.scope === MOTION_SCOPE) {
+        if (m.vehicleId === VEHICLE_ID && m.scope === state.motionScope) {
           releaseTracker.acknowledge();
+          // The motion lease is released (input-loss OR a profile handover):
+          // drop local authority and fence the released generation so the
+          // runtime gates motion output and only re-requests once reflected. A
+          // release opens a new recovery cycle, so the host's prior
+          // confirmation no longer applies until it clears the fresh generation.
+          applyMotionLease(decoded);
+          state.motionRecovered = false;
           log(`LeaseReleased: released=${m.released} generation=${m.generation}`);
+          if (state.pendingMotionScope) {
+            // The scope handover's release boundary: flight moves to the
+            // sibling scope. Both siblings share ONE authority group on the
+            // host — one generation domain (the fence carries over) and one
+            // link-loss latch, so recovery is ALWAYS required and its ack
+            // names the group.
+            state.motionScope = state.pendingMotionScope;
+            state.pendingMotionScope = null;
+            if (state.motionScope === DIRECT_SCOPE) {
+              const heading = currentTelemetryHeading();
+              state.fpvHeading = heading ?? 0;
+              state.lastDirectFrameMs = 0;
+            }
+            log(`motion scope is now ${state.motionScope}`);
+          }
+        } else if (m.vehicleId === VEHICLE_ID && m.scope === GIMBAL_SCOPE) {
+          log(`LeaseReleased[gimbal]: released=${m.released} generation=${m.generation}`);
         } else {
           log(`ignoring LeaseReleased for vehicle=${m.vehicleId} scope=${m.scope}`);
+        }
+      }
+      if (
+        decoded.kind === "LeaseResponse" &&
+        decoded.message.scope === GIMBAL_SCOPE &&
+        decoded.message.vehicleId === VEHICLE_ID
+      ) {
+        // The gimbal lease is requested after bootstrap, so its response
+        // arrives here rather than in the bootstrap reader. Another
+        // vehicle's response must never install our generation.
+        const m = decoded.message;
+        state.gimbalGeneration = BigInt(m.generation || 0);
+        state.gimbalLeaseGranted = !!m.granted;
+        state.gimbalLeaseDenied = !m.granted;
+        log(`LeaseResponse[gimbal]: granted=${m.granted} generation=${m.generation}`);
+        if (!m.granted) {
+          log(`gimbal lease denied (reason ${m.reason}); flight control is unaffected`);
+        }
+      }
+      if (
+        decoded.kind === "LeaseResponse" &&
+        decoded.message.scope === SIM_LIFECYCLE_SCOPE &&
+        decoded.message.vehicleId === VEHICLE_ID
+      ) {
+        const m = decoded.message;
+        state.lifecycle.granted = !!m.granted;
+        state.lifecycle.generation = BigInt(m.generation || 0);
+        log(`LeaseResponse[lifecycle]: granted=${m.granted} generation=${m.generation}`);
+        if (m.granted && state.lifecycle.pendingPress) {
+          state.lifecycle.pendingPress = false;
+          if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
+            log("simulation reset requested");
+          }
+        } else if (!m.granted) {
+          state.lifecycle.pendingPress = false;
+          log(`sim reset authorization denied (reason ${m.reason})`);
+        }
+      }
+      if (
+        decoded.kind === "LeaseResponse" &&
+        decoded.message.scope === state.motionScope &&
+        decoded.message.vehicleId === VEHICLE_ID
+      ) {
+        // A motion lease response after a profile handover. The pure transition
+        // enforces the fence (a grant must be strictly newer than the released
+        // generation) and the terminal denial; a fresh grant installs the new
+        // generation and restarts the sequence BEFORE any frame rides it, so
+        // the runtime resumes only on verified authority. Another vehicle's
+        // response never installs ours (filtered above).
+        const m = decoded.message;
+        const after = applyMotionLease(decoded);
+        if (after.stale !== undefined) {
+          log(`ignoring stale motion grant generation=${m.generation} (fence ${after.fence})`);
+        } else if (after.denied) {
+          log(`motion lease denied (reason ${m.reason}); control stays suspended`);
+        } else {
+          // Direct-flight state follows the GRANTED scope, never a local
+          // optimistic flip.
+          state.fpvActive = state.motionScope === DIRECT_SCOPE;
+          els.overlay.textContent = state.fpvActive
+            ? "direct (FPV) flight scope granted"
+            : "camera flight scope granted";
+          log(`LeaseResponse[motion:${state.motionScope}]: granted generation=${m.generation}`);
         }
       }
     }
@@ -559,8 +800,34 @@ function handleBootstrapMessage(decoded, token) {
   if (!transportSessions.isActive(token)) return;
   if (decoded.kind === "ServerWelcome") {
     state.sessionId = decoded.message.sessionId;
+    state.advertisedScopes = decoded.message.advertisedScopes ?? [];
+    // Correlation ids are per-connection; presses from a dead session must
+    // not retransmit into a new one, and the new session has announced
+    // nothing yet. Flight restarts on the velocity scope.
+    state.actionTracker = createActionTracker();
+    state.announcedActivationRevision = null;
+    state.motionScope = MOTION_SCOPE;
+    state.pendingMotionScope = null;
+    state.fpvActive = false;
+    state.lifecycle = { granted: false, generation: 0n, pendingPress: false };
     log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
+    for (const scope of state.advertisedScopes) {
+      const families = scope.intents.map((i) => i.family).join(",");
+      log(`capability: ${scope.scope} intents=[${families}] actions=${scope.actions.length}`);
+    }
+    if (!velocityCapabilityFor(MOTION_SCOPE)) {
+      log("vehicle advertises no velocity intent for vehicle.motion; motion control disabled");
+    }
+  } else if (decoded.kind === "ControlActionResult") {
+    handleActionResult(decoded.message);
   } else if (decoded.kind === "LeaseResponse") {
+    // Bootstrap requests only the motion lease, but route by scope
+    // anyway: a response for any other scope must not overwrite the
+    // motion generation.
+    if (decoded.message.scope && decoded.message.scope !== MOTION_SCOPE) {
+      log(`ignoring bootstrap LeaseResponse for scope=${decoded.message.scope}`);
+      return;
+    }
     state.generation = BigInt(decoded.message.generation || 0);
     state.leaseGranted = !!decoded.message.granted;
     log(`LeaseResponse: granted=${decoded.message.granted} generation=${decoded.message.generation}`);
@@ -615,29 +882,28 @@ async function acceptIncomingUniStreams(transport, token) {
   });
 }
 
-/** Drains one uni stream to completion, buffering bytes, reading the kind tag, then dispatching. */
+/** Drains one uni stream to completion via the shared {@link readUniStream}
+ *  core (kind tag + live authority dispatch), then renders a video body at
+ *  close. */
 async function readOneUniStream(stream, token) {
   if (!transportSessions.isActive(token)) return;
   const reader = stream.getReader();
   if (!transportSessions.trackReader(token, reader)) return;
-  let buf = new Uint8Array(0);
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (!transportSessions.isActive(token)) return;
-      if (value) buf = appendBytes(buf, value);
-      if (done) break;
-    }
-    if (buf.length === 0) return;
-    const kind = buf[0];
-    const body = buf.subarray(1);
-    if (kind === STREAM_KIND_AUTHORITY) {
-      dispatchAuthorityStream(body, token);
-    } else if (kind === STREAM_KIND_VIDEO_V2) {
-      await renderVideoFrameV2(body, token);
+    const { kind, tail, aborted } = await readUniStream(reader, {
+      authorityKind: STREAM_KIND_AUTHORITY,
+      decode: decodeLengthDelimitedEnvelope,
+      onAuthorityEnvelope: (decoded) => dispatchAuthorityEnvelope(decoded, token),
+      shouldContinue: () => transportSessions.isActive(token),
+    });
+    if (aborted) return;
+    // Video streams are per-frame: the whole body is one frame, rendered at
+    // close. (Authority already dispatched incrementally inside readUniStream.)
+    if (kind === STREAM_KIND_VIDEO_V2) {
+      await renderVideoFrameV2(tail, token);
     } else if (kind === STREAM_KIND_VIDEO) {
-      await renderVideoFrame(body, token);
-    } else {
+      await renderVideoFrame(tail, token);
+    } else if (kind !== null && kind !== STREAM_KIND_AUTHORITY) {
       log(`unrecognized uni stream kind tag 0x${kind.toString(16)}`);
     }
   } finally {
@@ -646,30 +912,36 @@ async function readOneUniStream(stream, token) {
 }
 
 /** The dedicated authority-events stream is opened once at connection start and may carry several length-delimited envelopes over the stream's lifetime; decode every complete one buffered. */
-function dispatchAuthorityStream(body, token) {
+/** Handles one authority-stream envelope, decoded live as it arrives. */
+function dispatchAuthorityEnvelope(decoded, token) {
   if (!transportSessions.isActive(token)) return;
-  let pending = body;
-  for (;;) {
-    const decoded = decodeLengthDelimitedEnvelope(pending);
-    if (!decoded) return;
-    pending = pending.subarray(decoded.consumed);
-    if (decoded.kind === "AuthorityEvent") {
-      els.overlay.textContent = `authority: ${decoded.message.arm}`;
-      log(`authority event: ${decoded.message.arm}`);
+  if (decoded.kind === "AuthorityEvent") {
+    els.overlay.textContent = `authority: ${decoded.message.arm}`;
+    log(`authority event: ${decoded.message.arm}`);
+  } else if (decoded.kind === "LinkLossCleared") {
+    // The host confirmed it cleared the vehicle's link-loss latch. Resume live
+    // control only when it correlates to OUR pending recovery (vehicle + motion
+    // scope + the current fresh generation) — the shared transition the
+    // uni-stream test drives.
+    if (applyMotionRecovery(decoded, state, VEHICLE_ID, motionGroup(state.motionScope))) {
+      log(`LinkLossCleared[motion]: recovery confirmed on generation=${decoded.message.generation}`);
     }
   }
 }
 
-// The source_id (0 = onboard FPV, 1 = chase) routes a frame to its canvas. An
-// unknown source_id is counted and logged, never a hard failure, so a host
-// streaming a source this viewer lacks degrades gracefully. Codec dispatch is
+// The source_id (0 = onboard FPV, 1 = chase, 2 = gimbal payload) routes a frame
+// to its canvas. An unknown source_id is counted and logged, never a hard
+// failure, so a host streaming a source this viewer lacks degrades
+// gracefully. Codec dispatch is
 // separate: "MJPG" paints via createImageBitmap; "H264" routes to WebCodecs.
 const FOURCC_MJPEG = "MJPG";
 const SOURCE_FPV = 0;
 const SOURCE_CHASE = 1;
+const SOURCE_GIMBAL = 2;
 const VIDEO_TARGETS = {
   [SOURCE_FPV]: { canvas: els.canvas, ctx },
   [SOURCE_CHASE]: { canvas: els.chaseCanvas, ctx: chaseCtx },
+  [SOURCE_GIMBAL]: { canvas: els.gimbalCanvas, ctx: gimbalCtx },
 };
 
 // Per-source H.264 decoders, each bound to the transport session that built it
@@ -893,7 +1165,52 @@ async function readTelemetryDatagrams(transport, token) {
       } else if (decoded.kind === "Pong") {
         // RTT probing is out of scope for this demo viewer; ignored.
       } else if (decoded.kind === "FrameRejected") {
-        log(`control frame rejected (reason ${decoded.message.reason})`);
+        const r = decoded.message;
+        log(
+          `control frame rejected (reason ${r.reason}) scope=${r.scope} ` +
+            `seq=${r.sequence} hostGen=${r.currentGeneration}`,
+        );
+        // A fenced rejection on the GIMBAL scope while we think we hold it:
+        // the host revoked (e.g. the silence watchdog during a stall). Drop
+        // the local grant so the quasimode's lease planner re-requests,
+        // instead of streaming rejected frames forever.
+        if (
+          (r.reason === 1 || r.reason === 2) &&
+          r.scope === GIMBAL_SCOPE &&
+          state.gimbalLeaseGranted
+        ) {
+          state.gimbalLeaseGranted = false;
+          log("host fenced our gimbal authority; the lease planner will re-request");
+        }
+        // Reasons 1 (stale generation) and 2 (no holder) on the motion
+        // group while we believe we hold it mean the host fenced us out —
+        // typically the silence watchdog revoked during a stall. Drop the
+        // local grant and re-request (debounced), instead of streaming
+        // rejected frames forever.
+        if (
+          (r.reason === 1 || r.reason === 2) &&
+          motionGroup(r.scope) === motionGroup(state.motionScope) &&
+          state.leaseGranted
+        ) {
+          state.leaseGranted = false;
+          state.motionRecovered = false;
+          if (r.currentGeneration !== undefined) {
+            state.motionFence = BigInt(r.currentGeneration);
+          }
+          const nowMs = performance.now();
+          if (nowMs - (state.lastAuthorityReacquireMs ?? 0) > 500) {
+            state.lastAuthorityReacquireMs = nowMs;
+            const writer = state.sessionWriter;
+            if (writer) {
+              const request = encodeLeaseRequestEnvelope({
+                vehicleId: VEHICLE_ID,
+                scope: state.motionScope,
+              });
+              writer.write(lengthDelimit(request)).catch(() => {});
+              log("host fenced our motion authority; reacquiring the lease");
+            }
+          }
+        }
       }
     }
   } finally {
@@ -903,297 +1220,45 @@ async function readTelemetryDatagrams(transport, token) {
 
 // ---- keyboard -> control frame datagrams -----------------------------------
 
-const DRIVE_KEYS = new Set([
-  "ArrowUp",
-  "ArrowDown",
-  "ArrowLeft",
-  "ArrowRight",
-  "w",
-  "a",
-  "s",
-  "d",
-  "W",
-  "A",
-  "S",
-  "D",
-  "Enter",
-  "Backspace",
-]);
-
-// Keys are stored raw (letters lower-cased) so rover and flight modes can
-// map WASD and the arrows independently.
+// Which keys the page captures is a device-profile question, answered by the
+// runtime's keyboard profile data (boundKey) — no key list lives here. Keys
+// are canonicalized (letters lower-cased) so the profile speaks one form.
 function canonicalKey(key) {
   return key.length === 1 ? key.toLowerCase() : key;
 }
-window.addEventListener("keydown", (event) => {
-  if (DRIVE_KEYS.has(event.key)) {
-    state.keys.add(canonicalKey(event.key));
-    event.preventDefault();
+function forwardKey(event, pressed) {
+  if (!state.controlShell) return;
+  const key = canonicalKey(event.key);
+  if (!state.controlShell.boundKey(key)) return;
+  state.controlShell.keyEvent(key, pressed);
+  event.preventDefault();
+}
+window.addEventListener("keydown", (event) => forwardKey(event, true));
+window.addEventListener("keyup", (event) => forwardKey(event, false));
+
+// A pad disconnect — including the disconnect half of a same-model
+// replacement — returns control to the keyboard TRANSACTIONALLY and
+// re-announces the keyboard's real identity. The reconnect (or the
+// replacement's connect half) re-selects through the same path, so a new
+// physical unit is always a fresh activation.
+window.addEventListener("gamepaddisconnected", (event) => {
+  if (!state.controlShell) return;
+  if (state.selectedPadId !== null && event.gamepad?.id === state.selectedPadId) {
+    state.selectedPadId = null;
+    state.controlShell.deselectDevice();
+    log(`gamepad disconnected: ${event.gamepad.id}; control returns to the keyboard`);
   }
 });
-window.addEventListener("keyup", (event) => {
-  if (DRIVE_KEYS.has(event.key)) {
-    state.keys.delete(canonicalKey(event.key));
-    event.preventDefault();
-  }
-});
-
-/** Maps current key state to [throttle, yaw] axis values in [-1.0, 1.0]. */
-function axesFromKeys() {
-  const k = (key) => (state.keys.has(key) ? 1 : 0);
-  const throttle = k("ArrowUp") + k("w") - k("ArrowDown") - k("s");
-  const yaw = k("ArrowRight") + k("d") - k("ArrowLeft") - k("a");
-  return [Math.max(-1, Math.min(1, throttle)), Math.max(-1, Math.min(1, yaw))];
-}
-
-/** Keyboard fallback for flight modes: W/S = climb/descend, A/D = yaw,
- *  arrows = forward/back + left/right translation. */
-function flightAxesFromKeys() {
-  const k = (key) => (state.keys.has(key) ? 1 : 0);
-  return {
-    roll: k("ArrowRight") - k("ArrowLeft"),
-    pitch: k("ArrowUp") - k("ArrowDown"),
-    throttle: k("w") - k("s"),
-    yaw: k("d") - k("a"),
-  };
-}
-
-// Per-controller FPV mapping profiles. EdgeTX radios (RadioMaster Pocket) output
-// the "Classic Joystick" report in AETR channel order over 8 HID axes, and
-// EdgeTX maps CH1->axis0, CH2->axis1, CH3->axis2, CH4->axis3, so:
-//   axis 0 = Aileron (roll), 1 = Elevator (pitch), 2 = Throttle, 3 = Rudder (yaw).
-// The FPV convention drives with throttle for speed and rudder for yaw (both the
-// left stick in Mode 2). Throttle does not self-center — it holds its position
-// like an aircraft throttle — so centering it stops the vehicle.
-// Field of a profile: forwardAxis/turnAxis (HID axis index), forwardSign/turnSign
-// (+1 or -1), deadzone. A `match(id)` picks the profile from the gamepad id.
-const CONTROLLER_PROFILES = [
-  {
-    name: "RadioMaster Pocket (EdgeTX, FPV AETR)",
-    match: (id) => /radiomaster|pocket|1209/i.test(id),
-    forwardAxis: 2, // throttle
-    forwardSign: 1, // stick up = forward, center = stop, down = reverse
-    turnAxis: 3, // rudder
-    turnSign: -1, // rudder right = turn right (negative yaw-rate in Gazebo)
-  },
-  {
-    // PS4 (DualShock 4) / PS5 (DualSense) map to the browser "Standard Gamepad"
-    // layout: axis 0 = left stick X, 1 = left stick Y, 2 = right stick X,
-    // 3 = right stick Y, with stick-up reported as negative. Both sticks
-    // self-center, so releasing stops the vehicle. Drive from the left stick
-    // (throttle = vertical, yaw = horizontal), matching the FPV convention.
-    name: "PS4/PS5 pad (Standard Gamepad)",
-    match: (id) => /054c|dualshock|dualsense|wireless controller|standard gamepad/i.test(id),
-    forwardAxis: 1, // left stick vertical
-    forwardSign: -1, // stick up (negative) = forward
-    turnAxis: 0, // left stick horizontal
-    turnSign: -1, // stick right (positive) = turn right (negative yaw-rate)
-    deadzone: 0.06,
-    standard: true, // W3C Standard Gamepad layout: flight schemes apply
-  },
-];
-
-// Flight-mode stick schemes for Standard Gamepad pads. Both
-// command the identical velocity control law — only stick assignment
-// differs. Browser reports stick-up as negative, hence the -1 signs.
-//   pilot  = RC Mode 2 (camera-drone default): left = climb+yaw,
-//            right = translate.
-//   cruise = game-native: left = translate, right X = yaw,
-//            R2/L2 analog triggers = climb/descend.
-// DualSense standard mapping: axes 0/1 left X/Y, 2/3 right X/Y;
-// buttons 6/7 = L2/R2 analog, 8 = create/share, 9 = options.
-const FLIGHT_SCHEMES = {
-  "quad-pilot": (raw) => ({
-    throttle: -raw(1),
-    yaw: raw(0),
-    pitch: -raw(3),
-    roll: raw(2),
-    label: "PILOT (Mode 2): L=climb/yaw R=move",
-  }),
-  "quad-cruise": (raw, buttons) => ({
-    pitch: -raw(1),
-    roll: raw(0),
-    yaw: raw(2),
-    throttle: (buttons[7]?.value ?? 0) - (buttons[6]?.value ?? 0),
-    label: "CRUISE: L=move RX=yaw R2/L2=climb",
-  }),
-  // FPV: same Mode-2 stick geometry as PILOT, but the adapter is in
-  // attitude mode — right stick commands tilt ANGLES, throttle is
-  // direct collective around hover. Toggle with the FPV button.
-  fpv: (raw) => ({
-    throttle: -raw(1),
-    yaw: raw(0),
-    pitch: -raw(3),
-    roll: raw(2),
-    label: "FPV: R=tilt angle L=thrust/yaw",
-  }),
-};
-// Gamepad buttons that fire arm/disarm edges: options (9) arms,
-// create/share (8) disarms — deliberately away from the face buttons.
-const PAD_ARM_BUTTON = 9;
-const PAD_DISARM_BUTTON = 8;
-
-/** Maps a Standard-Gamepad pad to flight axes under the given scheme;
- *  non-standard pads (EdgeTX radios) use their AETR axes directly, which
- *  is true RC Mode 2 on a real radio. */
-function flightAxesFromGamepad(pad, profile, mode) {
-  const rawAt = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
-  const clamp = (v) => Math.max(-1, Math.min(1, v));
-  const dz = profile.deadzone ?? 0.1;
-  // Cubic expo (50%): fine authority near center, full range at the
-  // ends — half of the DJI feel; the uplink's slew limit is the other.
-  const expo = (v) => 0.35 * v * v * v + 0.65 * v;
-  const shaped = (v) => expo(clamp(Math.abs(v) < dz ? 0 : v));
-  const raw = (i) => shaped(rawAt(i));
-  if (profile.standard) {
-    const scheme = FLIGHT_SCHEMES[mode] ?? FLIGHT_SCHEMES["quad-pilot"];
-    const a = scheme(raw, pad.buttons ?? []);
-    return {
-      roll: clamp(a.roll),
-      pitch: clamp(a.pitch),
-      throttle: clamp(a.throttle),
-      yaw: clamp(a.yaw),
-      label: a.label,
-    };
-  }
-  // EdgeTX AETR HID order: 0 roll, 1 pitch, 2 throttle, 3 yaw.
-  return {
-    roll: raw(0),
-    pitch: -raw(1),
-    throttle: raw(2),
-    yaw: -raw(3),
-    label: "radio AETR (Mode 2)",
-  };
-}
-
-/** The arm/disarm inputs held right now, from gamepad buttons and keys: Enter
- *  arms, Backspace disarms; pad options (9) arms, create (8) disarms. */
-function currentArmInputs(pad) {
-  return pressedArmInputs({
-    padArm: !!pad?.buttons?.[PAD_ARM_BUTTON]?.pressed,
-    padDisarm: !!pad?.buttons?.[PAD_DISARM_BUTTON]?.pressed,
-    keyArm: state.keys.has("Enter"),
-    keyDisarm: state.keys.has("Backspace"),
-  });
-}
-
-/** One-shot arm/disarm edges: only inputs newly pressed since last tick fire.
- *  `state.prevArmInputs` is primed to the held set at control start, so a
- *  button held across a reconnect does not read as a fresh command. */
-function collectArmEdges(pad) {
-  const pressedNow = currentArmInputs(pad);
-  const edges = [];
-  for (const which of risingArmEdges(pressedNow, state.prevArmInputs)) {
-    const arm = which.endsWith("-arm");
-    edges.push([arm ? BUTTON_ARM : BUTTON_DISARM, BUTTON_EDGE_PRESSED]);
-    els.overlay.textContent = arm ? "ARM sent" : "DISARM sent";
-    log(arm ? "arm command sent" : "disarm command sent");
-  }
-  state.prevArmInputs = pressedNow;
-  return edges;
-}
-// Fallback for any other gamepad: drive from the left stick's self-centering
-// vertical/horizontal axes so the vehicle stops when the stick is released.
-const GENERIC_PROFILE = {
-  name: "generic gamepad",
-  forwardAxis: 1,
-  forwardSign: -1, // browsers report stick-up as negative
-  turnAxis: 0,
-  turnSign: -1, // stick right (positive) = turn right (negative yaw-rate in Gazebo)
-  deadzone: 0.1,
-};
-
-// User overrides for the active profile, taken from URL query params today; this
-// is the seam a future in-app remapping UI plugs into. Any of ?fwd= ?turn=
-// ?fwdsign= ?turnsign= ?deadzone= replaces the corresponding profile field.
-function overrideProfile(profile) {
-  const q = new URLSearchParams(window.location.search);
-  const intParam = (name, fallback) => {
-    const v = Number.parseInt(q.get(name) ?? "", 10);
-    return Number.isInteger(v) ? v : fallback;
-  };
-  const numParam = (name, fallback) => {
-    const v = Number.parseFloat(q.get(name) ?? "");
-    return Number.isFinite(v) ? v : fallback;
-  };
-  const signParam = (name, fallback) => (intParam(name, fallback) < 0 ? -1 : 1);
-  return {
-    name: q.has("fwd") || q.has("turn") ? `${profile.name} (overridden)` : profile.name,
-    forwardAxis: intParam("fwd", profile.forwardAxis),
-    forwardSign: signParam("fwdsign", profile.forwardSign),
-    turnAxis: intParam("turn", profile.turnAxis),
-    turnSign: signParam("turnsign", profile.turnSign),
-    deadzone: numParam("deadzone", profile.deadzone),
-    standard: profile.standard === true,
-  };
-}
 
 /** Returns the first connected gamepad that matches a known profile, else any
  *  connected gamepad, else null. A gamepad is exposed to the page only after the
  *  user moves a stick or presses a button once. */
 function activeGamepad() {
   const pads = (navigator.getGamepads && navigator.getGamepads()) || [];
-  let firstConnected = null;
   for (const pad of pads) {
-    if (!pad || !pad.connected) continue;
-    firstConnected = firstConnected || pad;
-    if (CONTROLLER_PROFILES.some((p) => p.match(pad.id))) return pad;
+    if (pad && pad.connected) return pad;
   }
-  return firstConnected;
-}
-
-/** Picks the FPV profile for a gamepad id and applies user overrides. */
-function profileFor(id) {
-  const base = CONTROLLER_PROFILES.find((p) => p.match(id)) || GENERIC_PROFILE;
-  return overrideProfile(base);
-}
-
-/** Maps a gamepad's axes to [throttle, yaw] in [-1.0, 1.0] under `profile`. */
-function axesFromGamepad(pad, profile) {
-  const raw = (i) => (i >= 0 && i < pad.axes.length ? pad.axes[i] : 0);
-  const clamp = (v) => Math.max(-1, Math.min(1, v));
-  const deadzone = (v) => (Math.abs(v) < profile.deadzone ? 0 : v);
-  const throttle = clamp(deadzone(profile.forwardSign * raw(profile.forwardAxis)));
-  const yaw = clamp(deadzone(profile.turnSign * raw(profile.turnAxis)));
-  return [throttle, yaw];
-}
-
-/** Updates the gamepad readout so the active profile and axis-to-control mapping
- *  are visible while driving (and easy to re-map with the ?fwd=/?turn= overrides). */
-function updateGamepadReadout(pad, profile, throttle, yaw) {
-  if (!pad) {
-    els.gamepad.textContent = "gamepad: none (move a stick to detect) — using keyboard";
-    return;
-  }
-  const axes = Array.from(pad.axes, (v) => v.toFixed(2)).join(", ");
-  els.gamepad.textContent =
-    `gamepad: ${pad.id} [${profile.name}] | axes[${axes}] | ` +
-    `throttle=${throttle.toFixed(2)} (axis ${profile.forwardAxis}) ` +
-    `yaw=${yaw.toFixed(2)} (axis ${profile.turnAxis})`;
-}
-
-/** Shows the live 4-axis flight mapping and stick values. */
-function updateFlightReadout(pad, f) {
-  const src = pad ? `${pad.id.slice(0, 24)} [${f.label}]` : "keyboard (WS=climb AD=yaw arrows=move)";
-  els.gamepad.textContent =
-    `flight: ${src} | roll=${f.roll.toFixed(2)} pitch=${f.pitch.toFixed(2)} ` +
-    `climb=${f.throttle.toFixed(2)} yaw=${f.yaw.toFixed(2)} | arm: Options/Enter, disarm: Create/Backspace`;
-}
-
-/** Neutral (zeroed) control axes for a flight mode: rover carries only
- *  throttle/yaw, the flight modes carry roll/pitch/throttle/yaw. */
-function neutralAxesFor(mode) {
-  return mode === "rover"
-    ? [
-        [AXIS_THROTTLE, 0],
-        [AXIS_YAW, 0],
-      ]
-    : [
-        [AXIS_ROLL, 0],
-        [AXIS_PITCH, 0],
-        [AXIS_THROTTLE, 0],
-        [AXIS_YAW, 0],
-      ];
+  return null;
 }
 
 /** Sends one control-fast datagram at `CONTROL_HZ`, carrying the latest key-derived axes (superseded samples are droppable, ADR-0011). */
@@ -1219,10 +1284,8 @@ function startControlLoop(transport, token) {
 
 /** Runs the control-fast send loop with an acquired, session-owned writer. */
 async function runControlLoop(writer, token) {
-  // Prime the arm-edge baseline to whatever is held right now, so a button held
-  // down as control starts (e.g. across a reconnect) is not read as a fresh
-  // arm/disarm on the first tick.
-  state.prevArmInputs = currentArmInputs(activeGamepad());
+  // The control runtime owns every edge baseline (arm/disarm/R3), so a button
+  // held across a reconnect cannot read as a fresh edge — no priming here.
   const intervalMs = 1000 / CONTROL_HZ;
   // Self-paced async loop rather than setInterval: it awaits the writer's
   // backpressure signal (`ready`) before each send, so datagrams never queue up
@@ -1249,67 +1312,431 @@ async function runControlLoop(writer, token) {
         // client-side neutral would both violate the latch invariant and
         // refresh the very setpoint freshness the silence watchdog (the
         // independent backup) is watching.
-        state.prevArmInputs = new Set();
         sendLeaseRelease(token);
         els.gamepad.textContent =
           "control released — input lost; press Connect to resume control";
         log("input lost — control authority released (host acknowledges or watchdog covers)");
         return;
       }
-      const pad = activeGamepad();
-      const profile = pad ? profileFor(pad.id) : null;
-      let axes;
-      let edges = [];
-      if (mode === "rover") {
-        // Ground vehicles (the Gazebo yard world) accept only the
-        // throttle/yaw pair; extra axes would be rejected as unknown.
-        const [throttle, yaw] = pad ? axesFromGamepad(pad, profile) : axesFromKeys();
-        updateGamepadReadout(pad, profile, throttle, yaw);
-        axes = [
-          [AXIS_THROTTLE, throttle],
-          [AXIS_YAW, yaw],
-        ];
-      } else {
-        const f = pad ? flightAxesFromGamepad(pad, profile, mode) : flightAxesFromKeys();
-        updateFlightReadout(pad, f);
-        edges = collectArmEdges(pad);
-        if (state.pendingFpvToggle) {
-          state.pendingFpvToggle = false;
-          edges.push([BUTTON_FPV_TOGGLE, BUTTON_EDGE_PRESSED]);
-        }
-        if (state.pendingReset) {
-          state.pendingReset = false;
-          edges.push([BUTTON_RESET, BUTTON_EDGE_PRESSED]);
-          log("simulation reset requested");
-        }
-        axes = [
-          [AXIS_ROLL, f.roll],
-          [AXIS_PITCH, f.pitch],
-          [AXIS_THROTTLE, f.throttle],
-          [AXIS_YAW, f.yaw],
-        ];
+      // The control runtime maps every input; until its wasm has loaded there
+      // is no mapping to run, so idle this tick rather than send anything.
+      if (!state.controlShell) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
       }
+      // One WASM call per tick maps the raw sample (gamepad or keyboard) to
+      // the whole plan: the motion frame, the gimbal quasimode frame, and the
+      // lease action. All device mapping, curves, masking, edge detection, and
+      // lease planning live in the runtime; this shell only executes the plan.
+      const pad = activeGamepad();
+      // Resolve the pad's profile through the runtime's shared selector the
+      // moment its identity changes. A refused selection (ambiguous registry)
+      // keeps NO device map: those ticks sample empty and drive nothing.
+      if (pad && pad.id !== state.selectedPadId) {
+        state.selectedPadId = pad.id;
+        const outcome = state.controlShell.selectDevice(pad.id);
+        if (outcome === null) {
+          log(`gamepad REFUSED (ambiguous device-profile registry): ${pad.id}`);
+        } else {
+          log(`gamepad selected (${outcome}): ${pad.id}`);
+        }
+      } else if (!pad && state.selectedPadId !== null) {
+        // Poll-level backstop for a disconnect whose DOM event was missed.
+        state.selectedPadId = null;
+        state.controlShell.deselectDevice();
+        log("gamepad gone; control returns to the keyboard");
+      }
+      const sessionState = {
+        generation: state.controlGeneration,
+        mode,
+        connected: state.connected,
+        leaseGranted: state.gimbalLeaseGranted,
+        leaseDenied: state.gimbalLeaseDenied,
+        // The MOTION lease grant: the runtime gates all motion output until it
+        // is regranted on a fresh generation after a profile handover, so a
+        // remapped scheme never publishes on the released generation.
+        motionGranted: state.leaseGranted,
+        // A denied reacquire is terminal — the runtime stops re-requesting.
+        motionDenied: state.motionDenied,
+        // The runtime stays neutralizing after a handover until the host
+        // confirms it cleared the vehicle's link-loss latch on this generation.
+        motionRecovered: state.motionRecovered,
+        nowMs: performance.now(),
+      };
+      const plan = pad
+        ? state.controlShell.tickFromPad(pad, sessionState)
+        : state.controlShell.tickFromKeys(sessionState);
+      updateControlReadout(pad, mode, plan);
+      reportExpiredActions();
+      if (state.pendingReset) {
+        state.pendingReset = false;
+        requestSimReset();
+      }
+      // A completed device-swap handover advances the activation revision;
+      // the re-announcement must ride the reliable stream before the swap's
+      // lease reacquisition (queued below via plan.motionLease) so frames
+      // never carry an unannounced revision.
+      maybeAnnounceProfileActivation();
       // Re-check the latch immediately before the write: no frame may be
       // sent under this generation once input loss latched, regardless of
       // which await the latch interleaved with.
       if (!controlGate.mayPublish()) continue;
-      state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
-      const envelope = encodeControlFrameEnvelope({
-        sessionId: state.sessionId,
-        vehicleId: VEHICLE_ID,
-        scope: MOTION_SCOPE,
-        generation: state.generation,
-        sequence: state.sequence,
-        sampledAtNanos: nowNanos(),
-        profileRevision: 1,
-        axes,
-        edges,
-      });
-      writer.write(envelope).catch((error) => {
-        transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
-      });
+      if (plan.motion) {
+        sendMotionFrame(writer, token, mode, plan);
+      }
+      if (plan.gimbal) {
+        sendGimbalFrame(writer, token, plan.gimbal);
+      }
+      if (plan.lease) {
+        executeLeaseAction(token, plan.lease, GIMBAL_SCOPE);
+      }
+      if (plan.motionLease) {
+        // A profile switch (or scope handover) cycles the motion lease so
+        // the host fences the old flight generation before the remapped
+        // scheme runs (distinct from the input-loss release, which drives
+        // the link-loss policy).
+        executeLeaseAction(token, plan.motionLease, state.motionScope);
+      }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+}
+
+function velocityCapabilityFor(scope) {
+  return capabilityFor(state.advertisedScopes, VEHICLE_ID, scope, INTENT_FAMILY_VELOCITY);
+}
+
+/** The fencing generation the client holds `scope` at — the binding every
+ *  action command carries. */
+function generationForScope(scope) {
+  if (scope === GIMBAL_SCOPE) return state.gimbalGeneration;
+  if (scope === SIM_LIFECYCLE_SCOPE) return state.lifecycle.generation;
+  return state.generation;
+}
+
+/** The reset press: a LIFECYCLE action under its own lease (SIM-01), never
+ *  flight authority. Leases the scope on demand, sends the reset once
+ *  granted, and releases when the result lands. */
+function requestSimReset() {
+  if (!actionAdvertised(state.advertisedScopes, VEHICLE_ID, SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
+    log("sim reset not advertised (not a simulator host); not sent");
+    return;
+  }
+  if (state.lifecycle.granted) {
+    if (requestAction(SIM_LIFECYCLE_SCOPE, CONTROL_ACTION.simReset)) {
+      log("simulation reset requested");
+    }
+    return;
+  }
+  state.lifecycle.pendingPress = true;
+  const writer = state.sessionWriter;
+  if (!writer) return;
+  const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope: SIM_LIFECYCLE_SCOPE });
+  writer.write(lengthDelimit(request)).catch(() => {});
+  log(`sent LeaseRequest for ${SIM_LIFECYCLE_SCOPE} (reset authorization)`);
+}
+
+/** Gates a press on the vehicle's advertisement (CTRL-01: nothing sends
+ *  without a matching capability — a suppressed press is logged so the
+ *  operator sees WHY nothing fired), then sends it ONCE as a
+ *  `ControlActionCommand` on the RELIABLE ordered session stream, bound to
+ *  the session, vehicle, scope, held generation, and announced activation
+ *  revision. The press stays pending until its result echoes the id. */
+function requestAction(scope, action, modeTarget, cancels = []) {
+  if (!actionAdvertised(state.advertisedScopes, VEHICLE_ID, scope, action, modeTarget)) {
+    log(`action ${action} not advertised for ${scope}; not sent`);
+    return false;
+  }
+  const writer = state.sessionWriter;
+  if (!writer) {
+    log(`action ${action}: no session stream; not sent`);
+    return false;
+  }
+  const actionId = enqueueAction(state.actionTracker, scope, action, performance.now(), {
+    modeTarget,
+    cancels,
+  });
+  const command = encodeControlActionCommandEnvelope({
+    sessionId: state.sessionId,
+    vehicleId: VEHICLE_ID,
+    scope,
+    generation: generationForScope(scope),
+    activationRevision: state.controlShell.activationRevision(),
+    action,
+    modeTarget,
+    actionId,
+  });
+  writer.write(lengthDelimit(command)).catch(() => {
+    log(`action ${action} (id ${actionId}): session stream write failed`);
+  });
+  return true;
+}
+
+/** The explicit per-action outcome (CTRL-01): a press is never silently
+ *  dropped, a rejection is loud, and local mode state changes ONLY here —
+ *  on the host's acceptance — never optimistically on send. */
+function handleActionResult(m) {
+  const verdict = m.accepted ? "accepted" : `REJECTED (${m.detail})`;
+  const id = m.actionId ? ` id=${m.actionId}` : "";
+  log(`action result [${m.scope} seq=${m.sequence}] action=${m.action}${id} ${verdict}`);
+  if (!m.actionId) return;
+  const entry = resolveAction(state.actionTracker, m.actionId);
+  if (!entry) return; // a replay of an already-settled press
+  if (entry.scope === SIM_LIFECYCLE_SCOPE) {
+    // The lifecycle lease exists only for this press: release it so the
+    // silence watchdog never has a held-but-frameless scope to revoke.
+    state.lifecycle.granted = false;
+    const writer = state.sessionWriter;
+    if (writer) {
+      const release = encodeLeaseReleaseEnvelope({
+        vehicleId: VEHICLE_ID,
+        scope: SIM_LIFECYCLE_SCOPE,
+      });
+      writer.write(lengthDelimit(release)).catch(() => {});
+      log(`released the ${SIM_LIFECYCLE_SCOPE} lease`);
+    }
+  }
+  if (entry.action === CONTROL_ACTION.modeRequest && m.accepted) {
+    state.fpvActive = entry.modeTarget === MODE_TARGET.fpvDirect;
+    els.overlay.textContent = state.fpvActive ? "FPV mode engaged" : "camera mode engaged";
+    log(`mode ack: ${state.fpvActive ? "fpv-direct" : "camera-velocity"} engaged`);
+  }
+}
+
+/** Reports every press whose answer window expired — on the reliable
+ *  channel that means the transport died or the host never answered. */
+function reportExpiredActions() {
+  for (const gone of expirePending(state.actionTracker, performance.now())) {
+    log(
+      `action ${gone.action} (id ${gone.actionId}) got no result within ` +
+        `${ACTION_TIMEOUT_MS} ms; the session stream may be dead`,
+    );
+  }
+}
+
+/** Announces the active control profile on the reliable session stream:
+ *  scheme identity, document revision, monotonic activation revision, and
+ *  the content digests of BOTH the scheme and the selected device profile —
+ *  the composite traceability record the host validates every typed frame
+ *  against (INPUT-01). Ordered BEFORE the LeaseRequest on the same stream,
+ *  so the host records the activation before any frame can be accepted. */
+function announceProfileActivation(writer = state.sessionWriter) {
+  if (!writer || !state.controlShell) return;
+  const shell = state.controlShell;
+  const activation = encodeProfileActivationEnvelope({
+    sessionId: state.sessionId,
+    profileId: shell.profileId(),
+    profileRevision: shell.profileRevision(),
+    activationRevision: shell.activationRevision(),
+    digest: shell.profileDigestBytes(),
+    deviceProfileId: shell.deviceLabel(),
+    deviceProfileRevision: shell.deviceRevision(),
+    deviceDigest: shell.deviceDigestBytes(),
+  });
+  writer.write(lengthDelimit(activation)).catch(() => {});
+  state.announcedActivationRevision = shell.activationRevision();
+  const device = shell.deviceLabel() || "(keyboard only)";
+  log(
+    `announced profile ${shell.profileId()} rev=${shell.profileRevision()} ` +
+      `activation=${shell.activationRevision()} digest=${shell.profileDigest().slice(0, 16)}... ` +
+      `device=${device}`,
+  );
+}
+
+/** Re-announces when the activation revision advanced past the announced
+ *  one (a device swap or profile install completed its handover), so the
+ *  host learns the new composite mapping before frames carry its revision —
+ *  the swap's lease reacquisition rides the same ordered stream AFTER this
+ *  write, and frames only flow once that lease is regranted. */
+function maybeAnnounceProfileActivation() {
+  if (!state.sessionWriter || !state.controlShell) return;
+  if (state.controlShell.activationRevision() === state.announcedActivationRevision) return;
+  announceProfileActivation();
+}
+
+/** Encodes and sends the runtime's motion frame as a TYPED velocity intent:
+ *  the plan's normalized demands scale by the scope's ADVERTISED envelope
+ *  (CTRL-01), so full stick commands exactly what the vehicle advertises.
+ *  The runtime supplies typed arm/disarm; the DOM-driven mode-request and
+ *  sim-reset actions are appended here. Fails closed (no frame) when the
+ *  vehicle does not advertise a velocity intent. */
+function sendMotionFrame(writer, token, mode, plan) {
+  const direct = state.motionScope === DIRECT_SCOPE;
+  const capability = direct
+    ? capabilityFor(state.advertisedScopes, VEHICLE_ID, DIRECT_SCOPE, INTENT_FAMILY_ATTITUDE_THRUST)
+    : velocityCapabilityFor(state.motionScope);
+  if (!capability) return;
+  const m = plan.motion;
+  if (plan.arm && requestAction(state.motionScope, CONTROL_ACTION.arm, undefined, [CONTROL_ACTION.disarm])) {
+    els.overlay.textContent = "ARM sent";
+    log("arm command sent");
+  }
+  if (plan.disarm && requestAction(state.motionScope, CONTROL_ACTION.disarm, undefined, [CONTROL_ACTION.arm])) {
+    els.overlay.textContent = "DISARM sent";
+    log("disarm command sent");
+  }
+  if (state.pendingFpvToggle) {
+    state.pendingFpvToggle = false;
+    requestFlightModeSwitch();
+  }
+
+  let velocity;
+  let attitudeThrust;
+  if (direct) {
+    // The client OWNS the direct-flight heading: the yaw stick slews the
+    // integrated setpoint at the ADVERTISED rate, and tilt scales by the
+    // advertised bound — the vehicle executes exactly this attitude,
+    // reinterpreting nothing.
+    const nowMs = performance.now();
+    const dt = state.lastDirectFrameMs
+      ? Math.min((nowMs - state.lastDirectFrameMs) / 1000, 0.1)
+      : 0;
+    state.lastDirectFrameMs = nowMs;
+    state.fpvHeading = integrateHeading(state.fpvHeading, m.yaw, capability, dt);
+    attitudeThrust = buildAttitudeThrustIntent(m, state.fpvHeading, capability);
+  } else {
+    velocity = buildVelocityIntent(m, mode, capability);
+  }
+  state.sequence = (state.sequence + 1) >>> 0; // wraps at u32, matching the wire SequenceNum width.
+  const envelope = encodeControlFrameEnvelope({
+    sessionId: state.sessionId,
+    vehicleId: VEHICLE_ID,
+    scope: state.motionScope,
+    generation: state.generation,
+    sequence: state.sequence,
+    sampledAtNanos: nowNanos(),
+    profileRevision: state.controlShell.profileRevision(),
+    activationRevision: state.controlShell.activationRevision(),
+    velocity,
+    attitudeThrust,
+  });
+  writer.write(envelope).catch((error) => {
+    transportSessions.runIfActive(token, () => log(`control datagram send failed: ${error}`));
+  });
+}
+
+/** The latest declared sim heading (rad, local NED), or null without an
+ *  attitude estimate — the direct-flight heading integrator's seed. */
+function currentTelemetryHeading() {
+  const snapshot = instruments.ingress?.snapshot(performance.now());
+  const heading = declaredSimHeading(snapshot?.attitude);
+  return heading === null ? null : heading.rad;
+}
+
+/** The FPV/camera flight toggle. When the vehicle advertises the
+ *  direct-flight scope (AttitudeThrust under vehicle.motion.direct), the
+ *  switch is a SCOPE HANDOVER — the runtime's transactional reactivation
+ *  neutral-fences the sticks, releases the current motion lease, and the
+ *  reacquisition targets the other scope under a fresh generation. The
+ *  typed ModeRequest remains only for vehicles that advertise one; with
+ *  neither advertised the press is suppressed loudly. */
+function requestFlightModeSwitch() {
+  const target = state.motionScope === DIRECT_SCOPE ? MOTION_SCOPE : DIRECT_SCOPE;
+  const family =
+    target === DIRECT_SCOPE ? INTENT_FAMILY_ATTITUDE_THRUST : INTENT_FAMILY_VELOCITY;
+  if (capabilityFor(state.advertisedScopes, VEHICLE_ID, target, family)) {
+    if (state.pendingMotionScope) return; // a handover is already in flight
+    if (target === DIRECT_SCOPE && currentTelemetryHeading() === null) {
+      log("no heading telemetry yet; cannot enter direct flight");
+      return;
+    }
+    state.pendingMotionScope = target;
+    state.controlShell.reactivate();
+    log(`flight-scope handover to ${target}: neutral fence + lease cycle opened`);
+    return;
+  }
+  const pendingTarget = pendingModeTarget(
+    state.actionTracker,
+    state.motionScope,
+    CONTROL_ACTION.modeRequest,
+  );
+  const fpvBase =
+    pendingTarget !== undefined ? pendingTarget === MODE_TARGET.fpvDirect : state.fpvActive;
+  const modeTarget = fpvBase ? MODE_TARGET.cameraVelocity : MODE_TARGET.fpvDirect;
+  if (
+    requestAction(state.motionScope, CONTROL_ACTION.modeRequest, modeTarget, [
+      CONTROL_ACTION.modeRequest,
+    ])
+  ) {
+    log(
+      `mode request sent: target=${modeTarget === MODE_TARGET.fpvDirect ? "fpv-direct" : "camera-velocity"}`,
+    );
+  }
+}
+
+/** Encodes and sends the runtime's gimbal frame. The runtime emits one every
+ *  tick while the lease is held (zero rates when idle), so the continuous
+ *  stream is the scope's liveness (ADR-0011); R3 rides as the recenter edge. */
+function sendGimbalFrame(writer, token, gimbal) {
+  const capability = capabilityFor(
+    state.advertisedScopes,
+    VEHICLE_ID,
+    GIMBAL_SCOPE,
+    INTENT_FAMILY_GIMBAL_RATE,
+  );
+  if (!capability) return;
+  if (
+    gimbal.recenter &&
+    requestAction(GIMBAL_SCOPE, CONTROL_ACTION.gimbalRecenter)
+  ) {
+    log("gimbal recenter requested (R3)");
+  }
+  state.gimbalSequence = (state.gimbalSequence + 1) >>> 0;
+  const envelope = encodeControlFrameEnvelope({
+    sessionId: state.sessionId,
+    vehicleId: VEHICLE_ID,
+    scope: GIMBAL_SCOPE,
+    generation: state.gimbalGeneration,
+    sequence: state.gimbalSequence,
+    sampledAtNanos: nowNanos(),
+    profileRevision: state.controlShell.profileRevision(),
+    activationRevision: state.controlShell.activationRevision(),
+    // The plan's normalized LOS rates scale by the ADVERTISED angular
+    // envelope, so full deflection slews exactly what the vehicle allows.
+    gimbalRate: buildGimbalRateIntent(gimbal, capability),
+  });
+  writer.write(envelope).catch((error) => {
+    transportSessions.runIfActive(token, () => log(`gimbal datagram send failed: ${error}`));
+  });
+}
+
+/** Executes the runtime's gimbal-lease decision on the reliable session
+ *  stream: request or release the `vehicle.gimbal` scope. The runtime owns the
+ *  request debounce and the mode/grant/deny policy; this only sends. */
+function executeLeaseAction(token, action, scope) {
+  const writer = state.sessionWriter;
+  if (!writer || !transportSessions.isActive(token)) return;
+  if (action === "release") {
+    if (scope === GIMBAL_SCOPE) state.gimbalLeaseGranted = false;
+    const release = encodeLeaseReleaseEnvelope({ vehicleId: VEHICLE_ID, scope });
+    writer.write(lengthDelimit(release)).catch(() => {});
+    log(`released the ${scope} lease`);
+  } else if (action === "request") {
+    const request = encodeLeaseRequestEnvelope({ vehicleId: VEHICLE_ID, scope });
+    writer.write(lengthDelimit(request)).catch(() => {});
+    log(`sent LeaseRequest for ${scope}`);
+  }
+}
+
+/** Shows the live control mapping in the readout: the gimbal quasimode when a
+ *  gimbal frame streams, otherwise the flight axes. Display only. */
+function updateControlReadout(pad, mode, plan) {
+  // The selected-profile label comes from the runtime (visible identity,
+  // ADR-0007); an empty label means the pad's selection was refused.
+  const src = pad
+    ? state.controlShell.deviceLabel() || "pad refused (ambiguous profiles)"
+    : "keyboard (WS=climb AD=yaw arrows=move)";
+  // Capture is shown whenever the modifier is held, even at a centered stick,
+  // so #167's deliberate LT-descend suppression is always visible.
+  if (plan.captureActive) {
+    els.gamepad.textContent =
+      `GIMBAL (LT held): pitch=${(plan.gimbal?.pitch ?? 0).toFixed(2)} yaw=${(plan.gimbal?.yaw ?? 0).toFixed(2)} | ` +
+      "right stick captured, LT-descend inhibited; R3 recenters";
+    return;
+  }
+  const m = plan.motion ?? { roll: 0, pitch: 0, throttle: 0, yaw: 0 };
+  els.gamepad.textContent =
+    `flight [${mode}]: ${src} | roll=${m.roll.toFixed(2)} pitch=${m.pitch.toFixed(2)} ` +
+    `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | arm: Options/Enter disarm: Create/Backspace`;
 }
 
 // ---- instrument panels (ADR-0017) -------------------------------------------
@@ -1437,9 +1864,24 @@ async function startInstruments() {
   }
 }
 
+/** Loads the control-runtime wasm and bootstraps it: compile the built-in
+ *  default profile bytes and activate them through the normal path. The
+ *  control loop stays idle until this resolves; a failure degrades to
+ *  no-control (telemetry/video still run) rather than taking the page down. */
+async function startControl() {
+  try {
+    const wasmSource = await fetch("./control-runtime_bg.wasm", { cache: "no-cache" });
+    state.controlShell = await loadControlShell(wasmSource);
+    log(`control runtime ready (profile revision ${state.controlShell.activationRevision()})`);
+  } catch (error) {
+    log(`control runtime unavailable: ${error} (run scripts/build-web-instruments.sh)`);
+  }
+}
+
 window.addEventListener("pagehide", () => instruments.mod?.dispose(), { once: true });
 applyUrlParams();
 startInstruments();
+startControl();
 document.getElementById("fpvBtn").addEventListener("click", () => {
   state.pendingFpvToggle = true;
 });
@@ -1488,6 +1930,5 @@ window.addEventListener("blur", () => {
   if (state.leaseGranted && transportSessions.active !== null) {
     sendLeaseRelease(transportSessions.active);
   }
-  state.keys.clear();
-  state.prevArmInputs = new Set();
+  state.controlShell?.clearKeys();
 });

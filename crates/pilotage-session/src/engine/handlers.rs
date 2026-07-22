@@ -4,12 +4,12 @@
 //! to the shared bounded [`Actions`] accumulator. The handlers hold every
 //! handshake, lease, fencing, and staleness decision so the driver stays thin.
 
-use pilotage_authority::{AuthorityCommand, AuthorityEffect, FrameVerdict};
+use pilotage_authority::{AuthorityCommand, AuthorityEffect};
 use pilotage_protocol::{
-    ClientHello, FrameRejected, FrameRejectionReason, Generation, LeaseDenialReason, LeaseRequest,
-    Ping, Pong, PrincipalId, ScopedControlFrame, ServerWelcome,
+    ClientHello, Generation, LeaseDenialReason, LeaseRequest, Ping, Pong, ScopedControlFrame,
+    ServerWelcome,
 };
-use pilotage_timing::{Freshness, MonoTimestamp};
+use pilotage_timing::MonoTimestamp;
 
 use crate::action::{CloseReason, LinkLossTrigger, SessionAction};
 use crate::capabilities::host_capabilities;
@@ -67,8 +67,9 @@ impl SessionEngine {
         let Some(principal) = self.welcomed_principal(client, actions) else {
             return;
         };
-        let pair: ScopePair = (request.vehicle, request.scope.clone());
-        if !self.clients.is_registered(&pair) {
+        // Leasing operates on the scope's exclusive-authority GROUP: sibling
+        // scopes drive the same actuator and can never be held apart.
+        let Some(pair) = self.authority_pair(request.vehicle, &request.scope) else {
             actions.send(
                 client,
                 OutboundMessage::LeaseResponse(lease_denied(
@@ -78,26 +79,16 @@ impl SessionEngine {
                 )),
             );
             return;
-        }
+        };
         if let Some(current) = self.clients.holder_of(&pair) {
-            let generation = self
-                .clients
-                .generation_of(&pair)
-                .unwrap_or_else(|| Generation::new(0));
-            // A principal already holding the scope re-requesting it is not an
-            // error; reply with the standing grant rather than a denial.
-            let response = if current == principal {
-                lease_granted(&request, generation)
-            } else {
-                lease_denied(&request, generation, LeaseDenialReason::AlreadyHeld)
-            };
+            let response = self.standing_holder_response(&pair, current, principal, &request);
             actions.send(client, OutboundMessage::LeaseResponse(response));
             return;
         }
         let effects = self.authority.handle(
             AuthorityCommand::Grant {
-                vehicle: request.vehicle,
-                scope: request.scope.clone(),
+                vehicle: pair.0,
+                scope: pair.1.clone(),
                 to: principal,
             },
             now,
@@ -122,9 +113,41 @@ impl SessionEngine {
         let response = if rejected {
             lease_denied(&request, current_generation, LeaseDenialReason::AlreadyHeld)
         } else {
+            // Bind the group lease to the CONCRETE member scope it was
+            // acquired for: the holder commands that member and only that
+            // member. (The grant's effects cleared any previous binding.)
+            self.clients
+                .set_held_member(pair.clone(), request.scope.clone());
             lease_granted(&request, current_generation)
         };
         actions.send(client, OutboundMessage::LeaseResponse(response));
+    }
+
+    /// The reply to a lease request on an already-held group: a principal
+    /// re-requesting the MEMBER it leased gets the standing grant.
+    /// Requesting a SIBLING while holding is a scope switch and must go
+    /// release-first — neutralize, re-fence, fresh generation — so it is
+    /// denied like any other conflicting claim on the group.
+    fn standing_holder_response(
+        &self,
+        pair: &ScopePair,
+        current: pilotage_protocol::PrincipalId,
+        principal: pilotage_protocol::PrincipalId,
+        request: &LeaseRequest,
+    ) -> pilotage_protocol::LeaseResponse {
+        let generation = self
+            .clients
+            .generation_of(pair)
+            .unwrap_or_else(|| Generation::new(0));
+        let same_member = self
+            .clients
+            .held_member(pair)
+            .is_some_and(|member| *member == request.scope);
+        if current == principal && same_member {
+            lease_granted(request, generation)
+        } else {
+            lease_denied(request, generation, LeaseDenialReason::AlreadyHeld)
+        }
     }
 
     /// Routes a voluntary scope release through the authority engine and
@@ -147,11 +170,16 @@ impl SessionEngine {
         let Some(principal) = self.welcomed_principal(client, actions) else {
             return;
         };
-        let pair: ScopePair = (release.vehicle, release.scope.clone());
+        // Releases resolve through the same exclusive-authority group the
+        // grant used; an undeclared scope releases nothing (`released:
+        // false` below tells the sender so).
+        let pair = self
+            .authority_pair(release.vehicle, &release.scope)
+            .unwrap_or_else(|| (release.vehicle, release.scope.clone()));
         let effects = self.authority.handle(
             AuthorityCommand::Release {
-                vehicle: release.vehicle,
-                scope: release.scope.clone(),
+                vehicle: pair.0,
+                scope: pair.1.clone(),
                 by: principal,
             },
             now,
@@ -175,105 +203,66 @@ impl SessionEngine {
         );
     }
 
-    /// Staleness-checks, fence-verifies, then forwards or rejects a control
-    /// frame (ADR-0009).
-    pub(super) fn on_frame(
+    /// Records a client's control-profile activation announcement
+    /// (INPUT-01): the session-side traceability record binding the
+    /// `activation_revision` its frames carry to the profile identity,
+    /// document revision, and content digests of both the scheme and the
+    /// selected device profile. An announcement before the handshake closes
+    /// the connection like any other pre-welcome traffic; one naming a
+    /// foreign session, or regressing the monotonic activation revision,
+    /// closes it too — a corrupted traceability record is worse than none.
+    pub(super) fn on_profile_activation(
         &mut self,
         client: ClientKey,
-        frame: ScopedControlFrame,
-        now: MonoTimestamp,
+        activation: pilotage_protocol::ProfileActivation,
         actions: &mut Actions,
     ) {
-        let Some(sender) = self.welcomed_principal(client, actions) else {
+        if self.welcomed_principal(client, actions).is_none() {
+            return;
+        }
+        let Some(state) = self.clients.get(client) else {
             return;
         };
-        // LOOPBACK-ONLY: `sampled_at` and `now` are treated as one monotonic
-        // clock (see the crate/engine module docs). A networked host must route
-        // this through `pilotage_timing::estimated_age` instead.
-        let age = now.saturating_duration_since(frame.sampled_at);
-        if let Freshness::Stale { .. } = self.staleness.check(age) {
-            let generation = self.frame_generation(&frame);
-            actions.push(reject_frame(
+        if activation.session != state.session {
+            actions.push(SessionAction::CloseClient {
                 client,
-                &frame,
-                FrameRejectionReason::TooOld,
-                generation,
-            ));
+                reason: CloseReason::ProfileSessionMismatch {
+                    announced: activation.session,
+                    expected: state.session,
+                },
+            });
             return;
         }
-        // Fence on the sender's identity, not just on generation. `verify_frame`
-        // confirms a holder exists at the current generation, but generations are
-        // broadcast to every client, so a non-holder could otherwise forge an
-        // in-generation frame. Only the recorded holder may drive the scope. An
-        // unregistered scope has no holder and is left to `verify_frame` so the
-        // sender still learns the scope is unknown rather than merely unheld.
-        let pair = (frame.vehicle, frame.scope.clone());
-        if self.clients.is_registered(&pair) && self.clients.holder_of(&pair) != Some(sender) {
-            let generation = self.frame_generation(&frame);
-            actions.push(reject_frame(
-                client,
-                &frame,
-                FrameRejectionReason::NoHolder,
-                generation,
-            ));
-            return;
-        }
-        match self
-            .authority
-            .verify_frame(frame.vehicle, &frame.scope, frame.generation)
-        {
-            FrameVerdict::Accepted => self.accept_frame(frame, sender, now, actions),
-            FrameVerdict::RejectedStaleGeneration { current } => {
-                actions.push(reject_frame(
+        if let Some(previous) = self.clients.active_profile(client) {
+            // Wrapping forward distance: the new revision must advance, and
+            // a jump past the half-range reads as a regression, not a leap.
+            let advance = activation
+                .activation_revision
+                .wrapping_sub(previous.activation_revision);
+            if advance == 0 || advance > u32::MAX / 2 {
+                actions.push(SessionAction::CloseClient {
                     client,
-                    &frame,
-                    FrameRejectionReason::StaleGeneration,
-                    current,
-                ));
-            }
-            FrameVerdict::RejectedNoHolder => {
-                let generation = self.frame_generation(&frame);
-                actions.push(reject_frame(
-                    client,
-                    &frame,
-                    FrameRejectionReason::NoHolder,
-                    generation,
-                ));
-            }
-            FrameVerdict::RejectedUnknownScope => {
-                actions.push(reject_frame(
-                    client,
-                    &frame,
-                    FrameRejectionReason::UnknownScope,
-                    Generation::new(0),
-                ));
+                    reason: CloseReason::NonMonotonicActivation {
+                        previous: previous.activation_revision,
+                        announced: activation.activation_revision,
+                    },
+                });
+                return;
             }
         }
+        self.clients
+            .record_profile_activation(client, activation.clone());
+        actions.push(SessionAction::ActivationAccepted { client, activation });
     }
 
-    /// Books an accepted frame: refreshes setpoint freshness, runs the
-    /// recovery activation check, and forwards the frame to the adapter.
-    fn accept_frame(
-        &mut self,
-        frame: ScopedControlFrame,
-        sender: PrincipalId,
-        now: MonoTimestamp,
-        actions: &mut Actions,
-    ) {
-        // The holder is actively driving; push its frame-silence deadline
-        // forward so the watchdog only fires on real silence. Only an
-        // axis-bearing frame counts as setpoint freshness — discrete/
-        // edge-only traffic proves the client is alive, not that it is
-        // commanding the vehicle, and must not hold the lease of an
-        // axis-silent holder open.
-        if !frame.payload.axes.is_empty() {
-            self.note_frame_accepted(frame.vehicle, &frame.scope, sender, now);
-        }
-        // A demonstrated-neutral frame from the fenced new holder is the
-        // recovery activation condition; the clear (if any) is emitted
-        // before the apply so the adapter un-latches first.
-        self.maybe_activate_recovery(frame.vehicle, &frame.scope, &frame.payload, actions);
-        actions.push(SessionAction::ApplyToAdapter { frame });
+    /// The client's last announced control-profile activation, if any —
+    /// the record session telemetry and evidence bind control frames to.
+    #[must_use]
+    pub fn active_profile(
+        &self,
+        client: ClientKey,
+    ) -> Option<&pilotage_protocol::ProfileActivation> {
+        self.clients.active_profile(client)
     }
 
     /// Answers a `Ping` with a `Pong` echoing the sender sample and stamping
@@ -305,7 +294,7 @@ impl SessionEngine {
 
     /// Returns the requesting client's principal, or emits a close action when
     /// the client has not completed the handshake.
-    fn welcomed_principal(
+    pub(super) fn welcomed_principal(
         &self,
         client: ClientKey,
         actions: &mut Actions,
@@ -324,29 +313,13 @@ impl SessionEngine {
 
     /// Looks up the current generation for a frame's scope, defaulting to zero
     /// for an unknown scope.
-    fn frame_generation(&self, frame: &ScopedControlFrame) -> Generation {
+    pub(super) fn frame_generation(&self, frame: &ScopedControlFrame) -> Generation {
+        let pair = self
+            .authority_pair(frame.vehicle, &frame.scope)
+            .unwrap_or_else(|| (frame.vehicle, frame.scope.clone()));
         self.clients
-            .generation_of(&(frame.vehicle, frame.scope.clone()))
+            .generation_of(&pair)
             .unwrap_or_else(|| Generation::new(0))
-    }
-}
-
-/// Builds a `RejectFrame` action carrying the scope's current generation.
-fn reject_frame(
-    client: ClientKey,
-    frame: &ScopedControlFrame,
-    reason: FrameRejectionReason,
-    current_generation: Generation,
-) -> SessionAction {
-    SessionAction::RejectFrame {
-        client,
-        rejection: FrameRejected {
-            vehicle: frame.vehicle,
-            scope: frame.scope.clone(),
-            sequence: frame.sequence,
-            reason,
-            current_generation,
-        },
     }
 }
 

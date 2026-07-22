@@ -7,12 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
-    LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    TelemetrySample, VehicleAdapter, VehicleDescriptor, VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossEnactError,
+    LinkLossPolicy, RejectReason, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample,
+    VehicleAdapter, VideoSource,
 };
 use pilotage_protocol::VehicleId;
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, ScopedControlFrame};
+use std::collections::BTreeMap;
+
+use pilotage_protocol::{ActionKind, LogicalAxisId, ScopeId, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
 use pilotage_mavlink::{LinkState, MavlinkLink};
@@ -21,10 +23,14 @@ use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
 use crate::uplink::Px4Uplink;
 
+mod advertisement;
 mod camera;
 mod control;
 #[cfg(test)]
+mod gimbal_link_loss_tests;
+#[cfg(test)]
 mod gimbal_tests;
+mod link_loss;
 mod pointing;
 mod sampling;
 #[cfg(test)]
@@ -46,8 +52,6 @@ pub const YAW_AXIS: u16 = 3;
 pub const ARM_BUTTON: u16 = 0;
 /// Logical button whose press disarms the vehicle.
 pub const DISARM_BUTTON: u16 = 1;
-/// Logical button whose press resets the simulation.
-pub const RESET_BUTTON: u16 = 2;
 /// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
 /// LOS rate demands, leased and fenced independently of flight.
 pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
@@ -100,7 +104,9 @@ pub struct Px4Adapter {
     // press the reset button without touching a live simulator.
     #[cfg(test)]
     reset_spawns: u32,
-    link_loss_policy: Option<LinkLossPolicy>,
+    // Per-scope link-loss latch (ADR-0008): engaging the gimbal scope must
+    // not suppress or neutralize motion, and vice versa.
+    link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
 }
 
 /// The MAVLink estimate source: the shared cache plus the link task
@@ -139,12 +145,22 @@ impl Px4Adapter {
         // rate lane is taken exactly once here, so it is always present
         // on this first (and only) take.
         let gimbal = match (config.gimbal, link.take_gimbal_rate_sender()) {
-            (true, Some(rates)) => Some(crate::gimbal::Px4GimbalControl::new(
-                link.command_sender(),
-                rates,
-                link_config.system_id,
-                link_config.component_id,
-            )),
+            (true, Some(rates)) => {
+                // Acceptance fault injection: suppress the host's gimbal
+                // link-loss stop so PX4's own setpoint-timeout is the sole
+                // failsafe under test. The typed config permits this ONLY under
+                // `Px4Profile::Simulation`, so a real vehicle can never withhold
+                // its safe-state command.
+                Some(
+                    crate::gimbal::Px4GimbalControl::new(
+                        link.command_sender(),
+                        rates,
+                        link_config.system_id,
+                        link_config.component_id,
+                    )
+                    .with_dropped_link_loss_stop(config.drop_gimbal_link_loss_stop()),
+                )
+            }
             _ => None,
         };
         let uplink = match Px4Uplink::new(config.command_endpoint) {
@@ -157,7 +173,8 @@ impl Px4Adapter {
                 None
             }
         };
-        let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
+        let (frames, camera_bridge, frame_forwarder) =
+            camera::spawn_camera_bridge(config.gimbal).await;
         Ok(Self {
             vehicle,
             estimate: Some(EstimateSource {
@@ -180,7 +197,7 @@ impl Px4Adapter {
             reset_latch: None,
             #[cfg(test)]
             reset_spawns: 0,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         })
     }
 
@@ -205,7 +222,7 @@ impl Px4Adapter {
             last_reset: None,
             reset_latch: None,
             reset_spawns: 0,
-            link_loss_policy: None,
+            link_loss_policy: BTreeMap::new(),
         }
     }
 
@@ -278,6 +295,33 @@ impl Px4Adapter {
     }
 }
 
+/// The video sources this adapter advertises: nothing without a camera
+/// bridge, FPV + chase with one, and the gimbal payload feed ONLY when the
+/// vehicle is configured with a gimbal — a gimbal-less vehicle must not
+/// advertise a source that never paints.
+fn advertised_video_sources(bridge_up: bool, gimbal: bool) -> Vec<VideoSource> {
+    if !bridge_up {
+        return vec![];
+    }
+    let mut sources = vec![
+        VideoSource {
+            id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
+            description: "onboard forward camera".to_owned(),
+        },
+        VideoSource {
+            id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
+            description: "chase camera".to_owned(),
+        },
+    ];
+    if gimbal {
+        sources.push(VideoSource {
+            id: pilotage_adapter_gazebo::GIMBAL_SOURCE_ID.to_owned(),
+            description: "gimbal payload camera".to_owned(),
+        });
+    }
+    sources
+}
+
 /// A random attachment identity; each adapter start is a distinct
 /// source incarnation.
 fn rand_incarnation() -> [u8; 16] {
@@ -292,51 +336,23 @@ fn rand_incarnation() -> [u8; 16] {
 
 impl VehicleAdapter for Px4Adapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            execution: ExecutionMode {
-                real_time: true,
-                ..ExecutionMode::default()
-            },
-            vehicles: vec![VehicleDescriptor {
-                id: self.vehicle,
-                scopes: {
-                    let mut scopes = Vec::new();
-                    if self.uplink.is_some() {
-                        scopes.push(ScopeDescriptor {
-                            scope: ScopeId::new(FLIGHT_SCOPE),
-                            axes: vec![
-                                LogicalAxisId::new(ROLL_AXIS),
-                                LogicalAxisId::new(PITCH_AXIS),
-                                LogicalAxisId::new(THROTTLE_AXIS),
-                                LogicalAxisId::new(YAW_AXIS),
-                            ],
-                        });
-                    }
-                    if self.gimbal.is_some() {
-                        scopes.push(ScopeDescriptor {
-                            scope: ScopeId::new(GIMBAL_SCOPE),
-                            axes: vec![
-                                LogicalAxisId::new(PITCH_AXIS),
-                                LogicalAxisId::new(YAW_AXIS),
-                            ],
-                        });
-                    }
-                    scopes
-                },
-                link_loss_actions: if self.uplink.is_some() {
-                    vec![LinkLossPolicy::Neutralize]
-                } else {
-                    vec![]
-                },
-            }],
-            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        }
+        self.advertised_capabilities()
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
         let tick = self.step(StepBudget { ticks: 0 }).now;
+        // Per-scope link-loss latch: a frame is suppressed only while ITS scope
+        // has a policy engaged, so a gimbal-scope failsafe never suppresses
+        // motion frames and vice versa. Applied to both the motion and gimbal
+        // routes below.
+        if self.link_loss_policy.contains_key(&frame.scope) {
+            return rejected_control(tick, RejectReason::LinkLossEngaged);
+        }
         if frame.scope.as_str() == GIMBAL_SCOPE {
             return self.apply_gimbal(frame, tick);
+        }
+        if frame.scope.as_str() == pilotage_adapter_api::SIM_LIFECYCLE_SCOPE {
+            return self.apply_sim_lifecycle(frame, tick);
         }
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
@@ -347,28 +363,43 @@ impl VehicleAdapter for Px4Adapter {
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
-        for (button, edge) in &frame.payload.edges {
-            if *edge != ButtonEdge::Pressed {
-                continue;
-            }
-            if *button == LogicalButtonId::new(ARM_BUTTON) {
-                uplink.begin_arm(current_yaw);
+        let mut action_results = Vec::with_capacity(frame.actions.len());
+        for action in &frame.actions {
+            match action.kind() {
+                ActionKind::Arm => {
+                    uplink.begin_arm(current_yaw);
+                    action_results.push(ActionResult::accepted(*action));
+                }
+                // Nothing else is advertised for this scope (sim reset
+                // lives on the lifecycle scope), so the session rejects it
+                // before delivery — defensive, not a reachable path.
+                _ => {
+                    action_results.push(ActionResult::rejected(
+                        *action,
+                        "not supported on the flight scope",
+                    ));
+                }
             }
         }
-        let (sticks, transformed) = control::normalized_flight_sticks(frame);
-        uplink.send_stick_frame(
-            sticks[usize::from(ROLL_AXIS)],
-            sticks[usize::from(PITCH_AXIS)],
-            sticks[usize::from(THROTTLE_AXIS)],
-            sticks[usize::from(YAW_AXIS)],
-        );
+        let Some(pilotage_protocol::ControlIntent::Velocity(velocity)) = frame.intent else {
+            // An actions-only frame (arm) carries no motion demand; the
+            // setpoint stream continues from the next frame.
+            return ApplyOutcome {
+                tick,
+                disposition: Disposition::Accepted,
+                action_results,
+            };
+        };
+        let (sticks, constrained) = control::sticks_from_velocity(&velocity);
+        uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3]);
         ApplyOutcome {
             tick,
-            disposition: if transformed {
-                Disposition::Transformed
+            disposition: if constrained {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
+            action_results,
         }
     }
 
@@ -415,51 +446,16 @@ impl VehicleAdapter for Px4Adapter {
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {
-        if self._camera_bridge.is_none() {
-            return vec![];
-        }
-        vec![
-            VideoSource {
-                id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
-                description: "onboard forward camera".to_owned(),
-            },
-            VideoSource {
-                id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
-                description: "chase camera".to_owned(),
-            },
-        ]
+        advertised_video_sources(self._camera_bridge.is_some(), self.gimbal.is_some())
     }
 
     fn set_link_loss_policy(
         &mut self,
         vehicle: VehicleId,
+        scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), LinkLossEnactError> {
-        if vehicle != self.vehicle {
-            return Err(LinkLossEnactError::UnknownVehicle { vehicle });
-        }
-        match policy {
-            Some(_) => {
-                let Some(uplink) = self.uplink.as_mut() else {
-                    self.link_loss_policy = policy;
-                    return Err(LinkLossEnactError::NoActuationChannel);
-                };
-                let failures_before = uplink.send_failures();
-                uplink.neutralize();
-                let refused = uplink.send_failures() != failures_before;
-                self.link_loss_policy = policy;
-                if refused {
-                    return Err(LinkLossEnactError::ChannelRejected {
-                        detail: "the neutral setpoint send was refused".to_owned(),
-                    });
-                }
-                Ok(())
-            }
-            None => {
-                self.link_loss_policy = None;
-                Ok(())
-            }
-        }
+        self.enact_link_loss_policy(vehicle, scope, policy)
     }
 
     fn step(&mut self, _budget: StepBudget) -> StepOutcome {

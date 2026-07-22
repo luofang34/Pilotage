@@ -24,6 +24,16 @@ pub(crate) struct ClientState {
     pub(crate) session: SessionId,
     /// Principal identity assigned to this connection.
     pub(crate) principal: PrincipalId,
+    /// The client's last announced control-profile activation (INPUT-01):
+    /// the traceability record binding the `activation_revision` its frames
+    /// carry to the profile identity, document revision, and content digest.
+    pub(crate) active_profile: Option<pilotage_protocol::ProfileActivation>,
+    /// The minimum observed `host_receive - client_sample` delta in
+    /// nanoseconds: the client-to-host clock correlation floor. The two
+    /// clocks share no epoch, so raw subtraction is meaningless — the
+    /// floor (offset plus minimum path delay) is the reference against
+    /// which a frame's EXTRA delay, the actual staleness, is measured.
+    pub(crate) clock_floor_nanos: Option<i64>,
 }
 
 /// Registry of connected clients and the scopes each principal holds.
@@ -37,6 +47,12 @@ pub(crate) struct ClientRegistry {
     clients: BTreeMap<ClientKey, ClientState>,
     held: BTreeMap<PrincipalId, BTreeSet<ScopePair>>,
     holders: BTreeMap<ScopePair, HolderRecord>,
+    /// The CONCRETE member scope each group lease was acquired for. A
+    /// holder commands only the member it leased — group authority is
+    /// exclusive across siblings, never a license to drive them all.
+    /// Cleared by every holder-changing effect (fail closed) and set only
+    /// by the lease path that knows the requested scope.
+    members: BTreeMap<ScopePair, ScopeId>,
     next_session: u64,
     next_principal: u64,
 }
@@ -113,9 +129,70 @@ impl ClientRegistry {
         let principal = PrincipalId::new(self.next_principal);
         self.next_session = self.next_session.wrapping_add(1);
         self.next_principal = self.next_principal.wrapping_add(1);
-        let state = ClientState { session, principal };
+        let state = ClientState {
+            session,
+            principal,
+            active_profile: None,
+            clock_floor_nanos: None,
+        };
         self.clients.insert(client, state.clone());
         state
+    }
+
+    /// Records the client's announced control-profile activation (INPUT-01).
+    /// Returns false when the client has not completed the handshake.
+    pub(crate) fn record_profile_activation(
+        &mut self,
+        client: ClientKey,
+        activation: pilotage_protocol::ProfileActivation,
+    ) -> bool {
+        match self.clients.get_mut(&client) {
+            Some(state) => {
+                state.active_profile = Some(activation);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Correlates one client-stamped sample against the host clock and
+    /// returns its estimated age: the delta past the smallest delta ever
+    /// observed from this client (the offset-plus-minimum-path floor).
+    /// Self-calibrating — the first sample defines the floor and reads as
+    /// fresh; only EXTRA delay beyond the floor counts as staleness.
+    pub(crate) fn correlated_age(
+        &mut self,
+        client: ClientKey,
+        now: pilotage_timing::MonoTimestamp,
+        sampled_at: pilotage_timing::MonoTimestamp,
+    ) -> core::time::Duration {
+        let Some(state) = self.clients.get_mut(&client) else {
+            return core::time::Duration::ZERO;
+        };
+        let delta = i64::try_from(i128::from(now.as_nanos()) - i128::from(sampled_at.as_nanos()))
+            .unwrap_or(i64::MAX);
+        let floor = match state.clock_floor_nanos {
+            Some(floor) if floor <= delta => floor,
+            _ => {
+                state.clock_floor_nanos = Some(delta);
+                delta
+            }
+        };
+        pilotage_timing::estimated_age(
+            now,
+            sampled_at,
+            pilotage_timing::ClockOffset::from_nanos(floor),
+        )
+    }
+
+    /// The client's last announced control-profile activation, if any.
+    pub(crate) fn active_profile(
+        &self,
+        client: ClientKey,
+    ) -> Option<&pilotage_protocol::ProfileActivation> {
+        self.clients
+            .get(&client)
+            .and_then(|state| state.active_profile.as_ref())
     }
 
     /// Removes a client on disconnect, returning the scopes its principal still
@@ -131,7 +208,9 @@ impl ClientRegistry {
     }
 
     /// Records that `holder` now holds `pair` at `generation`, clearing any
-    /// prior holder of the same pair.
+    /// prior holder of the same pair. The leased MEMBER is cleared here
+    /// (fail closed): only the lease path knows the requested concrete
+    /// scope and re-binds it after the grant's effects apply.
     pub(crate) fn record_hold(
         &mut self,
         holder: PrincipalId,
@@ -139,6 +218,7 @@ impl ClientRegistry {
         generation: Generation,
     ) {
         self.detach_pair(&pair);
+        self.members.remove(&pair);
         self.held.entry(holder).or_default().insert(pair.clone());
         self.holders.insert(
             pair,
@@ -149,9 +229,22 @@ impl ClientRegistry {
         );
     }
 
+    /// Binds the group lease to the concrete member scope it was acquired
+    /// for; frames and actions on any sibling are refused.
+    pub(crate) fn set_held_member(&mut self, pair: ScopePair, member: ScopeId) {
+        self.members.insert(pair, member);
+    }
+
+    /// The concrete member scope the group's current lease was acquired
+    /// for, if a lease named one.
+    pub(crate) fn held_member(&self, pair: &ScopePair) -> Option<&ScopeId> {
+        self.members.get(pair)
+    }
+
     /// Records that `pair` is no longer held by anyone, at `generation`.
     pub(crate) fn clear_pair(&mut self, pair: &ScopePair, generation: Generation) {
         self.detach_pair(pair);
+        self.members.remove(pair);
         self.holders.insert(
             pair.clone(),
             HolderRecord {

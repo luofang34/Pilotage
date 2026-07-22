@@ -16,8 +16,8 @@ use core::time::Duration;
 use pilotage_adapter_api::LinkLossPolicy;
 use pilotage_authority::{AuthorityClass, AuthorityCommand, LinkState, OverrideReason};
 use pilotage_protocol::{
-    ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VehicleId,
+    ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
+    SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use pilotage_timing::MonoTimestamp;
 
@@ -43,11 +43,6 @@ pub const OPERATOR_C: pilotage_protocol::PrincipalId = pilotage_protocol::Princi
 pub const MOTION_SCOPE: &str = "vehicle.motion";
 /// The camera control scope registered on the vehicle.
 pub const CAMERA_SCOPE: &str = "vehicle.camera";
-
-/// Logical throttle axis id the reference adapter's motion scope accepts.
-const THROTTLE_AXIS: u16 = 2;
-/// Logical steering axis id the reference adapter's motion scope accepts.
-const STEERING_AXIS: u16 = 3;
 
 /// The principals participating in the increment-0 session, for callers that
 /// want to assert against holders without re-deriving the ids.
@@ -81,9 +76,12 @@ fn camera() -> ScopeId {
     ScopeId::new(CAMERA_SCOPE)
 }
 
-/// Builds a motion control frame at `generation`/`sequence` driving the two
-/// motion axes. `sampled_at` is derived from the sequence so frames carry
-/// distinct, monotonically increasing timestamps.
+/// Builds a TYPED motion control frame at `generation`/`sequence`: the
+/// normalized surge/turn arguments map 1:1 onto the skiff's advertised unit
+/// velocity envelope, so the pinned trajectory checkpoints are unchanged
+/// from the legacy fixture that produced them. `sampled_at` is derived from
+/// the sequence so frames carry distinct, monotonically increasing
+/// timestamps.
 fn motion_frame(
     generation: u64,
     sequence: u32,
@@ -91,6 +89,7 @@ fn motion_frame(
     steering: f32,
 ) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SESSION,
         vehicle: VEHICLE,
         scope: motion(),
@@ -98,13 +97,16 @@ fn motion_frame(
         sequence: SequenceNum::new(sequence),
         sampled_at: MonoTimestamp::from_nanos(u64::from(sequence) * 1_000),
         profile_revision: 1,
-        payload: ControlPayload {
-            axes: vec![
-                (LogicalAxisId::new(THROTTLE_AXIS), throttle),
-                (LogicalAxisId::new(STEERING_AXIS), steering),
-            ],
-            edges: vec![],
-        },
+        activation_revision: 0,
+        payload: ControlPayload::default(),
+        intent: Some(ControlIntent::Velocity(VelocityIntent {
+            frame: ReferenceFrame::BodyFrd,
+            vx: throttle,
+            vy: 0.0,
+            vz: 0.0,
+            yaw_rate: steering,
+        })),
+        actions: vec![],
     }
 }
 

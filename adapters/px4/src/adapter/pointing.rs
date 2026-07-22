@@ -1,16 +1,16 @@
 //! Gimbal pointing-frame application for the `vehicle.gimbal` scope:
-//! structural validation, the typed claim-denial surface, and demand
-//! extraction into the gimbal-manager command path.
+//! structural validation, the typed claim-denial surface, and typed
+//! gimbal-rate/recenter consumption into the gimbal-manager command path.
 
 use std::time::Duration;
 
-use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
-use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopedControlFrame};
+use pilotage_adapter_api::{ActionResult, ApplyOutcome, Disposition, RejectReason};
+use pilotage_protocol::{ActionKind, ControlIntent, ScopedControlFrame};
 use pilotage_timing::SimTick;
 
+use super::Px4Adapter;
 use super::control::rejected_control;
-use super::{GIMBAL_NEUTRAL_BUTTON, PITCH_AXIS, Px4Adapter, YAW_AXIS};
-use crate::gimbal::CMD_GIMBAL_CONFIGURE;
+use crate::gimbal::{CMD_GIMBAL_CONFIGURE, MAX_PITCH_RATE_RPS, MAX_YAW_RATE_RPS};
 
 /// How long a CONFIGURE denial keeps rejecting pointing frames. The
 /// claim is re-asserted every second while demands flow, so a live
@@ -19,7 +19,7 @@ use crate::gimbal::CMD_GIMBAL_CONFIGURE;
 const CLAIM_DENIAL_FRESHNESS: Duration = Duration::from_secs(5);
 
 impl Px4Adapter {
-    /// Applies one `vehicle.gimbal` frame: neutral-reset edges and
+    /// Applies one `vehicle.gimbal` frame: the typed recenter action and
     /// pitch/yaw LOS rate demands. Pointing is deliberately outside
     /// the flight gate chain — a gimbal cannot fly the vehicle, and
     /// its scope is leased and fenced independently — but a fresh
@@ -33,11 +33,13 @@ impl Px4Adapter {
         if frame.vehicle != self.vehicle {
             return rejected_control(tick, RejectReason::UnknownVehicle);
         }
-        let known = [LogicalAxisId::new(PITCH_AXIS), LogicalAxisId::new(YAW_AXIS)];
-        for (axis, _) in &frame.payload.axes {
-            if !known.contains(axis) {
-                return rejected_control(tick, RejectReason::UnknownAxis);
-            }
+        // Typed-only consumption: the session host translates any legacy
+        // payload at its compatibility boundary before delivery.
+        if frame.carries_payload() || !frame.carries_typed() {
+            return rejected_control(
+                tick,
+                RejectReason::Other("the gimbal scope consumes typed commands only".to_owned()),
+            );
         }
         let denial = self.fresh_claim_denial();
         let Some(gimbal) = self.gimbal.as_mut() else {
@@ -55,30 +57,36 @@ impl Px4Adapter {
         // must not report as applied. Track every command/demand this
         // frame issued.
         let mut delivered = true;
-        for (button, edge) in &frame.payload.edges {
-            if *edge == ButtonEdge::Pressed
-                && *button == LogicalButtonId::new(GIMBAL_NEUTRAL_BUTTON)
-            {
-                delivered &= gimbal.neutral();
-            }
-        }
-        let mut pitch = 0.0_f32;
-        let mut yaw = 0.0_f32;
-        let mut transformed = false;
-        for (axis, value) in &frame.payload.axes {
-            let clamped = if value.is_nan() {
-                0.0
-            } else {
-                value.clamp(-1.0, 1.0)
+        let action_results: Vec<ActionResult> = frame
+            .actions
+            .iter()
+            .map(|action| match action.kind() {
+                ActionKind::GimbalRecenter => {
+                    let sent = gimbal.neutral();
+                    delivered &= sent;
+                    if sent {
+                        ActionResult::accepted(*action)
+                    } else {
+                        ActionResult::rejected(*action, "gimbal command lane full")
+                    }
+                }
+                // Nothing else is advertised for this scope; the session
+                // rejects it before delivery — defensive, not reachable.
+                _ => ActionResult::rejected(*action, "not supported on the gimbal scope"),
+            })
+            .collect();
+        let mut constrained = false;
+        if let Some(intent) = frame.intent {
+            let ControlIntent::GimbalRate(rate) = intent else {
+                return rejected_control(
+                    tick,
+                    RejectReason::Other(
+                        "the gimbal scope consumes gimbal-rate intents only".to_owned(),
+                    ),
+                );
             };
-            transformed |= clamped != *value;
-            if *axis == LogicalAxisId::new(PITCH_AXIS) {
-                pitch = clamped;
-            } else {
-                yaw = clamped;
-            }
-        }
-        if !frame.payload.axes.is_empty() {
+            let (pitch, yaw, clamped) = normalized_rate_demand(&rate);
+            constrained = clamped;
             delivered &= gimbal.rate_demand(pitch, yaw);
         }
         if !delivered {
@@ -89,11 +97,12 @@ impl Px4Adapter {
         }
         ApplyOutcome {
             tick,
-            disposition: if transformed {
-                Disposition::Transformed
+            disposition: if constrained {
+                Disposition::Constrained
             } else {
                 Disposition::Accepted
             },
+            action_results,
         }
     }
 
@@ -111,4 +120,22 @@ impl Px4Adapter {
             && ack.received_at.elapsed() < CLAIM_DENIAL_FRESHNESS)
             .then_some(ack.result)
     }
+}
+
+/// Converts a typed gimbal rate (rad/s inside the advertised envelope) to
+/// the normalized demand the command path consumes: the exact inverse of
+/// the envelope scaling a client applies. Out-of-envelope values clamp.
+fn normalized_rate_demand(rate: &pilotage_protocol::GimbalRateIntent) -> (f32, f32, bool) {
+    let normalize = |value: f32, limit: f32| {
+        let normalized = value / limit;
+        let clamped = if normalized.is_nan() {
+            0.0
+        } else {
+            normalized.clamp(-1.0, 1.0)
+        };
+        (clamped, clamped != normalized)
+    };
+    let (pitch, pitch_clamped) = normalize(rate.pitch_rate, MAX_PITCH_RATE_RPS);
+    let (yaw, yaw_clamped) = normalize(rate.yaw_rate, MAX_YAW_RATE_RPS);
+    (pitch, yaw, pitch_clamped || yaw_clamped)
 }

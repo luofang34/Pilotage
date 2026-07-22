@@ -18,6 +18,7 @@ use prost::Message;
 
 pub(super) fn sample_frame(payload: ControlPayload) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle: VehicleId::new(2),
         scope: ScopeId::new("vehicle.motion"),
@@ -25,7 +26,10 @@ pub(super) fn sample_frame(payload: ControlPayload) -> ScopedControlFrame {
         sequence: SequenceNum::new(4),
         sampled_at: MonoTimestamp::from_nanos(5),
         profile_revision: 6,
+        activation_revision: 0,
         payload,
+        intent: None,
+        actions: vec![],
     }
 }
 
@@ -187,6 +191,8 @@ fn envelope_roundtrips_for_host_capabilities_arm() {
                 }),
                 display_name: "Motion".to_owned(),
                 link_loss_action: wire::LinkLossAction::Stop as i32,
+                intents: vec![],
+                actions: vec![],
             }],
             supported_modes: vec![wire::ExecutionMode::Realtime as i32],
         }],
@@ -463,6 +469,7 @@ mod proptests {
                     payload,
                 )| {
                     ScopedControlFrame {
+                        action_ids: vec![],
                         session: SessionId::new(session),
                         vehicle: VehicleId::new(vehicle),
                         scope: ScopeId::new("vehicle.motion"),
@@ -470,7 +477,10 @@ mod proptests {
                         sequence: SequenceNum::new(sequence),
                         sampled_at: MonoTimestamp::from_nanos(sampled_at),
                         profile_revision,
+                        activation_revision: 0,
                         payload,
+                        intent: None,
+                        actions: vec![],
                     }
                 },
             )

@@ -6,4 +6,4 @@
 ./crates/pilotage-instrument-state/src/abi.rs	decode_state	125
 ./crates/pilotage-instrument-state/src/abi.rs	encode_state	97
 ./crates/pilotage-authority/src/wire.rs	from	88
-./hosts/session-host/tests/loopback.rs	hello_lease_frame_and_stale_generation_rejection	99
+./hosts/session-host/tests/loopback.rs	hello_lease_frame_and_stale_generation_rejection	97

@@ -88,6 +88,12 @@ pub(super) fn state_with_acquisition_skew(
     Arc::new(Mutex::new(state))
 }
 
+/// Builds a TYPED flight frame from legacy-shaped stick arguments: the axis
+/// values (normalized `[-1, 1]`) scale onto the advertised velocity envelope
+/// exactly as the session's compatibility boundary would scale them, and the
+/// pressed edges become the corresponding typed actions. Keeping the legacy
+/// call shape lets every test read in stick terms while exercising the
+/// typed-only adapter contract.
 pub(super) fn flight_frame(
     axes: Vec<(pilotage_protocol::LogicalAxisId, f32)>,
     edges: Vec<(
@@ -95,7 +101,36 @@ pub(super) fn flight_frame(
         pilotage_protocol::ButtonEdge,
     )>,
 ) -> pilotage_protocol::ScopedControlFrame {
+    use crate::adapter::{
+        ARM_BUTTON, DISARM_BUTTON, PITCH_AXIS, ROLL_AXIS, THROTTLE_AXIS, YAW_AXIS,
+    };
+    let mut velocity = pilotage_protocol::VelocityIntent {
+        frame: pilotage_protocol::ReferenceFrame::BodyFrd,
+        vx: 0.0,
+        vy: 0.0,
+        vz: 0.0,
+        yaw_rate: 0.0,
+    };
+    for (axis, value) in &axes {
+        match axis.as_u16() {
+            id if id == ROLL_AXIS => velocity.vy = value * 3.0,
+            id if id == PITCH_AXIS => velocity.vx = value * 3.0,
+            id if id == THROTTLE_AXIS => velocity.vz = -value * 1.5,
+            id if id == YAW_AXIS => velocity.yaw_rate = value * 0.9,
+            _ => {}
+        }
+    }
+    let actions = edges
+        .iter()
+        .filter(|(_, edge)| *edge == pilotage_protocol::ButtonEdge::Pressed)
+        .filter_map(|(button, _)| match button.as_u16() {
+            id if id == ARM_BUTTON => Some(pilotage_protocol::ControlAction::Arm),
+            id if id == DISARM_BUTTON => Some(pilotage_protocol::ControlAction::Disarm),
+            _ => None,
+        })
+        .collect();
     pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
         session: pilotage_protocol::SessionId::new(1),
         vehicle: VehicleId::new(1),
         scope: pilotage_protocol::ScopeId::new(crate::adapter::FLIGHT_SCOPE),
@@ -103,6 +138,64 @@ pub(super) fn flight_frame(
         sequence: pilotage_protocol::SequenceNum::new(1),
         sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
         profile_revision: 1,
-        payload: pilotage_protocol::ControlPayload { axes, edges },
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: Some(pilotage_protocol::ControlIntent::Velocity(velocity)),
+        actions,
+    }
+}
+
+/// A typed direct-flight frame on `vehicle.motion.direct`: attitude built
+/// from ZYX Euler angles (the client's construction) plus the linear
+/// normalized collective.
+pub(super) fn direct_frame(
+    roll_rad: f32,
+    pitch_rad: f32,
+    yaw_rad: f32,
+    thrust: f32,
+) -> pilotage_protocol::ScopedControlFrame {
+    let (sr, cr) = (roll_rad * 0.5).sin_cos();
+    let (sp, cp) = (pitch_rad * 0.5).sin_cos();
+    let (sy, cy) = (yaw_rad * 0.5).sin_cos();
+    let attitude = pilotage_protocol::AttitudeThrustIntent {
+        frame: pilotage_protocol::ReferenceFrame::LocalNed,
+        qw: cr * cp * cy + sr * sp * sy,
+        qx: sr * cp * cy - cr * sp * sy,
+        qy: cr * sp * cy + sr * cp * sy,
+        qz: cr * cp * sy - sr * sp * cy,
+        thrust,
+    };
+    pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![],
+        session: pilotage_protocol::SessionId::new(1),
+        vehicle: VehicleId::new(1),
+        scope: pilotage_protocol::ScopeId::new(crate::adapter::DIRECT_SCOPE),
+        generation: pilotage_protocol::Generation::new(1),
+        sequence: pilotage_protocol::SequenceNum::new(1),
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: Some(pilotage_protocol::ControlIntent::AttitudeThrust(attitude)),
+        actions: vec![],
+    }
+}
+
+/// A `SimReset` press on the separately leased lifecycle scope (SIM-01):
+/// the ONLY place a reset can arrive from.
+pub(super) fn lifecycle_reset_frame() -> pilotage_protocol::ScopedControlFrame {
+    pilotage_protocol::ScopedControlFrame {
+        action_ids: vec![1],
+        session: pilotage_protocol::SessionId::new(1),
+        vehicle: VehicleId::new(1),
+        scope: pilotage_protocol::ScopeId::new(pilotage_adapter_api::SIM_LIFECYCLE_SCOPE),
+        generation: pilotage_protocol::Generation::new(1),
+        sequence: pilotage_protocol::SequenceNum::new(0),
+        sampled_at: pilotage_timing::MonoTimestamp::from_nanos(0),
+        profile_revision: 1,
+        activation_revision: 0,
+        payload: pilotage_protocol::ControlPayload::default(),
+        intent: None,
+        actions: vec![pilotage_protocol::ControlAction::SimReset],
     }
 }

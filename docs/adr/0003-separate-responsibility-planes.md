@@ -23,7 +23,8 @@ boundaries** — how many binaries or services implement them is a deployment de
    short-lived session capabilities.
 2. **Authority plane** — ownership of independently assignable control scopes;
    handover, takeover requests, emergency override, revocation; lease generations and
-   effective authority; vehicle-level link-loss policy selection.
+   effective authority; per-vehicle link-loss policy selection, engaged and cleared
+   per scope (ADR-0010).
 3. **Real-time data plane** — control frames, fast telemetry, reliable authority and
    mode events, capability and configuration exchange.
 4. **Media plane** — rendered-video capture, encoding and delivery, camera-source

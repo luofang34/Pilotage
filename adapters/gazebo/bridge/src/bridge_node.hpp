@@ -23,6 +23,9 @@ struct BridgeConfig {
   std::string vehicle;             // e.g. "vehicle_blue"
   std::string camera_topic;        // e.g. "/camera" (FPV, camera_id = 0)
   std::string chase_camera_topic;  // e.g. "/chase_camera" (camera_id = 1)
+  // The gimbal payload camera (camera_id = 2). Empty when the vehicle carries
+  // no gimbal, in which case the bridge subscribes no third camera.
+  std::string gimbal_camera_topic;
 };
 
 // Wires gz-transport subscriptions/publisher to a BridgeConnection. The node
@@ -43,10 +46,11 @@ class BridgeNode {
   // gz-transport member-function callbacks (run on gz reader threads).
   void OnOdometry(const gz::msgs::Odometry &msg);
   // Per-topic thunks (gz-transport::Subscribe needs a fixed-arity callback)
-  // that both forward to the shared OnImage body with their camera_id.
+  // that each forward to the shared OnImage body with their camera_id.
   void OnFpvImage(const gz::msgs::Image &msg);
   void OnChaseImage(const gz::msgs::Image &msg);
-  // Shared onImage body for both camera subscriptions; camera_id tags the
+  void OnGimbalImage(const gz::msgs::Image &msg);
+  // Shared onImage body for every camera subscription; camera_id tags the
   // emitted BridgeFrame so the host can route it to the right video source.
   void OnImage(const gz::msgs::Image &msg, std::uint32_t camera_id);
 

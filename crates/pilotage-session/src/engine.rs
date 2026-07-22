@@ -11,6 +11,8 @@
 //! the host `now`: a documented loopback-only simplification for increment 0.
 //! See [`SessionEngine`] for the full caveat and the RTT/offset follow-up.
 
+mod action_command;
+mod frame_ingress;
 mod handlers;
 mod link_loss;
 
@@ -19,7 +21,6 @@ use pilotage_authority::{AuthorityCommand, AuthorityEffect, AuthorityEngine, Lin
 use pilotage_timing::{MonoTimestamp, StalenessPolicy};
 
 use crate::action::{LinkLossTrigger, SessionAction, SessionOutcome};
-use crate::capabilities::scope_pairs;
 use crate::clients::ClientRegistry;
 use crate::config::SessionConfig;
 use crate::liveness::{ExpiredHolder, HolderLiveness};
@@ -53,6 +54,19 @@ use link_loss::LinkLossState;
 #[derive(Debug)]
 pub struct SessionEngine {
     authority: AuthorityEngine,
+    /// Group pairs that are COMMAND-ONLY: every member advertises no
+    /// intent families, so there is no setpoint stream to watch for
+    /// silence and nothing to neutralize on release — the silence
+    /// watchdog and the link-loss latch do not apply. `sim.lifecycle` is
+    /// the motivating case: a release must never engage a latch that no
+    /// frame could ever clear (no intent means no neutral demonstration).
+    command_only: std::collections::HashSet<crate::clients::ScopePair>,
+    /// Concrete scope → its exclusive-authority group key. Leases,
+    /// generations, the silence watchdog, the link-loss latch, and recovery
+    /// all operate on GROUP pairs — scopes sharing a group drive one
+    /// actuator and are one authority. A scope without a declared group is
+    /// its own.
+    groups: std::collections::HashMap<crate::clients::ScopePair, pilotage_protocol::ScopeId>,
     capabilities: AdapterCapabilities,
     staleness: StalenessPolicy,
     config: SessionConfig,
@@ -65,6 +79,11 @@ pub struct SessionEngine {
     /// currently have a policy engaged (awaiting the recovery activation
     /// condition).
     link_loss: LinkLossState,
+    /// Last accepted datagram sequence per authority pair, keyed to the
+    /// generation it was observed under: wrap-aware duplicate/reorder
+    /// refusal (a fresh generation restarts the domain).
+    sequences:
+        std::collections::HashMap<crate::clients::ScopePair, (pilotage_protocol::Generation, u32)>,
     /// Reusable buffer for the watchdog's expiry pass, so the steady-state
     /// tick allocates nothing.
     expired_scratch: Vec<ExpiredHolder>,
@@ -86,21 +105,54 @@ impl SessionEngine {
         // stamp keeps construction free of a clock, per ADR-0002.
         let now = MonoTimestamp::from_nanos(0);
         let mut scope_count: usize = 0;
-        for (vehicle, scope) in scope_pairs(&capabilities) {
-            clients.register_scope((vehicle, scope.clone()));
-            let effects = authority.handle(AuthorityCommand::RegisterScope { vehicle, scope }, now);
-            drop(effects);
-            scope_count = scope_count.saturating_add(1);
+        let mut groups = std::collections::HashMap::new();
+        let mut registered = std::collections::HashSet::new();
+        let mut command_only = std::collections::HashSet::new();
+        for vehicle in &capabilities.vehicles {
+            for descriptor in &vehicle.scopes {
+                let group = descriptor.authority_group.as_ref().map_or_else(
+                    || descriptor.scope.clone(),
+                    |name| pilotage_protocol::ScopeId::new(name.clone()),
+                );
+                groups.insert((vehicle.id, descriptor.scope.clone()), group.clone());
+                let continuous = !descriptor.intents.is_empty()
+                    || descriptor.legacy.is_some()
+                    || !descriptor.axes.is_empty();
+                if continuous {
+                    // Any continuous-control member (typed intents, a
+                    // legacy translation, or routed axes) makes the whole
+                    // group a continuous authority.
+                    command_only.remove(&(vehicle.id, group.clone()));
+                } else if !registered.contains(&(vehicle.id, group.clone())) {
+                    command_only.insert((vehicle.id, group.clone()));
+                }
+                if !registered.insert((vehicle.id, group.clone())) {
+                    continue;
+                }
+                clients.register_scope((vehicle.id, group.clone()));
+                let effects = authority.handle(
+                    AuthorityCommand::RegisterScope {
+                        vehicle: vehicle.id,
+                        scope: group,
+                    },
+                    now,
+                );
+                drop(effects);
+                scope_count = scope_count.saturating_add(1);
+            }
         }
         let link_loss =
             LinkLossState::from_capabilities(&capabilities, &config.link_loss_overrides);
         Self {
             authority,
+            groups,
+            command_only,
             capabilities,
             staleness,
             config,
             clients,
             liveness: HolderLiveness::with_scope_capacity(scope_count),
+            sequences: std::collections::HashMap::new(),
             link_loss,
             expired_scratch: Vec::with_capacity(scope_count),
         }
@@ -120,6 +172,9 @@ impl SessionEngine {
         now: MonoTimestamp,
     ) -> SessionOutcome {
         let mut actions = Actions::new(self.config.max_actions_per_call);
+        // Deadlines are judged BEFORE the message: a late frame must find
+        // its authority already expired, not refresh the overdue deadline.
+        self.expire_overdue(now, &mut actions);
         match msg {
             DomainEnvelope::Hello(hello) => self.on_hello(client, hello, &mut actions),
             DomainEnvelope::Lease(request) => self.on_lease(client, request, now, &mut actions),
@@ -128,6 +183,12 @@ impl SessionEngine {
             }
             DomainEnvelope::Frame(frame) => self.on_frame(client, frame, now, &mut actions),
             DomainEnvelope::Ping(ping) => self.on_ping(client, ping, now, &mut actions),
+            DomainEnvelope::ProfileActivation(activation) => {
+                self.on_profile_activation(client, activation, &mut actions);
+            }
+            DomainEnvelope::ActionCommand(command) => {
+                self.on_action_command(client, command, now, &mut actions);
+            }
             DomainEnvelope::Disconnect => self.on_disconnect(client, &mut actions),
         }
         actions.into_outcome()
@@ -148,32 +209,12 @@ impl SessionEngine {
     #[must_use]
     pub fn handle_tick(&mut self, now: MonoTimestamp) -> SessionOutcome {
         let mut actions = Actions::new(self.config.max_actions_per_call);
-        let effects = self.authority.expire_due(now);
-        self.fan_out_authority(
-            effects,
-            now,
-            LinkLossTrigger::AuthorityRevoked,
-            &mut actions,
-        );
-        // A holder that stopped sending frames while its connection stayed open
-        // (a frozen client the QUIC keepalive holds up) is released here. The
-        // expiry list reuses the engine's scratch buffer (taken and restored
-        // around the loop so the borrow does not pin `self`).
-        let mut expired = core::mem::take(&mut self.expired_scratch);
-        self.liveness.expire_into(now, &mut expired);
-        for holder in expired.drain(..) {
-            let effects = self.authority.handle(
-                AuthorityCommand::HolderLinkChanged {
-                    vehicle: holder.vehicle,
-                    scope: holder.scope,
-                    principal: holder.principal,
-                    state: LinkState::Lost,
-                },
-                now,
-            );
-            self.fan_out_authority(effects, now, LinkLossTrigger::HolderSilence, &mut actions);
-        }
-        self.expired_scratch = expired;
+        self.expire_overdue(now, &mut actions);
+        // Re-drive any scope whose clear the adapter refused, so recovery is not
+        // stranded on one failed enactment. Generation-gated inside: a holder
+        // change already reverted the pending, so this never crosses a
+        // generation (ADR-0010 neutral-activation stays required).
+        self.retry_pending_clears(&mut actions);
         actions.into_outcome()
     }
 
@@ -222,6 +263,19 @@ impl SessionEngine {
     /// axis-bearing frame; called from the on-frame accept path. Refresh is
     /// in place (no allocation) and only for the recorded holder — a frame
     /// can never create or resurrect a watchdog entry.
+    /// The exclusive-authority pair a concrete scope belongs to: the group
+    /// key when the scope is grouped, itself otherwise, `None` for a scope
+    /// the capabilities never declared.
+    pub(crate) fn authority_pair(
+        &self,
+        vehicle: pilotage_protocol::VehicleId,
+        scope: &pilotage_protocol::ScopeId,
+    ) -> Option<crate::clients::ScopePair> {
+        self.groups
+            .get(&(vehicle, scope.clone()))
+            .map(|group| (vehicle, group.clone()))
+    }
+
     pub(crate) fn note_frame_accepted(
         &mut self,
         vehicle: pilotage_protocol::VehicleId,

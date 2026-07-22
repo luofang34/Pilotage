@@ -4,6 +4,7 @@ syntax = "proto3";
 package pilotage.v1;
 
 import "pilotage/v1/common.proto";
+import "pilotage/v1/control.proto";
 
 // Bitwise-independent execution-mode flags a host may advertise or a
 // session may request. Modeled as an enum of named flags combined via
@@ -27,12 +28,57 @@ enum LinkLossAction {
   LINK_LOSS_ACTION_REVOKE_SCOPE = 4;
 }
 
+// A typed control-intent family a vehicle can accept (CTRL-01). Mirrors the
+// `ControlIntent` families in `control.proto`; advertised so a client sends
+// only intents the vehicle can interpret rather than guessing from numeric
+// axis IDs.
+enum IntentFamily {
+  INTENT_FAMILY_UNSPECIFIED = 0;
+  INTENT_FAMILY_VELOCITY = 1;
+  INTENT_FAMILY_POSITION_HOLD = 2;
+  INTENT_FAMILY_ATTITUDE_THRUST = 3;
+  INTENT_FAMILY_BODY_RATE = 4;
+  INTENT_FAMILY_GIMBAL_RATE = 5;
+}
+
+// One intent family a vehicle accepts, with the reference frames it admits and
+// its magnitude limits, so a client negotiates typed capability rather than
+// discovering limits by rejection. `max_linear` bounds the horizontal linear
+// term (m/s for velocity, m for position hold); `max_vertical` bounds the
+// vertical linear term when the vehicle's vertical envelope is tighter (falls
+// back to `max_linear` when zero); `max_angular` bounds the angular term
+// (rad/s for rates, rad for headings). A zero limit means "unspecified / no
+// bound advertised", not "zero allowed".
+message IntentCapability {
+  IntentFamily family = 1;
+  repeated ReferenceFrame frames = 2;
+  float max_linear = 3;
+  float max_angular = 4;
+  float max_vertical = 5;
+  // For ATTITUDE_THRUST, where `max_angular` bounds the tilt ANGLE (rad),
+  // this bounds the heading-setpoint slew rate (rad/s) a direct-flight
+  // client integrates its yaw stick at. Zero elsewhere.
+  float max_yaw_rate = 6;
+}
+
+// One typed discrete action a scope accepts, with the mode targets it admits
+// for a MODE_REQUEST (empty for actions that carry no target).
+message ActionCapability {
+  ControlAction action = 1;
+  repeated ModeTarget mode_targets = 2;
+}
+
 // A single independently assignable control scope published by a host for
 // a vehicle (ADR-0006).
 message ScopeDescriptor {
   ScopeId scope = 1;
   string display_name = 2;
   LinkLossAction link_loss_action = 3;
+  // The typed intent families this scope accepts (CTRL-01). Empty on a scope
+  // that still takes only the legacy numeric axis payload.
+  repeated IntentCapability intents = 4;
+  // The typed discrete actions this scope accepts (CTRL-01).
+  repeated ActionCapability actions = 5;
 }
 
 // Describes one vehicle a host can offer for control.

@@ -5,7 +5,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    GazeboAdapter, MOTION_SCOPE, THROTTLE_AXIS, YAW_AXIS, clamp_axis, control_from_frame,
+    GazeboAdapter, MAX_ANGULAR_RPS, MAX_LINEAR_MPS, MOTION_SCOPE, clamp_axis, control_from_intent,
     telemetry_from_odometry,
 };
 use crate::bridge_client::BridgeClient;
@@ -14,16 +14,27 @@ use crate::framing::read_envelope;
 use crate::wire::{BridgeEnvelope, BridgeFrame, BridgeOdometry, bridge_envelope};
 use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
 use pilotage_protocol::{
-    ControlPayload, Generation, LogicalAxisId, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
-    VehicleId,
+    ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
+    SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
 use pilotage_timing::MonoTimestamp;
 use prost::Message;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
-fn frame(scope: &str, axes: Vec<(LogicalAxisId, f32)>, vehicle: VehicleId) -> ScopedControlFrame {
+fn velocity(vx: f32, yaw_rate: f32) -> VelocityIntent {
+    VelocityIntent {
+        frame: ReferenceFrame::BodyFrd,
+        vx,
+        vy: 0.0,
+        vz: 0.0,
+        yaw_rate,
+    }
+}
+
+fn frame(scope: &str, intent: Option<ControlIntent>, vehicle: VehicleId) -> ScopedControlFrame {
     ScopedControlFrame {
+        action_ids: vec![],
         session: SessionId::new(1),
         vehicle,
         scope: ScopeId::new(scope),
@@ -31,10 +42,10 @@ fn frame(scope: &str, axes: Vec<(LogicalAxisId, f32)>, vehicle: VehicleId) -> Sc
         sequence: SequenceNum::new(1),
         sampled_at: MonoTimestamp::from_nanos(0),
         profile_revision: 1,
-        payload: ControlPayload {
-            axes,
-            edges: vec![],
-        },
+        activation_revision: 0,
+        payload: ControlPayload::default(),
+        intent,
+        actions: vec![],
     }
 }
 
@@ -65,31 +76,30 @@ fn clamp_axis_neutralizes_nan_and_bounds_infinity() {
 }
 
 #[test]
-fn control_maps_throttle_to_linear_and_yaw_to_angular() {
-    let vehicle = VehicleId::new(7);
-    let (control, transformed) = control_from_frame(&frame(
-        MOTION_SCOPE,
-        vec![
-            (LogicalAxisId::new(THROTTLE_AXIS), 0.8),
-            (LogicalAxisId::new(YAW_AXIS), -0.4),
-        ],
-        vehicle,
-    ));
-    assert!(!transformed);
+fn control_maps_typed_velocity_to_twist() {
+    let (control, constrained) =
+        control_from_intent(&velocity(0.8 * MAX_LINEAR_MPS, -0.4 * MAX_ANGULAR_RPS));
+    assert!(!constrained);
     assert!((control.linear_x - 0.8).abs() < 1e-6);
     assert!((control.angular_z - -0.4).abs() < 1e-6);
 }
 
 #[test]
-fn control_clamps_out_of_range_and_reports_transformed() {
-    let vehicle = VehicleId::new(7);
-    let (control, transformed) = control_from_frame(&frame(
-        MOTION_SCOPE,
-        vec![(LogicalAxisId::new(THROTTLE_AXIS), 9.0)],
-        vehicle,
-    ));
-    assert!(transformed);
+fn control_clamps_out_of_envelope_and_reports_constrained() {
+    let (control, constrained) = control_from_intent(&velocity(9.0, 0.0));
+    assert!(constrained);
     assert!((control.linear_x - 1.0).abs() < 1e-6);
+}
+
+/// A lateral component a diff-drive cannot execute is constrained, and the
+/// executable components still apply.
+#[test]
+fn control_constrains_an_inexecutable_lateral_component() {
+    let mut intent = velocity(0.5, 0.0);
+    intent.vy = 0.5;
+    let (control, constrained) = control_from_intent(&intent);
+    assert!(constrained);
+    assert!((control.linear_x - 0.5).abs() < 1e-6);
 }
 
 #[test]
@@ -119,10 +129,7 @@ async fn apply_control_sends_mapped_command_over_the_bridge() {
 
     let outcome = adapter.apply_control(&frame(
         MOTION_SCOPE,
-        vec![
-            (LogicalAxisId::new(THROTTLE_AXIS), 0.5),
-            (LogicalAxisId::new(YAW_AXIS), 0.25),
-        ],
+        Some(ControlIntent::Velocity(velocity(0.5, 0.25))),
         vehicle,
     ));
     assert_eq!(outcome.disposition, Disposition::Accepted);
@@ -146,11 +153,32 @@ async fn unknown_scope_is_rejected_without_sending() {
     let (host_side, _bridge_side) = connected_pair().await;
     let mut adapter =
         GazeboAdapter::from_bridge(vehicle, BridgeClient::connect_stream_for_test(host_side));
-    let outcome = adapter.apply_control(&frame("vehicle.camera", vec![], vehicle));
+    let outcome = adapter.apply_control(&frame("vehicle.camera", None, vehicle));
     assert_eq!(
         outcome.disposition,
         Disposition::Rejected(RejectReason::UnknownScope)
     );
+}
+
+/// The typed-only contract: a legacy numeric payload reaching the adapter is
+/// a session-boundary violation, rejected rather than interpreted.
+#[tokio::test]
+async fn a_legacy_payload_frame_is_rejected() {
+    use pilotage_protocol::LogicalAxisId;
+    let vehicle = VehicleId::new(1);
+    let (host_side, _bridge_side) = connected_pair().await;
+    let mut adapter =
+        GazeboAdapter::from_bridge(vehicle, BridgeClient::connect_stream_for_test(host_side));
+    let mut legacy = frame(MOTION_SCOPE, None, vehicle);
+    legacy.payload = ControlPayload {
+        axes: vec![(LogicalAxisId::new(super::THROTTLE_AXIS), 1.0)],
+        edges: vec![],
+    };
+    let outcome = adapter.apply_control(&legacy);
+    assert!(matches!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::Other(_))
+    ));
 }
 
 #[tokio::test]
@@ -324,7 +352,11 @@ async fn set_link_loss_policy_sends_stop() {
         GazeboAdapter::from_bridge(vehicle, BridgeClient::connect_stream_for_test(host_side));
 
     adapter
-        .set_link_loss_policy(vehicle, Some(LinkLossPolicy::Neutralize))
+        .set_link_loss_policy(
+            vehicle,
+            &ScopeId::new(MOTION_SCOPE),
+            Some(LinkLossPolicy::Neutralize),
+        )
         .expect("policy enacted");
     let received = read_envelope(&mut bridge_side)
         .await

@@ -28,17 +28,19 @@ pub(crate) fn host_capabilities(
     }
 }
 
-/// Enumerates the `(vehicle, scope)` pairs the adapter exposes so the engine
-/// can register each with the authority engine at construction.
-pub(crate) fn scope_pairs(
-    caps: &AdapterCapabilities,
-) -> impl Iterator<Item = (pilotage_protocol::VehicleId, pilotage_protocol::ScopeId)> + '_ {
-    caps.vehicles.iter().flat_map(|vehicle| {
-        vehicle
-            .scopes
-            .iter()
-            .map(move |scope| (vehicle.id, scope.scope.clone()))
-    })
+/// The adapter-declared descriptor for one `(vehicle, scope)` pair, when the
+/// capabilities report it.
+pub(crate) fn scope_capability<'a>(
+    caps: &'a AdapterCapabilities,
+    vehicle: pilotage_protocol::VehicleId,
+    scope: &pilotage_protocol::ScopeId,
+) -> Option<&'a AdapterScope> {
+    caps.vehicles
+        .iter()
+        .find(|descriptor| descriptor.id == vehicle)?
+        .scopes
+        .iter()
+        .find(|descriptor| descriptor.scope == *scope)
 }
 
 fn vehicle_descriptor(vehicle: &AdapterVehicle) -> wire::VehicleDescriptor {
@@ -71,6 +73,78 @@ fn scope_descriptor(
         }),
         display_name: String::new(),
         link_loss_action: link_loss as i32,
+        intents: scope.intents.iter().map(intent_capability).collect(),
+        actions: scope.actions.iter().map(action_capability).collect(),
+    }
+}
+
+/// Projects one adapter-declared intent capability onto the wire, so a
+/// client scales its typed commands by the REAL envelope the adapter
+/// enforces (CTRL-01).
+fn intent_capability(intent: &pilotage_adapter_api::IntentCapability) -> wire::IntentCapability {
+    wire::IntentCapability {
+        family: intent_family(intent.family) as i32,
+        frames: intent
+            .frames
+            .iter()
+            .map(|frame| reference_frame(*frame) as i32)
+            .collect(),
+        max_linear: intent.max_linear,
+        max_angular: intent.max_angular,
+        max_yaw_rate: intent.max_yaw_rate,
+        max_vertical: intent.max_vertical,
+    }
+}
+
+fn action_capability(action: &pilotage_adapter_api::ActionCapability) -> wire::ActionCapability {
+    wire::ActionCapability {
+        action: action_kind(action.action) as i32,
+        mode_targets: action
+            .mode_targets
+            .iter()
+            .map(|target| mode_target(*target) as i32)
+            .collect(),
+    }
+}
+
+fn intent_family(family: pilotage_protocol::IntentFamily) -> wire::IntentFamily {
+    use pilotage_protocol::IntentFamily as Domain;
+    match family {
+        Domain::Velocity => wire::IntentFamily::Velocity,
+        Domain::PositionHold => wire::IntentFamily::PositionHold,
+        Domain::AttitudeThrust => wire::IntentFamily::AttitudeThrust,
+        Domain::BodyRate => wire::IntentFamily::BodyRate,
+        Domain::GimbalRate => wire::IntentFamily::GimbalRate,
+    }
+}
+
+fn reference_frame(frame: pilotage_protocol::ReferenceFrame) -> wire::ReferenceFrame {
+    use pilotage_protocol::ReferenceFrame as Domain;
+    match frame {
+        Domain::BodyFrd => wire::ReferenceFrame::BodyFrd,
+        Domain::LocalNed => wire::ReferenceFrame::LocalNed,
+        Domain::Gimbal => wire::ReferenceFrame::Gimbal,
+    }
+}
+
+fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
+    use pilotage_protocol::ActionKind as Domain;
+    match kind {
+        Domain::Arm => wire::ControlAction::Arm,
+        Domain::Disarm => wire::ControlAction::Disarm,
+        Domain::ModeRequest => wire::ControlAction::ModeRequest,
+        Domain::GimbalRecenter => wire::ControlAction::GimbalRecenter,
+        Domain::SimReset => wire::ControlAction::SimReset,
+    }
+}
+
+fn mode_target(target: pilotage_protocol::ModeTarget) -> wire::ModeTarget {
+    use pilotage_protocol::ModeTarget as Domain;
+    match target {
+        Domain::CameraVelocity => wire::ModeTarget::CameraVelocity,
+        Domain::FpvDirect => wire::ModeTarget::FpvDirect,
+        Domain::Hold => wire::ModeTarget::Hold,
+        Domain::Return => wire::ModeTarget::Return,
     }
 }
 

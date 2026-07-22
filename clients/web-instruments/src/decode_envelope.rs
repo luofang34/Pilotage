@@ -27,10 +27,16 @@ struct Decoded<M> {
 #[derive(Serialize)]
 struct Empty {}
 
-/// A `FrameRejected`, of which the viewer displays only the reason code.
+/// A `FrameRejected` with its full addressing, so the viewer can attribute
+/// the rejection to a scope and react to a fenced-out hold (host watchdog
+/// revocation) instead of streaming rejected frames blind.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FrameRejectedMessage {
     reason: i32,
+    scope: String,
+    sequence: u32,
+    current_generation: u64,
 }
 
 /// A `MeasurementStamp` in the browser gate's field vocabulary. `sourceId` and
@@ -178,6 +184,11 @@ pub fn decode_datagram_envelope(bytes: &[u8]) -> JsValue {
             kind: "FrameRejected",
             message: FrameRejectedMessage {
                 reason: rejection.reason,
+                scope: rejection.scope.map(|scope| scope.value).unwrap_or_default(),
+                sequence: rejection.sequence.map_or(0, |sequence| sequence.value),
+                current_generation: rejection
+                    .current_generation
+                    .map_or(0, |generation| generation.value),
             },
         }),
         _ => to_js(&Decoded {

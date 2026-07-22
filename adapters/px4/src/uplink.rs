@@ -21,11 +21,11 @@ use pilotage_mavlink::codec::{
 /// Full-stick horizontal velocity demand. Demand scaling is operator
 /// policy destined for per-vehicle profile configuration; these values
 /// match the Aviate adapter's so the two SITL vehicles feel identical.
-const MAX_HORIZONTAL_MPS: f32 = 3.0;
+pub(crate) const MAX_HORIZONTAL_MPS: f32 = 3.0;
 /// Full-stick climb/descend rate demand.
-const MAX_VERTICAL_MPS: f32 = 1.5;
+pub(crate) const MAX_VERTICAL_MPS: f32 = 1.5;
 /// Full-stick yaw rate demand (~52°/s).
-const MAX_YAW_RATE_RPS: f32 = 0.9;
+pub(crate) const MAX_YAW_RATE_RPS: f32 = 0.9;
 /// Acceleration limit shaping stick steps into velocity ramps. The
 /// PX4 velocity-only offboard path applies no acceleration shaping of
 /// its own, so this slew is the only one in the chain.

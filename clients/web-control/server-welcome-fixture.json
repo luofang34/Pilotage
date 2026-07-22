@@ -1,0 +1,38 @@
+{
+  "comment": "Capability-negotiation wire fixture (CTRL-01). envelopeHex is a length-delimited ServerWelcome envelope encoded by the REAL session host (hosts/session-host/tests/welcome_fixture.rs asserts the host still produces exactly these bytes); clients/web/wire.test.mjs decodes the SAME bytes and asserts the negotiated scopes, limits, PACKED reference-frame lists, and PACKED mode-target lists survive the browser decoder. Regenerate by running the Rust test and copying its reported hex.",
+  "envelopeHex": "cd0108013ac8010a0012001a86010a0f77656c636f6d652d6669787475726512700a0208011a380a100a0e76656869636c652e6d6f74696f6e180222150801120201021d00004040256666663f2d0000c03f2a0208012a07080312030102031a300a170a1576656869636c652e6d6f74696f6e2e6469726563741802220f0803120102259a99193f356666663f2a0208011a010122180a02080112100a0e76656869636c652e6d6f74696f6e2200221f0a02080112170a1576656869636c652e6d6f74696f6e2e6469726563742200",
+  "expected": {
+    "sessionId": 0,
+    "scopes": [
+      {
+        "scope": "vehicle.motion",
+        "velocity": {
+          "family": 1,
+          "frames": [
+            1,
+            2
+          ],
+          "maxLinear": 3.0,
+          "maxVertical": 1.5,
+          "maxAngular": 0.9
+        },
+        "modeTargets": [
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "scope": "vehicle.motion.direct",
+        "attitudeThrust": {
+          "family": 3,
+          "frames": [
+            2
+          ],
+          "maxAngular": 0.6,
+          "maxYawRate": 0.9
+        }
+      }
+    ]
+  }
+}

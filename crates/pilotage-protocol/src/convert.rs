@@ -15,6 +15,12 @@ use crate::ids::{Generation, ScopeId, SequenceNum, SessionId, VehicleId};
 use crate::wire;
 use pilotage_timing::MonoTimestamp;
 
+mod intent;
+
+pub(crate) use intent::{
+    action_from_wire as action_request_from_wire, action_to_wire as action_request_to_wire,
+};
+
 /// Errors converting a decoded wire message into its domain equivalent.
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ConvertError {
@@ -55,6 +61,29 @@ pub enum ConvertError {
         axis_id: u32,
         /// The raw, non-finite value found on the wire.
         value: f32,
+    },
+    /// A wire `f32` field of a typed control intent was NaN or infinite, which
+    /// cannot represent a physical velocity, rate, orientation, or thrust.
+    #[error("control intent field `{field}` is not finite")]
+    NonFiniteIntentValue {
+        /// The intent field that carried the non-finite value.
+        field: &'static str,
+    },
+    /// A typed intent field was outside its documented range (a thrust must
+    /// lie in `[0, 1]`), so it cannot represent a physical command.
+    #[error("control intent field `{field}` value {value} is outside its documented range")]
+    IntentOutOfRange {
+        /// The out-of-range intent field.
+        field: &'static str,
+        /// The raw value found on the wire.
+        value: f32,
+    },
+    /// An attitude intent's quaternion was not a unit rotation (within
+    /// tolerance), so it cannot represent an orientation.
+    #[error("attitude quaternion norm {norm} is not a unit rotation")]
+    InvalidQuaternion {
+        /// The quaternion's Euclidean norm as found on the wire.
+        norm: f32,
     },
     /// The envelope's `schema_version` is not one this build knows how to
     /// interpret (ADR-0014).
@@ -201,7 +230,24 @@ impl From<&ScopedControlFrame> for wire::ControlFrame {
                 nanos: frame.sampled_at.as_nanos(),
             }),
             profile_revision: frame.profile_revision,
-            payload: Some(payload_to_wire(&frame.payload)),
+            activation_revision: frame.activation_revision,
+            // A typed-only frame omits the payload field entirely; presence
+            // on the wire is decided by content, never by an empty message.
+            payload: frame
+                .carries_payload()
+                .then(|| payload_to_wire(&frame.payload)),
+            intent: frame.intent.as_ref().map(intent::intent_to_wire),
+            actions: frame
+                .actions
+                .iter()
+                .enumerate()
+                .map(|(index, action)| {
+                    intent::action_to_wire(
+                        *action,
+                        frame.action_ids.get(index).copied().unwrap_or(0),
+                    )
+                })
+                .collect(),
         }
     }
 }
@@ -220,7 +266,22 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
         let generation = frame.generation.ok_or_else(|| missing("generation"))?;
         let sequence = frame.sequence.ok_or_else(|| missing("sequence"))?;
         let sampled_at = frame.sampled_at.ok_or_else(|| missing("sampled_at"))?;
-        let payload = frame.payload.ok_or_else(|| missing("payload"))?;
+        // A typed-only frame legitimately carries no payload field; an absent
+        // payload decodes as the empty payload, and the session host's
+        // exactly-one-representation rule judges the CONTENT.
+        let payload = frame
+            .payload
+            .map(payload_from_wire)
+            .transpose()?
+            .unwrap_or_default();
+        let control_intent = frame.intent.map(intent::intent_from_wire).transpose()?;
+        let mut actions = Vec::with_capacity(frame.actions.len());
+        let mut action_ids = Vec::with_capacity(frame.actions.len());
+        for request in frame.actions {
+            let (action, action_id) = intent::action_from_wire(request)?;
+            actions.push(action);
+            action_ids.push(action_id);
+        }
 
         Ok(ScopedControlFrame {
             session: SessionId::new(session.value),
@@ -230,7 +291,11 @@ impl TryFrom<wire::ControlFrame> for ScopedControlFrame {
             sequence: SequenceNum::new(sequence.value),
             sampled_at: MonoTimestamp::from_nanos(sampled_at.nanos),
             profile_revision: frame.profile_revision,
-            payload: payload_from_wire(payload)?,
+            activation_revision: frame.activation_revision,
+            payload,
+            intent: control_intent,
+            actions,
+            action_ids,
         })
     }
 }
@@ -282,6 +347,44 @@ pub fn decode_control_frame_envelope(bytes: &[u8]) -> Result<ScopedControlFrame,
         _ => Err(ConvertError::MissingField {
             message: "pilotage.v1.Envelope",
             field: "control_frame",
+        }
+        .into()),
+    }
+}
+
+/// Decodes a bare `Envelope` into the reliable-stream action command it
+/// carries (CTRL-01), mirroring [`decode_control_frame_envelope`].
+///
+/// # Errors
+///
+/// Returns [`DecodeError`] when the bytes are not a valid envelope, the
+/// schema version is unsupported, or the payload is not a
+/// `ControlActionCommand`.
+pub fn decode_action_command_envelope(
+    bytes: &[u8],
+) -> Result<crate::session::ControlActionCommand, DecodeError> {
+    let envelope = wire::Envelope::decode(bytes).map_err(|source| DecodeError::Prost {
+        message: "pilotage.v1.Envelope",
+        source,
+    })?;
+    if envelope.schema_version != SCHEMA_VERSION {
+        return Err(ConvertError::UnsupportedSchemaVersion {
+            expected: SCHEMA_VERSION,
+            found: envelope.schema_version,
+        }
+        .into());
+    }
+    let payload = envelope.payload.ok_or(ConvertError::MissingField {
+        message: "pilotage.v1.Envelope",
+        field: "payload",
+    })?;
+    match payload {
+        wire::envelope::Payload::ControlActionCommand(command) => {
+            Ok(crate::session::ControlActionCommand::try_from(command)?)
+        }
+        _ => Err(ConvertError::MissingField {
+            message: "pilotage.v1.Envelope",
+            field: "control_action_command",
         }
         .into()),
     }
