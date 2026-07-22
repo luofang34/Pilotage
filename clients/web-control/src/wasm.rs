@@ -181,6 +181,7 @@ impl WebControl {
         mode: u32,
         now_ms: f64,
         connected: bool,
+        input_lost: bool,
         source: u32,
     ) -> u32 {
         self.load_sample(axis_count as usize, button_count as usize, source);
@@ -188,6 +189,7 @@ impl WebControl {
             now_ms,
             mode: mode_from_u32(mode),
             connected,
+            input_lost,
         };
         let plan = self.coordinator.evaluate(&self.sample, &state);
         self.store_plan(&plan)

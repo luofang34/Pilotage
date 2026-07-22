@@ -90,4 +90,6 @@ pub struct SessionState {
     pub mode: Mode,
     /// Whether a transport session is live; a dead session emits nothing.
     pub connected: bool,
+    /// Whether synchronous input loss is latched; publishable output is empty.
+    pub input_lost: bool,
 }

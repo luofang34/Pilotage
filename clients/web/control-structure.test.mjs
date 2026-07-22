@@ -115,6 +115,16 @@ if (authorityApplyOwners.join(",") !== "authority-transition.js") {
   );
 }
 
+const mayPublishCalls = modules.reduce(
+  (count, name) =>
+    count + (readFileSync(new URL(`./${name}`, dir), "utf8").match(/\.mayPublish\(/g)?.length ?? 0),
+  0,
+);
+if (mayPublishCalls !== 1) {
+  failures += 1;
+  console.error(`FAIL - mayPublish must guard only the datagram write (got ${mayPublishCalls})`);
+}
+
 // And the shell must still drive the runtime through the one seam.
 const main = readFileSync(new URL("./main.js", dir), "utf8");
 function require(label, pattern) {

@@ -18,7 +18,7 @@ export async function resumeSessionControl({
   gate.reset();
   await releases.settled();
   await controlSettled();
-  if (!isSessionLive() || !gate.mayPublish()) {
+  if (!isSessionLive() || gate.isLatched()) {
     return { requested: false, interrupted: true };
   }
 
@@ -29,7 +29,7 @@ export async function resumeSessionControl({
     surrender();
     throw error;
   }
-  if (!isSessionLive() || !gate.mayPublish()) {
+  if (!isSessionLive() || gate.isLatched()) {
     surrender();
     return { requested: true, interrupted: true };
   }

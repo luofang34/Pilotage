@@ -33,6 +33,7 @@ fn session(_motion_granted: bool, _motion_recovered: bool) -> SessionState {
         now_ms: 100_000.0,
         mode: Mode::QuadPilot,
         connected: true,
+        input_lost: false,
     }
 }
 

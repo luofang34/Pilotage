@@ -187,6 +187,11 @@ impl ControlRuntime {
             self.prev_arm = sample.pressed(usize::from(active.flight.arm_button));
             self.prev_disarm = sample.pressed(usize::from(active.flight.disarm_button));
         }
+        if session.input_lost {
+            let plan = self.consume_lost_input(sample, &active);
+            self.active = Some(active);
+            return plan;
+        }
         let plan = if self.pending.is_some() {
             self.evaluate_handover(sample, session, &active)
         } else {
@@ -196,6 +201,17 @@ impl ControlRuntime {
             self.active = Some(active);
         }
         plan
+    }
+
+    fn consume_lost_input(&mut self, sample: &RawSample, active: &CompiledProfile) -> ControlPlan {
+        self.reset_baseline = reset_held(sample, &active.gimbal);
+        let arm = self.edge_fired(sample, active.flight.arm_button, true);
+        let disarm = self.edge_fired(sample, active.flight.disarm_button, false);
+        ControlPlan {
+            arm_suppressed: arm,
+            disarm_suppressed: disarm,
+            ..ControlPlan::default()
+        }
     }
 
     /// The normal tick: flight motion (masked while LT is held), the gimbal

@@ -823,7 +823,7 @@ function completePendingResume(token, granted) {
     pending: state.resumePendingToken === token,
     granted,
     sessionLive: transportSessions.isActive(token) && state.connected,
-    mayPublish: controlGate.mayPublish(),
+    mayPublish: !controlGate.isLatched(),
   });
   if (decision === "unrelated") return;
   if (decision === "surrender") {
@@ -1548,7 +1548,7 @@ function evaluateInputTick(mode) {
   }
   const sessionState = {
     mode,
-    connected: state.connected,
+    connected: state.connected, inputLost: controlGate.isLatched(),
     nowMs: performance.now(),
   };
   const plan = pad
@@ -1599,7 +1599,7 @@ async function runControlLoop(writer, token, runStop) {
       if (!ready) return;
       if (!transportSessions.isActive(token) || !state.connected) return;
       const mode = els.flightMode ? els.flightMode.value : "rover";
-      if (!controlGate.mayPublish()) {
+      if (controlGate.isLatched()) {
         // Input loss RELINQUISHES control authority. The latch is
         // absolute: NO frame — not even a neutral — is sent under this
         // generation, because the explicit LeaseRelease (sent by the
