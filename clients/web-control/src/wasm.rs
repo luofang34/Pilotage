@@ -223,6 +223,20 @@ impl WebControl {
         self.coordinator.device_revision()
     }
 
+    /// The active source's operator-facing arm-control name, from profile
+    /// data (the bound key, or the pad's printed button name). Empty before
+    /// the first activation.
+    #[must_use]
+    pub fn arm_hint(&self) -> String {
+        self.coordinator.arm_hint()
+    }
+
+    /// The active source's operator-facing disarm-control name.
+    #[must_use]
+    pub fn disarm_hint(&self) -> String {
+        self.coordinator.disarm_hint()
+    }
+
     /// The installed pad profile's effective-content digest (empty when no
     /// pad map is installed), binding the announcement to the exact merged
     /// document that routes physical input.

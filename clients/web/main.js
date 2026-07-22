@@ -51,7 +51,7 @@ import {
   tickInstrumentSet,
 } from "./instrument-health.js";
 import { TurnDerivation } from "./turn-derivation.js";
-import { formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
+import { fcArmToken, formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
 import { AvionicsIngress, FcStateTracker, INCARNATION_POLICY } from "./telemetry-ingress.js";
 import { TransportSessionLifecycle } from "./transport-session.js";
 import { runBootstrapReader } from "./bootstrap.js";
@@ -161,6 +161,12 @@ const state = {
   // The FC arm/disarm verdict (kind:result) last logged, so each verdict
   // is announced exactly once however many samples repeat it.
   lastFcVerdictLogged: null,
+  // The latest FC-state view, so the control readout can render the FC's
+  // arm truth next to the motion authority it explains.
+  lastFcView: null,
+  // The session token whose suspended-press watch is running, so a live
+  // session gets exactly one watch and a dead one none.
+  pressWatchToken: null,
   // Camera-velocity vs FPV/direct flight, tracked here so the DOM toggle
   // sends an explicit typed ModeRequest TARGET, never a stateless flip.
   // Flips ONLY on the host's accepted mode ack (reliable delivery), never
@@ -451,6 +457,7 @@ async function connect({ manual } = { manual: true }) {
       transportSessions.runIfActive(token, () => {
         state.leaseGranted = false;
         sendLeaseRelease(token);
+        startSuspendedPressWatch(token);
       });
     },
     releaseLease: ({ token }) => {
@@ -460,9 +467,10 @@ async function connect({ manual } = { manual: true }) {
         els.gamepad.textContent =
           "control released — input lost during connect; press Connect to resume";
         log("input lost during connect — lease released immediately");
+        startSuspendedPressWatch(token);
       });
     },
-    telemetryOnly: (_session, wasManual) => {
+    telemetryOnly: (session, wasManual) => {
       // The overlay carries this state too: buried in the collapsed log,
       // a lease-less session is indistinguishable from a healthy wait for
       // telemetry, and every arm press would then vanish behind it (#180).
@@ -476,6 +484,7 @@ async function connect({ manual } = { manual: true }) {
         els.overlay.textContent = "reconnected without control; press Connect to resume";
         log("reconnected (telemetry/video); press Connect to resume control");
       }
+      if (session?.token !== undefined) startSuspendedPressWatch(session.token);
     },
   });
   // A failed attempt may mean this tab belongs to an older session (its
@@ -524,6 +533,7 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.pendingReset = false;
     state.pendingFpvToggle = false;
     state.lastFcVerdictLogged = null;
+    state.lastFcView = null;
     state.connected = false;
     state.leaseGranted = false;
     state.controlCompletion = null;
@@ -1449,6 +1459,7 @@ async function readTelemetryDatagrams(transport, token) {
         }
         if (t.vehicleId !== VEHICLE_ID) continue;
         const fcView = instruments.fcState.observe(t.fcState ?? null, performance.now());
+        state.lastFcView = fcView;
         logFcCommandVerdict(fcView);
         els.telemetry.textContent = formatTelemetrySummary(t, fcView);
       } else if (decoded.kind === "Pong") {
@@ -1532,11 +1543,94 @@ function startControlLoop(transport, token) {
         if (state.controlCompletion === completion) {
           state.controlCompletion = null;
           state.stopControlRun = null;
+          // The run ended but the session lives on (input-loss latch, loop
+          // error): presses must keep answering loudly until control runs
+          // again.
+          if (transportSessions.isActive(token) && state.connected) {
+            startSuspendedPressWatch(token);
+          }
         }
       })
       .catch(() => {});
   }
   return started.ok;
+}
+
+/** One input evaluation through the runtime — shared by the live control
+ *  loop and the suspended-press watch, so a press while control is
+ *  suspended runs the SAME device selection and edge detection a live
+ *  press runs. One WASM call maps the raw sample (gamepad or keyboard) to
+ *  the whole plan; all device mapping, curves, masking, edge detection,
+ *  and lease planning live in the runtime. */
+function evaluateInputTick(mode) {
+  // A connected gamepad drives under its profile; the keyboard is the
+  // fallback when none is present.
+  const pad = activeGamepad();
+  // Resolve the pad's profile through the runtime's shared selector the
+  // moment its identity changes. A refused selection (ambiguous registry)
+  // keeps NO device map: those ticks sample empty and drive nothing.
+  if (pad && pad.id !== state.selectedPadId) {
+    state.selectedPadId = pad.id;
+    const outcome = state.controlShell.selectDevice(pad.id);
+    if (outcome === null) {
+      log(`gamepad REFUSED (ambiguous device-profile registry): ${pad.id}`);
+    } else {
+      log(`gamepad selected (${outcome}): ${pad.id}`);
+    }
+  } else if (!pad && state.selectedPadId !== null) {
+    // Poll-level backstop for a disconnect whose DOM event was missed.
+    state.selectedPadId = null;
+    state.controlShell.deselectDevice();
+    log("gamepad gone; control returns to the keyboard");
+  }
+  const sessionState = {
+    generation: state.controlGeneration,
+    mode,
+    connected: state.connected,
+    leaseGranted: state.gimbalLeaseGranted,
+    leaseDenied: state.gimbalLeaseDenied,
+    // The MOTION lease grant: the runtime gates all motion output until it
+    // is regranted on a fresh generation after a profile handover, so a
+    // remapped scheme never publishes on the released generation.
+    motionGranted: state.leaseGranted,
+    // A denied reacquire is terminal — the runtime stops re-requesting.
+    motionDenied: state.motionDenied,
+    // The runtime stays neutralizing after a handover until the host
+    // confirms it cleared the vehicle's link-loss latch on this generation.
+    motionRecovered: state.motionRecovered,
+    nowMs: performance.now(),
+  };
+  const plan = pad
+    ? state.controlShell.tickFromPad(pad, sessionState)
+    : state.controlShell.tickFromKeys(sessionState);
+  return { pad, plan };
+}
+
+/** Watches input while a live session has NO control run (input-loss latch,
+ *  telemetry-only reconnect): every arm/disarm press still answers loudly
+ *  through the same edge detection the live loop uses (CTRL-01), instead
+ *  of vanishing into a stopped loop. Evaluates and reports ONLY — no frame,
+ *  lease action, or announcement leaves this loop. */
+function startSuspendedPressWatch(token) {
+  if (state.pressWatchToken === token) return;
+  state.pressWatchToken = token;
+  void (async () => {
+    const intervalMs = 1000 / CONTROL_HZ;
+    while (
+      transportSessions.isActive(token) &&
+      state.connected &&
+      state.controlCompletion === null
+    ) {
+      if (state.controlShell) {
+        const mode = els.flightMode ? els.flightMode.value : "rover";
+        const { plan } = evaluateInputTick(mode);
+        reportSuppressedPresses(plan);
+        reportExpiredActions();
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    if (state.pressWatchToken === token) state.pressWatchToken = null;
+  })();
 }
 
 /** Runs the control-fast send loop with an acquired, session-owned writer. */
@@ -1553,8 +1647,6 @@ async function runControlLoop(writer, token, runStop) {
       const ready = await runStop.waitFor(writer.ready);
       if (!ready) return;
       if (!transportSessions.isActive(token) || !state.connected) return;
-      // A connected gamepad drives under its profile; the keyboard is the
-      // fallback when none is present. The readout shows the live mapping.
       const mode = els.flightMode ? els.flightMode.value : "rover";
       if (!controlGate.mayPublish()) {
         // Input loss RELINQUISHES control authority. The latch is
@@ -1579,48 +1671,7 @@ async function runControlLoop(writer, token, runStop) {
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
         continue;
       }
-      // One WASM call per tick maps the raw sample (gamepad or keyboard) to
-      // the whole plan: the motion frame, the gimbal quasimode frame, and the
-      // lease action. All device mapping, curves, masking, edge detection, and
-      // lease planning live in the runtime; this shell only executes the plan.
-      const pad = activeGamepad();
-      // Resolve the pad's profile through the runtime's shared selector the
-      // moment its identity changes. A refused selection (ambiguous registry)
-      // keeps NO device map: those ticks sample empty and drive nothing.
-      if (pad && pad.id !== state.selectedPadId) {
-        state.selectedPadId = pad.id;
-        const outcome = state.controlShell.selectDevice(pad.id);
-        if (outcome === null) {
-          log(`gamepad REFUSED (ambiguous device-profile registry): ${pad.id}`);
-        } else {
-          log(`gamepad selected (${outcome}): ${pad.id}`);
-        }
-      } else if (!pad && state.selectedPadId !== null) {
-        // Poll-level backstop for a disconnect whose DOM event was missed.
-        state.selectedPadId = null;
-        state.controlShell.deselectDevice();
-        log("gamepad gone; control returns to the keyboard");
-      }
-      const sessionState = {
-        generation: state.controlGeneration,
-        mode,
-        connected: state.connected,
-        leaseGranted: state.gimbalLeaseGranted,
-        leaseDenied: state.gimbalLeaseDenied,
-        // The MOTION lease grant: the runtime gates all motion output until it
-        // is regranted on a fresh generation after a profile handover, so a
-        // remapped scheme never publishes on the released generation.
-        motionGranted: state.leaseGranted,
-        // A denied reacquire is terminal — the runtime stops re-requesting.
-        motionDenied: state.motionDenied,
-        // The runtime stays neutralizing after a handover until the host
-        // confirms it cleared the vehicle's link-loss latch on this generation.
-        motionRecovered: state.motionRecovered,
-        nowMs: performance.now(),
-      };
-      const plan = pad
-        ? state.controlShell.tickFromPad(pad, sessionState)
-        : state.controlShell.tickFromKeys(sessionState);
+      const { pad, plan } = evaluateInputTick(mode);
       updateControlReadout(pad, mode, plan);
       reportSuppressedPresses(plan);
       reportExpiredActions();
@@ -2015,10 +2066,15 @@ function updateControlReadout(pad, mode, plan) {
     motionRecovered: state.motionRecovered,
     needsArm: state.motionNeedsArm,
   });
+  // The arm/disarm hint names the ACTIVE device's real controls, from
+  // profile data (a rebound arm control renames its own hint); the FC arm
+  // token sits beside the motion state it explains.
+  const armHint = state.controlShell.armHint() || "?";
+  const disarmHint = state.controlShell.disarmHint() || "?";
   els.gamepad.textContent =
     `flight [${mode}]: ${src} | roll=${m.roll.toFixed(2)} pitch=${m.pitch.toFixed(2)} ` +
     `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | motion: ${motionState} | ` +
-    "arm: Options/Enter disarm: Create/Backspace";
+    `${fcArmToken(state.lastFcView)} | arm: ${armHint} disarm: ${disarmHint}`;
 }
 
 /** Logs each NEW FC arm/disarm verdict once (enactment truth): a refusal
@@ -2038,6 +2094,9 @@ function logFcCommandVerdict(fcView) {
 
 /** The reason a gated tick refuses arm/disarm presses, for the operator. */
 function motionGateReason() {
+  // The latch is the most specific state: it names the one action (Resume)
+  // that ends it, before the lease-level explanations apply.
+  if (controlGate.isLatched()) return "control suspended — press Resume control";
   if (state.motionDenied) return "motion lease denied; reconnect to retry";
   if (!state.leaseGranted) return "no motion lease; press Connect to take control";
   return "motion authority recovering";

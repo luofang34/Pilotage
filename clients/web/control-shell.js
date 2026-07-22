@@ -148,6 +148,18 @@ export class ControlShell {
     return this.#control.device_revision();
   }
 
+  /** The active source's operator-facing arm-control name, from profile
+   *  data (the bound key, or the pad's printed button name). Empty before
+   *  the first activation. */
+  armHint() {
+    return this.#control.arm_hint();
+  }
+
+  /** The active source's operator-facing disarm-control name. */
+  disarmHint() {
+    return this.#control.disarm_hint();
+  }
+
   /** The installed pad profile's effective-content digest bytes (empty
    *  when no pad map is installed). */
   deviceDigestBytes() {
