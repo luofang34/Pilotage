@@ -243,7 +243,7 @@ fn sample_frame_rejected() -> FrameRejected {
         vehicle: VehicleId::new(1),
         scope: ScopeId::new("vehicle.motion"),
         sequence: SequenceNum::new(7),
-        reason: FrameRejectionReason::StaleGeneration,
+        reason: FrameRejectionReason::UplinkIdle,
         current_generation: Generation::new(5),
     }
 }
@@ -403,6 +403,8 @@ mod proptests {
             Just(FrameRejectionReason::NoHolder),
             Just(FrameRejectionReason::UnknownScope),
             Just(FrameRejectionReason::TooOld),
+            Just(FrameRejectionReason::AdapterRejected),
+            Just(FrameRejectionReason::UplinkIdle),
         ]
     }
 

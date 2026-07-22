@@ -4,6 +4,12 @@
 // generation wraparound enforced off the wire.
 
 import { initialMotionLease, advanceMotionLease, isFreshGeneration } from "./motion-lease.js";
+import {
+  FRAME_REJECTION_UPLINK_IDLE,
+  motionReadoutState,
+  updateNeedsArm,
+} from "./control-enactment.js";
+import { CONTROL_ACTION } from "./wire.js";
 
 let failures = 0;
 function check(name, ok) {
@@ -69,6 +75,47 @@ check("denial persists through a later grant", grantAfterDenial.denied === true)
 // An unrelated message kind leaves the state unchanged.
 const unchanged = advanceMotionLease(afterGrant, { kind: "Pong", message: {} });
 check("an unrelated message is a no-op", unchanged === afterGrant);
+
+// Lease and recovery are authority truth, not adapter enactment truth. An
+// idle-uplink rejection latches the readout until an accepted ARM result.
+const livePlan = { motion: { roll: 0, pitch: 0, throttle: 0, yaw: 0 } };
+let needsArm = updateNeedsArm(false, {
+  kind: "FrameRejected",
+  reason: FRAME_REJECTION_UPLINK_IDLE,
+});
+check("uplink idle latches needs-arm", needsArm === true);
+check(
+  "lease plus recovery cannot overstate enactment",
+  motionReadoutState(livePlan, { motionRecovered: true, needsArm }) === "needs arm",
+);
+needsArm = updateNeedsArm(needsArm, {
+  kind: "ControlActionResult",
+  action: CONTROL_ACTION.arm,
+  accepted: false,
+});
+check("a refused arm cannot clear needs-arm", needsArm === true);
+needsArm = updateNeedsArm(needsArm, {
+  kind: "ControlActionResult",
+  action: CONTROL_ACTION.modeRequest,
+  accepted: true,
+});
+check("an unrelated result cannot clear needs-arm", needsArm === true);
+needsArm = updateNeedsArm(needsArm, {
+  kind: "ControlActionResult",
+  action: CONTROL_ACTION.arm,
+  accepted: true,
+});
+check("accepted arm restores enacted state", needsArm === false);
+check(
+  "the readout returns to streaming on the positive signal",
+  motionReadoutState(livePlan, { motionRecovered: true, needsArm }) === "streaming",
+);
+needsArm = updateNeedsArm(needsArm, {
+  kind: "ControlActionResult",
+  action: CONTROL_ACTION.disarm,
+  accepted: true,
+});
+check("accepted disarm retires enacted state", needsArm === true);
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

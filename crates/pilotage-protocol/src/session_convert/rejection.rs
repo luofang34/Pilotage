@@ -31,6 +31,8 @@ impl From<FrameRejectionReason> for wire::FrameRejectionReason {
             FrameRejectionReason::SessionMismatch => wire::FrameRejectionReason::SessionMismatch,
             FrameRejectionReason::StaleSequence => wire::FrameRejectionReason::StaleSequence,
             FrameRejectionReason::LegacyDisabled => wire::FrameRejectionReason::LegacyDisabled,
+            FrameRejectionReason::AdapterRejected => wire::FrameRejectionReason::AdapterRejected,
+            FrameRejectionReason::UplinkIdle => wire::FrameRejectionReason::UplinkIdle,
         }
     }
 }
@@ -70,6 +72,10 @@ impl TryFrom<wire::FrameRejectionReason> for FrameRejectionReason {
             }
             wire::FrameRejectionReason::StaleSequence => Ok(FrameRejectionReason::StaleSequence),
             wire::FrameRejectionReason::LegacyDisabled => Ok(FrameRejectionReason::LegacyDisabled),
+            wire::FrameRejectionReason::AdapterRejected => {
+                Ok(FrameRejectionReason::AdapterRejected)
+            }
+            wire::FrameRejectionReason::UplinkIdle => Ok(FrameRejectionReason::UplinkIdle),
             wire::FrameRejectionReason::Unspecified => Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.FrameRejectionReason",
                 value: reason as i32,

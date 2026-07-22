@@ -82,6 +82,15 @@ enum ArmPhase {
     Commanded,
 }
 
+/// Whether a stick frame reached the PX4 setpoint queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StickFrameDisposition {
+    /// The frame was encoded and queued on the MAVLink uplink.
+    Queued,
+    /// No arm sequence is active, so no setpoint left the process.
+    UplinkIdle,
+}
+
 /// The UDP MAVLink command uplink to PX4's onboard instance.
 #[derive(Debug)]
 pub struct Px4Uplink {
@@ -347,12 +356,19 @@ impl Px4Uplink {
     /// Converts one canonical stick frame (`[-1, 1]` roll/pitch/
     /// throttle/yaw; pitch + = forward, roll + = right, throttle + =
     /// climb, yaw + = clockwise) into a slew-limited velocity setpoint.
-    /// Ignored while no arm sequence is active: PX4 rejects setpoints
-    /// disarmed, and streaming before an explicit arm would mask the
-    /// arm sequencing.
-    pub fn send_stick_frame(&mut self, roll: f32, pitch: f32, throttle: f32, yaw: f32) {
+    /// Reports [`StickFrameDisposition::UplinkIdle`] while no arm sequence is
+    /// active: PX4 rejects setpoints disarmed, and streaming before an
+    /// explicit arm would mask the arm sequencing.
+    #[must_use]
+    pub(crate) fn send_stick_frame(
+        &mut self,
+        roll: f32,
+        pitch: f32,
+        throttle: f32,
+        yaw: f32,
+    ) -> StickFrameDisposition {
         if self.arm_phase == ArmPhase::Idle {
-            return;
+            return StickFrameDisposition::UplinkIdle;
         }
         let now = self.clock.now();
         let dt = self
@@ -378,6 +394,7 @@ impl Px4Uplink {
             *out = current + (target - current).clamp(-dv_max, dv_max);
         }
         self.send_velocity(slewed);
+        StickFrameDisposition::Queued
     }
 
     fn send_velocity(&mut self, vel_ned_mps: [f32; 3]) {

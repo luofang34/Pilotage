@@ -29,9 +29,11 @@ mod action_dedup;
 mod apply;
 mod drops;
 mod link_loss;
+mod rejection_dedup;
 use action_dedup::ActionDedup;
 use drops::{DropCounters, MessageClass};
 use pilotage_protocol::ScopedControlFrame;
+use rejection_dedup::RejectionDedup;
 
 /// Capacity of the [`EngineActor`]'s inbound command queue.
 ///
@@ -90,6 +92,7 @@ pub struct EngineActor<A: VehicleAdapter> {
     latency: BoundedLatencyLog<LATENCY_LOG_CAPACITY>,
     drops: DropCounters,
     action_dedup: ActionDedup,
+    adapter_rejection_dedup: RejectionDedup,
     /// Wrapping count of link-loss policy changes the adapter failed to
     /// enact. A non-zero value is a fail-closed fault, not noise: authority
     /// was already fenced, so an unenacted policy means the vehicle may
@@ -119,6 +122,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             latency: BoundedLatencyLog::new(),
             drops: DropCounters::default(),
             action_dedup: ActionDedup::default(),
+            adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
             start,
         }
@@ -195,6 +199,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         if is_disconnect {
             self.clients.remove(client);
             self.action_dedup.forget(client);
+            self.adapter_rejection_dedup.forget(client);
         }
         self.enact(outcome);
     }
@@ -270,6 +275,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
                 self.send_to(client, ToConnection::Close, MessageClass::Unicast);
                 self.clients.remove(client);
                 self.action_dedup.forget(client);
+                self.adapter_rejection_dedup.forget(client);
             }
             SessionAction::ActivationAccepted { client, activation } => {
                 // The traceability record for control evidence (INPUT-01):
@@ -338,6 +344,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             Err(TrySendError::Closed(_)) => {
                 self.clients.remove(client);
                 self.action_dedup.forget(client);
+                self.adapter_rejection_dedup.forget(client);
             }
         }
     }
@@ -352,6 +359,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         }
         self.clients.remove(client);
         self.action_dedup.forget(client);
+        self.adapter_rejection_dedup.forget(client);
     }
 
     fn broadcast_datagram(&mut self, bytes: Vec<u8>) {
@@ -413,6 +421,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         for client in closed {
             self.clients.remove(client);
             self.action_dedup.forget(client);
+            self.adapter_rejection_dedup.forget(client);
         }
     }
 
@@ -478,7 +487,8 @@ fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConn
         pilotage_session::OutboundMessage::Welcome(_)
         | pilotage_session::OutboundMessage::LeaseResponse(_)
         | pilotage_session::OutboundMessage::LeaseReleased(_)
-        | pilotage_session::OutboundMessage::ControlActionResult(_) => {
+        | pilotage_session::OutboundMessage::ControlActionResult(_)
+        | pilotage_session::OutboundMessage::FrameRejected(_) => {
             ToConnection::BootstrapMessage(encode_envelope_message(envelope))
         }
     }

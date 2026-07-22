@@ -82,6 +82,11 @@ import { startDatagramControl } from "./datagram-control.js";
 import { loadControlShell } from "./control-shell.js";
 import { advanceMotionLease, applyMotionRecovery } from "./motion-lease.js";
 import {
+  FRAME_REJECTION_UPLINK_IDLE,
+  motionReadoutState,
+  updateNeedsArm,
+} from "./control-enactment.js";
+import {
   INTENT_FAMILY_VELOCITY,
   INTENT_FAMILY_ATTITUDE_THRUST,
   INTENT_FAMILY_GIMBAL_RATE,
@@ -199,6 +204,10 @@ const state = {
   // datagram. Irrelevant in steady flight; reset false when a release starts a
   // new recovery cycle.
   motionRecovered: true,
+  // Session authority is not enactment truth: an adapter rejection latches
+  // this until the reliable accepted Arm result proves the uplink restarted.
+  motionNeedsArm: false,
+  lastFrameRejectionLogged: null,
   // The gimbal scope's own lease/fencing state: independent generation and
   // sequence, granted (or not) without affecting flight control.
   gimbalGeneration: 0n,
@@ -492,6 +501,8 @@ async function openTransportSession({ url, certHash, certHashHex, manual, leaseP
     state.motionFence = 0n;
     state.motionDenied = false;
     state.motionRecovered = true;
+    state.motionNeedsArm = false;
+    state.lastFrameRejectionLogged = null;
     state.gimbalGeneration = 0n;
     state.gimbalSequence = 0;
     state.gimbalLeaseGranted = false;
@@ -752,6 +763,9 @@ async function runSessionStreamReader(reader, token) {
       pending = pending.subarray(decoded.consumed);
       if (decoded.kind === "ControlActionResult") {
         handleActionResult(decoded.message);
+      }
+      if (decoded.kind === "FrameRejected") {
+        handleFrameRejected(decoded.message);
       }
       if (decoded.kind === "LeaseReleased") {
         // Validate the acknowledgement before it settles anything: an
@@ -1207,6 +1221,65 @@ async function renderVideoFrameV2(body, token) {
   await paintByCodec(fourcc, payload, meta.sourceId, target, token);
 }
 
+/** Applies ingress or adapter rejection truth without repeating one latched
+ *  condition at control-frame cadence. */
+function handleFrameRejected(r) {
+  const key = `${r.reason}:${r.scope}:${r.currentGeneration}`;
+  const firstNotice = key !== state.lastFrameRejectionLogged;
+  if (firstNotice) {
+    state.lastFrameRejectionLogged = key;
+    log(
+      `control frame rejected (reason ${r.reason}) scope=${r.scope} ` +
+        `seq=${r.sequence} hostGen=${r.currentGeneration}`,
+    );
+  }
+  if (
+    r.reason === FRAME_REJECTION_UPLINK_IDLE &&
+    motionGroup(r.scope) === motionGroup(state.motionScope)
+  ) {
+    state.motionNeedsArm = updateNeedsArm(state.motionNeedsArm, {
+      kind: "FrameRejected",
+      reason: r.reason,
+    });
+    if (firstNotice) {
+      els.overlay.textContent = "motion uplink idle — press arm to start control";
+      log("motion authority is granted but the vehicle uplink needs arm");
+    }
+  }
+  if (
+    (r.reason === 1 || r.reason === 2) &&
+    r.scope === GIMBAL_SCOPE &&
+    state.gimbalLeaseGranted
+  ) {
+    state.gimbalLeaseGranted = false;
+    log("host fenced our gimbal authority; the lease planner will re-request");
+  }
+  if (
+    (r.reason === 1 || r.reason === 2) &&
+    motionGroup(r.scope) === motionGroup(state.motionScope) &&
+    state.leaseGranted
+  ) {
+    state.leaseGranted = false;
+    state.motionRecovered = false;
+    if (r.currentGeneration !== undefined) {
+      state.motionFence = BigInt(r.currentGeneration);
+    }
+    const nowMs = performance.now();
+    if (nowMs - (state.lastAuthorityReacquireMs ?? 0) > 500) {
+      state.lastAuthorityReacquireMs = nowMs;
+      const writer = state.sessionWriter;
+      if (writer) {
+        const request = encodeLeaseRequestEnvelope({
+          vehicleId: VEHICLE_ID,
+          scope: state.motionScope,
+        });
+        writer.write(lengthDelimit(request)).catch(() => {});
+        log("host fenced our motion authority; reacquiring the lease");
+      }
+    }
+  }
+}
+
 /** Reads telemetry-fast datagrams (bare Envelope, TelemetrySample arm) forever, updating the pose overlay. */
 async function readTelemetryDatagrams(transport, token) {
   if (!transportSessions.isActive(token)) return;
@@ -1239,52 +1312,7 @@ async function readTelemetryDatagrams(transport, token) {
       } else if (decoded.kind === "Pong") {
         // RTT probing is out of scope for this demo viewer; ignored.
       } else if (decoded.kind === "FrameRejected") {
-        const r = decoded.message;
-        log(
-          `control frame rejected (reason ${r.reason}) scope=${r.scope} ` +
-            `seq=${r.sequence} hostGen=${r.currentGeneration}`,
-        );
-        // A fenced rejection on the GIMBAL scope while we think we hold it:
-        // the host revoked (e.g. the silence watchdog during a stall). Drop
-        // the local grant so the quasimode's lease planner re-requests,
-        // instead of streaming rejected frames forever.
-        if (
-          (r.reason === 1 || r.reason === 2) &&
-          r.scope === GIMBAL_SCOPE &&
-          state.gimbalLeaseGranted
-        ) {
-          state.gimbalLeaseGranted = false;
-          log("host fenced our gimbal authority; the lease planner will re-request");
-        }
-        // Reasons 1 (stale generation) and 2 (no holder) on the motion
-        // group while we believe we hold it mean the host fenced us out —
-        // typically the silence watchdog revoked during a stall. Drop the
-        // local grant and re-request (debounced), instead of streaming
-        // rejected frames forever.
-        if (
-          (r.reason === 1 || r.reason === 2) &&
-          motionGroup(r.scope) === motionGroup(state.motionScope) &&
-          state.leaseGranted
-        ) {
-          state.leaseGranted = false;
-          state.motionRecovered = false;
-          if (r.currentGeneration !== undefined) {
-            state.motionFence = BigInt(r.currentGeneration);
-          }
-          const nowMs = performance.now();
-          if (nowMs - (state.lastAuthorityReacquireMs ?? 0) > 500) {
-            state.lastAuthorityReacquireMs = nowMs;
-            const writer = state.sessionWriter;
-            if (writer) {
-              const request = encodeLeaseRequestEnvelope({
-                vehicleId: VEHICLE_ID,
-                scope: state.motionScope,
-              });
-              writer.write(lengthDelimit(request)).catch(() => {});
-              log("host fenced our motion authority; reacquiring the lease");
-            }
-          }
-        }
+        handleFrameRejected(decoded.message);
       }
     }
   } finally {
@@ -1556,6 +1584,19 @@ function handleActionResult(m) {
   if (!m.actionId) return;
   const entry = resolveAction(state.actionTracker, m.actionId);
   if (!entry) return; // a replay of an already-settled press
+  if (motionGroup(entry.scope) === motionGroup(state.motionScope)) {
+    const wasNeedsArm = state.motionNeedsArm;
+    state.motionNeedsArm = updateNeedsArm(state.motionNeedsArm, {
+      kind: "ControlActionResult",
+      action: entry.action,
+      accepted: m.accepted,
+    });
+    if (wasNeedsArm && !state.motionNeedsArm) {
+      state.lastFrameRejectionLogged = null;
+      els.overlay.textContent = "arm sequence accepted — motion uplink active";
+      log("accepted arm result restored motion enactment");
+    }
+  }
   if (entry.scope === SIM_LIFECYCLE_SCOPE) {
     // The lifecycle lease exists only for this press: release it so the
     // silence watchdog never has a held-but-frameless scope to revoke.
@@ -1809,16 +1850,12 @@ function updateControlReadout(pad, mode, plan) {
     return;
   }
   const m = plan.motion ?? { roll: 0, pitch: 0, throttle: 0, yaw: 0 };
-  // Three honest states: "gated" (no frames — presses are suppressed),
-  // "recovering" (neutral recovery frames flow but live authority has not
-  // been confirmed, so presses are still suppressed), "streaming" (live).
-  // The distinction keeps the pre-press indicator from overstating
-  // authority during the post-revocation neutral-activation burst.
-  const motionState = !plan.motion
-    ? "gated"
-    : state.motionRecovered
-      ? "streaming"
-      : "recovering";
+  // Authority and enactment are separate: an idle adapter uplink stays
+  // "needs arm" even while the lease is held and frames leave the browser.
+  const motionState = motionReadoutState(plan, {
+    motionRecovered: state.motionRecovered,
+    needsArm: state.motionNeedsArm,
+  });
   els.gamepad.textContent =
     `flight [${mode}]: ${src} | roll=${m.roll.toFixed(2)} pitch=${m.pitch.toFixed(2)} ` +
     `climb=${m.throttle.toFixed(2)} yaw=${m.yaw.toFixed(2)} | motion: ${motionState} | ` +

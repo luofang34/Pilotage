@@ -21,7 +21,7 @@ use pilotage_mavlink::{LinkState, MavlinkLink};
 
 use crate::config::Px4Config;
 use crate::error::Px4AdapterError;
-use crate::uplink::Px4Uplink;
+use crate::uplink::{Px4Uplink, StickFrameDisposition};
 
 mod advertisement;
 mod camera;
@@ -391,7 +391,15 @@ impl VehicleAdapter for Px4Adapter {
             };
         };
         let (sticks, constrained) = control::sticks_from_velocity(&velocity);
-        uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3]);
+        if uplink.send_stick_frame(sticks[0], sticks[1], sticks[2], sticks[3])
+            == StickFrameDisposition::UplinkIdle
+        {
+            return ApplyOutcome {
+                tick,
+                disposition: Disposition::Rejected(RejectReason::UplinkIdle),
+                action_results,
+            };
+        }
         ApplyOutcome {
             tick,
             disposition: if constrained {

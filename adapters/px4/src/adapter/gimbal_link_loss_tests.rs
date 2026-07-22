@@ -39,6 +39,9 @@ fn gimbal_link_loss_latches_gimbal_but_leaves_motion_flying() {
     let mut adapter = Px4Adapter::from_state(VehicleId::new(1), live_state())
         .with_uplink(uplink_to(addr))
         .with_gimbal(control);
+    adapter.uplink.as_mut().expect("uplink").begin_arm(0.0);
+    let mut initial = [0u8; 128];
+    fc.recv_from(&mut initial).expect("initial setpoint");
 
     adapter
         .set_link_loss_policy(
@@ -59,19 +62,19 @@ fn gimbal_link_loss_latches_gimbal_but_leaves_motion_flying() {
         "the gimbal latch suppresses gimbal frames"
     );
 
+    // Engaging the gimbal scope itself never sent a neutral to the FC.
+    let mut buf = [0u8; 128];
+    assert!(
+        fc.recv_from(&mut buf).is_err(),
+        "engaging the gimbal scope must not neutralize the FC"
+    );
+
     // ...but motion is untouched: a neutral flight frame still flies.
     let motion = adapter.apply_control(&neutral_flight_frame());
     assert_eq!(
         motion.disposition,
         Disposition::Accepted,
         "a gimbal failsafe must never suppress motion"
-    );
-
-    // And engaging the gimbal scope never sent a neutral to the FC.
-    let mut buf = [0u8; 128];
-    assert!(
-        fc.recv_from(&mut buf).is_err(),
-        "engaging the gimbal scope must not neutralize the FC"
     );
 }
 

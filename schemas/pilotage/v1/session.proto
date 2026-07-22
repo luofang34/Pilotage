@@ -143,8 +143,8 @@ message Pong {
   MonoTimestamp responder_sent_at = 3;
 }
 
-// Why the host rejected an inbound `ControlFrame` without applying it
-// (ADR-0009 rejection rules).
+// Why an admitted `ControlFrame` was not enacted, either at host ingress or
+// at the vehicle-adapter boundary (ADR-0009 rejection rules).
 enum FrameRejectionReason {
   FRAME_REJECTION_REASON_UNSPECIFIED = 0;
   // The frame's `generation` is older than the scope's current generation.
@@ -197,11 +197,18 @@ enum FrameRejectionReason {
   // typed-only (the production default); legacy translation exists only
   // behind the explicit simulation compatibility mode.
   FRAME_REJECTION_REASON_LEGACY_DISABLED = 16;
+  // The adapter rejected the admitted frame for a reason without a more
+  // specific wire representation.
+  FRAME_REJECTION_REASON_ADAPTER_REJECTED = 17;
+  // The adapter's vehicle uplink has no active command sequence. Session
+  // authority remains held, but the operator must arm before frames enact.
+  FRAME_REJECTION_REASON_UPLINK_IDLE = 18;
 }
 
-// Sent back to the frame's sender (never broadcast) when a `ControlFrame`
-// is well-formed but not honored, so the client can distinguish "dropped in
-// transit" from "explicitly rejected" (ADR-0009, ADR-0012).
+// Sent back to the frame's sender (never broadcast) when a `ControlFrame` is
+// well-formed but not honored at ingress or enactment, so the client can
+// distinguish "dropped in transit" from "explicitly rejected" (ADR-0009,
+// ADR-0012).
 message FrameRejected {
   VehicleId vehicle = 1;
   ScopeId scope = 2;

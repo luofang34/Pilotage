@@ -18,7 +18,7 @@ use pilotage_mavlink::link::apply_messages_at;
 use pilotage_mavlink::{AuthorizationSource, LinkState};
 
 use super::{ARM_BUTTON, DISARM_BUTTON, Px4Adapter, THROTTLE_AXIS};
-use crate::uplink::Px4Uplink;
+use crate::uplink::{Px4Uplink, StickFrameDisposition};
 
 pub(super) const SOURCE: FrameSource = FrameSource {
     system_id: 1,
@@ -277,16 +277,33 @@ fn disarm_stops_the_stream() {
 }
 
 #[test]
-fn sticks_are_ignored_until_an_arm_sequence_starts() {
+fn sticks_report_uplink_idle_until_an_arm_sequence_starts() {
     let (fc, addr) = fake_fc();
     let mut uplink = uplink_to(addr);
-    uplink.send_stick_frame(0.0, 0.5, 0.5, 0.0);
+    assert_eq!(
+        uplink.send_stick_frame(0.0, 0.5, 0.5, 0.0),
+        StickFrameDisposition::UplinkIdle
+    );
     fc.set_read_timeout(Some(Duration::from_millis(200)))
         .expect("timeout");
     let mut buf = [0u8; 128];
     assert!(
         fc.recv_from(&mut buf).is_err(),
         "no setpoint may leave before an explicit arm"
+    );
+}
+
+#[test]
+fn a_velocity_frame_after_neutralize_is_rejected_as_uplink_idle() {
+    let (_fc, addr) = fake_fc();
+    let mut adapter =
+        Px4Adapter::from_state(VehicleId::new(1), live_state()).with_uplink(uplink_to(addr));
+    adapter.uplink.as_mut().expect("uplink").neutralize();
+
+    let outcome = adapter.apply_control(&neutral());
+    assert_eq!(
+        outcome.disposition,
+        Disposition::Rejected(RejectReason::UplinkIdle)
     );
 }
 
@@ -411,8 +428,8 @@ fn fresh_epoch_and_neutral_input_clear_the_reset_latch() {
     let outcome = adapter.apply_control(&neutral());
     assert_eq!(
         outcome.disposition,
-        Disposition::Accepted,
-        "a full-axis neutral frame over the fresh stream clears the latch"
+        Disposition::Rejected(RejectReason::UplinkIdle),
+        "the neutral frame clears the reset latch but cannot revive an idle uplink"
     );
     let outcome = adapter.apply_control(&press(ARM_BUTTON));
     assert_eq!(

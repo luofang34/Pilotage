@@ -203,6 +203,9 @@ pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
         OutboundMessage::ControlActionResult(result) => {
             wire::envelope::Payload::ControlActionResult(result.into())
         }
+        OutboundMessage::FrameRejected(rejected) => {
+            wire::envelope::Payload::FrameRejected(rejected.into())
+        }
         OutboundMessage::Authority(effect) => {
             wire::envelope::Payload::AuthorityEvent(wire::AuthorityEvent::from(effect))
         }

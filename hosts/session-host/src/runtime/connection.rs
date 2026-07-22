@@ -56,9 +56,9 @@ impl DatagramClass {
 /// One message the engine actor asks a connection task to write out.
 #[derive(Debug, Clone)]
 pub enum ToConnection {
-    /// Bytes to write, length-delimited, on the bootstrap stream (unicast
-    /// handshake/lease/`Pong` replies only — never authority events,
-    /// ADR-0005's dedicated authority-events stream).
+    /// Bytes to write, length-delimited, on the reliable session stream
+    /// (handshake, lease, action, and adapter-enactment replies — never
+    /// authority events, which use ADR-0005's dedicated stream).
     BootstrapMessage(Vec<u8>),
     /// Bytes to write, length-delimited, on the dedicated authority-events
     /// stream (ADR-0005: reliable ordered, no head-of-line contention with
