@@ -174,24 +174,42 @@ impl<A: VehicleAdapter> EngineActor<A> {
     ) {
         let validate_start = Instant::now();
         let is_disconnect = matches!(message, DomainEnvelope::Disconnect);
-        if let DomainEnvelope::ProfileActivation(activation) = &message {
-            // The traceability record for control evidence (INPUT-01): the
-            // digest and monotonic activation revision every subsequent
-            // frame's `activation_revision` binds to.
-            info!(
-                client = client.as_u64(),
-                profile = %activation.profile_id,
-                profile_revision = activation.profile_revision,
-                activation_revision = activation.activation_revision,
-                digest = %hex_digest(&activation.digest),
-                device_profile = %activation.device_profile_id,
-                device_profile_revision = activation.device_profile_revision,
-                device_digest = %hex_digest(&activation.device_digest),
-                "control profile activation announced"
-            );
-        }
+        let announced = match &message {
+            DomainEnvelope::ProfileActivation(activation) => Some(activation.clone()),
+            _ => None,
+        };
         let outcome = self.engine.handle_client_message(client, message, now);
         self.record_stage(Stage::Validate, validate_start.elapsed());
+        if let Some(activation) = announced {
+            // Evidence records ACCEPTED activations only: the engine has
+            // validated the session binding and the monotonic revision, and
+            // the record it now holds IS this announcement. A rejected
+            // announcement is a fault line, never a traceability record.
+            let accepted = self.engine.active_profile(client).is_some_and(|active| {
+                active.activation_revision == activation.activation_revision
+                    && active.digest == activation.digest
+            });
+            if accepted {
+                info!(
+                    client = client.as_u64(),
+                    profile = %activation.profile_id,
+                    profile_revision = activation.profile_revision,
+                    activation_revision = activation.activation_revision,
+                    digest = %hex_digest(&activation.digest),
+                    device_profile = %activation.device_profile_id,
+                    device_profile_revision = activation.device_profile_revision,
+                    device_digest = %hex_digest(&activation.device_digest),
+                    "control profile activation accepted"
+                );
+            } else {
+                warn!(
+                    client = client.as_u64(),
+                    profile = %activation.profile_id,
+                    activation_revision = activation.activation_revision,
+                    "control profile activation REJECTED (session or revision binding failed)"
+                );
+            }
+        }
         if is_disconnect {
             self.clients.remove(client);
             self.action_dedup.forget(client);

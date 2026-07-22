@@ -168,7 +168,14 @@ impl VehicleAdapter for ReferenceAdapter {
                         max_vertical: 0.0,
                         max_angular: MAX_TURN_RPS,
                     }],
-                    actions: vec![],
+                    // The skiff acknowledges ARM as a bookkeeping action so
+                    // the reliable action chain (command → engine binding →
+                    // adapter → correlated result) is exercisable against
+                    // the reference vehicle; its dynamics need no arming.
+                    actions: vec![pilotage_adapter_api::ActionCapability {
+                        action: pilotage_protocol::ActionKind::Arm,
+                        mode_targets: vec![],
+                    }],
                     legacy: Some(LegacyCommandMap::Velocity {
                         vx: Some(LegacyAxisRoute {
                             axis: THROTTLE_AXIS,
@@ -206,6 +213,30 @@ impl VehicleAdapter for ReferenceAdapter {
                 self.tick,
                 Disposition::Rejected(RejectReason::LinkLossEngaged),
             );
+        }
+        // Discrete actions answer explicitly: ARM is acknowledged (the
+        // skiff needs no arming), anything else is refused — never silent.
+        let action_results: Vec<pilotage_adapter_api::ActionResult> = frame
+            .actions
+            .iter()
+            .map(|action| match action {
+                pilotage_protocol::ControlAction::Arm => {
+                    pilotage_adapter_api::ActionResult::accepted(*action)
+                }
+                other => pilotage_adapter_api::ActionResult::rejected(
+                    *other,
+                    "not supported by the reference vehicle",
+                ),
+            })
+            .collect();
+        if frame.intent.is_none() && !frame.actions.is_empty() {
+            // An actions-only delivery from the reliable command path
+            // carries no setpoint; the dynamics continue unchanged.
+            return ApplyOutcome {
+                tick: self.tick,
+                disposition: Disposition::Accepted,
+                action_results,
+            };
         }
         // Typed-only consumption: the session host translates any legacy
         // payload at its compatibility boundary, so a payload reaching this
