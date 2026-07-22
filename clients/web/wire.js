@@ -1103,28 +1103,28 @@ function decodeIncarnation(bytes) {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-// authority.proto AuthorityEvent: a oneof; we only care which arm fired and a
-// human-readable label, not full field decode, for the demo overlay.
-const AUTHORITY_ARM_NAMES = {
-  1: "ScopeLeaseGranted",
-  2: "ScopeTransferOffered",
-  3: "ScopeTransferAccepted",
-  4: "ScopeTransferCommitted",
-  5: "ScopeLeaseRevoked",
-  6: "EmergencyOverrideApplied",
-  7: "ScopeRegistered",
-  8: "ScopeTransferExpired",
-  9: "LinkStateChanged",
-  10: "WarningRaised",
-};
+const AUTHORITY_ARM_NAMES = [
+  null, "ScopeLeaseGranted", "ScopeTransferOffered", "ScopeTransferAccepted", "ScopeTransferCommitted",
+  "ScopeLeaseRevoked", "EmergencyOverrideApplied", "ScopeRegistered", "ScopeTransferExpired",
+  "LinkStateChanged", "WarningRaised",
+];
 
 function decodeAuthorityEvent(bytes) {
   if (!bytes) return { arm: "unknown" };
   const fields = parseFields(bytes);
   for (const fieldNumber of fields.keys()) {
-    if (AUTHORITY_ARM_NAMES[fieldNumber]) {
-      return { arm: AUTHORITY_ARM_NAMES[fieldNumber] };
-    }
+    const arm = AUTHORITY_ARM_NAMES[fieldNumber];
+    if (!arm) continue;
+    if (fieldNumber !== 1 && fieldNumber !== 5) return { arm };
+    const event = parseFields(firstBytes(fields, fieldNumber));
+    return {
+      arm,
+      kind: fieldNumber === 1 ? "grant" : "revocation",
+      principalId: decodeUint64Message(firstBytes(event, 1)),
+      vehicleId: decodeUint64Message(firstBytes(event, 2)),
+      scope: decodeStringMessage(firstBytes(event, 3)),
+      generation: decodeUint64Message(firstBytes(event, 4)),
+    };
   }
   return { arm: "unknown" };
 }

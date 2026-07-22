@@ -218,6 +218,9 @@ impl AuthorityTable {
         match event {
             AuthorityEvent::LeaseGranted { generation } => apply_grant(slot, generation),
             AuthorityEvent::LeaseDenied => {
+                if slot.state.denied {
+                    return AuthorityDisposition::Ignored;
+                }
                 slot.pending = None;
                 slot.state.granted = false;
                 slot.state.denied = true;
@@ -226,6 +229,9 @@ impl AuthorityTable {
             AuthorityEvent::LeaseReleased { generation }
             | AuthorityEvent::Revoked { generation } => {
                 if fence_event_is_stale(slot, generation) {
+                    return AuthorityDisposition::Ignored;
+                }
+                if !slot.state.granted && slot.fence_active && slot.state.fence == generation {
                     return AuthorityDisposition::Ignored;
                 }
                 slot.pending = None;
@@ -241,6 +247,7 @@ impl AuthorityTable {
                 if scope != AuthorityScope::Motion
                     || !slot.state.granted
                     || generation != slot.state.generation
+                    || slot.state.recovered
                 {
                     return AuthorityDisposition::Ignored;
                 }
@@ -248,7 +255,7 @@ impl AuthorityTable {
                 AuthorityDisposition::Applied
             }
             AuthorityEvent::UplinkIdle => {
-                if scope != AuthorityScope::Motion {
+                if scope != AuthorityScope::Motion || slot.state.needs_arm {
                     return AuthorityDisposition::Ignored;
                 }
                 slot.state.needs_arm = true;
@@ -332,8 +339,8 @@ fn apply_action_result(
         return AuthorityDisposition::Ignored;
     }
     match action {
-        ACTION_ARM => slot.state.needs_arm = false,
-        ACTION_DISARM => slot.state.needs_arm = true,
+        ACTION_ARM if slot.state.needs_arm => slot.state.needs_arm = false,
+        ACTION_DISARM if !slot.state.needs_arm => slot.state.needs_arm = true,
         _ => return AuthorityDisposition::Ignored,
     }
     AuthorityDisposition::Applied
