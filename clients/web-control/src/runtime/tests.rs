@@ -9,6 +9,7 @@ use crate::sample::{ButtonSample, Mode, RawSample, SessionState};
 
 // The motion-lease reacquisition tests share these helpers but would push this
 // file past the module size limit, so they live in a sibling submodule.
+mod input_loss;
 mod motion;
 
 /// A second profile with DIFFERENT bindings: the modifier and reset move to
@@ -55,6 +56,7 @@ fn session_gen(_generation: u32, mode: Mode, _granted: bool) -> SessionState {
         now_ms: 100_000.0,
         mode,
         connected: true,
+        input_lost: false,
     }
 }
 

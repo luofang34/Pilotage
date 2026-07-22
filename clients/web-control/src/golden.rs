@@ -154,6 +154,7 @@ impl Harness {
             now_ms: 100_000.0,
             mode: Mode::from_str_or_pilot(&session.mode),
             connected: true,
+            input_lost: false,
         };
         self.coordinator.evaluate(&sample, &state)
     }

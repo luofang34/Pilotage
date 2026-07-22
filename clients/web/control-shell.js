@@ -305,7 +305,7 @@ export class ControlShell {
       buttonCount,
       mode,
       session.nowMs,
-      session.connected,
+      session.connected, session.inputLost === true,
       source,
     );
     return this.#readPlan(result);

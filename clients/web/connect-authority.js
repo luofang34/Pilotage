@@ -20,7 +20,7 @@
 /**
  * @param {object} deps
  * @param {boolean} deps.manual explicit user connect (only path to control)
- * @param {{ reset: () => void, mayPublish: () => boolean }} deps.gate
+ * @param {{ reset: () => void, isLatched: () => boolean }} deps.gate
  * @param {{ settled: () => Promise<any> }} deps.releases
  * @param {(leaseProbe: () => boolean) => Promise<object>} deps.openAndBootstrap
  *   transport construction + handshake + bootstrap; must pass `leaseProbe`
@@ -46,10 +46,10 @@ export async function negotiateSessionAuthority({
     gate.reset(); // synchronous, BEFORE the first await
     await releases.settled();
   }
-  const session = await openAndBootstrap(() => manual && gate.mayPublish());
+  const session = await openAndBootstrap(() => manual && !gate.isLatched());
   if (!session || !session.completed) return session;
   if (session.leaseGranted) {
-    if (gate.mayPublish()) {
+    if (!gate.isLatched()) {
       if (startControl(session) === false) controlUnavailable(session);
     } else {
       // The blur raced the grant: input loss latched after the lease

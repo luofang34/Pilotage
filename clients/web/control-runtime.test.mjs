@@ -32,8 +32,35 @@ function toSession(session) {
   return {
     mode: session.mode,
     connected: true,
+    inputLost: false,
     nowMs: 100_000,
   };
+}
+
+// A latched input-loss tick consumes controls but gives the shell no
+// publishable frame, edge, or lease action, even with live authority.
+{
+  const shell = await loadControlShell(wasmBytes);
+  shell.beginSession();
+  shell.authorityEvent("motion", "grant", { generation: 1n });
+  shell.authorityEvent("gimbal", "grant", { generation: 1n });
+  shell.beginControlRun();
+  const live = toSession({ mode: "quad-pilot" });
+  shell.tickFromKeys(live);
+  const lost = { ...live, inputLost: true };
+  const empty = shell.tickFromKeys(lost);
+  check(
+    "input loss: a granted live session emits an empty publishable plan",
+    empty.motion === null && empty.gimbal === null && empty.lease === null &&
+      empty.motionLease === null && !empty.arm && !empty.disarm,
+    empty,
+  );
+  shell.keyEvent("Enter", true);
+  const pressed = shell.tickFromKeys(lost);
+  check("input loss: a consumed arm press remains loud", pressed.armSuppressed, pressed);
+  const resumed = shell.tickFromKeys(live);
+  check("input loss: the consumed press cannot re-fire on resume", !resumed.arm, resumed);
+  shell.keyEvent("Enter", false);
 }
 
 function syncScope(shell, scope, granted, denied, generation) {
