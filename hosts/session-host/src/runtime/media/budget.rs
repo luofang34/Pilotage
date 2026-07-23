@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// The pre-transport aggregate ceiling for one client's video.
 pub(super) const MAX_BYTES_PER_SECOND: u64 = 2_000_000;
-const MIN_BYTES_PER_SECOND: u64 = 125_000;
+pub(super) const MIN_BYTES_PER_SECOND: u64 = 125_000;
 const RECOVERY_STEP_BYTES_PER_SECOND: u64 = 250_000;
 const FEEDBACK_INTERVAL_NS: u64 = 250_000_000;
 const QUIET_RECOVERY_NS: u64 = 5_000_000_000;
@@ -218,8 +218,11 @@ impl SendBudget {
         } else {
             (self.rate / 2).max(MIN_BYTES_PER_SECOND)
         };
-        self.tokens = self.tokens.min(bucket_capacity(self.rate));
-        self.clamp_source_tokens();
+        self.tokens = 0;
+        for source in self.sources.values_mut() {
+            source.tokens = 0;
+        }
+        self.last_refill_ns = now_ns;
         self.last_rate_change_ns = now_ns;
     }
 

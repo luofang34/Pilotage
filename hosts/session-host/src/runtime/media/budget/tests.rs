@@ -99,3 +99,48 @@ fn quic_loss_deadlines_and_live_reapers_are_adaptive_pressure() {
     signals.reaper_finished();
     assert_eq!(signals.snapshot().active_reapers, 0);
 }
+
+#[test]
+fn a_rate_cut_discards_credit_earned_at_the_higher_rate() {
+    let signals = PressureSignals::default();
+    let mut budget = SendBudget::new(0, TransportSnapshot::default());
+    assert!(
+        budget
+            .admit(
+                0,
+                0,
+                FRAME_BYTES,
+                signals.snapshot(),
+                TransportSnapshot::default()
+            )
+            .admitted
+    );
+
+    signals.record_busy_drop();
+    let cut = budget.admit(
+        FEEDBACK_INTERVAL_NS,
+        0,
+        FRAME_BYTES,
+        signals.snapshot(),
+        TransportSnapshot::default(),
+    );
+    assert_eq!(budget.rate, MAX_BYTES_PER_SECOND / 2);
+    assert!(
+        !cut.admitted,
+        "the reduced path starts without stale burst credit"
+    );
+
+    let refill_ns = FRAME_BYTES as u64 * 1_000_000_000 / budget.rate;
+    assert!(
+        budget
+            .admit(
+                FEEDBACK_INTERVAL_NS.saturating_add(refill_ns),
+                0,
+                FRAME_BYTES,
+                signals.snapshot(),
+                TransportSnapshot::default(),
+            )
+            .admitted,
+        "fresh credit accrues at the enacted rate"
+    );
+}

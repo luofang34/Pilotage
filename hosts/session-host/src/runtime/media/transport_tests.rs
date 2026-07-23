@@ -19,10 +19,11 @@ use wtransport::config::QuicTransportConfig;
 use wtransport::quinn::VarInt as QuinnVarInt;
 use wtransport::{ClientConfig, Connection, Endpoint, Identity, ServerConfig, VarInt};
 
+use super::budget::{MAX_BYTES_PER_SECOND, MIN_BYTES_PER_SECOND};
+use super::encoding::encode_jpeg;
 use super::spawn_media_task;
 
 const IO_BOUND: Duration = Duration::from_secs(8);
-const VIDEO_DRAIN_PERIOD: Duration = Duration::from_millis(40);
 const FRAME_PERIOD: Duration = Duration::from_micros(11_111);
 const TELEMETRY_PERIOD: Duration = Duration::from_millis(5);
 const TELEMETRY_SAMPLES: u32 = 100;
@@ -128,7 +129,7 @@ async fn produce_video(mut stop: watch::Receiver<bool>, frames: mpsc::Sender<Raw
 }
 
 async fn drain_video_slowly(connection: Connection, mut stop: watch::Receiver<bool>) {
-    let mut ticker = tokio::time::interval(VIDEO_DRAIN_PERIOD);
+    let mut ticker = tokio::time::interval(sustainable_drain_period());
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         let stream = tokio::select! {
@@ -147,6 +148,30 @@ async fn drain_video_slowly(connection: Connection, mut stop: watch::Receiver<bo
         let mut buf = [0_u8; 16 * 1024];
         while let Ok(Some(_)) = stream.read(&mut buf).await {}
     }
+}
+
+fn sustainable_drain_period() -> Duration {
+    let templates = [video_frame(0), video_frame(1), video_frame(2)];
+    let encoded_bytes: u64 = templates
+        .iter()
+        .filter_map(encode_jpeg)
+        .map(|jpeg| u64::try_from(jpeg.len()).unwrap_or(u64::MAX))
+        .sum();
+    let offered = encoded_bytes.saturating_mul(30);
+    assert!(
+        offered > MIN_BYTES_PER_SECOND,
+        "fixture overloads the minimum budget"
+    );
+    let bounded_offer = offered.min(MAX_BYTES_PER_SECOND);
+    let drain_rate =
+        MIN_BYTES_PER_SECOND.saturating_add(bounded_offer.saturating_sub(MIN_BYTES_PER_SECOND) / 2);
+    assert!(
+        drain_rate < offered,
+        "fixture remains slower than all three sources"
+    );
+    let mean_frame_bytes = encoded_bytes / 3;
+    let period_ns = mean_frame_bytes.saturating_mul(1_000_000_000) / drain_rate;
+    Duration::from_nanos(period_ns.max(1))
 }
 
 async fn await_stable_degradation(
