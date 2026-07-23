@@ -22,7 +22,7 @@ const SIZE_CAPS = {
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
-  "control-loop.js": 809,
+  "control-loop.js": 820,
   "control-shell.js": 341,
   "datagram-control.js": 80,
   "instrument-health.js": 395,

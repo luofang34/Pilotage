@@ -551,7 +551,18 @@ export function createControlLoop({
         requestSimReset();
       }
       maybeAnnounceProfileActivation();
-      if (!controlGate.mayPublish()) continue;
+      if (!controlGate.mayPublish()) {
+        // The gate can be closed WITHOUT the latch: a window the operator
+        // never focused (launcher-opened tab, autoconnect while working in
+        // the terminal) has no blur to latch, yet hasFocus() is false. The
+        // writer's ready promise resolves immediately when idle, so skipping
+        // the interval here would spin the loop on microtasks alone —
+        // starving timers, rendering, and the transport readers, with no
+        // way back (the focus event that would open the gate rides the
+        // starved macrotask queue).
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
+      }
       if (plan.motion) sendMotionFrame(writer, token, mode, plan);
       if (plan.gimbal) sendGimbalFrame(writer, token, plan.gimbal);
       if (plan.lease) executeLeaseAction(token, plan.lease, gimbalScope);
