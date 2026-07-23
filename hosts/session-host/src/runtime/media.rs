@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 use wtransport::Connection;
 
 use frame_writer::client_writer;
@@ -57,21 +57,36 @@ pub struct MediaHandle {
 }
 
 impl MediaHandle {
-    /// Registers `client`'s connection to receive video frames. Best-effort:
-    /// a closed channel (media task gone) is ignored, since a host without a
-    /// running media task simply serves no video.
+    /// Registers `client`'s connection to receive video frames. Best-effort —
+    /// a missing media task simply serves no video — but a DROPPED command is
+    /// logged: an unregistered client silently gets no video otherwise.
     pub fn register(&self, client: ClientKey, connection: Connection) {
-        self.commands
+        if self
+            .commands
             .try_send(MediaCommand::Register(MediaClient { client, connection }))
-            .ok();
+            .is_err()
+        {
+            warn!(
+                client = client.as_u64(),
+                "media register dropped (queue full or task gone); client will receive no video"
+            );
+        }
     }
 
     /// Deregisters `client` on disconnect. Best-effort for the same reason as
-    /// [`Self::register`].
+    /// [`Self::register`]; a dropped command is logged, and the fan-out's
+    /// all-sources-retired backstop reaps the client regardless.
     pub fn deregister(&self, client: ClientKey) {
-        self.commands
+        if self
+            .commands
             .try_send(MediaCommand::Deregister(client))
-            .ok();
+            .is_err()
+        {
+            warn!(
+                client = client.as_u64(),
+                "media deregister dropped (queue full or task gone); the all-retired backstop reaps it"
+            );
+        }
     }
 }
 
@@ -122,12 +137,48 @@ struct EncodedFrame {
 /// best-effort media).
 type FrameTx = mpsc::Sender<EncodedFrame>;
 
+/// Writer respawns allowed per (client, source) before the source is retired
+/// for that client. A writer that exits while its connection still lives is a
+/// transient (a stream-open error classified connection-fatal, a QUIC
+/// hiccup); a genuinely dead connection's respawned writer exits again within
+/// one frame, and connection teardown deregisters the whole client anyway —
+/// the bound keeps a wedged connection from costing one writer spawn per
+/// frame forever.
+const MAX_WRITER_RESPAWNS: u32 = 3;
+
+/// What fan-out does with a sink whose writer task has exited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SinkAction {
+    /// Spawn a fresh writer (recording this exit) and hand it the frame.
+    Respawn,
+    /// The bound is exhausted: retire this source for this client, loudly.
+    Retire,
+}
+
+/// Pure respawn policy: `writer_exits` counts exits BEFORE this one.
+fn on_writer_exit(writer_exits: u32) -> SinkAction {
+    if writer_exits < MAX_WRITER_RESPAWNS {
+        SinkAction::Respawn
+    } else {
+        SinkAction::Retire
+    }
+}
+
 /// The media task's own view of one video source of a connected client: the
-/// handoff channel to that source's writer task, plus the running drop count
-/// for frames its writer could not keep up with.
-struct ClientSink {
-    frames: FrameTx,
-    dropped: u64,
+/// handoff channel to that source's writer task, the running drop count for
+/// frames its writer could not keep up with, and how many writers for this
+/// source have exited. A retired sink keeps the source dark for this client
+/// (other sources and the client itself live on; only connection teardown
+/// removes the CLIENT).
+enum ClientSink {
+    /// A live writer task holds the other end of `frames`.
+    Live {
+        frames: FrameTx,
+        dropped: u64,
+        writer_exits: u32,
+    },
+    /// The writer exit bound is exhausted; the source stays dark, loudly.
+    Retired,
 }
 
 /// The media task's view of a connected client: its connection (so per-source
@@ -212,10 +263,87 @@ fn apply_command(
     }
 }
 
+/// One frame's fate at one client sink.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SinkDelivery {
+    /// Handed to the live writer.
+    Delivered,
+    /// The writer is still busy with the previous frame; carries the new
+    /// running drop total.
+    DroppedFull(u64),
+    /// The writer had exited; a fresh one took the frame. Carries the new
+    /// exit count.
+    Respawned(u32),
+    /// The writer exit bound is exhausted; the sink retired on this frame.
+    Retired(u32),
+    /// The sink was already retired; the source stays dark for this client.
+    Skipped,
+}
+
+/// Routes one encoded frame into a sink, absorbing a dead writer through the
+/// bounded respawn policy. `respawn(exits)` builds the replacement live sink
+/// carrying the new exit count; it is injected so the transition is testable
+/// with real channels and no live connection.
+fn deliver_to_sink(
+    sink: &mut ClientSink,
+    encoded: &EncodedFrame,
+    respawn: impl FnOnce(u32) -> ClientSink,
+) -> SinkDelivery {
+    let ClientSink::Live {
+        frames,
+        dropped,
+        writer_exits,
+    } = sink
+    else {
+        return SinkDelivery::Skipped;
+    };
+    match frames.try_send(encoded.clone()) {
+        Ok(()) => SinkDelivery::Delivered,
+        Err(TrySendError::Full(_)) => {
+            *dropped = dropped.wrapping_add(1);
+            SinkDelivery::DroppedFull(*dropped)
+        }
+        Err(TrySendError::Closed(_)) => {
+            // The writer task exited (a connection-fatal classification). The
+            // CLIENT is not evicted here — a live connection deserves a fresh
+            // writer, and a dead one is deregistered by its connection task's
+            // teardown (with the all-retired backstop below covering a lost
+            // deregistration). Only this source's writer is respawned,
+            // bounded, then retired.
+            let exits = *writer_exits;
+            match on_writer_exit(exits) {
+                SinkAction::Respawn => {
+                    *sink = respawn(exits + 1);
+                    if let ClientSink::Live { frames, .. } = sink {
+                        frames.try_send(encoded.clone()).ok();
+                    }
+                    SinkDelivery::Respawned(exits + 1)
+                }
+                SinkAction::Retire => {
+                    *sink = ClientSink::Retired;
+                    SinkDelivery::Retired(exits)
+                }
+            }
+        }
+    }
+}
+
+/// Whether every source of a client has retired — the media-side backstop
+/// for a LOST deregistration: such a client receives nothing anyway, and a
+/// genuinely dead connection's writers retire within a few frames, so
+/// removing it restores the old eviction guarantee with bounded patience.
+fn fully_retired(sources: &std::collections::BTreeMap<u8, ClientSink>) -> bool {
+    !sources.is_empty()
+        && sources
+            .values()
+            .all(|sink| matches!(sink, ClientSink::Retired))
+}
+
 /// Encodes `frame` to JPEG once and hands it to every client's writer for the
 /// frame's source, lazily spawning that per-source writer on first use,
 /// counting a drop for any source whose in-flight slot is still full (slow
-/// consumer), and evicting any client whose connection has gone away.
+/// consumer), respawning (bounded) any writer that exited, and removing a
+/// client only once EVERY one of its sources has retired.
 fn fan_out_frame(
     frame: RawVideoFrame,
     received_at_ns: u64,
@@ -236,38 +364,74 @@ fn fan_out_frame(
         capture,
         received_at_ns,
     };
-    let mut closed = Vec::new();
+    let mut reaped = Vec::new();
     for (client, entry) in clients.iter_mut() {
-        let sink = entry.sources.entry(source_id).or_insert_with(|| {
-            let (frame_tx, frame_rx) = mpsc::channel::<EncodedFrame>(1);
-            writers.spawn(client_writer(
-                *client,
-                source_id,
-                entry.connection.clone(),
-                frame_rx,
-                start,
-            ));
-            ClientSink {
-                frames: frame_tx,
-                dropped: 0,
-            }
+        let ClientEntry {
+            connection,
+            sources,
+        } = entry;
+        let sink = sources
+            .entry(source_id)
+            .or_insert_with(|| spawn_sink(*client, source_id, connection, writers, start, 0));
+        let delivery = deliver_to_sink(sink, &encoded, |exits| {
+            spawn_sink(*client, source_id, connection, writers, start, exits)
         });
-        match sink.frames.try_send(encoded.clone()) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
-                sink.dropped = sink.dropped.wrapping_add(1);
-                warn!(
+        match delivery {
+            SinkDelivery::Delivered | SinkDelivery::Skipped => {}
+            SinkDelivery::DroppedFull(total_dropped) => warn!(
+                client = client.as_u64(),
+                source_id,
+                total_dropped,
+                "video frame dropped: client writer still busy with the previous frame"
+            ),
+            SinkDelivery::Respawned(writer_exits) => warn!(
+                client = client.as_u64(),
+                source_id, writer_exits, "video writer exited; respawning for this source"
+            ),
+            SinkDelivery::Retired(writer_exits) => {
+                error!(
                     client = client.as_u64(),
                     source_id,
-                    total_dropped = sink.dropped,
-                    "video frame dropped: client writer still busy with the previous frame"
+                    writer_exits,
+                    "video source retired for this client: writer exit bound exhausted"
                 );
+                if fully_retired(sources) {
+                    reaped.push(*client);
+                }
             }
-            Err(TrySendError::Closed(_)) => closed.push(*client),
         }
     }
-    for client in closed {
+    for client in reaped {
         clients.remove(&client);
+        warn!(
+            client = client.as_u64(),
+            "video client removed: every source retired (lost-deregistration backstop)"
+        );
+    }
+}
+
+/// Spawns one per-(client, source) writer task and returns its live sink,
+/// carrying the exit count the respawn bound is judged against.
+fn spawn_sink(
+    client: ClientKey,
+    source_id: u8,
+    connection: &Connection,
+    writers: &mut JoinSet<()>,
+    start: Instant,
+    writer_exits: u32,
+) -> ClientSink {
+    let (frame_tx, frame_rx) = mpsc::channel::<EncodedFrame>(1);
+    writers.spawn(client_writer(
+        client,
+        source_id,
+        connection.clone(),
+        frame_rx,
+        start,
+    ));
+    ClientSink::Live {
+        frames: frame_tx,
+        dropped: 0,
+        writer_exits,
     }
 }
 
@@ -303,87 +467,4 @@ fn encode_jpeg(frame: &RawVideoFrame) -> Option<Vec<u8>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::encode_jpeg;
-    use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
-    use pilotage_adapter_api::{
-        CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
-        SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
-    };
-    use pilotage_adapter_gazebo::RawVideoFrame;
-    use pilotage_timing::SimTick;
-
-    fn capture_stamp() -> VideoCaptureStamp {
-        VideoCaptureStamp {
-            stamp: MeasurementStamp {
-                role: SourceRole::VideoCapture,
-                integrity: SourceIntegrity::Unprotected,
-                source_id: 1,
-                source_incarnation: SourceIncarnation::new([5; 16]),
-                source_epoch: 0,
-                sequence: 3,
-                acquired_at_ns: 999,
-                clock: MeasurementClock::Simulation,
-            },
-            camera_id: CameraId(1),
-            calibration_id: CalibrationId::NONE,
-            mapping: CaptureClockMapping::identity(MeasurementClock::Simulation),
-        }
-    }
-
-    /// Builds a synthetic RGB frame with a simple gradient so the encoder has
-    /// real (non-constant) pixel data to work with.
-    fn synthetic_rgb(width: u32, height: u32) -> RawVideoFrame {
-        let mut rgb = Vec::with_capacity((width * height * 3) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                rgb.push((x % 256) as u8);
-                rgb.push((y % 256) as u8);
-                rgb.push(((x + y) % 256) as u8);
-            }
-        }
-        RawVideoFrame {
-            source_id: 0,
-            width,
-            height,
-            pixel_format: "RGB_INT8".to_owned(),
-            tick: SimTick::new(0),
-            rgb,
-            capture: capture_stamp(),
-        }
-    }
-
-    #[test]
-    fn encodes_frame_and_v2_body_carries_the_jpeg() {
-        let frame = synthetic_rgb(16, 12);
-        let jpeg = encode_jpeg(&frame).expect("synthetic RGB frame encodes to JPEG");
-        // A JPEG stream begins with the SOI marker 0xFFD8 and ends with EOI
-        // 0xFFD9; check both so a garbage encode is caught.
-        assert_eq!(&jpeg[..2], &[0xFF, 0xD8], "JPEG starts with SOI");
-        assert_eq!(&jpeg[jpeg.len() - 2..], &[0xFF, 0xD9], "JPEG ends with EOI");
-
-        // Frame the JPEG exactly as the media task writes it after the tag: a
-        // v2 capture-identity body (ADR-0020). The full on-wire unit leads with
-        // the v2 kind tag, then the header, codec, length prefix, and payload.
-        let body = frame_video_payload_v2(1, &frame.capture, 10, 20, FOURCC_MJPEG, &jpeg)
-            .expect("JPEG frames into a v2 body");
-        assert_eq!(body[0], 1, "leads with the chase source id");
-        assert_eq!(
-            &body[body.len() - jpeg.len()..],
-            jpeg.as_slice(),
-            "JPEG trails intact"
-        );
-
-        let mut wire = vec![VIDEO_FRAME_V2];
-        wire.extend_from_slice(&body);
-        assert_eq!(wire[0], VIDEO_FRAME_V2, "leads with the v2 video kind tag");
-    }
-
-    #[test]
-    fn non_rgb_frame_is_skipped() {
-        let mut frame = synthetic_rgb(4, 4);
-        frame.pixel_format = "BGR_INT8".to_owned();
-        assert!(encode_jpeg(&frame).is_none());
-    }
-}
+mod tests;

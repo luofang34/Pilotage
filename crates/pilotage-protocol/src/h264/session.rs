@@ -38,8 +38,14 @@ pub enum FeedAction {
 /// The decode-session state machine for one video source: unconfigured until
 /// a decodable keyframe arrives, configured for that keyframe's codec until
 /// an in-band codec change reconfigures it, failed — permanently — on
-/// invalid input, an undecodable keyframe, or a platform-reported decode
-/// error, and retired when its owner discards it. Each configuration is a
+/// invalid input, an undecodable keyframe, or a platform CAPABILITY failure
+/// (no decoder, configure error), and retired when its owner discards it.
+/// A platform-reported DECODE error is different: it is a mid-stream data
+/// fault (a lost access unit leaves the next delta referencing a missing
+/// frame), so the session re-enters unconfigured and awaits the next
+/// decodable keyframe instead of dying — bounded by a strike count that only
+/// a subsequently painted output frame re-arms, so a stream that never
+/// recovers still fails closed. Each configuration is a
 /// distinct decoder GENERATION: a platform callback captured at configure
 /// time carries its generation and is honored only while it matches
 /// [`DecodeSession::generation`], so a callback from a replaced, reset, or
@@ -50,7 +56,24 @@ pub struct DecodeSession {
     generation: u32,
     failed: bool,
     retired: bool,
+    decode_error_strikes: u8,
 }
+
+/// How the session absorbed a platform-reported decode error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeErrorRecovery {
+    /// The session dropped to unconfigured: the platform layer closes its
+    /// decoder, and the next decodable keyframe reconfigures a fresh one.
+    AwaitKeyframe,
+    /// The strike bound is exhausted (or the session was already dead): the
+    /// failure is permanent and surfaced once.
+    Failed,
+}
+
+/// Decode-error recoveries allowed without an intervening painted output
+/// frame. Exhausting them fails the session closed: a source whose every
+/// reconfiguration errors again is broken at the stream, not the viewer.
+const MAX_DECODE_ERROR_STRIKES: u8 = 3;
 
 impl DecodeSession {
     /// A fresh, unconfigured session.
@@ -129,11 +152,40 @@ impl DecodeSession {
         self.generation = self.generation.wrapping_add(1);
     }
 
-    /// The platform decoder could not be configured or reported a decode
-    /// error (synchronous or asynchronous): the session fails permanently
-    /// and stale callbacks are retired with it.
+    /// The platform decoder could not be built or configured — a CAPABILITY
+    /// failure: the session fails permanently and stale callbacks are
+    /// retired with it. A mid-stream decode error is not this; report it
+    /// through [`Self::platform_decode_error`].
     pub fn platform_failed(&mut self) {
         self.fail_now();
+    }
+
+    /// The platform decoder reported a DECODE error (synchronous throw or
+    /// the asynchronous error callback): a mid-stream data fault. Within the
+    /// strike bound the session re-enters unconfigured — stale callbacks are
+    /// retired by the generation advance, deltas drop, and the next
+    /// decodable keyframe reconfigures. Beyond the bound it fails closed.
+    pub fn platform_decode_error(&mut self) -> DecodeErrorRecovery {
+        if self.failed || self.retired {
+            return DecodeErrorRecovery::Failed;
+        }
+        self.decode_error_strikes = self.decode_error_strikes.saturating_add(1);
+        if self.decode_error_strikes > MAX_DECODE_ERROR_STRIKES {
+            self.fail_now();
+            return DecodeErrorRecovery::Failed;
+        }
+        self.configured_codec = None;
+        self.generation = self.generation.wrapping_add(1);
+        DecodeErrorRecovery::AwaitKeyframe
+    }
+
+    /// The platform painted an output frame from `generation`: the stream is
+    /// demonstrably decoding again, so the decode-error strike count
+    /// re-arms. A stale generation proves nothing and is ignored.
+    pub fn note_output(&mut self, generation: u32) {
+        if self.accepts_output_from(generation) {
+            self.decode_error_strikes = 0;
+        }
     }
 
     /// Whether the session has failed and will feed nothing further.

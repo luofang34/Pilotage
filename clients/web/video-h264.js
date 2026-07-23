@@ -47,6 +47,7 @@ export class H264CanvasDecoder {
       options.EncodedVideoChunk ??
       (typeof EncodedVideoChunk !== "undefined" ? EncodedVideoChunk : undefined);
     this.session = options.session ?? new H264DecodeSession();
+    this.onPainted = options.onPainted ?? (() => {});
     this.decoder = null;
     this.failReported = false;
     this.timestamp = 0;
@@ -85,9 +86,22 @@ export class H264CanvasDecoder {
         }),
       );
     } catch (error) {
-      this.session.platformFailed();
-      this.fail(`H.264 decode failed: ${error}`);
+      this.recoverOrFail(`H.264 decode failed: ${error}`);
     }
+  }
+
+  /** A mid-stream DECODE error (a lost access unit breaks the next delta's
+   *  reference): within the session machine's strike bound, drop back to
+   *  unconfigured and await the next decodable keyframe — visibly — instead
+   *  of dying; beyond it, fail permanently as before. */
+  recoverOrFail(message) {
+    if (this.session.platformDecodeError() === "await-keyframe") {
+      this.closeDecoder();
+      this.log(`${message}; awaiting a fresh keyframe`);
+      this.paintStall();
+      return;
+    }
+    this.fail(message);
   }
 
   configure(codec) {
@@ -103,8 +117,7 @@ export class H264CanvasDecoder {
         output: (frame) => this.paint(frame, generation),
         error: (error) => {
           if (!this.session.acceptsOutputFrom(generation)) return;
-          this.session.platformFailed();
-          this.fail(`H.264 decoder error: ${error}`);
+          this.recoverOrFail(`H.264 decoder error: ${error}`);
         },
       });
       this.decoder.configure({ codec, optimizeForLatency: true });
@@ -125,6 +138,11 @@ export class H264CanvasDecoder {
         canvas.height = frame.displayHeight;
       }
       ctx.drawImage(frame, 0, 0);
+      // A painted frame is proof the stream decodes again: it re-arms the
+      // session machine's decode-error strike bound and feeds the stall
+      // watch (delivered-but-undecodable frames count for nothing there).
+      this.session.noteOutput(generation);
+      this.onPainted();
     } finally {
       frame.close();
     }
@@ -139,6 +157,26 @@ export class H264CanvasDecoder {
     this.log(`video codec H264 unavailable: ${message}`);
     this.paintFailure();
     this.closeDecoder();
+  }
+
+  /** Fail-visible stall marker: the picture is stale while the session
+   *  awaits a fresh keyframe, so say so on the slot instead of freezing
+   *  silently. The next decoded frame paints over it. */
+  paintStall() {
+    try {
+      const { canvas, ctx } = this.target;
+      if (!canvas.width || !canvas.height) {
+        canvas.width = 320;
+        canvas.height = 240;
+      }
+      ctx.fillStyle = "rgba(40, 30, 0, 0.85)";
+      ctx.fillRect(0, 0, canvas.width, 22);
+      ctx.fillStyle = "#fc6";
+      ctx.font = "12px monospace";
+      ctx.fillText("H.264 stalled — awaiting keyframe", 8, 15);
+    } catch {
+      // No paintable target; the typed log line is the signal.
+    }
   }
 
   paintFailure() {
@@ -207,7 +245,7 @@ export class H264DecoderRegistry {
     const claim = this.ownership.claim(sourceId, token?.generation ?? 0);
     if (claim === "reuse") return this.decoders.get(sourceId);
     if (claim === "replace") this.decoders.get(sourceId)?.close();
-    const decoder = this.makeDecoder(target, token);
+    const decoder = this.makeDecoder(target, token, sourceId);
     this.decoders.set(sourceId, decoder);
     return decoder;
   }

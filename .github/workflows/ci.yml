@@ -171,6 +171,9 @@ jobs:
       - name: viewer video-diagnostics decision logic (readiness dedup + read-failure coalescing)
         run: node clients/web/video-diagnostics.test.mjs
 
+      - name: video stall transitions (frame-arrival freshness, enter/recover once)
+        run: node clients/web/video-stall.test.mjs
+
       - name: viewer video-source routing (FPV + chase + gimbal payload)
         run: node clients/web/video-routing.test.mjs
 
