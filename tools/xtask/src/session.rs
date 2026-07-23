@@ -36,11 +36,7 @@ const MAX_STAGE_RESTARTS: u32 = 3;
 pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     let backend = backend_for(&args.fc)?;
     let repo_root = repo_root()?;
-    let log_dir = repo_root.join("target/xtask-sim");
-    std::fs::create_dir_all(&log_dir).map_err(|source| XtaskError::Io {
-        context: "creating the session log directory",
-        source,
-    })?;
+    let log_dir = prepared_log_dir(&repo_root)?;
     let ctx = SessionContext {
         repo_root: repo_root.clone(),
         host_port: args.host_port,
@@ -249,6 +245,23 @@ pub fn run_reset(fc: &str) -> Result<(), XtaskError> {
 /// This repository's root: the checkout `cargo xtask` was INVOKED from.
 ///
 /// `cargo run` exports `CARGO_MANIFEST_DIR` into the child's runtime
+/// Ensures the stage-log directory exists with the previous run's logs
+/// preserved out of the way, announcing where they went.
+fn prepared_log_dir(repo_root: &std::path::Path) -> Result<PathBuf, XtaskError> {
+    let log_dir = repo_root.join("target/xtask-sim");
+    std::fs::create_dir_all(&log_dir).map_err(|source| XtaskError::Io {
+        context: "creating the session log directory",
+        source,
+    })?;
+    if let Some(archive) = crate::log_archive::archive_previous_logs(&log_dir)? {
+        print_line(&format!(
+            "previous run's logs preserved at {}",
+            archive.display()
+        ));
+    }
+    Ok(log_dir)
+}
+
 /// environment, pointing at the invoking workspace's `tools/xtask` — so a
 /// binary cached from another checkout (a worktree, a moved clone) still
 /// operates on the repository the user is standing in. The compile-time
