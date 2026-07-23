@@ -196,6 +196,88 @@ await (async () => {
   check("the matching-generation motion ack resumes", observed[2][1] === true);
 })();
 
+// ---- mid-read abandonment returns the stream to its producer ----
+await (async () => {
+  let cancellation = null;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([2, 1, 2, 3]));
+    },
+    cancel(reason) {
+      cancellation = reason;
+    },
+  });
+  const result = await readUniStream(stream.getReader(), {
+    authorityKind: STREAM_KIND_AUTHORITY,
+    decode: decodeLengthDelimitedEnvelope,
+    onAuthorityEnvelope: () => {},
+    shouldContinue: () => false,
+  });
+  check("an abandoned mid-read stream reports aborted", result.aborted === true);
+  check(
+    "an abandoned mid-read stream is cancelled with a typed reason",
+    cancellation?.name === "StreamCancellationReason" && cancellation?.kind === "stream-abandoned",
+  );
+})();
+
+// ---- decoder failure cancels rather than stranding the readable stream ----
+await (async () => {
+  let cancellation = null;
+  const decodeFailure = new Error("injected envelope failure");
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([STREAM_KIND_AUTHORITY, 0]));
+    },
+    cancel(reason) {
+      cancellation = reason;
+    },
+  });
+  let rejected = null;
+  try {
+    await readUniStream(stream.getReader(), {
+      authorityKind: STREAM_KIND_AUTHORITY,
+      decode: () => {
+        throw decodeFailure;
+      },
+      onAuthorityEnvelope: () => {},
+    });
+  } catch (error) {
+    rejected = error;
+  }
+  check("the original stream failure remains the rejected error", rejected === decodeFailure);
+  check(
+    "a failed stream drain cancels with the failure preserved as its cause",
+    cancellation?.kind === "stream-read-failed" && cancellation?.cause === decodeFailure,
+  );
+})();
+
+// ---- a cancellation failure is observable without masking the read failure ----
+await (async () => {
+  const readFailure = new Error("injected read failure");
+  const cancelFailure = new Error("injected cancel failure");
+  let observed = null;
+  const reader = {
+    read: () => Promise.reject(readFailure),
+    cancel: () => Promise.reject(cancelFailure),
+  };
+  try {
+    await readUniStream(reader, {
+      authorityKind: STREAM_KIND_AUTHORITY,
+      decode: decodeLengthDelimitedEnvelope,
+      onAuthorityEnvelope: () => {},
+      onCancelFailure: (error, reason) => {
+        observed = { error, reason };
+      },
+    });
+  } catch (error) {
+    check("cancellation failure does not mask the read failure", error === readFailure);
+  }
+  check(
+    "cancellation failure is reported through the diagnostic seam",
+    observed?.error === cancelFailure && observed?.reason.kind === "stream-read-failed",
+  );
+})();
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

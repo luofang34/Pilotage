@@ -10,6 +10,7 @@
 // body, rendered from the returned tail at close.
 
 import { drainAuthorityEnvelopes } from "./authority-stream.js";
+import { streamCancellationReason } from "./stream-cancellation.js";
 
 /** Appends `incoming` after `existing`. */
 function appendBytes(existing, incoming) {
@@ -33,26 +34,43 @@ function appendBytes(existing, incoming) {
  */
 export async function readUniStream(
   reader,
-  { authorityKind, decode, onAuthorityEnvelope, shouldContinue },
+  { authorityKind, decode, onAuthorityEnvelope, shouldContinue, onCancelFailure },
 ) {
+  async function cancel(kind, cause = null) {
+    const reason = streamCancellationReason(kind, cause);
+    try {
+      await reader.cancel(reason);
+    } catch (error) {
+      onCancelFailure?.(error, reason);
+    }
+  }
+
   let buf = new Uint8Array(0);
   let kind = null;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (shouldContinue && !shouldContinue()) return { kind, tail: buf, aborted: true };
-    if (value) buf = appendBytes(buf, value);
-    // The one-byte kind tag leads the stream; peel it once it arrives.
-    if (kind === null && buf.length >= 1) {
-      kind = buf[0];
-      buf = buf.subarray(1);
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (shouldContinue && !shouldContinue()) {
+        await cancel("stream-abandoned");
+        return { kind, tail: buf, aborted: true };
+      }
+      if (value) buf = appendBytes(buf, value);
+      // The one-byte kind tag leads the stream; peel it once it arrives.
+      if (kind === null && buf.length >= 1) {
+        kind = buf[0];
+        buf = buf.subarray(1);
+      }
+      // Authority is long-lived: dispatch every complete envelope live so a
+      // recovery ack is acted on immediately, never buffered until a close that
+      // never comes.
+      if (kind === authorityKind) {
+        buf = drainAuthorityEnvelopes(buf, decode, onAuthorityEnvelope);
+      }
+      if (done) break;
     }
-    // Authority is long-lived: dispatch every complete envelope live so a
-    // recovery ack is acted on immediately, never buffered until a close that
-    // never comes.
-    if (kind === authorityKind) {
-      buf = drainAuthorityEnvelopes(buf, decode, onAuthorityEnvelope);
-    }
-    if (done) break;
+  } catch (error) {
+    await cancel("stream-read-failed", error);
+    throw error;
   }
   return { kind, tail: buf, aborted: false };
 }

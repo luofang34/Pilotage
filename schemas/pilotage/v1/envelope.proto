@@ -36,5 +36,6 @@ message Envelope {
     ProfileActivation profile_activation = 16;
     ControlActionResult control_action_result = 17;
     ControlActionCommand control_action_command = 18;
+    MediaAttachRequest media_attach_request = 19;
   }
 }

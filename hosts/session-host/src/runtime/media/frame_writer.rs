@@ -199,13 +199,28 @@ pub(super) async fn client_writer(
 }
 
 /// What one frame's delivery attempt produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeadlinePhase {
+    Open,
+    Write,
+}
+
+impl DeadlinePhase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Write => "write",
+        }
+    }
+}
+
 enum FrameOutcome {
     /// Written and finished cleanly.
     Sent,
     /// The frame exceeded its deadline. `reset` is true when the stream
     /// had opened and was explicitly reset, false when the open itself
     /// timed out (there was no stream to reset).
-    Stalled { reset: bool },
+    Stalled { phase: DeadlinePhase, reset: bool },
     /// The peer stopped or refused this stream alone; the connection and
     /// other sources are healthy — one-frame loss, keep writing.
     PeerStop {
@@ -288,11 +303,12 @@ fn record_outcome(
 ) -> bool {
     match outcome {
         FrameOutcome::Sent => {}
-        FrameOutcome::Stalled { reset } => {
+        FrameOutcome::Stalled { phase, reset } => {
             counters.stalls = counters.stalls.wrapping_add(1);
             warn!(
                 client = client.as_u64(),
                 source_id,
+                phase = phase.as_str(),
                 total_stalls = counters.stalls,
                 stream_reset = reset,
                 "video frame exceeded its deadline; continuing with the next frame"
@@ -360,14 +376,22 @@ async fn deliver_frame<C: FrameChannel>(
     let mut stream = match tokio::time::timeout_at(deadline, channel.open()).await {
         Ok(Ok(stream)) => stream,
         Ok(Err(error)) => return error.into_outcome(),
-        Err(_elapsed) => return FrameOutcome::Stalled { reset: false },
+        Err(_elapsed) => {
+            return FrameOutcome::Stalled {
+                phase: DeadlinePhase::Open,
+                reset: false,
+            };
+        }
     };
     match tokio::time::timeout_at(deadline, write_body(&mut stream, tag, body)).await {
         Ok(Ok(())) => FrameOutcome::Sent,
         Ok(Err(error)) => error.into_outcome(),
         Err(_elapsed) => {
             stream.reset();
-            FrameOutcome::Stalled { reset: true }
+            FrameOutcome::Stalled {
+                phase: DeadlinePhase::Write,
+                reset: true,
+            }
         }
     }
 }

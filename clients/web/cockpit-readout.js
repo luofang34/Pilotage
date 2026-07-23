@@ -20,13 +20,16 @@ import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { bindVideoTargets, resolveVideoTarget } from "./video-routing.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
+import { MediaRecoveryGate } from "./media-recovery.js";
 import {
   VIDEO_STALL_THRESHOLD_MS,
+  allVideoSourcesStalled,
   createVideoFreshness,
   newlyStalledSources,
   noteVideoFrame,
 } from "./video-stall.js";
 import { readUniStream } from "./uni-stream.js";
+import { streamCancellationReason } from "./stream-cancellation.js";
 import {
   decodeLengthDelimitedEnvelope,
   STREAM_KIND_AUTHORITY,
@@ -51,6 +54,7 @@ export function createCockpitReadout({
   dispatchAuthorityEnvelope,
   handleFrameRejected,
   handleTransportClosed,
+  requestMediaAttach,
 }) {
   const pfdCtx = els.pfd.getContext("2d");
   const hsiCtx = els.hsi.getContext("2d");
@@ -61,6 +65,7 @@ export function createCockpitReadout({
   const turnDerivation = new TurnDerivation();
   const videoTargets = bindVideoTargets(document);
   let videoFreshness = createVideoFreshness();
+  const mediaRecovery = new MediaRecoveryGate(VIDEO_STALL_THRESHOLD_MS);
   // The stall watch runs from boot, independent of the instrument wasm:
   // MJPEG stays usable when the wasm fails, and its stalls must still show.
   setInterval(videoStallTick, VIDEO_STALL_THRESHOLD_MS / 2);
@@ -215,15 +220,25 @@ export function createCockpitReadout({
   }
 
   async function readOneUniStream(stream, token) {
-    if (!transportSessions.isActive(token)) return;
     const reader = stream.getReader();
-    if (!transportSessions.trackReader(token, reader)) return;
+    if (
+      !transportSessions.trackReader(
+        token,
+        reader,
+        streamCancellationReason("stream-abandoned", "session inactive before read"),
+      )
+    ) {
+      releaseUniStreamReader(reader);
+      return;
+    }
     try {
       const { kind, tail, aborted } = await readUniStream(reader, {
         authorityKind: STREAM_KIND_AUTHORITY,
         decode: decodeLengthDelimitedEnvelope,
         onAuthorityEnvelope: (decoded) => dispatchAuthorityEnvelope(decoded, token),
         shouldContinue: () => transportSessions.isActive(token),
+        onCancelFailure: (error, reason) =>
+          log(`uni stream cancellation failed (${reason.kind}): ${error}`),
       });
       if (aborted) return;
       if (kind === STREAM_KIND_VIDEO_V2) {
@@ -235,6 +250,15 @@ export function createCockpitReadout({
       }
     } finally {
       transportSessions.untrackReader(token, reader);
+      releaseUniStreamReader(reader);
+    }
+  }
+
+  function releaseUniStreamReader(reader) {
+    try {
+      reader.releaseLock();
+    } catch (error) {
+      log(`uni stream reader lock release failed: ${error}`);
     }
   }
 
@@ -317,16 +341,21 @@ export function createCockpitReadout({
     streamReadFailures.count = 0;
     streamReadFailures.lastLoggedMs = null;
     videoFreshness = createVideoFreshness();
+    mediaRecovery.reset();
   }
 
   /** Banners and logs each source whose frames STOPPED arriving — once per
    *  transition (a host writer death or dead route must never be a silent
    *  freeze); the next delivered frame repaints the slot and logs recovery. */
   function videoStallTick() {
-    for (const sourceId of newlyStalledSources(videoFreshness, performance.now())) {
+    const nowMs = performance.now();
+    for (const sourceId of newlyStalledSources(videoFreshness, nowMs)) {
       log(`video source ${sourceId} stalled: no frames for ${VIDEO_STALL_THRESHOLD_MS} ms`);
       const target = videoTargets[sourceId] ?? null;
       paintStallBanner(target);
+    }
+    if (mediaRecovery.shouldRequest(allVideoSourcesStalled(videoFreshness), nowMs)) {
+      void requestMediaAttach();
     }
   }
 
@@ -334,6 +363,7 @@ export function createCockpitReadout({
    *  delivered-but-undecodable frame (awaiting keyframe) counts for
    *  nothing, so that state stalls visibly within the threshold. */
   function notePaintedFrame(sourceId) {
+    mediaRecovery.notePaintedFrame();
     if (noteVideoFrame(videoFreshness, sourceId, performance.now())) {
       log(`video source ${sourceId} frames resumed`);
     }

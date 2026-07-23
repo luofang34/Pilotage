@@ -53,6 +53,7 @@ fn encoded_frame() -> EncodedFrame {
 #[derive(Default)]
 struct Tally {
     opened: AtomicU32,
+    open_cancelled: AtomicU32,
     finished: AtomicU32,
     reset: AtomicU32,
 }
@@ -128,6 +129,16 @@ struct MockChannel {
     tally: Arc<Tally>,
 }
 
+struct OpenCancellationProbe {
+    tally: Arc<Tally>,
+}
+
+impl Drop for OpenCancellationProbe {
+    fn drop(&mut self) {
+        self.tally.open_cancelled.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 impl FrameChannel for MockChannel {
     type Stream = MockStream;
 
@@ -140,8 +151,10 @@ impl FrameChannel for MockChannel {
             .unwrap_or(Open::Ready(Write::Ok))
         {
             Open::Stall => {
-                std::future::pending::<()>().await;
-                unreachable!("a stalled open never resolves")
+                let _cancellation_probe = OpenCancellationProbe {
+                    tally: self.tally.clone(),
+                };
+                std::future::pending::<Result<MockStream, StreamError>>().await
             }
             Open::Refused => Err(classify_open(&StreamOpeningError::Refused)),
             Open::ConnFatal => Err(classify_open(&StreamOpeningError::NotConnected)),
@@ -211,6 +224,11 @@ async fn a_stalled_open_is_skipped_and_the_next_frame_proceeds() {
         tally.opened.load(Ordering::SeqCst),
         2,
         "the next frame opens its own stream after the stalled open"
+    );
+    assert_eq!(
+        tally.open_cancelled.load(Ordering::SeqCst),
+        1,
+        "the timed-out open future is cancelled and returns its stream allowance wait"
     );
     assert_eq!(
         tally.finished.load(Ordering::SeqCst),

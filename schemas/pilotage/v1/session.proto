@@ -9,6 +9,11 @@ import "pilotage/v1/capability.proto";
 import "pilotage/v1/common.proto";
 import "pilotage/v1/control.proto";
 
+// Requests that the host register this live session with the media fan-out.
+// The request carries no identity because the receiving transport connection
+// is the identity and destination; repeating it is idempotent.
+message MediaAttachRequest {}
+
 // The first message a client sends after the WebTransport session is
 // established, before any host state has been shared (ADR-0005: session
 // bootstrap uses plain HTTPS for admission, then this message begins the

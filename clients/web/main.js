@@ -93,6 +93,7 @@ const readout = createCockpitReadout({
   dispatchAuthorityEnvelope: (...args) => control.dispatchAuthorityEnvelope(...args),
   handleFrameRejected: (...args) => control.handleFrameRejected(...args),
   handleTransportClosed: (...args) => transport.handleTransportClosed(...args),
+  requestMediaAttach: (...args) => bootstrap.requestMediaAttach(...args),
 });
 
 control = createControlLoop({

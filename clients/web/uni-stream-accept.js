@@ -46,7 +46,13 @@ export async function runIncomingStreamAcceptLoop(
   try {
     for (;;) {
       const { value: stream, done } = await reader.read();
-      if (!isActive()) return;
+      if (!isActive()) {
+        // The collection read transferred ownership of this stream before the
+        // session retired. Hand it to the normal drain owner so its inactive
+        // path cancels the reader and returns transport credit.
+        if (!done && stream) await Promise.resolve(handleStream(stream)).catch(() => {});
+        return;
+      }
       if (done) {
         // The collection closed gracefully — the session is ending. Terminal.
         onCollectionTerminal(null);

@@ -216,6 +216,9 @@ jobs:
       - name: uni-stream reader (0x01 tag + fragmented open stream + live recovery transition)
         run: node clients/web/uni-stream.test.mjs
 
+      - name: headless-CDP media recovery (cancelled reader credit + live-session re-attach)
+        run: node clients/web/media-recovery.browser.test.mjs
+
       - name: viewer explicit lease release (ack/timeout/abandon, reconnect awaits settlement)
         run: node clients/web/lease-release.test.mjs
 
