@@ -188,7 +188,9 @@ fn the_recorded_fixture_matches_its_provenance_and_classifies_decodable() {
 }
 
 mod session_machine {
-    use super::super::{ChunkClass, ClaimAction, DecodeSession, FeedAction, SourceOwnership};
+    use super::super::{
+        ChunkClass, ClaimAction, DecodeErrorRecovery, DecodeSession, FeedAction, SourceOwnership,
+    };
     use super::{access_unit, nal, sps};
 
     fn keyframe_au(profile: u8, constraint: u8, level: u8) -> Vec<u8> {
@@ -258,6 +260,86 @@ mod session_machine {
         s.platform_failed();
         assert!(s.is_failed() && !s.is_configured());
         assert_eq!(s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e)), FeedAction::Drop);
+    }
+
+    #[test]
+    fn a_decode_error_awaits_the_next_keyframe_instead_of_dying() {
+        let mut s = DecodeSession::new();
+        let _ = s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+        let configured_generation = s.generation();
+
+        // Mid-stream data fault (a lost access unit broke a reference).
+        assert_eq!(
+            s.platform_decode_error(),
+            DecodeErrorRecovery::AwaitKeyframe
+        );
+        assert!(!s.is_failed() && !s.is_configured());
+        assert!(
+            !s.accepts_output_from(configured_generation),
+            "the reset retires the errored decoder's callbacks"
+        );
+
+        // Deltas drop while unconfigured; the next keyframe reconfigures.
+        assert_eq!(
+            s.on_chunk(&access_unit(&[nal(1, &[0x03])])),
+            FeedAction::Drop
+        );
+        let FeedAction::ConfigureAndFeed { .. } = s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e)) else {
+            panic!("a decodable keyframe must reconfigure after recovery");
+        };
+    }
+
+    #[test]
+    fn decode_error_strikes_fail_closed_without_output_and_rearm_with_it() {
+        let mut s = DecodeSession::new();
+        // Three recoveries without a painted frame are absorbed...
+        for strike in 1..=3 {
+            let _ = s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+            assert_eq!(
+                s.platform_decode_error(),
+                DecodeErrorRecovery::AwaitKeyframe,
+                "strike {strike} recovers"
+            );
+        }
+        // ...the fourth is terminal.
+        let _ = s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+        assert_eq!(s.platform_decode_error(), DecodeErrorRecovery::Failed);
+        assert!(s.is_failed());
+        assert_eq!(s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e)), FeedAction::Drop);
+
+        // A painted output frame re-arms the bound.
+        let mut healthy = DecodeSession::new();
+        for _ in 0..3 {
+            let _ = healthy.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+            assert_eq!(
+                healthy.platform_decode_error(),
+                DecodeErrorRecovery::AwaitKeyframe
+            );
+        }
+        let _ = healthy.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+        healthy.note_output(healthy.generation());
+        assert_eq!(
+            healthy.platform_decode_error(),
+            DecodeErrorRecovery::AwaitKeyframe,
+            "output re-armed the strike bound"
+        );
+    }
+
+    #[test]
+    fn a_stale_generation_output_does_not_rearm_strikes() {
+        let mut s = DecodeSession::new();
+        for _ in 0..3 {
+            let _ = s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+            let stale = s.generation();
+            assert_eq!(
+                s.platform_decode_error(),
+                DecodeErrorRecovery::AwaitKeyframe
+            );
+            // An output surfacing from the errored decoder proves nothing.
+            s.note_output(stale);
+        }
+        let _ = s.on_chunk(&keyframe_au(0x42, 0xe0, 0x1e));
+        assert_eq!(s.platform_decode_error(), DecodeErrorRecovery::Failed);
     }
 
     #[test]

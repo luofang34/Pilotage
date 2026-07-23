@@ -41,8 +41,15 @@ function makeFrame() {
 }
 function makeTarget() {
   const draws = [];
-  const ctx = { fillStyle: "", font: "", drawImage: (f) => draws.push(f), fillRect() {}, fillText() {} };
-  return { target: { canvas: { width: 0, height: 0 }, ctx }, draws };
+  const texts = [];
+  const ctx = {
+    fillStyle: "",
+    font: "",
+    drawImage: (f) => draws.push(f),
+    fillRect() {},
+    fillText: (s) => texts.push(s),
+  };
+  return { target: { canvas: { width: 0, height: 0 }, ctx }, draws, texts };
 }
 function makeChunkCtor() {
   return class FakeChunk {
@@ -186,28 +193,63 @@ function decoderOptions(overrides) {
   check("undecodable keyframe fails visible with the typed reason", dec.failed === true && logs.some((m) => /no in-band PPS precedes the IDR/.test(m)));
 }
 
-// A decode() throw (the synchronous WebCodecs decode failure path) fails visible.
+// A decode() throw (the synchronous WebCodecs decode failure path) is a
+// mid-stream data fault: the session awaits the next keyframe — visibly —
+// and the next decodable keyframe restores painting.
 {
-  const { target } = makeTarget();
-  const { ctor, instances } = makeDecoderCtor({ decodeThrows: true });
+  const { target, draws, texts } = makeTarget();
+  const opts = { decodeThrows: true };
+  const { ctor, instances } = makeDecoderCtor(opts);
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
   dec.decode(KEYFRAME_A);
   check("decode throw is caught (configure succeeded)", instances.length === 1 && instances[0].config !== null);
-  check("decode throw fails visible with a typed reason", dec.failed === true && logs.some((m) => /decode failed/.test(m)));
+  check("decode throw recovers instead of dying", dec.failed === false);
+  check("decode throw closes the errored decoder", instances[0].closed === true);
+  check("decode throw logs the await-keyframe reason", logs.some((m) => /decode failed.*awaiting a fresh keyframe/.test(m)));
+  check("decode throw paints the stall banner", texts.some((s) => /stalled — awaiting keyframe/.test(s)));
+  check("a delta while awaiting keyframe builds no decoder", (dec.decode(DELTA), instances.length === 1));
+  opts.decodeThrows = false;
+  dec.decode(KEYFRAME_A);
+  check("the next keyframe reconfigures a fresh decoder", instances.length === 2 && instances[1].config !== null);
+  check("painting resumes after recovery", draws.length === 1);
 }
 
 // The asynchronous decoder error callback (WebCodecs' out-of-band error path)
-// fails visible without an exception into the frame path.
+// recovers the same way, without an exception into the frame path.
 {
-  const { target } = makeTarget();
+  const { target, draws } = makeTarget();
   const { ctor, instances } = makeDecoderCtor();
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
   dec.decode(KEYFRAME_A); // configures; captures the decoder's error callback
+  const painted = draws.length;
   instances[0].error(new Error("hardware reset"));
-  check("async decoder error fails visible with a typed reason", dec.failed === true && logs.some((m) => /decoder error/.test(m)));
+  check("async decoder error recovers with the typed reason", dec.failed === false && logs.some((m) => /decoder error.*awaiting a fresh keyframe/.test(m)));
   check("async decoder error closes the decoder", instances[0].closed === true);
+  dec.decode(KEYFRAME_A);
+  check("a fresh keyframe restores painting after the async error", instances.length === 2 && draws.length === painted + 1);
+}
+
+// The paint callback feeds the stall watch: only PAINTED frames count, so a
+// source stuck awaiting a keyframe (deltas arriving, nothing decodable)
+// stalls visibly within the watch threshold.
+{
+  const { target } = makeTarget();
+  const opts = { decodeThrows: true };
+  const { ctor } = makeDecoderCtor(opts);
+  let painted = 0;
+  const dec = new H264CanvasDecoder(target, {
+    ...decoderOptions({ VideoDecoder: ctor }),
+    onPainted: () => {
+      painted += 1;
+    },
+  });
+  dec.decode(KEYFRAME_A); // decode throws -> awaiting keyframe; nothing painted
+  check("an errored feed reports no paint to the stall watch", painted === 0);
+  opts.decodeThrows = false;
+  dec.decode(KEYFRAME_A);
+  check("a decoded frame reports its paint to the stall watch", painted === 1);
 }
 
 // ---- stale platform callbacks (the retained-callback hazards) ---------------
@@ -250,14 +292,21 @@ function decoderOptions(overrides) {
   check("the post-close frame is still closed", stale.closed === true);
 }
 
-// After a platform failure, the failed decoder's retained callback must not
-// paint over the fail-visible marker, and its late error must not re-log.
+// Exhausting the decode-error strike bound without a painted frame is the
+// PERMANENT failure; the failed decoder's retained callback must not paint
+// over the fail-visible marker, and its late error must not re-log.
 {
   const { target, draws } = makeTarget();
   const { ctor, instances } = makeDecoderCtor({ decodeThrows: true });
   const logs = [];
   const dec = new H264CanvasDecoder(target, decoderOptions({ VideoDecoder: ctor, log: (m) => logs.push(m) }));
-  dec.decode(KEYFRAME_A); // decode throws -> platform failure -> marker painted
+  // Three strikes recover; the fourth decode error is terminal.
+  dec.decode(KEYFRAME_A);
+  dec.decode(KEYFRAME_A);
+  dec.decode(KEYFRAME_A);
+  check("strikes recover up to the bound", dec.failed === false);
+  dec.decode(KEYFRAME_A); // fourth error -> permanent failure -> marker painted
+  check("the strike bound fails closed", dec.failed === true);
   const logged = logs.length;
   const stale = makeFrame();
   instances[0].output(stale);

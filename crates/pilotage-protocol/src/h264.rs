@@ -189,7 +189,7 @@ fn codec_string(bytes: &[u8], sps_header_offset: usize, unit_end: usize) -> Opti
 
 mod session;
 
-pub use session::{ClaimAction, DecodeSession, FeedAction, SourceOwnership};
+pub use session::{ClaimAction, DecodeErrorRecovery, DecodeSession, FeedAction, SourceOwnership};
 
 #[cfg(test)]
 mod tests;

@@ -124,11 +124,32 @@ impl H264DecodeSession {
         to_js(&action)
     }
 
-    /// The platform decoder failed (configure error, decode throw, or the
-    /// asynchronous error callback): the session fails permanently.
+    /// The platform decoder could not be built or configured — a CAPABILITY
+    /// failure: the session fails permanently.
     #[wasm_bindgen(js_name = platformFailed)]
     pub fn platform_failed(&mut self) {
         self.inner.platform_failed();
+    }
+
+    /// The platform decoder reported a mid-stream DECODE error (a lost
+    /// access unit breaks the next delta's reference). Returns
+    /// `"await-keyframe"` when the session re-entered unconfigured to
+    /// recover on the next decodable keyframe, or `"failed"` when the
+    /// bounded strikes are exhausted and the failure is permanent.
+    #[wasm_bindgen(js_name = platformDecodeError)]
+    pub fn platform_decode_error(&mut self) -> String {
+        use pilotage_protocol::h264::DecodeErrorRecovery;
+        match self.inner.platform_decode_error() {
+            DecodeErrorRecovery::AwaitKeyframe => "await-keyframe".to_string(),
+            DecodeErrorRecovery::Failed => "failed".to_string(),
+        }
+    }
+
+    /// The platform painted an output frame from `generation`: the stream is
+    /// demonstrably decoding again, so the decode-error strike bound re-arms.
+    #[wasm_bindgen(js_name = noteOutput)]
+    pub fn note_output(&mut self, generation: u32) {
+        self.inner.note_output(generation);
     }
 
     /// Whether the session has failed and will feed nothing further.

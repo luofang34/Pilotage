@@ -20,6 +20,12 @@ import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { bindVideoTargets, resolveVideoTarget } from "./video-routing.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
+import {
+  VIDEO_STALL_THRESHOLD_MS,
+  createVideoFreshness,
+  newlyStalledSources,
+  noteVideoFrame,
+} from "./video-stall.js";
 import { readUniStream } from "./uni-stream.js";
 import {
   decodeLengthDelimitedEnvelope,
@@ -54,6 +60,10 @@ export function createCockpitReadout({
   const snapshotHistory = new SnapshotAssociator();
   const turnDerivation = new TurnDerivation();
   const videoTargets = bindVideoTargets(document);
+  let videoFreshness = createVideoFreshness();
+  // The stall watch runs from boot, independent of the instrument wasm:
+  // MJPEG stays usable when the wasm fails, and its stalls must still show.
+  setInterval(videoStallTick, VIDEO_STALL_THRESHOLD_MS / 2);
   const videoReadinessLog = new Map();
   const streamReadFailures = { count: 0, lastLoggedMs: null };
   let h264Registry = null;
@@ -229,10 +239,11 @@ export function createCockpitReadout({
   }
 
   function buildH264Registry() {
-    return new H264DecoderRegistry((target, token) =>
+    return new H264DecoderRegistry((target, token, sourceId) =>
       new H264CanvasDecoder(target, {
         log: (message) => log(message),
         isActive: () => transportSessions.isActive(token),
+        onPainted: () => notePaintedFrame(sourceId),
       }),
     );
   }
@@ -255,6 +266,7 @@ export function createCockpitReadout({
   async function paintByCodec(fourcc, payload, sourceId, target, token) {
     if (fourcc === FOURCC_MJPEG) {
       await paintJpeg(payload, target, token);
+      notePaintedFrame(sourceId);
       return;
     }
     if (fourcc === FOURCC_H264) {
@@ -296,13 +308,50 @@ export function createCockpitReadout({
       return;
     }
     const target = videoTargetFor(sourceId);
-    if (target) await paintByCodec(fourcc, payload, sourceId, target, token);
+    if (!target) return;
+    await paintByCodec(fourcc, payload, sourceId, target, token);
   }
 
   function resetVideoDiagnostics() {
     videoReadinessLog.clear();
     streamReadFailures.count = 0;
     streamReadFailures.lastLoggedMs = null;
+    videoFreshness = createVideoFreshness();
+  }
+
+  /** Banners and logs each source whose frames STOPPED arriving — once per
+   *  transition (a host writer death or dead route must never be a silent
+   *  freeze); the next delivered frame repaints the slot and logs recovery. */
+  function videoStallTick() {
+    for (const sourceId of newlyStalledSources(videoFreshness, performance.now())) {
+      log(`video source ${sourceId} stalled: no frames for ${VIDEO_STALL_THRESHOLD_MS} ms`);
+      const target = videoTargets[sourceId] ?? null;
+      paintStallBanner(target);
+    }
+  }
+
+  /** Records one PAINTED frame — the freshness the stall watch judges. A
+   *  delivered-but-undecodable frame (awaiting keyframe) counts for
+   *  nothing, so that state stalls visibly within the threshold. */
+  function notePaintedFrame(sourceId) {
+    if (noteVideoFrame(videoFreshness, sourceId, performance.now())) {
+      log(`video source ${sourceId} frames resumed`);
+    }
+  }
+
+  function paintStallBanner(target) {
+    if (!target) return;
+    try {
+      const { canvas, ctx } = target;
+      if (!canvas.width || !canvas.height) return;
+      ctx.fillStyle = "rgba(40, 30, 0, 0.85)";
+      ctx.fillRect(0, 0, canvas.width, 22);
+      ctx.fillStyle = "#fc6";
+      ctx.font = "12px monospace";
+      ctx.fillText("video stalled — no frames arriving", 8, 15);
+    } catch {
+      // No paintable target; the typed log line is the signal.
+    }
   }
 
   function logVideoReadiness(sourceId, association) {
