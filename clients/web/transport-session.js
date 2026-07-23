@@ -2,13 +2,15 @@
 // not only its wrapping generation, so a delayed callback cannot become active
 // again after the numeric generation wraps.
 
+import { streamCancellationReason } from "./stream-cancellation.js";
+
 function discardTeardownRejection(pending) {
   if (pending && typeof pending.catch === "function") pending.catch(() => {});
 }
 
-function cancelReader(reader) {
+function cancelReader(reader, reason) {
   try {
-    discardTeardownRejection(reader.cancel());
+    discardTeardownRejection(reader.cancel(reason));
   } catch {
     // Teardown is already fail-closed because the token was invalidated first.
   }
@@ -30,8 +32,8 @@ function closeTransport(transport) {
   }
 }
 
-function disposeSession(session, shouldCloseTransport) {
-  for (const reader of session.readers) cancelReader(reader);
+function disposeSession(session, shouldCloseTransport, reason) {
+  for (const reader of session.readers) cancelReader(reader, reason);
   for (const writer of session.writers) abortWriter(writer);
   session.readers.clear();
   session.writers.clear();
@@ -52,7 +54,13 @@ export class TransportSessionLifecycle {
     this.generation = (this.generation + 1) >>> 0;
     const token = Object.freeze({ generation: this.generation, transport });
     this.active = { token, readers: new Set(), writers: new Set() };
-    if (previous) disposeSession(previous, true);
+    if (previous) {
+      disposeSession(
+        previous,
+        true,
+        streamCancellationReason("session-replaced"),
+      );
+    }
     return token;
   }
 
@@ -70,12 +78,12 @@ export class TransportSessionLifecycle {
     return true;
   }
 
-  trackReader(token, reader) {
+  trackReader(token, reader, inactiveReason = streamCancellationReason("session-inactive")) {
     if (!reader || typeof reader.cancel !== "function") {
       throw new TypeError("reader must provide cancel()");
     }
     if (!this.isActive(token)) {
-      cancelReader(reader);
+      cancelReader(reader, inactiveReason);
       return false;
     }
     this.active.readers.add(reader);
@@ -106,7 +114,7 @@ export class TransportSessionLifecycle {
     if (!this.isActive(token)) return false;
     const session = this.active;
     this.active = null;
-    disposeSession(session, true);
+    disposeSession(session, true, streamCancellationReason("session-closed"));
     return true;
   }
 
@@ -114,7 +122,7 @@ export class TransportSessionLifecycle {
     if (!this.isActive(token)) return false;
     const session = this.active;
     this.active = null;
-    disposeSession(session, false);
+    disposeSession(session, false, streamCancellationReason("session-retired"));
     return true;
   }
 }

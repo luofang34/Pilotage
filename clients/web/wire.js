@@ -269,13 +269,14 @@ const ENVELOPE_FIELD = {
   profileActivation: 16,
   controlActionResult: 17,
   controlActionCommand: 18,
+  mediaAttachRequest: 19,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
 function encodeEnvelope(payloadFieldNumber, payloadBytes) {
   const bytes = [];
   fieldVarint(bytes, ENVELOPE_FIELD.schemaVersion, SCHEMA_VERSION);
-  fieldBytes(bytes, payloadFieldNumber, payloadBytes);
+  fieldMessage(bytes, payloadFieldNumber, payloadBytes);
   return bytes;
 }
 
@@ -301,6 +302,11 @@ function encodeLeaseRelease({ vehicleId, scope }) {
 /** Encodes a `LeaseRelease` as a bare `Envelope` (payload field 13). */
 export function encodeLeaseReleaseEnvelope(release) {
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.leaseRelease, encodeLeaseRelease(release)));
+}
+
+/** Encodes an idempotent media attachment request for the live session. */
+export function encodeMediaAttachRequestEnvelope() {
+  return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.mediaAttachRequest, []));
 }
 
 // ---- control.proto: ControlFrame (field numbers per schema) ----------------

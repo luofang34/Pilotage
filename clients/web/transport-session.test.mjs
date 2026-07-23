@@ -15,8 +15,10 @@ function fakeTransport(name) {
 function fakeReader() {
   return {
     cancelCount: 0,
-    cancel() {
+    cancelReason: null,
+    cancel(reason) {
       this.cancelCount += 1;
+      this.cancelReason = reason;
       return Promise.resolve();
     },
   };
@@ -75,6 +77,7 @@ async function testInterleavedReplacementRejectsOldDataAndCallbacks() {
 
   assert.equal(oldTransport.closeCount, 1);
   assert.equal(oldReader.cancelCount, 1);
+  assert.equal(oldReader.cancelReason?.kind, "session-replaced");
   assert.equal(oldWriter.abortCount, 1);
   oldDatagram.resolve("old datagram");
   oldClosed.resolve();

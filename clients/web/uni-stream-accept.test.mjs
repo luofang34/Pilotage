@@ -10,6 +10,7 @@
 // Run: node clients/web/uni-stream-accept.test.mjs
 
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
+import { streamCancellationReason } from "./stream-cancellation.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -111,8 +112,15 @@ function scriptedCollection(steps) {
 // ---- 3. going inactive stops the loop without a terminal report ------------
 {
   let calls = 0;
-  const collection = scriptedCollection([{ value: { id: 1 } }, { value: { id: 2 } }]);
+  let cancellation = null;
+  const abandoned = new ReadableStream({
+    cancel(reason) {
+      cancellation = reason;
+    },
+  });
+  const collection = scriptedCollection([{ value: abandoned }, { value: { id: 2 } }]);
   const terminals = [];
+  const handled = [];
 
   await runIncomingStreamAcceptLoop(collection, {
     // true for the entry guard, false right after the first read.
@@ -120,12 +128,17 @@ function scriptedCollection(steps) {
       calls += 1;
       return calls < 2;
     },
-    handleStream: () => Promise.resolve(),
+    handleStream: (stream) => {
+      handled.push(stream);
+      return stream.getReader().cancel(streamCancellationReason("stream-abandoned"));
+    },
     onStreamFailure: () => {},
     onCollectionTerminal: (error) => terminals.push(error),
   });
 
   check("an inactive session stops the loop", true);
+  check("the stream accepted during retirement is handed to its cancellation owner", handled[0] === abandoned);
+  check("the accepted stream is cancelled with a typed reason", cancellation?.kind === "stream-abandoned");
   check("stopping for inactivity is not a terminal session failure", terminals.length === 0);
 }
 

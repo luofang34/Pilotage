@@ -1,5 +1,6 @@
 import {
   encodeClientHelloEnvelope,
+  encodeMediaAttachRequestEnvelope,
   encodeProfileActivationEnvelope,
 } from "./wire.js";
 import { createActionTracker } from "./action-tracker.js";
@@ -59,6 +60,21 @@ export function createSessionBootstrap({
     if (!transportSessions.isActive(token)) return false;
     log(`sent LeaseRequest for ${motionScope}`);
     return true;
+  }
+
+  async function requestMediaAttach() {
+    const token = transportSessions.currentToken();
+    const writer = state.sessionWriter;
+    if (!token || !writer || !state.connected || !transportSessions.isActive(token)) return false;
+    try {
+      await writer.write(lengthDelimit(encodeMediaAttachRequestEnvelope()));
+      if (!transportSessions.isActive(token)) return false;
+      log("requested media attachment on live session");
+      return true;
+    } catch (error) {
+      log(`media attachment request failed: ${error}`);
+      return false;
+    }
   }
 
   function handleBootstrapMessage(decoded, token) {
@@ -129,6 +145,7 @@ export function createSessionBootstrap({
     handleBootstrapMessage,
     lengthDelimit,
     maybeAnnounceProfileActivation,
+    requestMediaAttach,
     sendClientHello,
     sendLeaseRequest,
   };

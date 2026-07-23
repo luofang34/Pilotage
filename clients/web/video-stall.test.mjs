@@ -3,6 +3,7 @@
 
 import {
   VIDEO_STALL_THRESHOLD_MS,
+  allVideoSourcesStalled,
   createVideoFreshness,
   newlyStalledSources,
   noteVideoFrame,
@@ -20,6 +21,7 @@ function check(name, ok) {
 
 const f = createVideoFreshness();
 check("no sources, no stalls", newlyStalledSources(f, 10_000).length === 0);
+check("no observed sources is not an all-source stall", allVideoSourcesStalled(f) === false);
 
 noteVideoFrame(f, 0, 1000);
 noteVideoFrame(f, 2, 1000);
@@ -27,9 +29,11 @@ check("fresh frames do not stall", newlyStalledSources(f, 1000 + VIDEO_STALL_THR
 
 const entered = newlyStalledSources(f, 1000 + VIDEO_STALL_THRESHOLD_MS);
 check("both silent sources cross the threshold together", entered.length === 2);
+check("every observed source is now stalled", allVideoSourcesStalled(f) === true);
 check("a stalled source reports its transition exactly once", newlyStalledSources(f, 60_000).length === 0);
 
 check("a frame recovers a stalled source (transition reported)", noteVideoFrame(f, 0, 61_000) === true);
+check("one recovered source clears all-source stall", allVideoSourcesStalled(f) === false);
 check("a frame on a fresh source is no transition", noteVideoFrame(f, 0, 61_005) === false);
 check("the other source stays stalled without re-reporting", newlyStalledSources(f, 61_010).length === 0);
 check("the recovered source can stall again later", newlyStalledSources(f, 61_005 + VIDEO_STALL_THRESHOLD_MS).length === 1);

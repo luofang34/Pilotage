@@ -32,3 +32,8 @@ export function newlyStalledSources(freshness, nowMs, thresholdMs = VIDEO_STALL_
   }
   return entering;
 }
+
+/** True only when every source that has painted a frame is now stalled. */
+export function allVideoSourcesStalled(freshness) {
+  return freshness.lastFrameMs.size > 0 && freshness.stalled.size === freshness.lastFrameMs.size;
+}

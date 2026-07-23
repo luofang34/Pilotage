@@ -18,9 +18,8 @@ use prost::encoding::decode_varint;
 
 /// Upper bound on a single client-origin bootstrap-stream frame.
 ///
-/// The only frames a client legitimately sends on this stream are
-/// `ClientHello` and `LeaseRequest` (ADR-0005), both a few hundred bytes at
-/// most. Without a cap, a client declaring a huge varint length and then
+/// Client-origin session/control messages on this stream are at most a few
+/// hundred bytes. Without a cap, a client declaring a huge varint length and then
 /// dribbling the body would grow the reassembly buffer toward that declared
 /// size before a full frame ever arrives — an unbounded-memory vector that
 /// QUIC flow control does not bound, because the application buffer is
@@ -94,22 +93,31 @@ pub enum BootstrapDecodeError {
     },
 }
 
-/// Decodes one length-delimited envelope from the front of `bytes` into a
-/// client-origin [`DomainEnvelope`] plus the unconsumed remainder.
+/// One client-origin message carried by the reliable bootstrap stream.
+pub enum InboundBootstrap {
+    /// A message decided by the sans-IO session engine.
+    Engine(DomainEnvelope),
+    /// An idempotent request to register the live connection for media.
+    MediaAttach,
+}
+
+/// Decodes one length-delimited envelope from the front of `bytes` into an
+/// [`InboundBootstrap`] plus the unconsumed remainder.
 ///
 /// Only `ClientHello`, `LeaseRequest`, `LeaseRelease`, `ProfileActivation`,
-/// and `ControlActionCommand` are legitimately received on the bootstrap
-/// stream (ADR-0005): control frames and `Ping` travel as datagrams —
-/// discrete actions deliberately do NOT (CTRL-01 reliable delivery).
+/// `ControlActionCommand`, and `MediaAttachRequest` are legitimately received
+/// on the bootstrap stream (ADR-0005): control frames and `Ping` travel as
+/// datagrams — discrete actions deliberately do NOT (CTRL-01 reliable
+/// delivery).
 ///
 /// # Errors
 ///
 /// Returns [`BootstrapDecodeError`] if the bytes are not a valid envelope,
-/// the schema version is unsupported, or the payload is not one of the two
-/// client-origin bootstrap-stream arms.
+/// the schema version is unsupported, or the payload is not a supported
+/// client-origin bootstrap-stream arm.
 pub fn decode_bootstrap_message(
     bytes: &[u8],
-) -> Result<(DomainEnvelope, &[u8]), BootstrapDecodeError> {
+) -> Result<(InboundBootstrap, &[u8]), BootstrapDecodeError> {
     let (envelope, rest) = decode_envelope_length_delimited(bytes)?;
     if envelope.schema_version != SCHEMA_VERSION {
         return Err(BootstrapDecodeError::UnsupportedSchemaVersion {
@@ -117,31 +125,34 @@ pub fn decode_bootstrap_message(
             found: envelope.schema_version,
         });
     }
-    let domain = match envelope.payload {
+    let message = match envelope.payload {
         Some(wire::envelope::Payload::ClientHello(hello)) => {
-            DomainEnvelope::Hello(ClientHello::from(hello))
+            InboundBootstrap::Engine(DomainEnvelope::Hello(ClientHello::from(hello)))
         }
-        Some(wire::envelope::Payload::LeaseRequest(request)) => {
-            DomainEnvelope::Lease(LeaseRequest::try_from(request).map_err(DecodeError::from)?)
-        }
-        Some(wire::envelope::Payload::LeaseRelease(release)) => DomainEnvelope::Release(
-            pilotage_protocol::LeaseRelease::try_from(release).map_err(DecodeError::from)?,
+        Some(wire::envelope::Payload::LeaseRequest(request)) => InboundBootstrap::Engine(
+            DomainEnvelope::Lease(LeaseRequest::try_from(request).map_err(DecodeError::from)?),
         ),
+        Some(wire::envelope::Payload::LeaseRelease(release)) => {
+            InboundBootstrap::Engine(DomainEnvelope::Release(
+                pilotage_protocol::LeaseRelease::try_from(release).map_err(DecodeError::from)?,
+            ))
+        }
         Some(wire::envelope::Payload::ProfileActivation(activation)) => {
-            DomainEnvelope::ProfileActivation(
+            InboundBootstrap::Engine(DomainEnvelope::ProfileActivation(
                 pilotage_protocol::ProfileActivation::try_from(activation)
                     .map_err(DecodeError::from)?,
-            )
+            ))
         }
         Some(wire::envelope::Payload::ControlActionCommand(command)) => {
-            DomainEnvelope::ActionCommand(
+            InboundBootstrap::Engine(DomainEnvelope::ActionCommand(
                 pilotage_protocol::ControlActionCommand::try_from(command)
                     .map_err(DecodeError::from)?,
-            )
+            ))
         }
+        Some(wire::envelope::Payload::MediaAttachRequest(_)) => InboundBootstrap::MediaAttach,
         _ => return Err(BootstrapDecodeError::UnexpectedPayload),
     };
-    Ok((domain, rest))
+    Ok((message, rest))
 }
 
 /// Decodes one control-fast datagram payload into a [`DomainEnvelope::Frame`].
@@ -252,7 +263,11 @@ pub fn encode_frame_rejected_datagram(rejection: &pilotage_protocol::FrameReject
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{MAX_BOOTSTRAP_FRAME_LEN, complete_frame_len};
+    use super::{
+        InboundBootstrap, MAX_BOOTSTRAP_FRAME_LEN, complete_frame_len, decode_bootstrap_message,
+    };
+    use pilotage_protocol::{SCHEMA_VERSION, wire};
+    use prost::Message;
     use prost::encoding::encode_varint;
 
     #[test]
@@ -297,5 +312,19 @@ mod tests {
         // Prefix only; body has not arrived, so this is a well-formed pending
         // frame (None), not a rejection.
         assert_eq!(complete_frame_len(&bytes), Ok(None));
+    }
+
+    #[test]
+    fn media_attach_decodes_as_a_transport_request() {
+        let envelope = wire::Envelope {
+            schema_version: SCHEMA_VERSION,
+            payload: Some(wire::envelope::Payload::MediaAttachRequest(
+                wire::MediaAttachRequest {},
+            )),
+        };
+        let bytes = envelope.encode_length_delimited_to_vec();
+        let (message, rest) = decode_bootstrap_message(&bytes).expect("request decodes");
+        assert!(matches!(message, InboundBootstrap::MediaAttach));
+        assert!(rest.is_empty());
     }
 }

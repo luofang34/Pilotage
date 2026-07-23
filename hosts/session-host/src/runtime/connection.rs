@@ -25,8 +25,8 @@ use crate::runtime::media::MediaHandle;
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 use crate::runtime::stream_tag::AUTHORITY_EVENTS;
 use crate::runtime::wire_codec::{
-    OversizedFrame, complete_frame_len, decode_bootstrap_message, decode_control_datagram,
-    decode_ping_datagram,
+    InboundBootstrap, OversizedFrame, complete_frame_len, decode_bootstrap_message,
+    decode_control_datagram, decode_ping_datagram,
 };
 
 /// The ADR-0011 message class a datagram send belongs to, carried so a failed
@@ -139,7 +139,7 @@ pub async fn run_connection(
     }
 
     tokio::select! {
-        () = run_reader(&connection, recv, client, start, &to_engine) => {}
+        () = run_reader(&connection, recv, client, start, &to_engine, media.as_ref()) => {}
         () = run_writer(&connection, send, authority_send, outbound_rx) => {}
     }
 
@@ -163,6 +163,7 @@ async fn run_reader(
     client: ClientKey,
     start: Instant,
     to_engine: &mpsc::Sender<ToEngine>,
+    media: Option<&MediaHandle>,
 ) {
     let mut read_buf = vec![0u8; 64 * 1024];
     let mut pending = Vec::new();
@@ -182,7 +183,14 @@ async fn run_reader(
                     Ok(Some(count)) => {
                         pending.extend_from_slice(&read_buf[..count]);
                         if let Err(error) =
-                            drain_bootstrap_frames(&mut pending, client, start, to_engine).await
+                            drain_bootstrap_frames(
+                                &mut pending,
+                                client,
+                                start,
+                                to_engine,
+                                media,
+                                connection,
+                            ).await
                         {
                             warn!(%error, "closing connection: oversized bootstrap frame");
                             break;
@@ -381,6 +389,8 @@ async fn drain_bootstrap_frames(
     client: ClientKey,
     start: Instant,
     to_engine: &mpsc::Sender<ToEngine>,
+    media: Option<&MediaHandle>,
+    connection: &Connection,
 ) -> Result<(), OversizedFrame> {
     loop {
         let frame_len = match complete_frame_len(pending)? {
@@ -388,8 +398,17 @@ async fn drain_bootstrap_frames(
             None => return Ok(()),
         };
         match decode_bootstrap_message(&pending[..frame_len]) {
-            Ok((message, _rest)) => {
+            Ok((InboundBootstrap::Engine(message), _rest)) => {
                 forward(to_engine, client, message, start).await;
+            }
+            Ok((InboundBootstrap::MediaAttach, _rest)) => {
+                if let Some(media) = media {
+                    media.register(client, connection.clone());
+                    debug!(
+                        client = client.as_u64(),
+                        "media attachment requested on live session"
+                    );
+                }
             }
             Err(error) => {
                 warn!(%error, "dropping malformed bootstrap-stream envelope");

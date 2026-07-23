@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 import {
   encodeControlFrameEnvelope,
+  encodeMediaAttachRequestEnvelope,
   decodeBareEnvelope,
   decodeLengthDelimitedEnvelope,
   parseVideoFrameV2,
@@ -95,6 +96,11 @@ const envelope = encodeControlFrameEnvelope({
 const top = walk(envelope);
 check("envelope carries the supported schema version", top.get(1) === BigInt(SCHEMA_VERSION));
 check("envelope carries the control_frame arm (field 2)", top.has(2));
+
+const mediaAttach = walk(encodeMediaAttachRequestEnvelope());
+check("media attach carries the supported schema version", mediaAttach.get(1) === BigInt(SCHEMA_VERSION));
+check("media attach uses its typed envelope arm (field 19)", mediaAttach.has(19));
+check("media attach has an empty idempotent body", mediaAttach.get(19)?.length === 0);
 
 const frame = walk(top.get(2));
 for (const [num, name] of [
