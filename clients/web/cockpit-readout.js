@@ -20,7 +20,7 @@ import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
 import { bindVideoTargets, resolveVideoTarget } from "./video-routing.js";
 import { runIncomingStreamAcceptLoop } from "./uni-stream-accept.js";
-import { MediaRecoveryGate } from "./media-recovery.js";
+import { MEDIA_RESTART_AFTER_ATTEMPTS, MediaRecoveryGate } from "./media-recovery.js";
 import {
   VIDEO_STALL_THRESHOLD_MS,
   allVideoSourcesStalled,
@@ -60,6 +60,7 @@ export function createCockpitReadout({
   handleFrameRejected,
   handleTransportClosed,
   requestMediaAttach,
+  requestReconnect,
 }) {
   const pfdCtx = els.pfd.getContext("2d");
   const hsiCtx = els.hsi.getContext("2d");
@@ -400,8 +401,18 @@ export function createCockpitReadout({
       const target = videoTargets[sourceId] ?? null;
       paintStallBanner(target);
     }
-    if (mediaRecovery.shouldRequest(allVideoSourcesStalled(videoFreshness), nowMs)) {
+    const recovery = mediaRecovery.decide(allVideoSourcesStalled(videoFreshness), nowMs);
+    if (recovery === "attach") {
       void requestMediaAttach();
+    } else if (recovery === "restart") {
+      // Streams are dead while the session still answers datagrams — the
+      // wedge only a fresh connection clears. Automate the operator's
+      // manual recovery (the Connect click).
+      log(
+        `video delivery dead: ${MEDIA_RESTART_AFTER_ATTEMPTS} re-attach requests ` +
+          "went unanswered; restarting the session",
+      );
+      requestReconnect();
     }
   }
 

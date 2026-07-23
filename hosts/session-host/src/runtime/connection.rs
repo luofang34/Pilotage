@@ -29,6 +29,8 @@ use crate::runtime::wire_codec::{
     decode_control_datagram, decode_ping_datagram, encode_video_delivery_state,
 };
 
+mod send_blocked;
+
 const CONTROL_STREAM_PRIORITY: i32 = 10;
 
 /// The ADR-0011 message class a datagram send belongs to, carried so a failed
@@ -143,6 +145,7 @@ pub async fn run_connection(
     tokio::select! {
         () = run_reader(&connection, recv, client, start, &to_engine, media.as_ref()) => {}
         () = run_writer(&connection, send, event_send, outbound_rx, media_status) => {}
+        () = send_blocked::run_send_blocked_watch(&connection, client.as_u64()) => {}
     }
 
     if let Some(media) = &media {
