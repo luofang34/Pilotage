@@ -105,6 +105,29 @@ check(
 );
 check("firstFault returns null when every field is valid", firstFault([["a", "u32", 0], ["b", "u64", 0n]]) === null);
 
+// ---- the varint encoder fails loudly on a negative -------------------------
+// A negative BigInt in writeVarint would shift toward -1n forever (an
+// infinite encode loop, page-freezing); the encoder must throw instead.
+import { encodeControlFrameEnvelope } from "./wire.js";
+check(
+  "a negative varint field throws RangeError instead of looping",
+  (() => {
+    try {
+      encodeControlFrameEnvelope({
+        sessionId: 0n,
+        vehicleId: 1n,
+        scope: "vehicle.motion",
+        generation: 1n,
+        sequence: -1,
+        sampledAtNanos: 1n,
+      });
+      return false;
+    } catch (error) {
+      return error instanceof RangeError;
+    }
+  })(),
+);
+
 if (failures > 0) {
   console.error(`${failures} check(s) failed`);
   process.exit(1);

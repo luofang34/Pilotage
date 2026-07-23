@@ -210,6 +210,9 @@ jobs:
       - name: control-loop macrotask pacing (gated un-latched path must not microtask-spin)
         run: node clients/web/control-pacing.test.mjs
 
+      - name: control-loop failure surface (channel-death release, keyup delivery, rejection re-log)
+        run: node clients/web/control-loop-failsafe.test.mjs
+
       - name: motion-lease reacquisition (release fence, stale-grant rejection, terminal denial)
         run: node clients/web/motion-lease.test.mjs
 

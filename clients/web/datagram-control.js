@@ -25,29 +25,36 @@ function releaseWriterLock(writer) {
   }
 }
 
-/** Interrupts one pending backpressure wait without closing the send stream. */
+/** Interrupts one pending backpressure wait without closing the send stream.
+ *
+ *  `waitFor` resolves `"ready"`, `"stopped"` (deliberate teardown), or
+ *  `"writer-failed"` (the writer's ready promise REJECTED — the datagram
+ *  channel itself is dead). The two non-ready outcomes must stay distinct:
+ *  a stop is silent by design, while a failed channel with control
+ *  authority still held leaves the vehicle enacting the last command, so
+ *  the caller must release authority loudly, never just exit. */
 export function createDatagramRunStop() {
   let stopped = false;
   let wake = null;
   return {
     stop() {
       stopped = true;
-      wake?.(false);
+      wake?.("stopped");
     },
     waitFor(writerReady) {
-      if (stopped) return Promise.resolve(false);
+      if (stopped) return Promise.resolve("stopped");
       return new Promise((resolve) => {
         let settled = false;
-        const finish = (ready) => {
+        const finish = (outcome) => {
           if (settled) return;
           settled = true;
           wake = null;
-          resolve(ready);
+          resolve(outcome);
         };
         wake = finish;
         Promise.resolve(writerReady).then(
-          () => finish(true),
-          () => finish(false),
+          () => finish("ready"),
+          () => finish("writer-failed"),
         );
       });
     },

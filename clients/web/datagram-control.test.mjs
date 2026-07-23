@@ -190,9 +190,21 @@ async function testInputLossInterruptsPendingBackpressureWithoutClosingStream() 
   const pending = deferred();
   const ready = stop.waitFor(pending.promise);
   stop.stop();
-  assert.equal(await ready, false);
-  assert.equal(await stop.waitFor(Promise.resolve()), false);
+  assert.equal(await ready, "stopped");
+  assert.equal(await stop.waitFor(Promise.resolve()), "stopped");
   pending.resolve();
+}
+
+async function testAFailedWriterIsDistinctFromADeliberateStop() {
+  const stop = createDatagramRunStop();
+  assert.equal(await stop.waitFor(Promise.resolve()), "ready");
+  // The channel dying (writer.ready REJECTING) must not look like a stop:
+  // a stop is silent teardown, a dead channel demands loud authority
+  // release — conflating them is the silent-loop-death defect.
+  assert.equal(
+    await stop.waitFor(Promise.reject(new Error("datagram stream errored"))),
+    "writer-failed",
+  );
 }
 
 for (const test of [
@@ -204,6 +216,7 @@ for (const test of [
   testInactiveSessionReleasesARefusedWriterLock,
   testCompletedRunReleasesTheWriterForSameTransportReuse,
   testInputLossInterruptsPendingBackpressureWithoutClosingStream,
+  testAFailedWriterIsDistinctFromADeliberateStop,
 ]) {
   await test();
   console.log(`ok - ${test.name}`);

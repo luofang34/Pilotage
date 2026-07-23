@@ -108,6 +108,9 @@ export function parseVideoFrameV2(body) {
 /** Appends an unsigned LEB128 varint to `bytes` (protobuf's varint encoding). */
 function writeVarint(bytes, value) {
   let v = BigInt(value);
+  // A negative BigInt shifts toward -1n forever: an infinite loop, not a
+  // wrong encoding. Every varint field in this protocol is unsigned.
+  if (v < 0n) throw new RangeError(`varint field must be non-negative, got ${value}`);
   for (;;) {
     let byte = Number(v & 0x7fn);
     v >>= 7n;

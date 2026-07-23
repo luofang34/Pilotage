@@ -29,6 +29,9 @@ import {
   integrateHeading,
 } from "./typed-command.js";
 
+/** How often an ongoing stream of identical frame rejections re-logs. */
+export const FRAME_REJECTION_RELOG_MS = 5000;
+
 /** Builds live control, suspended input watching, and lease execution. */
 export function createControlLoop({
   state,
@@ -385,13 +388,22 @@ export function createControlLoop({
 
   function handleFrameRejected(rejection) {
     const key = `${rejection.reason}:${rejection.scope}:${rejection.currentGeneration}`;
-    const firstNotice = key !== state.lastFrameRejectionLogged;
+    // Rate-limited, not once-ever: a steady stream of rejections IS the
+    // operator's only evidence that frames are not enacting ("nothing
+    // responds"), so the log must keep saying so, with a suppressed count.
+    const nowMs = performance.now();
+    const last = state.lastFrameRejectionLogged;
+    const repeat = last !== null && last.key === key;
+    const firstNotice = !repeat || nowMs - last.atMs >= FRAME_REJECTION_RELOG_MS;
     if (firstNotice) {
-      state.lastFrameRejectionLogged = key;
+      const suppressed = repeat && last.suppressed > 0 ? ` (+${last.suppressed} suppressed)` : "";
+      state.lastFrameRejectionLogged = { key, atMs: nowMs, suppressed: 0 };
       log(
         `control frame rejected (reason ${rejection.reason}) scope=${rejection.scope} ` +
-          `seq=${rejection.sequence} hostGen=${rejection.currentGeneration}`,
+          `seq=${rejection.sequence} hostGen=${rejection.currentGeneration}${suppressed}`,
       );
+    } else {
+      last.suppressed += 1;
     }
     if (
       rejection.reason === frameRejectionUplinkIdle &&
@@ -428,9 +440,15 @@ export function createControlLoop({
   function forwardKey(event, pressed) {
     if (!state.controlShell) return;
     const key = canonicalKey(event.key);
-    if (!state.controlShell.boundKey(key)) return;
+    const bound = state.controlShell.boundKey(key);
+    // A RELEASE must always reach the runtime: bindings can re-resolve
+    // while a key is down (device swap, profile install), and a swallowed
+    // keyup strands the key in the held set — a phantom deflection that no
+    // later input clears and that wedges every neutral-gated recovery.
+    // Releasing a key the runtime never held is a no-op.
+    if (pressed && !bound) return;
     state.controlShell.keyEvent(key, pressed);
-    event.preventDefault();
+    if (bound) event.preventDefault();
   }
 
   function gamepadDisconnected(event) {
@@ -528,7 +546,21 @@ export function createControlLoop({
     const intervalMs = 1000 / controlHz;
     while (transportSessions.isActive(token) && state.connected) {
       const ready = await runStop.waitFor(writer.ready);
-      if (!ready) return;
+      if (ready === "stopped") return;
+      if (ready === "writer-failed") {
+        // The datagram channel died with authority still held: the host is
+        // enacting the last frame we sent and no further frame can correct
+        // it. Exiting silently here would leave the vehicle on that command
+        // until the host's silence watchdog fires — release authority NOW
+        // (the lease release rides the reliable session stream, which
+        // survives datagram-channel death) and surface the loss.
+        controlGate.latchInputLoss();
+        suspendControlForInputLoss(token);
+        surface.controlReleased();
+        log("control datagram channel failed — authority released; press Resume control");
+        showResumeAffordance();
+        return;
+      }
       if (!transportSessions.isActive(token) || !state.connected) return;
       const mode = els.flightMode ? els.flightMode.value : "rover";
       if (controlGate.isLatched()) {
