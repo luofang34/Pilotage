@@ -33,7 +33,7 @@ jpeg-encoder = "0.7.0"
 pilotage-adapter-reference.workspace = true
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-wtransport = { workspace = true, features = ["dangerous-configuration"] }
+wtransport = { workspace = true, features = ["dangerous-configuration", "quinn"] }
 
 [lints]
 workspace = true

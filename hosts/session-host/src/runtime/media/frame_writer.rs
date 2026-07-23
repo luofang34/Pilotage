@@ -10,10 +10,15 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{error, warn};
 use wtransport::error::{ConnectionError, StreamOpeningError, StreamWriteError};
+use wtransport::stream::OpeningUniStream;
 use wtransport::{Connection, SendStream, VarInt};
 
 use super::{EncodedFrame, now_ns};
 use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
+
+use reaper::OpenReapers;
+
+mod reaper;
 
 /// Longest a single frame's uni-stream write may take before the stream
 /// is reset and the writer moves on. A client that stops consuming one
@@ -24,6 +29,11 @@ use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_paylo
 /// Generous against transient congestion (a healthy frame completes in
 /// milliseconds on the deployment link).
 const FRAME_WRITE_DEADLINE: Duration = Duration::from_secs(2);
+
+/// A peer that withholds uni-stream credit for this long is starving the
+/// connection, not merely delaying one frame. This stage allocates no stream,
+/// so cancellation is safe and later frames may retry loudly.
+const STREAM_CREDIT_STARVATION_BOUND: Duration = Duration::from_secs(30);
 
 /// Application error code carried on the RESET_STREAM of a
 /// deadline-exceeded frame. Informational to the peer, which discards the
@@ -147,9 +157,15 @@ trait FrameStream {
 /// Opens per-frame outbound streams on a connection.
 trait FrameChannel {
     /// The stream this channel opens.
-    type Stream: FrameStream;
-    /// Opens one host-initiated uni stream.
-    fn open(&self) -> impl Future<Output = Result<Self::Stream, StreamError>> + Send;
+    type Stream: FrameStream + Send + 'static;
+    /// The allocated stream while its WebTransport header is being flushed.
+    type Opening: Send + 'static;
+    /// Waits for stream credit, returning only after allocation.
+    fn request_open(&self) -> impl Future<Output = Result<Self::Opening, StreamError>> + Send;
+    /// Flushes the WebTransport stream header for an allocated stream.
+    fn finish_open(
+        opening: Self::Opening,
+    ) -> impl Future<Output = Result<Self::Stream, StreamError>> + Send + 'static;
 }
 
 impl FrameStream for SendStream {
@@ -174,11 +190,13 @@ impl FrameStream for SendStream {
 
 impl FrameChannel for Connection {
     type Stream = SendStream;
+    type Opening = OpeningUniStream;
 
-    async fn open(&self) -> Result<SendStream, StreamError> {
-        // The open-request error is connection-level (its cause preserved);
-        // the opening error can be a peer refusal of this stream alone.
-        let opening = self.open_uni().await.map_err(classify_open_request)?;
+    async fn request_open(&self) -> Result<OpeningUniStream, StreamError> {
+        self.open_uni().await.map_err(classify_open_request)
+    }
+
+    async fn finish_open(opening: OpeningUniStream) -> Result<SendStream, StreamError> {
         opening.await.map_err(|e| classify_open(&e))
     }
 }
@@ -201,26 +219,33 @@ pub(super) async fn client_writer(
 /// What one frame's delivery attempt produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeadlinePhase {
-    Open,
+    CreditWait,
+    HeaderFlush,
     Write,
 }
 
 impl DeadlinePhase {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Open => "open",
+            Self::CreditWait => "open_credit",
+            Self::HeaderFlush => "open_header",
             Self::Write => "write",
         }
     }
 }
 
+#[derive(Debug)]
 enum FrameOutcome {
     /// Written and finished cleanly.
     Sent,
     /// The frame exceeded its deadline. `reset` is true when the stream
-    /// had opened and was explicitly reset, false when the open itself
-    /// timed out (there was no stream to reset).
-    Stalled { phase: DeadlinePhase, reset: bool },
+    /// was immediately reset. `reaper_owned` is true when an allocated
+    /// stream is still opening under detached ownership.
+    Stalled {
+        phase: DeadlinePhase,
+        reset: bool,
+        reaper_owned: bool,
+    },
     /// The peer stopped or refused this stream alone; the connection and
     /// other sources are healthy — one-frame loss, keep writing.
     PeerStop {
@@ -254,11 +279,10 @@ struct LossCounters {
     local_closes: u64,
 }
 
-/// Drains the handoff channel, delivering one frame per stream under a
-/// single absolute per-frame deadline that covers BOTH opening the stream
-/// and writing it. A frame lost to a deadline, a peer stop/refusal, or a
-/// local close costs one frame and the writer proceeds; only
-/// connection-level loss retires the writer.
+/// Drains the handoff channel, delivering one frame per stream. Stream-credit
+/// waits have an allocation-free starvation bound; header flush and writing
+/// share a per-frame deadline. Frame-local loss keeps the writer alive, while
+/// connection-level loss retires it.
 async fn drain_frames<C: FrameChannel>(
     client: ClientKey,
     source_id: u8,
@@ -267,6 +291,7 @@ async fn drain_frames<C: FrameChannel>(
     start: Instant,
 ) {
     let mut counters = LossCounters::default();
+    let mut reapers = OpenReapers::new(client, source_id);
     while let Some(frame) = frames.recv().await {
         // Stamp publication at the moment of write, distinct from the receive
         // stamp taken at dequeue, so a consumer can separate host queueing
@@ -285,8 +310,15 @@ async fn drain_frames<C: FrameChannel>(
             error!("video frame exceeds u32 length prefix; skipping");
             continue;
         };
-        let deadline = Instant::now() + FRAME_WRITE_DEADLINE;
-        let outcome = deliver_frame(channel, deadline, VIDEO_FRAME_V2, &body).await;
+        let outcome = deliver_frame(
+            channel,
+            &mut reapers,
+            STREAM_CREDIT_STARVATION_BOUND,
+            FRAME_WRITE_DEADLINE,
+            VIDEO_FRAME_V2,
+            &body,
+        )
+        .await;
         if !record_outcome(client, source_id, outcome, &mut counters) {
             return;
         }
@@ -303,7 +335,11 @@ fn record_outcome(
 ) -> bool {
     match outcome {
         FrameOutcome::Sent => {}
-        FrameOutcome::Stalled { phase, reset } => {
+        FrameOutcome::Stalled {
+            phase,
+            reset,
+            reaper_owned,
+        } => {
             counters.stalls = counters.stalls.wrapping_add(1);
             warn!(
                 client = client.as_u64(),
@@ -311,6 +347,7 @@ fn record_outcome(
                 phase = phase.as_str(),
                 total_stalls = counters.stalls,
                 stream_reset = reset,
+                reaper_owned,
                 "video frame exceeded its deadline; continuing with the next frame"
             );
         }
@@ -360,29 +397,52 @@ fn record_outcome(
     true
 }
 
-/// Opens a stream and writes the tag then the framed body, all under one
-/// absolute `deadline`. An open that exceeds the deadline yields a stall
-/// with no stream to reset; a write that exceeds it explicitly resets the
-/// opened stream (RESET_STREAM), retained across the timed region so the
-/// reset can fire rather than a dropped-future FIN. Typed open/write
-/// failures pass their peer-local vs connection-fatal classification
-/// through unchanged.
+/// Opens a stream and writes the tag then the framed body. Stream-credit wait
+/// has its own allocation-free bound. Once allocated, the header flush and
+/// body write share the frame budget; an expired header flush transfers its
+/// still-live future to the reaper, while an expired body write resets the
+/// stream immediately.
 async fn deliver_frame<C: FrameChannel>(
     channel: &C,
-    deadline: Instant,
+    reapers: &mut OpenReapers,
+    credit_bound: Duration,
+    frame_budget: Duration,
     tag: u8,
     body: &[u8],
 ) -> FrameOutcome {
-    let mut stream = match tokio::time::timeout_at(deadline, channel.open()).await {
-        Ok(Ok(stream)) => stream,
+    let Some(reaper_permit) = reapers.reserve().await else {
+        error!("video open reaper semaphore closed; retiring writer");
+        return FrameOutcome::ConnectionFatal {
+            phase: "open_header",
+            kind: FatalKind::NotConnected,
+        };
+    };
+    let opening = match tokio::time::timeout(credit_bound, channel.request_open()).await {
+        Ok(Ok(opening)) => opening,
         Ok(Err(error)) => return error.into_outcome(),
         Err(_elapsed) => {
             return FrameOutcome::Stalled {
-                phase: DeadlinePhase::Open,
+                phase: DeadlinePhase::CreditWait,
                 reset: false,
+                reaper_owned: false,
             };
         }
     };
+    let deadline = Instant::now() + frame_budget;
+    let mut completion = Box::pin(C::finish_open(opening));
+    let mut stream = match tokio::time::timeout_at(deadline, &mut completion).await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(error)) => return error.into_outcome(),
+        Err(_elapsed) => {
+            reapers.own(completion, reaper_permit);
+            return FrameOutcome::Stalled {
+                phase: DeadlinePhase::HeaderFlush,
+                reset: false,
+                reaper_owned: true,
+            };
+        }
+    };
+    drop(reaper_permit);
     match tokio::time::timeout_at(deadline, write_body(&mut stream, tag, body)).await {
         Ok(Ok(())) => FrameOutcome::Sent,
         Ok(Err(error)) => error.into_outcome(),
@@ -391,6 +451,7 @@ async fn deliver_frame<C: FrameChannel>(
             FrameOutcome::Stalled {
                 phase: DeadlinePhase::Write,
                 reset: true,
+                reaper_owned: false,
             }
         }
     }
@@ -422,4 +483,8 @@ async fn write_body<S: FrameStream>(
 }
 
 #[cfg(test)]
+mod classification_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transport_tests;

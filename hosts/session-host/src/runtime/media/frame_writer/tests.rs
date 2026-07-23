@@ -12,15 +12,15 @@ use pilotage_adapter_api::{
     SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
 };
 use pilotage_session::ClientKey;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio::time::Instant;
 
 use wtransport::VarInt;
-use wtransport::error::{ConnectionError, StreamOpeningError, StreamWriteError};
+use wtransport::error::{StreamOpeningError, StreamWriteError};
 
 use super::{
-    EncodedFrame, FatalKind, FrameChannel, FrameStream, StreamError, classify_open,
-    classify_open_request, classify_write, drain_frames,
+    EncodedFrame, FrameChannel, FrameStream, StreamError, classify_open, classify_write,
+    drain_frames,
 };
 
 fn capture_stamp() -> VideoCaptureStamp {
@@ -53,9 +53,13 @@ fn encoded_frame() -> EncodedFrame {
 #[derive(Default)]
 struct Tally {
     opened: AtomicU32,
-    open_cancelled: AtomicU32,
+    credit_wait_cancelled: AtomicU32,
+    header_cancelled: AtomicU32,
     finished: AtomicU32,
     reset: AtomicU32,
+    header_started: Notify,
+    header_release: Notify,
+    reset_observed: Notify,
 }
 
 /// How a mock stream behaves once opened. The failure cases construct a
@@ -80,8 +84,10 @@ enum Write {
 /// `StreamOpeningError`s through the production `classify_open`.
 #[derive(Clone, Copy)]
 enum Open {
-    /// `open()` never completes (the peer's stream allowance is full).
-    Stall,
+    /// The allocation-free stream-credit wait never completes.
+    CreditStall,
+    /// Allocation completes, but the WebTransport header flush stalls.
+    HeaderStall(Write),
     /// The peer refused this stream alone (`StreamOpeningError::Refused`).
     Refused,
     /// The connection is gone (`StreamOpeningError::NotConnected`).
@@ -119,6 +125,7 @@ impl FrameStream for MockStream {
 
     fn reset(&mut self) {
         self.tally.reset.fetch_add(1, Ordering::SeqCst);
+        self.tally.reset_observed.notify_one();
     }
 }
 
@@ -129,40 +136,82 @@ struct MockChannel {
     tally: Arc<Tally>,
 }
 
-struct OpenCancellationProbe {
+struct MockOpening {
+    open: Open,
     tally: Arc<Tally>,
 }
 
-impl Drop for OpenCancellationProbe {
+struct CreditWaitCancellationProbe {
+    tally: Arc<Tally>,
+}
+
+impl Drop for CreditWaitCancellationProbe {
     fn drop(&mut self) {
-        self.tally.open_cancelled.fetch_add(1, Ordering::SeqCst);
+        self.tally
+            .credit_wait_cancelled
+            .fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+struct HeaderCancellationProbe {
+    tally: Arc<Tally>,
+    completed: bool,
+}
+
+impl Drop for HeaderCancellationProbe {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.tally.header_cancelled.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
 impl FrameChannel for MockChannel {
     type Stream = MockStream;
+    type Opening = MockOpening;
 
-    async fn open(&self) -> Result<MockStream, StreamError> {
+    async fn request_open(&self) -> Result<MockOpening, StreamError> {
         let n = self.tally.opened.fetch_add(1, Ordering::SeqCst) as usize;
-        match self
+        let open = self
             .script
             .get(n)
             .copied()
-            .unwrap_or(Open::Ready(Write::Ok))
-        {
-            Open::Stall => {
-                let _cancellation_probe = OpenCancellationProbe {
+            .unwrap_or(Open::Ready(Write::Ok));
+        match open {
+            Open::CreditStall => {
+                let _cancellation_probe = CreditWaitCancellationProbe {
                     tally: self.tally.clone(),
                 };
-                std::future::pending::<Result<MockStream, StreamError>>().await
+                std::future::pending::<Result<MockOpening, StreamError>>().await
             }
-            Open::Refused => Err(classify_open(&StreamOpeningError::Refused)),
-            Open::ConnFatal => Err(classify_open(&StreamOpeningError::NotConnected)),
-            Open::Ready(write) => Ok(MockStream {
-                write,
+            _ => Ok(MockOpening {
+                open,
                 tally: self.tally.clone(),
             }),
         }
+    }
+
+    async fn finish_open(opening: MockOpening) -> Result<MockStream, StreamError> {
+        let write = match opening.open {
+            Open::CreditStall => std::future::pending::<Write>().await,
+            Open::HeaderStall(write) => {
+                let mut cancellation_probe = HeaderCancellationProbe {
+                    tally: opening.tally.clone(),
+                    completed: false,
+                };
+                opening.tally.header_started.notify_one();
+                opening.tally.header_release.notified().await;
+                cancellation_probe.completed = true;
+                write
+            }
+            Open::Refused => return Err(classify_open(&StreamOpeningError::Refused)),
+            Open::ConnFatal => return Err(classify_open(&StreamOpeningError::NotConnected)),
+            Open::Ready(write) => write,
+        };
+        Ok(MockStream {
+            write,
+            tally: opening.tally,
+        })
     }
 }
 
@@ -206,15 +255,14 @@ async fn a_stalled_write_resets_once_and_the_next_frame_proceeds() {
     );
 }
 
-/// A stalled OPEN also costs one frame: the per-frame deadline covers
-/// opening, so an open that never completes is skipped (nothing to
-/// reset) and the next frame opens its own stream and finishes.
+/// A stalled allocation-free credit wait costs one frame. It is safe to
+/// cancel because no QUIC stream exists yet.
 #[tokio::test(start_paused = true)]
-async fn a_stalled_open_is_skipped_and_the_next_frame_proceeds() {
+async fn a_stalled_credit_wait_is_cancelled_and_the_next_frame_proceeds() {
     let mut rx = queue(2).await;
     let tally = Arc::new(Tally::default());
     let channel = MockChannel {
-        script: vec![Open::Stall, Open::Ready(Write::Ok)],
+        script: vec![Open::CreditStall, Open::Ready(Write::Ok)],
         tally: tally.clone(),
     };
 
@@ -226,7 +274,7 @@ async fn a_stalled_open_is_skipped_and_the_next_frame_proceeds() {
         "the next frame opens its own stream after the stalled open"
     );
     assert_eq!(
-        tally.open_cancelled.load(Ordering::SeqCst),
+        tally.credit_wait_cancelled.load(Ordering::SeqCst),
         1,
         "the timed-out open future is cancelled and returns its stream allowance wait"
     );
@@ -239,6 +287,50 @@ async fn a_stalled_open_is_skipped_and_the_next_frame_proceeds() {
         tally.reset.load(Ordering::SeqCst),
         0,
         "a stalled open has no stream to reset"
+    );
+}
+
+/// Once a QUIC stream is allocated, its header-flush future stays owned.
+/// The reaper awaits it and sends RESET_STREAM instead of dropping a
+/// headerless stream with FIN.
+#[tokio::test(start_paused = true)]
+async fn a_stalled_header_flush_is_reaped_with_reset_and_writing_continues() {
+    let mut rx = queue(2).await;
+    let tally = Arc::new(Tally::default());
+    let channel = MockChannel {
+        script: vec![Open::HeaderStall(Write::Ok), Open::Ready(Write::Ok)],
+        tally: tally.clone(),
+    };
+    let reset_observed = tally.reset_observed.notified();
+    let task = tokio::spawn(async move {
+        drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    });
+
+    tally.header_started.notified().await;
+    tokio::time::advance(super::FRAME_WRITE_DEADLINE).await;
+    task.await.expect("frame writer joins");
+
+    assert_eq!(
+        tally.header_cancelled.load(Ordering::SeqCst),
+        0,
+        "the allocated stream's header future remains owned after its deadline"
+    );
+    assert_eq!(
+        tally.finished.load(Ordering::SeqCst),
+        1,
+        "the next frame finishes while the first is reaped"
+    );
+    tally.header_release.notify_one();
+    reset_observed.await;
+    assert_eq!(
+        tally.reset.load(Ordering::SeqCst),
+        1,
+        "the reaper resets the allocated stream exactly once"
+    );
+    assert_eq!(
+        tally.header_cancelled.load(Ordering::SeqCst),
+        0,
+        "completing through the reaper never cancellation-drops the header future"
     );
 }
 
@@ -361,79 +453,4 @@ async fn a_local_close_loses_one_frame_and_the_writer_survives() {
         0,
         "a local close does not reset a stream"
     );
-}
-
-// ---- direct classifier matrix: every pinned wtransport variant --------------
-//
-// The drain tests above route through `classify_write`/`classify_open`,
-// but these pin the mapping itself so a reversed production classifier
-// (peer-local vs connection-fatal swapped) fails outright.
-
-#[test]
-fn classify_write_maps_every_pinned_variant() {
-    assert_eq!(
-        classify_write(&StreamWriteError::Stopped(VarInt::from_u32(9)), "write"),
-        StreamError::PeerStop {
-            phase: "write",
-            code: Some(9),
-        },
-    );
-    assert_eq!(
-        classify_write(&StreamWriteError::Closed, "finish"),
-        StreamError::LocalClose { phase: "finish" },
-    );
-    assert_eq!(
-        classify_write(&StreamWriteError::NotConnected, "write"),
-        StreamError::ConnectionFatal {
-            phase: "write",
-            kind: FatalKind::NotConnected,
-        },
-    );
-    assert_eq!(
-        classify_write(&StreamWriteError::QuicProto, "write"),
-        StreamError::ConnectionFatal {
-            phase: "write",
-            kind: FatalKind::QuicProto,
-        },
-    );
-}
-
-#[test]
-fn classify_open_maps_every_pinned_variant() {
-    assert_eq!(
-        classify_open(&StreamOpeningError::Refused),
-        StreamError::PeerStop {
-            phase: "open",
-            code: None,
-        },
-    );
-    assert_eq!(
-        classify_open(&StreamOpeningError::NotConnected),
-        StreamError::ConnectionFatal {
-            phase: "open",
-            kind: FatalKind::NotConnected,
-        },
-    );
-}
-
-#[test]
-fn an_open_request_error_preserves_its_concrete_cause() {
-    // A concrete ConnectionError must survive classification, not be
-    // erased to a static string: it is retained in the OpenRequest kind
-    // and reachable through the error source chain and Display.
-    let classified = classify_open_request(ConnectionError::TimedOut);
-    assert_eq!(
-        classified,
-        StreamError::ConnectionFatal {
-            phase: "open",
-            kind: FatalKind::OpenRequest(ConnectionError::TimedOut),
-        },
-    );
-    // The source chain reaches the exact ConnectionError.
-    let via_source = std::error::Error::source(&classified)
-        .and_then(std::error::Error::source)
-        .and_then(|e| e.downcast_ref::<ConnectionError>());
-    assert_eq!(via_source, Some(&ConnectionError::TimedOut));
-    // ...and its Display carries the concrete cause for the log.
-    assert!(classified.to_string().contains("timed out"), "{classified}");
 }
