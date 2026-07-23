@@ -224,7 +224,22 @@ export function createCockpitReadout({
       )
     ) return;
     streamReadFailures.lastLoggedMs = nowMs;
-    log(`uni stream read failed: ${error} (${streamReadFailures.count} total this session)`);
+    log(
+      `uni stream read failed: ${describeTransportError(error)} ` +
+        `(${streamReadFailures.count} total this session)`,
+    );
+  }
+
+  // A bare `WebTransportError` cannot distinguish a host-side stream RESET
+  // (the reaper abandoning one mid-open frame — per-stream, recoverable)
+  // from session-level failure; the source and error code make the log a
+  // usable forensic record.
+  function describeTransportError(error) {
+    if (typeof WebTransportError !== "undefined" && error instanceof WebTransportError) {
+      const code = error.streamErrorCode === null ? "none" : error.streamErrorCode;
+      return `WebTransportError source=${error.source} streamErrorCode=${code}`;
+    }
+    return `${error}`;
   }
 
   async function acceptIncomingUniStreams(transport, token) {
