@@ -207,6 +207,9 @@ jobs:
       - name: viewer input-loss gate (latched blur, no post-latch frames, held-button safety)
         run: node clients/web/control-gate.test.mjs
 
+      - name: control-loop macrotask pacing (gated un-latched path must not microtask-spin)
+        run: node clients/web/control-pacing.test.mjs
+
       - name: motion-lease reacquisition (release fence, stale-grant rejection, terminal denial)
         run: node clients/web/motion-lease.test.mjs
 
