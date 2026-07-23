@@ -94,6 +94,7 @@ const readout = createCockpitReadout({
   handleFrameRejected: (...args) => control.handleFrameRejected(...args),
   handleTransportClosed: (...args) => transport.handleTransportClosed(...args),
   requestMediaAttach: (...args) => bootstrap.requestMediaAttach(...args),
+  requestReconnect: () => transport.reconnect.requestConnect(),
 });
 
 control = createControlLoop({

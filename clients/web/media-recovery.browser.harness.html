@@ -93,7 +93,7 @@ async function run() {
     handleActionResult: () => {},
     applyLeaseResponse: () => {},
   });
-  const requested = gate.shouldRequest(allVideoSourcesStalled(freshness), 3000)
+  const requested = gate.decide(allVideoSourcesStalled(freshness), 3000) === "attach"
     && await bootstrap.requestMediaAttach();
 
   const resumed = [];
