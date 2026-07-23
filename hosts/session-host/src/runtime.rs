@@ -133,6 +133,9 @@ pub async fn start_with_options(
     let identity: Identity = dev_identity.identity;
     let cert_hash_hex = dev_identity.cert_hash_hex.clone();
 
+    // The endpoint intentionally keeps OS-default UDP socket buffers. A larger
+    // host send buffer would permit a larger video burst but cannot enlarge the
+    // browser's receive buffer; per-connection media admission is the bound.
     let config = ServerConfig::builder()
         .with_bind_default(port)
         .with_identity(identity)

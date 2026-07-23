@@ -3,7 +3,7 @@
 // real ReadableStreams (the core of `readOneUniStream`).
 //
 // Every incoming uni stream leads with a one-byte kind tag (0x01
-// authority-events, 0x02/0x03 one video frame). The authority stream is
+// reliable session events, 0x02/0x03 one video frame). The event stream is
 // long-lived and NEVER closes during a session, so its envelopes must be
 // decoded and dispatched AS THEY COMPLETE — buffering to close would strand a
 // recovery acknowledgement forever. A video stream is one frame in its whole
@@ -27,7 +27,8 @@ function appendBytes(existing, incoming) {
  * caller renders a video body from `tail` at close (authority has already
  * dispatched incrementally). `shouldContinue()`, when supplied, aborts the read
  * on session teardown and reports `aborted: true` so the caller skips its
- * close-time work.
+ * close-time work. The `authorityKind` callback receives every typed envelope
+ * carried on the reliable session-events stream.
  *
  * @param reader a `ReadableStreamDefaultReader` over the stream's bytes
  * @param cb `{ authorityKind, decode, onAuthorityEnvelope, shouldContinue }`

@@ -31,6 +31,11 @@ import {
 import { readUniStream } from "./uni-stream.js";
 import { streamCancellationReason } from "./stream-cancellation.js";
 import {
+  bandwidthBannerText,
+  normalizeVideoDelivery,
+  stallWatchEnabled,
+} from "./video-bandwidth.js";
+import {
   decodeLengthDelimitedEnvelope,
   STREAM_KIND_AUTHORITY,
   STREAM_KIND_VIDEO,
@@ -73,6 +78,11 @@ export function createCockpitReadout({
   const streamReadFailures = { count: 0, lastLoggedMs: null };
   let h264Registry = null;
   let calibrationRegistry = new CalibrationRegistry();
+  let videoDelivery = normalizeVideoDelivery({
+    mode: "normal",
+    reason: "unknown",
+    budgetBytesPerSecond: 0,
+  });
 
   loadCalibrationRegistry("./sim-fpv-calibration.json")
     .then((registry) => {
@@ -175,6 +185,17 @@ export function createCockpitReadout({
     uplinkIdle() {
       els.overlay.textContent = "motion uplink idle — press arm to start control";
     },
+    videoDeliveryState(message) {
+      videoDelivery = normalizeVideoDelivery(message);
+      const banner = bandwidthBannerText(videoDelivery);
+      if (banner) {
+        els.overlay.textContent = banner;
+        for (const target of Object.values(videoTargets)) paintBandwidthBanner(target);
+      }
+      log(
+        banner ?? `video delivery normal (${videoDelivery.budgetBytesPerSecond} bytes/s budget)`,
+      );
+    },
   };
 
   function retireSessionPresentation(phase) {
@@ -267,7 +288,10 @@ export function createCockpitReadout({
       new H264CanvasDecoder(target, {
         log: (message) => log(message),
         isActive: () => transportSessions.isActive(token),
-        onPainted: () => notePaintedFrame(sourceId),
+        onPainted: () => {
+          notePaintedFrame(sourceId);
+          paintBandwidthBanner(target);
+        },
       }),
     );
   }
@@ -291,6 +315,7 @@ export function createCockpitReadout({
     if (fourcc === FOURCC_MJPEG) {
       await paintJpeg(payload, target, token);
       notePaintedFrame(sourceId);
+      paintBandwidthBanner(target);
       return;
     }
     if (fourcc === FOURCC_H264) {
@@ -342,12 +367,18 @@ export function createCockpitReadout({
     streamReadFailures.lastLoggedMs = null;
     videoFreshness = createVideoFreshness();
     mediaRecovery.reset();
+    videoDelivery = normalizeVideoDelivery({
+      mode: "normal",
+      reason: "unknown",
+      budgetBytesPerSecond: 0,
+    });
   }
 
   /** Banners and logs each source whose frames STOPPED arriving — once per
    *  transition (a host writer death or dead route must never be a silent
    *  freeze); the next delivered frame repaints the slot and logs recovery. */
   function videoStallTick() {
+    if (!stallWatchEnabled(videoDelivery)) return;
     const nowMs = performance.now();
     for (const sourceId of newlyStalledSources(videoFreshness, nowMs)) {
       log(`video source ${sourceId} stalled: no frames for ${VIDEO_STALL_THRESHOLD_MS} ms`);
@@ -356,6 +387,22 @@ export function createCockpitReadout({
     }
     if (mediaRecovery.shouldRequest(allVideoSourcesStalled(videoFreshness), nowMs)) {
       void requestMediaAttach();
+    }
+  }
+
+  function paintBandwidthBanner(target) {
+    const text = bandwidthBannerText(videoDelivery);
+    if (!target || !text) return;
+    try {
+      const { canvas, ctx } = target;
+      if (!canvas.width || !canvas.height) return;
+      ctx.fillStyle = "rgba(30, 15, 35, 0.88)";
+      ctx.fillRect(0, 0, canvas.width, 22);
+      ctx.fillStyle = "#f9b8ff";
+      ctx.font = "12px monospace";
+      ctx.fillText(text, 8, 15);
+    } catch {
+      // The reliable status log remains visible without a paintable target.
     }
   }
 

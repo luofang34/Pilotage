@@ -195,7 +195,7 @@ pub fn decode_ping_datagram(bytes: &[u8]) -> Result<Ping, BootstrapDecodeError> 
 
 /// Encodes an [`OutboundMessage`] as a length-delimited envelope. Used for
 /// both the bootstrap stream (`Welcome`/`LeaseResponse`) and the dedicated
-/// authority-events stream (`Authority`) — the framing is identical, only
+/// session-events stream (`Authority`) — the framing is identical, only
 /// the destination stream differs (ADR-0005).
 #[must_use]
 pub fn encode_envelope_message(message: &OutboundMessage) -> Vec<u8> {
@@ -249,6 +249,16 @@ pub fn encode_telemetry_datagram(sample: wire::TelemetrySample) -> Vec<u8> {
     envelope.encode_to_vec()
 }
 
+/// Encodes a video-delivery snapshot for the reliable session-events stream.
+#[must_use]
+pub fn encode_video_delivery_state(state: wire::VideoDeliveryState) -> Vec<u8> {
+    let envelope = wire::Envelope {
+        schema_version: SCHEMA_VERSION,
+        payload: Some(wire::envelope::Payload::VideoDeliveryState(state)),
+    };
+    encode_envelope_length_delimited(&envelope)
+}
+
 /// Encodes a `FrameRejected` notice as a datagram envelope (sent back to the
 /// frame's sender only, ADR-0009).
 #[must_use]
@@ -265,8 +275,9 @@ pub fn encode_frame_rejected_datagram(rejection: &pilotage_protocol::FrameReject
 mod tests {
     use super::{
         InboundBootstrap, MAX_BOOTSTRAP_FRAME_LEN, complete_frame_len, decode_bootstrap_message,
+        encode_video_delivery_state,
     };
-    use pilotage_protocol::{SCHEMA_VERSION, wire};
+    use pilotage_protocol::{SCHEMA_VERSION, decode_envelope_length_delimited, wire};
     use prost::Message;
     use prost::encoding::encode_varint;
 
@@ -326,5 +337,22 @@ mod tests {
         let (message, rest) = decode_bootstrap_message(&bytes).expect("request decodes");
         assert!(matches!(message, InboundBootstrap::MediaAttach));
         assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn video_delivery_state_round_trips_on_the_reliable_envelope_path() {
+        let state = wire::VideoDeliveryState {
+            mode: wire::VideoDeliveryMode::Degraded.into(),
+            reason: wire::VideoDeliveryReason::Bandwidth.into(),
+            budget_bytes_per_second: 500_000,
+        };
+        let encoded = encode_video_delivery_state(state);
+        let (envelope, rest) =
+            decode_envelope_length_delimited(&encoded).expect("delivery state decodes");
+        assert!(rest.is_empty());
+        assert_eq!(
+            envelope.payload,
+            Some(wire::envelope::Payload::VideoDeliveryState(state))
+        );
     }
 }

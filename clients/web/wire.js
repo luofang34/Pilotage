@@ -13,8 +13,8 @@
 //     prefix followed by that many bytes of `Envelope` (ADR-0014). Every
 //     host-initiated uni stream additionally leads with one raw kind-tag
 //     byte before the first length-delimited envelope
-//     (hosts/session-host/src/runtime/stream_tag.rs): 0x01 = authority-events
-//     stream, 0x02 = one video frame
+//     (hosts/session-host/src/runtime/stream_tag.rs): 0x01 = reliable session
+//     events (authority and delivery state), 0x02 = one video frame
 //     (`[source_id: u8][fourcc: 4 bytes][u32 LE len][jpeg]` after the tag,
 //     ADR-0016, not an Envelope at all). source_id 0 = onboard FPV, 1 = chase.
 
@@ -270,6 +270,7 @@ const ENVELOPE_FIELD = {
   controlActionResult: 17,
   controlActionCommand: 18,
   mediaAttachRequest: 19,
+  videoDeliveryState: 20,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
@@ -756,7 +757,25 @@ function decodeEnvelopeBody(body) {
       message: decodeControlActionResult(firstBytes(fields, ENVELOPE_FIELD.controlActionResult)),
     };
   }
+  if (fields.has(ENVELOPE_FIELD.videoDeliveryState)) {
+    return {
+      kind: "VideoDeliveryState",
+      message: decodeVideoDeliveryState(firstBytes(fields, ENVELOPE_FIELD.videoDeliveryState)),
+    };
+  }
   return { kind: "unknown", message: {} };
+}
+
+// session.proto VideoDeliveryState: mode=1, reason=2,
+// budget_bytes_per_second=3
+function decodeVideoDeliveryState(bytes) {
+  if (!bytes) return {};
+  const fields = parseFields(bytes);
+  return {
+    mode: ["unknown", "normal", "degraded", "suspended"][firstVarint(fields, 1)] ?? "unknown",
+    reason: ["unknown", "bandwidth"][firstVarint(fields, 2)] ?? "unknown",
+    budgetBytesPerSecond: Number(firstBigVarint(fields, 3)),
+  };
 }
 
 // session.proto ServerWelcome: session=1, principal=2, host_capabilities=3, scope_holders=4

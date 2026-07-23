@@ -5,7 +5,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use pilotage_adapter_api::{
     CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
@@ -22,6 +22,26 @@ use super::{
     EncodedFrame, FrameChannel, FrameStream, StreamError, classify_open, classify_write,
     drain_frames,
 };
+use crate::runtime::media::budget::PressureSignals;
+
+fn pressure() -> Arc<PressureSignals> {
+    Arc::new(PressureSignals::default())
+}
+
+async fn drain_test_frames<C: FrameChannel>(
+    channel: &C,
+    frames: &mut mpsc::Receiver<EncodedFrame>,
+) {
+    drain_frames(
+        ClientKey::new(1),
+        0,
+        channel,
+        frames,
+        pressure(),
+        Instant::now(),
+    )
+    .await;
+}
 
 fn capture_stamp() -> VideoCaptureStamp {
     VideoCaptureStamp {
@@ -57,6 +77,7 @@ struct Tally {
     header_cancelled: AtomicU32,
     finished: AtomicU32,
     reset: AtomicU32,
+    priority: AtomicI32,
     header_started: Notify,
     header_release: Notify,
     reset_observed: Notify,
@@ -102,6 +123,10 @@ struct MockStream {
 }
 
 impl FrameStream for MockStream {
+    fn set_priority(&self, priority: i32) {
+        self.tally.priority.store(priority, Ordering::SeqCst);
+    }
+
     async fn write_all(&mut self, _buf: &[u8]) -> Result<(), StreamError> {
         match self.write {
             Write::Stall => {
@@ -236,7 +261,7 @@ async fn a_stalled_write_resets_once_and_the_next_frame_proceeds() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.reset.load(Ordering::SeqCst),
@@ -253,6 +278,11 @@ async fn a_stalled_write_resets_once_and_the_next_frame_proceeds() {
         1,
         "the second frame finishes cleanly and is not reset"
     );
+    assert_eq!(
+        tally.priority.load(Ordering::SeqCst),
+        super::VIDEO_STREAM_PRIORITY,
+        "video streams are lower priority than control traffic"
+    );
 }
 
 /// A stalled allocation-free credit wait costs one frame. It is safe to
@@ -266,7 +296,7 @@ async fn a_stalled_credit_wait_is_cancelled_and_the_next_frame_proceeds() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.opened.load(Ordering::SeqCst),
@@ -303,7 +333,7 @@ async fn a_stalled_header_flush_is_reaped_with_reset_and_writing_continues() {
     };
     let reset_observed = tally.reset_observed.notified();
     let task = tokio::spawn(async move {
-        drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+        drain_test_frames(&channel, &mut rx).await;
     });
 
     tally.header_started.notified().await;
@@ -346,7 +376,7 @@ async fn a_peer_stopped_write_loses_one_frame_and_the_writer_survives() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.opened.load(Ordering::SeqCst),
@@ -371,7 +401,7 @@ async fn a_refused_open_loses_one_frame_and_the_next_proceeds() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.opened.load(Ordering::SeqCst),
@@ -396,7 +426,7 @@ async fn a_connection_fatal_write_retires_the_writer() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.opened.load(Ordering::SeqCst),
@@ -415,7 +445,7 @@ async fn a_connection_fatal_open_retires_the_writer() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.opened.load(Ordering::SeqCst),
@@ -436,7 +466,7 @@ async fn a_local_close_loses_one_frame_and_the_writer_survives() {
         tally: tally.clone(),
     };
 
-    drain_frames(ClientKey::new(1), 0, &channel, &mut rx, Instant::now()).await;
+    drain_test_frames(&channel, &mut rx).await;
 
     assert_eq!(
         tally.opened.load(Ordering::SeqCst),

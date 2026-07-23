@@ -11,6 +11,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{error, warn};
 
 use super::{FrameStream, StreamError};
+use crate::runtime::media::budget::PressureSignals;
 
 pub(super) const MAX_PENDING_OPEN_REAPERS: usize = 8;
 
@@ -19,16 +20,18 @@ pub(super) struct OpenReapers {
     source_id: u8,
     slots: Arc<Semaphore>,
     active: Arc<AtomicUsize>,
+    pressure: Arc<PressureSignals>,
     total_spawned: u64,
 }
 
 impl OpenReapers {
-    pub(super) fn new(client: ClientKey, source_id: u8) -> Self {
+    pub(super) fn new(client: ClientKey, source_id: u8, pressure: Arc<PressureSignals>) -> Self {
         Self {
             client,
             source_id,
             slots: Arc::new(Semaphore::new(MAX_PENDING_OPEN_REAPERS)),
             active: Arc::new(AtomicUsize::new(0)),
+            pressure,
             total_spawned: 0,
         }
     }
@@ -54,7 +57,9 @@ impl OpenReapers {
         self.total_spawned = self.total_spawned.wrapping_add(1);
         let reaper_id = self.total_spawned;
         let active = Arc::clone(&self.active);
+        let pressure = Arc::clone(&self.pressure);
         let pending = active.fetch_add(1, Ordering::AcqRel).saturating_add(1);
+        self.pressure.reaper_started();
         let client = self.client.as_u64();
         let source_id = self.source_id;
         warn!(
@@ -66,7 +71,10 @@ impl OpenReapers {
             "video stream header flush exceeded its deadline; reaper owns allocated stream"
         );
         drop(tokio::spawn(async move {
-            reap(completion, permit, active, client, source_id, reaper_id).await;
+            reap(
+                completion, permit, active, pressure, client, source_id, reaper_id,
+            )
+            .await;
         }));
     }
 
@@ -80,6 +88,7 @@ async fn reap<F, S>(
     completion: Pin<Box<F>>,
     permit: OwnedSemaphorePermit,
     active: Arc<AtomicUsize>,
+    pressure: Arc<PressureSignals>,
     client: u64,
     source_id: u8,
     reaper_id: u64,
@@ -100,6 +109,7 @@ async fn reap<F, S>(
         }
     }
     let remaining = active.fetch_sub(1, Ordering::AcqRel).saturating_sub(1);
+    pressure.reaper_finished();
     drop(permit);
     if remaining >= MAX_PENDING_OPEN_REAPERS {
         error!(
@@ -124,6 +134,8 @@ mod tests {
     }
 
     impl FrameStream for MockStream {
+        fn set_priority(&self, _priority: i32) {}
+
         async fn write_all(&mut self, _buf: &[u8]) -> Result<(), StreamError> {
             Ok(())
         }
@@ -139,7 +151,8 @@ mod tests {
 
     #[tokio::test]
     async fn pending_open_reapers_are_bounded_counted_and_reset_on_completion() {
-        let mut reapers = OpenReapers::new(ClientKey::new(9), 3);
+        let pressure = Arc::new(PressureSignals::default());
+        let mut reapers = OpenReapers::new(ClientKey::new(9), 3, Arc::clone(&pressure));
         let (reset_tx, mut reset_rx) = mpsc::unbounded_channel();
         let mut releases = Vec::with_capacity(MAX_PENDING_OPEN_REAPERS);
 
@@ -156,6 +169,11 @@ mod tests {
                 permit,
             );
         }
+        assert_eq!(
+            pressure.snapshot().active_reapers,
+            MAX_PENDING_OPEN_REAPERS,
+            "the aggregate controller sees every active reaper"
+        );
 
         assert_eq!(reapers.available_slots(), 0, "the configured bound is hard");
         assert_eq!(
@@ -177,5 +195,6 @@ mod tests {
                 .await
                 .expect("each open resolves to a reset");
         }
+        assert_eq!(pressure.snapshot().active_reapers, 0);
     }
 }

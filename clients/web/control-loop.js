@@ -378,6 +378,8 @@ export function createControlLoop({
           generation: message.generation,
         });
       }
+    } else if (decoded.kind === "VideoDeliveryState") {
+      surface.videoDeliveryState(decoded.message);
     }
   }
 

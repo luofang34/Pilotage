@@ -18,6 +18,7 @@ use super::{
     DeadlinePhase, FrameChannel, FrameOutcome, FrameStream, StreamError, classify_open,
     classify_open_request, classify_write, deliver_frame,
 };
+use crate::runtime::media::budget::PressureSignals;
 
 const IO_BOUND: Duration = Duration::from_secs(5);
 const SOAK_CYCLES: usize = 32;
@@ -40,6 +41,10 @@ struct ObservedSendStream {
 }
 
 impl FrameStream for ObservedSendStream {
+    fn set_priority(&self, priority: i32) {
+        self.stream.set_priority(priority);
+    }
+
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), StreamError> {
         self.stream
             .write_all(buf)
@@ -151,7 +156,7 @@ async fn repeated_mid_open_deadlines_recycle_real_quic_credit() {
         header_gates: Arc::clone(&header_gates),
         reset_events: reset_tx,
     };
-    let mut reapers = OpenReapers::new(ClientKey::new(21), 4);
+    let mut reapers = OpenReapers::new(ClientKey::new(21), 4, Arc::new(PressureSignals::default()));
 
     for _ in 0..SOAK_CYCLES {
         let outcome = deliver_frame(
