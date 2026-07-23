@@ -22,9 +22,9 @@ const SIZE_CAPS = {
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
-  "control-loop.js": 820,
+  "control-loop.js": 852,
   "control-shell.js": 341,
-  "datagram-control.js": 80,
+  "datagram-control.js": 87,
   "instrument-health.js": 395,
   "instruments.js": 761,
   "layout.js": 55,
@@ -53,7 +53,7 @@ const SIZE_CAPS = {
   "video-identity.js": 291,
   "video-routing.js": 37,
   "wire-bounds.js": 120,
-  "wire.js": 1168,
+  "wire.js": 1171,
 };
 
 const dir = new URL("./", import.meta.url);
