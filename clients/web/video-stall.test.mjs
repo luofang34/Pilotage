@@ -8,6 +8,11 @@ import {
   newlyStalledSources,
   noteVideoFrame,
 } from "./video-stall.js";
+import {
+  bandwidthBannerText,
+  normalizeVideoDelivery,
+  stallWatchEnabled,
+} from "./video-bandwidth.js";
 
 let failures = 0;
 function check(name, ok) {
@@ -37,6 +42,32 @@ check("one recovered source clears all-source stall", allVideoSourcesStalled(f) 
 check("a frame on a fresh source is no transition", noteVideoFrame(f, 0, 61_005) === false);
 check("the other source stays stalled without re-reporting", newlyStalledSources(f, 61_010).length === 0);
 check("the recovered source can stall again later", newlyStalledSources(f, 61_005 + VIDEO_STALL_THRESHOLD_MS).length === 1);
+
+const degraded = normalizeVideoDelivery({
+  mode: "degraded",
+  reason: "bandwidth",
+  budgetBytesPerSecond: 1_000_000,
+});
+check(
+  "degradation names bandwidth and the enacted aggregate budget",
+  bandwidthBannerText(degraded) === "video degraded — bandwidth (8.0 Mbit/s)",
+);
+check("degraded video still participates in freshness checks", stallWatchEnabled(degraded));
+
+const suspended = normalizeVideoDelivery({
+  mode: "suspended",
+  reason: "bandwidth",
+  budgetBytesPerSecond: 0,
+});
+check(
+  "bandwidth suspension is distinct from a no-frame stall",
+  bandwidthBannerText(suspended) === "video suspended — bandwidth"
+    && !stallWatchEnabled(suspended),
+);
+check(
+  "an unknown delivery mode fails visibly closed",
+  normalizeVideoDelivery({ mode: "future-mode" }).mode === "suspended",
+);
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

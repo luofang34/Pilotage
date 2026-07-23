@@ -3,6 +3,7 @@
 //! costs one frame rather than wedging its source permanently.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use pilotage_session::ClientKey;
@@ -13,6 +14,7 @@ use wtransport::error::{ConnectionError, StreamOpeningError, StreamWriteError};
 use wtransport::stream::OpeningUniStream;
 use wtransport::{Connection, SendStream, VarInt};
 
+use super::budget::PressureSignals;
 use super::{EncodedFrame, now_ns};
 use crate::runtime::stream_tag::{FOURCC_MJPEG, VIDEO_FRAME_V2, frame_video_payload_v2};
 
@@ -40,10 +42,12 @@ const STREAM_CREDIT_STARVATION_BOUND: Duration = Duration::from_secs(30);
 /// partial frame regardless of the code.
 const STALL_RESET_CODE: u32 = 1;
 
-/// A connection-fatal error's kind, preserved rather than erased so the
-/// log names — and the error chain carries — what actually failed. The
-/// open-request kind keeps the real [`ConnectionError`] as its `#[source]`
-/// (timeout, application-close reason/code, H3, QUIC details all survive).
+/// Video body streams yield to reliable session traffic on the same QUIC
+/// connection. DATAGRAM frames already precede stream frames in Quinn's packet
+/// assembly, while this negative priority keeps bulk video behind control.
+const VIDEO_STREAM_PRIORITY: i32 = -10;
+
+/// Preserves the concrete cause behind a connection-fatal stream failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 enum FatalKind {
     /// The connection has been dropped.
@@ -52,14 +56,12 @@ enum FatalKind {
     /// A QUIC protocol error.
     #[error("QUIC protocol error")]
     QuicProto,
-    /// The uni-stream open request itself failed (connection-level); the
-    /// concrete cause is preserved.
+    /// The uni-stream open request itself failed.
     #[error("uni stream request failed: {0}")]
     OpenRequest(#[source] ConnectionError),
 }
 
-/// Why an open, write, or finish failed, classified so neither a peer's
-/// decision to abandon ONE stream nor a local close retires the writer.
+/// Separates frame-local loss from connection-fatal loss.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 enum StreamError {
     /// The peer stopped or refused this stream alone (`Stopped`,
@@ -91,9 +93,6 @@ enum StreamError {
     },
 }
 
-/// Classifies a wtransport write/finish error: `Stopped` is a peer stop,
-/// `Closed` is a local close, `NotConnected`/`QuicProto` are
-/// connection-fatal. Pinned to wtransport 0.7.1's four variants.
 fn classify_write(error: &StreamWriteError, phase: &'static str) -> StreamError {
     match error {
         StreamWriteError::Stopped(code) => StreamError::PeerStop {
@@ -112,9 +111,7 @@ fn classify_write(error: &StreamWriteError, phase: &'static str) -> StreamError 
     }
 }
 
-/// Classifies a wtransport stream-opening error: `Refused` is a peer
-/// refusal of this stream alone, `NotConnected` is connection-fatal.
-/// Pinned to wtransport 0.7.1's two variants.
+/// Classifies a refused stream as frame-local and a lost connection as fatal.
 fn classify_open(error: &StreamOpeningError) -> StreamError {
     match error {
         StreamOpeningError::Refused => StreamError::PeerStop {
@@ -146,6 +143,8 @@ fn classify_open_request(error: ConnectionError) -> StreamError {
 /// Resetting the retained stream frees its slot immediately. Send-bounded
 /// because the writer runs as a spawned task on a multi-threaded runtime.
 trait FrameStream {
+    /// Assigns the stream's transport scheduler priority.
+    fn set_priority(&self, priority: i32);
     /// Writes the whole buffer, awaiting flow-control credit.
     fn write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), StreamError>> + Send;
     /// Finishes the stream cleanly (graceful FIN).
@@ -169,6 +168,10 @@ trait FrameChannel {
 }
 
 impl FrameStream for SendStream {
+    fn set_priority(&self, priority: i32) {
+        SendStream::set_priority(self, priority);
+    }
+
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), StreamError> {
         SendStream::write_all(self, buf)
             .await
@@ -211,9 +214,10 @@ pub(super) async fn client_writer(
     source_id: u8,
     connection: Connection,
     mut frames: mpsc::Receiver<EncodedFrame>,
+    pressure: Arc<PressureSignals>,
     start: Instant,
 ) {
-    drain_frames(client, source_id, &connection, &mut frames, start).await;
+    drain_frames(client, source_id, &connection, &mut frames, pressure, start).await;
 }
 
 /// What one frame's delivery attempt produced.
@@ -288,10 +292,11 @@ async fn drain_frames<C: FrameChannel>(
     source_id: u8,
     channel: &C,
     frames: &mut mpsc::Receiver<EncodedFrame>,
+    pressure: Arc<PressureSignals>,
     start: Instant,
 ) {
     let mut counters = LossCounters::default();
-    let mut reapers = OpenReapers::new(client, source_id);
+    let mut reapers = OpenReapers::new(client, source_id, Arc::clone(&pressure));
     while let Some(frame) = frames.recv().await {
         // Stamp publication at the moment of write, distinct from the receive
         // stamp taken at dequeue, so a consumer can separate host queueing
@@ -319,7 +324,7 @@ async fn drain_frames<C: FrameChannel>(
             &body,
         )
         .await;
-        if !record_outcome(client, source_id, outcome, &mut counters) {
+        if !record_outcome(client, source_id, outcome, &mut counters, &pressure) {
             return;
         }
     }
@@ -332,6 +337,7 @@ fn record_outcome(
     source_id: u8,
     outcome: FrameOutcome,
     counters: &mut LossCounters,
+    pressure: &PressureSignals,
 ) -> bool {
     match outcome {
         FrameOutcome::Sent => {}
@@ -340,6 +346,7 @@ fn record_outcome(
             reset,
             reaper_owned,
         } => {
+            pressure.record_deadline_stall();
             counters.stalls = counters.stalls.wrapping_add(1);
             warn!(
                 client = client.as_u64(),
@@ -443,6 +450,7 @@ async fn deliver_frame<C: FrameChannel>(
         }
     };
     drop(reaper_permit);
+    stream.set_priority(VIDEO_STREAM_PRIORITY);
     match tokio::time::timeout_at(deadline, write_body(&mut stream, tag, body)).await {
         Ok(Ok(())) => FrameOutcome::Sent,
         Ok(Err(error)) => error.into_outcome(),

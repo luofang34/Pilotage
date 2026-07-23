@@ -1,7 +1,7 @@
 //! Kind tags that disambiguate the host's several host-initiated
 //! unidirectional streams (ADR-0005).
 //!
-//! Both authority events and video frames travel on host-initiated uni
+//! Both session events and video frames travel on host-initiated uni
 //! streams, so a reader accepting a fresh uni stream cannot tell them apart
 //! from the QUIC stream type alone. Every host-initiated uni stream therefore
 //! begins with a single kind-tag byte before its payload; the reader consumes
@@ -10,10 +10,9 @@
 use pilotage_adapter_api::{CaptureClockMapping, MeasurementClock, VideoCaptureStamp};
 use pilotage_protocol::{CaptureHeader, encode_video_frame_v2};
 
-/// Tag prefixing the dedicated authority-events stream: the reliable, ordered
-/// stream of lease/handover/override events (ADR-0005) carries
-/// length-delimited envelopes after this byte.
-pub const AUTHORITY_EVENTS: u8 = 0x01;
+/// Tag prefixing reliable session events, including authority transitions and
+/// per-connection video-delivery state.
+pub const SESSION_EVENTS: u8 = 0x01;
 
 /// Tag prefixing a per-frame video stream: a
 /// `[source_id: u8][fourcc: 4 bytes][u32 LE len][payload]` media unit follows

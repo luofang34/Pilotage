@@ -697,6 +697,24 @@ check(
   check("link-loss-cleared generation round-trips", decoded.message.generation === 42n);
 }
 
+// ---- typed video bandwidth state (envelope field 20) ------------------------
+{
+  const delivery = [];
+  varint(delivery, (1 << 3) | 0); // mode
+  varint(delivery, 2); // degraded
+  varint(delivery, (2 << 3) | 0); // reason
+  varint(delivery, 1); // bandwidth
+  varint(delivery, (3 << 3) | 0); // budget_bytes_per_second
+  varint(delivery, 1_000_000);
+  const envelope = [];
+  bytesField(envelope, 20, delivery);
+  const decoded = decodeBareEnvelope(new Uint8Array(envelope));
+  check("video delivery decodes as typed state", decoded.kind === "VideoDeliveryState");
+  check("video delivery names its degraded mode", decoded.message.mode === "degraded");
+  check("video delivery names bandwidth pressure", decoded.message.reason === "bandwidth");
+  check("video delivery carries the enacted byte budget", decoded.message.budgetBytesPerSecond === 1_000_000);
+}
+
 // --- Capability negotiation against the HOST-encoded ServerWelcome fixture ---
 // The bytes come from the real session host (see
 // hosts/session-host/tests/welcome_fixture.rs); they deliberately carry

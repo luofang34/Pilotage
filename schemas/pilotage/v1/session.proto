@@ -14,6 +14,30 @@ import "pilotage/v1/control.proto";
 // is the identity and destination; repeating it is idempotent.
 message MediaAttachRequest {}
 
+// The host's current admission mode for this connection's aggregate video
+// downlink. This is transport state, not camera freshness: a suspended video
+// budget must not be rendered as an unexplained source stall.
+enum VideoDeliveryMode {
+  VIDEO_DELIVERY_MODE_UNSPECIFIED = 0;
+  VIDEO_DELIVERY_MODE_NORMAL = 1;
+  VIDEO_DELIVERY_MODE_DEGRADED = 2;
+  VIDEO_DELIVERY_MODE_SUSPENDED = 3;
+}
+
+// The pressure that caused the host to shed video for this connection.
+enum VideoDeliveryReason {
+  VIDEO_DELIVERY_REASON_UNSPECIFIED = 0;
+  VIDEO_DELIVERY_REASON_BANDWIDTH = 1;
+}
+
+// A reliable snapshot emitted whenever the host changes this connection's
+// video admission mode or byte budget.
+message VideoDeliveryState {
+  VideoDeliveryMode mode = 1;
+  VideoDeliveryReason reason = 2;
+  uint64 budget_bytes_per_second = 3;
+}
+
 // The first message a client sends after the WebTransport session is
 // established, before any host state has been shared (ADR-0005: session
 // bootstrap uses plain HTTPS for admission, then this message begins the

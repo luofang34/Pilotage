@@ -23,7 +23,7 @@ pilotage-adapter-px4 = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
-wtransport = { workspace = true }
+wtransport = { workspace = true, features = ["quinn"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 prost.workspace = true
