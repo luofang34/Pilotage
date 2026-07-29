@@ -129,11 +129,16 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        match self.execution.advance(&solution.position) {
-            SequenceEvent::LegAdvanced { to_index } => {
-                events.push(MissionEvent::LegAdvanced { to_index });
+        match self
+            .execution
+            .advance(&solution.position, self.commanded_groundspeed_mps())
+        {
+            SequenceEvent::LegAdvanced {
+                to_index, reason, ..
+            } => {
+                events.push(MissionEvent::LegAdvanced { to_index, reason });
             }
-            SequenceEvent::PlanComplete => {
+            SequenceEvent::PlanComplete { .. } => {
                 self.state = MissionState::Complete;
                 events.push(MissionEvent::MissionComplete);
                 return Some(zero_velocity_intent());
@@ -184,6 +189,23 @@ impl MissionEngine {
                 None
             }
         }
+    }
+
+    /// The groundspeed the sequencer sizes fly-by turn anticipation on:
+    /// the fastest along-track speed this engine can actually command.
+    /// Cruise is what guidance is asked for, but the horizontal ceiling
+    /// caps every emitted intent, so a host that tightens the ceiling
+    /// below cruise would otherwise have its turns anticipated at a
+    /// speed the vehicle is never commanded to fly.
+    ///
+    /// Guidance tapers this speed approaching a fix, which would shrink
+    /// the anticipation distance exactly where it is being tested
+    /// against; the commanded cruise keeps the sizing independent of the
+    /// distance already run.
+    fn commanded_groundspeed_mps(&self) -> f64 {
+        self.config
+            .cruise_mps
+            .min(self.config.limits.max_horizontal_mps)
     }
 
     /// Clamps the commanded NED velocity to the mission limits, rotates

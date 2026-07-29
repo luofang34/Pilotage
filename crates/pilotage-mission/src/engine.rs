@@ -75,7 +75,7 @@ impl MissionEngine {
     ///
     /// Any [`MissionBuildError`]: expansion failure (with cycle
     /// context), an empty expansion, an implausible anchor, or a plan
-    /// that fails structural validation.
+    /// the sequencer refuses to activate.
     pub fn new(
         snapshot: &NavDataSnapshot,
         provenance: SnapshotProvenance,

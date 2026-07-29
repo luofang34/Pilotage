@@ -1,6 +1,7 @@
 //! Typed outputs of one engine tick: intent, action, state, events,
 //! and the refusal counters.
 
+use navigate_fpl::SequenceReason;
 use navigate_guidance::GuidanceRefusal;
 use pilotage_protocol::{ControlAction, ControlIntent};
 
@@ -59,6 +60,11 @@ pub enum MissionEvent {
     LegAdvanced {
         /// Index of the newly active `to` waypoint in fly order.
         to_index: usize,
+        /// Which sequencing rule authorized the advance: turn
+        /// anticipation ahead of a fly-by fix, or the capture radius.
+        /// Telemetry carries it so an early transition is attributable
+        /// to the rule rather than read as a skipped waypoint.
+        reason: SequenceReason,
     },
     /// The final waypoint captured; emitted exactly once.
     MissionComplete,

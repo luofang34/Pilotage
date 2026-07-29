@@ -4,7 +4,7 @@ use aerocontext_core::NavDataError;
 use aerocontext_navdata::blob::BlobError;
 use aerocontext_planning::route::RouteError;
 use chrono::NaiveDate;
-use navigate_contract::PlanValidationError;
+use navigate_fpl::PlanActivationError;
 use navigate_geodesy::GeodesyError;
 
 /// Why a mission could not be built. Every variant carries the context
@@ -40,7 +40,10 @@ pub enum MissionBuildError {
     /// The mission anchor cannot anchor a local tangent plane.
     #[error("mission anchor rejected by geodesy")]
     Geodesy(#[from] GeodesyError),
-    /// The built flight plan failed structural validation.
-    #[error("mission plan invalid")]
-    PlanInvalid(#[from] PlanValidationError),
+    /// The built flight plan could not be activated: a structural
+    /// defect, an execution parameter that cannot be flown, or a
+    /// waypoint constraint the sequencer refuses (an approach speed
+    /// under the floor, a leg no longer than the capture radius).
+    #[error("mission plan cannot be activated")]
+    PlanActivation(#[from] PlanActivationError),
 }

@@ -1,0 +1,60 @@
+MISSION-02 acceptance flight — fixture navdata, Aviate SITL, headless
+=====================================================================
+
+Command: PILOTAGE_MISSION_ROUTE=fixture RUST_LOG=info cargo xtask sim --fc aviate-gz --no-open
+Stack: Gazebo (aviate x500 flightdeck) + Aviate SITL FC + pilotage-session-host
+       (aviate adapter, shm telemetry) + in-process mission executor.
+No client attached at any point. Navigate pin ace50f68b3ffae6237bbb53f6af6
+87c335518272 (turn types + procedure constraints); aerocontext 0.4.5
+(crates.io).
+
+Purpose: re-record the MISSION-01 chain at the turn-types Navigate pin.
+Sequencing is now groundspeed-aware (advance() takes the commanded
+groundspeed, cruise bounded by the tightened ceiling) and every sequence
+event carries its reason. At this ceiling (2.5 m/s) the bank-limit model
+earns a turn radius of ~2 m, so anticipation distance never approaches
+the 100 m capture radius: both advances report reason=Overflown, exactly
+as the cdi_realism suite predicts for every mission at current config.
+
+Chain exercised end to end (unchanged from MISSION-01):
+  Communicate fixture blob (real .acnav container, sha256-verified decode)
+  -> route "DEMOA V901 DEMOC" expanded via airway V901 to DEMOA DEMOB DEMOC
+  -> navigate FlightPlan (degrees->radians once, ADR-0030 unit boundary)
+  -> automation-class local principal (hello/welcome/activation/lease,
+     ClientKey u64::MAX, fenced generation 1, ADR-0025 no-bypass path)
+  -> typed Arm via ControlActionCommand (accepted, action_id 1)
+  -> Navigate fusion (sim-truth-derived GNSS, SimulationTruth role only)
+  -> guide_velocity -> BodyFrd velocity intents within advertised limits
+     (tightened to 2.5 / 1.0 / 0.8)
+  -> aviate adapter -> Aviate SITL (armed 22:02:48, "Armed successfully").
+
+Host log (ANSI-stripped, mission lines verbatim):
+
+2026-07-29T22:02:48.445360Z INFO mission packed for flight route=DEMOA V901 DEMOC waypoints=3 expanded=["DEMOA", "DEMOB", "DEMOC"] authority=faa-nasr effective_on=2026-01-22 sha256=74952060bf48e49f3176de552610543bdc9add6fdaf8b8985283898c2dd18ff2 fixture=true
+2026-07-29T22:02:48.541386Z INFO mission engine ready under advertised limits route=DEMOA V901 DEMOC max_horizontal_mps=2.5 max_vertical_mps=1.0 max_yaw_rate_rps=0.8
+2026-07-29T22:02:48.541412Z INFO control profile activation accepted client=18446744073709551615 profile=automation.mission profile_revision=1 activation_revision=1
+2026-07-29T22:02:48.541430Z INFO mission motion lease granted generation=1
+2026-07-29T22:02:48.547076Z INFO mission event event=ArmRequested { action_id: 1 }
+2026-07-29T22:02:48.547105Z INFO mission action command action=Arm action_id=1
+2026-07-29T22:02:48.547195Z INFO mission action result action=Arm accepted=true detail=
+2026-07-29T22:02:48.597535Z INFO mission event event=ArmAccepted { action_id: 1 }
+2026-07-29T22:02:48.597559Z INFO mission event event=ClimbStarted
+2026-07-29T22:03:06.546962Z INFO mission event event=EnrouteStarted
+2026-07-29T22:03:18.697245Z INFO mission event event=LegAdvanced { to_index: 1, reason: Overflown }
+2026-07-29T22:04:35.896753Z INFO mission event event=LegAdvanced { to_index: 2, reason: Overflown }
+2026-07-29T22:05:14.718582Z INFO mission complete
+
+Timeline: arm+climb 18 s, enroute 2 m 8 s, wheels-up to complete 2 m 26 s.
+Zero GuidanceRefused events, zero FrameRejected lines in the host log for
+the mission principal over the full flight. Leg timings corroborate the
+capture geometry: the DEMOB leg (185.6 m plus the post-sequence
+cross-track transient) ran 77 s and the final leg completed 39 s after
+its advance — the terminal fix captures 100 m out, 76.8 m of the
+176.8 m leg plus transient at the tapering approach speed.
+
+Gate context: cargo fmt --check; clippy --all-targets -D warnings;
+mission + session-host tests 136 passed (cdi_realism 4/4, twice,
+identical); cargo check --workspace; release build; structure check;
+wasm wire-decode conformance; doc gate (-D missing_docs -D
+broken_intra_doc_links) — all green at flight time.
+SIM / NOT FOR FLIGHT — fixture navdata, sim-truth-derived GNSS.

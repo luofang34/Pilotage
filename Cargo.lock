@@ -1180,7 +1180,7 @@ dependencies = [
 [[package]]
 name = "navigate-contract"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=dcee4e14e93d8fccb0a9f89e4be38abc0804861a#dcee4e14e93d8fccb0a9f89e4be38abc0804861a"
+source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
 dependencies = [
  "thiserror",
 ]
@@ -1188,7 +1188,7 @@ dependencies = [
 [[package]]
 name = "navigate-fpl"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=dcee4e14e93d8fccb0a9f89e4be38abc0804861a#dcee4e14e93d8fccb0a9f89e4be38abc0804861a"
+source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
 dependencies = [
  "navigate-contract",
  "navigate-geodesy",
@@ -1198,7 +1198,7 @@ dependencies = [
 [[package]]
 name = "navigate-fusion"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=dcee4e14e93d8fccb0a9f89e4be38abc0804861a#dcee4e14e93d8fccb0a9f89e4be38abc0804861a"
+source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
 dependencies = [
  "nalgebra",
  "navigate-contract",
@@ -1209,7 +1209,7 @@ dependencies = [
 [[package]]
 name = "navigate-geodesy"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=dcee4e14e93d8fccb0a9f89e4be38abc0804861a#dcee4e14e93d8fccb0a9f89e4be38abc0804861a"
+source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
 dependencies = [
  "navigate-contract",
  "thiserror",
@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "navigate-guidance"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Navigate.git?rev=dcee4e14e93d8fccb0a9f89e4be38abc0804861a#dcee4e14e93d8fccb0a9f89e4be38abc0804861a"
+source = "git+https://github.com/luofang34/Navigate.git?rev=ace50f68b3ffae6237bbb53f6af687c335518272#ace50f68b3ffae6237bbb53f6af687c335518272"
 dependencies = [
  "navigate-contract",
  "navigate-geodesy",
