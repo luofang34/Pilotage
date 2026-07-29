@@ -45,6 +45,7 @@ fn main() -> ExitCode {
         .boxed(".pilotage.v1.TelemetrySample.sim_truth")
         .boxed(".pilotage.v1.TelemetrySample.fc_state")
         .boxed(".pilotage.v1.TelemetrySample.gimbal")
+        .boxed(".pilotage.v1.TelemetrySample.nav_guidance")
         .compile_protos(&protos, &[schema_root])
     {
         Ok(()) => ExitCode::SUCCESS,

@@ -19,7 +19,9 @@ mod stream_tag;
 mod wire_codec;
 // The mission rig is exported for the in-process integration test: the
 // same actor/principal wiring the runtime uses, without a transport.
-pub use automation::{AutomationStatus, MissionRig, spawn_reference_mission_rig};
+pub use automation::{
+    AutomationStatus, MissionRig, TelemetryObserver, spawn_reference_mission_rig,
+};
 pub use options::{DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, RuntimeOptions};
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.

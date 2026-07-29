@@ -124,9 +124,13 @@ fn role_from_wire(role: i32) -> Option<TruthRole> {
         wire::SourceRole::SimulationTruth => Some(TruthRole::SimulationTruth),
         wire::SourceRole::OperationalEstimate => Some(TruthRole::OperationalEstimate),
         wire::SourceRole::FcState => Some(TruthRole::FcState),
+        // Guidance output is the mission's own plan-relative product
+        // (ADR-0024/0031): reading it back as an ownship observation
+        // would close a loop on the executor's own numbers.
         wire::SourceRole::Unspecified
         | wire::SourceRole::VideoCapture
-        | wire::SourceRole::PayloadDevice => None,
+        | wire::SourceRole::PayloadDevice
+        | wire::SourceRole::NavigationSolution => None,
     }
 }
 

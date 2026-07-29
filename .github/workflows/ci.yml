@@ -151,6 +151,9 @@ jobs:
       - name: telemetry ingress gate contract
         run: node clients/web/telemetry-ingress.test.mjs
 
+      - name: navigation display profile (ADR-0031 deviation scaling and signs)
+        run: node clients/web/nav-display.test.mjs
+
       - name: telemetry display retirement contract
         run: node clients/web/telemetry-display.test.mjs
 

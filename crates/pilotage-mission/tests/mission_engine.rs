@@ -8,8 +8,8 @@ use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_guidance::GuidanceRefusal;
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
-    MissionConfig, MissionEngine, MissionEvent, MissionState, OwnshipSample, TruthRole,
-    decode_snapshot,
+    MissionConfig, MissionEngine, MissionEvent, MissionState, NavGuidance, NavQuality,
+    OwnshipSample, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -229,6 +229,103 @@ fn mission_arms_once_climbs_flies_the_route_and_completes() {
         assert!(post_events.is_empty(), "no events after completion");
         assert!(truth.ned_velocity.iter().all(|v| v.abs() < 1e-9));
     }
+}
+
+#[test]
+fn guidance_is_absent_until_a_leg_is_being_flown() {
+    let (mut engine, _) = build_engine();
+    assert!(
+        engine.nav_guidance().is_none(),
+        "no solution yet, so nothing to display"
+    );
+
+    // Fly up to the arm request and leave it outstanding: a solution now
+    // exists, but the executor is not flying a leg yet.
+    let mut truth = Truth::new();
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000);
+    let mut requested = false;
+    for _ in 0..50 {
+        now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+        truth.sequence = truth.sequence.wrapping_add(1);
+        engine.on_ownship(&truth.sample(now), now);
+        if engine.tick(now).action.is_some() {
+            requested = true;
+            break;
+        }
+    }
+    assert!(requested, "the arm request goes out within the step budget");
+    assert_eq!(engine.state(), MissionState::Arming);
+    assert!(
+        engine.nav_guidance().is_none(),
+        "arming is not flying a leg: no guidance display"
+    );
+}
+
+#[test]
+fn guidance_tracks_the_active_leg_and_leaves_with_the_plan() {
+    let (mut engine, _) = build_engine();
+    let mut truth = Truth::new();
+    let mut now = MonotonicNanos::from_nanos(1_000_000_000);
+    let mut arm_requests = 0;
+    let mut events = Vec::new();
+    let mut climb: Option<NavGuidance> = None;
+    let mut sequenced: Option<NavGuidance> = None;
+
+    for _ in 0..20_000 {
+        step(
+            &mut engine,
+            &mut truth,
+            &mut now,
+            &mut arm_requests,
+            &mut events,
+        );
+        if engine.state() == MissionState::Complete {
+            break;
+        }
+        let Some(guidance) = engine.nav_guidance() else {
+            continue;
+        };
+        if engine.state() == MissionState::Climb && climb.is_none() {
+            climb = Some(guidance);
+        } else if guidance.leg_index > 0 && sequenced.is_none() {
+            sequenced = Some(guidance);
+        }
+    }
+    assert_eq!(engine.state(), MissionState::Complete);
+
+    // The climb flies direct-to: guidance is published with the live
+    // bearing to the first fix and a real distance, but no lateral course
+    // is being tracked, so there is nothing to deviate from.
+    let climb = climb.expect("the climb phase publishes guidance");
+    assert_eq!(climb.to_ident, "DEMOA");
+    assert_eq!(climb.from_ident, None);
+    assert_eq!(climb.lateral_deviation_m, None);
+    assert_eq!(climb.leg_index, 0);
+    assert_eq!(climb.waypoint_count, 3);
+    assert!((0.0..std::f64::consts::TAU).contains(&climb.course_rad));
+    assert!(
+        climb.distance_to_waypoint_m > 0.0 && climb.distance_to_waypoint_m.is_finite(),
+        "the climb still reports a real distance to run, got {}",
+        climb.distance_to_waypoint_m
+    );
+
+    // Past the first capture the leg has an origin fix, so cross-track
+    // deviation exists and the course is the leg's track.
+    let sequenced = sequenced.expect("a sequenced leg publishes guidance");
+    assert_eq!(sequenced.from_ident.as_deref(), Some("DEMOA"));
+    assert_eq!(sequenced.to_ident, "DEMOB");
+    assert_eq!(sequenced.leg_index, 1);
+    assert_eq!(sequenced.quality, NavQuality::Good);
+    assert!(sequenced.lateral_deviation_m.is_some_and(f64::is_finite));
+    assert!(
+        sequenced.vertical_deviation_m.is_some_and(f64::is_finite),
+        "every demo waypoint carries an altitude constraint"
+    );
+
+    assert!(
+        engine.nav_guidance().is_none(),
+        "a completed plan removes the guidance display rather than freezing it"
+    );
 }
 
 #[test]

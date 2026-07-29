@@ -18,7 +18,7 @@ const SIZE_CAPS = {
   "authority-transition.js": 22,
   "bootstrap.js": 88,
   "calibration.js": 285,
-  "cockpit-readout.js": 724,
+  "cockpit-readout.js": 731,
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
@@ -32,6 +32,7 @@ const SIZE_CAPS = {
   "lease-release.js": 67,
   "main.js": 192,
   "media-recovery.js": 50,
+  "nav-display.js": 85,
   "reconnect.js": 150,
   "resume-control.js": 59,
   "session-discovery.js": 68,
@@ -39,7 +40,7 @@ const SIZE_CAPS = {
   "session-transport.js": 285,
   "snapshot-association.js": 266,
   "telemetry-display.js": 75,
-  "telemetry-ingress.js": 689,
+  "telemetry-ingress.js": 825,
   "stream-cancellation.js": 16,
   "transport-session.js": 128,
   "turn-derivation.js": 101,
@@ -53,7 +54,7 @@ const SIZE_CAPS = {
   "video-identity.js": 291,
   "video-routing.js": 37,
   "wire-bounds.js": 120,
-  "wire.js": 1171,
+  "wire.js": 1208,
 };
 
 const dir = new URL("./", import.meta.url);

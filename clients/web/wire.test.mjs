@@ -580,6 +580,63 @@ check(
     wrongMessage.gimbal === null);
 }
 
+// ---- ADR-0031 navigation-solution lane: nav_guidance (10) -------------------
+// Active-leg guidance travels under its own navigation-solution stamp in raw
+// canonical units. It is unconsumable (null) without that stamp or under any
+// other role: guidance is display context and never a substitute for the
+// estimate lane.
+{
+  function navGuidance(role, { lateral = -30.0, vertical = 12.5 } = {}) {
+    const out = [];
+    if (role !== null) {
+      bytesField(out, 1, measurementStamp(21, 2, 7, 7_000_000, 3, 0x44, role));
+    }
+    bytesField(out, 2, new TextEncoder().encode("WP02"));
+    bytesField(out, 3, new TextEncoder().encode("WP01"));
+    f32Field(out, 4, 1.25); // course_rad
+    f32Field(out, 5, lateral); // lateral_deviation_m
+    f32Field(out, 6, vertical); // vertical_deviation_m
+    f32Field(out, 7, 3704.0); // distance_to_waypoint_m
+    for (const [field, value] of [[8, 2], [9, 5], [10, 1]]) {
+      varint(out, (field << 3) | 0);
+      varint(out, value);
+    }
+    return out;
+  }
+  function decodeGuidanceOnly(guidanceBytes) {
+    const telemetry = [];
+    bytesField(telemetry, 1, uint64Message(1));
+    bytesField(telemetry, 10, guidanceBytes);
+    const envelope = [];
+    varint(envelope, (1 << 3) | 0);
+    varint(envelope, SCHEMA_VERSION);
+    bytesField(envelope, 4, telemetry);
+    return decodeBareEnvelope(new Uint8Array(envelope)).message;
+  }
+
+  const nav = decodeGuidanceOnly(navGuidance(6)).navGuidance;
+  check("guidance lane decodes leg identifiers", nav?.toIdent === "WP02" && nav?.fromIdent === "WP01");
+  check("guidance lane decodes course and deviations in canonical units",
+    nav?.courseRad === 1.25 && nav?.lateralDeviationM === -30.0
+    && nav?.verticalDeviationM === 12.5 && nav?.distanceToWaypointM === 3704.0);
+  check("guidance lane decodes leg position and solution quality",
+    nav?.legIndex === 2 && nav?.waypointCount === 5 && nav?.solutionQuality === 1);
+  check("guidance stamp carries the navigation-solution role",
+    nav?.stamp?.role === 6 && nav?.stamp?.clock === 3);
+
+  // Not tracking a lateral course, and a leg with no vertical constraint,
+  // both reach the display profile as NaN — zero would read as on-course.
+  const untracked = decodeGuidanceOnly(navGuidance(6, { lateral: NaN, vertical: NaN })).navGuidance;
+  check("guidance carries an untracked lateral course through as NaN",
+    Number.isNaN(untracked?.lateralDeviationM));
+  check("guidance carries an unconstrained vertical profile through as NaN",
+    Number.isNaN(untracked?.verticalDeviationM));
+
+  check("an unstamped nav_guidance decodes to null", decodeGuidanceOnly(navGuidance(null)).navGuidance === null);
+  check("a guidance lane with a non-navigation role decodes to null",
+    decodeGuidanceOnly(navGuidance(1)).navGuidance === null);
+}
+
 // --- a fully neutral frame reports EVERY axis on the wire ---------------
 // The host's full-coverage neutral checks (link-loss recovery, reset-latch
 // clearance) require every declared axis REPORTED; proto3 default-skipping

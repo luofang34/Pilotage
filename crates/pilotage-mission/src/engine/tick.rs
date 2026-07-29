@@ -34,7 +34,7 @@ impl MissionEngine {
         let mut action = None;
         match self.state {
             MissionState::AwaitSolution => {
-                if self.filter.tick(now).is_some() {
+                if self.publish_solution(now).is_some() {
                     self.state = MissionState::Arming;
                     action = Some(self.send_arm(&mut events));
                 }
@@ -54,6 +54,15 @@ impl MissionEngine {
             state: self.state,
             events,
         }
+    }
+
+    /// Publishes the filter's solution for `now` and remembers it as the
+    /// basis of the display-facing guidance view. A tick that publishes
+    /// nothing forgets the previous solution: guidance that cannot be
+    /// recomputed must disappear rather than age on an instrument.
+    fn publish_solution(&mut self, now: MonotonicNanos) -> Option<NavigationSolution> {
+        self.last_solution = self.filter.tick(now);
+        self.last_solution
     }
 
     /// Emits an arm action under a fresh nonzero wrapping id. The action
@@ -83,7 +92,7 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        let solution = self.filter.tick(now)?;
+        let solution = self.publish_solution(now)?;
         let target_m = self.config.anchor.altitude_m + self.config.cruise_height_m;
         if solution.position.altitude_m >= target_m - CLIMB_CAPTURE_MARGIN_M {
             self.state = MissionState::Enroute;
@@ -108,7 +117,7 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        let solution = self.filter.tick(now)?;
+        let solution = self.publish_solution(now)?;
         self.guide(&solution, now, events)
     }
 

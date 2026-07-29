@@ -37,6 +37,8 @@ One file per decision, numbered in acceptance order. See
 | [0028](0028-multi-vehicle-and-swarm-coordinator-hosts.md) | Multi-vehicle operation scales from roster attach to swarm aggregation via coordinator hosts | Proposed |
 | [0029](0029-panel-layout-look-plugins.md) | Panels, layout, and look are data-driven plugins over the scene and state contracts | Proposed |
 | [0030](0030-communicate-navdata-provisioning.md) | The host consumes aeronautical navdata through Communicate's cycle-dated snapshot surface | Proposed |
+| [0031](0031-nav-guidance-telemetry-display.md) | Navigation guidance rides telemetry as its own stamped role; deviation scaling is display policy | Proposed |
+| [0032](0032-ipad-native-client-shared-cores.md) | The iPad client is a thin native shell over the same Rust cores the web client runs as wasm | Proposed |
 
 ## Provenance
 

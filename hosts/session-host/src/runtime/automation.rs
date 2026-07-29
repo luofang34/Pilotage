@@ -23,6 +23,7 @@ use tracing::info;
 
 use crate::error::HostError;
 use crate::mission_navdata::{self, LoadedNavdata};
+use crate::runtime::connection::ToConnection;
 use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor, ToEngine};
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
 use crate::runtime::{MissionOptions, RuntimeOptions};
@@ -32,6 +33,10 @@ use crate::runtime::{MissionOptions, RuntimeOptions};
 /// collide after 2^64 - 1 accepted connections — beyond any process
 /// lifetime — making it collision-free for the local principal.
 const MISSION_CLIENT: ClientKey = ClientKey::new(u64::MAX);
+
+/// The observing client's key, allocated from the same collision-free end
+/// of the space as [`MISSION_CLIENT`].
+const OBSERVER_CLIENT: ClientKey = ClientKey::new(u64::MAX - 1);
 
 /// The single clock domain every mission `now`, ownship stamp, and fusion
 /// judgment lives on: the host's shared monotonic origin (ADR-0009).
@@ -153,11 +158,47 @@ pub struct MissionRig {
     automation: JoinHandle<()>,
 }
 
+/// A synthetic client registered with the engine actor purely to read
+/// what it broadcasts: the same outbound path a remote connection's
+/// writer half drains, so a test reads exactly the bytes that would go on
+/// the wire.
+pub struct TelemetryObserver {
+    outbound: mpsc::Receiver<ToConnection>,
+}
+
+impl TelemetryObserver {
+    /// The next best-effort datagram broadcast to this observer, or
+    /// `None` once the engine actor is gone.
+    pub async fn next_datagram(&mut self) -> Option<Vec<u8>> {
+        while let Some(message) = self.outbound.recv().await {
+            if let ToConnection::Datagram { bytes, .. } = message {
+                return Some(bytes);
+            }
+        }
+        None
+    }
+}
+
 impl MissionRig {
     /// A fresh handle on the mission principal's status watch.
     #[must_use]
     pub fn status(&self) -> watch::Receiver<AutomationStatus> {
         self.status.clone()
+    }
+
+    /// Registers an observing client with the engine actor and hands back
+    /// its outbound datagrams. Dropping the observer closes the channel
+    /// and the actor evicts it on the next send.
+    pub async fn observe(&self) -> TelemetryObserver {
+        let (outbound_tx, outbound) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
+        self.engine_tx
+            .send(ToEngine::ClientConnected {
+                client: OBSERVER_CLIENT,
+                sender: outbound_tx,
+            })
+            .await
+            .ok();
+        TelemetryObserver { outbound }
     }
 
     /// Closes the engine actor's command channel and waits for the actor

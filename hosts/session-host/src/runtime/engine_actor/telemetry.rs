@@ -42,6 +42,9 @@ pub(super) fn sample_to_wire(
             .fc_state
             .map(|state| Box::new(fc_state_to_wire(state))),
         gimbal: sample.gimbal.map(|gimbal| Box::new(gimbal_to_wire(gimbal))),
+        // Guidance does not come from the adapter; the engine actor
+        // attaches the navigation component's own state (ADR-0031).
+        nav_guidance: None,
     }
 }
 

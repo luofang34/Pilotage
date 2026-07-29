@@ -2,6 +2,7 @@
 //! actions out. All time is caller-supplied; nothing here reads a clock
 //! or performs I/O.
 
+mod nav_guidance;
 mod output;
 mod tick;
 
@@ -10,15 +11,16 @@ use core::mem::Discriminant;
 use aerocontext_core::NavDataSnapshot;
 use aerocontext_planning::route::expand_str;
 use navigate_contract::{
-    AltitudeConstraint, FlightPlan, GeodeticPosition, MonotonicNanos, ObservationStamp, PlanRole,
-    SensorClass, SourceComposition, SourceEpoch, SourceId, SymmetricCov3, Waypoint,
-    WrappingSequence,
+    AltitudeConstraint, FlightPlan, GeodeticPosition, MonotonicNanos, NavigationSolution,
+    ObservationStamp, PlanRole, SensorClass, SourceComposition, SourceEpoch, SourceId,
+    SymmetricCov3, Waypoint, WrappingSequence,
 };
 use navigate_fpl::{ExecutionConfig, PlanExecution};
 use navigate_fusion::{FusionConfig, NavigationFilter, Observation, ObservationValue};
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
 
+pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
 
 use crate::config::MissionConfig;
@@ -46,6 +48,10 @@ pub struct MissionEngine {
     guidance: VelocityGuidanceConfig,
     state: MissionState,
     counters: MissionCounters,
+    /// The solution the last tick published, backing the display-facing
+    /// guidance view. A tick whose filter published nothing clears it, so
+    /// [`MissionEngine::nav_guidance`] cannot serve stale geometry.
+    last_solution: Option<NavigationSolution>,
     pending_events: Vec<MissionEvent>,
     last_yaw_rad: f64,
     next_action_id: u64,
@@ -109,6 +115,7 @@ impl MissionEngine {
             guidance,
             state: MissionState::AwaitSolution,
             counters: MissionCounters::default(),
+            last_solution: None,
             pending_events: Vec::new(),
             last_yaw_rad: 0.0,
             next_action_id: 0,

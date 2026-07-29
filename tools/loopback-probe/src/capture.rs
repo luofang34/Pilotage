@@ -160,6 +160,7 @@ mod tests {
                 ..Default::default()
             })),
             gimbal: None,
+            nav_guidance: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(9));
 

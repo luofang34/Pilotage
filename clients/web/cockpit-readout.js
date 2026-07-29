@@ -14,7 +14,13 @@ import {
 } from "./instrument-health.js";
 import { TurnDerivation } from "./turn-derivation.js";
 import { fcArmToken, formatTelemetrySummary, setTelemetrySessionState } from "./telemetry-display.js";
-import { AvionicsIngress, FcStateTracker, INCARNATION_POLICY } from "./telemetry-ingress.js";
+import {
+  AvionicsIngress,
+  FcStateTracker,
+  INCARNATION_POLICY,
+  NavGuidanceTracker,
+} from "./telemetry-ingress.js";
+import { navDisplayState } from "./nav-display.js";
 import { SnapshotAssociator, associateIfAccepted } from "./snapshot-association.js";
 import { CalibrationRegistry, loadCalibrationRegistry } from "./calibration.js";
 import { readinessTransition, shouldLogReadFailure } from "./video-diagnostics.js";
@@ -105,6 +111,7 @@ export function createCockpitReadout({
     moduleFault: null,
     ingress: newSimulatorAvionicsIngress(),
     fcState: new FcStateTracker(),
+    navGuidance: new NavGuidanceTracker(),
     health: {
       [PANEL.PFD]: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
       [PANEL.HSI]: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
@@ -534,6 +541,7 @@ export function createCockpitReadout({
             if (accepted.kinematics) snapshotHistory.observe(accepted.kinematics.stamp);
           }
           if (telemetry.vehicleId !== vehicleId) continue;
+          instruments.navGuidance.observe(telemetry.navGuidance ?? null, performance.now());
           const fcView = instruments.fcState.observe(telemetry.fcState ?? null, performance.now());
           state.lastFcView = fcView;
           logFcCommandVerdict(fcView);
@@ -645,7 +653,7 @@ export function createCockpitReadout({
       attitude,
       kinematics,
       air: null,
-      nav: null,
+      nav: navDisplayState(instruments.navGuidance.snapshot(performance.now())),
       wind: null,
       selections: { headingBugRad: 0, headingBugReference: 2 },
       heading,

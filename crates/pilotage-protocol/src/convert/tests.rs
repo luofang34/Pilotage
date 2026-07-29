@@ -165,6 +165,7 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
         sim_truth: None,
         fc_state: None,
         gimbal: None,
+        nav_guidance: None,
     };
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,

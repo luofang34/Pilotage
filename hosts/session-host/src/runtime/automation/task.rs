@@ -4,13 +4,14 @@
 //! and authority fencing live in the submodules.
 
 mod fencing;
+mod nav_guidance;
 mod session_flow;
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use navigate_contract::MonotonicNanos;
-use pilotage_mission::{MissionAction, MissionEngine, MissionEvent};
+use pilotage_mission::{MissionAction, MissionEngine, MissionEvent, NavGuidance};
 use pilotage_protocol::{
     ClientHello, ControlActionCommand, ControlIntent, ControlPayload, Generation, PrincipalId,
     SESSION_PROTOCOL_VERSION, ScopeId, ScopedControlFrame, SequenceNum, SessionId,
@@ -27,6 +28,7 @@ use crate::runtime::engine_actor::ToEngine;
 
 use super::ownship;
 use super::{AutomationStatus, MISSION_CLIENT, MissionPlan};
+use nav_guidance::{NavGuidancePublisher, NavPublication};
 
 /// The scope the mission principal leases and frames against.
 const MISSION_SCOPE: &str = "vehicle.motion";
@@ -67,6 +69,9 @@ pub(super) struct MissionTask {
     sequence: u32,
     next_action_id: u32,
     pending_actions: HashMap<u32, u64>,
+    /// Stamps the guidance group; bound to the session at the welcome,
+    /// since the incarnation token it carries is derived from it.
+    nav_guidance: Option<NavGuidancePublisher>,
 }
 
 impl MissionTask {
@@ -89,6 +94,7 @@ impl MissionTask {
             sequence: 0,
             next_action_id: 0,
             pending_actions: HashMap::new(),
+            nav_guidance: None,
         }
     }
 
@@ -136,6 +142,10 @@ impl MissionTask {
                 }
             }
         }
+        // A principal that stops flying stops guiding: clear the group so
+        // no instrument keeps a frozen leg on screen after it is gone.
+        let nanos = self.elapsed_nanos();
+        self.publish_nav_guidance(None, nanos).await;
         self.log_counters();
     }
 
@@ -175,6 +185,10 @@ impl MissionTask {
         };
         self.log_events(&output.events);
         self.update(|status| status.mission_state = Some(output.state));
+        let guidance = self.mission.as_ref().and_then(MissionEngine::nav_guidance);
+        if !self.publish_nav_guidance(guidance.as_ref(), nanos).await {
+            return false;
+        }
         if let Some(action) = output.action
             && !self.send_action(action).await
         {
@@ -188,6 +202,32 @@ impl MissionTask {
             return false;
         }
         true
+    }
+
+    /// Hands this tick's guidance to the telemetry assembly, or clears
+    /// what it holds once the executor stops flying a leg (ADR-0031):
+    /// display context travels as its own stamped group, and absence —
+    /// never zeros — is how "no guidance" reaches an instrument.
+    async fn publish_nav_guidance(
+        &mut self,
+        guidance: Option<&NavGuidance>,
+        acquired_at_ns: u64,
+    ) -> bool {
+        let Some(publisher) = self.nav_guidance.as_mut() else {
+            return true;
+        };
+        let Some(publication) = publisher.publication(guidance, acquired_at_ns) else {
+            return true;
+        };
+        let state = match publication {
+            NavPublication::Sample(state) => Some(Box::new(state)),
+            NavPublication::Clear => None,
+        };
+        self.send_command(ToEngine::NavGuidance {
+            vehicle: HOST_VEHICLE,
+            state,
+        })
+        .await
     }
 
     /// Frames one typed intent under the held lease with a wrap-advancing

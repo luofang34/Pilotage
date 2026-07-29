@@ -55,6 +55,10 @@ enum SourceRole {
   // FC link: not a vehicle estimate and never eligible for control
   // validation. Carries the device's own boot clock, not host time.
   SOURCE_ROLE_PAYLOAD_DEVICE = 5;
+  // The vehicle's navigation/guidance component's plan-relative output:
+  // display context only. Never an input to control validation, and never
+  // a fallback for a missing estimate.
+  SOURCE_ROLE_NAVIGATION_SOLUTION = 6;
 }
 
 // Integrity classification of the path that delivered an observation. The
@@ -210,6 +214,43 @@ message GimbalAttitude {
   uint32 failure_flags = 10;
 }
 
+// Active-leg guidance from the vehicle's navigation component (ADR-0031)
+// under its own provenance stamp: display context in raw canonical units.
+// Scaling deviations to instrument dots is display policy and never
+// crosses the wire. Absence means no guidance — receivers remove the
+// deviation display rather than centering it.
+message NavGuidanceState {
+  // Identity and acquisition of this guidance sample. Absence makes the
+  // sample unconsumable: guidance without provenance is discarded.
+  MeasurementStamp stamp = 1;
+  // Identifier of the waypoint being flown toward.
+  string to_ident = 2;
+  // Identifier of the leg's origin fix; empty on a direct-to leg, which
+  // is flown from the present position and has no upstream fix.
+  string from_ident = 3;
+  // Desired track of the active leg, radians clockwise from true north in
+  // [0, 2π). On a direct-to leg this is the live bearing to the waypoint.
+  float course_rad = 4;
+  // Cross-track deviation from the desired track in meters, positive
+  // right of course. NaN when guidance is not tracking a lateral course
+  // (e.g. climb): a direct-to leg's track is anchored at ownship, so
+  // there is no cross-track geometry, and zero would read as on-course.
+  float lateral_deviation_m = 5;
+  // Deviation from the vertical profile in meters, positive above the
+  // profile; NaN when the active leg carries no vertical constraint.
+  float vertical_deviation_m = 6;
+  // Great-circle distance to the active waypoint, meters.
+  float distance_to_waypoint_m = 7;
+  // Index of the active leg's destination waypoint in fly order, 0-based.
+  uint32 leg_index = 8;
+  // Waypoints in the plan being flown.
+  uint32 waypoint_count = 9;
+  // Quality of the navigation solution this guidance rests on: 0 good,
+  // 1 degraded, 2 unusable. Consumers remove the guidance display on
+  // unusable rather than displaying it with a caution.
+  uint32 solution_quality = 10;
+}
+
 // A single best-effort telemetry sample for one vehicle.
 message TelemetrySample {
   VehicleId vehicle = 1;
@@ -229,4 +270,7 @@ message TelemetrySample {
   FcState fc_state = 8;
   // Gimbal payload-device orientation with its own provenance stamp.
   GimbalAttitude gimbal = 9;
+  // Active-leg navigation guidance with its own provenance stamp,
+  // published by the navigation component rather than the FC adapter.
+  NavGuidanceState nav_guidance = 10;
 }

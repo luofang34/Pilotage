@@ -23,6 +23,7 @@ mod body_frame;
 pub use config::{MissionConfig, MissionLimits};
 pub use engine::{
     MissionAction, MissionCounters, MissionEngine, MissionEvent, MissionOutput, MissionState,
+    NavGuidance, NavQuality,
 };
 pub use error::MissionBuildError;
 pub use ownship::{OwnshipSample, TruthRole};

@@ -186,6 +186,7 @@ mod tests {
             sim_truth: None,
             fc_state: None,
             gimbal: None,
+            nav_guidance: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(100));
         assert_eq!(observation.pose, Some((1.5, 2.5, 0.25)));
@@ -206,6 +207,7 @@ mod tests {
             sim_truth: None,
             fc_state: None,
             gimbal: None,
+            nav_guidance: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(0));
         assert_eq!(observation.pose, None);
@@ -241,6 +243,7 @@ mod tests {
                 ..Default::default()
             })),
             gimbal: None,
+            nav_guidance: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(9));
         let truth = observation.sim_truth.expect("truth lane captured");
@@ -280,6 +283,7 @@ mod tests {
                 ..Default::default()
             })),
             gimbal: None,
+            nav_guidance: None,
         };
         let observation = observation_from_sample(&sample, MonoTimestamp::from_nanos(1));
         assert_eq!(observation.sim_truth, None, "truth without provenance");

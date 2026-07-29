@@ -26,14 +26,17 @@ export const ROLE = Object.freeze({
   OPERATIONAL_ESTIMATE: 1,
   SIMULATION_TRUTH: 2,
   FC_STATE: 3,
+  NAVIGATION_SOLUTION: 6,
 });
 // Role-specific stamp rules: which clock domains a role may legitimately
 // stamp. Estimates carry source clocks; truth is simulation-clocked; FC
-// state is stamped at host receipt (its wire carries no source time).
+// state is stamped at host receipt (its wire carries no source time), as is
+// navigation guidance, which the host's navigation component computes.
 const ROLE_CLOCKS = Object.freeze({
   [ROLE.OPERATIONAL_ESTIMATE]: [CLOCK_VEHICLE_BOOT, CLOCK_SIMULATION],
   [ROLE.SIMULATION_TRUTH]: [CLOCK_SIMULATION],
   [ROLE.FC_STATE]: [CLOCK_HOST_MONOTONIC],
+  [ROLE.NAVIGATION_SOLUTION]: [CLOCK_HOST_MONOTONIC],
 });
 const KNOWN_INTEGRITY = Object.freeze([1, 2, 3]);
 const QUALITY_UNUSABLE = 2;
@@ -686,4 +689,137 @@ function sanitizeFcCommand(lastCommand) {
   const result = lastCommand.result;
   if (!Number.isInteger(result) || result < 0) return null;
   return { arm: lastCommand.arm, result };
+}
+
+// Navigation guidance freshness, fail closed (ADR-0031). A guidance sample
+// is accepted only when its COMPLETE stamp validates for the
+// navigation-solution role; the source identity (id + incarnation) is
+// pinned at first acceptance for the session; and the epoch/sequence pair
+// must strictly ADVANCE in wrapping serial order, so a duplicate or a
+// reordered sample never refreshes age and never regresses the displayed
+// leg. The sample's own values stay raw here — meters and radians — and
+// reach the instrument's dot scale only through the display profile.
+//
+// Age is reported rather than judged: the panel's freshness policy owns
+// when guidance stops showing, so there is no second staleness rule here
+// to diverge from it.
+export class NavGuidanceTracker {
+  constructor() {
+    this.last = null;
+    this.lastRejectReason = null;
+    this.counters = {
+      accepted: 0,
+      invalidStamps: 0,
+      wrongSource: 0,
+      duplicates: 0,
+      malformedGuidance: 0,
+    };
+  }
+
+  // Feeds one decoded navGuidance lane (or null) and returns the current
+  // snapshot. Only a NEW sample — pinned identity, epoch advanced, or same
+  // epoch with the sequence strictly newer in wrapping order — restarts the
+  // age clock.
+  observe(navGuidance, nowMs) {
+    if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
+    if (this.accepts(navGuidance)) {
+      const stamp = navGuidance.stamp;
+      this.last = {
+        navGuidance: freezeGuidance(navGuidance),
+        sourceId: stamp.sourceId,
+        sourceIncarnation: stamp.sourceIncarnation,
+        sourceEpoch: stamp.sourceEpoch,
+        sequence: stamp.sequence,
+        firstSeenMs: nowMs,
+      };
+      this.bump("accepted");
+    }
+    return this.snapshot(nowMs);
+  }
+
+  // Whether a sample is a valid, strictly-new observation from the pinned
+  // source. Every rejection is fail-closed: the previous snapshot (and its
+  // age) stands, so guidance goes stale rather than jumping to a leg that
+  // failed its provenance check.
+  accepts(navGuidance) {
+    if (!navGuidance) return false;
+    if (stampFaultForRole(navGuidance.stamp, ROLE.NAVIGATION_SOLUTION) !== null) {
+      return this.reject("invalidStamps");
+    }
+    if (!guidanceIsWellFormed(navGuidance)) return this.reject("malformedGuidance");
+    const last = this.last;
+    if (last === null) return true;
+    const stamp = navGuidance.stamp;
+    // Identity is pinned for the session: a different source id or
+    // incarnation is not this navigation component's guidance stream.
+    if (stamp.sourceId !== last.sourceId || stamp.sourceIncarnation !== last.sourceIncarnation) {
+      return this.reject("wrongSource");
+    }
+    if (stamp.sourceEpoch === last.sourceEpoch) {
+      return serialIsNewer(stamp.sequence, last.sequence) || this.reject("duplicates");
+    }
+    // A newer epoch (navigation restart) restarts the numbering; an older
+    // epoch is a replay.
+    return serialIsNewer(stamp.sourceEpoch, last.sourceEpoch) || this.reject("duplicates");
+  }
+
+  // The display view: null before any accepted sample. `ageMs` is measured
+  // against the receive clock from when the newest sample was accepted.
+  snapshot(nowMs) {
+    if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
+    if (this.last === null) return null;
+    return Object.freeze({
+      navGuidance: this.last.navGuidance,
+      ageMs: nowMs - this.last.firstSeenMs,
+    });
+  }
+
+  diagnostics() {
+    return Object.freeze({ ...this.counters, lastRejectReason: this.lastRejectReason });
+  }
+
+  reject(reason) {
+    this.lastRejectReason = reason;
+    this.bump(reason);
+    return false;
+  }
+
+  bump(name, amount = 1) {
+    this.counters[name] = increment(this.counters[name], amount);
+  }
+}
+
+// Guidance whose numbers are not numbers at all is unusable whole: a
+// non-finite course or distance has no display, and a leg index or quality
+// outside the schema's coding is a sample this build cannot interpret.
+// NaN deviations are the schema's "not tracking" encoding and stay legal.
+function guidanceIsWellFormed(guidance) {
+  const finite = [guidance.courseRad, guidance.distanceToWaypointM].every(Number.isFinite);
+  const counted = [guidance.legIndex, guidance.waypointCount, guidance.solutionQuality].every(
+    (value) => Number.isInteger(value) && value >= 0,
+  );
+  const deviationsNumeric = [guidance.lateralDeviationM, guidance.verticalDeviationM].every(
+    (value) => typeof value === "number",
+  );
+  return (
+    finite &&
+    counted &&
+    deviationsNumeric &&
+    typeof guidance.toIdent === "string" &&
+    typeof guidance.fromIdent === "string"
+  );
+}
+
+function freezeGuidance(guidance) {
+  return Object.freeze({
+    toIdent: guidance.toIdent,
+    fromIdent: guidance.fromIdent,
+    courseRad: guidance.courseRad,
+    lateralDeviationM: guidance.lateralDeviationM,
+    verticalDeviationM: guidance.verticalDeviationM,
+    distanceToWaypointM: guidance.distanceToWaypointM,
+    legIndex: guidance.legIndex,
+    waypointCount: guidance.waypointCount,
+    solutionQuality: guidance.solutionQuality,
+  });
 }

@@ -14,6 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::runtime::HOST_VEHICLE;
 
+use super::nav_guidance::NavGuidancePublisher;
 use super::{
     ACTIVATION_REVISION, MISSION_SCOPE, MissionTask, NO_DEVICE_DIGEST, PROFILE_DIGEST, PROFILE_ID,
     PROFILE_REVISION, ownship,
@@ -75,6 +76,7 @@ impl MissionTask {
     async fn on_welcome(&mut self, welcome: ServerWelcome) -> bool {
         self.session = Some(welcome.session);
         self.principal = Some(welcome.principal);
+        self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
         self.update(|status| status.session = Some(welcome.session.as_u64()));
         let Some(plan) = self.plan.take() else {
             return true;
