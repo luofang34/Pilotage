@@ -36,6 +36,12 @@ impl MissionTask {
         if !our_pair(granted.vehicle.as_ref(), granted.scope.as_ref()) {
             return;
         }
+        // Fencing is permanent for this task: a later grant naming this
+        // principal must not re-arm the generation or the status, or the
+        // status would claim a lease the tick loop refuses to use.
+        if self.fenced {
+            return;
+        }
         if self.our_principal(granted.principal.as_ref()) {
             if let Some(generation) = granted.generation.as_ref() {
                 self.generation = Some(Generation::new(generation.value));
@@ -101,4 +107,47 @@ impl MissionTask {
 fn our_pair(vehicle: Option<&wire::VehicleId>, scope: Option<&wire::ScopeId>) -> bool {
     vehicle.is_some_and(|id| id.value == HOST_VEHICLE.as_u64())
         && scope.is_some_and(|id| id.value == MISSION_SCOPE)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
+    use pilotage_protocol::PrincipalId;
+    use tokio::sync::{mpsc, watch};
+
+    use super::super::MissionTask;
+    use crate::runtime::{HOST_VEHICLE, automation::AutomationStatus};
+    use pilotage_protocol::wire;
+
+    #[tokio::test]
+    async fn a_grant_after_fencing_does_not_re_arm_the_generation() {
+        let (engine_tx, _engine_rx) = mpsc::channel(4);
+        let (status_tx, status_rx) = watch::channel(AutomationStatus::default());
+        let mut task = MissionTask::without_plan(
+            engine_tx.downgrade(),
+            tokio::time::Instant::now(),
+            status_tx,
+        );
+        task.principal = Some(PrincipalId::new(9));
+        task.fence("test fence");
+        let granted = wire::ScopeLeaseGranted {
+            vehicle: Some(wire::VehicleId {
+                value: HOST_VEHICLE.as_u64(),
+            }),
+            scope: Some(wire::ScopeId {
+                value: super::MISSION_SCOPE.to_owned(),
+            }),
+            principal: Some(wire::PrincipalId { value: 9 }),
+            generation: Some(wire::Generation { value: 5 }),
+            ..Default::default()
+        };
+        task.on_granted_event(&granted);
+        assert!(task.fenced, "fencing is permanent for the task");
+        assert_eq!(
+            task.generation, None,
+            "a later grant must not re-arm a fenced principal"
+        );
+        assert_eq!(status_rx.borrow().lease_generation, None);
+    }
 }

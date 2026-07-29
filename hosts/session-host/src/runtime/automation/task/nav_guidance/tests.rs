@@ -130,3 +130,18 @@ fn an_undefined_deviation_travels_as_nan_and_a_direct_to_leg_has_no_origin() {
     assert!(state.vertical_deviation_m.is_nan());
     assert_eq!(state.solution_quality, 2);
 }
+
+#[test]
+fn a_course_a_hair_under_north_narrows_inside_the_half_open_range() {
+    let mut publisher = NavGuidancePublisher::for_session(SessionId::new(7));
+    // A few f64 ULPs below 2π rounds UP to exactly f32 τ in the
+    // narrowing; the wire contract is half-open [0, 2π), so due north
+    // owns that boundary.
+    let near_north = NavGuidance {
+        course_rad: std::f64::consts::TAU - 1e-9,
+        ..guidance()
+    };
+    let state = sample(publisher.publication(Some(&near_north), 0));
+    assert_eq!(state.course_rad, 0.0, "the boundary folds to due north");
+    assert!((0.0..std::f32::consts::TAU).contains(&state.course_rad));
+}

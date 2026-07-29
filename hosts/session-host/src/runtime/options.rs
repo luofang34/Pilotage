@@ -132,16 +132,7 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
     }
     let cruise_height_m = match mission_var("PILOTAGE_MISSION_CRUISE_HEIGHT")? {
         None => None,
-        Some(value) => {
-            Some(
-                value
-                    .parse::<f64>()
-                    .map_err(|source| HostError::MissionCruiseHeight {
-                        value: value.clone(),
-                        source,
-                    })?,
-            )
-        }
+        Some(value) => Some(parse_cruise_height(&value)?),
     };
     Ok(Some(MissionOptions {
         route,
@@ -150,6 +141,23 @@ fn mission_from_env() -> Result<Option<MissionOptions>, HostError> {
         date,
         cruise_height_m,
     }))
+}
+
+/// Parses and range-screens `PILOTAGE_MISSION_CRUISE_HEIGHT`. A negative
+/// height would plan every waypoint below the launch elevation, and a
+/// non-finite one disables every altitude comparison downstream; zero
+/// legitimately disables the climb phase.
+fn parse_cruise_height(value: &str) -> Result<f64, HostError> {
+    let height = value
+        .parse::<f64>()
+        .map_err(|source| HostError::MissionCruiseHeight {
+            value: value.to_owned(),
+            source,
+        })?;
+    if !height.is_finite() || height < 0.0 {
+        return Err(HostError::MissionCruiseHeightRange { height });
+    }
+    Ok(height)
 }
 
 /// Reads one `PILOTAGE_MISSION_*` variable, treating "unset" as `None` and
@@ -179,4 +187,35 @@ fn parse_anchor(value: &str) -> Result<GeoPointDegrees, HostError> {
         lon_deg: parse(lon)?,
         alt_m: parse(alt)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
+    use super::parse_cruise_height;
+    use crate::error::HostError;
+
+    #[test]
+    fn a_negative_cruise_height_is_refused_with_the_value() {
+        let error = parse_cruise_height("-5.0").expect_err("below launch elevation");
+        assert!(
+            matches!(error, HostError::MissionCruiseHeightRange { height } if height == -5.0),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_cruise_height_is_refused() {
+        let error = parse_cruise_height("NaN").expect_err("not flyable");
+        assert!(matches!(error, HostError::MissionCruiseHeightRange { .. }));
+        let error = parse_cruise_height("inf").expect_err("not flyable");
+        assert!(matches!(error, HostError::MissionCruiseHeightRange { .. }));
+    }
+
+    #[test]
+    fn zero_cruise_height_legitimately_disables_the_climb() {
+        let height = parse_cruise_height("0").expect("zero is the no-climb configuration");
+        assert_eq!(height, 0.0);
+    }
 }

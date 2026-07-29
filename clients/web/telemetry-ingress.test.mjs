@@ -909,3 +909,28 @@ function testNavGuidanceRejectsUninterpretableSamples() {
 }
 testNavGuidanceRejectsUninterpretableSamples();
 console.log("ok - testNavGuidanceRejectsUninterpretableSamples");
+
+function testNavGuidanceReplacementTrackerAcceptsTheSuccessorSession() {
+  // The reconnect contract the cockpit's session reset relies on: a
+  // tracker pinned to a dead session's incarnation refuses the restarted
+  // host forever, so the session boundary REPLACES the tracker and the
+  // replacement accepts the successor identity as its own first pin.
+  const pinned = new NavGuidanceTracker();
+  pinned.observe(guidance(1, { toIdent: "WP01" }), 0);
+  const rejected = pinned.observe(
+    guidance(1, { toIdent: "WP09" }, { sourceIncarnation: INCARNATION_B }),
+    10,
+  );
+  assert.equal(rejected.navGuidance.toIdent, "WP01", "the dead pin persists");
+  assert.equal(pinned.diagnostics().wrongSource, 1);
+
+  const replacement = new NavGuidanceTracker();
+  const accepted = replacement.observe(
+    guidance(1, { toIdent: "WP09" }, { sourceIncarnation: INCARNATION_B }),
+    20,
+  );
+  assert.equal(accepted.navGuidance.toIdent, "WP09", "a fresh tracker pins the new session");
+  assert.equal(replacement.diagnostics().wrongSource, 0);
+}
+testNavGuidanceReplacementTrackerAcceptsTheSuccessorSession();
+console.log("ok - testNavGuidanceReplacementTrackerAcceptsTheSuccessorSession");

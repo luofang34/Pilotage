@@ -72,6 +72,10 @@ pub(super) struct MissionTask {
     /// Stamps the guidance group; bound to the session at the welcome,
     /// since the incarnation token it carries is derived from it.
     nav_guidance: Option<NavGuidancePublisher>,
+    /// Whether this host's UNSTAMPED planar poses are the simulator's
+    /// own state (true only for the deterministic reference adapter).
+    /// Anything else must arrive under a stamped role or be refused.
+    planar_pose_is_truth: bool,
 }
 
 impl MissionTask {
@@ -80,6 +84,7 @@ impl MissionTask {
         start: Instant,
         plan: MissionPlan,
         status: watch::Sender<AutomationStatus>,
+        planar_pose_is_truth: bool,
     ) -> Self {
         Self {
             engine,
@@ -95,6 +100,33 @@ impl MissionTask {
             next_action_id: 0,
             pending_actions: HashMap::new(),
             nav_guidance: None,
+            planar_pose_is_truth,
+        }
+    }
+
+    /// A task with no plan, for unit tests of session/fencing behavior
+    /// that is independent of mission content.
+    #[cfg(test)]
+    pub(super) fn without_plan(
+        engine: mpsc::WeakSender<ToEngine>,
+        start: Instant,
+        status: watch::Sender<AutomationStatus>,
+    ) -> Self {
+        Self {
+            engine,
+            start,
+            plan: None,
+            status,
+            session: None,
+            principal: None,
+            generation: None,
+            fenced: false,
+            mission: None,
+            sequence: 0,
+            next_action_id: 0,
+            pending_actions: HashMap::new(),
+            nav_guidance: None,
+            planar_pose_is_truth: true,
         }
     }
 

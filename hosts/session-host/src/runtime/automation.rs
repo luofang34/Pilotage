@@ -131,16 +131,25 @@ pub(crate) fn prepare(options: &MissionOptions) -> Result<MissionPlan, HostError
 }
 
 /// Spawns the mission principal against `engine_tx`'s actor, sharing the
-/// host's monotonic origin `start`. Returns the task handle and the
-/// status watch.
+/// host's monotonic origin `start`. `planar_pose_is_truth` declares
+/// whether this host's unstamped planar poses are the simulator's own
+/// state — true only for the deterministic reference adapter. Returns
+/// the task handle and the status watch.
 pub(crate) fn spawn_mission_task(
     engine_tx: &mpsc::Sender<ToEngine>,
     start: Instant,
     plan: MissionPlan,
+    planar_pose_is_truth: bool,
 ) -> (JoinHandle<()>, watch::Receiver<AutomationStatus>) {
     let (status_tx, status_rx) = watch::channel(AutomationStatus::default());
     let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
-    let task = task::MissionTask::new(engine_tx.downgrade(), start, plan, status_tx);
+    let task = task::MissionTask::new(
+        engine_tx.downgrade(),
+        start,
+        plan,
+        status_tx,
+        planar_pose_is_truth,
+    );
     let handle = tokio::spawn(async move {
         task.run(outbound_tx, outbound_rx).await;
         tracing::debug!(task = "mission-automation", "task exited");
@@ -230,7 +239,7 @@ pub fn spawn_reference_mission_rig() -> Result<MissionRig, HostError> {
     let (engine, adapter) = super::build_reference(RuntimeOptions::default());
     let (engine_tx, engine_rx) = mpsc::channel(ENGINE_QUEUE_CAPACITY);
     let actor = tokio::spawn(EngineActor::new(engine, adapter, start).run(engine_rx));
-    let (automation, status) = spawn_mission_task(&engine_tx, start, plan);
+    let (automation, status) = spawn_mission_task(&engine_tx, start, plan, true);
     Ok(MissionRig {
         engine_tx,
         status,

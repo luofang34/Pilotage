@@ -208,7 +208,12 @@ async fn spawn_host_runtime(
     let mission = match options.mission.take() {
         Some(mission_options) => {
             let plan = automation::prepare(&mission_options)?;
-            Some(automation::spawn_mission_task(&engine_tx, start, plan))
+            Some(automation::spawn_mission_task(
+                &engine_tx,
+                start,
+                plan,
+                matches!(adapter, AdapterKind::Reference),
+            ))
         }
         None => None,
     };

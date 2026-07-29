@@ -53,7 +53,10 @@ pub struct MissionEngine {
     /// [`MissionEngine::nav_guidance`] cannot serve stale geometry.
     last_solution: Option<NavigationSolution>,
     pending_events: Vec<MissionEvent>,
-    last_yaw_rad: f64,
+    /// The latest known heading. `None` until a sample carries an
+    /// attitude group: intents need the NED→body rotation, and guessing
+    /// zero would silently rotate every command to due north.
+    last_yaw_rad: Option<f64>,
     next_action_id: u64,
     outstanding_arm: Option<u64>,
     arm_needs_send: bool,
@@ -117,7 +120,7 @@ impl MissionEngine {
             counters: MissionCounters::default(),
             last_solution: None,
             pending_events: Vec::new(),
-            last_yaw_rad: 0.0,
+            last_yaw_rad: None,
             next_action_id: 0,
             outstanding_arm: None,
             arm_needs_send: false,
@@ -135,7 +138,9 @@ impl MissionEngine {
             self.counters.rejected_role = self.counters.rejected_role.wrapping_add(1);
             return;
         }
-        self.last_yaw_rad = sample.yaw_rad;
+        if let Some(yaw) = sample.yaw_rad {
+            self.last_yaw_rad = Some(yaw);
+        }
         let position =
             self.plane
                 .from_ned(&NedOffset::new(sample.ned[0], sample.ned[1], sample.ned[2]));

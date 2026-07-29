@@ -17,12 +17,21 @@ PILOTAGE_MISSION_ROUTE=fixture cargo xtask sim --fc aviate-gz
 ```
 
 `PILOTAGE_MISSION_ROUTE` enables the executor (`fixture` selects the
-built-in demo route through the fixture snapshot; any other value is a
-route string over the store configured by `PILOTAGE_MISSION_NAVDATA` +
-`PILOTAGE_MISSION_DATE`). The host logs the pack-for-flight record
-(route, cycle, digest, fixture flag) at startup and the mission state
+built-in demo route). Any other value is a route string expanded against
+the configured navdata: by default the fixture snapshot (so custom
+routes must name fixture idents), or a real synced store when
+`PILOTAGE_MISSION_NAVDATA` points at one, with `PILOTAGE_MISSION_DATE`
+selecting the cycle. The host logs the pack-for-flight record (route,
+cycle, digest, fixture flag) at startup and the mission state
 transitions and counters as it flies. A browser joining the session
 mid-flight sees automation holding `vehicle.motion`.
+
+Terminal behavior: after the final waypoint captures (`PlanComplete`)
+the executor holds a zero-velocity hover — the adapters' brake-then-hold
+takes over — with the vehicle armed and the motion lease held
+indefinitely, and navigation guidance goes absent (the HSI removes the
+needle). Landing, disarm, and lease-release policy at mission end is
+part of the failure-detection scope tracked in issue #245.
 
 Run records in this directory are structured captures of acceptance
 flights: the pack-for-flight line, state transitions, terminal counters,

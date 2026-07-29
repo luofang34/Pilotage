@@ -115,6 +115,15 @@ pub enum HostError {
         #[source]
         source: std::num::ParseFloatError,
     },
+    /// `PILOTAGE_MISSION_CRUISE_HEIGHT` parsed but cannot be flown: a
+    /// negative height would plan every waypoint below the launch
+    /// elevation, and a non-finite one disables every altitude
+    /// comparison downstream.
+    #[error("PILOTAGE_MISSION_CRUISE_HEIGHT must be a finite height >= 0 m, got {height}")]
+    MissionCruiseHeightRange {
+        /// The rejected height in meters.
+        height: f64,
+    },
     /// Loading or selecting the mission navdata snapshot failed.
     #[error("failed to load mission navdata: {0}")]
     MissionNavdata(#[source] crate::mission_navdata::NavdataError),

@@ -209,6 +209,10 @@ export function createCockpitReadout({
   function retireSessionPresentation(phase) {
     instruments.ingress = newSimulatorAvionicsIngress();
     instruments.fcState = new FcStateTracker();
+    // A restarted host mints a new guidance incarnation; a tracker that
+    // survives the session boundary would pin the dead session's identity
+    // and refuse the new one forever.
+    instruments.navGuidance = new NavGuidanceTracker();
     snapshotHistory.reset();
     turnDerivation.reset();
     h264Registry?.closeAll();
@@ -218,6 +222,7 @@ export function createCockpitReadout({
   function beginTelemetrySession() {
     instruments.ingress = newSimulatorAvionicsIngress();
     instruments.fcState = new FcStateTracker();
+    instruments.navGuidance = new NavGuidanceTracker();
     setTelemetrySessionState(els, "awaiting");
   }
 

@@ -165,7 +165,14 @@ impl MissionEngine {
                     self.counters.guidance_refused = self.counters.guidance_refused.wrapping_add(1);
                     return None;
                 };
-                Some(self.compose_intent(&velocity))
+                let Some(yaw) = self.last_yaw_rad else {
+                    // Without a known heading the NED command cannot be
+                    // rotated into the body frame honestly; a guessed
+                    // zero would steer every command toward due north.
+                    self.counters.missing_yaw = self.counters.missing_yaw.wrapping_add(1);
+                    return None;
+                };
+                Some(self.compose_intent(&velocity, yaw))
             }
             Err(refusal) => {
                 self.counters.guidance_refused = self.counters.guidance_refused.wrapping_add(1);
@@ -184,7 +191,7 @@ impl MissionEngine {
     /// rate toward the course of the commanded horizontal velocity —
     /// chosen over the leg course so the nose also follows cross-track
     /// corrections and stays defined on direct-to legs.
-    fn compose_intent(&self, velocity: &NedVelocity) -> ControlIntent {
+    fn compose_intent(&self, velocity: &NedVelocity, yaw_rad: f64) -> ControlIntent {
         let limits = &self.config.limits;
         let (vn, ve) = cap_horizontal(
             velocity.north_mps,
@@ -192,14 +199,14 @@ impl MissionEngine {
             limits.max_horizontal_mps,
         );
         let vd = clamp_symmetric(velocity.down_mps, limits.max_vertical_mps);
-        let (vx, vy) = ned_to_body(vn, ve, self.last_yaw_rad);
+        let (vx, vy) = ned_to_body(vn, ve, yaw_rad);
         let horizontal_mps = (vn * vn + ve * ve).sqrt();
         let yaw_rate = if horizontal_mps < YAW_COURSE_FLOOR_MPS {
             0.0
         } else {
             let course = bearing_rad(vn, ve);
             clamp_symmetric(
-                self.config.yaw_gain_per_s * wrap_to_pi(course - self.last_yaw_rad),
+                self.config.yaw_gain_per_s * wrap_to_pi(course - yaw_rad),
                 limits.max_yaw_rate_rps,
             )
         };

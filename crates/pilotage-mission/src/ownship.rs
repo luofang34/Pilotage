@@ -33,8 +33,12 @@ pub struct OwnshipSample {
     /// Velocity in NED, m/s. The synthesized observation is
     /// position-only; velocity aiding is a designed extension.
     pub ned_velocity: [f64; 3],
-    /// Heading, radians, zero north, positive toward east.
-    pub yaw_rad: f64,
+    /// Heading, radians, zero north, positive toward east. Absent when
+    /// the source carried no attitude group: the engine can still feed
+    /// fusion from position, but it cannot rotate NED into the body
+    /// frame honestly, so a tick without a known heading emits no
+    /// intent (zero would silently rotate commands to due north).
+    pub yaw_rad: Option<f64>,
     /// Which estimator family produced this sample.
     pub role: TruthRole,
     /// Monotonic acquisition time on the engine's clock domain.

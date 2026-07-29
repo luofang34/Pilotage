@@ -74,6 +74,11 @@ impl MissionTask {
     /// mission ceilings to the advertised envelope, build the flight
     /// engine, then announce the profile and request the motion lease.
     async fn on_welcome(&mut self, welcome: ServerWelcome) -> bool {
+        // Fencing is permanent for this task: even a fresh welcome must
+        // not restart activation or re-lease the motion scope.
+        if self.fenced {
+            return false;
+        }
         self.session = Some(welcome.session);
         self.principal = Some(welcome.principal);
         self.nav_guidance = Some(NavGuidancePublisher::for_session(welcome.session));
@@ -82,7 +87,13 @@ impl MissionTask {
             return true;
         };
         let mut config = plan.config();
-        tighten_limits(&mut config.limits, &welcome.host_capabilities);
+        if !tighten_limits(&mut config.limits, &welcome.host_capabilities) {
+            // Streaming velocity intents the host never advertised would
+            // fail open against the command gate; a mission with no
+            // authorized envelope does not fly.
+            self.fence("no vehicle.motion velocity capability advertised");
+            return false;
+        }
         let limits = config.limits;
         match MissionEngine::new(
             &plan.navdata.snapshot,
@@ -212,7 +223,7 @@ impl MissionTask {
         if !ours {
             return;
         }
-        if let Some(ownship) = ownship::ownship_from_wire(sample, now) {
+        if let Some(ownship) = ownship::ownship_from_wire(sample, now, self.planar_pose_is_truth) {
             mission.on_ownship(&ownship, now);
         }
     }
@@ -223,10 +234,12 @@ impl MissionTask {
 /// ceiling; a zero advertisement means "no bound" on the wire and leaves
 /// the configured ceiling in force. Vertical mirrors the command gate's
 /// effective bound (`max_vertical`, falling back to `max_linear`).
-fn tighten_limits(limits: &mut MissionLimits, capabilities: &wire::HostCapabilities) {
+/// Returns false when no velocity capability is advertised at all — the
+/// mission has no authorized envelope and must not fly.
+fn tighten_limits(limits: &mut MissionLimits, capabilities: &wire::HostCapabilities) -> bool {
     let Some(intent) = velocity_capability(capabilities) else {
-        warn!("no vehicle.motion velocity capability advertised; keeping configured limits");
-        return;
+        error!("no vehicle.motion velocity capability advertised; the mission cannot fly");
+        return false;
     };
     tighten(&mut limits.max_horizontal_mps, intent.max_linear);
     let vertical = if intent.max_vertical > 0.0 {
@@ -236,6 +249,7 @@ fn tighten_limits(limits: &mut MissionLimits, capabilities: &wire::HostCapabilit
     };
     tighten(&mut limits.max_vertical_mps, vertical);
     tighten(&mut limits.max_yaw_rate_rps, intent.max_angular);
+    true
 }
 
 fn tighten(limit: &mut f64, advertised: f32) {
@@ -267,4 +281,55 @@ fn velocity_capability(capabilities: &wire::HostCapabilities) -> Option<&wire::I
         .intents
         .iter()
         .find(|intent| intent.family == wire::IntentFamily::Velocity as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    fn advertised(max_linear: f32) -> wire::HostCapabilities {
+        wire::HostCapabilities {
+            vehicles: vec![wire::VehicleDescriptor {
+                vehicle: Some(wire::VehicleId {
+                    value: HOST_VEHICLE.as_u64(),
+                }),
+                scopes: vec![wire::ScopeDescriptor {
+                    scope: Some(wire::ScopeId {
+                        value: MISSION_SCOPE.to_owned(),
+                    }),
+                    intents: vec![wire::IntentCapability {
+                        family: wire::IntentFamily::Velocity as i32,
+                        max_linear,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_missing_velocity_capability_is_mission_fatal_not_fail_open() {
+        let mut limits = MissionLimits::default();
+        let configured = limits;
+        assert!(!tighten_limits(
+            &mut limits,
+            &wire::HostCapabilities::default()
+        ));
+        assert_eq!(
+            limits, configured,
+            "refusal, not silent flight on unadvertised ceilings"
+        );
+    }
+
+    #[test]
+    fn an_advertised_envelope_tightens_the_configured_ceilings() {
+        let mut limits = MissionLimits::default();
+        assert!(tighten_limits(&mut limits, &advertised(1.0)));
+        assert_eq!(limits.max_horizontal_mps, 1.0);
+    }
 }

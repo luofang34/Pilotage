@@ -99,4 +99,8 @@ pub struct MissionCounters {
     pub guidance_refused: u64,
     /// Arm actions the vehicle rejected.
     pub arm_rejected: u64,
+    /// Ticks that produced a guided velocity but no intent because no
+    /// sample has carried a heading yet (the NED→body rotation needs
+    /// one; zero would steer toward due north).
+    pub missing_yaw: u64,
 }

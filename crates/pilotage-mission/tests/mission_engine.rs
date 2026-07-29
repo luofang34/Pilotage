@@ -45,7 +45,7 @@ impl Truth {
         OwnshipSample {
             ned: self.ned,
             ned_velocity: self.ned_velocity,
-            yaw_rad: self.yaw,
+            yaw_rad: Some(self.yaw),
             role: TruthRole::SimulationTruth,
             acquired_at: now,
             sequence: self.sequence,
@@ -413,4 +413,63 @@ fn observation_silence_refuses_guidance_with_one_surfaced_event() {
         0
     );
     assert!(engine.counters().guidance_refused > refused);
+}
+
+/// A sample stream that never carries a heading feeds fusion but cannot
+/// be rotated into the body frame: no intent, a counted refusal, and
+/// flight resumes the moment a heading arrives.
+#[test]
+fn a_missing_heading_withholds_intents_and_is_counted() {
+    // Zero cruise height goes straight to Enroute, where intents need
+    // the NED→body rotation (the climb command is body-vertical only).
+    let blob = fixture::demo_blob(ANCHOR).expect("demo blob encodes");
+    let (snapshot, provenance) = decode_snapshot(&blob, true).expect("demo blob decodes");
+    let anchor = GeodeticPosition::new(
+        ANCHOR.lat_deg.to_radians(),
+        ANCHOR.lon_deg.to_radians(),
+        ANCHOR.alt_m,
+    );
+    let mut config = MissionConfig::new(
+        fixture::DEMO_ROUTE.to_owned(),
+        anchor,
+        ClockDomainId::new(7),
+    );
+    config.cruise_height_m = 0.0;
+    let (mut engine, _record) =
+        MissionEngine::new(&snapshot, provenance, config).expect("mission builds");
+    let mut truth = Truth::new();
+    let mut now = MonotonicNanos::from_nanos(0);
+    let mut armed = false;
+    let mut saw_missing_yaw_intentless_tick = false;
+    for _ in 0..40 {
+        now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+        truth.sequence = truth.sequence.wrapping_add(1);
+        let mut sample = truth.sample(now);
+        sample.yaw_rad = None;
+        engine.on_ownship(&sample, now);
+        let out = engine.tick(now);
+        if let Some(action) = out.action {
+            engine.on_action_result(action.action_id, true);
+            armed = true;
+        }
+        if armed && matches!(out.state, MissionState::Enroute) && out.intent.is_none() {
+            saw_missing_yaw_intentless_tick = true;
+        }
+        assert!(
+            out.intent.is_none(),
+            "an unheaded stream must never produce a body-frame intent"
+        );
+    }
+    assert!(saw_missing_yaw_intentless_tick, "enroute was reached");
+    assert!(engine.counters().missing_yaw > 0, "the refusal is counted");
+
+    // One headed sample restores flight on the very next tick.
+    now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
+    truth.sequence = truth.sequence.wrapping_add(1);
+    engine.on_ownship(&truth.sample(now), now);
+    let out = engine.tick(now);
+    assert!(
+        out.intent.is_some(),
+        "a known heading resumes intent emission"
+    );
 }

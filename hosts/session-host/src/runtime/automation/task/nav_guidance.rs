@@ -109,7 +109,7 @@ fn to_wire(guidance: &NavGuidance, stamp: wire::MeasurementStamp) -> wire::NavGu
         stamp: Some(stamp),
         to_ident: guidance.to_ident.clone(),
         from_ident: guidance.from_ident.clone().unwrap_or_default(),
-        course_rad: guidance.course_rad as f32,
+        course_rad: course_to_wire(guidance.course_rad),
         lateral_deviation_m: deviation_to_wire(guidance.lateral_deviation_m),
         vertical_deviation_m: deviation_to_wire(guidance.vertical_deviation_m),
         distance_to_waypoint_m: guidance.distance_to_waypoint_m as f32,
@@ -125,4 +125,16 @@ fn to_wire(guidance: &NavGuidance, stamp: wire::MeasurementStamp) -> wire::NavGu
 
 fn deviation_to_wire(deviation_m: Option<f64>) -> f32 {
     deviation_m.map_or(f32::NAN, |value| value as f32)
+}
+
+/// Narrows a course to the wire's half-open `[0, 2π)` contract. An f64 a
+/// few ULPs below 2π rounds UP to exactly f32 τ in the narrowing, which
+/// would leave the documented range; due north owns that boundary.
+fn course_to_wire(course_rad: f64) -> f32 {
+    let narrowed = course_rad as f32;
+    if narrowed >= std::f32::consts::TAU {
+        0.0
+    } else {
+        narrowed
+    }
 }
