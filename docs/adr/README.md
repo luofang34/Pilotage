@@ -22,10 +22,21 @@ One file per decision, numbered in acceptance order. See
 | [0013](0013-interactive-and-accelerated-sessions.md) | Single-vehicle operation and horizontally scalable accelerated training | Accepted |
 | [0014](0014-protobuf-wire-schema.md) | Protobuf as the wire-schema source of truth | Accepted |
 | [0015](0015-workspace-quality-gates.md) | Workspace-enforced quality gates | Accepted |
-| [0016](0016-codec-pluggable-media-plane.md) | Codec-pluggable media plane; the control core never sees the codec | Accepted |
+| [0016](0016-codec-pluggable-media-plane.md) | The media plane is codec-pluggable; the control core never sees the codec | Accepted |
 | [0017](0017-instrument-display-runtime.md) | Instrument display runtime as a no_std sans-IO crate family emitting a versioned scene-command IR | Accepted |
 | [0018](0018-avionics-telemetry-and-aviate-adapter.md) | Avionics state rides telemetry additively; Aviate joins through a MAVLink adapter | Accepted |
 | [0019](0019-pluggable-vehicle-link-shm-first.md) | Vehicle links are pluggable below the adapter; co-located SITL binds shared memory | Accepted |
+| [0020](0020-video-capture-identity-and-clock-mapping.md) | Video frames carry a capture identity and an explicit clock mapping | Accepted |
+| [0021](0021-simulator-camera-calibration-contract.md) | Versioned, hashed simulator camera/design-eye calibration | Accepted |
+| [0022](0022-geospatial-projection-availability-contract.md) | Transport-independent geospatial, projection, and availability contract | Accepted |
+| [0023](0023-vehicle-side-decomposition-fc-navigate-communicate.md) | Vehicle-side decomposition: flight control, Navigate, and Communicate behind typed contracts | Proposed |
+| [0024](0024-navigation-authority-boundary.md) | Control-grade estimation stays with the flight controller; Navigate owns the global solution and guidance | Proposed |
+| [0025](0025-client-optional-operation-automation-principals.md) | Client-optional operation: mission execution and agents are automation-class principals | Proposed |
+| [0026](0026-host-capability-profiles.md) | Client posture follows discovered host capability: full-authority, data-gateway, or embedded | Proposed |
+| [0027](0027-optional-coordination-server.md) | Optional coordination server: identity, rendezvous, and entitlements — never the session data plane | Proposed |
+| [0028](0028-multi-vehicle-and-swarm-coordinator-hosts.md) | Multi-vehicle operation scales from roster attach to swarm aggregation via coordinator hosts | Proposed |
+| [0029](0029-panel-layout-look-plugins.md) | Panels, layout, and look are data-driven plugins over the scene and state contracts | Proposed |
+| [0030](0030-communicate-navdata-provisioning.md) | The host consumes aeronautical navdata through Communicate's cycle-dated snapshot surface | Proposed |
 
 ## Provenance
 
