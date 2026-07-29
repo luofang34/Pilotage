@@ -11,10 +11,11 @@ No client attached at any point. Navigate pin ace50f68b3ffae6237bbb53f6af6
 Purpose: re-record the MISSION-01 chain at the turn-types Navigate pin.
 Sequencing is now groundspeed-aware (advance() takes the commanded
 groundspeed, cruise bounded by the tightened ceiling) and every sequence
-event carries its reason. At this ceiling (2.5 m/s) the bank-limit model
-earns a turn radius of ~2 m, so anticipation distance never approaches
-the 100 m capture radius: both advances report reason=Overflown, exactly
-as the cdi_realism suite predicts for every mission at current config.
+event carries its reason. At the commanded groundspeed (2.0 m/s cruise,
+under the 2.5 m/s ceiling) the bank-limit model earns a turn radius of
+~1.3 m, so anticipation distance never approaches the 100 m capture
+radius: both advances report reason=Overflown, exactly as the
+cdi_realism suite predicts for every mission at current config.
 
 Chain exercised end to end (unchanged from MISSION-01):
   Communicate fixture blob (real .acnav container, sha256-verified decode)
@@ -49,8 +50,9 @@ Zero GuidanceRefused events, zero FrameRejected lines in the host log for
 the mission principal over the full flight. Leg timings corroborate the
 capture geometry: the DEMOB leg (185.6 m plus the post-sequence
 cross-track transient) ran 77 s and the final leg completed 39 s after
-its advance — the terminal fix captures 100 m out, 76.8 m of the
-176.8 m leg plus transient at the tapering approach speed.
+its advance — the terminal fix captures 100 m out, and the corner's
+100 m run-in already projects ~29 m along the outbound course, leaving
+~48 m of along-track plus the corner transient to null.
 
 Gate context: cargo fmt --check; clippy --all-targets -D warnings;
 mission + session-host tests 136 passed (cdi_realism 4/4, twice,

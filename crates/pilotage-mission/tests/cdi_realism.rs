@@ -1,5 +1,5 @@
-//! CDI realism (Pilotage #249): the display-facing cross-track deviation
-//! is checked closed-loop, against a vehicle that is actually off course.
+//! CDI realism: the display-facing cross-track deviation is checked
+//! closed-loop, against a vehicle that is actually off course.
 //!
 //! A deviation readout can be wrong in three ways a static geometry test
 //! never reaches: it can carry the wrong sign, it can carry a magnitude
@@ -26,9 +26,11 @@
 #[path = "cdi_realism/closed_loop.rs"]
 mod closed_loop;
 
-use closed_loop::{CORNER_IDENTS, Rig, corner_engine, fixture_engine, right_of_course_ned};
-use navigate_fpl::SequenceReason;
-use pilotage_mission::{MissionEvent, NavQuality};
+use closed_loop::{
+    CORNER_IDENTS, Rig, corner_engine, fixture_engine, right_of_course_ned, try_engine_over_offsets,
+};
+use navigate_fpl::{PlanActivationError, SequenceReason};
+use pilotage_mission::{MissionBuildError, MissionEvent, NavQuality};
 
 /// Lateral disturbance a displacement scenario applies, m/s. Above the
 /// guidance correction ceiling, so the deviation grows while the push is
@@ -310,4 +312,32 @@ fn cdi_realism_demo_fixture_transition_deflects_right_and_recovers() {
 fn wrap_to_pi(angle_rad: f64) -> f64 {
     let wrapped = (angle_rad + core::f64::consts::PI).rem_euclid(core::f64::consts::TAU);
     wrapped - core::f64::consts::PI
+}
+
+/// A route whose final leg cannot clear the capture radius refuses to
+/// build as a typed activation error, and the rendered refusal names the
+/// offending leg — what an operator reading the single host log line
+/// actually sees. Guards the boundary where the sequencer's activation
+/// check surfaces out of `MissionEngine::new`.
+#[test]
+fn activation_refuses_a_leg_no_longer_than_the_capture_radius() {
+    let idents = ["TIGHA", "TIGHB", "TIGHC"];
+    // 500 m first leg, then a 90 m closer — inside the 100 m capture
+    // radius the mission defaults configure.
+    let offsets = [(0.0, 400.0), (0.0, 900.0), (-90.0, 900.0)];
+    let error = try_engine_over_offsets(&idents, &offsets, "TIGHA TIGHB TIGHC")
+        .map(|_| ())
+        .expect_err("a 90 m leg inside the 100 m capture radius must refuse to build");
+    assert!(
+        matches!(
+            error,
+            MissionBuildError::PlanActivation(PlanActivationError::CaptureRadiusExceedsLeg { .. })
+        ),
+        "expected a typed capture-radius refusal, got {error:?}"
+    );
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("TIGHC") && rendered.contains("capture radius"),
+        "the rendered refusal must name the offending leg: {rendered}"
+    );
 }

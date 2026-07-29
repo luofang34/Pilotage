@@ -44,6 +44,6 @@ pub enum MissionBuildError {
     /// defect, an execution parameter that cannot be flown, or a
     /// waypoint constraint the sequencer refuses (an approach speed
     /// under the floor, a leg no longer than the capture radius).
-    #[error("mission plan cannot be activated")]
+    #[error("mission plan cannot be activated: {0}")]
     PlanActivation(#[from] PlanActivationError),
 }

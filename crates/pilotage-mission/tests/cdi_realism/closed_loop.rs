@@ -14,8 +14,8 @@ use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
-    MissionConfig, MissionEngine, MissionOutput, MissionState, NavGuidance, OwnshipSample,
-    TruthRole, decode_snapshot,
+    MissionBuildError, MissionConfig, MissionEngine, MissionOutput, MissionPlanRecord,
+    MissionState, NavGuidance, OwnshipSample, TruthRole, decode_snapshot,
 };
 use pilotage_protocol::{ControlAction, ControlIntent, ReferenceFrame};
 
@@ -224,10 +224,23 @@ pub fn fixture_engine() -> MissionEngine {
 /// blob container published data travels.
 #[must_use]
 pub fn corner_engine() -> MissionEngine {
+    let (engine, _record) = try_engine_over_offsets(&CORNER_IDENTS, &CORNER_OFFSETS, CORNER_ROUTE)
+        .expect("the corner mission builds");
+    engine
+}
+
+/// Packs arbitrary NED fix offsets through the blob container published
+/// data travels and attempts the mission build, surfacing the typed
+/// refusal a route the sequencer cannot activate earns.
+pub fn try_engine_over_offsets(
+    idents: &[&str],
+    offsets: &[(f64, f64)],
+    route: &str,
+) -> Result<(MissionEngine, MissionPlanRecord), MissionBuildError> {
     let plane = LocalTangentPlane::new(anchor_position()).expect("the anchor is plausible");
-    let points = CORNER_IDENTS
+    let points = idents
         .iter()
-        .zip(CORNER_OFFSETS)
+        .zip(offsets.iter().copied())
         .map(|(ident, (north_m, east_m))| {
             let position = plane.from_ned(&NedOffset::new(north_m, east_m, 0.0));
             NavPoint::new(
@@ -240,10 +253,12 @@ pub fn corner_engine() -> MissionEngine {
             )
         })
         .collect();
-    let cycle = NavDataCycle::faa_nasr(CORNER_EFFECTIVE_DATE).expect("the corner cycle is valid");
+    let cycle = NavDataCycle::faa_nasr(CORNER_EFFECTIVE_DATE).expect("the cycle is valid");
     let snapshot = NavDataSnapshot::new(cycle, points);
-    let blob = blob::encode(&snapshot).expect("the corner snapshot encodes");
-    engine_over(&blob, CORNER_ROUTE)
+    let blob = blob::encode(&snapshot).expect("the snapshot encodes");
+    let (snapshot, provenance) = decode_snapshot(&blob, true).expect("the blob decodes");
+    let config = MissionConfig::new(route.to_owned(), anchor_position(), ClockDomainId::new(7));
+    MissionEngine::new(&snapshot, provenance, config)
 }
 
 /// The anchor as the engine sees it: radians and meters.
