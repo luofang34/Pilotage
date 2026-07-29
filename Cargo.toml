@@ -23,6 +23,7 @@ members = [
     "crates/pilotage-instrument-panels",
     "crates/pilotage-instrument-raster",
     "crates/pilotage-evidence",
+    "crates/pilotage-mission",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
@@ -44,6 +45,19 @@ edition = "2024"
 # types, the transport, and the canonical object name cannot drift apart.
 aviate-xil-contract = { git = "https://github.com/luofang34/Aviate.git", rev = "ac9bd248406a892fbe97a712d921326c96abd8b6" }
 aviate-xil-shm = { git = "https://github.com/luofang34/Aviate.git", rev = "ac9bd248406a892fbe97a712d921326c96abd8b6" }
+# The Navigate crates are consumed only at one exact upstream revision:
+# all five crates must always pin the identical rev so the contract
+# vocabulary, fusion, plan sequencing, guidance, and geodesy cannot
+# drift apart (the same discipline as the aviate-xil pins above).
+navigate-contract = { git = "https://github.com/luofang34/Navigate.git", rev = "dcee4e14e93d8fccb0a9f89e4be38abc0804861a" }
+navigate-geodesy = { git = "https://github.com/luofang34/Navigate.git", rev = "dcee4e14e93d8fccb0a9f89e4be38abc0804861a" }
+navigate-fusion = { git = "https://github.com/luofang34/Navigate.git", rev = "dcee4e14e93d8fccb0a9f89e4be38abc0804861a" }
+navigate-fpl = { git = "https://github.com/luofang34/Navigate.git", rev = "dcee4e14e93d8fccb0a9f89e4be38abc0804861a" }
+navigate-guidance = { git = "https://github.com/luofang34/Navigate.git", rev = "dcee4e14e93d8fccb0a9f89e4be38abc0804861a" }
+aerocontext-core = "0.4.5"
+aerocontext-planning = "0.4.5"
+aerocontext-navdata = { version = "0.4.5", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = { version = "2.0.18", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
@@ -84,6 +98,7 @@ pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-adapter-aviate = { path = "adapters/aviate" }
 pilotage-adapter-px4 = { path = "adapters/px4" }
 pilotage-session = { path = "crates/pilotage-session" }
+pilotage-mission = { path = "crates/pilotage-mission" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

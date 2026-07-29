@@ -20,7 +20,12 @@ pilotage-adapter-reference = { workspace = true }
 pilotage-adapter-gazebo = { workspace = true }
 pilotage-adapter-aviate = { workspace = true }
 pilotage-adapter-px4 = { workspace = true }
+pilotage-mission = { workspace = true }
 pilotage-timing = { workspace = true }
+navigate-contract = { workspace = true }
+aerocontext-core = { workspace = true }
+aerocontext-navdata = { workspace = true }
+chrono = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
 wtransport = { workspace = true, features = ["quinn"] }
