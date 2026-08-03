@@ -19,6 +19,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Workspace resolution touches the private Navigate git dependency even
+  # for a single-crate build; the git CLI can use the runner's rewritten
+  # ssh credentials, libgit2 cannot.
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   FIXTURES: crates/pilotage-evidence/tests/fixtures
 
 jobs:
@@ -32,6 +36,17 @@ jobs:
           # commits against real history; a shallow clone would make every
           # recorded baseline unverifiable.
           fetch-depth: 0
+
+      - name: Authorize the private Navigate dependency
+        env:
+          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
+          chmod 600 ~/.ssh/navigate_ci
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global core.sshCommand "ssh -i ~/.ssh/navigate_ci -o IdentitiesOnly=yes"
+          git config --global url."ssh://git@github.com/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
