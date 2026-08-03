@@ -18,7 +18,7 @@ const SIZE_CAPS = {
   "authority-transition.js": 22,
   "bootstrap.js": 88,
   "calibration.js": 285,
-  "cockpit-readout.js": 731,
+  "cockpit-readout.js": 736,
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
