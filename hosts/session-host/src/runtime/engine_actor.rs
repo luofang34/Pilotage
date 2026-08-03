@@ -3,13 +3,15 @@
 //! messages here instead of touching engine state directly, so the state
 //! machine is driven from exactly one place.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{StepBudget, VehicleAdapter};
+use pilotage_protocol::{VehicleId, wire};
 use pilotage_session::{ClientKey, DomainEnvelope, SessionAction, SessionEngine, SessionOutcome};
 use pilotage_timing::{BoundedLatencyLog, MonoTimestamp, Stage, StageLatency};
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -19,7 +21,9 @@ use crate::runtime::wire_codec::{
     encode_envelope_message, encode_pong_datagram, encode_telemetry_datagram,
 };
 
+mod command;
 mod telemetry;
+pub use command::ToEngine;
 use telemetry::sample_to_wire;
 
 #[cfg(test)]
@@ -49,34 +53,6 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(10);
 /// Capacity of the per-stage latency ring buffer dumped at shutdown.
 const LATENCY_LOG_CAPACITY: usize = 4096;
 
-/// One command a connection task submits to the engine actor.
-#[derive(Debug)]
-pub enum ToEngine {
-    /// A client connected; the actor should register its outbound sender in
-    /// the client registry keyed on `client`.
-    ClientConnected {
-        /// Driver-assigned key for the new connection.
-        client: ClientKey,
-        /// Outbound sender the actor unicasts/broadcasts through.
-        sender: mpsc::Sender<ToConnection>,
-    },
-    /// A decoded client message ready for [`SessionEngine::handle_client_message`].
-    ClientMessage {
-        /// Sender of the message.
-        client: ClientKey,
-        /// The decoded message.
-        message: DomainEnvelope,
-        /// The driver's receive timestamp, for staleness/latency accounting.
-        now: MonoTimestamp,
-    },
-    /// A one-shot latency summary request, used by the shutdown path to log
-    /// the accumulated per-stage timings before the process exits.
-    DumpLatencySummary {
-        /// Where to send the formatted summary line.
-        reply: oneshot::Sender<String>,
-    },
-}
-
 /// Owns the [`SessionEngine`], the embedded vehicle adapter, the client
 /// registry, and the per-stage latency log; runs until its command channel
 /// closes.
@@ -98,6 +74,11 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// was already fenced, so an unenacted policy means the vehicle may
     /// still be executing its last command with nobody in control.
     link_loss_enact_failures: u64,
+    /// Latest navigation guidance per vehicle, published by the host's
+    /// navigation component (ADR-0031). A vehicle with no entry has no
+    /// guidance to show: its telemetry carries the field absent rather
+    /// than a centered or zeroed one.
+    nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -124,6 +105,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             action_dedup: ActionDedup::default(),
             adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
+            nav_guidance: BTreeMap::new(),
             start,
         }
     }
@@ -161,6 +143,14 @@ impl<A: VehicleAdapter> EngineActor<A> {
             } => {
                 self.on_client_message(client, message, now);
             }
+            ToEngine::NavGuidance { vehicle, state } => match state {
+                Some(state) => {
+                    self.nav_guidance.insert(vehicle, *state);
+                }
+                None => {
+                    self.nav_guidance.remove(&vehicle);
+                }
+            },
             ToEngine::DumpLatencySummary { reply } => {
                 let summary = self.latency_summary();
                 // The receiver may have already given up waiting; a dropped
@@ -220,7 +210,16 @@ impl<A: VehicleAdapter> EngineActor<A> {
     fn broadcast_telemetry(&mut self, now: MonoTimestamp) {
         let batch = self.adapter.sample_telemetry();
         for sample in batch.samples {
-            let wire_sample = sample_to_wire(sample, now);
+            let vehicle = sample.vehicle;
+            let mut wire_sample = sample_to_wire(sample, now);
+            // Guidance is a host-internal side input, not adapter output
+            // (ADR-0031): the assembly attaches the vehicle's latest
+            // state, re-publishing it unchanged until the navigation
+            // component supplies a new one.
+            wire_sample.nav_guidance = self
+                .nav_guidance
+                .get(&vehicle)
+                .map(|state| Box::new(state.clone()));
             let bytes = encode_telemetry_datagram(wire_sample);
             self.broadcast_datagram(bytes);
         }

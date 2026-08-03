@@ -5,6 +5,7 @@ import {
   COHERENCE,
   FcStateTracker,
   INCARNATION_POLICY,
+  NavGuidanceTracker,
   serialIsNewer,
   stampFaultForRole,
 } from "./telemetry-ingress.js";
@@ -761,3 +762,175 @@ function testFcVerdictLaneIsCarriedAndSanitized() {
 }
 testFcVerdictLaneIsCarriedAndSanitized();
 console.log("ok - testFcVerdictLaneIsCarriedAndSanitized");
+
+function guidance(sequence, overrides = {}, stampOverrides = {}) {
+  return {
+    toIdent: "WP02",
+    fromIdent: "WP01",
+    courseRad: 1.25,
+    lateralDeviationM: -30,
+    verticalDeviationM: 12.5,
+    distanceToWaypointM: 3704,
+    legIndex: 2,
+    waypointCount: 5,
+    solutionQuality: 0,
+    ...overrides,
+    stamp: {
+      sourceId: 0x0a1en,
+      sourceIncarnation: INCARNATION_A,
+      sourceEpoch: 1,
+      sequence,
+      acquiredAtNanos: BigInt(sequence) * 1_000_000n,
+      clock: 3, // host-monotonic: the navigation-solution role's only clock
+      role: 6,
+      integrity: 1, // unprotected: a host-internal side input
+      ...stampOverrides,
+    },
+  };
+}
+
+function testNavGuidanceAgesFromTheNewestAcceptedSample() {
+  const tracker = new NavGuidanceTracker();
+  assert.equal(tracker.observe(null, 0), null, "no guidance before any sample");
+
+  let view = tracker.observe(guidance(1), 1000);
+  assert.equal(view.ageMs, 0);
+  assert.equal(view.navGuidance.toIdent, "WP02");
+  assert.equal(view.navGuidance.lateralDeviationM, -30, "meters reach the display profile raw");
+  assert.equal(view.navGuidance.stamp, undefined, "the snapshot carries values, not provenance");
+
+  // The SAME sample re-published keeps aging: duplicates never refresh.
+  view = tracker.observe(guidance(1), 4500);
+  assert.equal(view.ageMs, 3500, "duplicate must not reset the age clock");
+
+  // A NEW sample restarts freshness and replaces the leg.
+  view = tracker.observe(guidance(2, { toIdent: "WP03", legIndex: 3 }), 4600);
+  assert.equal(view.ageMs, 0);
+  assert.equal(view.navGuidance.toIdent, "WP03");
+
+  // Silence ages the last accepted sample; the panel's freshness policy,
+  // not this tracker, decides when that stops displaying.
+  assert.equal(tracker.observe(null, 9600).ageMs, 5000);
+  assert.equal(tracker.diagnostics().accepted, 2);
+  assert.equal(tracker.diagnostics().duplicates, 1);
+}
+testNavGuidanceAgesFromTheNewestAcceptedSample();
+console.log("ok - testNavGuidanceAgesFromTheNewestAcceptedSample");
+
+function testNavGuidanceRejectsReorderedAndOldSamples() {
+  const tracker = new NavGuidanceTracker();
+  tracker.observe(guidance(10, { toIdent: "WP10" }), 1000);
+
+  // A reordered OLDER sample must not present as fresh, and must not
+  // regress the displayed leg to one already flown.
+  let view = tracker.observe(guidance(9, { toIdent: "WP09" }), 4500);
+  assert.equal(view.navGuidance.toIdent, "WP10", "older sequence must not replace the leg");
+  assert.equal(view.ageMs, 3500, "older sequence must not refresh age");
+
+  // Wrapping serial order: u32 wrap is an advance, not a regression.
+  const wrapped = new NavGuidanceTracker();
+  wrapped.observe(guidance(0xffffffff), 0);
+  assert.equal(wrapped.observe(guidance(0), 10).ageMs, 0, "u32 sequence wrap is an advance");
+
+  // A newer epoch (navigation restart) restarts the numbering; an older
+  // epoch is a replay.
+  view = tracker.observe(guidance(1, { toIdent: "WP01" }, { sourceEpoch: 2 }), 4600);
+  assert.equal(view.navGuidance.toIdent, "WP01", "newer epoch restarts the numbering");
+  view = tracker.observe(guidance(50, { toIdent: "WP50" }, { sourceEpoch: 1 }), 4700);
+  assert.equal(view.navGuidance.toIdent, "WP01", "older epoch is a replay");
+}
+testNavGuidanceRejectsReorderedAndOldSamples();
+console.log("ok - testNavGuidanceRejectsReorderedAndOldSamples");
+
+function testNavGuidancePinsIdentityAndValidatesProvenance() {
+  const tracker = new NavGuidanceTracker();
+  tracker.observe(guidance(1, { toIdent: "WP01" }), 0);
+
+  // Pinned identity: another incarnation or id is not this stream.
+  let view = tracker.observe(
+    guidance(2, { toIdent: "OTHER" }, { sourceIncarnation: INCARNATION_B }),
+    10,
+  );
+  assert.equal(view.navGuidance.toIdent, "WP01", "foreign incarnation rejected");
+  view = tracker.observe(guidance(2, { toIdent: "OTHER" }, { sourceId: 7n }), 20);
+  assert.equal(view.navGuidance.toIdent, "WP01", "foreign source id rejected");
+  assert.equal(tracker.diagnostics().wrongSource, 2);
+
+  // Malformed provenance is rejected whole. The role gate is the load-
+  // bearing one: guidance is display context, never a stand-in for the
+  // estimate lane, so an estimate-role sample is not guidance.
+  for (const stampOverrides of [
+    { role: 1 },
+    { role: 3 },
+    { clock: 2 }, // simulation clock on a host-computed solution
+    { integrity: 0 }, // unspecified integrity
+    { sourceEpoch: -1 },
+    { acquiredAtNanos: 5 }, // not a BigInt u64
+    { sourceIncarnation: "abc" },
+  ]) {
+    view = tracker.observe(guidance(3, { toIdent: "BAD" }, stampOverrides), 30);
+    assert.equal(
+      view.navGuidance.toIdent,
+      "WP01",
+      `must reject ${JSON.stringify(stampOverrides)}`,
+    );
+  }
+  assert.equal(tracker.diagnostics().invalidStamps, 7);
+  assert.equal(tracker.diagnostics().lastRejectReason, "invalidStamps");
+}
+testNavGuidancePinsIdentityAndValidatesProvenance();
+console.log("ok - testNavGuidancePinsIdentityAndValidatesProvenance");
+
+function testNavGuidanceRejectsUninterpretableSamples() {
+  const tracker = new NavGuidanceTracker();
+  tracker.observe(guidance(1, { toIdent: "WP01" }), 0);
+
+  for (const overrides of [
+    { courseRad: NaN },
+    { distanceToWaypointM: Infinity },
+    { legIndex: -1 },
+    { waypointCount: 1.5 },
+    { toIdent: 42 },
+  ]) {
+    const view = tracker.observe(guidance(9, { toIdent: "BAD", ...overrides }), 10);
+    assert.equal(view.navGuidance.toIdent, "WP01", `must reject ${JSON.stringify(overrides)}`);
+  }
+  assert.equal(tracker.diagnostics().malformedGuidance, 5);
+
+  // NaN deviations are the schema's "not tracking" encoding, not a fault:
+  // they are accepted so the display profile can remove that deviation.
+  const view = tracker.observe(
+    guidance(9, { lateralDeviationM: NaN, verticalDeviationM: NaN }),
+    20,
+  );
+  assert.equal(Number.isNaN(view.navGuidance.lateralDeviationM), true);
+  assert.equal(Number.isNaN(view.navGuidance.verticalDeviationM), true);
+  assert.equal(view.ageMs, 0, "an untracked deviation is still a fresh sample");
+}
+testNavGuidanceRejectsUninterpretableSamples();
+console.log("ok - testNavGuidanceRejectsUninterpretableSamples");
+
+function testNavGuidanceReplacementTrackerAcceptsTheSuccessorSession() {
+  // The reconnect contract the cockpit's session reset relies on: a
+  // tracker pinned to a dead session's incarnation refuses the restarted
+  // host forever, so the session boundary REPLACES the tracker and the
+  // replacement accepts the successor identity as its own first pin.
+  const pinned = new NavGuidanceTracker();
+  pinned.observe(guidance(1, { toIdent: "WP01" }), 0);
+  const rejected = pinned.observe(
+    guidance(1, { toIdent: "WP09" }, { sourceIncarnation: INCARNATION_B }),
+    10,
+  );
+  assert.equal(rejected.navGuidance.toIdent, "WP01", "the dead pin persists");
+  assert.equal(pinned.diagnostics().wrongSource, 1);
+
+  const replacement = new NavGuidanceTracker();
+  const accepted = replacement.observe(
+    guidance(1, { toIdent: "WP09" }, { sourceIncarnation: INCARNATION_B }),
+    20,
+  );
+  assert.equal(accepted.navGuidance.toIdent, "WP09", "a fresh tracker pins the new session");
+  assert.equal(replacement.diagnostics().wrongSource, 0);
+}
+testNavGuidanceReplacementTrackerAcceptsTheSuccessorSession();
+console.log("ok - testNavGuidanceReplacementTrackerAcceptsTheSuccessorSession");

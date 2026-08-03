@@ -259,6 +259,7 @@ async fn start_sim_compat_host() -> runtime::RunningHost {
         AdapterKind::Reference,
         runtime::RuntimeOptions {
             legacy_compatibility: true,
+            mission: None,
         },
     )
     .await

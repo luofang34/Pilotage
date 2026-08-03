@@ -205,6 +205,8 @@ function stampBytes(s) {
     ...varintField(4, s.acquiredAtNanos),
     ...varintField(5, s.clock),
     ...lenField(6, s.incarnation),
+    ...(s.role ? varintField(7, s.role) : []),
+    ...(s.integrity ? varintField(8, s.integrity) : []),
   ];
 }
 
@@ -245,6 +247,104 @@ const envelopeBytes = new Uint8Array([...varintField(1, 1), ...lenField(4, sampl
   check("telemetry: attitude stamp sourceId is BigInt", typeof wasm.message.avionics.attitudeStamp.sourceId === "bigint");
   check("telemetry: attitude stamp incarnation is 32 hex", /^[0-9a-f]{32}$/.test(wasm.message.avionics.attitudeStamp.sourceIncarnation));
   check("telemetry: kinematics absent (no stamp) is nullish", wasm.message.avionics.kinematics === null || wasm.message.avionics.kinematics === undefined);
+}
+
+// ---- stamped sub-message presence parity ------------------------------------
+// A group the host encodes and only ONE decoder surfaces is invisible in
+// whichever client uses the other, with no decode error to notice it by.
+// These checks pin, for every stamped group the sample carries, that the two
+// decoders agree on presence — when the group is well-formed, when its
+// provenance stamp is missing, and when its stamp wears another lane's role.
+
+const ROLE = { estimate: 1, simulationTruth: 2, fcState: 3, payloadDevice: 5, navigationSolution: 6 };
+const STAMPED_GROUPS = ["avionics", "simTruth", "fcState", "gimbal", "navGuidance"];
+
+function laneStamp(role, clock) {
+  return { ...stamp, role, clock, integrity: 2 };
+}
+function present(value) {
+  return value !== null && value !== undefined;
+}
+// Each stamped group, encoded with its stamp at the tag the schema gives it.
+// `role` null omits the stamp entirely.
+function groupBytes(role, clock, stampField, body) {
+  return [...body, ...(role === null ? [] : lenField(stampField, stampBytes(laneStamp(role, clock))))];
+}
+function sampleWithGroups({ truthRole, fcRole, gimbalRole, navRole }) {
+  return new Uint8Array([
+    ...varintField(1, 1),
+    ...lenField(4, [
+      ...lenField(1, varintField(1, 1)),
+      ...lenField(6, avionicsBytes),
+      ...lenField(7, groupBytes(truthRole, 2, 11, [...floatField(1, 1.0), ...floatField(5, 12.0)])),
+      ...lenField(8, groupBytes(fcRole, 3, 2, varintField(1, 2))),
+      ...lenField(9, groupBytes(gimbalRole, 1, 8, [...floatField(1, 1.0), ...varintField(9, 0b101)])),
+      ...lenField(10, groupBytes(navRole, 3, 1, [
+        ...lenField(2, [...new TextEncoder().encode("WP02")]),
+        ...lenField(3, [...new TextEncoder().encode("WP01")]),
+        ...floatField(4, 1.25),
+        ...floatField(5, -30.0),
+        ...floatField(6, 12.5),
+        ...floatField(7, 3704.0),
+        ...varintField(8, 2),
+        ...varintField(9, 5),
+        ...varintField(10, 1),
+      ])),
+    ]),
+  ]);
+}
+
+// Correctly stamped: every group must reach BOTH decoders, with equal values.
+{
+  const bytes = sampleWithGroups({
+    truthRole: ROLE.simulationTruth,
+    fcRole: ROLE.fcState,
+    gimbalRole: ROLE.payloadDevice,
+    navRole: ROLE.navigationSolution,
+  });
+  const wasm = decodeDatagramEnvelope(bytes).message;
+  const ref = decodeBareEnvelope(bytes).message;
+  for (const group of STAMPED_GROUPS) {
+    check(`presence parity: ${group} reaches both decoders`, present(wasm[group]) && present(ref[group]));
+    check(`presence parity: ${group} decodes identically`, deepEqual(wasm[group], ref[group]));
+  }
+  // Neither decoder may carry a top-level field the other lacks: a group
+  // added to one side only shows up here as a key-set difference.
+  const wasmKeys = Object.keys(wasm).sort().join(",");
+  const refKeys = Object.keys(ref).sort().join(",");
+  check(`presence parity: identical top-level field sets (${wasmKeys})`, wasmKeys === refKeys);
+  check("presence parity: navGuidance carries meters and radians, never dots",
+    wasm.navGuidance.lateralDeviationM === -30.0 && wasm.navGuidance.courseRad === 1.25
+    && wasm.navGuidance.distanceToWaypointM === 3704.0);
+  check("presence parity: navGuidance carries the leg and its solution quality",
+    wasm.navGuidance.toIdent === "WP02" && wasm.navGuidance.fromIdent === "WP01"
+    && wasm.navGuidance.legIndex === 2 && wasm.navGuidance.waypointCount === 5
+    && wasm.navGuidance.solutionQuality === 1);
+}
+
+// Unstamped: every role-gated group must be ABSENT in both, never defaulted.
+{
+  const bytes = sampleWithGroups({ truthRole: null, fcRole: null, gimbalRole: null, navRole: null });
+  const wasm = decodeDatagramEnvelope(bytes).message;
+  const ref = decodeBareEnvelope(bytes).message;
+  for (const group of ["simTruth", "fcState", "gimbal", "navGuidance"]) {
+    check(`presence parity: unstamped ${group} is absent in both`, !present(wasm[group]) && !present(ref[group]));
+  }
+}
+
+// Mislabeled: a stamp wearing another lane's role must fail the gate in both.
+{
+  const bytes = sampleWithGroups({
+    truthRole: ROLE.fcState,
+    fcRole: ROLE.simulationTruth,
+    gimbalRole: ROLE.navigationSolution,
+    navRole: ROLE.estimate,
+  });
+  const wasm = decodeDatagramEnvelope(bytes).message;
+  const ref = decodeBareEnvelope(bytes).message;
+  for (const group of ["simTruth", "fcState", "gimbal", "navGuidance"]) {
+    check(`presence parity: mislabeled ${group} is refused by both`, !present(wasm[group]) && !present(ref[group]));
+  }
 }
 
 // ---- H.264 chunk classification (shared pilotage_protocol::h264) ------------

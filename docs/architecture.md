@@ -1,34 +1,49 @@
 # Pilotage architecture overview
 
 Pilotage is a Rust-first, engine-independent platform for low-latency control,
-supervision, simulation, and training of maritime, aerial, and terrestrial vehicles.
-This document is the orientation map; the [ADRs](adr/README.md) are the authoritative
-decisions.
+supervision, simulation, and training of maritime, aerial, and terrestrial
+vehicles. The target system spans a vehicle-side **host** that orchestrates
+flight control (Aviate, PX4), navigation (Navigate), and communication
+(Communicate); **operator clients** ranging from a full control terminal to an
+EFB-style preflight tool; and an optional **coordination server** for
+identity, rendezvous, and entitlements. This document is the orientation map;
+the [ADRs](adr/README.md) are the authoritative decisions.
 
-## System shape (v1 hosted deployment)
+## System shape (target)
 
 ```text
-                 Passkey / WebAuthn
-                        |
-                        v
-              Identity & admission service ──> short-lived session capability
-                        |
-             session bootstrap (HTTPS)
-                        |
-   Browser client <═ WebTransport (QUIC) ═> Session host
-   (wasm core +        │                     ├─ authority engine (scoped leases, generations)
-    browser ports)     │                     ├─ Gazebo + renderer capture
-                       │                     ├─ vehicle adapter
-      video ◄──────────┤                     └─ telemetry / control / media endpoint
-      telemetry ◄──────┤
-      control ─────────►
-      authority events ◄──►
+               Optional coordination server (ADR-0027)
+     identity/admission · host registry · rendezvous · entitlements
+    (never carries session data; optional — local deployments need none)
+               |                                |
+        HTTPS bootstrap                registration/signaling
+               |                                |
+   Operator client(s) <═ WebTransport (QUIC) ═> Pilotage host
+   (web / iPadOS /      │  direct; opt-in       ├─ authority engine (leases, generations)
+    native; plugin      │  separately           ├─ vehicle adapter ── FC (Aviate | PX4)
+    panels/layout,      │  deployed relay       ├─ Navigate: fusion, FPL, guidance, EGPWS
+    ADR-0029; EFB or    │                       ├─ Communicate: advisory context
+    terminal posture    │                       └─ telemetry/control/media/advisory
+    by discovery,       │
+    ADR-0026)           │
+      video ◄───────────┤
+      telemetry ◄───────┤
+      advisory ◄────────┤
+      control ──────────►
+      authority events ◄►
 ```
 
-The same two deployables run a local demonstration over loopback or LAN with no
-special integration path. Peer-hosted simulators and real-vehicle gateways are future
-session hosts behind the same contracts; central services stay optional
-([ADR-0004](adr/0004-host-oriented-topology.md)).
+Clients and hosts are not one-to-one: several operators may hold different
+scopes on one vehicle, one client may attach a roster of vehicles, and a
+coordinator host aggregates a swarm behind ordinary scopes
+([ADR-0028](adr/0028-multi-vehicle-and-swarm-coordinator-hosts.md)). The host
+flies with no client attached: the mission executor is an automation-class
+principal under the same authority machinery
+([ADR-0025](adr/0025-client-optional-operation-automation-principals.md)).
+
+The v1 hosted deployment ships two deployables (identity/signaling service +
+session host) and runs the same binaries over loopback or LAN with no special
+integration path ([ADR-0004](adr/0004-host-oriented-topology.md)).
 
 ## The five planes
 
@@ -36,12 +51,22 @@ session hosts behind the same contracts; central services stay optional
 |---|---|---|
 | Identity & admission | Passkeys, membership, session capabilities | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0006](adr/0006-capability-auth-scoped-leases-fencing.md) |
 | Authority | Scoped leases, fencing generations, handover/override state machines | [ADR-0006](adr/0006-capability-auth-scoped-leases-fencing.md), [ADR-0010](adr/0010-authority-state-machines.md) |
-| Real-time data | Control frames, fast telemetry, authority events, bulk config | [ADR-0005](adr/0005-webtransport-primary-transport.md), [ADR-0011](adr/0011-message-classes-and-channel-semantics.md) |
-| Media | Capture, encode, delivery, adaptation, timing correlation | [ADR-0005](adr/0005-webtransport-primary-transport.md) |
+| Real-time data | Control frames, fast telemetry, authority events, bulk config, advisory context | [ADR-0005](adr/0005-webtransport-primary-transport.md), [ADR-0011](adr/0011-message-classes-and-channel-semantics.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md) |
+| Media | Capture, encode, delivery, adaptation, timing correlation | [ADR-0005](adr/0005-webtransport-primary-transport.md), [ADR-0016](adr/0016-codec-pluggable-media-plane.md) |
 | Session host | Simulator/vehicle gateway, adapter, real-time endpoint | [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0008](adr/0008-engine-independent-adapter-boundary.md) |
 
-Planes are contract boundaries; v1 ships them as two deployables (identity/signaling
-service + session host).
+Planes are contract boundaries; deployables are a deployment decision.
+
+## System components
+
+| Component | Role | Decided in |
+|---|---|---|
+| Flight control (Aviate first; PX4 via adapter) | Control-grade estimation, stabilization, actuation | [ADR-0008](adr/0008-engine-independent-adapter-boundary.md), [ADR-0018](adr/0018-avionics-telemetry-and-aviate-adapter.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
+| Navigate (sibling repository) | Multi-sensor fusion, integrity, flight-plan execution, guidance, terrain awareness | [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
+| Communicate (aerocontext, repository `v99n62`) | Provenance-tracked advisory aeronautical context; AI-agent surface | [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0025](adr/0025-client-optional-operation-automation-principals.md) |
+| Pilotage host | Component orchestration + session/authority/media endpoint | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md) |
+| Operator client | Control terminal ↔ EFB by discovered capability; plugin displays | [ADR-0026](adr/0026-host-capability-profiles.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
+| Coordination server (optional) | Identity, host registry, rendezvous, entitlement-gated data services | [ADR-0027](adr/0027-optional-coordination-server.md) |
 
 ## Load-bearing principles
 
@@ -62,6 +87,16 @@ service + session host).
 5. **Schema-first protocol** ([ADR-0014](adr/0014-protobuf-wire-schema.md)):
    `schemas/` (protobuf) is the source of truth; hosts and clients evolve
    independently under mechanical breaking-change detection.
+6. **Advisory and measurement never blur** ([ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md)):
+   measurements ride stamped, coherence-gated telemetry
+   ([ADR-0018](adr/0018-avionics-telemetry-and-aviate-adapter.md)); advisory
+   context rides provenance- and freshness-tracked classes; neither is ever
+   presented as the other.
+7. **One authority machinery for every commander**
+   ([ADR-0025](adr/0025-client-optional-operation-automation-principals.md)):
+   humans, the mission executor, coordinators, and AI agents are all fenced
+   principals under the same leases, watchdogs, and audit — no privileged
+   side door.
 
 ## Implementation increments
 
@@ -75,6 +110,18 @@ service + session host).
 | 5 | Override and failure: emergency override, revocation, link-loss policy | Previous generation ineffective immediately; configured failover executes |
 | 6 | Peer-host preparation: self-contained host package, registration, direct + relay paths | A non-platform-operated host creates a session without central simulator scheduling |
 | 7 | Recording and replay: structured authority/timing log, deterministic replay | A recorded session reproduces authority transitions and applied-control ordering |
+
+### Next increments (component build-out)
+
+Increment 8 is committed as the next slice; the order beyond it is indicative.
+
+| # | Deliverable | Acceptance signal |
+|---|---|---|
+| 8 | Navigate skeleton: new repository with a sans-IO fusion/flight-plan core; flight-plan execution flies Aviate SITL through the FC's declared setpoint surface as an automation-class principal ([ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md), [ADR-0025](adr/0025-client-optional-operation-automation-principals.md)); the FC-side guidance command-surface RFC below is a prerequisite | A preloaded plan flies headless in SITL with no client attached; a joining client sees automation as holder and takes over via the authority machinery |
+| 9 | Authority completion: handover/override wire vocabulary, identity/admission service, observer admission | Two operators transfer a scope with positive confirmation; a supervisor overrides; a monitor observes with no grantable scopes |
+| 10 | EFB slice: client embeds Communicate cores; briefing on a live map; data-gateway host profile ([ADR-0026](adr/0026-host-capability-profiles.md)) | Preflight brief and pack-for-flight on a client with no host process; the same client is a full terminal against a full-authority host |
+| 11 | Coordination server: registry + rendezvous + entitlement gate ([ADR-0027](adr/0027-optional-coordination-server.md)) | A WAN session forms behind NAT with no session data transiting the server |
+| 12 | Coordinator host: aggregate scopes decomposed over member hosts ([ADR-0028](adr/0028-multi-vehicle-and-swarm-coordinator-hosts.md)) | A swarm command reaches members under end-to-end fencing; displacing the coordinator on one member affects exactly that member |
 
 ## Backlog
 
@@ -90,18 +137,35 @@ service + session host).
 - p95/p99 closed-loop latency targets under specified network profiles (after
   increment 2 measurements).
 - Expected simultaneous operators and spectators per host (increment 3).
-- Emergency-override authority-class matrix and takeover-veto policy (increment 5).
+- Emergency-override authority-class matrix and takeover-veto policy, now
+  including automation, agent, and aggregate-scope rows (increments 5, 8, 12).
 - Host registration and trust model; threat model for malicious hosts, clients, and
   compromised tokens (increment 6).
 - Recording retention and privacy policy (increment 7).
+- Aiding-observation schema RFC with the Aviate side — frames, covariance,
+  integrity terms, source composition ([ADR-0024](adr/0024-navigation-authority-boundary.md))
+  — before any aiding lands (increment 8 exit).
+- Guidance command-surface RFC with the Aviate side: position/velocity
+  setpoint ingress mapped into the FC command path, and deviation-setpoint
+  carriage and consumption defined
+  ([ADR-0024](adr/0024-navigation-authority-boundary.md)) (increment 8
+  prerequisite).
+- Loss-of-communication procedure configuration: format, provenance, and
+  selection rules ([ADR-0025](adr/0025-client-optional-operation-automation-principals.md))
+  (increment 8).
+- Panel descriptor and extensible state-group contract design, and the
+  safety-fixed vs skinnable attribute set
+  ([ADR-0029](adr/0029-panel-layout-look-plugins.md)) — before plugin work
+  begins.
 
 ### P1 — design now, implement after the core path is stable
 
-WebTransport for control/telemetry; multiple camera sources and picture-in-picture;
+Multiple camera sources and picture-in-picture;
 spectator stream fan-out (host- or relay-side replication); instructor and supervisory modes; organization
 policy and temporary guests; automation-assisted blended control; signed online
 device-registry updates; repeatable network-impairment benchmark harness; peer-host
-update and attestation.
+update and attestation; FIS-B/ADS-B providers in Communicate; host-to-host
+collaboration behaviors over the reserved coordinator seam.
 
 ### P2 — preserve compatibility, defer implementation
 
@@ -119,4 +183,8 @@ advanced SVC and spectator quality tiers; tournament/adjudication tooling.
 | Simulator | Tick delay, renderer slowdown, adapter restart, vehicle respawn, dynamic camera addition |
 | Host lifecycle | Registration, update, reconnect, crash recovery, peer-host trust and revocation |
 | Link loss | Per-vehicle configuration, default inheritance, stale-input hold limit, neutralization or automation transition |
+| Navigation | Fusion integrity honesty, single-source degradation, FC/Navigate divergence display, aiding rejection paths |
+| Autonomy | Headless plan execution, link-loss automation engagement, human takeover and give-back, stalled-automation fencing |
+| Multi-vehicle | Roster attach, coordinator displacement per member, member link-loss independence, media keyed by session |
+| Capability profiles | Host-absent bootstrap, data-gateway honesty (zero actuator scopes), EFB↔terminal continuity |
 | Observability | Correlation from client sample through simulator application to resulting telemetry/video |

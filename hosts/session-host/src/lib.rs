@@ -8,6 +8,7 @@
 
 pub mod cli;
 pub mod error;
+pub mod mission_navdata;
 pub mod output;
 pub mod runtime;
 pub mod tls_identity;

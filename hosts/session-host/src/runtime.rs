@@ -4,6 +4,8 @@
 //!
 //! [`SessionEngine`]: pilotage_session::SessionEngine
 
+mod adapter_launch;
+mod automation;
 mod aviate_profile;
 mod connection;
 mod engine_actor;
@@ -15,9 +17,14 @@ mod registry;
 mod shutdown;
 mod stream_tag;
 mod wire_codec;
+// The mission rig is exported for the in-process integration test: the
+// same actor/principal wiring the runtime uses, without a transport.
+pub use automation::{
+    AutomationStatus, MissionRig, TelemetryObserver, spawn_reference_mission_rig,
+};
+pub use options::{DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, RuntimeOptions};
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.
-pub use options::RuntimeOptions;
 pub use wire_codec::encode_envelope_message;
 
 use std::net::SocketAddr;
@@ -119,7 +126,7 @@ fn build_engine<A: VehicleAdapter>(adapter: &A, options: RuntimeOptions) -> Sess
 /// WebTransport endpoint cannot bind, or the Gazebo sidecar bridge cannot be
 /// spawned and connected.
 pub async fn start(port: u16, adapter: AdapterKind) -> Result<RunningHost, HostError> {
-    start_with_options(port, adapter, RuntimeOptions::from_env()).await
+    start_with_options(port, adapter, RuntimeOptions::from_env()?).await
 }
 
 /// [`start`] with explicit [`RuntimeOptions`] instead of the environment.
@@ -178,11 +185,12 @@ pub async fn start_with_options(
     })
 }
 
-/// Builds the chosen adapter (and, for Gazebo, its media task) and spawns the
-/// per-adapter `run_until_shutdown` task.
+/// Builds the chosen adapter, spawns the per-adapter `run_until_shutdown`
+/// task, and — when the mission executor is configured — spawns the
+/// in-process mission principal against the same engine actor.
 async fn spawn_host_runtime(
     adapter: AdapterKind,
-    options: RuntimeOptions,
+    mut options: RuntimeOptions,
     endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
     engine_tx: mpsc::Sender<ToEngine>,
     engine_rx: mpsc::Receiver<ToEngine>,
@@ -191,141 +199,44 @@ async fn spawn_host_runtime(
     // A single monotonic origin feeds every `host_time` stamp across the host
     // (ADR-0009): the engine actor, each connection task, and — so a video
     // frame's receive/publication stamps stay comparable with them — the media
-    // task all derive from this `Instant`.
+    // task all derive from this `Instant`. The mission principal shares it
+    // too, so its frame sample stamps are exact host-clock time.
     let start = tokio::time::Instant::now();
-    match adapter {
-        AdapterKind::Reference => {
-            let (engine, adapter) = build_reference(options);
-            Ok(tokio::spawn(run_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                None,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
+    // Mission navdata and route are validated (and the ADR-0030
+    // pack-for-flight record logged) before the host listens, so a bad
+    // route or store fails startup instead of a silent no-mission run.
+    let mission = match options.mission.take() {
+        Some(mission_options) => {
+            let plan = automation::prepare(&mission_options)?;
+            Some(automation::spawn_mission_task(
+                &engine_tx,
                 start,
-            )))
+                plan,
+                matches!(adapter, AdapterKind::Reference),
+            ))
         }
-        AdapterKind::Gazebo => {
-            let (engine, adapter, frames) =
-                gazebo_launch::build_gazebo(HOST_VEHICLE, MAX_CONTROL_AGE).await?;
-            let (media, media_task) = media::spawn_media_task(frames, start);
-            Ok(tokio::spawn(run_with_media_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                media,
-                media_task,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
-        }
-        AdapterKind::Aviate => {
-            spawn_aviate_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
-        }
-        AdapterKind::Px4 => {
-            spawn_px4_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
-        }
-    }
-}
-
-/// Builds the PX4 adapter and spawns its runtime, wiring the media task only
-/// when the adapter exposes a video frame source.
-async fn spawn_px4_runtime(
-    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    options: RuntimeOptions,
-    engine_tx: mpsc::Sender<ToEngine>,
-    engine_rx: mpsc::Receiver<ToEngine>,
-    shutdown_rx: oneshot::Receiver<()>,
-    start: tokio::time::Instant,
-) -> Result<tokio::task::JoinHandle<()>, HostError> {
-    let config = px4_config::from_env()?;
-    let mut adapter = pilotage_adapter_px4::Px4Adapter::start(HOST_VEHICLE, config)
-        .await
-        .map_err(HostError::Px4Adapter)?;
-    let engine = build_engine(&adapter, options);
-    match adapter.subscribe_frames() {
-        Some(frames) => {
-            let (media, media_task) = media::spawn_media_task(frames, start);
-            Ok(tokio::spawn(run_with_media_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                media,
-                media_task,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
-        }
-        None => Ok(tokio::spawn(run_until_shutdown(
-            endpoint,
-            engine,
-            adapter,
-            None,
-            engine_tx,
-            engine_rx,
-            shutdown_rx,
-            start,
-        ))),
-    }
-}
-
-/// Builds the Aviate adapter and spawns its runtime, wiring the media task only
-/// when the adapter exposes a video frame source.
-async fn spawn_aviate_runtime(
-    endpoint: Endpoint<wtransport::endpoint::endpoint_side::Server>,
-    options: RuntimeOptions,
-    engine_tx: mpsc::Sender<ToEngine>,
-    engine_rx: mpsc::Receiver<ToEngine>,
-    shutdown_rx: oneshot::Receiver<()>,
-    start: tokio::time::Instant,
-) -> Result<tokio::task::JoinHandle<()>, HostError> {
-    // PILOTAGE_AVIATE_PROFILE selects the session profile (LINK-04):
-    // "physical" (FC estimate + FC state; no truth), the default
-    // "simulation" (estimate + FC state, plus the truth oracle when the
-    // co-located shm block attaches), or "oracle-only" (truth stream
-    // only; no uplink, no operational control). Parsing fails closed and
-    // Physical gets the conservative link configuration.
-    let profile = aviate_profile::profile_from_env(std::env::var("PILOTAGE_AVIATE_PROFILE"))?;
-    let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
-        HOST_VEHICLE,
-        profile,
-        aviate_profile::link_config(profile),
+        None => None,
+    };
+    let runtime = adapter_launch::spawn_adapter_runtime(
+        adapter,
+        options,
+        endpoint,
+        engine_tx,
+        engine_rx,
+        shutdown_rx,
+        start,
     )
-    .await
-    .map_err(HostError::AviateAdapter)?;
-    let engine = build_engine(&adapter, options);
-    match adapter.subscribe_frames() {
-        Some(frames) => {
-            let (media, media_task) = media::spawn_media_task(frames, start);
-            Ok(tokio::spawn(run_with_media_until_shutdown(
-                endpoint,
-                engine,
-                adapter,
-                media,
-                media_task,
-                engine_tx,
-                engine_rx,
-                shutdown_rx,
-                start,
-            )))
-        }
-        None => Ok(tokio::spawn(run_until_shutdown(
-            endpoint,
-            engine,
-            adapter,
-            None,
-            engine_tx,
-            engine_rx,
-            shutdown_rx,
-            start,
-        ))),
-    }
+    .await?;
+    Ok(match mission {
+        None => runtime,
+        Some((mission_task, _status)) => tokio::spawn(async move {
+            runtime.await.ok();
+            // The principal holds only a weak engine handle, so it drains
+            // out once the engine actor is gone; joining it here keeps
+            // teardown complete before the host reports shutdown.
+            mission_task.await.ok();
+        }),
+    })
 }
 
 /// Runs the accept loop and engine actor until `shutdown_rx` fires, then

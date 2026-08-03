@@ -1,0 +1,21 @@
+[package]
+name = "pilotage-mission"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+navigate-contract = { workspace = true }
+navigate-geodesy = { workspace = true }
+navigate-fusion = { workspace = true }
+navigate-fpl = { workspace = true }
+navigate-guidance = { workspace = true }
+aerocontext-core = { workspace = true }
+aerocontext-planning = { workspace = true }
+aerocontext-navdata = { workspace = true }
+chrono = { workspace = true }
+pilotage-protocol = { workspace = true }
+thiserror = { workspace = true }

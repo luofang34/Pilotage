@@ -6,6 +6,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The Navigate crates are a private git dependency; libgit2 cannot use
+  # the runner's rewritten ssh credentials, the git CLI can.
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   PROTOC_SHA256: a7be2928c0454f132c599e25b79b7ad1b57663f2337d7f7e468a1d59b98ec1b0
   PROTOC_VERSION: "26.1"
 
@@ -19,6 +22,17 @@ jobs:
           # buf breaking compares the working tree against the base ref, so the
           # base commit must be present locally; a shallow clone would hide it.
           fetch-depth: 0
+
+      - name: Authorize the private Navigate dependency
+        env:
+          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
+          chmod 600 ~/.ssh/navigate_ci
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global core.sshCommand "ssh -i ~/.ssh/navigate_ci -o IdentitiesOnly=yes"
+          git config --global url."ssh://git@github.com/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
 
       - name: Install system dependencies (hidapi on Linux)
         run: |
@@ -150,6 +164,9 @@ jobs:
 
       - name: telemetry ingress gate contract
         run: node clients/web/telemetry-ingress.test.mjs
+
+      - name: navigation display profile (ADR-0031 deviation scaling and signs)
+        run: node clients/web/nav-display.test.mjs
 
       - name: telemetry display retirement contract
         run: node clients/web/telemetry-display.test.mjs

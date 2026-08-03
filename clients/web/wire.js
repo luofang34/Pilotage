@@ -922,7 +922,7 @@ function decodeAdvertisedScopes(hostCapabilitiesBytes) {
 }
 
 // telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,
-// velocity=5, avionics=6, sim_truth=7, fc_state=8, gimbal=9
+// velocity=5, avionics=6, sim_truth=7, fc_state=8, gimbal=9, nav_guidance=10
 // Pose2d: x_m=1, y_m=2, heading_rad=3 (all float, wire type 5)
 function decodeTelemetrySample(bytes) {
   if (!bytes) return {};
@@ -944,6 +944,7 @@ function decodeTelemetrySample(bytes) {
     simTruth: decodeSimTruthState(firstBytes(fields, 7)),
     fcState: decodeFcState(firstBytes(fields, 8)),
     gimbal: decodeGimbalAttitude(firstBytes(fields, 9)),
+    navGuidance: decodeNavGuidance(firstBytes(fields, 10)),
   };
 }
 
@@ -1029,6 +1030,42 @@ function decodeGimbalAttitude(bytes) {
     failureFlags: firstVarint(f, 10) ?? 0,
     stamp,
   };
+}
+
+// telemetry.proto NavGuidanceState (ADR-0031): stamp=1, to_ident=2,
+// from_ident=3 (string), course_rad=4, lateral_deviation_m=5,
+// vertical_deviation_m=6, distance_to_waypoint_m=7 (float), leg_index=8,
+// waypoint_count=9, solution_quality=10 (varint). Active-leg geometry in raw
+// canonical units — meters and radians, never dots; scaling to an
+// instrument's dot scale is client display policy. Unconsumable (null)
+// without a navigation-solution stamp, so no other lane can stand in for the
+// navigation component's own solution.
+function decodeNavGuidance(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  const stamp = decodeMeasurementStamp(firstBytes(f, 1));
+  // Exact-role gate: guidance must carry the navigation-solution role.
+  if (stamp === null || stamp.role !== 6) return null;
+  return {
+    toIdent: decodeStringField(f, 2),
+    fromIdent: decodeStringField(f, 3),
+    courseRad: decodeFloat32(firstBytes(f, 4)),
+    // NaN survives the decode: guidance that tracks no lateral course, or a
+    // leg with no vertical constraint, must remove that deviation rather
+    // than present a centered needle.
+    lateralDeviationM: decodeFloat32(firstBytes(f, 5)),
+    verticalDeviationM: decodeFloat32(firstBytes(f, 6)),
+    distanceToWaypointM: decodeFloat32(firstBytes(f, 7)),
+    legIndex: firstVarint(f, 8) ?? 0,
+    waypointCount: firstVarint(f, 9) ?? 0,
+    solutionQuality: firstVarint(f, 10) ?? 0,
+    stamp,
+  };
+}
+
+function decodeStringField(fields, fieldNumber) {
+  const raw = firstBytes(fields, fieldNumber);
+  return raw ? new TextDecoder().decode(raw) : "";
 }
 
 function decodePose2d(bytes) {
