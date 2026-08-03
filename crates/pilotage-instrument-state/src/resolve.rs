@@ -265,7 +265,7 @@ pub fn resolve_stateful(
         track_rad: finite(track),
         baro_hpa: finite(baro),
         wind,
-        nav: nav_resolved(state, policy, &integrity, rose),
+        nav: nav_resolved(state, policy, &integrity, rose, trust),
         selections: sanitized_selections(state.selections),
         integrity,
         presentation,
@@ -390,11 +390,17 @@ fn nav_resolved(
     policy: &FreshnessPolicy,
     integrity: &StateIntegrity,
     rose: crate::heading::HeadingReference,
+    trust: Trust,
 ) -> NavResolved {
     let nav_fresh = policy.status_for_age(state.nav.age_ms);
     match state.nav.data {
         Some(data) => {
-            let status = nav_fresh.worst(fault_status(integrity.nav));
+            // Nav folds source trust like every other group: a source that
+            // declares itself Unusable, or a snapshot whose groups cannot be
+            // paired, must not draw a confident CDI. `ValidFlags` has no nav
+            // bit, so the declared-valid input is neutral here; giving nav its
+            // own bit is a wire and ABI change tracked separately.
+            let status = trust.fold(true, nav_fresh, integrity.nav, true);
             // Guidance from an unidentifiable source must not draw a
             // CDI at all; failing the group removes it.
             let data = if matches!(data.source, NavSource::Unknown) {

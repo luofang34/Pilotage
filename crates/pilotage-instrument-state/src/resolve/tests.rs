@@ -286,6 +286,64 @@ fn unknown_nav_source_fails_the_group_and_clears_guidance() {
     assert_eq!(p.nav.data.cdi_dots, 0.0, "guidance values cleared");
 }
 
+#[test]
+fn an_unusable_source_cannot_draw_a_confident_cdi() {
+    let mut s = flying_state();
+    s.nav = Stamped {
+        data: Some(pilotage_state_navdata_valid()),
+        age_ms: Some(10.0),
+    };
+    s.quality = EstimateQuality::Unusable;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_ne!(
+        p.nav.status,
+        SignalStatus::Valid,
+        "a source declaring itself unusable must degrade the nav display"
+    );
+    assert!(
+        !p.nav.status.shows_value(),
+        "an unusable CDI must not be read"
+    );
+}
+
+#[test]
+fn an_incoherent_snapshot_degrades_the_nav_group() {
+    let mut s = flying_state();
+    s.nav = Stamped {
+        data: Some(pilotage_state_navdata_valid()),
+        age_ms: Some(10.0),
+    };
+    s.snapshot.coherence = crate::aircraft::SnapshotCoherence::ExcessiveSkew;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.nav.status, SignalStatus::Degraded);
+}
+
+#[test]
+fn a_trusted_fresh_source_still_resolves_valid() {
+    // The folding must not degrade the ordinary path.
+    let mut s = flying_state();
+    s.nav = Stamped {
+        data: Some(pilotage_state_navdata_valid()),
+        age_ms: Some(10.0),
+    };
+    s.quality = EstimateQuality::Good;
+    s.snapshot.coherence = crate::aircraft::SnapshotCoherence::Coherent;
+    let p = resolve(&s, &FreshnessPolicy::default());
+    assert_eq!(p.nav.status, SignalStatus::Valid);
+}
+
+fn pilotage_state_navdata_valid() -> crate::aircraft::NavData {
+    crate::aircraft::NavData {
+        source: crate::aircraft::NavSource::Gps,
+        course_rad: 1.0,
+        cdi_dots: 1.5,
+        fromto: crate::aircraft::NavFromTo::To,
+        vdev_dots: None,
+        dist_nm: None,
+        course_reference: crate::heading::HeadingReference::SimLocalTrue,
+    }
+}
+
 fn pilotage_state_navdata_unknown() -> crate::aircraft::NavData {
     crate::aircraft::NavData {
         source: crate::aircraft::NavSource::Unknown,
