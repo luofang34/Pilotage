@@ -129,11 +129,16 @@ impl MissionEngine {
         now: MonotonicNanos,
         events: &mut Vec<MissionEvent>,
     ) -> Option<ControlIntent> {
-        match self.execution.advance(&solution.position) {
-            SequenceEvent::LegAdvanced { to_index } => {
-                events.push(MissionEvent::LegAdvanced { to_index });
+        match self
+            .execution
+            .advance(&solution.position, self.commanded_groundspeed_mps())
+        {
+            SequenceEvent::LegAdvanced {
+                to_index, reason, ..
+            } => {
+                events.push(MissionEvent::LegAdvanced { to_index, reason });
             }
-            SequenceEvent::PlanComplete => {
+            SequenceEvent::PlanComplete { .. } => {
                 self.state = MissionState::Complete;
                 events.push(MissionEvent::MissionComplete);
                 return Some(zero_velocity_intent());
@@ -184,6 +189,26 @@ impl MissionEngine {
                 None
             }
         }
+    }
+
+    /// The groundspeed the sequencer sizes fly-by turn anticipation on:
+    /// the along-track speed this engine commands, cruise bounded by the
+    /// horizontal ceiling. A host that tightens the ceiling below cruise
+    /// would otherwise have its turns anticipated at a speed the vehicle
+    /// is never commanded to fly.
+    ///
+    /// Anticipation only matters when it exceeds the capture radius, and
+    /// the capture radius sits outside guidance's arrival-slowdown
+    /// radius — so wherever anticipation can fire, the approach taper
+    /// has not begun and commanded cruise is the speed being flown.
+    /// A cross-track correction can push the composed groundspeed above
+    /// this value (up to the ceiling), under-sizing the anticipation
+    /// toward a later turn; the sequencer's capture radius bounds that
+    /// error.
+    fn commanded_groundspeed_mps(&self) -> f64 {
+        self.config
+            .cruise_mps
+            .min(self.config.limits.max_horizontal_mps)
     }
 
     /// Clamps the commanded NED velocity to the mission limits, rotates

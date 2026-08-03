@@ -5,6 +5,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use navigate_contract::{ClockDomainId, GeodeticPosition, MonotonicNanos};
+use navigate_fpl::SequenceReason;
 use navigate_guidance::GuidanceRefusal;
 use pilotage_mission::fixture::{self, GeoPointDegrees};
 use pilotage_mission::{
@@ -149,11 +150,16 @@ fn assert_flight_events(events: &[MissionEvent]) {
         count(events, |e| matches!(e, MissionEvent::EnrouteStarted)),
         1
     );
+    // Every demo advance is capture-driven: at the mission cruise speed
+    // the fly-by turn radius is on the order of a meter, so the distance
+    // of turn anticipation stays far inside the capture radius and no
+    // transition is authorized early.
     for to_index in [1usize, 2] {
         assert_eq!(
             count(events, |e| matches!(
                 e,
-                MissionEvent::LegAdvanced { to_index: t } if *t == to_index
+                MissionEvent::LegAdvanced { to_index: t, reason: SequenceReason::Overflown }
+                    if *t == to_index
             )),
             1,
             "leg advance to {to_index}"
