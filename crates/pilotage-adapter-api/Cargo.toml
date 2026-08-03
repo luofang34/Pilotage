@@ -8,6 +8,7 @@ publish = false
 workspace = true
 
 [dependencies]
+pilotage-ingress = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 pilotage-frames = { workspace = true }

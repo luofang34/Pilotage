@@ -3,107 +3,12 @@
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
-/// The monotonic clock in which a measurement's acquisition timestamp is
-/// expressed. Timestamps from different domains are never subtracted without
-/// an explicit correlation supplied by the adapter boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeasurementClock {
-    /// Monotonic time since the producing vehicle computer booted.
-    VehicleBoot,
-    /// Monotonic simulation time supplied by the simulator.
-    Simulation,
-    /// Monotonic time on the ground host that received the observation,
-    /// for reports whose wire carries no source timestamp (an FC
-    /// heartbeat). Receive time is not acquisition time; consumers may
-    /// only reason about staleness in this domain, never correlate it
-    /// with vehicle or simulation clocks without an explicit mapping.
-    HostMonotonic,
-}
-
-/// Opaque identity of one source attachment or boot instance.
-///
-/// Unlike [`MeasurementStamp::source_epoch`], this value is compared only for
-/// equality. A new incarnation cannot be ordered relative to an earlier one;
-/// the receiver must authorize that transition at a lifecycle boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SourceIncarnation([u8; 16]);
-
-impl SourceIncarnation {
-    /// Constructs an incarnation from its complete 128-bit representation.
-    #[must_use]
-    pub const fn new(bytes: [u8; 16]) -> Self {
-        Self(bytes)
-    }
-
-    /// Returns the complete opaque representation.
-    #[must_use]
-    pub const fn into_bytes(self) -> [u8; 16] {
-        self.0
-    }
-}
-
-/// Explicit role of the source behind a measurement. Role is carried in
-/// provenance — never encoded into id ranges — so a configured source id
-/// can collide across roles without ambiguity, and consumers gate on the
-/// role itself (panels and control accept only
-/// [`SourceRole::OperationalEstimate`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceRole {
-    /// FC estimator output: the only role eligible for primary panels
-    /// and operational command construction.
-    OperationalEstimate,
-    /// Simulator ground truth: logging, assertions, and comparison in
-    /// simulation profiles only.
-    SimulationTruth,
-    /// FC-owned vehicle state (arm/mode/failsafe) reports.
-    FcState,
-    /// Video capture identity for camera frames.
-    VideoCapture,
-    /// Payload-device orientation/state (gimbal attitude) relayed over
-    /// the FC link: never a vehicle estimate, never eligible for control
-    /// validation, carrying the device's own boot clock.
-    PayloadDevice,
-}
-
-/// Integrity classification of the path that delivered an observation.
-/// The distinction that matters end-to-end is authenticated source data
-/// versus merely checksummed or unprotected observations; a consumer
-/// making a safety claim must require the level the claim needs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceIntegrity {
-    /// Cryptographically authenticated end-to-end source data.
-    Authenticated,
-    /// Checksummed (CRC-style) but unauthenticated transport.
-    ChecksummedOnly,
-    /// No integrity protection beyond the transport's own boundaries
-    /// (a local shared-memory mapping relies on host process isolation).
-    Unprotected,
-}
-
-/// Identity and acquisition stamp for one independently advancing
-/// measurement group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MeasurementStamp {
-    /// Explicit source role; consumers gate on this, never on id ranges.
-    pub role: SourceRole,
-    /// Integrity classification of the path that delivered this
-    /// observation; every role carries it so authenticated, checksummed,
-    /// and unprotected inputs stay distinguishable end to end.
-    pub integrity: SourceIntegrity,
-    /// Adapter-defined source identifier, stable within one vehicle and
-    /// one role. Ids may collide across roles; the role disambiguates.
-    pub source_id: u64,
-    /// Opaque attachment/boot identity for the producing source.
-    pub source_incarnation: SourceIncarnation,
-    /// Source boot/attachment generation. A reset changes this value.
-    pub source_epoch: u32,
-    /// Wrapping group sequence, advanced only for a new measurement.
-    pub sequence: u32,
-    /// Acquisition time in nanoseconds in [`Self::clock`].
-    pub acquired_at_ns: u64,
-    /// Clock domain for [`Self::acquired_at_ns`].
-    pub clock: MeasurementClock,
-}
+// Source identity moved to `pilotage-ingress` so the ingress rules can be
+// applied where no wire exists (ADR-0018, ADR-0026's host-absent posture).
+// Re-exported here because this crate is the adapter-facing vocabulary.
+pub use pilotage_ingress::{
+    MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,
+};
 
 /// A planar pose: position and heading, independent of any specific vehicle
 /// model's internal representation.

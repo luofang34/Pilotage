@@ -1006,6 +1006,7 @@ dependencies = [
  "pilotage-calibration-id",
  "pilotage-camera-calibration",
  "pilotage-frames",
+ "pilotage-ingress",
  "pilotage-protocol",
  "pilotage-timing",
  "serde",
@@ -1154,6 +1155,10 @@ dependencies = [
  "pilotage-frames",
  "thiserror",
 ]
+
+[[package]]
+name = "pilotage-ingress"
+version = "0.1.0"
 
 [[package]]
 name = "pilotage-input"

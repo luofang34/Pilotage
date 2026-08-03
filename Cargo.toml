@@ -4,6 +4,7 @@ members = [
     "crates/pilotage-protocol",
     "crates/pilotage-authority",
     "crates/pilotage-session",
+    "crates/pilotage-ingress",
     "crates/pilotage-input",
     "crates/pilotage-timing",
     "crates/pilotage-adapter-api",
@@ -63,6 +64,7 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 pilotage-timing = { path = "crates/pilotage-timing" }
 pilotage-protocol = { path = "crates/pilotage-protocol" }
 pilotage-authority = { path = "crates/pilotage-authority" }
+pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-mavlink = { path = "crates/pilotage-mavlink" }
