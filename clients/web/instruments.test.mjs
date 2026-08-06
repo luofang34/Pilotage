@@ -11,6 +11,7 @@
 
 import { readFileSync } from "node:fs";
 import {
+  EXPECTED_SCENE_DIGEST,
   InstrumentModule,
   PANEL,
   COORD_LIMIT_PX,
@@ -24,10 +25,13 @@ import {
 import {
   PanelHealth,
   REASON,
+  coverInstrumentFailures,
   createDomFaultPresenter,
   drawFailurePage,
+  failInstrumentSet,
   renderInstrumentSet,
   startDisplayLoop,
+  tickInstrumentSet,
 } from "./instrument-health.js";
 
 let failures = 0;
@@ -1484,6 +1488,33 @@ function tickToCadence(health, target, interval = 250) {
       "the real registry derives {PFD: 0, HSI: 1, MONITOR: 2}",
       PANEL.PFD === 0 && PANEL.HSI === 1 && PANEL.MONITOR === 2 && Object.keys(PANEL).length === 3,
     );
+    check(
+      "the composition rides the module instance",
+      Array.isArray(mod.panels) &&
+        mod.panels.length === 3 &&
+        mod.panels[0].id === "pfd" &&
+        mod.panels[0].width === 480,
+    );
+    {
+      const byId = mod.renderPanel("pfd", new RecordingCtx(), 480, 360);
+      const byIndex = mod.renderPanel(0, new RecordingCtx(), 480, 360);
+      check(
+        "the id dialect matches the index dialect",
+        byId.ok === byIndex.ok && byId.reason === byIndex.reason,
+      );
+    }
+    check(
+      "an unknown id fails as an invalid panel, not a trap",
+      mod.renderPanel("radar", new RecordingCtx(), 480, 360).reason === REASON.INVALID_PANEL,
+    );
+    check(
+      "the decode forward-compat counters are reachable from the shell",
+      mod.stateUnknownGroups() === 0 && mod.stateExtendedGroups() === 0,
+    );
+    check(
+      "the wasm build reproduces the pinned scene digest",
+      bindings.scene_digest_hex() === EXPECTED_SCENE_DIGEST,
+    );
 
     // The verification chain fails closed on a corrupt, truncated, or
     // wrong-hash glyph asset — the backend never becomes ready over one.
@@ -1617,6 +1648,35 @@ function tickToCadence(health, target, interval = 250) {
     );
     mod.dispose();
   }
+}
+
+
+{
+  // A cockpit's health table and targets are keyed by the page's own
+  // layout ids and exist before any wasm loads — the failure paths must
+  // paint visible covers pre-load and must never throw on a missing
+  // entry (a wiring fault still covers, it does not black-screen).
+  const ctx = new RecordingCtx();
+  const canvas = { width: 480, height: 360, ctx };
+  const presenter = { show: () => {}, hide: () => {} };
+  const targets = [["pfd", ctx, canvas, presenter]];
+  const failed = failInstrumentSet(
+    { pfd: new PanelHealth({}, 0) },
+    targets,
+    0,
+    REASON.WASM_LOAD,
+  );
+  check("pre-load failure paints the cover", failed[0].covered !== false);
+  const orphanCover = coverInstrumentFailures({}, targets);
+  check(
+    "a missing health entry covers instead of throwing",
+    orphanCover[0].showFailure === true && orphanCover[0].covered !== false,
+  );
+  const orphanTick = tickInstrumentSet({}, targets, 0);
+  check(
+    "the watchdog tolerates a missing entry fail-visibly",
+    orphanTick[0].showFailure === true,
+  );
 }
 
 if (failures > 0) {

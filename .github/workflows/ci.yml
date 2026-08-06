@@ -154,8 +154,9 @@ jobs:
         run: cargo test -p pilotage-instrument-raster
 
       - name: instrument bench shell conformance smoke (ADR-0029)
-        # The third shell: composes the same registry, runs admission,
-        # and must report the identical pinned scene digest.
+        # A shell built from the registry alone: runs admission and
+        # reproduces the pinned composition digest on the host target
+        # (the wasm target's reproduction is pinned in the node suite).
         run: cargo run -q -p instrument-bench
 
       - name: instrument wasm backend builds

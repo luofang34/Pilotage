@@ -70,6 +70,14 @@ const REQUIRED_RUNTIME_METHODS = [
   "glyph_recorded_hash",
 ];
 
+// The pinned cross-shell scene digest (ADR-0033). The wasm build must
+// reproduce exactly this value over its composed registry and the
+// canonical corpus — pinned here as a JS literal (the glyph-hash
+// pattern) so wasm-target divergence from the host-verified contract
+// fails the suite, not just a Rust unit test.
+export const EXPECTED_SCENE_DIGEST =
+  "3b80ce9c8a5231b350108f514c7706af765eaec19167635e40e6d9074eba1ed5";
+
 // Registry enumeration exported at module level by the bindings; the
 // backend derives its panel map from these instead of mirroring one.
 const REQUIRED_BINDING_FNS = [

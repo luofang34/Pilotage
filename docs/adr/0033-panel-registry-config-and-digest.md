@@ -64,10 +64,12 @@ v6; absence resolves Missing by construction).
   state id and emitted scene bytes. Everything draws with the empty
   config and no alerts, so the digest is invariant to SVS by
   construction; theme independence holds because panels take no theme
-  parameter at this boundary. Shells report the same digest or they
-  are not showing the same instruments; pixel hashes remain
-  per-backend rasterizer regression tests, not the cross-shell
-  contract.
+  parameter at this boundary. Every build target must reproduce the
+  pinned value — the host via the bench shell and the unit pin, the
+  wasm build via a script-pinned export — and a shell's live rendering
+  shares identity with the corpus structurally, by drawing through the
+  same descriptors. Pixel hashes remain per-backend rasterizer
+  regression tests, not the cross-target contract.
 
 ## Consequences
 

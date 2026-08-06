@@ -249,12 +249,15 @@ pub const MONITOR_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     id: "monitor",
     title: "Monitor",
     required_layers: layer_bit(LayerId::Tapes) | layer_bit(LayerId::Annunciation),
-    required_groups: GroupSet::of(&[GroupId::MonitorText, GroupId::Trust]),
+    required_groups: GroupSet::of(&[GroupId::MonitorText]),
     design_frame: DesignFrame {
         width: PANEL_W,
         height: PANEL_H,
     },
-    background: BackgroundCapability::NotUsed,
+    // The panel owns its band with an opaque ground: text needs it, and
+    // declaring anything weaker would hand a compositor a black
+    // rectangle it was told is not painted.
+    background: BackgroundCapability::Opaque,
     config_schema: &[],
     // The whole text area is the channel's region: with MONITOR_TEXT
     // withheld the panel shows dashes, never lines it was not given.
@@ -276,13 +279,16 @@ pub const MONITOR_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
 pub const BUILTIN_PANELS: &[PanelDescriptor] =
     &[PFD_DESCRIPTOR, HSI_DESCRIPTOR, MONITOR_DESCRIPTOR];
 
-/// The pinned cross-shell scene digest over [`BUILTIN_PANELS`] and the
-/// canonical corpus (ADR-0033). Every shell reports exactly this value
-/// or it is not showing these instruments; it moves once per
-/// deliberate contract change, re-pinned with a review note saying
-/// why.
+/// The pinned scene digest over [`BUILTIN_PANELS`] and the canonical
+/// corpus (ADR-0033): the composition contract every build target must
+/// reproduce — the host (bench and unit pin) and the wasm build (the
+/// script pins the exported value against its own literal). A shell's
+/// LIVE rendering shares identity with this corpus structurally, by
+/// drawing through the same descriptors, rather than by digest. The
+/// value moves once per deliberate contract change, re-pinned with a
+/// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "735bf9a9dad12f0b722577bbef5e7e284f33a6b58f6b3dc9824b9545f8f8b6e5";
+    "3b80ce9c8a5231b350108f514c7706af765eaec19167635e40e6d9074eba1ed5";
 
 #[cfg(test)]
 mod digest_tests;
