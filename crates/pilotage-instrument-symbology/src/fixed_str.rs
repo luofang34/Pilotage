@@ -26,6 +26,12 @@ impl<const N: usize> FixedStr<N> {
     }
 }
 
+impl<const N: usize> Default for FixedStr<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const N: usize> Write for FixedStr<N> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let end = self.len.checked_add(s.len()).ok_or(fmt::Error)?;
@@ -38,6 +44,7 @@ impl<const N: usize> Write for FixedStr<N> {
 
 /// Formats into a [`FixedStr`], returning an empty string on overflow —
 /// a wrong-but-safe label beats a panic in drawing code.
+#[macro_export]
 macro_rules! fmt_label {
     ($cap:literal, $($arg:tt)*) => {{
         use core::fmt::Write as _;
@@ -47,4 +54,9 @@ macro_rules! fmt_label {
     }};
 }
 
-pub(crate) use fmt_label;
+// #[macro_export] roots the macro at the crate root; this keeps it
+// importable beside the type it constructs.
+pub use crate::fmt_label;
+
+#[cfg(test)]
+mod tests;

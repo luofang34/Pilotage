@@ -10,13 +10,13 @@
 //! - then, per glyph in [`crate::font`] order: character (u32), advance
 //!   (u8), and the seven bitmap rows.
 //!
-//! [`RECORDED_HASH`] is [`crate::sha256::sha256`] of this form, evaluated at
-//! compile time over the shipped glyphs, so verification compares live data
-//! against a hash the build itself produced.
+//! [`RECORDED_HASH`] is [`pilotage_sha256::sha256`] of this form, evaluated
+//! at compile time over the shipped glyphs, so verification compares live
+//! data against a hash the build itself produced.
 
 use crate::font::GROUPS;
 use crate::glyph::{ADVANCE, BASELINE, CELL_H, CELL_W, GLYPH_MANIFEST_VERSION, Glyph};
-use crate::sha256::sha256;
+use pilotage_sha256::sha256;
 
 /// Fixed header length in bytes.
 pub const HEADER_LEN: usize = 8;

@@ -4,13 +4,16 @@ use pilotage_instrument_scene::{Anchor, PaintMode, Rgba8, SceneError, SceneWrite
 use pilotage_instrument_state::SignalStatus;
 
 use crate::palette;
+use crate::safety;
 
 /// The accent color a status imposes on its readout, `None` for normal.
+/// Status colors are flag semantics (ADR-0029 never-skinnable), so they
+/// come from the safety set and no theme path reaches them.
 pub fn status_accent(status: SignalStatus) -> Option<Rgba8> {
     match status {
         SignalStatus::Valid => None,
-        SignalStatus::Degraded | SignalStatus::Stale => Some(palette::AMBER),
-        SignalStatus::Missing | SignalStatus::Failed => Some(palette::RED),
+        SignalStatus::Degraded | SignalStatus::Stale => Some(safety::CAUTION_AMBER),
+        SignalStatus::Missing | SignalStatus::Failed => Some(safety::FAILURE_RED),
     }
 }
 
@@ -24,10 +27,10 @@ pub fn draw_red_x(
     h: f32,
     label: &str,
 ) -> Result<(), SceneError> {
-    scene.stroke(palette::RED, 4.0)?;
+    scene.stroke(safety::FAILURE_RED, 4.0)?;
     scene.line(x, y, x + w, y + h)?;
     scene.line(x + w, y, x, y + h)?;
-    scene.fill_color(palette::RED)?;
+    scene.fill_color(safety::FAILURE_RED)?;
     scene.text(x + w / 2.0, y + h / 2.0, 20.0, Anchor::CENTER, label)?;
     Ok(())
 }
@@ -39,7 +42,7 @@ pub fn draw_flag(
     y: f32,
     label: &str,
 ) -> Result<(), SceneError> {
-    scene.fill_color(palette::AMBER)?;
+    scene.fill_color(safety::CAUTION_AMBER)?;
     scene.text(x, y, 11.0, Anchor::CENTER, label)?;
     Ok(())
 }
@@ -66,7 +69,7 @@ pub fn readout_box(
         scene.fill_color(text_color)?;
         scene.text(x + w / 2.0, y + h / 2.0, size, Anchor::CENTER, text)?;
     } else {
-        scene.fill_color(palette::RED)?;
+        scene.fill_color(safety::FAILURE_RED)?;
         scene.text(x + w / 2.0, y + h / 2.0, size, Anchor::CENTER, "---")?;
     }
     Ok(())
