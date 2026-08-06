@@ -1634,6 +1634,7 @@ dependencies = [
  "pilotage-instrument-feeder",
  "pilotage-instrument-glyphs",
  "pilotage-instrument-panels",
+ "pilotage-instrument-registry",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
  "pilotage-protocol",

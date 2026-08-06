@@ -16,12 +16,20 @@
 
 import { InstrumentFault, REASON } from "./instrument-health.js";
 
-export const PANEL = { PFD: 0, HSI: 1 };
+// Panel map derived from the wasm registry enumeration at load time
+// (ADR-0029): keys are the descriptor ids uppercased, values the panel
+// indices. The script holds no panel list of its own; a pin test keeps
+// the derived map equal to the shape consumers rely on.
+export const PANEL = {};
 
-// Logical drawing space every panel targets (pilotage-instrument-panels
-// PANEL_W/PANEL_H); backends scale it to their viewport.
-export const LOGICAL_W = 480;
-export const LOGICAL_H = 360;
+// Per-panel design frames from the descriptors, filled at load; the
+// fallback only guards a render attempted before any load completes.
+const DESIGN = new Map();
+const FALLBACK_DESIGN = Object.freeze({ width: 480, height: 360 });
+
+function designOf(panel) {
+  return DESIGN.get(panel) ?? FALLBACK_DESIGN;
+}
 
 import { STATE_ABI_VERSION, encodeState, maxFrameBytes } from "./state-abi.js";
 
@@ -42,7 +50,7 @@ export { STATE_ABI_VERSION } from "./state-abi.js";
 // buffer capacity the writer stays within. The floor is the largest
 // canonical frame the writer can produce, measured, not mirrored.
 const STATE_MIN_CAPACITY = maxFrameBytes();
-const MAX_WASM_RENDER_STATUS = 11;
+const MAX_WASM_RENDER_STATUS = 12;
 
 // A resource missing any required method is incompatible and must fail as an
 // ABI mismatch rather than as a TypeError mid-frame.
@@ -54,9 +62,25 @@ const REQUIRED_RUNTIME_METHODS = [
   "scene_ptr",
   "render_result",
   "set_v_speeds",
+  "set_panel_config",
+  "state_unknown_groups",
+  "state_extended_groups",
   "step_alerts",
   "glyph_manifest",
   "glyph_recorded_hash",
+];
+
+// Registry enumeration exported at module level by the bindings; the
+// backend derives its panel map from these instead of mirroring one.
+const REQUIRED_BINDING_FNS = [
+  "panel_count",
+  "panel_id",
+  "panel_title",
+  "panel_required_layers",
+  "panel_required_groups",
+  "panel_design_width",
+  "panel_design_height",
+  "panel_background_capability",
 ];
 
 export async function loadInstruments(wasmUrl, options = {}) {
@@ -75,6 +99,12 @@ export async function loadInstruments(wasmUrl, options = {}) {
     typeof queryAbiVersion !== "function"
   ) {
     throw new InstrumentFault(REASON.ABI_MISMATCH, "instrument binding surface is incomplete");
+  }
+  const enumeration = options.enumeration ?? bindings;
+  for (const name of REQUIRED_BINDING_FNS) {
+    if (typeof enumeration?.[name] !== "function") {
+      throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument binding lacks ${name}`);
+    }
   }
   let wasm;
   try {
@@ -143,6 +173,52 @@ export async function loadInstruments(wasmUrl, options = {}) {
       `instrument state capacity invalid: wasm=${stateCapacity}`,
     );
   }
+  // Derive the panel map and design frames from the registry
+  // enumeration; the shell holds no panel list of its own (ADR-0029).
+  let panelCount;
+  try {
+    panelCount = enumeration.panel_count();
+  } catch (error) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.ABI_MISMATCH, `panel enumeration failed: ${error}`);
+  }
+  if (!Number.isInteger(panelCount) || panelCount < 1) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(REASON.ABI_MISMATCH, `panel count invalid: ${panelCount}`);
+  }
+  // Build into locals and swap only after the whole enumeration
+  // validates: a broken second load must not clobber the map a working
+  // module's consumers are already using.
+  const nextPanel = {};
+  const nextDesign = new Map();
+  const panels = [];
+  for (let index = 0; index < panelCount; index += 1) {
+    const id = enumeration.panel_id(index);
+    const width = enumeration.panel_design_width(index);
+    const height = enumeration.panel_design_height(index);
+    if (typeof id !== "string" || id.length === 0 || !(width > 0) || !(height > 0)) {
+      releaseRuntime(runtime);
+      throw new InstrumentFault(REASON.ABI_MISMATCH, `panel descriptor ${index} invalid`);
+    }
+    nextPanel[id.toUpperCase()] = index;
+    nextDesign.set(index, Object.freeze({ width, height }));
+    panels.push(
+      Object.freeze({
+        index,
+        id,
+        title: enumeration.panel_title(index),
+        requiredLayers: enumeration.panel_required_layers(index),
+        requiredGroups: enumeration.panel_required_groups(index),
+        width,
+        height,
+        background: enumeration.panel_background_capability(index),
+      }),
+    );
+  }
+  for (const key of Object.keys(PANEL)) delete PANEL[key];
+  DESIGN.clear();
+  Object.assign(PANEL, nextPanel);
+  for (const [index, design] of nextDesign) DESIGN.set(index, design);
   let statePtr;
   let scenePtr;
   try {
@@ -172,7 +248,7 @@ export async function loadInstruments(wasmUrl, options = {}) {
     releaseRuntime(runtime);
     throw error;
   }
-  return new InstrumentModule(runtime, {
+  const mod = new InstrumentModule(runtime, {
     ...options,
     memory: wasm.memory,
     statePtr,
@@ -180,6 +256,11 @@ export async function loadInstruments(wasmUrl, options = {}) {
     scenePtr,
     glyphs,
   });
+  // The registry composition, on the instance: consumers that must not
+  // depend on load-order side effects read this instead of the module
+  // globals.
+  mod.panels = Object.freeze(panels);
+  return mod;
 }
 
 /// Loads the wasm-exported glyph canonical bytes, verifies them against
@@ -332,6 +413,27 @@ export class InstrumentModule {
   // disagree on the semantic alert state. pathHealthy carries the
   // independent display-watchdog verdict into the manager (false marks
   // the output untrusted without suppressing it).
+  /// Wrapping count of decoded frames' group tags this build cannot
+  /// place — the state-path sibling of unknownOpcodes.
+  stateUnknownGroups() {
+    if (this.#disposed) return 0;
+    try {
+      return this.#runtime.state_unknown_groups();
+    } catch {
+      return 0;
+    }
+  }
+
+  /// Wrapping count of known groups whose payloads carried grown tails.
+  stateExtendedGroups() {
+    if (this.#disposed) return 0;
+    try {
+      return this.#runtime.state_extended_groups();
+    } catch {
+      return 0;
+    }
+  }
+
   stepAlerts(nowMs, pathHealthy) {
     if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
     try {
@@ -379,6 +481,13 @@ export class InstrumentModule {
   // backend-owned failure page, never leave the last visible frame.
   renderPanel(panel, ctx, width, height) {
     if (this.#disposed) return { ok: false, reason: REASON.RENDER_TRAP };
+    // Shell layouts key their surfaces by descriptor id; indices exist
+    // only after enumeration, so the id dialect is resolved here where
+    // a loaded module is a given.
+    if (typeof panel === "string") {
+      panel = PANEL[panel.toUpperCase()];
+    }
+    if (!Number.isInteger(panel)) return { ok: false, reason: REASON.INVALID_PANEL };
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
       return { ok: false, reason: REASON.PAINT_FAILED };
     }
@@ -413,19 +522,20 @@ export class InstrumentModule {
     if (!structurallyValid) return { ok: false, reason: REASON.SCENE_FRAMING };
     let back;
     try {
+      const design = designOf(panel);
       back = this.back.get(panel);
       if (!back) {
-        back = this.createCanvas(LOGICAL_W, LOGICAL_H);
+        back = this.createCanvas(design.width, design.height);
         this.back.set(panel, back);
       }
       // Re-assigning width resets the back context wholesale (state
       // stack, transform, clip), so an unbalanced save/clip in one frame
       // cannot leak into the next.
-      back.width = LOGICAL_W;
-      back.height = LOGICAL_H;
+      back.width = design.width;
+      back.height = design.height;
       const bctx = back.getContext("2d");
       bctx.fillStyle = "#000";
-      bctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+      bctx.fillRect(0, 0, design.width, design.height);
       const unknownThisFrame = interpretScene(view, bctx, this.#glyphs);
       this.unknownOpcodes += unknownThisFrame;
       if (unknownThisFrame > 0) {
@@ -439,9 +549,10 @@ export class InstrumentModule {
       return { ok: false, reason: REASON.PAINT_FAILED };
     }
     try {
-      const scale = Math.min(width / LOGICAL_W, height / LOGICAL_H);
-      const dw = LOGICAL_W * scale;
-      const dh = LOGICAL_H * scale;
+      const design = designOf(panel);
+      const scale = Math.min(width / design.width, height / design.height);
+      const dw = design.width * scale;
+      const dh = design.height * scale;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, width, height);

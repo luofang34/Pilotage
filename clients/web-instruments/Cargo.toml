@@ -16,6 +16,7 @@ pilotage-alerts = { workspace = true }
 pilotage-instrument-feeder = { workspace = true }
 pilotage-instrument-glyphs = { workspace = true }
 pilotage-instrument-panels = { workspace = true }
+pilotage-instrument-registry = { workspace = true }
 pilotage-instrument-scene = { workspace = true }
 pilotage-instrument-state = { workspace = true }
 pilotage-protocol = { workspace = true }

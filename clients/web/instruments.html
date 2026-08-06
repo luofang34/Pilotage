@@ -125,7 +125,7 @@
 writes packed state and interprets abstract scene commands onto Canvas2D.</div>
 
 <script type="module">
-  import { loadInstruments, eulerToQuat, PANEL } from "./instruments.js";
+  import { loadInstruments, eulerToQuat } from "./instruments.js";
   import {
     coverInstrumentFailures,
     createDomFaultPresenter,
@@ -178,13 +178,16 @@ writes packed state and interprets abstract scene commands onto Canvas2D.</div>
   const hsi = hsiCanvas.getContext("2d");
   const pfdFaultPresenter = createDomFaultPresenter(pfdCanvas);
   const hsiFaultPresenter = createDomFaultPresenter(hsiCanvas);
+  // Keyed by canvas id (equal to the descriptor id by contract): the
+  // layout exists before the wasm loads, so failure covers paint even
+  // when the load fails. Indices resolve inside the module.
   const health = {
-    [PANEL.PFD]: new PanelHealth(),
-    [PANEL.HSI]: new PanelHealth(),
+    pfd: new PanelHealth(),
+    hsi: new PanelHealth(),
   };
   const targets = () => [
-    [PANEL.PFD, pfd, pfdCanvas, pfdFaultPresenter],
-    [PANEL.HSI, hsi, hsiCanvas, hsiFaultPresenter],
+    ["pfd", pfd, pfdCanvas, pfdFaultPresenter],
+    ["hsi", hsi, hsiCanvas, hsiFaultPresenter],
   ];
   let mod = null;
   let moduleFault = null;

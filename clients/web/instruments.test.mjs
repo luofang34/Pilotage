@@ -12,8 +12,6 @@
 import { readFileSync } from "node:fs";
 import {
   InstrumentModule,
-  LOGICAL_H,
-  LOGICAL_W,
   PANEL,
   COORD_LIMIT_PX,
   MAX_PATH_VERTICES,
@@ -153,12 +151,29 @@ function fakeExports({
       return packRenderResult(resultStatus, resultLen, renderGeneration(panel));
     },
     set_v_speeds: () => 0,
+    set_panel_config: () => 0,
+    state_unknown_groups: () => 0,
+    state_extended_groups: () => 0,
     step_alerts: () => 0n,
     glyph_manifest: () => new Uint8Array(0),
     glyph_recorded_hash: () => new Uint8Array(0),
     memory: { buffer },
   };
   return Object.assign(exports, overrides);
+}
+
+// A fake module-level registry enumeration matching the shipped shape.
+function fakeEnumeration() {
+  return {
+    panel_count: () => 2,
+    panel_id: (i) => ["pfd", "hsi"][i] ?? "",
+    panel_title: (i) => ["PFD", "HSI"][i] ?? "",
+    panel_required_layers: () => 0,
+    panel_required_groups: () => 0,
+    panel_design_width: () => 480,
+    panel_design_height: () => 360,
+    panel_background_capability: (i) => [2, 1][i] ?? 255,
+  };
 }
 
 // A minimal verified-shape atlas for unit paths that are not exercising
@@ -183,6 +198,7 @@ function injectedLoader(exports) {
     initializeBindings: async () => ({ memory: exports.memory }),
     createRuntime: () => exports,
     queryAbiVersion: () => exports.abi_version(),
+    enumeration: fakeEnumeration(),
     createCanvas: recordingCanvas,
     glyphAtlas: fakeAtlas(),
   };
@@ -344,6 +360,29 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "the malformed-state status mirrors the wasm enum",
     REASON.STATE_MALFORMED === 11,
   );
+  check("the config-invalid status mirrors the wasm enum", REASON.CONFIG_INVALID === 12);
+  {
+    const mod = await loadInstruments(
+      "injected.wasm",
+      injectedLoader(fakeExports({ status: REASON.CONFIG_INVALID })),
+    );
+    const refused = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+    check(
+      "a refused panel config surfaces its own diagnostic",
+      !refused.ok && refused.reason === REASON.CONFIG_INVALID,
+    );
+    mod.dispose();
+  }
+  {
+    // The panel map is DERIVED from the registry enumeration; consumers
+    // rely on exactly this shape (ADR-0029 acceptance for this shell).
+    const mod = await loadInstruments("injected.wasm", injectedLoader(fakeExports()));
+    check(
+      "the derived panel map is {PFD: 0, HSI: 1}",
+      PANEL.PFD === 0 && PANEL.HSI === 1 && Object.keys(PANEL).length === 2,
+    );
+    mod.dispose();
+  }
   {
     const mod = await loadInstruments(
       "injected.wasm",
@@ -542,8 +581,8 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check("frame painted to the back buffer, not a visible target", backs.length === 1);
   const backOps = backs[0].ctx.calls("fillRect");
   check(
-    "back buffer cleared to full logical size before painting",
-    backOps.length >= 2 && backOps[0].args.join(",") === `0,0,${LOGICAL_W},${LOGICAL_H}`,
+    "back buffer cleared to the descriptor design frame before painting",
+    backOps.length >= 2 && backOps[0].args.join(",") === "0,0,480,360",
   );
   check(
     "visible commit covers the whole target before the frame",
@@ -1454,6 +1493,9 @@ function tickToCadence(health, target, interval = 250) {
         scene_ptr: () => rt.scene_ptr(),
         render_result: (panel) => rt.render_result(panel),
         set_v_speeds: (...a) => rt.set_v_speeds(...a),
+        set_panel_config: (...a) => rt.set_panel_config(...a),
+        state_unknown_groups: () => rt.state_unknown_groups(),
+        state_extended_groups: () => rt.state_extended_groups(),
         step_alerts: (...a) => rt.step_alerts(...a),
         glyph_manifest: () => rt.glyph_manifest(),
         glyph_recorded_hash: () => rt.glyph_recorded_hash(),

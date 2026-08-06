@@ -37,4 +37,7 @@ pub enum RenderStatus {
     /// The state frame is malformed: a group tag repeated or descended,
     /// or a known group's payload is below its minimum layout.
     StateMalformed = 11,
+    /// The panel's configuration blob does not validate: bad framing,
+    /// a key outside the panel's schema, or an uninterpretable value.
+    ConfigInvalid = 12,
 }
