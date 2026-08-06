@@ -1,5 +1,5 @@
 //! Shared ABI posture fixtures: the states behind the committed golden
-//! frames in `clients/web/fixtures/`.
+//! frames in `crates/pilotage-instrument-state/fixtures/`.
 //!
 //! Three deliberately different group sets (ADR-0026): a fully fed
 //! source, a data-gateway bridge, and a flight controller. Neither
