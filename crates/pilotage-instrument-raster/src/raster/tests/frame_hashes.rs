@@ -29,9 +29,7 @@ fn pinned_baseline(id: &str) -> &'static str {
 
 /// The shared canonical "typical" state (ADR-0033): the same fixture
 /// the scene digest draws, so the pinned frame hashes and the digest
-/// exercise one corpus. The unchanged hash values below prove the
-/// shared copy renders bit-identically to the fixture this module used
-/// to own.
+/// exercise one corpus.
 pub(super) fn demo_state() -> AircraftState {
     pilotage_instrument_registry::states::typical()
 }
