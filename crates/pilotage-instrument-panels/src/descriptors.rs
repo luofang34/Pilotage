@@ -11,6 +11,7 @@
 use pilotage_alerts::AlertOutput;
 use pilotage_instrument_registry::{
     BackgroundCapability, ConfigBlob, DesignFrame, GroupSet, PanelDescriptor, PanelDrawError,
+    Region,
 };
 use pilotage_instrument_scene::{LayerId, SceneWriter};
 use pilotage_instrument_state::{GroupId, PanelData};
@@ -69,7 +70,78 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     },
     background: BackgroundCapability::Cedeable,
     config_schema: PFD_CONFIG_SCHEMA,
-    group_regions: &[],
+    // Value-readout surfaces, keyed by the group whose data the number
+    // comes from: the honest-status family proves these stay
+    // numeral-free when that group is withheld. Scale ladders and the
+    // attitude ball carry no per-group numerals and stay undeclared.
+    group_regions: &[
+        // IAS pointed readout value (the run anchors at x 40; the
+        // scale ladder's runs anchor at x 70 and stay outside).
+        (
+            GroupId::Air,
+            Region {
+                x: 20.0,
+                y: 162.0,
+                width: 40.0,
+                height: 36.0,
+            },
+        ),
+        // Baro setting box.
+        (
+            GroupId::Air,
+            Region {
+                x: 390.0,
+                y: 335.0,
+                width: 90.0,
+                height: 25.0,
+            },
+        ),
+        // Groundspeed box.
+        (
+            GroupId::Kinematics,
+            Region {
+                x: 0.0,
+                y: 335.0,
+                width: 90.0,
+                height: 25.0,
+            },
+        ),
+        // Altitude pointed readout value (anchors at x 442; the scale
+        // ladder anchors at x 408 and stays outside). The value is
+        // kinematic altitude; the altitude group only qualifies its
+        // datum.
+        (
+            GroupId::Kinematics,
+            Region {
+                x: 424.0,
+                y: 162.0,
+                width: 36.0,
+                height: 36.0,
+            },
+        ),
+        // Selected-altitude box.
+        (
+            GroupId::Selections,
+            Region {
+                x: 390.0,
+                y: 0.0,
+                width: 90.0,
+                height: 24.0,
+            },
+        ),
+        // VSI numeral strip (kinematic vertical speed), bounded to
+        // exclude the selected-altitude box above and the baro box
+        // below, whose numerals belong to other groups.
+        (
+            GroupId::Kinematics,
+            Region {
+                x: 440.0,
+                y: 28.0,
+                width: 26.0,
+                height: 307.0,
+            },
+        ),
+    ],
     extreme_states: &[],
     // Reference-rasterizer frame hash over the shared typical state —
     // pinned per panel here so a panel travels with its own regression
@@ -101,7 +173,59 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     },
     background: BackgroundCapability::Opaque,
     config_schema: &[],
-    group_regions: &[],
+    group_regions: &[
+        // Wind box.
+        (
+            GroupId::Wind,
+            Region {
+                x: 2.0,
+                y: 2.0,
+                width: 112.0,
+                height: 48.0,
+            },
+        ),
+        // Distance box.
+        (
+            GroupId::Nav,
+            Region {
+                x: 366.0,
+                y: 2.0,
+                width: 112.0,
+                height: 48.0,
+            },
+        ),
+        // Course box.
+        (
+            GroupId::Nav,
+            Region {
+                x: 2.0,
+                y: 322.0,
+                width: 112.0,
+                height: 36.0,
+            },
+        ),
+        // Heading-select box.
+        (
+            GroupId::Selections,
+            Region {
+                x: 366.0,
+                y: 322.0,
+                width: 112.0,
+                height: 36.0,
+            },
+        ),
+        // Digital heading readout at the panel top: the panel's
+        // primary heading number must dash out with the sample gone.
+        (
+            GroupId::Heading,
+            Region {
+                x: 206.0,
+                y: 2.0,
+                width: 68.0,
+                height: 26.0,
+            },
+        ),
+    ],
     extreme_states: &[],
     raster_baseline: Some("66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c"),
     draw: draw_hsi_panel,

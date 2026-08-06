@@ -24,6 +24,7 @@ members = [
     "crates/pilotage-instrument-symbology",
     "crates/pilotage-instrument-panels",
     "crates/pilotage-instrument-raster",
+    "crates/pilotage-instrument-conformance",
     "crates/pilotage-instrument-feeder",
     "crates/pilotage-instrument-registry",
     "crates/pilotage-evidence",
@@ -99,6 +100,7 @@ pilotage-instrument-glyphs = { path = "crates/pilotage-instrument-glyphs" }
 pilotage-instrument-symbology = { path = "crates/pilotage-instrument-symbology" }
 pilotage-instrument-panels = { path = "crates/pilotage-instrument-panels" }
 pilotage-instrument-raster = { path = "crates/pilotage-instrument-raster" }
+pilotage-instrument-conformance = { path = "crates/pilotage-instrument-conformance" }
 pilotage-instrument-feeder = { path = "crates/pilotage-instrument-feeder" }
 pilotage-instrument-registry = { path = "crates/pilotage-instrument-registry" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }

@@ -1532,6 +1532,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-instrument-conformance"
+version = "0.1.0"
+dependencies = [
+ "pilotage-alerts",
+ "pilotage-instrument-glyphs",
+ "pilotage-instrument-panels",
+ "pilotage-instrument-registry",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-instrument-feeder"
 version = "0.1.0"
 dependencies = [
