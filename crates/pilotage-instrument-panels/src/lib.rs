@@ -23,7 +23,7 @@ mod descriptors;
 mod hsi;
 mod pfd;
 
-pub use descriptors::{BUILTIN_PANELS, HSI_DESCRIPTOR, PFD_DESCRIPTOR};
+pub use descriptors::{BUILTIN_PANELS, BUILTIN_SCENE_DIGEST, HSI_DESCRIPTOR, PFD_DESCRIPTOR};
 pub use hsi::draw_hsi;
 pub use pfd::{BackgroundMode, PFD_CONFIG_SCHEMA, PfdConfig, SvsViewport, VSpeeds, draw_pfd};
 

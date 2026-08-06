@@ -24,13 +24,9 @@ fn digest_of(panels: &'static [PanelDescriptor]) -> String {
     hex(scene_digest(&registry, &mut scratch).expect("digests"))
 }
 
-/// THE cross-shell migration invariant (ADR-0033). A change to this
-/// value is a deliberate contract change; its re-pin must say why.
-const SCENE_DIGEST: &str = "c7519ab608500728e3475a246e7558ea1ff01d423cbe68028f55404db652060c";
-
 #[test]
 fn the_builtin_scene_digest_is_pinned() {
-    assert_eq!(digest_of(BUILTIN_PANELS), SCENE_DIGEST);
+    assert_eq!(digest_of(BUILTIN_PANELS), super::BUILTIN_SCENE_DIGEST);
 }
 
 #[test]

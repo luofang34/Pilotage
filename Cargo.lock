@@ -984,6 +984,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "instrument-bench"
+version = "0.1.0"
+dependencies = [
+ "pilotage-instrument-conformance",
+ "pilotage-instrument-panels",
+ "pilotage-instrument-raster",
+ "pilotage-instrument-registry",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
+ "thiserror",
+]
+
+[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

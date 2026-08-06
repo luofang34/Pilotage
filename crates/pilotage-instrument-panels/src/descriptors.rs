@@ -234,6 +234,14 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
 /// The panels this crate ships, in shell display order.
 pub const BUILTIN_PANELS: &[PanelDescriptor] = &[PFD_DESCRIPTOR, HSI_DESCRIPTOR];
 
+/// The pinned cross-shell scene digest over [`BUILTIN_PANELS`] and the
+/// canonical corpus (ADR-0033). Every shell reports exactly this value
+/// or it is not showing these instruments; it moves once per
+/// deliberate contract change, re-pinned with a review note saying
+/// why.
+pub const BUILTIN_SCENE_DIGEST: &str =
+    "c7519ab608500728e3475a246e7558ea1ff01d423cbe68028f55404db652060c";
+
 #[cfg(test)]
 mod digest_tests;
 #[cfg(test)]
