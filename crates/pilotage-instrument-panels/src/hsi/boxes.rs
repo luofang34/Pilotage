@@ -6,8 +6,7 @@ use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::units::{MPS_TO_KT, RAD_TO_DEG, wrap_deg_360};
 use pilotage_instrument_state::{NavSource, PanelData};
 
-use crate::fixed_str::fmt_label;
-use crate::palette;
+use pilotage_instrument_symbology::{fmt_label, palette, safety};
 
 use super::cdi::source_color;
 
@@ -95,7 +94,7 @@ pub fn heading_sel_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<
     scene.stroke(palette::GREY, 1.5)?;
     scene.rect(PaintMode::FillStroke, 366.0, 322.0, 112.0, 36.0)?;
     if !data.heading_bug_rose_rad.status.shows_value() {
-        scene.fill_color(palette::AMBER)?;
+        scene.fill_color(safety::CAUTION_AMBER)?;
         scene.text(422.0, 340.0, 15.0, Anchor::CENTER, "HDG REF")?;
         return Ok(());
     }

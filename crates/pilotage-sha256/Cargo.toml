@@ -1,0 +1,12 @@
+[package]
+name = "pilotage-sha256"
+description = "Dependency-free SHA-256 (FIPS 180-4): const-evaluable one-shot digest plus a streaming context, no_std and allocation-free"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+sha2 = { workspace = true }
