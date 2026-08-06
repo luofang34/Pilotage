@@ -8,7 +8,7 @@ use pilotage_instrument_state::{AircraftState, Stamped};
 
 use crate::exports::InstrumentRuntime;
 use crate::render_status::RenderStatus;
-use crate::tests::{attitude_state, encoded_state_block, unpack};
+use crate::tests::{attitude_state, unpack, write_state};
 
 fn failed_alt_state() -> AircraftState {
     let mut state = attitude_state();
@@ -56,12 +56,10 @@ fn render_texts(rt: &mut InstrumentRuntime, panel: u32) -> Vec<String> {
 fn one_alert_step_feeds_every_panel_the_same_semantic_state() {
     let mut rt = InstrumentRuntime::new();
     rt.init();
-    let block = encoded_state_block(&failed_alt_state());
-    rt.runtime
-        .as_mut()
-        .expect("initialized")
-        .state
-        .copy_from_slice(&block);
+    write_state(
+        rt.runtime.as_mut().expect("initialized"),
+        &failed_alt_state(),
+    );
 
     let summary = rt.step_alerts(1_000, 1);
     assert_eq!(summary & 0xff, RenderStatus::Ok as u64);
@@ -78,12 +76,10 @@ fn one_alert_step_feeds_every_panel_the_same_semantic_state() {
 fn primary_flags_render_when_alerts_were_never_stepped() {
     let mut rt = InstrumentRuntime::new();
     rt.init();
-    let block = encoded_state_block(&failed_alt_state());
-    rt.runtime
-        .as_mut()
-        .expect("initialized")
-        .state
-        .copy_from_slice(&block);
+    write_state(
+        rt.runtime.as_mut().expect("initialized"),
+        &failed_alt_state(),
+    );
 
     let texts = render_texts(&mut rt, 0);
     assert!(
@@ -100,12 +96,10 @@ fn primary_flags_render_when_alerts_were_never_stepped() {
 fn faulted_alerting_path_is_annunciated_and_flags_survive() {
     let mut rt = InstrumentRuntime::new();
     rt.init();
-    let block = encoded_state_block(&failed_alt_state());
-    rt.runtime
-        .as_mut()
-        .expect("initialized")
-        .state
-        .copy_from_slice(&block);
+    write_state(
+        rt.runtime.as_mut().expect("initialized"),
+        &failed_alt_state(),
+    );
 
     let summary = rt.step_alerts(1_000, 0);
     assert_eq!((summary >> 16) & 1, 1, "monitor fault must mark the output");

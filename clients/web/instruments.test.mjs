@@ -17,8 +17,6 @@ import {
   PANEL,
   COORD_LIMIT_PX,
   MAX_PATH_VERTICES,
-  STATE_ABI_SIZE,
-  STATE_ABI_SIZE_BY_VERSION,
   STATE_ABI_VERSION,
   decodeRenderResult,
   interpretScene,
@@ -127,6 +125,9 @@ function packRenderResult(status, sceneLen, generation) {
   );
 }
 
+// The wasm side's state-buffer capacity (abi/v6.rs CAPACITY).
+const STATE_CAPACITY = 1024;
+
 // A fake WASM export surface with programmable behavior.
 function fakeExports({
   status = 0,
@@ -144,7 +145,7 @@ function fakeExports({
     free: () => {},
     init: () => 1,
     state_ptr: () => 256,
-    state_len: () => STATE_ABI_SIZE,
+    state_capacity: () => STATE_CAPACITY,
     scene_ptr: () => 1024,
     render_result: (panel) => {
       const resultStatus = renderStatus(panel);
@@ -320,10 +321,6 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
 // ---- transactional renderPanel ---------------------------------------------
 
 {
-  check(
-    "state ABI versions have exact independent sizes",
-    STATE_ABI_SIZE_BY_VERSION[1] === 120 && STATE_ABI_SIZE_BY_VERSION[2] === 128,
-  );
   const wrappedResult = decodeRenderResult(
     BigInt.asIntN(64, packRenderResult(REASON.OK, 65535, 0xffffffff)),
   );
@@ -343,6 +340,22 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "scene length decodes at the real buffer capacity (bit 16 set)",
     capacity?.sceneLen === 65536 && capacity?.generation === 1,
   );
+  check(
+    "the malformed-state status mirrors the wasm enum",
+    REASON.STATE_MALFORMED === 11,
+  );
+  {
+    const mod = await loadInstruments(
+      "injected.wasm",
+      injectedLoader(fakeExports({ status: REASON.STATE_MALFORMED })),
+    );
+    const malformed = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+    check(
+      "a malformed state frame surfaces its own diagnostic, not a generic trap",
+      malformed.ok === false && malformed.reason === REASON.STATE_MALFORMED,
+    );
+    mod.dispose();
+  }
   check(
     "load rejects a non-function export as ABI_MISMATCH",
     (await loadFailureReason(fakeExports({ overrides: { render_result: 7 } }))) ===
@@ -388,22 +401,20 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       REASON.INIT_FAILED,
   );
   check(
-    "state length trap is ABI_MISMATCH",
+    "state capacity trap is ABI_MISMATCH",
     (await loadFailureReason(
       fakeExports({
         overrides: {
-          state_len: () => {
-            throw new Error("state length trap");
+          state_capacity: () => {
+            throw new Error("state capacity trap");
           },
         },
       }),
     )) === REASON.ABI_MISMATCH,
   );
   check(
-    `ABI v${STATE_ABI_VERSION} requires exactly ${STATE_ABI_SIZE} state bytes`,
-    (await loadFailureReason(
-      fakeExports({ overrides: { state_len: () => (STATE_ABI_SIZE === 120 ? 128 : 120) } }),
-    )) ===
+    `ABI v${STATE_ABI_VERSION} rejects a state capacity below the frame header`,
+    (await loadFailureReason(fakeExports({ overrides: { state_capacity: () => 1 } }))) ===
       REASON.ABI_MISMATCH,
   );
   check(
@@ -421,7 +432,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check(
     "out-of-bounds state buffer is ABI_MISMATCH",
     (await loadFailureReason(
-      fakeExports({ overrides: { state_ptr: () => 65536 - STATE_ABI_SIZE + 1 } }),
+      fakeExports({ overrides: { state_ptr: () => 65536 - STATE_CAPACITY + 1 } }),
     )) === REASON.ABI_MISMATCH,
   );
   check(
@@ -445,7 +456,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       free: () => {
         rejectedReleases += 1;
       },
-      state_len: () => STATE_ABI_SIZE - 1,
+      state_capacity: () => 1,
     },
   });
   await loadFailureReason(rejectedRuntime);
@@ -491,7 +502,7 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     statePtr,
     scenePtr: 1024,
   });
-  const replacementState = new Uint8Array(memory.buffer, statePtr, STATE_ABI_SIZE);
+  const replacementState = new Uint8Array(memory.buffer, statePtr, STATE_CAPACITY);
   const replacementWrite = replacement.writeState({ quality: 2 });
   const beforeStaleWrite = replacementState.slice();
 
@@ -1177,19 +1188,63 @@ function tickToCadence(health, target, interval = 250) {
   );
 }
 
-// ---- VAL-01: fail-safe write defaults mirror abi.rs ---------------------------
+// ---- VAL-01: fail-safe write defaults mirror abi/v6.rs ------------------------
 
 {
   const exportsFake = fakeExports({});
   const mod = new InstrumentModule(exportsFake, { createCanvas: recordingCanvas });
+  const TAG = Object.freeze({
+    ATTITUDE: 1,
+    NAV: 4,
+    SELECTIONS: 6,
+    TRUST: 7,
+    ALTITUDE: 8,
+    HEADING: 9,
+    VARIATION: 10,
+    DYNAMICS: 11,
+  });
+
+  // Walks the self-delimiting v6 frame: tag -> payload DataView.
+  function frameGroups() {
+    const base = exportsFake.state_ptr();
+    const view = new DataView(exportsFake.memory.buffer, base, STATE_CAPACITY);
+    check("frame version byte is v6", view.getUint8(0) === STATE_ABI_VERSION);
+    const groups = new Map();
+    let at = 2;
+    for (let i = 0; i < view.getUint8(1); i += 1) {
+      const tag = view.getUint8(at);
+      const len = view.getUint16(at + 1, true);
+      groups.set(tag, new DataView(exportsFake.memory.buffer, base + at + 3, len));
+      at += 3 + len;
+    }
+    return groups;
+  }
+
   const minimal = mod.writeState({ selections: { headingBugRad: 0 } });
   check("minimal state write succeeds", minimal.ok === true);
-  const view = new DataView(exportsFake.memory.buffer, exportsFake.state_ptr(), STATE_ABI_SIZE);
+  let groups = frameGroups();
   check(
-    "undeclared quality writes the unknown code (abi.rs parity), never Good",
-    view.getUint8(84) === 255,
+    "an unfed group emits no tag: absence IS Missing (VAL-01 by construction)",
+    !groups.has(TAG.TRUST) &&
+      !groups.has(TAG.ATTITUDE) &&
+      !groups.has(TAG.ALTITUDE) &&
+      !groups.has(TAG.HEADING) &&
+      !groups.has(TAG.DYNAMICS),
   );
-  check("undeclared validity writes no flags (nothing declared valid)", view.getUint8(85) === 0);
+  check(
+    "undeclared bug reference fails closed inside the selections payload",
+    groups.get(TAG.SELECTIONS)?.getUint8(4) === 255,
+  );
+
+  const validOnly = mod.writeState({
+    selections: { headingBugRad: 0 },
+    valid: { attitude: true },
+  });
+  check("validity-only trust write succeeds", validOnly.ok === true);
+  check(
+    "undeclared quality writes the unknown code, never Good",
+    frameGroups().get(TAG.TRUST)?.getUint8(0) === 255,
+  );
 
   const declared = mod.writeState({
     selections: { headingBugRad: 0 },
@@ -1197,9 +1252,11 @@ function tickToCadence(health, target, interval = 250) {
     valid: { attitude: true, rates: true, position: true, velocity: true },
   });
   check("declared trust write succeeds", declared.ok === true);
+  groups = frameGroups();
   check(
     "declared quality and flags encode exactly",
-    view.getUint8(84) === 1 && view.getUint8(85) === 0b1111,
+    groups.get(TAG.TRUST)?.getUint8(0) === 1 &&
+      groups.get(TAG.TRUST)?.getUint16(2, true) === 0b1111,
   );
 
   const partial = mod.writeState({
@@ -1210,20 +1267,12 @@ function tickToCadence(health, target, interval = 250) {
   check("partial validity write succeeds", partial.ok === true);
   check(
     "undeclared flags stay unset within a partial declaration",
-    view.getUint8(85) === 0b1001,
+    frameGroups().get(TAG.TRUST)?.getUint16(2, true) === 0b1001,
   );
 
-  // ALT-01: the default altitude declaration is local-relative with no
-  // sample; declared classes and identities encode exactly.
-  check(
-    "undeclared altitude datum writes local-relative with no sample",
-    view.getUint8(125) === 0 &&
-      view.getUint8(126) === 0 &&
-      view.getUint8(127) === 0 &&
-      Number.isNaN(view.getFloat32(128, true)) &&
-      Number.isNaN(view.getFloat32(132, true)) &&
-      view.getUint32(136, true) === 0,
-  );
+  // ALT-01: an undeclared altitude datum emits no tag (the decoder's
+  // default is local-relative with no sample); declared classes and
+  // identities encode exactly.
   const withDatum = mod.writeState({
     selections: {
       headingBugRad: 0,
@@ -1235,75 +1284,80 @@ function tickToCadence(health, target, interval = 250) {
     altitude: { referenceClass: 1, geoidModel: 2, sampleM: 457.2, originId: 7 },
   });
   check("datum-qualified state write succeeds", withDatum.ok === true);
+  groups = frameGroups();
+  const alt = groups.get(TAG.ALTITUDE);
   check(
-    "declared altitude datum encodes exactly (abi.rs parity)",
-    view.getUint8(125) === 1 &&
-      view.getUint8(126) === 1 &&
-      view.getUint8(127) === 2 &&
-      Math.abs(view.getFloat32(128, true) - 457.2) < 1e-3 &&
-      Math.abs(view.getFloat32(132, true) - 1020.5) < 1e-3 &&
-      view.getUint32(136, true) === 7,
+    "declared altitude datum encodes exactly (abi/v6.rs parity)",
+    alt?.getUint8(0) === 1 &&
+      alt?.getUint8(1) === 2 &&
+      Math.abs(alt?.getFloat32(4, true) - 457.2) < 1e-3 &&
+      alt?.getUint32(8, true) === 7,
   );
+  const sel = groups.get(TAG.SELECTIONS);
   check(
-    "selection datum identity encodes exactly (abi.rs parity)",
-    view.getUint8(140) === 4 && view.getUint32(144, true) === 9,
+    "selection datum identity encodes exactly (abi/v6.rs parity)",
+    sel?.getUint8(5) === 1 &&
+      sel?.getUint8(6) === 4 &&
+      sel?.getUint32(12, true) === 9 &&
+      Math.abs(sel?.getFloat32(16, true) - 1020.5) < 1e-3,
   );
 
-  // NAV-01: undeclared heading/bug/course write Unknown references and
-  // no sample — a zero-default heading would be a plausible frozen rose.
-  const bare2 = mod.writeState({ selections: { headingBugRad: 0 } });
-  check("headingless state write succeeds", bare2.ok === true);
-  check(
-    "undeclared heading and angle references fail closed on the wire",
-    view.getUint8(152) === 255 &&
-      view.getUint8(154) === 255 &&
-      view.getUint8(155) === 255 &&
-      Number.isNaN(view.getFloat32(156, true)) &&
-      view.getUint8(172) === 0,
-  );
+  // NAV-01: undeclared heading emits no tag; declared references and
+  // the active waypoint ident encode exactly.
   const headed = mod.writeState({
     selections: { headingBugRad: 0.5, headingBugReference: 2 },
     heading: { rad: 1.25, reference: 2, ageMs: 12 },
     variation: { eastRad: 0.03, sourceId: 3, ageMs: 40 },
-    nav: { source: 1, courseRad: 0.3, courseReference: 2 },
+    nav: { source: 1, courseRad: 0.3, courseReference: 2, toIdent: "WPT-9", ageMs: 5 },
     valid: { heading: true, variation: true },
   });
   check("declared heading write succeeds", headed.ok === true);
+  groups = frameGroups();
+  const heading = groups.get(TAG.HEADING);
+  const variation = groups.get(TAG.VARIATION);
+  const nav = groups.get(TAG.NAV);
   check(
     "declared heading, bug, course, and variation encode exactly",
-    view.getUint8(152) === 2 &&
-      view.getUint8(153) === 3 &&
-      view.getUint8(154) === 2 &&
-      view.getUint8(155) === 2 &&
-      Math.abs(view.getFloat32(156, true) - 1.25) < 1e-6 &&
-      Math.abs(view.getFloat32(164, true) - 0.03) < 1e-6 &&
-      view.getUint8(172) === 0b11,
+    heading?.getUint8(0) === 2 &&
+      Math.abs(heading?.getFloat32(4, true) - 1.25) < 1e-6 &&
+      variation?.getUint8(0) === 3 &&
+      Math.abs(variation?.getFloat32(4, true) - 0.03) < 1e-6 &&
+      groups.get(TAG.SELECTIONS)?.getUint8(4) === 2 &&
+      nav?.getUint8(2) === 2 &&
+      groups.get(TAG.TRUST)?.getUint16(2, true) === 0b110000,
+  );
+  check(
+    "the active waypoint ident rides the nav payload as a bounded atom",
+    nav?.getUint8(24) === 5 &&
+      String.fromCharCode(
+        nav.getUint8(25),
+        nav.getUint8(26),
+        nav.getUint8(27),
+        nav.getUint8(28),
+        nav.getUint8(29),
+      ) === "WPT-9",
   );
 
-  // DYN-01: undeclared dynamics write no sample and an unknown basis —
-  // there is no encoding through which body yaw rate could pose as a
-  // turn indication.
+  // DYN-01: undeclared dynamics emit no tag — there is no encoding
+  // through which body yaw rate could pose as a turn indication.
   const bare3 = mod.writeState({ selections: { headingBugRad: 0 } });
   check("dynamicsless state write succeeds", bare3.ok === true);
-  check(
-    "undeclared dynamics fail closed on the wire",
-    view.getUint8(173) === 255 &&
-      Number.isNaN(view.getFloat32(176, true)) &&
-      Number.isNaN(view.getFloat32(184, true)),
-  );
+  check("undeclared dynamics emit no tag", !frameGroups().has(TAG.DYNAMICS));
   const dyn = mod.writeState({
     selections: { headingBugRad: 0 },
     dynamics: { turnBasis: 0, turnRps: 0.05, lateralMps2: -0.8, ageMs: 15 },
     valid: { turn: true, slip: true },
   });
   check("typed dynamics write succeeds", dyn.ok === true);
+  groups = frameGroups();
+  const dynPayload = groups.get(TAG.DYNAMICS);
   check(
-    "declared dynamics encode exactly (abi.rs parity)",
-    view.getUint8(173) === 0 &&
-      Math.abs(view.getFloat32(176, true) - 0.05) < 1e-6 &&
-      Math.abs(view.getFloat32(180, true) + 0.8) < 1e-6 &&
-      Math.abs(view.getFloat32(184, true) - 15) < 1e-6 &&
-      view.getUint8(172) === 0b1100,
+    "declared dynamics encode exactly (abi/v6.rs parity)",
+    dynPayload?.getUint8(0) === 0 &&
+      Math.abs(dynPayload?.getFloat32(4, true) - 0.05) < 1e-6 &&
+      Math.abs(dynPayload?.getFloat32(8, true) + 0.8) < 1e-6 &&
+      Math.abs(dynPayload?.getFloat32(12, true) - 15) < 1e-6 &&
+      groups.get(TAG.TRUST)?.getUint16(2, true) === 0b11000000,
   );
 }
 
@@ -1396,7 +1450,7 @@ function tickToCadence(health, target, interval = 250) {
         free: () => rt.free(),
         init: () => rt.init(),
         state_ptr: () => rt.state_ptr(),
-        state_len: () => rt.state_len(),
+        state_capacity: () => rt.state_capacity(),
         scene_ptr: () => rt.scene_ptr(),
         render_result: (panel) => rt.render_result(panel),
         set_v_speeds: (...a) => rt.set_v_speeds(...a),

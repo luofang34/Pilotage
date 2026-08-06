@@ -4,7 +4,7 @@ use pilotage_instrument_panels::PfdConfig;
 use pilotage_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
-use pilotage_instrument_state::abi::{STATE_ABI_SIZE, STATE_ABI_VERSION, encode_state};
+use pilotage_instrument_state::abi::v6::{CAPACITY, VERSION, encode_state};
 use pilotage_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
 use super::{InstrumentRuntime, RenderStatus, abi_version};
@@ -27,10 +27,9 @@ pub(crate) fn unpack(result: u64) -> PackedResult {
     }
 }
 
-fn write_state(runtime: &mut Runtime, state: &AircraftState) {
-    let mut block = vec![0u8; STATE_ABI_SIZE];
-    encode_state(state, &mut block).expect("encodes");
-    runtime.state.copy_from_slice(&block);
+pub(crate) fn write_state(runtime: &mut Runtime, state: &AircraftState) {
+    runtime.state.fill(0);
+    encode_state(state, &mut runtime.state).expect("encodes");
 }
 
 pub(crate) fn attitude_state() -> AircraftState {
@@ -55,8 +54,9 @@ pub(crate) fn attitude_state() -> AircraftState {
 }
 
 pub(crate) fn encoded_state_block(state: &AircraftState) -> Vec<u8> {
-    let mut block = vec![0u8; STATE_ABI_SIZE];
-    encode_state(state, &mut block).expect("encodes");
+    let mut block = vec![0u8; CAPACITY];
+    let len = encode_state(state, &mut block).expect("encodes");
+    block.truncate(len);
     block
 }
 
@@ -115,7 +115,7 @@ fn assert_scene_rejected(panel_idx: usize, scene: &[u8], expected: RenderStatus)
 }
 #[test]
 fn exported_surface_packs_one_atomic_render_result() {
-    assert_eq!(abi_version(), STATE_ABI_VERSION);
+    assert_eq!(abi_version(), u32::from(VERSION));
     let mut resource = InstrumentRuntime::new();
     assert_eq!(
         unpack(resource.render_result(0)),
@@ -131,7 +131,7 @@ fn exported_surface_packs_one_atomic_render_result() {
     );
     assert_eq!(resource.state_ptr(), 0);
     assert_eq!(resource.scene_ptr(), 0);
-    assert_eq!(resource.state_len() as usize, STATE_ABI_SIZE);
+    assert_eq!(resource.state_capacity() as usize, CAPACITY);
 
     assert_eq!(resource.init(), 1);
     assert_ne!(resource.state_ptr(), 0);
@@ -227,6 +227,36 @@ fn resources_are_independent_and_reinitialization_resets_one() {
 }
 
 #[test]
+fn a_non_canonical_state_frame_fails_malformed() {
+    // Tags out of ascending order must fail with the malformed-state
+    // status, not truncation and never a render.
+    let mut malformed = Runtime {
+        state: {
+            let mut frame = vec![6u8, 2];
+            frame.extend_from_slice(&[0x05, 12, 0]);
+            frame.extend_from_slice(&[0u8; 12]);
+            frame.extend_from_slice(&[0x03, 12, 0]);
+            frame.extend_from_slice(&[0u8; 12]);
+            frame
+        },
+        scene: vec![0u8; SCENE_CAPACITY],
+        generation: [2, 3],
+        pfd_cfg: PfdConfig::default(),
+        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
+        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: pilotage_alerts::AlertManager::new(),
+        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        alert_output: None,
+    };
+    assert_attempt(
+        render_into(&mut malformed, 0),
+        RenderStatus::StateMalformed,
+        0,
+        2,
+    );
+}
+
+#[test]
 fn render_into_reports_buffer_and_truncation_failures() {
     let mut tiny = Runtime {
         state: encoded_state_block(&attitude_state()),
@@ -247,8 +277,9 @@ fn render_into_reports_buffer_and_truncation_failures() {
     );
     assert_eq!(tiny.generation, [0; 2], "failure must not advance");
 
+    let frame = encoded_state_block(&attitude_state());
     let mut truncated = Runtime {
-        state: encoded_state_block(&attitude_state())[..STATE_ABI_SIZE - 1].to_vec(),
+        state: frame[..frame.len() - 1].to_vec(),
         scene: vec![0u8; SCENE_CAPACITY],
         generation: [4, 8],
         pfd_cfg: PfdConfig::default(),

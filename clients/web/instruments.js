@@ -23,6 +23,8 @@ export const PANEL = { PFD: 0, HSI: 1 };
 export const LOGICAL_W = 480;
 export const LOGICAL_H = 360;
 
+import { STATE_ABI_VERSION, encodeState, maxFrameBytes } from "./state-abi.js";
+
 const SCENE_FORMAT_VERSION = 1;
 
 // The controlled glyph pack's recorded content hash (REN-02). The backend
@@ -35,10 +37,12 @@ export const EXPECTED_GLYPH_SHA256 =
 const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
-export const STATE_ABI_VERSION = 5;
-export const STATE_ABI_SIZE_BY_VERSION = Object.freeze({ 1: 120, 2: 128, 3: 152, 4: 176, 5: 192 });
-export const STATE_ABI_SIZE = STATE_ABI_SIZE_BY_VERSION[STATE_ABI_VERSION];
-const MAX_WASM_RENDER_STATUS = 10;
+export { STATE_ABI_VERSION } from "./state-abi.js";
+// The v6 state frame is self-delimiting; the wasm side publishes a
+// buffer capacity the writer stays within. The floor is the largest
+// canonical frame the writer can produce, measured, not mirrored.
+const STATE_MIN_CAPACITY = maxFrameBytes();
+const MAX_WASM_RENDER_STATUS = 11;
 
 // A resource missing any required method is incompatible and must fail as an
 // ABI mismatch rather than as a TypeError mid-frame.
@@ -46,7 +50,7 @@ const REQUIRED_RUNTIME_METHODS = [
   "free",
   "init",
   "state_ptr",
-  "state_len",
+  "state_capacity",
   "scene_ptr",
   "render_result",
   "set_v_speeds",
@@ -122,18 +126,21 @@ export async function loadInstruments(wasmUrl, options = {}) {
     releaseRuntime(runtime);
     throw new InstrumentFault(REASON.INIT_FAILED, `instrument wasm init returned ${initialized}`);
   }
-  let stateLen;
+  let stateCapacity;
   try {
-    stateLen = runtime.state_len();
+    stateCapacity = runtime.state_capacity();
   } catch (error) {
-    releaseRuntime(runtime);
-    throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument state length query failed: ${error}`);
-  }
-  if (stateLen !== STATE_ABI_SIZE) {
     releaseRuntime(runtime);
     throw new InstrumentFault(
       REASON.ABI_MISMATCH,
-      `instrument state size mismatch: wasm=${stateLen} js=${STATE_ABI_SIZE}`,
+      `instrument state capacity query failed: ${error}`,
+    );
+  }
+  if (!Number.isInteger(stateCapacity) || stateCapacity < STATE_MIN_CAPACITY) {
+    releaseRuntime(runtime);
+    throw new InstrumentFault(
+      REASON.ABI_MISMATCH,
+      `instrument state capacity invalid: wasm=${stateCapacity}`,
     );
   }
   let statePtr;
@@ -148,7 +155,7 @@ export async function loadInstruments(wasmUrl, options = {}) {
   const activeMemoryBuffer = wasm.memory.buffer;
   const memoryLen = activeMemoryBuffer.byteLength;
   const stateFits =
-    Number.isInteger(statePtr) && statePtr > 0 && statePtr + STATE_ABI_SIZE <= memoryLen;
+    Number.isInteger(statePtr) && statePtr > 0 && statePtr + stateCapacity <= memoryLen;
   const sceneStartsInMemory =
     Number.isInteger(scenePtr) && scenePtr > 0 && scenePtr < memoryLen;
   if (!stateFits || !sceneStartsInMemory) {
@@ -169,6 +176,7 @@ export async function loadInstruments(wasmUrl, options = {}) {
     ...options,
     memory: wasm.memory,
     statePtr,
+    stateCapacity,
     scenePtr,
     glyphs,
   });
@@ -266,6 +274,7 @@ export class InstrumentModule {
   #runtime;
   #memory;
   #statePtr;
+  #stateCapacity;
   #scenePtr;
   #disposed;
 
@@ -273,11 +282,12 @@ export class InstrumentModule {
   // recording double; the browser default is a plain offscreen element).
   #glyphs;
 
-  constructor(runtime, { createCanvas, memory, statePtr, scenePtr, glyphs } = {}) {
+  constructor(runtime, { createCanvas, memory, statePtr, stateCapacity, scenePtr, glyphs } = {}) {
     this.#glyphs = glyphs ?? null;
     this.#runtime = runtime;
     this.#memory = memory ?? runtime.memory;
     this.#statePtr = statePtr ?? runtime.state_ptr();
+    this.#stateCapacity = stateCapacity ?? runtime.state_capacity();
     this.#scenePtr = scenePtr ?? runtime.scene_ptr();
     this.#disposed = false;
     this.unknownOpcodes = 0;
@@ -346,115 +356,15 @@ export class InstrumentModule {
     }
   }
 
-  // state: see writeState field handling below; absent groups may be
-  // omitted entirely.
+  // state: the group-keyed object state-abi.js encodes; a group key that
+  // is absent emits no tag, and the wasm side resolves that group
+  // Missing by construction. Field-level fail-safe defaults (unknown
+  // enums, undeclared trust) live in the shared writer.
   writeState(state) {
     if (this.#disposed) return { ok: false, reason: REASON.STATE_WRITE_FAILED };
     try {
-      const view = new DataView(this.#memory.buffer, this.#statePtr, STATE_ABI_SIZE);
-      const f = (off, v) => view.setFloat32(off, v ?? NaN, true);
-      const b = (off, v) => view.setUint8(off, v);
-
-      view.setUint32(0, STATE_ABI_VERSION, true);
-      const att = state.attitude;
-      f(4, att?.quat?.w ?? 1);
-      f(8, att?.quat?.x ?? 0);
-      f(12, att?.quat?.y ?? 0);
-      f(16, att?.quat?.z ?? 0);
-      f(20, att?.rates?.[0] ?? 0);
-      f(24, att?.rates?.[1] ?? 0);
-      f(28, att?.rates?.[2] ?? 0);
-      const kin = state.kinematics;
-      f(32, kin?.posNed?.[0] ?? 0);
-      f(36, kin?.posNed?.[1] ?? 0);
-      f(40, kin?.posNed?.[2] ?? 0);
-      f(44, kin?.velNed?.[0] ?? 0);
-      f(48, kin?.velNed?.[1] ?? 0);
-      f(52, kin?.velNed?.[2] ?? 0);
-      f(56, state.air?.iasMps ?? NaN);
-      f(60, state.air?.baroHpa ?? NaN);
-      f(64, att ? att.ageMs : NaN);
-      f(68, kin ? kin.ageMs : NaN);
-      f(72, state.air ? state.air.ageMs : NaN);
-      f(76, state.nav ? state.nav.ageMs : NaN);
-      f(80, state.wind ? state.wind.ageMs : NaN);
-      // Fail-safe defaults mirror abi.rs exactly (VAL-01): undeclared
-      // quality is unknown (255, resolves Failed), and validity is
-      // never assumed — unset flags mean "not declared valid".
-      b(84, state.quality ?? 255);
-      const valid = state.valid ?? {};
-      b(
-        85,
-        (valid.attitude ?? false ? 1 : 0) |
-          (valid.rates ?? false ? 2 : 0) |
-          (valid.position ?? false ? 4 : 0) |
-          (valid.velocity ?? false ? 8 : 0),
-      );
-      b(86, state.nav?.source ?? 0);
-      b(87, state.nav?.fromto ?? 0);
-      f(88, state.nav?.courseRad ?? 0);
-      f(92, state.nav?.cdiDots ?? 0);
-      f(96, state.nav?.vdevDots ?? NaN);
-      f(100, state.nav?.distNm ?? NaN);
-      f(104, state.selections?.headingBugRad ?? 0);
-      f(108, state.selections?.altitudeSelM ?? NaN);
-      f(112, state.wind?.fromRad ?? 0);
-      f(116, state.wind?.speedMps ?? 0);
-      view.setUint32(120, state.snapshot?.generation ?? 0, true);
-      b(124, state.snapshot?.coherence ?? 0);
-      // ALT-01 datum declaration (abi.rs parity): the default is the
-      // simulator's local-relative reference with no sample — a tape
-      // that reads REL, never an unlabelled barometric altitude.
-      b(125, state.altitude?.referenceClass ?? 0);
-      b(126, state.selections?.altitudeSelClass ?? 0);
-      b(127, state.altitude?.geoidModel ?? 0);
-      f(128, state.altitude?.sampleM ?? NaN);
-      f(132, state.selections?.baroSelHpa ?? NaN);
-      view.setUint32(136, state.altitude?.originId ?? 0, true);
-      // The selection's COMPLETE datum identity (abi.rs parity): class
-      // equality alone never renders a bug — origin and model must
-      // match the displayed datum too.
-      b(140, state.selections?.altitudeSelModel ?? 0);
-      b(141, 0);
-      b(142, 0);
-      b(143, 0);
-      view.setUint32(144, state.selections?.altitudeSelOriginId ?? 0, true);
-      b(148, 0);
-      b(149, 0);
-      b(150, 0);
-      b(151, 0);
-      // NAV-01 typed angles (abi.rs parity): operational heading is an
-      // independent declared sample — the fail-safe default is NO
-      // sample and Unknown references, so nothing renders on a north
-      // nobody declared.
-      b(152, state.heading?.reference ?? 255);
-      b(153, state.variation?.sourceId ?? 0);
-      b(154, state.selections?.headingBugReference ?? 255);
-      b(155, state.nav?.courseReference ?? 255);
-      f(156, state.heading?.rad ?? NaN);
-      f(160, state.heading ? state.heading.ageMs : NaN);
-      f(164, state.variation?.eastRad ?? NaN);
-      f(168, state.variation ? state.variation.ageMs : NaN);
-      b(
-        172,
-        (state.valid?.heading ?? false ? 1 : 0) |
-          (state.valid?.variation ?? false ? 2 : 0) |
-          (state.valid?.turn ?? false ? 4 : 0) |
-          (state.valid?.slip ?? false ? 8 : 0),
-      );
-      // DYN-01 typed dynamics (abi.rs parity): the fail-safe default is
-      // no sample and an unknown basis — body yaw rate has no encoding
-      // to fall back to.
-      b(173, state.dynamics?.turnBasis ?? 255);
-      b(174, 0);
-      b(175, 0);
-      f(176, state.dynamics?.turnRps ?? NaN);
-      f(180, state.dynamics?.lateralMps2 ?? NaN);
-      f(184, state.dynamics ? state.dynamics.ageMs : NaN);
-      b(188, 0);
-      b(189, 0);
-      b(190, 0);
-      b(191, 0);
+      const view = new DataView(this.#memory.buffer, this.#statePtr, this.#stateCapacity);
+      encodeState(view, state);
       return { ok: true };
     } catch {
       return { ok: false, reason: REASON.STATE_WRITE_FAILED };

@@ -28,6 +28,7 @@ export const REASON = Object.freeze({
   SCENE_STRUCTURE: 8,
   SCENE_LAYER_CONTRACT: 9,
   SCENE_CRITICAL_LAYERS_MISSING: 10,
+  STATE_MALFORMED: 11,
   // Backend-observed.
   WASM_LOAD: 100,
   ABI_MISMATCH: 101,

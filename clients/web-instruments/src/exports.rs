@@ -11,7 +11,7 @@ use pilotage_alerts::{
 use pilotage_instrument_panels::{PfdConfig, VSpeeds, draw_hsi, draw_pfd};
 use pilotage_instrument_scene::{LayerError, LayerId, SceneError, SceneWriter, validate_layers};
 use pilotage_instrument_state::FreshnessPolicy;
-use pilotage_instrument_state::abi::{AbiError, STATE_ABI_SIZE, STATE_ABI_VERSION, decode_state};
+use pilotage_instrument_state::abi::v6::{self, AbiError};
 use pilotage_instrument_state::{NavSource, SignalStatus};
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -63,7 +63,7 @@ pub(crate) struct Runtime {
 impl Runtime {
     fn new() -> Self {
         Self {
-            state: vec![0u8; STATE_ABI_SIZE],
+            state: vec![0u8; v6::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
             generation: [0; PANEL_COUNT],
             pfd_cfg: PfdConfig::default(),
@@ -166,13 +166,16 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
         _ => return RenderAttempt::failure(RenderStatus::InvalidPanel, 0),
     };
     let generation = panel_generation(runtime, panel_idx);
-    let state = match decode_state(&runtime.state) {
-        Ok(state) => state,
+    let state = match v6::decode_state(&runtime.state) {
+        Ok(report) => report.state,
         Err(AbiError::Truncated) => {
             return RenderAttempt::failure(RenderStatus::StateTruncated, generation);
         }
         Err(AbiError::BadVersion { .. }) => {
             return RenderAttempt::failure(RenderStatus::StateBadVersion, generation);
+        }
+        Err(AbiError::NonCanonicalOrder { .. } | AbiError::GroupTruncated { .. }) => {
+            return RenderAttempt::failure(RenderStatus::StateMalformed, generation);
         }
     };
     let data = pilotage_instrument_state::resolve_stateful(
@@ -229,10 +232,10 @@ fn derive_alert_events(data: &pilotage_instrument_state::PanelData) -> [AlertEve
     ]
 }
 
-/// The state-block ABI version this module was built against.
+/// The state-frame ABI version this module was built against.
 #[wasm_bindgen]
 pub fn abi_version() -> u32 {
-    STATE_ABI_VERSION
+    u32::from(v6::VERSION)
 }
 
 /// One explicitly owned instrument renderer and its fixed-capacity buffers.
@@ -260,16 +263,18 @@ impl InstrumentRuntime {
         1
     }
 
-    /// Linear-memory offset of the packed state block, or zero before init.
+    /// Linear-memory offset of the state-frame buffer, or zero before init.
     pub fn state_ptr(&self) -> u32 {
         self.runtime
             .as_ref()
             .map_or(0, |runtime| runtime.state.as_ptr() as u32)
     }
 
-    /// Size of the packed state block in bytes.
-    pub fn state_len(&self) -> u32 {
-        STATE_ABI_SIZE as u32
+    /// Capacity of the state-frame buffer in bytes. The v6 frame is
+    /// self-delimiting, so the writer needs a bound, not an exact size;
+    /// growing the capacity is not a wire break.
+    pub fn state_capacity(&self) -> u32 {
+        v6::CAPACITY as u32
     }
 
     /// Linear-memory offset of the encoded-scene buffer, or zero before init.
@@ -327,10 +332,13 @@ impl InstrumentRuntime {
         let Some(runtime) = self.runtime.as_mut() else {
             return RenderStatus::NotInitialized as u64;
         };
-        let state = match decode_state(&runtime.state) {
-            Ok(state) => state,
+        let state = match v6::decode_state(&runtime.state) {
+            Ok(report) => report.state,
             Err(AbiError::Truncated) => return RenderStatus::StateTruncated as u64,
             Err(AbiError::BadVersion { .. }) => return RenderStatus::StateBadVersion as u64,
+            Err(AbiError::NonCanonicalOrder { .. } | AbiError::GroupTruncated { .. }) => {
+                return RenderStatus::StateMalformed as u64;
+            }
         };
         let data = pilotage_instrument_state::resolve_stateful(
             &state,

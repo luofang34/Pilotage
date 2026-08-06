@@ -29,7 +29,6 @@ import {
   InstrumentModule,
   MAX_PATH_VERTICES,
   PANEL,
-  STATE_ABI_SIZE,
   STATE_ABI_VERSION,
   interpretScene,
   validateSceneStructure,
@@ -409,7 +408,7 @@ function fakeRuntime({ status = 0, sceneBytes = new Uint8Array([1]), generation 
   const resolve = (fn, panel) => (typeof fn === "function" ? fn(panel) : fn);
   return {
     free() {}, init: () => 1, abi_version: () => STATE_ABI_VERSION,
-    state_ptr: () => 256, state_len: () => STATE_ABI_SIZE, scene_ptr: () => 1024,
+    state_ptr: () => 256, state_capacity: () => 1024, scene_ptr: () => 1024,
     set_v_speeds: () => 0, glyph_manifest: () => new Uint8Array(0), glyph_recorded_hash: () => new Uint8Array(0),
     render_result: (panel) => {
       const s = resolve(status, panel);

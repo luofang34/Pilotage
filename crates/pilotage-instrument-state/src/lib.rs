@@ -15,9 +15,9 @@
 //!   last-good values silently.
 //!
 //! The crate is `no_std`, allocation-free, and sans-IO: time enters only
-//! as ages the caller supplies. [`abi`] defines the packed little-endian
-//! input layout shared with non-Rust feeders (the browser writes it into
-//! WASM linear memory). Decoding and resolution are fail-safe (VAL-01):
+//! as ages the caller supplies. [`abi`] defines the tagged-group input
+//! frame shared with non-Rust feeders (the browser writes it into WASM
+//! linear memory). Decoding and resolution are fail-safe (VAL-01):
 //! trust must be declared, unknown wire values fail rather than mapping
 //! to benign ones, and no non-finite value can reach scene generation.
 

@@ -177,6 +177,9 @@ jobs:
       - name: control datagram capability contract
         run: node clients/web/datagram-control.test.mjs
 
+      - name: state-frame ABI cross-language golden pin
+        run: node clients/web/state-abi.test.mjs
+
       - name: instrument display fail-visible contract
         run: node clients/web/instruments.test.mjs
 

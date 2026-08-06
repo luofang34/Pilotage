@@ -34,4 +34,7 @@ pub enum RenderStatus {
     SceneLayerContract = 9,
     /// The scene omitted a critical layer required by the selected panel.
     SceneCriticalLayersMissing = 10,
+    /// The state frame is malformed: a group tag repeated or descended,
+    /// or a known group's payload is below its minimum layout.
+    StateMalformed = 11,
 }
