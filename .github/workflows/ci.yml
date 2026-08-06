@@ -104,8 +104,8 @@ jobs:
         # This is an inventory, not a compliance trace, and fabricates nothing.
         run: bash scripts/trace-report.sh
 
-      - name: instrument crates are no_std (ADR-0017)
-        # Compiling the instrument family for a bare-metal target proves the
+      - name: sans-IO core crates are no_std (ADR-0017)
+        # Compiling the sans-IO leaf crates for a bare-metal target proves the
         # no_std/no-alloc claim instead of trusting a comment.
         run: >
           cargo check
@@ -113,9 +113,11 @@ jobs:
           -p pilotage-geo
           -p pilotage-ingress
           -p pilotage-alerts
+          -p pilotage-sha256
           -p pilotage-instrument-state
           -p pilotage-instrument-scene
           -p pilotage-instrument-glyphs
+          -p pilotage-instrument-symbology
           -p pilotage-instrument-panels
           -p pilotage-instrument-raster
           --target thumbv7em-none-eabihf

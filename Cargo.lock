@@ -1535,6 +1535,7 @@ dependencies = [
 name = "pilotage-instrument-glyphs"
 version = "0.1.0"
 dependencies = [
+ "pilotage-sha256",
  "thiserror",
 ]
 
@@ -1548,6 +1549,7 @@ dependencies = [
  "pilotage-instrument-glyphs",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
+ "pilotage-instrument-symbology",
 ]
 
 [[package]]
@@ -1578,6 +1580,16 @@ dependencies = [
  "libm",
  "pilotage-alerts",
  "pilotage-frames",
+ "thiserror",
+]
+
+[[package]]
+name = "pilotage-instrument-symbology"
+version = "0.1.0"
+dependencies = [
+ "pilotage-alerts",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
  "thiserror",
 ]
 
@@ -1673,6 +1685,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wtransport",
+]
+
+[[package]]
+name = "pilotage-sha256"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.10.9",
 ]
 
 [[package]]

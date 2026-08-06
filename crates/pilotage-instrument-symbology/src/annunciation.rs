@@ -15,7 +15,7 @@ use pilotage_alerts::{
 };
 use pilotage_instrument_scene::{Anchor, Rgba8, SceneError, SceneWriter};
 
-use crate::palette;
+use crate::safety;
 
 const STACK_X: f32 = 100.0;
 const STACK_BASE_Y: f32 = 352.0;
@@ -24,18 +24,26 @@ const ROW_STEP: f32 = 16.0;
 /// stack can never crowd primary symbology.
 const STACK_ROWS: usize = 3;
 
+// Alert-class colors are alert semantics (ADR-0029 never-skinnable), so
+// they come from the safety set and no theme path reaches them.
 fn class_color(class: AlertClass) -> Rgba8 {
     match class {
-        AlertClass::Warning => palette::RED,
-        AlertClass::Caution => palette::AMBER,
-        AlertClass::Advisory | AlertClass::Status | AlertClass::Maintenance => palette::WHITE,
+        AlertClass::Warning => safety::FAILURE_RED,
+        AlertClass::Caution => safety::CAUTION_AMBER,
+        AlertClass::Advisory | AlertClass::Status | AlertClass::Maintenance => {
+            safety::ANNUNCIATION_WHITE
+        }
     }
 }
 
 /// Short, glyph-pack-covered label for a stable alert identity. An
 /// identity outside the known vocabulary still shows — as the generic
 /// ALERT token — because an unknown fault must never be invisible.
-fn alert_label(id: AlertId) -> &'static str {
+/// Crate-private: labels are only meaningful inside the one shared
+/// stack, whose geometry and semantics [`draw_alert_stack`] owns — an
+/// external caller with labels but not the stack would necessarily
+/// diverge from it.
+pub(crate) fn alert_label(id: AlertId) -> &'static str {
     use AlertCondition as C;
     let table: [(AlertId, &'static str); 20] = [
         (C::Altitude(AltFault::ReferenceLost).id(), "ALT REF"),
@@ -87,12 +95,12 @@ fn alert_label(id: AlertId) -> &'static str {
 /// truncated or overflowed list shows the amber MORE marker, and a
 /// faulted alerting path shows ALRT FAIL — the degradation itself is
 /// annunciated from the primary render path.
-pub(crate) fn draw_alert_stack(
+pub fn draw_alert_stack(
     scene: &mut SceneWriter<'_>,
     alerts: &AlertOutput,
 ) -> Result<(), SceneError> {
     if alerts.health() == ManagerHealth::Faulted {
-        scene.fill_color(palette::AMBER)?;
+        scene.fill_color(safety::CAUTION_AMBER)?;
         scene.text(
             STACK_X,
             STACK_BASE_Y - 4.0 * ROW_STEP,
@@ -122,7 +130,7 @@ pub(crate) fn draw_alert_stack(
         row = row.wrapping_add(1);
     }
     if truncated {
-        scene.fill_color(palette::AMBER)?;
+        scene.fill_color(safety::CAUTION_AMBER)?;
         scene.text(
             STACK_X,
             STACK_BASE_Y - (row as f32) * ROW_STEP,
@@ -133,6 +141,3 @@ pub(crate) fn draw_alert_stack(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

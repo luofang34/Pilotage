@@ -1,3 +1,5 @@
+// Crate-level rather than under pfd/ or hsi/: the stack contract spans
+// both panels, and the cross-panel agreement test is its core claim.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::string::String;
