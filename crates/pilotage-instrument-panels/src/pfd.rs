@@ -6,7 +6,7 @@ use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
 
-use pilotage_instrument_symbology::{annunciation, palette, source_label, status_paint};
+use pilotage_instrument_symbology::{annunciation, palette, safety, source_label, status_paint};
 
 use crate::{PANEL_H, PANEL_W};
 
@@ -156,7 +156,7 @@ fn draw_recovery_chevrons(
     scene.save()?;
     scene.translate(240.0, 180.0)?;
     scene.rotate(-roll_rad)?;
-    scene.stroke(palette::RED, 6.0)?;
+    scene.stroke(safety::FAILURE_RED, 6.0)?;
     let toward: f32 = match sense {
         ChevronSense::HorizonBelow => 1.0,
         ChevronSense::HorizonAbove => -1.0,

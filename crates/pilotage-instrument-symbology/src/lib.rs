@@ -19,5 +19,7 @@
 pub mod annunciation;
 pub mod fixed_str;
 pub mod palette;
+pub mod safety;
 pub mod source_label;
 pub mod status_paint;
+pub mod theme;

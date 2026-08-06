@@ -6,7 +6,7 @@ use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWri
 use pilotage_instrument_state::HeadingReference;
 use pilotage_instrument_state::{NavSource, PanelData, SignalStatus};
 
-use pilotage_instrument_symbology::{annunciation, palette, source_label, status_paint};
+use pilotage_instrument_symbology::{annunciation, palette, safety, source_label, status_paint};
 
 use crate::{PANEL_H, PANEL_W};
 
@@ -76,7 +76,7 @@ pub fn draw_hsi(
     }
     if hdg.status.shows_value() {
         scene.fill_color(match data.heading.reference {
-            HeadingReference::SimLocalTrue => palette::AMBER,
+            HeadingReference::SimLocalTrue => safety::CAUTION_AMBER,
             _ => palette::WHITE,
         })?;
         scene.text(

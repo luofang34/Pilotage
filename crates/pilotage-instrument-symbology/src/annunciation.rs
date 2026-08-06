@@ -15,7 +15,7 @@ use pilotage_alerts::{
 };
 use pilotage_instrument_scene::{Anchor, Rgba8, SceneError, SceneWriter};
 
-use crate::palette;
+use crate::safety;
 
 const STACK_X: f32 = 100.0;
 const STACK_BASE_Y: f32 = 352.0;
@@ -24,11 +24,15 @@ const ROW_STEP: f32 = 16.0;
 /// stack can never crowd primary symbology.
 const STACK_ROWS: usize = 3;
 
+// Alert-class colors are alert semantics (ADR-0029 never-skinnable), so
+// they come from the safety set and no theme path reaches them.
 fn class_color(class: AlertClass) -> Rgba8 {
     match class {
-        AlertClass::Warning => palette::RED,
-        AlertClass::Caution => palette::AMBER,
-        AlertClass::Advisory | AlertClass::Status | AlertClass::Maintenance => palette::WHITE,
+        AlertClass::Warning => safety::FAILURE_RED,
+        AlertClass::Caution => safety::CAUTION_AMBER,
+        AlertClass::Advisory | AlertClass::Status | AlertClass::Maintenance => {
+            safety::ANNUNCIATION_WHITE
+        }
     }
 }
 
@@ -96,7 +100,7 @@ pub fn draw_alert_stack(
     alerts: &AlertOutput,
 ) -> Result<(), SceneError> {
     if alerts.health() == ManagerHealth::Faulted {
-        scene.fill_color(palette::AMBER)?;
+        scene.fill_color(safety::CAUTION_AMBER)?;
         scene.text(
             STACK_X,
             STACK_BASE_Y - 4.0 * ROW_STEP,
@@ -126,7 +130,7 @@ pub fn draw_alert_stack(
         row = row.wrapping_add(1);
     }
     if truncated {
-        scene.fill_color(palette::AMBER)?;
+        scene.fill_color(safety::CAUTION_AMBER)?;
         scene.text(
             STACK_X,
             STACK_BASE_Y - (row as f32) * ROW_STEP,

@@ -10,7 +10,7 @@ use pilotage_instrument_scene::{
 use pilotage_instrument_state::AltitudeClass;
 use pilotage_instrument_state::{PanelData, Sig};
 
-use pilotage_instrument_symbology::{fmt_label, palette, status_paint};
+use pilotage_instrument_symbology::{fmt_label, palette, safety, status_paint};
 
 use super::VSpeeds;
 
@@ -77,8 +77,8 @@ pub fn speed_tape(
 fn speed_bands(scene: &mut SceneWriter<'_>, ias: f32, v: &VSpeeds) -> Result<(), SceneError> {
     let segs: [(f32, f32, Rgba8); 3] = [
         (v.vs_kt, v.vno_kt, palette::BAND_GREEN),
-        (v.vno_kt, v.vne_kt, palette::BAND_YELLOW),
-        (v.vne_kt, v.vne_kt + 1000.0, palette::RED),
+        (v.vno_kt, v.vne_kt, safety::BAND_CAUTION),
+        (v.vne_kt, v.vne_kt + 1000.0, safety::FAILURE_RED),
     ];
     for (lo, hi, color) in segs {
         band_rect(scene, ias, lo, hi, 86.0, 4.0, color)?;
@@ -165,7 +165,7 @@ fn pointed_readout(
     scene.fill_color(if sig.status.shows_value() {
         palette::WHITE
     } else {
-        palette::RED
+        safety::FAILURE_RED
     })?;
     let shown = if sig.status.shows_value() {
         text
@@ -262,8 +262,8 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
 fn reference_label(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneError> {
     let class = data.altitude.class;
     scene.fill_color(match class {
-        AltitudeClass::LocalRelative => palette::AMBER,
-        AltitudeClass::Unknown => palette::RED,
+        AltitudeClass::LocalRelative => safety::CAUTION_AMBER,
+        AltitudeClass::Unknown => safety::FAILURE_RED,
         _ => palette::WHITE,
     })?;
     scene.text(442.0, 222.0, 12.0, Anchor::CENTER, class.label())?;
@@ -309,7 +309,7 @@ fn baro_and_sel_boxes(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(
         (false, Some(_)) => {
             // A selection in an incompatible reference never renders as
             // a plausible number; the amber marker says why it is gone.
-            scene.fill_color(palette::AMBER)?;
+            scene.fill_color(safety::CAUTION_AMBER)?;
             scene.text(435.0, 12.0, 14.0, Anchor::CENTER, "SEL REF")?;
         }
         (_, None) => {}

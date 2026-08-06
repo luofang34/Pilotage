@@ -11,6 +11,7 @@ use pilotage_instrument_state::{ComparisonState, SourcedFunction};
 
 use crate::fmt_label;
 use crate::palette;
+use crate::safety;
 
 /// Draws the selected source id under a function prefix (e.g. `IAS2`), amber
 /// on a reversion or a sustained miscompare, with a `{prefix} CMP` cue on a
@@ -28,7 +29,7 @@ pub fn draw_source_label<T: Copy>(
     };
     let miscompare = selection.state == ComparisonState::Miscompare;
     let color = if miscompare || selection.reverted {
-        palette::AMBER
+        safety::CAUTION_AMBER
     } else {
         palette::GREEN
     };
