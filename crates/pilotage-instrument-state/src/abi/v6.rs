@@ -269,4 +269,6 @@ pub(super) fn put_u32(payload: &mut [u8], off: usize, value: u32) {
 #[cfg(test)]
 mod fixture_tests;
 #[cfg(test)]
+mod posture_tests;
+#[cfg(test)]
 mod tests;
