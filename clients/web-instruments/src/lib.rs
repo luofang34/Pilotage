@@ -24,6 +24,7 @@ mod classify_h264;
 mod decode_envelope;
 mod decode_video;
 mod exports;
+mod feeder_exports;
 mod render_status;
 mod wire_js;
 

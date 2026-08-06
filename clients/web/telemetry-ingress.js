@@ -1,8 +1,15 @@
-// Reorder-safe avionics ingestion for the simulator viewer.
-// Publication/receipt time is transport metadata: freshness advances only
-// when a source group presents a new epoch/sequence.
+// Reorder-safe avionics ingestion — thin wrappers over the shared
+// feeder core (#252). Publication/receipt time is transport metadata:
+// freshness advances only when a source group presents a new
+// epoch/sequence. Every semantic judgement (identity pinning,
+// incarnation policy, wrap-safe ordering, coherence, the fail-closed
+// authorization regimes) runs in pilotage-instrument-feeder via the
+// instrument wasm build; this module keeps decode-shape validation of
+// the script's own object dialect, marshalling, and the constructor
+// contracts its consumers rely on.
 
 import { firstFault } from "./wire-bounds.js";
+import { bindings, deepFreeze } from "./feeder-wasm.js";
 
 export const COHERENCE = Object.freeze({
   INSUFFICIENT: "insufficient",
@@ -16,9 +23,6 @@ export const INCARNATION_POLICY = Object.freeze({
 });
 
 const SERIAL_HALF_RANGE = 0x80000000;
-const CLOCK_VEHICLE_BOOT = 1;
-const CLOCK_SIMULATION = 2;
-const CLOCK_HOST_MONOTONIC = 3;
 // Source roles (LINK-04). Primary panels admit only the operational
 // estimate; truth and FC state have their own consumers. Every consumer
 // validates the COMPLETE stamp for its exact role.
@@ -28,25 +32,6 @@ export const ROLE = Object.freeze({
   FC_STATE: 3,
   NAVIGATION_SOLUTION: 6,
 });
-// Role-specific stamp rules: which clock domains a role may legitimately
-// stamp. Estimates carry source clocks; truth is simulation-clocked; FC
-// state is stamped at host receipt (its wire carries no source time), as is
-// navigation guidance, which the host's navigation component computes.
-const ROLE_CLOCKS = Object.freeze({
-  [ROLE.OPERATIONAL_ESTIMATE]: [CLOCK_VEHICLE_BOOT, CLOCK_SIMULATION],
-  [ROLE.SIMULATION_TRUTH]: [CLOCK_SIMULATION],
-  [ROLE.FC_STATE]: [CLOCK_HOST_MONOTONIC],
-  [ROLE.NAVIGATION_SOLUTION]: [CLOCK_HOST_MONOTONIC],
-});
-const KNOWN_INTEGRITY = Object.freeze([1, 2, 3]);
-const QUALITY_UNUSABLE = 2;
-const ATTITUDE_VALID_FLAGS = 0b0011;
-const KINEMATICS_VALID_FLAGS = 0b1100;
-const KNOWN_VALID_FLAGS = ATTITUDE_VALID_FLAGS | KINEMATICS_VALID_FLAGS;
-
-function increment(value, amount = 1) {
-  return (value + amount) >>> 0;
-}
 
 function serialDistance(candidate, current) {
   return (candidate - current) >>> 0;
@@ -58,14 +43,11 @@ export function serialIsNewer(candidate, current) {
 }
 
 // The first stamp field to violate its exact wire type, range, or role
-// contract, as a typed `{ field, rule }` reason, or `null` when the stamp
-// is valid for `role`: source id and acquisition time are u64 (BigInt,
-// upper-bounded — a decoded varint past 2^64 is refused, not accepted),
-// epoch and sequence are u32, the role must match the lane exactly, the
-// clock must be legal for that role, and the integrity classification
-// must be KNOWN (unspecified is a fault, not a default). Fail-closed,
-// never clamped. This one validator serves the estimate, truth, and
-// FC-state lanes so no lane ships weaker provenance checks.
+// contract, as a typed `{ field, rule }` reason, or `null` when the
+// stamp is valid for `role`. Shape rules (u64/u32 bounds, the
+// incarnation encoding) belong to this decode boundary; the role, clock
+// and integrity legality verdict comes from the feeder core so no lane
+// ships weaker provenance checks than the shells that link it directly.
 export function stampFaultForRole(stamp, role) {
   if (stamp === null || stamp === undefined || typeof stamp !== "object") {
     return { field: "stamp", rule: "malformed" };
@@ -78,119 +60,45 @@ export function stampFaultForRole(stamp, role) {
     ["acquiredAtNanos", "u64", stamp.acquiredAtNanos],
   ]);
   if (fault) return fault;
-  if (stamp.role !== role) {
-    return { field: "role", rule: "role-mismatch" };
-  }
-  if (!ROLE_CLOCKS[role].includes(stamp.clock)) {
+  if (!Number.isInteger(stamp.clock) || !Number.isInteger(stamp.integrity)) {
     return { field: "clock", rule: "malformed" };
   }
-  if (!KNOWN_INTEGRITY.includes(stamp.integrity)) {
-    return { field: "integrity", rule: "unknown" };
-  }
-  return null;
-}
-
-function copyAttitude(avionics) {
-  return Object.freeze({
-    quat: Object.freeze({ ...avionics.quat }),
-    rates: Object.freeze([...avionics.rates]),
-    armState: avionics.armState >>> 0,
-  });
-}
-
-function copyKinematics(avionics) {
-  return Object.freeze({
-    posNed: Object.freeze([...avionics.posNed]),
-    velNed: Object.freeze([...avionics.velNed]),
-    armState: avionics.armState >>> 0,
-  });
-}
-
-function copyEstimatorStatus() {
-  return Object.freeze({});
-}
-
-function stampCopy(stamp) {
-  return Object.freeze({ ...stamp });
-}
-
-function stampsEqual(left, right) {
-  return (
-    left !== null &&
-    left !== undefined &&
-    right !== null &&
-    right !== undefined &&
-    left.sourceId === right.sourceId &&
-    left.sourceIncarnation === right.sourceIncarnation &&
-    left.sourceEpoch === right.sourceEpoch &&
-    left.sequence === right.sequence &&
-    left.acquiredAtNanos === right.acquiredAtNanos &&
-    left.clock === right.clock
+  // With the wasm unavailable there is no role/clock/integrity verdict;
+  // fail closed rather than pass a stamp half-validated.
+  if (bindings === null) return { field: "stamp", rule: "malformed" };
+  const verdict = bindings.feeder_stamp_fault(
+    Number.isInteger(stamp.role) ? stamp.role : 0,
+    stamp.clock,
+    stamp.integrity,
+    role,
   );
+  if (verdict === null || verdict === undefined) return null;
+  const [field, rule] = verdict.split(":");
+  return { field, rule };
 }
 
-// Whether `status` can vouch for a numeric group acquired at `numeric`:
-// identical source identity and clock, and an acquisition gap within the
-// coherence budget. The host merges lanes into one sample per tick, so a
-// numeric group lawfully arrives alongside a status acquired a few
-// milliseconds later (attitude, position, and status streams interleave
-// at their own rates); demanding the exact same instant would strip a
-// validly authorized lane on every interleaved arrival and flash the
-// panels between valid and invalid. Beyond the budget — or across any
-// identity or clock change — authorization still fails closed.
-function acquisitionPaired(numeric, status, maximumSkewNanos) {
-  if (
-    numeric === null ||
-    numeric === undefined ||
-    status === null ||
-    status === undefined ||
-    numeric.sourceId !== status.sourceId ||
-    numeric.sourceIncarnation !== status.sourceIncarnation ||
-    numeric.sourceEpoch !== status.sourceEpoch ||
-    numeric.clock !== status.clock
-  ) {
-    return false;
-  }
-  const skew =
-    numeric.acquiredAtNanos >= status.acquiredAtNanos
-      ? numeric.acquiredAtNanos - status.acquiredAtNanos
-      : status.acquiredAtNanos - numeric.acquiredAtNanos;
-  return skew <= maximumSkewNanos;
-}
-
-function groupSnapshot(group, nowMs) {
-  if (!group) return null;
-  return Object.freeze({
-    ...group.data,
-    stamp: group.stamp,
-    ageMs: Math.max(0, nowMs - group.acceptedAtMs),
-  });
-}
-
-function coherenceOf(attitude, kinematics, maximumSkewNanos) {
-  if (!attitude || !kinematics) {
-    return Object.freeze({ status: COHERENCE.INSUFFICIENT, skewNanos: null });
-  }
-  const a = attitude.stamp;
-  const k = kinematics.stamp;
-  if (
-    a.sourceId !== k.sourceId ||
-    a.sourceIncarnation !== k.sourceIncarnation ||
-    a.sourceEpoch !== k.sourceEpoch ||
-    a.clock !== k.clock
-  ) {
-    return Object.freeze({ status: COHERENCE.INSUFFICIENT, skewNanos: null });
-  }
-  const skew = a.acquiredAtNanos >= k.acquiredAtNanos
-    ? a.acquiredAtNanos - k.acquiredAtNanos
-    : k.acquiredAtNanos - a.acquiredAtNanos;
-  return Object.freeze({
-    status: skew <= maximumSkewNanos ? COHERENCE.COHERENT : COHERENCE.EXCESSIVE_SKEW,
-    skewNanos: skew,
-  });
+function rawStamp(stamp) {
+  return {
+    role: stamp.role,
+    integrity: stamp.integrity,
+    sourceId: stamp.sourceId,
+    sourceIncarnation: stamp.sourceIncarnation,
+    sourceEpoch: stamp.sourceEpoch,
+    sequence: stamp.sequence,
+    acquiredAtNanos: stamp.acquiredAtNanos,
+    clock: stamp.clock,
+  };
 }
 
 export class AvionicsIngress {
+  #inner;
+  #vehicleId;
+  #invalidStamps;
+  #lastRejectReason;
+  #generationPatch;
+  #counterPatches;
+  #countersProxy;
+
   constructor({
     vehicleId,
     sourceId = null,
@@ -215,468 +123,202 @@ export class AvionicsIngress {
     if (typeof maximumSkewNanos !== "bigint" || maximumSkewNanos < 0n) {
       throw new TypeError("maximumSkewNanos must be a non-negative bigint");
     }
-    this.vehicleId = vehicleId;
-    this.sourceId = sourceId;
-    this.sourceIncarnation = sourceIncarnation;
-    this.incarnationPolicy = incarnationPolicy;
-    this.maximumSeenIncarnations = maximumSeenIncarnations;
-    this.seenIncarnations = new Set();
-    if (sourceIncarnation !== null) this.seenIncarnations.add(sourceIncarnation);
-    this.maximumSkewNanos = maximumSkewNanos;
-    this.sourceEpoch = null;
-    this.attitude = null;
-    this.kinematics = null;
-    this.estimatorStatus = null;
-    this.statusRegime = null;
-    this.previousStatusRegime = null;
-    this.attitudeAuthorizationPaired = false;
-    this.kinematicsAuthorizationPaired = false;
-    this.validFlags = 0;
-    this.quality = QUALITY_UNUSABLE;
-    this.generation = 0;
-    this.lastCoherence = COHERENCE.INSUFFICIENT;
-    this.lastRejectReason = null;
-    this.counters = {
-      duplicates: 0,
-      reordered: 0,
-      wrongVehicle: 0,
-      wrongSource: 0,
-      wrongIncarnation: 0,
-      oldIncarnation: 0,
-      incarnationTransitions: 0,
-      incarnationCapacity: 0,
-      oldEpoch: 0,
-      sourceResets: 0,
-      invalidStamps: 0,
-      sequenceGaps: 0,
-      excessiveSkew: 0,
-      timeRegressions: 0,
-      clockChanges: 0,
-    };
+    this.#vehicleId = vehicleId;
+    this.#invalidStamps = 0;
+    this.#lastRejectReason = null;
+    this.#generationPatch = null;
+    this.#counterPatches = new Map();
+    this.#countersProxy = null;
+    // With the wasm unavailable the ingress degrades to admitting
+    // nothing — the panels report unavailable through the instruments
+    // module's own fail-visible path.
+    this.#inner =
+      bindings === null
+        ? null
+        : new bindings.FeederIngress(
+            vehicleId,
+            sourceId === null ? undefined : sourceId,
+            sourceIncarnation ?? "",
+            incarnationPolicy === INCARNATION_POLICY.SIM_ACCEPT_UNSEEN,
+            maximumSeenIncarnations,
+            maximumSkewNanos,
+          );
   }
 
   ingest(message, nowMs) {
     if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
-    if (message.vehicleId !== this.vehicleId) {
-      this.bump("wrongVehicle");
-      return false;
-    }
+    if (this.#inner === null) return false;
     const avionics = message.avionics;
-    if (!avionics) return false;
+    if (message.vehicleId === this.#vehicleId && !avionics) return false;
 
-    const acceptedStatus = this.acceptGroup(
-      "estimatorStatus",
-      avionics.estimatorStatusStamp,
-      copyEstimatorStatus,
-      avionics,
-      nowMs,
-    );
-    if (acceptedStatus) {
-      // Each accepted status opens a new authorization regime; the one it
-      // closes is retained so a numeric group acquired under the closed
-      // regime (the host merges lanes into one sample per tick, so lanes
-      // interleave with the status stream) is judged by the estimator
-      // state that actually governed its acquisition instant.
-      const s = avionics.estimatorStatusStamp;
-      this.previousStatusRegime = this.statusRegime;
-      this.statusRegime = Object.freeze({
-        stamp: Object.freeze({
-          sourceId: s.sourceId,
-          sourceIncarnation: s.sourceIncarnation,
-          sourceEpoch: s.sourceEpoch,
-          acquiredAtNanos: s.acquiredAtNanos,
-          clock: s.clock,
-        }),
-        validFlags: avionics.validFlags >>> 0,
-        quality: avionics.quality >>> 0,
-      });
-    }
-    const acceptedAttitude = this.acceptGroup(
-      "attitude",
-      avionics.attitudeStamp,
-      copyAttitude,
-      avionics,
-      nowMs,
-    );
-    const acceptedKinematics = this.acceptGroup(
-      "kinematics",
-      avionics.kinematicsStamp,
-      copyKinematics,
-      avionics,
-      nowMs,
-    );
-    const acceptedNumeric = acceptedAttitude || acceptedKinematics;
-    const previousValidFlags = this.validFlags;
-    const previousQuality = this.quality;
-    this.updateAuthorization(avionics, acceptedAttitude, acceptedKinematics);
-    const authorizationChanged =
-      this.validFlags !== previousValidFlags || this.quality !== previousQuality;
-    const changed = acceptedNumeric || acceptedStatus || authorizationChanged;
-    if (changed) {
-      this.generation = increment(this.generation);
-      this.recordCoherenceTransition();
-    }
-    return changed;
-  }
-
-  updateAuthorization(avionics, acceptedAttitude, acceptedKinematics) {
-    // A transport validation fault cannot mint a source acquisition time, so
-    // a publication backed by the current stamp may change trust only in the
-    // fail-closed direction and never refreshes that stamp's age.
-    if (stampsEqual(avionics.estimatorStatusStamp, this.estimatorStatus?.stamp)) {
-      this.applyStatusDowngrade(avionics);
-    }
-    if (acceptedAttitude || acceptedKinematics) {
-      this.updateAuthorizationFromNumeric(avionics, acceptedAttitude, acceptedKinematics);
-    }
-  }
-
-  applyStatusDowngrade(avionics) {
-    const incomingValidFlags = avionics.validFlags >>> 0;
-    const incomingQuality = avionics.quality >>> 0;
-    // A duplicate status stamp may only tighten authorization, never
-    // restore it — so the downgrade must fold into the regime itself,
-    // not only the published flags. Otherwise a later numeric bearing
-    // this same status stamp would consult the pre-downgrade regime and
-    // reverse a fail-closed decision. The fold is monotone (bitwise-and
-    // of flags, max of quality), so re-applying the status that opened
-    // the regime is a no-op and successive duplicates only ever tighten.
-    if (this.statusRegime !== null) {
-      this.statusRegime = Object.freeze({
-        stamp: this.statusRegime.stamp,
-        validFlags: (this.statusRegime.validFlags & incomingValidFlags) >>> 0,
-        quality: Math.max(this.statusRegime.quality, incomingQuality),
-      });
-    }
-    if (!this.hasEstablishedAuthorization()) {
-      this.failClosedAuthorization();
-      return;
-    }
-    this.validFlags = (this.validFlags & incomingValidFlags) >>> 0;
-    this.quality = Math.max(this.quality, incomingQuality);
-  }
-
-  // The regime whose declared estimator state governs a numeric group
-  // acquired at `numericStamp`: the current status when acquired at or
-  // after its instant, else the previous status when acquired within its
-  // reign. The skew budget against the current status keeps a stale
-  // numeric from borrowing authority across a stream gap; identity and
-  // clock must match in every case, so nothing authorizes across a
-  // source reset. Null means no status can vouch for this acquisition —
-  // fail closed.
-  authorizationRegimeFor(numericStamp) {
-    const current = this.statusRegime;
-    if (
-      current === null ||
-      !acquisitionPaired(numericStamp, current.stamp, this.maximumSkewNanos)
-    ) {
-      return null;
-    }
-    if (numericStamp.acquiredAtNanos >= current.stamp.acquiredAtNanos) return current;
-    const previous = this.previousStatusRegime;
-    if (
-      previous !== null &&
-      acquisitionPaired(numericStamp, previous.stamp, this.maximumSkewNanos) &&
-      numericStamp.acquiredAtNanos >= previous.stamp.acquiredAtNanos
-    ) {
-      return previous;
-    }
-    return null;
-  }
-
-  updateAuthorizationFromNumeric(avionics, acceptedAttitude, acceptedKinematics) {
-    const currentStatusStamp = this.estimatorStatus?.stamp;
-    const statusMatches = stampsEqual(avionics.estimatorStatusStamp, currentStatusStamp);
-    const incomingValidFlags = avionics.validFlags >>> 0;
-    // The CURRENT status regime is a monotonic authorization ceiling: even
-    // when a numeric legitimately falls under a still-good previous regime,
-    // the estimator's most recent declared state caps it. Without this a
-    // duplicate-status downgrade of the current regime could be reversed by
-    // a numeric acquired just before that status but selected onto the
-    // earlier good regime. A good current regime (all bits set) caps
-    // nothing, so the legitimate interleave case is untouched.
-    let pairedQuality = null;
-    if (acceptedAttitude) {
-      const regime = statusMatches
-        ? this.authorizationRegimeFor(avionics.attitudeStamp)
-        : null;
-      this.attitudeAuthorizationPaired = regime !== null;
-      const attitudeFlags =
-        regime !== null
-          ? regime.validFlags &
-            this.statusRegime.validFlags &
-            incomingValidFlags &
-            ATTITUDE_VALID_FLAGS
-          : 0;
-      this.validFlags = (
-        (this.validFlags & ~ATTITUDE_VALID_FLAGS) | attitudeFlags
-      ) >>> 0;
-      if (regime !== null) {
-        pairedQuality = Math.max(
-          regime.quality,
-          this.statusRegime.quality,
-          avionics.quality >>> 0,
-        );
+    // Decode-shape validation happens at this boundary; a faulty stamp
+    // is stripped so the core never sees it, and the refusal is counted
+    // here with the script's `{field, rule}` vocabulary. The core
+    // refuses a wrong-vehicle publication before reading its stamps;
+    // matching that order keeps invalidStamps meaning "this vehicle's
+    // stamps were bad".
+    const foreign = message.vehicleId !== this.#vehicleId;
+    const admit = (stamp) => {
+      if (foreign || stamp === null || stamp === undefined) return null;
+      const fault = stampFaultForRole(stamp, ROLE.OPERATIONAL_ESTIMATE);
+      if (fault !== null) {
+        this.#invalidStamps = (this.#invalidStamps + 1) >>> 0;
+        this.#lastRejectReason = fault;
+        return null;
       }
-    }
-    if (acceptedKinematics) {
-      const regime = statusMatches
-        ? this.authorizationRegimeFor(avionics.kinematicsStamp)
-        : null;
-      this.kinematicsAuthorizationPaired = regime !== null;
-      const kinematicsFlags =
-        regime !== null
-          ? regime.validFlags &
-            this.statusRegime.validFlags &
-            incomingValidFlags &
-            KINEMATICS_VALID_FLAGS
-          : 0;
-      this.validFlags = (
-        (this.validFlags & ~KINEMATICS_VALID_FLAGS) | kinematicsFlags
-      ) >>> 0;
-      if (regime !== null) {
-        pairedQuality = Math.max(
-          pairedQuality ?? 0,
-          regime.quality,
-          this.statusRegime.quality,
-          avionics.quality >>> 0,
-        );
-      }
-    }
-
-    if ((this.validFlags & KNOWN_VALID_FLAGS) === 0) {
-      this.quality = QUALITY_UNUSABLE;
-      return;
-    }
-    if (pairedQuality !== null) this.quality = pairedQuality;
-  }
-
-  hasEstablishedAuthorization() {
-    return (
-      (this.attitude !== null && this.attitudeAuthorizationPaired) ||
-      (this.kinematics !== null && this.kinematicsAuthorizationPaired)
-    );
-  }
-
-  failClosedAuthorization() {
-    this.attitudeAuthorizationPaired = false;
-    this.kinematicsAuthorizationPaired = false;
-    this.validFlags = 0;
-    this.quality = QUALITY_UNUSABLE;
-  }
-
-  acceptGroup(name, stamp, copyData, avionics, nowMs) {
-    if (stamp === null || stamp === undefined) return false;
-    const fault = stampFaultForRole(stamp, ROLE.OPERATIONAL_ESTIMATE);
-    if (fault !== null) {
-      this.bump("invalidStamps");
-      this.lastRejectReason = fault;
-      return false;
-    }
-    if (!this.acceptSource(stamp.sourceId)) return false;
-    if (!this.acceptIncarnation(stamp.sourceIncarnation)) return false;
-    if (!this.acceptEpoch(stamp.sourceEpoch)) return false;
-
-    const current = this[name];
-    if (current && current.stamp.sequence === stamp.sequence) {
-      this.bump("duplicates");
-      return false;
-    }
-    if (current && !serialIsNewer(stamp.sequence, current.stamp.sequence)) {
-      this.bump("reordered");
-      return false;
-    }
-    if (current && stamp.clock !== current.stamp.clock) {
-      this.bump("clockChanges");
-      return false;
-    }
-    if (current && stamp.acquiredAtNanos <= current.stamp.acquiredAtNanos) {
-      this.bump("timeRegressions");
-      return false;
-    }
-    if (current) {
-      const gap = serialDistance(stamp.sequence, current.stamp.sequence);
-      if (gap > 1) this.bump("sequenceGaps", gap - 1);
-    }
-    this[name] = Object.freeze({
-      stamp: stampCopy(stamp),
-      data: copyData(avionics),
-      acceptedAtMs: nowMs,
-    });
-    return true;
-  }
-
-  acceptSource(candidate) {
-    if (this.sourceId === null) {
-      this.sourceId = candidate;
-      return true;
-    }
-    if (candidate === this.sourceId) return true;
-    this.bump("wrongSource");
-    return false;
-  }
-
-  acceptIncarnation(candidate) {
-    if (this.sourceIncarnation === null) {
-      this.sourceIncarnation = candidate;
-      this.seenIncarnations.add(candidate);
-      return true;
-    }
-    if (candidate === this.sourceIncarnation) return true;
-    if (this.seenIncarnations.has(candidate)) {
-      this.bump("oldIncarnation");
-      return false;
-    }
-    if (this.incarnationPolicy !== INCARNATION_POLICY.SIM_ACCEPT_UNSEEN) {
-      this.bump("wrongIncarnation");
-      return false;
-    }
-    if (this.seenIncarnations.size >= this.maximumSeenIncarnations) {
-      this.bump("incarnationCapacity");
-      return false;
-    }
-    this.seenIncarnations.add(candidate);
-    this.sourceIncarnation = candidate;
-    this.sourceEpoch = null;
-    this.attitude = null;
-    this.kinematics = null;
-    this.estimatorStatus = null;
-    this.statusRegime = null;
-    this.previousStatusRegime = null;
-    this.failClosedAuthorization();
-    this.lastCoherence = COHERENCE.INSUFFICIENT;
-    this.bump("incarnationTransitions");
-    return true;
-  }
-
-  acceptEpoch(candidate) {
-    if (this.sourceEpoch === null) {
-      this.sourceEpoch = candidate;
-      return true;
-    }
-    if (candidate === this.sourceEpoch) return true;
-    if (!serialIsNewer(candidate, this.sourceEpoch)) {
-      this.bump("oldEpoch");
-      return false;
-    }
-    this.sourceEpoch = candidate;
-    this.attitude = null;
-    this.kinematics = null;
-    this.estimatorStatus = null;
-    this.statusRegime = null;
-    this.previousStatusRegime = null;
-    this.failClosedAuthorization();
-    this.bump("sourceResets");
-    return true;
-  }
-
-  recordCoherenceTransition() {
-    const coherence = coherenceOf(this.attitude, this.kinematics, this.maximumSkewNanos);
-    if (
-      coherence.status === COHERENCE.EXCESSIVE_SKEW &&
-      this.lastCoherence !== COHERENCE.EXCESSIVE_SKEW
-    ) {
-      this.bump("excessiveSkew");
-    }
-    this.lastCoherence = coherence.status;
+      return rawStamp(stamp);
+    };
+    const sample = {
+      vehicleId: message.vehicleId,
+      quat: {
+        w: avionics?.quat?.w ?? 0,
+        x: avionics?.quat?.x ?? 0,
+        y: avionics?.quat?.y ?? 0,
+        z: avionics?.quat?.z ?? 0,
+      },
+      rates: [avionics?.rates?.[0] ?? 0, avionics?.rates?.[1] ?? 0, avionics?.rates?.[2] ?? 0],
+      posNed: [avionics?.posNed?.[0] ?? 0, avionics?.posNed?.[1] ?? 0, avionics?.posNed?.[2] ?? 0],
+      velNed: [avionics?.velNed?.[0] ?? 0, avionics?.velNed?.[1] ?? 0, avionics?.velNed?.[2] ?? 0],
+      armState: avionics?.armState >>> 0,
+      validFlags: avionics?.validFlags >>> 0,
+      quality: avionics?.quality >>> 0,
+      attitudeStamp: admit(avionics?.attitudeStamp),
+      kinematicsStamp: admit(avionics?.kinematicsStamp),
+      estimatorStatusStamp: admit(avionics?.estimatorStatusStamp),
+    };
+    return this.#inner.ingest(sample, nowMs);
   }
 
   snapshot(nowMs) {
     if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
-    const attitude = groupSnapshot(this.attitude, nowMs);
-    const kinematics = groupSnapshot(this.kinematics, nowMs);
-    const estimatorStatus = groupSnapshot(this.estimatorStatus, nowMs);
-    return Object.freeze({
-      generation: this.generation,
-      sourceId: this.sourceId,
-      sourceIncarnation: this.sourceIncarnation,
-      sourceEpoch: this.sourceEpoch,
-      attitude,
-      kinematics,
-      estimatorStatus,
-      validFlags: this.validFlags,
-      quality: this.quality,
-      coherence: coherenceOf(this.attitude, this.kinematics, this.maximumSkewNanos),
-    });
+    if (this.#inner === null) {
+      return deepFreeze({
+        generation: 0,
+        sourceId: null,
+        sourceIncarnation: null,
+        sourceEpoch: null,
+        attitude: null,
+        kinematics: null,
+        estimatorStatus: null,
+        validFlags: 0,
+        quality: 2,
+        coherence: { status: COHERENCE.INSUFFICIENT, skewNanos: null },
+      });
+    }
+    const snapshot = this.#inner.snapshot(nowMs);
+    if (this.#generationPatch !== null) {
+      const { assigned, base } = this.#generationPatch;
+      snapshot.generation = (assigned + (snapshot.generation - base)) >>> 0;
+    }
+    return deepFreeze(snapshot);
+  }
+
+  // The generation and counter fields remain assignable, as they were
+  // when this class held them directly: an assignment rebases the
+  // published value, and subsequent counting continues from it under
+  // the same wrapping arithmetic.
+  get generation() {
+    return this.snapshot(0).generation;
+  }
+
+  set generation(value) {
+    if (this.#inner === null) return;
+    this.#generationPatch = {
+      assigned: value >>> 0,
+      base: this.#inner.snapshot(0).generation,
+    };
+  }
+
+  get counters() {
+    this.#countersProxy ??= new Proxy(
+      {},
+      {
+        get: (_target, field) => this.diagnostics()[field],
+        set: (_target, field, value) => {
+          this.#counterPatches.set(field, {
+            assigned: value >>> 0,
+            base: this.#rawCounters()[field] >>> 0,
+          });
+          return true;
+        },
+      },
+    );
+    return this.#countersProxy;
+  }
+
+  #rawCounters() {
+    if (this.#inner === null) {
+      return {
+        duplicates: 0,
+        reordered: 0,
+        wrongVehicle: 0,
+        wrongSource: 0,
+        wrongIncarnation: 0,
+        oldIncarnation: 0,
+        incarnationTransitions: 0,
+        incarnationCapacity: 0,
+        oldEpoch: 0,
+        sourceResets: 0,
+        invalidStamps: this.#invalidStamps,
+        sequenceGaps: 0,
+        excessiveSkew: 0,
+        timeRegressions: 0,
+        clockChanges: 0,
+      };
+    }
+    const counters = this.#inner.diagnostics();
+    counters.invalidStamps = (counters.invalidStamps + this.#invalidStamps) >>> 0;
+    return counters;
   }
 
   diagnostics() {
-    return Object.freeze({ ...this.counters, lastRejectReason: this.lastRejectReason });
-  }
-
-  bump(name, amount = 1) {
-    this.counters[name] = increment(this.counters[name], amount);
+    const counters = this.#rawCounters();
+    for (const [field, { assigned, base }] of this.#counterPatches) {
+      counters[field] = (assigned + ((counters[field] >>> 0) - base)) >>> 0;
+    }
+    return Object.freeze({
+      ...counters,
+      lastRejectReason: this.#lastRejectReason,
+    });
   }
 }
 
 // FC-state freshness, fail closed. A report is accepted only when its
 // COMPLETE stamp validates for the FC-state role; the source identity
-// (id + incarnation) is pinned at first acceptance for the session; the
-// epoch/sequence pair must strictly ADVANCE in wrapping serial order —
-// duplicates and reordered/older reports never refresh age and never
-// regress the displayed state; and the arm value itself must be in
-// range. Heartbeat loss surfaces as stale instead of a forever-fresh
-// arm state.
+// is pinned at first acceptance for the session; the epoch/sequence
+// pair must strictly ADVANCE in wrapping serial order; and the arm
+// value itself must be in range. Heartbeat loss surfaces as stale
+// instead of a forever-fresh arm state.
 export class FcStateTracker {
+  #inner;
+
   constructor(staleAfterMs = 3000) {
-    this.staleAfterMs = staleAfterMs;
-    this.last = null;
+    this.#inner = bindings === null ? null : new bindings.FeederFcState(staleAfterMs);
   }
 
   // Feeds one decoded fcState lane (or null) and returns the current
-  // view. Only a NEW report — pinned identity, epoch advanced, or same
-  // epoch with the sequence strictly newer in wrapping order — restarts
-  // the age clock.
+  // view. Only a NEW report restarts the age clock.
   observe(fcState, nowMs) {
-    if (this.accepts(fcState)) {
-      const stamp = fcState.stamp;
-      this.last = {
-        armState: fcState.armState >>> 0,
-        lastCommand: sanitizeFcCommand(fcState.lastCommand),
-        sourceId: stamp.sourceId,
-        sourceIncarnation: stamp.sourceIncarnation,
-        sourceEpoch: stamp.sourceEpoch,
-        sequence: stamp.sequence,
-        firstSeenMs: nowMs,
-      };
-    }
-    return this.view(nowMs);
-  }
-
-  // Whether a report is a valid, strictly-new observation from the
-  // pinned source. Every rejection is fail-closed: the previous view
-  // (and its age) stands.
-  accepts(fcState) {
-    if (!fcState) return false;
-    if (stampFaultForRole(fcState.stamp, ROLE.FC_STATE) !== null) return false;
-    const armState = fcState.armState;
-    if (!Number.isInteger(armState) || armState < 0 || armState > 2) return false;
-    const last = this.last;
-    if (last === null) return true;
-    const stamp = fcState.stamp;
-    // Identity is pinned for the session: a different source id or
-    // incarnation is not this FC's report stream.
-    if (stamp.sourceId !== last.sourceId || stamp.sourceIncarnation !== last.sourceIncarnation) {
-      return false;
-    }
-    if (stamp.sourceEpoch === last.sourceEpoch) {
-      return serialIsNewer(stamp.sequence, last.sequence);
-    }
-    // A newer epoch (FC restart/re-attach) restarts the numbering; an
-    // older epoch is a replay.
-    return serialIsNewer(stamp.sourceEpoch, last.sourceEpoch);
+    if (this.#inner === null) return null;
+    return this.#inner.observe(this.#marshal(fcState), nowMs);
   }
 
   // The display view: null before any report; stale once the newest
   // report's age exceeds the threshold.
   view(nowMs) {
-    if (this.last === null) return null;
-    const ageMs = nowMs - this.last.firstSeenMs;
+    if (this.#inner === null) return null;
+    return this.#inner.observe(null, nowMs);
+  }
+
+  #marshal(fcState) {
+    if (!fcState) return null;
+    if (stampFaultForRole(fcState.stamp, ROLE.FC_STATE) !== null) return null;
+    const armState = fcState.armState;
+    if (!Number.isInteger(armState) || armState < 0) return null;
     return {
-      armState: this.last.armState,
-      lastCommand: this.last.lastCommand,
-      ageMs,
-      stale: ageMs > this.staleAfterMs,
+      stamp: rawStamp(fcState.stamp),
+      armState,
+      lastCommand: sanitizeFcCommand(fcState.lastCommand),
     };
   }
 }
@@ -691,135 +333,86 @@ function sanitizeFcCommand(lastCommand) {
   return { arm: lastCommand.arm, result };
 }
 
-// Navigation guidance freshness, fail closed (ADR-0031). A guidance sample
-// is accepted only when its COMPLETE stamp validates for the
-// navigation-solution role; the source identity (id + incarnation) is
-// pinned at first acceptance for the session; and the epoch/sequence pair
-// must strictly ADVANCE in wrapping serial order, so a duplicate or a
-// reordered sample never refreshes age and never regresses the displayed
-// leg. The sample's own values stay raw here — meters and radians — and
-// reach the instrument's dot scale only through the display profile.
-//
-// Age is reported rather than judged: the panel's freshness policy owns
-// when guidance stops showing, so there is no second staleness rule here
-// to diverge from it.
+// Navigation guidance freshness, fail closed (ADR-0031). The sample's
+// own values stay raw here — meters and radians — and reach the
+// instrument's dot scale only through the display profile.
 export class NavGuidanceTracker {
+  #inner;
+
   constructor() {
-    this.last = null;
-    this.lastRejectReason = null;
-    this.counters = {
-      accepted: 0,
-      invalidStamps: 0,
-      wrongSource: 0,
-      duplicates: 0,
-      malformedGuidance: 0,
-    };
+    this.#inner = bindings === null ? null : new bindings.FeederNavGuidance();
   }
 
-  // Feeds one decoded navGuidance lane (or null) and returns the current
-  // snapshot. Only a NEW sample — pinned identity, epoch advanced, or same
-  // epoch with the sequence strictly newer in wrapping order — restarts the
-  // age clock.
+  // Feeds one decoded navGuidance lane (or null) and returns the
+  // current snapshot. Only a NEW sample restarts the age clock.
   observe(navGuidance, nowMs) {
     if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
-    if (this.accepts(navGuidance)) {
-      const stamp = navGuidance.stamp;
-      this.last = {
-        navGuidance: freezeGuidance(navGuidance),
-        sourceId: stamp.sourceId,
-        sourceIncarnation: stamp.sourceIncarnation,
-        sourceEpoch: stamp.sourceEpoch,
-        sequence: stamp.sequence,
-        firstSeenMs: nowMs,
-      };
-      this.bump("accepted");
-    }
-    return this.snapshot(nowMs);
+    if (this.#inner === null) return null;
+    return deepFreeze(this.#inner.observe(this.#marshal(navGuidance), nowMs));
   }
 
-  // Whether a sample is a valid, strictly-new observation from the pinned
-  // source. Every rejection is fail-closed: the previous snapshot (and its
-  // age) stands, so guidance goes stale rather than jumping to a leg that
-  // failed its provenance check.
-  accepts(navGuidance) {
-    if (!navGuidance) return false;
-    if (stampFaultForRole(navGuidance.stamp, ROLE.NAVIGATION_SOLUTION) !== null) {
-      return this.reject("invalidStamps");
-    }
-    if (!guidanceIsWellFormed(navGuidance)) return this.reject("malformedGuidance");
-    const last = this.last;
-    if (last === null) return true;
-    const stamp = navGuidance.stamp;
-    // Identity is pinned for the session: a different source id or
-    // incarnation is not this navigation component's guidance stream.
-    if (stamp.sourceId !== last.sourceId || stamp.sourceIncarnation !== last.sourceIncarnation) {
-      return this.reject("wrongSource");
-    }
-    if (stamp.sourceEpoch === last.sourceEpoch) {
-      return serialIsNewer(stamp.sequence, last.sequence) || this.reject("duplicates");
-    }
-    // A newer epoch (navigation restart) restarts the numbering; an older
-    // epoch is a replay.
-    return serialIsNewer(stamp.sourceEpoch, last.sourceEpoch) || this.reject("duplicates");
-  }
-
-  // The display view: null before any accepted sample. `ageMs` is measured
-  // against the receive clock from when the newest sample was accepted.
+  // The display view: null before any accepted sample.
   snapshot(nowMs) {
     if (!Number.isFinite(nowMs)) throw new TypeError("nowMs must be finite");
-    if (this.last === null) return null;
-    return Object.freeze({
-      navGuidance: this.last.navGuidance,
-      ageMs: nowMs - this.last.firstSeenMs,
-    });
+    if (this.#inner === null) return null;
+    return deepFreeze(this.#inner.snapshot(nowMs));
   }
 
   diagnostics() {
-    return Object.freeze({ ...this.counters, lastRejectReason: this.lastRejectReason });
+    if (this.#inner === null) {
+      return Object.freeze({
+        accepted: 0,
+        invalidStamps: 0,
+        wrongSource: 0,
+        duplicates: 0,
+        malformedGuidance: 0,
+        lastRejectReason: null,
+      });
+    }
+    return Object.freeze(this.#inner.diagnostics());
   }
 
-  reject(reason) {
-    this.lastRejectReason = reason;
-    this.bump(reason);
-    return false;
+  #marshal(navGuidance) {
+    if (!navGuidance) return null;
+    // A shape-faulted stamp is poisoned (role 0) so the core counts an
+    // invalid stamp with the same vocabulary the script always used.
+    const stampOk = stampFaultForRole(navGuidance.stamp, ROLE.NAVIGATION_SOLUTION) === null;
+    const stamp = stampOk
+      ? rawStamp(navGuidance.stamp)
+      : {
+          role: 0,
+          integrity: 0,
+          sourceId: 0n,
+          sourceIncarnation: "00000000000000000000000000000000",
+          sourceEpoch: 0,
+          sequence: 0,
+          acquiredAtNanos: 0n,
+          clock: 0,
+        };
+    // Uninterpretable guidance values poison the course, which the core
+    // refuses as malformed guidance — never a partial display.
+    const counted = [navGuidance.legIndex, navGuidance.waypointCount, navGuidance.solutionQuality];
+    const wellShaped =
+      counted.every((value) => Number.isInteger(value) && value >= 0) &&
+      typeof navGuidance.toIdent === "string" &&
+      typeof navGuidance.fromIdent === "string" &&
+      [
+        navGuidance.courseRad,
+        navGuidance.lateralDeviationM,
+        navGuidance.verticalDeviationM,
+        navGuidance.distanceToWaypointM,
+      ].every((value) => typeof value === "number");
+    return {
+      stamp,
+      toIdent: wellShaped ? navGuidance.toIdent : "",
+      fromIdent: wellShaped ? navGuidance.fromIdent : "",
+      courseRad: wellShaped ? navGuidance.courseRad : NaN,
+      lateralDeviationM: wellShaped ? navGuidance.lateralDeviationM : NaN,
+      verticalDeviationM: wellShaped ? navGuidance.verticalDeviationM : NaN,
+      distanceToWaypointM: wellShaped ? navGuidance.distanceToWaypointM : NaN,
+      legIndex: wellShaped ? navGuidance.legIndex : 0,
+      waypointCount: wellShaped ? navGuidance.waypointCount : 0,
+      solutionQuality: wellShaped ? navGuidance.solutionQuality : 0,
+    };
   }
-
-  bump(name, amount = 1) {
-    this.counters[name] = increment(this.counters[name], amount);
-  }
-}
-
-// Guidance whose numbers are not numbers at all is unusable whole: a
-// non-finite course or distance has no display, and a leg index or quality
-// outside the schema's coding is a sample this build cannot interpret.
-// NaN deviations are the schema's "not tracking" encoding and stay legal.
-function guidanceIsWellFormed(guidance) {
-  const finite = [guidance.courseRad, guidance.distanceToWaypointM].every(Number.isFinite);
-  const counted = [guidance.legIndex, guidance.waypointCount, guidance.solutionQuality].every(
-    (value) => Number.isInteger(value) && value >= 0,
-  );
-  const deviationsNumeric = [guidance.lateralDeviationM, guidance.verticalDeviationM].every(
-    (value) => typeof value === "number",
-  );
-  return (
-    finite &&
-    counted &&
-    deviationsNumeric &&
-    typeof guidance.toIdent === "string" &&
-    typeof guidance.fromIdent === "string"
-  );
-}
-
-function freezeGuidance(guidance) {
-  return Object.freeze({
-    toIdent: guidance.toIdent,
-    fromIdent: guidance.fromIdent,
-    courseRad: guidance.courseRad,
-    lateralDeviationM: guidance.lateralDeviationM,
-    verticalDeviationM: guidance.verticalDeviationM,
-    distanceToWaypointM: guidance.distanceToWaypointM,
-    legIndex: guidance.legIndex,
-    waypointCount: guidance.waypointCount,
-    solutionQuality: guidance.solutionQuality,
-  });
 }

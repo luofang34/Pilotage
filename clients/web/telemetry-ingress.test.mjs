@@ -149,6 +149,14 @@ function testVehicleAndSourceIsolation() {
   assert.equal(gate.snapshot(2).attitude.quat.w, 1);
   assert.equal(gate.diagnostics().wrongVehicle, 1);
   assert.equal(gate.diagnostics().wrongSource, 1);
+
+  // A wrong-vehicle publication is refused before its stamps are read
+  // — a malformed stamp riding it must not count against THIS vehicle's
+  // stamp hygiene.
+  const malformed = { ...stamp(3, 30n), sourceId: "not-a-bigint" };
+  assert.equal(gate.ingest(packet(malformed, null, 1, 2n), 3), false);
+  assert.equal(gate.diagnostics().wrongVehicle, 2);
+  assert.equal(gate.diagnostics().invalidStamps, 0);
 }
 
 function testDefaultPolicyPinsFirstIncarnation() {

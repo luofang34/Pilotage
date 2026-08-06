@@ -1593,6 +1593,7 @@ name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
  "pilotage-alerts",
+ "pilotage-instrument-feeder",
  "pilotage-instrument-glyphs",
  "pilotage-instrument-panels",
  "pilotage-instrument-scene",

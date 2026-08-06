@@ -164,6 +164,22 @@ function stamp(sequence, atMs, over = {}) {
   check("a missing heading resets everything", gap === null);
 }
 
+// ---- production stamp dialect: numeric clock codes ----------------------------
+
+{
+  // wire.js delivers `clock` as the u8 wire code, not the string name;
+  // the DYN-01 clock-domain guarantee must hold in that dialect too.
+  const d = new TurnDerivation();
+  d.update(0, 5, stamp(1, 0, { clock: 2 }));
+  const derived = d.update(1 * DEG, 5, stamp(2, 100, { clock: 2 }));
+  check(
+    "numeric clock codes derive a rate",
+    derived !== null && Math.abs(derived.turnRps - (1 * DEG) / 0.1) < 1e-6,
+  );
+  const crossed = d.update(5 * DEG, 5, stamp(3, 200, { clock: 1 }));
+  check("a numeric clock-domain change resets the derivation", crossed === null);
+}
+
 if (failures > 0) {
   console.error(`${failures} check(s) failed`);
   process.exit(1);

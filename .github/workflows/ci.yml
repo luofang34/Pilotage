@@ -292,6 +292,9 @@ jobs:
       - name: browser turn-derivation tests (DYN-01)
         run: node clients/web/turn-derivation.test.mjs
 
+      - name: feeder degraded-mode contract (wasm absent)
+        run: node clients/web/feeder-degraded.test.mjs
+
       - name: browser wire-range identity bounds (GEO-68)
         run: node clients/web/wire-bounds.test.mjs
 
