@@ -43,17 +43,11 @@ const RED: [u8; 3] = [255, 0, 0];
 
 /// f32 ZYX euler → quaternion, matching the panel orientation fixtures.
 fn euler_quat(roll_deg: f32, pitch_deg: f32, yaw_deg: f32) -> Quat {
-    let d = core::f32::consts::PI / 180.0;
-    let (r, p, y) = (roll_deg * d / 2.0, pitch_deg * d / 2.0, yaw_deg * d / 2.0);
-    let (cr, sr) = (libm::cosf(r), libm::sinf(r));
-    let (cp, sp) = (libm::cosf(p), libm::sinf(p));
-    let (cy, sy) = (libm::cosf(y), libm::sinf(y));
-    Quat {
-        w: cr * cp * cy + sr * sp * sy,
-        x: sr * cp * cy - cr * sp * sy,
-        y: cr * sp * cy + sr * cp * sy,
-        z: cr * cp * sy - sr * sp * cy,
-    }
+    Quat::from_euler(
+        roll_deg.to_radians(),
+        pitch_deg.to_radians(),
+        yaw_deg.to_radians(),
+    )
 }
 
 /// A valid flying state at the given orientation, populated enough that the
