@@ -22,6 +22,7 @@ members = [
     "crates/pilotage-instrument-glyphs",
     "crates/pilotage-instrument-panels",
     "crates/pilotage-instrument-raster",
+    "crates/pilotage-instrument-feeder",
     "crates/pilotage-evidence",
     "crates/pilotage-mission",
     "adapters/reference-headless",
@@ -93,6 +94,7 @@ pilotage-instrument-state = { path = "crates/pilotage-instrument-state" }
 pilotage-instrument-glyphs = { path = "crates/pilotage-instrument-glyphs" }
 pilotage-instrument-panels = { path = "crates/pilotage-instrument-panels" }
 pilotage-instrument-raster = { path = "crates/pilotage-instrument-raster" }
+pilotage-instrument-feeder = { path = "crates/pilotage-instrument-feeder" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-adapter-aviate = { path = "adapters/aviate" }

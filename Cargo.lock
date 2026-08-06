@@ -1532,6 +1532,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-instrument-feeder"
+version = "0.1.0"
+dependencies = [
+ "pilotage-instrument-state",
+]
+
+[[package]]
 name = "pilotage-instrument-glyphs"
 version = "0.1.0"
 dependencies = [
