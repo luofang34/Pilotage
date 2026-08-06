@@ -128,6 +128,23 @@ function stamp(sequence, atMs, over = {}) {
   check("a clock-domain change resets the derivation", clock === null);
 }
 
+// ---- prototype keys are not clock names ---------------------------------------
+
+{
+  // CLOCK_CODES is a plain object: without an own-property lookup,
+  // "constructor" or "__proto__" resolves through the prototype chain
+  // to a non-null value, and two such stamps would difference as one
+  // stream instead of being refused.
+  const d = new TurnDerivation();
+  d.update(0, 5, stamp(1, 0, { clock: "constructor" }));
+  const derived = d.update(1 * DEG, 5, stamp(2, 100, { clock: "constructor" }));
+  check("a prototype key is refused as a clock name", derived === null);
+  check(
+    "__proto__ is refused as a clock name",
+    d.update(0, 5, stamp(3, 200, { clock: "__proto__" })) === null,
+  );
+}
+
 // ---- rapid reconnect ----------------------------------------------------------
 
 {

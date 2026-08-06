@@ -1,12 +1,10 @@
 //! Built-in panel descriptors: the registry entries every shell
 //! composes (ADR-0029, ADR-0033).
 //!
-//! The masks and identities that used to live as shell constants are
-//! owned here, beside the panels they describe. `group_regions` and
-//! `extreme_states` are populated when their consumers land (the
-//! admission harness and the canonical-state corpus); `raster_baseline`
-//! is populated when the pinned frame hashes travel into the
-//! descriptors.
+//! Each descriptor owns its panel's full contract — identity, masks,
+//! required groups, honest-status regions, its own extreme states, and
+//! the pinned raster baseline — so a shell consumes composition data
+//! and never holds a panel list, index, or mask of its own.
 
 use pilotage_alerts::AlertOutput;
 use pilotage_instrument_registry::{

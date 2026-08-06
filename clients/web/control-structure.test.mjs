@@ -45,7 +45,7 @@ const SIZE_CAPS = {
   "telemetry-ingress.js": 484,
   "stream-cancellation.js": 16,
   "transport-session.js": 128,
-  "turn-derivation.js": 90,
+  "turn-derivation.js": 92,
   "typed-command.js": 131,
   "uni-stream-accept.js": 84,
   "uni-stream.js": 120,

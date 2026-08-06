@@ -16,8 +16,10 @@ export const MAX_TURN_DT_MS = 500;
 
 // Stamps arrive in two dialects: wire-decoded stamps already carry the
 // numeric u8 clock code and pass through untouched; script-built stamps
-// name their clock and map through this table. An unknown name maps to
-// 0, which the core treats as its own stream key.
+// name their clock and map through this table. There is no fallback —
+// a clock this table does not know is refused by clockCode, because
+// collapsing distinct unknown clocks onto one key would bridge two
+// streams as one.
 const CLOCK_CODES = Object.freeze({
   "vehicle-boot": 1,
   simulation: 2,
@@ -29,7 +31,7 @@ const CLOCK_CODES = Object.freeze({
 // unknown clocks must never collapse into one stream.
 function clockCode(clock) {
   if (Number.isInteger(clock) && clock >= 0 && clock <= 255) return clock;
-  return CLOCK_CODES[clock] ?? null;
+  return Object.hasOwn(CLOCK_CODES, clock) ? CLOCK_CODES[clock] : null;
 }
 
 function rawStamp(stamp, clock) {
