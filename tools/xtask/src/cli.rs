@@ -203,7 +203,7 @@ commands:
 
   gen-state-fixture
       Regenerate the committed state-ABI golden frames in
-      clients/web/fixtures/ from the shared posture fixtures.
+      crates/pilotage-instrument-state/fixtures/ from the shared posture fixtures.
 
   help
       Print this help text.";

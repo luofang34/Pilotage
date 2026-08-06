@@ -12,9 +12,9 @@
 // which fails the nav group visibly on the Rust side).
 //
 // This writer is pinned byte-for-byte against the committed golden
-// frames in clients/web/fixtures/ (state-abi.test.mjs); the Rust codec
-// pins against the same files, so the two sides of the wasm boundary
-// can only drift by turning CI red.
+// frames in crates/pilotage-instrument-state/fixtures/ via
+// state-abi.test.mjs; the Rust codec pins against the same files, so
+// the two sides of the wasm boundary can only drift by turning CI red.
 
 export const STATE_ABI_VERSION = 6;
 
