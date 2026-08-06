@@ -252,4 +252,11 @@ fn excessive_skew_between_groups_is_a_counted_transition() {
     assert_eq!(snapshot.coherence.status, Coherence::ExcessiveSkew);
     let (counters, _) = ingress.diagnostics();
     assert_eq!(counters.excessive_skew, 1);
+    // A second publication that KEEPS the skew excessive is not a new
+    // transition: the counter pins the edge, not the condition.
+    let mut still_split = sample(2, 2_000_000);
+    still_split.kinematics_stamp = Some(stamp(1, 1, 2, 2_000_000 + SKEW_BUDGET_NS + 1));
+    assert!(ingress.ingest(&still_split, 1.0));
+    let (counters, _) = ingress.diagnostics();
+    assert_eq!(counters.excessive_skew, 1);
 }

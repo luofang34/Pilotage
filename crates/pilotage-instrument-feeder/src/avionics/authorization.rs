@@ -109,11 +109,11 @@ impl AvionicsIngress {
         );
         let mut paired_quality: Option<u32> = None;
         if accepted_attitude {
-            let stamp = sample.attitude_stamp.unwrap_or_else(zero_stamp);
-            let regime = if status_matches {
-                self.regime_for(&stamp)
-            } else {
-                None
+            // `accepted_attitude` implies the stamp exists; an absent
+            // stamp must still fail closed, never pair by default.
+            let regime = match (status_matches, sample.attitude_stamp) {
+                (true, Some(stamp)) => self.regime_for(&stamp),
+                _ => None,
             };
             self.attitude_paired = regime.is_some();
             let flags = self.masked_flags(regime, sample.valid_flags, ATTITUDE_VALID_FLAGS);
@@ -123,11 +123,9 @@ impl AvionicsIngress {
             }
         }
         if accepted_kinematics {
-            let stamp = sample.kinematics_stamp.unwrap_or_else(zero_stamp);
-            let regime = if status_matches {
-                self.regime_for(&stamp)
-            } else {
-                None
+            let regime = match (status_matches, sample.kinematics_stamp) {
+                (true, Some(stamp)) => self.regime_for(&stamp),
+                _ => None,
             };
             self.kinematics_paired = regime.is_some();
             let flags = self.masked_flags(regime, sample.valid_flags, KINEMATICS_VALID_FLAGS);
@@ -158,18 +156,5 @@ impl AvionicsIngress {
     fn capped_quality(&self, regime: StatusRegime, incoming: u32, floor: u32) -> u32 {
         let current = self.regime.map_or(0, |current| current.quality);
         floor.max(regime.quality).max(current).max(incoming)
-    }
-}
-
-fn zero_stamp() -> RawStamp {
-    RawStamp {
-        role: 0,
-        integrity: 0,
-        source_id: 0,
-        incarnation: [0; 16],
-        epoch: 0,
-        sequence: 0,
-        acquired_at_ns: 0,
-        clock: 0,
     }
 }

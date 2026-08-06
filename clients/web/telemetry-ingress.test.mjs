@@ -432,6 +432,52 @@ function testDuplicateStatusStampCanOnlyPublishALocalDowngrade() {
   assert.equal(snapshot.attitude.ageMs, 20);
 }
 
+
+function testOutOfByteRangeStampCodesAreRefusedNotTruncated() {
+  // Role, clock, and integrity are byte codings; a value congruent to a
+  // legal code mod 256 must still be refused — and must never reach the
+  // wasm marshaller, whose u8 parameters would truncate it into
+  // passing validation and then throw mid-ingest.
+  const gate = ingress();
+  for (const over of [{ clock: 257 }, { role: 257 }, { integrity: 258 }]) {
+    const bad = { ...stamp(1, 10n), ...over };
+    assert.equal(gate.ingest(packet(bad, null), 0), false);
+  }
+  assert.equal(gate.diagnostics().invalidStamps, 3);
+  assert.deepEqual(gate.diagnostics().lastRejectReason, {
+    field: "integrity",
+    rule: "malformed",
+  });
+}
+
+function testFaultedDuplicateStatusStampStillDowngrades() {
+  // A re-published status stamp whose only fault is a corrupt
+  // role/integrity byte matches the regime on its six identity fields
+  // and may only tighten authorization — the fault cannot shield a
+  // fail-open retention of revoked trust.
+  const gate = ingress();
+  const status = stamp(10, 1_000n);
+  gate.ingest(statusPacket(status, 0b1111, 0), 0);
+  gate.ingest(pairedPacket(stamp(1, 1_000n), stamp(1, 1_000n), status, 1, 0b1111, 0), 1);
+  let snapshot = gate.snapshot(2);
+  assert.equal(snapshot.validFlags, 0b1111);
+  assert.equal(snapshot.quality, 0);
+
+  const corrupt = { ...status, integrity: 9 };
+  gate.ingest(statusPacket(corrupt, 0, 2), 3);
+  snapshot = gate.snapshot(4);
+  assert.equal(snapshot.validFlags, 0, "revocation must fold despite the corrupt byte");
+  assert.equal(snapshot.quality, 2);
+  assert.equal(gate.diagnostics().invalidStamps, 1);
+}
+
+function testCountersSpreadYieldsTheFullVocabulary() {
+  const gate = ingress();
+  const spread = { ...gate.counters };
+  assert.equal(Object.keys(spread).length, 15);
+  assert.equal(spread.invalidStamps, 0);
+}
+
 function testDowngradeIsNotReversibleThroughThePreviousRegime() {
   // The reversal must not sneak back in through the PREVIOUS regime: a
   // numeric acquired between the previous and current status selects the
@@ -598,6 +644,9 @@ for (const test of [
   testNumericBeyondSkewBudgetIsNotAuthorized,
   testCombinedStatusRevokesBeforeOneNumericGroupRecovers,
   testDuplicateStatusStampCanOnlyPublishALocalDowngrade,
+  testOutOfByteRangeStampCodesAreRefusedNotTruncated,
+  testFaultedDuplicateStatusStampStillDowngrades,
+  testCountersSpreadYieldsTheFullVocabulary,
   testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric,
   testDowngradeIsNotReversibleThroughThePreviousRegime,
   testStatusOrderingIsIndependent,

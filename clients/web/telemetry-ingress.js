@@ -37,6 +37,10 @@ function serialDistance(candidate, current) {
   return (candidate - current) >>> 0;
 }
 
+function byteCode(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 255;
+}
+
 export function serialIsNewer(candidate, current) {
   const distance = serialDistance(candidate, current);
   return distance !== 0 && distance < SERIAL_HALF_RANGE;
@@ -60,8 +64,14 @@ export function stampFaultForRole(stamp, role) {
     ["acquiredAtNanos", "u64", stamp.acquiredAtNanos],
   ]);
   if (fault) return fault;
-  if (!Number.isInteger(stamp.clock) || !Number.isInteger(stamp.integrity)) {
-    return { field: "clock", rule: "malformed" };
+  // Role, clock, and integrity are byte codings on the wire; a value
+  // outside 0..=255 must be rejected here, never truncated into range
+  // by the wasm boundary's u8 parameters (a 257 would otherwise pass
+  // validation mod 256 and then fault mid-marshal).
+  if (!byteCode(stamp.clock)) return { field: "clock", rule: "malformed" };
+  if (!byteCode(stamp.integrity)) return { field: "integrity", rule: "malformed" };
+  if (Number.isInteger(stamp.role) && !byteCode(stamp.role)) {
+    return { field: "role", rule: "malformed" };
   }
   // With the wasm unavailable there is no role/clock/integrity verdict;
   // fail closed rather than pass a stamp half-validated.
@@ -168,6 +178,33 @@ export class AvionicsIngress {
       }
       return rawStamp(stamp);
     };
+    // The status stamp is special: a re-published status whose only
+    // fault is a corrupt role/integrity byte must still fold the
+    // fail-closed duplicate-status downgrade (its six identity fields
+    // are what the regime matches on). When the identity survives shape
+    // validation, the stamp passes through with the legality verdict
+    // poisoned so the core refuses it in its own ladder (which counts
+    // the invalid stamp) while the downgrade still applies; identity
+    // damage falls back to stripping, exactly like the other lanes.
+    const admitStatus = (stamp) => {
+      if (foreign || stamp === null || stamp === undefined) return null;
+      const fault = stampFaultForRole(stamp, ROLE.OPERATIONAL_ESTIMATE);
+      if (fault === null) return rawStamp(stamp);
+      this.#lastRejectReason = fault;
+      const identityIntact =
+        firstFault([
+          ["sourceId", "u64", stamp.sourceId],
+          ["sourceIncarnation", "incarnation", stamp.sourceIncarnation],
+          ["sourceEpoch", "u32", stamp.sourceEpoch],
+          ["sequence", "u32", stamp.sequence],
+          ["acquiredAtNanos", "u64", stamp.acquiredAtNanos],
+        ]) === null && byteCode(stamp.clock);
+      if (!identityIntact) {
+        this.#invalidStamps = (this.#invalidStamps + 1) >>> 0;
+        return null;
+      }
+      return { ...rawStamp(stamp), role: 0, integrity: 0 };
+    };
     const sample = {
       vehicleId: message.vehicleId,
       quat: {
@@ -184,7 +221,7 @@ export class AvionicsIngress {
       quality: avionics?.quality >>> 0,
       attitudeStamp: admit(avionics?.attitudeStamp),
       kinematicsStamp: admit(avionics?.kinematicsStamp),
-      estimatorStatusStamp: admit(avionics?.estimatorStatusStamp),
+      estimatorStatusStamp: admitStatus(avionics?.estimatorStatusStamp),
     };
     return this.#inner.ingest(sample, nowMs);
   }
@@ -241,6 +278,15 @@ export class AvionicsIngress {
           });
           return true;
         },
+        // Spread and enumeration must see the counter fields, as they
+        // did when this class held a plain object.
+        ownKeys: () => Object.keys(this.#rawCounters()),
+        getOwnPropertyDescriptor: (_target, field) => ({
+          value: this.diagnostics()[field],
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        }),
       },
     );
     return this.#countersProxy;

@@ -180,6 +180,21 @@ function stamp(sequence, atMs, over = {}) {
   check("a numeric clock-domain change resets the derivation", crossed === null);
 }
 
+
+// ---- unmarshalable stamps reset instead of throwing or bridging ---------------
+
+{
+  const d = new TurnDerivation();
+  d.update(0, 5, stamp(1, 0, { clock: "gps-utc" }));
+  const crossed = d.update(2 * DEG, 5, stamp(2, 100, { clock: "wall-clock" }));
+  check(
+    "two different unknown clocks never collapse into one stream",
+    crossed === null,
+  );
+  const alien = d.update(3 * DEG, 5, stamp(3, 200, { sourceIncarnation: "session-A" }));
+  check("a malformed incarnation resets, never throws", alien === null);
+}
+
 if (failures > 0) {
   console.error(`${failures} check(s) failed`);
   process.exit(1);

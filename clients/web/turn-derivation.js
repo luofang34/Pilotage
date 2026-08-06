@@ -24,7 +24,15 @@ const CLOCK_CODES = Object.freeze({
   "host-monotonic": 3,
 });
 
-function rawStamp(stamp) {
+// The stamp's clock as a wire code: numeric byte codes pass through,
+// known names map, anything else is refused (`null`) — two different
+// unknown clocks must never collapse into one stream.
+function clockCode(clock) {
+  if (Number.isInteger(clock) && clock >= 0 && clock <= 255) return clock;
+  return CLOCK_CODES[clock] ?? null;
+}
+
+function rawStamp(stamp, clock) {
   return {
     // Role and integrity do not participate in stream identity for the
     // derivation; fixed legal codes keep the marshalled stamp complete.
@@ -35,7 +43,7 @@ function rawStamp(stamp) {
     sourceEpoch: stamp.sourceEpoch >>> 0,
     sequence: stamp.sequence >>> 0,
     acquiredAtNanos: stamp.acquiredAtNanos,
-    clock: typeof stamp.clock === "number" ? stamp.clock : (CLOCK_CODES[stamp.clock] ?? 0),
+    clock,
   };
 }
 
@@ -63,9 +71,19 @@ export class TurnDerivation {
    */
   update(headingRad, ageMs, stamp) {
     if (this.#inner === null) return null;
+    // A stamp this dialect cannot marshal faithfully (wrong identity
+    // shapes, an unrecognized clock) resets the derivation rather than
+    // throwing mid-loop or bridging two streams as one.
+    const clock =
+      stamp && typeof stamp === "object" ? clockCode(stamp.clock) : null;
     const marshalled =
-      stamp && typeof stamp === "object" && typeof stamp.acquiredAtNanos === "bigint"
-        ? rawStamp(stamp)
+      stamp &&
+      typeof stamp === "object" &&
+      typeof stamp.acquiredAtNanos === "bigint" &&
+      typeof stamp.sourceId === "bigint" &&
+      /^[0-9a-f]{32}$/.test(stamp.sourceIncarnation ?? "") &&
+      clock !== null
+        ? rawStamp(stamp, clock)
         : null;
     return this.#inner.update(headingRad, ageMs, marshalled);
   }

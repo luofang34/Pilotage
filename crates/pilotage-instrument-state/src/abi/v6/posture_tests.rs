@@ -1,9 +1,10 @@
 //! ADR-0026 posture acceptance (#256): two sources with genuinely
 //! different group sets — a data-gateway bridge and a flight controller,
-//! neither a subset of the other — drive the same state model with zero
-//! dead fields, and every unfed group resolves `Missing` with no
-//! producer opt-in. This is what proves the contract is open rather
-//! than merely open-to-FCs.
+//! neither a subset of the other — drive the same state model with no
+//! dead fields between them (the machine-monitoring channel belongs to
+//! neither posture and stays Missing for both), and every unfed group
+//! resolves `Missing` with no producer opt-in. This is what proves the
+//! contract is open rather than merely open-to-FCs.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -82,6 +83,12 @@ fn gateway_groups_resolve_valid_and_unfed_groups_resolve_missing() {
     // live CDI with its waypoint idents.
     assert_eq!(data.ias_kt.status, SignalStatus::Missing);
     assert_eq!(data.heading.value_rad.status, SignalStatus::Missing);
+    // Selections is deliberately absent from the Missing sweep: it is a
+    // declaration bag, not a stamped feed. Undeclared selections are a
+    // valid state of affairs whose fields each carry their own
+    // fail-closed sentinel — nothing renders on an unknown reference —
+    // so the group resolves Valid with inert defaults.
+    assert_eq!(data.groups.status(GroupId::Selections), SignalStatus::Valid);
     assert_eq!(data.nav.status, SignalStatus::Valid);
     assert_eq!(data.nav.data.to_ident.as_str(), "WPT-3");
 }
@@ -113,6 +120,11 @@ fn flight_controller_groups_resolve_valid_and_nav_stays_missing() {
     }
     assert_eq!(data.groups.status(GroupId::Nav), SignalStatus::Missing);
     assert_eq!(data.nav.status, SignalStatus::Missing);
+    assert_eq!(
+        data.groups.status(GroupId::MonitorText),
+        SignalStatus::Missing,
+        "the FC posture feeds no monitor channel"
+    );
     assert_eq!(data.roll_rad.status, SignalStatus::Valid);
     assert_eq!(data.ias_kt.status, SignalStatus::Valid);
 }
