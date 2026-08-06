@@ -3,7 +3,8 @@
 // Run: node clients/web/scene-conformance.test.mjs
 //
 // The reference rasterizer (pilotage-instrument-raster) authors
-// scene-conformance-corpus.json: for each case it pins the reference verdict,
+// the IR crate's corpus/scene-conformance-corpus.json: for each case
+// it pins the reference verdict,
 // typed failure class, unknown-opcode count, layer-gate results, and a
 // canonicalized decoded-command and Canvas draw trace. This test replays the
 // same bytes through the browser backend — validateSceneStructure for framing,
@@ -317,7 +318,10 @@ function conformCanvas(entry, v, out) {
 // ---- load and pin the golden -----------------------------------------------
 
 const golden = JSON.parse(
-  readFileSync(new URL("./scene-conformance-corpus.json", import.meta.url), "utf8"),
+  readFileSync(
+    new URL("../../crates/pilotage-instrument-scene/corpus/scene-conformance-corpus.json", import.meta.url),
+    "utf8",
+  ),
 );
 check("golden schema version is understood", golden.schemaVersion === 2);
 check("browser backend is declared SIM / NOT FOR FLIGHT", /SIM \/ NOT FOR FLIGHT/.test(golden.simOnly));

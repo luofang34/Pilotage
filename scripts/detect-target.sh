@@ -7,7 +7,7 @@
 # is informational: the envelope gate itself is the deterministic cargo test
 # `timing::tests::budget_envelope_fits_the_display_derived_deadline`, and the
 # detection outcome is recorded in
-# docs/instruments/evidence-artifacts/timing/target-timing.txt.
+# crates/pilotage-instrument-raster/evidence/target-timing.txt.
 #
 # A measured timing model (provenance measured-usb-cdc) requires the firmware
 # to report, and the artifact to record: firmware identity + build hash, MCU
