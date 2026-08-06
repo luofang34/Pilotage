@@ -2,7 +2,9 @@
 //!
 //! Encodes the shared posture fixtures with the same Rust codec the
 //! runtime uses and writes one lowercase-hex line per fixture into
-//! `clients/web/fixtures/`. The Rust golden test and the JS state-writer
+//! `crates/pilotage-instrument-state/fixtures/` — inside the crate that
+//! owns the codec, so the fixtures travel with it. The Rust golden test
+//! and the JS state-writer
 //! test both pin against these committed files, so the two sides of the
 //! wasm boundary can only drift by turning CI red.
 
@@ -44,9 +46,12 @@ fn repo_root() -> PathBuf {
 
 /// Writes every golden frame, printing each path and byte count.
 pub fn run() -> Result<(), XtaskError> {
-    let dir = repo_root().join("clients").join("web").join("fixtures");
+    let dir = repo_root()
+        .join("crates")
+        .join("pilotage-instrument-state")
+        .join("fixtures");
     std::fs::create_dir_all(&dir).map_err(|source| XtaskError::Io {
-        context: "creating clients/web/fixtures",
+        context: "creating crates/pilotage-instrument-state/fixtures",
         source,
     })?;
     for (stem, build) in FIXTURES {
