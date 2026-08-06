@@ -231,8 +231,50 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     draw: draw_hsi_panel,
 };
 
+fn draw_monitor_panel(
+    data: &PanelData,
+    config: &ConfigBlob<'_>,
+    alerts: Option<&AlertOutput>,
+    scene: &mut SceneWriter<'_>,
+) -> Result<(), PanelDrawError> {
+    config.require_schema(MONITOR_DESCRIPTOR.config_schema)?;
+    crate::monitor::draw_monitor(data, alerts, scene)?;
+    Ok(())
+}
+
+/// The machine-monitoring text panel (AIR-IN-014) — the registry's
+/// proof of modularity: it exists as this descriptor and a draw
+/// function, with no shell change beyond composition.
+pub const MONITOR_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
+    id: "monitor",
+    title: "Monitor",
+    required_layers: layer_bit(LayerId::Tapes) | layer_bit(LayerId::Annunciation),
+    required_groups: GroupSet::of(&[GroupId::MonitorText, GroupId::Trust]),
+    design_frame: DesignFrame {
+        width: PANEL_W,
+        height: PANEL_H,
+    },
+    background: BackgroundCapability::NotUsed,
+    config_schema: &[],
+    // The whole text area is the channel's region: with MONITOR_TEXT
+    // withheld the panel shows dashes, never lines it was not given.
+    group_regions: &[(
+        GroupId::MonitorText,
+        Region {
+            x: 0.0,
+            y: 60.0,
+            width: 480.0,
+            height: 300.0,
+        },
+    )],
+    extreme_states: &[],
+    raster_baseline: Some("6f554f502cd05f77526194a180ab93d5fbcdd26ba578f6216d281ff3125da8ec"),
+    draw: draw_monitor_panel,
+};
+
 /// The panels this crate ships, in shell display order.
-pub const BUILTIN_PANELS: &[PanelDescriptor] = &[PFD_DESCRIPTOR, HSI_DESCRIPTOR];
+pub const BUILTIN_PANELS: &[PanelDescriptor] =
+    &[PFD_DESCRIPTOR, HSI_DESCRIPTOR, MONITOR_DESCRIPTOR];
 
 /// The pinned cross-shell scene digest over [`BUILTIN_PANELS`] and the
 /// canonical corpus (ADR-0033). Every shell reports exactly this value
@@ -240,7 +282,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] = &[PFD_DESCRIPTOR, HSI_DESCRIPTOR]
 /// deliberate contract change, re-pinned with a review note saying
 /// why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "c7519ab608500728e3475a246e7558ea1ff01d423cbe68028f55404db652060c";
+    "57e6049a1905d720dec6756acf54034ced9855a015549189c0016626933bc368";
 
 #[cfg(test)]
 mod digest_tests;

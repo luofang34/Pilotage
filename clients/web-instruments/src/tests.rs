@@ -176,7 +176,7 @@ fn exported_surface_packs_one_atomic_render_result() {
     assert_eq!(invalid_panel.generation, 0);
     assert_eq!(
         resource.runtime.as_ref().expect("initialized").generation,
-        [1, 1]
+        [1, 1, 0]
     );
 
     {
@@ -222,7 +222,7 @@ fn resources_are_independent_and_reinitialization_resets_one() {
     assert_eq!(reinitialized.generation, 0);
     assert_eq!(
         second.runtime.as_ref().expect("initialized").generation,
-        [0, 0],
+        [0, 0, 0],
         "reinitializing one resource cannot mutate another"
     );
 }

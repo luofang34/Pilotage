@@ -15,8 +15,9 @@ use super::{AdmissionError, admit};
 fn builtin_panels_pass_admission() {
     let registry = Registry::new(BUILTIN_PANELS).expect("composes");
     let report = admit(&registry).expect("shipped panels must be admissible");
-    // 2 panels × 4 canonical states × (1 fed + 7 withheld) cases.
-    assert_eq!(report.cases, 64);
+    // PFD and HSI: 4 canonical states × (1 fed + 7 withheld) each; the
+    // monitor panel: 4 × (1 fed + 2 withheld).
+    assert_eq!(report.cases, 76);
     // Every warning is the PFD's groundspeed or baro readout: their
     // boxes are 90 units wide but a wide value at size 16 has ~107
     // units of nominal ink, so the run overhangs its box and the frame

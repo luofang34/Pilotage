@@ -165,14 +165,14 @@ function fakeExports({
 // A fake module-level registry enumeration matching the shipped shape.
 function fakeEnumeration() {
   return {
-    panel_count: () => 2,
-    panel_id: (i) => ["pfd", "hsi"][i] ?? "",
-    panel_title: (i) => ["PFD", "HSI"][i] ?? "",
+    panel_count: () => 3,
+    panel_id: (i) => ["pfd", "hsi", "monitor"][i] ?? "",
+    panel_title: (i) => ["PFD", "HSI", "Monitor"][i] ?? "",
     panel_required_layers: () => 0,
     panel_required_groups: () => 0,
     panel_design_width: () => 480,
     panel_design_height: () => 360,
-    panel_background_capability: (i) => [2, 1][i] ?? 255,
+    panel_background_capability: (i) => [2, 1, 0][i] ?? 255,
   };
 }
 
@@ -378,8 +378,8 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     // rely on exactly this shape (ADR-0029 acceptance for this shell).
     const mod = await loadInstruments("injected.wasm", injectedLoader(fakeExports()));
     check(
-      "the derived panel map is {PFD: 0, HSI: 1}",
-      PANEL.PFD === 0 && PANEL.HSI === 1 && Object.keys(PANEL).length === 2,
+      "the derived panel map is {PFD: 0, HSI: 1, MONITOR: 2}",
+      PANEL.PFD === 0 && PANEL.HSI === 1 && PANEL.MONITOR === 2 && Object.keys(PANEL).length === 3,
     );
     mod.dispose();
   }
@@ -1480,6 +1480,10 @@ function tickToCadence(health, target, interval = 250) {
   }
   if (mod) {
     check("real wasm passes load, ABI, init, and exact-size validation", mod instanceof InstrumentModule);
+    check(
+      "the real registry derives {PFD: 0, HSI: 1, MONITOR: 2}",
+      PANEL.PFD === 0 && PANEL.HSI === 1 && PANEL.MONITOR === 2 && Object.keys(PANEL).length === 3,
+    );
 
     // The verification chain fails closed on a corrupt, truncated, or
     // wrong-hash glyph asset — the backend never becomes ready over one.

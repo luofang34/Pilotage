@@ -21,10 +21,14 @@ extern crate std;
 mod alert_stack_tests;
 mod descriptors;
 mod hsi;
+mod monitor;
 mod pfd;
 
-pub use descriptors::{BUILTIN_PANELS, BUILTIN_SCENE_DIGEST, HSI_DESCRIPTOR, PFD_DESCRIPTOR};
+pub use descriptors::{
+    BUILTIN_PANELS, BUILTIN_SCENE_DIGEST, HSI_DESCRIPTOR, MONITOR_DESCRIPTOR, PFD_DESCRIPTOR,
+};
 pub use hsi::draw_hsi;
+pub use monitor::draw_monitor;
 pub use pfd::{BackgroundMode, PFD_CONFIG_SCHEMA, PfdConfig, SvsViewport, VSpeeds, draw_pfd};
 
 /// Logical panel width all panels draw against.

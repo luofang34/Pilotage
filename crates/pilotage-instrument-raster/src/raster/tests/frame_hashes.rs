@@ -114,3 +114,17 @@ fn all_builtin_panels_carry_a_baseline() {
         assert!(baseline.bytes().all(|b| b.is_ascii_hexdigit()));
     }
 }
+
+#[test]
+fn monitor_frame_hash_is_reproducible_and_pinned() {
+    let data = resolve(&demo_state(), &FreshnessPolicy::default());
+    let scene =
+        encode(|w| pilotage_instrument_panels::draw_monitor(&data, None, w).expect("monitor"));
+    let first = frame(&scene);
+    let second = frame(&scene);
+    assert_eq!(
+        first, second,
+        "monitor frame is bit-reproducible across renders"
+    );
+    assert_eq!(sha_hex(&first), pinned_baseline("monitor"));
+}
