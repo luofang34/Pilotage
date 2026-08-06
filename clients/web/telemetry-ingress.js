@@ -278,18 +278,38 @@ export class AvionicsIngress {
           });
           return true;
         },
-        // Spread and enumeration must see the counter fields, as they
-        // did when this class held a plain object.
-        ownKeys: () => Object.keys(this.#rawCounters()),
-        getOwnPropertyDescriptor: (_target, field) => ({
-          value: this.diagnostics()[field],
-          writable: true,
-          enumerable: true,
-          configurable: true,
-        }),
+        // Membership, enumeration, and descriptors resolve one
+        // own-property model, as a plain object would: the counter
+        // fields plus any patched-in assignment are enumerable own
+        // properties; lastRejectReason is an own property held out of
+        // enumeration (it was never a counter); nothing else exists.
+        has: (_target, field) =>
+          field === "lastRejectReason" || this.#counterFields().has(field),
+        ownKeys: () => {
+          const keys = this.#counterFields();
+          keys.add("lastRejectReason");
+          return [...keys];
+        },
+        getOwnPropertyDescriptor: (_target, field) => {
+          if (field !== "lastRejectReason" && !this.#counterFields().has(field)) {
+            return undefined;
+          }
+          return {
+            value: this.diagnostics()[field],
+            writable: true,
+            enumerable: field !== "lastRejectReason",
+            configurable: true,
+          };
+        },
       },
     );
     return this.#countersProxy;
+  }
+
+  #counterFields() {
+    const keys = new Set(Object.keys(this.#rawCounters()));
+    for (const field of this.#counterPatches.keys()) keys.add(field);
+    return keys;
   }
 
   #rawCounters() {

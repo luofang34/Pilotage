@@ -42,7 +42,7 @@ const SIZE_CAPS = {
   "snapshot-association.js": 266,
   "telemetry-display.js": 75,
   "state-abi.js": 351,
-  "telemetry-ingress.js": 464,
+  "telemetry-ingress.js": 484,
   "stream-cancellation.js": 16,
   "transport-session.js": 128,
   "turn-derivation.js": 90,

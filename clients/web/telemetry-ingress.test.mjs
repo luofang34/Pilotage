@@ -476,6 +476,36 @@ function testCountersSpreadYieldsTheFullVocabulary() {
   const spread = { ...gate.counters };
   assert.equal(Object.keys(spread).length, 15);
   assert.equal(spread.invalidStamps, 0);
+  // An assigned field a plain object never had is readable AND
+  // enumerable, exactly as it would be on the plain object this proxy
+  // stands in for.
+  gate.counters.bogus = 3;
+  assert.equal(gate.counters.bogus, 3);
+  const patched = { ...gate.counters };
+  assert.equal(patched.bogus, 3);
+  assert.equal(Object.keys(patched).length, 16);
+}
+
+function testCountersMembershipAgreesAcrossEveryOperator() {
+  const gate = ingress();
+  const counters = gate.counters;
+  // `in`, hasOwnProperty, descriptors, and enumeration answer from one
+  // own-property model — no operator pair disagrees about a field.
+  assert.ok("duplicates" in counters);
+  assert.ok(Object.prototype.hasOwnProperty.call(counters, "duplicates"));
+  assert.equal(Object.getOwnPropertyDescriptor(counters, "duplicates").enumerable, true);
+  assert.ok(!("totallyBogus" in counters));
+  assert.equal(Object.getOwnPropertyDescriptor(counters, "totallyBogus"), undefined);
+  // lastRejectReason is an own property held out of enumeration: every
+  // membership operator sees it; spread and Object.keys do not.
+  assert.ok("lastRejectReason" in counters);
+  const reason = Object.getOwnPropertyDescriptor(counters, "lastRejectReason");
+  assert.equal(reason.enumerable, false);
+  assert.ok(!Object.keys(counters).includes("lastRejectReason"));
+  assert.ok(!("lastRejectReason" in { ...counters }));
+  // An assigned field joins the membership model, not just enumeration.
+  counters.bogus = 3;
+  assert.ok("bogus" in counters);
 }
 
 function testDowngradeIsNotReversibleThroughThePreviousRegime() {
@@ -647,6 +677,7 @@ for (const test of [
   testOutOfByteRangeStampCodesAreRefusedNotTruncated,
   testFaultedDuplicateStatusStampStillDowngrades,
   testCountersSpreadYieldsTheFullVocabulary,
+  testCountersMembershipAgreesAcrossEveryOperator,
   testDuplicateStatusDowngradeIsNotReversibleByANewerNumeric,
   testDowngradeIsNotReversibleThroughThePreviousRegime,
   testStatusOrderingIsIndependent,
