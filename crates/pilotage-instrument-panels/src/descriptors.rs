@@ -71,7 +71,10 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     config_schema: PFD_CONFIG_SCHEMA,
     group_regions: &[],
     extreme_states: &[],
-    raster_baseline: None,
+    // Reference-rasterizer frame hash over the shared typical state —
+    // pinned per panel here so a panel travels with its own regression
+    // baseline; the raster crate asserts it (REN-03).
+    raster_baseline: Some("43b49bde6bbf7372d704d54214d4a3d0b9cd3ad09e86862a8ffc20fd6ae05ef1"),
     draw: draw_pfd_panel,
 };
 
@@ -100,7 +103,7 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     config_schema: &[],
     group_regions: &[],
     extreme_states: &[],
-    raster_baseline: None,
+    raster_baseline: Some("66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c"),
     draw: draw_hsi_panel,
 };
 

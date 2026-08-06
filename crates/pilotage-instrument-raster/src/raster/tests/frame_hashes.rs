@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_instrument_panels::{PANEL_H, PANEL_W, PfdConfig, draw_hsi, draw_pfd};
+use pilotage_instrument_panels::{BUILTIN_PANELS, PANEL_H, PANEL_W, PfdConfig, draw_hsi, draw_pfd};
 use pilotage_instrument_scene::{MAX_SCENE_BYTES, SceneWriter};
 use pilotage_instrument_state::{AircraftState, FreshnessPolicy, resolve};
 use sha2::{Digest, Sha256};
@@ -9,16 +9,23 @@ use std::vec::Vec;
 use crate::{FrameId, FramebufferDims, RenderStatus, render};
 
 // Frame hashes pinned from a byte-reproducible render on the reference
-// rasterizer. `libm` plus IEEE-754 f32 make these identical across the
-// supported CI architectures; a mismatch is a determinism regression, not a
-// value to re-pin casually. The PFD hash covers the datum-qualified
-// altitude tape: the fixture's local-relative reference paints the amber
-// REL label and the not-applied SET setting box (ALT-01). The HSI hash
-// covers the reference-typed heading: the rose turns with the fixture's
-// explicit SIM-declared independent sample — never quaternion yaw — and
-// paints the amber SIM reference label (NAV-01).
-const PFD_SHA256: &str = "43b49bde6bbf7372d704d54214d4a3d0b9cd3ad09e86862a8ffc20fd6ae05ef1";
-const HSI_SHA256: &str = "66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c";
+// rasterizer, owned by each panel's descriptor (`raster_baseline`) so a
+// panel travels with its regression baseline. `libm` plus IEEE-754 f32
+// make these identical across the supported CI architectures; a
+// mismatch is a determinism regression, not a value to re-pin
+// casually. The PFD hash covers the datum-qualified altitude tape: the
+// fixture's local-relative reference paints the amber REL label and
+// the not-applied SET setting box (ALT-01). The HSI hash covers the
+// reference-typed heading: the rose turns with the fixture's explicit
+// SIM-declared independent sample — never quaternion yaw — and paints
+// the amber SIM reference label (NAV-01).
+fn pinned_baseline(id: &str) -> &'static str {
+    BUILTIN_PANELS
+        .iter()
+        .find(|panel| panel.id == id)
+        .and_then(|panel| panel.raster_baseline)
+        .expect("every builtin panel carries a raster baseline")
+}
 
 /// The shared canonical "typical" state (ADR-0033): the same fixture
 /// the scene digest draws, so the pinned frame hashes and the digest
@@ -73,7 +80,7 @@ fn pfd_frame_hash_is_reproducible_and_pinned() {
         first, second,
         "PFD frame is bit-reproducible across renders"
     );
-    assert_eq!(sha_hex(&first), PFD_SHA256);
+    assert_eq!(sha_hex(&first), pinned_baseline("pfd"));
 }
 
 #[test]
@@ -86,5 +93,24 @@ fn hsi_frame_hash_is_reproducible_and_pinned() {
         first, second,
         "HSI frame is bit-reproducible across renders"
     );
-    assert_eq!(sha_hex(&first), HSI_SHA256);
+    assert_eq!(sha_hex(&first), pinned_baseline("hsi"));
+}
+
+/// A shape gate, not a value check: the per-panel hash tests above own
+/// value correctness; this keeps a new builtin from shipping with no
+/// baseline at all (Registry::new does not require one).
+#[test]
+fn all_builtin_panels_carry_a_baseline() {
+    for panel in BUILTIN_PANELS {
+        let baseline = panel
+            .raster_baseline
+            .unwrap_or_else(|| panic!("{} ships without a raster baseline", panel.id));
+        assert_eq!(
+            baseline.len(),
+            64,
+            "{} baseline is not sha256 hex",
+            panel.id
+        );
+        assert!(baseline.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
 }
