@@ -241,12 +241,12 @@ attr outcome pass
 node RESULT-LINK-AUTHZ verification-result
 title browser authorization-regime suite — recorded pass
 attr command node clients/web/telemetry-ingress.test.mjs
-attr config-digest 761ce177fee219894c536e86390428a41953b799
+attr config-digest 9d4469f8100894cbad4254030f4673f5bb8171b6
 attr tool-version node v26.5.0
-attr source-digest git-blob:a1b2f74177c36cccf6d5397c6dec4ef7ad24fda9
+attr source-digest git-blob:7b2ce7d8fec93bd9258808fdfafa724a19db49fb
 attr artifact docs/link/evidence-artifacts/link05/authz-regime.run.txt
-attr output-digest sha256:77351649165097d45f772ae6dedc4b53ed416d5218a4f14f0cef50e229673ce7
-attr run-id local:761ce177fee219894c536e86390428a41953b799
+attr output-digest sha256:04a7070ec359afc8a474392f51c659b11fcc4ed6fad8657f01a5f3768e201d5e
+attr run-id local:9d4469f8100894cbad4254030f4673f5bb8171b6
 attr outcome pass
 
 node CFG-LINK-EXTRACTION configuration-item
@@ -270,8 +270,8 @@ attr tree 49c412a2fcdfb609c4ef4efd35b3ac58792139a6
 node CFG-LINK-AUTHZ configuration-item
 title committed code baseline for the client authorization-regime result (LINK-05 lands after LINK-04, on its own commit)
 attr scm git
-attr commit 761ce177fee219894c536e86390428a41953b799
-attr tree ec6dde5041d8616fd5ea20be51e12858bda2ea01
+attr commit 9d4469f8100894cbad4254030f4673f5bb8171b6
+attr tree e8fabd07a770ebda51699c3d15552e771f17f002
 
 node TOOL-LINK-CARGO tool
 title cargo test on Rust stable — not DO-330 tool-qualified
