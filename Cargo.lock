@@ -1567,6 +1567,7 @@ dependencies = [
  "libm",
  "pilotage-instrument-glyphs",
  "pilotage-instrument-panels",
+ "pilotage-instrument-registry",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
  "sha2 0.10.9",
@@ -1580,6 +1581,7 @@ dependencies = [
  "pilotage-alerts",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
+ "pilotage-sha256",
  "thiserror",
 ]
 

@@ -12,4 +12,5 @@ workspace = true
 pilotage-alerts = { workspace = true }
 pilotage-instrument-scene = { workspace = true }
 pilotage-instrument-state = { workspace = true }
+pilotage-sha256 = { workspace = true }
 thiserror = { workspace = true }

@@ -18,13 +18,17 @@ extern crate std;
 
 mod config;
 mod descriptor;
+mod digest;
 mod group_set;
 mod registry;
+pub mod states;
 
 pub use config::{CONFIG_BLOB_MAX, ConfigBlob, ConfigError, ConfigKey, EMPTY_CONFIG, keys};
 pub use descriptor::{
     BackgroundCapability, DesignFrame, DrawFn, ExtremeState, PanelDescriptor, PanelDrawError,
     Region,
 };
+pub use digest::{DigestError, SCENE_DIGEST_DOMAIN, scene_digest};
 pub use group_set::GroupSet;
 pub use registry::{Registry, RegistryError};
+pub use states::{CANONICAL_STATES, CanonicalState};

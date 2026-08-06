@@ -2,11 +2,7 @@
 
 use pilotage_instrument_panels::{PANEL_H, PANEL_W, PfdConfig, draw_hsi, draw_pfd};
 use pilotage_instrument_scene::{MAX_SCENE_BYTES, SceneWriter};
-use pilotage_instrument_state::{
-    AirData, AircraftState, Attitude, EstimateQuality, Kinematics, NavData, NavFromTo, NavSource,
-    Quat, Selections, SnapshotMeta, Stamped, ValidFlags, Wind,
-};
-use pilotage_instrument_state::{FreshnessPolicy, resolve};
+use pilotage_instrument_state::{AircraftState, FreshnessPolicy, resolve};
 use sha2::{Digest, Sha256};
 use std::vec::Vec;
 
@@ -24,106 +20,13 @@ use crate::{FrameId, FramebufferDims, RenderStatus, render};
 const PFD_SHA256: &str = "43b49bde6bbf7372d704d54214d4a3d0b9cd3ad09e86862a8ffc20fd6ae05ef1";
 const HSI_SHA256: &str = "66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c";
 
-/// A fixed, richly populated state so every panel band paints content.
-///
-/// The fixture must resolve bit-identically whether or not fail-safe
-/// validation is in the resolution path: trust is declared explicitly
-/// (defaults must not be relied on), and the quaternion's squared
-/// component sum is exactly 1.0 in f32, so a validating resolver's
-/// renormalization divides by exactly 1.0 and changes nothing.
+/// The shared canonical "typical" state (ADR-0033): the same fixture
+/// the scene digest draws, so the pinned frame hashes and the digest
+/// exercise one corpus. The unchanged hash values below prove the
+/// shared copy renders bit-identically to the fixture this module used
+/// to own.
 pub(super) fn demo_state() -> AircraftState {
-    AircraftState {
-        attitude: Stamped {
-            data: Some(Attitude {
-                quat: Quat {
-                    w: 0.5,
-                    x: 0.5,
-                    y: 0.5,
-                    z: 0.5,
-                },
-                rates_rps: [0.02, -0.01, 0.05],
-            }),
-            age_ms: Some(80.0),
-        },
-        kinematics: Stamped {
-            data: Some(Kinematics {
-                pos_ned_m: [1200.0, 340.0, -305.0],
-                vel_ned_mps: [52.0, 9.0, -2.0],
-            }),
-            age_ms: Some(80.0),
-        },
-        air: Stamped {
-            data: Some(AirData {
-                ias_mps: Some(53.0),
-                baro_setting_hpa: Some(1013.2),
-            }),
-            age_ms: Some(80.0),
-        },
-        nav: Stamped {
-            data: Some(NavData {
-                source: NavSource::Gps,
-                course_rad: 0.6,
-                cdi_dots: 0.7,
-                fromto: NavFromTo::To,
-                vdev_dots: Some(-0.4),
-                dist_nm: Some(12.4),
-                course_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
-                ..NavData::default()
-            }),
-            age_ms: Some(80.0),
-        },
-        wind: Stamped {
-            data: Some(Wind {
-                from_rad: 2.1,
-                speed_mps: 7.5,
-            }),
-            age_ms: Some(80.0),
-        },
-        selections: Selections {
-            heading_bug_rad: 0.5,
-            heading_bug_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
-            altitude_sel_m: Some(915.0),
-            ..Selections::default()
-        },
-        quality: EstimateQuality::Good,
-        valid: ValidFlags {
-            attitude: true,
-            rates: true,
-            position: true,
-            velocity: true,
-            heading: true,
-            ..ValidFlags::default()
-        },
-        snapshot: SnapshotMeta::default(),
-        altitude: pilotage_instrument_state::AltitudeDeclaration::default(),
-        heading: demo_heading(),
-        variation: Stamped::default(),
-        dynamics: demo_dynamics(),
-        monitor_text: Stamped::default(),
-    }
-}
-
-fn demo_heading() -> Stamped<pilotage_instrument_state::HeadingSample> {
-    Stamped {
-        data: Some(pilotage_instrument_state::HeadingSample {
-            heading_rad: 0.6,
-            reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
-        }),
-        age_ms: Some(80.0),
-    }
-}
-
-fn demo_dynamics() -> Stamped<pilotage_instrument_state::DynSample> {
-    Stamped {
-        data: Some(pilotage_instrument_state::DynSample {
-            turn: Some(pilotage_instrument_state::TurnSample {
-                rate_rps: 0.05,
-                basis: pilotage_instrument_state::TurnBasis::HeadingRate,
-            }),
-            lateral_mps2: Some(-0.6),
-        }),
-        age_ms: Some(80.0),
-    }
+    pilotage_instrument_registry::states::typical()
 }
 
 pub(super) fn encode(build: impl FnOnce(&mut SceneWriter<'_>)) -> Vec<u8> {

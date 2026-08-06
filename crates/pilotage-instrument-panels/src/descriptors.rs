@@ -108,4 +108,6 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
 pub const BUILTIN_PANELS: &[PanelDescriptor] = &[PFD_DESCRIPTOR, HSI_DESCRIPTOR];
 
 #[cfg(test)]
+mod digest_tests;
+#[cfg(test)]
 mod tests;
