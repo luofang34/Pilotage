@@ -14,6 +14,11 @@ use crate::validate::StateIntegrity;
 
 use super::{Trust, fault_status, group_freshness};
 
+/// The monitor channel's own slow policy: a live machine feed updates
+/// irregularly and must not flap under the flight-data thresholds.
+pub(crate) const TEXT_FRESHNESS: FreshnessPolicy =
+    FreshnessPolicy::from_validated_literals(2000.0, 10_000.0);
+
 pub(super) fn group_statuses(
     state: &AircraftState,
     policy: &FreshnessPolicy,
@@ -94,5 +99,30 @@ fn group_status(
                 state.valid.turn && state.valid.slip,
             )
         }
+        // Advisory machine text folds no flight-source trust and runs
+        // its own slow freshness policy, mirroring wind's independence.
+        GroupId::MonitorText => group_freshness(
+            &TEXT_FRESHNESS,
+            state.monitor_text.data.is_some(),
+            state.monitor_text.age_ms,
+        )
+        .worst(fault_status(integrity.monitor_text)),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::TEXT_FRESHNESS;
+    use crate::signal::FreshnessPolicy;
+
+    #[test]
+    fn text_freshness_passes_the_validating_constructor() {
+        let validated = FreshnessPolicy::new(
+            TEXT_FRESHNESS.stale_after_ms(),
+            TEXT_FRESHNESS.fail_after_ms(),
+        )
+        .expect("literal thresholds validate");
+        assert_eq!(validated, TEXT_FRESHNESS);
     }
 }

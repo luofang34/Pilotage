@@ -115,6 +115,9 @@ pub struct PanelData {
     /// when the caller resolves without source comparison;
     /// [`crate::resolve_with_sources`] populates it.
     pub sources: crate::source_monitor::SourceSelection,
+    /// Machine-monitoring text channel (AIR-IN-014), advisory only; a
+    /// hidden status leaves the default empty channel behind it.
+    pub monitor_text: Sig<crate::monitor_text::MonitorText>,
     /// Group-level status keyed by [`crate::GroupId`] — the surface a
     /// registry or admission harness asks generically.
     pub groups: crate::group_id::GroupStatuses,
@@ -246,6 +249,7 @@ pub fn resolve_stateful(
         policy,
     );
     let wind = presented_wind(wind_signal(state, policy, &integrity), rose, state, policy);
+    let groups = group_status::group_statuses(state, policy, &trust, &integrity);
     let bug = presented_angle(
         Sig::with_status(state.selections.heading_bug_rad, SignalStatus::Valid),
         state.selections.heading_bug_reference,
@@ -274,7 +278,11 @@ pub fn resolve_stateful(
         presentation,
         require_dynamics_cue: profile.require_dynamics_cue,
         sources: crate::source_monitor::SourceSelection::default(),
-        groups: group_status::group_statuses(state, policy, &trust, &integrity),
+        monitor_text: Sig::with_status(
+            state.monitor_text.data.unwrap_or_default(),
+            groups.status(crate::group_id::GroupId::MonitorText),
+        ),
+        groups,
     }
 }
 

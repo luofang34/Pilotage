@@ -17,6 +17,7 @@ use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId
 use crate::dynamics::{DynSample, TurnBasis, TurnSample};
 use crate::heading::{HeadingReference, HeadingSample, MagneticVariation, VariationSourceId};
 use crate::ident::IdentStr;
+use crate::monitor_text::{MonitorText, TextLine};
 use pilotage_frames::Quat;
 
 fn ident(text: &str) -> IdentStr {
@@ -125,6 +126,15 @@ fn all_valid() -> ValidFlags {
     }
 }
 
+fn monitor(revision: u32, texts: &[&str]) -> MonitorText {
+    let mut lines = [TextLine::EMPTY; MonitorText::MAX_LINES];
+    for (slot, text) in lines.iter_mut().zip(texts) {
+        *slot = TextLine::new(text).unwrap_or(TextLine::EMPTY);
+    }
+    MonitorText::new(revision, &lines[..texts.len().min(MonitorText::MAX_LINES)])
+        .unwrap_or_default()
+}
+
 fn baro_altitude(sample_m: f32, origin: u32) -> AltitudeDeclaration {
     AltitudeDeclaration {
         reference_class: AltitudeClass::BaroIndicated,
@@ -172,6 +182,7 @@ pub fn full() -> AircraftState {
         heading: heading(0.35, HeadingReference::SimLocalTrue, 90.0),
         variation: variation(0.15, 3, 120.0),
         dynamics: dynamics(0.05, TurnBasis::HeadingRate, 0.3, 85.0),
+        monitor_text: stamped(monitor(9, &["ENG 1 OK", "FUEL 82.5"]), 500.0),
     }
 }
 

@@ -76,6 +76,9 @@ pub struct StateIntegrity {
     /// Dynamics fault: non-finite turn rate or lateral force, or an
     /// unknown turn basis.
     pub dynamics: Option<GroupFault>,
+    /// Monitor-text fault: an impossible line count or malformed line
+    /// content on the wire.
+    pub monitor_text: Option<GroupFault>,
 }
 
 fn all_finite(values: &[f32]) -> bool {
@@ -183,20 +186,29 @@ pub fn validate_state(state: &AircraftState) -> StateIntegrity {
             integrity.variation = Some(GroupFault::SourceAbsent);
         }
     }
-    if let Some(dynamics) = &state.dynamics.data {
-        let turn_bad = dynamics.turn.is_some_and(|sample| {
-            !sample.rate_rps.is_finite() || sample.basis == crate::dynamics::TurnBasis::Unknown
-        });
-        let unknown_basis = dynamics
-            .turn
-            .is_some_and(|sample| sample.basis == crate::dynamics::TurnBasis::Unknown);
-        if unknown_basis {
-            integrity.dynamics = Some(GroupFault::UnknownEnum);
-        } else if turn_bad || !opt_finite(dynamics.lateral_mps2) {
-            integrity.dynamics = Some(GroupFault::NonFinite);
-        }
+    integrity.dynamics = state.dynamics.data.as_ref().and_then(dynamics_fault);
+    if let Some(text) = &state.monitor_text.data
+        && text.is_malformed()
+    {
+        integrity.monitor_text = Some(GroupFault::MalformedIdent);
     }
     integrity
+}
+
+fn dynamics_fault(dynamics: &crate::dynamics::DynSample) -> Option<GroupFault> {
+    let unknown_basis = dynamics
+        .turn
+        .is_some_and(|sample| sample.basis == crate::dynamics::TurnBasis::Unknown);
+    if unknown_basis {
+        return Some(GroupFault::UnknownEnum);
+    }
+    let turn_bad = dynamics
+        .turn
+        .is_some_and(|sample| !sample.rate_rps.is_finite());
+    if turn_bad || !opt_finite(dynamics.lateral_mps2) {
+        return Some(GroupFault::NonFinite);
+    }
+    None
 }
 
 /// Typed reason a datum-qualified altitude cannot display. Class rules:

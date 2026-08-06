@@ -33,6 +33,7 @@ mod dynamics;
 mod group_id;
 mod heading;
 mod ident;
+mod monitor_text;
 mod presentation;
 mod resolve;
 mod signal;
@@ -53,6 +54,7 @@ pub use heading::{
     convert_heading, shortest_angle_rad, wrap_2pi,
 };
 pub use ident::{IdentError, IdentStr};
+pub use monitor_text::{MonitorText, TextError, TextLine};
 pub use pilotage_frames::Quat;
 pub use presentation::{
     AirframeDisplayProfile, AttitudePresentation, ChevronSense, Hysteresis, ProfileError,

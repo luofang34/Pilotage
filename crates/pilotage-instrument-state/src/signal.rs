@@ -96,6 +96,16 @@ impl Default for FreshnessPolicy {
 }
 
 impl FreshnessPolicy {
+    /// Crate-internal const construction for literal threshold pairs.
+    /// Callers state literals the validation in [`Self::new`] would
+    /// accept; a test pins each such constant against `new`.
+    pub(crate) const fn from_validated_literals(stale_after_ms: f32, fail_after_ms: f32) -> Self {
+        Self {
+            stale_after_ms,
+            fail_after_ms,
+        }
+    }
+
     /// Builds a policy after validating both thresholds.
     ///
     /// # Errors

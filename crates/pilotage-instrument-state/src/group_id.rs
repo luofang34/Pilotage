@@ -16,8 +16,7 @@
 //! | id | group |
 //! |----|-------|
 //! | 0x00 | never assigned (guards zeroed memory) |
-//! | 0x01–0x0B | the variants below |
-//! | 0x0C | monitor text (machine-monitoring readout; planned) |
+//! | 0x01–0x0C | the variants below |
 //! | 0x0D | engine (planned) |
 //! | 0x0E | traffic (planned) |
 //! | 0x0F | projection view (synthetic vision; planned) |
@@ -56,11 +55,13 @@ pub enum GroupId {
     Variation = 0x0A,
     /// Typed turn and slip/skid estimates.
     Dynamics = 0x0B,
+    /// Machine-monitoring text channel.
+    MonitorText = 0x0C,
 }
 
 impl GroupId {
     /// Number of defined groups.
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 12;
 
     /// Every defined group in ascending id order — the canonical wire
     /// order and the index order of [`GroupStatuses`].
@@ -76,6 +77,7 @@ impl GroupId {
         GroupId::Heading,
         GroupId::Variation,
         GroupId::Dynamics,
+        GroupId::MonitorText,
     ];
 
     /// The wire tag.
@@ -98,6 +100,7 @@ impl GroupId {
             0x09 => Some(GroupId::Heading),
             0x0A => Some(GroupId::Variation),
             0x0B => Some(GroupId::Dynamics),
+            0x0C => Some(GroupId::MonitorText),
             _ => None,
         }
     }
@@ -166,6 +169,7 @@ pub fn withhold_group(state: &AircraftState, group: GroupId) -> AircraftState {
             out.valid.turn = false;
             out.valid.slip = false;
         }
+        GroupId::MonitorText => out.monitor_text = Default::default(),
     }
     out
 }

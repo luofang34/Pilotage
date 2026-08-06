@@ -30,10 +30,13 @@ const TAG = Object.freeze({
   HEADING: 0x09,
   VARIATION: 0x0a,
   DYNAMICS: 0x0b,
+  MONITOR_TEXT: 0x0c,
 });
 
 const IDENT_CAPACITY = 8;
-const IDENT_INVALID_LEN = 0xff;
+const TEXT_LINE_CAPACITY = 32;
+const TEXT_MAX_LINES = 8;
+const TEXT_INVALID_LEN = 0xff;
 
 function identByteOk(code) {
   return (
@@ -44,19 +47,24 @@ function identByteOk(code) {
   );
 }
 
-// Writes one 9-byte ident atom. Malformed content (over-length or
-// out-of-charset) writes the INVALID marker so the Rust side fails the
-// nav group instead of displaying text nobody vetted.
-function putIdent(view, off, text) {
-  const ident = text ?? "";
-  let invalid = ident.length > IDENT_CAPACITY;
-  for (let i = 0; i < IDENT_CAPACITY; i += 1) {
+function textByteOk(code) {
+  return identByteOk(code) || code === 0x2e; // .
+}
+
+// Writes one length-prefixed, zero-padded text atom of `capacity`
+// bytes. Malformed content (over-length or out-of-charset) writes the
+// INVALID marker so the Rust side fails the group instead of displaying
+// text nobody vetted.
+function putTextAtom(view, off, text, capacity, byteOk) {
+  const content = text ?? "";
+  let invalid = typeof content !== "string" || content.length > capacity;
+  for (let i = 0; i < capacity; i += 1) {
     view.setUint8(off + 1 + i, 0);
   }
   if (!invalid) {
-    for (let i = 0; i < ident.length; i += 1) {
-      const code = ident.charCodeAt(i);
-      if (!identByteOk(code)) {
+    for (let i = 0; i < content.length; i += 1) {
+      const code = content.charCodeAt(i);
+      if (!byteOk(code)) {
         invalid = true;
         break;
       }
@@ -64,13 +72,17 @@ function putIdent(view, off, text) {
     }
   }
   if (invalid) {
-    for (let i = 0; i < IDENT_CAPACITY; i += 1) {
+    for (let i = 0; i < capacity; i += 1) {
       view.setUint8(off + 1 + i, 0);
     }
-    view.setUint8(off, IDENT_INVALID_LEN);
+    view.setUint8(off, TEXT_INVALID_LEN);
   } else {
-    view.setUint8(off, ident.length);
+    view.setUint8(off, content.length);
   }
+}
+
+function putIdent(view, off, text) {
+  putTextAtom(view, off, text, IDENT_CAPACITY, identByteOk);
 }
 
 // Each encoder writes its group payload at `off` and returns the payload
@@ -167,7 +179,19 @@ function groupEncoders() {
     ],
     [
       TAG.TRUST,
-      (s) => (s.quality !== undefined || s.valid || s.snapshot ? s : undefined),
+      // Mirrors the Rust encoder's default-omission: a trust group whose
+      // quality, flags, and snapshot all equal their fail-closed defaults
+      // encodes as absent, so equal states produce equal bytes on both
+      // writers.
+      (s) => {
+        const v = s.valid ?? {};
+        const flags =
+          v.attitude || v.rates || v.position || v.velocity ||
+          v.heading || v.variation || v.turn || v.slip;
+        const snap =
+          (s.snapshot?.coherence ?? 0) !== 0 || (s.snapshot?.generation ?? 0) !== 0;
+        return (s.quality ?? 255) !== 255 || flags || snap ? s : undefined;
+      },
       (view, off, s) => {
         // Undeclared quality is unknown (255, resolves Failed), and
         // validity is never assumed — unset flags mean "not declared
@@ -242,6 +266,35 @@ function groupEncoders() {
         return 16;
       },
     ],
+    [
+      TAG.MONITOR_TEXT,
+      (s) => s.monitorText,
+      (view, off, mt) => {
+        // Fixed 274-byte payload: count, reserved, revision u32, eight
+        // 33-byte line atoms, age f32 — unused slots stay zero so equal
+        // channels produce equal bytes.
+        const lines = mt.lines ?? [];
+        if (lines.length > TEXT_MAX_LINES) {
+          // Mirrors MonitorText::new: an over-long channel is refused,
+          // never silently truncated (AIR-IN-014).
+          throw new RangeError(`monitor text exceeds ${TEXT_MAX_LINES} lines`);
+        }
+        b(view, off, lines.length);
+        b(view, off + 1, 0);
+        view.setUint32(off + 2, mt.revision ?? 0, true);
+        const atom = TEXT_LINE_CAPACITY + 1;
+        for (let i = 0; i < TEXT_MAX_LINES; i += 1) {
+          const at = off + 6 + i * atom;
+          if (i < lines.length) {
+            putTextAtom(view, at, lines[i], TEXT_LINE_CAPACITY, textByteOk);
+          } else {
+            for (let z = 0; z < atom; z += 1) view.setUint8(at + z, 0);
+          }
+        }
+        f(view, off + 6 + TEXT_MAX_LINES * atom, mt.ageMs);
+        return 6 + TEXT_MAX_LINES * atom + 4;
+      },
+    ],
   ];
 }
 
@@ -286,6 +339,7 @@ const PROBE_STATE = {
   heading: { ageMs: 0 },
   variation: { ageMs: 0 },
   dynamics: { ageMs: 0 },
+  monitorText: { revision: 0, lines: [], ageMs: 0 },
 };
 
 // The largest frame this writer can produce, measured by encoding the

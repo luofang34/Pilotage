@@ -249,6 +249,9 @@ pub struct AircraftState {
     /// Typed turn and slip/skid estimates (DYN-01); body rates never
     /// substitute for either.
     pub dynamics: Stamped<DynSample>,
+    /// Machine-monitoring text channel (AIR-IN-014); advisory content
+    /// with its own slow freshness policy, never flight data.
+    pub monitor_text: Stamped<crate::monitor_text::MonitorText>,
 }
 
 impl Default for Selections {

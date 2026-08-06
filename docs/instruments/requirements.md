@@ -158,6 +158,17 @@ The display function shall receive independent evidence of renderer progress,
 frame generation, command-buffer integrity, backend status, and output-path
 health sufficient to detect a retained last-good image.
 
+<a id="air-in-014"></a>
+### AIR-IN-014 — Machine-monitoring text input
+
+The display function may receive a bounded advisory text channel from a
+non-flight source (build stamps, link health, payload status). The channel
+shall be bounded in line count and line length, restricted to a declared
+character set, and carried with its own freshness policy and content
+revision; malformed content shall fail the channel visibly rather than
+display, and the channel shall never substitute for, obscure, or imply any
+flight-data function.
+
 ## Outputs and functions
 
 <a id="air-out-001"></a>

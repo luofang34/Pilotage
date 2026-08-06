@@ -34,6 +34,7 @@ use crate::group_id::GroupId;
 pub mod fixtures;
 
 mod declared;
+mod monitor;
 mod stamped;
 
 /// Version stamped in the frame's first byte.
@@ -96,6 +97,7 @@ const fn min_len(id: GroupId) -> usize {
         GroupId::Heading => 12,
         GroupId::Variation => 12,
         GroupId::Dynamics => 16,
+        GroupId::MonitorText => monitor::MONITOR_LEN,
     }
 }
 
@@ -114,6 +116,7 @@ fn decode_group(state: &mut AircraftState, id: GroupId, payload: &[u8]) {
         GroupId::Heading => stamped::decode_heading(state, payload),
         GroupId::Variation => stamped::decode_variation(state, payload),
         GroupId::Dynamics => stamped::decode_dynamics(state, payload),
+        GroupId::MonitorText => monitor::decode_monitor_text(state, payload),
     }
 }
 
@@ -137,6 +140,7 @@ fn encode_group(
         GroupId::Heading => stamped::encode_heading(state, out),
         GroupId::Variation => stamped::encode_variation(state, out),
         GroupId::Dynamics => stamped::encode_dynamics(state, out),
+        GroupId::MonitorText => monitor::encode_monitor_text(state, out),
     }
 }
 

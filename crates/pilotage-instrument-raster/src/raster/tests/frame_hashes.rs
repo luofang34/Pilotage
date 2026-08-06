@@ -99,6 +99,7 @@ pub(super) fn demo_state() -> AircraftState {
         heading: demo_heading(),
         variation: Stamped::default(),
         dynamics: demo_dynamics(),
+        monitor_text: Stamped::default(),
     }
 }
 

@@ -87,6 +87,7 @@ function fullState() {
     heading: { rad: 0.35, reference: 2, ageMs: 90 },
     variation: { eastRad: 0.15, sourceId: 3, ageMs: 120 },
     dynamics: { turnRps: 0.05, turnBasis: 0, lateralMps2: 0.3, ageMs: 85 },
+    monitorText: { revision: 9, lines: ["ENG 1 OK", "FUEL 82.5"], ageMs: 500 },
   };
 }
 
@@ -161,6 +162,40 @@ for (const [stem, build] of [
   const over = encodedHex({ nav: { source: 1, toIdent: "ABCDEFGHI", ageMs: 10 } });
   const overBytes = over.match(/.{2}/g).map((b) => parseInt(b, 16));
   check("an over-length ident encodes the INVALID marker", overBytes[5 + 24] === 0xff);
+}
+
+{
+  // Canonicalization: a trust group whose quality, flags, and snapshot
+  // all equal their fail-closed defaults encodes as absent — matching
+  // the Rust encoder, so equal states produce equal bytes.
+  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0600");
+  check(
+    "explicitly declared defaults still omit the trust group",
+    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0600",
+  );
+  check(
+    "one set flag makes the trust group present",
+    encodedHex({ valid: { attitude: true } }) !== "0600",
+  );
+}
+
+{
+  // A non-string ident is malformed content, not empty text.
+  const hex = encodedHex({ nav: { source: 1, toIdent: 12345, ageMs: 10 } });
+  const bytes = hex.match(/.{2}/g).map((b) => parseInt(b, 16));
+  check("a non-string ident encodes the INVALID marker", bytes[5 + 24] === 0xff);
+}
+
+{
+  // An over-long monitor channel is refused, never silently truncated
+  // (AIR-IN-014) — matching MonitorText::new on the Rust side.
+  let refused = false;
+  try {
+    encodedHex({ monitorText: { revision: 1, lines: Array(9).fill("A"), ageMs: 0 } });
+  } catch (error) {
+    refused = error instanceof RangeError;
+  }
+  check("more than eight monitor lines throws instead of truncating", refused);
 }
 
 if (failures > 0) {
