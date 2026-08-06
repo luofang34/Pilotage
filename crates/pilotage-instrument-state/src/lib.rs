@@ -61,7 +61,8 @@ pub use presentation::{
     ProfileLimits, UnusualAttitudeState, down_in_body,
 };
 pub use resolve::{
-    BARO_SETTING_TOLERANCE_HPA, NavResolved, PanelData, ResolvedAltitude, resolve, resolve_stateful,
+    BARO_SETTING_TOLERANCE_HPA, NavResolved, PanelData, ResolvedAltitude, ResolvedHeading,
+    RoseBasis, resolve, resolve_stateful,
 };
 pub use signal::{FreshnessPolicy, PolicyError, Sig, SignalStatus};
 pub use source_compare::{

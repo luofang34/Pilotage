@@ -74,6 +74,9 @@ pub struct PanelData {
     pub pitch_rad: Sig<f32>,
     /// Independent, reference-typed heading.
     pub heading: ResolvedHeading,
+    /// What orients the rose and which reference the angular
+    /// quantities present in.
+    pub rose_basis: RoseBasis,
     /// Heading bug presented in the rose reference; `Failed` when the
     /// bug's own reference is unknown or cannot convert.
     pub heading_bug_rose_rad: Sig<f32>,
@@ -241,7 +244,8 @@ pub fn resolve_stateful(
 
     let (ias, baro) = air_signals(state, policy, trust.quality, &integrity);
     let heading = heading_resolved(state, policy, &trust, &integrity);
-    let rose = heading.reference;
+    let basis = rose_basis(&heading, track_status.shows_value());
+    let rose = basis.display_reference(heading.reference);
     let track = presented_true(
         Sig::with_status(track_rad, track_status),
         rose,
@@ -262,6 +266,7 @@ pub fn resolve_stateful(
         roll_rad: finite(Sig::with_status(presentation.bank_rad, att_status)),
         pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
         heading,
+        rose_basis: basis,
         heading_bug_rose_rad: finite(bug),
         turn: turn_resolved(state, policy, &trust, &integrity),
         slip_lat_mps2: slip_resolved(state, policy, &trust, &integrity),
@@ -473,8 +478,10 @@ mod group_status;
 use altitude_signal::altitude_resolved;
 use dynamics_signal::{slip_resolved, turn_resolved};
 mod heading_signal;
-pub use heading_signal::ResolvedHeading;
-use heading_signal::{heading_resolved, presented_angle, presented_true, presented_wind};
+pub use heading_signal::{ResolvedHeading, RoseBasis};
+use heading_signal::{
+    heading_resolved, presented_angle, presented_true, presented_wind, rose_basis,
+};
 
 #[cfg(test)]
 mod altitude_tests;

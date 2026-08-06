@@ -3,8 +3,8 @@
 use core::f32::consts::PI;
 use libm::{cosf, sinf};
 use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
+use pilotage_instrument_state::Sig;
 use pilotage_instrument_state::units::{RAD_TO_DEG, wrap_deg_360};
-use pilotage_instrument_state::{GroupId, Sig};
 
 use pilotage_instrument_symbology::{fmt_label, palette, status_paint};
 
@@ -14,7 +14,11 @@ const TEXT_R: f32 = 126.0;
 
 /// Rose ticks rotate with heading; labels are drawn upright at computed
 /// positions (the pyG5 counter-rotation, without nested transforms).
-pub fn draw_rose(scene: &mut SceneWriter<'_>, heading_rad: f32) -> Result<(), SceneError> {
+pub fn draw_rose(
+    scene: &mut SceneWriter<'_>,
+    group: u8,
+    heading_rad: f32,
+) -> Result<(), SceneError> {
     scene.save()?;
     scene.translate(CX, CY)?;
 
@@ -62,14 +66,7 @@ pub fn draw_rose(scene: &mut SceneWriter<'_>, heading_rad: f32) -> Result<(), Sc
             other => fmt_label!(4, "{}", other / 10),
         };
         let size = if deg % 90 == 0 { 22.0 } else { 17.0 };
-        scene.text_attributed(
-            GroupId::Heading.to_u8(),
-            x,
-            y,
-            size,
-            Anchor::CENTER,
-            label.as_str(),
-        )?;
+        scene.text_attributed(group, x, y, size, Anchor::CENTER, label.as_str())?;
     }
 
     // Fixed lubber triangle at the top of the rose.
@@ -87,13 +84,17 @@ pub fn draw_rose(scene: &mut SceneWriter<'_>, heading_rad: f32) -> Result<(), Sc
 }
 
 /// The digital heading readout box at the panel top.
-pub fn draw_heading_box(scene: &mut SceneWriter<'_>, hdg: Sig<f32>) -> Result<(), SceneError> {
+pub fn draw_heading_box(
+    scene: &mut SceneWriter<'_>,
+    group: u8,
+    hdg: Sig<f32>,
+) -> Result<(), SceneError> {
     let deg = libm::roundf(wrap_deg_360(hdg.value * RAD_TO_DEG)) as i32;
     let shown = if deg == 0 { 360 } else { deg };
     let text = fmt_label!(8, "{shown:03}°");
     status_paint::readout_box(
         scene,
-        GroupId::Heading.to_u8(),
+        group,
         CX - 34.0,
         2.0,
         68.0,

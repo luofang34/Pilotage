@@ -237,10 +237,16 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
             },
         ),
     ],
-    extreme_states: &[ExtremeState {
-        id: "reciprocal-course",
-        build: hsi_reciprocal_course,
-    }],
+    extreme_states: &[
+        ExtremeState {
+            id: "reciprocal-course",
+            build: hsi_reciprocal_course,
+        },
+        ExtremeState {
+            id: "track-up",
+            build: hsi_track_up,
+        },
+    ],
     raster_baseline: Some("66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c"),
     draw: draw_hsi_panel,
 };
@@ -374,6 +380,19 @@ fn hsi_reciprocal_course() -> AircraftState {
     state
 }
 
+/// The data-gateway profile (#260): a certified GPS navigator bridged
+/// over its serial protocol publishes position, track, and guidance —
+/// and no magnetic heading at all. The rose must present track-up,
+/// annunciated TRK, instead of going structurally inert.
+fn hsi_track_up() -> AircraftState {
+    let mut state = states::typical();
+    state.heading = Stamped {
+        data: None,
+        age_ms: None,
+    };
+    state
+}
+
 /// Eight maximum-length lines: the channel's full frame budget against
 /// the glyph vocabulary, with digits in every row for the honest-status
 /// family to police.
@@ -414,7 +433,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// value moves once per deliberate contract change, re-pinned with a
 /// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "9ab67b5fed5988a5df39b6f1c32a5613406b7a3e43f53d005609eb3fa5ff8622";
+    "8c3bf3ff21a396784434e4dcbc320d2f190212671995ac03fa5a856eef52acb2";
 
 #[cfg(test)]
 mod digest_tests;
