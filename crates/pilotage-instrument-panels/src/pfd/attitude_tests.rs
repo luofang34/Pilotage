@@ -13,17 +13,11 @@ use super::{PfdConfig, VSpeeds};
 
 /// f32 ZYX euler → quaternion for orientation fixtures.
 fn quat_euler(roll_deg: f32, pitch_deg: f32, yaw_deg: f32) -> Quat {
-    let d = core::f32::consts::PI / 180.0;
-    let (r, p, y) = (roll_deg * d / 2.0, pitch_deg * d / 2.0, yaw_deg * d / 2.0);
-    let (cr, sr) = (libm::cosf(r), libm::sinf(r));
-    let (cp, sp) = (libm::cosf(p), libm::sinf(p));
-    let (cy, sy) = (libm::cosf(y), libm::sinf(y));
-    Quat {
-        w: cr * cp * cy + sr * sp * sy,
-        x: sr * cp * cy - cr * sp * sy,
-        y: cr * sp * cy + sr * cp * sy,
-        z: cr * cp * sy - sr * sp * cy,
-    }
+    Quat::from_euler(
+        roll_deg.to_radians(),
+        pitch_deg.to_radians(),
+        yaw_deg.to_radians(),
+    )
 }
 
 fn oriented(roll_deg: f32, pitch_deg: f32) -> PanelData {

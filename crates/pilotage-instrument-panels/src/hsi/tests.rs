@@ -47,13 +47,7 @@ fn heading_only(heading_rad: f32) -> PanelData {
 }
 
 fn quat_yaw(yaw: f32) -> pilotage_instrument_state::Quat {
-    let h = yaw / 2.0;
-    pilotage_instrument_state::Quat {
-        w: libm::cosf(h),
-        x: 0.0,
-        y: 0.0,
-        z: libm::sinf(h),
-    }
+    pilotage_instrument_state::Quat::from_euler(0.0, 0.0, yaw)
 }
 
 fn render(data: &PanelData) -> Vec<u8> {
