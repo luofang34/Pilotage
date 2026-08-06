@@ -25,7 +25,7 @@ mod layer;
 mod opcode;
 mod text_metrics;
 
-pub use cmd::{Anchor, Cmd, HAlign, MAX_TEXT_BYTES, PaintMode, PointsRef, VAlign};
+pub use cmd::{ATTR_CONFIG, Anchor, Cmd, HAlign, MAX_TEXT_BYTES, PaintMode, PointsRef, VAlign};
 pub use color::Rgba8;
 pub use decode::{DecodeError, SceneCmds};
 pub use encode::{SceneError, SceneWriter};

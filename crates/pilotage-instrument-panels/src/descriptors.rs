@@ -75,9 +75,11 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     background: BackgroundCapability::Cedeable,
     config_schema: PFD_CONFIG_SCHEMA,
     // Value-readout surfaces, keyed by the group whose data the number
-    // comes from: the honest-status family proves these stay
-    // numeral-free when that group is withheld. Scale ladders and the
-    // attitude ball carry no per-group numerals and stay undeclared.
+    // comes from. Honest status is proven by provenance claims on the
+    // runs themselves (the harness's withholding matrix tests every
+    // claim, wherever the ink lands), so these regions are the
+    // descriptor's statement of readout ownership for a shell — not
+    // the numeral police.
     group_regions: &[
         // IAS pointed readout value (the run anchors at x 40; the
         // scale ladder's runs anchor at x 70 and stay outside).
@@ -123,14 +125,12 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
                 height: 36.0,
             },
         ),
-        // The selected-altitude box is deliberately undeclared: it sits
-        // on the altitude tape strip, whose kinematics scale ladder
-        // legitimately runs ink through that area at extreme values,
-        // and the ladder label's y moves with altitude, so no region
-        // geometry separates the two — any band that is clear at one
-        // altitude is crossed at another. A region there would flag
-        // honest scale ink; the HSI's heading-select region carries the
-        // selections coverage instead.
+        // The selected-altitude box carries no region: it shares the
+        // altitude tape strip with kinematics ladder ink whose y moves
+        // with altitude, so no region geometry separates the two. Its
+        // honest-status coverage is the provenance claim on the
+        // selected-altitude run itself — a fabricated selection is
+        // refused wherever it is drawn.
         // VSI numeral strip (kinematic vertical speed), bounded to
         // exclude the selected-altitude box above and the baro box
         // below, whose numerals belong to other groups.
@@ -414,7 +414,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// value moves once per deliberate contract change, re-pinned with a
 /// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "850f92983ee1d30eb7948aa1dc53c40de854bf131dcfc1dc03981af396dc712c";
+    "9ab67b5fed5988a5df39b6f1c32a5613406b7a3e43f53d005609eb3fa5ff8622";
 
 #[cfg(test)]
 mod digest_tests;

@@ -288,6 +288,7 @@ fn command_token(cmd: &Cmd<'_>) -> String {
         Cmd::ClipRect { x, y, w, h } => std::format!("40:{},{},{},{}", q(*x), q(*y), q(*w), q(*h)),
         Cmd::BeginLayer { layer } => std::format!("50:{}", layer.to_u8()),
         Cmd::EndLayer { layer } => std::format!("51:{}", layer.to_u8()),
+        Cmd::Attribute { group } => std::format!("31:{group}"),
         Cmd::Unknown { opcode } => std::format!("unknown:{}", opcode),
     }
 }
@@ -368,6 +369,7 @@ fn canvas_tokens(cmd: &Cmd<'_>, out: &mut Vec<String>) {
         | Cmd::Text { .. }
         | Cmd::BeginLayer { .. }
         | Cmd::EndLayer { .. }
+        | Cmd::Attribute { .. }
         | Cmd::Unknown { .. } => {}
     }
 }

@@ -27,7 +27,7 @@ const SIZE_CAPS = {
   "datagram-control.js": 87,
   "feeder-wasm.js": 44,
   "instrument-health.js": 423,
-  "instruments.js": 790,
+  "instruments.js": 795,
   "layout.js": 55,
   "lease-executor.js": 14,
   "lease-release.js": 67,

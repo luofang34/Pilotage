@@ -3,8 +3,8 @@
 use core::f32::consts::PI;
 use libm::{cosf, sinf};
 use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
-use pilotage_instrument_state::Sig;
 use pilotage_instrument_state::units::{RAD_TO_DEG, wrap_deg_360};
+use pilotage_instrument_state::{GroupId, Sig};
 
 use pilotage_instrument_symbology::{fmt_label, palette, status_paint};
 
@@ -62,7 +62,14 @@ pub fn draw_rose(scene: &mut SceneWriter<'_>, heading_rad: f32) -> Result<(), Sc
             other => fmt_label!(4, "{}", other / 10),
         };
         let size = if deg % 90 == 0 { 22.0 } else { 17.0 };
-        scene.text(x, y, size, Anchor::CENTER, label.as_str())?;
+        scene.text_attributed(
+            GroupId::Heading.to_u8(),
+            x,
+            y,
+            size,
+            Anchor::CENTER,
+            label.as_str(),
+        )?;
     }
 
     // Fixed lubber triangle at the top of the rose.
@@ -86,6 +93,7 @@ pub fn draw_heading_box(scene: &mut SceneWriter<'_>, hdg: Sig<f32>) -> Result<()
     let text = fmt_label!(8, "{shown:03}°");
     status_paint::readout_box(
         scene,
+        GroupId::Heading.to_u8(),
         CX - 34.0,
         2.0,
         68.0,

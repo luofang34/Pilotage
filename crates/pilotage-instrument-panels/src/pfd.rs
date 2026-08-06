@@ -4,7 +4,7 @@
 
 use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
-use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
+use pilotage_instrument_state::{ChevronSense, GroupId, PanelData, SignalStatus};
 
 use pilotage_instrument_symbology::{annunciation, palette, safety, source_label, status_paint};
 
@@ -149,6 +149,18 @@ pub fn draw_pfd(
     }
     scene.end_layer(LayerId::Tapes)?;
 
+    annunciation_band(scene, data, alerts, att_status)?;
+    Ok(())
+}
+
+/// The Annunciation band: attitude/airspeed/altitude failure flags,
+/// per-function source labels, and the alert stack.
+fn annunciation_band(
+    scene: &mut SceneWriter<'_>,
+    data: &PanelData,
+    alerts: Option<&AlertOutput>,
+    att_status: SignalStatus,
+) -> Result<(), SceneError> {
     scene.begin_layer(LayerId::Annunciation)?;
     if att_status.shows_value() {
         if att_status != SignalStatus::Valid {
@@ -163,9 +175,30 @@ pub fn draw_pfd(
     if data.altitude.value_ft.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
-    source_label::draw_source_label(scene, 45.0, 250.0, "IAS", &data.sources.airspeed)?;
-    source_label::draw_source_label(scene, 435.0, 250.0, "ALT", &data.sources.altitude)?;
-    source_label::draw_source_label(scene, 240.0, 300.0, "ATT", &data.sources.attitude)?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Air.to_u8(),
+        45.0,
+        250.0,
+        "IAS",
+        &data.sources.airspeed,
+    )?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Kinematics.to_u8(),
+        435.0,
+        250.0,
+        "ALT",
+        &data.sources.altitude,
+    )?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Attitude.to_u8(),
+        240.0,
+        300.0,
+        "ATT",
+        &data.sources.attitude,
+    )?;
     if let Some(alerts) = alerts {
         annunciation::draw_alert_stack(scene, alerts)?;
     }

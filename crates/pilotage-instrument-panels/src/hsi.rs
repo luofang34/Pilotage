@@ -4,7 +4,7 @@
 use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::HeadingReference;
-use pilotage_instrument_state::{NavSource, PanelData, SignalStatus};
+use pilotage_instrument_state::{GroupId, NavSource, PanelData, SignalStatus};
 
 use pilotage_instrument_symbology::{annunciation, palette, safety, source_label, status_paint};
 
@@ -89,7 +89,14 @@ pub fn draw_hsi(
     } else {
         status_paint::draw_red_x(scene, CX - 140.0, CY - 140.0, 280.0, 280.0, "HDG")?;
     }
-    source_label::draw_source_label(scene, CX + 90.0, 14.0, "HDG", &data.sources.heading)?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Heading.to_u8(),
+        CX + 90.0,
+        14.0,
+        "HDG",
+        &data.sources.heading,
+    )?;
     if let Some(alerts) = alerts {
         annunciation::draw_alert_stack(scene, alerts)?;
     }

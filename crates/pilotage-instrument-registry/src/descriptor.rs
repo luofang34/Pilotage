@@ -103,8 +103,11 @@ pub struct PanelDescriptor {
     /// Configuration keys this panel understands; a shell refuses a
     /// blob carrying any other key.
     pub config_schema: &'static [ConfigKey],
-    /// Where each consumed group paints, for honest-status region
-    /// checks; populated when the admission harness consumes it.
+    /// Where each consumed group paints its readout — a forward
+    /// declaration for a shell that presents readout ownership or a
+    /// dash-out check. Structurally validated; no shipped consumer
+    /// reads it today (honest status is proven by provenance claims on
+    /// the runs, not by regions).
     pub group_regions: &'static [(GroupId, Region)],
     /// Panel-contributed stress fixtures beyond the canonical states.
     pub extreme_states: &'static [ExtremeState],

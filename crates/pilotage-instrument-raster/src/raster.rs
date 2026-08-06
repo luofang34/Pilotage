@@ -84,6 +84,8 @@ fn run(
             Ok(())
         }
         Cmd::Stroke { color, width } => state.set_stroke(*color, *width),
+        // Provenance metadata for the admission harness; paints nothing.
+        Cmd::Attribute { .. } => Ok(()),
         Cmd::ClipRect { x, y, w, h } => clip(state, *x, *y, *w, *h),
         Cmd::Line { x1, y1, x2, y2 } => line(state, surface, [*x1, *y1, *x2, *y2]),
         Cmd::Polyline { points } => polyline(state, surface, points),

@@ -10,7 +10,7 @@
 
 use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
-use pilotage_instrument_state::{PanelData, SignalStatus};
+use pilotage_instrument_state::{GroupId, PanelData, SignalStatus};
 use pilotage_instrument_symbology::{annunciation, palette, safety, status_paint};
 
 use crate::{PANEL_H, PANEL_W};
@@ -45,7 +45,14 @@ pub fn draw_monitor(
             // Sized so a maximum-length line's nominal ink fits the
             // frame from the left margin — a full 32-character row at a
             // larger size would overrun the right edge.
-            scene.text(TEXT_X, y, 16.0, Anchor::MIDDLE_LEFT, line.as_str())?;
+            scene.text_attributed(
+                GroupId::MonitorText.to_u8(),
+                TEXT_X,
+                y,
+                16.0,
+                Anchor::MIDDLE_LEFT,
+                line.as_str(),
+            )?;
         }
     } else {
         scene.fill_color(safety::ANNUNCIATION_WHITE)?;

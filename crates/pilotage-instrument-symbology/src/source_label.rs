@@ -13,12 +13,15 @@ use crate::fmt_label;
 use crate::palette;
 use crate::safety;
 
-/// Draws the selected source id under a function prefix (e.g. `IAS2`), amber
+/// Draws the selected source id under a function prefix (e.g. `IAS2`) —
+/// claimed from `group`, the same group the labeled value derives from,
+/// and drawn through the same `Some(selected)` gate — amber
 /// on a reversion or a sustained miscompare, with a `{prefix} CMP` cue on a
 /// miscompare. Draws nothing when the function is unmonitored or every
 /// candidate failed — the instrument's own failure flag covers that.
 pub fn draw_source_label<T: Copy>(
     scene: &mut SceneWriter<'_>,
+    group: u8,
     x: f32,
     y: f32,
     prefix: &str,
@@ -35,7 +38,7 @@ pub fn draw_source_label<T: Copy>(
     };
     scene.fill_color(color)?;
     let label = fmt_label!(12, "{prefix}{}", source.source().0);
-    scene.text(x, y, 12.0, Anchor::CENTER, label.as_str())?;
+    scene.text_attributed(group, x, y, 12.0, Anchor::CENTER, label.as_str())?;
     if miscompare {
         let cmp = fmt_label!(12, "{prefix} CMP");
         scene.text(x, y + 12.0, 12.0, Anchor::CENTER, cmp.as_str())?;
