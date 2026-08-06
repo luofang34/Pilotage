@@ -1,7 +1,8 @@
 # ADR-0029: Panels, layout, and look are data-driven plugins over the scene and state contracts
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
+- Concrete contracts: [ADR-0033](0033-panel-registry-config-and-digest.md)
 
 ## Context
 

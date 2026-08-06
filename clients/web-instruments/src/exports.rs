@@ -9,7 +9,7 @@ use pilotage_alerts::{
     DynFault, ManagerHealth, NavFault,
 };
 use pilotage_instrument_panels::{PfdConfig, VSpeeds, draw_hsi, draw_pfd};
-use pilotage_instrument_scene::{LayerError, LayerId, SceneError, SceneWriter, validate_layers};
+use pilotage_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
 use pilotage_instrument_state::FreshnessPolicy;
 use pilotage_instrument_state::abi::v6::{self, AbiError};
 use pilotage_instrument_state::{NavSource, SignalStatus};
@@ -23,16 +23,10 @@ const PANEL_PFD: u32 = 0;
 const PANEL_HSI: u32 = 1;
 const PANEL_COUNT: usize = 2;
 
-const fn layer_bit(layer: LayerId) -> u8 {
-    1u8 << layer.to_u8()
-}
-
-const PFD_CRITICAL_LAYERS: u8 =
-    layer_bit(LayerId::Attitude) | layer_bit(LayerId::Tapes) | layer_bit(LayerId::Annunciation);
-const HSI_CRITICAL_LAYERS: u8 = layer_bit(LayerId::Attitude)
-    | layer_bit(LayerId::Tapes)
-    | layer_bit(LayerId::Guidance)
-    | layer_bit(LayerId::Annunciation);
+// The critical-layer masks are owned by the panel descriptors
+// (ADR-0029): this shell holds no mask of its own.
+const PFD_CRITICAL_LAYERS: u8 = pilotage_instrument_panels::PFD_DESCRIPTOR.required_layers;
+const HSI_CRITICAL_LAYERS: u8 = pilotage_instrument_panels::HSI_DESCRIPTOR.required_layers;
 
 pub(crate) struct Runtime {
     pub(crate) state: Vec<u8>,

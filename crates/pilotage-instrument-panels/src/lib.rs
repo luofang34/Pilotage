@@ -19,11 +19,13 @@ extern crate std;
 
 #[cfg(test)]
 mod alert_stack_tests;
+mod descriptors;
 mod hsi;
 mod pfd;
 
+pub use descriptors::{BUILTIN_PANELS, HSI_DESCRIPTOR, PFD_DESCRIPTOR};
 pub use hsi::draw_hsi;
-pub use pfd::{BackgroundMode, PfdConfig, VSpeeds, draw_pfd};
+pub use pfd::{BackgroundMode, PFD_CONFIG_SCHEMA, PfdConfig, SvsViewport, VSpeeds, draw_pfd};
 
 /// Logical panel width all panels draw against.
 pub const PANEL_W: f32 = 480.0;

@@ -1554,6 +1554,7 @@ dependencies = [
  "pilotage-alerts",
  "pilotage-frames",
  "pilotage-instrument-glyphs",
+ "pilotage-instrument-registry",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
  "pilotage-instrument-symbology",
@@ -1569,6 +1570,16 @@ dependencies = [
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
  "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
+name = "pilotage-instrument-registry"
+version = "0.1.0"
+dependencies = [
+ "pilotage-alerts",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
  "thiserror",
 ]
 

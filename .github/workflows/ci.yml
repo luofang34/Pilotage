@@ -121,6 +121,7 @@ jobs:
           -p pilotage-instrument-panels
           -p pilotage-instrument-raster
           -p pilotage-instrument-feeder
+          -p pilotage-instrument-registry
           --target thumbv7em-none-eabihf
 
       - name: target timing gate (REN-04)
