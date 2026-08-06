@@ -35,7 +35,11 @@ fn class_color(class: AlertClass) -> Rgba8 {
 /// Short, glyph-pack-covered label for a stable alert identity. An
 /// identity outside the known vocabulary still shows — as the generic
 /// ALERT token — because an unknown fault must never be invisible.
-fn alert_label(id: AlertId) -> &'static str {
+/// Crate-private: labels are only meaningful inside the one shared
+/// stack, whose geometry and semantics [`draw_alert_stack`] owns — an
+/// external caller with labels but not the stack would necessarily
+/// diverge from it.
+pub(crate) fn alert_label(id: AlertId) -> &'static str {
     use AlertCondition as C;
     let table: [(AlertId, &'static str); 20] = [
         (C::Altitude(AltFault::ReferenceLost).id(), "ALT REF"),
@@ -87,7 +91,7 @@ fn alert_label(id: AlertId) -> &'static str {
 /// truncated or overflowed list shows the amber MORE marker, and a
 /// faulted alerting path shows ALRT FAIL — the degradation itself is
 /// annunciated from the primary render path.
-pub(crate) fn draw_alert_stack(
+pub fn draw_alert_stack(
     scene: &mut SceneWriter<'_>,
     alerts: &AlertOutput,
 ) -> Result<(), SceneError> {
@@ -133,6 +137,3 @@ pub(crate) fn draw_alert_stack(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

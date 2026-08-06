@@ -6,8 +6,8 @@ use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
 
-use crate::palette;
-use crate::status_paint;
+use pilotage_instrument_symbology::{annunciation, palette, source_label, status_paint};
+
 use crate::{PANEL_H, PANEL_W};
 
 mod horizon;
@@ -134,11 +134,11 @@ pub fn draw_pfd(
     if data.altitude.value_ft.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
-    crate::source_label::draw_source_label(scene, 45.0, 250.0, "IAS", &data.sources.airspeed)?;
-    crate::source_label::draw_source_label(scene, 435.0, 250.0, "ALT", &data.sources.altitude)?;
-    crate::source_label::draw_source_label(scene, 240.0, 300.0, "ATT", &data.sources.attitude)?;
+    source_label::draw_source_label(scene, 45.0, 250.0, "IAS", &data.sources.airspeed)?;
+    source_label::draw_source_label(scene, 435.0, 250.0, "ALT", &data.sources.altitude)?;
+    source_label::draw_source_label(scene, 240.0, 300.0, "ATT", &data.sources.attitude)?;
     if let Some(alerts) = alerts {
-        crate::annunciation::draw_alert_stack(scene, alerts)?;
+        annunciation::draw_alert_stack(scene, alerts)?;
     }
     scene.end_layer(LayerId::Annunciation)?;
     Ok(())

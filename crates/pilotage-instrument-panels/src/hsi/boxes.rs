@@ -6,8 +6,7 @@ use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::units::{MPS_TO_KT, RAD_TO_DEG, wrap_deg_360};
 use pilotage_instrument_state::{NavSource, PanelData};
 
-use crate::fixed_str::fmt_label;
-use crate::palette;
+use pilotage_instrument_symbology::{fmt_label, palette};
 
 use super::cdi::source_color;
 

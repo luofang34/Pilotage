@@ -116,6 +116,7 @@ jobs:
           -p pilotage-instrument-state
           -p pilotage-instrument-scene
           -p pilotage-instrument-glyphs
+          -p pilotage-instrument-symbology
           -p pilotage-instrument-panels
           -p pilotage-instrument-raster
           --target thumbv7em-none-eabihf

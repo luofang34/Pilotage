@@ -9,8 +9,7 @@ use libm::{cosf, sinf};
 use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::units::RAD_TO_DEG;
 
-use crate::fixed_str::fmt_label;
-use crate::palette;
+use pilotage_instrument_symbology::{fmt_label, palette};
 
 const PX_PER_DEG_PITCH: f32 = 7.2;
 const ROLL_ARC_R: f32 = 144.0;

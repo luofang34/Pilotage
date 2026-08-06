@@ -10,9 +10,7 @@ use pilotage_instrument_scene::{
 use pilotage_instrument_state::AltitudeClass;
 use pilotage_instrument_state::{PanelData, Sig};
 
-use crate::fixed_str::fmt_label;
-use crate::palette;
-use crate::status_paint;
+use pilotage_instrument_symbology::{fmt_label, palette, status_paint};
 
 use super::VSpeeds;
 

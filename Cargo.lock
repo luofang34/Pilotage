@@ -1548,6 +1548,7 @@ dependencies = [
  "pilotage-instrument-glyphs",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
+ "pilotage-instrument-symbology",
 ]
 
 [[package]]
@@ -1578,6 +1579,15 @@ dependencies = [
  "libm",
  "pilotage-alerts",
  "pilotage-frames",
+]
+
+[[package]]
+name = "pilotage-instrument-symbology"
+version = "0.1.0"
+dependencies = [
+ "pilotage-alerts",
+ "pilotage-instrument-scene",
+ "pilotage-instrument-state",
 ]
 
 [[package]]
