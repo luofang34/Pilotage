@@ -53,6 +53,7 @@ fn full_nav() -> Stamped<NavData> {
             vdev_dots: Some(0.4),
             dist_nm: Some(40.3),
             course_reference: HeadingReference::SimLocalTrue,
+            ..NavData::default()
         }),
         age_ms: Some(9.0),
     }

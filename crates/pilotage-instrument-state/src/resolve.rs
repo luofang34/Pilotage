@@ -115,6 +115,9 @@ pub struct PanelData {
     /// when the caller resolves without source comparison;
     /// [`crate::resolve_with_sources`] populates it.
     pub sources: crate::source_monitor::SourceSelection,
+    /// Group-level status keyed by [`crate::GroupId`] — the surface a
+    /// registry or admission harness asks generically.
+    pub groups: crate::group_id::GroupStatuses,
 }
 
 fn quality_status(q: EstimateQuality) -> SignalStatus {
@@ -271,6 +274,7 @@ pub fn resolve_stateful(
         presentation,
         require_dynamics_cue: profile.require_dynamics_cue,
         sources: crate::source_monitor::SourceSelection::default(),
+        groups: group_status::group_statuses(state, policy, &trust, &integrity),
     }
 }
 
@@ -457,6 +461,7 @@ fn wind_signal(
 
 mod altitude_signal;
 mod dynamics_signal;
+mod group_status;
 use altitude_signal::altitude_resolved;
 use dynamics_signal::{slip_resolved, turn_resolved};
 mod heading_signal;

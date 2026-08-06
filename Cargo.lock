@@ -1578,6 +1578,7 @@ dependencies = [
  "libm",
  "pilotage-alerts",
  "pilotage-frames",
+ "thiserror",
 ]
 
 [[package]]
@@ -2999,6 +3000,7 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "pilotage-instrument-state",
  "thiserror",
  "tokio",
  "tracing",

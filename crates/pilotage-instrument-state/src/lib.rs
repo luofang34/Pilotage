@@ -23,11 +23,16 @@
 
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 pub mod abi;
 mod aircraft;
 mod altitude;
 mod dynamics;
+mod group_id;
 mod heading;
+mod ident;
 mod presentation;
 mod resolve;
 mod signal;
@@ -42,10 +47,12 @@ pub use aircraft::{
 };
 pub use altitude::{AltitudeClass, AltitudeDeclaration, AltitudeReference, GeoidModelId, OriginId};
 pub use dynamics::{DynSample, TurnBasis, TurnSample};
+pub use group_id::{GroupId, GroupStatuses, withhold_group};
 pub use heading::{
     ConversionFault, HeadingReference, HeadingSample, MagneticVariation, VariationSourceId,
     convert_heading, shortest_angle_rad, wrap_2pi,
 };
+pub use ident::{IdentError, IdentStr};
 pub use pilotage_frames::Quat;
 pub use presentation::{
     AirframeDisplayProfile, AttitudePresentation, ChevronSense, Hysteresis, ProfileError,

@@ -153,37 +153,7 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         age_ms: air_age,
     };
 
-    // Unknown wire values are preserved as Unknown, never mapped to a
-    // benign known value: guidance from an unidentifiable source must
-    // fail, not masquerade as no-source (VAL-01 fail-safe decoding).
-    let source = match u8_at(buf, 86)? {
-        0 => NavSource::None,
-        1 => NavSource::Gps,
-        2 => NavSource::Nav1,
-        3 => NavSource::Nav2,
-        _ => NavSource::Unknown,
-    };
-    let fromto = match u8_at(buf, 87)? {
-        0 => NavFromTo::Off,
-        1 => NavFromTo::To,
-        2 => NavFromTo::From,
-        _ => NavFromTo::Unknown,
-    };
-    let nav = Stamped {
-        data: match nav_age {
-            Some(_) => Some(NavData {
-                source,
-                course_rad: f32_at(buf, 88)?,
-                cdi_dots: f32_at(buf, 92)?,
-                fromto,
-                vdev_dots: opt(f32_at(buf, 96)?),
-                dist_nm: opt(f32_at(buf, 100)?),
-                course_reference: HeadingReference::from_u8(u8_at(buf, 155)?),
-            }),
-            None => None,
-        },
-        age_ms: nav_age,
-    };
+    let nav = decode_nav(buf, nav_age)?;
 
     let wind = Stamped {
         data: match wind_age {
@@ -222,6 +192,44 @@ pub fn decode_state(buf: &[u8]) -> Result<AircraftState, AbiError> {
         heading: decode_heading(buf)?,
         variation: decode_variation(buf)?,
         dynamics: decode_dynamics(buf)?,
+    })
+}
+
+/// Decodes the nav-guidance group. Unknown wire values are preserved as
+/// Unknown, never mapped to a benign known value: guidance from an
+/// unidentifiable source must fail, not masquerade as no-source (VAL-01
+/// fail-safe decoding). The v5 layout has no ident capability; idents
+/// ride only in the v6 tagged frame.
+fn decode_nav(buf: &[u8], nav_age: Option<f32>) -> Result<Stamped<NavData>, AbiError> {
+    let source = match u8_at(buf, 86)? {
+        0 => NavSource::None,
+        1 => NavSource::Gps,
+        2 => NavSource::Nav1,
+        3 => NavSource::Nav2,
+        _ => NavSource::Unknown,
+    };
+    let fromto = match u8_at(buf, 87)? {
+        0 => NavFromTo::Off,
+        1 => NavFromTo::To,
+        2 => NavFromTo::From,
+        _ => NavFromTo::Unknown,
+    };
+    Ok(Stamped {
+        data: match nav_age {
+            Some(_) => Some(NavData {
+                source,
+                course_rad: f32_at(buf, 88)?,
+                cdi_dots: f32_at(buf, 92)?,
+                fromto,
+                vdev_dots: opt(f32_at(buf, 96)?),
+                dist_nm: opt(f32_at(buf, 100)?),
+                course_reference: HeadingReference::from_u8(u8_at(buf, 155)?),
+                to_ident: crate::ident::IdentStr::EMPTY,
+                from_ident: crate::ident::IdentStr::EMPTY,
+            }),
+            None => None,
+        },
+        age_ms: nav_age,
     })
 }
 
@@ -426,6 +434,8 @@ fn encode_altitude(state: &AircraftState, buf: &mut [u8]) -> Result<(), AbiError
     }
     encode_heading(state, buf)
 }
+
+pub mod v6;
 
 mod groups;
 use groups::{decode_dynamics, decode_heading, decode_variation, encode_heading};

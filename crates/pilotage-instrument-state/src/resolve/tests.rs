@@ -341,6 +341,7 @@ fn pilotage_state_navdata_valid() -> crate::aircraft::NavData {
         vdev_dots: None,
         dist_nm: None,
         course_reference: crate::heading::HeadingReference::SimLocalTrue,
+        ..crate::aircraft::NavData::default()
     }
 }
 
@@ -353,6 +354,7 @@ fn pilotage_state_navdata_unknown() -> crate::aircraft::NavData {
         vdev_dots: None,
         dist_nm: None,
         course_reference: crate::heading::HeadingReference::SimLocalTrue,
+        ..crate::aircraft::NavData::default()
     }
 }
 

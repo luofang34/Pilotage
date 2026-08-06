@@ -68,6 +68,7 @@ pub(super) fn demo_state() -> AircraftState {
                 vdev_dots: Some(-0.4),
                 dist_nm: Some(12.4),
                 course_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
+                ..NavData::default()
             }),
             age_ms: Some(80.0),
         },

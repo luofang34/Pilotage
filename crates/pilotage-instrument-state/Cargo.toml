@@ -12,3 +12,4 @@ workspace = true
 pilotage-frames = { workspace = true }
 pilotage-alerts = { workspace = true }
 libm = { workspace = true }
+thiserror = { workspace = true }
