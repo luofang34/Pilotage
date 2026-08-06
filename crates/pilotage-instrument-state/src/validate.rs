@@ -34,6 +34,10 @@ pub enum GroupFault {
     /// model identity that was not provided. The group fails; nothing
     /// substitutes.
     SourceAbsent,
+    /// A bounded text field carried malformed wire content (over-length,
+    /// out-of-charset, or non-canonical padding). Text nobody vetted
+    /// must not display, so the group fails.
+    MalformedIdent,
 }
 
 /// Per-group validation results; `None` means the group's received data
@@ -143,6 +147,8 @@ pub fn validate_state(state: &AircraftState) -> StateIntegrity {
     if let Some(nav) = &state.nav.data {
         if matches!(nav.source, NavSource::Unknown) || matches!(nav.fromto, NavFromTo::Unknown) {
             integrity.nav = Some(GroupFault::UnknownEnum);
+        } else if nav.to_ident.is_invalid() || nav.from_ident.is_invalid() {
+            integrity.nav = Some(GroupFault::MalformedIdent);
         } else if !(all_finite(&[nav.course_rad, nav.cdi_dots])
             && opt_finite(nav.vdev_dots)
             && opt_finite(nav.dist_nm))

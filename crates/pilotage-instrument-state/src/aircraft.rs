@@ -3,6 +3,7 @@
 use crate::altitude::{AltitudeClass, AltitudeDeclaration, GeoidModelId, OriginId};
 use crate::dynamics::DynSample;
 use crate::heading::{HeadingReference, HeadingSample, MagneticVariation};
+use crate::ident::IdentStr;
 use pilotage_frames::Quat;
 
 /// Attitude estimate: orientation and body rotation rates.
@@ -84,6 +85,11 @@ pub struct NavData {
     pub vdev_dots: Option<f32>,
     /// Distance to the waypoint/station in nautical miles.
     pub dist_nm: Option<f32>,
+    /// Active (TO) waypoint ident; empty renders dashes, and malformed
+    /// wire content decodes [`IdentStr::INVALID`], failing the group.
+    pub to_ident: IdentStr,
+    /// Previous (FROM) waypoint ident; same rules as `to_ident`.
+    pub from_ident: IdentStr,
 }
 
 /// Pilot selections and bugs. These are local UI state, not sensed data,

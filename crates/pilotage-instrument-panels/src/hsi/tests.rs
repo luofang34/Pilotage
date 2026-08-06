@@ -128,6 +128,7 @@ fn gps_course_draws_cdi_and_course_box() {
             vdev_dots: Some(0.4),
             dist_nm: Some(40.3),
             course_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
+            ..NavData::default()
         },
         status: SignalStatus::Valid,
         course_rose_rad: Sig::with_status(0.35, SignalStatus::Valid),
@@ -209,6 +210,7 @@ fn degraded_navigation_cue_is_an_annunciation() {
             vdev_dots: Some(0.4),
             dist_nm: Some(40.3),
             course_reference: pilotage_instrument_state::HeadingReference::SimLocalTrue,
+            ..NavData::default()
         },
         status: SignalStatus::Degraded,
         course_rose_rad: Sig::with_status(0.35, SignalStatus::Degraded),
@@ -288,6 +290,7 @@ fn incompatible_course_shows_dashes_and_no_cdi() {
             vdev_dots: Some(0.4),
             dist_nm: Some(40.3),
             course_reference: pilotage_instrument_state::HeadingReference::True,
+            ..NavData::default()
         },
         status: SignalStatus::Valid,
         course_rose_rad: Sig::with_status(0.0, SignalStatus::Failed),

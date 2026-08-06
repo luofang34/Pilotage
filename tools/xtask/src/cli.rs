@@ -59,6 +59,8 @@ pub enum Command {
     Sim(SimArgs),
     /// Reset the running simulation world and FC of the named backend.
     Reset(String),
+    /// Regenerate the committed state-ABI golden frames.
+    GenStateFixture,
     /// Print usage.
     Help,
 }
@@ -77,9 +79,19 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "reset" => Ok(Command::Reset(parse_reset(rest)?)),
+        "gen-state-fixture" => {
+            if let Some(extra) = rest.first() {
+                return Err(XtaskError::Usage {
+                    message: format!("gen-state-fixture takes no arguments, got {extra:?}"),
+                });
+            }
+            Ok(Command::GenStateFixture)
+        }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
-            message: format!("unknown command {other:?} (expected sim, reset, or help)"),
+            message: format!(
+                "unknown command {other:?} (expected sim, reset, gen-state-fixture, or help)"
+            ),
         }),
     }
 }
@@ -188,6 +200,10 @@ commands:
       Reset the running simulation world and restart its FC.
 
       --fc <name>          FC backend (default: aviate)
+
+  gen-state-fixture
+      Regenerate the committed state-ABI golden frames in
+      clients/web/fixtures/ from the shared posture fixtures.
 
   help
       Print this help text.";

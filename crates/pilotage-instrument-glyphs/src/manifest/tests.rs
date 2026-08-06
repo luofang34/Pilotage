@@ -195,10 +195,10 @@ fn flipping_one_canonical_byte_changes_the_hash() {
     PANEL_GLYPHS
         .write_canonical(&mut bytes)
         .expect("canonical fits");
-    let baseline = crate::sha256::sha256(&bytes);
+    let baseline = pilotage_sha256::sha256(&bytes);
     assert_eq!(baseline, RECORDED_HASH);
     bytes[HEADER_INDEX_TO_FLIP] ^= 0x01;
-    assert_ne!(crate::sha256::sha256(&bytes), RECORDED_HASH);
+    assert_ne!(pilotage_sha256::sha256(&bytes), RECORDED_HASH);
 }
 
 const HEADER_INDEX_TO_FLIP: usize = 8;

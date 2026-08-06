@@ -48,6 +48,7 @@ fn trusted_full_state() -> AircraftState {
             vdev_dots: Some(0.2),
             dist_nm: Some(12.5),
             course_reference: HeadingReference::SimLocalTrue,
+            ..NavData::default()
         }),
         wind: stamped(Wind {
             from_rad: 1.0,

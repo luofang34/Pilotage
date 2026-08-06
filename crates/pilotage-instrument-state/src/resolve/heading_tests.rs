@@ -165,6 +165,7 @@ fn with_course(
             vdev_dots: None,
             dist_nm: None,
             course_reference: reference,
+            ..crate::aircraft::NavData::default()
         }),
         age_ms: Some(20.0),
     };
