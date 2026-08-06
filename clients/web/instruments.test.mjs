@@ -11,9 +11,8 @@
 
 import { readFileSync } from "node:fs";
 import {
+  EXPECTED_SCENE_DIGEST,
   InstrumentModule,
-  LOGICAL_H,
-  LOGICAL_W,
   PANEL,
   COORD_LIMIT_PX,
   MAX_PATH_VERTICES,
@@ -26,10 +25,13 @@ import {
 import {
   PanelHealth,
   REASON,
+  coverInstrumentFailures,
   createDomFaultPresenter,
   drawFailurePage,
+  failInstrumentSet,
   renderInstrumentSet,
   startDisplayLoop,
+  tickInstrumentSet,
 } from "./instrument-health.js";
 
 let failures = 0;
@@ -153,12 +155,29 @@ function fakeExports({
       return packRenderResult(resultStatus, resultLen, renderGeneration(panel));
     },
     set_v_speeds: () => 0,
+    set_panel_config: () => 0,
+    state_unknown_groups: () => 0,
+    state_extended_groups: () => 0,
     step_alerts: () => 0n,
     glyph_manifest: () => new Uint8Array(0),
     glyph_recorded_hash: () => new Uint8Array(0),
     memory: { buffer },
   };
   return Object.assign(exports, overrides);
+}
+
+// A fake module-level registry enumeration matching the shipped shape.
+function fakeEnumeration() {
+  return {
+    panel_count: () => 3,
+    panel_id: (i) => ["pfd", "hsi", "monitor"][i] ?? "",
+    panel_title: (i) => ["PFD", "HSI", "Monitor"][i] ?? "",
+    panel_required_layers: () => 0,
+    panel_required_groups: () => 0,
+    panel_design_width: () => 480,
+    panel_design_height: () => 360,
+    panel_background_capability: (i) => [2, 1, 0][i] ?? 255,
+  };
 }
 
 // A minimal verified-shape atlas for unit paths that are not exercising
@@ -183,6 +202,7 @@ function injectedLoader(exports) {
     initializeBindings: async () => ({ memory: exports.memory }),
     createRuntime: () => exports,
     queryAbiVersion: () => exports.abi_version(),
+    enumeration: fakeEnumeration(),
     createCanvas: recordingCanvas,
     glyphAtlas: fakeAtlas(),
   };
@@ -344,6 +364,29 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "the malformed-state status mirrors the wasm enum",
     REASON.STATE_MALFORMED === 11,
   );
+  check("the config-invalid status mirrors the wasm enum", REASON.CONFIG_INVALID === 12);
+  {
+    const mod = await loadInstruments(
+      "injected.wasm",
+      injectedLoader(fakeExports({ status: REASON.CONFIG_INVALID })),
+    );
+    const refused = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+    check(
+      "a refused panel config surfaces its own diagnostic",
+      !refused.ok && refused.reason === REASON.CONFIG_INVALID,
+    );
+    mod.dispose();
+  }
+  {
+    // The panel map is DERIVED from the registry enumeration; consumers
+    // rely on exactly this shape (ADR-0029 acceptance for this shell).
+    const mod = await loadInstruments("injected.wasm", injectedLoader(fakeExports()));
+    check(
+      "the derived panel map is {PFD: 0, HSI: 1, MONITOR: 2}",
+      PANEL.PFD === 0 && PANEL.HSI === 1 && PANEL.MONITOR === 2 && Object.keys(PANEL).length === 3,
+    );
+    mod.dispose();
+  }
   {
     const mod = await loadInstruments(
       "injected.wasm",
@@ -542,8 +585,8 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
   check("frame painted to the back buffer, not a visible target", backs.length === 1);
   const backOps = backs[0].ctx.calls("fillRect");
   check(
-    "back buffer cleared to full logical size before painting",
-    backOps.length >= 2 && backOps[0].args.join(",") === `0,0,${LOGICAL_W},${LOGICAL_H}`,
+    "back buffer cleared to the descriptor design frame before painting",
+    backOps.length >= 2 && backOps[0].args.join(",") === "0,0,480,360",
   );
   check(
     "visible commit covers the whole target before the frame",
@@ -1441,6 +1484,37 @@ function tickToCadence(health, target, interval = 250) {
   }
   if (mod) {
     check("real wasm passes load, ABI, init, and exact-size validation", mod instanceof InstrumentModule);
+    check(
+      "the real registry derives {PFD: 0, HSI: 1, MONITOR: 2}",
+      PANEL.PFD === 0 && PANEL.HSI === 1 && PANEL.MONITOR === 2 && Object.keys(PANEL).length === 3,
+    );
+    check(
+      "the composition rides the module instance",
+      Array.isArray(mod.panels) &&
+        mod.panels.length === 3 &&
+        mod.panels[0].id === "pfd" &&
+        mod.panels[0].width === 480,
+    );
+    {
+      const byId = mod.renderPanel("pfd", new RecordingCtx(), 480, 360);
+      const byIndex = mod.renderPanel(0, new RecordingCtx(), 480, 360);
+      check(
+        "the id dialect matches the index dialect",
+        byId.ok === byIndex.ok && byId.reason === byIndex.reason,
+      );
+    }
+    check(
+      "an unknown id fails as an invalid panel, not a trap",
+      mod.renderPanel("radar", new RecordingCtx(), 480, 360).reason === REASON.INVALID_PANEL,
+    );
+    check(
+      "the decode forward-compat counters are reachable from the shell",
+      mod.stateUnknownGroups() === 0 && mod.stateExtendedGroups() === 0,
+    );
+    check(
+      "the wasm build reproduces the pinned scene digest",
+      bindings.scene_digest_hex() === EXPECTED_SCENE_DIGEST,
+    );
 
     // The verification chain fails closed on a corrupt, truncated, or
     // wrong-hash glyph asset — the backend never becomes ready over one.
@@ -1454,6 +1528,9 @@ function tickToCadence(health, target, interval = 250) {
         scene_ptr: () => rt.scene_ptr(),
         render_result: (panel) => rt.render_result(panel),
         set_v_speeds: (...a) => rt.set_v_speeds(...a),
+        set_panel_config: (...a) => rt.set_panel_config(...a),
+        state_unknown_groups: () => rt.state_unknown_groups(),
+        state_extended_groups: () => rt.state_extended_groups(),
         step_alerts: (...a) => rt.step_alerts(...a),
         glyph_manifest: () => rt.glyph_manifest(),
         glyph_recorded_hash: () => rt.glyph_recorded_hash(),
@@ -1571,6 +1648,35 @@ function tickToCadence(health, target, interval = 250) {
     );
     mod.dispose();
   }
+}
+
+
+{
+  // A cockpit's health table and targets are keyed by the page's own
+  // layout ids and exist before any wasm loads — the failure paths must
+  // paint visible covers pre-load and must never throw on a missing
+  // entry (a wiring fault still covers, it does not black-screen).
+  const ctx = new RecordingCtx();
+  const canvas = { width: 480, height: 360, ctx };
+  const presenter = { show: () => {}, hide: () => {} };
+  const targets = [["pfd", ctx, canvas, presenter]];
+  const failed = failInstrumentSet(
+    { pfd: new PanelHealth({}, 0) },
+    targets,
+    0,
+    REASON.WASM_LOAD,
+  );
+  check("pre-load failure paints the cover", failed[0].covered !== false);
+  const orphanCover = coverInstrumentFailures({}, targets);
+  check(
+    "a missing health entry covers instead of throwing",
+    orphanCover[0].showFailure === true && orphanCover[0].covered !== false,
+  );
+  const orphanTick = tickInstrumentSet({}, targets, 0);
+  check(
+    "the watchdog tolerates a missing entry fail-visibly",
+    orphanTick[0].showFailure === true,
+  );
 }
 
 if (failures > 0) {

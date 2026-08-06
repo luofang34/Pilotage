@@ -1,0 +1,18 @@
+[package]
+name = "instrument-bench"
+description = "Standalone instrument bench shell: registry × canonical states → admission, scene digest, raster frames — no host, no protocol (ADR-0029)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-instrument-conformance = { workspace = true }
+pilotage-instrument-panels = { workspace = true }
+pilotage-instrument-raster = { workspace = true }
+pilotage-instrument-registry = { workspace = true }
+pilotage-instrument-scene = { workspace = true }
+pilotage-instrument-state = { workspace = true }
+thiserror = { workspace = true }

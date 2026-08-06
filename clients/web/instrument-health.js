@@ -29,6 +29,7 @@ export const REASON = Object.freeze({
   SCENE_LAYER_CONTRACT: 9,
   SCENE_CRITICAL_LAYERS_MISSING: 10,
   STATE_MALFORMED: 11,
+  CONFIG_INVALID: 12,
   // Backend-observed.
   WASM_LOAD: 100,
   ABI_MISMATCH: 101,
@@ -277,9 +278,24 @@ function coverFailure(ctx, width, height, presenter, reason) {
   return independentlyCovered || canvasCovered;
 }
 
+// A target with no health entry is a wiring fault; it must still paint
+// a visible failure rather than throw from inside a frame or watchdog.
+function orphanTarget(target, reason) {
+  const [panel, ctx, canvas, presenter] = target;
+  return {
+    panel,
+    showFailure: true,
+    ok: false,
+    reason,
+    covered: coverFailure(ctx, canvas.width, canvas.height, presenter, reason),
+  };
+}
+
 function failTarget(health, target, nowMs, reason) {
   const [panel, ctx, canvas, presenter] = target;
-  const display = health[panel].reportFailure(nowMs, reason);
+  const entry = health[panel];
+  if (!entry) return orphanTarget(target, reason);
+  const display = entry.reportFailure(nowMs, reason);
   return {
     panel,
     ok: false,
@@ -293,8 +309,11 @@ export function failInstrumentSet(health, targets, nowMs, reason) {
 }
 
 export function coverInstrumentFailures(health, targets) {
-  return targets.map(([panel, ctx, canvas, presenter]) => {
-    const display = health[panel].display();
+  return targets.map((target) => {
+    const [panel, ctx, canvas, presenter] = target;
+    const entry = health[panel];
+    if (!entry) return orphanTarget(target, REASON.RENDER_TRAP);
+    const display = entry.display();
     return {
       panel,
       showFailure: display.showFailure,
@@ -328,7 +347,7 @@ export function renderInstrumentSet(module, health, targets, state, nowMs) {
   // a wasm anomaly here is as disqualifying as a state-write failure.
   let alertResult;
   try {
-    const pathHealthy = targets.every(([panel]) => !health[panel].display().showFailure);
+    const pathHealthy = targets.every(([panel]) => !(health[panel]?.display().showFailure ?? true));
     alertResult = module.stepAlerts(nowMs, pathHealthy);
   } catch {
     alertResult = { ok: false, reason: REASON.RENDER_TRAP };
@@ -350,7 +369,12 @@ export function renderInstrumentSet(module, health, targets, state, nowMs) {
       outcomes.push(failTarget(health, target, nowMs, result?.reason ?? REASON.RENDER_TRAP));
       continue;
     }
-    const display = health[panel].reportSuccess(nowMs, result.generation);
+    const entry = health[panel];
+    if (!entry) {
+      outcomes.push(orphanTarget(target, REASON.RENDER_TRAP));
+      continue;
+    }
+    const display = entry.reportSuccess(nowMs, result.generation);
     outcomes.push({
       panel,
       ok: true,
@@ -366,8 +390,11 @@ export function renderInstrumentSet(module, health, targets, state, nowMs) {
 }
 
 export function tickInstrumentSet(health, targets, nowMs) {
-  return targets.map(([panel, ctx, canvas, presenter]) => {
-    const display = health[panel].tick(nowMs);
+  return targets.map((target) => {
+    const [panel, ctx, canvas, presenter] = target;
+    const entry = health[panel];
+    if (!entry) return orphanTarget(target, REASON.RENDER_TRAP);
+    const display = entry.tick(nowMs);
     return {
       panel,
       showFailure: display.showFailure,

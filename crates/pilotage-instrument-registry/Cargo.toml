@@ -1,0 +1,16 @@
+[package]
+name = "pilotage-instrument-registry"
+description = "Panel registry: descriptors, config blobs, and shell composition of panel plugins (ADR-0029, ADR-0033)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-alerts = { workspace = true }
+pilotage-instrument-scene = { workspace = true }
+pilotage-instrument-state = { workspace = true }
+pilotage-sha256 = { workspace = true }
+thiserror = { workspace = true }

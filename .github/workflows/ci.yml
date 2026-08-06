@@ -121,6 +121,7 @@ jobs:
           -p pilotage-instrument-panels
           -p pilotage-instrument-raster
           -p pilotage-instrument-feeder
+          -p pilotage-instrument-registry
           --target thumbv7em-none-eabihf
 
       - name: target timing gate (REN-04)
@@ -151,6 +152,12 @@ jobs:
         # Re-render the PFD and HSI panels and assert their pinned SHA-256
         # frame hashes, proving the software rasterizer is bit-reproducible.
         run: cargo test -p pilotage-instrument-raster
+
+      - name: instrument bench shell conformance smoke (ADR-0029)
+        # A shell built from the registry alone: runs admission and
+        # reproduces the pinned composition digest on the host target
+        # (the wasm target's reproduction is pinned in the node suite).
+        run: cargo run -q -p instrument-bench
 
       - name: instrument wasm backend builds
         # Generating the resource binding here makes the fail-visible test

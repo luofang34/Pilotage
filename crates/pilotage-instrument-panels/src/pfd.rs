@@ -11,7 +11,10 @@ use pilotage_instrument_symbology::{annunciation, palette, safety, source_label,
 use crate::{PANEL_H, PANEL_W};
 
 mod horizon;
+mod panel_config;
 mod tapes;
+
+pub use panel_config::PFD_CONFIG_SCHEMA;
 
 /// Airframe reference speeds (knots) driving the speed-tape color bands.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,13 +37,37 @@ pub struct VSpeeds {
 /// background layer at all: the safety compositor owns that band (a
 /// hypothetical SVS raster composes strictly below the critical overlay),
 /// and the layers above it are byte-identical either way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum BackgroundMode {
     /// Flat-shaded sky-over-ground attitude ball.
     #[default]
     Horizon,
     /// No background layer; the compositor supplies that band.
     None,
+    /// Synthetic-vision imagery in the background band, accept-and-cede
+    /// (ADR-0033): the panel validates and carries the request but
+    /// emits exactly what [`BackgroundMode::None`] emits — the band is
+    /// ceded to whatever renders the imagery, and the critical overlay
+    /// above it never depends on the choice.
+    Svs {
+        /// Viewport within the design frame the imagery should fill.
+        viewport: SvsViewport,
+        /// Quality tier requested from the renderer.
+        quality: u8,
+    },
+}
+
+/// The design-frame rectangle synthetic vision should fill.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SvsViewport {
+    /// Left edge.
+    pub x: f32,
+    /// Top edge.
+    pub y: f32,
+    /// Width.
+    pub width: f32,
+    /// Height.
+    pub height: f32,
 }
 
 /// PFD panel configuration.
@@ -89,7 +116,9 @@ pub fn draw_pfd(
             }
             scene.end_layer(LayerId::Background)?;
         }
-        BackgroundMode::None => {}
+        // Svs cedes the band exactly like None until the SVS renderer
+        // exists; a guardrail test pins the equivalence.
+        BackgroundMode::None | BackgroundMode::Svs { .. } => {}
     }
 
     scene.begin_layer(LayerId::Attitude)?;

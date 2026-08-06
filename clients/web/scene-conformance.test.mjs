@@ -28,7 +28,6 @@ import {
   COORD_LIMIT_PX,
   InstrumentModule,
   MAX_PATH_VERTICES,
-  PANEL,
   STATE_ABI_VERSION,
   interpretScene,
   validateSceneStructure,
@@ -427,7 +426,7 @@ function fakeRuntime({ status = 0, sceneBytes = new Uint8Array([1]), generation 
     createCanvas: () => { created += 1; return recordingCanvas(); },
   });
   const visible = new RecordingCtx();
-  const result = mod.renderPanel(PANEL.PFD, visible, 480, 360);
+  const result = mod.renderPanel(0, visible, 480, 360);
   check("a framing-invalid corpus scene is SCENE_FRAMING", !result.ok && result.reason === REASON.SCENE_FRAMING);
   check("a framing-invalid scene never reaches a canvas", created === 0 && visible.log.length === 0);
 }
@@ -439,7 +438,7 @@ function fakeRuntime({ status = 0, sceneBytes = new Uint8Array([1]), generation 
   const throwing = recordingCanvas();
   throwing.ctx.fillRect = () => { throw new Error("canvas dead"); };
   const mod = new InstrumentModule(fakeRuntime({ sceneBytes: scene }), { createCanvas: () => throwing });
-  const result = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+  const result = mod.renderPanel(0, new RecordingCtx(), 480, 360);
   check("a backend paint fault is PAINT_FAILED", !result.ok && result.reason === REASON.PAINT_FAILED);
 }
 
@@ -449,7 +448,7 @@ function fakeRuntime({ status = 0, sceneBytes = new Uint8Array([1]), generation 
   const mod = new InstrumentModule(fakeRuntime({ status: REASON.SCENE_LAYER_CONTRACT }), {
     createCanvas: recordingCanvas,
   });
-  const result = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);
+  const result = mod.renderPanel(0, new RecordingCtx(), 480, 360);
   check("a wasm layer-contract failure passes through untouched", !result.ok && result.reason === REASON.SCENE_LAYER_CONTRACT);
 
   const health = new PanelHealth({ recoveryFrames: 3 }, 0);

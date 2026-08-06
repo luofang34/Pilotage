@@ -16,5 +16,6 @@ pilotage-instrument-scene = { workspace = true }
 
 [dev-dependencies]
 pilotage-instrument-panels = { workspace = true }
+pilotage-instrument-registry = { workspace = true }
 pilotage-instrument-state = { workspace = true }
 sha2 = "0.10.9"

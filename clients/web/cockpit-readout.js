@@ -1,7 +1,7 @@
 import { decodeVideoFrameV2, decodeDatagramEnvelope } from "./instrument-runtime.js";
 import { VideoIdentityTracker } from "./video-identity.js";
 import { H264CanvasDecoder, H264DecoderRegistry, FOURCC_H264 } from "./video-h264.js";
-import { loadInstruments, PANEL } from "./instruments.js";
+import { loadInstruments } from "./instruments.js";
 import {
   coverInstrumentFailures,
   createDomFaultPresenter,
@@ -112,16 +112,20 @@ export function createCockpitReadout({
     ingress: newSimulatorAvionicsIngress(),
     fcState: new FcStateTracker(),
     navGuidance: new NavGuidanceTracker(),
+    // Keyed by the page's canvas ids (equal to the descriptor ids by
+    // contract): the layout exists before any wasm loads, so failure
+    // covers paint even when the load itself is what failed. Indices
+    // resolve inside the module, never here.
     health: {
-      [PANEL.PFD]: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
-      [PANEL.HSI]: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
+      pfd: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
+      hsi: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
     },
   };
 
   function instrumentTargets() {
     return [
-      [PANEL.PFD, pfdCtx, els.pfd, pfdFaultPresenter],
-      [PANEL.HSI, hsiCtx, els.hsi, hsiFaultPresenter],
+      ["pfd", pfdCtx, els.pfd, pfdFaultPresenter],
+      ["hsi", hsiCtx, els.hsi, hsiFaultPresenter],
     ];
   }
 

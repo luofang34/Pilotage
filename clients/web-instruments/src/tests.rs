@@ -1,6 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_instrument_panels::PfdConfig;
 use pilotage_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
@@ -95,8 +94,10 @@ fn scene_runtime(scene: &[u8]) -> Runtime {
     Runtime {
         state: encoded_state_block(&attitude_state()),
         scene: buffer,
-        generation: [7, 11],
-        pfd_cfg: PfdConfig::default(),
+        generation: vec![7, 11],
+        config: vec![Vec::new(); 2],
+        unknown_groups: 0,
+        extended_groups: 0,
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         alerts: pilotage_alerts::AlertManager::new(),
@@ -107,7 +108,7 @@ fn scene_runtime(scene: &[u8]) -> Runtime {
 
 fn assert_scene_rejected(panel_idx: usize, scene: &[u8], expected: RenderStatus) {
     let mut runtime = scene_runtime(scene);
-    let generations = runtime.generation;
+    let generations = runtime.generation.clone();
     let expected_generation = runtime.generation.get(panel_idx).copied().unwrap_or(0);
     let attempt = validate_and_commit_scene(&mut runtime, panel_idx, scene.len());
     assert_attempt(attempt, expected, 0, expected_generation);
@@ -175,7 +176,7 @@ fn exported_surface_packs_one_atomic_render_result() {
     assert_eq!(invalid_panel.generation, 0);
     assert_eq!(
         resource.runtime.as_ref().expect("initialized").generation,
-        [1, 1]
+        [1, 1, 0]
     );
 
     {
@@ -221,7 +222,7 @@ fn resources_are_independent_and_reinitialization_resets_one() {
     assert_eq!(reinitialized.generation, 0);
     assert_eq!(
         second.runtime.as_ref().expect("initialized").generation,
-        [0, 0],
+        [0, 0, 0],
         "reinitializing one resource cannot mutate another"
     );
 }
@@ -240,8 +241,10 @@ fn a_non_canonical_state_frame_fails_malformed() {
             frame
         },
         scene: vec![0u8; SCENE_CAPACITY],
-        generation: [2, 3],
-        pfd_cfg: PfdConfig::default(),
+        generation: vec![2, 3],
+        config: vec![Vec::new(); 2],
+        unknown_groups: 0,
+        extended_groups: 0,
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         alerts: pilotage_alerts::AlertManager::new(),
@@ -261,8 +264,10 @@ fn render_into_reports_buffer_and_truncation_failures() {
     let mut tiny = Runtime {
         state: encoded_state_block(&attitude_state()),
         scene: vec![0u8; 4],
-        generation: [0; 2],
-        pfd_cfg: PfdConfig::default(),
+        generation: vec![0; 2],
+        config: vec![Vec::new(); 2],
+        unknown_groups: 0,
+        extended_groups: 0,
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         alerts: pilotage_alerts::AlertManager::new(),
@@ -281,8 +286,10 @@ fn render_into_reports_buffer_and_truncation_failures() {
     let mut truncated = Runtime {
         state: frame[..frame.len() - 1].to_vec(),
         scene: vec![0u8; SCENE_CAPACITY],
-        generation: [4, 8],
-        pfd_cfg: PfdConfig::default(),
+        generation: vec![4, 8],
+        config: vec![Vec::new(); 2],
+        unknown_groups: 0,
+        extended_groups: 0,
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         alerts: pilotage_alerts::AlertManager::new(),
@@ -299,8 +306,10 @@ fn render_into_reports_buffer_and_truncation_failures() {
     let mut valid = Runtime {
         state: encoded_state_block(&attitude_state()),
         scene: vec![0u8; SCENE_CAPACITY],
-        generation: [0; 2],
-        pfd_cfg: PfdConfig::default(),
+        generation: vec![0; 2],
+        config: vec![Vec::new(); 2],
+        unknown_groups: 0,
+        extended_groups: 0,
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         alerts: pilotage_alerts::AlertManager::new(),
@@ -320,8 +329,10 @@ fn malformed_scene_never_advances_or_commits_length() {
     let mut runtime = Runtime {
         state: encoded_state_block(&attitude_state()),
         scene: vec![1, 0],
-        generation: [7, 11],
-        pfd_cfg: PfdConfig::default(),
+        generation: vec![7, 11],
+        config: vec![Vec::new(); 2],
+        unknown_groups: 0,
+        extended_groups: 0,
         unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
         profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
         alerts: pilotage_alerts::AlertManager::new(),

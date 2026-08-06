@@ -8,37 +8,31 @@ use pilotage_alerts::{
     AlertCondition, AlertContext, AlertEvent, AlertManager, AlertOutput, AlertProfile, AltFault,
     DynFault, ManagerHealth, NavFault,
 };
-use pilotage_instrument_panels::{PfdConfig, VSpeeds, draw_hsi, draw_pfd};
-use pilotage_instrument_scene::{LayerError, LayerId, SceneError, SceneWriter, validate_layers};
+use pilotage_instrument_registry::{ConfigBlob, PanelDrawError};
+use pilotage_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
 use pilotage_instrument_state::FreshnessPolicy;
 use pilotage_instrument_state::abi::v6::{self, AbiError};
 use pilotage_instrument_state::{NavSource, SignalStatus};
 use wasm_bindgen::prelude::wasm_bindgen;
 
+use crate::panel_registry::{descriptor, registry, splice_v_speeds};
 use crate::render_status::RenderStatus;
 
 pub(crate) const SCENE_CAPACITY: usize = 64 * 1024;
 const PACKED_SCENE_LEN_MAX: usize = 0x00ff_ffff;
-const PANEL_PFD: u32 = 0;
-const PANEL_HSI: u32 = 1;
-const PANEL_COUNT: usize = 2;
-
-const fn layer_bit(layer: LayerId) -> u8 {
-    1u8 << layer.to_u8()
-}
-
-const PFD_CRITICAL_LAYERS: u8 =
-    layer_bit(LayerId::Attitude) | layer_bit(LayerId::Tapes) | layer_bit(LayerId::Annunciation);
-const HSI_CRITICAL_LAYERS: u8 = layer_bit(LayerId::Attitude)
-    | layer_bit(LayerId::Tapes)
-    | layer_bit(LayerId::Guidance)
-    | layer_bit(LayerId::Annunciation);
 
 pub(crate) struct Runtime {
     pub(crate) state: Vec<u8>,
     pub(crate) scene: Vec<u8>,
-    pub(crate) generation: [u32; PANEL_COUNT],
-    pub(crate) pfd_cfg: PfdConfig,
+    pub(crate) generation: Vec<u32>,
+    /// Per-panel validated configuration blobs, indexed like the
+    /// registry composition; empty means the panel's defaults.
+    pub(crate) config: Vec<Vec<u8>>,
+    /// Frames that carried group tags this build cannot place, and
+    /// known groups whose payloads grew — forward-compatibility
+    /// telemetry the script surfaces beside unknownOpcodes.
+    pub(crate) unknown_groups: u32,
+    pub(crate) extended_groups: u32,
     /// Unusual-attitude hysteresis latches, carried across frames so
     /// tier entry/exit cannot chatter (ATT-01). Stepping twice per frame
     /// (PFD then HSI) is idempotent: the latches depend on the input
@@ -62,11 +56,14 @@ pub(crate) struct Runtime {
 
 impl Runtime {
     fn new() -> Self {
+        let panels = registry().map_or(0, |registry| registry.panels().len());
         Self {
             state: vec![0u8; v6::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
-            generation: [0; PANEL_COUNT],
-            pfd_cfg: PfdConfig::default(),
+            generation: vec![0; panels],
+            config: vec![Vec::new(); panels],
+            unknown_groups: 0,
+            extended_groups: 0,
             unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
             profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
             alerts: AlertManager::new(),
@@ -118,10 +115,10 @@ fn panel_generation(runtime: &Runtime, panel_idx: usize) -> u32 {
 }
 
 fn validate_panel_scene(panel_idx: usize, scene: &[u8]) -> RenderStatus {
-    let required = match panel_idx {
-        0 => PFD_CRITICAL_LAYERS,
-        1 => HSI_CRITICAL_LAYERS,
-        _ => return RenderStatus::InvalidPanel,
+    // The critical-layer masks are owned by the panel descriptors
+    // (ADR-0029): this shell holds no mask or panel list of its own.
+    let Some(required) = descriptor(panel_idx as u32).map(|d| d.required_layers) else {
+        return RenderStatus::InvalidPanel;
     };
     let report = match validate_layers(scene) {
         Ok(report) => report,
@@ -160,11 +157,10 @@ pub(crate) fn validate_and_commit_scene(
 }
 
 pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
-    let panel_idx = match panel {
-        PANEL_PFD => 0usize,
-        PANEL_HSI => 1,
-        _ => return RenderAttempt::failure(RenderStatus::InvalidPanel, 0),
+    let Some(panel_descriptor) = descriptor(panel) else {
+        return RenderAttempt::failure(RenderStatus::InvalidPanel, 0);
     };
+    let panel_idx = panel as usize;
     let generation = panel_generation(runtime, panel_idx);
     let state = match v6::decode_state(&runtime.state) {
         Ok(report) => report.state,
@@ -184,19 +180,23 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
         &runtime.profile,
         &mut runtime.unusual,
     );
+    let config_bytes: &[u8] = runtime.config.get(panel_idx).map_or(&[], |bytes| bytes);
+    let Ok(config) = ConfigBlob::parse(config_bytes) else {
+        return RenderAttempt::failure(RenderStatus::ConfigInvalid, generation);
+    };
     let mut writer = match SceneWriter::new(&mut runtime.scene) {
         Ok(writer) => writer,
         Err(error) => return RenderAttempt::failure(scene_error_status(error), generation),
     };
     let alerts = runtime.alert_output.as_ref();
-    let drawn = if panel == PANEL_PFD {
-        draw_pfd(&data, &runtime.pfd_cfg, alerts, &mut writer)
-    } else {
-        draw_hsi(&data, alerts, &mut writer)
-    };
-    let len = match drawn {
+    let len = match (panel_descriptor.draw)(&data, &config, alerts, &mut writer) {
         Ok(()) => writer.finish(),
-        Err(error) => return RenderAttempt::failure(scene_error_status(error), generation),
+        Err(PanelDrawError::Scene(error)) => {
+            return RenderAttempt::failure(scene_error_status(error), generation);
+        }
+        Err(PanelDrawError::Config(_)) => {
+            return RenderAttempt::failure(RenderStatus::ConfigInvalid, generation);
+        }
     };
     validate_and_commit_scene(runtime, panel_idx, len)
 }
@@ -285,23 +285,81 @@ impl InstrumentRuntime {
     }
 
     /// Configures speed-tape bands in knots; pass all zeros to clear.
-    /// Returns a stable [`RenderStatus`] code.
+    /// Returns a stable [`RenderStatus`] code. This is sugar over the
+    /// PFD's config blob: it splices the V_SPEEDS entry and leaves
+    /// every other configured key alone.
     pub fn set_v_speeds(&mut self, vs0: f32, vs: f32, vfe: f32, vno: f32, vne: f32) -> u32 {
         let Some(runtime) = self.runtime.as_mut() else {
             return RenderStatus::NotInitialized as u32;
         };
-        runtime.pfd_cfg.v_speeds = if vne > 0.0 {
-            Some(VSpeeds {
-                vs0_kt: vs0,
-                vs_kt: vs,
-                vfe_kt: vfe,
-                vno_kt: vno,
-                vne_kt: vne,
-            })
-        } else {
-            None
+        let payload = (vne > 0.0).then(|| {
+            let mut bytes = [0u8; 20];
+            for (slot, value) in bytes.chunks_exact_mut(4).zip([vs0, vs, vfe, vno, vne]) {
+                slot.copy_from_slice(&value.to_le_bytes());
+            }
+            bytes
+        });
+        // Resolved by descriptor id, never by position: composition is
+        // the extension point, so panel 0 is not necessarily the PFD.
+        let Some((index, panel)) = registry().and_then(|registry| {
+            registry
+                .panels()
+                .iter()
+                .enumerate()
+                .find(|(_, panel)| panel.id == "pfd")
+        }) else {
+            return RenderStatus::InvalidPanel as u32;
         };
+        let Some(current) = runtime.config.get(index) else {
+            return RenderStatus::InvalidPanel as u32;
+        };
+        let Some(next) = splice_v_speeds(current, panel.config_schema, payload) else {
+            return RenderStatus::ConfigInvalid as u32;
+        };
+        let gated =
+            ConfigBlob::parse(&next).and_then(|parsed| parsed.require_schema(panel.config_schema));
+        if gated.is_err() {
+            return RenderStatus::ConfigInvalid as u32;
+        }
+        runtime.config[index] = next;
         RenderStatus::Ok as u32
+    }
+
+    /// Replaces a panel's configuration with `blob` (the bounded
+    /// key-TLV encoding), validated for framing and against the
+    /// panel's declared schema before it is accepted — a refused blob
+    /// leaves the previous configuration in effect. Returns a stable
+    /// [`RenderStatus`] code.
+    pub fn set_panel_config(&mut self, panel: u32, blob: &[u8]) -> u32 {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return RenderStatus::NotInitialized as u32;
+        };
+        let Some(panel_descriptor) = descriptor(panel) else {
+            return RenderStatus::InvalidPanel as u32;
+        };
+        let Some(slot) = runtime.config.get_mut(panel as usize) else {
+            return RenderStatus::InvalidPanel as u32;
+        };
+        let accepted = ConfigBlob::parse(blob)
+            .and_then(|parsed| parsed.require_schema(panel_descriptor.config_schema));
+        if accepted.is_err() {
+            return RenderStatus::ConfigInvalid as u32;
+        }
+        *slot = blob.to_vec();
+        RenderStatus::Ok as u32
+    }
+
+    /// Wrapping count of decoded frames' group tags this build cannot
+    /// place — a producer ahead of this consumer is visible, not
+    /// silent (mirrors the scene path's unknownOpcodes).
+    pub fn state_unknown_groups(&self) -> u32 {
+        self.runtime.as_ref().map_or(0, |r| r.unknown_groups)
+    }
+
+    /// Wrapping count of known groups whose payloads carried grown
+    /// tails this build skipped.
+    pub fn state_extended_groups(&self) -> u32 {
+        self.runtime.as_ref().map_or(0, |r| r.extended_groups)
     }
 
     /// Renders a panel and returns status in bits 0..7, scene length in bits
@@ -333,7 +391,17 @@ impl InstrumentRuntime {
             return RenderStatus::NotInitialized as u64;
         };
         let state = match v6::decode_state(&runtime.state) {
-            Ok(report) => report.state,
+            Ok(report) => {
+                // Counted here, once per frame step, so a frame rendered
+                // across N panels does not multiply its tag counts.
+                runtime.unknown_groups = runtime
+                    .unknown_groups
+                    .wrapping_add(u32::from(report.unknown_groups));
+                runtime.extended_groups = runtime
+                    .extended_groups
+                    .wrapping_add(u32::from(report.extended_groups));
+                report.state
+            }
             Err(AbiError::Truncated) => return RenderStatus::StateTruncated as u64,
             Err(AbiError::BadVersion { .. }) => return RenderStatus::StateBadVersion as u64,
             Err(AbiError::NonCanonicalOrder { .. } | AbiError::GroupTruncated { .. }) => {
