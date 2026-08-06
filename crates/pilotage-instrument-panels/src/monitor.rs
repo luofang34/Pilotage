@@ -42,11 +42,14 @@ pub fn draw_monitor(
         scene.fill_color(palette::WHITE)?;
         for (row, line) in channel.value.lines().iter().enumerate() {
             let y = FIRST_LINE_Y + row as f32 * LINE_H;
-            scene.text(TEXT_X, y, 18.0, Anchor::MIDDLE_LEFT, line.as_str())?;
+            // Sized so a maximum-length line's nominal ink fits the
+            // frame from the left margin — a full 32-character row at a
+            // larger size would overrun the right edge.
+            scene.text(TEXT_X, y, 16.0, Anchor::MIDDLE_LEFT, line.as_str())?;
         }
     } else {
         scene.fill_color(safety::ANNUNCIATION_WHITE)?;
-        scene.text(TEXT_X, FIRST_LINE_Y, 18.0, Anchor::MIDDLE_LEFT, "---")?;
+        scene.text(TEXT_X, FIRST_LINE_Y, 16.0, Anchor::MIDDLE_LEFT, "---")?;
     }
     scene.end_layer(LayerId::Tapes)?;
 

@@ -12,7 +12,13 @@ use pilotage_instrument_registry::{
     Region,
 };
 use pilotage_instrument_scene::{LayerId, SceneWriter};
-use pilotage_instrument_state::{GroupId, PanelData};
+use pilotage_instrument_state::{
+    AirData, AircraftState, Attitude, DynSample, GroupId, HeadingReference, HeadingSample,
+    Kinematics, MonitorText, NavData, NavFromTo, NavSource, PanelData, Quat, Stamped, TextLine,
+    TurnBasis, TurnSample,
+};
+
+use pilotage_instrument_registry::{ExtremeState, states};
 
 use crate::pfd::PFD_CONFIG_SCHEMA;
 use crate::{PANEL_H, PANEL_W, PfdConfig, draw_hsi, draw_pfd};
@@ -117,16 +123,14 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
                 height: 36.0,
             },
         ),
-        // Selected-altitude box.
-        (
-            GroupId::Selections,
-            Region {
-                x: 390.0,
-                y: 0.0,
-                width: 90.0,
-                height: 24.0,
-            },
-        ),
+        // The selected-altitude box is deliberately undeclared: it sits
+        // on the altitude tape strip, whose kinematics scale ladder
+        // legitimately runs ink through that area at extreme values,
+        // and the ladder label's y moves with altitude, so no region
+        // geometry separates the two — any band that is clear at one
+        // altitude is crossed at another. A region there would flag
+        // honest scale ink; the HSI's heading-select region carries the
+        // selections coverage instead.
         // VSI numeral strip (kinematic vertical speed), bounded to
         // exclude the selected-altitude box above and the baro box
         // below, whose numerals belong to other groups.
@@ -140,7 +144,16 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
             },
         ),
     ],
-    extreme_states: &[],
+    extreme_states: &[
+        ExtremeState {
+            id: "unusual-inverted",
+            build: pfd_unusual_inverted,
+        },
+        ExtremeState {
+            id: "readout-extremes",
+            build: pfd_readout_extremes,
+        },
+    ],
     // Reference-rasterizer frame hash over the shared typical state —
     // pinned per panel here so a panel travels with its own regression
     // baseline; the raster crate asserts it (REN-03).
@@ -224,7 +237,10 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
             },
         ),
     ],
-    extreme_states: &[],
+    extreme_states: &[ExtremeState {
+        id: "reciprocal-course",
+        build: hsi_reciprocal_course,
+    }],
     raster_baseline: Some("66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c"),
     draw: draw_hsi_panel,
 };
@@ -268,10 +284,122 @@ pub const MONITOR_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
             height: 300.0,
         },
     )],
-    extreme_states: &[],
-    raster_baseline: Some("6f554f502cd05f77526194a180ab93d5fbcdd26ba578f6216d281ff3125da8ec"),
+    extreme_states: &[ExtremeState {
+        id: "full-channel",
+        build: monitor_full_channel,
+    }],
+    raster_baseline: Some("40f44383f3ad46a0bbd65f04afc1d80fb9d94c11acff8dc66edbfcf7b8fa4c01"),
     draw: draw_monitor_panel,
 };
+
+/// Inverted, nose-low, rolling hard: the unusual-attitude tier, the
+/// recovery chevrons, and the pitch ladder far from level — the PFD's
+/// own hardest drawing, unreachable from the gentle shared corpus.
+fn pfd_unusual_inverted() -> AircraftState {
+    let mut state = states::typical();
+    state.attitude = Stamped {
+        data: Some(Attitude {
+            quat: Quat::from_euler(2.8, -0.9, 4.0),
+            rates_rps: [1.5, -0.8, 0.9],
+        }),
+        age_ms: Some(40.0),
+    };
+    state.dynamics = Stamped {
+        data: Some(DynSample {
+            turn: Some(TurnSample {
+                rate_rps: -0.6,
+                basis: TurnBasis::HeadingRate,
+            }),
+            lateral_mps2: 3.5.into(),
+        }),
+        age_ms: Some(40.0),
+    };
+    state
+}
+
+/// Wide and negative readout values — the DISP-02 fit cases ("10300",
+/// "-1030"-class) — plus the heading on the 360/0 wrap.
+fn pfd_readout_extremes() -> AircraftState {
+    let mut state = states::typical();
+    state.air = Stamped {
+        data: Some(AirData {
+            ias_mps: Some(199.0),
+            baro_setting_hpa: Some(1049.7),
+        }),
+        age_ms: Some(40.0),
+    };
+    state.kinematics = Stamped {
+        data: Some(Kinematics {
+            pos_ned_m: [0.0, 0.0, 320.0],
+            vel_ned_mps: [-90.0, -2.0, 18.0],
+        }),
+        age_ms: Some(40.0),
+    };
+    state.heading = Stamped {
+        data: Some(HeadingSample {
+            heading_rad: 6.2828,
+            reference: HeadingReference::SimLocalTrue,
+        }),
+        age_ms: Some(40.0),
+    };
+    state
+}
+
+/// Course exactly reciprocal to the flown track, full-scale deviation,
+/// a zero-distance waypoint, and a heading on the 360/0 wrap.
+fn hsi_reciprocal_course() -> AircraftState {
+    let mut state = states::typical();
+    state.nav = Stamped {
+        data: Some(NavData {
+            source: NavSource::Gps,
+            // Exactly pi from the wrapped heading this fixture sets:
+            // the reciprocal the state id names, not an inherited one.
+            course_rad: 3.1412,
+            cdi_dots: -2.5,
+            fromto: NavFromTo::From,
+            vdev_dots: Some(2.5),
+            dist_nm: Some(0.0),
+            course_reference: HeadingReference::SimLocalTrue,
+            ..NavData::default()
+        }),
+        age_ms: Some(40.0),
+    };
+    state.heading = Stamped {
+        data: Some(HeadingSample {
+            heading_rad: 6.2828,
+            reference: HeadingReference::SimLocalTrue,
+        }),
+        age_ms: Some(40.0),
+    };
+    state
+}
+
+/// Eight maximum-length lines: the channel's full frame budget against
+/// the glyph vocabulary, with digits in every row for the honest-status
+/// family to police.
+fn monitor_full_channel() -> AircraftState {
+    let mut state = states::typical();
+    let mut lines = [TextLine::EMPTY; MonitorText::MAX_LINES];
+    for (row, slot) in lines.iter_mut().enumerate() {
+        let text = match row {
+            0 => "0123456789 ABCDEFGHIJKLMNOPQRS-.",
+            1 => "ENG 1 N1 101.5 EGT 899 FF 1204.7",
+            2 => "ENG 2 N1 100.9 EGT 901 FF 1198.2",
+            3 => "FUEL L 1250.5 R 1248.0 CTR 890.4",
+            4 => "HYD A 2987 B 3011 ELEC 28.4 27.9",
+            5 => "GEAR DOWN-LOCKED FLAPS 25 TRIM 4",
+            6 => "CABIN ALT 6500 RATE -300 DIFF 7.",
+            7 => "WXYZ-0123456789.0123456789-WXYZ.",
+            _ => "",
+        };
+        *slot = TextLine::new(text).unwrap_or(TextLine::EMPTY);
+    }
+    state.monitor_text = Stamped {
+        data: Some(MonitorText::new(9, &lines).unwrap_or_default()),
+        age_ms: Some(120.0),
+    };
+    state
+}
 
 /// The panels this crate ships, in shell display order.
 pub const BUILTIN_PANELS: &[PanelDescriptor] =
@@ -286,7 +414,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// value moves once per deliberate contract change, re-pinned with a
 /// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "3b80ce9c8a5231b350108f514c7706af765eaec19167635e40e6d9074eba1ed5";
+    "850f92983ee1d30eb7948aa1dc53c40de854bf131dcfc1dc03981af396dc712c";
 
 #[cfg(test)]
 mod digest_tests;

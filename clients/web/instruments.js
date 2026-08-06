@@ -76,7 +76,7 @@ const REQUIRED_RUNTIME_METHODS = [
 // pattern) so wasm-target divergence from the host-verified contract
 // fails the suite, not just a Rust unit test.
 export const EXPECTED_SCENE_DIGEST =
-  "3b80ce9c8a5231b350108f514c7706af765eaec19167635e40e6d9074eba1ed5";
+  "850f92983ee1d30eb7948aa1dc53c40de854bf131dcfc1dc03981af396dc712c";
 
 // Registry enumeration exported at module level by the bindings; the
 // backend derives its panel map from these instead of mirroring one.

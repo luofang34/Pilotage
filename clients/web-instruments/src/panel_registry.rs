@@ -13,9 +13,13 @@ use pilotage_instrument_registry::{
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// The validated shell composition, or `None` if the shipped panels no
-/// longer compose — which the panels crate's own tests make unreachable.
+/// longer compose — which the panels crate's own tests make
+/// unreachable. Validated once and memoized: the input is `&'static`
+/// and `Registry::new` is pure, so the answer cannot change between
+/// calls, and the render path asks for it twice per panel per frame.
 pub(crate) fn registry() -> Option<Registry> {
-    Registry::new(BUILTIN_PANELS).ok()
+    static COMPOSED: std::sync::OnceLock<Option<Registry>> = std::sync::OnceLock::new();
+    *COMPOSED.get_or_init(|| Registry::new(BUILTIN_PANELS).ok())
 }
 
 pub(crate) fn descriptor(panel: u32) -> Option<&'static PanelDescriptor> {

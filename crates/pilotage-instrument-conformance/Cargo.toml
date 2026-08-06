@@ -1,6 +1,6 @@
 [package]
 name = "pilotage-instrument-conformance"
-description = "Panel admission harness: layer, budget, glyph, and honest-status conformance over the registry corpus (ADR-0029, ADR-0033)"
+description = "Panel admission harness: layer, background-contract, budget, glyph, and honest-status conformance over the registry corpus (ADR-0029, ADR-0033)"
 version = "0.1.0"
 edition.workspace = true
 publish = false
