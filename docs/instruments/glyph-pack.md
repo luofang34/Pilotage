@@ -31,13 +31,16 @@ guessed. Every `text(...)` literal and every `fmt_label!` template in
 - **`.`** — the distance readout and `--.-`.
 - **`°`** — heading, course, and wind labels.
 - **space** — `WIND ---`, `DIST NM`, `GS …kt`.
-- **Uppercase `A C D E G I L M N R S T V W`** — the fixed labels `IAS`, `ALT`,
-  `ATT`, `GS`, `WIND`, `DIST NM`, `CRS`, the `N`/`E`/`S`/`W` rose marks, and
-  the `V`/`G` vertical-deviation tags.
+- **Uppercase `A`–`Z`** — the fixed labels `IAS`, `ALT`, `ATT`, `GS`,
+  `WIND`, `DIST NM`, `CRS`, the `N`/`E`/`S`/`W` rose marks, the `V`/`G`
+  vertical-deviation tags, and the full alphabet because bounded waypoint
+  idents (ADR-0031) and the machine-monitoring text channel
+  ([`AIR-IN-014`](requirements.md#air-in-014)) draw arbitrary text from
+  their closed uppercase charsets.
 - **Lowercase `k t`** — the `kt` speed unit.
 
-This set is pinned as `PANEL_VOCABULARY`. The pack additionally provides the
-full uppercase `A`–`Z`, lowercase `a`–`z`, and the slash `/` so that the
+This set is pinned as `PANEL_VOCABULARY`. The pack additionally provides
+lowercase `a`–`z` and the slash `/` so that the
 simulation and conformality labels required by
 [`AIR-FLAG-007`](requirements.md#air-flag-007) and
 [`AIR-BAS-001`](requirements.md#air-bas-001) — `SIM / NOT FOR FLIGHT`,

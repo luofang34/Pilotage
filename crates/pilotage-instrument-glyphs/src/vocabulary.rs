@@ -18,19 +18,44 @@
 //! one is deferred to the integration change; until then the vocabulary is
 //! pinned by this static list rather than by re-parsing the panels source.
 
-/// Characters the PFD and HSI panels emit, in canonical order.
+/// Characters the panels may emit, in canonical order: the fixed-label
+/// set plus the full uppercase alphabet, because bounded waypoint idents
+/// (ADR-0031) and the machine-monitoring text channel (AIR-IN-014) draw
+/// arbitrary text from their closed `A`–`Z` / digit charsets, and a
+/// character outside this covered set fails a frame closed.
 pub const PANEL_VOCABULARY: &[char] = &[
     ' ', '-', '.', '°', //
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', //
-    'A', 'C', 'D', 'E', 'G', 'I', 'L', 'M', 'N', 'R', 'S', 'T', 'V', 'W', //
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', //
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', //
     'k', 't',
 ];
 
 /// Representative label strings the panels draw; the completeness test
 /// requires every character of each to resolve.
 pub const PANEL_STRINGS: &[&str] = &[
-    "IAS", "ALT", "ATT", "GS 0kt", "WIND ---", "DIST NM", "CRS", "N", "E", "S", "W", "V", "G",
-    "---", "--.-", "---°", "360°", "-100",
+    "IAS",
+    "ALT",
+    "ATT",
+    "GS 0kt",
+    "WIND ---",
+    "DIST NM",
+    "CRS",
+    "N",
+    "E",
+    "S",
+    "W",
+    "V",
+    "G",
+    "---",
+    "--.-",
+    "---°",
+    "360°",
+    "-100",
+    "WPT-2",
+    "KMRY",
+    "ENG 1 OK",
+    "FUEL 82.5",
 ];
 
 /// Simulation and conformality labels every surface must render
