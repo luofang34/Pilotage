@@ -6,7 +6,7 @@
 //! need Euler angles or a down vector derive them explicitly — the
 //! canonical state is never reduced to them.
 
-use libm::{asinf, atan2f, sqrtf};
+use libm::{asinf, atan2f, cosf, sinf, sqrtf};
 
 /// A unit quaternion rotating one frame's coordinates into another's.
 /// Which frames those are is carried by the wrapping type
@@ -33,6 +33,25 @@ impl Quat {
         y: 0.0,
         z: 0.0,
     };
+
+    /// The aerospace ZYX inverse of [`Self::to_euler`]: builds the
+    /// rotation from `(roll, pitch, yaw)` in radians, same signs and
+    /// axis order (yaw about Z, then pitch about Y, then roll about X).
+    ///
+    /// The convention's owner carries both directions so no attitude
+    /// producer needs to hand-write the conversion; the round trip is
+    /// pinned where the convention lives.
+    pub fn from_euler(roll: f32, pitch: f32, yaw: f32) -> Self {
+        let (sr, cr) = (sinf(roll * 0.5), cosf(roll * 0.5));
+        let (sp, cp) = (sinf(pitch * 0.5), cosf(pitch * 0.5));
+        let (sy, cy) = (sinf(yaw * 0.5), cosf(yaw * 0.5));
+        Self {
+            w: cr * cp * cy + sr * sp * sy,
+            x: sr * cp * cy - cr * sp * sy,
+            y: cr * sp * cy + sr * cp * sy,
+            z: cr * cp * sy - sr * sp * cy,
+        }
+    }
 
     /// Aerospace ZYX Euler angles `(roll, pitch, yaw)` in radians.
     ///
