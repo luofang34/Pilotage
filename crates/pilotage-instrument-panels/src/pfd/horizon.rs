@@ -12,7 +12,7 @@ use pilotage_instrument_state::units::RAD_TO_DEG;
 
 use pilotage_instrument_symbology::{fmt_label, palette, safety};
 
-const PX_PER_DEG_PITCH: f32 = 7.2;
+pub(super) const PX_PER_DEG_PITCH: f32 = 7.2;
 const ROLL_ARC_R: f32 = 144.0;
 /// Half the panel height expressed in degrees of pitch: the pitch at which
 /// the level horizon reaches the top/bottom edge. Beyond it the true

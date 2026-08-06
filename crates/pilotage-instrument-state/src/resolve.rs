@@ -80,6 +80,10 @@ pub struct PanelData {
     /// Heading bug presented in the rose reference; `Failed` when the
     /// bug's own reference is unknown or cannot convert.
     pub heading_bug_rose_rad: Sig<f32>,
+    /// Flight-director command presentation: bars draw only from a
+    /// fully valid, engaged director — under any degradation they
+    /// disappear (a frozen or dashed command is still a command).
+    pub director: ResolvedDirector,
     /// Typed turn indication; body rates never feed this.
     pub turn: ResolvedTurn,
     /// Lateral specific force (m/s², body +Y right) for the slip/skid
@@ -266,6 +270,7 @@ pub fn resolve_stateful(
         roll_rad: finite(Sig::with_status(presentation.bank_rad, att_status)),
         pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
         heading,
+        director: director_resolved(state, policy, &trust, &integrity),
         rose_basis: basis,
         heading_bug_rose_rad: finite(bug),
         turn: turn_resolved(state, policy, &trust, &integrity),
@@ -479,9 +484,11 @@ use altitude_signal::altitude_resolved;
 use dynamics_signal::{slip_resolved, turn_resolved};
 mod heading_signal;
 pub use heading_signal::{ResolvedHeading, RoseBasis};
-use heading_signal::{
-    heading_resolved, presented_angle, presented_true, presented_wind, rose_basis,
-};
+mod director_signal;
+pub use director_signal::ResolvedDirector;
+use director_signal::director_resolved;
+use heading_signal::rose_basis;
+use heading_signal::{heading_resolved, presented_angle, presented_true, presented_wind};
 
 #[cfg(test)]
 mod altitude_tests;

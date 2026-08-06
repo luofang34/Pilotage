@@ -13,9 +13,9 @@ use pilotage_instrument_registry::{
 };
 use pilotage_instrument_scene::{LayerId, SceneWriter};
 use pilotage_instrument_state::{
-    AirData, AircraftState, Attitude, DynSample, GroupId, HeadingReference, HeadingSample,
-    Kinematics, MonitorText, NavData, NavFromTo, NavSource, PanelData, Quat, Stamped, TextLine,
-    TurnBasis, TurnSample,
+    AirData, AircraftState, Attitude, DynSample, FdEngagement, FdMode, FdSample, GroupId,
+    HeadingReference, HeadingSample, Kinematics, MonitorText, NavData, NavFromTo, NavSource,
+    PanelData, Quat, Stamped, TextLine, TurnBasis, TurnSample,
 };
 
 use pilotage_instrument_registry::{ExtremeState, states};
@@ -58,6 +58,7 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     title: "PFD",
     required_layers: layer_bit(LayerId::Attitude)
         | layer_bit(LayerId::Tapes)
+        | layer_bit(LayerId::Guidance)
         | layer_bit(LayerId::Annunciation),
     required_groups: GroupSet::of(&[
         GroupId::Attitude,
@@ -67,6 +68,7 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
         GroupId::Trust,
         GroupId::Altitude,
         GroupId::Dynamics,
+        GroupId::FlightDirector,
     ]),
     design_frame: DesignFrame {
         width: PANEL_W,
@@ -152,6 +154,10 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
         ExtremeState {
             id: "readout-extremes",
             build: pfd_readout_extremes,
+        },
+        ExtremeState {
+            id: "director-engaged",
+            build: pfd_director_engaged,
         },
     ],
     // Reference-rasterizer frame hash over the shared typical state —
@@ -380,6 +386,24 @@ fn hsi_reciprocal_course() -> AircraftState {
     state
 }
 
+/// An engaged director commanding away from the current attitude: the
+/// dual-cue bars deflect in both axes and the mode annunciates. The
+/// withholding matrix then proves the bars and the mode label vanish
+/// with the group.
+fn pfd_director_engaged() -> AircraftState {
+    let mut state = states::typical();
+    state.director = Stamped {
+        data: Some(FdSample {
+            pitch_cmd_rad: 0.09,
+            roll_cmd_rad: -0.35,
+            mode: FdMode::Nav,
+            engagement: FdEngagement::Engaged,
+        }),
+        age_ms: Some(60.0),
+    };
+    state
+}
+
 /// The data-gateway profile (#260): a certified GPS navigator bridged
 /// over its serial protocol publishes position, track, and guidance —
 /// and no magnetic heading at all. The rose must present track-up,
@@ -433,7 +457,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// value moves once per deliberate contract change, re-pinned with a
 /// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "a809f1768d03f533b134e15ddf1a49779565f03fc829164fb6c94b357bdb1abc";
+    "bd85b8537f0b3e4abf8cf3ad3d36c6abfdceac15355639af2804d58dd9c61931";
 
 #[cfg(test)]
 mod digest_tests;
