@@ -6,9 +6,7 @@ use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::Sig;
 use pilotage_instrument_state::units::{RAD_TO_DEG, wrap_deg_360};
 
-use crate::fixed_str::fmt_label;
-use crate::palette;
-use crate::status_paint;
+use pilotage_instrument_symbology::{fmt_label, palette, status_paint};
 
 use super::{CX, CY, ROSE_R};
 

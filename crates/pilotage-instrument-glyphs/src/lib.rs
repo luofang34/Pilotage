@@ -33,7 +33,6 @@ mod error;
 mod font;
 mod glyph;
 mod manifest;
-mod sha256;
 mod vocabulary;
 
 pub use canonical::{CANONICAL_LEN, RECORDED_HASH};
@@ -42,5 +41,5 @@ pub use glyph::{
     ADVANCE, BASELINE, CELL_H, CELL_W, GLYPH_MANIFEST_VERSION, Glyph, GlyphId, GlyphRef,
 };
 pub use manifest::{GlyphManifest, PANEL_GLYPHS};
-pub use sha256::sha256;
+pub use pilotage_sha256::sha256;
 pub use vocabulary::{FLAG_VOCABULARY, PANEL_STRINGS, PANEL_VOCABULARY};

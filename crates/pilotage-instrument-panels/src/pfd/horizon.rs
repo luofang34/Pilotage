@@ -9,8 +9,7 @@ use libm::{cosf, sinf};
 use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::units::RAD_TO_DEG;
 
-use crate::fixed_str::fmt_label;
-use crate::palette;
+use pilotage_instrument_symbology::{fmt_label, palette, safety};
 
 const PX_PER_DEG_PITCH: f32 = 7.2;
 const ROLL_ARC_R: f32 = 144.0;
@@ -180,7 +179,7 @@ pub fn draw_roll_scale(scene: &mut SceneWriter<'_>, roll_rad: f32) -> Result<(),
 pub fn draw_aircraft_symbol(scene: &mut SceneWriter<'_>) -> Result<(), SceneError> {
     scene.save()?;
     scene.translate(240.0, 180.0)?;
-    scene.fill_color(palette::YELLOW)?;
+    scene.fill_color(safety::REFERENCE_YELLOW)?;
     scene.stroke(palette::BLACK, 1.0)?;
     scene.polygon(
         PaintMode::FillStroke,
