@@ -78,6 +78,14 @@ impl Ctm {
         self.d = -b * s + d * k;
     }
 
+    /// Whether the transform is a pure translation/scale (no rotation
+    /// or shear): the case where a mapped rectangle's bounds ARE the
+    /// rectangle, so bbox containment is exact rather than merely
+    /// conservative.
+    pub(super) fn is_axis_aligned(&self) -> bool {
+        self.b == 0.0 && self.c == 0.0
+    }
+
     fn apply(&self, x: f32, y: f32) -> (f32, f32) {
         (
             self.a * x + self.c * y + self.e,

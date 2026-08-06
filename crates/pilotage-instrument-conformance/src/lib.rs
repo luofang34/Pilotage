@@ -3,11 +3,14 @@
 //!
 //! [`admit`] drives every registered panel through the shared canonical
 //! corpus plus the panel's own extreme states, and through every
-//! single-group withholding its descriptor declares, then checks four
+//! single-group withholding its descriptor declares, then checks five
 //! families: the layer contract (well-formed scenes with every required
-//! band present under every degradation), budgets (a text run outside
-//! the design frame is a counted warning), glyph coverage (every text
-//! run resolves within the controlled vocabulary), and honest status
+//! band present under every degradation), the background contract (the
+//! declared capability is the band's actual behavior — `NotUsed` never
+//! opens it, an owned band carries a full-frame opaque paint), budgets
+//! (a text run outside the design frame is a counted warning), glyph
+//! coverage (every text run resolves within the controlled
+//! vocabulary), and honest status
 //! (a withheld group's declared region may not show numeric text, and
 //! the nothing-fed furniture itself must be numeral-free inside every
 //! declared region). A shell composes its registry and runs this once

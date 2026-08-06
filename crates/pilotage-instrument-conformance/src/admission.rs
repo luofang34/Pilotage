@@ -1,4 +1,4 @@
-//! The admission matrix and its four check families.
+//! The admission matrix and its five check families.
 //!
 //! All geometry tests happen in DESIGN-FRAME space: text runs are
 //! reduced to conservative ink rectangles (nominal metrics around the
@@ -18,8 +18,10 @@ use pilotage_instrument_state::{
     AircraftState, FreshnessPolicy, GroupId, PanelData, resolve, withhold_group,
 };
 
+mod background;
 mod geometry;
 
+use background::check_background;
 use geometry::{Ctm, Rect, text_rect};
 
 /// One admission run's outcome: how much was covered, and what was
@@ -119,6 +121,21 @@ pub enum AdmissionError {
         group: GroupId,
         /// The offending run.
         text: String,
+    },
+    /// The Background band contradicts the declared capability: a
+    /// compositor plans around this declaration, so both directions are
+    /// refused — painting a band declared `NotUsed`, and failing to
+    /// opaquely cover a band declared owned.
+    #[error("panel {panel} declares background {declared} but its {state} scene {defect} the band")]
+    BackgroundContract {
+        /// The drawing panel.
+        panel: &'static str,
+        /// The corpus state.
+        state: &'static str,
+        /// The declared capability.
+        declared: &'static str,
+        /// What the scene actually did: "paints" or "does not cover".
+        defect: &'static str,
     },
     /// The nothing-fed furniture itself paints numerals inside a
     /// declared region — an always-fabricating panel would otherwise
@@ -306,6 +323,7 @@ fn draw_runs(
             missing,
         });
     }
+    check_background(panel, state_id, scene)?;
     collect_runs(scene).ok_or(AdmissionError::Decode {
         panel: panel.id,
         state: state_id,
