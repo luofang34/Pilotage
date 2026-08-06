@@ -282,7 +282,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// deliberate contract change, re-pinned with a review note saying
 /// why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "57e6049a1905d720dec6756acf54034ced9855a015549189c0016626933bc368";
+    "735bf9a9dad12f0b722577bbef5e7e284f33a6b58f6b3dc9824b9545f8f8b6e5";
 
 #[cfg(test)]
 mod digest_tests;

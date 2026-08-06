@@ -1,10 +1,12 @@
 //! The cross-shell scene digest (ADR-0033): one number that proves two
 //! shells show the same instruments.
 //!
-//! The digest streams, per registered panel and corpus state, the
-//! length-prefixed panel id, state id, and emitted scene bytes — drawn
-//! with the empty config and no alerts, so it is invariant to SVS and
-//! themes by construction. Shells report the same digest or they are
+//! The digest streams, per registered panel: the role-tagged,
+//! length-prefixed panel id and the contract-relevant descriptor
+//! fields, then per corpus state the role-tagged state id and emitted
+//! scene bytes — drawn with the empty config and no alerts, so it is
+//! invariant to SVS by construction (theme independence holds because
+//! panels take no theme parameter at this boundary). Shells report the same digest or they are
 //! not showing the same panels; pixel hashes stay per-backend
 //! rasterizer regression tests, not the cross-shell contract. The
 //! digest moves exactly once per deliberate contract change, re-pinned
@@ -44,6 +46,12 @@ pub enum DigestError {
     },
 }
 
+/// Item-role tags framing the digest stream: every item carries its
+/// role, so no cross-role collision can exist even in principle.
+const ROLE_PANEL: u8 = 1;
+const ROLE_STATE: u8 = 2;
+const ROLE_SCENE: u8 = 3;
+
 /// Digests `registry` over the shared corpus plus each panel's own
 /// extreme states, drawing into `scratch` (size it
 /// [`pilotage_instrument_scene::MAX_SCENE_BYTES`]).
@@ -52,7 +60,7 @@ pub fn scene_digest(registry: &Registry, scratch: &mut [u8]) -> Result<[u8; 32],
     ctx.update(SCENE_DIGEST_DOMAIN);
     ctx.update(&[SCENE_FORMAT_VERSION, v6::VERSION]);
     for panel in registry.panels() {
-        update_framed(&mut ctx, panel.id.as_bytes());
+        digest_panel_contract(&mut ctx, panel);
         for state in CANONICAL_STATES {
             digest_state(&mut ctx, panel, state.id, (state.build)(), scratch)?;
         }
@@ -63,6 +71,27 @@ pub fn scene_digest(registry: &Registry, scratch: &mut [u8]) -> Result<[u8; 32],
     Ok(ctx.finalize())
 }
 
+/// Binds the contract-relevant descriptor fields, not just the id: two
+/// shells whose descriptors declare different required layers, groups,
+/// frames, background capability, or schemas are not showing the same
+/// instruments even if their scene bytes agree.
+fn digest_panel_contract(ctx: &mut Sha256Ctx, panel: &PanelDescriptor) {
+    update_framed(ctx, ROLE_PANEL, panel.id.as_bytes());
+    ctx.update(&[panel.required_layers]);
+    ctx.update(&panel.required_groups.bits().to_le_bytes());
+    ctx.update(&panel.design_frame.width.to_le_bytes());
+    ctx.update(&panel.design_frame.height.to_le_bytes());
+    ctx.update(&[match panel.background {
+        crate::descriptor::BackgroundCapability::NotUsed => 0,
+        crate::descriptor::BackgroundCapability::Opaque => 1,
+        crate::descriptor::BackgroundCapability::Cedeable => 2,
+    }]);
+    ctx.update(&(panel.config_schema.len() as u32).to_le_bytes());
+    for key in panel.config_schema {
+        ctx.update(&key.0.to_le_bytes());
+    }
+}
+
 fn digest_state(
     ctx: &mut Sha256Ctx,
     panel: &PanelDescriptor,
@@ -70,7 +99,7 @@ fn digest_state(
     state: pilotage_instrument_state::AircraftState,
     scratch: &mut [u8],
 ) -> Result<(), DigestError> {
-    update_framed(ctx, state_id.as_bytes());
+    update_framed(ctx, ROLE_STATE, state_id.as_bytes());
     let data = resolve(&state, &FreshnessPolicy::default());
     let scratch_len = scratch.len();
     let mut writer =
@@ -81,13 +110,19 @@ fn digest_state(
         source,
     })?;
     let used = writer.finish();
-    update_framed(ctx, scratch.get(..used).unwrap_or(&[]));
+    let Some(scene) = scratch.get(..used) else {
+        // A writer that reports more bytes than its buffer is broken;
+        // digesting a truncated scene would silently misstate identity.
+        return Err(DigestError::Scratch { len: scratch_len });
+    };
+    update_framed(ctx, ROLE_SCENE, scene);
     Ok(())
 }
 
-/// Length-prefixed (`u32` LE) update: framing keeps adjacent fields
-/// from aliasing each other's bytes.
-fn update_framed(ctx: &mut Sha256Ctx, bytes: &[u8]) {
+/// Role-tagged, length-prefixed (`u32` LE) update: framing keeps
+/// adjacent fields and different item roles from aliasing each other.
+fn update_framed(ctx: &mut Sha256Ctx, role: u8, bytes: &[u8]) {
+    ctx.update(&[role]);
     ctx.update(&(bytes.len() as u32).to_le_bytes());
     ctx.update(bytes);
 }

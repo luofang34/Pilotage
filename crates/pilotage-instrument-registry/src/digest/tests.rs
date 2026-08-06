@@ -52,6 +52,26 @@ fn the_digest_binds_panel_identity_and_composition() {
     assert_ne!(one, digest(&TWO, &mut scratch), "composition is bound");
 }
 
+#[test]
+fn the_digest_binds_the_descriptor_contract() {
+    static BASE: [PanelDescriptor; 1] = [panel("alpha")];
+    static WIDER_MASK: [PanelDescriptor; 1] = [{
+        let mut p = panel("alpha");
+        p.required_layers = 0b110;
+        p
+    }];
+    let mut scratch = std::vec![0u8; MAX_SCENE_BYTES];
+    let digest = |panels: &'static [PanelDescriptor], scratch: &mut [u8]| {
+        scene_digest(&Registry::new(panels).expect("composes"), scratch).expect("digests")
+    };
+    let base = digest(&BASE, &mut scratch);
+    assert_ne!(
+        base,
+        digest(&WIDER_MASK, &mut scratch),
+        "a weaker or stronger completeness gate is a different contract"
+    );
+}
+
 fn draw_one_layer(
     _data: &PanelData,
     _config: &ConfigBlob<'_>,
