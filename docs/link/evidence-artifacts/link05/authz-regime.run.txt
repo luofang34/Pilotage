@@ -2,9 +2,9 @@ Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
 scope: LINK-04
 suite: browser avionics-ingress authorization regime
 command: node clients/web/telemetry-ingress.test.mjs
-config-digest: a4502c305e5be2d573bf576cadc5df024ab86cf6
+config-digest: 761ce177fee219894c536e86390428a41953b799
 tool-version: node v26.5.0
-run-id: local:a4502c305e5be2d573bf576cadc5df024ab86cf6
+run-id: local:761ce177fee219894c536e86390428a41953b799
 outcome: pass
 summary:
   33 browser ingress checks passed; LINK-AUTHZ-005 cases:
