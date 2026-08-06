@@ -17,13 +17,10 @@
 #[cfg(test)]
 extern crate std;
 
-mod annunciation;
-mod fixed_str;
+#[cfg(test)]
+mod alert_stack_tests;
 mod hsi;
-mod palette;
 mod pfd;
-mod source_label;
-mod status_paint;
 
 pub use hsi::draw_hsi;
 pub use pfd::{BackgroundMode, PfdConfig, VSpeeds, draw_pfd};

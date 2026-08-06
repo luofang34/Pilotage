@@ -1,0 +1,15 @@
+[package]
+name = "pilotage-instrument-symbology"
+description = "Shared instrument symbology: palette, honest-status paint, alert annunciation, source labels, and fixed-capacity label formatting (ADR-0029)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-alerts = { workspace = true }
+pilotage-instrument-scene = { workspace = true }
+pilotage-instrument-state = { workspace = true }
+thiserror = { workspace = true }

@@ -4,7 +4,7 @@
 use pilotage_instrument_scene::{PaintMode, Rgba8, SceneError, SceneWriter};
 use pilotage_instrument_state::{NavFromTo, NavResolved, NavSource};
 
-use crate::palette;
+use pilotage_instrument_symbology::palette;
 
 /// Two dots of lateral deviation = 75 px (37.5 px/dot, G5 proportions).
 const PX_PER_DOT: f32 = 37.5;
