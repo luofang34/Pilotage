@@ -9,14 +9,15 @@
 use pilotage_instrument_scene::{Anchor, SceneError, SceneWriter};
 use pilotage_instrument_state::{ComparisonState, SourcedFunction};
 
-use crate::fixed_str::fmt_label;
+use crate::fmt_label;
 use crate::palette;
+use crate::safety;
 
 /// Draws the selected source id under a function prefix (e.g. `IAS2`), amber
 /// on a reversion or a sustained miscompare, with a `{prefix} CMP` cue on a
 /// miscompare. Draws nothing when the function is unmonitored or every
 /// candidate failed — the instrument's own failure flag covers that.
-pub(crate) fn draw_source_label<T: Copy>(
+pub fn draw_source_label<T: Copy>(
     scene: &mut SceneWriter<'_>,
     x: f32,
     y: f32,
@@ -28,7 +29,7 @@ pub(crate) fn draw_source_label<T: Copy>(
     };
     let miscompare = selection.state == ComparisonState::Miscompare;
     let color = if miscompare || selection.reverted {
-        palette::AMBER
+        safety::CAUTION_AMBER
     } else {
         palette::GREEN
     };

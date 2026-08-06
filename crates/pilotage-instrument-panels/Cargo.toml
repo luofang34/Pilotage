@@ -13,6 +13,7 @@ libm = { workspace = true }
 pilotage-alerts = { workspace = true }
 pilotage-instrument-scene = { workspace = true }
 pilotage-instrument-state = { workspace = true }
+pilotage-instrument-symbology = { workspace = true }
 
 [dev-dependencies]
 pilotage-frames = { workspace = true }

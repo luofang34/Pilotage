@@ -17,9 +17,11 @@ members = [
     "crates/pilotage-svs-db",
     "crates/pilotage-svs-build",
     "crates/pilotage-alerts",
+    "crates/pilotage-sha256",
     "crates/pilotage-instrument-scene",
     "crates/pilotage-instrument-state",
     "crates/pilotage-instrument-glyphs",
+    "crates/pilotage-instrument-symbology",
     "crates/pilotage-instrument-panels",
     "crates/pilotage-instrument-raster",
     "crates/pilotage-instrument-feeder",
@@ -89,9 +91,11 @@ pilotage-camera-calibration = { path = "crates/pilotage-camera-calibration" }
 pilotage-geo = { path = "crates/pilotage-geo" }
 pilotage-svs-db = { path = "crates/pilotage-svs-db" }
 pilotage-alerts = { path = "crates/pilotage-alerts" }
+pilotage-sha256 = { path = "crates/pilotage-sha256" }
 pilotage-instrument-scene = { path = "crates/pilotage-instrument-scene" }
 pilotage-instrument-state = { path = "crates/pilotage-instrument-state" }
 pilotage-instrument-glyphs = { path = "crates/pilotage-instrument-glyphs" }
+pilotage-instrument-symbology = { path = "crates/pilotage-instrument-symbology" }
 pilotage-instrument-panels = { path = "crates/pilotage-instrument-panels" }
 pilotage-instrument-raster = { path = "crates/pilotage-instrument-raster" }
 pilotage-instrument-feeder = { path = "crates/pilotage-instrument-feeder" }
