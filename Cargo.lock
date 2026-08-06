@@ -1535,6 +1535,7 @@ dependencies = [
 name = "pilotage-instrument-glyphs"
 version = "0.1.0"
 dependencies = [
+ "pilotage-sha256",
  "thiserror",
 ]
 
@@ -1672,6 +1673,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wtransport",
+]
+
+[[package]]
+name = "pilotage-sha256"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.10.9",
 ]
 
 [[package]]
