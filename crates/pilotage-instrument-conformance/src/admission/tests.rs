@@ -15,17 +15,18 @@ use super::{AdmissionError, admit};
 fn builtin_panels_pass_admission() {
     let registry = Registry::new(BUILTIN_PANELS).expect("composes");
     let report = admit(&registry).expect("shipped panels must be admissible");
-    // PFD and HSI: 4 canonical states × (1 fed + 7 withheld) each; the
-    // monitor panel: 4 × (1 fed + 1 withheld).
-    assert_eq!(report.cases, 72);
+    // PFD: (4 canonical + 2 extreme) states × (1 fed + 7 withheld);
+    // HSI: 5 × 8; monitor: 5 × 2.
+    assert_eq!(report.cases, 98);
     // Every warning is the PFD's groundspeed or baro readout: their
     // boxes are 90 units wide but a wide value at size 16 has ~107
     // units of nominal ink, so the run overhangs its box and the frame
     // edge (status_paint::readout_box draws at the requested size with
-    // no fit shrink). Real display debt, honestly counted; fixing the
-    // paint moves frame hashes and is its own change. The ratchet makes
-    // any NEW unclipped off-frame text a deliberate decision.
-    assert_eq!(report.warnings.len(), 33);
+    // no fit shrink). Real display debt, honestly counted across every
+    // corpus and extreme state; fixing the paint moves frame hashes and
+    // is its own change. The ratchet makes any NEW unclipped off-frame
+    // text a deliberate decision.
+    assert_eq!(report.warnings.len(), 59);
     assert!(report.warnings.iter().all(|w| matches!(
         w,
         super::AdmissionWarning::FrameOverflow { panel: "pfd", text, .. }

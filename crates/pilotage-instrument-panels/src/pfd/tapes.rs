@@ -336,7 +336,10 @@ pub fn vsi(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneErr
         scene.rect(PaintMode::Fill, 466.0, CENTER_Y, 8.0, -len)?;
     }
     if v.value.abs() >= 100.0 {
-        let tip_y = (CENTER_Y - len).clamp(10.0, 350.0);
+        // Clamped clear of the selected-altitude box above and the baro
+        // box below: at full scale the label parks at the strip edge
+        // instead of sliding its ink under a readout box.
+        let tip_y = (CENTER_Y - len).clamp(32.0, 328.0);
         let label = fmt_label!(12, "{}", libm::roundf(v.value / 50.0) as i64 * 50);
         scene.fill_color(palette::WHITE)?;
         scene.text(452.0, tip_y, 12.0, Anchor::CENTER, label.as_str())?;

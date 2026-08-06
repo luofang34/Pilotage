@@ -44,6 +44,39 @@ fn scene_via_descriptor(
 }
 
 #[test]
+fn all_builtin_panels_declare_extreme_states() {
+    // The half of per-panel verification that travels with a panel: its
+    // own hardest cases. A shipped panel declaring none would leave the
+    // admission matrix covering only the gentle shared corpus.
+    for panel in BUILTIN_PANELS {
+        assert!(
+            !panel.extreme_states.is_empty(),
+            "{} ships without its own stress fixtures",
+            panel.id
+        );
+    }
+}
+
+#[test]
+fn the_monitor_stress_fixture_rows_are_full() {
+    // The fixture builds its rows through a fallback that substitutes
+    // an empty line for an over-long or out-of-charset literal; a row
+    // silently emptied would weaken the stress case without failing
+    // anything. Every row must be exactly at capacity.
+    use pilotage_instrument_state::TextLine;
+    let state = super::monitor_full_channel();
+    let text = state.monitor_text.data.expect("fixture feeds the channel");
+    assert!(!text.is_malformed());
+    for (row, line) in text.lines().iter().enumerate() {
+        assert_eq!(
+            line.as_str().len(),
+            TextLine::CAPACITY,
+            "row {row} is not at capacity — the literal was rejected"
+        );
+    }
+}
+
+#[test]
 fn the_builtin_composition_validates() {
     Registry::new(BUILTIN_PANELS).expect("shipped panels must compose");
 }
