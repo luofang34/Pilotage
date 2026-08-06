@@ -87,6 +87,7 @@ pub fn draw_rose(
 pub fn draw_heading_box(
     scene: &mut SceneWriter<'_>,
     group: u8,
+    color: pilotage_instrument_scene::Rgba8,
     hdg: Sig<f32>,
 ) -> Result<(), SceneError> {
     let deg = libm::roundf(wrap_deg_360(hdg.value * RAD_TO_DEG)) as i32;
@@ -100,7 +101,7 @@ pub fn draw_heading_box(
         68.0,
         26.0,
         text.as_str(),
-        palette::WHITE,
+        color,
         20.0,
         hdg.status,
     )

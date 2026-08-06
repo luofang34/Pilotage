@@ -65,9 +65,12 @@ pub fn draw_hsi(
     scene.begin_layer(LayerId::Tapes)?;
     match up {
         Some((_, group)) if data.rose_basis == RoseBasis::Track => {
-            rose::draw_heading_box(scene, group.to_u8(), data.track_rad)?;
+            // The value itself wears the selection color under a track
+            // basis: the box must not read as a heading even before the
+            // eye reaches the TRK annunciation.
+            rose::draw_heading_box(scene, group.to_u8(), palette::CYAN, data.track_rad)?;
         }
-        _ => rose::draw_heading_box(scene, GroupId::Heading.to_u8(), hdg)?,
+        _ => rose::draw_heading_box(scene, GroupId::Heading.to_u8(), palette::WHITE, hdg)?,
     }
     boxes::wind_box(scene, data)?;
     boxes::dist_box(scene, data)?;

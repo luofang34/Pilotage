@@ -218,7 +218,7 @@ fn a_track_up_rose_annunciates_trk_and_never_a_heading_reference() {
         labels.iter().any(|t| t == "TRK"),
         "track-up must annunciate TRK: {labels:?}"
     );
-    for reference in ["MAG", "TRU", "SIM"] {
+    for reference in ["MAG", "TRU", "SIM", "REF"] {
         assert!(
             !labels.iter().any(|t| t == reference),
             "{reference} must not annunciate on a track rose: {labels:?}"
@@ -262,6 +262,27 @@ fn a_stationary_heading_less_source_still_fails_visibly() {
     assert!(
         labels.iter().any(|t| t == "HDG"),
         "no heading and no track must flag: {labels:?}"
+    );
+}
+
+#[test]
+fn an_unusable_rose_fails_the_bug_box_closed() {
+    // Heading present but trust-failed, no usable track: the basis is
+    // Unavailable, the display reference is unknown, and the
+    // heading-select bug cannot be presented against any rose — the
+    // box shows its label, never the selection value.
+    let mut data = heading_only(0.5);
+    data.heading.value_rad = Sig::with_status(0.5, SignalStatus::Failed);
+    data.rose_basis = pilotage_instrument_state::RoseBasis::Unavailable;
+    data.heading_bug_rose_rad = Sig::with_status(0.0, SignalStatus::Failed);
+    let labels = texts(&render(&data));
+    assert!(
+        labels.iter().any(|t| t == "HDG REF"),
+        "the select box fails closed to its label: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|t| t.ends_with("°") && t != "---°"),
+        "no selection or heading value may present without a rose: {labels:?}"
     );
 }
 

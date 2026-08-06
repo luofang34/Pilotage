@@ -433,7 +433,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// value moves once per deliberate contract change, re-pinned with a
 /// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "8c3bf3ff21a396784434e4dcbc320d2f190212671995ac03fa5a856eef52acb2";
+    "a809f1768d03f533b134e15ddf1a49779565f03fc829164fb6c94b357bdb1abc";
 
 #[cfg(test)]
 mod digest_tests;
