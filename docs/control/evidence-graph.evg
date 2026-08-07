@@ -1,5 +1,5 @@
 # Pilotage lifecycle evidence graph — CTRL-01 typed control-authority slice
-# format: pilotage-evidence graph v1 (see crates/pilotage-evidence)
+# format: pilotage-evidence graph v1 (see the pilotage-evidence crate in the Indicate repository)
 #
 # SIM / NOT FOR FLIGHT. This is the maintained engineering trace record for
 # the typed control-authority behavior slice (INPUT-01 / CTRL-01): profile

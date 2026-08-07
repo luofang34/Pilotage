@@ -1,5 +1,5 @@
 # Pilotage lifecycle evidence graph — LINK-04 vertical slice
-# format: pilotage-evidence graph v1 (see crates/pilotage-evidence)
+# format: pilotage-evidence graph v1 (see the pilotage-evidence crate in the Indicate repository)
 #
 # SIM / NOT FOR FLIGHT. This is the maintained engineering trace record for
 # the source-role separation behavior slice (FC operational estimate vs
