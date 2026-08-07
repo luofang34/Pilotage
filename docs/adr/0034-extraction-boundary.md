@@ -1,7 +1,9 @@
 # ADR-0034: The instrument extraction boundary — frame contract, artifact ownership, and gate placement
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-06
+- Extracted repository: <https://github.com/luofang34/Indicate> (private;
+  consumers pin it by exact rev in their workspace manifests)
 
 ## Context
 
@@ -11,8 +13,7 @@ repository. The mechanical blockers are resolved (the closure reaches
 nothing outside `crates/`, and the closure's `no_std` gate passes in
 one standalone invocation); what remains are the boundary decisions
 that must be written down before a `git mv` freezes them. This record
-proposes them. Each is revisable while `Proposed`; extraction promotes
-whatever stands here to `Accepted`.
+states them; the extraction froze them.
 
 ## Decision 1 — the design-frame contract
 
@@ -79,7 +80,9 @@ reproduces the new digest.
 ## Consequences
 
 The `git mv` becomes executable: nothing in the closure reaches out,
-the standalone gate exists, and each artifact has one owner. Checks
-that cannot run until after extraction (corpus sync exercised across
-repositories; the closure gate green in the new repository) are the
-first two actions of the extraction PR itself.
+the standalone gate exists, and each artifact has one owner. Of the two
+checks that cannot run until after extraction, the closure gate runs
+green in the extracted repository's own CI; the corpus sync is
+exercised across repositories by the first post-extraction pin advance
+that carries a corpus edit ([#262](https://github.com/luofang34/Pilotage/issues/262)
+ready-when check 2).

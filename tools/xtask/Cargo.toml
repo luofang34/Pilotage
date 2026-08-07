@@ -9,7 +9,6 @@ publish = false
 workspace = true
 
 [dependencies]
-pilotage-instrument-state = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "signal", "sync", "time"] }
 tracing = { workspace = true }

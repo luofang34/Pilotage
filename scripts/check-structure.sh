@@ -177,10 +177,10 @@ check_calibration_id_uniqueness() {
 }
 
 # The palette names RED, AMBER, YELLOW, and BAND_YELLOW alias the
-# never-skinnable safety set (ADR-0029). Outside the symbology crate,
-# safety-semantic paints must reference `safety::` directly so a future
-# palette-to-theme sweep cannot silently make failure, caution, or
-# reference colors skinnable.
+# never-skinnable safety set (ADR-0029). Outside the symbology crate —
+# a pinned upstream dependency here — safety-semantic paints must
+# reference `safety::` directly so a future palette-to-theme sweep
+# cannot silently make failure, caution, or reference colors skinnable.
 # Text-level ratchet, not a proof: it catches direct `palette::RED`
 # uses and `use ...::palette::RED` imports, but a module alias
 # (`use ... as p; p::RED`) slips through, like the AWK heuristics above.
@@ -188,9 +188,6 @@ check_safety_palette_aliases() {
     local file
     while IFS= read -r file; do
         is_excluded_path "$file" && continue
-        case "$file" in
-            ./crates/pilotage-instrument-symbology/*) continue ;;
-        esac
         if grep -Eq 'palette::(RED|AMBER|YELLOW|BAND_YELLOW)\b' "$file"; then
             echo "FORBIDDEN: $file references a safety palette alias; use the safety:: constants outside pilotage-instrument-symbology" >&2
             status=1
@@ -198,13 +195,24 @@ check_safety_palette_aliases() {
     done < <(collect_rs_files)
 }
 
-# The theme imitation screen (SAFETY_HUES) and its exemption list are
-# hand-maintained; a new safety constant must visit them deliberately.
-check_safety_constant_count() {
-    local expected=5 actual
-    actual=$(grep -c '^pub const' ./crates/pilotage-instrument-symbology/src/safety.rs)
-    if [ "$actual" -ne "$expected" ]; then
-        echo "FORBIDDEN: safety.rs public constant count moved ($actual, pinned $expected); add the new constant to theme.rs SAFETY_HUES or its documented exemption, then update this pin" >&2
+# The Indicate pin is one fact recorded in two files: every Indicate git
+# dependency in Cargo.toml and the rev the evidence-gate workflow
+# installs the gate binary from must be identical, or the gate silently
+# builds from a different tree than the workspace links.
+check_indicate_pin_coherence() {
+    local manifest_revs workflow_rev count
+    manifest_revs="$(grep -oE 'Indicate\.git", rev = "[0-9a-f]{40}"' Cargo.toml \
+        | grep -oE '[0-9a-f]{40}' | LC_ALL=C sort -u || true)"
+    count="$(printf '%s\n' "$manifest_revs" | grep -c . || true)"
+    if [ "$count" -ne 1 ]; then
+        echo "FORBIDDEN: Cargo.toml pins Indicate at $count distinct revs; the family advances as one" >&2
+        status=1
+        return
+    fi
+    workflow_rev="$(grep -oE -- '--rev [0-9a-f]{40}' .github/workflows/evidence-gate.yml \
+        | grep -oE '[0-9a-f]{40}' | LC_ALL=C sort -u || true)"
+    if [ "$workflow_rev" != "$manifest_revs" ]; then
+        echo "FORBIDDEN: evidence-gate.yml installs the gate at rev ${workflow_rev:-<none>} but Cargo.toml pins $manifest_revs; advance them together" >&2
         status=1
     fi
 }
@@ -214,7 +222,7 @@ check_file_length
 check_function_length
 check_calibration_id_uniqueness
 check_safety_palette_aliases
-check_safety_constant_count
+check_indicate_pin_coherence
 
 if [ "$status" -ne 0 ]; then
     echo "check-structure: FAILED" >&2

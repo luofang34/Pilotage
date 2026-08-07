@@ -7,7 +7,6 @@ use std::process::ExitCode;
 mod backend;
 mod cli;
 mod error;
-mod fixture;
 mod log_archive;
 mod output;
 mod process;
@@ -39,7 +38,6 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
             Ok(())
         }
         Command::Reset(fc) => session::run_reset(&fc),
-        Command::GenStateFixture => fixture::run(),
         Command::Sim(sim) => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

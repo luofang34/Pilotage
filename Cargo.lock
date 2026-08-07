@@ -984,19 +984,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "instrument-bench"
-version = "0.1.0"
-dependencies = [
- "pilotage-instrument-conformance",
- "pilotage-instrument-panels",
- "pilotage-instrument-raster",
- "pilotage-instrument-registry",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
- "thiserror",
-]
-
-[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1446,6 +1433,7 @@ dependencies = [
 [[package]]
 name = "pilotage-alerts"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "thiserror",
 ]
@@ -1502,17 +1490,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-evidence"
-version = "0.1.0"
-dependencies = [
- "sha1",
- "sha2 0.10.9",
- "thiserror",
-]
-
-[[package]]
 name = "pilotage-frames"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "libm",
 ]
@@ -1545,21 +1525,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-instrument-conformance"
-version = "0.1.0"
-dependencies = [
- "pilotage-alerts",
- "pilotage-instrument-glyphs",
- "pilotage-instrument-panels",
- "pilotage-instrument-registry",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
- "thiserror",
-]
-
-[[package]]
 name = "pilotage-instrument-feeder"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "pilotage-instrument-state",
 ]
@@ -1567,6 +1535,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-glyphs"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "pilotage-sha256",
  "thiserror",
@@ -1575,11 +1544,10 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-panels"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "libm",
  "pilotage-alerts",
- "pilotage-frames",
- "pilotage-instrument-glyphs",
  "pilotage-instrument-registry",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
@@ -1587,22 +1555,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-instrument-raster"
-version = "0.1.0"
-dependencies = [
- "libm",
- "pilotage-instrument-glyphs",
- "pilotage-instrument-panels",
- "pilotage-instrument-registry",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
- "sha2 0.10.9",
- "thiserror",
-]
-
-[[package]]
 name = "pilotage-instrument-registry"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "pilotage-alerts",
  "pilotage-instrument-scene",
@@ -1614,14 +1569,15 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-scene"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
- "proptest",
  "thiserror",
 ]
 
 [[package]]
 name = "pilotage-instrument-state"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "libm",
  "pilotage-alerts",
@@ -1632,6 +1588,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-symbology"
 version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 dependencies = [
  "pilotage-alerts",
  "pilotage-instrument-scene",
@@ -1748,9 +1705,7 @@ dependencies = [
 [[package]]
 name = "pilotage-sha256"
 version = "0.1.0"
-dependencies = [
- "sha2 0.10.9",
-]
+source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
 
 [[package]]
 name = "pilotage-svs-build"
@@ -2373,17 +2328,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "sha1"
-version = "0.10.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
 ]
 
 [[package]]
@@ -3077,7 +3021,6 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "pilotage-instrument-state",
  "thiserror",
  "tokio",
  "tracing",
