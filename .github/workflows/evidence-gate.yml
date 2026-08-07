@@ -6,11 +6,16 @@
 # qualification result (SIM / NOT FOR FLIGHT).
 #
 # Baseline RESOLVABILITY is NOT advisory. The "baselines MUST be reachable
-# and resolvable (HARD)" step and the negative-fixture must-fail loops carry
-# no `continue-on-error`, so a broken or orphaned baseline — a declared SCM
-# commit unreachable from HEAD, a missing selector, or a missing artifact —
-# reddens this job. Durable evidence resolution is enforced; the review
-# verdict is not.
+# and resolvable (HARD)" steps carry no `continue-on-error`, so a broken or
+# orphaned baseline — a declared SCM commit unreachable from HEAD, a
+# missing selector, or a missing artifact — reddens this job. Durable
+# evidence resolution is enforced; the review verdict is not.
+#
+# The gate tool itself lives upstream (pilotage-evidence in the Indicate
+# repository, pinned below at the same rev the workspace pins); its own
+# tests and negative-fixture batteries run in that repository's CI. The
+# instruments evidence graph travels with the panels and is gated there
+# too; the graphs here are the ones whose sources live in this tree.
 name: Evidence trace gate
 
 on:
@@ -19,11 +24,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Workspace resolution touches the private Navigate git dependency even
-  # for a single-crate build; the git CLI can use the runner's rewritten
-  # ssh credentials, libgit2 cannot.
+  # The gate binary is a private git dependency; the git CLI can use the
+  # runner's rewritten ssh credentials, libgit2 cannot.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  FIXTURES: crates/pilotage-evidence/tests/fixtures
 
 jobs:
   evidence-trace-gate:
@@ -37,16 +40,27 @@ jobs:
           # recorded baseline unverifiable.
           fetch-depth: 0
 
-      - name: Authorize the private Navigate dependency
+      - name: Authorize the private git dependencies (Navigate, Indicate)
         env:
           NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+          INDICATE_DEPLOY_KEY: ${{ secrets.INDICATE_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          chmod 600 ~/.ssh/navigate_ci
+          printf '%s\n' "$INDICATE_DEPLOY_KEY" > ~/.ssh/indicate_ci
+          chmod 600 ~/.ssh/navigate_ci ~/.ssh/indicate_ci
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-          git config --global core.sshCommand "ssh -i ~/.ssh/navigate_ci -o IdentitiesOnly=yes"
-          git config --global url."ssh://git@github.com/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+          # One read-only deploy key per upstream repository. GitHub binds an
+          # ssh authentication to the single repository whose deploy key it
+          # is, so each pin needs its own host alias with its own identity; a
+          # shared core.sshCommand would offer one repository's key for the
+          # other and be refused.
+          {
+            printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n'
+            printf 'Host github-indicate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_ci\n  IdentitiesOnly yes\n'
+          } >> ~/.ssh/config
+          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+          git config --global url."ssh://git@github-indicate/luofang34/Indicate".insteadOf "https://github.com/luofang34/Indicate"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -54,18 +68,15 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Build the evidence gate and run its tests
-        run: cargo test -p pilotage-evidence --all-targets
-
-      - name: ATT-01 slice — honest verdict and bidirectional trace
-        # Informational. The slice is structurally traced, resolves both ways,
-        # and its independent review is recorded (rec-att-01), so the expected
-        # verdict is VALID; the hard guard is the crate's own tests (run
-        # above), which assert the same and the green-washing inverses.
-        continue-on-error: true
+      - name: Install the pinned evidence gate
+        # The rev here is the same Indicate pin the workspace manifest
+        # carries, so the gate that judges these graphs is the one the
+        # family's own CI tests.
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
-          --graph docs/instruments/evidence-graph.evg --repo-root . --trace
+          cargo install --locked
+          --git https://github.com/luofang34/Indicate.git
+          --rev 25ca50747af46436d81308f2672f8f99428da368
+          pilotage-evidence
 
       - name: LINK-04 slice — honest verdict and bidirectional trace
         # Informational. The source-role slice is structurally traced and
@@ -74,7 +85,7 @@ jobs:
         # the required quality gates.
         continue-on-error: true
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          evidence-gate
           --graph docs/link/evidence-graph.evg --repo-root . --trace
 
       - name: CTRL-01 slice — honest verdict and bidirectional trace
@@ -84,13 +95,13 @@ jobs:
         # which run in the required quality gates.
         continue-on-error: true
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          evidence-gate
           --graph docs/control/evidence-graph.evg --repo-root . --trace
 
       - name: CTRL-01 slice — resolve selectors against the tree
         continue-on-error: true
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          evidence-gate
           --graph docs/control/evidence-graph.evg --repo-root .
           --resolve-selectors
 
@@ -99,14 +110,14 @@ jobs:
         # resolve — its declared SCM baseline reachable from HEAD, its
         # selectors and artifacts present (ASSURE-04).
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          evidence-gate
           --graph docs/control/evidence-graph.evg --repo-root .
           --require-resolvable
 
       - name: LINK-04 slice — resolve selectors against the tree
         continue-on-error: true
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          evidence-gate
           --graph docs/link/evidence-graph.evg --repo-root .
           --resolve-selectors
 
@@ -118,87 +129,6 @@ jobs:
         # reddens this job (ASSURE-04, issue 133). Needs full history
         # (fetch-depth: 0 above) so reachability is decidable.
         run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
+          evidence-gate
           --graph docs/link/evidence-graph.evg --repo-root .
           --require-resolvable
-
-      - name: ATT-01 slice — resolve selectors against the tree
-        # Informational: selector resolution reads the referenced test files.
-        # A lane those cases point at may not be present on this branch yet, so
-        # a non-resolving selector here is expected and must not redden the job.
-        continue-on-error: true
-        run: >
-          cargo run -q -p pilotage-evidence --bin evidence-gate --
-          --graph docs/instruments/evidence-graph.evg --repo-root .
-          --resolve-selectors
-
-      - name: Negative fixtures must all FAIL the gate
-        run: |
-          set -u
-          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
-          fail=0
-          for f in empty missing-root missing-layer dangling-edge \
-                   unresolved-selector orphan-requirement \
-                   missing-result invalid-exception \
-                   pending-review placeholder-result \
-                   unexecuted-result unbacked-review; do
-            if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
-                --repo-root crates/pilotage-evidence >/dev/null 2>&1; then
-              echo "REGRESSION: $f.evg unexpectedly PASSED the gate"; fail=1
-            else
-              echo "ok: $f.evg correctly failed the gate"
-            fi
-          done
-          exit $fail
-
-      - name: Exception expiry is actually enforced in the gate
-        # The invalid-exception fixture is complete and independently reviewed but
-        # EXPIRED. Past its expiry it must fail; before its expiry the same
-        # exception legitimately applies. This proves the as-of date drives the
-        # outcome and expiry is not silently skipped.
-        run: |
-          set -u
-          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
-          fixture="$FIXTURES/invalid-exception.evg"
-          root=crates/pilotage-evidence
-          if "${bin[@]}" --graph "$fixture" --repo-root "$root" \
-              --as-of 2026-07-14 >/dev/null 2>&1; then
-            echo "REGRESSION: expired exception was not caught as of 2026-07-14"; exit 1
-          fi
-          echo "ok: expired exception fails once past its expiry"
-          if "${bin[@]}" --graph "$fixture" --repo-root "$root" \
-              --as-of 2019-01-01 >/dev/null 2>&1; then
-            echo "ok: the same exception applies before its expiry"
-          else
-            echo "REGRESSION: exception rejected before its expiry date"; exit 1
-          fi
-
-      - name: Filesystem resolution rejects unresolvable evidence
-        # These fixtures are structurally VALID and fail only when the gate
-        # resolves them against the tree: a test selector naming a missing symbol;
-        # an execution-output artifact that is absent, whose content does not hash
-        # to its declared digest, whose parsed run-record fields (including the
-        # run identity) disagree with the result, or which is a source file with
-        # no run-record fields; an artifact path that is absolute, climbs out via
-        # '..', or symlinks outside the evidence root; and a review whose named
-        # record entry is still pending.
-        run: |
-          set -u
-          bin=(cargo run -q -p pilotage-evidence --bin evidence-gate --)
-          fail=0
-          for f in unresolvable-selector-fs unresolvable-artifact \
-                   mismatched-artifact field-mismatch-artifact \
-                   runid-mismatch-artifact absolute-artifact \
-                   traversal-artifact symlink-escape-artifact \
-                   stale-source-artifact selector-not-a-test \
-                   source-as-artifact unresolved-review-entry \
-                   baseline-unverifiable baseline-unreachable; do
-            if "${bin[@]}" --graph "$FIXTURES/$f.evg" \
-                --repo-root crates/pilotage-evidence \
-                --resolve-selectors >/dev/null 2>&1; then
-              echo "REGRESSION: $f.evg unexpectedly passed resolution"; fail=1
-            else
-              echo "ok: $f.evg correctly failed resolution"
-            fi
-          done
-          exit $fail

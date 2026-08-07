@@ -24,7 +24,9 @@
 // checks its own.
 
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { crateDir } from "./crate-dir.mjs";
 import {
   COORD_LIMIT_PX,
   InstrumentModule,
@@ -317,13 +319,34 @@ function conformCanvas(entry, v, out) {
 
 // ---- load and pin the golden -----------------------------------------------
 
+// This interpreter is correct only relative to a corpus version. The two
+// literals below pin the exact corpus this suite is verified against; an
+// upstream corpus edit arrives via a pin advance and MUST turn this suite
+// red until the interpreter is re-verified against the new corpus and the
+// literals are consciously moved. Never resolve a mismatch by unpinning.
+const EXPECTED_CORPUS_VERSION = 3;
+const EXPECTED_CORPUS_SHA256 =
+  "7130efd29b19c2f0fb4622cefd7357dd4e6c038f70efa27e0adbebc4d03cdc6f";
+
 const golden = JSON.parse(
   readFileSync(
-    new URL("../../crates/pilotage-instrument-scene/corpus/scene-conformance-corpus.json", import.meta.url),
+    join(
+      crateDir("pilotage-instrument-scene"),
+      "corpus",
+      "scene-conformance-corpus.json",
+    ),
     "utf8",
   ),
 );
 check("golden schema version is understood", golden.schemaVersion === 2);
+check(
+  "corpus version is the one this interpreter is verified against",
+  golden.corpusVersion === EXPECTED_CORPUS_VERSION,
+);
+check(
+  "corpus identity matches the verified pin",
+  golden.corpusSha256 === EXPECTED_CORPUS_SHA256,
+);
 check("browser backend is declared SIM / NOT FOR FLIGHT", /SIM \/ NOT FOR FLIGHT/.test(golden.simOnly));
 check(
   "budgets are the pinned resource bounds",

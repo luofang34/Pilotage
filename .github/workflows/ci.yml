@@ -6,8 +6,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # The Navigate crates are a private git dependency; libgit2 cannot use
-  # the runner's rewritten ssh credentials, the git CLI can.
+  # The Navigate and Indicate crates are private git dependencies; libgit2
+  # cannot use the runner's rewritten ssh credentials, the git CLI can.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   PROTOC_SHA256: a7be2928c0454f132c599e25b79b7ad1b57663f2337d7f7e468a1d59b98ec1b0
   PROTOC_VERSION: "26.1"
@@ -23,16 +23,27 @@ jobs:
           # base commit must be present locally; a shallow clone would hide it.
           fetch-depth: 0
 
-      - name: Authorize the private Navigate dependency
+      - name: Authorize the private git dependencies (Navigate, Indicate)
         env:
           NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+          INDICATE_DEPLOY_KEY: ${{ secrets.INDICATE_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          chmod 600 ~/.ssh/navigate_ci
+          printf '%s\n' "$INDICATE_DEPLOY_KEY" > ~/.ssh/indicate_ci
+          chmod 600 ~/.ssh/navigate_ci ~/.ssh/indicate_ci
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-          git config --global core.sshCommand "ssh -i ~/.ssh/navigate_ci -o IdentitiesOnly=yes"
-          git config --global url."ssh://git@github.com/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+          # One read-only deploy key per upstream repository. GitHub binds an
+          # ssh authentication to the single repository whose deploy key it
+          # is, so each pin needs its own host alias with its own identity; a
+          # shared core.sshCommand would offer one repository's key for the
+          # other and be refused.
+          {
+            printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n'
+            printf 'Host github-indicate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_ci\n  IdentitiesOnly yes\n'
+          } >> ~/.ssh/config
+          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+          git config --global url."ssh://git@github-indicate/luofang34/Indicate".insteadOf "https://github.com/luofang34/Indicate"
 
       - name: Install system dependencies (hidapi on Linux)
         run: |
@@ -83,47 +94,10 @@ jobs:
       - name: check-structure
         run: bash scripts/check-structure.sh
 
-      - name: instrument requirement references
-        run: bash scripts/check-instrument-requirements.sh
-
       - name: certification-claim guard (AIR-03)
         # Fail on any tracked doc/UI artifact that asserts a certification,
         # compliance, approval, or airworthiness claim about this SIM project.
         run: bash scripts/check-certification-claims.sh
-
-      - name: standards registry drift guard (AIR-04)
-        # Keep the standards registry honest and the applicability matrix in
-        # sync with it: fail closed on an absent/empty registry, on missing
-        # status provenance, on contradictory active/superseded classifications,
-        # and on matrix drift. This checks internal consistency only and does
-        # not prove external freshness, which remains a human source review.
-        run: bash scripts/check-standards-registry.sh
-
-      - name: instrument trace inventory (AIR-03)
-        # Emit a requirement/test/review/configuration inventory to the log.
-        # This is an inventory, not a compliance trace, and fabricates nothing.
-        run: bash scripts/trace-report.sh
-
-      - name: instrument closure is no_std, standalone (ADR-0017, ADR-0034)
-        # The extraction closure compiles for a bare-metal target in ONE
-        # invocation containing ONLY closure crates — this is the gate the
-        # extracted repo runs unchanged, so it must pass with nothing from
-        # outside the closure. The conformance harness is deliberately
-        # absent: it is a host-side tool and allocates.
-        run: >
-          cargo check
-          -p pilotage-frames
-          -p pilotage-alerts
-          -p pilotage-sha256
-          -p pilotage-instrument-state
-          -p pilotage-instrument-scene
-          -p pilotage-instrument-glyphs
-          -p pilotage-instrument-symbology
-          -p pilotage-instrument-panels
-          -p pilotage-instrument-raster
-          -p pilotage-instrument-feeder
-          -p pilotage-instrument-registry
-          --target thumbv7em-none-eabihf
 
       - name: remaining sans-IO crates are no_std (ADR-0017)
         run: >
@@ -141,18 +115,6 @@ jobs:
             echo "pilotage-instruments-web-shell depends on pilotage-protocol"; exit 1
           fi
 
-      - name: target timing gate (REN-04)
-        # No display hardware is selected: the USB CDC scan documents that no
-        # target is connected, and the envelope gate prices the per-class
-        # work budget with the conservative model against the frame deadline
-        # derived from the SIM display liveness requirement. The artifact
-        # drift guard keeps the committed timing record equal to the shipped
-        # model. The envelope is provisional — not a WCET claim — until a
-        # measured target binds firmware, clock, memory, and compiler state.
-        run: |
-          bash scripts/detect-target.sh
-          cargo test -p pilotage-instrument-raster timing
-
       - name: geospatial contract (SVS-01)
         # Datum discipline, coherence, view/projection, availability, and the
         # fail-closed versioned ABI for synthetic vision and conformal HUD.
@@ -165,26 +127,10 @@ jobs:
         # rollback, expiry, coverage, and datum rules fail closed.
         run: cargo test -p pilotage-svs-db
 
-      - name: reference rasterizer frame hashes (REN-03)
-        # Re-render the PFD and HSI panels and assert their pinned SHA-256
-        # frame hashes, proving the software rasterizer is bit-reproducible.
-        run: cargo test -p pilotage-instrument-raster
-
-      - name: instrument bench shell conformance smoke (ADR-0029)
-        # A shell built from the registry alone: runs admission and
-        # reproduces the pinned composition digest on the host target
-        # (the wasm target's reproduction is pinned in the node suite).
-        run: cargo run -q -p instrument-bench
-
       - name: instrument wasm backend builds
         # Generating the resource binding here makes the fail-visible test
         # exercise the exact WASM artifact served by the browser client.
         run: bash scripts/build-web-instruments.sh
-
-      - name: glyph pack integrity (REN-02)
-        # Mandatory-vocabulary completeness, byte-identical reproducibility,
-        # and fail-closed corruption detection for the controlled glyph pack.
-        run: cargo test -p pilotage-instrument-glyphs
 
       - name: web viewer wire conformance
         run: node clients/web/wire.test.mjs

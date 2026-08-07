@@ -1,7 +1,9 @@
 # ADR-0034: The instrument extraction boundary — frame contract, artifact ownership, and gate placement
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-06
+- Extracted repository: <https://github.com/luofang34/Indicate> (private;
+  consumers pin it by exact rev in their workspace manifests)
 
 ## Context
 

@@ -1,5 +1,5 @@
 // State-frame ABI v6 writer: the JS side of the tagged-group contract in
-// crates/pilotage-instrument-state/src/abi/v6.rs.
+// the pilotage-instrument-state crate's abi/v6.rs (pinned upstream).
 //
 // The frame is self-delimiting: [version u8][group count u8] then, per
 // present group in strictly ascending tag order, [tag u8][payload length
@@ -12,7 +12,7 @@
 // which fails the nav group visibly on the Rust side).
 //
 // This writer is pinned byte-for-byte against the committed golden
-// frames in crates/pilotage-instrument-state/fixtures/ via
+// frames in the state crate's fixtures/ (at the pinned upstream rev) via
 // state-abi.test.mjs; the Rust codec pins against the same files, so
 // the two sides of the wasm boundary can only drift by turning CI red.
 

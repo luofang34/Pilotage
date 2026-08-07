@@ -10,30 +10,16 @@ members = [
     "crates/pilotage-adapter-api",
     "crates/pilotage-mavlink",
     "crates/pilotage-conformance",
-    "crates/pilotage-frames",
     "crates/pilotage-calibration-id",
     "crates/pilotage-camera-calibration",
     "crates/pilotage-geo",
     "crates/pilotage-svs-db",
     "crates/pilotage-svs-build",
-    "crates/pilotage-alerts",
-    "crates/pilotage-sha256",
-    "crates/pilotage-instrument-scene",
-    "crates/pilotage-instrument-state",
-    "crates/pilotage-instrument-glyphs",
-    "crates/pilotage-instrument-symbology",
-    "crates/pilotage-instrument-panels",
-    "crates/pilotage-instrument-raster",
-    "crates/pilotage-instrument-conformance",
-    "crates/pilotage-instrument-feeder",
-    "crates/pilotage-instrument-registry",
-    "crates/pilotage-evidence",
     "crates/pilotage-mission",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
     "tools/hid-probe",
-    "tools/instrument-bench",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",
@@ -61,6 +47,19 @@ navigate-geodesy = { git = "https://github.com/luofang34/Navigate.git", rev = "a
 navigate-fusion = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
 navigate-fpl = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
 navigate-guidance = { git = "https://github.com/luofang34/Navigate.git", rev = "ace50f68b3ffae6237bbb53f6af687c335518272" }
+# The instrument family is consumed only at one exact upstream revision:
+# every Indicate crate must always pin the identical rev so the state ABI,
+# the scene vocabulary, the panels, and the registry digest cannot drift
+# apart. The pilot of a change that moves the cross-shell scene digest
+# advances this pin as part of that change (ADR-0034).
+pilotage-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-alerts = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-instrument-scene = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-instrument-state = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-instrument-glyphs = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-instrument-panels = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
+pilotage-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "25ca50747af46436d81308f2672f8f99428da368" }
 aerocontext-core = "0.4.5"
 aerocontext-planning = "0.4.5"
 aerocontext-navdata = { version = "0.4.5", default-features = false }
@@ -89,22 +88,10 @@ pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-mavlink = { path = "crates/pilotage-mavlink" }
-pilotage-frames = { path = "crates/pilotage-frames" }
 pilotage-calibration-id = { path = "crates/pilotage-calibration-id" }
 pilotage-camera-calibration = { path = "crates/pilotage-camera-calibration" }
 pilotage-geo = { path = "crates/pilotage-geo" }
 pilotage-svs-db = { path = "crates/pilotage-svs-db" }
-pilotage-alerts = { path = "crates/pilotage-alerts" }
-pilotage-sha256 = { path = "crates/pilotage-sha256" }
-pilotage-instrument-scene = { path = "crates/pilotage-instrument-scene" }
-pilotage-instrument-state = { path = "crates/pilotage-instrument-state" }
-pilotage-instrument-glyphs = { path = "crates/pilotage-instrument-glyphs" }
-pilotage-instrument-symbology = { path = "crates/pilotage-instrument-symbology" }
-pilotage-instrument-panels = { path = "crates/pilotage-instrument-panels" }
-pilotage-instrument-raster = { path = "crates/pilotage-instrument-raster" }
-pilotage-instrument-conformance = { path = "crates/pilotage-instrument-conformance" }
-pilotage-instrument-feeder = { path = "crates/pilotage-instrument-feeder" }
-pilotage-instrument-registry = { path = "crates/pilotage-instrument-registry" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-adapter-aviate = { path = "adapters/aviate" }
