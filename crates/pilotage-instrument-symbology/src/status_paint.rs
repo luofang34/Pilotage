@@ -48,10 +48,12 @@ pub fn draw_flag(
 }
 
 /// Draws a readout box: filled background, status-colored border, and
-/// either the value text or dashes when the status hides the value.
+/// either the value text — claimed from `group`, the state group the
+/// value derives from — or dashes when the status hides the value.
 #[allow(clippy::too_many_arguments)]
 pub fn readout_box(
     scene: &mut SceneWriter<'_>,
+    group: u8,
     x: f32,
     y: f32,
     w: f32,
@@ -67,8 +69,10 @@ pub fn readout_box(
     scene.rect(PaintMode::FillStroke, x, y, w, h)?;
     if status.shows_value() {
         scene.fill_color(text_color)?;
-        scene.text(x + w / 2.0, y + h / 2.0, size, Anchor::CENTER, text)?;
+        scene.text_attributed(group, x + w / 2.0, y + h / 2.0, size, Anchor::CENTER, text)?;
     } else {
+        // Unclaimed on purpose: the claim rule covers every visible
+        // run, and dashes ARE the honest degraded display.
         scene.fill_color(safety::FAILURE_RED)?;
         scene.text(x + w / 2.0, y + h / 2.0, size, Anchor::CENTER, "---")?;
     }

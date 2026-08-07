@@ -91,7 +91,7 @@ selected yet — the USB CDC scan (`scripts/detect-target.sh`) detects a
 connected target and attempts an identity handshake rather than asking — so
 the shipped model is the named conservative bound recorded, with its
 assumptions and derivation, in
-`docs/instruments/evidence-artifacts/timing/target-timing.txt`; a drift guard
+`crates/pilotage-instrument-raster/evidence/target-timing.txt`; a drift guard
 keeps that artifact equal to the shipped constants. A measured model must bind
 the firmware/build identity, MCU, clock and memory configuration, compiler
 flags, and raw output; only then does the envelope become a WCET and the
@@ -100,7 +100,8 @@ simulator-only) latches a stalled panel as `LIVENESS` past its deadline.
 
 ## The conformance corpus
 
-`clients/web/scene-conformance-corpus.json` is a reviewed, versioned golden. The
+`crates/pilotage-instrument-scene/corpus/scene-conformance-corpus.json`
+is a reviewed, versioned golden. The
 reference rasterizer authors it (`pilotage-instrument-raster`, module
 `src/raster/tests/conformance`); the browser test
 `clients/web/scene-conformance.test.mjs` replays it. Both sides pin to it, and a

@@ -12,13 +12,7 @@ crate-type = ["cdylib", "rlib"]
 workspace = true
 
 [dependencies]
-pilotage-alerts = { workspace = true }
-pilotage-instrument-feeder = { workspace = true }
-pilotage-instrument-glyphs = { workspace = true }
-pilotage-instrument-panels = { workspace = true }
-pilotage-instrument-registry = { workspace = true }
-pilotage-instrument-scene = { workspace = true }
-pilotage-instrument-state = { workspace = true }
+pilotage-instruments-web-shell = { path = "../web-instrument-shell" }
 pilotage-protocol = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }

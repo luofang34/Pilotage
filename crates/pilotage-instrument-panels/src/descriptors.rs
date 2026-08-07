@@ -13,9 +13,9 @@ use pilotage_instrument_registry::{
 };
 use pilotage_instrument_scene::{LayerId, SceneWriter};
 use pilotage_instrument_state::{
-    AirData, AircraftState, Attitude, DynSample, GroupId, HeadingReference, HeadingSample,
-    Kinematics, MonitorText, NavData, NavFromTo, NavSource, PanelData, Quat, Stamped, TextLine,
-    TurnBasis, TurnSample,
+    AirData, AircraftState, Attitude, DynSample, FdEngagement, FdMode, FdSample, GroupId,
+    HeadingReference, HeadingSample, Kinematics, MonitorText, NavData, NavFromTo, NavSource,
+    PanelData, Quat, Stamped, TextLine, TurnBasis, TurnSample,
 };
 
 use pilotage_instrument_registry::{ExtremeState, states};
@@ -58,6 +58,7 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     title: "PFD",
     required_layers: layer_bit(LayerId::Attitude)
         | layer_bit(LayerId::Tapes)
+        | layer_bit(LayerId::Guidance)
         | layer_bit(LayerId::Annunciation),
     required_groups: GroupSet::of(&[
         GroupId::Attitude,
@@ -67,6 +68,7 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
         GroupId::Trust,
         GroupId::Altitude,
         GroupId::Dynamics,
+        GroupId::FlightDirector,
     ]),
     design_frame: DesignFrame {
         width: PANEL_W,
@@ -75,9 +77,11 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
     background: BackgroundCapability::Cedeable,
     config_schema: PFD_CONFIG_SCHEMA,
     // Value-readout surfaces, keyed by the group whose data the number
-    // comes from: the honest-status family proves these stay
-    // numeral-free when that group is withheld. Scale ladders and the
-    // attitude ball carry no per-group numerals and stay undeclared.
+    // comes from. Honest status is proven by provenance claims on the
+    // runs themselves (the harness's withholding matrix tests every
+    // claim, wherever the ink lands), so these regions are the
+    // descriptor's statement of readout ownership for a shell — not
+    // the numeral police.
     group_regions: &[
         // IAS pointed readout value (the run anchors at x 40; the
         // scale ladder's runs anchor at x 70 and stay outside).
@@ -123,14 +127,12 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
                 height: 36.0,
             },
         ),
-        // The selected-altitude box is deliberately undeclared: it sits
-        // on the altitude tape strip, whose kinematics scale ladder
-        // legitimately runs ink through that area at extreme values,
-        // and the ladder label's y moves with altitude, so no region
-        // geometry separates the two — any band that is clear at one
-        // altitude is crossed at another. A region there would flag
-        // honest scale ink; the HSI's heading-select region carries the
-        // selections coverage instead.
+        // The selected-altitude box carries no region: it shares the
+        // altitude tape strip with kinematics ladder ink whose y moves
+        // with altitude, so no region geometry separates the two. Its
+        // honest-status coverage is the provenance claim on the
+        // selected-altitude run itself — a fabricated selection is
+        // refused wherever it is drawn.
         // VSI numeral strip (kinematic vertical speed), bounded to
         // exclude the selected-altitude box above and the baro box
         // below, whose numerals belong to other groups.
@@ -152,6 +154,10 @@ pub const PFD_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
         ExtremeState {
             id: "readout-extremes",
             build: pfd_readout_extremes,
+        },
+        ExtremeState {
+            id: "director-engaged",
+            build: pfd_director_engaged,
         },
     ],
     // Reference-rasterizer frame hash over the shared typical state —
@@ -237,10 +243,16 @@ pub const HSI_DESCRIPTOR: PanelDescriptor = PanelDescriptor {
             },
         ),
     ],
-    extreme_states: &[ExtremeState {
-        id: "reciprocal-course",
-        build: hsi_reciprocal_course,
-    }],
+    extreme_states: &[
+        ExtremeState {
+            id: "reciprocal-course",
+            build: hsi_reciprocal_course,
+        },
+        ExtremeState {
+            id: "track-up",
+            build: hsi_track_up,
+        },
+    ],
     raster_baseline: Some("66653ce135e6f2163fa48d805a0ab1a8f3d0ac51d778f7b1eb2aa4ec05bfbb7c"),
     draw: draw_hsi_panel,
 };
@@ -374,6 +386,37 @@ fn hsi_reciprocal_course() -> AircraftState {
     state
 }
 
+/// An engaged director commanding away from the current attitude: the
+/// dual-cue bars deflect in both axes and the mode annunciates. The
+/// withholding matrix then proves the bars and the mode label vanish
+/// with the group.
+fn pfd_director_engaged() -> AircraftState {
+    let mut state = states::typical();
+    state.director = Stamped {
+        data: Some(FdSample {
+            pitch_cmd_rad: 0.09,
+            roll_cmd_rad: -0.35,
+            mode: FdMode::Nav,
+            engagement: FdEngagement::Engaged,
+        }),
+        age_ms: Some(60.0),
+    };
+    state
+}
+
+/// The data-gateway profile (#260): a certified GPS navigator bridged
+/// over its serial protocol publishes position, track, and guidance —
+/// and no magnetic heading at all. The rose must present track-up,
+/// annunciated TRK, instead of going structurally inert.
+fn hsi_track_up() -> AircraftState {
+    let mut state = states::typical();
+    state.heading = Stamped {
+        data: None,
+        age_ms: None,
+    };
+    state
+}
+
 /// Eight maximum-length lines: the channel's full frame budget against
 /// the glyph vocabulary, with digits in every row for the honest-status
 /// family to police.
@@ -414,7 +457,7 @@ pub const BUILTIN_PANELS: &[PanelDescriptor] =
 /// value moves once per deliberate contract change, re-pinned with a
 /// review note saying why.
 pub const BUILTIN_SCENE_DIGEST: &str =
-    "850f92983ee1d30eb7948aa1dc53c40de854bf131dcfc1dc03981af396dc712c";
+    "bd85b8537f0b3e4abf8cf3ad3d36c6abfdceac15355639af2804d58dd9c61931";
 
 #[cfg(test)]
 mod digest_tests;

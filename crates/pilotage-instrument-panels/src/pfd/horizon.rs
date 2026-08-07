@@ -7,11 +7,12 @@
 use core::f32::consts::PI;
 use libm::{cosf, sinf};
 use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
+use pilotage_instrument_state::GroupId;
 use pilotage_instrument_state::units::RAD_TO_DEG;
 
 use pilotage_instrument_symbology::{fmt_label, palette, safety};
 
-const PX_PER_DEG_PITCH: f32 = 7.2;
+pub(super) const PX_PER_DEG_PITCH: f32 = 7.2;
 const ROLL_ARC_R: f32 = 144.0;
 /// Half the panel height expressed in degrees of pitch: the pitch at which
 /// the level horizon reaches the top/bottom edge. Beyond it the true
@@ -104,8 +105,9 @@ fn draw_pitch_ladder(
         scene.line(-half, y, half, y)?;
         if i.rem_euclid(4) == 0 {
             let label = fmt_label!(8, "{}", deg.abs() as i32);
-            scene.text(-half - 16.0, y, 14.0, Anchor::CENTER, label.as_str())?;
-            scene.text(half + 16.0, y, 14.0, Anchor::CENTER, label.as_str())?;
+            let tag = GroupId::Attitude.to_u8();
+            scene.text_attributed(tag, -half - 16.0, y, 14.0, Anchor::CENTER, label.as_str())?;
+            scene.text_attributed(tag, half + 16.0, y, 14.0, Anchor::CENTER, label.as_str())?;
         }
     }
     Ok(())

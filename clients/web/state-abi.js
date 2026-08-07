@@ -31,6 +31,7 @@ const TAG = Object.freeze({
   VARIATION: 0x0a,
   DYNAMICS: 0x0b,
   MONITOR_TEXT: 0x0c,
+  FLIGHT_DIRECTOR: 0x0d,
 });
 
 const IDENT_CAPACITY = 8;
@@ -293,6 +294,20 @@ function groupEncoders() {
         }
         f(view, off + 6 + TEXT_MAX_LINES * atom, mt.ageMs);
         return 6 + TEXT_MAX_LINES * atom + 4;
+      },
+    ],
+    [
+      TAG.FLIGHT_DIRECTOR,
+      (s) => s.director,
+      (view, off, fd) => {
+        b(view, off, fd.mode ?? 255);
+        b(view, off + 1, fd.engagement ?? 255);
+        b(view, off + 2, 0);
+        b(view, off + 3, 0);
+        f(view, off + 4, fd.pitchCmdRad);
+        f(view, off + 8, fd.rollCmdRad);
+        f(view, off + 12, fd.ageMs);
+        return 16;
       },
     ],
   ];

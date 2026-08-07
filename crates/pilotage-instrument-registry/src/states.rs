@@ -116,6 +116,7 @@ pub fn typical() -> AircraftState {
         },
         variation: Stamped::default(),
         dynamics: typical_dynamics(),
+        director: Stamped::default(),
         monitor_text: Stamped::default(),
     }
 }

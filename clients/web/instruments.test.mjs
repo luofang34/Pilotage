@@ -273,6 +273,13 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     "a genuinely unknown opcode still counts",
     interpretScene(view(trulyUnknown), new RecordingCtx()) === 1,
   );
+  // Every real scene carries provenance claims before its text runs; a
+  // dropped case would inflate the version-skew counter on every frame.
+  const attributed = Uint8Array.from([1, ...cmd(0x31, [3])]);
+  check(
+    "a provenance claim paints as a known no-op, not an unknown opcode",
+    interpretScene(view(attributed), new RecordingCtx()) === 0,
+  );
 }
 
 // ---- raw-argument guards (REN-04: fail-closed parity with the rasterizer) ---

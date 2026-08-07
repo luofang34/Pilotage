@@ -32,6 +32,37 @@ pub(super) fn group_statuses(
     out
 }
 
+/// The presence and freshness inputs one stamped group contributes to
+/// its fold.
+struct Ctx<'a> {
+    policy: &'a FreshnessPolicy,
+    trust: &'a Trust,
+    has: bool,
+    age_ms: Option<f32>,
+}
+
+impl<'a> Ctx<'a> {
+    fn of<T>(
+        policy: &'a FreshnessPolicy,
+        trust: &'a Trust,
+        stamped: &crate::aircraft::Stamped<T>,
+    ) -> Self {
+        Self {
+            policy,
+            trust,
+            has: stamped.data.is_some(),
+            age_ms: stamped.age_ms,
+        }
+    }
+}
+
+/// One group's trust fold from its presence, freshness, integrity, and
+/// declared validity.
+fn fold(ctx: &Ctx<'_>, fault: Option<crate::validate::GroupFault>, valid: bool) -> SignalStatus {
+    let fresh = group_freshness(ctx.policy, ctx.has, ctx.age_ms);
+    ctx.trust.fold(ctx.has, fresh, fault, valid)
+}
+
 fn group_status(
     state: &AircraftState,
     policy: &FreshnessPolicy,
@@ -40,36 +71,28 @@ fn group_status(
     id: GroupId,
 ) -> SignalStatus {
     match id {
-        GroupId::Attitude => {
-            let has = state.attitude.data.is_some();
-            let fresh = group_freshness(policy, has, state.attitude.age_ms);
-            trust.fold(
-                has,
-                fresh,
-                integrity.attitude.or(integrity.rates),
-                state.valid.attitude && state.valid.rates,
-            )
-        }
-        GroupId::Kinematics => {
-            let has = state.kinematics.data.is_some();
-            let fresh = group_freshness(policy, has, state.kinematics.age_ms);
-            trust.fold(
-                has,
-                fresh,
-                integrity.position.or(integrity.velocity),
-                state.valid.position && state.valid.velocity,
-            )
-        }
-        GroupId::Air => {
-            let has = state.air.data.is_some();
-            let fresh = group_freshness(policy, has, state.air.age_ms);
-            trust.fold(has, fresh, integrity.air, true)
-        }
-        GroupId::Nav => {
-            let has = state.nav.data.is_some();
-            let fresh = group_freshness(policy, has, state.nav.age_ms);
-            trust.fold(has, fresh, integrity.nav, true)
-        }
+        GroupId::Attitude => fold(
+            &Ctx {
+                policy,
+                trust,
+                has: state.attitude.data.is_some(),
+                age_ms: state.attitude.age_ms,
+            },
+            integrity.attitude.or(integrity.rates),
+            state.valid.attitude && state.valid.rates,
+        ),
+        GroupId::Kinematics => fold(
+            &Ctx {
+                policy,
+                trust,
+                has: state.kinematics.data.is_some(),
+                age_ms: state.kinematics.age_ms,
+            },
+            integrity.position.or(integrity.velocity),
+            state.valid.position && state.valid.velocity,
+        ),
+        GroupId::Air => fold(&Ctx::of(policy, trust, &state.air), integrity.air, true),
+        GroupId::Nav => fold(&Ctx::of(policy, trust, &state.nav), integrity.nav, true),
         // Wind folds no source trust, mirroring its resolved signal: a
         // wind estimate is advisory and independently stamped.
         GroupId::Wind => group_freshness(policy, state.wind.data.is_some(), state.wind.age_ms)
@@ -79,26 +102,28 @@ fn group_status(
         // be declared before any estimate group can show Valid.
         GroupId::Trust => trust.quality.worst(trust.coherence),
         GroupId::Altitude => fault_status(integrity.altitude),
-        GroupId::Heading => {
-            let has = state.heading.data.is_some();
-            let fresh = group_freshness(policy, has, state.heading.age_ms);
-            trust.fold(has, fresh, integrity.heading, state.valid.heading)
-        }
-        GroupId::Variation => {
-            let has = state.variation.data.is_some();
-            let fresh = group_freshness(policy, has, state.variation.age_ms);
-            trust.fold(has, fresh, integrity.variation, state.valid.variation)
-        }
-        GroupId::Dynamics => {
-            let has = state.dynamics.data.is_some();
-            let fresh = group_freshness(policy, has, state.dynamics.age_ms);
-            trust.fold(
-                has,
-                fresh,
-                integrity.dynamics,
-                state.valid.turn && state.valid.slip,
-            )
-        }
+        GroupId::Heading => fold(
+            &Ctx::of(policy, trust, &state.heading),
+            integrity.heading,
+            state.valid.heading,
+        ),
+        GroupId::Variation => fold(
+            &Ctx::of(policy, trust, &state.variation),
+            integrity.variation,
+            state.valid.variation,
+        ),
+        GroupId::Dynamics => fold(
+            &Ctx::of(policy, trust, &state.dynamics),
+            integrity.dynamics,
+            state.valid.turn && state.valid.slip,
+        ),
+        // The director folds source trust like nav: a command from an
+        // untrusted source must not draw bars.
+        GroupId::FlightDirector => fold(
+            &Ctx::of(policy, trust, &state.director),
+            integrity.director,
+            true,
+        ),
         // Advisory machine text folds no flight-source trust and runs
         // its own slow freshness policy, mirroring wind's independence.
         GroupId::MonitorText => group_freshness(

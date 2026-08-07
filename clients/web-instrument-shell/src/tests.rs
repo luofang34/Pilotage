@@ -373,7 +373,12 @@ fn every_encode_error_maps_to_its_own_status() {
 
 #[test]
 fn critical_layer_masks_gate_visible_commit() {
-    let pfd = panel_scene(&[LayerId::Attitude, LayerId::Tapes, LayerId::Annunciation]);
+    let pfd = panel_scene(&[
+        LayerId::Attitude,
+        LayerId::Tapes,
+        LayerId::Guidance,
+        LayerId::Annunciation,
+    ]);
     let hsi = panel_scene(&[
         LayerId::Attitude,
         LayerId::Tapes,
@@ -401,7 +406,8 @@ fn critical_layer_masks_gate_visible_commit() {
     );
     assert_scene_rejected(1, &failure_only, RenderStatus::SceneCriticalLayersMissing);
 
-    let pfd_missing_annunciation = panel_scene(&[LayerId::Attitude, LayerId::Tapes]);
+    let pfd_missing_annunciation =
+        panel_scene(&[LayerId::Attitude, LayerId::Tapes, LayerId::Guidance]);
     let hsi_missing_guidance =
         panel_scene(&[LayerId::Attitude, LayerId::Tapes, LayerId::Annunciation]);
     assert_scene_rejected(

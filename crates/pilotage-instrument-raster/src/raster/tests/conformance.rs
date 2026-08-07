@@ -2,7 +2,8 @@
 //!
 //! This module owns the reviewed scene corpus and its reference outcomes, and
 //! emits the shared golden the browser interpreter replays
-//! (`clients/web/scene-conformance-corpus.json`). The tests here are the
+//! (the IR crate's
+//! `corpus/scene-conformance-corpus.json`). The tests here are the
 //! reference-side wall:
 //!
 //! - the golden is exactly the reference's canonical serialization (drift
@@ -33,7 +34,7 @@ use crate::{FrameId, FramebufferDims, RasterError, render};
 
 fn golden_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../clients/web/scene-conformance-corpus.json")
+        .join("../pilotage-instrument-scene/corpus/scene-conformance-corpus.json")
 }
 
 fn entry<'a>(all: &'a [CorpusEntry], name: &str) -> &'a CorpusEntry {

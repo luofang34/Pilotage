@@ -163,6 +163,129 @@ fn failed_heading_renders_red_x() {
     );
 }
 
+/// The data-gateway shape (#260): kinematics with a moving velocity and
+/// no heading sample at all.
+fn track_only(vel_n: f32, vel_e: f32) -> PanelData {
+    let state = pilotage_instrument_state::AircraftState {
+        kinematics: pilotage_instrument_state::Stamped {
+            data: Some(pilotage_instrument_state::Kinematics {
+                pos_ned_m: [0.0, 0.0, -300.0],
+                vel_ned_mps: [vel_n, vel_e, 0.0],
+            }),
+            age_ms: Some(10.0),
+        },
+        quality: pilotage_instrument_state::EstimateQuality::Good,
+        valid: pilotage_instrument_state::ValidFlags {
+            position: true,
+            velocity: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    pilotage_instrument_state::resolve(
+        &state,
+        &pilotage_instrument_state::FreshnessPolicy::default(),
+    )
+}
+
+#[test]
+fn a_heading_less_source_gets_a_track_up_rose() {
+    // Due-east ground track: the rose paints, oriented by track, with
+    // the heading box showing the track value — the panel is no longer
+    // structurally inert for the data-gateway profile.
+    let data = track_only(0.0, 40.0);
+    assert_eq!(data.rose_basis, pilotage_instrument_state::RoseBasis::Track);
+    let labels = texts(&render(&data));
+    assert!(
+        labels.iter().any(|t| t == "N"),
+        "rose must paint track-up: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|t| t == "090°"),
+        "box shows the track value: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|t| t == "HDG"),
+        "a live track-up rose is not a failure: {labels:?}"
+    );
+}
+
+#[test]
+fn a_track_up_rose_annunciates_trk_and_never_a_heading_reference() {
+    let data = track_only(30.0, 30.0);
+    let labels = texts(&render(&data));
+    assert!(
+        labels.iter().any(|t| t == "TRK"),
+        "track-up must annunciate TRK: {labels:?}"
+    );
+    for reference in ["MAG", "TRU", "SIM", "REF"] {
+        assert!(
+            !labels.iter().any(|t| t == reference),
+            "{reference} must not annunciate on a track rose: {labels:?}"
+        );
+    }
+}
+
+#[test]
+fn a_track_up_rose_claims_kinematics_for_its_numerals() {
+    use pilotage_instrument_scene::SceneCmds;
+    let data = track_only(0.0, 40.0);
+    let scene = render(&data);
+    let heading_tag = pilotage_instrument_state::GroupId::Heading.to_u8();
+    let kinematics_tag = pilotage_instrument_state::GroupId::Kinematics.to_u8();
+    let mut claims = Vec::new();
+    for cmd in SceneCmds::new(&scene).expect("decodes") {
+        if let Ok(Cmd::Attribute { group }) = cmd {
+            claims.push(group);
+        }
+    }
+    assert!(
+        claims.contains(&kinematics_tag),
+        "rotating symbology derives from kinematics: {claims:?}"
+    );
+    assert!(
+        !claims.contains(&heading_tag),
+        "nothing on a track rose may claim heading: {claims:?}"
+    );
+}
+
+#[test]
+fn a_stationary_heading_less_source_still_fails_visibly() {
+    // Below the track groundspeed floor there is no usable track, so
+    // the rose fails exactly as before the track basis existed.
+    let data = track_only(0.0, 0.0);
+    assert_eq!(
+        data.rose_basis,
+        pilotage_instrument_state::RoseBasis::Unavailable
+    );
+    let labels = texts(&render(&data));
+    assert!(
+        labels.iter().any(|t| t == "HDG"),
+        "no heading and no track must flag: {labels:?}"
+    );
+}
+
+#[test]
+fn an_unusable_rose_fails_the_bug_box_closed() {
+    // Heading present but trust-failed, no usable track: the basis is
+    // Unavailable, the display reference is unknown, and the
+    // heading-select bug cannot be presented against any rose — the
+    // box shows its label, never the selection value.
+    let mut data = heading_only(0.5);
+    data.heading.value_rad = Sig::with_status(0.5, SignalStatus::Failed);
+    data.rose_basis = pilotage_instrument_state::RoseBasis::Unavailable;
+    data.heading_bug_rose_rad = Sig::with_status(0.0, SignalStatus::Failed);
+    let labels = texts(&render(&data));
+    assert!(
+        labels.iter().any(|t| t == "HDG REF"),
+        "the select box fails closed to its label: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|t| t.ends_with("°") && t != "---°"),
+        "no selection or heading value may present without a rose: {labels:?}"
+    );
+}
+
 // ---- layer contract ----------------------------------------------------------
 
 use pilotage_instrument_scene::{LayerId, validate_layers};

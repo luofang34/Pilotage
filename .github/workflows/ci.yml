@@ -104,14 +104,15 @@ jobs:
         # This is an inventory, not a compliance trace, and fabricates nothing.
         run: bash scripts/trace-report.sh
 
-      - name: sans-IO core crates are no_std (ADR-0017)
-        # Compiling the sans-IO leaf crates for a bare-metal target proves the
-        # no_std/no-alloc claim instead of trusting a comment.
+      - name: instrument closure is no_std, standalone (ADR-0017, ADR-0034)
+        # The extraction closure compiles for a bare-metal target in ONE
+        # invocation containing ONLY closure crates — this is the gate the
+        # extracted repo runs unchanged, so it must pass with nothing from
+        # outside the closure. The conformance harness is deliberately
+        # absent: it is a host-side tool and allocates.
         run: >
           cargo check
           -p pilotage-frames
-          -p pilotage-geo
-          -p pilotage-ingress
           -p pilotage-alerts
           -p pilotage-sha256
           -p pilotage-instrument-state
@@ -123,6 +124,22 @@ jobs:
           -p pilotage-instrument-feeder
           -p pilotage-instrument-registry
           --target thumbv7em-none-eabihf
+
+      - name: remaining sans-IO crates are no_std (ADR-0017)
+        run: >
+          cargo check
+          -p pilotage-geo
+          -p pilotage-ingress
+          --target thumbv7em-none-eabihf
+
+      - name: the instrument shell is protocol-free (ADR-0034)
+        # The wasm bundle splits on the protocol dependency: the instrument
+        # half must never grow one, or the extraction cut line closes.
+        run: |
+          tree=$(cargo tree -p pilotage-instruments-web-shell -e normal)
+          if grep -q "pilotage-protocol" <<<"$tree"; then
+            echo "pilotage-instruments-web-shell depends on pilotage-protocol"; exit 1
+          fi
 
       - name: target timing gate (REN-04)
         # No display hardware is selected: the USB CDC scan documents that no

@@ -17,6 +17,7 @@ pub(crate) const RECT: u8 = 0x23;
 pub(crate) const CIRCLE: u8 = 0x24;
 pub(crate) const ARC: u8 = 0x25;
 pub(crate) const TEXT: u8 = 0x30;
+pub(crate) const ATTRIBUTE: u8 = 0x31;
 pub(crate) const CLIP_RECT: u8 = 0x40;
 pub(crate) const BEGIN_LAYER: u8 = 0x50;
 pub(crate) const END_LAYER: u8 = 0x51;

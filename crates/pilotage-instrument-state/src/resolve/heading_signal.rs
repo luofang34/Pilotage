@@ -8,6 +8,38 @@ use crate::validate::StateIntegrity;
 
 use super::{Trust, Wind, finite, group_freshness};
 
+/// The orientation basis of the compass rose, and the display
+/// reference every angular quantity was converted into (NAV-01/#260).
+/// The panel draws from this — it never re-derives the selection, so
+/// the rose and the converted quantities cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoseBasis {
+    /// Rose oriented by the heading sample, presented in its declared
+    /// reference.
+    Heading,
+    /// No usable heading; the rose orients by the NED ground track and
+    /// every quantity presents in the true reference. The data-gateway
+    /// profile: a certified GPS navigator publishes track and no
+    /// magnetic heading. Annunciated distinctly (TRK) — a track-up
+    /// rose must never read as a heading.
+    Track,
+    /// Neither heading nor track is usable; the rose fails visibly.
+    Unavailable,
+}
+
+impl RoseBasis {
+    /// The display reference conversions present in under this basis:
+    /// the heading sample's own, the true reference a NED track lives
+    /// in, or unknown — under which referenced angles fail closed.
+    pub fn display_reference(self, heading: HeadingReference) -> HeadingReference {
+        match self {
+            Self::Heading => heading,
+            Self::Track => HeadingReference::True,
+            Self::Unavailable => HeadingReference::Unknown,
+        }
+    }
+}
+
 /// Heading resolved from the independent sample (NAV-01): the value,
 /// its declared reference, and nothing else — attitude yaw never feeds
 /// this. A missing sample resolves `Missing` and the compass rose fails
@@ -19,6 +51,20 @@ pub struct ResolvedHeading {
     pub value_rad: Sig<f32>,
     /// The reference every HSI angular quantity is presented in.
     pub reference: HeadingReference,
+}
+
+/// Selects the rose basis: the heading sample when it shows a value,
+/// else the ground track — an honest, annunciated presentation, never
+/// a substitution (track is not heading; the basis says which one the
+/// rose is).
+pub(super) fn rose_basis(heading: &ResolvedHeading, track_shows: bool) -> RoseBasis {
+    if heading.value_rad.status.shows_value() {
+        RoseBasis::Heading
+    } else if track_shows {
+        RoseBasis::Track
+    } else {
+        RoseBasis::Unavailable
+    }
 }
 
 /// Resolves the independent heading sample. Its status folds the same

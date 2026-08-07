@@ -31,7 +31,7 @@
 //! conservative placeholder is never mistaken for a measured target. The one
 //! model shipped here is [`CONSERVATIVE_CORTEX_M7_CLASS`]; its bounds,
 //! rationale, and derived envelope are recorded in the timing artifact
-//! (`docs/instruments/evidence-artifacts/timing/target-timing.txt`), and the
+//! (`crates/pilotage-instrument-raster/evidence/target-timing.txt`), and the
 //! USB CDC scan (`scripts/detect-target.sh`) detects a connected target
 //! rather than asking.
 //!

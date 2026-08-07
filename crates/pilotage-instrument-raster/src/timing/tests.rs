@@ -132,8 +132,7 @@ fn the_timing_artifact_matches_the_shipped_model() {
     // this guard fails CI when either side drifts, so the recorded bounds,
     // budgets, envelope, and deadline can never disagree with the shipped
     // code.
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/instruments/evidence-artifacts/timing/target-timing.txt");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("evidence/target-timing.txt");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let model = CONSERVATIVE_CORTEX_M7_CLASS;

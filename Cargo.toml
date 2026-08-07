@@ -39,6 +39,7 @@ members = [
     "hosts/session-host",
     "adapters/gazebo",
     "clients/web-instruments",
+    "clients/web-instrument-shell",
     "clients/web-control",
 ]
 

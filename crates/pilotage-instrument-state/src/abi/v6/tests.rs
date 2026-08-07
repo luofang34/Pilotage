@@ -267,3 +267,75 @@ fn unknown_variants_encode_as_255_and_round_trip_explicitly() {
     let report = decode_state(&frame).expect("decodes");
     assert_eq!(report.state, state, "Unknown round-trips as Unknown");
 }
+
+#[test]
+fn unknown_director_bytes_round_trip_as_the_fail_closed_sentinels() {
+    use crate::aircraft::Stamped;
+    use crate::director::{FdEngagement, FdMode, FdSample};
+    let state = AircraftState {
+        director: Stamped {
+            data: Some(FdSample {
+                pitch_cmd_rad: 0.0,
+                roll_cmd_rad: 0.0,
+                mode: FdMode::Unknown,
+                engagement: FdEngagement::Unknown,
+            }),
+            age_ms: Some(5.0),
+        },
+        ..AircraftState::default()
+    };
+    let frame = encode(&state);
+    let payload = locate_payload(&frame, 0x0D).expect("director present");
+    assert_eq!(frame[payload], 255, "unknown mode byte");
+    assert_eq!(frame[payload + 1], 255, "unknown engagement byte");
+    let report = decode_state(&frame).expect("decodes");
+    assert_eq!(report.state.director, state.director);
+}
+
+#[test]
+fn director_faults_fail_the_group_per_branch() {
+    use crate::aircraft::Stamped;
+    use crate::director::{FdEngagement, FdMode, FdSample};
+    use crate::validate_state;
+    let base = |sample: FdSample| AircraftState {
+        director: Stamped {
+            data: Some(sample),
+            age_ms: Some(5.0),
+        },
+        ..AircraftState::default()
+    };
+    let good = FdSample {
+        pitch_cmd_rad: 0.1,
+        roll_cmd_rad: -0.2,
+        mode: FdMode::Nav,
+        engagement: FdEngagement::Engaged,
+    };
+    assert!(validate_state(&base(good)).director.is_none());
+    for bad in [
+        FdSample {
+            mode: FdMode::Unknown,
+            ..good
+        },
+        FdSample {
+            engagement: FdEngagement::Unknown,
+            ..good
+        },
+        FdSample {
+            pitch_cmd_rad: f32::NAN,
+            ..good
+        },
+        FdSample {
+            pitch_cmd_rad: 2.0,
+            ..good
+        },
+        FdSample {
+            roll_cmd_rad: 4.0,
+            ..good
+        },
+    ] {
+        assert!(
+            validate_state(&base(bad)).director.is_some(),
+            "must fault: {bad:?}"
+        );
+    }
+}

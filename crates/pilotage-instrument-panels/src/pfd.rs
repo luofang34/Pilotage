@@ -4,7 +4,7 @@
 
 use pilotage_alerts::AlertOutput;
 use pilotage_instrument_scene::{Anchor, LayerId, PaintMode, SceneError, SceneWriter};
-use pilotage_instrument_state::{ChevronSense, PanelData, SignalStatus};
+use pilotage_instrument_state::{ChevronSense, FdEngagement, GroupId, PanelData, SignalStatus};
 
 use pilotage_instrument_symbology::{annunciation, palette, safety, source_label, status_paint};
 
@@ -149,6 +149,79 @@ pub fn draw_pfd(
     }
     scene.end_layer(LayerId::Tapes)?;
 
+    // Director command bars are guidance overlaying the attitude
+    // field: layers encode once each in ascending z-order, so the
+    // Guidance band paints over Attitude by the layer contract — an
+    // explicit decision, not an accident of band choice (#261). The
+    // band is always emitted so the layer contract holds under every
+    // degradation; its content disappears with the director.
+    scene.begin_layer(LayerId::Guidance)?;
+    // The unusual-attitude tier strips everything that competes with
+    // the horizon and the recovery chevrons — command bars included:
+    // they overlay the exact chevron region from a higher band, and a
+    // recovery is flown to the horizon, not to an autopilot command.
+    if !declutter {
+        director_bars(scene, data, att_status)?;
+    }
+    scene.end_layer(LayerId::Guidance)?;
+
+    annunciation_band(scene, data, alerts, att_status)?;
+    Ok(())
+}
+
+/// Dual-cue flight-director command bars, drawn only from a fully
+/// valid, ENGAGED director over a shown attitude: the bars mean "fly
+/// toward the command", so they need both the command and the current
+/// attitude, and under any degradation they disappear entirely — a
+/// frozen or dashed command is still a command (#261).
+fn director_bars(
+    scene: &mut SceneWriter<'_>,
+    data: &PanelData,
+    att_status: SignalStatus,
+) -> Result<(), SceneError> {
+    let fd = data.director;
+    if fd.engagement != FdEngagement::Engaged
+        || !fd.status.shows_value()
+        || !att_status.shows_value()
+    {
+        return Ok(());
+    }
+    const PX_PER_DEG_ROLL: f32 = 3.0;
+    use horizon::PX_PER_DEG_PITCH;
+    const RAD_TO_DEG: f32 = pilotage_instrument_state::units::RAD_TO_DEG;
+    let pitch_err_px = ((fd.pitch_cmd_rad - data.pitch_rad.value) * RAD_TO_DEG * PX_PER_DEG_PITCH)
+        .clamp(-90.0, 90.0);
+    let roll_err_px =
+        ((fd.roll_cmd_rad - data.roll_rad.value) * RAD_TO_DEG * PX_PER_DEG_ROLL).clamp(-90.0, 90.0);
+    scene.fill_color(palette::MAGENTA)?;
+    // Fly-to bars: the pitch bar sits where the commanded pitch is
+    // (positive command error displaces it up), the roll bar likewise
+    // sideways; centering both on the aircraft symbol satisfies them.
+    scene.rect(
+        PaintMode::Fill,
+        240.0 - 45.0,
+        180.0 - pitch_err_px - 2.5,
+        90.0,
+        5.0,
+    )?;
+    scene.rect(
+        PaintMode::Fill,
+        240.0 + roll_err_px - 2.5,
+        180.0 - 45.0,
+        5.0,
+        90.0,
+    )?;
+    Ok(())
+}
+
+/// The Annunciation band: attitude/airspeed/altitude failure flags,
+/// per-function source labels, and the alert stack.
+fn annunciation_band(
+    scene: &mut SceneWriter<'_>,
+    data: &PanelData,
+    alerts: Option<&AlertOutput>,
+    att_status: SignalStatus,
+) -> Result<(), SceneError> {
     scene.begin_layer(LayerId::Annunciation)?;
     if att_status.shows_value() {
         if att_status != SignalStatus::Valid {
@@ -160,12 +233,53 @@ pub fn draw_pfd(
     if data.ias_kt.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 8.0, 60.0, 74.0, 200.0, "IAS")?;
     }
+    // The mode is part of the director feature, not a follow-up: a
+    // command bar without the mode that produced it is not
+    // interpretable. Annunciated when armed or engaged; claimed from
+    // the director group so the withholding matrix tests it.
+    if data.director.status.shows_value()
+        && matches!(
+            data.director.engagement,
+            FdEngagement::Armed | FdEngagement::Engaged
+        )
+    {
+        scene.fill_color(palette::MAGENTA)?;
+        scene.text_attributed(
+            GroupId::FlightDirector.to_u8(),
+            240.0,
+            44.0,
+            12.0,
+            Anchor::CENTER,
+            data.director.mode.label(),
+        )?;
+    }
     if data.altitude.value_ft.status == SignalStatus::Failed {
         status_paint::draw_red_x(scene, 398.0, 60.0, 74.0, 200.0, "ALT")?;
     }
-    source_label::draw_source_label(scene, 45.0, 250.0, "IAS", &data.sources.airspeed)?;
-    source_label::draw_source_label(scene, 435.0, 250.0, "ALT", &data.sources.altitude)?;
-    source_label::draw_source_label(scene, 240.0, 300.0, "ATT", &data.sources.attitude)?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Air.to_u8(),
+        45.0,
+        250.0,
+        "IAS",
+        &data.sources.airspeed,
+    )?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Kinematics.to_u8(),
+        435.0,
+        250.0,
+        "ALT",
+        &data.sources.altitude,
+    )?;
+    source_label::draw_source_label(
+        scene,
+        GroupId::Attitude.to_u8(),
+        240.0,
+        300.0,
+        "ATT",
+        &data.sources.attitude,
+    )?;
     if let Some(alerts) = alerts {
         annunciation::draw_alert_stack(scene, alerts)?;
     }
@@ -264,6 +378,8 @@ fn draw_slip_ball(scene: &mut SceneWriter<'_>, data: &PanelData, y: f32) -> Resu
 mod attitude_tests;
 #[cfg(test)]
 mod datum_tests;
+#[cfg(test)]
+mod director_tests;
 #[cfg(test)]
 mod dyn_tests;
 #[cfg(test)]

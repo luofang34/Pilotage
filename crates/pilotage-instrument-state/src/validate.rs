@@ -79,6 +79,9 @@ pub struct StateIntegrity {
     /// Monitor-text fault: an impossible line count or malformed line
     /// content on the wire.
     pub monitor_text: Option<GroupFault>,
+    /// Flight-director fault: non-finite or out-of-envelope commanded
+    /// attitude, or an unknown mode/engagement byte.
+    pub director: Option<GroupFault>,
 }
 
 fn all_finite(values: &[f32]) -> bool {
@@ -187,12 +190,28 @@ pub fn validate_state(state: &AircraftState) -> StateIntegrity {
         }
     }
     integrity.dynamics = state.dynamics.data.as_ref().and_then(dynamics_fault);
+    integrity.director = state.director.data.as_ref().and_then(director_fault);
     if let Some(text) = &state.monitor_text.data
         && text.is_malformed()
     {
         integrity.monitor_text = Some(GroupFault::MalformedIdent);
     }
     integrity
+}
+
+fn director_fault(director: &crate::director::FdSample) -> Option<GroupFault> {
+    use crate::director::{FdEngagement, FdMode};
+    if director.mode == FdMode::Unknown || director.engagement == FdEngagement::Unknown {
+        return Some(GroupFault::UnknownEnum);
+    }
+    let pitch_ok = director.pitch_cmd_rad.is_finite()
+        && director.pitch_cmd_rad.abs() <= core::f32::consts::FRAC_PI_2;
+    let roll_ok =
+        director.roll_cmd_rad.is_finite() && director.roll_cmd_rad.abs() <= core::f32::consts::PI;
+    if !(pitch_ok && roll_ok) {
+        return Some(GroupFault::NonFinite);
+    }
+    None
 }
 
 fn dynamics_fault(dynamics: &crate::dynamics::DynSample) -> Option<GroupFault> {

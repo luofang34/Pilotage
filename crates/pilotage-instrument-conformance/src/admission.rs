@@ -6,10 +6,18 @@
 //! a backend would place them, so a panel cannot move a run out of a
 //! check's sight with a `translate`/`rotate` it already uses for
 //! legitimate drawing.
+//!
+//! Honest status is a provenance rule, not a positional one: every
+//! numeric run must claim the state group its value derives from
+//! ([`Cmd::Attribute`]), and a claimed run may not be visible when its
+//! group shows no value — wherever it is drawn. Declared
+//! `group_regions` no longer drive this family; they remain the
+//! descriptor's statement of which readout surface belongs to which
+//! group (the dash-out declaration a shell may present).
 
 use pilotage_instrument_glyphs::PANEL_VOCABULARY;
 use pilotage_instrument_registry::{
-    CANONICAL_STATES, EMPTY_CONFIG, PanelDescriptor, PanelDrawError, Region, Registry,
+    CANONICAL_STATES, EMPTY_CONFIG, PanelDescriptor, PanelDrawError, Registry,
 };
 use pilotage_instrument_scene::{
     Cmd, LayerError, MAX_SCENE_BYTES, SceneCmds, SceneWriter, validate_layers,
@@ -20,9 +28,11 @@ use pilotage_instrument_state::{
 
 mod background;
 mod geometry;
+mod provenance;
 
 use background::check_background;
 use geometry::{Ctm, Rect, text_rect};
+use provenance::check_provenance;
 
 /// One admission run's outcome: how much was covered, and what was
 /// tolerated. Failures are typed errors, never entries here.
@@ -107,20 +117,69 @@ pub enum AdmissionError {
         /// The uncovered character.
         ch: char,
     },
-    /// A withheld group's declared region shows numeric text — the
-    /// panel painted numbers for data it was not given.
+    /// A visible run claims a group that shows no value in the drawn
+    /// state — the panel painted a number for data it was not given.
     #[error(
-        "panel {panel} paints numeric text {text:?} in the {group:?} region of {state} with {group:?} withheld"
+        "panel {panel} shows {text:?} claimed from {group:?} in {state} while {group:?} shows no value"
     )]
-    DishonestNumeral {
+    FabricatedNumeral {
         /// The drawing panel.
         panel: &'static str,
         /// The corpus state.
         state: &'static str,
-        /// The withheld group whose region gained numbers.
+        /// The claimed group.
         group: GroupId,
         /// The offending run.
         text: String,
+    },
+    /// A numeric run carries no provenance claim. Totality is what
+    /// makes the claim rule sound: an unclaimed numeral would escape
+    /// every withholding case.
+    #[error("panel {panel} draws numeric text {text:?} in {state} with no provenance claim")]
+    UntaggedNumeral {
+        /// The drawing panel.
+        panel: &'static str,
+        /// The corpus state.
+        state: &'static str,
+        /// The unclaimed run.
+        text: String,
+    },
+    /// A run claims a group outside the panel's required set (or an
+    /// unknown tag) — a claim the withholding matrix could never test.
+    #[error(
+        "panel {panel} claims tag {tag:#04x} for {text:?} in {state}, outside its required groups"
+    )]
+    ForeignClaim {
+        /// The drawing panel.
+        panel: &'static str,
+        /// The corpus state.
+        state: &'static str,
+        /// The claimed tag byte.
+        tag: u8,
+        /// The claiming run.
+        text: String,
+    },
+    /// A visible run claims configuration provenance under the
+    /// harness's fixed empty configuration — it derives from nothing.
+    #[error(
+        "panel {panel} shows {text:?} in {state} claiming configuration provenance under the empty configuration"
+    )]
+    ConfigClaim {
+        /// The drawing panel.
+        panel: &'static str,
+        /// The corpus state.
+        state: &'static str,
+        /// The claiming run.
+        text: String,
+    },
+    /// A provenance claim not immediately followed by the text run it
+    /// covers — a dangling or stacked claim is structurally malformed.
+    #[error("panel {panel} scene for {state} carries a provenance claim that covers no text run")]
+    MisplacedClaim {
+        /// The drawing panel.
+        panel: &'static str,
+        /// The corpus state.
+        state: &'static str,
     },
     /// The Background band contradicts the declared capability: a
     /// compositor plans around this declaration, so both directions are
@@ -137,20 +196,6 @@ pub enum AdmissionError {
         /// What the scene actually did: "paints" or "does not cover".
         defect: &'static str,
     },
-    /// The nothing-fed furniture itself paints numerals inside a
-    /// declared region — an always-fabricating panel would otherwise
-    /// launder its numbers into the honest-status baseline.
-    #[error(
-        "panel {panel} paints numeric furniture {text:?} inside its {group:?} region with nothing fed"
-    )]
-    DishonestFurniture {
-        /// The drawing panel.
-        panel: &'static str,
-        /// The group whose region carries the furniture numerals.
-        group: GroupId,
-        /// The offending run.
-        text: String,
-    },
 }
 
 /// One decoded text run as a conservative design-space ink rectangle.
@@ -158,6 +203,8 @@ pub enum AdmissionError {
 struct TextRun {
     rect: Rect,
     text: String,
+    /// The provenance claim prefixing the run, if any.
+    attribution: Option<u8>,
     /// Whether a clip was active when the run painted.
     clipped: bool,
     /// Whether the ink rectangle intersects the active clip — a tape
@@ -168,15 +215,6 @@ struct TextRun {
 impl TextRun {
     fn numeric(&self) -> bool {
         self.text.chars().any(|c| c.is_ascii_digit())
-    }
-
-    fn in_region(&self, region: &Region) -> bool {
-        self.rect.intersects(&Rect {
-            min_x: region.x,
-            min_y: region.y,
-            max_x: region.x + region.width,
-            max_y: region.y + region.height,
-        })
     }
 }
 
@@ -193,23 +231,6 @@ fn admit_panel(
     panel: &'static PanelDescriptor,
     report: &mut AdmissionReport,
 ) -> Result<(), AdmissionError> {
-    // The nothing-fed furniture must be numeral-free inside every
-    // declared region: honest degradation shows dashes and labels
-    // there, and an always-fabricating panel must not be able to
-    // launder its numbers into the baseline.
-    let nothing_fed = &CANONICAL_STATES[0];
-    let furniture = draw_runs(panel, nothing_fed.id, None, (nothing_fed.build)())?;
-    for (group, region) in panel.group_regions {
-        for run in &furniture {
-            if run.numeric() && run.visible && run.in_region(region) {
-                return Err(AdmissionError::DishonestFurniture {
-                    panel: panel.id,
-                    group: *group,
-                    text: run.text.clone(),
-                });
-            }
-        }
-    }
     let states = CANONICAL_STATES
         .iter()
         .map(|s| (s.id, s.build))
@@ -233,7 +254,9 @@ fn check_case(
     state: AircraftState,
     report: &mut AdmissionReport,
 ) -> Result<(), AdmissionError> {
-    let runs = draw_runs(panel, state_id, withheld, state)?;
+    let data = resolve(&state, &FreshnessPolicy::default());
+    let runs = draw_runs(panel, state_id, withheld, &data)?;
+    check_provenance(panel, state_id, withheld, &runs)?;
     let frame = Rect {
         min_x: 0.0,
         min_y: 0.0,
@@ -258,34 +281,7 @@ fn check_case(
             });
         }
     }
-    if let Some(group) = withheld {
-        check_honest_status(panel, state_id, group, &runs)?;
-    }
     report.cases += 1;
-    Ok(())
-}
-
-fn check_honest_status(
-    panel: &'static PanelDescriptor,
-    state_id: &'static str,
-    group: GroupId,
-    runs: &[TextRun],
-) -> Result<(), AdmissionError> {
-    for (region_group, region) in panel.group_regions {
-        if *region_group != group {
-            continue;
-        }
-        for run in runs {
-            if run.numeric() && run.visible && run.in_region(region) {
-                return Err(AdmissionError::DishonestNumeral {
-                    panel: panel.id,
-                    state: state_id,
-                    group,
-                    text: run.text.clone(),
-                });
-            }
-        }
-    }
     Ok(())
 }
 
@@ -293,11 +289,10 @@ fn draw_runs(
     panel: &'static PanelDescriptor,
     state_id: &'static str,
     withheld: Option<GroupId>,
-    state: AircraftState,
+    data: &PanelData,
 ) -> Result<Vec<TextRun>, AdmissionError> {
-    let data = resolve(&state, &FreshnessPolicy::default());
     let mut buf = vec![0u8; MAX_SCENE_BYTES];
-    let scene = draw_scene(panel, &data, &mut buf).map_err(|source| AdmissionError::Draw {
+    let scene = draw_scene(panel, data, &mut buf).map_err(|source| AdmissionError::Draw {
         panel: panel.id,
         state: state_id,
         withheld,
@@ -324,10 +319,23 @@ fn draw_runs(
         });
     }
     check_background(panel, state_id, scene)?;
-    collect_runs(scene).ok_or(AdmissionError::Decode {
-        panel: panel.id,
-        state: state_id,
-    })
+    match collect_runs(scene) {
+        Ok(runs) => Ok(runs),
+        Err(RunsDefect::Decode) => Err(AdmissionError::Decode {
+            panel: panel.id,
+            state: state_id,
+        }),
+        Err(RunsDefect::MisplacedClaim) => Err(AdmissionError::MisplacedClaim {
+            panel: panel.id,
+            state: state_id,
+        }),
+    }
+}
+
+/// Why the run scanner refused a scene.
+enum RunsDefect {
+    Decode,
+    MisplacedClaim,
 }
 
 fn draw_scene<'b>(
@@ -342,13 +350,21 @@ fn draw_scene<'b>(
 }
 
 /// Decodes every text run into a design-space ink rectangle, tracking
-/// the transform and clip state the way a backend would.
-fn collect_runs(scene: &[u8]) -> Option<Vec<TextRun>> {
-    let cmds = SceneCmds::new(scene).ok()?;
+/// the transform and clip state the way a backend would, and pairing
+/// each run with the provenance claim prefixing it. A claim not
+/// immediately consumed by a text run is refused — stacked, dangling,
+/// or shape-interposed claims are structurally malformed.
+fn collect_runs(scene: &[u8]) -> Result<Vec<TextRun>, RunsDefect> {
+    let cmds = SceneCmds::new(scene).map_err(|_| RunsDefect::Decode)?;
     let mut runs = Vec::new();
+    let mut pending: Option<u8> = None;
     let mut stack = vec![(Ctm::IDENTITY, None::<Rect>)];
     for cmd in cmds {
+        if pending.is_some() && !matches!(cmd, Ok(Cmd::Text { .. })) {
+            return Err(RunsDefect::MisplacedClaim);
+        }
         match cmd {
+            Ok(Cmd::Attribute { group }) => pending = Some(group),
             Ok(Cmd::Text {
                 x,
                 y,
@@ -356,17 +372,18 @@ fn collect_runs(scene: &[u8]) -> Option<Vec<TextRun>> {
                 anchor,
                 text,
             }) => {
-                let (ctm, clip) = stack.last().copied()?;
+                let (ctm, clip) = stack.last().copied().ok_or(RunsDefect::Decode)?;
                 let local = text_rect(x, y, size, anchor.h, anchor.v, text.chars().count());
                 let rect = ctm.map_rect(&local);
                 runs.push(TextRun {
                     visible: clip.is_none_or(|clip| rect.intersects(&clip)),
                     rect,
                     text: text.to_string(),
+                    attribution: pending.take(),
                     clipped: clip.is_some(),
                 });
             }
-            Ok(Cmd::Save) => stack.push(stack.last().copied()?),
+            Ok(Cmd::Save) => stack.push(stack.last().copied().ok_or(RunsDefect::Decode)?),
             Ok(Cmd::Restore) => {
                 stack.pop();
                 if stack.is_empty() {
@@ -398,10 +415,13 @@ fn collect_runs(scene: &[u8]) -> Option<Vec<TextRun>> {
                 }
             }
             Ok(_) => {}
-            Err(_) => return None,
+            Err(_) => return Err(RunsDefect::Decode),
         }
     }
-    Some(runs)
+    if pending.is_some() {
+        return Err(RunsDefect::MisplacedClaim);
+    }
+    Ok(runs)
 }
 
 #[cfg(test)]

@@ -1643,6 +1643,18 @@ dependencies = [
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
+ "pilotage-instruments-web-shell",
+ "pilotage-protocol",
+ "prost",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "pilotage-instruments-web-shell"
+version = "0.1.0"
+dependencies = [
  "pilotage-alerts",
  "pilotage-instrument-feeder",
  "pilotage-instrument-glyphs",
@@ -1650,8 +1662,6 @@ dependencies = [
  "pilotage-instrument-registry",
  "pilotage-instrument-scene",
  "pilotage-instrument-state",
- "pilotage-protocol",
- "prost",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",

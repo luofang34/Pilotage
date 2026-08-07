@@ -153,6 +153,15 @@ pub fn full() -> AircraftState {
     }
     AircraftState {
         attitude: attitude([0.5, 0.5, 0.5, 0.5], [0.02, -0.01, 0.05], 80.0),
+        director: stamped(
+            crate::director::FdSample {
+                pitch_cmd_rad: 0.08,
+                roll_cmd_rad: -0.2,
+                mode: crate::director::FdMode::Nav,
+                engagement: crate::director::FdEngagement::Engaged,
+            },
+            80.0,
+        ),
         kinematics: kinematics([1200.0, 340.0, -305.0], [52.0, 9.0, -2.0], 80.0),
         air: air(53.0, 1013.2, 80.0),
         nav,

@@ -21,7 +21,7 @@ fn all_is_ascending_and_bijective_with_from_u8() {
 #[test]
 fn unassigned_tags_do_not_resolve() {
     assert_eq!(GroupId::from_u8(0x00), None);
-    for value in 0x0Du8..=0xFF {
+    for value in 0x0Eu8..=0xFF {
         assert_eq!(GroupId::from_u8(value), None, "tag {value:#04x}");
     }
 }
