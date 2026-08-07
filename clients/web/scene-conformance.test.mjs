@@ -324,9 +324,9 @@ function conformCanvas(entry, v, out) {
 // upstream corpus edit arrives via a pin advance and MUST turn this suite
 // red until the interpreter is re-verified against the new corpus and the
 // literals are consciously moved. Never resolve a mismatch by unpinning.
-const EXPECTED_CORPUS_VERSION = 3;
+const EXPECTED_CORPUS_VERSION = 4;
 const EXPECTED_CORPUS_SHA256 =
-  "7130efd29b19c2f0fb4622cefd7357dd4e6c038f70efa27e0adbebc4d03cdc6f";
+  "1fb8e6de2734ff7506843b05869f39d501f0926599636c6110a7e3b0c6e1625e";
 
 const golden = JSON.parse(
   readFileSync(
