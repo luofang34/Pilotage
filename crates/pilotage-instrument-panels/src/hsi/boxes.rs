@@ -4,7 +4,7 @@
 use core::f32::consts::PI;
 use pilotage_instrument_scene::{Anchor, PaintMode, SceneError, SceneWriter};
 use pilotage_instrument_state::units::{MPS_TO_KT, RAD_TO_DEG, wrap_deg_360};
-use pilotage_instrument_state::{NavSource, PanelData};
+use pilotage_instrument_state::{GroupId, NavSource, PanelData};
 
 use pilotage_instrument_symbology::{fmt_label, palette, safety};
 
@@ -36,8 +36,9 @@ pub fn wind_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), Sce
     let dir = fmt_label!(8, "{deg:03}°");
     let spd = fmt_label!(12, "{:.0}kt", wind.value.speed_mps * MPS_TO_KT);
     scene.fill_color(palette::WHITE)?;
-    scene.text(78.0, 16.0, 15.0, Anchor::CENTER, dir.as_str())?;
-    scene.text(78.0, 36.0, 15.0, Anchor::CENTER, spd.as_str())?;
+    let wind = GroupId::Wind.to_u8();
+    scene.text_attributed(wind, 78.0, 16.0, 15.0, Anchor::CENTER, dir.as_str())?;
+    scene.text_attributed(wind, 78.0, 36.0, 15.0, Anchor::CENTER, spd.as_str())?;
     Ok(())
 }
 
@@ -52,7 +53,14 @@ pub fn dist_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), Sce
         (Some(nm), true) => {
             let text = fmt_label!(12, "{nm:.1}");
             scene.fill_color(palette::MAGENTA)?;
-            scene.text(422.0, 34.0, 18.0, Anchor::CENTER, text.as_str())?;
+            scene.text_attributed(
+                GroupId::Nav.to_u8(),
+                422.0,
+                34.0,
+                18.0,
+                Anchor::CENTER,
+                text.as_str(),
+            )?;
         }
         _ => {
             scene.fill_color(palette::GREY)?;
@@ -84,7 +92,14 @@ pub fn course_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), S
     let shown = if deg == 0 { 360 } else { deg };
     let text = fmt_label!(8, "{shown:03}°");
     scene.fill_color(source_color(data.nav.data.source))?;
-    scene.text(78.0, 340.0, 18.0, Anchor::CENTER, text.as_str())?;
+    scene.text_attributed(
+        GroupId::Nav.to_u8(),
+        78.0,
+        340.0,
+        18.0,
+        Anchor::CENTER,
+        text.as_str(),
+    )?;
     Ok(())
 }
 
@@ -114,7 +129,14 @@ pub fn heading_sel_box(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<
             [382.0, 346.0],
         ],
     )?;
-    scene.text(438.0, 340.0, 18.0, Anchor::CENTER, text.as_str())?;
+    scene.text_attributed(
+        GroupId::Selections.to_u8(),
+        438.0,
+        340.0,
+        18.0,
+        Anchor::CENTER,
+        text.as_str(),
+    )?;
     Ok(())
 }
 

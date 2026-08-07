@@ -91,6 +91,7 @@ function fullState() {
     heading: { rad: 0.35, reference: 2, ageMs: 90 },
     variation: { eastRad: 0.15, sourceId: 3, ageMs: 120 },
     dynamics: { turnRps: 0.05, turnBasis: 0, lateralMps2: 0.3, ageMs: 85 },
+    director: { pitchCmdRad: 0.08, rollCmdRad: -0.2, mode: 1, engagement: 2, ageMs: 80 },
     monitorText: { revision: 9, lines: ["ENG 1 OK", "FUEL 82.5"], ageMs: 500 },
   };
 }

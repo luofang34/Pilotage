@@ -8,7 +8,7 @@ use pilotage_instrument_scene::{
     Anchor, PaintMode, Rgba8, SceneError, SceneWriter, nominal_text_ink_width, nominal_text_width,
 };
 use pilotage_instrument_state::AltitudeClass;
-use pilotage_instrument_state::{PanelData, Sig};
+use pilotage_instrument_state::{GroupId, PanelData, Sig};
 
 use pilotage_instrument_symbology::{fmt_label, palette, safety, status_paint};
 
@@ -44,7 +44,14 @@ pub fn speed_tape(
             scene.line(78.0, y, 90.0, y)?;
             if step % 2 == 0 {
                 let label = fmt_label!(8, "{kt}");
-                scene.text(70.0, y, 20.0, Anchor::CENTER, label.as_str())?;
+                scene.text_attributed(
+                    GroupId::Air.to_u8(),
+                    70.0,
+                    y,
+                    20.0,
+                    Anchor::CENTER,
+                    label.as_str(),
+                )?;
             }
         }
         scene.restore()?;
@@ -55,13 +62,20 @@ pub fn speed_tape(
 
     // Pointed readout box, always drawn so `Missing` shows dashes.
     let text = fmt_label!(8, "{:03}", libm::roundf(ias.value) as i32);
-    pointed_readout(scene, ias, text.as_str(), &IAS_READOUT)?;
+    pointed_readout(
+        scene,
+        GroupId::Air.to_u8(),
+        ias,
+        text.as_str(),
+        &IAS_READOUT,
+    )?;
 
     // Groundspeed box under the tape.
     let gs = data.gs_kt;
     let gs_text = fmt_label!(12, "GS {:.0}kt", gs.value);
     status_paint::readout_box(
         scene,
+        GroupId::Kinematics.to_u8(),
         0.0,
         335.0,
         90.0,
@@ -143,6 +157,7 @@ const ALT_READOUT: PointedBox = PointedBox {
 /// signal's whole representable range.
 fn pointed_readout(
     scene: &mut SceneWriter<'_>,
+    group: u8,
     sig: Sig<f32>,
     text: &str,
     geo: &PointedBox,
@@ -167,13 +182,19 @@ fn pointed_readout(
     } else {
         safety::FAILURE_RED
     })?;
+    // The dash path stays unclaimed on purpose: the claim rule covers
+    // every visible run, and dashes ARE the honest degraded display.
     let shown = if sig.status.shows_value() {
         text
     } else {
         "---"
     };
     let size = fitted_text_size(geo, shown.chars().count());
-    scene.text(geo.text_x, 180.0, size, Anchor::CENTER, shown)?;
+    if sig.status.shows_value() {
+        scene.text_attributed(group, geo.text_x, 180.0, size, Anchor::CENTER, shown)?;
+    } else {
+        scene.text(geo.text_x, 180.0, size, Anchor::CENTER, shown)?;
+    }
     Ok(())
 }
 
@@ -222,7 +243,14 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
             scene.line(390.0, y, 400.0, y)?;
             if step.rem_euclid(5) == 0 {
                 let label = fmt_label!(12, "{ft}");
-                scene.text(408.0, y, 18.0, Anchor::MIDDLE_LEFT, label.as_str())?;
+                scene.text_attributed(
+                    altitude_claim(data),
+                    408.0,
+                    y,
+                    18.0,
+                    Anchor::MIDDLE_LEFT,
+                    label.as_str(),
+                )?;
             }
         }
         if let (true, Some(sel_m)) = (data.altitude.bug_compatible, data.selections.altitude_sel_m)
@@ -250,10 +278,28 @@ pub fn altitude_tape(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<()
     }
 
     let text = fmt_label!(12, "{}", libm::roundf(alt.value / 10.0) as i64 * 10);
-    pointed_readout(scene, alt, text.as_str(), &ALT_READOUT)?;
+    pointed_readout(
+        scene,
+        altitude_claim(data),
+        alt,
+        text.as_str(),
+        &ALT_READOUT,
+    )?;
     reference_label(scene, data)?;
     baro_and_sel_boxes(scene, data)?;
     Ok(())
+}
+
+/// The group an altitude value derives from under the declared class:
+/// local-relative altitude is kinematic; every other class rides the
+/// air-data group's stamp (the altitude group only qualifies the
+/// datum), and its claim must say so or a barometric altitude would be
+/// refused as fabricated under kinematics withholding.
+fn altitude_claim(data: &PanelData) -> u8 {
+    match data.altitude.class {
+        AltitudeClass::LocalRelative => GroupId::Kinematics.to_u8(),
+        _ => GroupId::Air.to_u8(),
+    }
 }
 
 /// The altitude reference label under the value box. REL is amber —
@@ -284,6 +330,7 @@ fn baro_and_sel_boxes(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(
     };
     status_paint::readout_box(
         scene,
+        GroupId::Air.to_u8(),
         390.0,
         335.0,
         90.0,
@@ -304,7 +351,14 @@ fn baro_and_sel_boxes(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(
             scene.stroke(palette::GREY, 1.5)?;
             scene.rect(PaintMode::FillStroke, 390.0, 0.0, 90.0, 24.0)?;
             scene.fill_color(palette::CYAN)?;
-            scene.text(435.0, 12.0, 18.0, Anchor::CENTER, text.as_str())?;
+            scene.text_attributed(
+                GroupId::Selections.to_u8(),
+                435.0,
+                12.0,
+                18.0,
+                Anchor::CENTER,
+                text.as_str(),
+            )?;
         }
         (false, Some(_)) => {
             // A selection in an incompatible reference never renders as
@@ -342,7 +396,14 @@ pub fn vsi(scene: &mut SceneWriter<'_>, data: &PanelData) -> Result<(), SceneErr
         let tip_y = (CENTER_Y - len).clamp(32.0, 328.0);
         let label = fmt_label!(12, "{}", libm::roundf(v.value / 50.0) as i64 * 50);
         scene.fill_color(palette::WHITE)?;
-        scene.text(452.0, tip_y, 12.0, Anchor::CENTER, label.as_str())?;
+        scene.text_attributed(
+            GroupId::Kinematics.to_u8(),
+            452.0,
+            tip_y,
+            12.0,
+            Anchor::CENTER,
+            label.as_str(),
+        )?;
     }
     Ok(())
 }

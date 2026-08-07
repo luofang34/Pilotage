@@ -134,6 +134,12 @@ impl Anchor {
     }
 }
 
+/// The reserved [`Cmd::Attribute`] tag claiming a value derives from
+/// panel configuration or static content rather than any state group.
+/// Under the admission harness's fixed empty configuration, a visible
+/// run carrying this claim is a fabrication by definition.
+pub const ATTR_CONFIG: u8 = 0;
+
 /// One decoded drawing command.
 ///
 /// Coordinates are in the panel's logical space; transforms compose in
@@ -243,6 +249,18 @@ pub enum Cmd<'a> {
         anchor: Anchor,
         /// The UTF-8 text.
         text: &'a str,
+    },
+    /// Provenance claim for the immediately following [`Cmd::Text`]:
+    /// its value derives from the state group with this wire tag
+    /// ([`ATTR_CONFIG`] claims configuration/static provenance). The
+    /// claim is adversarially tested by the admission harness's
+    /// withholding matrix — a run whose claimed group shows no value in
+    /// the drawn state is refused, and a numeric run without a claim is
+    /// refused outright. Draws nothing on any backend.
+    Attribute {
+        /// The claimed source: a state-group wire tag, or
+        /// [`ATTR_CONFIG`].
+        group: u8,
     },
     /// Intersect the current clip with an axis-aligned rectangle.
     ClipRect {

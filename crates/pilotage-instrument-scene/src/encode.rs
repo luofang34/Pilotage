@@ -234,6 +234,26 @@ impl<'a> SceneWriter<'a> {
         self.cmd(opcode::TEXT, &[&head, text.as_bytes()])
     }
 
+    /// A text run carrying its provenance claim: a [`crate::Cmd::Attribute`]
+    /// prefix naming the state-group wire tag (or
+    /// [`crate::ATTR_CONFIG`]) the value derives from, then the run
+    /// itself. The writer emits the pair or fails — a claim never
+    /// outlives its run in a successfully written scene.
+    /// Every run that shows a numeral must go through here — an
+    /// unclaimed numeral fails admission.
+    pub fn text_attributed(
+        &mut self,
+        group: u8,
+        x: f32,
+        y: f32,
+        size: f32,
+        anchor: Anchor,
+        text: &str,
+    ) -> Result<(), SceneError> {
+        self.cmd(opcode::ATTRIBUTE, &[&[group]])?;
+        self.text(x, y, size, anchor, text)
+    }
+
     /// Intersects the current clip with a rectangle.
     pub fn clip_rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> Result<(), SceneError> {
         self.cmd_f32(opcode::CLIP_RECT, &[], &[x, y, w, h])

@@ -184,6 +184,12 @@ fn decode_payload(op: u8, payload: &[u8]) -> Result<Cmd<'_>, DecodeError> {
                 text,
             })
         }
+        opcode::ATTRIBUTE => {
+            let [group] = payload else {
+                return Err(bad);
+            };
+            Ok(Cmd::Attribute { group: *group })
+        }
         opcode::CLIP_RECT => Ok(Cmd::ClipRect {
             x: f32_at(payload, 0).ok_or(bad)?,
             y: f32_at(payload, 1).ok_or(bad)?,

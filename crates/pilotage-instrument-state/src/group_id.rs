@@ -16,12 +16,12 @@
 //! | id | group |
 //! |----|-------|
 //! | 0x00 | never assigned (guards zeroed memory) |
-//! | 0x01–0x0C | the variants below |
-//! | 0x0D | engine (planned) |
-//! | 0x0E | traffic (planned) |
-//! | 0x0F | projection view (synthetic vision; planned) |
-//! | 0x10 | terrain bands (planned) |
-//! | 0x11–0xDF | future standard groups |
+//! | 0x01–0x0D | the variants below |
+//! | 0x0E | engine (planned) |
+//! | 0x0F | traffic (planned) |
+//! | 0x10 | projection view (synthetic vision; planned) |
+//! | 0x11 | terrain bands (planned) |
+//! | 0x12–0xDF | future standard groups |
 //! | 0xE0–0xEF | experimentation; never in committed fixtures |
 //! | 0xF0–0xFF | never assigned |
 
@@ -57,11 +57,13 @@ pub enum GroupId {
     Dynamics = 0x0B,
     /// Machine-monitoring text channel.
     MonitorText = 0x0C,
+    /// Flight-director commanded attitude, mode, and engagement.
+    FlightDirector = 0x0D,
 }
 
 impl GroupId {
     /// Number of defined groups.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 13;
 
     /// Every defined group in ascending id order — the canonical wire
     /// order and the index order of [`GroupStatuses`].
@@ -78,6 +80,7 @@ impl GroupId {
         GroupId::Variation,
         GroupId::Dynamics,
         GroupId::MonitorText,
+        GroupId::FlightDirector,
     ];
 
     /// The wire tag.
@@ -101,6 +104,7 @@ impl GroupId {
             0x0A => Some(GroupId::Variation),
             0x0B => Some(GroupId::Dynamics),
             0x0C => Some(GroupId::MonitorText),
+            0x0D => Some(GroupId::FlightDirector),
             _ => None,
         }
     }
@@ -170,6 +174,7 @@ pub fn withhold_group(state: &AircraftState, group: GroupId) -> AircraftState {
             out.valid.slip = false;
         }
         GroupId::MonitorText => out.monitor_text = Default::default(),
+        GroupId::FlightDirector => out.director = Default::default(),
     }
     out
 }

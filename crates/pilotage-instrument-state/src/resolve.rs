@@ -74,9 +74,16 @@ pub struct PanelData {
     pub pitch_rad: Sig<f32>,
     /// Independent, reference-typed heading.
     pub heading: ResolvedHeading,
+    /// What orients the rose and which reference the angular
+    /// quantities present in.
+    pub rose_basis: RoseBasis,
     /// Heading bug presented in the rose reference; `Failed` when the
     /// bug's own reference is unknown or cannot convert.
     pub heading_bug_rose_rad: Sig<f32>,
+    /// Flight-director command presentation: bars draw only from a
+    /// fully valid, engaged director — under any degradation they
+    /// disappear (a frozen or dashed command is still a command).
+    pub director: ResolvedDirector,
     /// Typed turn indication; body rates never feed this.
     pub turn: ResolvedTurn,
     /// Lateral specific force (m/s², body +Y right) for the slip/skid
@@ -241,7 +248,8 @@ pub fn resolve_stateful(
 
     let (ias, baro) = air_signals(state, policy, trust.quality, &integrity);
     let heading = heading_resolved(state, policy, &trust, &integrity);
-    let rose = heading.reference;
+    let basis = rose_basis(&heading, track_status.shows_value());
+    let rose = basis.display_reference(heading.reference);
     let track = presented_true(
         Sig::with_status(track_rad, track_status),
         rose,
@@ -262,6 +270,8 @@ pub fn resolve_stateful(
         roll_rad: finite(Sig::with_status(presentation.bank_rad, att_status)),
         pitch_rad: finite(Sig::with_status(presentation.pitch_rad, att_status)),
         heading,
+        director: director_resolved(state, policy, &trust, &integrity),
+        rose_basis: basis,
         heading_bug_rose_rad: finite(bug),
         turn: turn_resolved(state, policy, &trust, &integrity),
         slip_lat_mps2: slip_resolved(state, policy, &trust, &integrity),
@@ -473,7 +483,11 @@ mod group_status;
 use altitude_signal::altitude_resolved;
 use dynamics_signal::{slip_resolved, turn_resolved};
 mod heading_signal;
-pub use heading_signal::ResolvedHeading;
+pub use heading_signal::{ResolvedHeading, RoseBasis};
+mod director_signal;
+pub use director_signal::ResolvedDirector;
+use director_signal::director_resolved;
+use heading_signal::rose_basis;
 use heading_signal::{heading_resolved, presented_angle, presented_true, presented_wind};
 
 #[cfg(test)]

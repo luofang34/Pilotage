@@ -347,3 +347,40 @@ pub(super) fn encode_dynamics(
     put_f32(p, 12, or_nan(state.dynamics.age_ms));
     Ok(Some(16))
 }
+
+/// Flight-director payload (16 bytes): mode u8, engagement u8, two
+/// reserved zero bytes, commanded pitch f32, commanded roll f32,
+/// age f32 — unknown mode or engagement bytes decode to the
+/// fail-closed sentinels.
+pub(super) fn decode_director(state: &mut AircraftState, p: &[u8]) {
+    use crate::director::{FdEngagement, FdMode, FdSample};
+    let age = opt(get_f32(p, 12));
+    state.director = Stamped {
+        data: age.map(|_| FdSample {
+            mode: FdMode::from_u8(get_u8(p, 0)),
+            engagement: FdEngagement::from_u8(get_u8(p, 1)),
+            pitch_cmd_rad: get_f32(p, 4),
+            roll_cmd_rad: get_f32(p, 8),
+        }),
+        age_ms: age,
+    };
+}
+
+pub(super) fn encode_director(
+    state: &AircraftState,
+    out: &mut [u8],
+) -> Result<Option<usize>, AbiError> {
+    if absent(&state.director) {
+        return Ok(None);
+    }
+    let p = sized(out, 16)?;
+    let director = state.director.data.unwrap_or_default();
+    put_u8(p, 0, director.mode.to_u8());
+    put_u8(p, 1, director.engagement.to_u8());
+    put_u8(p, 2, 0);
+    put_u8(p, 3, 0);
+    put_f32(p, 4, director.pitch_cmd_rad);
+    put_f32(p, 8, director.roll_cmd_rad);
+    put_f32(p, 12, or_nan(state.director.age_ms));
+    Ok(Some(16))
+}

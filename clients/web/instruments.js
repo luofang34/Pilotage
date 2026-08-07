@@ -76,7 +76,7 @@ const REQUIRED_RUNTIME_METHODS = [
 // pattern) so wasm-target divergence from the host-verified contract
 // fails the suite, not just a Rust unit test.
 export const EXPECTED_SCENE_DIGEST =
-  "850f92983ee1d30eb7948aa1dc53c40de854bf131dcfc1dc03981af396dc712c";
+  "bd85b8537f0b3e4abf8cf3ad3d36c6abfdceac15355639af2804d58dd9c61931";
 
 // Registry enumeration exported at module level by the bindings; the
 // backend derives its panel map from these instead of mirroring one.
@@ -737,6 +737,11 @@ export function interpretScene(view, ctx, glyphs = null) {
         drawGlyphRun(ctx, glyphs, text, coordGuard(x), coordGuard(y), coordGuard(size), anchor);
         break;
       }
+      case 0x31:
+        // Provenance claim for the next text run, consumed by the
+        // admission harness; paints nothing. Known vocabulary — see
+        // the layer-marker note on the version-skew diagnostic.
+        break;
       case 0x40:
         ctx.beginPath();
         ctx.rect(coordGuard(f(0)), coordGuard(f(1)), coordGuard(f(2)), coordGuard(f(3)));
