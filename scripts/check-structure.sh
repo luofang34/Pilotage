@@ -202,7 +202,7 @@ check_safety_palette_aliases() {
 check_indicate_pin_coherence() {
     local manifest_revs workflow_rev count
     manifest_revs="$(grep -oE 'Indicate\.git", rev = "[0-9a-f]{40}"' Cargo.toml \
-        | grep -oE '[0-9a-f]{40}' | LC_ALL=C sort -u)"
+        | grep -oE '[0-9a-f]{40}' | LC_ALL=C sort -u || true)"
     count="$(printf '%s\n' "$manifest_revs" | grep -c . || true)"
     if [ "$count" -ne 1 ]; then
         echo "FORBIDDEN: Cargo.toml pins Indicate at $count distinct revs; the family advances as one" >&2
@@ -210,7 +210,7 @@ check_indicate_pin_coherence() {
         return
     fi
     workflow_rev="$(grep -oE -- '--rev [0-9a-f]{40}' .github/workflows/evidence-gate.yml \
-        | grep -oE '[0-9a-f]{40}' | LC_ALL=C sort -u)"
+        | grep -oE '[0-9a-f]{40}' | LC_ALL=C sort -u || true)"
     if [ "$workflow_rev" != "$manifest_revs" ]; then
         echo "FORBIDDEN: evidence-gate.yml installs the gate at rev ${workflow_rev:-<none>} but Cargo.toml pins $manifest_revs; advance them together" >&2
         status=1
