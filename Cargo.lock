@@ -1433,7 +1433,7 @@ dependencies = [
 [[package]]
 name = "pilotage-alerts"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "thiserror",
 ]
@@ -1492,7 +1492,7 @@ dependencies = [
 [[package]]
 name = "pilotage-frames"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "libm",
 ]
@@ -1527,7 +1527,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-feeder"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "pilotage-instrument-state",
 ]
@@ -1535,7 +1535,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-glyphs"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "pilotage-sha256",
  "thiserror",
@@ -1544,7 +1544,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-panels"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "libm",
  "pilotage-alerts",
@@ -1557,7 +1557,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-registry"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "pilotage-alerts",
  "pilotage-instrument-scene",
@@ -1569,7 +1569,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-scene"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "thiserror",
 ]
@@ -1577,7 +1577,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-state"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "libm",
  "pilotage-alerts",
@@ -1588,7 +1588,7 @@ dependencies = [
 [[package]]
 name = "pilotage-instrument-symbology"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 dependencies = [
  "pilotage-alerts",
  "pilotage-instrument-scene",
@@ -1705,7 +1705,7 @@ dependencies = [
 [[package]]
 name = "pilotage-sha256"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=25ca50747af46436d81308f2672f8f99428da368#25ca50747af46436d81308f2672f8f99428da368"
+source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 
 [[package]]
 name = "pilotage-svs-build"
