@@ -7,7 +7,7 @@
 //! 1. JS constructs [`InstrumentRuntime`], calls [`InstrumentRuntime::init`],
 //!    then queries its fixed state and scene buffer offsets.
 //! 2. Each frame, JS writes a packed
-//!    [`pilotage_instrument_state::abi`] state block into the state
+//!    [`indicate_instrument_state::abi`] state block into the state
 //!    buffer and calls [`InstrumentRuntime::render_result`] with a panel id.
 //! 3. The returned `u64` carries status in bits 0..7, scene length in
 //!    bits 8..31, and generation in bits 32..63. Status zero means the scene

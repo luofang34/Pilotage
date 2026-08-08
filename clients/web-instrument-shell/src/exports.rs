@@ -4,18 +4,18 @@
 //! resource owns its buffers, configuration, and generations; this module has
 //! no process-global or thread-local mutable state.
 
-use pilotage_alerts::{
+use indicate_alerts::{
     AlertCondition, AlertContext, AlertEvent, AlertManager, AlertOutput, AlertProfile, AltFault,
     DynFault, ManagerHealth, NavFault,
 };
-use pilotage_instrument_registry::{ConfigBlob, PanelDrawError};
-use pilotage_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
-use pilotage_instrument_state::FreshnessPolicy;
-use pilotage_instrument_state::abi::v6::{self, AbiError};
-use pilotage_instrument_state::{NavSource, SignalStatus};
+use indicate_instrument_registry::{ConfigBlob, PanelDrawError};
+use indicate_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
+use indicate_instrument_state::FreshnessPolicy;
+use indicate_instrument_state::abi::v6::{self, AbiError};
+use indicate_instrument_state::{NavSource, SignalStatus};
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::panel_registry::{descriptor, registry, splice_v_speeds};
+use crate::panel_registry::{canonical_frame, descriptor, registry, splice_v_speeds};
 use crate::render_status::RenderStatus;
 
 pub(crate) const SCENE_CAPACITY: usize = 64 * 1024;
@@ -37,10 +37,10 @@ pub(crate) struct Runtime {
     /// tier entry/exit cannot chatter (ATT-01). Stepping twice per frame
     /// (PFD then HSI) is idempotent: the latches depend on the input
     /// magnitudes, not on step count.
-    pub(crate) unusual: pilotage_instrument_state::UnusualAttitudeState,
+    pub(crate) unusual: indicate_instrument_state::UnusualAttitudeState,
     /// Display thresholds; the simulator profile's numbers are benchmark
     /// data, not an aircraft approval.
-    pub(crate) profile: pilotage_instrument_state::AirframeDisplayProfile,
+    pub(crate) profile: indicate_instrument_state::AirframeDisplayProfile,
     /// The single alert state machine (ALR-01). Stepped once per
     /// [`InstrumentRuntime::step_alerts`] call; every panel render then
     /// consumes the one cached [`AlertOutput`], so the PFD and HSI can
@@ -56,7 +56,7 @@ pub(crate) struct Runtime {
 
 impl Runtime {
     fn new() -> Self {
-        let panels = registry().map_or(0, |registry| registry.panels().len());
+        let panels = registry().map_or(0, |registry| registry.panels().count());
         Self {
             state: vec![0u8; v6::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
@@ -64,8 +64,8 @@ impl Runtime {
             config: vec![Vec::new(); panels],
             unknown_groups: 0,
             extended_groups: 0,
-            unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-            profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
+            unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+            profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
             alerts: AlertManager::new(),
             alert_profile: AlertProfile::simulator(),
             alert_output: None,
@@ -174,7 +174,7 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
             return RenderAttempt::failure(RenderStatus::StateMalformed, generation);
         }
     };
-    let data = pilotage_instrument_state::resolve_stateful(
+    let data = indicate_instrument_state::resolve_stateful(
         &state,
         &FreshnessPolicy::default(),
         &runtime.profile,
@@ -189,7 +189,10 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
         Err(error) => return RenderAttempt::failure(scene_error_status(error), generation),
     };
     let alerts = runtime.alert_output.as_ref();
-    let len = match (panel_descriptor.draw)(&data, &config, alerts, &mut writer) {
+    // The same canonical frame the design-dimension exports publish, so
+    // the frame this scene is emitted at is the one the backend maps.
+    let frame = canonical_frame(panel_descriptor);
+    let len = match (panel_descriptor.draw)(&data, &config, alerts, frame, &mut writer) {
         Ok(()) => writer.finish(),
         Err(PanelDrawError::Scene(error)) => {
             return RenderAttempt::failure(scene_error_status(error), generation);
@@ -208,7 +211,7 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
 /// display of a lost primary never depends on the manager. Every
 /// condition is asserted or cleared each step; both operations are
 /// idempotent in the manager.
-fn derive_alert_events(data: &pilotage_instrument_state::PanelData) -> [AlertEvent; 3] {
+fn derive_alert_events(data: &indicate_instrument_state::PanelData) -> [AlertEvent; 3] {
     let cond = |active: bool, c: AlertCondition| {
         if active {
             AlertEvent::Assert(c)
@@ -304,7 +307,6 @@ impl InstrumentRuntime {
         let Some((index, panel)) = registry().and_then(|registry| {
             registry
                 .panels()
-                .iter()
                 .enumerate()
                 .find(|(_, panel)| panel.id == "pfd")
         }) else {
@@ -408,7 +410,7 @@ impl InstrumentRuntime {
                 return RenderStatus::StateMalformed as u64;
             }
         };
-        let data = pilotage_instrument_state::resolve_stateful(
+        let data = indicate_instrument_state::resolve_stateful(
             &state,
             &FreshnessPolicy::default(),
             &runtime.profile,
@@ -437,7 +439,7 @@ impl InstrumentRuntime {
     /// construction. A serialization failure returns an empty buffer,
     /// which no verifier accepts.
     pub fn glyph_manifest(&self) -> Vec<u8> {
-        let manifest = pilotage_instrument_glyphs::PANEL_GLYPHS;
+        let manifest = indicate_instrument_glyphs::PANEL_GLYPHS;
         let mut out = vec![0u8; manifest.canonical_len()];
         match manifest.write_canonical(&mut out) {
             Ok(len) => {
@@ -451,7 +453,7 @@ impl InstrumentRuntime {
     /// The compile-time-recorded glyph content hash the backend must
     /// match against both the canonical bytes and its own pinned value.
     pub fn glyph_recorded_hash(&self) -> Vec<u8> {
-        pilotage_instrument_glyphs::PANEL_GLYPHS
+        indicate_instrument_glyphs::PANEL_GLYPHS
             .recorded_hash()
             .to_vec()
     }

@@ -90,7 +90,7 @@ missing data.
 
 The wire stays raw because derivation is display policy: barometric-style
 altitude (−z), vertical speed (−vz), groundspeed (√(vx²+vy²)), and
-Euler attitude all derive in `pilotage-instrument-state`, where they are unit
+Euler attitude all derive in `indicate-instrument-state`, where they are unit
 tests in a `no_std` crate rather than per-host arithmetic. A host that
 forwards the estimate untouched cannot skew it.
 

@@ -1,10 +1,10 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_instrument_scene::{
+use indicate_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
-use pilotage_instrument_state::abi::v6::{CAPACITY, VERSION, encode_state};
-use pilotage_instrument_state::{AircraftState, Attitude, Quat, Stamped};
+use indicate_instrument_state::abi::v6::{CAPACITY, VERSION, encode_state};
+use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
 use super::{InstrumentRuntime, RenderStatus, abi_version};
 use crate::exports::{
@@ -40,8 +40,8 @@ pub(crate) fn attitude_state() -> AircraftState {
             }),
             age_ms: Some(10.0),
         },
-        quality: pilotage_instrument_state::EstimateQuality::Good,
-        valid: pilotage_instrument_state::ValidFlags {
+        quality: indicate_instrument_state::EstimateQuality::Good,
+        valid: indicate_instrument_state::ValidFlags {
             attitude: true,
             rates: true,
             position: true,
@@ -98,10 +98,10 @@ fn scene_runtime(scene: &[u8]) -> Runtime {
         config: vec![Vec::new(); 2],
         unknown_groups: 0,
         extended_groups: 0,
-        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
-        alerts: pilotage_alerts::AlertManager::new(),
-        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+        profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: indicate_alerts::AlertManager::new(),
+        alert_profile: indicate_alerts::AlertProfile::simulator(),
         alert_output: None,
     }
 }
@@ -245,10 +245,10 @@ fn a_non_canonical_state_frame_fails_malformed() {
         config: vec![Vec::new(); 2],
         unknown_groups: 0,
         extended_groups: 0,
-        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
-        alerts: pilotage_alerts::AlertManager::new(),
-        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+        profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: indicate_alerts::AlertManager::new(),
+        alert_profile: indicate_alerts::AlertProfile::simulator(),
         alert_output: None,
     };
     assert_attempt(
@@ -268,10 +268,10 @@ fn render_into_reports_buffer_and_truncation_failures() {
         config: vec![Vec::new(); 2],
         unknown_groups: 0,
         extended_groups: 0,
-        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
-        alerts: pilotage_alerts::AlertManager::new(),
-        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+        profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: indicate_alerts::AlertManager::new(),
+        alert_profile: indicate_alerts::AlertProfile::simulator(),
         alert_output: None,
     };
     assert_attempt(
@@ -290,10 +290,10 @@ fn render_into_reports_buffer_and_truncation_failures() {
         config: vec![Vec::new(); 2],
         unknown_groups: 0,
         extended_groups: 0,
-        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
-        alerts: pilotage_alerts::AlertManager::new(),
-        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+        profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: indicate_alerts::AlertManager::new(),
+        alert_profile: indicate_alerts::AlertProfile::simulator(),
         alert_output: None,
     };
     assert_attempt(
@@ -310,10 +310,10 @@ fn render_into_reports_buffer_and_truncation_failures() {
         config: vec![Vec::new(); 2],
         unknown_groups: 0,
         extended_groups: 0,
-        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
-        alerts: pilotage_alerts::AlertManager::new(),
-        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+        profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: indicate_alerts::AlertManager::new(),
+        alert_profile: indicate_alerts::AlertProfile::simulator(),
         alert_output: None,
     };
     assert_attempt(render_into(&mut valid, 2), RenderStatus::InvalidPanel, 0, 0);
@@ -333,10 +333,10 @@ fn malformed_scene_never_advances_or_commits_length() {
         config: vec![Vec::new(); 2],
         unknown_groups: 0,
         extended_groups: 0,
-        unusual: pilotage_instrument_state::UnusualAttitudeState::default(),
-        profile: pilotage_instrument_state::AirframeDisplayProfile::simulator(),
-        alerts: pilotage_alerts::AlertManager::new(),
-        alert_profile: pilotage_alerts::AlertProfile::simulator(),
+        unusual: indicate_instrument_state::UnusualAttitudeState::default(),
+        profile: indicate_instrument_state::AirframeDisplayProfile::simulator(),
+        alerts: indicate_alerts::AlertManager::new(),
+        alert_profile: indicate_alerts::AlertProfile::simulator(),
         alert_output: None,
     };
     assert_attempt(
@@ -350,7 +350,7 @@ fn malformed_scene_never_advances_or_commits_length() {
 
 #[test]
 fn every_encode_error_maps_to_its_own_status() {
-    use pilotage_instrument_scene::SceneError;
+    use indicate_instrument_scene::SceneError;
 
     use crate::exports::scene_error_status;
     use crate::render_status::RenderStatus;
@@ -473,7 +473,7 @@ fn malformed_scene_framing_gates_visible_commit() {
 
 #[test]
 fn glyph_exports_surface_the_verified_pack() {
-    use pilotage_instrument_glyphs::PANEL_GLYPHS;
+    use indicate_instrument_glyphs::PANEL_GLYPHS;
 
     use crate::exports::InstrumentRuntime;
 

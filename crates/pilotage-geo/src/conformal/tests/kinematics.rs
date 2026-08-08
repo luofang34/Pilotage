@@ -9,7 +9,7 @@
 
 use super::*;
 
-use pilotage_frames::FrameId;
+use indicate_frames::FrameId;
 
 use crate::availability::AvailabilityReason;
 use crate::identity::IntegrityLevel;

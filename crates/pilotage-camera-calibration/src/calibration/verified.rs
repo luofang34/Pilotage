@@ -10,8 +10,8 @@
 //! reconstructs its own calibration reference from [`Self::calibration_id`] and
 //! [`Self::content_hash`], so this crate does not depend on the projector.
 
+use indicate_frames::Quat;
 use pilotage_calibration_id::CalibrationId;
-use pilotage_frames::Quat;
 
 /// The resolved geometry of a verified calibration: its identity and content
 /// hash, the body→camera rotation, the field-of-view half-tangents, and the

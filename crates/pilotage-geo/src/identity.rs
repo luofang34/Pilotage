@@ -27,7 +27,7 @@
 //! silently-inferred difference, and a future sample is a typed refusal, never a
 //! saturated zero.
 
-use pilotage_frames::{Epoch, Quat};
+use indicate_frames::{Epoch, Quat};
 
 use crate::datum::GeodeticPosition;
 use crate::error::AgeError;
@@ -204,7 +204,7 @@ pub struct StatedPosition {
 
 /// A vehicle attitude with its identity stamp and angular accuracy. The attitude
 /// rotates body directions to the local navigation frame; the frame pairing is
-/// a `pilotage-frames` concern the consumer applies, never implied here.
+/// a `indicate-frames` concern the consumer applies, never implied here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StatedAttitude {
     /// Body → local-navigation rotation.

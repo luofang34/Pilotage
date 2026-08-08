@@ -3,16 +3,16 @@
 //! client script holds no wire- or measurement-interpreting logic
 //! (ADR-0029). The script wrappers keep only decode-shape validation
 //! and marshalling; every semantic judgement runs in
-//! `pilotage-instrument-feeder`, the same crate a native shell links.
+//! `indicate-instrument-feeder`, the same crate a native shell links.
 
-use pilotage_instrument_feeder::avionics::{
+use indicate_instrument_feeder::avionics::{
     AvionicsIngress, AvionicsSample, IncarnationPolicy, IngressConfig,
 };
-use pilotage_instrument_feeder::fc_state::{FcReport, FcStateTracker};
-use pilotage_instrument_feeder::nav_display::nav_display_state;
-use pilotage_instrument_feeder::nav_guidance::{Guidance, NavGuidanceTracker};
-use pilotage_instrument_feeder::turn::TurnDerivation;
-use pilotage_instrument_feeder::{RawStamp, StampFault};
+use indicate_instrument_feeder::fc_state::{FcReport, FcStateTracker};
+use indicate_instrument_feeder::nav_display::nav_display_state;
+use indicate_instrument_feeder::nav_guidance::{Guidance, NavGuidanceTracker};
+use indicate_instrument_feeder::turn::TurnDerivation;
+use indicate_instrument_feeder::{RawStamp, StampFault};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -241,7 +241,7 @@ pub fn feeder_stamp_fault(role: u8, clock: u8, integrity: u8, lane_role: u8) -> 
         acquired_at_ns: 0,
         clock,
     };
-    pilotage_instrument_feeder::stamp_fault_for_role(&probe, lane_role).map(|fault| {
+    indicate_instrument_feeder::stamp_fault_for_role(&probe, lane_role).map(|fault| {
         let (field, rule) = match fault {
             StampFault::RoleMismatch => ("role", "role-mismatch"),
             StampFault::IllegalClock => ("clock", "malformed"),

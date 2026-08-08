@@ -984,6 +984,110 @@ dependencies = [
 ]
 
 [[package]]
+name = "indicate-alerts"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-frames"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "indicate-instrument-descriptor"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-alerts",
+ "indicate-instrument-scene",
+ "indicate-instrument-state",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-instrument-feeder"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-instrument-state",
+]
+
+[[package]]
+name = "indicate-instrument-glyphs"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-sha256",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-instrument-panels"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-alerts",
+ "indicate-instrument-descriptor",
+ "indicate-instrument-scene",
+ "indicate-instrument-state",
+ "indicate-instrument-symbology",
+ "libm",
+]
+
+[[package]]
+name = "indicate-instrument-registry"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-instrument-descriptor",
+ "indicate-instrument-scene",
+ "indicate-instrument-state",
+ "indicate-sha256",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-instrument-scene"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-instrument-state"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-alerts",
+ "indicate-frames",
+ "libm",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-instrument-symbology"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+dependencies = [
+ "indicate-alerts",
+ "indicate-instrument-scene",
+ "indicate-instrument-state",
+ "thiserror",
+]
+
+[[package]]
+name = "indicate-sha256"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+
+[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1362,9 +1466,9 @@ dependencies = [
 name = "pilotage-adapter-api"
 version = "0.1.0"
 dependencies = [
+ "indicate-frames",
  "pilotage-calibration-id",
  "pilotage-camera-calibration",
- "pilotage-frames",
  "pilotage-ingress",
  "pilotage-protocol",
  "pilotage-timing",
@@ -1431,14 +1535,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-alerts"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "pilotage-authority"
 version = "0.1.0"
 dependencies = [
@@ -1456,9 +1552,9 @@ version = "0.1.0"
 name = "pilotage-camera-calibration"
 version = "0.1.0"
 dependencies = [
+ "indicate-frames",
  "libm",
  "pilotage-calibration-id",
- "pilotage-frames",
  "sha2 0.10.9",
  "thiserror",
 ]
@@ -1490,21 +1586,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-frames"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "libm",
-]
-
-[[package]]
 name = "pilotage-geo"
 version = "0.1.0"
 dependencies = [
+ "indicate-frames",
  "libm",
  "pilotage-calibration-id",
  "pilotage-camera-calibration",
- "pilotage-frames",
  "thiserror",
 ]
 
@@ -1525,78 +1613,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilotage-instrument-feeder"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "pilotage-instrument-state",
-]
-
-[[package]]
-name = "pilotage-instrument-glyphs"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "pilotage-sha256",
- "thiserror",
-]
-
-[[package]]
-name = "pilotage-instrument-panels"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "libm",
- "pilotage-alerts",
- "pilotage-instrument-registry",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
- "pilotage-instrument-symbology",
-]
-
-[[package]]
-name = "pilotage-instrument-registry"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "pilotage-alerts",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
- "pilotage-sha256",
- "thiserror",
-]
-
-[[package]]
-name = "pilotage-instrument-scene"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "pilotage-instrument-state"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "libm",
- "pilotage-alerts",
- "pilotage-frames",
- "thiserror",
-]
-
-[[package]]
-name = "pilotage-instrument-symbology"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
-dependencies = [
- "pilotage-alerts",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
- "thiserror",
-]
-
-[[package]]
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
@@ -1612,13 +1628,13 @@ dependencies = [
 name = "pilotage-instruments-web-shell"
 version = "0.1.0"
 dependencies = [
- "pilotage-alerts",
- "pilotage-instrument-feeder",
- "pilotage-instrument-glyphs",
- "pilotage-instrument-panels",
- "pilotage-instrument-registry",
- "pilotage-instrument-scene",
- "pilotage-instrument-state",
+ "indicate-alerts",
+ "indicate-instrument-feeder",
+ "indicate-instrument-glyphs",
+ "indicate-instrument-panels",
+ "indicate-instrument-registry",
+ "indicate-instrument-scene",
+ "indicate-instrument-state",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
@@ -1701,11 +1717,6 @@ dependencies = [
  "tracing-subscriber",
  "wtransport",
 ]
-
-[[package]]
-name = "pilotage-sha256"
-version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=045ccc91457588c1722949845d00db546c2439bd#045ccc91457588c1722949845d00db546c2439bd"
 
 [[package]]
 name = "pilotage-svs-build"

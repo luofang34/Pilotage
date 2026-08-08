@@ -2,7 +2,7 @@
 //
 // Run: node clients/web/scene-conformance.test.mjs
 //
-// The reference rasterizer (pilotage-instrument-raster) authors
+// The reference rasterizer (indicate-instrument-raster) authors
 // the IR crate's corpus/scene-conformance-corpus.json: for each case
 // it pins the reference verdict,
 // typed failure class, unknown-opcode count, layer-gate results, and a
@@ -121,7 +121,7 @@ function q(v) {
 
 const MODE_LETTERS = { 1: "F", 2: "S", 3: "FS" };
 
-// A wire decoder mirroring pilotage-instrument-scene's SceneCmds/decode_payload:
+// A wire decoder mirroring indicate-instrument-scene's SceneCmds/decode_payload:
 // known-opcode payloads are shape-validated (a hard BadPayload), unknown opcodes
 // are skipped by length. Returns { ok, error, trace } where trace matches the
 // reference command trace exactly.
@@ -331,7 +331,7 @@ const EXPECTED_CORPUS_SHA256 =
 const golden = JSON.parse(
   readFileSync(
     join(
-      crateDir("pilotage-instrument-scene"),
+      crateDir("indicate-instrument-scene"),
       "corpus",
       "scene-conformance-corpus.json",
     ),
@@ -360,6 +360,15 @@ check(
 );
 
 const entries = golden.entries.map((e) => ({ entry: e, bytes: entryBytes(e) }));
+
+// The gate-accept census is pinned alongside the corpus identity: a corpus
+// edit that flips a verdict (or adds a case, as frame-edge-overhang did in
+// v4) must move this count consciously, with the interpreter re-verified —
+// the count is read off the golden, never adjusted to make a run green.
+check(
+  "corpus v4 carries 26 gate-accepted cases",
+  golden.entries.filter((e) => e.gate.verdict === "accept").length === 26,
+);
 
 // Corpus hash drift guard: both backends recompute it from the reconstructed
 // bytes, so a Rust/JS generator divergence would surface here.

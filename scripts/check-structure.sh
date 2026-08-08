@@ -189,7 +189,7 @@ check_safety_palette_aliases() {
     while IFS= read -r file; do
         is_excluded_path "$file" && continue
         if grep -Eq 'palette::(RED|AMBER|YELLOW|BAND_YELLOW)\b' "$file"; then
-            echo "FORBIDDEN: $file references a safety palette alias; use the safety:: constants outside pilotage-instrument-symbology" >&2
+            echo "FORBIDDEN: $file references a safety palette alias; use the safety:: constants outside indicate-instrument-symbology" >&2
             status=1
         fi
     done < <(collect_rs_files)

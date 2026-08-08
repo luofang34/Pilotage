@@ -33,7 +33,7 @@
 //!
 //! SIM / NOT FOR FLIGHT.
 
-use pilotage_frames::{AngularVelocity, Epoch, FrameId, ROTATION_NORM_TOLERANCE, Velocity};
+use indicate_frames::{AngularVelocity, Epoch, FrameId, ROTATION_NORM_TOLERANCE, Velocity};
 
 use crate::availability::{
     AvailabilityProfile, ExternalHealth, SvsAvailability, derive_inputs, health_from_integrity,

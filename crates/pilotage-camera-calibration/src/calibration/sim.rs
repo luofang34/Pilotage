@@ -17,7 +17,7 @@ use super::identity::{
     Residuals, ToolVersion, ValidityStatus,
 };
 use super::recovery::recovery_report;
-use pilotage_frames::FrameId;
+use indicate_frames::FrameId;
 
 /// The FPV camera's physical id, matching the Gazebo bridge `camera_id` for the
 /// onboard camera and the calibration id the artifact publishes.

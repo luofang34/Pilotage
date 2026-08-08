@@ -12,13 +12,13 @@ crate-type = ["rlib"]
 workspace = true
 
 [dependencies]
-pilotage-alerts = { workspace = true }
-pilotage-instrument-feeder = { workspace = true }
-pilotage-instrument-glyphs = { workspace = true }
-pilotage-instrument-panels = { workspace = true }
-pilotage-instrument-registry = { workspace = true }
-pilotage-instrument-scene = { workspace = true }
-pilotage-instrument-state = { workspace = true }
+indicate-alerts = { workspace = true }
+indicate-instrument-feeder = { workspace = true }
+indicate-instrument-glyphs = { workspace = true }
+indicate-instrument-panels = { workspace = true }
+indicate-instrument-registry = { workspace = true }
+indicate-instrument-scene = { workspace = true }
+indicate-instrument-state = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 wasm-bindgen = { workspace = true }

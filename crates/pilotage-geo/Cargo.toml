@@ -8,7 +8,7 @@ publish = false
 workspace = true
 
 [dependencies]
-pilotage-frames = { workspace = true }
+indicate-frames = { workspace = true }
 pilotage-calibration-id = { workspace = true }
 # HUD-03 (#38): the conformal projector consumes the unforgeable VerifiedCameraModel
 # minted only by CAL-01's verified path. Acyclic: camera-calibration does not

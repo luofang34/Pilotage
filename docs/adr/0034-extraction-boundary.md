@@ -35,14 +35,14 @@ A panel is authored in the logical frame its descriptor declares
 ## Decision 2 — artifact ownership at the boundary
 
 - The scene-conformance corpus lives with the IR that defines its
-  vocabulary: `crates/pilotage-instrument-scene/corpus/`. The
+  vocabulary: `crates/indicate-instrument-scene/corpus/`. The
   reference rasterizer reads it as a sibling crate; the browser suite
   reads into the crate tree and pins `corpusSha256`, so a corpus edit
   reddens every consumer — that pin is the cross-repo sync mechanism,
   and the first post-extraction corpus change must be watched through
   it (ready-when check 2).
 - The REN-04 timing artifact lives with the crate whose tests consume
-  it: `crates/pilotage-instrument-raster/evidence/`.
+  it: `crates/indicate-instrument-raster/evidence/`.
 - `docs/instruments/evidence-graph.evg` and its artifacts travel WITH
   the panels at extraction: its locators point into the closure and
   into the instruments docs that travel with it, and a

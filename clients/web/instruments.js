@@ -2,7 +2,7 @@
 //
 // Loads the pilotage-instruments-web WASM module (built by
 // scripts/build-web-instruments.sh), writes packed aircraft state into its
-// linear memory (mirroring pilotage-instrument-state/src/abi.rs exactly),
+// linear memory (mirroring indicate-instrument-state/src/abi.rs exactly),
 // and interprets the returned scene-command bytes onto a Canvas2D.
 //
 // Rendering is transactional: a frame reaches the visible canvas
@@ -76,7 +76,7 @@ const REQUIRED_RUNTIME_METHODS = [
 // pattern) so wasm-target divergence from the host-verified contract
 // fails the suite, not just a Rust unit test.
 export const EXPECTED_SCENE_DIGEST =
-  "bd85b8537f0b3e4abf8cf3ad3d36c6abfdceac15355639af2804d58dd9c61931";
+  "3efb08c55eadadc2b006ee6b006b29e4b3a3f8d4ec3ce1324f401dbc16dc85ca";
 
 // Registry enumeration exported at module level by the bindings; the
 // backend derives its panel map from these instead of mirroring one.

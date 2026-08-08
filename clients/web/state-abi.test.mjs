@@ -2,7 +2,7 @@
 //
 // Run: node clients/web/state-abi.test.mjs
 //
-// The committed golden frames in the pilotage-instrument-state crate's
+// The committed golden frames in the indicate-instrument-state crate's
 // fixtures/ directory (the codec owner's own tree, so they travel with
 // the crate and arrive here at the pinned upstream rev) are generated
 // by the upstream `cargo xtask gen-state-fixture` from the shared Rust
@@ -28,7 +28,7 @@ function check(name, cond) {
 }
 
 function goldenHex(stem) {
-  const path = join(crateDir("pilotage-instrument-state"), "fixtures", `${stem}.hex`);
+  const path = join(crateDir("indicate-instrument-state"), "fixtures", `${stem}.hex`);
   return readFileSync(path, "utf8").trim();
 }
 

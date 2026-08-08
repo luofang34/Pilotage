@@ -17,7 +17,7 @@ v6; absence resolves Missing by construction).
 ## Decision
 
 - **The registry is plain data composed by each shell.** A
-  `PanelDescriptor` (in `pilotage-instrument-registry`) carries
+  `PanelDescriptor` (in `indicate-instrument-registry`) carries
   identity, title, required layers, required state groups, design
   frame, background capability, config schema, honest-status group
   regions, panel-contributed extreme states, the pinned raster

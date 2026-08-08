@@ -3,7 +3,7 @@
 // freshness advances only when a source group presents a new
 // epoch/sequence. Every semantic judgement (identity pinning,
 // incarnation policy, wrap-safe ordering, coherence, the fail-closed
-// authorization regimes) runs in pilotage-instrument-feeder via the
+// authorization regimes) runs in indicate-instrument-feeder via the
 // instrument wasm build; this module keeps decode-shape validation of
 // the script's own object dialect, marshalling, and the constructor
 // contracts its consumers rely on.

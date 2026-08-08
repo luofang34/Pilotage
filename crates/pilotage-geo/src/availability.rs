@@ -11,7 +11,7 @@
 //! coverage, renderer) are producer-stated ([`ExternalHealth`]). An untrusted
 //! reading can never produce an [`SvsAvailability::Available`] scene.
 
-use pilotage_frames::Epoch;
+use indicate_frames::Epoch;
 
 use crate::identity::{IntegrityLevel, PositionQuality, StatedAttitude, StatedPosition};
 

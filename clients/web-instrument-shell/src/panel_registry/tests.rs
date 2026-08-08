@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_instrument_panels::PFD_CONFIG_SCHEMA;
-use pilotage_instrument_registry::keys;
+use indicate_instrument_panels::PFD_CONFIG_SCHEMA;
+use indicate_instrument_registry::keys;
 
 use super::splice_v_speeds;
 

@@ -11,7 +11,7 @@
 # missing selector, or a missing artifact — reddens this job. Durable
 # evidence resolution is enforced; the review verdict is not.
 #
-# The gate tool itself lives upstream (pilotage-evidence in the Indicate
+# The gate tool itself lives upstream (indicate-evidence in the Indicate
 # repository, pinned below at the same rev the workspace pins); its own
 # tests and negative-fixture batteries run in that repository's CI. The
 # instruments evidence graph travels with the panels and is gated there
@@ -24,7 +24,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # The gate binary is a private git dependency; the git CLI can use the
+  # Navigate is a private git dependency; the git CLI can use the
   # runner's rewritten ssh credentials, libgit2 cannot.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
@@ -40,27 +40,19 @@ jobs:
           # recorded baseline unverifiable.
           fetch-depth: 0
 
-      - name: Authorize the private git dependencies (Navigate, Indicate)
+      - name: Authorize the private git dependency (Navigate)
         env:
           NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
-          INDICATE_DEPLOY_KEY: ${{ secrets.INDICATE_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          printf '%s\n' "$INDICATE_DEPLOY_KEY" > ~/.ssh/indicate_ci
-          chmod 600 ~/.ssh/navigate_ci ~/.ssh/indicate_ci
+          chmod 600 ~/.ssh/navigate_ci
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-          # One read-only deploy key per upstream repository. GitHub binds an
-          # ssh authentication to the single repository whose deploy key it
-          # is, so each pin needs its own host alias with its own identity; a
-          # shared core.sshCommand would offer one repository's key for the
-          # other and be refused.
-          {
-            printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n'
-            printf 'Host github-indicate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_ci\n  IdentitiesOnly yes\n'
-          } >> ~/.ssh/config
+          # A read-only deploy key, bound by GitHub to the one repository
+          # whose key it is, offered through a dedicated host alias.
+          # Indicate is public and needs no credential.
+          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
           git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
-          git config --global url."ssh://git@github-indicate/luofang34/Indicate".insteadOf "https://github.com/luofang34/Indicate"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -71,12 +63,14 @@ jobs:
       - name: Install the pinned evidence gate
         # The rev here is the same Indicate pin the workspace manifest
         # carries, so the gate that judges these graphs is the one the
-        # family's own CI tests.
+        # family's own CI tests. --force: the restored cargo cache may
+        # hold an evidence-gate binary owned by a different crate name
+        # or rev, and a stale gate must be overwritten, never kept.
         run: >
-          cargo install --locked
+          cargo install --locked --force
           --git https://github.com/luofang34/Indicate.git
-          --rev 045ccc91457588c1722949845d00db546c2439bd
-          pilotage-evidence
+          --rev 14e9a7591a8a659b71d4a19e027c07b7448d6bcb
+          indicate-evidence
 
       - name: LINK-04 slice — honest verdict and bidirectional trace
         # Informational. The source-role slice is structurally traced and

@@ -1,7 +1,7 @@
 // Measurement-coherent turn-rate derivation (DYN-01) — a thin wrapper
 // over the shared feeder core (#252). The semantics (stream identity,
 // wrap-safe ordering, dt bounds, circular differencing) run in
-// pilotage-instrument-feeder via the instrument wasm build; this module
+// indicate-instrument-feeder via the instrument wasm build; this module
 // keeps only the script-side stamp dialect (string clock names) and
 // marshalling.
 

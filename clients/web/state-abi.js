@@ -1,5 +1,5 @@
 // State-frame ABI v6 writer: the JS side of the tagged-group contract in
-// the pilotage-instrument-state crate's abi/v6.rs (pinned upstream).
+// the indicate-instrument-state crate's abi/v6.rs (pinned upstream).
 //
 // The frame is self-delimiting: [version u8][group count u8] then, per
 // present group in strictly ascending tag order, [tag u8][payload length

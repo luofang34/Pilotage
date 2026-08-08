@@ -34,7 +34,7 @@ would be a safety-relevant category error.
   validity status). It lives in `pilotage-adapter-api::calibration`.
 
 - **Every unit and frame is explicit.** Field names carry units (`_px`, `_m`,
-  `_rad`); the extrinsics name both frames using the `pilotage-frames`
+  `_rad`); the extrinsics name both frames using the `indicate-frames`
   vocabulary (`FrameId::Body` → `FrameId::Installation`, the sensor mount) and
   never invent a frame; the optical convention (OpenCV: `+Z` forward, `+X`
   right, `+Y` down) is a stored enum, not an assumption; a units marker is

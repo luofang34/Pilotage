@@ -2,7 +2,7 @@
 //! panic-free. This is the byte layer only; the frame types and the public
 //! [`encode`]/[`decode`] entry points live in the parent module.
 
-use pilotage_frames::{ClockDomain, Epoch, Quat, TimeScale};
+use indicate_frames::{ClockDomain, Epoch, Quat, TimeScale};
 
 use crate::availability::{AvailabilityProfile, ExternalHealth, InputHealth};
 use crate::datum::{

@@ -3,7 +3,7 @@
 //! that an untrusted or incoherent input can never yield an available scene.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_frames::{ClockDomain, Epoch, Quat, TimeScale};
+use indicate_frames::{ClockDomain, Epoch, Quat, TimeScale};
 
 use super::{
     ABI_VERSION, RawSvsFrame, SVS_FRAME_LEN, ValidatedSvsFrame, decode_frame, encode_frame,
