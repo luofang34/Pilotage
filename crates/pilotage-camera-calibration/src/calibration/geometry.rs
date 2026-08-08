@@ -8,7 +8,7 @@
 //! distinction; the types here keep every unit and coordinate frame explicit
 //! (`_px` pixels, `_m` meters, `_rad` radians) so nothing is implied.
 
-use pilotage_frames::FrameId;
+use indicate_frames::FrameId;
 
 /// The optical coordinate convention a camera's projection is expressed in.
 ///

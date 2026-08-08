@@ -12,7 +12,7 @@
 //!
 //! # Mapping to instrument-state `AltitudeClass`
 //!
-//! This crate is foundational and `pilotage-instrument-state` is a consumer, so
+//! This crate is foundational and `indicate-instrument-state` is a consumer, so
 //! it cannot depend on this crate's inverse; the vertical vocabulary is minted
 //! here with an explicit mapping instead of a dependency:
 //!

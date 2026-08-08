@@ -121,7 +121,7 @@ fn availability_reason_wire_codes_round_trip_and_reject_unknown() {
 
 // ---- derivation from validated inputs --------------------------------------
 
-use pilotage_frames::{ClockDomain, Epoch, Quat, TimeScale};
+use indicate_frames::{ClockDomain, Epoch, Quat, TimeScale};
 
 use super::{
     AvailabilityProfile, AvailabilityProfileId, ExternalHealth, derive_inputs,

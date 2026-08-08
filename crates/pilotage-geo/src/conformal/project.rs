@@ -47,8 +47,8 @@
 //! whose calibration does not match the [`crate::ProjectionView`]'s, so there is
 //! no path to a registered scene without a genuinely verified calibration.
 
+use indicate_frames::{Quat, ROTATION_NORM_TOLERANCE};
 use pilotage_camera_calibration::VerifiedCameraModel;
-use pilotage_frames::{Quat, ROTATION_NORM_TOLERANCE};
 
 use super::policy::ConformalError;
 use crate::view::{CalibrationRef, NearFarPolicy};

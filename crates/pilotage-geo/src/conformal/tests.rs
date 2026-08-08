@@ -15,7 +15,7 @@ mod kinematics;
 mod projection;
 mod verdict;
 
-use pilotage_frames::{ClockDomain, Epoch, FrameId, Quat, Tagged, TimeScale};
+use indicate_frames::{ClockDomain, Epoch, FrameId, Quat, Tagged, TimeScale};
 
 use pilotage_camera_calibration::{
     SIM_FPV_CALIBRATION_HASH, SIM_FPV_CALIBRATION_ID, VerifiedCameraModel, sim_fpv_calibration,

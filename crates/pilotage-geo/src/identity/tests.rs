@@ -1,7 +1,7 @@
 //! Tests for source identity, typed age, and coherent-snapshot binding.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_frames::{ClockDomain, Epoch, TimeScale};
+use indicate_frames::{ClockDomain, Epoch, TimeScale};
 
 use super::{CoherentSnapshot, IntegrityLevel, SourceIncarnation, SourceStamp};
 use crate::error::AgeError;

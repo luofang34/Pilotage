@@ -2,11 +2,11 @@
 //! declarations, FC-state reports and views, and navigation guidance in
 //! both directions across the script boundary.
 
-use pilotage_instrument_feeder::RawStamp;
-use pilotage_instrument_feeder::fc_state::{FcCommand, FcReport, FcView};
-use pilotage_instrument_feeder::nav_guidance::{Guidance, NavCounters, NavReject, NavSnapshot};
-use pilotage_instrument_feeder::turn::TurnDeclaration;
-use pilotage_instrument_state::{IdentStr, NavData, NavFromTo, NavSource, Stamped};
+use indicate_instrument_feeder::RawStamp;
+use indicate_instrument_feeder::fc_state::{FcCommand, FcReport, FcView};
+use indicate_instrument_feeder::nav_guidance::{Guidance, NavCounters, NavReject, NavSnapshot};
+use indicate_instrument_feeder::turn::TurnDeclaration;
+use indicate_instrument_state::{IdentStr, NavData, NavFromTo, NavSource, Stamped};
 use serde::{Deserialize, Serialize};
 
 use super::JsStamp;

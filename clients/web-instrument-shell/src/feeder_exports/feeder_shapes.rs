@@ -2,8 +2,8 @@
 //! camelCase objects with BigInt u64s and 32-hex incarnations on the
 //! JavaScript side, wire-coded plain data on the Rust side.
 
-use pilotage_instrument_feeder::RawStamp;
-use pilotage_instrument_feeder::avionics::{
+use indicate_instrument_feeder::RawStamp;
+use indicate_instrument_feeder::avionics::{
     AttitudeGroup, AvionicsSample, Coherence, IngressCounters, IngressSnapshot, KinematicsGroup,
 };
 use serde::{Deserialize, Serialize};

@@ -15,7 +15,7 @@
 //! the error budget) and its coherent identity. Re-deriving a value nothing reads
 //! would add antimeridian and datum-realization edge cases for no consumer.
 
-use pilotage_frames::Quat;
+use indicate_frames::Quat;
 
 use super::KinematicSample;
 

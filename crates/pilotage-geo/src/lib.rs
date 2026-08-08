@@ -19,8 +19,8 @@
 //! # Consumed vocabularies
 //!
 //! Reference frames, clock domains, time scales, epochs, and rotations come
-//! from `pilotage-frames` ([`pilotage_frames::FrameId`],
-//! [`pilotage_frames::Epoch`], [`pilotage_frames::Quat`]); source identity
+//! from `indicate-frames` ([`indicate_frames::FrameId`],
+//! [`indicate_frames::Epoch`], [`indicate_frames::Quat`]); source identity
 //! reuses the AV-01 `MeasurementStamp` shape ([`identity`] documents the
 //! mapping). The vertical-datum vocabulary parallels instrument-state's
 //! `AltitudeClass` with a documented mapping ([`datum`]) rather than a

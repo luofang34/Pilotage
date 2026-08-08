@@ -6,9 +6,9 @@
 //! mirroring shell constants. The surface is append-only, like every
 //! other wasm export here.
 
-use pilotage_instrument_panels::BUILTIN_PANELS;
-use pilotage_instrument_registry::{
-    BackgroundCapability, ConfigBlob, PanelDescriptor, Registry, keys,
+use indicate_instrument_panels::BUILTIN_PANELS;
+use indicate_instrument_registry::{
+    BackgroundCapability, ConfigBlob, DesignFrame, PanelDescriptor, Registry, keys,
 };
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -23,13 +23,28 @@ pub(crate) fn registry() -> Option<Registry> {
 }
 
 pub(crate) fn descriptor(panel: u32) -> Option<&'static PanelDescriptor> {
-    registry()?.panels().get(panel as usize)
+    registry()?.panels().nth(panel as usize)
+}
+
+/// The frame this shell requests for a panel: its first canonical frame,
+/// falling back to the floor for a descriptor that declares none. The
+/// canonical frames are where the digest, admission matrix, and raster
+/// baselines are pinned, so drawing at one keeps every emitted scene
+/// comparable with the recorded artefacts. The same value feeds the draw
+/// call and the design-dimension exports, so the frame the producer emits
+/// at and the frame the backend maps into pixels cannot diverge.
+pub(crate) fn canonical_frame(descriptor: &PanelDescriptor) -> DesignFrame {
+    descriptor
+        .canonical_frames
+        .first()
+        .copied()
+        .unwrap_or(descriptor.frame_min)
 }
 
 /// Number of composed panels.
 #[wasm_bindgen]
 pub fn panel_count() -> u32 {
-    registry().map_or(0, |registry| registry.panels().len() as u32)
+    registry().map_or(0, |registry| registry.panels().count() as u32)
 }
 
 /// Stable panel id (canvas ids and health keys derive from this), or
@@ -57,16 +72,20 @@ pub fn panel_required_groups(panel: u32) -> u32 {
     descriptor(panel).map_or(0, |d| d.required_groups.bits())
 }
 
-/// Design-frame width in logical units, or zero.
+/// Width of the frame this shell draws the panel at, in logical units,
+/// or zero. This is the same canonical frame the render path hands the
+/// panel's draw entry point, so the backend that sizes its canvas from
+/// this maps exactly the frame the scene was emitted at.
 #[wasm_bindgen]
 pub fn panel_design_width(panel: u32) -> f32 {
-    descriptor(panel).map_or(0.0, |d| d.design_frame.width)
+    descriptor(panel).map_or(0.0, |d| canonical_frame(d).width)
 }
 
-/// Design-frame height in logical units, or zero.
+/// Height of the frame this shell draws the panel at, in logical units,
+/// or zero.
 #[wasm_bindgen]
 pub fn panel_design_height(panel: u32) -> f32 {
-    descriptor(panel).map_or(0.0, |d| d.design_frame.height)
+    descriptor(panel).map_or(0.0, |d| canonical_frame(d).height)
 }
 
 /// Background capability code: 0 not-used, 1 opaque, 2 cedeable;
@@ -90,8 +109,8 @@ pub fn scene_digest_hex() -> String {
     let Some(registry) = registry() else {
         return String::new();
     };
-    let mut scratch = vec![0u8; pilotage_instrument_scene::MAX_SCENE_BYTES];
-    match pilotage_instrument_registry::scene_digest(&registry, &mut scratch) {
+    let mut scratch = vec![0u8; indicate_instrument_scene::MAX_SCENE_BYTES];
+    match indicate_instrument_registry::scene_digest(&registry, &mut scratch) {
         Ok(digest) => {
             const HEX: &[u8; 16] = b"0123456789abcdef";
             let mut out = String::with_capacity(64);
@@ -113,7 +132,7 @@ pub fn scene_digest_hex() -> String {
 /// grows a key can never be silently dropped by this splice.
 pub(crate) fn splice_v_speeds(
     blob: &[u8],
-    schema: &[pilotage_instrument_registry::ConfigKey],
+    schema: &[indicate_instrument_registry::ConfigKey],
     payload: Option<[u8; 20]>,
 ) -> Option<Vec<u8>> {
     let parsed = ConfigBlob::parse(blob).ok()?;

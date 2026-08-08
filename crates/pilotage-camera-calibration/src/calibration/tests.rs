@@ -1,7 +1,7 @@
 //! Verification tests for the calibration contract.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_frames::FrameId;
+use indicate_frames::FrameId;
 
 use super::CameraCalibration;
 use super::error::CalibrationError;

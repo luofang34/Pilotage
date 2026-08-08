@@ -34,7 +34,7 @@ mod sim;
 mod validate;
 mod verified;
 
-use pilotage_frames::Quat;
+use indicate_frames::Quat;
 
 pub use budget::{AlignmentAllowances, AlignmentErrorBudget, derive_budget, radians_per_pixel};
 pub use canonical::{

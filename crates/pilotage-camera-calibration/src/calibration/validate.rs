@@ -9,7 +9,7 @@
 //! reason, never clamping or repairing. It runs from [`super::verify`] and is
 //! mirrored by the browser admission path in `clients/web/calibration.js`.
 
-use pilotage_frames::FrameId;
+use indicate_frames::FrameId;
 
 use super::CameraCalibration;
 use super::budget::AlignmentAllowances;

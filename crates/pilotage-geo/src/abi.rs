@@ -17,7 +17,7 @@
 //! read. [`encode_frame`] serializes only a [`ValidatedSvsFrame`], so an invalid
 //! frame cannot be encoded, and it is allocation-free.
 
-use pilotage_frames::Epoch;
+use indicate_frames::Epoch;
 
 use crate::availability::{
     AvailabilityProfile, ExternalHealth, SvsAvailability, SvsInputs, derive_inputs,

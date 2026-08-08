@@ -57,9 +57,9 @@ into instrument state, and it is the only place the two vocabularies meet.
 
 | Crate | Owns |
 |---|---|
-| `pilotage-instrument-state` | Unified aircraft/nav/selection state, per-signal validity, unit conversions, quaternion→attitude derivations |
-| `pilotage-instrument-scene` | The draw-command IR: command enum, fixed-capacity encoder/decoder over caller-provided buffers, versioned little-endian binary encoding |
-| `pilotage-instrument-panels` | The instruments: PFD, HSI, six-pack as pure functions `(state, layout) → scene commands` |
+| `indicate-instrument-state` | Unified aircraft/nav/selection state, per-signal validity, unit conversions, quaternion→attitude derivations |
+| `indicate-instrument-scene` | The draw-command IR: command enum, fixed-capacity encoder/decoder over caller-provided buffers, versioned little-endian binary encoding |
+| `indicate-instrument-panels` | The instruments: PFD, HSI, six-pack as pure functions `(state, layout) → scene commands` |
 
 These are the workspace's first strictly `#![no_std]` crates (existing core
 crates are IO-free but assume alloc). They use `f32` and `libm` only, no
@@ -157,7 +157,7 @@ claim). The byte-level contract is specified in the
   markers themselves.
 - Frames are bounded: per-layer command count, graphics-state stack depth,
   and scene byte budgets are compile-time constants in
-  `pilotage-instrument-scene::layer`. `validate_layers` enforces these with
+  `indicate-instrument-scene::layer`. `validate_layers` enforces these with
   the duplicate, ordering, nesting, state-isolation, and framing rules.
 - Version policy: unknown *opcodes* inside a layer remain counted skips;
   an unknown *layer id* fails the whole frame, because content whose

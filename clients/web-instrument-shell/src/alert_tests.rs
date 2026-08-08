@@ -3,8 +3,8 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_instrument_scene::SceneCmds;
-use pilotage_instrument_state::{AircraftState, Stamped};
+use indicate_instrument_scene::SceneCmds;
+use indicate_instrument_state::{AircraftState, Stamped};
 
 use crate::exports::InstrumentRuntime;
 use crate::render_status::RenderStatus;
@@ -13,7 +13,7 @@ use crate::tests::{attitude_state, unpack, write_state};
 fn failed_alt_state() -> AircraftState {
     let mut state = attitude_state();
     state.kinematics = Stamped {
-        data: Some(pilotage_instrument_state::Kinematics {
+        data: Some(indicate_instrument_state::Kinematics {
             pos_ned_m: [0.0, 0.0, -300.0],
             vel_ned_mps: [0.0; 3],
         }),
@@ -31,7 +31,7 @@ fn committed_scene_texts(rt: &InstrumentRuntime, len: usize) -> Vec<String> {
         .expect("valid scene")
         .map(|c| c.expect("valid command"))
         .filter_map(|c| match c {
-            pilotage_instrument_scene::Cmd::Text { text, .. } => Some(String::from(text)),
+            indicate_instrument_scene::Cmd::Text { text, .. } => Some(String::from(text)),
             _ => None,
         })
         .collect()

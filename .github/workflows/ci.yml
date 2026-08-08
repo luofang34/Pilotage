@@ -6,7 +6,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # The Navigate and Indicate crates are private git dependencies; libgit2
+  # The Navigate crates are private git dependencies; libgit2
   # cannot use the runner's rewritten ssh credentials, the git CLI can.
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   PROTOC_SHA256: a7be2928c0454f132c599e25b79b7ad1b57663f2337d7f7e468a1d59b98ec1b0
@@ -23,27 +23,19 @@ jobs:
           # base commit must be present locally; a shallow clone would hide it.
           fetch-depth: 0
 
-      - name: Authorize the private git dependencies (Navigate, Indicate)
+      - name: Authorize the private git dependency (Navigate)
         env:
           NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
-          INDICATE_DEPLOY_KEY: ${{ secrets.INDICATE_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
-          printf '%s\n' "$INDICATE_DEPLOY_KEY" > ~/.ssh/indicate_ci
-          chmod 600 ~/.ssh/navigate_ci ~/.ssh/indicate_ci
+          chmod 600 ~/.ssh/navigate_ci
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-          # One read-only deploy key per upstream repository. GitHub binds an
-          # ssh authentication to the single repository whose deploy key it
-          # is, so each pin needs its own host alias with its own identity; a
-          # shared core.sshCommand would offer one repository's key for the
-          # other and be refused.
-          {
-            printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n'
-            printf 'Host github-indicate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_ci\n  IdentitiesOnly yes\n'
-          } >> ~/.ssh/config
+          # A read-only deploy key, bound by GitHub to the one repository
+          # whose key it is, offered through a dedicated host alias.
+          # Indicate is public and needs no credential.
+          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
           git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
-          git config --global url."ssh://git@github-indicate/luofang34/Indicate".insteadOf "https://github.com/luofang34/Indicate"
 
       - name: Install system dependencies (hidapi on Linux)
         run: |

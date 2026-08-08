@@ -1,6 +1,6 @@
 // The client's navigation display profile (ADR-0031) — a thin wrapper
 // over the shared feeder core (#252). The one meters-to-dots conversion
-// runs in pilotage-instrument-feeder via the instrument wasm build; the
+// runs in indicate-instrument-feeder via the instrument wasm build; the
 // constants are mirrored here for consumers that size expectations, and
 // the wrapper restores the instrument model's NaN coding for an
 // unconstrained vertical profile.
