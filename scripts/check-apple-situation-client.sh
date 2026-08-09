@@ -46,6 +46,9 @@ require_pattern '"[$]AERO_LINK_HOST_BUNDLE_IDENTIFIER"[.][*]' \
 require_pattern 'brew install xcodegen' \
     "$root/.github/workflows/ci.yml" \
     "the Apple situation client job must install XcodeGen"
+require_pattern 'ARCHS=arm64' \
+    "$client/scripts/ci-ios.sh" \
+    "the simulator build must use the available Rust architecture"
 
 if [ "$status" -ne 0 ]; then
     echo "Apple situation client: FAILED" >&2

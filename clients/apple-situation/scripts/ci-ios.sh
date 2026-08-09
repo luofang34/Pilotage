@@ -41,6 +41,7 @@ if [ -n "${AERO_LINK_SOURCE:-}" ]; then
         -scheme PilotageSituation \
         -destination 'generic/platform=iOS Simulator' \
         -derivedDataPath "$client_root/.build/app-derived-data" \
+        ARCHS=arm64 \
         CODE_SIGNING_ALLOWED=NO \
         build
 fi
