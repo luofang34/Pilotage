@@ -1,4 +1,8 @@
-//! Weather display policy.
+//! Weather display policy with a stopgap input decoder.
+//!
+//! The durable boundary uses typed Airmass weather values. This module
+//! currently decodes interim product payloads and derives flight categories.
+//! The category-to-style mapping is the durable display policy.
 
 use airmass_core::{WeatherProductSnapshot, WeatherSnapshotEnvelope};
 use serde::Deserialize;
