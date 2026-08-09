@@ -1,4 +1,9 @@
-//! WASM export of the instrument panels (ADR-0017's first backend).
+//! Thin WASM adapter over the Pilotage instrument runtime (ADR-0032).
+//!
+//! The `pilotage-instrument-runtime` crate owns the instrument logic.
+//! This adapter owns the wasm ABI: it marshals values, packs typed
+//! outcomes, and holds the `wasm_bindgen` attributes. It does not own a
+//! decision.
 //!
 //! wasm-bindgen exposes an explicit [`InstrumentRuntime`] resource so each JS
 //! owner has independent buffers, configuration, and generations without
@@ -23,12 +28,9 @@
 mod exports;
 mod feeder_exports;
 mod panel_registry;
-mod render_status;
 
 pub use exports::{InstrumentRuntime, abi_version};
-pub use render_status::RenderStatus;
+pub use pilotage_instrument_runtime::RenderStatus;
 
-#[cfg(test)]
-mod alert_tests;
 #[cfg(test)]
 mod tests;

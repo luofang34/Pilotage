@@ -1,18 +1,12 @@
 //! WASM resources for the shared feeder (#252): the browser's telemetry
-//! ingress, trackers, and display-profile conversions delegate here so
-//! client script holds no wire- or measurement-interpreting logic
-//! (ADR-0029). The script wrappers keep only decode-shape validation
-//! and marshalling; every semantic judgement runs in
-//! `indicate-instrument-feeder`, the same crate a native shell links.
+//! ingress, trackers, and display-profile conversions delegate to the
+//! portable runtime so client script holds no wire- or
+//! measurement-interpreting logic (ADR-0029, ADR-0032). The script
+//! wrappers keep only decode-shape validation and marshalling; every
+//! semantic judgement runs in `indicate-instrument-feeder` behind the
+//! runtime's plain-Rust feeder state.
 
-use indicate_instrument_feeder::avionics::{
-    AvionicsIngress, AvionicsSample, IncarnationPolicy, IngressConfig,
-};
-use indicate_instrument_feeder::fc_state::{FcReport, FcStateTracker};
-use indicate_instrument_feeder::nav_display::nav_display_state;
-use indicate_instrument_feeder::nav_guidance::{Guidance, NavGuidanceTracker};
-use indicate_instrument_feeder::turn::TurnDerivation;
-use indicate_instrument_feeder::{RawStamp, StampFault};
+use pilotage_instrument_runtime::feeder::{FcState, Ingress, IngressParams, NavGuidance, Turn};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -26,7 +20,7 @@ fn to_js_error(context: &str, error: impl core::fmt::Display) -> JsValue {
 /// The AV-01 avionics ingress as a JavaScript-owned resource.
 #[wasm_bindgen]
 pub struct FeederIngress {
-    inner: AvionicsIngress,
+    inner: Ingress,
 }
 
 #[wasm_bindgen]
@@ -52,16 +46,12 @@ impl FeederIngress {
             )
         };
         Ok(Self {
-            inner: AvionicsIngress::new(IngressConfig {
+            inner: Ingress::new(&IngressParams {
                 vehicle_id,
                 source_id,
                 incarnation,
-                incarnation_policy: if sim_accept_unseen {
-                    IncarnationPolicy::SimAcceptUnseen
-                } else {
-                    IncarnationPolicy::PinFirst
-                },
-                maximum_seen_incarnations: maximum_seen_incarnations as usize,
+                sim_accept_unseen,
+                maximum_seen_incarnations,
                 maximum_skew_nanos,
             }),
         })
@@ -72,7 +62,7 @@ impl FeederIngress {
     pub fn ingest(&mut self, sample: JsValue, now_ms: f64) -> Result<bool, JsValue> {
         let sample: JsSample = serde_wasm_bindgen::from_value(sample)
             .map_err(|error| to_js_error("avionics sample", error))?;
-        let sample: AvionicsSample = sample
+        let sample: indicate_instrument_feeder::avionics::AvionicsSample = sample
             .try_into()
             .map_err(|error: &str| to_js_error("avionics sample", error))?;
         Ok(self.inner.ingest(&sample, now_ms))
@@ -94,7 +84,7 @@ impl FeederIngress {
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct FeederTurn {
-    inner: TurnDerivation,
+    inner: Turn,
 }
 
 #[wasm_bindgen]
@@ -120,7 +110,7 @@ impl FeederTurn {
     ) -> Result<JsValue, JsValue> {
         let stamp: Option<JsStamp> = serde_wasm_bindgen::from_value(stamp)
             .map_err(|error| to_js_error("turn stamp", error))?;
-        let raw: Option<RawStamp> = match stamp {
+        let raw: Option<indicate_instrument_feeder::RawStamp> = match stamp {
             Some(stamp) => Some(
                 stamp
                     .try_into()
@@ -139,7 +129,7 @@ impl FeederTurn {
 /// The pinned FC-state lane as a JavaScript-owned resource.
 #[wasm_bindgen]
 pub struct FeederFcState {
-    inner: FcStateTracker,
+    inner: FcState,
 }
 
 #[wasm_bindgen]
@@ -148,7 +138,7 @@ impl FeederFcState {
     #[wasm_bindgen(constructor)]
     pub fn new(stale_after_ms: f64) -> Self {
         Self {
-            inner: FcStateTracker::new(stale_after_ms),
+            inner: FcState::new(stale_after_ms),
         }
     }
 
@@ -156,7 +146,7 @@ impl FeederFcState {
     pub fn observe(&mut self, report: JsValue, now_ms: f64) -> Result<JsValue, JsValue> {
         let report: Option<JsFcReport> = serde_wasm_bindgen::from_value(report)
             .map_err(|error| to_js_error("fc report", error))?;
-        let report: Option<FcReport> = match report {
+        let report: Option<indicate_instrument_feeder::fc_state::FcReport> = match report {
             Some(report) => Some(
                 report
                     .try_into()
@@ -175,7 +165,7 @@ impl FeederFcState {
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct FeederNavGuidance {
-    inner: NavGuidanceTracker,
+    inner: NavGuidance,
 }
 
 #[wasm_bindgen]
@@ -191,7 +181,7 @@ impl FeederNavGuidance {
     pub fn observe(&mut self, sample: JsValue, now_ms: f64) -> Result<JsValue, JsValue> {
         let sample: Option<JsGuidanceSample> = serde_wasm_bindgen::from_value(sample)
             .map_err(|error| to_js_error("nav guidance", error))?;
-        let converted: Option<(RawStamp, Guidance)> = sample.map(JsGuidanceSample::into_lane);
+        let converted = sample.map(JsGuidanceSample::into_lane);
         match self.inner.observe(converted.as_ref(), now_ms) {
             Some(snapshot) => serialize(&feeder_shapes::JsNavSnapshot::from(snapshot)),
             None => Ok(JsValue::NULL),
@@ -220,7 +210,7 @@ pub fn feeder_nav_display_state(snapshot: JsValue) -> Result<JsValue, JsValue> {
     let snapshot: Option<feeder_shapes::JsNavSnapshotIn> = serde_wasm_bindgen::from_value(snapshot)
         .map_err(|error| to_js_error("nav snapshot", error))?;
     let snapshot = snapshot.map(feeder_shapes::JsNavSnapshotIn::into_snapshot);
-    match nav_display_state(snapshot.as_ref()) {
+    match pilotage_instrument_runtime::feeder::nav_display_state(snapshot.as_ref()) {
         Some(stamped) => serialize(&feeder_shapes::JsNavGroup::from(stamped)),
         None => Ok(JsValue::NULL),
     }
@@ -231,22 +221,6 @@ pub fn feeder_nav_display_state(snapshot: JsValue) -> Result<JsValue, JsValue> {
 /// sides speak one reason vocabulary.
 #[wasm_bindgen]
 pub fn feeder_stamp_fault(role: u8, clock: u8, integrity: u8, lane_role: u8) -> Option<String> {
-    let probe = RawStamp {
-        role,
-        integrity,
-        source_id: 0,
-        incarnation: [0; 16],
-        epoch: 0,
-        sequence: 0,
-        acquired_at_ns: 0,
-        clock,
-    };
-    indicate_instrument_feeder::stamp_fault_for_role(&probe, lane_role).map(|fault| {
-        let (field, rule) = match fault {
-            StampFault::RoleMismatch => ("role", "role-mismatch"),
-            StampFault::IllegalClock => ("clock", "malformed"),
-            StampFault::UnknownIntegrity => ("integrity", "unknown"),
-        };
-        format!("{field}:{rule}")
-    })
+    pilotage_instrument_runtime::feeder::stamp_fault(role, clock, integrity, lane_role)
+        .map(|(field, rule)| format!("{field}:{rule}"))
 }

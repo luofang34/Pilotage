@@ -1613,6 +1613,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-instrument-runtime"
+version = "0.1.0"
+dependencies = [
+ "indicate-alerts",
+ "indicate-instrument-feeder",
+ "indicate-instrument-glyphs",
+ "indicate-instrument-panels",
+ "indicate-instrument-registry",
+ "indicate-instrument-scene",
+ "indicate-instrument-state",
+]
+
+[[package]]
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
@@ -1628,13 +1641,9 @@ dependencies = [
 name = "pilotage-instruments-web-shell"
 version = "0.1.0"
 dependencies = [
- "indicate-alerts",
  "indicate-instrument-feeder",
- "indicate-instrument-glyphs",
- "indicate-instrument-panels",
- "indicate-instrument-registry",
- "indicate-instrument-scene",
  "indicate-instrument-state",
+ "pilotage-instrument-runtime",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",

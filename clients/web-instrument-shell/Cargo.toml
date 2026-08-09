@@ -1,6 +1,6 @@
 [package]
 name = "pilotage-instruments-web-shell"
-description = "The instrument half of the browser wasm: runtime, registry enumeration, and feeder exports — no protocol dependency by construction (ADR-0034)"
+description = "Thin WASM adapter over the Pilotage instrument runtime (ADR-0032): marshalling and packing only — no protocol dependency by construction (ADR-0034)"
 version = "0.1.0"
 edition.workspace = true
 publish = false
@@ -12,13 +12,9 @@ crate-type = ["rlib"]
 workspace = true
 
 [dependencies]
-indicate-alerts = { workspace = true }
 indicate-instrument-feeder = { workspace = true }
-indicate-instrument-glyphs = { workspace = true }
-indicate-instrument-panels = { workspace = true }
-indicate-instrument-registry = { workspace = true }
-indicate-instrument-scene = { workspace = true }
 indicate-instrument-state = { workspace = true }
+pilotage-instrument-runtime = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 wasm-bindgen = { workspace = true }

@@ -16,6 +16,7 @@ members = [
     "crates/pilotage-svs-db",
     "crates/pilotage-svs-build",
     "crates/pilotage-mission",
+    "crates/pilotage-instrument-runtime",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
@@ -98,6 +99,7 @@ pilotage-adapter-aviate = { path = "adapters/aviate" }
 pilotage-adapter-px4 = { path = "adapters/px4" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
+pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
