@@ -4,6 +4,7 @@ set -euo pipefail
 
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 client="$root/clients/apple-situation"
+driver_entitlements="$client/Configuration/AeroLinkDriverDevelopment.entitlements"
 status=0
 
 require_pattern() {
@@ -32,6 +33,22 @@ require_pattern 'AeroLink/AeroLinkAppleClient' "$client/project.yml" \
     "the application must embed its AeroLink client copy"
 require_pattern 'AeroLink/AeroLinkDriver' "$client/project.yml" \
     "the application must embed its AeroLink driver copy"
+require_pattern 'Configuration/AeroLinkDriverDevelopment[.]entitlements' \
+    "$client/scripts/prepare-aero-link.sh" \
+    "the staged driver must use the Pilotage development entitlements"
+require_pattern 'com[.]apple[.]developer[.]driverkit[.]transport[.]usb' \
+    "$driver_entitlements" \
+    "the DriverKit development entitlement must include USB transport"
+require_pattern '<string>[*]</string>' "$driver_entitlements" \
+    "the DriverKit development entitlement must use the vendor wildcard"
+if grep -Eq 'idProduct|<integer>' "$driver_entitlements"; then
+    echo "FORBIDDEN: the DriverKit development entitlement must match the self-service profile" >&2
+    status=1
+fi
+if [ "$(grep -c '<key>idVendor</key>' "$driver_entitlements")" -ne 1 ]; then
+    echo "FORBIDDEN: the DriverKit development entitlement must contain one vendor wildcard" >&2
+    status=1
+fi
 require_pattern 'com\.apple\.developer\.driverkit\.communicates-with-drivers' \
     "$client/App/PilotageSituation.entitlements" \
     "the host must declare its DriverKit communication capability"

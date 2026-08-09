@@ -58,6 +58,12 @@ if ! cmp -s \
     echo "the two driver copies do not have the same radio match table" >&2
     exit 1
 fi
+if ! cmp -s \
+    "$client_root/Configuration/AeroLinkDriverDevelopment.entitlements" \
+    "$staged_root/platforms/apple/Driver/AeroLinkDriver.entitlements"; then
+    echo "the Pilotage driver does not use its development entitlements" >&2
+    exit 1
+fi
 if ! grep -q 'Driver management' "$client_root/Resources/Settings.bundle/Root.plist"; then
     echo "the Pilotage Settings bundle does not expose driver management" >&2
     exit 1

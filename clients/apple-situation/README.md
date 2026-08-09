@@ -37,6 +37,10 @@ The script copies the pinned AeroLink source to an ignored build directory.
 It generates one AeroLink project for this app. The app embeds the generated
 client framework and driver extension.
 
+The staging script applies the Pilotage DriverKit development entitlements to
+the copied driver. These entitlements use one USB vendor wildcard. The copied
+driver property list keeps the exact receiver match table.
+
 The default App ID pair is:
 
 - Host: `org.luofang.pilotage.situation`
