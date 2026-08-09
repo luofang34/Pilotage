@@ -38,7 +38,10 @@ One file per decision, numbered in acceptance order. See
 | [0029](0029-panel-layout-look-plugins.md) | Panels, layout, and look are data-driven plugins over the scene and state contracts | Proposed |
 | [0030](0030-communicate-navdata-provisioning.md) | The host consumes aeronautical navdata through Communicate's cycle-dated snapshot surface | Proposed |
 | [0031](0031-nav-guidance-telemetry-display.md) | Navigation guidance rides telemetry as its own stamped role; deviation scaling is display policy | Proposed |
-| [0032](0032-ipad-native-client-shared-cores.md) | The iPad client is a thin native shell over the same Rust cores the web client runs as wasm | Proposed |
+| [0032](0032-ipad-native-client-shared-cores.md) | The Apple instrument composition boundary — Indicate owns the contract, the shells stay thin | Accepted |
+| [0033](0033-panel-registry-config-and-digest.md) | Compose panel registries as data and use one scene digest across shells | Accepted |
+| [0034](0034-extraction-boundary.md) | Keep instrument artifacts, gates, and pinned consumers at explicit repository boundaries | Accepted |
+| [0035](0035-source-neutral-situational-services.md) | Keep situational services source-neutral and compose them through Pilotage | Accepted |
 
 ## Provenance
 
