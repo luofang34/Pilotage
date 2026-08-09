@@ -98,6 +98,10 @@ The [domain snapshot envelope contract](domain-snapshot-envelope.md) defines
 immutable domain output. It defines producer identity, snapshot revision,
 retainable handles, field evidence, absence, and schema-version rules.
 
+The [SituationView V1 contract](situation-view-contract.md) defines the
+versioned query and result. It defines clock correspondence, best-available
+consistency, age assessment, and the shared conformance corpus.
+
 ## Load-bearing principles
 
 1. **Sans-IO core** ([ADR-0002](adr/0002-cargo-workspace-portable-sans-io-core.md)):
