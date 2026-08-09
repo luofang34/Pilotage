@@ -18,6 +18,7 @@ members = [
     "crates/pilotage-svs-build",
     "crates/pilotage-mission",
     "crates/pilotage-instrument-runtime",
+    "crates/pilotage-presentation",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
@@ -63,6 +64,11 @@ indicate-instrument-glyphs = { git = "https://github.com/luofang34/Indicate.git"
 indicate-instrument-panels = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
 indicate-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
 indicate-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+# The presentation input crates use exact revisions. The FFI facade and the
+# portable adapter must read the same snapshot schemas.
+surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "a563bd2eb8774892791af4d2e2de31f2b9ac3ab9", default-features = false }
+surveillance-geojson = { git = "https://github.com/luofang34/Surveillance.git", rev = "a563bd2eb8774892791af4d2e2de31f2b9ac3ab9", default-features = false }
+airmass-core = { git = "https://github.com/luofang34/Airmass.git", rev = "d903da96fa9778af013afe4bc0210b58916a3bf2", default-features = false }
 aerocontext-core = "0.4.5"
 aerocontext-planning = "0.4.5"
 aerocontext-navdata = { version = "0.4.5", default-features = false }
@@ -104,6 +110,7 @@ pilotage-adapter-px4 = { path = "adapters/px4" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
+pilotage-presentation = { path = "crates/pilotage-presentation" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

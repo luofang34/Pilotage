@@ -60,6 +60,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "airmass-core"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Airmass.git?rev=d903da96fa9778af013afe4bc0210b58916a3bf2#d903da96fa9778af013afe4bc0210b58916a3bf2"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1841,6 +1850,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-presentation"
+version = "0.1.0"
+dependencies = [
+ "airmass-core",
+ "serde",
+ "serde_json",
+ "surveillance-core",
+ "surveillance-geojson",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-protocol"
 version = "0.1.0"
 dependencies = [
@@ -2695,6 +2716,24 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "surveillance-core"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
+dependencies = [
+ "libm",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "surveillance-geojson"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
+dependencies = [
+ "surveillance-core",
+]
 
 [[package]]
 name = "syn"
