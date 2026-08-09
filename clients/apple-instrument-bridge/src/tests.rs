@@ -30,6 +30,7 @@ fn attitude_state() -> AircraftState {
             }),
             age_ms: Some(10.0),
         },
+        quality: indicate_instrument_state::EstimateQuality::Good,
         valid: indicate_instrument_state::ValidFlags {
             attitude: true,
             rates: true,
@@ -96,17 +97,53 @@ fn digest_identity_equals_the_pinned_tuple_values() {
 #[test]
 fn render_round_trip_carries_the_typed_outcome() {
     let bridge = InstrumentBridge::new();
-    assert_eq!(bridge.write_state(&encode(&attitude_state())).status, 0);
+    assert_eq!(
+        bridge.write_state(&encode(&attitude_state()), 100).status,
+        0
+    );
 
-    let first = bridge.render(0);
+    let first = bridge.composition_frame(100, true);
     assert_eq!(first.status, RenderStatus::Ok as u32);
     assert!(!first.scene.is_empty(), "the outcome carries scene bytes");
     assert_eq!(first.generation, 1);
-    assert_eq!((first.frame_width, first.frame_height), (480.0, 360.0));
+    assert_eq!(first.panels.len(), 2);
+    assert_eq!(
+        (first.panels[0].frame_width, first.panels[0].frame_height),
+        (480.0, 360.0)
+    );
+    assert!(first.panels.iter().all(|panel| panel.generation == 1));
 
-    let second = bridge.render(0);
+    let second = bridge.composition_frame(101, true);
     assert_eq!(second.status, RenderStatus::Ok as u32);
     assert_eq!(second.generation, 2, "a second success advances generation");
+}
+
+#[test]
+fn quiet_input_crosses_both_freshness_thresholds() {
+    let bridge = InstrumentBridge::new();
+    assert_eq!(
+        bridge.write_state(&encode(&attitude_state()), 100).status,
+        0
+    );
+
+    let fresh = bridge.composition_frame(100, true);
+    let stale = bridge.composition_frame(900, true);
+    let failed = bridge.composition_frame(3_200, true);
+    assert_eq!(fresh.status, RenderStatus::Ok as u32);
+    assert_eq!(stale.status, RenderStatus::Ok as u32);
+    assert_eq!(failed.status, RenderStatus::Ok as u32);
+    assert_eq!(
+        (fresh.generation, stale.generation, failed.generation),
+        (1, 2, 3)
+    );
+    assert_ne!(
+        fresh.scene, stale.scene,
+        "stale data must change the scenes"
+    );
+    assert_ne!(
+        stale.scene, failed.scene,
+        "failed data must change the scenes"
+    );
 }
 
 #[test]
@@ -116,9 +153,9 @@ fn a_truncated_state_fails_with_unchanged_generation() {
     // over-declared group length is: tag 0x05 claims 65535 payload
     // bytes against the 1024-byte buffer.
     let bridge = InstrumentBridge::new();
-    assert_eq!(bridge.write_state(&[7, 1, 0x05, 0xff, 0xff]).status, 0);
+    assert_eq!(bridge.write_state(&[7, 1, 0x05, 0xff, 0xff], 0).status, 0);
 
-    let outcome = bridge.render(0);
+    let outcome = bridge.composition_frame(0, true);
     assert_eq!(outcome.status, RenderStatus::StateTruncated as u32);
     assert!(outcome.scene.is_empty(), "a failure carries no scene bytes");
     assert_eq!(outcome.generation, 0, "a failure never advances generation");
@@ -128,9 +165,9 @@ fn a_truncated_state_fails_with_unchanged_generation() {
 fn state_write_accepts_exact_capacity_and_refuses_capacity_plus_one() {
     let bridge = InstrumentBridge::new();
     let capacity = indicate_instrument_state::abi::v7::CAPACITY;
-    assert_eq!(bridge.write_state(&vec![0; capacity]).status, 0);
+    assert_eq!(bridge.write_state(&vec![0; capacity], 0).status, 0);
 
-    let error = bridge.write_state(&vec![0; capacity + 1]);
+    let error = bridge.write_state(&vec![0; capacity + 1], 0);
     assert_eq!(error.status, 1);
     assert_eq!(error.actual, (capacity + 1) as u64);
     assert_eq!(error.capacity, capacity as u64);
@@ -140,14 +177,14 @@ fn state_write_accepts_exact_capacity_and_refuses_capacity_plus_one() {
 fn oversized_valid_prefix_is_not_truncated_into_an_accepted_frame() {
     let bridge = InstrumentBridge::new();
     let encoded = encode(&attitude_state());
-    assert_eq!(bridge.write_state(&encoded).status, 0);
-    let first = bridge.render(0);
+    assert_eq!(bridge.write_state(&encoded, 0).status, 0);
+    let first = bridge.composition_frame(0, true);
     assert_eq!(first.status, RenderStatus::Ok as u32);
 
     let mut oversized = encoded;
     oversized.resize(indicate_instrument_state::abi::v7::CAPACITY + 1, 0);
-    assert_eq!(bridge.write_state(&oversized).status, 1);
-    let refused = bridge.render(0);
+    assert_eq!(bridge.write_state(&oversized, 1).status, 1);
+    let refused = bridge.composition_frame(1, true);
     assert_ne!(refused.status, RenderStatus::Ok as u32);
     assert!(refused.scene.is_empty());
     assert_eq!(refused.generation, first.generation);

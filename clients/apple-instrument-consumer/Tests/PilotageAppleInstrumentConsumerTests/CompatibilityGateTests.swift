@@ -5,19 +5,34 @@ import Testing
 @testable import PilotageAppleInstrumentConsumer
 
 private final class RuntimeDouble: InstrumentRuntimeServing {
-    var renderCalls = 0
-    var outcome = InstrumentRuntimeRenderOutcome(
+    var compositionCalls = 0
+    var writes: [(bytes: [UInt8], acceptedAtMs: UInt64)] = []
+    var outcome = InstrumentRuntimeCompositionOutcome(
         status: 0,
         scene: [1],
-        frameWidth: 10,
-        frameHeight: 10,
+        panels: [
+            InstrumentRuntimePanelOutcome(
+                panel: 0,
+                status: 0,
+                sceneOffset: 0,
+                sceneLength: 1,
+                frameWidth: 10,
+                frameHeight: 10,
+                generation: 1
+            ),
+        ],
         generation: 1
     )
 
-    func writeState(_: [UInt8]) throws {}
+    func writeState(_ bytes: [UInt8], acceptedAtMs: UInt64) throws {
+        writes.append((bytes, acceptedAtMs))
+    }
 
-    func render(panel _: UInt32) -> InstrumentRuntimeRenderOutcome {
-        renderCalls += 1
+    func compositionFrame(
+        nowMs _: UInt64,
+        pathHealthy _: Bool
+    ) -> InstrumentRuntimeCompositionOutcome {
+        compositionCalls += 1
         return outcome
     }
 }
@@ -52,6 +67,17 @@ private func matchingIdentity() -> InstrumentRuntimeIdentity {
     )
 }
 
+private func requirements(width: CGFloat = 10) -> PanelRequirements {
+    PanelRequirements(
+        id: "test",
+        title: "Test",
+        criticalLayers: [],
+        frameMin: CGSize(width: width, height: 10),
+        frameMax: CGSize(width: width, height: 10),
+        canonicalFrame: CGSize(width: width, height: 10)
+    )
+}
+
 @Test("The Swift gate equals the Pilotage consumer pin")
 func swiftGateMatchesConsumerPin() throws {
     let pin = try compatibilityPin()
@@ -66,7 +92,7 @@ func swiftGateMatchesConsumerPin() throws {
     )
 }
 
-@Test("Each compatibility mismatch stops scene production")
+@Test("Each compatibility mismatch stops composition production")
 func everyMismatchStopsBeforeProduction() {
     let expected = matchingIdentity()
     let cases: [(InstrumentCompatibilityField, InstrumentRuntimeIdentity)] = [
@@ -97,80 +123,140 @@ func everyMismatchStopsBeforeProduction() {
             Issue.record("The gate returned an untyped error: \(error)")
         }
         #expect(initializationCalls == 0)
-        #expect(runtime.renderCalls == 0)
+        #expect(runtime.compositionCalls == 0)
     }
 }
 
-@Test("A verified runtime can paint through IndicateAppleDisplay")
-func verifiedRuntimePaints() throws {
+@Test("A verified composition can paint through IndicateAppleDisplay")
+func verifiedCompositionPaints() throws {
     let runtime = RuntimeDouble()
     let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
-    let producer = PilotageInstrumentSceneProducer(verifiedRuntime: verified, panel: 0)
-    let requirements = PanelRequirements(
-        id: "test",
-        title: "Test",
-        criticalLayers: [],
-        frameMin: CGSize(width: 10, height: 10),
-        frameMax: CGSize(width: 10, height: 10),
-        canonicalFrame: CGSize(width: 10, height: 10)
+    let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
+    try composition.compose(nowMs: 100, pathHealthy: true)
+    let display = PanelDisplay(
+        requirements: requirements(),
+        producer: composition.producer(panel: 0)
     )
-    let display = PanelDisplay(requirements: requirements, producer: producer)
-    let outcome = display.render(pixelWidth: 10, pixelHeight: 10, nowMs: 0)
+
+    let outcome = display.render(pixelWidth: 10, pixelHeight: 10, nowMs: 100)
     #expect(!outcome.showingFailure)
-    #expect(runtime.renderCalls == 1)
+    #expect(runtime.compositionCalls == 1)
 }
 
-@Test("A frame mismatch is covered before paint")
+@Test("One runtime call supplies every panel producer")
+func oneRuntimeCallSuppliesEveryPanel() throws {
+    let runtime = RuntimeDouble()
+    runtime.outcome = InstrumentRuntimeCompositionOutcome(
+        status: 0,
+        scene: [1, 1],
+        panels: [
+            InstrumentRuntimePanelOutcome(
+                panel: 0, status: 0, sceneOffset: 0, sceneLength: 1,
+                frameWidth: 10, frameHeight: 10, generation: 7
+            ),
+            InstrumentRuntimePanelOutcome(
+                panel: 1, status: 0, sceneOffset: 1, sceneLength: 1,
+                frameWidth: 20, frameHeight: 10, generation: 7
+            ),
+        ],
+        generation: 7
+    )
+    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
+
+    #expect(try composition.compose(nowMs: 500, pathHealthy: true) == 7)
+    let first = try composition.producer(panel: 0).frame(
+        designFrame: CGRect(x: 0, y: 0, width: 10, height: 10)
+    )
+    let second = try composition.producer(panel: 1).frame(
+        designFrame: CGRect(x: 0, y: 0, width: 20, height: 10)
+    )
+    #expect(first.bytes == [1])
+    #expect(second.bytes == [1])
+    #expect(runtime.compositionCalls == 1)
+}
+
+@Test("State acceptance time reaches the runtime and clears cached scenes")
+func stateAcceptanceInvalidatesCachedScenes() throws {
+    let runtime = RuntimeDouble()
+    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
+    try composition.compose(nowMs: 100, pathHealthy: true)
+
+    try composition.writeState([7, 0], acceptedAtMs: 250)
+    #expect(runtime.writes.count == 1)
+    #expect(runtime.writes[0].bytes == [7, 0])
+    #expect(runtime.writes[0].acceptedAtMs == 250)
+    do {
+        _ = try composition.producer(panel: 0).frame(
+            designFrame: CGRect(x: 0, y: 0, width: 10, height: 10)
+        )
+        Issue.record("A state write left the previous scene available")
+    } catch let fault as ProducerFault {
+        #expect(fault.reason == .notInitialized)
+    } catch {
+        Issue.record("The producer returned an untyped error: \(error)")
+    }
+}
+
+@Test("A failed transaction removes the previous composition")
+func failedTransactionRemovesPreviousComposition() throws {
+    let runtime = RuntimeDouble()
+    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
+    try composition.compose(nowMs: 100, pathHealthy: true)
+    runtime.outcome = InstrumentRuntimeCompositionOutcome(
+        status: 11,
+        scene: [],
+        panels: [],
+        generation: 1
+    )
+
+    do {
+        try composition.compose(nowMs: 200, pathHealthy: true)
+        Issue.record("The composition accepted a failed transaction")
+    } catch let fault as ProducerFault {
+        #expect(fault.reason == .stateMalformed)
+    } catch {
+        Issue.record("The composition returned an untyped error: \(error)")
+    }
+    do {
+        _ = try composition.producer(panel: 0).frame(
+            designFrame: CGRect(x: 0, y: 0, width: 10, height: 10)
+        )
+        Issue.record("The failed transaction left an old scene available")
+    } catch let fault as ProducerFault {
+        #expect(fault.reason == .notInitialized)
+    } catch {
+        Issue.record("The producer returned an untyped error: \(error)")
+    }
+}
+
+@Test("A panel frame mismatch fails before paint")
 func frameMismatchFailsClosed() throws {
     let runtime = RuntimeDouble()
-    runtime.outcome = InstrumentRuntimeRenderOutcome(
+    runtime.outcome = InstrumentRuntimeCompositionOutcome(
         status: 0,
         scene: [1],
-        frameWidth: 11,
-        frameHeight: 10,
+        panels: [
+            InstrumentRuntimePanelOutcome(
+                panel: 0, status: 0, sceneOffset: 0, sceneLength: 1,
+                frameWidth: 11, frameHeight: 10, generation: 1
+            ),
+        ],
         generation: 1
     )
     let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
-    let producer = PilotageInstrumentSceneProducer(verifiedRuntime: verified, panel: 0)
-    let requirements = PanelRequirements(
-        id: "test",
-        title: "Test",
-        criticalLayers: [],
-        frameMin: CGSize(width: 10, height: 10),
-        frameMax: CGSize(width: 10, height: 10),
-        canonicalFrame: CGSize(width: 10, height: 10)
+    let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
+    try composition.compose(nowMs: 0, pathHealthy: true)
+    let display = PanelDisplay(
+        requirements: requirements(),
+        producer: composition.producer(panel: 0)
     )
-    let display = PanelDisplay(requirements: requirements, producer: producer)
+
     let outcome = display.render(pixelWidth: 10, pixelHeight: 10, nowMs: 0)
     #expect(outcome.showingFailure)
     #expect(outcome.reason == .abiMismatch)
-}
-
-@Test("Producer status codes remain typed through the Apple display")
-func producerStatusCodesRemainTyped() throws {
-    for (status, reason) in [
-        (UInt32(11), DisplayReason.stateMalformed),
-        (UInt32(12), DisplayReason.configInvalid),
-    ] {
-        let runtime = RuntimeDouble()
-        runtime.outcome = InstrumentRuntimeRenderOutcome(
-            status: status,
-            scene: [],
-            frameWidth: 10,
-            frameHeight: 10,
-            generation: 0
-        )
-        let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
-        let producer = PilotageInstrumentSceneProducer(verifiedRuntime: verified, panel: 0)
-        do {
-            _ = try producer.frame(designFrame: CGRect(x: 0, y: 0, width: 10, height: 10))
-            Issue.record("The producer accepted status \(status)")
-        } catch let fault as ProducerFault {
-            #expect(fault.reason == reason)
-        } catch {
-            Issue.record("The producer returned an untyped error: \(error)")
-        }
-    }
 }
 
 private func identity(
