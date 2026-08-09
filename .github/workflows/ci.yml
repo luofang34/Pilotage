@@ -42,6 +42,10 @@ jobs:
           AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
           SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
         run: |
+          if [ -z "$AIRMASS_DEPLOY_KEY" ] || [ -z "$SURVEILLANCE_DEPLOY_KEY" ]; then
+            echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
+            exit 1
+          fi
           printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
           printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
           chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
@@ -383,6 +387,10 @@ jobs:
           AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
           SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
         run: |
+          if [ -z "$AIRMASS_DEPLOY_KEY" ] || [ -z "$SURVEILLANCE_DEPLOY_KEY" ]; then
+            echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
+            exit 1
+          fi
           printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
           printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
           chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
@@ -408,6 +416,10 @@ jobs:
           AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
           SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
         run: |
+          if [ -z "$AIRMASS_DEPLOY_KEY" ] || [ -z "$SURVEILLANCE_DEPLOY_KEY" ]; then
+            echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
+            exit 1
+          fi
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
@@ -417,6 +429,15 @@ jobs:
           printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
           git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
           git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
+      - name: Require the AeroLink deploy key
+        env:
+          AERO_LINK_DEPLOY_KEY: ${{ secrets.AERO_LINK_DEPLOY_KEY }}
+        run: |
+          if [ -z "$AERO_LINK_DEPLOY_KEY" ]; then
+            echo "::error::AERO_LINK_DEPLOY_KEY must contain a private deploy key." >&2
+            exit 1
+          fi
 
       - name: Checkout the pinned AeroLink source
         uses: actions/checkout@v7
