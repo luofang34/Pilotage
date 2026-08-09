@@ -1,6 +1,6 @@
 # ADR-0036: Separate situational state by lifecycle
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-09
 - Supersedes on acceptance: [ADR-0035](0035-source-neutral-situational-services.md)
 

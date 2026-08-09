@@ -23,9 +23,9 @@ authoritative decisions.
     native; plugin      │  separately           ├─ vehicle adapter ── FC (Aviate | PX4)
     panels/layout,      │  deployed relay       ├─ Navigate: navigation solution and guidance
     ADR-0029; EFB or    │                       ├─ Surveillance: traffic fusion and tracks
-    terminal posture    │                       ├─ AeroContext: weather, notices, and navdata
-    by discovery,       │                       └─ telemetry/control/media/advisory
-    ADR-0026)           │
+    terminal posture    │                       ├─ Airmass and AeronauticalUpdates
+    by discovery,       │                       ├─ Navdata, FlightPlanning, and Briefing
+    ADR-0026)           │                       └─ telemetry/control/media/advisory
       video ◄───────────┤
       telemetry ◄───────┤
       advisory ◄────────┤
@@ -63,24 +63,36 @@ Planes are contract boundaries; deployables are a deployment decision.
 |---|---|---|
 | Flight control (Aviate first; PX4 via adapter) | Control-grade estimation, stabilization, actuation | [ADR-0008](adr/0008-engine-independent-adapter-boundary.md), [ADR-0018](adr/0018-avionics-telemetry-and-aviate-adapter.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
 | Navigate (sibling repository) | Multi-sensor fusion, integrity, flight-plan execution, guidance, terrain awareness | [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
-| `aero-link` and `avionics-link` | Source access, protocol decode, and thin domain adapters | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
-| Surveillance (sibling repository) | Source-neutral traffic observations, fusion, tracks, deltas, and snapshots | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
-| AeroContext (repository `v99n62`) | Weather, NOTAM, TFR, briefing, navigation data, revision, validity, and expiry | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
-| Pilotage host | Component orchestration + session/authority/media endpoint | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md) |
+| `aero-link` | Radio access, protocol decode, bounded FIS-B product assembly, classification, and domain adapters | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| `avionics-link` | Installed-avionics transport, protocol decode, and domain adapters | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Surveillance (sibling repository) | Source-neutral traffic observations, fusion, tracks, deltas, and snapshots | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Airmass | Weather observations, forecasts, hazards, revisions, validity, and expiry | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| `AeronauticalUpdates` | Perishable notices, restrictions, operational status, validity, and expiry | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Navdata | Cycle-dated NASR and CIFP baseline | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| FlightPlanning | Plan drafts, resolution, validation, filing state, and immutable revisions | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Briefing | Immutable evidence results from fixed inputs | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| AeroContext (repository `v99n62`) | Temporary compatibility facade for existing consumers | [ADR-0036](adr/0036-situational-domain-ownership.md) |
+| Pilotage host | Composition, session and authority services, media endpoint, and read-only `SituationView` | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0036](adr/0036-situational-domain-ownership.md) |
 | Operator client | Control terminal ↔ EFB by discovered capability; plugin displays | [ADR-0026](adr/0026-host-capability-profiles.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
 | Coordination server (optional) | Identity, host registry, rendezvous, entitlement-gated data services | [ADR-0027](adr/0027-optional-coordination-server.md) |
 
 ## Situational services
 
-[ADR-0035](adr/0035-source-neutral-situational-services.md) assigns traffic
-state to Surveillance and advisory product state to AeroContext. `aero-link`
-and `avionics-link` supply source data through thin adapters. Pilotage reads
-the domain outputs through a read-only `SituationView`.
+[ADR-0036](adr/0036-situational-domain-ownership.md) assigns each type of
+situational state to one lifecycle owner. Surveillance owns traffic state.
+Airmass owns weather state. `AeronauticalUpdates` owns perishable notices and
+operational status. Navdata owns the cycle-dated baseline. FlightPlanning owns
+plan state. Briefing owns immutable results from fixed inputs.
+
+`aero-link` and `avionics-link` supply source data through domain adapters.
+Pilotage composes immutable snapshot handles through a read-only
+`SituationView`.
 
 Map adapters and AI are optional consumers of `SituationView`. A headless
-deployment does not need either consumer. `Communicate` does not own
-Surveillance or AeroContext. Add a shared communication mechanism to it only
-when two components need that mechanism.
+deployment does not need either consumer. An application owns presentation,
+tiles, and styling. `Communicate` does not own situational domain state. Add a
+shared communication mechanism to it only when two components need that
+mechanism.
 
 The [domain snapshot envelope contract](domain-snapshot-envelope.md) defines
 immutable domain output. It defines producer identity, snapshot revision,
