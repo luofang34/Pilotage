@@ -17,9 +17,8 @@ if [ ! -d "$source_root/.git" ]; then
 fi
 
 expected_revision=$(tr -d '[:space:]' < "$revision_file")
-actual_revision=$(git -C "$source_root" rev-parse HEAD)
-if [ "$actual_revision" != "$expected_revision" ]; then
-    echo "AeroLink HEAD does not match AERO_LINK_REVISION" >&2
+if ! git -C "$source_root" cat-file -e "$expected_revision^{commit}"; then
+    echo "AeroLink does not contain AERO_LINK_REVISION" >&2
     exit 2
 fi
 

@@ -3,20 +3,59 @@
 version = 4
 
 [[package]]
+name = "aero-link"
+version = "0.1.0"
+dependencies = [
+ "aero-link-core",
+ "aero-link-rx",
+]
+
+[[package]]
+name = "aero-link-core"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "aero-link-rx"
+version = "0.1.0"
+dependencies = [
+ "aero-link-core",
+ "libm",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "airmass-aero-link"
+version = "0.1.0"
+dependencies = [
+ "aero-link",
+ "airmass-core",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "airmass-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Airmass.git?rev=b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb#b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
 [[package]]
 name = "airmass-geojson"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Airmass.git?rev=b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb#b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb"
 dependencies = [
  "airmass-core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -350,10 +389,15 @@ dependencies = [
 name = "pilotage-situation-ffi"
 version = "0.1.0"
 dependencies = [
+ "aero-link",
+ "airmass-aero-link",
  "airmass-core",
+ "airmass-geojson",
  "pilotage-presentation",
  "serde_json",
+ "surveillance-aero-link",
  "surveillance-core",
+ "surveillance-geojson",
  "thiserror",
  "uniffi",
 ]
@@ -514,21 +558,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
+name = "surveillance-aero-link"
+version = "0.1.0"
+dependencies = [
+ "aero-link",
+ "libm",
+ "serde_json",
+ "surveillance-core",
+ "thiserror",
+]
+
+[[package]]
 name = "surveillance-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
 dependencies = [
  "libm",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
 [[package]]
 name = "surveillance-geojson"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
 dependencies = [
+ "serde",
+ "serde_json",
  "surveillance-core",
+ "thiserror",
 ]
 
 [[package]]

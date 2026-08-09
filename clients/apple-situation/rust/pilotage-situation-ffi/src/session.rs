@@ -1,10 +1,16 @@
 //! Retained display state for one presentation session.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use airmass_core::{
+    WeatherSnapshotEnvelope, WeatherSnapshotRecord, WeatherSnapshotRecordHeader, WeatherStationId,
+};
+use airmass_geojson::{Wgs84Position, map_snapshot_transition};
 use pilotage_presentation::{PointChange, PresentationAdapter};
+use surveillance_core::{TrackRecord, TrackRecordHeader};
 
-use crate::{DisplayBatch, FfiError};
+use crate::{DisplayBatch, FfiError, WeatherStationPosition};
 
 #[cfg(test)]
 mod tests;
@@ -12,6 +18,8 @@ mod tests;
 #[derive(Default)]
 struct SessionState {
     presentation: PresentationAdapter,
+    weather_snapshot: Option<WeatherSnapshotEnvelope>,
+    weather_positions: BTreeMap<String, Wgs84Position>,
 }
 
 /// Retains display state for the Swift host.
@@ -33,24 +41,58 @@ impl PresentationSession {
 
     /// Accept one versioned Surveillance track record.
     pub fn accept_track_record(&self, record_json: String) -> Result<DisplayBatch, FfiError> {
-        let record: surveillance_core::TrackRecord =
-            serde_json::from_str(&record_json).map_err(|source| FfiError::TrackRecord {
-                message: source.to_string(),
-            })?;
-        let delta = record
-            .into_delta()
-            .map_err(|source| FfiError::TrackRecord {
-                message: source.to_string(),
-            })?;
+        validate_track_header(&record_json)?;
+        let record: TrackRecord = serde_json::from_str(&record_json).map_err(track_record_error)?;
+        let delta = record.into_delta().map_err(track_record_error)?;
         let mut state = self.lock_state()?;
         let change = state.presentation.apply_traffic_delta(&delta);
-        Ok(display_for_state(&state, change))
+        Ok(display_for_state(&state, change.into_iter().collect()))
+    }
+
+    /// Accept one versioned Airmass weather snapshot record.
+    pub fn accept_weather_record(&self, record_json: String) -> Result<DisplayBatch, FfiError> {
+        validate_weather_header(&record_json)?;
+        let record: WeatherSnapshotRecord =
+            serde_json::from_str(&record_json).map_err(weather_record_error)?;
+        let current = record.into_envelope().map_err(weather_record_error)?;
+        let mut state = self.lock_state()?;
+        if weather_record_is_stale(state.weather_snapshot.as_ref(), &current) {
+            return Ok(display_for_state(&state, Vec::new()));
+        }
+        let deltas = map_weather_transition(&state, &current);
+        let changes = apply_weather_deltas(&mut state.presentation, deltas);
+        state.weather_snapshot = Some(current);
+        Ok(display_for_state(&state, changes))
+    }
+
+    /// Replace the navigation-data positions used for weather stations.
+    pub fn replace_weather_station_positions(
+        &self,
+        positions: Vec<WeatherStationPosition>,
+    ) -> Result<DisplayBatch, FfiError> {
+        let catalog = weather_position_catalog(positions)?;
+        let mut state = self.lock_state()?;
+        let mut changes = state.presentation.clear_weather();
+        state.weather_positions = catalog;
+        if let Some(current) = state.weather_snapshot.clone() {
+            let deltas = map_weather_initial(&state, &current);
+            changes.extend(apply_weather_deltas(&mut state.presentation, deltas));
+        }
+        Ok(display_for_state(&state, changes))
+    }
+
+    /// Clear retained traffic and weather display state.
+    pub fn clear_radio_records(&self) -> Result<DisplayBatch, FfiError> {
+        let mut state = self.lock_state()?;
+        state.presentation = PresentationAdapter::default();
+        state.weather_snapshot = None;
+        Ok(display_for_state(&state, Vec::new()))
     }
 
     /// Get display values for the newest accepted records.
     pub fn current_display(&self) -> Result<DisplayBatch, FfiError> {
         let state = self.lock_state()?;
-        Ok(display_for_state(&state, None))
+        Ok(display_for_state(&state, Vec::new()))
     }
 }
 
@@ -62,8 +104,91 @@ impl PresentationSession {
     }
 }
 
-fn display_for_state(state: &SessionState, change: Option<PointChange>) -> DisplayBatch {
+fn validate_track_header(record_json: &str) -> Result<(), FfiError> {
+    let header: TrackRecordHeader =
+        serde_json::from_str(record_json).map_err(track_record_error)?;
+    header.validate().map_err(track_record_error)
+}
+
+fn validate_weather_header(record_json: &str) -> Result<(), FfiError> {
+    let header: WeatherSnapshotRecordHeader =
+        serde_json::from_str(record_json).map_err(weather_record_error)?;
+    header.validate().map_err(weather_record_error)
+}
+
+fn weather_record_is_stale(
+    previous: Option<&WeatherSnapshotEnvelope>,
+    current: &WeatherSnapshotEnvelope,
+) -> bool {
+    previous.is_some_and(|prior| {
+        prior.producer_instance_id() == current.producer_instance_id()
+            && prior.snapshot_revision().get() >= current.snapshot_revision().get()
+    })
+}
+
+fn map_weather_transition(
+    state: &SessionState,
+    current: &WeatherSnapshotEnvelope,
+) -> Vec<airmass_geojson::FeatureDelta> {
+    map_snapshot_transition(
+        state.weather_snapshot.as_ref(),
+        current,
+        &|station: &WeatherStationId| state.weather_positions.get(station.as_str()).copied(),
+    )
+}
+
+fn map_weather_initial(
+    state: &SessionState,
+    current: &WeatherSnapshotEnvelope,
+) -> Vec<airmass_geojson::FeatureDelta> {
+    map_snapshot_transition(None, current, &|station: &WeatherStationId| {
+        state.weather_positions.get(station.as_str()).copied()
+    })
+}
+
+fn apply_weather_deltas(
+    presentation: &mut PresentationAdapter,
+    deltas: Vec<airmass_geojson::FeatureDelta>,
+) -> Vec<PointChange> {
+    deltas
+        .iter()
+        .filter_map(|delta| presentation.apply_weather_delta(delta))
+        .collect()
+}
+
+fn weather_position_catalog(
+    positions: Vec<WeatherStationPosition>,
+) -> Result<BTreeMap<String, Wgs84Position>, FfiError> {
+    let mut catalog = BTreeMap::new();
+    for position in positions {
+        let value =
+            Wgs84Position::new(position.latitude_deg, position.longitude_deg).ok_or_else(|| {
+                FfiError::WeatherStationPosition {
+                    message: format!(
+                        "station {} has WGS84 coordinates ({}, {}) outside the valid range",
+                        position.station_id, position.latitude_deg, position.longitude_deg
+                    ),
+                }
+            })?;
+        catalog.insert(position.station_id, value);
+    }
+    Ok(catalog)
+}
+
+fn display_for_state(state: &SessionState, changes: Vec<PointChange>) -> DisplayBatch {
     let mut batch = state.presentation.adapt();
-    batch.point_changes.extend(change);
+    batch.point_changes = changes;
     batch.into()
+}
+
+fn track_record_error(source: impl ToString) -> FfiError {
+    FfiError::TrackRecord {
+        message: source.to_string(),
+    }
+}
+
+fn weather_record_error(source: impl ToString) -> FfiError {
+    FfiError::WeatherRecord {
+        message: source.to_string(),
+    }
 }

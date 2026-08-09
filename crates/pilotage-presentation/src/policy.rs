@@ -89,6 +89,20 @@ impl PresentationAdapter {
         Some(change)
     }
 
+    /// Remove all weather points without changing traffic state.
+    pub fn clear_weather(&mut self) -> Vec<PointChange> {
+        let points = std::mem::take(&mut self.weather_points);
+        points
+            .into_iter()
+            .map(|(id, point)| PointChange::Remove {
+                id,
+                transfer_to: None,
+                producer_instance_id: point.producer_instance_id,
+                snapshot_revision: point.snapshot_revision,
+            })
+            .collect()
+    }
+
     /// Convert current traffic and weather values into one batch.
     #[must_use]
     pub fn adapt(&self) -> DisplayBatch {

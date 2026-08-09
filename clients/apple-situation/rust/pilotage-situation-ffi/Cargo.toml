@@ -10,6 +10,15 @@ publish = false
 
 [workspace]
 
+[workspace.dependencies]
+aero-link = { path = "../../.build/aero-link", default-features = false }
+airmass-core = { path = ".build/airmass/crates/airmass-core", default-features = false }
+libm = "0.2"
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
+surveillance-core = { path = ".build/surveillance/crates/surveillance-core", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
 
@@ -18,12 +27,25 @@ name = "pilotage-situation-uniffi-bindgen"
 path = "src/bin/uniffi_bindgen.rs"
 
 [dependencies]
-airmass-core = { git = "https://github.com/luofang34/Airmass.git", rev = "b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb", default-features = false }
+aero-link = { path = "../../.build/aero-link", features = ["std"] }
+airmass-aero-link = { path = ".build/airmass/crates/airmass-aero-link", features = ["std"] }
+airmass-core = { path = ".build/airmass/crates/airmass-core", features = ["std"] }
+airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }
 pilotage-presentation = { path = "../../../../crates/pilotage-presentation" }
 serde_json = "1.0"
-surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "a563bd2eb8774892791af4d2e2de31f2b9ac3ab9", default-features = false }
+surveillance-aero-link = { path = ".build/surveillance/crates/surveillance-aero-link", features = ["std"] }
+surveillance-core = { path = ".build/surveillance/crates/surveillance-core", features = ["std"] }
+surveillance-geojson = { path = ".build/surveillance/crates/surveillance-geojson" }
 thiserror = "2.0"
 uniffi = { version = "0.32", features = ["cli"] }
+
+[patch."https://github.com/luofang34/Airmass.git"]
+airmass-core = { path = ".build/airmass/crates/airmass-core" }
+airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }
+
+[patch."https://github.com/luofang34/Surveillance.git"]
+surveillance-core = { path = ".build/surveillance/crates/surveillance-core" }
+surveillance-geojson = { path = ".build/surveillance/crates/surveillance-geojson" }
 
 [workspace.lints.rust]
 missing_docs = "deny"
