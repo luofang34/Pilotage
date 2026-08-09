@@ -10,7 +10,8 @@ use airmass_geojson::{Wgs84Position, map_snapshot_transition};
 use pilotage_presentation::{PointChange, PresentationAdapter};
 use surveillance_core::{TrackRecord, TrackRecordHeader};
 
-use crate::{DisplayBatch, FfiError, WeatherStationPosition};
+use crate::WeatherStationPosition;
+use crate::{DisplayBatch, FfiError, PresentationRadioState, PresentationSourceObservation};
 
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,7 @@ struct SessionState {
     presentation: PresentationAdapter,
     weather_snapshot: Option<WeatherSnapshotEnvelope>,
     weather_positions: BTreeMap<String, Wgs84Position>,
+    source_observation: PresentationSourceObservation,
 }
 
 /// Retains display state for the Swift host.
@@ -40,22 +42,32 @@ impl PresentationSession {
     }
 
     /// Accept one versioned Surveillance track record.
-    pub fn accept_track_record(&self, record_json: String) -> Result<DisplayBatch, FfiError> {
+    pub fn accept_track_record(
+        &self,
+        record_json: String,
+        now_micros: u64,
+    ) -> Result<DisplayBatch, FfiError> {
         validate_track_header(&record_json)?;
         let record: TrackRecord = serde_json::from_str(&record_json).map_err(track_record_error)?;
         let delta = record.into_delta().map_err(track_record_error)?;
         let mut state = self.lock_state()?;
+        state.presentation.advance_time(now_micros);
         let change = state.presentation.apply_traffic_delta(&delta);
         Ok(display_for_state(&state, change.into_iter().collect()))
     }
 
     /// Accept one versioned Airmass weather snapshot record.
-    pub fn accept_weather_record(&self, record_json: String) -> Result<DisplayBatch, FfiError> {
+    pub fn accept_weather_record(
+        &self,
+        record_json: String,
+        now_micros: u64,
+    ) -> Result<DisplayBatch, FfiError> {
         validate_weather_header(&record_json)?;
         let record: WeatherSnapshotRecord =
             serde_json::from_str(&record_json).map_err(weather_record_error)?;
         let current = record.into_envelope().map_err(weather_record_error)?;
         let mut state = self.lock_state()?;
+        state.presentation.advance_time(now_micros);
         if weather_record_is_stale(state.weather_snapshot.as_ref(), &current) {
             return Ok(display_for_state(&state, Vec::new()));
         }
@@ -74,6 +86,7 @@ impl PresentationSession {
         let mut state = self.lock_state()?;
         let mut changes = state.presentation.clear_weather();
         state.weather_positions = catalog;
+        apply_source_observation(&mut state);
         if let Some(current) = state.weather_snapshot.clone() {
             let deltas = map_weather_initial(&state, &current);
             changes.extend(apply_weather_deltas(&mut state.presentation, deltas));
@@ -84,16 +97,56 @@ impl PresentationSession {
     /// Clear retained traffic and weather display state.
     pub fn clear_radio_records(&self) -> Result<DisplayBatch, FfiError> {
         let mut state = self.lock_state()?;
-        state.presentation = PresentationAdapter::default();
+        state.presentation.clear_radio_state();
         state.weather_snapshot = None;
+        state.source_observation.radio_state = PresentationRadioState::Suspended;
+        state.source_observation.radio_receivers.clear();
+        apply_source_observation(&mut state);
+        Ok(display_for_state(&state, Vec::new()))
+    }
+
+    /// Record source facts and advance the display clock.
+    pub fn observe_sources(
+        &self,
+        observation: PresentationSourceObservation,
+        now_micros: u64,
+    ) -> Result<DisplayBatch, FfiError> {
+        let mut state = self.lock_state()?;
+        state.source_observation = observation;
+        state.presentation.advance_time(now_micros);
+        apply_source_observation(&mut state);
+        Ok(display_for_state(&state, Vec::new()))
+    }
+
+    /// Set one application layer control.
+    pub fn set_layer_enabled(
+        &self,
+        layer_id: String,
+        enabled: bool,
+    ) -> Result<DisplayBatch, FfiError> {
+        let mut state = self.lock_state()?;
+        if !state.presentation.set_layer_enabled(&layer_id, enabled) {
+            return Err(FfiError::UnknownLayer { layer_id });
+        }
         Ok(display_for_state(&state, Vec::new()))
     }
 
     /// Get display values for the newest accepted records.
-    pub fn current_display(&self) -> Result<DisplayBatch, FfiError> {
-        let state = self.lock_state()?;
+    pub fn current_display(&self, now_micros: u64) -> Result<DisplayBatch, FfiError> {
+        let mut state = self.lock_state()?;
+        state.presentation.advance_time(now_micros);
         Ok(display_for_state(&state, Vec::new()))
     }
+}
+
+fn apply_source_observation(state: &mut SessionState) {
+    let weather_positions_available = !state.weather_positions.is_empty();
+    state.presentation.observe_sources(
+        state
+            .source_observation
+            .clone()
+            .into_portable(weather_positions_available),
+    );
 }
 
 impl PresentationSession {

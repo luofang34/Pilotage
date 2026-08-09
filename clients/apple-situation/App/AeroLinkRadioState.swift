@@ -1,3 +1,4 @@
+import Dispatch
 import PilotageRadioSource
 import PilotageSituationCore
 
@@ -60,7 +61,7 @@ actor AeroLinkRadioState {
         idleAvailability = .unplugged
         reconnectRequested = true
         do {
-            let display = try session.currentDisplay()
+            let display = try session.currentDisplay(nowMicros: Self.monotonicMicros)
             lastError = nil
             await emit(display: display)
         } catch {
@@ -214,7 +215,7 @@ actor AeroLinkRadioState {
                 utcMillis: utcMillis,
                 monotonicMicros: monotonicMicros
             )
-            let display = try accept(records)
+            let display = try accept(records, monotonicMicros: monotonicMicros)
             lastError = nil
             await emit(display: display)
         } catch {
@@ -253,7 +254,7 @@ actor AeroLinkRadioState {
                     utcMillis: utcMillis,
                     monotonicMicros: monotonicMicros
                 )
-                try accept(records, into: &display)
+                try accept(records, monotonicMicros: monotonicMicros, into: &display)
                 acceptedLine = true
             } catch {
                 live.diagnostics.rejectedInputs &+= 1
@@ -276,21 +277,31 @@ actor AeroLinkRadioState {
         }
     }
 
-    private func accept(_ records: RadioRecordBatch) throws -> DisplayBatch? {
+    private func accept(
+        _ records: RadioRecordBatch,
+        monotonicMicros: UInt64
+    ) throws -> DisplayBatch? {
         var display = DisplayAccumulator()
-        try accept(records, into: &display)
+        try accept(records, monotonicMicros: monotonicMicros, into: &display)
         return display.batch
     }
 
     private func accept(
         _ records: RadioRecordBatch,
+        monotonicMicros: UInt64,
         into display: inout DisplayAccumulator
     ) throws {
         for record in records.trackRecords {
-            display.append(try session.acceptTrackRecord(recordJson: record))
+            display.append(try session.acceptTrackRecord(
+                recordJson: record,
+                nowMicros: monotonicMicros
+            ))
         }
         for record in records.weatherRecords {
-            display.append(try session.acceptWeatherRecord(recordJson: record))
+            display.append(try session.acceptWeatherRecord(
+                recordJson: record,
+                nowMicros: monotonicMicros
+            ))
         }
     }
 
@@ -339,6 +350,10 @@ actor AeroLinkRadioState {
             return .ready
         }
         return receivers.isEmpty ? nil : .checking
+    }
+
+    private static var monotonicMicros: UInt64 {
+        DispatchTime.now().uptimeNanoseconds / 1_000
     }
 }
 

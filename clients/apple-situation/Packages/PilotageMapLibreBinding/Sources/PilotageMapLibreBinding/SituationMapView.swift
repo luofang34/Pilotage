@@ -7,6 +7,10 @@ import UIKit
 public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate {
     /// Receives an error that occurs after the map style loads.
     public var onOverlayError: ((Error) -> Void)?
+    /// Receives the stable identity of a tapped display feature.
+    public var onFeatureTapped: ((String) -> Void)?
+    /// Maps portable base-layer identities to base-style layer identities.
+    public var baseLayerIdentifiers: [String: String] = [:]
 
     private let mapView: MLNMapView
     private let overlay = SituationOverlay()
@@ -19,6 +23,7 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
         mapView.translatesAutoresizingMaskIntoConstraints = false
         mapView.delegate = self
         addSubview(mapView)
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
         NSLayoutConstraint.activate([
             mapView.leadingAnchor.constraint(equalTo: leadingAnchor),
             mapView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -48,9 +53,34 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
             return
         }
         do {
+            applyBaseLayerVisibility(batch.layers, to: style)
             try overlay.apply(batch, to: style)
         } catch {
             onOverlayError?(error)
         }
+    }
+
+    private func applyBaseLayerVisibility(
+        _ layers: [DisplayLayerControl],
+        to style: MLNStyle
+    ) {
+        for layer in layers {
+            guard let identifier = baseLayerIdentifiers[layer.id] else { continue }
+            style.layer(withIdentifier: identifier)?.isVisible = layer.enabled
+        }
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended, !overlay.interactiveLayerIdentifiers.isEmpty else {
+            return
+        }
+        let features = mapView.visibleFeatures(
+            at: gesture.location(in: mapView),
+            styleLayerIdentifiers: overlay.interactiveLayerIdentifiers
+        )
+        guard let identifier = features.compactMap({ $0.identifier as? String }).first else {
+            return
+        }
+        onFeatureTapped?(identifier)
     }
 }

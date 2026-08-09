@@ -1,5 +1,13 @@
 //! Flat records that cross the Apple FFI boundary.
 
+mod presentation;
+
+pub use presentation::{
+    DisplayLayerControl, DisplayLayerSourceState, DisplayTrafficDetail, DisplayTrafficDetailField,
+    DisplayTrafficListItem, PresentationRadioBand, PresentationRadioState,
+    PresentationReceiverObservation, PresentationSourceObservation,
+};
+
 /// Schema versions of the linked domain producers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Record)]
 pub struct ProducerSchemaVersions {
@@ -120,6 +128,8 @@ pub struct DisplayShapeStyle {
 pub struct DisplayPoint {
     /// Stable feature identity.
     pub id: String,
+    /// Stable application layer identity.
+    pub layer_id: String,
     /// Feature position.
     pub coordinate: DisplayCoordinate,
     /// Style identity.
@@ -169,6 +179,8 @@ pub struct DisplayPointChange {
 pub struct DisplayShape {
     /// Stable feature identity.
     pub id: String,
+    /// Stable application layer identity.
+    pub layer_id: String,
     /// Polygon rings.
     pub rings: Vec<DisplayCoordinateRing>,
     /// Style identity.
@@ -184,6 +196,8 @@ pub struct DisplayShape {
 /// One complete set of display values and styles.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct DisplayBatch {
+    /// User-controlled display layers.
+    pub layers: Vec<DisplayLayerControl>,
     /// Point style catalog.
     pub point_styles: Vec<DisplayPointStyle>,
     /// Polygon style catalog.
@@ -194,6 +208,10 @@ pub struct DisplayBatch {
     pub point_changes: Vec<DisplayPointChange>,
     /// Polygon features.
     pub shapes: Vec<DisplayShape>,
+    /// Traffic tracks that do not have a map position.
+    pub positionless_traffic: Vec<DisplayTrafficListItem>,
+    /// Detail values for retained traffic tracks.
+    pub traffic_details: Vec<DisplayTrafficDetail>,
     /// Products that had no display value.
     pub omitted_products: u64,
 }
@@ -218,11 +236,18 @@ pub struct RadioRecordBatch {
 impl From<pilotage_presentation::DisplayBatch> for DisplayBatch {
     fn from(value: pilotage_presentation::DisplayBatch) -> Self {
         Self {
+            layers: value.layers.into_iter().map(Into::into).collect(),
             point_styles: value.point_styles.into_iter().map(Into::into).collect(),
             shape_styles: value.shape_styles.into_iter().map(Into::into).collect(),
             points: value.points.into_iter().map(Into::into).collect(),
             point_changes: value.point_changes.into_iter().map(Into::into).collect(),
             shapes: value.shapes.into_iter().map(Into::into).collect(),
+            positionless_traffic: value
+                .positionless_traffic
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            traffic_details: value.traffic_details.into_iter().map(Into::into).collect(),
             omitted_products: value.omitted_products,
         }
     }
@@ -293,6 +318,7 @@ impl From<pilotage_presentation::PointFeature> for DisplayPoint {
     fn from(value: pilotage_presentation::PointFeature) -> Self {
         Self {
             id: value.id,
+            layer_id: value.layer_id,
             coordinate: value.coordinate.into(),
             style_id: value.style_id,
             label: value.label,
@@ -356,6 +382,7 @@ impl From<pilotage_presentation::ShapeFeature> for DisplayShape {
     fn from(value: pilotage_presentation::ShapeFeature) -> Self {
         Self {
             id: value.id,
+            layer_id: value.layer_id,
             rings: value
                 .rings
                 .into_iter()

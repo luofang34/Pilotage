@@ -32,7 +32,7 @@ fn serialized_receptions_drive_surveillance_and_clear_on_suspend() {
         observations += batch.traffic_observations;
         for record in batch.track_records {
             session
-                .accept_track_record(record)
+                .accept_track_record(record, 1_000_000)
                 .expect("track record must be accepted");
         }
     }
@@ -40,7 +40,7 @@ fn serialized_receptions_drive_surveillance_and_clear_on_suspend() {
     assert_eq!(observations, 2);
     assert_eq!(
         session
-            .current_display()
+            .current_display(1_000_000)
             .expect("display state must be available")
             .points
             .len(),
@@ -74,7 +74,7 @@ fn fis_b_reception_reaches_typed_airmass_presentation() {
     assert_eq!(batch.weather_products, 1);
     assert_eq!(batch.weather_records.len(), 1);
     let display = session
-        .accept_weather_record(batch.weather_records[0].clone())
+        .accept_weather_record(batch.weather_records[0].clone(), 1_000_000)
         .expect("weather record must be accepted");
     assert_eq!(display.points.len(), 1);
     assert_eq!(display.points[0].label.as_deref(), Some("KJFK"));

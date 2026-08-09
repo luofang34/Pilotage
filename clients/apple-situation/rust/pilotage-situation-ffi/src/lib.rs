@@ -11,8 +11,11 @@ mod session;
 pub use error::FfiError;
 pub use reception::RadioDomainSession;
 pub use records::{
-    DisplayBatch, DisplayColor, DisplayCoordinate, DisplayCoordinateRing, DisplayPoint,
-    DisplayPointChange, DisplayPointChangeKind, DisplayPointStyle, DisplayShape, DisplayShapeStyle,
+    DisplayBatch, DisplayColor, DisplayCoordinate, DisplayCoordinateRing, DisplayLayerControl,
+    DisplayLayerSourceState, DisplayPoint, DisplayPointChange, DisplayPointChangeKind,
+    DisplayPointStyle, DisplayShape, DisplayShapeStyle, DisplayTrafficDetail,
+    DisplayTrafficDetailField, DisplayTrafficListItem, PresentationRadioBand,
+    PresentationRadioState, PresentationReceiverObservation, PresentationSourceObservation,
     ProducerSchemaVersions, RadioRecordBatch, WeatherStationPosition,
 };
 pub use session::PresentationSession;

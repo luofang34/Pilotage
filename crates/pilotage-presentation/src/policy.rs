@@ -3,8 +3,9 @@
 use std::collections::BTreeMap;
 
 use airmass_geojson::FeatureDelta as WeatherFeatureDelta;
-use surveillance_core::TrackDelta;
+use surveillance_core::{TrackDelta, TrackSnapshotHandle};
 
+use crate::layer::{LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_REPORT_LAYER_ID};
 use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeStyle};
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
@@ -24,9 +25,12 @@ pub(crate) const ADVISORY_CWA_STYLE: &str = "advisory-cwa";
 /// Converts typed domain feature changes to display values.
 #[derive(Clone, Debug, Default)]
 pub struct PresentationAdapter {
+    layers: LayerPolicy,
     traffic_points: BTreeMap<(u64, u64), PointFeature>,
     traffic_revisions: BTreeMap<(u64, u64), u64>,
+    traffic_tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
     weather_points: BTreeMap<String, PointFeature>,
+    now_micros: u64,
 }
 
 impl PresentationAdapter {
@@ -40,13 +44,34 @@ impl PresentationAdapter {
     #[must_use]
     pub fn empty_batch(&self) -> DisplayBatch {
         DisplayBatch {
+            layers: self.layers.controls(
+                !self.traffic_tracks.is_empty(),
+                !self.weather_points.is_empty(),
+            ),
             point_styles: point_styles(),
             shape_styles: shape_styles(),
             points: Vec::new(),
             point_changes: Vec::new(),
             shapes: Vec::new(),
+            positionless_traffic: Vec::new(),
+            traffic_details: Vec::new(),
             omitted_products: 0,
         }
+    }
+
+    /// Advance the display clock without changing domain state.
+    pub fn advance_time(&mut self, now_micros: u64) {
+        self.now_micros = self.now_micros.max(now_micros);
+    }
+
+    /// Record raw source facts from the composition host.
+    pub fn observe_sources(&mut self, sources: SourceObservation) {
+        self.layers.observe_sources(sources);
+    }
+
+    /// Set the visibility of one known layer.
+    pub fn set_layer_enabled(&mut self, id: &str, enabled: bool) -> bool {
+        self.layers.set_enabled(id, enabled)
     }
 
     /// Apply one ordered Surveillance delta.
@@ -62,6 +87,7 @@ impl PresentationAdapter {
             return None;
         }
         self.traffic_revisions.insert(key, snapshot_revision);
+        self.retain_track(key, delta);
         let source_change = surveillance_geojson::map_track_delta(delta)?;
         let change = crate::traffic::point_change(
             &source_change,
@@ -70,7 +96,7 @@ impl PresentationAdapter {
             self.traffic_points.get(&key),
         )?;
         self.apply_point_change(key, &change);
-        Some(change)
+        self.layers.is_enabled(TRAFFIC_LAYER_ID).then_some(change)
     }
 
     /// Apply one ordered Airmass feature change.
@@ -86,13 +112,15 @@ impl PresentationAdapter {
             }
             PointChange::Stale { .. } => {}
         }
-        Some(change)
+        self.layers
+            .is_enabled(WEATHER_REPORT_LAYER_ID)
+            .then_some(change)
     }
 
     /// Remove all weather points without changing traffic state.
     pub fn clear_weather(&mut self) -> Vec<PointChange> {
         let points = std::mem::take(&mut self.weather_points);
-        points
+        let changes: Vec<_> = points
             .into_iter()
             .map(|(id, point)| PointChange::Remove {
                 id,
@@ -100,16 +128,64 @@ impl PresentationAdapter {
                 producer_instance_id: point.producer_instance_id,
                 snapshot_revision: point.snapshot_revision,
             })
-            .collect()
+            .collect();
+        if self.layers.is_enabled(WEATHER_REPORT_LAYER_ID) {
+            changes
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Clear state supplied by radio reception and keep application controls.
+    pub fn clear_radio_state(&mut self) {
+        self.traffic_points.clear();
+        self.traffic_revisions.clear();
+        self.traffic_tracks.clear();
+        self.weather_points.clear();
     }
 
     /// Convert current traffic and weather values into one batch.
     #[must_use]
     pub fn adapt(&self) -> DisplayBatch {
         let mut batch = self.empty_batch();
-        batch.points.extend(self.traffic_points.values().cloned());
-        batch.points.extend(self.weather_points.values().cloned());
+        if self.layers.is_enabled(TRAFFIC_LAYER_ID) {
+            batch.points.extend(self.traffic_points.values().cloned());
+            batch.positionless_traffic = self
+                .traffic_tracks
+                .values()
+                .filter_map(|track| crate::detail::positionless_item(track, self.now_micros))
+                .collect();
+        }
+        if self.layers.is_enabled(WEATHER_REPORT_LAYER_ID) {
+            batch.points.extend(self.weather_points.values().cloned());
+        }
+        batch.traffic_details = self
+            .traffic_tracks
+            .values()
+            .map(|track| crate::detail::detail_for(track, self.now_micros))
+            .collect();
         batch
+    }
+
+    fn retain_track(&mut self, key: (u64, u64), delta: &TrackDelta) {
+        match delta {
+            TrackDelta::Created(handle)
+            | TrackDelta::Updated(handle)
+            | TrackDelta::Coasting(handle) => {
+                self.now_micros = self
+                    .now_micros
+                    .max(handle.snapshot().last_observed_at_micros);
+                if handle.snapshot().ownship_shadow {
+                    self.traffic_tracks.remove(&key);
+                } else {
+                    self.traffic_tracks.insert(key, handle.clone());
+                }
+            }
+            TrackDelta::Removed { .. } => {
+                self.traffic_tracks.remove(&key);
+            }
+            _ => {}
+        }
     }
 
     fn apply_point_change(&mut self, key: (u64, u64), change: &PointChange) {

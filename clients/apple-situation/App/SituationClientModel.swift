@@ -1,3 +1,4 @@
+import Foundation
 import PilotageRadioSource
 import PilotageSituationCore
 import SwiftUI
@@ -6,14 +7,12 @@ import SwiftUI
 final class SituationClientModel: ObservableObject {
     @Published private(set) var display: DisplayBatch?
     @Published private(set) var errorMessage: String?
-    @Published private(set) var radioSource = RadioSourceSnapshot(
-        availability: .suspended,
-        receivers: [],
-        bandFailures: []
-    )
+    @Published private(set) var radioSource: RadioSourceSnapshot
+    @Published private(set) var selectedTraffic: DisplayTrafficDetail?
 
     private let session: PresentationSession
     private let domain: RadioDomainSession?
+    private let terrainAvailable: Bool
     private let discovery = AeroLinkDiscoveryGate()
     private var runtime: AeroLinkRadioRuntime?
     private var maintenanceTask: Task<Void, Never>?
@@ -24,12 +23,28 @@ final class SituationClientModel: ObservableObject {
     private var isActive = false
 
     init() {
+        let source = RadioSourceSnapshot(
+            availability: .suspended,
+            receivers: [],
+            bandFailures: []
+        )
         let session = PresentationSession()
         self.session = session
+        radioSource = source
+        terrainAvailable = Bundle.main.url(
+            forResource: "SituationTerrain",
+            withExtension: "mbtiles"
+        ) != nil
         var createdDomain: RadioDomainSession?
         var initialDisplay: DisplayBatch?
         do {
-            initialDisplay = try session.currentDisplay()
+            initialDisplay = try session.observeSources(
+                observation: PresentationSourceObservation(
+                    source: source,
+                    terrainAvailable: terrainAvailable
+                ),
+                nowMicros: Self.monotonicMicros
+            )
             createdDomain = try RadioDomainSession()
         } catch {
             startupError = Self.join(startupError, error.localizedDescription)
@@ -100,10 +115,46 @@ final class SituationClientModel: ObservableObject {
 
     private func apply(_ emission: RadioRuntimeEmission) {
         radioSource = emission.source
-        if let display = emission.display {
-            self.display = display
+        var presentationError: String?
+        do {
+            let next = try session.observeSources(
+                observation: PresentationSourceObservation(
+                    source: emission.source,
+                    terrainAvailable: terrainAvailable
+                ),
+                nowMicros: Self.monotonicMicros
+            )
+            applyDisplay(next)
+        } catch {
+            presentationError = error.localizedDescription
         }
-        errorMessage = Self.join(startupError, emission.errorMessage)
+        errorMessage = Self.join(
+            startupError,
+            Self.join(emission.errorMessage, presentationError)
+        )
+    }
+
+    func setLayerEnabled(id: String, enabled: Bool) {
+        do {
+            applyDisplay(try session.setLayerEnabled(layerId: id, enabled: enabled))
+        } catch {
+            errorMessage = Self.join(startupError, error.localizedDescription)
+        }
+    }
+
+    func selectTraffic(id: String) {
+        selectedTraffic = display?.trafficDetails.first { $0.id == id }
+    }
+
+    func clearTrafficSelection() {
+        selectedTraffic = nil
+    }
+
+    private func applyDisplay(_ next: DisplayBatch) {
+        display = next
+        if let selected = selectedTraffic {
+            selectedTraffic = next.trafficDetails.first { $0.id == selected.id }
+        }
     }
 
     private static func join(_ first: String?, _ second: String?) -> String? {
@@ -112,5 +163,9 @@ final class SituationClientModel: ObservableObject {
         case (.some(let value), .none), (.none, .some(let value)): value
         case (.some(let first), .some(let second)): "\(first)\n\(second)"
         }
+    }
+
+    private static var monotonicMicros: UInt64 {
+        DispatchTime.now().uptimeNanoseconds / 1_000
     }
 }
