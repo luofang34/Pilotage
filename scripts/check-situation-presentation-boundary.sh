@@ -6,6 +6,7 @@ root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 rust_root="$root/crates/pilotage-presentation"
 swift_root="$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources"
 traffic_source="$rust_root/src/traffic.rs"
+weather_source="$rust_root/src/weather.rs"
 status=0
 
 if grep -RInE 'MapLibre|MLN[A-Z]|GeoJSON|UIKit|SwiftUI' "$rust_root"; then
@@ -20,6 +21,18 @@ fi
 
 if [ -f "$traffic_source" ] && ! grep -q 'surveillance_geojson' "$traffic_source"; then
     echo "FORBIDDEN: traffic display policy does not consume typed feature changes" >&2
+    status=1
+fi
+
+if [ -f "$weather_source" ] && grep -nE \
+    'serde(_json)?|WeatherPayload|media_type|from_(slice|str)|ceiling|visibility' \
+    "$weather_source"; then
+    echo "FORBIDDEN: weather display policy decodes a payload or derives source data" >&2
+    status=1
+fi
+
+if [ -f "$weather_source" ] && ! grep -q 'airmass_geojson' "$weather_source"; then
+    echo "FORBIDDEN: weather display policy does not consume typed feature changes" >&2
     status=1
 fi
 

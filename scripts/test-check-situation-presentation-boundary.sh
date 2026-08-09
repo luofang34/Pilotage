@@ -11,6 +11,7 @@ swift_root="$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/So
 mkdir -p "$rust_root" "$swift_root"
 printf '%s\n' 'pub struct DisplayValue;' > "$rust_root/lib.rs"
 printf '%s\n' 'use surveillance_geojson::FeatureDelta;' > "$rust_root/traffic.rs"
+printf '%s\n' 'use airmass_geojson::FeatureDelta;' > "$rust_root/weather.rs"
 printf '%s\n' 'struct DisplayValue {}' > "$swift_root/DisplayValue.swift"
 
 bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null
@@ -35,6 +36,20 @@ if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture"
     exit 1
 fi
 printf '%s\n' 'use surveillance_geojson::FeatureDelta;' > "$rust_root/traffic.rs"
+
+printf '%s\n' 'let value = serde_json::from_slice(payload);' >> "$rust_root/weather.rs"
+if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then
+    echo "test failed: weather policy decoded a payload" >&2
+    exit 1
+fi
+printf '%s\n' 'use airmass_geojson::FeatureDelta;' > "$rust_root/weather.rs"
+
+printf '%s\n' 'pub struct WeatherFeature;' > "$rust_root/weather.rs"
+if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then
+    echo "test failed: weather policy omitted the typed feature adapter" >&2
+    exit 1
+fi
+printf '%s\n' 'use airmass_geojson::FeatureDelta;' > "$rust_root/weather.rs"
 
 printf '%s\n' 'struct TrackSnapshot {}' > "$swift_root/Domain.swift"
 if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then

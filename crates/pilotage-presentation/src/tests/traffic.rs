@@ -31,13 +31,7 @@ fn ownship_shadow_is_not_a_traffic_target() {
     let delta = updated_delta(42, 3, true, EmergencyState::None);
 
     assert!(adapter.apply_traffic_delta(&delta).is_none());
-    assert!(
-        adapter
-            .adapt(None)
-            .expect("batch conversion must succeed")
-            .points
-            .is_empty()
-    );
+    assert!(adapter.adapt().points.is_empty());
 }
 
 #[test]
@@ -53,7 +47,7 @@ fn coasting_keeps_the_stale_vocabulary() {
         PointChange::Stale { ref id, ref style_id, snapshot_revision: 4, .. }
             if id == "traffic-7-42" && style_id == "traffic-coasting"
     ));
-    let batch = adapter.adapt(None).expect("batch conversion must succeed");
+    let batch = adapter.adapt();
     assert_eq!(batch.points[0].style_id, "traffic-coasting");
 }
 
@@ -94,7 +88,7 @@ fn merged_removal_names_the_surviving_feature() {
         PointChange::Remove { ref id, transfer_to: Some(ref target), .. }
             if id == "traffic-7-42" && target == "traffic-7-43"
     ));
-    let batch = adapter.adapt(None).expect("batch conversion must succeed");
+    let batch = adapter.adapt();
     assert_eq!(batch.points.len(), 1);
     assert_eq!(batch.points[0].id, "traffic-7-43");
 }
