@@ -986,7 +986,7 @@ dependencies = [
 [[package]]
 name = "indicate-alerts"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "thiserror",
 ]
@@ -994,7 +994,7 @@ dependencies = [
 [[package]]
 name = "indicate-frames"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "libm",
 ]
@@ -1002,7 +1002,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-descriptor"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-scene",
@@ -1013,7 +1013,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-feeder"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-instrument-state",
 ]
@@ -1021,7 +1021,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-glyphs"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-sha256",
  "thiserror",
@@ -1030,7 +1030,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-panels"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-descriptor",
@@ -1043,7 +1043,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-registry"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-instrument-descriptor",
  "indicate-instrument-scene",
@@ -1055,7 +1055,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-scene"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "thiserror",
 ]
@@ -1063,7 +1063,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-state"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-alerts",
  "indicate-frames",
@@ -1074,7 +1074,7 @@ dependencies = [
 [[package]]
 name = "indicate-instrument-symbology"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 dependencies = [
  "indicate-alerts",
  "indicate-instrument-scene",
@@ -1085,7 +1085,7 @@ dependencies = [
 [[package]]
 name = "indicate-sha256"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Indicate.git?rev=14e9a7591a8a659b71d4a19e027c07b7448d6bcb#14e9a7591a8a659b71d4a19e027c07b7448d6bcb"
+source = "git+https://github.com/luofang34/Indicate.git?rev=985eb3390d3e09abf83d730f356668fe6499d01e#985eb3390d3e09abf83d730f356668fe6499d01e"
 
 [[package]]
 name = "itertools"

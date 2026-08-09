@@ -3,7 +3,7 @@
 use indicate_instrument_scene::{
     LayerId, MAX_LAYER_COMMANDS, MAX_SCENE_BYTES, SceneCmds, SceneWriter,
 };
-use indicate_instrument_state::abi::v6::{CAPACITY, VERSION, encode_state};
+use indicate_instrument_state::abi::v7::{CAPACITY, VERSION, encode_state};
 use indicate_instrument_state::{AircraftState, Attitude, Quat, Stamped};
 
 use super::{InstrumentRuntime, RenderStatus, abi_version};
@@ -45,7 +45,8 @@ pub(crate) fn attitude_state() -> AircraftState {
             attitude: true,
             rates: true,
             position: true,
-            velocity: true,
+            velocity_horizontal: true,
+            velocity_vertical: true,
             ..Default::default()
         },
         ..AircraftState::default()
@@ -233,7 +234,7 @@ fn a_non_canonical_state_frame_fails_malformed() {
     // status, not truncation and never a render.
     let mut malformed = Runtime {
         state: {
-            let mut frame = vec![6u8, 2];
+            let mut frame = vec![VERSION, 2];
             frame.extend_from_slice(&[0x05, 12, 0]);
             frame.extend_from_slice(&[0u8; 12]);
             frame.extend_from_slice(&[0x03, 12, 0]);

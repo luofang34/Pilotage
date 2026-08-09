@@ -69,7 +69,7 @@ jobs:
         run: >
           cargo install --locked --force
           --git https://github.com/luofang34/Indicate.git
-          --rev 14e9a7591a8a659b71d4a19e027c07b7448d6bcb
+          --rev 985eb3390d3e09abf83d730f356668fe6499d01e
           indicate-evidence
 
       - name: LINK-04 slice — honest verdict and bidirectional trace

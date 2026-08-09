@@ -46,7 +46,7 @@ const GLYPH_HEADER_LEN = 8;
 const GLYPH_RECORD_LEN = 12;
 const GLYPH_ROWS = 7;
 export { STATE_ABI_VERSION } from "./state-abi.js";
-// The v6 state frame is self-delimiting; the wasm side publishes a
+// The v7 state frame is self-delimiting; the wasm side publishes a
 // buffer capacity the writer stays within. The floor is the largest
 // canonical frame the writer can produce, measured, not mirrored.
 const STATE_MIN_CAPACITY = maxFrameBytes();
@@ -76,7 +76,7 @@ const REQUIRED_RUNTIME_METHODS = [
 // pattern) so wasm-target divergence from the host-verified contract
 // fails the suite, not just a Rust unit test.
 export const EXPECTED_SCENE_DIGEST =
-  "3efb08c55eadadc2b006ee6b006b29e4b3a3f8d4ec3ce1324f401dbc16dc85ca";
+  "f82d905643b48822de25665761ad3e29daa334d937f18b1e98a3e215353cb704";
 
 // Registry enumeration exported at module level by the bindings; the
 // backend derives its panel map from these instead of mirroring one.

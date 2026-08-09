@@ -1238,7 +1238,7 @@ function tickToCadence(health, target, interval = 250) {
   );
 }
 
-// ---- VAL-01: fail-safe write defaults mirror abi/v6.rs ------------------------
+// ---- VAL-01: fail-safe write defaults mirror abi/v7.rs ------------------------
 
 {
   const exportsFake = fakeExports({});
@@ -1254,11 +1254,11 @@ function tickToCadence(health, target, interval = 250) {
     DYNAMICS: 11,
   });
 
-  // Walks the self-delimiting v6 frame: tag -> payload DataView.
+  // Walks the self-delimiting v7 frame: tag -> payload DataView.
   function frameGroups() {
     const base = exportsFake.state_ptr();
     const view = new DataView(exportsFake.memory.buffer, base, STATE_CAPACITY);
-    check("frame version byte is v6", view.getUint8(0) === STATE_ABI_VERSION);
+    check("frame version byte is v7", view.getUint8(0) === STATE_ABI_VERSION);
     const groups = new Map();
     let at = 2;
     for (let i = 0; i < view.getUint8(1); i += 1) {
@@ -1299,25 +1299,25 @@ function tickToCadence(health, target, interval = 250) {
   const declared = mod.writeState({
     selections: { headingBugRad: 0 },
     quality: 1,
-    valid: { attitude: true, rates: true, position: true, velocity: true },
+    valid: { attitude: true, rates: true, position: true, velocityHorizontal: true, velocityVertical: true },
   });
   check("declared trust write succeeds", declared.ok === true);
   groups = frameGroups();
   check(
     "declared quality and flags encode exactly",
     groups.get(TAG.TRUST)?.getUint8(0) === 1 &&
-      groups.get(TAG.TRUST)?.getUint16(2, true) === 0b1111,
+      groups.get(TAG.TRUST)?.getUint16(2, true) === 0b100001111,
   );
 
   const partial = mod.writeState({
     selections: { headingBugRad: 0 },
     quality: 0,
-    valid: { attitude: true, velocity: true },
+    valid: { attitude: true, velocityHorizontal: true, velocityVertical: true },
   });
   check("partial validity write succeeds", partial.ok === true);
   check(
     "undeclared flags stay unset within a partial declaration",
-    frameGroups().get(TAG.TRUST)?.getUint16(2, true) === 0b1001,
+    frameGroups().get(TAG.TRUST)?.getUint16(2, true) === 0b100001001,
   );
 
   // ALT-01: an undeclared altitude datum emits no tag (the decoder's
@@ -1337,7 +1337,7 @@ function tickToCadence(health, target, interval = 250) {
   groups = frameGroups();
   const alt = groups.get(TAG.ALTITUDE);
   check(
-    "declared altitude datum encodes exactly (abi/v6.rs parity)",
+    "declared altitude datum encodes exactly (abi/v7.rs parity)",
     alt?.getUint8(0) === 1 &&
       alt?.getUint8(1) === 2 &&
       Math.abs(alt?.getFloat32(4, true) - 457.2) < 1e-3 &&
@@ -1345,7 +1345,7 @@ function tickToCadence(health, target, interval = 250) {
   );
   const sel = groups.get(TAG.SELECTIONS);
   check(
-    "selection datum identity encodes exactly (abi/v6.rs parity)",
+    "selection datum identity encodes exactly (abi/v7.rs parity)",
     sel?.getUint8(5) === 1 &&
       sel?.getUint8(6) === 4 &&
       sel?.getUint32(12, true) === 9 &&
@@ -1402,7 +1402,7 @@ function tickToCadence(health, target, interval = 250) {
   groups = frameGroups();
   const dynPayload = groups.get(TAG.DYNAMICS);
   check(
-    "declared dynamics encode exactly (abi/v6.rs parity)",
+    "declared dynamics encode exactly (abi/v7.rs parity)",
     dynPayload?.getUint8(0) === 0 &&
       Math.abs(dynPayload?.getFloat32(4, true) - 0.05) < 1e-6 &&
       Math.abs(dynPayload?.getFloat32(8, true) + 0.8) < 1e-6 &&
@@ -1605,7 +1605,7 @@ function tickToCadence(health, target, interval = 250) {
       wind: null,
       selections: { headingBugRad: 0 },
       quality: 0,
-      valid: { attitude: true, rates: true, position: true, velocity: true },
+      valid: { attitude: true, rates: true, position: true, velocityHorizontal: true, velocityVertical: true },
     });
     check("real wasm state write succeeds", writeResult.ok === true);
     let lastResult = null;
@@ -1645,7 +1645,7 @@ function tickToCadence(health, target, interval = 250) {
       wind: null,
       selections: { headingBugRad: 0 },
       quality: 0,
-      valid: { attitude: false, rates: false, position: true, velocity: true },
+      valid: { attitude: false, rates: false, position: true, velocityHorizontal: true, velocityVertical: true },
     });
     check("invalid-data state write succeeds", invalidWrite.ok === true);
     const invalidData = mod.renderPanel(PANEL.PFD, new RecordingCtx(), 480, 360);

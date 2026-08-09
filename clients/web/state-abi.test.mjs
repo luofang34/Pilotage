@@ -1,4 +1,4 @@
-// Cross-language pin for the state-frame ABI v6 writer.
+// Cross-language pin for the state-frame ABI v7 writer.
 //
 // Run: node clients/web/state-abi.test.mjs
 //
@@ -8,7 +8,7 @@
 // by the upstream `cargo xtask gen-state-fixture` from the shared Rust
 // posture fixtures and pinned by the Rust codec's own tests. This suite
 // rebuilds the same three states as writer input objects and requires
-// byte equality, so any drift between state-abi.js and abi/v6.rs —
+// byte equality, so any drift between state-abi.js and abi/v7.rs —
 // offsets, widths, endianness, enum codings, presence rules, ident
 // atoms — turns CI red on whichever side moved.
 
@@ -50,7 +50,8 @@ const ALL_VALID = {
   attitude: true,
   rates: true,
   position: true,
-  velocity: true,
+  velocityHorizontal: true,
+  velocityVertical: true,
   heading: true,
   variation: true,
   turn: true,
@@ -111,7 +112,7 @@ function dataGatewayState() {
       ageMs: 150,
     },
     quality: 0,
-    valid: { position: true, velocity: true },
+    valid: { position: true, velocityHorizontal: true, velocityVertical: true },
     snapshot: { generation: 7, coherence: 0 },
     altitude: { referenceClass: 2, sampleM: 1150, geoidModel: 0, originId: 0 },
   };
@@ -141,19 +142,19 @@ function flightControllerState() {
   };
 }
 
-check("writer version is the v6 wire version", STATE_ABI_VERSION === 6);
+check("writer version is the v7 wire version", STATE_ABI_VERSION === 7);
 
 for (const [stem, build] of [
-  ["state-abi-v6.full", fullState],
-  ["state-abi-v6.data-gateway", dataGatewayState],
-  ["state-abi-v6.flight-controller", flightControllerState],
+  ["state-abi-v7.full", fullState],
+  ["state-abi-v7.data-gateway", dataGatewayState],
+  ["state-abi-v7.flight-controller", flightControllerState],
 ]) {
   check(`${stem} matches the committed golden frame byte for byte`, encodedHex(build()) === goldenHex(stem));
 }
 
 {
   // Presence is meaning: an empty state is exactly the two-byte header.
-  check("an empty state encodes the empty frame", encodedHex({}) === "0600");
+  check("an empty state encodes the empty frame", encodedHex({}) === "0700");
 }
 
 {
@@ -173,14 +174,38 @@ for (const [stem, build] of [
   // Canonicalization: a trust group whose quality, flags, and snapshot
   // all equal their fail-closed defaults encodes as absent — matching
   // the Rust encoder, so equal states produce equal bytes.
-  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0600");
+  check("an all-default trust group encodes as absent", encodedHex({ valid: {} }) === "0700");
   check(
     "explicitly declared defaults still omit the trust group",
-    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0600",
+    encodedHex({ quality: 255, valid: {}, snapshot: { coherence: 0, generation: 0 } }) === "0700",
   );
   check(
     "one set flag makes the trust group present",
-    encodedHex({ valid: { attitude: true } }) !== "0600",
+    encodedHex({ valid: { attitude: true } }) !== "0700",
+  );
+}
+
+{
+  // v7 splits velocity validity: bit 3 (0x0008) is the horizontal
+  // north/east pair, bit 8 (0x0100) is vertical speed. The trust flags
+  // are the u16 LE at payload offset 2 of the trust group, which starts
+  // after the two-byte frame header and the three-byte group header.
+  const trustFlags = (valid) => {
+    const hex = encodedHex({ valid });
+    const bytes = hex.match(/.{2}/g).map((b) => parseInt(b, 16));
+    return bytes[7] | (bytes[8] << 8);
+  };
+  check(
+    "horizontal-only velocity validity sets bit 3 and clears bit 8",
+    trustFlags({ velocityHorizontal: true }) === 0x0008,
+  );
+  check(
+    "vertical-only velocity validity sets bit 8 and clears bit 3",
+    trustFlags({ velocityVertical: true }) === 0x0100,
+  );
+  check(
+    "full-NED velocity validity sets both velocity bits",
+    trustFlags({ velocityHorizontal: true, velocityVertical: true }) === 0x0108,
   );
 }
 
