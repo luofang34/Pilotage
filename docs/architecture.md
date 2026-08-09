@@ -2,12 +2,12 @@
 
 Pilotage is a Rust-first, engine-independent platform for low-latency control,
 supervision, simulation, and training of maritime, aerial, and terrestrial
-vehicles. The target system spans a vehicle-side **host** that orchestrates
-flight control (Aviate, PX4), navigation (Navigate), and communication
-(Communicate); **operator clients** ranging from a full control terminal to an
-EFB-style preflight tool; and an optional **coordination server** for
-identity, rendezvous, and entitlements. This document is the orientation map;
-the [ADRs](adr/README.md) are the authoritative decisions.
+vehicles. A vehicle-side **host** composes flight control, navigation,
+surveillance, aeronautical context, and communication adapters. An **operator
+client** can be a full control terminal or an EFB preflight tool. An optional
+**coordination server** supplies identity, rendezvous, and entitlements. This
+document is the orientation map. The [ADRs](adr/README.md) contain the
+authoritative decisions.
 
 ## System shape (target)
 
@@ -21,10 +21,10 @@ the [ADRs](adr/README.md) are the authoritative decisions.
    Operator client(s) <═ WebTransport (QUIC) ═> Pilotage host
    (web / iPadOS /      │  direct; opt-in       ├─ authority engine (leases, generations)
     native; plugin      │  separately           ├─ vehicle adapter ── FC (Aviate | PX4)
-    panels/layout,      │  deployed relay       ├─ Navigate: fusion, FPL, guidance, EGPWS
-    ADR-0029; EFB or    │                       ├─ Communicate: advisory context
-    terminal posture    │                       └─ telemetry/control/media/advisory
-    by discovery,       │
+    panels/layout,      │  deployed relay       ├─ Navigate: navigation solution and guidance
+    ADR-0029; EFB or    │                       ├─ Surveillance: traffic fusion and tracks
+    terminal posture    │                       ├─ AeroContext: weather, notices, and navdata
+    by discovery,       │                       └─ telemetry/control/media/advisory
     ADR-0026)           │
       video ◄───────────┤
       telemetry ◄───────┤
@@ -63,10 +63,24 @@ Planes are contract boundaries; deployables are a deployment decision.
 |---|---|---|
 | Flight control (Aviate first; PX4 via adapter) | Control-grade estimation, stabilization, actuation | [ADR-0008](adr/0008-engine-independent-adapter-boundary.md), [ADR-0018](adr/0018-avionics-telemetry-and-aviate-adapter.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
 | Navigate (sibling repository) | Multi-sensor fusion, integrity, flight-plan execution, guidance, terrain awareness | [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
-| Communicate (aerocontext, repository `v99n62`) | Provenance-tracked advisory aeronautical context; AI-agent surface | [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0025](adr/0025-client-optional-operation-automation-principals.md) |
+| `aero-link` and `avionics-link` | Source access, protocol decode, and thin domain adapters | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
+| Surveillance (sibling repository) | Source-neutral traffic observations, fusion, tracks, deltas, and snapshots | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
+| AeroContext (repository `v99n62`) | Weather, NOTAM, TFR, briefing, navigation data, revision, validity, and expiry | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
 | Pilotage host | Component orchestration + session/authority/media endpoint | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md) |
 | Operator client | Control terminal ↔ EFB by discovered capability; plugin displays | [ADR-0026](adr/0026-host-capability-profiles.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
 | Coordination server (optional) | Identity, host registry, rendezvous, entitlement-gated data services | [ADR-0027](adr/0027-optional-coordination-server.md) |
+
+## Situational services
+
+[ADR-0035](adr/0035-source-neutral-situational-services.md) assigns traffic
+state to Surveillance and advisory product state to AeroContext. `aero-link`
+and `avionics-link` supply source data through thin adapters. Pilotage reads
+the domain outputs through a read-only `SituationView`.
+
+Map adapters and AI are optional consumers of `SituationView`. A headless
+deployment does not need either consumer. `Communicate` does not own
+Surveillance or AeroContext. Add a shared communication mechanism to it only
+when two components need that mechanism.
 
 ## Load-bearing principles
 
@@ -119,7 +133,7 @@ Increment 8 is committed as the next slice; the order beyond it is indicative.
 |---|---|---|
 | 8 | Navigate skeleton: new repository with a sans-IO fusion/flight-plan core; flight-plan execution flies Aviate SITL through the FC's declared setpoint surface as an automation-class principal ([ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md), [ADR-0025](adr/0025-client-optional-operation-automation-principals.md)); the FC-side guidance command-surface RFC below is a prerequisite | A preloaded plan flies headless in SITL with no client attached; a joining client sees automation as holder and takes over via the authority machinery |
 | 9 | Authority completion: handover/override wire vocabulary, identity/admission service, observer admission | Two operators transfer a scope with positive confirmation; a supervisor overrides; a monitor observes with no grantable scopes |
-| 10 | EFB slice: client embeds Communicate cores; briefing on a live map; data-gateway host profile ([ADR-0026](adr/0026-host-capability-profiles.md)) | Preflight brief and pack-for-flight on a client with no host process; the same client is a full terminal against a full-authority host |
+| 10 | EFB slice: client embeds AeroContext cores; briefing on a live map; data-gateway host profile ([ADR-0026](adr/0026-host-capability-profiles.md)) | Preflight brief and pack-for-flight on a client with no host process; the same client is a full terminal against a full-authority host |
 | 11 | Coordination server: registry + rendezvous + entitlement gate ([ADR-0027](adr/0027-optional-coordination-server.md)) | A WAN session forms behind NAT with no session data transiting the server |
 | 12 | Coordinator host: aggregate scopes decomposed over member hosts ([ADR-0028](adr/0028-multi-vehicle-and-swarm-coordinator-hosts.md)) | A swarm command reaches members under end-to-end fencing; displacing the coordinator on one member affects exactly that member |
 
@@ -164,7 +178,8 @@ Multiple camera sources and picture-in-picture;
 spectator stream fan-out (host- or relay-side replication); instructor and supervisory modes; organization
 policy and temporary guests; automation-assisted blended control; signed online
 device-registry updates; repeatable network-impairment benchmark harness; peer-host
-update and attestation; FIS-B/ADS-B providers in Communicate; host-to-host
+update and attestation; FIS-B providers in AeroContext; traffic providers in
+Surveillance; host-to-host
 collaboration behaviors over the reserved coordinator seam.
 
 ### P2 — preserve compatibility, defer implementation
