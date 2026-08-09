@@ -121,6 +121,12 @@ jobs:
       - name: Apple situation client guard
         run: bash scripts/check-apple-situation-client.sh
 
+      - name: Terrain base layer guard self-test
+        run: bash scripts/test-check-terrain-base-layer.sh
+
+      - name: Terrain base layer guard
+        run: bash scripts/check-terrain-base-layer.sh
+
       - name: ADR supersession lifecycle tests
         run: bash scripts/test-check-adr-supersession.sh
 

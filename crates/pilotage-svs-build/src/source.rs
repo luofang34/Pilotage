@@ -21,7 +21,7 @@ pub use license::LicenseCode;
 pub(crate) use records::source_record_refs;
 
 use pilotage_geo::{DatumRealizationId, GeoidModelId, HorizontalDatum, VerticalDatum};
-use pilotage_svs_db::Accuracy;
+pub use pilotage_svs_db::Accuracy;
 
 /// Identity of a source dataset feeding the chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]

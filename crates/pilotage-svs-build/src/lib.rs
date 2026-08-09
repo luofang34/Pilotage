@@ -54,8 +54,8 @@ pub use provenance::{
 };
 pub use report::{BuildReports, CoverageReport, HoleCheck, QualityReport, SeamCheck, VoidNode};
 pub use source::{
-    Aerodrome, LicenseCode, Obstacle, ObstacleKind, Runway, SourceDataset, SourceId, SourceMeta,
-    SourceRecordRef, TerrainGrid,
+    Accuracy, Aerodrome, LicenseCode, Obstacle, ObstacleKind, Runway, SourceDataset, SourceId,
+    SourceMeta, SourceRecordRef, TerrainGrid,
 };
 pub use verify::{
     DecodedReports, decode_package_reports, verify_artifact, verify_artifact_with_sources,

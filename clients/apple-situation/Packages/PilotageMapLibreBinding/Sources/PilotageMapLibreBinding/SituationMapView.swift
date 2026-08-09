@@ -12,9 +12,9 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
     private let overlay = SituationOverlay()
     private var pendingBatch: DisplayBatch?
 
-    /// Create a map with the specified base style when it is available.
-    public init(frame: CGRect = .zero, styleURL: URL?) {
-        mapView = MLNMapView(frame: .zero, styleURL: styleURL)
+    /// Create a map with the specified base style JSON.
+    public init(frame: CGRect = .zero, styleJSON: String) {
+        mapView = MLNMapView(frame: .zero, styleJSON: styleJSON)
         super.init(frame: frame)
         mapView.translatesAutoresizingMaskIntoConstraints = false
         mapView.delegate = self

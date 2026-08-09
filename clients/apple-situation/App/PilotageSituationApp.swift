@@ -42,8 +42,9 @@ private struct SituationMap: UIViewRepresentable {
     let batch: DisplayBatch?
 
     func makeUIView(context: Context) -> SituationMapView {
-        let styleURL = Bundle.main.url(forResource: "SituationStyle", withExtension: "json")
-        return SituationMapView(styleURL: styleURL)
+        let styleJSON = (try? SituationStyleResource.load())
+            ?? SituationStyleResource.fallbackJSON
+        return SituationMapView(styleJSON: styleJSON)
     }
 
     func updateUIView(_ mapView: SituationMapView, context: Context) {

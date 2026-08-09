@@ -1,14 +1,33 @@
 {
   "version": 8,
   "name": "Pilotage situation base",
-  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-  "sources": {},
+  "sources": {
+    "pilotage-terrain": {
+      "type": "raster-dem",
+      "url": "__PILOTAGE_TERRAIN_MBTILES_URL__",
+      "tileSize": 256,
+      "encoding": "terrarium"
+    }
+  },
   "layers": [
     {
       "id": "background",
       "type": "background",
       "paint": {
         "background-color": "#0b1721"
+      }
+    },
+    {
+      "id": "pilotage-terrain-hillshade",
+      "type": "hillshade",
+      "source": "pilotage-terrain",
+      "paint": {
+        "hillshade-exaggeration": 0.42,
+        "hillshade-shadow-color": "#050b11",
+        "hillshade-highlight-color": "#526879",
+        "hillshade-accent-color": "#1b3243",
+        "hillshade-illumination-direction": 315,
+        "hillshade-illumination-anchor": "map"
       }
     }
   ]
