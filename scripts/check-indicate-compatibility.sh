@@ -45,8 +45,7 @@ check_equal "registry scene digest" \
   "$(jq -r '.compositionDigest' "$manifest")"
 
 cargo_revisions="$(
-  rg -o 'Indicate\.git", rev = "[0-9a-f]+"' Cargo.toml |
-    sed -E 's/.*rev = "([0-9a-f]+)"/\1/' |
+  sed -nE 's/.*Indicate\.git", rev = "([0-9a-f]+)".*/\1/p' Cargo.toml |
     sort -u
 )"
 if [ "$cargo_revisions" != "$revision" ]; then
