@@ -3,10 +3,23 @@
 /// Schema versions of the linked domain producers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Record)]
 pub struct ProducerSchemaVersions {
+    /// AeroLink reception event schema version.
+    pub aero_link: u16,
     /// Surveillance track schema version.
     pub surveillance: u16,
     /// Airmass weather snapshot schema version.
     pub airmass: u16,
+}
+
+/// One weather station position supplied by the application.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct WeatherStationPosition {
+    /// Published weather station identity.
+    pub station_id: String,
+    /// WGS84 latitude in degrees.
+    pub latitude_deg: f64,
+    /// WGS84 longitude in degrees.
+    pub longitude_deg: f64,
 }
 
 /// One color in the sRGB color space.
@@ -185,6 +198,23 @@ pub struct DisplayBatch {
     pub omitted_products: u64,
 }
 
+/// Versioned domain records emitted for one radio operation.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct RadioRecordBatch {
+    /// Versioned Surveillance track records.
+    pub track_records: Vec<String>,
+    /// Versioned Airmass weather snapshot records.
+    pub weather_records: Vec<String>,
+    /// AeroLink reception events consumed by this operation.
+    pub events_consumed: u64,
+    /// Traffic observations accepted by Surveillance.
+    pub traffic_observations: u64,
+    /// Traffic receptions refused without ending the stream.
+    pub traffic_refusals: u64,
+    /// Weather products accepted by Airmass.
+    pub weather_products: u64,
+}
+
 impl From<pilotage_presentation::DisplayBatch> for DisplayBatch {
     fn from(value: pilotage_presentation::DisplayBatch) -> Self {
         Self {
@@ -351,10 +381,12 @@ mod tests {
         assert_ne!(
             versions,
             ProducerSchemaVersions {
+                aero_link: 0,
                 surveillance: 0,
                 airmass: 0,
             }
         );
+        assert_ne!(versions.aero_link, 0);
         assert_ne!(versions.surveillance, 0);
         assert_ne!(versions.airmass, 0);
     }

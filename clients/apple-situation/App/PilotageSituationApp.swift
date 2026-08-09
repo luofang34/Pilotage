@@ -12,32 +12,28 @@ struct PilotageSituationApp: App {
 }
 
 private struct SituationContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = SituationClientModel()
 
     var body: some View {
         ZStack(alignment: .top) {
             SituationMap(batch: model.display)
-            if let message = model.errorMessage {
-                Text(message)
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .padding()
+            VStack(spacing: 8) {
+                RadioStatusView(source: model.radioSource)
+                if let message = model.errorMessage {
+                    Text(message)
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                }
             }
+            .padding()
         }
-    }
-}
-
-@MainActor
-private final class SituationClientModel: ObservableObject {
-    @Published private(set) var display: DisplayBatch?
-    @Published private(set) var errorMessage: String?
-    private let session = PresentationSession()
-
-    init() {
-        do {
-            display = try session.currentDisplay()
-        } catch {
-            errorMessage = error.localizedDescription
+        .task(id: scenePhase) {
+            if scenePhase == .active {
+                await model.activate()
+            } else {
+                await model.suspend()
+            }
         }
     }
 }

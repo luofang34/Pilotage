@@ -14,6 +14,18 @@ The portable adapter consumes typed feature changes from
 `surveillance-geojson` and `airmass-geojson`. Airmass supplies each flight
 category. The Rust adapter maps each category to a display style.
 
+The application uses one AeroLink discovery object. A maintenance task opens
+and starts receiver connections. A separate task drains each live connection.
+The drain has a limit of 32 transfers for each 20 millisecond cycle.
+
+The application splits the AeroLink output into lines. The Rust radio adapter
+converts each line into typed Surveillance and Airmass records. The application
+routes these records to the presentation session. Swift does not decode a radio
+payload.
+
+The application stops reception when its scene is not active. It removes the
+retained traffic and weather display values at the same time.
+
 Run this command:
 
 ```sh
@@ -35,6 +47,11 @@ sh clients/apple-situation/scripts/generate-project.sh
 The script copies the pinned AeroLink source to an ignored build directory.
 It generates one AeroLink project for this app. The app embeds the generated
 client framework and driver extension.
+
+Clone Airmass and Surveillance next to this repository. The Apple check stages
+the commits in `AIRMASS_REVISION` and `SURVEILLANCE_REVISION`. You can set
+`AIRMASS_SOURCE` and `SURVEILLANCE_SOURCE` when the worktrees are in a different
+directory.
 
 The staging script applies the Pilotage DriverKit development entitlements to
 the copied driver. These entitlements use one USB vendor wildcard. The copied

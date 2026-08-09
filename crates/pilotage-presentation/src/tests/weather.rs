@@ -118,6 +118,20 @@ fn replacement_removes_the_prior_report() {
     assert_eq!(batch.points[0].label.as_deref(), Some("KJFK"));
 }
 
+#[test]
+fn clearing_weather_emits_removal() {
+    let delta = initial_delta(Some(FlightCategory::Vfr));
+    let mut adapter = PresentationAdapter::new();
+    adapter
+        .apply_weather_delta(&delta)
+        .expect("typed report must produce a point");
+
+    let changes = adapter.clear_weather();
+
+    assert!(matches!(changes.as_slice(), [PointChange::Remove { .. }]));
+    assert!(adapter.adapt().points.is_empty());
+}
+
 fn initial_delta(category: Option<FlightCategory>) -> FeatureDelta {
     let mut store = weather_store();
     let current = store

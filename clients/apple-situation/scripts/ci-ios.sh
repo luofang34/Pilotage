@@ -7,12 +7,14 @@ manifest="$client_root/rust/pilotage-situation-ffi/Cargo.toml"
 package="$client_root/Packages/PilotageSituationCore"
 map_package="$client_root/Packages/PilotageMapLibreBinding"
 geojson_package="$client_root/Packages/PilotageGeoJSONEdge"
+radio_package="$client_root/Packages/PilotageRadioSource"
 cache_root="$client_root/.build/cache"
 mkdir -p "$cache_root/clang" "$cache_root/swiftpm"
 export CLANG_MODULE_CACHE_PATH="$cache_root/clang"
 export SWIFTPM_MODULECACHE_OVERRIDE="$cache_root/clang"
 export XDG_CACHE_HOME="$cache_root/swiftpm"
 
+sh "$client_root/scripts/prepare-radio-sources.sh"
 cargo fmt --manifest-path "$manifest" --check
 if grep -RInE 'anyhow(::Error)?' "$client_root/rust/pilotage-situation-ffi/src"; then
     echo "the hand-written FFI facade must use typed errors" >&2
@@ -24,6 +26,7 @@ sh "$client_root/scripts/build-xcframework.sh"
 swift build --disable-sandbox --package-path "$package"
 swift test --disable-sandbox --package-path "$package"
 swift test --disable-sandbox --package-path "$geojson_package"
+swift test --disable-sandbox --package-path "$radio_package"
 simulator_sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
 swift build \
     --disable-sandbox \
