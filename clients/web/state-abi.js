@@ -1,5 +1,5 @@
-// State-frame ABI v6 writer: the JS side of the tagged-group contract in
-// the indicate-instrument-state crate's abi/v6.rs (pinned upstream).
+// State-frame ABI v7 writer: the JS side of the tagged-group contract in
+// the indicate-instrument-state crate's abi/v7.rs (pinned upstream).
 //
 // The frame is self-delimiting: [version u8][group count u8] then, per
 // present group in strictly ascending tag order, [tag u8][payload length
@@ -16,7 +16,7 @@
 // state-abi.test.mjs; the Rust codec pins against the same files, so
 // the two sides of the wasm boundary can only drift by turning CI red.
 
-export const STATE_ABI_VERSION = 6;
+export const STATE_ABI_VERSION = 7;
 
 const TAG = Object.freeze({
   ATTITUDE: 0x01,
@@ -187,8 +187,8 @@ function groupEncoders() {
       (s) => {
         const v = s.valid ?? {};
         const flags =
-          v.attitude || v.rates || v.position || v.velocity ||
-          v.heading || v.variation || v.turn || v.slip;
+          v.attitude || v.rates || v.position || v.velocityHorizontal ||
+          v.velocityVertical || v.heading || v.variation || v.turn || v.slip;
         const snap =
           (s.snapshot?.coherence ?? 0) !== 0 || (s.snapshot?.generation ?? 0) !== 0;
         return (s.quality ?? 255) !== 255 || flags || snap ? s : undefined;
@@ -196,7 +196,9 @@ function groupEncoders() {
       (view, off, s) => {
         // Undeclared quality is unknown (255, resolves Failed), and
         // validity is never assumed — unset flags mean "not declared
-        // valid" (VAL-01).
+        // valid" (VAL-01). v7 splits velocity: bit 3 is the horizontal
+        // (north/east) pair, bit 8 is vertical speed; a source that
+        // declares only one loses the other on the Rust side.
         b(view, off, s.quality ?? 255);
         b(view, off + 1, s.snapshot?.coherence ?? 0);
         const v = s.valid ?? {};
@@ -204,11 +206,12 @@ function groupEncoders() {
           (v.attitude ? 0x01 : 0) |
           (v.rates ? 0x02 : 0) |
           (v.position ? 0x04 : 0) |
-          (v.velocity ? 0x08 : 0) |
+          (v.velocityHorizontal ? 0x08 : 0) |
           (v.heading ? 0x10 : 0) |
           (v.variation ? 0x20 : 0) |
           (v.turn ? 0x40 : 0) |
-          (v.slip ? 0x80 : 0);
+          (v.slip ? 0x80 : 0) |
+          (v.velocityVertical ? 0x100 : 0);
         view.setUint16(off + 2, flags, true);
         view.setUint32(off + 4, s.snapshot?.generation ?? 0, true);
         return 8;
@@ -315,7 +318,7 @@ function groupEncoders() {
 
 const ENCODERS = groupEncoders();
 
-// Encodes `state` as a canonical v6 frame into `view` (a DataView over
+// Encodes `state` as a canonical v7 frame into `view` (a DataView over
 // the wasm state buffer). Returns the used length, or throws RangeError
 // when the buffer cannot hold the frame — the caller surfaces that as a
 // state-write failure, never a partial frame.

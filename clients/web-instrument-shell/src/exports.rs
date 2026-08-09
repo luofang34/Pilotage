@@ -11,7 +11,7 @@ use indicate_alerts::{
 use indicate_instrument_registry::{ConfigBlob, PanelDrawError};
 use indicate_instrument_scene::{LayerError, SceneError, SceneWriter, validate_layers};
 use indicate_instrument_state::FreshnessPolicy;
-use indicate_instrument_state::abi::v6::{self, AbiError};
+use indicate_instrument_state::abi::v7::{self, AbiError};
 use indicate_instrument_state::{NavSource, SignalStatus};
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -58,7 +58,7 @@ impl Runtime {
     fn new() -> Self {
         let panels = registry().map_or(0, |registry| registry.panels().count());
         Self {
-            state: vec![0u8; v6::CAPACITY],
+            state: vec![0u8; v7::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
             generation: vec![0; panels],
             config: vec![Vec::new(); panels],
@@ -162,7 +162,7 @@ pub(crate) fn render_into(runtime: &mut Runtime, panel: u32) -> RenderAttempt {
     };
     let panel_idx = panel as usize;
     let generation = panel_generation(runtime, panel_idx);
-    let state = match v6::decode_state(&runtime.state) {
+    let state = match v7::decode_state(&runtime.state) {
         Ok(report) => report.state,
         Err(AbiError::Truncated) => {
             return RenderAttempt::failure(RenderStatus::StateTruncated, generation);
@@ -238,7 +238,7 @@ fn derive_alert_events(data: &indicate_instrument_state::PanelData) -> [AlertEve
 /// The state-frame ABI version this module was built against.
 #[wasm_bindgen]
 pub fn abi_version() -> u32 {
-    u32::from(v6::VERSION)
+    u32::from(v7::VERSION)
 }
 
 /// One explicitly owned instrument renderer and its fixed-capacity buffers.
@@ -273,11 +273,11 @@ impl InstrumentRuntime {
             .map_or(0, |runtime| runtime.state.as_ptr() as u32)
     }
 
-    /// Capacity of the state-frame buffer in bytes. The v6 frame is
+    /// Capacity of the state-frame buffer in bytes. The v7 frame is
     /// self-delimiting, so the writer needs a bound, not an exact size;
     /// growing the capacity is not a wire break.
     pub fn state_capacity(&self) -> u32 {
-        v6::CAPACITY as u32
+        v7::CAPACITY as u32
     }
 
     /// Linear-memory offset of the encoded-scene buffer, or zero before init.
@@ -392,7 +392,7 @@ impl InstrumentRuntime {
         let Some(runtime) = self.runtime.as_mut() else {
             return RenderStatus::NotInitialized as u64;
         };
-        let state = match v6::decode_state(&runtime.state) {
+        let state = match v7::decode_state(&runtime.state) {
             Ok(report) => {
                 // Counted here, once per frame step, so a frame rendered
                 // across N panels does not multiply its tag counts.

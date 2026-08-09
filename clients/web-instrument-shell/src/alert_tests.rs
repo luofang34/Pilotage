@@ -20,7 +20,8 @@ fn failed_alt_state() -> AircraftState {
         age_ms: Some(10.0),
     };
     state.valid.position = false;
-    state.valid.velocity = false;
+    state.valid.velocity_horizontal = false;
+    state.valid.velocity_vertical = false;
     state
 }
 
