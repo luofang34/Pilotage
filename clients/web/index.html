@@ -12,9 +12,10 @@
   those two values (plus the host, usually 127.0.0.1) into the boxes below, or
   pass them as URL query params: ?host=127.0.0.1&port=4433&cert=<hex>.
 
-  Layout contract: one large main view (selectable camera or PFD) beside a
-  vertically stacked G5-style PFD/HSI column. Captions, the SIM banner, and
-  every status readout live OUTSIDE the instrument/video boxes so nothing
+  Layout contract: one large main view beside a G5-style instrument column.
+  The instrument stages come from the wasm screen composition (ADR-0032).
+  Slot order is the column order. Captions, the SIM banner, and every
+  status readout live OUTSIDE the instrument/video boxes so nothing
   overlays flight-critical pixels and any box can go fullscreen later.
 -->
 <title>Pilotage demo viewer</title>
@@ -85,9 +86,10 @@
     cursor: pointer;
   }
   /* Cockpit grid: [ main picture | G5 column ]. The main slot holds whichever
-     figure #mainView selects; the G5 column keeps the small-format PFD/HSI
-     stack. On narrow screens (tablet portrait) the columns stack — the
-     visionOS/iPadOS-native layout is future work, this is only the fallback. */
+     figure #mainView selects. The G5 column holds the instrument stages;
+     layout.js builds them from the composition slots. On narrow screens
+     (tablet portrait) the columns stack — the visionOS/iPadOS-native
+     layout is future work, this is only the fallback. */
   .cockpit {
     display: grid;
     /* The main slot wraps its video's own aspect (no pillarboxing), and
@@ -258,7 +260,7 @@
       <option value="stage-video" selected>FPV / onboard camera</option>
       <option value="stage-gimbal">gimbal / payload</option>
       <option value="stage-chase">chase / 3rd person</option>
-      <option value="stage-pfd">PFD</option>
+      <!-- layout.js appends one option per composition slot. -->
     </select>
   </label>
   <button id="fpvBtn">FPV mode</button><button id="resetBtn" title="Reset the simulation world and restart the FC">Reset sim</button>
@@ -271,16 +273,8 @@
       <div class="frame"><canvas id="video" width="320" height="240"></canvas></div>
     </figure>
   </div>
-  <aside class="g5-column" id="g5Column">
-    <figure class="stage" id="stage-pfd">
-      <figcaption>PFD</figcaption>
-      <div class="frame"><canvas id="pfd" width="480" height="360"></canvas></div>
-    </figure>
-    <figure class="stage" id="stage-hsi">
-      <figcaption>HSI</figcaption>
-      <div class="frame"><canvas id="hsi" width="480" height="360"></canvas></div>
-    </figure>
-  </aside>
+  <!-- layout.js fills this column from the wasm composition slots. -->
+  <aside class="g5-column" id="g5Column"></aside>
 </div>
 <div id="stageShelf">
   <figure class="stage" id="stage-gimbal">

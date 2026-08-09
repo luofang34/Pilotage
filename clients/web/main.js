@@ -9,6 +9,7 @@ import { createSessionTransport } from "./session-transport.js";
 import { createSessionBootstrap } from "./session-bootstrap.js";
 import { createControlLoop } from "./control-loop.js";
 import { createCockpitReadout } from "./cockpit-readout.js";
+import { loadCompositionForPage } from "./instrument-startup.js";
 
 const VEHICLE_ID = 1n;
 const INSTRUMENT_SOURCE_ID = 1n;
@@ -30,10 +31,16 @@ const els = {
   overlay: document.getElementById("overlay"),
   telemetry: document.getElementById("telemetry"),
   gamepad: document.getElementById("gamepad"),
-  pfd: document.getElementById("pfd"),
-  hsi: document.getElementById("hsi"),
   flightMode: document.getElementById("flightMode"),
 };
+
+// The instrument stages come from the screen composition (ADR-0032).
+// layout.js evaluates first and builds their figures from the same
+// memoized promise, so the canvases exist before the readout resolves
+// them. A failed enumeration keeps the rest of the client available and
+// leaves a page-level display failure visible.
+const { slots: instrumentSlots, fault: instrumentStartupFault } =
+  await loadCompositionForPage();
 
 const state = {
   transport: null,
@@ -84,6 +91,8 @@ let controlStarted = Promise.resolve();
 const readout = createCockpitReadout({
   state,
   els,
+  instrumentSlots,
+  instrumentStartupFault,
   transportSessions,
   vehicleId: VEHICLE_ID,
   instrumentSourceId: INSTRUMENT_SOURCE_ID,

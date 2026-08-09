@@ -16,6 +16,7 @@ members = [
     "crates/pilotage-svs-db",
     "crates/pilotage-svs-build",
     "crates/pilotage-mission",
+    "crates/pilotage-instrument-runtime",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
@@ -52,14 +53,14 @@ navigate-guidance = { git = "https://github.com/luofang34/Navigate.git", rev = "
 # the scene vocabulary, the panels, and the registry digest cannot drift
 # apart. The pilot of a change that moves the cross-shell scene digest
 # advances this pin as part of that change (ADR-0034).
-indicate-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-alerts = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-instrument-scene = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-instrument-state = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-instrument-glyphs = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-instrument-panels = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
-indicate-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "14e9a7591a8a659b71d4a19e027c07b7448d6bcb" }
+indicate-frames = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-alerts = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-instrument-scene = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-instrument-state = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-instrument-glyphs = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-instrument-panels = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
+indicate-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
 aerocontext-core = "0.4.5"
 aerocontext-planning = "0.4.5"
 aerocontext-navdata = { version = "0.4.5", default-features = false }
@@ -98,6 +99,7 @@ pilotage-adapter-aviate = { path = "adapters/aviate" }
 pilotage-adapter-px4 = { path = "adapters/px4" }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
+pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -107,6 +107,21 @@ jobs:
             echo "pilotage-instruments-web-shell depends on pilotage-protocol"; exit 1
           fi
 
+      - name: the instrument runtime is platform-neutral (ADR-0032)
+        # The portable instrument runtime must never link a platform
+        # binding or the protocol: the shells are thin adapters, and a
+        # forbidden dependency here closes the ADR-0032 cut line.
+        run: |
+          tree=$(cargo tree -p pilotage-instrument-runtime -e normal)
+          for forbidden in wasm-bindgen serde-wasm-bindgen pilotage-protocol; do
+            if grep -q "$forbidden" <<<"$tree"; then
+              echo "pilotage-instrument-runtime depends on $forbidden"; exit 1
+            fi
+          done
+
+      - name: Indicate compatibility identity
+        run: bash scripts/check-indicate-compatibility.sh
+
       - name: geospatial contract (SVS-01)
         # Datum discipline, coherence, view/projection, availability, and the
         # fail-closed versioned ABI for synthetic vision and conformal HUD.
@@ -147,6 +162,9 @@ jobs:
 
       - name: instrument display fail-visible contract
         run: node clients/web/instruments.test.mjs
+
+      - name: screen composition tests (INST-CONS-03)
+        run: node clients/web/composition.test.mjs
 
       - name: renderer backend conformance corpus
         run: node clients/web/scene-conformance.test.mjs

@@ -6,9 +6,8 @@
 use indicate_instrument_scene::SceneCmds;
 use indicate_instrument_state::{AircraftState, Stamped};
 
-use crate::exports::InstrumentRuntime;
-use crate::render_status::RenderStatus;
-use crate::tests::{attitude_state, unpack, write_state};
+use crate::tests::{attitude_state, write_state};
+use crate::{RenderStatus, Runtime};
 
 fn failed_alt_state() -> AircraftState {
     let mut state = attitude_state();
@@ -20,12 +19,12 @@ fn failed_alt_state() -> AircraftState {
         age_ms: Some(10.0),
     };
     state.valid.position = false;
-    state.valid.velocity = false;
+    state.valid.velocity_horizontal = false;
+    state.valid.velocity_vertical = false;
     state
 }
 
-fn committed_scene_texts(rt: &InstrumentRuntime, len: usize) -> Vec<String> {
-    let runtime = rt.runtime.as_ref().expect("initialized");
+fn committed_scene_texts(runtime: &Runtime, len: usize) -> Vec<String> {
     let scene = &runtime.scene[..len];
     SceneCmds::new(scene)
         .expect("valid scene")
@@ -46,42 +45,34 @@ fn stack_only(texts: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn render_texts(rt: &mut InstrumentRuntime, panel: u32) -> Vec<String> {
-    let packed = unpack(rt.render_result(panel));
-    assert_eq!(packed.status, RenderStatus::Ok as u32);
-    committed_scene_texts(rt, packed.scene_len as usize)
+fn render_texts(runtime: &mut Runtime, panel: u32) -> Vec<String> {
+    let outcome = runtime.render(panel);
+    assert_eq!(outcome.status, RenderStatus::Ok);
+    committed_scene_texts(runtime, outcome.scene_len as usize)
 }
 
 #[test]
 fn one_alert_step_feeds_every_panel_the_same_semantic_state() {
-    let mut rt = InstrumentRuntime::new();
-    rt.init();
-    write_state(
-        rt.runtime.as_mut().expect("initialized"),
-        &failed_alt_state(),
-    );
+    let mut runtime = Runtime::new();
+    write_state(&mut runtime, &failed_alt_state());
 
-    let summary = rt.step_alerts(1_000, 1);
-    assert_eq!(summary & 0xff, RenderStatus::Ok as u64);
-    assert!((summary >> 8) & 0xff >= 1, "alt loss must assert an alert");
-    assert_eq!((summary >> 16) & 1, 0, "healthy path is not faulted");
+    let outcome = runtime.step_alerts(1_000, true);
+    assert_eq!(outcome.status, RenderStatus::Ok);
+    assert!(outcome.active_count >= 1, "alt loss must assert an alert");
+    assert!(!outcome.faulted, "healthy path is not faulted");
 
-    let pfd = stack_only(&render_texts(&mut rt, 0));
-    let hsi = stack_only(&render_texts(&mut rt, 1));
+    let pfd = stack_only(&render_texts(&mut runtime, 0));
+    let hsi = stack_only(&render_texts(&mut runtime, 1));
     assert!(pfd.contains(&String::from("ALT SRC")), "{pfd:?}");
     assert_eq!(pfd, hsi, "both panels consume the one cached AlertOutput");
 }
 
 #[test]
 fn primary_flags_render_when_alerts_were_never_stepped() {
-    let mut rt = InstrumentRuntime::new();
-    rt.init();
-    write_state(
-        rt.runtime.as_mut().expect("initialized"),
-        &failed_alt_state(),
-    );
+    let mut runtime = Runtime::new();
+    write_state(&mut runtime, &failed_alt_state());
 
-    let texts = render_texts(&mut rt, 0);
+    let texts = render_texts(&mut runtime, 0);
     assert!(
         texts.contains(&String::from("ALT")),
         "ALT red X comes from resolved state, not the manager: {texts:?}"
@@ -94,17 +85,13 @@ fn primary_flags_render_when_alerts_were_never_stepped() {
 
 #[test]
 fn faulted_alerting_path_is_annunciated_and_flags_survive() {
-    let mut rt = InstrumentRuntime::new();
-    rt.init();
-    write_state(
-        rt.runtime.as_mut().expect("initialized"),
-        &failed_alt_state(),
-    );
+    let mut runtime = Runtime::new();
+    write_state(&mut runtime, &failed_alt_state());
 
-    let summary = rt.step_alerts(1_000, 0);
-    assert_eq!((summary >> 16) & 1, 1, "monitor fault must mark the output");
+    let outcome = runtime.step_alerts(1_000, false);
+    assert!(outcome.faulted, "monitor fault must mark the output");
 
-    let texts = render_texts(&mut rt, 0);
+    let texts = render_texts(&mut runtime, 0);
     assert!(texts.contains(&String::from("ALRT FAIL")), "{texts:?}");
     assert!(
         texts.contains(&String::from("ALT")),

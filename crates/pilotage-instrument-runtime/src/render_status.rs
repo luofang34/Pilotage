@@ -1,6 +1,6 @@
-//! Stable render-status reason codes shared with the JS backend.
+//! Stable render-status reason codes shared with the shells.
 
-/// Stable status field carried by the packed WASM render result.
+/// Stable status field carried by every producer result.
 ///
 /// Codes are append-only ABI: values are never reused or renumbered. The
 /// JS mirror in `clients/web/instrument-health.js` maps each code to the

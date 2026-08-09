@@ -12,7 +12,7 @@
 // scheduled monitor can consume it later.
 
 // Stable diagnostic reason codes, shown as `D-<code>` on the failure page.
-// 1..99 mirror clients/web-instruments/src/render_status.rs exactly;
+// 1..99 mirror crates/pilotage-instrument-runtime/src/render_status.rs exactly;
 // 100+ are failures only this backend can observe. Codes are append-only:
 // never reused or renumbered.
 export const REASON = Object.freeze({
