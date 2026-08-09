@@ -1,0 +1,896 @@
+{
+  "corpus_version": 1,
+  "cases": [
+    {
+      "name": "mixed_age_inputs",
+      "request": {
+        "schema_version": 1,
+        "query": {
+          "time": {
+            "axis": "valid_time",
+            "evaluation_utc": {
+              "unix_seconds": 1000,
+              "subsecond_nanoseconds": 0
+            }
+          },
+          "domains": [
+            { "domain": "surveillance", "subject": "all_tracks" },
+            { "domain": "airmass", "subject": "regional_weather" }
+          ],
+          "requirements": {
+            "freshness": [
+              {
+                "requirement_id": "traffic_recent",
+                "field": {
+                  "domain": "surveillance",
+                  "subject": "all_tracks",
+                  "field": "position"
+                },
+                "age": "ingress",
+                "maximum_age_nanoseconds": 10000000000
+              },
+              {
+                "requirement_id": "weather_recent",
+                "field": {
+                  "domain": "airmass",
+                  "subject": "regional_weather",
+                  "field": "precipitation"
+                },
+                "age": "observation",
+                "maximum_age_nanoseconds": 15000000000
+              }
+            ],
+            "coherence": [
+              {
+                "requirement_id": "mixed_age_spread",
+                "kind": "maximum_ingress_age_spread",
+                "fields": [
+                  {
+                    "domain": "surveillance",
+                    "subject": "all_tracks",
+                    "field": "position"
+                  },
+                  {
+                    "domain": "airmass",
+                    "subject": "regional_weather",
+                    "field": "precipitation"
+                  }
+                ],
+                "maximum_spread_nanoseconds": 10000000000
+              }
+            ]
+          }
+        },
+        "host_evaluation": {
+          "clock_id": "host-clock",
+          "nanoseconds": 30000000000
+        }
+      },
+      "captures": [
+        {
+          "state": "available",
+          "snapshot": {
+            "domain": "surveillance",
+            "subject": "all_tracks",
+            "domain_schema_version": 3,
+            "producer_instance_id": "traffic-producer-a",
+            "snapshot_revision": 7,
+            "domain_identity": { "kind": "common" },
+            "fields": [
+              {
+                "field": "position",
+                "value": {
+                  "state": "present",
+                  "value": { "latitude_degrees": 41, "longitude_degrees": -72 }
+                },
+                "contributors": [
+                  {
+                    "source_identity": { "state": "present", "value": "receiver-a" },
+                    "source_epoch": { "state": "present", "value": "receiver-a-epoch-1" },
+                    "ingress_time": {
+                      "state": "present",
+                      "value": { "clock_id": "host-clock", "nanoseconds": 25000000000 }
+                    },
+                    "source_time": {
+                      "state": "present",
+                      "value": { "unix_seconds": 995, "subsecond_nanoseconds": 0 }
+                    },
+                    "time_quality": { "state": "present", "value": "trusted" },
+                    "validity": {
+                      "state": "present",
+                      "value": {
+                        "start": { "unix_seconds": 990, "subsecond_nanoseconds": 0 },
+                        "end": { "unix_seconds": 1010, "subsecond_nanoseconds": 0 }
+                      }
+                    },
+                    "data_quality": {
+                      "state": "present",
+                      "value": { "integrity": "valid" }
+                    },
+                    "time_uncertainty_nanoseconds": {
+                      "state": "present",
+                      "value": 100000000
+                    }
+                  }
+                ]
+              }
+            ],
+            "clock_correspondences": []
+          }
+        },
+        {
+          "state": "available",
+          "snapshot": {
+            "domain": "airmass",
+            "subject": "regional_weather",
+            "domain_schema_version": 2,
+            "producer_instance_id": "weather-producer-a",
+            "snapshot_revision": 11,
+            "domain_identity": { "kind": "common" },
+            "fields": [
+              {
+                "field": "precipitation",
+                "value": {
+                  "state": "present",
+                  "value": { "rate_millimeters_per_hour": 3 }
+                },
+                "contributors": [
+                  {
+                    "source_identity": { "state": "present", "value": "weather-feed-a" },
+                    "source_epoch": { "state": "present", "value": "weather-feed-a-epoch-8" },
+                    "ingress_time": {
+                      "state": "present",
+                      "value": { "clock_id": "host-clock", "nanoseconds": 12000000000 }
+                    },
+                    "source_time": {
+                      "state": "present",
+                      "value": { "unix_seconds": 980, "subsecond_nanoseconds": 0 }
+                    },
+                    "time_quality": { "state": "present", "value": "trusted" },
+                    "validity": {
+                      "state": "present",
+                      "value": {
+                        "start": { "unix_seconds": 970, "subsecond_nanoseconds": 0 },
+                        "end": { "unix_seconds": 1030, "subsecond_nanoseconds": 0 }
+                      }
+                    },
+                    "data_quality": {
+                      "state": "present",
+                      "value": { "coverage": "regional" }
+                    },
+                    "time_uncertainty_nanoseconds": {
+                      "state": "present",
+                      "value": 2000000000
+                    }
+                  }
+                ]
+              }
+            ],
+            "clock_correspondences": []
+          }
+        }
+      ],
+      "expected": {
+        "schema_version": 1,
+        "query_time": {
+          "axis": "valid_time",
+          "evaluation_utc": { "unix_seconds": 1000, "subsecond_nanoseconds": 0 }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 30000000000 },
+        "consistency": "best_available_non_atomic",
+        "domains": [
+          {
+            "state": "available",
+            "domain": "surveillance",
+            "subject": "all_tracks",
+            "result": {
+              "domain_schema_version": 3,
+              "producer_instance_id": "traffic-producer-a",
+              "snapshot_revision": 7,
+              "domain_identity": { "kind": "common" },
+              "fields": [
+                {
+                  "field": "position",
+                  "value": {
+                    "state": "present",
+                    "value": { "latitude_degrees": 41, "longitude_degrees": -72 }
+                  },
+                  "contributors": [
+                    {
+                      "source_identity": { "state": "present", "value": "receiver-a" },
+                      "source_epoch": { "state": "present", "value": "receiver-a-epoch-1" },
+                      "ingress_time": {
+                        "state": "present",
+                        "value": { "clock_id": "host-clock", "nanoseconds": 25000000000 }
+                      },
+                      "source_time": {
+                        "state": "present",
+                        "value": { "unix_seconds": 995, "subsecond_nanoseconds": 0 }
+                      },
+                      "time_quality": { "state": "present", "value": "trusted" },
+                      "validity": {
+                        "state": "present",
+                        "value": {
+                          "start": { "unix_seconds": 990, "subsecond_nanoseconds": 0 },
+                          "end": { "unix_seconds": 1010, "subsecond_nanoseconds": 0 }
+                        }
+                      },
+                      "data_quality": {
+                        "state": "present",
+                        "value": { "integrity": "valid" }
+                      },
+                      "time_uncertainty_nanoseconds": {
+                        "state": "present",
+                        "value": 100000000
+                      },
+                      "ingress_age": {
+                        "state": "known",
+                        "nanoseconds": 5000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                      },
+                      "observation_age": {
+                        "state": "known",
+                        "nanoseconds": 5000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 100000000 }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "clock_correspondences": []
+            }
+          },
+          {
+            "state": "available",
+            "domain": "airmass",
+            "subject": "regional_weather",
+            "result": {
+              "domain_schema_version": 2,
+              "producer_instance_id": "weather-producer-a",
+              "snapshot_revision": 11,
+              "domain_identity": { "kind": "common" },
+              "fields": [
+                {
+                  "field": "precipitation",
+                  "value": {
+                    "state": "present",
+                    "value": { "rate_millimeters_per_hour": 3 }
+                  },
+                  "contributors": [
+                    {
+                      "source_identity": { "state": "present", "value": "weather-feed-a" },
+                      "source_epoch": { "state": "present", "value": "weather-feed-a-epoch-8" },
+                      "ingress_time": {
+                        "state": "present",
+                        "value": { "clock_id": "host-clock", "nanoseconds": 12000000000 }
+                      },
+                      "source_time": {
+                        "state": "present",
+                        "value": { "unix_seconds": 980, "subsecond_nanoseconds": 0 }
+                      },
+                      "time_quality": { "state": "present", "value": "trusted" },
+                      "validity": {
+                        "state": "present",
+                        "value": {
+                          "start": { "unix_seconds": 970, "subsecond_nanoseconds": 0 },
+                          "end": { "unix_seconds": 1030, "subsecond_nanoseconds": 0 }
+                        }
+                      },
+                      "data_quality": {
+                        "state": "present",
+                        "value": { "coverage": "regional" }
+                      },
+                      "time_uncertainty_nanoseconds": {
+                        "state": "present",
+                        "value": 2000000000
+                      },
+                      "ingress_age": {
+                        "state": "known",
+                        "nanoseconds": 18000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                      },
+                      "observation_age": {
+                        "state": "known",
+                        "nanoseconds": 20000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 2000000000 }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "clock_correspondences": []
+            }
+          }
+        ],
+        "requirement_assessments": [
+          { "requirement_id": "traffic_recent", "state": "satisfied" },
+          {
+            "requirement_id": "weather_recent",
+            "state": "not_satisfied",
+            "reason": "maximum_age_exceeded"
+          },
+          {
+            "requirement_id": "mixed_age_spread",
+            "state": "not_satisfied",
+            "reason": "maximum_spread_exceeded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_age",
+      "request": {
+        "schema_version": 1,
+        "query": {
+          "time": {
+            "axis": "valid_time",
+            "evaluation_utc": { "unix_seconds": 2000, "subsecond_nanoseconds": 0 }
+          },
+          "domains": [
+            { "domain": "aeronautical_updates", "subject": "all_updates" }
+          ],
+          "requirements": {
+            "freshness": [
+              {
+                "requirement_id": "update_observation_age",
+                "field": {
+                  "domain": "aeronautical_updates",
+                  "subject": "all_updates",
+                  "field": "restrictions"
+                },
+                "age": "observation",
+                "maximum_age_nanoseconds": 30000000000
+              }
+            ],
+            "coherence": []
+          }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 100000000000 }
+      },
+      "captures": [
+        {
+          "state": "available",
+          "snapshot": {
+            "domain": "aeronautical_updates",
+            "subject": "all_updates",
+            "domain_schema_version": 1,
+            "producer_instance_id": "update-producer-a",
+            "snapshot_revision": 4,
+            "domain_identity": { "kind": "common" },
+            "fields": [
+              {
+                "field": "restrictions",
+                "value": { "state": "present", "value": ["TFR-1"] },
+                "contributors": [
+                  {
+                    "source_identity": { "state": "present", "value": "notice-feed" },
+                    "source_epoch": { "state": "present", "value": "notice-feed-epoch-2" },
+                    "ingress_time": {
+                      "state": "present",
+                      "value": { "clock_id": "remote-clock", "nanoseconds": 40000000000 }
+                    },
+                    "source_time": { "state": "missing", "reason": "invalid_time_evidence" },
+                    "time_quality": { "state": "missing", "reason": "invalid_time_evidence" },
+                    "validity": {
+                      "state": "present",
+                      "value": {
+                        "start": { "unix_seconds": 1900, "subsecond_nanoseconds": 0 },
+                        "end": { "unix_seconds": 2100, "subsecond_nanoseconds": 0 }
+                      }
+                    },
+                    "data_quality": { "state": "present", "value": { "status": "active" } },
+                    "time_uncertainty_nanoseconds": {
+                      "state": "missing",
+                      "reason": "invalid_time_evidence"
+                    }
+                  }
+                ]
+              }
+            ],
+            "clock_correspondences": [
+              {
+                "source_clock_id": "remote-clock",
+                "target_clock_id": "host-clock",
+                "offset_nanoseconds": 50000000000,
+                "uncertainty_nanoseconds": 1000000000,
+                "valid_source": {
+                  "start_nanoseconds": 0,
+                  "end_nanoseconds": 30000000000
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "schema_version": 1,
+        "query_time": {
+          "axis": "valid_time",
+          "evaluation_utc": { "unix_seconds": 2000, "subsecond_nanoseconds": 0 }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 100000000000 },
+        "consistency": "best_available_non_atomic",
+        "domains": [
+          {
+            "state": "available",
+            "domain": "aeronautical_updates",
+            "subject": "all_updates",
+            "result": {
+              "domain_schema_version": 1,
+              "producer_instance_id": "update-producer-a",
+              "snapshot_revision": 4,
+              "domain_identity": { "kind": "common" },
+              "fields": [
+                {
+                  "field": "restrictions",
+                  "value": { "state": "present", "value": ["TFR-1"] },
+                  "contributors": [
+                    {
+                      "source_identity": { "state": "present", "value": "notice-feed" },
+                      "source_epoch": { "state": "present", "value": "notice-feed-epoch-2" },
+                      "ingress_time": {
+                        "state": "present",
+                        "value": { "clock_id": "remote-clock", "nanoseconds": 40000000000 }
+                      },
+                      "source_time": { "state": "missing", "reason": "invalid_time_evidence" },
+                      "time_quality": { "state": "missing", "reason": "invalid_time_evidence" },
+                      "validity": {
+                        "state": "present",
+                        "value": {
+                          "start": { "unix_seconds": 1900, "subsecond_nanoseconds": 0 },
+                          "end": { "unix_seconds": 2100, "subsecond_nanoseconds": 0 }
+                        }
+                      },
+                      "data_quality": {
+                        "state": "present",
+                        "value": { "status": "active" }
+                      },
+                      "time_uncertainty_nanoseconds": {
+                        "state": "missing",
+                        "reason": "invalid_time_evidence"
+                      },
+                      "ingress_age": {
+                        "state": "unknown",
+                        "reason": "clock_correspondence_out_of_range"
+                      },
+                      "observation_age": {
+                        "state": "unknown",
+                        "reason": "missing_source_time"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "clock_correspondences": [
+                {
+                  "source_clock_id": "remote-clock",
+                  "target_clock_id": "host-clock",
+                  "offset_nanoseconds": 50000000000,
+                  "uncertainty_nanoseconds": 1000000000,
+                  "valid_source": {
+                    "start_nanoseconds": 0,
+                    "end_nanoseconds": 30000000000
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "requirement_assessments": [
+          {
+            "requirement_id": "update_observation_age",
+            "state": "indeterminate",
+            "reason": "unknown_age"
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing_domain",
+      "request": {
+        "schema_version": 1,
+        "query": {
+          "time": {
+            "axis": "valid_time",
+            "evaluation_utc": { "unix_seconds": 3000, "subsecond_nanoseconds": 0 }
+          },
+          "domains": [
+            { "domain": "airmass", "subject": "regional_weather" }
+          ],
+          "requirements": { "freshness": [], "coherence": [] }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 50000000000 }
+      },
+      "captures": [
+        {
+          "state": "missing",
+          "domain": "airmass",
+          "subject": "regional_weather",
+          "reason": "domain_unavailable"
+        }
+      ],
+      "expected": {
+        "schema_version": 1,
+        "query_time": {
+          "axis": "valid_time",
+          "evaluation_utc": { "unix_seconds": 3000, "subsecond_nanoseconds": 0 }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 50000000000 },
+        "consistency": "best_available_non_atomic",
+        "domains": [
+          {
+            "state": "missing",
+            "domain": "airmass",
+            "subject": "regional_weather",
+            "reason": "domain_unavailable"
+          }
+        ],
+        "requirement_assessments": []
+      }
+    },
+    {
+      "name": "source_restart",
+      "request": {
+        "schema_version": 1,
+        "query": {
+          "time": {
+            "axis": "valid_time",
+            "evaluation_utc": { "unix_seconds": 4000, "subsecond_nanoseconds": 0 }
+          },
+          "domains": [
+            { "domain": "surveillance", "subject": "all_tracks" }
+          ],
+          "requirements": { "freshness": [], "coherence": [] }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 50000000000 }
+      },
+      "captures": [
+        {
+          "state": "available",
+          "snapshot": {
+            "domain": "surveillance",
+            "subject": "all_tracks",
+            "domain_schema_version": 3,
+            "producer_instance_id": "traffic-producer-stable",
+            "snapshot_revision": 9,
+            "domain_identity": { "kind": "common" },
+            "fields": [
+              {
+                "field": "expired_track",
+                "value": { "state": "missing", "reason": "expired" },
+                "contributors": [
+                  {
+                    "source_identity": { "state": "present", "value": "transponder-42" },
+                    "source_epoch": { "state": "present", "value": "boot-1" },
+                    "ingress_time": {
+                      "state": "present",
+                      "value": { "clock_id": "host-clock", "nanoseconds": 20000000000 }
+                    },
+                    "source_time": {
+                      "state": "present",
+                      "value": { "unix_seconds": 3980, "subsecond_nanoseconds": 0 }
+                    },
+                    "time_quality": { "state": "present", "value": "trusted" },
+                    "validity": { "state": "missing", "reason": "expired" },
+                    "data_quality": { "state": "missing", "reason": "expired" },
+                    "time_uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                  }
+                ]
+              },
+              {
+                "field": "current_track",
+                "value": { "state": "present", "value": { "track_id": "42-new" } },
+                "contributors": [
+                  {
+                    "source_identity": { "state": "present", "value": "transponder-42" },
+                    "source_epoch": { "state": "present", "value": "boot-2" },
+                    "ingress_time": {
+                      "state": "present",
+                      "value": { "clock_id": "host-clock", "nanoseconds": 45000000000 }
+                    },
+                    "source_time": {
+                      "state": "present",
+                      "value": { "unix_seconds": 3998, "subsecond_nanoseconds": 0 }
+                    },
+                    "time_quality": { "state": "present", "value": "trusted" },
+                    "validity": {
+                      "state": "present",
+                      "value": {
+                        "start": { "unix_seconds": 3998, "subsecond_nanoseconds": 0 },
+                        "end": { "unix_seconds": 4008, "subsecond_nanoseconds": 0 }
+                      }
+                    },
+                    "data_quality": { "state": "present", "value": { "integrity": "valid" } },
+                    "time_uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                  }
+                ]
+              }
+            ],
+            "clock_correspondences": []
+          }
+        }
+      ],
+      "expected": {
+        "schema_version": 1,
+        "query_time": {
+          "axis": "valid_time",
+          "evaluation_utc": { "unix_seconds": 4000, "subsecond_nanoseconds": 0 }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 50000000000 },
+        "consistency": "best_available_non_atomic",
+        "domains": [
+          {
+            "state": "available",
+            "domain": "surveillance",
+            "subject": "all_tracks",
+            "result": {
+              "domain_schema_version": 3,
+              "producer_instance_id": "traffic-producer-stable",
+              "snapshot_revision": 9,
+              "domain_identity": { "kind": "common" },
+              "fields": [
+                {
+                  "field": "expired_track",
+                  "value": { "state": "missing", "reason": "expired" },
+                  "contributors": [
+                    {
+                      "source_identity": { "state": "present", "value": "transponder-42" },
+                      "source_epoch": { "state": "present", "value": "boot-1" },
+                      "ingress_time": {
+                        "state": "present",
+                        "value": { "clock_id": "host-clock", "nanoseconds": 20000000000 }
+                      },
+                      "source_time": {
+                        "state": "present",
+                        "value": { "unix_seconds": 3980, "subsecond_nanoseconds": 0 }
+                      },
+                      "time_quality": { "state": "present", "value": "trusted" },
+                      "validity": { "state": "missing", "reason": "expired" },
+                      "data_quality": { "state": "missing", "reason": "expired" },
+                      "time_uncertainty_nanoseconds": { "state": "present", "value": 0 },
+                      "ingress_age": {
+                        "state": "known",
+                        "nanoseconds": 30000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                      },
+                      "observation_age": {
+                        "state": "known",
+                        "nanoseconds": 20000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "field": "current_track",
+                  "value": { "state": "present", "value": { "track_id": "42-new" } },
+                  "contributors": [
+                    {
+                      "source_identity": { "state": "present", "value": "transponder-42" },
+                      "source_epoch": { "state": "present", "value": "boot-2" },
+                      "ingress_time": {
+                        "state": "present",
+                        "value": { "clock_id": "host-clock", "nanoseconds": 45000000000 }
+                      },
+                      "source_time": {
+                        "state": "present",
+                        "value": { "unix_seconds": 3998, "subsecond_nanoseconds": 0 }
+                      },
+                      "time_quality": { "state": "present", "value": "trusted" },
+                      "validity": {
+                        "state": "present",
+                        "value": {
+                          "start": { "unix_seconds": 3998, "subsecond_nanoseconds": 0 },
+                          "end": { "unix_seconds": 4008, "subsecond_nanoseconds": 0 }
+                        }
+                      },
+                      "data_quality": {
+                        "state": "present",
+                        "value": { "integrity": "valid" }
+                      },
+                      "time_uncertainty_nanoseconds": { "state": "present", "value": 0 },
+                      "ingress_age": {
+                        "state": "known",
+                        "nanoseconds": 5000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                      },
+                      "observation_age": {
+                        "state": "known",
+                        "nanoseconds": 2000000000,
+                        "uncertainty_nanoseconds": { "state": "present", "value": 0 }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "clock_correspondences": []
+            }
+          }
+        ],
+        "requirement_assessments": []
+      }
+    },
+    {
+      "name": "clock_correspondence_uncertainty",
+      "request": {
+        "schema_version": 1,
+        "query": {
+          "time": {
+            "axis": "valid_time",
+            "evaluation_utc": { "unix_seconds": 5000, "subsecond_nanoseconds": 0 }
+          },
+          "domains": [
+            { "domain": "airmass", "subject": "regional_weather" }
+          ],
+          "requirements": {
+            "freshness": [
+              {
+                "requirement_id": "wind_ingress_bound",
+                "field": {
+                  "domain": "airmass",
+                  "subject": "regional_weather",
+                  "field": "wind"
+                },
+                "age": "ingress",
+                "maximum_age_nanoseconds": 11000000000
+              }
+            ],
+            "coherence": []
+          }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 100000000000 }
+      },
+      "captures": [
+        {
+          "state": "available",
+          "snapshot": {
+            "domain": "airmass",
+            "subject": "regional_weather",
+            "domain_schema_version": 2,
+            "producer_instance_id": "weather-producer-b",
+            "snapshot_revision": 12,
+            "domain_identity": { "kind": "common" },
+            "fields": [
+              {
+                "field": "wind",
+                "value": { "state": "present", "value": { "knots": 20 } },
+                "contributors": [
+                  {
+                    "source_identity": { "state": "present", "value": "wind-sensor" },
+                    "source_epoch": { "state": "present", "value": "wind-sensor-epoch-4" },
+                    "ingress_time": {
+                      "state": "present",
+                      "value": { "clock_id": "sensor-clock", "nanoseconds": 80000000000 }
+                    },
+                    "source_time": {
+                      "state": "present",
+                      "value": { "unix_seconds": 4995, "subsecond_nanoseconds": 0 }
+                    },
+                    "time_quality": { "state": "present", "value": "estimated" },
+                    "validity": {
+                      "state": "present",
+                      "value": {
+                        "start": { "unix_seconds": 4990, "subsecond_nanoseconds": 0 },
+                        "end": { "unix_seconds": 5010, "subsecond_nanoseconds": 0 }
+                      }
+                    },
+                    "data_quality": { "state": "present", "value": { "grade": "estimated" } },
+                    "time_uncertainty_nanoseconds": {
+                      "state": "present",
+                      "value": 1000000000
+                    }
+                  }
+                ]
+              }
+            ],
+            "clock_correspondences": [
+              {
+                "source_clock_id": "sensor-clock",
+                "target_clock_id": "host-clock",
+                "offset_nanoseconds": 10000000000,
+                "uncertainty_nanoseconds": 2000000000,
+                "valid_source": {
+                  "start_nanoseconds": 0,
+                  "end_nanoseconds": 100000000000
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "schema_version": 1,
+        "query_time": {
+          "axis": "valid_time",
+          "evaluation_utc": { "unix_seconds": 5000, "subsecond_nanoseconds": 0 }
+        },
+        "host_evaluation": { "clock_id": "host-clock", "nanoseconds": 100000000000 },
+        "consistency": "best_available_non_atomic",
+        "domains": [
+          {
+            "state": "available",
+            "domain": "airmass",
+            "subject": "regional_weather",
+            "result": {
+              "domain_schema_version": 2,
+              "producer_instance_id": "weather-producer-b",
+              "snapshot_revision": 12,
+              "domain_identity": { "kind": "common" },
+              "fields": [
+                {
+                  "field": "wind",
+                  "value": { "state": "present", "value": { "knots": 20 } },
+                  "contributors": [
+                    {
+                      "source_identity": { "state": "present", "value": "wind-sensor" },
+                      "source_epoch": { "state": "present", "value": "wind-sensor-epoch-4" },
+                      "ingress_time": {
+                        "state": "present",
+                        "value": { "clock_id": "sensor-clock", "nanoseconds": 80000000000 }
+                      },
+                      "source_time": {
+                        "state": "present",
+                        "value": { "unix_seconds": 4995, "subsecond_nanoseconds": 0 }
+                      },
+                      "time_quality": { "state": "present", "value": "estimated" },
+                      "validity": {
+                        "state": "present",
+                        "value": {
+                          "start": { "unix_seconds": 4990, "subsecond_nanoseconds": 0 },
+                          "end": { "unix_seconds": 5010, "subsecond_nanoseconds": 0 }
+                        }
+                      },
+                      "data_quality": {
+                        "state": "present",
+                        "value": { "grade": "estimated" }
+                      },
+                      "time_uncertainty_nanoseconds": {
+                        "state": "present",
+                        "value": 1000000000
+                      },
+                      "ingress_age": {
+                        "state": "known",
+                        "nanoseconds": 10000000000,
+                        "uncertainty_nanoseconds": {
+                          "state": "present",
+                          "value": 2000000000
+                        }
+                      },
+                      "observation_age": {
+                        "state": "known",
+                        "nanoseconds": 5000000000,
+                        "uncertainty_nanoseconds": {
+                          "state": "present",
+                          "value": 1000000000
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "clock_correspondences": [
+                {
+                  "source_clock_id": "sensor-clock",
+                  "target_clock_id": "host-clock",
+                  "offset_nanoseconds": 10000000000,
+                  "uncertainty_nanoseconds": 2000000000,
+                  "valid_source": {
+                    "start_nanoseconds": 0,
+                    "end_nanoseconds": 100000000000
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "requirement_assessments": [
+          {
+            "requirement_id": "wind_ingress_bound",
+            "state": "not_satisfied",
+            "reason": "maximum_age_exceeded"
+          }
+        ]
+      }
+    }
+  ]
+}

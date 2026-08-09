@@ -75,6 +75,12 @@ jobs:
       - name: cargo test
         run: cargo test --all-targets
 
+      - name: SituationView conformance corpus
+        run: cargo test -p pilotage-situation-view --test corpus
+
+      - name: SituationView dependency boundary
+        run: bash scripts/check-situation-view-boundary.sh
+
       - name: cargo doc
         env:
           RUSTDOCFLAGS: "-D missing_docs -D rustdoc::broken_intra_doc_links"
