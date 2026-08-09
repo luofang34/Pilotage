@@ -37,6 +37,19 @@ jobs:
           printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
           git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
 
+      - name: Authorize the private situation domain dependencies
+        env:
+          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
+          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
+          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
+          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
+          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
+          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
       - name: Install system dependencies (hidapi on Linux)
         run: |
           sudo apt-get update
@@ -97,6 +110,12 @@ jobs:
 
       - name: situation presentation boundary
         run: bash scripts/check-situation-presentation-boundary.sh
+
+      - name: Apple situation client guard self-test
+        run: bash scripts/test-check-apple-situation-client.sh
+
+      - name: Apple situation client guard
+        run: bash scripts/check-apple-situation-client.sh
 
       - name: ADR supersession lifecycle tests
         run: bash scripts/test-check-adr-supersession.sh
@@ -359,8 +378,60 @@ jobs:
           printf 'Host github-indicate-apple-display\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_apple_display_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
           git config --global url."ssh://git@github-indicate-apple-display/luofang34/IndicateAppleDisplay".insteadOf "https://github.com/luofang34/IndicateAppleDisplay"
 
+      - name: Authorize the private situation domain dependencies
+        env:
+          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
+          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
+          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
+          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
+          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
+          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Generate the bridge and test the Apple consumer
         run: bash scripts/check-apple-instrument-consumer.sh
+
+  apple-situation-client:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Authorize the private situation domain dependencies
+        env:
+          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
+          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
+          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
+          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
+          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
+          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
+      - name: Checkout the pinned AeroLink source
+        uses: actions/checkout@v7
+        with:
+          repository: luofang34/aero-link
+          ref: 5cc03234357099eee035f983854b5918bd52ba80
+          path: external/aero-link
+          ssh-key: ${{ secrets.AERO_LINK_DEPLOY_KEY }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
+
+      - name: Test the Apple situation client
+        env:
+          AERO_LINK_SOURCE: ${{ github.workspace }}/external/aero-link
+        run: sh clients/apple-situation/scripts/ci-ios.sh

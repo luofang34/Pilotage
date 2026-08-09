@@ -1,0 +1,58 @@
+name: PilotageSituation
+options:
+  bundleIdPrefix: org.luofang.pilotage
+  deploymentTarget:
+    iOS: "18.4"
+settings:
+  base:
+    AERO_LINK_DRIVER_BUNDLE_IDENTIFIER: ${AERO_LINK_DRIVER_BUNDLE_IDENTIFIER}
+    AERO_LINK_HOST_BUNDLE_IDENTIFIER: ${AERO_LINK_HOST_BUNDLE_IDENTIFIER}
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.0
+    SWIFT_VERSION: 6.0
+packages:
+  PilotageSituationCore:
+    path: Packages/PilotageSituationCore
+  PilotageMapLibreBinding:
+    path: Packages/PilotageMapLibreBinding
+projectReferences:
+  AeroLink:
+    path: .build/aero-link/platforms/apple/AeroLink.xcodeproj
+targets:
+  PilotageSituation:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+          - PilotageSituation.entitlements
+      - path: Resources
+    settings:
+      base:
+        CODE_SIGN_ENTITLEMENTS: App/PilotageSituation.entitlements
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: App/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: $(AERO_LINK_HOST_BUNDLE_IDENTIFIER)
+        SUPPORTS_MACCATALYST: false
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
+        TARGETED_DEVICE_FAMILY: 2
+    dependencies:
+      - package: PilotageSituationCore
+        product: PilotageSituationCore
+      - package: PilotageMapLibreBinding
+        product: PilotageMapLibreBinding
+      - target: AeroLink/AeroLinkAppleClient
+        embed: true
+      - target: AeroLink/AeroLinkDriver
+        embed: true
+      - sdk: SystemExtensions.framework
+schemes:
+  PilotageSituation:
+    build:
+      targets:
+        PilotageSituation: all
+    run:
+      config: Debug
+    archive:
+      config: Release
