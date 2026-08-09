@@ -20,11 +20,16 @@
 //! values into its own wire format; the packing is the shell's ABI, not
 //! this crate's.
 
+mod composition;
 pub mod feeder;
 mod registry;
 mod render_status;
 mod runtime;
 
+pub use composition::{
+    SCREEN_COMPOSITION, composition, composition_digest_hex, composition_slot_count,
+    composition_slot_panel, composition_slot_rect,
+};
 pub use registry::{
     background_capability_code, canonical_frame, descriptor, panel_count, panel_design_height,
     panel_design_width, panel_id, panel_required_groups, panel_required_layers, panel_title,

@@ -56,6 +56,8 @@ const STREAM_READ_FAILURE_LOG_INTERVAL_MS = 2000;
 export function createCockpitReadout({
   state,
   els,
+  instrumentSlots = [],
+  instrumentStartupFault = null,
   transportSessions,
   vehicleId,
   instrumentSourceId,
@@ -68,10 +70,18 @@ export function createCockpitReadout({
   requestMediaAttach,
   requestReconnect,
 }) {
-  const pfdCtx = els.pfd.getContext("2d");
-  const hsiCtx = els.hsi.getContext("2d");
-  const pfdFaultPresenter = createDomFaultPresenter(els.pfd);
-  const hsiFaultPresenter = createDomFaultPresenter(els.hsi);
+  // Panels come from the screen composition (ADR-0032): canvas ids equal
+  // the slot panel ids, so health keys and render targets derive from
+  // the slots. Indices resolve inside the module, never here.
+  const instrumentPanels = instrumentSlots.map((slot) => {
+    const canvas = document.getElementById(slot.panel);
+    return {
+      id: slot.panel,
+      canvas,
+      ctx: canvas.getContext("2d"),
+      faultPresenter: createDomFaultPresenter(canvas),
+    };
+  });
   const videoIdentity = new VideoIdentityTracker();
   const snapshotHistory = new SnapshotAssociator();
   const turnDerivation = new TurnDerivation();
@@ -112,21 +122,25 @@ export function createCockpitReadout({
     ingress: newSimulatorAvionicsIngress(),
     fcState: new FcStateTracker(),
     navGuidance: new NavGuidanceTracker(),
-    // Keyed by the page's canvas ids (equal to the descriptor ids by
-    // contract): the layout exists before any wasm loads, so failure
-    // covers paint even when the load itself is what failed. Indices
-    // resolve inside the module, never here.
-    health: {
-      pfd: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
-      hsi: new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
-    },
+    // Keyed by the slot panel ids (equal to the canvas ids by
+    // contract): the composition-driven layout exists before the
+    // readout runs, so failure covers paint even when the instrument
+    // load itself is what failed.
+    health: Object.fromEntries(
+      instrumentPanels.map((panel) => [
+        panel.id,
+        new PanelHealth({ tickIntervalMs: WATCHDOG_INTERVAL_MS }),
+      ]),
+    ),
   };
 
   function instrumentTargets() {
-    return [
-      ["pfd", pfdCtx, els.pfd, pfdFaultPresenter],
-      ["hsi", hsiCtx, els.hsi, hsiFaultPresenter],
-    ];
+    return instrumentPanels.map((panel) => [
+      panel.id,
+      panel.ctx,
+      panel.canvas,
+      panel.faultPresenter,
+    ]);
   }
 
   function log(line) {
@@ -704,6 +718,11 @@ export function createCockpitReadout({
         REASON.RENDER_TRAP,
       ),
     );
+    if (instrumentStartupFault !== null) {
+      instruments.moduleFault = instrumentStartupFault;
+      log(`instrument panels unavailable (D-${instrumentStartupFault}): composition refused`);
+      return;
+    }
     try {
       const wasmSource = await fetch("./instrument-runtime_bg.wasm", { cache: "no-cache" });
       instruments.mod = await loadInstruments(wasmSource);
