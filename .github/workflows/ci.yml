@@ -122,6 +122,15 @@ jobs:
       - name: Indicate compatibility identity
         run: bash scripts/check-indicate-compatibility.sh
 
+      - name: companion host excludes Apple bridge dependencies
+        run: |
+          tree=$(cargo tree -p pilotage-session-host -e normal)
+          for forbidden in pilotage-instrument-apple-bridge uniffi; do
+            if grep -q "$forbidden" <<<"$tree"; then
+              echo "pilotage-session-host depends on $forbidden"; exit 1
+            fi
+          done
+
       - name: geospatial contract (SVS-01)
         # Datum discipline, coherence, view/projection, availability, and the
         # fail-closed versioned ABI for synthetic vision and conformal HUD.
@@ -305,3 +314,15 @@ jobs:
           else
             echo "origin/${base} has no .proto files yet; nothing to compare against."
           fi
+
+  apple-instrument-consumer:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate the bridge and test the Apple consumer
+        run: bash scripts/check-apple-instrument-consumer.sh

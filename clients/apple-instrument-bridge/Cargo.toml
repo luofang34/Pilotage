@@ -1,0 +1,19 @@
+[package]
+name = "pilotage-instrument-apple-bridge"
+description = "Thin generated FFI bridge (uniffi) to the Pilotage instrument runtime for Apple shells (ADR-0032)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-instrument-runtime = { workspace = true }
+uniffi = { workspace = true, features = ["cli"] }
+
+[dev-dependencies]
+indicate-instrument-state = { workspace = true }
