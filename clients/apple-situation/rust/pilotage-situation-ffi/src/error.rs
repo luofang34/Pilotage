@@ -9,18 +9,6 @@ pub enum FfiError {
         /// Validation or decode detail.
         message: String,
     },
-    /// A weather record did not match the linked schema.
-    #[error("weather record is invalid: {message}")]
-    WeatherRecord {
-        /// Validation or decode detail.
-        message: String,
-    },
-    /// Display-value conversion failed.
-    #[error("display conversion failed: {message}")]
-    Presentation {
-        /// Conversion detail.
-        message: String,
-    },
     /// The session state is not available.
     #[error("session state is not available: {message}")]
     SessionState {

@@ -5,10 +5,18 @@ version = 4
 [[package]]
 name = "airmass-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Airmass.git?rev=d903da96fa9778af013afe4bc0210b58916a3bf2#d903da96fa9778af013afe4bc0210b58916a3bf2"
+source = "git+https://github.com/luofang34/Airmass.git?rev=b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb#b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb"
 dependencies = [
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "airmass-geojson"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Airmass.git?rev=b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb#b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb"
+dependencies = [
+ "airmass-core",
 ]
 
 [[package]]
@@ -333,11 +341,9 @@ name = "pilotage-presentation"
 version = "0.1.0"
 dependencies = [
  "airmass-core",
- "serde",
- "serde_json",
+ "airmass-geojson",
  "surveillance-core",
  "surveillance-geojson",
- "thiserror",
 ]
 
 [[package]]

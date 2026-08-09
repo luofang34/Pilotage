@@ -10,10 +10,9 @@ The portable Rust adapter supplies all overlay values and styles. The Swift
 binding maps these values to MapLibre Native 6.28.0. The binding does not read
 domain snapshots.
 
-The weather input path is a stopgap. It decodes interim Airmass product
-payloads and derives flight categories. The durable boundary uses typed
-Airmass observation, advisory, and flight-category values. The Rust adapter
-keeps the category-to-style policy.
+The portable adapter consumes typed feature changes from
+`surveillance-geojson` and `airmass-geojson`. Airmass supplies each flight
+category. The Rust adapter maps each category to a display style.
 
 Run this command:
 

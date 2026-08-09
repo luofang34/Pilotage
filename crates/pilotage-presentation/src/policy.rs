@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use airmass_core::WeatherSnapshotEnvelope;
+use airmass_geojson::FeatureDelta as WeatherFeatureDelta;
 use surveillance_core::TrackDelta;
 
-use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, PresentationError, ShapeStyle};
+use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeStyle};
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
 pub(crate) const TRAFFIC_COASTING_STYLE: &str = "traffic-coasting";
@@ -21,11 +21,12 @@ pub(crate) const ADVISORY_AIRMET_STYLE: &str = "advisory-airmet";
 pub(crate) const ADVISORY_G_AIRMET_STYLE: &str = "advisory-g-airmet";
 pub(crate) const ADVISORY_CWA_STYLE: &str = "advisory-cwa";
 
-/// Converts domain snapshots to display values.
+/// Converts typed domain feature changes to display values.
 #[derive(Clone, Debug, Default)]
 pub struct PresentationAdapter {
     traffic_points: BTreeMap<(u64, u64), PointFeature>,
     traffic_revisions: BTreeMap<(u64, u64), u64>,
+    weather_points: BTreeMap<String, PointFeature>,
 }
 
 impl PresentationAdapter {
@@ -72,17 +73,29 @@ impl PresentationAdapter {
         Some(change)
     }
 
+    /// Apply one ordered Airmass feature change.
+    pub fn apply_weather_delta(&mut self, delta: &WeatherFeatureDelta) -> Option<PointChange> {
+        let id = crate::weather::feature_id_for_delta(delta)?;
+        let change = crate::weather::point_change(delta, self.weather_points.get(&id))?;
+        match &change {
+            PointChange::Upsert { point } => {
+                self.weather_points.insert(id, point.clone());
+            }
+            PointChange::Remove { .. } => {
+                self.weather_points.remove(&id);
+            }
+            PointChange::Stale { .. } => {}
+        }
+        Some(change)
+    }
+
     /// Convert current traffic and weather values into one batch.
-    pub fn adapt(
-        &self,
-        weather: Option<&WeatherSnapshotEnvelope>,
-    ) -> Result<DisplayBatch, PresentationError> {
+    #[must_use]
+    pub fn adapt(&self) -> DisplayBatch {
         let mut batch = self.empty_batch();
         batch.points.extend(self.traffic_points.values().cloned());
-        if let Some(snapshot) = weather {
-            batch.append(crate::weather::features_for_weather(snapshot)?);
-        }
-        Ok(batch)
+        batch.points.extend(self.weather_points.values().cloned());
+        batch
     }
 
     fn apply_point_change(&mut self, key: (u64, u64), change: &PointChange) {

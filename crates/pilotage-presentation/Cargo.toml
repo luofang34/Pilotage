@@ -7,11 +7,12 @@ license = "MIT"
 
 [dependencies]
 airmass-core.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+airmass-geojson.workspace = true
 surveillance-core.workspace = true
 surveillance-geojson.workspace = true
-thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
