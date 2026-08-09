@@ -1,0 +1,20 @@
+[package]
+name = "pilotage-terrain-build"
+description = "Deterministic cosmetic Terrarium MBTiles builder"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+libm = { workspace = true }
+pilotage-geo = { workspace = true }
+pilotage-svs-build = { path = "../pilotage-svs-build" }
+png = { workspace = true }
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.23.0"

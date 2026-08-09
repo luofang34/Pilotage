@@ -16,6 +16,7 @@ members = [
     "crates/pilotage-geo",
     "crates/pilotage-svs-db",
     "crates/pilotage-svs-build",
+    "crates/pilotage-terrain-build",
     "crates/pilotage-mission",
     "crates/pilotage-instrument-runtime",
     "crates/pilotage-presentation",
@@ -77,6 +78,8 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = { version = "2.0.18", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+png = "0.18.1"
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "serialize"] }
 prost = "0.14.4"
 prost-build = "0.14.4"
 libm = "0.2.16"
