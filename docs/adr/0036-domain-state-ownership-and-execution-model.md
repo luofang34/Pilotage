@@ -156,6 +156,48 @@ the drop.
 No component may use an unbounded channel between components. Every drop
 increments a counter that a consumer can read.
 
+## Decision 5 — the component map
+
+Each row states one component. A repository can act on its own row without a
+decision from another repository.
+
+| Component | Repository | Builds for bare metal | Execution | Publishes | Consumes |
+|---|---|---|---|---|---|
+| `aero-link-core`, `aero-link-rx` | `aero-link` | Yes | Synchronous, callback emission, caller-supplied time | `ReceptionEvent`, `FisBMessage` | Bytes from an adapter |
+| FIS-B assembler | `aero-link` | Yes | Synchronous, bounded store, caller-supplied time | `CompleteFisBProduct` | `FisBMessage` |
+| `aero-link-usb`, Apple and board adapters | `aero-link` | Adapter-dependent | Asynchronous or blocking at the device | `ReceptionEvent` | Device I/O |
+| `surveillance-core` | `Surveillance` | Yes | Synchronous, single writer, caller-supplied time | `TrackDelta`, `TrackSnapshot` | `TrafficProjection` |
+| Airmass store | `Airmass` | Yes | Synchronous, single writer, caller-supplied time | Weather product events and snapshots | `CompleteFisBProduct`, provider products |
+| Airspace store | `Airspace` | Yes | Synchronous, single writer, caller-supplied time | Notice and restriction events and snapshots | `CompleteFisBProduct`, provider notices, Navdata baseline |
+| Navdata | `v99n62` today | No | Host, cycle-dated | Navigation-data snapshot and cycle identity | NASR and CIFP files |
+| Provider adapters | `v99n62` today | No | Asynchronous fetch | Domain products with provenance | Network responses |
+| Briefing | `v99n62` today | No | Host, composition only | `BriefingSnapshot` | Snapshots from other components |
+| `SituationView` | `Pilotage` | No | Asynchronous read-only query | Query results with time, source, and age | Snapshots from other components |
+
+A component that builds for bare metal must not require an executor, a clock, a
+socket, or an unbounded allocation.
+
+### How a repository works alone
+
+A repository can start work when three conditions are true.
+
+1. The contract it consumes has a written definition and a test corpus.
+2. The contract it publishes has a written definition.
+3. Its channel policy is stated in Decision 4.
+
+A repository must not wait for another repository to finish. It can accept its
+input contract from a fixture until the producer is ready. `Surveillance` uses
+this method today with recorded receptions.
+
+Two contracts do not exist yet and block the components that consume them:
+
+- `CompleteFisBProduct` and the product routing table. `aero-link` owns both.
+  Airmass and Airspace wait for them. `aero-link` issue #33 supplies the
+  product identification that the table needs.
+- The read-only `SituationView` query contract. Pilotage owns it.
+
+Write those two first. Every other component then has a defined input.
+
 ## Consequences
 
 - A new source adds an adapter. It does not change a domain core.

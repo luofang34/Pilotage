@@ -41,7 +41,7 @@ One file per decision, numbered in acceptance order. See
 | [0032](0032-ipad-native-client-shared-cores.md) | The Apple instrument composition boundary — Indicate owns the contract, the shells stay thin | Accepted |
 | [0033](0033-panel-registry-config-and-digest.md) | Compose panel registries as data and use one scene digest across shells | Accepted |
 | [0034](0034-extraction-boundary.md) | Keep instrument artifacts, gates, and pinned consumers at explicit repository boundaries | Accepted |
-| [0035](0035-source-neutral-situational-services.md) | Keep situational services source-neutral and compose them through Pilotage | Accepted |
+| [0035](0035-source-neutral-situational-services.md) | Keep situational services source-neutral and compose them through Pilotage | Superseded by ADR-0036 |
 | [0036](0036-domain-state-ownership-and-execution-model.md) | Own domain state by data category, assemble FIS-B one time, and state the execution and channel rules | Proposed |
 
 ## Provenance
