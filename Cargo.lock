@@ -1623,6 +1623,7 @@ dependencies = [
  "indicate-instrument-registry",
  "indicate-instrument-scene",
  "indicate-instrument-state",
+ "serde_json",
 ]
 
 [[package]]

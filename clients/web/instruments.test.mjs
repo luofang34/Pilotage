@@ -11,7 +11,11 @@
 
 import { readFileSync } from "node:fs";
 import {
+  EXPECTED_COMPOSITION_DIGEST,
+  EXPECTED_CORPUS_DIGEST,
+  EXPECTED_CORPUS_VERSION,
   EXPECTED_SCENE_DIGEST,
+  EXPECTED_SCENE_FORMAT_VERSION,
   InstrumentModule,
   PANEL,
   COORD_LIMIT_PX,
@@ -22,7 +26,9 @@ import {
   loadInstruments,
   validateSceneStructure,
 } from "./instruments.js";
+import { enumerateComposition } from "./composition.js";
 import {
+  InstrumentFault,
   PanelHealth,
   REASON,
   coverInstrumentFailures,
@@ -33,6 +39,10 @@ import {
   startDisplayLoop,
   tickInstrumentSet,
 } from "./instrument-health.js";
+import {
+  loadCompositionForPage,
+  showInstrumentStartupFailure,
+} from "./instrument-startup.js";
 
 let failures = 0;
 function check(name, cond) {
@@ -42,6 +52,27 @@ function check(name, cond) {
     console.error(`FAIL - ${name}`);
     failures += 1;
   }
+}
+
+{
+  const pin = JSON.parse(
+    readFileSync(new URL("../instrument-compatibility.json", import.meta.url), "utf8"),
+  );
+  check("browser state ABI equals the consumer pin", STATE_ABI_VERSION === pin.stateAbiVersion);
+  check(
+    "browser scene format equals the consumer pin",
+    EXPECTED_SCENE_FORMAT_VERSION === pin.sceneFormatVersion,
+  );
+  check("browser corpus version equals the consumer pin", EXPECTED_CORPUS_VERSION === pin.corpusVersion);
+  check("browser corpus digest equals the consumer pin", EXPECTED_CORPUS_DIGEST === pin.corpusDigest);
+  check(
+    "browser registry scene digest equals the consumer pin",
+    EXPECTED_SCENE_DIGEST === pin.registrySceneDigest,
+  );
+  check(
+    "browser screen composition digest equals the consumer pin",
+    EXPECTED_COMPOSITION_DIGEST === pin.screenCompositionDigest,
+  );
 }
 
 // ---- doubles ---------------------------------------------------------------
@@ -127,7 +158,7 @@ function packRenderResult(status, sceneLen, generation) {
   );
 }
 
-// The wasm side's state-buffer capacity (abi/v6.rs CAPACITY).
+// The wasm side's state-buffer capacity (abi/v7.rs CAPACITY).
 const STATE_CAPACITY = 1024;
 
 // A fake WASM export surface with programmable behavior.
@@ -167,8 +198,13 @@ function fakeExports({
 }
 
 // A fake module-level registry enumeration matching the shipped shape.
-function fakeEnumeration() {
-  return {
+function fakeEnumeration(overrides = {}) {
+  return Object.assign({
+    scene_format_version: () => EXPECTED_SCENE_FORMAT_VERSION,
+    corpus_version: () => EXPECTED_CORPUS_VERSION,
+    corpus_digest_hex: () => EXPECTED_CORPUS_DIGEST,
+    scene_digest_hex: () => EXPECTED_SCENE_DIGEST,
+    composition_digest_hex: () => EXPECTED_COMPOSITION_DIGEST,
     panel_count: () => 3,
     panel_id: (i) => ["pfd", "hsi", "monitor"][i] ?? "",
     panel_title: (i) => ["PFD", "HSI", "Monitor"][i] ?? "",
@@ -177,7 +213,18 @@ function fakeEnumeration() {
     panel_design_width: () => 480,
     panel_design_height: () => 360,
     panel_background_capability: (i) => [2, 1, 0][i] ?? 255,
-  };
+  }, overrides);
+}
+
+function fakeCompositionEnumeration(overrides = {}) {
+  return Object.assign(fakeEnumeration(), {
+    composition_slot_count: () => 2,
+    composition_slot_panel: (i) => ["pfd", "hsi"][i] ?? "",
+    composition_slot_x: (i) => [0, 480][i] ?? 0,
+    composition_slot_y: () => 0,
+    composition_slot_width: () => 480,
+    composition_slot_height: () => 360,
+  }, overrides);
 }
 
 // A minimal verified-shape atlas for unit paths that are not exercising
@@ -208,9 +255,9 @@ function injectedLoader(exports) {
   };
 }
 
-async function loadFailureReason(exports) {
+async function loadFailureReason(exports, options = {}) {
   try {
-    await loadInstruments("injected.wasm", injectedLoader(exports));
+    await loadInstruments("injected.wasm", { ...injectedLoader(exports), ...options });
     return null;
   } catch (error) {
     return error?.reason ?? null;
@@ -433,6 +480,50 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
       }),
     )) === REASON.ABI_MISMATCH,
   );
+  const identityCases = [
+    ["scene format", "scene_format_version", EXPECTED_SCENE_FORMAT_VERSION + 1],
+    ["corpus version", "corpus_version", EXPECTED_CORPUS_VERSION + 1],
+    ["corpus digest", "corpus_digest_hex", `0${EXPECTED_CORPUS_DIGEST.slice(1)}`],
+    ["registry scene digest", "scene_digest_hex", `0${EXPECTED_SCENE_DIGEST.slice(1)}`],
+    [
+      "screen composition digest",
+      "composition_digest_hex",
+      `0${EXPECTED_COMPOSITION_DIGEST.slice(1)}`,
+    ],
+  ];
+  for (const [label, method, mismatch] of identityCases) {
+    check(
+      `${label} mismatch stops module readiness`,
+      (await loadFailureReason(fakeExports(), {
+        enumeration: fakeEnumeration({ [method]: () => mismatch }),
+      })) === REASON.ABI_MISMATCH,
+    );
+    check(
+      `${label} query trap stops module readiness`,
+      (await loadFailureReason(fakeExports(), {
+        enumeration: fakeEnumeration({
+          [method]: () => {
+            throw new Error(`${label} trap`);
+          },
+        }),
+      })) === REASON.ABI_MISMATCH,
+    );
+  }
+  let incompatibleInitCalls = 0;
+  await loadFailureReason(
+    fakeExports({
+      overrides: {
+        init: () => {
+          incompatibleInitCalls += 1;
+          return 1;
+        },
+      },
+    }),
+    {
+      enumeration: fakeEnumeration({ corpus_version: () => EXPECTED_CORPUS_VERSION + 1 }),
+    },
+  );
+  check("the compatibility tuple is verified before runtime init", incompatibleInitCalls === 0);
   check(
     "init trap has a stable reason",
     (await loadFailureReason(
@@ -523,6 +614,66 @@ const view = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteL
     fetchReason = error?.reason ?? null;
   }
   check("generated-binding WASM failure is typed WASM_LOAD", fetchReason === REASON.WASM_LOAD);
+}
+
+{
+  for (const [label, enumeration] of [
+    ["zero slot count", fakeCompositionEnumeration({ composition_slot_count: () => 0 })],
+    ["invalid slot", fakeCompositionEnumeration({ composition_slot_width: () => 0 })],
+  ]) {
+    let shown = null;
+    const result = await loadCompositionForPage({
+      load: async () => enumerateComposition(enumeration),
+      showFailure: (reason) => {
+        shown = reason;
+      },
+    });
+    check(
+      `${label} creates a fail-visible composition result`,
+      result.slots.length === 0 && result.fault === REASON.ABI_MISMATCH && shown === result.fault,
+    );
+  }
+
+  for (const [label, reason] of [
+    ["composition runtime load failure", REASON.WASM_LOAD],
+    ["composition digest mismatch", REASON.ABI_MISMATCH],
+  ]) {
+    let shown = null;
+    const result = await loadCompositionForPage({
+      load: async () => {
+        throw new InstrumentFault(reason, label);
+      },
+      showFailure: (shownReason) => {
+        shown = shownReason;
+      },
+    });
+    check(
+      `${label} stays visible without panel targets`,
+      result.slots.length === 0 && result.fault === reason && shown === reason,
+    );
+  }
+
+  const elements = new Map();
+  const doc = {
+    body: {
+      append(element) {
+        elements.set(element.id, element);
+      },
+    },
+    createElement: () => ({
+      id: "",
+      style: {},
+      setAttribute() {},
+      textContent: "",
+    }),
+    getElementById: (id) => elements.get(id) ?? null,
+  };
+  check(
+    "the page-level startup presenter covers a missing composition",
+    showInstrumentStartupFailure(REASON.ABI_MISMATCH, doc) &&
+      elements.get("instrumentStartupFailure")?.style.display === "grid" &&
+      elements.get("instrumentStartupFailure")?.textContent.includes("D-101"),
+  );
 }
 
 {
@@ -1521,6 +1672,28 @@ function tickToCadence(health, target, interval = 250) {
     check(
       "the wasm build reproduces the pinned scene digest",
       bindings.scene_digest_hex() === EXPECTED_SCENE_DIGEST,
+    );
+    check(
+      "the wasm build reproduces the pinned screen-composition digest",
+      bindings.composition_digest_hex() === EXPECTED_COMPOSITION_DIGEST,
+    );
+    check(
+      "the composition enumerates the shipped two-slot G5 layout",
+      bindings.composition_slot_count() === 2 &&
+        bindings.composition_slot_panel(0) === "pfd" &&
+        bindings.composition_slot_x(0) === 0 &&
+        bindings.composition_slot_y(0) === 0 &&
+        bindings.composition_slot_width(0) === 480 &&
+        bindings.composition_slot_height(0) === 360 &&
+        bindings.composition_slot_panel(1) === "hsi" &&
+        bindings.composition_slot_x(1) === 480 &&
+        bindings.composition_slot_y(1) === 0 &&
+        bindings.composition_slot_width(1) === 480 &&
+        bindings.composition_slot_height(1) === 360,
+    );
+    check(
+      "an unknown composition slot fails closed",
+      bindings.composition_slot_panel(9) === "" && bindings.composition_slot_width(9) === 0,
     );
 
     // The verification chain fails closed on a corrupt, truncated, or
