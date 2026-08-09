@@ -332,6 +332,15 @@ jobs:
           printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
           git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
 
+      - name: Authorize the private Swift dependency (IndicateAppleDisplay)
+        env:
+          INDICATE_APPLE_DISPLAY_DEPLOY_KEY: ${{ secrets.INDICATE_APPLE_DISPLAY_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$INDICATE_APPLE_DISPLAY_DEPLOY_KEY" > ~/.ssh/indicate_apple_display_ci
+          chmod 600 ~/.ssh/indicate_apple_display_ci
+          printf 'Host github-indicate-apple-display\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_apple_display_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-indicate-apple-display/luofang34/IndicateAppleDisplay".insteadOf "https://github.com/luofang34/IndicateAppleDisplay"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
