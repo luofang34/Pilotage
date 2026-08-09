@@ -82,6 +82,10 @@ deployment does not need either consumer. `Communicate` does not own
 Surveillance or AeroContext. Add a shared communication mechanism to it only
 when two components need that mechanism.
 
+The [domain snapshot envelope contract](domain-snapshot-envelope.md) defines
+immutable domain output. It defines producer identity, snapshot revision,
+retainable handles, field evidence, absence, and schema-version rules.
+
 ## Load-bearing principles
 
 1. **Sans-IO core** ([ADR-0002](adr/0002-cargo-workspace-portable-sans-io-core.md)):
