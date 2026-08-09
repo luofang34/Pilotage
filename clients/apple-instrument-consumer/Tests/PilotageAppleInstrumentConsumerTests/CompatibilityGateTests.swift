@@ -38,6 +38,84 @@ private final class RuntimeDouble: InstrumentRuntimeServing {
     }
 }
 
+private final class BlockingRuntime: InstrumentRuntimeServing, @unchecked Sendable {
+    private let lock = NSLock()
+    private let compositionEntered = DispatchSemaphore(value: 0)
+    private let compositionMayFinish = DispatchSemaphore(value: 0)
+    private var outcome: InstrumentRuntimeCompositionOutcome
+    private var mustBlock = false
+
+    init(outcome: InstrumentRuntimeCompositionOutcome) {
+        self.outcome = outcome
+    }
+
+    func blockNextComposition(with outcome: InstrumentRuntimeCompositionOutcome) {
+        lock.lock()
+        self.outcome = outcome
+        mustBlock = true
+        lock.unlock()
+    }
+
+    func waitUntilCompositionStarts() -> Bool {
+        compositionEntered.wait(timeout: .now() + .seconds(5)) == .success
+    }
+
+    func releaseComposition() {
+        compositionMayFinish.signal()
+    }
+
+    func writeState(_: [UInt8], acceptedAtMs _: UInt64) throws {}
+
+    func compositionFrame(
+        nowMs _: UInt64,
+        pathHealthy _: Bool
+    ) -> InstrumentRuntimeCompositionOutcome {
+        lock.lock()
+        let result = outcome
+        let block = mustBlock
+        mustBlock = false
+        lock.unlock()
+        if block {
+            compositionEntered.signal()
+            if compositionMayFinish.wait(timeout: .now() + .seconds(5)) != .success {
+                Issue.record("The blocked runtime did not receive a release event")
+            }
+        }
+        return result
+    }
+}
+
+private final class ConcurrentResultProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var frame: SceneFrame?
+    private var reason: DisplayReason?
+    private var compositionFailure: String?
+
+    func store(frame: SceneFrame) {
+        lock.lock()
+        self.frame = frame
+        lock.unlock()
+    }
+
+    func store(reason: DisplayReason) {
+        lock.lock()
+        self.reason = reason
+        lock.unlock()
+    }
+
+    func store(compositionFailure: String) {
+        lock.lock()
+        self.compositionFailure = compositionFailure
+        lock.unlock()
+    }
+
+    var value: (frame: SceneFrame?, reason: DisplayReason?, compositionFailure: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (frame, reason, compositionFailure)
+    }
+}
+
 private struct CompatibilityPin: Decodable {
     let stateAbiVersion: UInt32
     let sceneFormatVersion: UInt32
@@ -90,6 +168,25 @@ private func requirements(width: CGFloat = 10) -> PanelRequirements {
         frameMin: CGSize(width: width, height: 10),
         frameMax: CGSize(width: width, height: 10),
         canonicalFrame: CGSize(width: width, height: 10)
+    )
+}
+
+private func runtimeOutcome(byte: UInt8, generation: UInt32) -> InstrumentRuntimeCompositionOutcome {
+    InstrumentRuntimeCompositionOutcome(
+        status: 0,
+        scene: [byte],
+        panels: [
+            InstrumentRuntimePanelOutcome(
+                panel: 0,
+                status: 0,
+                sceneOffset: 0,
+                sceneLength: 1,
+                frameWidth: 10,
+                frameHeight: 10,
+                generation: generation
+            ),
+        ],
+        generation: generation
     )
 }
 
@@ -224,6 +321,65 @@ func stateAcceptanceInvalidatesCachedScenes() throws {
     } catch {
         Issue.record("The producer returned an untyped error: \(error)")
     }
+}
+
+@Test("A producer cannot observe a composition update in progress")
+func producerWaitsForCompleteComposition() throws {
+    let runtime = BlockingRuntime(outcome: runtimeOutcome(byte: 1, generation: 1))
+    let verified = try AppleInstrumentCompatibilityGate.verify(
+        matchingIdentity(),
+        glyphAtlas: syntheticGlyphAtlas()
+    ) { runtime }
+    let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
+    try composition.compose(nowMs: 1, pathHealthy: true)
+    runtime.blockNextComposition(with: runtimeOutcome(byte: 2, generation: 2))
+
+    let producer = composition.producer(panel: 0)
+    let probe = ConcurrentResultProbe()
+    let compositionFinished = DispatchSemaphore(value: 0)
+    let frameStarted = DispatchSemaphore(value: 0)
+    let frameFinished = DispatchSemaphore(value: 0)
+
+    DispatchQueue.global().async {
+        do {
+            _ = try composition.compose(nowMs: 2, pathHealthy: true)
+        } catch {
+            probe.store(compositionFailure: String(describing: error))
+        }
+        compositionFinished.signal()
+    }
+    #expect(runtime.waitUntilCompositionStarts())
+
+    DispatchQueue.global().async {
+        frameStarted.signal()
+        do {
+            probe.store(frame: try producer.frame(
+                designFrame: CGRect(x: 0, y: 0, width: 10, height: 10)
+            ))
+        } catch let fault as ProducerFault {
+            probe.store(reason: fault.reason)
+        } catch {
+            probe.store(reason: .renderTrap)
+        }
+        frameFinished.signal()
+    }
+    #expect(frameStarted.wait(timeout: .now() + .seconds(5)) == .success)
+    let frameFinishedDuringUpdate = frameFinished.wait(
+        timeout: .now() + .milliseconds(20)
+    ) == .success
+
+    runtime.releaseComposition()
+    #expect(compositionFinished.wait(timeout: .now() + .seconds(5)) == .success)
+    if !frameFinishedDuringUpdate {
+        #expect(frameFinished.wait(timeout: .now() + .seconds(5)) == .success)
+    }
+
+    let result = probe.value
+    #expect(!frameFinishedDuringUpdate)
+    #expect(result.compositionFailure == nil)
+    #expect(result.reason == nil)
+    #expect(result.frame?.bytes == [2])
+    #expect(result.frame?.generation == 2)
 }
 
 @Test("A failed transaction removes the previous composition")

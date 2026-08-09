@@ -17,7 +17,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/luofang34/IndicateAppleDisplay.git",
-            revision: "74e5845d09a58342fd282ec426759550dafc6887"
+            revision: "ca5fe14f22798fbee2d184970b928b04736f4083"
         ),
     ],
     targets: [

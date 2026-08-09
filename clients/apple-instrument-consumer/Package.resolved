@@ -1,12 +1,12 @@
 {
-  "originHash" : "baa6945a215f4a8e460402595dbd4b3217b5a49488dc8057bd9554fc6717aff8",
+  "originHash" : "14cae5a34f99cb5983b70c5b07fb2e1301590872de817b43c96f8dd6d07dfa66",
   "pins" : [
     {
       "identity" : "indicateappledisplay",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/luofang34/IndicateAppleDisplay.git",
       "state" : {
-        "revision" : "74e5845d09a58342fd282ec426759550dafc6887"
+        "revision" : "ca5fe14f22798fbee2d184970b928b04736f4083"
       }
     }
   ],
