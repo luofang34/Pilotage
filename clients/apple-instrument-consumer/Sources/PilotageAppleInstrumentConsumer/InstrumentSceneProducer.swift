@@ -1,9 +1,11 @@
 import CoreGraphics
+import Foundation
 import IndicateAppleDisplay
 
 /// One committed composition frame that all panel producers share.
-public final class PilotageInstrumentComposition {
+public final class PilotageInstrumentComposition: @unchecked Sendable {
     private let verifiedRuntime: VerifiedInstrumentRuntime
+    private let lock = NSLock()
     private var panels: [UInt32: (scene: [UInt8], outcome: InstrumentRuntimePanelOutcome)] = [:]
 
     public init(verifiedRuntime: VerifiedInstrumentRuntime) {
@@ -12,6 +14,8 @@ public final class PilotageInstrumentComposition {
 
     /// Accepts one state frame and invalidates the current scenes.
     public func writeState(_ bytes: [UInt8], acceptedAtMs: UInt64) throws {
+        lock.lock()
+        defer { lock.unlock() }
         panels.removeAll(keepingCapacity: true)
         try verifiedRuntime.writeState(bytes, acceptedAtMs: acceptedAtMs)
     }
@@ -19,6 +23,8 @@ public final class PilotageInstrumentComposition {
     /// Produces and commits all composition panels with one runtime call.
     @discardableResult
     public func compose(nowMs: UInt64, pathHealthy: Bool) throws -> UInt32 {
+        lock.lock()
+        defer { lock.unlock() }
         panels.removeAll(keepingCapacity: true)
         let frame = verifiedRuntime.compositionFrame(
             nowMs: nowMs,
@@ -49,6 +55,8 @@ public final class PilotageInstrumentComposition {
     }
 
     fileprivate func frame(panel: UInt32, designFrame: CGRect) throws -> SceneFrame {
+        lock.lock()
+        defer { lock.unlock() }
         guard let committed = panels[panel] else {
             throw ProducerFault(reason: .notInitialized)
         }
