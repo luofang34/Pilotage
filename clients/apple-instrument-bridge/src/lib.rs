@@ -33,12 +33,12 @@ mod records;
 pub use bridge::InstrumentBridge;
 pub use enumeration::{
     composition_digest_hex, composition_slot, composition_slot_count, corpus_digest_hex,
-    corpus_version, panel_count, panel_descriptor, scene_digest_hex, scene_format_version,
-    state_abi_version,
+    corpus_version, glyph_asset, panel_count, panel_descriptor, scene_digest_hex,
+    scene_format_version, state_abi_version,
 };
 pub use records::{
     BridgeCompositionFrameOutcome, BridgeCompositionPanelOutcome, BridgeCompositionSlot,
-    BridgePanelDescriptor, BridgeWriteOutcome,
+    BridgeGlyphAsset, BridgePanelDescriptor, BridgeWriteOutcome,
 };
 
 #[cfg(test)]

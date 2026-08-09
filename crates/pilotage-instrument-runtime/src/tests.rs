@@ -385,4 +385,9 @@ fn compatibility_pin_matches_linked_runtime() {
         pin["screenCompositionDigest"],
         crate::composition_digest_hex()
     );
+    let glyph_hash = crate::glyph_recorded_hash()
+        .into_iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(pin["glyphRecordedHash"], glyph_hash);
 }

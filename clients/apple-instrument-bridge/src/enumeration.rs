@@ -5,7 +5,7 @@
 
 use pilotage_instrument_runtime::{canonical_frame, descriptor};
 
-use crate::records::{BridgeCompositionSlot, BridgePanelDescriptor};
+use crate::records::{BridgeCompositionSlot, BridgeGlyphAsset, BridgePanelDescriptor};
 
 /// Number of panels in the composed registry.
 #[uniffi::export]
@@ -47,6 +47,16 @@ pub fn composition_slot(index: u32) -> Option<BridgeCompositionSlot> {
         width: rect.width,
         height: rect.height,
     })
+}
+
+/// Returns the canonical glyph manifest and its recorded content hash:
+/// compatibility-tuple value 6.
+#[uniffi::export]
+pub fn glyph_asset() -> BridgeGlyphAsset {
+    BridgeGlyphAsset {
+        canonical: pilotage_instrument_runtime::glyph_manifest(),
+        recorded_hash: pilotage_instrument_runtime::glyph_recorded_hash(),
+    }
 }
 
 /// The state-frame ABI version this build was compiled against:

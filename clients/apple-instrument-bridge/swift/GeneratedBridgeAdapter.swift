@@ -7,19 +7,36 @@ public final class GeneratedInstrumentRuntime: InstrumentRuntimeServing {
     private let bridge: InstrumentBridge
 
     public static var identity: InstrumentRuntimeIdentity {
+        let asset = controlledGlyphAsset()
+        return identity(glyphRecordedHash: hex(asset.recordedHash))
+    }
+
+    private static func identity(glyphRecordedHash: String) -> InstrumentRuntimeIdentity {
         InstrumentRuntimeIdentity(
             stateABI: stateAbiVersion(),
             sceneFormat: sceneFormatVersion(),
             corpusVersion: corpusVersion(),
             corpusDigest: corpusDigestHex(),
             registrySceneDigest: sceneDigestHex(),
-            screenCompositionDigest: compositionDigestHex()
+            screenCompositionDigest: compositionDigestHex(),
+            glyphRecordedHash: glyphRecordedHash
+        )
+    }
+
+    private static func controlledGlyphAsset() -> InstrumentGlyphAsset {
+        let asset = glyphAsset()
+        return InstrumentGlyphAsset(
+            canonical: Array(asset.canonical),
+            recordedHash: Array(asset.recordedHash)
         )
     }
 
     /// Verifies the linked identity before it creates the Rust runtime.
     public static func verifiedRuntime() throws -> VerifiedInstrumentRuntime {
-        try AppleInstrumentCompatibilityGate.verify(identity) {
+        let asset = controlledGlyphAsset()
+        let atlas = try PilotageGlyphAtlas(asset: asset)
+        let actual = identity(glyphRecordedHash: hex(asset.recordedHash))
+        return try AppleInstrumentCompatibilityGate.verify(actual, glyphAtlas: atlas) {
             GeneratedInstrumentRuntime()
         }
     }
@@ -71,4 +88,8 @@ public final class GeneratedInstrumentRuntime: InstrumentRuntimeServing {
             alertManagerGeneration: outcome.alertManagerGeneration
         )
     }
+}
+
+private func hex(_ bytes: [UInt8]) -> String {
+    bytes.map { String(format: "%02x", $0) }.joined()
 }

@@ -75,16 +75,18 @@ ADR-0035 names.
 
 ### The compatibility tuple gates paint
 
-The compatibility tuple has five values:
+The compatibility tuple has six values:
 
 1. the state ABI version;
 2. the scene format version;
 3. the corpus version and the corpus digest;
 4. the registry scene digest;
-5. the screen-composition digest.
+5. the screen-composition digest;
+6. the glyph-pack content hash.
 
 - The runtime computes the tuple from the Indicate revision that it links.
 - Each shell pins the same tuple and checks it before the first paint.
+- Each shell also computes the glyph manifest hash before it builds the atlas.
 - A mismatch stops the paint. The shell shows the failure. The shell does not
   paint instruments from a backend that it did not verify.
 - Pilotage verifies the backend that it ships. Pilotage does not keep a

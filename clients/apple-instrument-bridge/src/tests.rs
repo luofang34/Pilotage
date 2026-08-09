@@ -10,8 +10,8 @@ use pilotage_instrument_runtime::RenderStatus;
 
 use crate::{
     InstrumentBridge, composition_digest_hex, composition_slot, composition_slot_count,
-    corpus_digest_hex, corpus_version, panel_count, panel_descriptor, scene_digest_hex,
-    scene_format_version, state_abi_version,
+    corpus_digest_hex, corpus_version, glyph_asset, panel_count, panel_descriptor,
+    scene_digest_hex, scene_format_version, state_abi_version,
 };
 
 const PINNED_SCENE_DIGEST: &str =
@@ -92,6 +92,21 @@ fn digest_identity_equals_the_pinned_tuple_values() {
     assert_eq!(corpus_digest_hex(), PINNED_CORPUS_DIGEST);
     assert_eq!(scene_digest_hex(), PINNED_SCENE_DIGEST);
     assert_eq!(composition_digest_hex(), PINNED_COMPOSITION_DIGEST);
+}
+
+#[test]
+fn glyph_asset_equals_the_verified_runtime_pack() {
+    let asset = glyph_asset();
+    assert_eq!(
+        asset.canonical,
+        pilotage_instrument_runtime::glyph_manifest()
+    );
+    assert_eq!(
+        asset.recorded_hash,
+        pilotage_instrument_runtime::glyph_recorded_hash()
+    );
+    assert!(!asset.canonical.is_empty());
+    assert_eq!(asset.recorded_hash.len(), 32);
 }
 
 #[test]

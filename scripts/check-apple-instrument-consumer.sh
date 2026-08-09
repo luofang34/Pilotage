@@ -18,7 +18,7 @@ cargo run --locked --quiet -p pilotage-instrument-apple-bridge \
   generate --library --language swift --out-dir "$output_root" "$library"
 
 for symbol in stateAbiVersion sceneFormatVersion corpusVersion corpusDigestHex \
-  sceneDigestHex compositionDigestHex InstrumentBridge compositionFrame; do
+  sceneDigestHex compositionDigestHex glyphAsset InstrumentBridge compositionFrame; do
   grep -q "$symbol" "$output_root"/*.swift
 done
 
@@ -28,17 +28,50 @@ if [ "$(uname -s)" = "Darwin" ]; then
   swiftc -parse-as-library -I "$output_root" \
     -Xcc "-fmodule-map-file=$module_map" "$generated_swift" \
     -emit-module -o "$output_root/pilotage_instrument_apple_bridge.swiftmodule"
+  swiftc -parse-as-library -I "$output_root" \
+    -Xcc "-fmodule-map-file=$module_map" "$generated_swift" \
+    -emit-object -o "$output_root/pilotage_instrument_apple_bridge.o"
   swift test --package-path clients/apple-instrument-consumer
-  consumer_bin_path="$(
-    swift build --package-path clients/apple-instrument-consumer --show-bin-path
+  indicate_source_root="$(
+    find clients/apple-instrument-consumer/.build/checkouts \
+      -type d -path '*/Sources/IndicateAppleDisplay' -print -quit
   )"
+  if [ -z "$indicate_source_root" ]; then
+    echo "IndicateAppleDisplay source checkout is missing" >&2
+    exit 1
+  fi
+  swiftc -parse-as-library \
+    "$indicate_source_root"/*.swift \
+    -module-name IndicateAppleDisplay \
+    -emit-module \
+    -emit-module-path "$output_root/IndicateAppleDisplay.swiftmodule" \
+    -emit-library -static \
+    -o "$output_root/libIndicateAppleDisplay.a"
   swiftc -parse-as-library \
     -I "$output_root" \
-    -I "$consumer_bin_path" \
-    -I "$consumer_bin_path/Modules" \
+    clients/apple-instrument-consumer/Sources/PilotageAppleInstrumentConsumer/*.swift \
+    -module-name PilotageAppleInstrumentConsumer \
+    -emit-module \
+    -emit-module-path "$output_root/PilotageAppleInstrumentConsumer.swiftmodule" \
+    -emit-library -static \
+    -o "$output_root/libPilotageAppleInstrumentConsumer.a"
+  swiftc -parse-as-library \
+    -I "$output_root" \
     -Xcc "-fmodule-map-file=$module_map" \
     clients/apple-instrument-bridge/swift/GeneratedBridgeAdapter.swift \
     -emit-module -o "$output_root/PilotageGeneratedBridgeAdapter.swiftmodule"
+  swiftc -parse-as-library \
+    -I "$output_root" \
+    -Xcc "-fmodule-map-file=$module_map" \
+    clients/apple-instrument-bridge/swift/GeneratedBridgeAdapter.swift \
+    clients/apple-instrument-bridge/swift/GeneratedBridgeIntegration.swift \
+    "$output_root/pilotage_instrument_apple_bridge.o" \
+    "$output_root/libPilotageAppleInstrumentConsumer.a" \
+    "$output_root/libIndicateAppleDisplay.a" \
+    "$library" \
+    -o "$output_root/generated-bridge-integration"
+  DYLD_LIBRARY_PATH="$(dirname "$library")" \
+    "$output_root/generated-bridge-integration"
   (
     cd clients/apple-instrument-consumer
     xcodebuild -scheme PilotageAppleInstrumentConsumer \
