@@ -29,9 +29,13 @@ if [ "$(uname -s)" = "Darwin" ]; then
     -Xcc "-fmodule-map-file=$module_map" "$generated_swift" \
     -emit-module -o "$output_root/pilotage_instrument_apple_bridge.swiftmodule"
   swift test --package-path clients/apple-instrument-consumer
+  consumer_bin_path="$(
+    swift build --package-path clients/apple-instrument-consumer --show-bin-path
+  )"
   swiftc -parse-as-library \
     -I "$output_root" \
-    -I clients/apple-instrument-consumer/.build/out/Products/Debug \
+    -I "$consumer_bin_path" \
+    -I "$consumer_bin_path/Modules" \
     -Xcc "-fmodule-map-file=$module_map" \
     clients/apple-instrument-bridge/swift/GeneratedBridgeAdapter.swift \
     -emit-module -o "$output_root/PilotageGeneratedBridgeAdapter.swiftmodule"
