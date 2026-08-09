@@ -45,33 +45,74 @@ public struct InstrumentRuntimeIdentity: Equatable, Sendable {
     }
 }
 
-/// The scene data returned by the generated Pilotage bridge.
-public struct InstrumentRuntimeRenderOutcome: Equatable, Sendable {
+/// One panel result in a runtime composition transaction.
+public struct InstrumentRuntimePanelOutcome: Equatable, Sendable {
+    public let panel: UInt32
     public let status: UInt32
-    public let scene: [UInt8]
+    public let sceneOffset: UInt32
+    public let sceneLength: UInt32
     public let frameWidth: Float
     public let frameHeight: Float
     public let generation: UInt32
 
     public init(
+        panel: UInt32,
         status: UInt32,
-        scene: [UInt8],
+        sceneOffset: UInt32,
+        sceneLength: UInt32,
         frameWidth: Float,
         frameHeight: Float,
         generation: UInt32
     ) {
+        self.panel = panel
         self.status = status
-        self.scene = scene
+        self.sceneOffset = sceneOffset
+        self.sceneLength = sceneLength
         self.frameWidth = frameWidth
         self.frameHeight = frameHeight
         self.generation = generation
     }
 }
 
+/// The scenes and status from one complete composition transaction.
+public struct InstrumentRuntimeCompositionOutcome: Equatable, Sendable {
+    public let status: UInt32
+    public let scene: [UInt8]
+    public let panels: [InstrumentRuntimePanelOutcome]
+    public let generation: UInt32
+    public let alertStatus: UInt32
+    public let activeAlertCount: UInt32
+    public let alertPathFaulted: Bool
+    public let alertOverflow: Bool
+    public let alertManagerGeneration: UInt32
+
+    public init(
+        status: UInt32,
+        scene: [UInt8],
+        panels: [InstrumentRuntimePanelOutcome],
+        generation: UInt32,
+        alertStatus: UInt32 = 0,
+        activeAlertCount: UInt32 = 0,
+        alertPathFaulted: Bool = false,
+        alertOverflow: Bool = false,
+        alertManagerGeneration: UInt32 = 0
+    ) {
+        self.status = status
+        self.scene = scene
+        self.panels = panels
+        self.generation = generation
+        self.alertStatus = alertStatus
+        self.activeAlertCount = activeAlertCount
+        self.alertPathFaulted = alertPathFaulted
+        self.alertOverflow = alertOverflow
+        self.alertManagerGeneration = alertManagerGeneration
+    }
+}
+
 /// The narrow runtime surface that the Apple shell consumes.
 public protocol InstrumentRuntimeServing: AnyObject {
-    func writeState(_ bytes: [UInt8]) throws
-    func render(panel: UInt32) -> InstrumentRuntimeRenderOutcome
+    func writeState(_ bytes: [UInt8], acceptedAtMs: UInt64) throws
+    func compositionFrame(nowMs: UInt64, pathHealthy: Bool) -> InstrumentRuntimeCompositionOutcome
 }
 
 /// A state write that the generated bridge refused.
@@ -88,12 +129,19 @@ public final class VerifiedInstrumentRuntime {
         self.runtime = runtime
     }
 
-    public func writeState(_ bytes: [UInt8]) throws {
-        try runtime.writeState(bytes)
+    public func writeState(_ bytes: [UInt8], acceptedAtMs: UInt64) throws {
+        try runtime.writeState(bytes, acceptedAtMs: acceptedAtMs)
+    }
+
+    public func compositionFrame(
+        nowMs: UInt64,
+        pathHealthy: Bool
+    ) -> InstrumentRuntimeCompositionOutcome {
+        runtime.compositionFrame(nowMs: nowMs, pathHealthy: pathHealthy)
     }
 }
 
-    /// Verifies the runtime and Apple display identities before runtime creation.
+/// Verifies the runtime and Apple display identities before runtime creation.
 public enum AppleInstrumentCompatibilityGate {
     public static let stateABI: UInt32 = 7
     public static let registrySceneDigest =

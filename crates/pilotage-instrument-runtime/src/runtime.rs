@@ -34,6 +34,9 @@ pub struct Runtime {
     pub(crate) state: Vec<u8>,
     pub(crate) scene: Vec<u8>,
     pub(crate) generation: Vec<u32>,
+    pub(crate) composition_scene: Vec<u8>,
+    pub(crate) composition_panels: Vec<crate::CompositionPanelOutcome>,
+    pub(crate) composition_generation: u32,
     /// Per-panel validated configuration blobs, indexed like the
     /// registry composition; empty means the panel's defaults.
     pub(crate) config: Vec<Vec<u8>>,
@@ -74,10 +77,14 @@ impl Runtime {
     /// and one generation counter per composed panel.
     pub fn new() -> Self {
         let panels = registry().map_or(0, |registry| registry.panels().count());
+        let slots = crate::composition_slot_count() as usize;
         Self {
             state: vec![0u8; v7::CAPACITY],
             scene: vec![0u8; SCENE_CAPACITY],
             generation: vec![0; panels],
+            composition_scene: vec![0; SCENE_CAPACITY.saturating_mul(slots)],
+            composition_panels: vec![crate::CompositionPanelOutcome::empty(); slots],
+            composition_generation: 0,
             config: vec![Vec::new(); panels],
             unknown_groups: 0,
             extended_groups: 0,
@@ -126,7 +133,7 @@ impl Runtime {
         self.extended_groups
     }
 
-    fn panel_generation(&self, panel_idx: usize) -> u32 {
+    pub(crate) fn panel_generation(&self, panel_idx: usize) -> u32 {
         self.generation.get(panel_idx).copied().unwrap_or(0)
     }
 
@@ -395,7 +402,7 @@ pub fn scene_error_status(error: SceneError) -> RenderStatus {
     }
 }
 
-fn validate_panel_scene(panel_idx: usize, scene: &[u8]) -> RenderStatus {
+pub(crate) fn validate_panel_scene(panel_idx: usize, scene: &[u8]) -> RenderStatus {
     // The critical-layer masks are owned by the panel descriptors
     // (ADR-0029): this runtime holds no mask or panel list of its own.
     let Some(required) = descriptor(panel_idx as u32).map(|d| d.required_layers) else {

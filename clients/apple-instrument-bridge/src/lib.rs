@@ -13,9 +13,8 @@
 //! - This bridge marshals data. It holds no panel logic and no state
 //!   derivation. It holds no latching and no interpretation helper.
 //!
-//! Deliberate boundary: this bridge does not export alert stepping or
-//! panel configuration. The Apple shell owns those functions only if
-//! its product surface needs them.
+//! The composition call steps alerts once and produces all panel scenes.
+//! The bridge does not export a per-panel render call.
 //!
 //! Companion-computer builds do not link this crate. The crate has no
 //! Apple-platform dependency: it builds on any host, and CI proves it.
@@ -38,7 +37,8 @@ pub use enumeration::{
     state_abi_version,
 };
 pub use records::{
-    BridgeCompositionSlot, BridgePanelDescriptor, BridgeRenderOutcome, BridgeWriteOutcome,
+    BridgeCompositionFrameOutcome, BridgeCompositionPanelOutcome, BridgeCompositionSlot,
+    BridgePanelDescriptor, BridgeWriteOutcome,
 };
 
 #[cfg(test)]

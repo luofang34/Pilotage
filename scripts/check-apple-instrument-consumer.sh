@@ -18,7 +18,7 @@ cargo run --locked --quiet -p pilotage-instrument-apple-bridge \
   generate --library --language swift --out-dir "$output_root" "$library"
 
 for symbol in stateAbiVersion sceneFormatVersion corpusVersion corpusDigestHex \
-  sceneDigestHex compositionDigestHex InstrumentBridge; do
+  sceneDigestHex compositionDigestHex InstrumentBridge compositionFrame; do
   grep -q "$symbol" "$output_root"/*.swift
 done
 

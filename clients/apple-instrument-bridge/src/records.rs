@@ -39,26 +39,46 @@ pub struct BridgeCompositionSlot {
     pub height: f32,
 }
 
-/// The typed result of one render call: the producer status, the scene
-/// bytes, the frame the scene was emitted at, and the panel's
-/// successful-production generation.
+/// One panel result in a composition transaction.
 #[derive(uniffi::Record)]
-pub struct BridgeRenderOutcome {
-    /// The typed producer status: the `RenderStatus` discriminant. Zero
-    /// means the scene rendered and self-validated.
+pub struct BridgeCompositionPanelOutcome {
+    /// The panel index in the runtime registry.
+    pub panel: u32,
+    /// The composition transaction status.
     pub status: u32,
-    /// The typed scene bytes. Empty on every failure; the caller does
-    /// not paint on a nonzero status.
-    pub scene: Vec<u8>,
-    /// Width of the frame the scene was emitted at. The caller
-    /// compares it with the frame it prepared and does not paint on
-    /// mismatch.
+    /// The panel scene offset in the shared scene buffer.
+    pub scene_offset: u32,
+    /// The panel scene length in bytes.
+    pub scene_len: u32,
+    /// The width used to produce the panel scene.
     pub frame_width: f32,
-    /// Height of the frame the scene was emitted at.
+    /// The height used to produce the panel scene.
     pub frame_height: f32,
-    /// The panel's successful-production generation. It advances only
-    /// on success, so it is a liveness signal no failed render can fake.
+    /// The panel generation after a successful transaction.
     pub generation: u32,
+}
+
+/// The typed result of one complete composition transaction.
+#[derive(uniffi::Record)]
+pub struct BridgeCompositionFrameOutcome {
+    /// The transaction status. Zero means all panels committed.
+    pub status: u32,
+    /// All panel scenes in composition order. This is empty on failure.
+    pub scene: Vec<u8>,
+    /// The typed result for each composition slot.
+    pub panels: Vec<BridgeCompositionPanelOutcome>,
+    /// The composition generation after a successful transaction.
+    pub generation: u32,
+    /// The alert-step status from the same transaction.
+    pub alert_status: u32,
+    /// The number of active alerts.
+    pub active_alert_count: u32,
+    /// The independent alert path is faulted.
+    pub alert_path_faulted: bool,
+    /// The alert manager dropped events.
+    pub alert_overflow: bool,
+    /// The alert-manager generation.
+    pub alert_manager_generation: u32,
 }
 
 /// The typed result of one state-buffer write.

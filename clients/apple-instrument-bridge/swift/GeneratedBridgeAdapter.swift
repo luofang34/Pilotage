@@ -28,8 +28,8 @@ public final class GeneratedInstrumentRuntime: InstrumentRuntimeServing {
         bridge = InstrumentBridge()
     }
 
-    public func writeState(_ bytes: [UInt8]) throws {
-        let outcome = bridge.writeState(bytes: Data(bytes))
+    public func writeState(_ bytes: [UInt8], acceptedAtMs: UInt64) throws {
+        let outcome = bridge.writeState(bytes: Data(bytes), acceptedAtMs: acceptedAtMs)
         switch outcome.status {
         case 0:
             return
@@ -43,14 +43,32 @@ public final class GeneratedInstrumentRuntime: InstrumentRuntimeServing {
         }
     }
 
-    public func render(panel: UInt32) -> InstrumentRuntimeRenderOutcome {
-        let outcome = bridge.render(panel: panel)
-        return InstrumentRuntimeRenderOutcome(
+    public func compositionFrame(
+        nowMs: UInt64,
+        pathHealthy: Bool
+    ) -> InstrumentRuntimeCompositionOutcome {
+        let outcome = bridge.compositionFrame(nowMs: nowMs, pathHealthy: pathHealthy)
+        let panels = outcome.panels.map { panel in
+            InstrumentRuntimePanelOutcome(
+                panel: panel.panel,
+                status: panel.status,
+                sceneOffset: panel.sceneOffset,
+                sceneLength: panel.sceneLen,
+                frameWidth: panel.frameWidth,
+                frameHeight: panel.frameHeight,
+                generation: panel.generation
+            )
+        }
+        return InstrumentRuntimeCompositionOutcome(
             status: outcome.status,
             scene: Array(outcome.scene),
-            frameWidth: outcome.frameWidth,
-            frameHeight: outcome.frameHeight,
-            generation: outcome.generation
+            panels: panels,
+            generation: outcome.generation,
+            alertStatus: outcome.alertStatus,
+            activeAlertCount: outcome.activeAlertCount,
+            alertPathFaulted: outcome.alertPathFaulted,
+            alertOverflow: outcome.alertOverflow,
+            alertManagerGeneration: outcome.alertManagerGeneration
         )
     }
 }

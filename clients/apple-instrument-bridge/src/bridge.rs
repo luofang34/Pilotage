@@ -1,17 +1,23 @@
-//! The bridge object: one owned instrument runtime behind the FFI.
-//! The caller copies each state frame in, then asks for panel scenes.
+//! The bridge object for one clocked composition transaction.
 
 use std::sync::Mutex;
 
-use pilotage_instrument_runtime::{RenderStatus, Runtime, canonical_frame, descriptor};
+use pilotage_instrument_runtime::{RenderStatus, Runtime};
 
-use crate::records::{BridgeRenderOutcome, BridgeWriteOutcome};
+use crate::records::{
+    BridgeCompositionFrameOutcome, BridgeCompositionPanelOutcome, BridgeWriteOutcome,
+};
+
+struct BridgeState {
+    runtime: Runtime,
+    accepted_at_ms: Option<u64>,
+}
 
 /// One owned instrument runtime behind the FFI. Each bridge object has
 /// independent buffers, configuration, and generations.
 #[derive(uniffi::Object)]
 pub struct InstrumentBridge {
-    runtime: Mutex<Runtime>,
+    state: Mutex<BridgeState>,
 }
 
 impl Default for InstrumentBridge {
@@ -26,70 +32,89 @@ impl InstrumentBridge {
     #[uniffi::constructor]
     pub fn new() -> Self {
         Self {
-            runtime: Mutex::new(Runtime::new()),
+            state: Mutex::new(BridgeState {
+                runtime: Runtime::new(),
+                accepted_at_ms: None,
+            }),
         }
     }
 
-    /// Copies one ABI state frame into the runtime's state buffer.
-    /// The function refuses input that exceeds the fixed capacity.
-    pub fn write_state(&self, bytes: &[u8]) -> BridgeWriteOutcome {
-        let mut runtime = match self.runtime.lock() {
+    /// Copies one state frame and records its monotonic acceptance time.
+    pub fn write_state(&self, bytes: &[u8], accepted_at_ms: u64) -> BridgeWriteOutcome {
+        let mut state = match self.state.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let buffer = runtime.state_mut();
-        buffer.fill(0);
-        if bytes.len() > buffer.len() {
+        state.accepted_at_ms = None;
+        let capacity = Runtime::state_capacity();
+        state.runtime.state_mut().fill(0);
+        if bytes.len() > capacity {
             return BridgeWriteOutcome {
                 status: 1,
                 actual: bytes.len() as u64,
-                capacity: buffer.len() as u64,
+                capacity: capacity as u64,
             };
         }
-        if let Some(target) = buffer.get_mut(..bytes.len()) {
+        if let Some(target) = state.runtime.state_mut().get_mut(..bytes.len()) {
             target.copy_from_slice(bytes);
         }
+        state.accepted_at_ms = Some(accepted_at_ms);
         BridgeWriteOutcome {
             status: 0,
             actual: bytes.len() as u64,
-            capacity: buffer.len() as u64,
+            capacity: capacity as u64,
         }
     }
 
-    /// Renders one panel from the last written state frame.
-    ///
-    /// The runtime draws every panel at its canonical frame. The outcome
-    /// returns this frame so the caller can compare it with the frame that
-    /// its display backend requested.
-    ///
-    /// A failure carries a nonzero status, empty scene bytes, and an
-    /// unchanged generation.
-    pub fn render(&self, panel: u32) -> BridgeRenderOutcome {
-        let mut runtime = match self.runtime.lock() {
+    /// Produces all composition panels from one state and one clock.
+    pub fn composition_frame(
+        &self,
+        now_ms: u64,
+        path_healthy: bool,
+    ) -> BridgeCompositionFrameOutcome {
+        let mut state = match self.state.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let outcome = runtime.render(panel);
-        let (emitted_width, emitted_height) = descriptor(panel)
-            .map(|d| {
-                let frame = canonical_frame(d);
-                (frame.width, frame.height)
-            })
-            .unwrap_or((0.0, 0.0));
+        let age_delta_ms = state
+            .accepted_at_ms
+            .map_or(0, |accepted_at_ms| now_ms.saturating_sub(accepted_at_ms));
+        let outcome = state
+            .runtime
+            .render_composition(age_delta_ms, now_ms, path_healthy);
         let scene = if outcome.status == RenderStatus::Ok {
-            runtime
-                .scene()
+            state
+                .runtime
+                .composition_scene()
                 .get(..outcome.scene_len as usize)
                 .map_or_else(Vec::new, <[u8]>::to_vec)
         } else {
             Vec::new()
         };
-        BridgeRenderOutcome {
+        let panels = state
+            .runtime
+            .composition_panel_outcomes()
+            .iter()
+            .map(|panel| BridgeCompositionPanelOutcome {
+                panel: panel.panel,
+                status: panel.status as u32,
+                scene_offset: panel.scene_offset,
+                scene_len: panel.scene_len,
+                frame_width: panel.frame_width,
+                frame_height: panel.frame_height,
+                generation: panel.generation,
+            })
+            .collect();
+        BridgeCompositionFrameOutcome {
             status: outcome.status as u32,
             scene,
-            frame_width: emitted_width,
-            frame_height: emitted_height,
+            panels,
             generation: outcome.generation,
+            alert_status: outcome.alerts.status as u32,
+            active_alert_count: outcome.alerts.active_count,
+            alert_path_faulted: outcome.alerts.faulted,
+            alert_overflow: outcome.alerts.overflow,
+            alert_manager_generation: outcome.alerts.manager_generation,
         }
     }
 }

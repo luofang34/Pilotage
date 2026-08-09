@@ -51,10 +51,14 @@ fn assert_outcome(outcome: RenderOutcome, status: RenderStatus, scene_len: u32, 
 
 fn scratch_runtime(state: Vec<u8>, scene: Vec<u8>, generation: Vec<u32>) -> Runtime {
     let panels = generation.len();
+    let slots = crate::composition_slot_count() as usize;
     Runtime {
         state,
         scene,
         generation,
+        composition_scene: vec![0u8; SCENE_CAPACITY.saturating_mul(slots)],
+        composition_panels: vec![crate::CompositionPanelOutcome::empty(); slots],
+        composition_generation: 0,
         config: vec![Vec::new(); panels],
         unknown_groups: 0,
         extended_groups: 0,

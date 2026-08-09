@@ -27,6 +27,10 @@ pub fn descriptor(panel: u32) -> Option<&'static PanelDescriptor> {
     registry()?.panels().nth(panel as usize)
 }
 
+pub(crate) fn panel_index(id: &str) -> Option<usize> {
+    registry()?.panels().position(|panel| panel.id == id)
+}
+
 /// The frame this runtime requests for a panel: its first canonical
 /// frame, falling back to the floor for a descriptor that declares none.
 /// The canonical frames are where the digest, admission matrix, and
