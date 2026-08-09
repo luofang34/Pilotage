@@ -33,6 +33,68 @@ schema, an executor, or a channel policy.
 
 ## Decision
 
+### Contract terms
+
+A source epoch identifies one continuous source instance. It changes after a
+source restart or a loss of sequence continuity.
+
+A producer instance ID identifies one continuous instance that creates domain
+snapshots. A snapshot revision orders published states for one snapshot subject
+from that producer instance. A consumer compares revisions only when the
+producer instance ID and subject identity are equal.
+
+Navdata is the component that owns the complete navigation baseline. It uses
+the [common snapshot envelope](../domain-snapshot-envelope.md). Its snapshot
+subject is the complete navigation baseline selection. This subject identity
+stays constant when the selected cycle or built snapshot changes.
+
+The Navdata domain snapshot contains a navigation-data cycle, a snapshot ID,
+and a snapshot digest. These three values are the Navdata snapshot identity.
+The cycle identifies the published effective edition. The snapshot ID
+identifies one immutable built snapshot. The snapshot digest verifies the
+canonical snapshot content and its cycle.
+
+The producer instance ID and snapshot revision identify publications of the
+Navdata subject. They do not replace the Navdata snapshot identity. A Navdata
+producer increments the revision when it publishes a different snapshot ID or
+changes another published member. The cycle is not the revision. A producer
+restart can publish the same cycle, snapshot ID, and snapshot digest under a
+new producer instance ID. Revisions from the two producer instances have no
+order.
+
+Equal Navdata snapshot IDs must have equal cycles and snapshot digests. A build
+that changes the canonical content must use a new snapshot ID and snapshot
+digest. A consumer uses the Navdata snapshot identity after a producer restart.
+It uses the producer instance ID, subject identity, and revision for continuity
+and gap detection.
+
+A snapshot handle is an immutable reference to one domain snapshot.
+
+A valid time states when data is in effect. It selects a restriction validity
+window or the navigation-data cycle that is effective at that time.
+
+A knowledge time states when the system held data. It selects a snapshot
+handle from a retained handle ring or a replay of the ingress stream.
+
+A time query fixes one of these axes. The query and its result state the axis
+and its value. They must not use one value as both valid time and knowledge
+time.
+
+A clock correspondence maps values between two clocks. It states the mapping
+uncertainty and the interval in which the mapping is valid.
+
+A coherence requirement states which mix of snapshot times or revisions a
+query can accept.
+
+Best-available consistency captures the current snapshot handle from each
+selected domain. It does not use a transaction across domains.
+
+Lossy replication is a transfer that can omit an update. A base revision
+identifies the state to which an update applies. Snapshot recovery replaces
+local replicated state after a revision gap.
+
+An idempotency ID identifies one external effect across retries.
+
 ### State ownership
 
 This record defines `AeronauticalUpdates` as the service for perishable
@@ -66,10 +128,28 @@ snapshots to an existing consumer interface. It must not keep a second
 authoritative copy of domain state. Provider orchestration belongs in
 composition adapters, not in the compatibility facade.
 
+An application owns presentation, tiles, and styling. A tile bundle or a
+GeoJSON document is an encoding at a renderer edge. It is not domain state. A
+domain must not produce it.
+
+An offline build converts one Navdata snapshot into a versioned tile bundle
+for its cycle. The bundle carries the navigation-data cycle and snapshot
+digest. The renderer caches this bundle. The build must not put a full NASR
+extract in the renderer's live snapshot path. A perishable update stays a live
+overlay feature.
+
+A coherence requirement also applies to a rendered composition. A tile bundle
+and an overlay stream each carry a navigation-data cycle. A rendered
+composition that has two cycle identities is invalid. The client must reject
+the composition and report the mismatch.
+
 Briefing reads fixed input revisions. Its input identifies a plan revision, a
-requested time, a weather snapshot, an aeronautical-update snapshot, and a
-navigation-data snapshot ID, digest, and cycle. Briefing can keep the immutable
-result for evidence.
+requested valid time, a weather snapshot handle, an aeronautical-update
+snapshot handle, and a Navdata snapshot handle. The Navdata handle includes
+the navigation-data cycle, snapshot ID, and snapshot digest. The fixed
+revisions select the knowledge state. The requested valid time selects the data
+that is in effect in that state. Briefing records both selections in its
+immutable evidence result.
 
 An `AirspaceView` is a derived query result. It combines the navigation
 baseline with applicable aeronautical updates and special-use airspace status.
@@ -77,29 +157,10 @@ It is not an authoritative store. An update can apply to a runway, a navaid, a
 procedure, a service, or another subject with no horizontal geometry. The
 update model must make geometry optional.
 
-### Contract terms
-
-A source epoch identifies one continuous source instance. It changes after a
-source restart or a loss of sequence continuity.
-
-A producer instance ID identifies one continuous instance that creates domain
-snapshots. A snapshot revision orders snapshots from that instance.
-
-A clock correspondence maps values between two clocks. It states the mapping
-uncertainty and the interval in which the mapping is valid.
-
-A snapshot handle is an immutable reference to one domain snapshot. A
-coherence requirement states which mix of snapshot times or revisions a query
-can accept.
-
-Best-available consistency captures the current snapshot handle from each
-selected domain. It does not use a transaction across domains.
-
-Lossy replication is a transfer that can omit an update. A base revision
-identifies the state to which an update applies. Snapshot recovery replaces
-local replicated state after a revision gap.
-
-An idempotency ID identifies one external effect across retries.
+A required record named *AirspaceView resolution contract: subject to baseline
+geometry* in [issue #349](https://github.com/luofang34/Pilotage/issues/349)
+defines the resolution owner, cycle scope, result identity, and typed failure
+reasons. It also defines how a result keeps an update that has no geometry.
 
 ### Dependency direction
 
@@ -131,13 +192,22 @@ flowchart LR
     DATA --> PLAN
     PLAN -- "Immutable resolved plan" --> NAV
 
+    DATA --> AIRSPACE["AirspaceView"]
+    UPDATES --> AIRSPACE
+
     SURV --> VIEW["SituationView"]
     AIR --> VIEW
     UPDATES --> VIEW
     DATA --> VIEW
+    AIRSPACE --> VIEW
     PLAN --> VIEW
     NAV --> VIEW
-    BRIEF["Briefing"] --> VIEW
+
+    PLAN -- "Fixed revision" --> BRIEF["Briefing"]
+    AIR -- "Fixed snapshot" --> BRIEF
+    UPDATES -- "Fixed snapshot" --> BRIEF
+    DATA -- "Fixed snapshot" --> BRIEF
+    BRIEF -- "Immutable evidence result" --> VIEW
 
     VIEW --> AI["Optional AI analysis"]
     VIEW --> MAP["Optional map adapter"]
@@ -147,6 +217,10 @@ flowchart LR
     NAV -- "Guidance request" --> PILOT["Pilotage authority path"]
     PILOT -- "Lease, fencing, and audit" --> FC
 ```
+
+Briefing reads only the fixed inputs in the diagram. `SituationView` can expose
+the completed Briefing result as evidence. This edge does not make the result
+live domain state.
 
 For example, an Airmass adapter can consume an assembled FIS-B product and
 produce a domain-owned weather ingress value. The Airmass core consumes the
@@ -169,8 +243,9 @@ adapters convert these records into domain ingress values.
 
 Availability data and current-report-list data can affect link health and
 domain freshness. Composition can send one decoded record to both consumers.
-Link health is not authoritative `AeronauticalUpdates` state. A domain can use
-link health as quality evidence.
+Link health is ownerless derived evidence. Each consumer calculates it from
+the records that it receives. No component stores link health as authoritative
+state. A domain can use link health as quality evidence.
 
 The FIS-B assembly output must preserve a bounded provenance summary. The
 summary contains a bounded set of contributors and an overflow indicator. Each
@@ -192,7 +267,7 @@ behavior.
 
 ### Time model
 
-Domain contracts use two time axes.
+Domain contracts use two clock domains.
 
 - Civil UTC defines issue, effective, and valid periods.
 - A runtime monotonic clock defines receive order, queue age, timeout, and
@@ -218,11 +293,18 @@ make a display object the only copy of domain state.
 decode, or own authoritative domain state. It can keep a non-authoritative
 cache of immutable snapshot handles.
 
-A query supplies an evaluation UTC value. The composition host attaches its
-local monotonic evaluation stamp and clock identity. A snapshot from a
-different monotonic clock supplies a correspondence to the host clock. UTC
-determines validity. Compatible monotonic stamps determine ingress age. The
-query can also supply freshness and coherence requirements.
+A query supplies one query axis and one query UTC value. A valid-time query
+uses that value to select the data that is in effect. It uses supplied snapshot
+handles or captures the best available handles. A knowledge-time query uses
+that value to select handles from a retained handle ring or a replay. It does
+not use the value to select data by validity.
+
+The composition host treats the query UTC value as the evaluation UTC value.
+It attaches its local monotonic evaluation stamp and clock identity. A snapshot
+from a different monotonic clock supplies a correspondence to the host clock.
+Compatible monotonic stamps determine ingress age. The query can also supply
+freshness and coherence requirements. The result repeats the query axis and
+value.
 
 A result supplies the producer instance ID and snapshot revision for each
 domain snapshot. It also supplies per-field or per-contributor provenance when
@@ -231,17 +313,27 @@ monotonic ingress time, source observation or product time, time quality, time
 uncertainty, validity, and data quality. The result gives a reason for each
 missing value.
 
+A result that includes Navdata also supplies its navigation-data cycle,
+snapshot ID, and snapshot digest. These fields are the Navdata snapshot
+identity. The producer instance ID and revision identify its publication
+stream.
+
 Ingress age is the difference between the host evaluation stamp and the
 translated monotonic ingress stamp. Stamps from the same clock need no clock
 correspondence. Observation age is the difference between evaluation UTC and
 a trusted source observation time. Report each age separately. Report an age
 as unknown when its required time evidence is not valid.
 
-The first version uses best-available consistency. It captures one immutable
-snapshot handle from each selected domain before it evaluates the query. It
-does not promise an atomic update across domains. The result identifies the
-producer instance ID and snapshot revision from each domain. A consumer can
-use this information to explain the composition.
+A valid-time query that does not supply fixed handles uses best-available
+consistency. It captures one immutable snapshot handle from each selected
+domain before it evaluates the query. It does not promise an atomic update
+across domains. The result identifies the producer instance ID and snapshot
+revision from each domain. A consumer can use this information to explain the
+composition.
+
+A knowledge-time query must use a retained handle ring or a replay. It must not
+fall back to current best-available handles. The result gives an absence reason
+when the selected knowledge state is not available.
 
 A lossy replication boundary needs a producer instance ID, a base revision, a
 new revision, gap detection, and snapshot recovery. A separate transport
@@ -252,8 +344,8 @@ boundary.
 
 FlightPlanning gives Navigate an immutable resolved plan revision. The handoff
 includes the revision ID, schema version, content digest, navigation-data
-snapshot ID and digest, navigation-data cycle, units, datum, and validation
-evidence. A draft change cannot change the active revision.
+cycle, snapshot ID, snapshot digest, units, datum, and validation evidence. A
+draft change cannot change the active revision.
 
 Navigate repeats the structural handoff checks. It also checks vehicle
 capability, active configuration, and execution state. Navigate can reject
@@ -323,7 +415,8 @@ recorded license decision, and an identified operational owner.
 
 ## Migration order
 
-1. Define the domain-owned ingress and immutable snapshot contracts.
+1. Define the domain-owned ingress contracts. The immutable snapshot part is
+   complete in the [domain snapshot envelope contract](../domain-snapshot-envelope.md).
 2. Define the `SituationView` request and result contract. Add a conformance
    corpus with test inputs and required results.
 3. Record the required license decisions for each sibling component that the

@@ -22,8 +22,8 @@ snapshot revision. A snapshot handle gives a consumer retainable access to one
 snapshot envelope.
 
 This contract does not define a domain ingress value. It does not define
-`SituationView`, a renderer, or a transport encoding. Each domain owns these
-types at its boundary.
+`SituationView`, a renderer, or a transport encoding. A domain owns its ingress
+and snapshot types. The owner of each other boundary defines its types.
 
 ## Contract shape
 
