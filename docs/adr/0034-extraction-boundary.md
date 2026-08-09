@@ -60,8 +60,8 @@ A panel is authored in the logical frame its descriptor declares
   that allocates.
 - The REN-03 raster baselines travel with their descriptors (already
   the case); the raster crate runs the gate on whichever side the
-  crates live. `states::typical` is owned by the registry crate and
-  moves with it.
+  crates live. `states::typical` is owned by the descriptor crate
+  (`indicate-instrument-descriptor`) and moves with it.
 - The browser shell's instrument half is protocol-free by crate
   boundary (`pilotage-instruments-web-shell`), enforced by a CI step,
   so the shell code that stays behind depends on the extracted family
