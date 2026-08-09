@@ -365,3 +365,20 @@ fn glyph_accessors_surface_the_verified_pack() {
     assert_eq!(canonical, expected[..len]);
     assert_eq!(glyph_recorded_hash(), PANEL_GLYPHS.recorded_hash().to_vec());
 }
+
+#[test]
+fn compatibility_pin_matches_linked_runtime() {
+    let pin: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../clients/instrument-compatibility.json"
+    ))
+    .expect("compatibility pin is valid JSON");
+    assert_eq!(pin["stateAbiVersion"], crate::abi_version());
+    assert_eq!(pin["sceneFormatVersion"], crate::scene_format_version());
+    assert_eq!(pin["corpusVersion"], crate::corpus_version());
+    assert_eq!(pin["corpusDigest"], crate::corpus_digest_hex());
+    assert_eq!(pin["registrySceneDigest"], crate::scene_digest_hex());
+    assert_eq!(
+        pin["screenCompositionDigest"],
+        crate::composition_digest_hex()
+    );
+}

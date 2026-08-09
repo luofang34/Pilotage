@@ -119,6 +119,9 @@ jobs:
             fi
           done
 
+      - name: Indicate compatibility identity
+        run: bash scripts/check-indicate-compatibility.sh
+
       - name: geospatial contract (SVS-01)
         # Datum discipline, coherence, view/projection, availability, and the
         # fail-closed versioned ABI for synthetic vision and conformal HUD.

@@ -19,3 +19,6 @@ indicate-instrument-panels = { workspace = true }
 indicate-instrument-registry = { workspace = true }
 indicate-instrument-scene = { workspace = true }
 indicate-instrument-state = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

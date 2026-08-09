@@ -15,6 +15,23 @@
 // opcodes are skipped and counted, never fatal (ADR-0017).
 
 import { InstrumentFault, REASON } from "./instrument-health.js";
+import {
+  COMPATIBILITY_BINDING_FNS,
+  EXPECTED_COMPOSITION_DIGEST,
+  EXPECTED_CORPUS_DIGEST,
+  EXPECTED_CORPUS_VERSION,
+  EXPECTED_SCENE_DIGEST,
+  EXPECTED_SCENE_FORMAT_VERSION,
+  verifyInstrumentCompatibility,
+} from "./instrument-compatibility.js";
+
+export {
+  EXPECTED_COMPOSITION_DIGEST,
+  EXPECTED_CORPUS_DIGEST,
+  EXPECTED_CORPUS_VERSION,
+  EXPECTED_SCENE_DIGEST,
+  EXPECTED_SCENE_FORMAT_VERSION,
+} from "./instrument-compatibility.js";
 
 // Panel map derived from the wasm registry enumeration at load time
 // (ADR-0029): keys are the descriptor ids uppercased, values the panel
@@ -33,7 +50,7 @@ function designOf(panel) {
 
 import { STATE_ABI_VERSION, encodeState, maxFrameBytes } from "./state-abi.js";
 
-const SCENE_FORMAT_VERSION = 1;
+const SCENE_FORMAT_VERSION = EXPECTED_SCENE_FORMAT_VERSION;
 
 // The controlled glyph pack's recorded content hash (REN-02). The backend
 // verifies the wasm-exported canonical bytes against BOTH the wasm's
@@ -75,12 +92,17 @@ const REQUIRED_RUNTIME_METHODS = [
 // canonical corpus — pinned here as a JS literal (the glyph-hash
 // pattern) so wasm-target divergence from the host-verified contract
 // fails the suite, not just a Rust unit test.
-export const EXPECTED_SCENE_DIGEST =
-  "f82d905643b48822de25665761ad3e29daa334d937f18b1e98a3e215353cb704";
+
+// The pinned screen-composition digest (ADR-0032): the fifth
+// compatibility-tuple value. The wasm build must reproduce exactly this
+// value over its validated composition — pinned here as a JS literal,
+// the same pattern as the scene digest, so a layout change is a
+// deliberate re-pin on both sides, never drift.
 
 // Registry enumeration exported at module level by the bindings; the
 // backend derives its panel map from these instead of mirroring one.
 const REQUIRED_BINDING_FNS = [
+  ...COMPATIBILITY_BINDING_FNS,
   "panel_count",
   "panel_id",
   "panel_title",
@@ -139,19 +161,11 @@ export async function loadInstruments(wasmUrl, options = {}) {
       throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument runtime has invalid method ${name}`);
     }
   }
-  let abiVersion;
   try {
-    abiVersion = queryAbiVersion();
+    verifyInstrumentCompatibility(queryAbiVersion, enumeration);
   } catch (error) {
     releaseRuntime(runtime);
-    throw new InstrumentFault(REASON.ABI_MISMATCH, `instrument ABI query failed: ${error}`);
-  }
-  if (abiVersion !== STATE_ABI_VERSION) {
-    releaseRuntime(runtime);
-    throw new InstrumentFault(
-      REASON.ABI_MISMATCH,
-      `instrument ABI mismatch: wasm=${abiVersion} js=${STATE_ABI_VERSION}`,
-    );
+    throw error;
   }
   let initialized;
   try {

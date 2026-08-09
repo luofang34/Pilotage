@@ -20,12 +20,14 @@
 //! values into its own wire format; the packing is the shell's ABI, not
 //! this crate's.
 
+mod compatibility;
 mod composition;
 pub mod feeder;
 mod registry;
 mod render_status;
 mod runtime;
 
+pub use compatibility::{CORPUS_DIGEST, CORPUS_VERSION, corpus_digest_hex, corpus_version};
 pub use composition::{
     SCREEN_COMPOSITION, composition, composition_digest_hex, composition_slot_count,
     composition_slot_panel, composition_slot_rect,
