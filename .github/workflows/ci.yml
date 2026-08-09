@@ -452,6 +452,9 @@ jobs:
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
 
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
       - name: Test the Apple situation client
         env:
           AERO_LINK_SOURCE: ${{ github.workspace }}/external/aero-link

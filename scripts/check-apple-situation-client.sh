@@ -43,6 +43,9 @@ require_pattern 'AeroLinkDriverBundleIdentifier' "$client/App/Info.plist" \
 require_pattern '"[$]AERO_LINK_HOST_BUNDLE_IDENTIFIER"[.][*]' \
     "$client/scripts/generate-project.sh" \
     "the project generator must require a nested driver App ID"
+require_pattern 'brew install xcodegen' \
+    "$root/.github/workflows/ci.yml" \
+    "the Apple situation client job must install XcodeGen"
 
 if [ "$status" -ne 0 ]; then
     echo "Apple situation client: FAILED" >&2
