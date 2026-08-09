@@ -27,7 +27,4 @@ pub enum FfiError {
         /// Lock failure detail.
         message: String,
     },
-    /// The linked producer supplied a delta that this facade does not know.
-    #[error("track delta kind is not supported by this facade")]
-    UnsupportedTrackDelta,
 }

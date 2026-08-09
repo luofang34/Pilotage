@@ -15,24 +15,27 @@ public enum SituationOverlayError: Error, Equatable {
 @MainActor
 final class SituationOverlay {
     private var layerIdentifiers: [String] = []
+    private var points: [String: DisplayPoint] = [:]
     private var sourceIdentifiers: [String] = []
 
     func apply(_ batch: DisplayBatch, to mapStyle: MLNStyle) throws {
-        try validate(batch)
+        updatePoints(with: batch)
+        let currentPoints = points.values.sorted { $0.id < $1.id }
+        try validate(batch, points: currentPoints)
         removeManagedContent(from: mapStyle)
         for entry in catalog(for: batch) {
             switch entry {
             case let .point(pointStyle):
-                try addPointStyle(pointStyle, batch: batch, to: mapStyle)
+                try addPointStyle(pointStyle, points: currentPoints, to: mapStyle)
             case let .shape(shapeStyle):
                 try addShapeStyle(shapeStyle, batch: batch, to: mapStyle)
             }
         }
     }
 
-    private func validate(_ batch: DisplayBatch) throws {
+    private func validate(_ batch: DisplayBatch, points: [DisplayPoint]) throws {
         let pointStyles = Set(batch.pointStyles.map(\.id))
-        if let point = batch.points.first(where: { !pointStyles.contains($0.styleId) }) {
+        if let point = points.first(where: { !pointStyles.contains($0.styleId) }) {
             throw SituationOverlayError.unknownPointStyle(point.styleId)
         }
         let shapeStyles = Set(batch.shapeStyles.map(\.id))
@@ -51,10 +54,10 @@ final class SituationOverlay {
 
     private func addPointStyle(
         _ pointStyle: DisplayPointStyle,
-        batch: DisplayBatch,
+        points: [DisplayPoint],
         to mapStyle: MLNStyle
     ) throws {
-        let features = batch.points
+        let features = points
             .filter { $0.styleId == pointStyle.id }
             .map(GeoJSONPointFeature.init)
         let data = try GeoJSONFeatureCollectionEncoder.encode(points: features)
@@ -65,6 +68,38 @@ final class SituationOverlay {
             addCircleLayer(style: pointStyle, source: source, to: mapStyle)
         }
         addPointLabelLayer(style: pointStyle, source: source, to: mapStyle)
+    }
+
+    private func updatePoints(with batch: DisplayBatch) {
+        if points.isEmpty || batch.pointChanges.isEmpty {
+            replacePoints(with: batch.points)
+            return
+        }
+        for change in batch.pointChanges {
+            switch change.kind {
+            case .upsert:
+                if let point = change.point {
+                    points[change.id] = point
+                }
+            case .stale:
+                if let point = batch.points.first(where: { $0.id == change.id }) {
+                    points[change.id] = point
+                }
+            case .remove:
+                if let target = change.transferTo,
+                   let point = batch.points.first(where: { $0.id == target }) {
+                    points[target] = point
+                }
+                points.removeValue(forKey: change.id)
+            }
+        }
+    }
+
+    private func replacePoints(with source: [DisplayPoint]) {
+        points.removeAll(keepingCapacity: true)
+        for point in source {
+            points[point.id] = point
+        }
     }
 
     private func addShapeStyle(

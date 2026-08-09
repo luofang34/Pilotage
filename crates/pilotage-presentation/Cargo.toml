@@ -10,6 +10,7 @@ airmass-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 surveillance-core.workspace = true
+surveillance-geojson.workspace = true
 thiserror.workspace = true
 
 [lints]

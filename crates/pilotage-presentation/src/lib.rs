@@ -14,8 +14,8 @@ mod tests;
 
 pub use error::PresentationError;
 pub use model::{
-    Color, Coordinate, CoordinateRing, DisplayBatch, PointFeature, PointStyle, ShapeFeature,
-    ShapeStyle,
+    Color, Coordinate, CoordinateRing, DisplayBatch, PointChange, PointFeature, PointStyle,
+    ShapeFeature, ShapeStyle,
 };
 pub use policy::PresentationAdapter;
 pub use weather::{WEATHER_ADVISORY_MEDIA_TYPE, WEATHER_OBSERVATION_MEDIA_TYPE};

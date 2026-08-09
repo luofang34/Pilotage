@@ -10,6 +10,7 @@ rust_root="$fixture/crates/pilotage-presentation/src"
 swift_root="$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/Binding"
 mkdir -p "$rust_root" "$swift_root"
 printf '%s\n' 'pub struct DisplayValue;' > "$rust_root/lib.rs"
+printf '%s\n' 'use surveillance_geojson::FeatureDelta;' > "$rust_root/traffic.rs"
 printf '%s\n' 'struct DisplayValue {}' > "$swift_root/DisplayValue.swift"
 
 bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null
@@ -20,6 +21,20 @@ if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture"
     exit 1
 fi
 rm "$rust_root/backend.rs"
+
+printf '%s\n' 'use surveillance_core::TrackSnapshot;' >> "$rust_root/traffic.rs"
+if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then
+    echo "test failed: traffic policy bypassed the typed feature adapter" >&2
+    exit 1
+fi
+printf '%s\n' 'use surveillance_geojson::FeatureDelta;' > "$rust_root/traffic.rs"
+
+printf '%s\n' 'pub struct TrafficFeature;' > "$rust_root/traffic.rs"
+if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then
+    echo "test failed: traffic policy omitted the typed feature adapter" >&2
+    exit 1
+fi
+printf '%s\n' 'use surveillance_geojson::FeatureDelta;' > "$rust_root/traffic.rs"
 
 printf '%s\n' 'struct TrackSnapshot {}' > "$swift_root/Domain.swift"
 if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then

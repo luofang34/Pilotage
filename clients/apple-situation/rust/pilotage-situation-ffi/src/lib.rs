@@ -10,7 +10,8 @@ mod session;
 pub use error::FfiError;
 pub use records::{
     DisplayBatch, DisplayColor, DisplayCoordinate, DisplayCoordinateRing, DisplayPoint,
-    DisplayPointStyle, DisplayShape, DisplayShapeStyle, ProducerSchemaVersions,
+    DisplayPointChange, DisplayPointChangeKind, DisplayPointStyle, DisplayShape, DisplayShapeStyle,
+    ProducerSchemaVersions,
 };
 pub use session::PresentationSession;
 

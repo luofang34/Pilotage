@@ -1,10 +1,9 @@
 //! Retained immutable domain records for one display session.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use airmass_core::{WeatherSnapshotEnvelope, WeatherSnapshotRecord};
-use surveillance_core::{TrackDelta, TrackSnapshotHandle};
+use pilotage_presentation::{PointChange, PresentationAdapter};
 
 use crate::{DisplayBatch, FfiError};
 
@@ -13,7 +12,7 @@ mod tests;
 
 #[derive(Default)]
 struct SessionState {
-    tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
+    presentation: PresentationAdapter,
     weather: Option<WeatherSnapshotEnvelope>,
 }
 
@@ -45,11 +44,9 @@ impl PresentationSession {
             .map_err(|source| FfiError::TrackRecord {
                 message: source.to_string(),
             })?;
-        {
-            let mut state = self.lock_state()?;
-            apply_track_delta(&mut state, delta)?;
-        }
-        self.current_display()
+        let mut state = self.lock_state()?;
+        let change = state.presentation.apply_traffic_delta(&delta);
+        display_for_state(&state, change)
     }
 
     /// Accept one versioned Airmass weather snapshot record.
@@ -63,28 +60,15 @@ impl PresentationSession {
             .map_err(|source| FfiError::WeatherRecord {
                 message: source.to_string(),
             })?;
-        {
-            let mut state = self.lock_state()?;
-            apply_weather(&mut state, envelope);
-        }
-        self.current_display()
+        let mut state = self.lock_state()?;
+        apply_weather(&mut state, envelope);
+        display_for_state(&state, None)
     }
 
     /// Get display values for the newest accepted records.
     pub fn current_display(&self) -> Result<DisplayBatch, FfiError> {
-        let (tracks, weather) = {
-            let state = self.lock_state()?;
-            (
-                state.tracks.values().cloned().collect::<Vec<_>>(),
-                state.weather.clone(),
-            )
-        };
-        pilotage_presentation::PresentationAdapter::new()
-            .adapt(&tracks, weather.as_ref())
-            .map(Into::into)
-            .map_err(|source| FfiError::Presentation {
-                message: source.to_string(),
-            })
+        let state = self.lock_state()?;
+        display_for_state(&state, None)
     }
 }
 
@@ -96,40 +80,18 @@ impl PresentationSession {
     }
 }
 
-fn apply_track_delta(state: &mut SessionState, delta: TrackDelta) -> Result<(), FfiError> {
-    match delta {
-        TrackDelta::Created(handle)
-        | TrackDelta::Updated(handle)
-        | TrackDelta::Coasting(handle) => apply_track_handle(state, handle),
-        TrackDelta::Removed {
-            producer_instance_id,
-            snapshot_revision,
-            id,
-            ..
-        } => {
-            let key = (producer_instance_id.get(), id.get());
-            let should_remove = state
-                .tracks
-                .get(&key)
-                .is_some_and(|current| snapshot_revision > current.snapshot_revision());
-            if should_remove {
-                state.tracks.remove(&key);
-            }
-        }
-        _ => return Err(FfiError::UnsupportedTrackDelta),
-    }
-    Ok(())
-}
-
-fn apply_track_handle(state: &mut SessionState, handle: TrackSnapshotHandle) {
-    let key = (handle.producer_instance_id().get(), handle.id.get());
-    let is_newer = state
-        .tracks
-        .get(&key)
-        .is_none_or(|current| handle.snapshot_revision() > current.snapshot_revision());
-    if is_newer {
-        state.tracks.insert(key, handle);
-    }
+fn display_for_state(
+    state: &SessionState,
+    change: Option<PointChange>,
+) -> Result<DisplayBatch, FfiError> {
+    let mut batch = state
+        .presentation
+        .adapt(state.weather.as_ref())
+        .map_err(|source| FfiError::Presentation {
+            message: source.to_string(),
+        })?;
+    batch.point_changes.extend(change);
+    Ok(batch.into())
 }
 
 fn apply_weather(state: &mut SessionState, envelope: WeatherSnapshotEnvelope) {

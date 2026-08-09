@@ -1857,6 +1857,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surveillance-core",
+ "surveillance-geojson",
  "thiserror",
 ]
 
@@ -2719,11 +2720,19 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "surveillance-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Surveillance.git?rev=a17e8d265e18b6009d8ed482ed2bcf0219cf2b84#a17e8d265e18b6009d8ed482ed2bcf0219cf2b84"
+source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
 dependencies = [
  "libm",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "surveillance-geojson"
+version = "0.1.0"
+source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
+dependencies = [
+ "surveillance-core",
 ]
 
 [[package]]

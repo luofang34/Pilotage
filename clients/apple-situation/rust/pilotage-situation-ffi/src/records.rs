@@ -121,6 +121,36 @@ pub struct DisplayPoint {
     pub snapshot_revision: u64,
 }
 
+/// Operation for one point change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
+pub enum DisplayPointChangeKind {
+    /// Place or move a point.
+    Upsert,
+    /// Mark a point as stale.
+    Stale,
+    /// Remove a point.
+    Remove,
+}
+
+/// One point change at the Swift display edge.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DisplayPointChange {
+    /// Operation to apply.
+    pub kind: DisplayPointChangeKind,
+    /// Complete point for an upsert.
+    pub point: Option<DisplayPoint>,
+    /// Stable feature identity.
+    pub id: String,
+    /// Style selected for a stale point.
+    pub style_id: Option<String>,
+    /// Feature that absorbs this point after a merge.
+    pub transfer_to: Option<String>,
+    /// Producer instance identity.
+    pub producer_instance_id: u64,
+    /// Snapshot revision.
+    pub snapshot_revision: u64,
+}
+
 /// One polygon ready for the Swift display edge.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct DisplayShape {
@@ -147,6 +177,8 @@ pub struct DisplayBatch {
     pub shape_styles: Vec<DisplayShapeStyle>,
     /// Point features.
     pub points: Vec<DisplayPoint>,
+    /// Point changes since the preceding batch.
+    pub point_changes: Vec<DisplayPointChange>,
     /// Polygon features.
     pub shapes: Vec<DisplayShape>,
     /// Products that had no display value.
@@ -159,6 +191,7 @@ impl From<pilotage_presentation::DisplayBatch> for DisplayBatch {
             point_styles: value.point_styles.into_iter().map(Into::into).collect(),
             shape_styles: value.shape_styles.into_iter().map(Into::into).collect(),
             points: value.points.into_iter().map(Into::into).collect(),
+            point_changes: value.point_changes.into_iter().map(Into::into).collect(),
             shapes: value.shapes.into_iter().map(Into::into).collect(),
             omitted_products: value.omitted_products,
         }
@@ -236,6 +269,55 @@ impl From<pilotage_presentation::PointFeature> for DisplayPoint {
             rotation_deg: value.rotation_deg,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,
+        }
+    }
+}
+
+impl From<pilotage_presentation::PointChange> for DisplayPointChange {
+    fn from(value: pilotage_presentation::PointChange) -> Self {
+        match value {
+            pilotage_presentation::PointChange::Upsert { point } => {
+                let id = point.id.clone();
+                let producer_instance_id = point.producer_instance_id;
+                let snapshot_revision = point.snapshot_revision;
+                Self {
+                    kind: DisplayPointChangeKind::Upsert,
+                    point: Some(point.into()),
+                    id,
+                    style_id: None,
+                    transfer_to: None,
+                    producer_instance_id,
+                    snapshot_revision,
+                }
+            }
+            pilotage_presentation::PointChange::Stale {
+                id,
+                style_id,
+                producer_instance_id,
+                snapshot_revision,
+            } => Self {
+                kind: DisplayPointChangeKind::Stale,
+                point: None,
+                id,
+                style_id: Some(style_id),
+                transfer_to: None,
+                producer_instance_id,
+                snapshot_revision,
+            },
+            pilotage_presentation::PointChange::Remove {
+                id,
+                transfer_to,
+                producer_instance_id,
+                snapshot_revision,
+            } => Self {
+                kind: DisplayPointChangeKind::Remove,
+                point: None,
+                id,
+                style_id: None,
+                transfer_to,
+                producer_instance_id,
+                snapshot_revision,
+            },
         }
     }
 }

@@ -140,6 +140,38 @@ pub struct PointFeature {
     pub snapshot_revision: u64,
 }
 
+/// One renderer-neutral change to the point feature set.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PointChange {
+    /// Place or move one point.
+    Upsert {
+        /// Complete point value.
+        point: PointFeature,
+    },
+    /// Mark an existing point as stale.
+    Stale {
+        /// Stable feature identity.
+        id: String,
+        /// Style identity selected by display policy.
+        style_id: String,
+        /// Producer instance identity.
+        producer_instance_id: u64,
+        /// Snapshot revision.
+        snapshot_revision: u64,
+    },
+    /// Remove one point.
+    Remove {
+        /// Stable feature identity.
+        id: String,
+        /// Feature that absorbs this point after a merge.
+        transfer_to: Option<String>,
+        /// Producer instance identity.
+        producer_instance_id: u64,
+        /// Snapshot revision.
+        snapshot_revision: u64,
+    },
+}
+
 /// One polygon ready for display.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeFeature {
@@ -166,6 +198,8 @@ pub struct DisplayBatch {
     pub shape_styles: Vec<ShapeStyle>,
     /// Point features.
     pub points: Vec<PointFeature>,
+    /// Point changes since the preceding batch.
+    pub point_changes: Vec<PointChange>,
     /// Polygon features.
     pub shapes: Vec<ShapeFeature>,
     /// Supported domain products that had no display value.
@@ -176,6 +210,7 @@ impl DisplayBatch {
     /// Add features and omission counts from another batch.
     pub fn append(&mut self, other: Self) {
         self.points.extend(other.points);
+        self.point_changes.extend(other.point_changes);
         self.shapes.extend(other.shapes);
         self.omitted_products = self.omitted_products.wrapping_add(other.omitted_products);
     }

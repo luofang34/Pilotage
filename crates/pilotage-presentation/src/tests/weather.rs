@@ -22,7 +22,7 @@ fn observation_thresholds_select_the_flight_category_style() {
     }"#;
     let envelope = weather_envelope(WEATHER_OBSERVATION_MEDIA_TYPE, payload);
     let batch = PresentationAdapter::new()
-        .adapt(&[], Some(&envelope))
+        .adapt(Some(&envelope))
         .expect("weather conversion must succeed");
     let point = batch.points.first().expect("station point must exist");
 
@@ -41,7 +41,7 @@ fn three_thousand_foot_ceiling_is_marginal_vfr() {
     }"#;
     let envelope = weather_envelope(WEATHER_OBSERVATION_MEDIA_TYPE, payload);
     let batch = PresentationAdapter::new()
-        .adapt(&[], Some(&envelope))
+        .adapt(Some(&envelope))
         .expect("weather conversion must succeed");
     let point = batch.points.first().expect("station point must exist");
 
@@ -62,7 +62,7 @@ fn advisory_payload_becomes_a_closed_polygon() {
     }"#;
     let envelope = weather_envelope(WEATHER_ADVISORY_MEDIA_TYPE, payload);
     let batch = PresentationAdapter::new()
-        .adapt(&[], Some(&envelope))
+        .adapt(Some(&envelope))
         .expect("advisory conversion must succeed");
     let shape = batch.shapes.first().expect("advisory shape must exist");
 
@@ -74,7 +74,7 @@ fn advisory_payload_becomes_a_closed_polygon() {
 fn unsupported_weather_payload_is_counted_and_not_guessed() {
     let envelope = weather_envelope("application/octet-stream", &[1, 2, 3]);
     let batch = PresentationAdapter::new()
-        .adapt(&[], Some(&envelope))
+        .adapt(Some(&envelope))
         .expect("unknown media type must not fail the batch");
 
     assert_eq!(batch.omitted_products, 1);
@@ -96,7 +96,7 @@ fn open_advisory_ring_fails_with_product_context() {
     }"#;
     let envelope = weather_envelope(WEATHER_ADVISORY_MEDIA_TYPE, payload);
     let error = PresentationAdapter::new()
-        .adapt(&[], Some(&envelope))
+        .adapt(Some(&envelope))
         .expect_err("open ring must fail");
 
     assert!(matches!(

@@ -1,9 +1,11 @@
 //! Display policy and style catalogs.
 
-use airmass_core::WeatherSnapshotEnvelope;
-use surveillance_core::TrackSnapshotHandle;
+use std::collections::BTreeMap;
 
-use crate::{DisplayBatch, PointStyle, PresentationError, ShapeStyle};
+use airmass_core::WeatherSnapshotEnvelope;
+use surveillance_core::TrackDelta;
+
+use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, PresentationError, ShapeStyle};
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
 pub(crate) const TRAFFIC_COASTING_STYLE: &str = "traffic-coasting";
@@ -20,42 +22,88 @@ pub(crate) const ADVISORY_G_AIRMET_STYLE: &str = "advisory-g-airmet";
 pub(crate) const ADVISORY_CWA_STYLE: &str = "advisory-cwa";
 
 /// Converts domain snapshots to display values.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PresentationAdapter;
+#[derive(Clone, Debug, Default)]
+pub struct PresentationAdapter {
+    traffic_points: BTreeMap<(u64, u64), PointFeature>,
+    traffic_revisions: BTreeMap<(u64, u64), u64>,
+}
 
 impl PresentationAdapter {
     /// Create an adapter with the Pilotage display policy.
     #[must_use]
-    pub const fn new() -> Self {
-        Self
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Create an empty batch that contains the complete style catalog.
     #[must_use]
-    pub fn empty_batch(self) -> DisplayBatch {
+    pub fn empty_batch(&self) -> DisplayBatch {
         DisplayBatch {
             point_styles: point_styles(),
             shape_styles: shape_styles(),
             points: Vec::new(),
+            point_changes: Vec::new(),
             shapes: Vec::new(),
             omitted_products: 0,
         }
     }
 
-    /// Convert current traffic and weather snapshots into one batch.
+    /// Apply one ordered Surveillance delta.
+    pub fn apply_traffic_delta(&mut self, delta: &TrackDelta) -> Option<PointChange> {
+        let producer_instance_id = delta.producer_instance_id().get();
+        let snapshot_revision = delta.snapshot_revision().get();
+        let key = (producer_instance_id, delta.id().get());
+        let is_newer = self
+            .traffic_revisions
+            .get(&key)
+            .is_none_or(|current| snapshot_revision > *current);
+        if !is_newer {
+            return None;
+        }
+        self.traffic_revisions.insert(key, snapshot_revision);
+        let source_change = surveillance_geojson::map_track_delta(delta)?;
+        let change = crate::traffic::point_change(
+            &source_change,
+            producer_instance_id,
+            snapshot_revision,
+            self.traffic_points.get(&key),
+        )?;
+        self.apply_point_change(key, &change);
+        Some(change)
+    }
+
+    /// Convert current traffic and weather values into one batch.
     pub fn adapt(
-        self,
-        tracks: &[TrackSnapshotHandle],
+        &self,
         weather: Option<&WeatherSnapshotEnvelope>,
     ) -> Result<DisplayBatch, PresentationError> {
         let mut batch = self.empty_batch();
-        batch
-            .points
-            .extend(tracks.iter().filter_map(crate::traffic::point_for_track));
+        batch.points.extend(self.traffic_points.values().cloned());
         if let Some(snapshot) = weather {
             batch.append(crate::weather::features_for_weather(snapshot)?);
         }
         Ok(batch)
+    }
+
+    fn apply_point_change(&mut self, key: (u64, u64), change: &PointChange) {
+        match change {
+            PointChange::Upsert { point } => {
+                self.traffic_points.insert(key, point.clone());
+            }
+            PointChange::Stale {
+                style_id,
+                snapshot_revision,
+                ..
+            } => {
+                if let Some(point) = self.traffic_points.get_mut(&key) {
+                    point.style_id.clone_from(style_id);
+                    point.snapshot_revision = *snapshot_revision;
+                }
+            }
+            PointChange::Remove { .. } => {
+                self.traffic_points.remove(&key);
+            }
+        }
     }
 }
 
