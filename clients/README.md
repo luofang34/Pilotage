@@ -11,6 +11,7 @@ Contents:
   Companion-computer builds do not link it.
 - `apple-instrument-consumer/` — thin Swift compatibility gate and scene
   producer for IndicateAppleDisplay. It does not own panel logic.
+- `apple-situation/` — Rust-to-iOS package and native situation display client.
 
 Planned contents:
 

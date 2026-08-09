@@ -1,0 +1,41 @@
+[package]
+name = "pilotage-situation-ffi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "UniFFI facade for Pilotage traffic and weather on iOS"
+license = "MIT"
+repository = "https://github.com/luofang34/Pilotage"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+name = "pilotage-situation-uniffi-bindgen"
+path = "src/bin/uniffi_bindgen.rs"
+
+[dependencies]
+airmass-core = { git = "https://github.com/luofang34/Airmass.git", rev = "d903da96fa9778af013afe4bc0210b58916a3bf2", default-features = false }
+surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "a17e8d265e18b6009d8ed482ed2bcf0219cf2b84", default-features = false }
+uniffi = { version = "0.32", features = ["cli"] }
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+await_holding_lock = "deny"
+dbg_macro = "deny"
+expect_used = "deny"
+let_underscore_future = "deny"
+let_underscore_must_use = "deny"
+panic = "deny"
+print_stderr = "deny"
+print_stdout = "deny"
+unwrap_used = "deny"
+
+[lints]
+workspace = true

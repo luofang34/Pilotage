@@ -2,3 +2,6 @@
 # (tools/xtask): launches SITL sessions, wraps the reset script.
 [alias]
 xtask = "run -q -p xtask --"
+
+[net]
+git-fetch-with-cli = true
