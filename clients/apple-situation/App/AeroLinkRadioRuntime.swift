@@ -216,6 +216,7 @@ final class AeroLinkRadioRuntime: @unchecked Sendable {
         while consumed < Self.maximumTransfersPerCycle {
             let batch = try handle.value.poll()
             guard batch.transferConsumed else { return result }
+            result.hasConsumedTransfer = true
             result.eventLines.append(contentsOf: batch.jsonLines
                 .split(whereSeparator: \.isNewline)
                 .map(String.init))

@@ -109,6 +109,7 @@ struct AeroLinkDiscoveryAttempt: Sendable {
 
 struct AeroLinkDrainResult: Sendable {
     var eventLines: [String] = []
+    var hasConsumedTransfer = false
     var accepted: UInt64 = 0
     var rejected: UInt64 = 0
     var adsb1090GapSamples: UInt64 = 0

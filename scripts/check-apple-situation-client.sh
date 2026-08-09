@@ -122,6 +122,10 @@ require_pattern 'await maintenance[.]value' "$model" \
     "suspension must wait for the maintenance worker to exit"
 require_pattern 'await drain[.]value' "$model" \
     "suspension must wait for the drain worker to exit"
+require_pattern 'if let cleanup = cleanupTask' "$model" \
+    "activation must wait for an earlier suspension to finish"
+require_pattern 'guard !Task[.]isCancelled, !isActive' "$model" \
+    "a canceled activation must not restart radio reception"
 require_pattern 'domain[.]acceptReceptionEvent' "$client/App/AeroLinkRadioState.swift" \
     "each opaque AeroLink line must enter the Rust domain router"
 require_pattern 'session[.]acceptTrackRecord' "$client/App/AeroLinkRadioState.swift" \
@@ -132,6 +136,9 @@ require_pattern 'split[(]whereSeparator: .[.]isNewline[)]' "$runtime" \
     "the host must split nonempty serialized event lines"
 require_pattern 'guard batch[.]transferConsumed else' "$runtime" \
     "the drain must continue until AeroLink reports no consumed transfer"
+require_pattern 'guard result[.]hasConsumedTransfer else' \
+    "$client/App/AeroLinkRadioState.swift" \
+    "an empty poll must not erase retained decoder counters"
 require_pattern 'OSSystemExtensionsWorkspace[.]shared' \
     "$client/App/AeroLinkRadioDiscovery.swift" \
     "the disabled-driver state must use the system extension state"
@@ -143,6 +150,8 @@ require_pattern 'source[.]availability == [.]driverDisabled' \
     "the settings action must appear only for a disabled driver"
 require_pattern 'session[.]clearRadioRecords' "$client/App/AeroLinkRadioState.swift" \
     "suspension must clear retained radio display records"
+require_pattern 'reconnectRequiredAfterScan[(]' "$client/App/AeroLinkRadioState.swift" \
+    "a reconnect request raised during discovery must survive the scan result"
 
 drain_body=$(sed -n '/private func drain[(]/,/^    }/p' "$runtime")
 if grep -Eq '[.](status|start|stop)[(]' <<<"$drain_body"; then

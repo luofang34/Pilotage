@@ -60,7 +60,9 @@ actor AeroLinkRadioState {
         idleAvailability = .unplugged
         reconnectRequested = true
         do {
-            try await emit(display: session.currentDisplay())
+            let display = try session.currentDisplay()
+            lastError = nil
+            await emit(display: display)
         } catch {
             lastError = error.localizedDescription
             await emit(display: nil)
@@ -78,7 +80,9 @@ actor AeroLinkRadioState {
         retired.removeAll()
         do {
             try domain.reset()
-            await emit(display: try session.clearRadioRecords())
+            let display = try session.clearRadioRecords()
+            lastError = nil
+            await emit(display: display)
         } catch {
             lastError = error.localizedDescription
             await emit(display: nil)
@@ -178,9 +182,12 @@ actor AeroLinkRadioState {
                 degraded.clear(band)
             }
         }
-        reconnectRequested = attempt.hadOpenFailures
-            || attempt.scanFailure != nil
-            || !attempt.receiverFailures.isEmpty
+        reconnectRequested = reconnectRequiredAfterScan(
+            pending: reconnectRequested,
+            hadOpenFailures: attempt.hadOpenFailures,
+            hasScanError: attempt.scanFailure != nil,
+            hasReceiverFailures: !attempt.receiverFailures.isEmpty
+        )
         await emit(display: nil)
         return discarded
     }
@@ -207,7 +214,9 @@ actor AeroLinkRadioState {
                 utcMillis: utcMillis,
                 monotonicMicros: monotonicMicros
             )
-            await emit(display: try accept(records))
+            let display = try accept(records)
+            lastError = nil
+            await emit(display: display)
         } catch {
             lastError = error.localizedDescription
             await emit(display: nil)
@@ -221,6 +230,7 @@ actor AeroLinkRadioState {
         utcMillis: Int64,
         monotonicMicros: UInt64
     ) async {
+        guard result.hasConsumedTransfer else { return }
         let handle = connection.handle
         guard isCurrent(handle, cycle: expectedCycle),
               var live = connections[handle.key] else { return }
@@ -232,10 +242,11 @@ actor AeroLinkRadioState {
         if result.limitExhausted {
             live.diagnostics.drainLimitExhaustions &+= 1
         }
-        connections[handle.key] = live
-        do {
-            var display = DisplayAccumulator()
-            for line in result.eventLines {
+        var display = DisplayAccumulator()
+        var acceptedLine = false
+        var rejectedLine = false
+        for line in result.eventLines {
+            do {
                 let records = try domain.acceptReceptionEvent(
                     eventJson: line,
                     reconnectGeneration: connection.reconnectGeneration,
@@ -243,12 +254,18 @@ actor AeroLinkRadioState {
                     monotonicMicros: monotonicMicros
                 )
                 try accept(records, into: &display)
+                acceptedLine = true
+            } catch {
+                live.diagnostics.rejectedInputs &+= 1
+                lastError = error.localizedDescription
+                rejectedLine = true
             }
-            await emit(display: display.batch)
-        } catch {
-            lastError = error.localizedDescription
-            await emit(display: nil)
         }
+        if acceptedLine && !rejectedLine {
+            lastError = nil
+        }
+        connections[handle.key] = live
+        await emit(display: display.batch)
     }
 
     private func record(_ failure: AeroLinkFailure) {

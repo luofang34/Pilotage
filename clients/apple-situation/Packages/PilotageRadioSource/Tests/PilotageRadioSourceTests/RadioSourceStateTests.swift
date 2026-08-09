@@ -86,3 +86,25 @@ func cleanScanRule() {
         hasReceiverFailures: false
     ))
 }
+
+@Test("A reconnect request raised during a scan survives its result")
+func reconnectRequestSurvivesScan() {
+    #expect(reconnectRequiredAfterScan(
+        pending: true,
+        hadOpenFailures: false,
+        hasScanError: false,
+        hasReceiverFailures: false
+    ))
+    #expect(reconnectRequiredAfterScan(
+        pending: false,
+        hadOpenFailures: true,
+        hasScanError: false,
+        hasReceiverFailures: false
+    ))
+    #expect(!reconnectRequiredAfterScan(
+        pending: false,
+        hadOpenFailures: false,
+        hasScanError: false,
+        hasReceiverFailures: false
+    ))
+}

@@ -246,3 +246,13 @@ public func scanRetiresProcessFailure(
 ) -> Bool {
     !hadOpenFailures && !hasScanError && !hasReceiverFailures
 }
+
+/// Keep a pending reconnect request or record a scan failure.
+public func reconnectRequiredAfterScan(
+    pending: Bool,
+    hadOpenFailures: Bool,
+    hasScanError: Bool,
+    hasReceiverFailures: Bool
+) -> Bool {
+    pending || hadOpenFailures || hasScanError || hasReceiverFailures
+}

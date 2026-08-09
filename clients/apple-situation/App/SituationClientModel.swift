@@ -18,6 +18,8 @@ final class SituationClientModel: ObservableObject {
     private var runtime: AeroLinkRadioRuntime?
     private var maintenanceTask: Task<Void, Never>?
     private var drainTask: Task<Void, Never>?
+    private var cleanupTask: (generation: UInt64, task: Task<Void, Never>)?
+    private var cleanupGeneration: UInt64 = 0
     private var startupError: String?
     private var isActive = false
 
@@ -38,7 +40,13 @@ final class SituationClientModel: ObservableObject {
     }
 
     func activate() async {
-        guard !isActive, let domain else { return }
+        if let cleanup = cleanupTask {
+            await cleanup.task.value
+            if cleanupTask?.generation == cleanup.generation {
+                cleanupTask = nil
+            }
+        }
+        guard !Task.isCancelled, !isActive, let domain else { return }
         isActive = true
         let runtime: AeroLinkRadioRuntime
         if let current = self.runtime {
@@ -54,6 +62,7 @@ final class SituationClientModel: ObservableObject {
             self.runtime = runtime
         }
         await runtime.activate()
+        guard !Task.isCancelled, isActive else { return }
         maintenanceTask = Task.detached(priority: .utility) {
             await runtime.maintenanceLoop()
         }
@@ -71,14 +80,21 @@ final class SituationClientModel: ObservableObject {
         drain?.cancel()
         maintenanceTask = nil
         drainTask = nil
-        await Task.detached(priority: .utility) {
+        cleanupGeneration &+= 1
+        let generation = cleanupGeneration
+        let cleanup = Task.detached(priority: .utility) {
             await runtime.suspend()
-        }.value
-        if let maintenance {
-            await maintenance.value
+            if let maintenance {
+                await maintenance.value
+            }
+            if let drain {
+                await drain.value
+            }
         }
-        if let drain {
-            await drain.value
+        cleanupTask = (generation, cleanup)
+        await cleanup.value
+        if cleanupTask?.generation == generation {
+            cleanupTask = nil
         }
     }
 

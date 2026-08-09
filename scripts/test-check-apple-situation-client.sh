@@ -116,6 +116,34 @@ fi
 
 sed -i.bak 's/await Task[.]yield()/await maintenance.value/' \
     "$fixture/clients/apple-situation/App/SituationClientModel.swift"
+sed -i.bak 's/reconnectRequiredAfterScan[(]/discardReconnectRequest(/' \
+    "$fixture/clients/apple-situation/App/AeroLinkRadioState.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted a lost reconnect request" >&2
+    exit 1
+fi
+
+sed -i.bak 's/discardReconnectRequest[(]/reconnectRequiredAfterScan(/' \
+    "$fixture/clients/apple-situation/App/AeroLinkRadioState.swift"
+sed -i.bak 's/if let cleanup = cleanupTask/if false/' \
+    "$fixture/clients/apple-situation/App/SituationClientModel.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted overlapping lifecycle work" >&2
+    exit 1
+fi
+
+sed -i.bak 's/if false/if let cleanup = cleanupTask/' \
+    "$fixture/clients/apple-situation/App/SituationClientModel.swift"
+sed -i.bak '/guard result[.]hasConsumedTransfer else { return }/d' \
+    "$fixture/clients/apple-situation/App/AeroLinkRadioState.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted counter loss after an empty poll" >&2
+    exit 1
+fi
+
+sed -i.bak '/let handle = connection[.]handle/i\
+        guard result.hasConsumedTransfer else { return }' \
+    "$fixture/clients/apple-situation/App/AeroLinkRadioState.swift"
 printf '\nlet decoder = JSONDecoder()\n' \
     >> "$fixture/clients/apple-situation/App/AeroLinkRadioRuntime.swift"
 if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
