@@ -122,6 +122,15 @@ jobs:
       - name: Indicate compatibility identity
         run: bash scripts/check-indicate-compatibility.sh
 
+      - name: companion host excludes Apple bridge dependencies
+        run: |
+          tree=$(cargo tree -p pilotage-session-host -e normal)
+          for forbidden in pilotage-instrument-apple-bridge uniffi; do
+            if grep -q "$forbidden" <<<"$tree"; then
+              echo "pilotage-session-host depends on $forbidden"; exit 1
+            fi
+          done
+
       - name: geospatial contract (SVS-01)
         # Datum discipline, coherence, view/projection, availability, and the
         # fail-closed versioned ABI for synthetic vision and conformal HUD.
@@ -305,3 +314,35 @@ jobs:
           else
             echo "origin/${base} has no .proto files yet; nothing to compare against."
           fi
+
+  apple-instrument-consumer:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Authorize the private git dependency (Navigate)
+        env:
+          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
+          chmod 600 ~/.ssh/navigate_ci
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+
+      - name: Authorize the private Swift dependency (IndicateAppleDisplay)
+        env:
+          INDICATE_APPLE_DISPLAY_DEPLOY_KEY: ${{ secrets.INDICATE_APPLE_DISPLAY_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$INDICATE_APPLE_DISPLAY_DEPLOY_KEY" > ~/.ssh/indicate_apple_display_ci
+          chmod 600 ~/.ssh/indicate_apple_display_ci
+          printf 'Host github-indicate-apple-display\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/indicate_apple_display_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-indicate-apple-display/luofang34/IndicateAppleDisplay".insteadOf "https://github.com/luofang34/IndicateAppleDisplay"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate the bridge and test the Apple consumer
+        run: bash scripts/check-apple-instrument-consumer.sh

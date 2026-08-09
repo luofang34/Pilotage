@@ -48,3 +48,5 @@ adapters/**/bridge/build/
 *.bak
 *.orig
 clients/web/session.json
+
+**.build/
