@@ -25,6 +25,7 @@
 //! attempts. Successful scene bytes remain valid until the next render attempt
 //! or reinitialization and must be consumed within that interval.
 
+mod composition;
 mod exports;
 mod feeder_exports;
 mod panel_registry;
