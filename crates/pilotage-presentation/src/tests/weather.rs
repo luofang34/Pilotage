@@ -8,7 +8,7 @@ use airmass_core::{
 };
 use airmass_geojson::{FeatureDelta, Wgs84Position, map_snapshot_transition};
 
-use crate::{PointChange, PresentationAdapter};
+use crate::{PointChange, PresentationAdapter, WEATHER_REPORT_LAYER_ID};
 
 #[test]
 fn typed_flight_categories_select_the_color_policy() {
@@ -130,6 +130,22 @@ fn clearing_weather_emits_removal() {
 
     assert!(matches!(changes.as_slice(), [PointChange::Remove { .. }]));
     assert!(adapter.adapt().points.is_empty());
+}
+
+#[test]
+fn disabled_weather_retains_the_current_report() {
+    let delta = initial_delta(Some(FlightCategory::Vfr));
+    let mut adapter = PresentationAdapter::new();
+    assert!(adapter.set_layer_enabled(WEATHER_REPORT_LAYER_ID, false));
+
+    assert!(adapter.apply_weather_delta(&delta).is_none());
+    assert!(adapter.adapt().points.is_empty());
+
+    assert!(adapter.set_layer_enabled(WEATHER_REPORT_LAYER_ID, true));
+    let batch = adapter.adapt();
+    assert_eq!(batch.points.len(), 1);
+    assert_eq!(batch.points[0].layer_id, WEATHER_REPORT_LAYER_ID);
+    assert!(batch.point_changes.is_empty());
 }
 
 fn initial_delta(category: Option<FlightCategory>) -> FeatureDelta {

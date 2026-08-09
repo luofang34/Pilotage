@@ -15,8 +15,11 @@ public enum SituationOverlayError: Error, Equatable {
 @MainActor
 final class SituationOverlay {
     private var layerIdentifiers: [String] = []
+    private var pointLayerIdentifiers: Set<String> = []
     private var points: [String: DisplayPoint] = [:]
     private var sourceIdentifiers: [String] = []
+
+    var interactiveLayerIdentifiers: Set<String> { pointLayerIdentifiers }
 
     func apply(_ batch: DisplayBatch, to mapStyle: MLNStyle) throws {
         updatePoints(with: batch)
@@ -135,7 +138,7 @@ final class SituationOverlay {
         layer.circleRadius = constant(style.radiusPoints)
         layer.circleStrokeColor = constant(color(style.outline))
         layer.circleStrokeWidth = constant(style.outlineWidthPoints)
-        add(layer, to: mapStyle)
+        add(layer, to: mapStyle, interactive: true)
     }
 
     private func addMarkerLayer(
@@ -154,7 +157,7 @@ final class SituationOverlay {
         layer.textRotation = NSExpression(forKeyPath: "rotation")
         layer.textRotationAlignment = constant("map")
         layer.textAllowsOverlap = constant(style.markerAllowsOverlap)
-        add(layer, to: mapStyle)
+        add(layer, to: mapStyle, interactive: true)
     }
 
     private func addPointLabelLayer(
@@ -172,7 +175,7 @@ final class SituationOverlay {
             offsetY: style.labelOffsetY,
             allowsOverlap: style.labelAllowsOverlap
         )
-        add(layer, to: mapStyle)
+        add(layer, to: mapStyle, interactive: true)
     }
 
     private func addFillLayer(
@@ -231,9 +234,16 @@ final class SituationOverlay {
         layer.textAllowsOverlap = constant(allowsOverlap)
     }
 
-    private func add(_ layer: MLNStyleLayer, to mapStyle: MLNStyle) {
+    private func add(
+        _ layer: MLNStyleLayer,
+        to mapStyle: MLNStyle,
+        interactive: Bool = false
+    ) {
         mapStyle.addLayer(layer)
         layerIdentifiers.append(layer.identifier)
+        if interactive {
+            pointLayerIdentifiers.insert(layer.identifier)
+        }
     }
 
     private func removeManagedContent(from mapStyle: MLNStyle) {
@@ -248,6 +258,7 @@ final class SituationOverlay {
             }
         }
         layerIdentifiers.removeAll(keepingCapacity: true)
+        pointLayerIdentifiers.removeAll(keepingCapacity: true)
         sourceIdentifiers.removeAll(keepingCapacity: true)
     }
 

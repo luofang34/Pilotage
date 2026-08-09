@@ -1,11 +1,11 @@
 use surveillance_core::{
-    AddressNamespace, Callsign, EmergencyState, FieldProvenance, FieldQuality, ObservationOrigin,
-    ObservationTime, ProducerInstanceId, RemovalReason, SnapshotRevision, SourceRef, TimedField,
-    TrackDelta, TrackId, TrackKey, TrackPhase, TrackSnapshot, TrackSnapshotHandle,
-    VelocityObservation, Wgs84Position,
+    AddressNamespace, AirGroundState, Band, Callsign, DeliveryPath, EmergencyState,
+    FieldProvenance, FieldQuality, ObservationOrigin, ObservationTime, ProducerInstanceId,
+    RemovalReason, SnapshotRevision, SourceRef, Squawk, TimedField, TrackDelta, TrackId, TrackKey,
+    TrackPhase, TrackSnapshot, TrackSnapshotHandle, VelocityObservation, Wgs84Position,
 };
 
-use crate::{PointChange, PresentationAdapter};
+use crate::{PointChange, PresentationAdapter, TRAFFIC_LAYER_ID};
 
 #[test]
 fn active_track_becomes_a_policy_styled_upsert() {
@@ -93,6 +93,88 @@ fn merged_removal_names_the_surviving_feature() {
     assert_eq!(batch.points[0].id, "traffic-7-43");
 }
 
+#[test]
+fn disabled_traffic_retains_the_newest_state_without_replay() {
+    let mut adapter = PresentationAdapter::new();
+    adapter.apply_traffic_delta(&updated_delta(42, 3, false, EmergencyState::None));
+    assert!(adapter.set_layer_enabled(TRAFFIC_LAYER_ID, false));
+
+    let hidden_change = adapter.apply_traffic_delta(&updated_delta_with_latitude(42, 4, 43.0));
+    let hidden = adapter.adapt();
+    assert!(hidden_change.is_none());
+    assert!(hidden.points.is_empty());
+    assert_eq!(hidden.traffic_details.len(), 1);
+
+    assert!(adapter.set_layer_enabled(TRAFFIC_LAYER_ID, true));
+    let visible = adapter.adapt();
+    assert_eq!(visible.points.len(), 1);
+    assert_eq!(visible.points[0].coordinate.latitude_deg, 43.0);
+    assert!(visible.point_changes.is_empty());
+}
+
+#[test]
+fn positionless_track_has_a_list_item_and_complete_absence_reasons() {
+    let mut track = TrackSnapshot::new(TrackId::new(51), track_key(51), 10);
+    track.callsign = Some(radio_timed(Callsign::new("MODESONLY")));
+    track.pressure_altitude_ft = Some(radio_timed(7_000));
+    let delta = TrackDelta::Updated(TrackSnapshotHandle::new(
+        ProducerInstanceId::new(7),
+        SnapshotRevision::new(1),
+        track,
+    ));
+    let mut adapter = PresentationAdapter::new();
+    adapter.advance_time(2_000_010);
+
+    assert!(adapter.apply_traffic_delta(&delta).is_none());
+    let batch = adapter.adapt();
+    assert!(batch.points.is_empty());
+    assert_eq!(batch.positionless_traffic.len(), 1);
+    assert_eq!(batch.positionless_traffic[0].title, "MODESONLY");
+    let detail = &batch.traffic_details[0];
+    let position = detail
+        .fields
+        .iter()
+        .find(|field| field.id == "position")
+        .expect("position field must exist");
+    assert!(position.value.is_none());
+    assert_eq!(
+        position.absence_reason.as_deref(),
+        Some("The track has no position observation.")
+    );
+}
+
+#[test]
+fn traffic_detail_keeps_field_age_band_and_link() {
+    let mut track = complete_track(61);
+    track
+        .identities
+        .associate(TrackKey::new(AddressNamespace::SelfAssigned, 0x00_C0DE));
+    let delta = TrackDelta::Updated(TrackSnapshotHandle::new(
+        ProducerInstanceId::new(7),
+        SnapshotRevision::new(2),
+        track,
+    ));
+    let mut adapter = PresentationAdapter::new();
+    adapter.advance_time(2_000_010);
+    adapter.apply_traffic_delta(&delta);
+
+    let batch = adapter.adapt();
+    let detail = &batch.traffic_details[0];
+    assert_eq!(detail.primary_identity, "ICAO A0B13D");
+    assert_eq!(detail.other_identities, ["Self-assigned 00C0DE"]);
+    assert_eq!(detail.lifecycle, "Active");
+    assert_eq!(detail.newest_observation_age, "2.0 s old");
+    assert_eq!(detail.fields.len(), 8);
+    for field in &detail.fields {
+        assert!(field.value.is_some(), "{} must have a value", field.id);
+        assert_eq!(field.age.as_deref(), Some("2.0 s old"));
+        let source = field.source.as_deref().expect("field source must exist");
+        assert!(source.contains("1090 MHz"));
+        assert!(source.contains("Local receiver"));
+        assert!(field.absence_reason.is_none());
+    }
+}
+
 fn updated_delta(
     id: u64,
     revision: u64,
@@ -115,6 +197,19 @@ fn coasting_delta(id: u64, revision: u64, emergency: EmergencyState) -> TrackDel
         false,
         TrackPhase::Coasting,
         emergency,
+    ))
+}
+
+fn updated_delta_with_latitude(id: u64, revision: u64, latitude_deg: f64) -> TrackDelta {
+    let mut track = complete_track(id);
+    track.position = Some(radio_timed(Wgs84Position {
+        latitude_deg,
+        longitude_deg: -71.0096,
+    }));
+    TrackDelta::Updated(TrackSnapshotHandle::new(
+        ProducerInstanceId::new(7),
+        SnapshotRevision::new(revision),
+        track,
     ))
 }
 
@@ -145,6 +240,27 @@ fn track_handle(
     )
 }
 
+fn complete_track(id: u64) -> TrackSnapshot {
+    let mut track = TrackSnapshot::new(TrackId::new(id), track_key(id), 10);
+    track.position = Some(radio_timed(Wgs84Position {
+        latitude_deg: 42.3656,
+        longitude_deg: -71.0096,
+    }));
+    track.pressure_altitude_ft = Some(radio_timed(5_500));
+    track.geometric_altitude_ft = Some(radio_timed(5_650));
+    track.velocity = Some(radio_timed(
+        serde_json::from_str(r#"{"ground_speed_kt":120.0,"track_angle_deg_true":92.0}"#)
+            .expect("velocity fixture must decode"),
+    ));
+    track.callsign = Some(radio_timed(Callsign::new("N61TEST")));
+    track.squawk = Some(radio_timed(
+        Squawk::try_from(1_200).expect("squawk fixture must be valid"),
+    ));
+    track.air_ground = Some(radio_timed(AirGroundState::Subsonic));
+    track.emergency = Some(radio_timed(EmergencyState::None));
+    track
+}
+
 fn track_key(id: u64) -> TrackKey {
     TrackKey::new(AddressNamespace::Icao, 0xA0_B1_00 + id as u32)
 }
@@ -158,6 +274,21 @@ fn timed<T>(value: T) -> TimedField<T> {
             ObservationOrigin::Replay,
             AddressNamespace::Icao,
             SourceRef::default(),
+        ),
+    )
+}
+
+fn radio_timed<T>(value: T) -> TimedField<T> {
+    TimedField::new(
+        value,
+        ObservationTime::local(10),
+        FieldQuality::default(),
+        FieldProvenance::new(
+            ObservationOrigin::AdsbDirect {
+                band: Band::Adsb1090,
+            },
+            AddressNamespace::Icao,
+            SourceRef::new(4, 2, DeliveryPath::LocalReceiver),
         ),
     )
 }

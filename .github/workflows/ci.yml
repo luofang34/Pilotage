@@ -115,6 +115,12 @@ jobs:
       - name: situation presentation boundary
         run: bash scripts/check-situation-presentation-boundary.sh
 
+      - name: situation layer controls self-test
+        run: bash scripts/test-check-situation-layer-controls.sh
+
+      - name: situation layer controls
+        run: bash scripts/check-situation-layer-controls.sh
+
       - name: Apple situation client guard self-test
         run: bash scripts/test-check-apple-situation-client.sh
 

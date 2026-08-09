@@ -2,6 +2,7 @@
 
 use surveillance_geojson::{AircraftFeature, FeatureDelta};
 
+use crate::layer::TRAFFIC_LAYER_ID;
 use crate::policy::{TRAFFIC_ACTIVE_STYLE, TRAFFIC_COASTING_STYLE, TRAFFIC_EMERGENCY_STYLE};
 use crate::{Coordinate, PointChange, PointFeature};
 
@@ -54,6 +55,7 @@ fn point_for_feature(feature: &AircraftFeature) -> Option<PointFeature> {
     let track = feature.snapshot();
     Some(PointFeature {
         id: traffic_id(feature.producer_instance_id().get(), feature.id().get()),
+        layer_id: TRAFFIC_LAYER_ID.into(),
         coordinate,
         style_id: traffic_style(feature).into(),
         label: traffic_display_label(feature),
@@ -112,6 +114,6 @@ fn traffic_display_label(feature: &AircraftFeature) -> Option<String> {
     })
 }
 
-fn traffic_id(producer_instance_id: u64, track_id: u64) -> String {
+pub(crate) fn traffic_id(producer_instance_id: u64, track_id: u64) -> String {
     format!("traffic-{producer_instance_id}-{track_id}")
 }

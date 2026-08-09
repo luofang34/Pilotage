@@ -126,6 +126,8 @@ pub struct ShapeStyle {
 pub struct PointFeature {
     /// Stable feature identity.
     pub id: String,
+    /// Stable application layer identity.
+    pub layer_id: String,
     /// Feature position.
     pub coordinate: Coordinate,
     /// Style identity from the point style catalog.
@@ -177,6 +179,8 @@ pub enum PointChange {
 pub struct ShapeFeature {
     /// Stable feature identity.
     pub id: String,
+    /// Stable application layer identity.
+    pub layer_id: String,
     /// Polygon rings. The first ring is the exterior ring.
     pub rings: Vec<CoordinateRing>,
     /// Style identity from the shape style catalog.
@@ -192,6 +196,8 @@ pub struct ShapeFeature {
 /// One complete set of display values and its style catalog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayBatch {
+    /// User-controlled display layers.
+    pub layers: Vec<crate::layer::LayerControl>,
     /// Point style catalog.
     pub point_styles: Vec<PointStyle>,
     /// Shape style catalog.
@@ -202,6 +208,10 @@ pub struct DisplayBatch {
     pub point_changes: Vec<PointChange>,
     /// Polygon features.
     pub shapes: Vec<ShapeFeature>,
+    /// Traffic tracks that do not have a map position.
+    pub positionless_traffic: Vec<crate::detail::TrafficListItem>,
+    /// Detail values for retained traffic tracks.
+    pub traffic_details: Vec<crate::detail::TrafficDetail>,
     /// Supported domain products that had no display value.
     pub omitted_products: u64,
 }
@@ -209,9 +219,12 @@ pub struct DisplayBatch {
 impl DisplayBatch {
     /// Add features and omission counts from another batch.
     pub fn append(&mut self, other: Self) {
+        self.layers = other.layers;
         self.points.extend(other.points);
         self.point_changes.extend(other.point_changes);
         self.shapes.extend(other.shapes);
+        self.positionless_traffic = other.positionless_traffic;
+        self.traffic_details = other.traffic_details;
         self.omitted_products = self.omitted_products.wrapping_add(other.omitted_products);
     }
 }

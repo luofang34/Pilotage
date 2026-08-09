@@ -33,6 +33,12 @@ pub enum FfiError {
         /// Validation or decode detail.
         message: String,
     },
+    /// A layer identity is not in the portable catalog.
+    #[error("display layer is not known: {layer_id}")]
+    UnknownLayer {
+        /// Rejected layer identity.
+        layer_id: String,
+    },
     /// The session state is not available.
     #[error("session state is not available: {message}")]
     SessionState {
