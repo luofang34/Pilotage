@@ -1,8 +1,8 @@
 # ADR-0036: Domain-state ownership by data category, and the execution model that connects it
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-08-09
-- Supersedes: [ADR-0035](0035-source-neutral-situational-services.md)
+- Supersedes on acceptance: [ADR-0035](0035-source-neutral-situational-services.md)
 
 ## Context
 
