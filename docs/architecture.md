@@ -63,19 +63,28 @@ Planes are contract boundaries; deployables are a deployment decision.
 |---|---|---|
 | Flight control (Aviate first; PX4 via adapter) | Control-grade estimation, stabilization, actuation | [ADR-0008](adr/0008-engine-independent-adapter-boundary.md), [ADR-0018](adr/0018-avionics-telemetry-and-aviate-adapter.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
 | Navigate (sibling repository) | Multi-sensor fusion, integrity, flight-plan execution, guidance, terrain awareness | [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md) |
-| `aero-link` and `avionics-link` | Source access, protocol decode, and thin domain adapters | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
-| Surveillance (sibling repository) | Source-neutral traffic observations, fusion, tracks, deltas, and snapshots | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
-| AeroContext (repository `v99n62`) | Weather, NOTAM, TFR, briefing, navigation data, revision, validity, and expiry | [ADR-0035](adr/0035-source-neutral-situational-services.md) |
+| `aero-link` and `avionics-link` | Source access, protocol decode, bounded FIS-B segment assembly, and thin domain adapters | [ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) |
+| Surveillance (sibling repository) | Source-neutral traffic observations, fusion, tracks, deltas, and snapshots | [ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) |
+| Airmass | Meteorological state: observations, forecasts, hazards, revision, validity, and expiry | [ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) |
+| Airspace | Aeronautical notice and restriction state: NOTAM, TFR, and special-use airspace status | [ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) |
+| Navdata | Cycle-dated NASR and CIFP baseline | [ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) |
+| AeroContext (repository `v99n62`) | Provider orchestration, briefing composition, and a temporary compatibility facade | [ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) |
 | Pilotage host | Component orchestration + session/authority/media endpoint | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md) |
 | Operator client | Control terminal ↔ EFB by discovered capability; plugin displays | [ADR-0026](adr/0026-host-capability-profiles.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
 | Coordination server (optional) | Identity, host registry, rendezvous, entitlement-gated data services | [ADR-0027](adr/0027-optional-coordination-server.md) |
 
 ## Situational services
 
-[ADR-0035](adr/0035-source-neutral-situational-services.md) assigns traffic
-state to Surveillance and advisory product state to AeroContext. `aero-link`
-and `avionics-link` supply source data through thin adapters. Pilotage reads
-the domain outputs through a read-only `SituationView`.
+[ADR-0036](adr/0036-domain-state-ownership-and-execution-model.md) assigns traffic state to Surveillance, meteorological
+state to Airmass, notice and restriction state to Airspace, and the cycle-dated
+baseline to Navdata. `aero-link` and `avionics-link` supply source data through
+thin adapters. `aero-link` assembles a FIS-B product one time and a router
+sends each product to its owner. Pilotage reads the domain outputs through a
+read-only `SituationView`.
+
+A domain core is synchronous and takes time as data. Asynchronous execution
+belongs between components, and each channel states its bound and its
+backpressure policy.
 
 Map adapters and AI are optional consumers of `SituationView`. A headless
 deployment does not need either consumer. `Communicate` does not own
