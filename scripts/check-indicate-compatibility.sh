@@ -43,6 +43,9 @@ check_equal "corpus digest" \
 check_equal "registry scene digest" \
   "$(jq -r '.registrySceneDigest' "$pin")" \
   "$(jq -r '.compositionDigest' "$manifest")"
+check_equal "glyph pack hash" \
+  "$(jq -r '.glyphRecordedHash' "$pin")" \
+  "$(jq -r '.glyphPackHash' "$manifest")"
 
 cargo_revisions="$(
   sed -nE 's/.*Indicate\.git", rev = "([0-9a-f]+)".*/\1/p' Cargo.toml |

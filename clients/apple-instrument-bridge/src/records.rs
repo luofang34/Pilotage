@@ -39,6 +39,15 @@ pub struct BridgeCompositionSlot {
     pub height: f32,
 }
 
+/// The controlled glyph asset for all shipped instrument panels.
+#[derive(uniffi::Record)]
+pub struct BridgeGlyphAsset {
+    /// The canonical glyph manifest bytes.
+    pub canonical: Vec<u8>,
+    /// The content hash recorded by the glyph pack.
+    pub recorded_hash: Vec<u8>,
+}
+
 /// One panel result in a composition transaction.
 #[derive(uniffi::Record)]
 pub struct BridgeCompositionPanelOutcome {

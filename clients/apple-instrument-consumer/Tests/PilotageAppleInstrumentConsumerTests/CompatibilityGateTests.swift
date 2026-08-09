@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 import IndicateAppleDisplay
 import Testing
@@ -44,6 +45,7 @@ private struct CompatibilityPin: Decodable {
     let corpusDigest: String
     let registrySceneDigest: String
     let screenCompositionDigest: String
+    let glyphRecordedHash: String
 }
 
 private func compatibilityPin() throws -> CompatibilityPin {
@@ -63,7 +65,20 @@ private func matchingIdentity() -> InstrumentRuntimeIdentity {
         corpusVersion: UInt32(SceneBackend.conformanceCorpusVersion),
         corpusDigest: SceneBackend.conformanceCorpusDigest,
         registrySceneDigest: AppleInstrumentCompatibilityGate.registrySceneDigest,
-        screenCompositionDigest: AppleInstrumentCompatibilityGate.screenCompositionDigest
+        screenCompositionDigest: AppleInstrumentCompatibilityGate.screenCompositionDigest,
+        glyphRecordedHash: AppleInstrumentCompatibilityGate.glyphRecordedHash
+    )
+}
+
+private func syntheticGlyphAtlas() throws -> PilotageGlyphAtlas {
+    let canonical: [UInt8] = [
+        1, 0, 1, 1, 1, 1, 1, 0,
+        65, 0, 0, 0, 1, 1,
+    ]
+    let digest = Array(SHA256.hash(data: Data(canonical)))
+    return try PilotageGlyphAtlas(
+        asset: InstrumentGlyphAsset(canonical: canonical, recordedHash: digest),
+        expectedHash: hex(digest)
     )
 }
 
@@ -90,10 +105,11 @@ func swiftGateMatchesConsumerPin() throws {
         AppleInstrumentCompatibilityGate.screenCompositionDigest ==
             pin.screenCompositionDigest
     )
+    #expect(AppleInstrumentCompatibilityGate.glyphRecordedHash == pin.glyphRecordedHash)
 }
 
 @Test("Each compatibility mismatch stops composition production")
-func everyMismatchStopsBeforeProduction() {
+func everyMismatchStopsBeforeProduction() throws {
     let expected = matchingIdentity()
     let cases: [(InstrumentCompatibilityField, InstrumentRuntimeIdentity)] = [
         (.stateABI, identity(expected, stateABI: expected.stateABI + 1)),
@@ -102,13 +118,15 @@ func everyMismatchStopsBeforeProduction() {
         (.corpusDigest, identity(expected, corpusDigest: "invalid")),
         (.registrySceneDigest, identity(expected, registrySceneDigest: "invalid")),
         (.screenCompositionDigest, identity(expected, screenCompositionDigest: "invalid")),
+        (.glyphRecordedHash, identity(expected, glyphRecordedHash: "invalid")),
     ]
+    let atlas = try syntheticGlyphAtlas()
 
     for (field, mismatched) in cases {
         let runtime = RuntimeDouble()
         var initializationCalls = 0
         do {
-            _ = try AppleInstrumentCompatibilityGate.verify(mismatched) {
+            _ = try AppleInstrumentCompatibilityGate.verify(mismatched, glyphAtlas: atlas) {
                 initializationCalls += 1
                 return runtime
             }
@@ -130,7 +148,10 @@ func everyMismatchStopsBeforeProduction() {
 @Test("A verified composition can paint through IndicateAppleDisplay")
 func verifiedCompositionPaints() throws {
     let runtime = RuntimeDouble()
-    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let verified = try AppleInstrumentCompatibilityGate.verify(
+        matchingIdentity(),
+        glyphAtlas: syntheticGlyphAtlas()
+    ) { runtime }
     let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
     try composition.compose(nowMs: 100, pathHealthy: true)
     let display = PanelDisplay(
@@ -161,7 +182,10 @@ func oneRuntimeCallSuppliesEveryPanel() throws {
         ],
         generation: 7
     )
-    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let verified = try AppleInstrumentCompatibilityGate.verify(
+        matchingIdentity(),
+        glyphAtlas: syntheticGlyphAtlas()
+    ) { runtime }
     let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
 
     #expect(try composition.compose(nowMs: 500, pathHealthy: true) == 7)
@@ -179,7 +203,10 @@ func oneRuntimeCallSuppliesEveryPanel() throws {
 @Test("State acceptance time reaches the runtime and clears cached scenes")
 func stateAcceptanceInvalidatesCachedScenes() throws {
     let runtime = RuntimeDouble()
-    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let verified = try AppleInstrumentCompatibilityGate.verify(
+        matchingIdentity(),
+        glyphAtlas: syntheticGlyphAtlas()
+    ) { runtime }
     let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
     try composition.compose(nowMs: 100, pathHealthy: true)
 
@@ -202,7 +229,10 @@ func stateAcceptanceInvalidatesCachedScenes() throws {
 @Test("A failed transaction removes the previous composition")
 func failedTransactionRemovesPreviousComposition() throws {
     let runtime = RuntimeDouble()
-    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let verified = try AppleInstrumentCompatibilityGate.verify(
+        matchingIdentity(),
+        glyphAtlas: syntheticGlyphAtlas()
+    ) { runtime }
     let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
     try composition.compose(nowMs: 100, pathHealthy: true)
     runtime.outcome = InstrumentRuntimeCompositionOutcome(
@@ -246,7 +276,10 @@ func frameMismatchFailsClosed() throws {
         ],
         generation: 1
     )
-    let verified = try AppleInstrumentCompatibilityGate.verify(matchingIdentity()) { runtime }
+    let verified = try AppleInstrumentCompatibilityGate.verify(
+        matchingIdentity(),
+        glyphAtlas: syntheticGlyphAtlas()
+    ) { runtime }
     let composition = PilotageInstrumentComposition(verifiedRuntime: verified)
     try composition.compose(nowMs: 0, pathHealthy: true)
     let display = PanelDisplay(
@@ -266,7 +299,8 @@ private func identity(
     corpusVersion: UInt32? = nil,
     corpusDigest: String? = nil,
     registrySceneDigest: String? = nil,
-    screenCompositionDigest: String? = nil
+    screenCompositionDigest: String? = nil,
+    glyphRecordedHash: String? = nil
 ) -> InstrumentRuntimeIdentity {
     InstrumentRuntimeIdentity(
         stateABI: stateABI ?? base.stateABI,
@@ -274,6 +308,7 @@ private func identity(
         corpusVersion: corpusVersion ?? base.corpusVersion,
         corpusDigest: corpusDigest ?? base.corpusDigest,
         registrySceneDigest: registrySceneDigest ?? base.registrySceneDigest,
-        screenCompositionDigest: screenCompositionDigest ?? base.screenCompositionDigest
+        screenCompositionDigest: screenCompositionDigest ?? base.screenCompositionDigest,
+        glyphRecordedHash: glyphRecordedHash ?? base.glyphRecordedHash
     )
 }
