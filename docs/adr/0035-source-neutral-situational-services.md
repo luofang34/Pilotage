@@ -1,6 +1,6 @@
 # ADR-0035: Source-neutral situational services and Pilotage composition
 
-- Status: Superseded by ADR-0036
+- Status: Accepted
 - Date: 2026-08-08
 
 ## Context
