@@ -1,0 +1,6 @@
+# UniFFI expands error derives through anyhow internally. The hand-written
+# facade uses typed thiserror variants and does not expose anyhow types.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+too-many-lines-threshold = 80

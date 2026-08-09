@@ -19,7 +19,10 @@ path = "src/bin/uniffi_bindgen.rs"
 
 [dependencies]
 airmass-core = { git = "https://github.com/luofang34/Airmass.git", rev = "d903da96fa9778af013afe4bc0210b58916a3bf2", default-features = false }
+pilotage-presentation = { path = "../../../../crates/pilotage-presentation" }
+serde_json = "1.0"
 surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "a17e8d265e18b6009d8ed482ed2bcf0219cf2b84", default-features = false }
+thiserror = "2.0"
 uniffi = { version = "0.32", features = ["cli"] }
 
 [workspace.lints.rust]

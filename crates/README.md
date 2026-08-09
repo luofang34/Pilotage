@@ -20,3 +20,4 @@ Seed crates (created as implementation starts, split further per the size limits
 | `pilotage-adapter-api` | Adapter traits and capability model |
 | `pilotage-situation-view` | Versioned read-only situation query and result contract |
 | `pilotage-conformance` | Shared fixtures and behavioral test suites |
+| `pilotage-presentation` | Display policy for traffic and weather snapshots |

@@ -92,6 +92,12 @@ jobs:
       - name: check-structure
         run: bash scripts/check-structure.sh
 
+      - name: situation presentation boundary self-test
+        run: bash scripts/test-check-situation-presentation-boundary.sh
+
+      - name: situation presentation boundary
+        run: bash scripts/check-situation-presentation-boundary.sh
+
       - name: ADR supersession lifecycle tests
         run: bash scripts/test-check-adr-supersession.sh
 

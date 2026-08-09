@@ -3,9 +3,16 @@
 //! This standalone crate links the Surveillance and Airmass domain crates.
 //! Generated bindings and binary artifacts stay outside the source tree.
 
+mod error;
 mod records;
+mod session;
 
-pub use records::ProducerSchemaVersions;
+pub use error::FfiError;
+pub use records::{
+    DisplayBatch, DisplayColor, DisplayCoordinate, DisplayCoordinateRing, DisplayPoint,
+    DisplayPointStyle, DisplayShape, DisplayShapeStyle, ProducerSchemaVersions,
+};
+pub use session::PresentationSession;
 
 /// Get the facade version.
 #[uniffi::export]

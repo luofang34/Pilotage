@@ -12,6 +12,10 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$cache_root/clang"
 export XDG_CACHE_HOME="$cache_root/swiftpm"
 
 cargo fmt --manifest-path "$manifest" --check
+if grep -RInE 'anyhow(::Error)?' "$client_root/rust/pilotage-situation-ffi/src"; then
+    echo "the hand-written FFI facade must use typed errors" >&2
+    exit 1
+fi
 cargo clippy --manifest-path "$manifest" --locked --all-targets -- -D warnings
 cargo test --manifest-path "$manifest" --locked
 sh "$client_root/scripts/build-xcframework.sh"
