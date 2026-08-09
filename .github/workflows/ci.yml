@@ -86,6 +86,12 @@ jobs:
       - name: check-structure
         run: bash scripts/check-structure.sh
 
+      - name: ADR supersession lifecycle tests
+        run: bash scripts/test-check-adr-supersession.sh
+
+      - name: ADR supersession lifecycle
+        run: bash scripts/check-adr-supersession.sh
+
       - name: certification-claim guard (AIR-03)
         # Fail on any tracked doc/UI artifact that asserts a certification,
         # compliance, approval, or airworthiness claim about this SIM project.
