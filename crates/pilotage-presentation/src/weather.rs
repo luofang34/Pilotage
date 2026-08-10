@@ -56,6 +56,7 @@ fn point_for_report(feature: &TextReportFeature) -> Option<PointFeature> {
         )
         .into(),
         label: Some(feature.id().station_id().as_str().into()),
+        altitude_ft: None,
         rotation_deg: 0.0,
         producer_instance_id: feature.id().producer_instance_id().get(),
         snapshot_revision: revisions.snapshot_revision().get(),

@@ -23,6 +23,7 @@ fn versioned_track_record_crosses_the_facade() {
 
     assert_eq!(batch.points.len(), 1);
     assert_eq!(batch.points[0].snapshot_revision, 2);
+    assert_eq!(batch.points[0].altitude_ft, Some(5_500));
     assert_eq!(batch.point_changes.len(), 1);
     assert_eq!(batch.point_changes[0].kind, DisplayPointChangeKind::Upsert);
 }
@@ -147,11 +148,22 @@ fn positionless_track_crosses_as_a_list_item() {
 
 fn track_record(id: u64, revision: u64, latitude_deg: f64) -> TrackRecord {
     let mut track = TrackSnapshot::new(TrackId::new(id), track_key(id), 10);
-    track.position = Some(TimedField::new(
-        Wgs84Position {
-            latitude_deg,
-            longitude_deg: -71.0,
-        },
+    track.position = Some(timed(Wgs84Position {
+        latitude_deg,
+        longitude_deg: -71.0,
+    }));
+    track.pressure_altitude_ft = Some(timed(5_500));
+    let handle = TrackSnapshotHandle::new(
+        ProducerInstanceId::new(8),
+        SnapshotRevision::new(revision),
+        track,
+    );
+    TrackRecord::new(TrackDelta::Updated(handle))
+}
+
+fn timed<T>(value: T) -> TimedField<T> {
+    TimedField::new(
+        value,
         ObservationTime::local(10),
         FieldQuality::default(),
         FieldProvenance::new(
@@ -159,13 +171,7 @@ fn track_record(id: u64, revision: u64, latitude_deg: f64) -> TrackRecord {
             AddressNamespace::Icao,
             SourceRef::default(),
         ),
-    ));
-    let handle = TrackSnapshotHandle::new(
-        ProducerInstanceId::new(8),
-        SnapshotRevision::new(revision),
-        track,
-    );
-    TrackRecord::new(TrackDelta::Updated(handle))
+    )
 }
 
 fn track_key(id: u64) -> TrackKey {

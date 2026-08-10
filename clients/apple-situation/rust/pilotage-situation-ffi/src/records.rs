@@ -136,6 +136,8 @@ pub struct DisplayPoint {
     pub style_id: String,
     /// Primary label.
     pub label: Option<String>,
+    /// Selected display altitude in feet.
+    pub altitude_ft: Option<i32>,
     /// Clockwise rotation from geographic north.
     pub rotation_deg: f64,
     /// Producer instance identity.
@@ -322,6 +324,7 @@ impl From<pilotage_presentation::PointFeature> for DisplayPoint {
             coordinate: value.coordinate.into(),
             style_id: value.style_id,
             label: value.label,
+            altitude_ft: value.altitude_ft,
             rotation_deg: value.rotation_deg,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,
