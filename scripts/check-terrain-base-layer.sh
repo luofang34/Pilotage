@@ -60,7 +60,7 @@ if ! jq -e '
     .sources["pilotage-terrain"].tileSize == 256 and
     .sources["pilotage-terrain"].url == "__PILOTAGE_TERRAIN_MBTILES_URL__" and
     ([.layers[] | select(.id == "pilotage-terrain-hillshade" and .type == "hillshade" and .source == "pilotage-terrain")] | length == 1) and
-    ([.layers[] | select(.source == "pilotage-terrain" and .type == "color-relief")] | length == 0) and
+    ([.layers[] | select(.id == "pilotage-terrain-relief" and .type == "color-relief" and .source == "pilotage-terrain")] | length == 1) and
     (has("terrain") | not)
 ' "$style" >/dev/null; then
     echo "FORBIDDEN: the situation style must use the Terrarium hillshade contract" >&2
@@ -70,11 +70,42 @@ fi
 if ! jq -e '
     .layers[] |
     select(.id == "pilotage-terrain-hillshade") |
-    .paint["hillshade-shadow-color"] == "#050b11" and
-    .paint["hillshade-highlight-color"] == "#526879" and
-    .paint["hillshade-accent-color"] == "#1b3243"
+    .paint["hillshade-shadow-color"] == "#241f16" and
+    .paint["hillshade-highlight-color"] == "#cfc9b4" and
+    .paint["hillshade-accent-color"] == "#3a3226"
 ' "$style" >/dev/null; then
-    echo "FORBIDDEN: the terrain hillshade must use the dark blue-grey palette" >&2
+    echo "FORBIDDEN: the terrain hillshade must use the warm neutral palette" >&2
+    status=1
+fi
+
+# The colour ramp is what separates sea from shore and low ground from high. A ramp that
+# reads the same on both sides of sea level draws a coastline that is not there, and a
+# ramp that is not driven by elevation is a flat wash that says nothing about height.
+relief_ramp="$(jq -c '
+    .layers[] | select(.id == "pilotage-terrain-relief") | .paint["color-relief-color"]
+' "$style")"
+if ! printf '%s' "$relief_ramp" | jq -e '
+    .[0] == "interpolate" and .[2] == ["elevation"] and
+    ((. | length) >= 12)
+' >/dev/null 2>&1; then
+    echo "FORBIDDEN: the terrain relief must interpolate colour over elevation" >&2
+    status=1
+fi
+
+# The ramp must start below sea level, so bathymetry reads as water and not as ground.
+if ! printf '%s' "$relief_ramp" | jq -e '.[3] < 0' >/dev/null 2>&1; then
+    echo "FORBIDDEN: the terrain relief must reach below sea level" >&2
+    status=1
+fi
+
+sea_colour="$(printf '%s' "$relief_ramp" | jq -r '
+    [range(3; length; 2) as $i | select(.[$i] == 0) | .[$i + 1]] | .[0] // ""
+')"
+below_colour="$(printf '%s' "$relief_ramp" | jq -r '
+    [range(3; length; 2) as $i | select(.[$i] == -1) | .[$i + 1]] | .[0] // ""
+')"
+if [ -z "$sea_colour" ] || [ -z "$below_colour" ] || [ "$sea_colour" = "$below_colour" ]; then
+    echo "FORBIDDEN: the terrain relief must change colour across sea level" >&2
     status=1
 fi
 

@@ -41,11 +41,50 @@ cp "$root/clients/apple-situation/project.yml" \
 PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null
 
-sed -i.bak 's/#526879/#ff0000/' \
+sed -i.bak 's/#cfc9b4/#ff0000/' \
     "$fixture/clients/apple-situation/Resources/SituationStyle.json"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted an unsafe colour" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
+# Sea and shore must not read the same. A ramp that does not change across sea level draws
+# a coastline where there is none and hides the one that is there.
+python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'FLATTEN'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-terrain-relief":
+        ramp = layer["paint"]["color-relief-color"]
+        sea = ramp[ramp.index(0) + 1]
+        ramp[ramp.index(-1) + 1] = sea
+json.dump(style, open(path, "w"), indent=2)
+FLATTEN
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a ramp that does not change across sea level" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
+# Height has to come from elevation. A constant colour is a flat wash that says nothing.
+python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'CONSTANT'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-terrain-relief":
+        layer["paint"]["color-relief-color"] = "#808080"
+json.dump(style, open(path, "w"), indent=2)
+CONSTANT
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a relief that ignores elevation" >&2
     exit 1
 fi
 
