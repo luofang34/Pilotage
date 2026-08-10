@@ -1,23 +1,47 @@
-# Situation terrain fixture
+# Situation terrain archive
 
-This archive is a synthetic simulator fixture. It is not surveyed terrain.
-Do not use it for flight.
+This archive holds published elevation tiles. It is not surveyed terrain for flight. Do
+not use it for terrain separation, for an obstacle clearance decision, or for any other
+operational purpose. It gives the map a shaded surface and a height to drape features on.
 
-The example creates one `SourceDataset`. The dataset contains one regular DEM
-grid. The grid covers the world. The build selects Web Mercator zoom 0. The
-stated region is 85.0511287798066 degrees south to 85.0511287798066 degrees
-north. The longitude range is 180 degrees west to 180 degrees east.
+## Source
 
-Run this command from the repository root:
+Tiles come from AWS Terrain Tiles, in Terrarium encoding, 256 pixels square. That dataset
+combines several public sources, and every published map must carry the attribution:
+
+> Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP.
+
+The style carries the same text on the `pilotage-terrain` source, so the renderer shows it.
+
+## What the archive contains
+
+`SituationTerrain.plan.json` selects the tiles and is committed. The plan has two bands:
+
+- a world band at low zoom, so a map zoomed out shows the shape of the globe rather than
+  empty ocean;
+- a regional band at the zoom a pilot reads, over the area the aircraft flies.
+
+A `raster-dem` source overzooms past its highest zoom, so the regional band stops below
+the closest zoom the map allows.
+
+## Building it
+
+The archive is a build artifact. It is large, its contents come from a tile service rather
+than from this repository, and it is not committed. Build it from the repository root:
 
 ```text
-cargo run --quiet -p pilotage-terrain-build --example build_situation_fixture -- clients/apple-situation/Resources/SituationTerrain.mbtiles
+sh clients/apple-situation/scripts/build-situation-terrain.sh
 ```
 
-The warm debug build took 0.28 seconds on 2026-08-09. The archive size was
-16,384 bytes. The SHA-256 digest was
-`4bfb229fab057719778a65ee4b68569e16839998137bd5ddb401c5c20d00eaee`.
+The script caches each tile under `clients/apple-situation/.build/terrain-tiles`, so a
+second run fetches only what is missing. It writes `SituationTerrain.manifest.json`, which
+records the plan digest, the archive digest, the tile counts, and the bands. That manifest
+is committed and is what the terrain check verifies.
 
-The application uses this fixture to test the offline delivery path. A data
-producer must replace the fixture with an archive from its DEM
-`SourceDataset`.
+Pass `--force` to rebuild an archive that already matches its manifest.
+
+## Replacing the source
+
+A data producer that publishes its own DEM replaces the plan with its own tile service and
+rebuilds. Nothing else in the client changes: the style names one `raster-dem` source and
+reads whatever the archive holds.

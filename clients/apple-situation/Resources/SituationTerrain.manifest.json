@@ -1,0 +1,30 @@
+{
+  "plan_sha256": "d2126f2fe3d8088dd3e83b9806067268c6c0e1e8da5e35db46a51ba25967b289",
+  "archive_sha256": "6c8f1bdeef56a777e45d7a7085b16df42e1cc0fbc44f629650dd5b40aaf3ac4d",
+  "tiles_requested": 2225,
+  "tiles_written": 2225,
+  "archive_bytes": 146153472,
+  "source": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  "source_name": "AWS Terrain Tiles",
+  "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP.",
+  "bands": [
+    {
+      "name": "world",
+      "min_zoom": 0,
+      "max_zoom": 5,
+      "min_lat_deg": -85.0511287798066,
+      "max_lat_deg": 85.0511287798066,
+      "min_lon_deg": -180.0,
+      "max_lon_deg": 180.0
+    },
+    {
+      "name": "region",
+      "min_zoom": 6,
+      "max_zoom": 10,
+      "min_lat_deg": 37.5,
+      "max_lat_deg": 43.5,
+      "min_lon_deg": -81.0,
+      "max_lon_deg": -72.0
+    }
+  ]
+}

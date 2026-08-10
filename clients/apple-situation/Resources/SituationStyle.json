@@ -6,7 +6,8 @@
       "type": "raster-dem",
       "url": "__PILOTAGE_TERRAIN_MBTILES_URL__",
       "tileSize": 256,
-      "encoding": "terrarium"
+      "encoding": "terrarium",
+      "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP."
     }
   },
   "layers": [
