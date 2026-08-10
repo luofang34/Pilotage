@@ -14,6 +14,7 @@ final class SituationClientModel: ObservableObject {
     private let domain: RadioDomainSession?
     private let terrainAvailable: Bool
     private let discovery = AeroLinkDiscoveryGate()
+    private let evidenceWriter = SituationEvidenceWriter()
     private var runtime: AeroLinkRadioRuntime?
     private var maintenanceTask: Task<Void, Never>?
     private var drainTask: Task<Void, Never>?
@@ -55,6 +56,7 @@ final class SituationClientModel: ObservableObject {
     }
 
     func activate() async {
+        recordEvidence()
         if let cleanup = cleanupTask {
             await cleanup.task.value
             if cleanupTask?.generation == cleanup.generation {
@@ -132,6 +134,9 @@ final class SituationClientModel: ObservableObject {
             startupError,
             Self.join(emission.errorMessage, presentationError)
         )
+        // A run that never produces a batch still has to say why: a receiver state and a
+        // disabled driver extension are the answer, and both change without a batch.
+        recordEvidence()
     }
 
     func setLayerEnabled(id: String, enabled: Bool) {
@@ -155,6 +160,19 @@ final class SituationClientModel: ObservableObject {
         if let selected = selectedTraffic {
             selectedTraffic = next.trafficDetails.first { $0.id == selected.id }
         }
+        recordEvidence()
+    }
+
+    private func recordEvidence() {
+        evidenceWriter.record(
+            SituationEvidence(
+                batch: display,
+                radioSource: radioSource,
+                driverEnabled: discovery.driverIsEnabled(),
+                terrainArchiveAvailable: terrainAvailable,
+                errorMessage: errorMessage
+            )
+        )
     }
 
     private static func join(_ first: String?, _ second: String?) -> String? {
