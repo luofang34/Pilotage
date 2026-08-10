@@ -98,6 +98,12 @@ jobs:
       - name: SituationView dependency boundary
         run: bash scripts/check-situation-view-boundary.sh
 
+      - name: AirspaceView contract self-test
+        run: bash scripts/test-check-airspace-view-contract.sh
+
+      - name: AirspaceView contract
+        run: bash scripts/check-airspace-view-contract.sh
+
       - name: cargo doc
         env:
           RUSTDOCFLAGS: "-D missing_docs -D rustdoc::broken_intra_doc_links"

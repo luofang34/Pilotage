@@ -1729,6 +1729,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-airspace-view"
+version = "0.1.0"
+dependencies = [
+ "aerocontext-core",
+ "chrono",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-authority"
 version = "0.1.0"
 dependencies = [

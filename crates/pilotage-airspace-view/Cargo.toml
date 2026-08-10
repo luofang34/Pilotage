@@ -1,0 +1,17 @@
+[package]
+name = "pilotage-airspace-view"
+version = "0.1.0"
+edition.workspace = true
+description = "Cycle-scoped AirspaceView geometry resolution contract"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aerocontext-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }
