@@ -26,6 +26,27 @@ fn active_track_becomes_a_policy_styled_upsert() {
 }
 
 #[test]
+fn pressure_altitude_is_the_traffic_comparison_value() {
+    let point = point_with_altitudes(Some(5_500), Some(5_650));
+
+    assert_eq!(point.altitude_ft, Some(5_500));
+}
+
+#[test]
+fn geometric_altitude_is_the_display_fallback() {
+    let point = point_with_altitudes(None, Some(5_650));
+
+    assert_eq!(point.altitude_ft, Some(5_650));
+}
+
+#[test]
+fn absent_track_altitude_stays_absent() {
+    let point = point_with_altitudes(None, None);
+
+    assert_eq!(point.altitude_ft, None);
+}
+
+#[test]
 fn ownship_shadow_is_not_a_traffic_target() {
     let mut adapter = PresentationAdapter::new();
     let delta = updated_delta(42, 3, true, EmergencyState::None);
@@ -211,6 +232,28 @@ fn updated_delta_with_latitude(id: u64, revision: u64, latitude_deg: f64) -> Tra
         SnapshotRevision::new(revision),
         track,
     ))
+}
+
+fn point_with_altitudes(
+    pressure_altitude_ft: Option<i32>,
+    geometric_altitude_ft: Option<i32>,
+) -> crate::PointFeature {
+    let mut track = complete_track(42);
+    track.pressure_altitude_ft = pressure_altitude_ft.map(radio_timed);
+    track.geometric_altitude_ft = geometric_altitude_ft.map(radio_timed);
+    let delta = TrackDelta::Updated(TrackSnapshotHandle::new(
+        ProducerInstanceId::new(7),
+        SnapshotRevision::new(3),
+        track,
+    ));
+    let mut adapter = PresentationAdapter::new();
+    let change = adapter
+        .apply_traffic_delta(&delta)
+        .expect("positioned track must produce a point");
+    let PointChange::Upsert { point } = change else {
+        panic!("positioned track must produce an upsert");
+    };
+    point
 }
 
 fn track_handle(
