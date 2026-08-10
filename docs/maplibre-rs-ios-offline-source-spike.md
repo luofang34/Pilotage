@@ -5,9 +5,9 @@
 Pilotage will not use `maplibre-rs` for the MVP iOS client. The MVP will use
 MapLibre Native.
 
-The local source adapter belongs in `maplibre-rs`. It changes general renderer
-input and has no Pilotage display policy. The implementation is in
-[maplibre-rs pull request 338](https://github.com/maplibre/maplibre-rs/pull/338).
+The local source adapter is a candidate `maplibre-rs` change. It changes general
+renderer input and has no Pilotage display policy. Pilotage keeps the candidate
+patch on a fork. An upstream submission requires explicit approval.
 
 The adapter can read and draw the Pilotage vector archive. The supported iOS
 27 application path cannot start the renderer. Thus, the physical iPad draw
