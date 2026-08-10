@@ -1891,6 +1891,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-navdata-tiles"
+version = "0.1.0"
+dependencies = [
+ "aerocontext-core",
+ "aerocontext-navdata",
+ "chrono",
+ "flate2",
+ "pilotage-airspace-view",
+ "prost",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-presentation"
 version = "0.1.0"
 dependencies = [

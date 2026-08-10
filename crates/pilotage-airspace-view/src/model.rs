@@ -50,7 +50,9 @@ impl IdentifiedNavdataSnapshotV1 {
         &self.identity
     }
 
-    pub(crate) const fn snapshot(&self) -> &NavDataSnapshot {
+    /// Gets the immutable Navdata snapshot.
+    #[must_use]
+    pub const fn snapshot(&self) -> &NavDataSnapshot {
         &self.snapshot
     }
 }
