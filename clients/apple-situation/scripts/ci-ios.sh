@@ -14,6 +14,15 @@ export CLANG_MODULE_CACHE_PATH="$cache_root/clang"
 export SWIFTPM_MODULECACHE_OVERRIDE="$cache_root/clang"
 export XDG_CACHE_HOME="$cache_root/swiftpm"
 
+case "${PILOTAGE_MAPLIBRE_TERRAIN:-0}" in
+    0) ;;
+    1) sh "$client_root/scripts/build-maplibre-terrain.sh" ;;
+    *)
+        echo "PILOTAGE_MAPLIBRE_TERRAIN must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
 sh "$client_root/scripts/prepare-radio-sources.sh"
 cargo fmt --manifest-path "$manifest" --check
 if grep -RInE 'anyhow(::Error)?' "$client_root/rust/pilotage-situation-ffi/src"; then

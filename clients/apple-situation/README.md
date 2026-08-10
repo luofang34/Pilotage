@@ -35,6 +35,26 @@ sh clients/apple-situation/scripts/ci-ios.sh
 The command checks the Rust facade. It builds the XCFramework. It tests the
 GeoJSON edge. It then builds the MapLibre binding for the iOS Simulator.
 
+The default build uses the reviewed MapLibre Native 6.28.0 distribution. The
+optional terrain build uses a pinned, unreleased MapLibre Native source. The
+6.28.0 renderer has no 3D terrain support. The optional build keeps the
+unreleased source out of the default product build.
+
+Prepare a clean `WifiDB/maplibre-native` worktree at the commit in
+`MAPLIBRE_TERRAIN_REVISION`. Initialize all its submodules. Install Bazel.
+Then run this command:
+
+```sh
+PILOTAGE_MAPLIBRE_TERRAIN=1 \
+MAPLIBRE_TERRAIN_SOURCE=/absolute/path/to/maplibre-native \
+sh clients/apple-situation/scripts/ci-ios.sh
+```
+
+The script uses the MapLibre Native Metal XCFramework target. It puts the
+binary in an ignored local Swift package. The same flag adds the style terrain
+root when the script builds the application. Run all terrain demo builds with
+the flag set. Do not use this build as the released distribution.
+
 ## Generate the iPadOS project
 
 Clone AeroLink next to this repository. Check out the commit in
