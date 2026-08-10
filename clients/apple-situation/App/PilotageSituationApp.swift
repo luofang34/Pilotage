@@ -80,6 +80,7 @@ private struct SituationMap: UIViewRepresentable {
         let styleJSON = (try? SituationStyleResource.load())
             ?? SituationStyleResource.fallbackJSON
         let view = SituationMapView(styleJSON: styleJSON)
+        view.initialPitchDegrees = 55
         view.baseLayerIdentifiers = ["terrain-base": "pilotage-terrain-hillshade"]
         view.onFeatureTapped = onFeatureTapped
         return view

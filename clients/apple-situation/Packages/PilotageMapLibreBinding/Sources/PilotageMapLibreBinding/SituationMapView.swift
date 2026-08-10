@@ -15,6 +15,14 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
     private let mapView: MLNMapView
     private let overlay = SituationOverlay()
     private var pendingBatch: DisplayBatch?
+    private var hasAppliedInitialPitch = false
+
+    /// Viewing angle away from straight down, in degrees, taken once the style loads.
+    ///
+    /// The renderer drapes nothing over the elevation model, so shading and colour carry
+    /// height on their own and only from a camera that looks across the ground. A pilot
+    /// can still tilt the map by hand afterwards.
+    public var initialPitchDegrees: CGFloat = 0
 
     /// Create a map with the specified base style JSON.
     public init(frame: CGRect = .zero, styleJSON: String) {
@@ -45,7 +53,22 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
 
     /// Apply retained display values after a base style load.
     public func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+        applyInitialPitch()
         applyPendingBatch()
+    }
+
+    /// Tilt the camera once, and never against a pilot who has already moved it.
+    ///
+    /// A style reload raises this callback again, and a second tilt would throw away the
+    /// view the pilot chose.
+    private func applyInitialPitch() {
+        guard !hasAppliedInitialPitch, initialPitchDegrees > 0 else {
+            return
+        }
+        hasAppliedInitialPitch = true
+        let camera = mapView.camera
+        camera.pitch = min(initialPitchDegrees, mapView.maximumPitch)
+        mapView.setCamera(camera, animated: false)
     }
 
     private func applyPendingBatch() {
