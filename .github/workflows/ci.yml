@@ -467,7 +467,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: luofang34/aero-link
-          ref: 38a30f1031a4cecbb1865c5169700a161004a55f
+          ref: 36b1bc9265cf7da881e6bd21816e19f8feba5431
           path: external/aero-link
           ssh-key: ${{ secrets.AERO_LINK_DEPLOY_KEY }}
 
