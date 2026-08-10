@@ -15,7 +15,62 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#0b1721"
+        "background-color": "#02060a"
+      }
+    },
+    {
+      "id": "pilotage-terrain-relief",
+      "type": "color-relief",
+      "source": "pilotage-terrain",
+      "paint": {
+        "color-relief-opacity": 1,
+        "color-relief-color": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "elevation"
+          ],
+          -11000,
+          "#01040a",
+          -4000,
+          "#02070e",
+          -1000,
+          "#030b14",
+          -200,
+          "#04101a",
+          -20,
+          "#061521",
+          -1,
+          "#081d29",
+          0,
+          "#4f5f3e",
+          60,
+          "#6a7649",
+          200,
+          "#828a58",
+          500,
+          "#9a9668",
+          900,
+          "#ab9b73",
+          1400,
+          "#ac8b63",
+          2000,
+          "#98724c",
+          2800,
+          "#7f5836",
+          3600,
+          "#6a4830",
+          4500,
+          "#7d6a5c",
+          5200,
+          "#a99c92",
+          6000,
+          "#e8e8e8",
+          8850,
+          "#ffffff"
+        ]
       }
     },
     {
@@ -23,10 +78,10 @@
       "type": "hillshade",
       "source": "pilotage-terrain",
       "paint": {
-        "hillshade-exaggeration": 0.42,
-        "hillshade-shadow-color": "#050b11",
-        "hillshade-highlight-color": "#526879",
-        "hillshade-accent-color": "#1b3243",
+        "hillshade-exaggeration": 0.35,
+        "hillshade-shadow-color": "#241f16",
+        "hillshade-highlight-color": "#cfc9b4",
+        "hillshade-accent-color": "#3a3226",
         "hillshade-illumination-direction": 315,
         "hillshade-illumination-anchor": "map"
       }
