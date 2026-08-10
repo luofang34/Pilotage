@@ -11,6 +11,7 @@ members = [
     "crates/pilotage-mavlink",
     "crates/pilotage-conformance",
     "crates/pilotage-situation-view",
+    "crates/pilotage-airspace-view",
     "crates/pilotage-calibration-id",
     "crates/pilotage-camera-calibration",
     "crates/pilotage-geo",
@@ -103,6 +104,7 @@ pilotage-input = { path = "crates/pilotage-input" }
 pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-mavlink = { path = "crates/pilotage-mavlink" }
 pilotage-situation-view = { path = "crates/pilotage-situation-view" }
+pilotage-airspace-view = { path = "crates/pilotage-airspace-view" }
 pilotage-calibration-id = { path = "crates/pilotage-calibration-id" }
 pilotage-camera-calibration = { path = "crates/pilotage-camera-calibration" }
 pilotage-geo = { path = "crates/pilotage-geo" }
