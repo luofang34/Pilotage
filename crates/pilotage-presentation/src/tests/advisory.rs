@@ -67,6 +67,35 @@ fn each_advisory_type_selects_its_own_color() {
 }
 
 #[test]
+fn a_band_states_each_limit_in_its_own_reference() {
+    // A flight level printed as a mean-sea-level height, or a surface limit printed as
+    // zero feet, states an altitude the advisory never gave.
+    let band = AdvisoryAltitudeBand::new(
+        AdvisoryAltitude::new(0, AdvisoryAltitudeReference::Surface),
+        AdvisoryAltitude::new(24_000, AdvisoryAltitudeReference::FlightLevel),
+    )
+    .expect("fixture band is ordered");
+    let mut store = weather_store();
+    let current = store
+        .accept(
+            advisory_ingress_with_band(WeatherAdvisoryType::Airmet, band),
+            time(100),
+        )
+        .expect("an advisory must be valid")
+        .into_publication()
+        .expect("an advisory must publish");
+    let mut adapter = PresentationAdapter::new();
+    for delta in map_snapshot_transition(None, current.envelope(), &station_position) {
+        adapter.apply_weather_delta(&delta);
+    }
+
+    let batch = adapter.adapt();
+
+    assert_eq!(batch.shapes.len(), 1);
+    assert_eq!(batch.shapes[0].label.as_deref(), Some("AIRMET SFC-FL240"));
+}
+
+#[test]
 fn a_disabled_advisory_layer_withholds_the_shape_and_keeps_it() {
     let mut adapter = PresentationAdapter::new();
     assert!(adapter.set_layer_enabled(WEATHER_ADVISORY_LAYER_ID, false));
@@ -133,6 +162,13 @@ fn weather_store() -> WeatherStore {
 }
 
 fn advisory_ingress(advisory_type: WeatherAdvisoryType) -> WeatherIngress {
+    advisory_ingress_with_band(advisory_type, band())
+}
+
+fn advisory_ingress_with_band(
+    advisory_type: WeatherAdvisoryType,
+    band: AdvisoryAltitudeBand,
+) -> WeatherIngress {
     // The store rejects an advisory whose validity does not match the product period, so
     // the fixture states one interval in both places.
     let validity = AdvisoryValidity::Period(UtcInterval::new(
@@ -145,7 +181,7 @@ fn advisory_ingress(advisory_type: WeatherAdvisoryType) -> WeatherIngress {
         present(validity),
         present(geometry()),
         absent(),
-        present(band()),
+        present(band),
     );
     let product = WeatherProduct::new(
         field(WeatherPayload::new("application/octet-stream", Vec::new())),

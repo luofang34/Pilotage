@@ -115,7 +115,11 @@ final class SituationOverlay {
             .map(GeoJSONPolygonFeature.init)
         let data = try GeoJSONFeatureCollectionEncoder.encode(polygons: features)
         let source = try addSource(data: data, identifier: sourceID("shape", shapeStyle.id), to: mapStyle)
-        addFillLayer(style: shapeStyle, source: source, to: mapStyle)
+        if shapeStyle.extruded {
+            addFillExtrusionLayer(style: shapeStyle, source: source, to: mapStyle)
+        } else {
+            addFillLayer(style: shapeStyle, source: source, to: mapStyle)
+        }
         addLineLayer(style: shapeStyle, source: source, to: mapStyle)
         addShapeLabelLayer(style: shapeStyle, source: source, to: mapStyle)
     }
@@ -185,6 +189,24 @@ final class SituationOverlay {
     ) {
         let layer = MLNFillStyleLayer(identifier: layerID("fill", style.id), source: source)
         layer.fillColor = constant(color(style.fill))
+        add(layer, to: mapStyle)
+    }
+
+    /// Raise one shape family between the heights its features carry.
+    ///
+    /// A polygon draped on the terrain cannot say how high a target or a weather volume
+    /// sits. A feature with no height falls back to the surface, which draws the same
+    /// outline a flat fill would.
+    private func addFillExtrusionLayer(
+        style: DisplayShapeStyle,
+        source: MLNShapeSource,
+        to mapStyle: MLNStyle
+    ) {
+        let layer = MLNFillExtrusionStyleLayer(identifier: layerID("fill", style.id), source: source)
+        layer.fillExtrusionColor = constant(color(style.fill))
+        layer.fillExtrusionOpacity = constant(Double(style.fill.alpha) / 255.0)
+        layer.fillExtrusionBase = NSExpression(forKeyPath: "base")
+        layer.fillExtrusionHeight = NSExpression(forKeyPath: "top")
         add(layer, to: mapStyle)
     }
 
@@ -329,7 +351,9 @@ private extension GeoJSONPolygonFeature {
                     )
                 }
             },
-            label: shape.label
+            label: shape.label,
+            baseAboveTerrainMetres: shape.baseAboveTerrainM,
+            topAboveTerrainMetres: shape.topAboveTerrainM
         )
     }
 }

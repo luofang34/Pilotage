@@ -119,6 +119,8 @@ pub struct DisplayShapeStyle {
     pub label_offset_y: f64,
     /// Whether the label can overlap another symbol.
     pub label_allows_overlap: bool,
+    /// Whether the renderer raises this shape to the heights its features carry.
+    pub extruded: bool,
     /// Order among shape styles.
     pub order: i32,
 }
@@ -189,6 +191,10 @@ pub struct DisplayShape {
     pub style_id: String,
     /// Feature label.
     pub label: Option<String>,
+    /// Floor of the shape, in metres above the terrain surface beneath it.
+    pub base_above_terrain_m: Option<f64>,
+    /// Ceiling of the shape, in metres above the terrain surface beneath it.
+    pub top_above_terrain_m: Option<f64>,
     /// Producer instance identity.
     pub producer_instance_id: u64,
     /// Snapshot revision.
@@ -311,6 +317,7 @@ impl From<pilotage_presentation::ShapeStyle> for DisplayShapeStyle {
             label_offset_x: value.label_offset_x,
             label_offset_y: value.label_offset_y,
             label_allows_overlap: value.label_allows_overlap,
+            extruded: value.extruded,
             order: value.order,
         }
     }
@@ -395,6 +402,8 @@ impl From<pilotage_presentation::ShapeFeature> for DisplayShape {
                 .collect(),
             style_id: value.style_id,
             label: value.label,
+            base_above_terrain_m: value.base_above_terrain_m,
+            top_above_terrain_m: value.top_above_terrain_m,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,
         }

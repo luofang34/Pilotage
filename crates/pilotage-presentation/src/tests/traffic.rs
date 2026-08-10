@@ -335,3 +335,66 @@ fn radio_timed<T>(value: T) -> TimedField<T> {
         ),
     )
 }
+
+#[test]
+fn a_track_with_an_altitude_draws_a_pad_at_that_height() {
+    // A symbol is draped on the terrain surface whatever altitude it carries, so the pad
+    // is the only part of the display that answers "above me or below me". A regression
+    // here shows as traffic that silently returns to one flat plane.
+    let mut adapter = PresentationAdapter::new();
+    adapter.apply_traffic_delta(&delta_with_altitude(42, 3, Some(5_500)));
+
+    let batch = adapter.adapt();
+
+    assert_eq!(batch.shapes.len(), 1, "one track must draw one pad");
+    let pad = &batch.shapes[0];
+    assert_eq!(pad.layer_id, TRAFFIC_LAYER_ID);
+    assert_eq!(pad.style_id, "traffic-altitude");
+    let base = pad.base_above_terrain_m.expect("a pad states its floor");
+    let top = pad.top_above_terrain_m.expect("a pad states its ceiling");
+    assert!((base - 5_500.0 * 0.3048).abs() < 1e-6);
+    assert!(top > base, "a pad must have thickness to be visible");
+    assert_eq!(pad.rings.len(), 1);
+    assert_eq!(pad.rings[0].coordinates.len(), 5);
+    assert!(
+        batch
+            .shape_styles
+            .iter()
+            .any(|style| style.id == pad.style_id && style.extruded),
+        "a pad must name an extruded style"
+    );
+}
+
+#[test]
+fn a_track_without_an_altitude_stays_a_point() {
+    // An invented height would claim knowledge the track never reported.
+    let mut adapter = PresentationAdapter::new();
+    adapter.apply_traffic_delta(&delta_with_altitude(42, 3, None));
+
+    let batch = adapter.adapt();
+
+    assert_eq!(batch.points.len(), 1);
+    assert!(batch.shapes.is_empty());
+}
+
+#[test]
+fn a_track_that_loses_its_altitude_loses_its_pad() {
+    let mut adapter = PresentationAdapter::new();
+    adapter.apply_traffic_delta(&delta_with_altitude(42, 3, Some(5_500)));
+    assert_eq!(adapter.adapt().shapes.len(), 1);
+
+    adapter.apply_traffic_delta(&delta_with_altitude(42, 4, None));
+
+    assert!(adapter.adapt().shapes.is_empty());
+}
+
+fn delta_with_altitude(id: u64, revision: u64, pressure_altitude_ft: Option<i32>) -> TrackDelta {
+    let mut track = complete_track(id);
+    track.pressure_altitude_ft = pressure_altitude_ft.map(radio_timed);
+    track.geometric_altitude_ft = None;
+    TrackDelta::Updated(TrackSnapshotHandle::new(
+        ProducerInstanceId::new(7),
+        SnapshotRevision::new(revision),
+        track,
+    ))
+}

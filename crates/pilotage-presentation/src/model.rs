@@ -117,6 +117,11 @@ pub struct ShapeStyle {
     pub label_offset_y: f64,
     /// Whether the label can overlap another symbol.
     pub label_allows_overlap: bool,
+    /// Whether the renderer raises this shape to the heights its features carry.
+    ///
+    /// A style that is not extruded draws flat on the terrain surface however the feature
+    /// states its heights, because a renderer without a terrain build cannot raise it.
+    pub extruded: bool,
     /// Order among shape styles. A greater value is above a smaller value.
     pub order: i32,
 }
@@ -189,6 +194,15 @@ pub struct ShapeFeature {
     pub style_id: String,
     /// Feature label.
     pub label: Option<String>,
+    /// Floor of the shape, in metres above the terrain surface beneath it.
+    ///
+    /// The renderer measures a raised shape from the terrain surface, and a reported
+    /// altitude is measured from mean sea level. The difference is the terrain elevation
+    /// under the feature, which this crate cannot read, so a shape over high ground rides
+    /// that much too high. The label carries the reported altitude and stays exact.
+    pub base_above_terrain_m: Option<f64>,
+    /// Ceiling of the shape, in metres above the terrain surface beneath it.
+    pub top_above_terrain_m: Option<f64>,
     /// Producer instance identity.
     pub producer_instance_id: u64,
     /// Snapshot revision.
