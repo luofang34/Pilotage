@@ -5,12 +5,16 @@ use std::collections::BTreeMap;
 use airmass_geojson::FeatureDelta as WeatherFeatureDelta;
 use surveillance_core::{TrackDelta, TrackSnapshotHandle};
 
-use crate::layer::{LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_REPORT_LAYER_ID};
-use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeStyle};
+use crate::layer::{
+    LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_ADVISORY_LAYER_ID,
+    WEATHER_REPORT_LAYER_ID,
+};
+use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeFeature, ShapeStyle};
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
 pub(crate) const TRAFFIC_COASTING_STYLE: &str = "traffic-coasting";
 pub(crate) const TRAFFIC_EMERGENCY_STYLE: &str = "traffic-emergency";
+pub(crate) const TRAFFIC_ALTITUDE_STYLE: &str = "traffic-altitude";
 pub(crate) const WEATHER_VFR_STYLE: &str = "weather-vfr";
 pub(crate) const WEATHER_MVFR_STYLE: &str = "weather-mvfr";
 pub(crate) const WEATHER_IFR_STYLE: &str = "weather-ifr";
@@ -27,9 +31,11 @@ pub(crate) const ADVISORY_CWA_STYLE: &str = "advisory-cwa";
 pub struct PresentationAdapter {
     layers: LayerPolicy,
     traffic_points: BTreeMap<(u64, u64), PointFeature>,
+    traffic_pads: BTreeMap<(u64, u64), ShapeFeature>,
     traffic_revisions: BTreeMap<(u64, u64), u64>,
     traffic_tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
     weather_points: BTreeMap<String, PointFeature>,
+    weather_shapes: BTreeMap<String, ShapeFeature>,
     now_micros: u64,
 }
 
@@ -47,6 +53,7 @@ impl PresentationAdapter {
             layers: self.layers.controls(
                 !self.traffic_tracks.is_empty(),
                 !self.weather_points.is_empty(),
+                !self.weather_shapes.is_empty(),
             ),
             point_styles: point_styles(),
             shape_styles: shape_styles(),
@@ -102,6 +109,7 @@ impl PresentationAdapter {
     /// Apply one ordered Airmass feature change.
     pub fn apply_weather_delta(&mut self, delta: &WeatherFeatureDelta) -> Option<PointChange> {
         let id = crate::weather::feature_id_for_delta(delta)?;
+        self.apply_weather_shape(&id, delta);
         let change = crate::weather::point_change(delta, self.weather_points.get(&id))?;
         match &change {
             PointChange::Upsert { point } => {
@@ -117,8 +125,9 @@ impl PresentationAdapter {
             .then_some(change)
     }
 
-    /// Remove all weather points without changing traffic state.
+    /// Remove all weather values without changing traffic state.
     pub fn clear_weather(&mut self) -> Vec<PointChange> {
+        self.weather_shapes.clear();
         let points = std::mem::take(&mut self.weather_points);
         let changes: Vec<_> = points
             .into_iter()
@@ -139,9 +148,11 @@ impl PresentationAdapter {
     /// Clear state supplied by radio reception and keep application controls.
     pub fn clear_radio_state(&mut self) {
         self.traffic_points.clear();
+        self.traffic_pads.clear();
         self.traffic_revisions.clear();
         self.traffic_tracks.clear();
         self.weather_points.clear();
+        self.weather_shapes.clear();
     }
 
     /// Convert current traffic and weather values into one batch.
@@ -150,6 +161,7 @@ impl PresentationAdapter {
         let mut batch = self.empty_batch();
         if self.layers.is_enabled(TRAFFIC_LAYER_ID) {
             batch.points.extend(self.traffic_points.values().cloned());
+            batch.shapes.extend(self.traffic_pads.values().cloned());
             batch.positionless_traffic = self
                 .traffic_tracks
                 .values()
@@ -159,12 +171,29 @@ impl PresentationAdapter {
         if self.layers.is_enabled(WEATHER_REPORT_LAYER_ID) {
             batch.points.extend(self.weather_points.values().cloned());
         }
+        if self.layers.is_enabled(WEATHER_ADVISORY_LAYER_ID) {
+            batch.shapes.extend(self.weather_shapes.values().cloned());
+        }
         batch.traffic_details = self
             .traffic_tracks
             .values()
             .map(|track| crate::detail::detail_for(track, self.now_micros))
             .collect();
         batch
+    }
+
+    fn apply_weather_shape(&mut self, id: &str, delta: &WeatherFeatureDelta) {
+        match delta {
+            WeatherFeatureDelta::Upsert(_) => {
+                if let Some(shape) = crate::weather::shape_change(delta) {
+                    self.weather_shapes.insert(id.to_owned(), shape);
+                }
+            }
+            WeatherFeatureDelta::Remove { .. } => {
+                self.weather_shapes.remove(id);
+            }
+            _ => {}
+        }
     }
 
     fn retain_track(&mut self, key: (u64, u64), delta: &TrackDelta) {
@@ -191,6 +220,12 @@ impl PresentationAdapter {
     fn apply_point_change(&mut self, key: (u64, u64), change: &PointChange) {
         match change {
             PointChange::Upsert { point } => {
+                match crate::traffic::altitude_pad(point) {
+                    Some(pad) => self.traffic_pads.insert(key, pad),
+                    // A track that loses its altitude must lose its pad with it, or the
+                    // display keeps a height the track no longer reports.
+                    None => self.traffic_pads.remove(&key),
+                };
                 self.traffic_points.insert(key, point.clone());
             }
             PointChange::Stale {
@@ -205,6 +240,7 @@ impl PresentationAdapter {
             }
             PointChange::Remove { .. } => {
                 self.traffic_points.remove(&key);
+                self.traffic_pads.remove(&key);
             }
         }
     }
@@ -261,37 +297,50 @@ fn point(
 
 fn shape_styles() -> Vec<ShapeStyle> {
     vec![
-        shape(
+        extruded_shape(
+            TRAFFIC_ALTITUDE_STYLE,
+            [0, 229, 255, 150],
+            [0, 229, 255, 255],
+            60,
+        ),
+        extruded_shape(
             ADVISORY_AIRMET_STYLE,
             [255, 193, 7, 70],
             [255, 193, 7, 255],
             10,
         ),
-        shape(
+        extruded_shape(
             ADVISORY_G_AIRMET_STYLE,
             [255, 152, 0, 70],
             [255, 152, 0, 255],
             20,
         ),
-        shape(
+        extruded_shape(
             ADVISORY_CWA_STYLE,
             [156, 39, 176, 70],
             [206, 147, 216, 255],
             30,
         ),
-        shape(
+        extruded_shape(
             ADVISORY_SIGMET_STYLE,
             [244, 67, 54, 75],
             [244, 67, 54, 255],
             40,
         ),
-        shape(
+        extruded_shape(
             ADVISORY_CONVECTIVE_STYLE,
             [213, 0, 0, 85],
             [255, 82, 82, 255],
             50,
         ),
     ]
+}
+
+fn extruded_shape(id: &str, fill: [u8; 4], outline: [u8; 4], order: i32) -> ShapeStyle {
+    ShapeStyle {
+        extruded: true,
+        ..shape(id, fill, outline, order)
+    }
 }
 
 fn shape(id: &str, fill: [u8; 4], outline: [u8; 4], order: i32) -> ShapeStyle {
@@ -306,6 +355,7 @@ fn shape(id: &str, fill: [u8; 4], outline: [u8; 4], order: i32) -> ShapeStyle {
         label_offset_x: 0.0,
         label_offset_y: 0.0,
         label_allows_overlap: false,
+        extruded: false,
         order,
     }
 }

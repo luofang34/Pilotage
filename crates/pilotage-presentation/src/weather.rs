@@ -1,14 +1,16 @@
 //! Weather display policy for typed Airmass feature changes.
 
+mod advisory;
+
 use airmass_core::{FlightCategory, WeatherReportType};
-use airmass_geojson::{FeatureDelta, TextReportFeature, WeatherFeatureId};
+use airmass_geojson::{FeatureDelta, TextReportFeature, WeatherFeatureId, WeatherFeatureKey};
 
 use crate::layer::WEATHER_REPORT_LAYER_ID;
 use crate::policy::{
     WEATHER_IFR_STYLE, WEATHER_LIFR_STYLE, WEATHER_MVFR_STYLE, WEATHER_UNKNOWN_STYLE,
     WEATHER_VFR_STYLE,
 };
-use crate::{Coordinate, PointChange, PointFeature};
+use crate::{Coordinate, PointChange, PointFeature, ShapeFeature};
 
 pub(crate) fn feature_id_for_delta(delta: &FeatureDelta) -> Option<String> {
     match delta {
@@ -16,6 +18,17 @@ pub(crate) fn feature_id_for_delta(delta: &FeatureDelta) -> Option<String> {
         FeatureDelta::Remove { id, .. } => Some(feature_id(id)),
         _ => None,
     }
+}
+
+/// Convert one advisory upsert into a display shape.
+///
+/// A text report and an advisory arrive through the same delta stream, so a caller asks
+/// for both and takes whichever the feature carries.
+pub(crate) fn shape_change(delta: &FeatureDelta) -> Option<ShapeFeature> {
+    let FeatureDelta::Upsert(feature) = delta else {
+        return None;
+    };
+    advisory::shape_for_advisory(feature_id(feature.id()), feature.advisory_shape()?)
 }
 
 pub(crate) fn point_change(
@@ -55,7 +68,10 @@ fn point_for_report(feature: &TextReportFeature) -> Option<PointFeature> {
                 .map(|field| field.value),
         )
         .into(),
-        label: Some(feature.id().station_id().as_str().into()),
+        label: feature
+            .id()
+            .station_id()
+            .map(|station_id| station_id.as_str().into()),
         altitude_ft: None,
         rotation_deg: 0.0,
         producer_instance_id: feature.id().producer_instance_id().get(),
@@ -73,19 +89,45 @@ fn category_style(category: Option<FlightCategory>) -> &'static str {
     }
 }
 
+/// Build one stable display identity for a weather feature.
+///
+/// Each text part is preceded by its length, because a station identifier and a product
+/// identifier may both contain the separator and two different features must never
+/// collapse onto one identity.
 fn feature_id(id: &WeatherFeatureId) -> String {
     let product_id = id.product_id().as_str();
-    let station_id = id.station_id().as_str();
-    format!(
-        "airmass:{}:{}:{}:{}:{}:{}:{}:point",
+    let head = format!(
+        "airmass:{}:{}:{}",
         id.producer_instance_id().get(),
         product_id.len(),
         product_id,
-        report_type_name(id.report_type()),
-        station_id.len(),
-        station_id,
-        id.occurrence(),
-    )
+    );
+    match id.key() {
+        WeatherFeatureKey::TextReport {
+            report_type,
+            station_id,
+            occurrence,
+        } => {
+            let station_id = station_id.as_str();
+            format!(
+                "{head}:{}:{}:{}:{occurrence}:point",
+                report_type_name(*report_type),
+                station_id.len(),
+                station_id,
+            )
+        }
+        WeatherFeatureKey::Advisory {
+            advisory_id,
+            occurrence,
+        } => {
+            let advisory_id = advisory_id.as_str();
+            format!(
+                "{head}:advisory:{}:{advisory_id}:{occurrence}:shape",
+                advisory_id.len(),
+            )
+        }
+        _ => format!("{head}:unknown:{}:opaque", id.occurrence()),
+    }
 }
 
 const fn report_type_name(report_type: WeatherReportType) -> &'static str {

@@ -67,9 +67,12 @@ fn raw_source_facts_select_live_and_stale_states() {
         source_state(&batch, WEATHER_REPORT_LAYER_ID),
         LayerSourceState::Stale
     );
+    // An advisory rides the same 978 reception as a weather report, so a receiver that is
+    // present but not streaming makes both layers stale. Absent would claim there is no
+    // advisory source at all.
     assert_eq!(
         source_state(&batch, WEATHER_ADVISORY_LAYER_ID),
-        LayerSourceState::Absent
+        LayerSourceState::Stale
     );
 }
 

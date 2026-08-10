@@ -52,12 +52,21 @@ require_pattern 'pub fn observe_sources' "$ffi" \
     "the facade must send raw source facts to portable Rust"
 require_pattern 'pub fn set_layer_enabled' "$ffi" \
     "the facade must send layer controls to portable Rust"
-require_pattern 'LayerControlsView' "$app/PilotageSituationApp.swift" \
-    "the application must show layer controls"
-require_pattern 'PositionlessTrafficView' "$app/PilotageSituationApp.swift" \
-    "the application must show positionless traffic"
-require_pattern 'TrafficDetailView' "$app/PilotageSituationApp.swift" \
-    "the application must show traffic detail"
+# These say the reader can reach each control, not which screen holds it. The map face
+# and the drawer both belong to the application, and moving a control between them is a
+# layout decision; removing one is a capability decision and is what this refuses.
+require_view() {
+    local view=$1
+    local message=$2
+    if ! grep -RqE "\<$view\>" "$app"; then
+        echo "FORBIDDEN: $message" >&2
+        status=1
+    fi
+}
+
+require_view 'LayerControlsView' "the application must show layer controls"
+require_view 'PositionlessTrafficView' "the application must show positionless traffic"
+require_view 'TrafficDetailView' "the application must show traffic detail"
 require_pattern 'visibleFeatures[(]' \
     "$binding/PilotageMapLibreBinding/SituationMapView.swift" \
     "the map binding must identify a tapped rendered feature"

@@ -157,12 +157,17 @@ impl LayerPolicy {
         self.sources = sources;
     }
 
-    pub(crate) fn controls(&self, has_traffic: bool, has_weather: bool) -> Vec<LayerControl> {
+    pub(crate) fn controls(
+        &self,
+        has_traffic: bool,
+        has_weather: bool,
+        has_advisory: bool,
+    ) -> Vec<LayerControl> {
         vec![
             self.terrain_control(),
             self.traffic_control(has_traffic),
             self.weather_control(has_weather),
-            self.advisory_control(),
+            self.advisory_control(has_advisory),
         ]
     }
 
@@ -250,7 +255,29 @@ impl LayerPolicy {
         )
     }
 
-    fn advisory_control(&self) -> LayerControl {
+    fn advisory_control(&self, has_advisory: bool) -> LayerControl {
+        let states = self.relevant_states(|band| band == RadioBand::Uat978);
+        if states
+            .iter()
+            .any(|state| **state == RadioReceptionState::Streaming)
+        {
+            return self.control(
+                WEATHER_ADVISORY_LAYER_ID,
+                "Weather advisories",
+                LayerSourceState::Live,
+                "978 MHz advisory reception is live.",
+            );
+        }
+        // An advisory carries its own validity period, so a retained shape can outlive the
+        // reception that delivered it. Stale is the honest state, never Absent.
+        if has_advisory || states.iter().any(|state| source_is_present(**state)) {
+            return self.control(
+                WEATHER_ADVISORY_LAYER_ID,
+                "Weather advisories",
+                LayerSourceState::Stale,
+                "Advisory reception is not live. Retained advisories can be old.",
+            );
+        }
         self.control(
             WEATHER_ADVISORY_LAYER_ID,
             "Weather advisories",

@@ -3,8 +3,78 @@
 use surveillance_geojson::{AircraftFeature, FeatureDelta};
 
 use crate::layer::TRAFFIC_LAYER_ID;
-use crate::policy::{TRAFFIC_ACTIVE_STYLE, TRAFFIC_COASTING_STYLE, TRAFFIC_EMERGENCY_STYLE};
-use crate::{Coordinate, PointChange, PointFeature};
+use crate::policy::{
+    TRAFFIC_ACTIVE_STYLE, TRAFFIC_ALTITUDE_STYLE, TRAFFIC_COASTING_STYLE, TRAFFIC_EMERGENCY_STYLE,
+};
+use crate::{Coordinate, CoordinateRing, PointChange, PointFeature, ShapeFeature};
+
+/// Half-width of one traffic pad in metres.
+///
+/// A pad marks where a target sits in the vertical, so it has to stay legible beside the
+/// symbol without covering the ground under it.
+const PAD_HALF_WIDTH_M: f64 = 220.0;
+
+/// Thickness of one traffic pad in metres.
+///
+/// A pad with no thickness is invisible from directly above, which is the view a pilot
+/// starts from.
+const PAD_THICKNESS_M: f64 = 60.0;
+
+const FEET_TO_METRES: f64 = 0.3048;
+const METRES_PER_DEGREE_LATITUDE: f64 = 111_320.0;
+
+/// Raise one traffic point into a pad at the altitude it reports.
+///
+/// A symbol is draped onto the terrain surface whatever altitude it carries, so a target
+/// at 8,000 ft and one at 800 ft draw in the same place. The pad is the part of the
+/// display that answers "above me or below me". A track with no altitude produces no pad
+/// and keeps its symbol, because an invented height would claim knowledge the track has
+/// not reported.
+pub(crate) fn altitude_pad(point: &PointFeature) -> Option<ShapeFeature> {
+    let altitude_m = f64::from(point.altitude_ft?) * FEET_TO_METRES;
+    if altitude_m <= 0.0 {
+        return None;
+    }
+    Some(ShapeFeature {
+        id: format!("{}-pad", point.id),
+        layer_id: TRAFFIC_LAYER_ID.into(),
+        rings: vec![pad_ring(point.coordinate)?],
+        style_id: TRAFFIC_ALTITUDE_STYLE.into(),
+        label: None,
+        base_above_terrain_m: Some(altitude_m),
+        top_above_terrain_m: Some(altitude_m + PAD_THICKNESS_M),
+        producer_instance_id: point.producer_instance_id,
+        snapshot_revision: point.snapshot_revision,
+    })
+}
+
+fn pad_ring(centre: Coordinate) -> Option<CoordinateRing> {
+    let latitude_span = PAD_HALF_WIDTH_M / METRES_PER_DEGREE_LATITUDE;
+    // A degree of longitude shortens toward the pole, so a pad built from the latitude
+    // span alone would stretch east to west at high latitude.
+    let longitude_scale = centre.latitude_deg.to_radians().cos();
+    if longitude_scale <= f64::EPSILON {
+        return None;
+    }
+    let longitude_span = latitude_span / longitude_scale;
+    let corners = [
+        (latitude_span, -longitude_span),
+        (latitude_span, longitude_span),
+        (-latitude_span, longitude_span),
+        (-latitude_span, -longitude_span),
+        (latitude_span, -longitude_span),
+    ];
+    let coordinates: Vec<Coordinate> = corners
+        .into_iter()
+        .filter_map(|(latitude_offset, longitude_offset)| {
+            Coordinate::checked(
+                centre.latitude_deg + latitude_offset,
+                centre.longitude_deg + longitude_offset,
+            )
+        })
+        .collect();
+    (coordinates.len() == corners.len()).then_some(CoordinateRing { coordinates })
+}
 
 pub(crate) fn point_change(
     change: &FeatureDelta,

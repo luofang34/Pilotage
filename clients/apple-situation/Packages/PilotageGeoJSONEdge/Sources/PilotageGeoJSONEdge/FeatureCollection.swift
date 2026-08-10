@@ -47,12 +47,24 @@ public struct GeoJSONPolygonFeature: Equatable, Sendable {
     public let rings: [[GeoJSONPosition]]
     /// Ready-to-display text.
     public let label: String?
+    /// Floor of the shape, in metres above the terrain surface beneath it.
+    public let baseAboveTerrainMetres: Double?
+    /// Ceiling of the shape, in metres above the terrain surface beneath it.
+    public let topAboveTerrainMetres: Double?
 
     /// Create one polygon feature.
-    public init(id: String, rings: [[GeoJSONPosition]], label: String?) {
+    public init(
+        id: String,
+        rings: [[GeoJSONPosition]],
+        label: String?,
+        baseAboveTerrainMetres: Double? = nil,
+        topAboveTerrainMetres: Double? = nil
+    ) {
         self.id = id
         self.rings = rings
         self.label = label
+        self.baseAboveTerrainMetres = baseAboveTerrainMetres
+        self.topAboveTerrainMetres = topAboveTerrainMetres
     }
 }
 
@@ -95,6 +107,12 @@ public enum GeoJSONFeatureCollectionEncoder {
     private static func polygonObject(_ polygon: GeoJSONPolygonFeature) -> [String: Any] {
         var properties: [String: Any] = [:]
         properties["label"] = polygon.label
+        // A renderer reads a raised height from the feature, so the height travels as a
+        // property rather than as a constant on the layer.
+        // Both keys are always written. A key-path expression on a missing property has
+        // no height to read, and the shape would vanish rather than lie flat.
+        properties["base"] = polygon.baseAboveTerrainMetres ?? 0
+        properties["top"] = polygon.topAboveTerrainMetres ?? 0
         return [
             "geometry": [
                 "coordinates": polygon.rings.map { $0.map(positionObject) },
