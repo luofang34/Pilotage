@@ -11,6 +11,7 @@ mkdir -p \
     "$client_fixture/App" \
     "$client_fixture/Configuration" \
     "$client_fixture/Packages/PilotageMapLibreBinding" \
+    "$client_fixture/Packages/PilotageMapLibreTerrain" \
     "$client_fixture/rust/pilotage-situation-ffi/src/reception" \
     "$client_fixture/scripts" \
     "$fixture/scripts"
@@ -18,6 +19,8 @@ cp "$root/.github/workflows/ci.yml" "$fixture/.github/workflows/"
 cp "$root/clients/apple-situation/AERO_LINK_REVISION" "$client_fixture/"
 cp "$root/clients/apple-situation/AIRMASS_REVISION" "$client_fixture/"
 cp "$root/clients/apple-situation/SURVEILLANCE_REVISION" "$client_fixture/"
+cp "$root/clients/apple-situation/MAPLIBRE_TERRAIN_REVISION" "$client_fixture/"
+cp "$root/clients/apple-situation/README.md" "$client_fixture/"
 cp "$root/clients/apple-situation/project.yml" "$client_fixture/"
 cp "$root/clients/apple-situation/App/"AeroLinkRadio*.swift "$client_fixture/App/"
 cp "$root/clients/apple-situation/App/RadioStatusView.swift" \
@@ -25,10 +28,14 @@ cp "$root/clients/apple-situation/App/RadioStatusView.swift" \
     "$client_fixture/App/"
 cp "$root/clients/apple-situation/App/Info.plist" "$client_fixture/App/"
 cp "$root/clients/apple-situation/App/PilotageSituation.entitlements" "$client_fixture/App/"
+cp "$root/clients/apple-situation/App/SituationStyleResource.swift" "$client_fixture/App/"
 cp "$root/clients/apple-situation/Configuration/AeroLinkDriverDevelopment.entitlements" \
     "$client_fixture/Configuration/"
 cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Package.swift" \
     "$client_fixture/Packages/PilotageMapLibreBinding/"
+cp "$root/clients/apple-situation/Packages/PilotageMapLibreTerrain/Package.swift" \
+    "$client_fixture/Packages/PilotageMapLibreTerrain/"
+cp "$root/clients/apple-situation/scripts/build-maplibre-terrain.sh" "$client_fixture/scripts/"
 cp "$root/clients/apple-situation/scripts/ci-ios.sh" "$client_fixture/scripts/"
 cp "$root/clients/apple-situation/scripts/generate-project.sh" "$client_fixture/scripts/"
 cp "$root/clients/apple-situation/scripts/prepare-aero-link.sh" "$client_fixture/scripts/"
@@ -52,6 +59,33 @@ fi
 
 sed -i.bak 's/exact: "6\.27\.0"/exact: "6.28.0"/' \
     "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Package.swift"
+sed -i.bak 's#../PilotageMapLibreTerrain#../UnreviewedTerrain#' \
+    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Package.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted an unreviewed terrain package" >&2
+    exit 1
+fi
+
+sed -i.bak 's#../UnreviewedTerrain#../PilotageMapLibreTerrain#' \
+    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Package.swift"
+sed -i.bak 's/--\/\/:renderer=metal/--\/\/:renderer=opengl/' \
+    "$fixture/clients/apple-situation/scripts/build-maplibre-terrain.sh"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted a non-Metal terrain build" >&2
+    exit 1
+fi
+
+sed -i.bak 's/--\/\/:renderer=opengl/--\/\/:renderer=metal/' \
+    "$fixture/clients/apple-situation/scripts/build-maplibre-terrain.sh"
+sed -i.bak 's/#if PILOTAGE_MAPLIBRE_TERRAIN/#if true/' \
+    "$fixture/clients/apple-situation/App/SituationStyleResource.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted an unflagged terrain style" >&2
+    exit 1
+fi
+
+sed -i.bak 's/#if true/#if PILOTAGE_MAPLIBRE_TERRAIN/' \
+    "$fixture/clients/apple-situation/App/SituationStyleResource.swift"
 sed -i.bak 's/brew install xcodegen/brew install removed-xcodegen/' \
     "$fixture/.github/workflows/ci.yml"
 if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
@@ -151,4 +185,5 @@ if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null
     exit 1
 fi
 
+bash "$root/scripts/test-build-maplibre-terrain.sh"
 echo "Apple situation client guard self-test: OK"

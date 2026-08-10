@@ -28,6 +28,12 @@ enum SituationStyleResource {
         terrain["url"] = try archiveURL(for: archiveFileURL).absoluteString
         sources["pilotage-terrain"] = terrain
         style["sources"] = sources
+#if PILOTAGE_MAPLIBRE_TERRAIN
+        style["terrain"] = [
+            "source": "pilotage-terrain",
+            "exaggeration": 1.0,
+        ]
+#endif
         let resolved = try JSONSerialization.data(withJSONObject: style, options: [.sortedKeys])
         guard let json = String(data: resolved, encoding: .utf8) else {
             throw SituationStyleResourceError.invalidEncoding

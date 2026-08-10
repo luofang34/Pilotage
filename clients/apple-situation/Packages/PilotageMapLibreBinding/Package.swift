@@ -1,6 +1,24 @@
 // swift-tools-version: 6.1
 
+import Foundation
 import PackageDescription
+
+let terrainRendererEnabled = ProcessInfo.processInfo.environment[
+    "PILOTAGE_MAPLIBRE_TERRAIN"
+] == "1"
+
+let mapLibreDependency: Package.Dependency = if terrainRendererEnabled {
+    .package(path: "../PilotageMapLibreTerrain")
+} else {
+    .package(
+        url: "https://github.com/maplibre/maplibre-gl-native-distribution",
+        exact: "6.28.0"
+    )
+}
+
+let mapLibrePackage = terrainRendererEnabled
+    ? "PilotageMapLibreTerrain"
+    : "maplibre-gl-native-distribution"
 
 let package = Package(
     name: "PilotageMapLibreBinding",
@@ -11,10 +29,7 @@ let package = Package(
         .library(name: "PilotageMapLibreBinding", targets: ["PilotageMapLibreBinding"]),
     ],
     dependencies: [
-        .package(
-            url: "https://github.com/maplibre/maplibre-gl-native-distribution",
-            exact: "6.28.0"
-        ),
+        mapLibreDependency,
         .package(path: "../PilotageGeoJSONEdge"),
         .package(path: "../PilotageSituationCore"),
     ],
@@ -24,7 +39,7 @@ let package = Package(
             dependencies: [
                 .product(name: "PilotageGeoJSONEdge", package: "PilotageGeoJSONEdge"),
                 .product(name: "PilotageSituationCore", package: "PilotageSituationCore"),
-                .product(name: "MapLibre", package: "maplibre-gl-native-distribution"),
+                .product(name: "MapLibre", package: mapLibrePackage),
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
