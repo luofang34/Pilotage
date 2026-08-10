@@ -8,6 +8,7 @@ trap 'rm -rf "$fixture"' EXIT
 
 mkdir -p \
     "$fixture/scripts" \
+    "$fixture/clients/apple-situation/scripts" \
     "$fixture/crates/pilotage-terrain-build/src" \
     "$fixture/crates/pilotage-terrain-build/examples" \
     "$fixture/clients/apple-situation/App" \
@@ -25,9 +26,13 @@ cp "$root/crates/pilotage-terrain-build/examples/build_situation_fixture.rs" \
 cp "$root/clients/apple-situation/App/SituationStyleResource.swift" \
     "$fixture/clients/apple-situation/App/"
 cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$root/clients/apple-situation/Resources/SituationTerrain.mbtiles" \
+    "$root/clients/apple-situation/Resources/SituationTerrain.plan.json" \
+    "$root/clients/apple-situation/Resources/SituationTerrain.manifest.json" \
     "$root/clients/apple-situation/Resources/SituationTerrain.provenance.md" \
     "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple-situation/scripts/build-situation-terrain.sh" \
+    "$fixture/clients/apple-situation/scripts/"
+cp "$root/.gitignore" "$fixture/"
 cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
     "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
 cp "$root/clients/apple-situation/project.yml" \
@@ -56,6 +61,46 @@ fi
 
 cp "$root/clients/apple-situation/App/SituationStyleResource.swift" \
     "$fixture/clients/apple-situation/App/"
+
+# A manifest that no longer describes the committed plan means the archive on disk was
+# built for different tiles than the ones the repository asks for.
+sed -i.bak 's/"min_zoom": 6/"min_zoom": 7/' \
+    "$fixture/clients/apple-situation/Resources/SituationTerrain.plan.json"
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a manifest that does not match its plan" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationTerrain.plan.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
+# Attribution is a licence condition of the tile source and has to reach the map.
+python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'STRIP'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["sources"]["pilotage-terrain"]["attribution"]
+json.dump(style, open(path, "w"), indent=2)
+STRIP
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a style with no source attribution" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
+# A committed archive would put a large build artifact in history and hide which tiles it
+# was built from.
+grep -v '^clients/apple-situation/Resources/SituationTerrain\.mbtiles$' \
+    "$root/.gitignore" > "$fixture/.gitignore"
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a committed terrain archive" >&2
+    exit 1
+fi
+cp "$root/.gitignore" "$fixture/"
+
 printf '\nbuild_package(source);\n' >> "$fixture/crates/pilotage-terrain-build/src/lib.rs"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then

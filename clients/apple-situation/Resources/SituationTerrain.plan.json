@@ -1,0 +1,27 @@
+{
+  "source": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  "source_name": "AWS Terrain Tiles",
+  "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP.",
+  "encoding": "terrarium",
+  "tile_size": 256,
+  "bands": [
+    {
+      "name": "world",
+      "min_zoom": 0,
+      "max_zoom": 5,
+      "min_lat_deg": -85.0511287798066,
+      "max_lat_deg": 85.0511287798066,
+      "min_lon_deg": -180.0,
+      "max_lon_deg": 180.0
+    },
+    {
+      "name": "region",
+      "min_zoom": 6,
+      "max_zoom": 10,
+      "min_lat_deg": 37.5,
+      "max_lat_deg": 43.5,
+      "min_lon_deg": -81.0,
+      "max_lon_deg": -72.0
+    }
+  ]
+}
