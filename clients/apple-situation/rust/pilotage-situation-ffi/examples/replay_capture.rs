@@ -39,12 +39,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // place every station seen at an invented point, which separates a weather path that
     // cannot decode from one that only lacks positions.
     let synthesize = std::env::args().any(|arg| arg == "--synthesize-weather-positions");
+    // A published cycle supplies real station positions, which is what the client will do.
+    let cycle_path = std::env::args()
+        .skip_while(|arg| arg != "--cycle")
+        .nth(1)
+        .map(PathBuf::from);
 
     let radio = RadioDomainSession::new()?;
     let presentation = PresentationSession::new();
     let mut run = Run::default();
     replay(&path, &radio, &presentation, synthesize, &mut run)?;
 
+    if let Some(cycle_path) = &cycle_path {
+        let bytes = std::fs::read(cycle_path)?;
+        run.display = Some(presentation.load_weather_stations_from_cycle(bytes)?);
+    }
     if synthesize && !run.stations.is_empty() {
         run.display = Some(place_stations(&presentation, &run.stations)?);
     }

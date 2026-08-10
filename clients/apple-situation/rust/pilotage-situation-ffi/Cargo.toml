@@ -31,6 +31,7 @@ aero-link = { path = "../../.build/aero-link", features = ["std"] }
 airmass-aero-link = { path = ".build/airmass/crates/airmass-aero-link", features = ["std"] }
 airmass-core = { path = ".build/airmass/crates/airmass-core", features = ["std"] }
 airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }
+pilotage-navdata-cycle = { path = "../../../../crates/pilotage-navdata-cycle" }
 pilotage-presentation = { path = "../../../../crates/pilotage-presentation" }
 serde_json = "1.0"
 surveillance-aero-link = { path = ".build/surveillance/crates/surveillance-aero-link", features = ["std"] }
