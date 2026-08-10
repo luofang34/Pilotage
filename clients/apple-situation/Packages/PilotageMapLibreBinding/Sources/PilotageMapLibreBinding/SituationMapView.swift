@@ -35,6 +35,13 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
     public var initialZoomLevel: Double = 6
     /// Furthest the map may be pinched out. Zero shows the whole world.
     public var minimumZoomLevel: Double = 0
+    /// Closest the map may be pinched in.
+    ///
+    /// A raster-dem source keeps drawing past its highest zoom by stretching the tile it
+    /// has. One step of that is a softer picture; several are a wash of colour that states
+    /// detail the elevation model never carried. The floor belongs just above the archive,
+    /// so the map stops where its data stops.
+    public var maximumZoomLevel: Double = 14
 
     /// Create a map with the specified base style JSON.
     public init(frame: CGRect = .zero, styleJSON: String) {
@@ -77,6 +84,7 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
         guard !hasAppliedInitialCamera else { return }
         hasAppliedInitialCamera = true
         mapView.minimumZoomLevel = minimumZoomLevel
+        mapView.maximumZoomLevel = maximumZoomLevel
         let camera = mapView.camera
         if initialPitchDegrees > 0 {
             camera.pitch = min(initialPitchDegrees, mapView.maximumPitch)

@@ -87,6 +87,7 @@ private struct SituationMap: UIViewRepresentable {
         view.initialCenter = CLLocationCoordinate2D(latitude: 40.5, longitude: -76.5)
         view.initialZoomLevel = 6
         view.minimumZoomLevel = 0
+        view.maximumZoomLevel = SituationStyleResource.maximumZoomLevel
         view.baseLayerIdentifiers = ["terrain-base": "pilotage-terrain-hillshade"]
         view.onFeatureTapped = onFeatureTapped
         return view

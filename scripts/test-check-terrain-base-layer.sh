@@ -140,6 +140,33 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
 fi
 cp "$root/.gitignore" "$fixture/"
 
+# The web renderer gets its globe from the same style file this one reads.
+python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'FLAT'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["projection"]
+json.dump(style, open(path, "w"), indent=2)
+FLAT
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a style with no globe projection" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
+# A map with no closest zoom stretches one elevation pixel across the screen.
+sed -i.bak 's/mapView.maximumZoomLevel = maximumZoomLevel//' \
+    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift"
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a map with no closest zoom" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
+    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
+
 printf '\nbuild_package(source);\n' >> "$fixture/crates/pilotage-terrain-build/src/lib.rs"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then

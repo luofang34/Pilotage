@@ -1,6 +1,9 @@
 {
   "version": 8,
   "name": "Pilotage situation base",
+  "projection": {
+    "type": "globe"
+  },
   "sources": {
     "pilotage-terrain": {
       "type": "raster-dem",
