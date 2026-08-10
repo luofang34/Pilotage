@@ -134,6 +134,8 @@ pub struct PointFeature {
     pub style_id: String,
     /// Primary label.
     pub label: Option<String>,
+    /// Selected display altitude in feet.
+    pub altitude_ft: Option<i32>,
     /// Clockwise rotation from geographic north.
     pub rotation_deg: f64,
     /// Producer instance identity.

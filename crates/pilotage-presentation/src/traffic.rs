@@ -59,6 +59,7 @@ fn point_for_feature(feature: &AircraftFeature) -> Option<PointFeature> {
         coordinate,
         style_id: traffic_style(feature).into(),
         label: traffic_display_label(feature),
+        altitude_ft: display_altitude_ft(feature),
         rotation_deg: track
             .velocity
             .as_ref()
@@ -67,6 +68,21 @@ fn point_for_feature(feature: &AircraftFeature) -> Option<PointFeature> {
         producer_instance_id: feature.producer_instance_id().get(),
         snapshot_revision: feature.snapshot_revision().get(),
     })
+}
+
+fn display_altitude_ft(feature: &AircraftFeature) -> Option<i32> {
+    let track = feature.snapshot();
+    // Traffic displays compare the pressure altitude that transponders report.
+    track
+        .pressure_altitude_ft
+        .as_ref()
+        .map(|field| field.value)
+        .or_else(|| {
+            track
+                .geometric_altitude_ft
+                .as_ref()
+                .map(|field| field.value)
+        })
 }
 
 fn traffic_style(feature: &AircraftFeature) -> &'static str {
