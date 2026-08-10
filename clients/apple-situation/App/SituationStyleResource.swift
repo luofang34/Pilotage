@@ -5,7 +5,8 @@ enum SituationStyleResource {
     {"version":8,"name":"Pilotage terrain unavailable","sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#0b1721"}}]}
     """
 
-    private static let archiveToken = "__PILOTAGE_TERRAIN_MBTILES_URL__"
+    private static let coastlineArchiveToken = "__PILOTAGE_COASTLINE_MBTILES_URL__"
+    private static let terrainArchiveToken = "__PILOTAGE_TERRAIN_MBTILES_URL__"
 
     /// Closest zoom the map allows.
     ///
@@ -33,21 +34,31 @@ enum SituationStyleResource {
         guard let styleURL = bundle.url(forResource: "SituationStyle", withExtension: "json") else {
             throw SituationStyleResourceError.missingStyle
         }
-        guard let archiveFileURL = bundle.url(
+        guard let coastlineArchiveFileURL = bundle.url(
+            forResource: "SituationCoastline",
+            withExtension: "mbtiles"
+        ) else {
+            throw SituationStyleResourceError.missingCoastlineArchive
+        }
+        guard let terrainArchiveFileURL = bundle.url(
             forResource: "SituationTerrain",
             withExtension: "mbtiles"
         ) else {
-            throw SituationStyleResourceError.missingArchive
+            throw SituationStyleResourceError.missingTerrainArchive
         }
         let data = try Data(contentsOf: styleURL)
         let object = try JSONSerialization.jsonObject(with: data)
         guard var style = object as? [String: Any],
               var sources = style["sources"] as? [String: Any],
+              var coastline = sources["pilotage-coastline"] as? [String: Any],
+              coastline["url"] as? String == coastlineArchiveToken,
               var terrain = sources["pilotage-terrain"] as? [String: Any],
-              terrain["url"] as? String == archiveToken else {
+              terrain["url"] as? String == terrainArchiveToken else {
             throw SituationStyleResourceError.invalidTemplate
         }
-        terrain["url"] = try archiveURL(for: archiveFileURL).absoluteString
+        coastline["url"] = try archiveURL(for: coastlineArchiveFileURL).absoluteString
+        terrain["url"] = try archiveURL(for: terrainArchiveFileURL).absoluteString
+        sources["pilotage-coastline"] = coastline
         sources["pilotage-terrain"] = terrain
         style["sources"] = sources
 #if PILOTAGE_MAPLIBRE_TERRAIN
@@ -81,7 +92,8 @@ enum SituationStyleResource {
 
 private enum SituationStyleResourceError: LocalizedError {
     case missingStyle
-    case missingArchive
+    case missingCoastlineArchive
+    case missingTerrainArchive
     case invalidTemplate
     case invalidEncoding
     case invalidArchiveURL
@@ -90,10 +102,12 @@ private enum SituationStyleResourceError: LocalizedError {
         switch self {
         case .missingStyle:
             "The application bundle has no SituationStyle.json resource."
-        case .missingArchive:
+        case .missingCoastlineArchive:
+            "The application bundle has no SituationCoastline.mbtiles resource."
+        case .missingTerrainArchive:
             "The application bundle has no SituationTerrain.mbtiles resource."
         case .invalidTemplate:
-            "SituationStyle.json has no terrain archive token."
+            "SituationStyle.json has an invalid archive token."
         case .invalidEncoding:
             "The resolved situation style is not UTF-8 text."
         case .invalidArchiveURL:

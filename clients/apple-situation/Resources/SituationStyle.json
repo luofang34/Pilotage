@@ -5,6 +5,11 @@
     "type": "globe"
   },
   "sources": {
+    "pilotage-coastline": {
+      "type": "vector",
+      "url": "__PILOTAGE_COASTLINE_MBTILES_URL__",
+      "attribution": "Made with Natural Earth. Free vector and raster map data at naturalearthdata.com."
+    },
     "pilotage-terrain": {
       "type": "raster-dem",
       "url": "__PILOTAGE_TERRAIN_MBTILES_URL__",
@@ -22,11 +27,41 @@
       }
     },
     {
+      "id": "pilotage-ocean-fill",
+      "type": "fill",
+      "source": "pilotage-coastline",
+      "source-layer": "ocean",
+      "paint": {
+        "fill-color": "#061927",
+        "fill-opacity": 1
+      }
+    },
+    {
+      "id": "pilotage-land-fill",
+      "type": "fill",
+      "source": "pilotage-coastline",
+      "source-layer": "land",
+      "paint": {
+        "fill-color": "#526044",
+        "fill-opacity": 1
+      }
+    },
+    {
+      "id": "pilotage-lake-fill",
+      "type": "fill",
+      "source": "pilotage-coastline",
+      "source-layer": "lakes",
+      "paint": {
+        "fill-color": "#061927",
+        "fill-opacity": 1
+      }
+    },
+    {
       "id": "pilotage-terrain-relief",
       "type": "color-relief",
       "source": "pilotage-terrain",
       "paint": {
-        "color-relief-opacity": 1,
+        "color-relief-opacity": 0.6,
         "color-relief-color": [
           "interpolate",
           [
@@ -42,11 +77,11 @@
           -1000,
           "#030b14",
           -200,
-          "#04101a",
+          "#394537",
           -20,
-          "#061521",
+          "#4a563c",
           -1,
-          "#081d29",
+          "#4f5f3e",
           0,
           "#4f5f3e",
           60,

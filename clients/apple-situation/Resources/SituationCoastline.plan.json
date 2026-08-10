@@ -1,0 +1,58 @@
+{
+  "source_name": "Natural Earth",
+  "dataset_scale": "1:10m",
+  "attribution": "Made with Natural Earth. Free vector and raster map data at naturalearthdata.com.",
+  "closest_zoom": 15,
+  "sources": [
+    {
+      "name": "ocean",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_ocean.zip",
+      "sha256": "db626fcd5d50b096b156c78a2cc95011b39f32a61b4e47d147e3f7a77b8b2719",
+      "shapefile": "ne_10m_ocean.shp"
+    },
+    {
+      "name": "land",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_land.zip",
+      "sha256": "e547d749445eaa0964aba76738090ec88f5e63c4585122170f98c67a7ea922dc",
+      "shapefile": "ne_10m_land.shp"
+    },
+    {
+      "name": "lakes",
+      "version": "5.0.0",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_lakes.zip",
+      "sha256": "0803a06f9c3cb4671d89b68c48b142aad9366ba40f665245e12a913fbc61722a",
+      "shapefile": "ne_10m_lakes.shp"
+    }
+  ],
+  "bands": [
+    {
+      "name": "world",
+      "min_zoom": 0,
+      "max_zoom": 5,
+      "min_lat_deg": -85.0511287798066,
+      "max_lat_deg": 85.0511287798066,
+      "min_lon_deg": -180.0,
+      "max_lon_deg": 180.0
+    },
+    {
+      "name": "region",
+      "min_zoom": 6,
+      "max_zoom": 10,
+      "min_lat_deg": 37.5,
+      "max_lat_deg": 43.5,
+      "min_lon_deg": -81.0,
+      "max_lon_deg": -72.0
+    },
+    {
+      "name": "local",
+      "min_zoom": 11,
+      "max_zoom": 15,
+      "min_lat_deg": 40.1,
+      "max_lat_deg": 41.1,
+      "min_lon_deg": -75.25,
+      "max_lon_deg": -74.25
+    }
+  ]
+}

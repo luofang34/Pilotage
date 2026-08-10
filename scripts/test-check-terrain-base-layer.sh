@@ -26,11 +26,16 @@ cp "$root/crates/pilotage-terrain-build/examples/build_situation_fixture.rs" \
 cp "$root/clients/apple-situation/App/SituationStyleResource.swift" \
     "$fixture/clients/apple-situation/App/"
 cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
+    "$root/clients/apple-situation/Resources/SituationCoastline.plan.json" \
+    "$root/clients/apple-situation/Resources/SituationCoastline.manifest.json" \
+    "$root/clients/apple-situation/Resources/SituationCoastline.provenance.md" \
     "$root/clients/apple-situation/Resources/SituationTerrain.plan.json" \
     "$root/clients/apple-situation/Resources/SituationTerrain.manifest.json" \
     "$root/clients/apple-situation/Resources/SituationTerrain.provenance.md" \
     "$fixture/clients/apple-situation/Resources/"
 cp "$root/clients/apple-situation/scripts/build-situation-terrain.sh" \
+    "$fixture/clients/apple-situation/scripts/"
+cp "$root/clients/apple-situation/scripts/build-situation-coastline.sh" \
     "$fixture/clients/apple-situation/scripts/"
 cp "$root/.gitignore" "$fixture/"
 cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
@@ -51,22 +56,50 @@ fi
 cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
     "$fixture/clients/apple-situation/Resources/"
 
-# Sea and shore must not read the same. A ramp that does not change across sea level draws
-# a coastline where there is none and hides the one that is there.
-python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'FLATTEN'
+# The polygon layers are the source of the coastline. The elevation ramp is not a
+# coastline source.
+python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'REMOVE_COASTLINE'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["sources"]["pilotage-coastline"]
+style["layers"] = [
+    layer for layer in style["layers"]
+    if layer["id"] not in {
+        "pilotage-ocean-fill",
+        "pilotage-land-fill",
+        "pilotage-lake-fill",
+    }
+]
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-terrain-relief":
+        layer["paint"]["color-relief-opacity"] = 1
+        ramp = layer["paint"]["color-relief-color"]
+        ramp[ramp.index(-1) + 1] = "#081d29"
+json.dump(style, open(path, "w"), indent=2)
+REMOVE_COASTLINE
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted an elevation-only coastline" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
+# The ramp must not classify water at sea level.
+python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'THRESHOLD'
 import json, sys
 path = sys.argv[1]
 style = json.load(open(path))
 for layer in style["layers"]:
     if layer["id"] == "pilotage-terrain-relief":
         ramp = layer["paint"]["color-relief-color"]
-        sea = ramp[ramp.index(0) + 1]
-        ramp[ramp.index(-1) + 1] = sea
+        ramp[ramp.index(-1) + 1] = "#081d29"
 json.dump(style, open(path, "w"), indent=2)
-FLATTEN
+THRESHOLD
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the terrain guard accepted a ramp that does not change across sea level" >&2
+    echo "the terrain guard accepted a sea-level threshold" >&2
     exit 1
 fi
 cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
@@ -113,6 +146,16 @@ fi
 cp "$root/clients/apple-situation/Resources/SituationTerrain.plan.json" \
     "$fixture/clients/apple-situation/Resources/"
 
+sed -i.bak 's/"closest_zoom": 15/"closest_zoom": 14/' \
+    "$fixture/clients/apple-situation/Resources/SituationCoastline.plan.json"
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a coastline plan below the closest zoom" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/Resources/SituationCoastline.plan.json" \
+    "$fixture/clients/apple-situation/Resources/"
+
 # Attribution is a licence condition of the tile source and has to reach the map.
 python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'STRIP'
 import json, sys
@@ -132,7 +175,9 @@ cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
 # A committed archive would put a large build artifact in history and hide which tiles it
 # was built from.
 grep -v '^clients/apple-situation/Resources/SituationTerrain\.mbtiles$' \
-    "$root/.gitignore" > "$fixture/.gitignore"
+    "$root/.gitignore" | \
+    grep -v '^clients/apple-situation/Resources/SituationCoastline\.mbtiles$' \
+    > "$fixture/.gitignore"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted a committed terrain archive" >&2
