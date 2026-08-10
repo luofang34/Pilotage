@@ -1891,6 +1891,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-navdata-cycle"
+version = "0.1.0"
+dependencies = [
+ "aerocontext-core",
+ "aerocontext-navdata",
+ "chrono",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-navdata-tiles"
 version = "0.1.0"
 dependencies = [

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/pilotage-navdata-cycle",
     "crates/pilotage-protocol",
     "crates/pilotage-authority",
     "crates/pilotage-session",
