@@ -109,6 +109,26 @@ if [ -z "$sea_colour" ] || [ -z "$below_colour" ] || [ "$sea_colour" = "$below_c
     status=1
 fi
 
+# One style file drives both renderers. The web renderer draws a globe from this key and
+# this one ignores it, so the two stay on the same data and the same colours.
+if ! jq -e '.projection.type == "globe"' "$style" >/dev/null; then
+    echo "FORBIDDEN: the style must declare the globe projection for the web renderer" >&2
+    status=1
+fi
+
+# A raster-dem source keeps drawing past its deepest tile by stretching what it has. The
+# map has to stop near where the archive stops, and the limit has to follow the plan
+# rather than be written twice.
+if ! grep -Fq 'SituationTerrain.manifest' "$resolver" \
+    || ! grep -Fq 'maximumZoomLevel' "$resolver"; then
+    echo "FORBIDDEN: the closest zoom must be read from the terrain manifest" >&2
+    status=1
+fi
+if ! grep -Fq 'mapView.maximumZoomLevel = maximumZoomLevel' "$map_view"; then
+    echo "FORBIDDEN: the map must apply a closest zoom" >&2
+    status=1
+fi
+
 if grep -Eqi 'https?://' "$style"; then
     echo "FORBIDDEN: the base style must have no network URL" >&2
     status=1
