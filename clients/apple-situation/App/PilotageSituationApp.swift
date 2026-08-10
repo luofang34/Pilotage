@@ -20,7 +20,11 @@ private struct SituationContentView: View {
         // The map owns the screen. Status, layers, reception and flights live in the
         // drawer, because a map covered in text answers "where" worse than a bare one.
         ZStack {
+            // The map is the document, so it runs to the glass. A safe-area inset here
+            // leaves a black band above and below that reads as a broken screen rather
+            // than as a margin. The controls above it keep the inset.
             SituationMap(batch: model.mapDisplay, onFeatureTapped: model.selectTraffic)
+                .ignoresSafeArea()
             VStack {
                 HStack(alignment: .top) {
                     if let flight = model.replayingFlight {
