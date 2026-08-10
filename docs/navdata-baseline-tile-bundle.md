@@ -15,6 +15,8 @@ The bundle uses MBTiles 1.3. Each tile is a gzip-compressed Mapbox Vector Tile
 MapLibre Native reads MBTiles from an application bundle on iOS. This path does
 not require a local HTTP server. The `maplibre-rs` local source can read the same
 SQLite rows and give the same Mapbox Vector Tile bytes to the renderer.
+The [maplibre-rs iOS offline source spike](maplibre-rs-ios-offline-source-spike.md)
+records the separate iOS application lifecycle limit.
 
 The build does not use PMTiles. The validated iOS path uses MBTiles. No validated
 PMTiles path exists. A tile directory would use more files and would not add a
