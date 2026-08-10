@@ -1,0 +1,17 @@
+[package]
+name = "pilotage-navdata-cycle"
+version = "0.1.0"
+edition.workspace = true
+description = "Load one published navigation-data cycle for airspace and station queries"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aerocontext-core = { workspace = true }
+aerocontext-navdata = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }
