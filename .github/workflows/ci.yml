@@ -104,6 +104,12 @@ jobs:
       - name: AirspaceView contract
         run: bash scripts/check-airspace-view-contract.sh
 
+      - name: Navdata tile bundle guard self-test
+        run: bash scripts/test-check-navdata-tile-bundle.sh
+
+      - name: Navdata tile bundle guard
+        run: bash scripts/check-navdata-tile-bundle.sh
+
       - name: cargo doc
         env:
           RUSTDOCFLAGS: "-D missing_docs -D rustdoc::broken_intra_doc_links"

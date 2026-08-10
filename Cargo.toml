@@ -12,6 +12,7 @@ members = [
     "crates/pilotage-conformance",
     "crates/pilotage-situation-view",
     "crates/pilotage-airspace-view",
+    "crates/pilotage-navdata-tiles",
     "crates/pilotage-calibration-id",
     "crates/pilotage-camera-calibration",
     "crates/pilotage-geo",
@@ -83,6 +84,7 @@ png = "0.18.1"
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "serialize"] }
 prost = "0.14.4"
 prost-build = "0.14.4"
+flate2 = "1.1.9"
 libm = "0.2.16"
 libc = "0.2.177"
 wasm-bindgen = "=0.2.126"
@@ -105,6 +107,7 @@ pilotage-adapter-api = { path = "crates/pilotage-adapter-api" }
 pilotage-mavlink = { path = "crates/pilotage-mavlink" }
 pilotage-situation-view = { path = "crates/pilotage-situation-view" }
 pilotage-airspace-view = { path = "crates/pilotage-airspace-view" }
+pilotage-navdata-tiles = { path = "crates/pilotage-navdata-tiles" }
 pilotage-calibration-id = { path = "crates/pilotage-calibration-id" }
 pilotage-camera-calibration = { path = "crates/pilotage-camera-calibration" }
 pilotage-geo = { path = "crates/pilotage-geo" }
