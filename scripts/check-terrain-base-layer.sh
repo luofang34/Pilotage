@@ -7,15 +7,20 @@ builder="$root/crates/pilotage-terrain-build"
 client="$root/clients/apple-situation"
 style="$client/Resources/SituationStyle.json"
 archive="$client/Resources/SituationTerrain.mbtiles"
+plan="$client/Resources/SituationTerrain.plan.json"
+manifest="$client/Resources/SituationTerrain.manifest.json"
+fetcher="$client/scripts/build-situation-terrain.sh"
 provenance="$client/Resources/SituationTerrain.provenance.md"
 resolver="$client/App/SituationStyleResource.swift"
 map_view="$client/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift"
 project="$client/project.yml"
-expected_digest="4bfb229fab057719778a65ee4b68569e16839998137bd5ddb401c5c20d00eaee"
 status=0
 
-for path in "$builder/src/lib.rs" "$builder/src/tests.rs" "$style" "$archive" \
-    "$provenance" "$resolver" "$map_view" "$project"; do
+# The archive itself is a build artifact and is not committed, so it is checked only when a
+# working tree holds one. The plan and the manifest are committed and are always checked:
+# they are what says which tiles an archive should contain and what one build produced.
+for path in "$builder/src/lib.rs" "$builder/src/tests.rs" "$style" "$plan" "$manifest" \
+    "$fetcher" "$provenance" "$resolver" "$map_view" "$project"; do
     if [ ! -f "$path" ]; then
         echo "FORBIDDEN: required terrain file is missing: $path" >&2
         status=1
@@ -55,7 +60,7 @@ if ! jq -e '
     .sources["pilotage-terrain"].tileSize == 256 and
     .sources["pilotage-terrain"].url == "__PILOTAGE_TERRAIN_MBTILES_URL__" and
     ([.layers[] | select(.id == "pilotage-terrain-hillshade" and .type == "hillshade" and .source == "pilotage-terrain")] | length == 1) and
-    ([.layers[] | select(.source == "pilotage-terrain" and .type == "color-relief")] | length == 0) and
+    ([.layers[] | select(.id == "pilotage-terrain-relief" and .type == "color-relief" and .source == "pilotage-terrain")] | length == 1) and
     (has("terrain") | not)
 ' "$style" >/dev/null; then
     echo "FORBIDDEN: the situation style must use the Terrarium hillshade contract" >&2
@@ -65,11 +70,62 @@ fi
 if ! jq -e '
     .layers[] |
     select(.id == "pilotage-terrain-hillshade") |
-    .paint["hillshade-shadow-color"] == "#050b11" and
-    .paint["hillshade-highlight-color"] == "#526879" and
-    .paint["hillshade-accent-color"] == "#1b3243"
+    .paint["hillshade-shadow-color"] == "#241f16" and
+    .paint["hillshade-highlight-color"] == "#cfc9b4" and
+    .paint["hillshade-accent-color"] == "#3a3226"
 ' "$style" >/dev/null; then
-    echo "FORBIDDEN: the terrain hillshade must use the dark blue-grey palette" >&2
+    echo "FORBIDDEN: the terrain hillshade must use the warm neutral palette" >&2
+    status=1
+fi
+
+# The colour ramp is what separates sea from shore and low ground from high. A ramp that
+# reads the same on both sides of sea level draws a coastline that is not there, and a
+# ramp that is not driven by elevation is a flat wash that says nothing about height.
+relief_ramp="$(jq -c '
+    .layers[] | select(.id == "pilotage-terrain-relief") | .paint["color-relief-color"]
+' "$style")"
+if ! printf '%s' "$relief_ramp" | jq -e '
+    .[0] == "interpolate" and .[2] == ["elevation"] and
+    ((. | length) >= 12)
+' >/dev/null 2>&1; then
+    echo "FORBIDDEN: the terrain relief must interpolate colour over elevation" >&2
+    status=1
+fi
+
+# The ramp must start below sea level, so bathymetry reads as water and not as ground.
+if ! printf '%s' "$relief_ramp" | jq -e '.[3] < 0' >/dev/null 2>&1; then
+    echo "FORBIDDEN: the terrain relief must reach below sea level" >&2
+    status=1
+fi
+
+sea_colour="$(printf '%s' "$relief_ramp" | jq -r '
+    [range(3; length; 2) as $i | select(.[$i] == 0) | .[$i + 1]] | .[0] // ""
+')"
+below_colour="$(printf '%s' "$relief_ramp" | jq -r '
+    [range(3; length; 2) as $i | select(.[$i] == -1) | .[$i + 1]] | .[0] // ""
+')"
+if [ -z "$sea_colour" ] || [ -z "$below_colour" ] || [ "$sea_colour" = "$below_colour" ]; then
+    echo "FORBIDDEN: the terrain relief must change colour across sea level" >&2
+    status=1
+fi
+
+# One style file drives both renderers. The web renderer draws a globe from this key and
+# this one ignores it, so the two stay on the same data and the same colours.
+if ! jq -e '.projection.type == "globe"' "$style" >/dev/null; then
+    echo "FORBIDDEN: the style must declare the globe projection for the web renderer" >&2
+    status=1
+fi
+
+# A raster-dem source keeps drawing past its deepest tile by stretching what it has. The
+# map has to stop near where the archive stops, and the limit has to follow the plan
+# rather than be written twice.
+if ! grep -Fq 'SituationTerrain.manifest' "$resolver" \
+    || ! grep -Fq 'maximumZoomLevel' "$resolver"; then
+    echo "FORBIDDEN: the closest zoom must be read from the terrain manifest" >&2
+    status=1
+fi
+if ! grep -Fq 'mapView.maximumZoomLevel = maximumZoomLevel' "$map_view"; then
+    echo "FORBIDDEN: the map must apply a closest zoom" >&2
     status=1
 fi
 
@@ -95,28 +151,58 @@ if ! grep -Eq '^[[:space:]]*- path: Resources[[:space:]]*$' "$project"; then
     status=1
 fi
 
-if [ "${PILOTAGE_TERRAIN_SKIP_REBUILD:-0}" != "1" ]; then
-    generated_archive="$(mktemp)"
-    trap 'rm -f "$generated_archive"' EXIT
-    cargo run --quiet \
-        --manifest-path "$builder/Cargo.toml" \
-        --example build_situation_fixture \
-        -- "$generated_archive"
-    if ! cmp -s "$archive" "$generated_archive"; then
-        echo "FORBIDDEN: SituationTerrain.mbtiles is not the example output" >&2
+if grep -Eq '^clients/apple-situation/Resources/SituationTerrain\.mbtiles$' "$root/.gitignore"; then
+    :
+else
+    echo "FORBIDDEN: the terrain archive must stay a build artifact, not a repository file" >&2
+    status=1
+fi
+
+# A world band keeps a zoomed-out map from showing empty ocean, and a regional band gives
+# the zoom a pilot reads. An archive with only one of them looks correct at one zoom and
+# blank at the other.
+if ! jq -e '
+    (.bands | length) >= 2 and
+    ([.bands[] | select(.min_lon_deg <= -180 and .max_lon_deg >= 180)] | length == 1) and
+    ([.bands[] | select(.max_zoom >= 10)] | length >= 1) and
+    (.encoding == "terrarium") and
+    (.tile_size == 256) and
+    (.attribution | length > 0)
+' "$plan" >/dev/null; then
+    echo "FORBIDDEN: the terrain plan must cover the world and a flown region in Terrarium" >&2
+    status=1
+fi
+
+plan_digest="$(shasum -a 256 "$plan" | awk '{print $1}')"
+if [ "$(jq -r '.plan_sha256 // ""' "$manifest")" != "$plan_digest" ]; then
+    echo "FORBIDDEN: the terrain manifest does not describe the committed plan" >&2
+    status=1
+fi
+
+if ! jq -e '.tiles_written > 0 and .tiles_written == .tiles_requested' "$manifest" >/dev/null; then
+    echo "FORBIDDEN: the terrain manifest must record a complete fetch" >&2
+    status=1
+fi
+
+# Attribution is a licence condition of the tile source, so it has to reach the map and not
+# only this repository.
+attribution="$(jq -r '.attribution' "$plan")"
+if ! jq -e --arg text "$attribution" \
+    '.sources["pilotage-terrain"].attribution == $text' "$style" >/dev/null; then
+    echo "FORBIDDEN: the style must carry the tile source attribution" >&2
+    status=1
+fi
+if ! grep -Fq "$attribution" "$provenance"; then
+    echo "FORBIDDEN: the terrain provenance must carry the tile source attribution" >&2
+    status=1
+fi
+
+if [ -f "$archive" ]; then
+    actual_digest="$(shasum -a 256 "$archive" | awk '{print $1}')"
+    if [ "$actual_digest" != "$(jq -r '.archive_sha256 // ""' "$manifest")" ]; then
+        echo "FORBIDDEN: the terrain archive does not match its manifest" >&2
         status=1
     fi
-fi
-
-actual_digest="$(shasum -a 256 "$archive" | awk '{print $1}')"
-if [ "$actual_digest" != "$expected_digest" ]; then
-    echo "FORBIDDEN: SituationTerrain.mbtiles does not match its reproducible source" >&2
-    status=1
-fi
-
-if ! grep -Fq "$expected_digest" "$provenance"; then
-    echo "FORBIDDEN: the terrain provenance must record the archive digest" >&2
-    status=1
 fi
 
 if [ "$status" -ne 0 ]; then

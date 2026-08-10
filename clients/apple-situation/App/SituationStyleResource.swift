@@ -7,6 +7,28 @@ enum SituationStyleResource {
 
     private static let archiveToken = "__PILOTAGE_TERRAIN_MBTILES_URL__"
 
+    /// Closest zoom the map allows.
+    ///
+    /// A raster-dem source draws past its deepest tile by stretching the one it has. Two
+    /// doublings keep a close view usable while the shape on screen still comes from
+    /// measured ground; past that the picture is invention. The value is read from the
+    /// manifest that ships beside the archive, so a plan that gains a closer band raises
+    /// the ceiling with it instead of leaving a second number to change by hand.
+    /// Doublings of stretch allowed past the deepest tile.
+    static let overzoomSteps: Double = 2
+
+    static var maximumZoomLevel: Double {
+        guard let url = Bundle.main.url(
+            forResource: "SituationTerrain.manifest",
+            withExtension: "json"
+        ),
+            let data = try? Data(contentsOf: url),
+            let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let bands = manifest["bands"] as? [[String: Any]] else { return 14 }
+        let deepest = bands.compactMap { $0["max_zoom"] as? Double }.max() ?? 13
+        return deepest + overzoomSteps
+    }
+
     static func load(bundle: Bundle = .main) throws -> String {
         guard let styleURL = bundle.url(forResource: "SituationStyle", withExtension: "json") else {
             throw SituationStyleResourceError.missingStyle
