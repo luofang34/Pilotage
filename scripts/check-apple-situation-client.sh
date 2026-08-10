@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Verify the fixed dependencies and the private driver identity boundary.
+# Verify the reviewed dependencies and the private driver identity boundary.
 set -euo pipefail
 
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 client="$root/clients/apple-situation"
 driver_entitlements="$client/Configuration/AeroLinkDriverDevelopment.entitlements"
+maplibre_manifest="$client/Packages/PilotageMapLibreBinding/Package.swift"
+terrain_manifest="$client/Packages/PilotageMapLibreTerrain/Package.swift"
+terrain_revision_file="$client/MAPLIBRE_TERRAIN_REVISION"
+terrain_build="$client/scripts/build-maplibre-terrain.sh"
 status=0
 
 require_pattern() {
@@ -21,7 +25,7 @@ require_fixed() {
     local value=$1
     local file=$2
     local message=$3
-    if ! grep -Fq "$value" "$file"; then
+    if ! grep -Fq -- "$value" "$file"; then
         echo "FORBIDDEN: $message" >&2
         status=1
     fi
@@ -45,11 +49,48 @@ check_revision "$client/AIRMASS_REVISION" AIRMASS_REVISION
 check_revision "$client/SURVEILLANCE_REVISION" SURVEILLANCE_REVISION
 
 require_pattern 'exact: "6\.28\.0"' \
-    "$client/Packages/PilotageMapLibreBinding/Package.swift" \
+    "$maplibre_manifest" \
     "the MapLibre Native package must use the reviewed exact version"
 require_pattern 'maplibre/maplibre-gl-native-distribution' \
-    "$client/Packages/PilotageMapLibreBinding/Package.swift" \
+    "$maplibre_manifest" \
     "the binding must use the official MapLibre Native distribution"
+require_pattern 'PILOTAGE_MAPLIBRE_TERRAIN' "$maplibre_manifest" \
+    "the terrain renderer must require its explicit build flag"
+require_pattern 'if terrainRendererEnabled' "$maplibre_manifest" \
+    "the local terrain package must stay behind the explicit build flag"
+require_fixed '.package(path: "../PilotageMapLibreTerrain")' "$maplibre_manifest" \
+    "the terrain flag must select only the local reviewed package"
+require_fixed 'path: "Artifacts/MapLibre.xcframework"' "$terrain_manifest" \
+    "the terrain package must use the locally built XCFramework"
+terrain_revision=$(tr -d '[:space:]' < "$terrain_revision_file")
+if [[ ! "$terrain_revision" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "FORBIDDEN: MAPLIBRE_TERRAIN_REVISION must contain one full commit identity" >&2
+    status=1
+fi
+require_fixed 'MAPLIBRE_TERRAIN_REVISION' "$terrain_build" \
+    "the terrain build must read the reviewed commit identity"
+require_pattern 'actual_revision=.*rev-parse HEAD' "$terrain_build" \
+    "the terrain build must compare the source HEAD with the reviewed identity"
+require_fixed "build_target='//platform/ios:MapLibre.dynamic'" "$terrain_build" \
+    "the terrain build must use the MapLibre Native XCFramework target"
+require_fixed '--//:renderer=metal' "$terrain_build" \
+    "the terrain build must select the iOS Metal renderer"
+require_fixed 'PILOTAGE_MAPLIBRE_TERRAIN must be 0 or 1' "$client/scripts/ci-ios.sh" \
+    "the Apple check must reject an invalid terrain flag"
+require_pattern 'build-maplibre-terrain[.]sh' "$client/scripts/ci-ios.sh" \
+    "the flagged Apple check must build the terrain package"
+require_pattern 'PILOTAGE_MAPLIBRE_SWIFT_CONDITIONS' "$client/project.yml" \
+    "the application project must record the terrain build condition"
+style_resource="$client/App/SituationStyleResource.swift"
+terrain_style_count=$(grep -Fc 'style["terrain"]' "$style_resource" || true)
+terrain_style_block=$(sed -n '/#if PILOTAGE_MAPLIBRE_TERRAIN/,/#endif/p' "$style_resource")
+if [ "$terrain_style_count" -ne 1 ] || \
+    ! grep -Fq 'style["terrain"]' <<<"$terrain_style_block"; then
+    echo "FORBIDDEN: only the flagged style may enable the terrain root" >&2
+    status=1
+fi
+require_fixed 'WifiDB/maplibre-native' "$client/README.md" \
+    "the terrain source repository must be recorded"
 require_pattern 'AeroLink/AeroLinkAppleClient' "$client/project.yml" \
     "the application must embed its AeroLink client copy"
 require_pattern 'AeroLink/AeroLinkDriver' "$client/project.yml" \

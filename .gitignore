@@ -57,5 +57,7 @@ clients/apple-situation/Packages/PilotageSituationCore/artifacts/
 clients/apple-situation/Packages/PilotageSituationCore/Sources/PilotageSituationCore/Generated/
 clients/apple-situation/Packages/PilotageSituationCore/.build/
 clients/apple-situation/Packages/PilotageMapLibreBinding/.build/
+clients/apple-situation/Packages/PilotageMapLibreTerrain/Artifacts/
 clients/apple-situation/.build/
 clients/apple-situation/PilotageSituation.xcodeproj/
+clients/apple-situation/Resources/SituationTerrain.mbtiles
