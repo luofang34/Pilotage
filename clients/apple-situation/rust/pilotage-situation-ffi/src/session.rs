@@ -77,6 +77,33 @@ impl PresentationSession {
         Ok(display_for_state(&state, changes))
     }
 
+    /// Take the weather station positions from one published navigation-data cycle.
+    ///
+    /// A text weather report names its station and carries no position, so a client with
+    /// no cycle draws no weather however well the report decoded. The caller supplies the
+    /// encoded cycle, because where a cycle comes from is a delivery question and this
+    /// session only needs its contents.
+    pub fn load_weather_stations_from_cycle(
+        &self,
+        cycle_bytes: Vec<u8>,
+    ) -> Result<DisplayBatch, FfiError> {
+        let snapshot =
+            pilotage_navdata_cycle::load_cycle_bytes("cycle", &cycle_bytes).map_err(|source| {
+                FfiError::WeatherStationPosition {
+                    message: source.to_string(),
+                }
+            })?;
+        let positions = pilotage_navdata_cycle::weather_station_positions(&snapshot)
+            .into_iter()
+            .map(|station| WeatherStationPosition {
+                station_id: station.station_id,
+                latitude_deg: station.latitude_deg,
+                longitude_deg: station.longitude_deg,
+            })
+            .collect();
+        self.replace_weather_station_positions(positions)
+    }
+
     /// Replace the navigation-data positions used for weather stations.
     pub fn replace_weather_station_positions(
         &self,
