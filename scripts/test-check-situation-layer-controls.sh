@@ -18,7 +18,7 @@ cp "$repo_root/crates/pilotage-presentation/src/policy.rs" "$portable/"
 cp "$repo_root/crates/pilotage-presentation/src/detail.rs" "$portable/"
 cp "$repo_root/crates/pilotage-presentation/src/tests/traffic.rs" "$portable/tests/"
 cp "$repo_root/clients/apple-situation/rust/pilotage-situation-ffi/src/session.rs" "$ffi/"
-cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+cp "$repo_root/clients/apple-situation/App/"*.swift "$app/"
 cp "$repo_root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"*.swift "$binding/"
 cp "$repo_root/scripts/check-situation-layer-controls.sh" "$fixture/scripts/"
 
@@ -41,6 +41,15 @@ sed -i.bak '/forbiddenLayerPolicy/d' "$binding/SituationOverlay.swift"
 sed -i.bak 's/visibleFeatures(/hiddenFeatures(/' "$binding/SituationMapView.swift"
 if bash "$fixture/scripts/check-situation-layer-controls.sh" "$fixture" >/dev/null 2>&1; then
     echo "the layer control guard accepted a missing tap query" >&2
+    exit 1
+fi
+sed -i.bak 's/hiddenFeatures(/visibleFeatures(/' "$binding/SituationMapView.swift"
+
+# Which screen holds a control is layout. Dropping it from every screen is a capability
+# the reader loses, and that is what this refuses.
+sed -i.bak 's/LayerControlsView/RemovedControlsView/g' "$app/"*.swift
+if bash "$fixture/scripts/check-situation-layer-controls.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the layer control guard accepted an application with no layer controls" >&2
     exit 1
 fi
 

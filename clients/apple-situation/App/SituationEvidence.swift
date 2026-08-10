@@ -48,15 +48,27 @@ struct SituationEvidence: Codable, Equatable {
     var highestTopM: Double?
     /// Layer control state, by layer identity.
     var layerSourceStates: [String: String]
+    /// Recording this run replays, when the map is not fed by a radio.
+    var replaySource: String?
+    /// Receptions the replay has handed to the decoders.
+    var replayEvents: UInt64?
+    /// Track records the replay decoded.
+    var replayTrackRecords: UInt64?
+    /// Weather records the replay decoded.
+    var replayWeatherRecords: UInt64?
+    /// Records the display refused during the replay.
+    var replayRefusedRecords: UInt64?
     /// First error the client reported, if any.
     var errorMessage: String?
 }
 
+@MainActor
 extension SituationEvidence {
     /// Read the evidence out of one display batch and its surrounding state.
     init(
         batch: DisplayBatch?,
         radioSource: RadioSourceSnapshot,
+        replay: SituationReplayRun?,
         driverEnabled: Bool?,
         terrainArchiveAvailable: Bool,
         errorMessage: String?
@@ -95,6 +107,11 @@ extension SituationEvidence {
             (batch?.layers ?? []).map { ($0.id, $0.sourceStateLabel) },
             uniquingKeysWith: { first, _ in first }
         )
+        replaySource = replay?.flight.receptionFileName
+        replayEvents = replay?.events
+        replayTrackRecords = replay?.trackRecords
+        replayWeatherRecords = replay?.weatherRecords
+        replayRefusedRecords = replay?.refusedRecords
         self.errorMessage = errorMessage
     }
 

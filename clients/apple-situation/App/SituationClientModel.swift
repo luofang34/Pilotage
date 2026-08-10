@@ -9,12 +9,47 @@ final class SituationClientModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var radioSource: RadioSourceSnapshot
     @Published private(set) var selectedTraffic: DisplayTrafficDetail?
+    /// Display of the replay in progress, when a flight is open.
+    @Published private(set) var replayDisplay: DisplayBatch?
+    /// Recordings the container holds.
+    @Published private(set) var flights: [Flight] = []
+    /// Whether the client claims the radios.
+    @Published var adsbEnabled: Bool {
+        didSet {
+            guard adsbEnabled != oldValue else { return }
+            UserDefaults.standard.set(adsbEnabled, forKey: Self.adsbEnabledKey)
+            Task { await adsbEnabled ? activateRadio() : suspendRadio() }
+        }
+    }
+
+    /// Batch the map draws. A reader who opened a flight sees the flight.
+    var mapDisplay: DisplayBatch? { replayDisplay ?? display }
+
+    /// The flight being replayed, when one is open.
+    var replayingFlight: Flight? { replayRun?.flight }
+
+    /// Whether something the reader should see is wrong.
+    ///
+    /// Reception state moved into the drawer, so a band that failed leaves the map with
+    /// nothing on it and no reason given. A map that looks clear because a receiver died
+    /// is the failure the layer states exist to prevent.
+    var hasAttention: Bool {
+        errorMessage != nil || (adsbEnabled && !radioSource.bandFailures.isEmpty)
+    }
 
     private let session: PresentationSession
     private let domain: RadioDomainSession?
     private let terrainAvailable: Bool
     private let discovery = AeroLinkDiscoveryGate()
     private let evidenceWriter = SituationEvidenceWriter()
+    private var replayTask: Task<Void, Never>?
+    private var pendingDisplay: DisplayBatch?
+    private var publishTask: Task<Void, Never>?
+    private var lastPublishMicros: UInt64 = 0
+    private var pendingReplayDisplay: DisplayBatch?
+    private var replayPublishTask: Task<Void, Never>?
+    private var lastReplayPublishMicros: UInt64 = 0
+    private var replayRun: SituationReplayRun?
     private var runtime: AeroLinkRadioRuntime?
     private var maintenanceTask: Task<Void, Never>?
     private var drainTask: Task<Void, Never>?
@@ -23,7 +58,11 @@ final class SituationClientModel: ObservableObject {
     private var startupError: String?
     private var isActive = false
 
+    /// Preference key for radio reception.
+    static let adsbEnabledKey = "pilotageAdsbInEnabled"
+
     init() {
+        adsbEnabled = UserDefaults.standard.bool(forKey: Self.adsbEnabledKey)
         let source = RadioSourceSnapshot(
             availability: .suspended,
             receivers: [],
@@ -57,6 +96,14 @@ final class SituationClientModel: ObservableObject {
 
     func activate() async {
         recordEvidence()
+        reloadFlights()
+        // Reception is optional. A reader who has not turned it on gets no driver
+        // discovery, no receiver claim, and no radio state on the map.
+        guard adsbEnabled else { return }
+        await activateRadio()
+    }
+
+    private func activateRadio() async {
         if let cleanup = cleanupTask {
             await cleanup.task.value
             if cleanupTask?.generation == cleanup.generation {
@@ -89,6 +136,10 @@ final class SituationClientModel: ObservableObject {
     }
 
     func suspend() async {
+        await suspendRadio()
+    }
+
+    private func suspendRadio() async {
         guard isActive, let runtime else { return }
         isActive = false
         let maintenance = maintenanceTask
@@ -155,11 +206,99 @@ final class SituationClientModel: ObservableObject {
         selectedTraffic = nil
     }
 
+    /// Hold one batch for the map, at a rate a screen can show.
+    ///
+    /// A batch arrives for every reception, and a busy band produces them far faster than
+    /// a display refreshes. Publishing each one drives a full SwiftUI update and a source
+    /// replacement that nobody ever sees. The newest batch always wins, and the trailing
+    /// one is never dropped, so the map settles on the current picture rather than on
+    /// whichever batch happened to arrive on a boundary.
     private func applyDisplay(_ next: DisplayBatch) {
+        pendingDisplay = next
+        let now = Self.monotonicMicros
+        if now &- lastPublishMicros >= Self.publishIntervalMicros {
+            publishPendingDisplay()
+            return
+        }
+        guard publishTask == nil else { return }
+        publishTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.publishIntervalMicros * 1_000)
+            guard let self else { return }
+            self.publishTask = nil
+            self.publishPendingDisplay()
+        }
+    }
+
+    private func publishPendingDisplay() {
+        guard let next = pendingDisplay else { return }
+        pendingDisplay = nil
+        lastPublishMicros = Self.monotonicMicros
         display = next
         if let selected = selectedTraffic {
             selectedTraffic = next.trafficDetails.first { $0.id == selected.id }
         }
+        recordEvidence()
+    }
+
+    /// Recordings the container holds.
+    func reloadFlights() {
+        flights = FlightsLibrary.flights()
+    }
+
+    /// Open one recorded flight.
+    ///
+    /// A replay never touches the live map. It owns its decoders and its display, and the
+    /// map shows whichever of the two the reader asked for, because a map fed from a file
+    /// looks exactly like a map fed from a radio.
+    func startReplay(_ flight: Flight) {
+        stopReplay()
+        guard let run = SituationReplayRun(flight: flight) else {
+            errorMessage = Self.join(startupError, "\(flight.receptionFileName) cannot be read.")
+            return
+        }
+        replayRun = run
+        replayTask = Task { [weak self] in
+            await run.run(deviceMonotonicMicros: Self.monotonicMicros) { batch in
+                guard let self else { return }
+                self.applyReplayDisplay(batch)
+            }
+            self?.flushReplayDisplay()
+            self?.recordEvidence()
+        }
+    }
+
+    /// Close the replay and put the live map back.
+    func stopReplay() {
+        replayTask?.cancel()
+        replayTask = nil
+        replayRun = nil
+        pendingReplayDisplay = nil
+        replayDisplay = nil
+        selectedTraffic = nil
+        recordEvidence()
+    }
+
+    private func applyReplayDisplay(_ next: DisplayBatch) {
+        pendingReplayDisplay = next
+        let now = Self.monotonicMicros
+        if now &- lastReplayPublishMicros >= Self.publishIntervalMicros {
+            flushReplayDisplay()
+            return
+        }
+        guard replayPublishTask == nil else { return }
+        replayPublishTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.publishIntervalMicros * 1_000)
+            guard let self else { return }
+            self.replayPublishTask = nil
+            self.flushReplayDisplay()
+        }
+    }
+
+    private func flushReplayDisplay() {
+        guard let next = pendingReplayDisplay else { return }
+        pendingReplayDisplay = nil
+        lastReplayPublishMicros = Self.monotonicMicros
+        replayDisplay = next
         recordEvidence()
     }
 
@@ -168,6 +307,7 @@ final class SituationClientModel: ObservableObject {
             SituationEvidence(
                 batch: display,
                 radioSource: radioSource,
+                replay: replayRun,
                 driverEnabled: discovery.driverIsEnabled(),
                 terrainArchiveAvailable: terrainAvailable,
                 errorMessage: errorMessage
@@ -182,6 +322,9 @@ final class SituationClientModel: ObservableObject {
         case (.some(let first), .some(let second)): "\(first)\n\(second)"
         }
     }
+
+    /// Shortest gap between two map updates, in microseconds.
+    private static let publishIntervalMicros: UInt64 = 100_000
 
     private static var monotonicMicros: UInt64 {
         DispatchTime.now().uptimeNanoseconds / 1_000

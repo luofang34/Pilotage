@@ -14,39 +14,57 @@ struct PilotageSituationApp: App {
 private struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = SituationClientModel()
+    @State private var menuPresented = false
 
     var body: some View {
+        // The map owns the screen. Status, layers, reception and flights live in the
+        // drawer, because a map covered in text answers "where" worse than a bare one.
         ZStack {
-            SituationMap(batch: model.display, onFeatureTapped: model.selectTraffic)
+            SituationMap(batch: model.mapDisplay, onFeatureTapped: model.selectTraffic)
             VStack {
                 HStack(alignment: .top) {
-                    VStack(spacing: 8) {
-                        RadioStatusView(source: model.radioSource)
-                        if let message = model.errorMessage {
-                            Text(message)
-                                .padding(12)
-                                .background(
-                                    .ultraThinMaterial,
-                                    in: RoundedRectangle(cornerRadius: 8)
-                                )
-                        }
+                    if let flight = model.replayingFlight {
+                        ReplayBannerView(flight: flight, stop: model.stopReplay)
                     }
                     Spacer()
-                    LayerControlsView(
-                        layers: model.display?.layers ?? [],
-                        setEnabled: model.setLayerEnabled
+                    Button {
+                        model.reloadFlights()
+                        menuPresented = true
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.title2)
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                            // A reader must not have to open the drawer to learn that a
+                            // receiver died. An empty map with no mark reads as clear air.
+                            .overlay(alignment: .topTrailing) {
+                                if model.hasAttention {
+                                    Circle()
+                                        .fill(.orange)
+                                        .frame(width: 12, height: 12)
+                                        .overlay(Circle().stroke(.black.opacity(0.5)))
+                                }
+                            }
+                    }
+                    .accessibilityLabel(
+                        model.hasAttention
+                            ? "Situation menu, reception needs attention"
+                            : "Situation menu"
                     )
                 }
                 Spacer()
                 HStack {
                     PositionlessTrafficView(
-                        items: model.display?.positionlessTraffic ?? [],
+                        items: model.mapDisplay?.positionlessTraffic ?? [],
                         select: model.selectTraffic
                     )
                     Spacer()
                 }
             }
             .padding()
+        }
+        .sheet(isPresented: $menuPresented) {
+            SituationMenuView(model: model)
         }
         .task(id: scenePhase) {
             if scenePhase == .active {
