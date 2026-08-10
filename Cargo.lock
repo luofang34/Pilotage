@@ -62,7 +62,7 @@ dependencies = [
 [[package]]
 name = "airmass-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Airmass.git?rev=b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb#b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb"
+source = "git+https://github.com/luofang34/Airmass.git?rev=58b525a7beb35cf3ca721ccb511b895a1d1221dc#58b525a7beb35cf3ca721ccb511b895a1d1221dc"
 dependencies = [
  "serde",
  "thiserror",
@@ -71,7 +71,7 @@ dependencies = [
 [[package]]
 name = "airmass-geojson"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Airmass.git?rev=b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb#b269aa3328d0d4eedd455d12f94d1f6ec21bb2fb"
+source = "git+https://github.com/luofang34/Airmass.git?rev=58b525a7beb35cf3ca721ccb511b895a1d1221dc#58b525a7beb35cf3ca721ccb511b895a1d1221dc"
 dependencies = [
  "airmass-core",
 ]

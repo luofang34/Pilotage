@@ -26,6 +26,7 @@ struct Tally {
     weather_products: u64,
     track_records: u64,
     weather_records: u64,
+    advisory_records: u64,
     rejected: u64,
 }
 
@@ -47,7 +48,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let radio = RadioDomainSession::new()?;
     let presentation = PresentationSession::new();
-    let mut run = Run::default();
+    let mut run = Run {
+        start_utc_millis: start_utc_millis(&path),
+        ..Default::default()
+    };
     replay(&path, &radio, &presentation, synthesize, &mut run)?;
 
     if let Some(cycle_path) = &cycle_path {
@@ -67,6 +71,51 @@ struct Run {
     display: Option<pilotage_situation_ffi::DisplayBatch>,
     first_rejection: Option<String>,
     stations: std::collections::BTreeSet<String>,
+    products: std::collections::BTreeMap<String, u64>,
+    start_utc_millis: i64,
+}
+
+/// Take the recording's wall clock from the file the harness named.
+///
+/// An advisory states a validity period in real UTC. A replay that starts its clock at the
+/// epoch places every advisory in the future, so the lifecycle marks it not effective and
+/// no shape ever reaches the display. The harness writes the start instant into the file
+/// name, which is the only wall clock a recording carries.
+fn start_utc_millis(path: &Path) -> i64 {
+    let Some(stem) = path.file_stem().and_then(std::ffi::OsStr::to_str) else {
+        return 0;
+    };
+    let Some(stamp) = stem.strip_prefix("receptions-") else {
+        return 0;
+    };
+    parse_file_name_instant(stamp).unwrap_or(0)
+}
+
+/// Read `YYYY-MM-DDTHH-MM-SSZ`, the colon-free form a file name can hold.
+fn parse_file_name_instant(stamp: &str) -> Option<i64> {
+    let stamp = stamp.strip_suffix('Z')?;
+    let (date, time) = stamp.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: i64 = date_parts.next()?.parse().ok()?;
+    let day: i64 = date_parts.next()?.parse().ok()?;
+    let mut time_parts = time.split('-');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts.next()?.parse().ok()?;
+    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second;
+    seconds.checked_mul(1_000)
+}
+
+/// Days between the Unix epoch and one proleptic Gregorian date.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_term = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_term + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 /// Push every reception in the file through the radio and presentation stages.
@@ -77,10 +126,10 @@ fn replay(
     synthesize: bool,
     run: &mut Run,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // The recording carries no wall clock, so drive one forward. Lifecycle rules retire a
-    // track and expire a product on elapsed time, and a clock that never advances would
-    // keep every feature alive and overstate the result.
-    let mut utc_millis: i64 = 0;
+    // Drive both clocks forward from the recording's start. Lifecycle rules retire a track
+    // and expire a product on elapsed time, and a clock that never advances would keep
+    // every feature alive and overstate the result.
+    let mut utc_millis: i64 = run.start_utc_millis;
     let mut monotonic_micros: u64 = 0;
 
     for line in BufReader::new(std::fs::File::open(path)?).lines() {
@@ -113,6 +162,12 @@ fn replay(
             run.display = Some(presentation.accept_track_record(record, monotonic_micros)?);
         }
         for record in batch.weather_records {
+            // An advisory is what becomes a map shape, so counting the records that carry
+            // one separates "the radio heard no advisory" from "the shape path dropped it".
+            if record.contains("\"advisories\"") {
+                run.tally.advisory_records += 1;
+            }
+            count_products(&record, &mut run.products);
             if synthesize {
                 collect_station_ids(&record, &mut run.stations);
             }
@@ -144,6 +199,7 @@ fn report(path: &Path, run: &Run) -> Result<(), Box<dyn std::error::Error>> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     writeln!(out, "capture            {}", path.display())?;
+    writeln!(out, "start utc millis   {}", run.start_utc_millis)?;
     writeln!(out, "lines read         {}", run.tally.lines)?;
     writeln!(out, "events consumed    {}", run.tally.events_consumed)?;
     writeln!(out, "events rejected    {}", run.tally.rejected)?;
@@ -152,11 +208,15 @@ fn report(path: &Path, run: &Run) -> Result<(), Box<dyn std::error::Error>> {
     writeln!(out, "weather products   {}", run.tally.weather_products)?;
     writeln!(out, "track records      {}", run.tally.track_records)?;
     writeln!(out, "weather records    {}", run.tally.weather_records)?;
+    writeln!(out, "advisory records   {}", run.tally.advisory_records)?;
     if let Some(reason) = &run.first_rejection {
         writeln!(out, "first rejection    {reason}")?;
     }
     if !run.stations.is_empty() {
         writeln!(out, "stations placed    {}", run.stations.len())?;
+    }
+    for (identity, count) in &run.products {
+        writeln!(out, "  product {identity:<24} {count}")?;
     }
     match &run.display {
         Some(batch) => {
@@ -182,6 +242,41 @@ fn report(path: &Path, run: &Run) -> Result<(), Box<dyn std::error::Error>> {
         )?,
     }
     Ok(())
+}
+
+/// Count each FIS-B product identity a weather record names.
+///
+/// Which products a receiver actually heard is the first question when a display stays
+/// empty, and the identity is the only thing that separates "never transmitted" from
+/// "transmitted and dropped".
+fn count_products(record: &str, out: &mut std::collections::BTreeMap<String, u64>) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(record) else {
+        return;
+    };
+    let mut identities = std::collections::BTreeSet::new();
+    collect_product_ids(&value, &mut identities);
+    for identity in identities {
+        *out.entry(identity).or_default() += 1;
+    }
+}
+
+fn collect_product_ids(value: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if key == "product_id" {
+                    collect_strings(child, out);
+                }
+                collect_product_ids(child, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_product_ids(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Collect every station identity a weather record names.

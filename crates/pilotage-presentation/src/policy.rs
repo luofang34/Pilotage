@@ -5,8 +5,11 @@ use std::collections::BTreeMap;
 use airmass_geojson::FeatureDelta as WeatherFeatureDelta;
 use surveillance_core::{TrackDelta, TrackSnapshotHandle};
 
-use crate::layer::{LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_REPORT_LAYER_ID};
-use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeStyle};
+use crate::layer::{
+    LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_ADVISORY_LAYER_ID,
+    WEATHER_REPORT_LAYER_ID,
+};
+use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeFeature, ShapeStyle};
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
 pub(crate) const TRAFFIC_COASTING_STYLE: &str = "traffic-coasting";
@@ -30,6 +33,7 @@ pub struct PresentationAdapter {
     traffic_revisions: BTreeMap<(u64, u64), u64>,
     traffic_tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
     weather_points: BTreeMap<String, PointFeature>,
+    weather_shapes: BTreeMap<String, ShapeFeature>,
     now_micros: u64,
 }
 
@@ -47,6 +51,7 @@ impl PresentationAdapter {
             layers: self.layers.controls(
                 !self.traffic_tracks.is_empty(),
                 !self.weather_points.is_empty(),
+                !self.weather_shapes.is_empty(),
             ),
             point_styles: point_styles(),
             shape_styles: shape_styles(),
@@ -102,6 +107,7 @@ impl PresentationAdapter {
     /// Apply one ordered Airmass feature change.
     pub fn apply_weather_delta(&mut self, delta: &WeatherFeatureDelta) -> Option<PointChange> {
         let id = crate::weather::feature_id_for_delta(delta)?;
+        self.apply_weather_shape(&id, delta);
         let change = crate::weather::point_change(delta, self.weather_points.get(&id))?;
         match &change {
             PointChange::Upsert { point } => {
@@ -117,8 +123,9 @@ impl PresentationAdapter {
             .then_some(change)
     }
 
-    /// Remove all weather points without changing traffic state.
+    /// Remove all weather values without changing traffic state.
     pub fn clear_weather(&mut self) -> Vec<PointChange> {
+        self.weather_shapes.clear();
         let points = std::mem::take(&mut self.weather_points);
         let changes: Vec<_> = points
             .into_iter()
@@ -142,6 +149,7 @@ impl PresentationAdapter {
         self.traffic_revisions.clear();
         self.traffic_tracks.clear();
         self.weather_points.clear();
+        self.weather_shapes.clear();
     }
 
     /// Convert current traffic and weather values into one batch.
@@ -159,12 +167,29 @@ impl PresentationAdapter {
         if self.layers.is_enabled(WEATHER_REPORT_LAYER_ID) {
             batch.points.extend(self.weather_points.values().cloned());
         }
+        if self.layers.is_enabled(WEATHER_ADVISORY_LAYER_ID) {
+            batch.shapes.extend(self.weather_shapes.values().cloned());
+        }
         batch.traffic_details = self
             .traffic_tracks
             .values()
             .map(|track| crate::detail::detail_for(track, self.now_micros))
             .collect();
         batch
+    }
+
+    fn apply_weather_shape(&mut self, id: &str, delta: &WeatherFeatureDelta) {
+        match delta {
+            WeatherFeatureDelta::Upsert(_) => {
+                if let Some(shape) = crate::weather::shape_change(delta) {
+                    self.weather_shapes.insert(id.to_owned(), shape);
+                }
+            }
+            WeatherFeatureDelta::Remove { .. } => {
+                self.weather_shapes.remove(id);
+            }
+            _ => {}
+        }
     }
 
     fn retain_track(&mut self, key: (u64, u64), delta: &TrackDelta) {
