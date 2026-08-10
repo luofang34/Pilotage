@@ -18,22 +18,69 @@ final class SituationOverlay {
     private var pointLayerIdentifiers: Set<String> = []
     private var points: [String: DisplayPoint] = [:]
     private var sourceIdentifiers: [String] = []
+    private var managedSources: [String: MLNShapeSource] = [:]
+    private var installedCatalog: [String] = []
 
     var interactiveLayerIdentifiers: Set<String> { pointLayerIdentifiers }
 
+    /// Put one batch on the map.
+    ///
+    /// The style catalog is display policy and changes only when the policy does, while a
+    /// batch arrives for every reception. Rebuilding every source and every layer for each
+    /// batch costs a full style teardown thousands of times a minute, so the layers are
+    /// built once for a catalog and only the feature data is replaced after that.
     func apply(_ batch: DisplayBatch, to mapStyle: MLNStyle) throws {
         updatePoints(with: batch)
         let currentPoints = points.values.sorted { $0.id < $1.id }
         try validate(batch, points: currentPoints)
-        removeManagedContent(from: mapStyle)
-        for entry in catalog(for: batch) {
+        let entries = catalog(for: batch)
+        let signature = entries.map(\.identifier)
+        if signature != installedCatalog {
+            removeManagedContent(from: mapStyle)
+            for entry in entries {
+                switch entry {
+                case let .point(pointStyle):
+                    try addPointStyle(pointStyle, points: currentPoints, to: mapStyle)
+                case let .shape(shapeStyle):
+                    try addShapeStyle(shapeStyle, batch: batch, to: mapStyle)
+                }
+            }
+            installedCatalog = signature
+            return
+        }
+        for entry in entries {
             switch entry {
             case let .point(pointStyle):
-                try addPointStyle(pointStyle, points: currentPoints, to: mapStyle)
+                try replaceShape(
+                    in: sourceID("point", pointStyle.id),
+                    with: pointData(pointStyle, points: currentPoints)
+                )
             case let .shape(shapeStyle):
-                try addShapeStyle(shapeStyle, batch: batch, to: mapStyle)
+                try replaceShape(
+                    in: sourceID("shape", shapeStyle.id),
+                    with: shapeData(shapeStyle, batch: batch)
+                )
             }
         }
+    }
+
+    private func replaceShape(in identifier: String, with data: Data) throws {
+        guard let source = managedSources[identifier] else { return }
+        source.shape = try MLNShape(data: data, encoding: String.Encoding.utf8.rawValue)
+    }
+
+    private func pointData(_ pointStyle: DisplayPointStyle, points: [DisplayPoint]) -> Data {
+        let features = points
+            .filter { $0.styleId == pointStyle.id }
+            .map(GeoJSONPointFeature.init)
+        return (try? GeoJSONFeatureCollectionEncoder.encode(points: features)) ?? Data()
+    }
+
+    private func shapeData(_ shapeStyle: DisplayShapeStyle, batch: DisplayBatch) -> Data {
+        let features = batch.shapes
+            .filter { $0.styleId == shapeStyle.id }
+            .map(GeoJSONPolygonFeature.init)
+        return (try? GeoJSONFeatureCollectionEncoder.encode(polygons: features)) ?? Data()
     }
 
     private func validate(_ batch: DisplayBatch, points: [DisplayPoint]) throws {
@@ -129,6 +176,7 @@ final class SituationOverlay {
         let source = MLNShapeSource(identifier: identifier, shape: shape, options: nil)
         mapStyle.addSource(source)
         sourceIdentifiers.append(identifier)
+        managedSources[identifier] = source
         return source
     }
 
@@ -282,6 +330,8 @@ final class SituationOverlay {
         layerIdentifiers.removeAll(keepingCapacity: true)
         pointLayerIdentifiers.removeAll(keepingCapacity: true)
         sourceIdentifiers.removeAll(keepingCapacity: true)
+        managedSources.removeAll(keepingCapacity: true)
+        installedCatalog.removeAll(keepingCapacity: true)
     }
 
     private func sourceID(_ kind: String, _ styleID: String) -> String {
