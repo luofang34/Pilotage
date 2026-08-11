@@ -74,17 +74,15 @@ struct MapControlsView<ModesContent: View>: View {
                 .glassEffectID("pilotage.map.pill", in: namespace)
 
                 if camera.isTilted {
+                    // The label sits over the control rather than inside it. A button
+                    // hands its label to its style, which is free to rebuild it, and a
+                    // view rebuilt by something else does not keep the transition it was
+                    // given. Over the top, the label answers to nothing but its own state.
                     control(label: "Look straight down", action: resetPitch) {
-                        // The shape arrives first and the label rises into it. A label
-                        // carried along by the shape that grew it appears finished on
-                        // arrival; this one reads as the control filling.
-                        if levelLabelShown {
-                            // Stated as a rise rather than left to a named transition,
-                            // because the direction is the point: the label comes up into
-                            // the control from under it.
-                            Text("2D")
-                                .transition(.offset(y: 10).combined(with: .opacity))
-                        }
+                        Color.clear
+                    }
+                    .overlay {
+                        risingLabel
                     }
                     .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.level", in: namespace)
@@ -122,6 +120,25 @@ struct MapControlsView<ModesContent: View>: View {
         .animation(.easeInOut(duration: 0.3), value: camera.isTilted)
         .animation(.easeInOut(duration: 0.3), value: camera.isRotated)
         .animation(.easeInOut(duration: 0.3), value: canLocate)
+    }
+
+    /// The word the level control shows, arriving from under it.
+    ///
+    /// Clipped to the control it fills, so the word travels from the edge of the shape
+    /// rather than from wherever the layout would otherwise have started it. Without the
+    /// clip the direction belongs to whatever alignment the surrounding stack happens to
+    /// use, which is how a rise becomes a slide from the side.
+    private var risingLabel: some View {
+        ZStack {
+            if levelLabelShown {
+                Text("2D")
+                    .font(Metrics.controlGlyph)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .frame(width: Metrics.control, height: Metrics.control)
+        .clipShape(.circle)
+        .allowsHitTesting(false)
     }
 
     /// One control: the same square, the same glyph weight, the same target.
