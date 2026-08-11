@@ -26,7 +26,7 @@ struct MapControlsView<ModesContent: View>: View {
     let cycleFollow: () -> Void
     @Binding var modesPresented: Bool
     @ViewBuilder let modesContent: () -> ModesContent
-    @State private var pillFlash = false
+    @State private var levelLabelShown = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -58,7 +58,7 @@ struct MapControlsView<ModesContent: View>: View {
     /// into it. The group flashes as it takes one back, the way a surface does when
     /// something rejoins it.
     private var controls: some View {
-        GlassEffectContainer(spacing: Metrics.controlSpacing) {
+        GlassEffectContainer(spacing: Metrics.controlBlend) {
             VStack(spacing: Metrics.controlSpacing) {
                 VStack(spacing: 0) {
                     control(label: "Map modes") { modesPresented = true } content: {
@@ -72,20 +72,29 @@ struct MapControlsView<ModesContent: View>: View {
                 }
                 .glassEffect(.clear.interactive(), in: .capsule)
                 .glassEffectID("pilotage.map.pill", in: namespace)
-                .brightness(pillFlash ? 0.22 : 0)
-                .animation(.easeOut(duration: 0.22), value: pillFlash)
 
                 if camera.isTilted {
                     control(label: "Look straight down", action: resetPitch) {
-                        // The label arrives from below the control rather than fading in
-                        // on the spot, so the glass looks like it is filling with the
-                        // control rather than having one drawn on it.
-                        Text("2D")
-                            .transition(.blurReplace(.downUp))
+                        // The shape arrives first and the label rises into it. A label
+                        // carried along by the shape that grew it appears finished on
+                        // arrival; this one reads as the control filling.
+                        if levelLabelShown {
+                            Text("2D")
+                                .transition(.blurReplace(.downUp))
+                        }
                     }
                     .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.level", in: namespace)
                     .glassEffectTransition(.matchedGeometry)
+                    // A child inserted with its parent has no transition of its own to
+                    // run: the parent's covers the whole subtree. The label is given its
+                    // own appearance so it can arrive after the shape it sits in.
+                    .onAppear {
+                        withAnimation(.easeOut(duration: 0.22).delay(0.12)) {
+                            levelLabelShown = true
+                        }
+                    }
+                    .onDisappear { levelLabelShown = false }
                 }
                 if camera.isRotated {
                     control(
@@ -103,12 +112,6 @@ struct MapControlsView<ModesContent: View>: View {
         .animation(.easeInOut(duration: 0.3), value: camera.isTilted)
         .animation(.easeInOut(duration: 0.3), value: camera.isRotated)
         .animation(.easeInOut(duration: 0.3), value: canLocate)
-        .onChange(of: camera.isTilted) { _, tilted in
-            if !tilted { flashPill() }
-        }
-        .onChange(of: camera.isRotated) { _, rotated in
-            if !rotated { flashPill() }
-        }
     }
 
     /// One control: the same square, the same glyph weight, the same target.
@@ -127,14 +130,6 @@ struct MapControlsView<ModesContent: View>: View {
         .accessibilityLabel(label)
     }
 
-    /// Mark the group taking a control back.
-    private func flashPill() {
-        pillFlash = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
-            pillFlash = false
-        }
-    }
 }
 
 /// A compass that names the direction the map faces.
