@@ -19,15 +19,12 @@ enum Metrics {
     static let controlGlyphBox: CGFloat = 30
 
     /// Gap between controls in a stack.
-    static let controlSpacing: CGFloat = 10
-
-    /// How near two glass controls must be before their shapes start to blend.
     ///
-    /// Below the gap between controls, so the group does not swell and blur every time a
-    /// control joins or leaves it. Apple's own example uses a blend distance equal to its
-    /// gap, but its controls sit a half diameter apart and these sit a fifth of one apart:
-    /// at that proximity an equal distance keeps the shapes blending at rest.
-    static let controlBlend: CGFloat = 4
+    /// Also the blend distance of the glass container that holds them, and the two are
+    /// the same number on purpose. A container blends only the shapes that sit within its
+    /// spacing, so a distance below this gap leaves each control its own island: it stops
+    /// growing out of the group and starts arriving from nowhere.
+    static let controlSpacing: CGFloat = 10
 
     /// Distance from a control to the edge of the safe area.
     ///
