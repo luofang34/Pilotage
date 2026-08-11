@@ -520,7 +520,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: luofang34/Airmass
-          ref: 58b525a7beb35cf3ca721ccb511b895a1d1221dc
+          ref: fbfec00b07b8bb34d44c951b0f98a33543487537
           path: external/Airmass
           ssh-key: ${{ secrets.AIRMASS_DEPLOY_KEY }}
 
