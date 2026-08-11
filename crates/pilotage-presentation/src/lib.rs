@@ -8,6 +8,7 @@ mod layer;
 mod model;
 mod policy;
 mod traffic;
+mod vertical;
 mod weather;
 
 #[cfg(test)]

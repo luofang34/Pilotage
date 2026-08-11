@@ -39,6 +39,7 @@ final class SituationClientModel: ObservableObject {
 
     private let session: PresentationSession
     private let domain: RadioDomainSession?
+    private let terrainArchivePath: String?
     private let terrainAvailable: Bool
     private let discovery = AeroLinkDiscoveryGate()
     private let evidenceWriter = SituationEvidenceWriter()
@@ -71,27 +72,40 @@ final class SituationClientModel: ObservableObject {
         let session = PresentationSession()
         self.session = session
         radioSource = source
-        terrainAvailable = Bundle.main.url(
+        let terrainArchivePath = Bundle.main.url(
             forResource: "SituationTerrain",
             withExtension: "mbtiles"
-        ) != nil
+        )?.path
+        self.terrainArchivePath = terrainArchivePath
+        var loadedTerrain = false
+        var initialError: String?
+        if let terrainArchivePath {
+            do {
+                try session.loadTerrainArchiveBlocking(archivePath: terrainArchivePath)
+                loadedTerrain = true
+            } catch {
+                initialError = Self.join(initialError, error.localizedDescription)
+            }
+        }
         var createdDomain: RadioDomainSession?
         var initialDisplay: DisplayBatch?
         do {
             initialDisplay = try session.observeSources(
                 observation: PresentationSourceObservation(
                     source: source,
-                    terrainAvailable: terrainAvailable
+                    terrainAvailable: loadedTerrain
                 ),
                 nowMicros: Self.monotonicMicros
             )
             createdDomain = try RadioDomainSession()
         } catch {
-            startupError = Self.join(startupError, error.localizedDescription)
+            initialError = Self.join(initialError, error.localizedDescription)
         }
+        terrainAvailable = loadedTerrain
         domain = createdDomain
+        startupError = initialError
         display = initialDisplay
-        errorMessage = startupError
+        errorMessage = initialError
     }
 
     func activate() async {
@@ -252,7 +266,10 @@ final class SituationClientModel: ObservableObject {
     /// looks exactly like a map fed from a radio.
     func startReplay(_ flight: Flight) {
         stopReplay()
-        guard let run = SituationReplayRun(flight: flight) else {
+        guard let run = SituationReplayRun(
+            flight: flight,
+            terrainArchivePath: terrainArchivePath
+        ) else {
             errorMessage = Self.join(startupError, "\(flight.receptionFileName) cannot be read.")
             return
         }

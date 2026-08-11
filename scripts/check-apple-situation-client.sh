@@ -6,9 +6,12 @@ root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 client="$root/clients/apple-situation"
 driver_entitlements="$client/Configuration/AeroLinkDriverDevelopment.entitlements"
 maplibre_manifest="$client/Packages/PilotageMapLibreBinding/Package.swift"
+core_manifest="$client/Packages/PilotageSituationCore/Package.swift"
 terrain_manifest="$client/Packages/PilotageMapLibreTerrain/Package.swift"
 terrain_revision_file="$client/MAPLIBRE_TERRAIN_REVISION"
 terrain_build="$client/scripts/build-maplibre-terrain.sh"
+geojson_edge="$client/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge/FeatureCollection.swift"
+map_overlay="$client/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift"
 status=0
 
 require_pattern() {
@@ -54,6 +57,8 @@ require_pattern 'exact: "6\.28\.0"' \
 require_pattern 'maplibre/maplibre-gl-native-distribution' \
     "$maplibre_manifest" \
     "the binding must use the official MapLibre Native distribution"
+require_fixed '.linkedLibrary("sqlite3")' "$core_manifest" \
+    "the situation core package must link the terrain archive database library"
 require_pattern 'PILOTAGE_MAPLIBRE_TERRAIN' "$maplibre_manifest" \
     "the terrain renderer must require its explicit build flag"
 require_pattern 'if terrainRendererEnabled' "$maplibre_manifest" \
@@ -173,6 +178,16 @@ require_pattern 'session[.]acceptTrackRecord' "$client/App/AeroLinkRadioState.sw
     "typed traffic records must enter the presentation session"
 require_pattern 'session[.]acceptWeatherRecord' "$client/App/AeroLinkRadioState.swift" \
     "typed weather records must enter the presentation session"
+require_pattern 'session[.]loadTerrainArchiveBlocking' "$model" \
+    "the application must open terrain before it presents vertical features"
+require_pattern 'pilotage_terrain_query::TerrainArchive' "$ffi/src/session.rs" \
+    "the FFI host must use the shared terrain archive reader"
+require_fixed 'properties["uses_reported_altitude_fallback"]' "$geojson_edge" \
+    "a terrain fallback must cross the display edge"
+require_fixed 'NSPredicate(format: "below_terrain == NO")' "$map_overlay" \
+    "the extrusion layer must reject negative heights"
+require_fixed 'NSPredicate(format: "below_terrain == YES")' "$map_overlay" \
+    "a flat fill must draw a negative height"
 require_pattern 'split[(]whereSeparator: .[.]isNewline[)]' "$runtime" \
     "the host must split nonempty serialized event lines"
 require_pattern 'guard batch[.]transferConsumed else' "$runtime" \

@@ -9,7 +9,9 @@ use crate::layer::{
     LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_ADVISORY_LAYER_ID,
     WEATHER_REPORT_LAYER_ID,
 };
-use crate::{DisplayBatch, PointChange, PointFeature, PointStyle, ShapeFeature, ShapeStyle};
+use crate::{
+    Coordinate, DisplayBatch, PointChange, PointFeature, PointStyle, ShapeFeature, ShapeStyle,
+};
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
 pub(crate) const TRAFFIC_COASTING_STYLE: &str = "traffic-coasting";
@@ -83,6 +85,45 @@ impl PresentationAdapter {
 
     /// Apply one ordered Surveillance delta.
     pub fn apply_traffic_delta(&mut self, delta: &TrackDelta) -> Option<PointChange> {
+        let (key, snapshot_revision, change) = self.prepare_traffic_delta(delta)?;
+        self.commit_traffic_delta(key, snapshot_revision, delta, change.as_ref(), None);
+        change.filter(|_| self.layers.is_enabled(TRAFFIC_LAYER_ID))
+    }
+
+    /// Apply one ordered Surveillance delta and read terrain for a positioned upsert.
+    ///
+    /// # Errors
+    ///
+    /// Returns the terrain reader error without changing retained display state.
+    pub fn apply_traffic_delta_with_terrain_blocking<E>(
+        &mut self,
+        delta: &TrackDelta,
+        mut elevation_at: impl FnMut(Coordinate) -> Result<Option<f64>, E>,
+    ) -> Result<Option<PointChange>, E> {
+        let Some((key, snapshot_revision, change)) = self.prepare_traffic_delta(delta) else {
+            return Ok(None);
+        };
+        let terrain_elevation_m = match change.as_ref() {
+            Some(PointChange::Upsert { point }) if point.altitude_ft.is_some() => {
+                elevation_at(point.coordinate)?
+            }
+            Some(PointChange::Stale { .. } | PointChange::Remove { .. }) | None => None,
+            Some(PointChange::Upsert { .. }) => None,
+        };
+        self.commit_traffic_delta(
+            key,
+            snapshot_revision,
+            delta,
+            change.as_ref(),
+            terrain_elevation_m,
+        );
+        Ok(change.filter(|_| self.layers.is_enabled(TRAFFIC_LAYER_ID)))
+    }
+
+    fn prepare_traffic_delta(
+        &self,
+        delta: &TrackDelta,
+    ) -> Option<((u64, u64), u64, Option<PointChange>)> {
         let producer_instance_id = delta.producer_instance_id().get();
         let snapshot_revision = delta.snapshot_revision().get();
         let key = (producer_instance_id, delta.id().get());
@@ -93,23 +134,61 @@ impl PresentationAdapter {
         if !is_newer {
             return None;
         }
+        let change = surveillance_geojson::map_track_delta(delta).and_then(|source_change| {
+            crate::traffic::point_change(
+                &source_change,
+                producer_instance_id,
+                snapshot_revision,
+                self.traffic_points.get(&key),
+            )
+        });
+        Some((key, snapshot_revision, change))
+    }
+
+    fn commit_traffic_delta(
+        &mut self,
+        key: (u64, u64),
+        snapshot_revision: u64,
+        delta: &TrackDelta,
+        change: Option<&PointChange>,
+        terrain_elevation_m: Option<f64>,
+    ) {
         self.traffic_revisions.insert(key, snapshot_revision);
         self.retain_track(key, delta);
-        let source_change = surveillance_geojson::map_track_delta(delta)?;
-        let change = crate::traffic::point_change(
-            &source_change,
-            producer_instance_id,
-            snapshot_revision,
-            self.traffic_points.get(&key),
-        )?;
-        self.apply_point_change(key, &change);
-        self.layers.is_enabled(TRAFFIC_LAYER_ID).then_some(change)
+        if let Some(change) = change {
+            self.apply_point_change(key, change, terrain_elevation_m);
+        }
     }
 
     /// Apply one ordered Airmass feature change.
     pub fn apply_weather_delta(&mut self, delta: &WeatherFeatureDelta) -> Option<PointChange> {
+        self.apply_weather_delta_with_sample(delta, None)
+    }
+
+    /// Apply one Airmass feature change and read terrain for an advisory footprint.
+    ///
+    /// # Errors
+    ///
+    /// Returns the terrain reader error without changing retained display state.
+    pub fn apply_weather_delta_with_terrain_blocking<E>(
+        &mut self,
+        delta: &WeatherFeatureDelta,
+        mut elevation_at: impl FnMut(Coordinate) -> Result<Option<f64>, E>,
+    ) -> Result<Option<PointChange>, E> {
+        let terrain_elevation_m = match crate::weather::terrain_coordinate(delta) {
+            Some(coordinate) => elevation_at(coordinate)?,
+            None => None,
+        };
+        Ok(self.apply_weather_delta_with_sample(delta, terrain_elevation_m))
+    }
+
+    fn apply_weather_delta_with_sample(
+        &mut self,
+        delta: &WeatherFeatureDelta,
+        terrain_elevation_m: Option<f64>,
+    ) -> Option<PointChange> {
         let id = crate::weather::feature_id_for_delta(delta)?;
-        self.apply_weather_shape(&id, delta);
+        self.apply_weather_shape(&id, delta, terrain_elevation_m);
         let change = crate::weather::point_change(delta, self.weather_points.get(&id))?;
         match &change {
             PointChange::Upsert { point } => {
@@ -182,10 +261,15 @@ impl PresentationAdapter {
         batch
     }
 
-    fn apply_weather_shape(&mut self, id: &str, delta: &WeatherFeatureDelta) {
+    fn apply_weather_shape(
+        &mut self,
+        id: &str,
+        delta: &WeatherFeatureDelta,
+        terrain_elevation_m: Option<f64>,
+    ) {
         match delta {
             WeatherFeatureDelta::Upsert(_) => {
-                if let Some(shape) = crate::weather::shape_change(delta) {
+                if let Some(shape) = crate::weather::shape_change(delta, terrain_elevation_m) {
                     self.weather_shapes.insert(id.to_owned(), shape);
                 }
             }
@@ -217,10 +301,15 @@ impl PresentationAdapter {
         }
     }
 
-    fn apply_point_change(&mut self, key: (u64, u64), change: &PointChange) {
+    fn apply_point_change(
+        &mut self,
+        key: (u64, u64),
+        change: &PointChange,
+        terrain_elevation_m: Option<f64>,
+    ) {
         match change {
             PointChange::Upsert { point } => {
-                match crate::traffic::altitude_pad(point) {
+                match crate::traffic::altitude_pad(point, terrain_elevation_m) {
                     Some(pad) => self.traffic_pads.insert(key, pad),
                     // A track that loses its altitude must lose its pad with it, or the
                     // display keeps a height the track no longer reports.

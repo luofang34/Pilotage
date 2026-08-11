@@ -30,19 +30,23 @@ const METRES_PER_DEGREE_LATITUDE: f64 = 111_320.0;
 /// display that answers "above me or below me". A track with no altitude produces no pad
 /// and keeps its symbol, because an invented height would claim knowledge the track has
 /// not reported.
-pub(crate) fn altitude_pad(point: &PointFeature) -> Option<ShapeFeature> {
-    let altitude_m = f64::from(point.altitude_ft?) * FEET_TO_METRES;
-    if altitude_m <= 0.0 {
-        return None;
-    }
+pub(crate) fn altitude_pad(
+    point: &PointFeature,
+    terrain_elevation_m: Option<f64>,
+) -> Option<ShapeFeature> {
+    let reported_altitude_m = f64::from(point.altitude_ft?) * FEET_TO_METRES;
+    let placement = crate::vertical::reported_height(reported_altitude_m, terrain_elevation_m);
+    let altitude_m = placement.metres;
+    let uses_reported_altitude_fallback = placement.uses_reported_altitude_fallback;
     Some(ShapeFeature {
         id: format!("{}-pad", point.id),
         layer_id: TRAFFIC_LAYER_ID.into(),
         rings: vec![pad_ring(point.coordinate)?],
         style_id: TRAFFIC_ALTITUDE_STYLE.into(),
-        label: None,
+        label: uses_reported_altitude_fallback.then(|| "REPORTED ALTITUDE".to_owned()),
         base_above_terrain_m: Some(altitude_m),
         top_above_terrain_m: Some(altitude_m + PAD_THICKNESS_M),
+        uses_reported_altitude_fallback,
         producer_instance_id: point.producer_instance_id,
         snapshot_revision: point.snapshot_revision,
     })

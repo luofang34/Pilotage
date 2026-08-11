@@ -7,7 +7,8 @@ use airmass_core::{
     WeatherSnapshotEnvelope, WeatherSnapshotRecord, WeatherSnapshotRecordHeader, WeatherStationId,
 };
 use airmass_geojson::{Wgs84Position, map_snapshot_transition};
-use pilotage_presentation::{PointChange, PresentationAdapter};
+use pilotage_presentation::{Coordinate, PointChange, PresentationAdapter};
+use pilotage_terrain_query::TerrainArchive;
 use surveillance_core::{TrackRecord, TrackRecordHeader};
 
 use crate::WeatherStationPosition;
@@ -19,6 +20,7 @@ mod tests;
 #[derive(Default)]
 struct SessionState {
     presentation: PresentationAdapter,
+    terrain: Option<TerrainArchive>,
     weather_snapshot: Option<WeatherSnapshotEnvelope>,
     weather_positions: BTreeMap<String, Wgs84Position>,
     source_observation: PresentationSourceObservation,
@@ -52,7 +54,15 @@ impl PresentationSession {
         let delta = record.into_delta().map_err(track_record_error)?;
         let mut state = self.lock_state()?;
         state.presentation.advance_time(now_micros);
-        let change = state.presentation.apply_traffic_delta(&delta);
+        let SessionState {
+            presentation,
+            terrain,
+            ..
+        } = &mut *state;
+        let change = presentation
+            .apply_traffic_delta_with_terrain_blocking(&delta, |coordinate| {
+                terrain_elevation_blocking(terrain, coordinate)
+            })?;
         Ok(display_for_state(&state, change.into_iter().collect()))
     }
 
@@ -72,7 +82,7 @@ impl PresentationSession {
             return Ok(display_for_state(&state, Vec::new()));
         }
         let deltas = map_weather_transition(&state, &current);
-        let changes = apply_weather_deltas(&mut state.presentation, deltas);
+        let changes = apply_weather_deltas(&mut state, deltas)?;
         state.weather_snapshot = Some(current);
         Ok(display_for_state(&state, changes))
     }
@@ -116,7 +126,7 @@ impl PresentationSession {
         apply_source_observation(&mut state);
         if let Some(current) = state.weather_snapshot.clone() {
             let deltas = map_weather_initial(&state, &current);
-            changes.extend(apply_weather_deltas(&mut state.presentation, deltas));
+            changes.extend(apply_weather_deltas(&mut state, deltas)?);
         }
         Ok(display_for_state(&state, changes))
     }
@@ -130,6 +140,19 @@ impl PresentationSession {
         state.source_observation.radio_receivers.clear();
         apply_source_observation(&mut state);
         Ok(display_for_state(&state, Vec::new()))
+    }
+
+    /// Open the Terrarium archive used for vertical placement.
+    ///
+    /// Call this function before the session accepts traffic or weather records.
+    pub fn load_terrain_archive_blocking(&self, archive_path: String) -> Result<(), FfiError> {
+        let terrain = TerrainArchive::open_blocking(&archive_path).map_err(|source| {
+            FfiError::TerrainArchive {
+                message: source.to_string(),
+            }
+        })?;
+        self.lock_state()?.terrain = Some(terrain);
+        Ok(())
     }
 
     /// Record source facts and advance the display clock.
@@ -227,13 +250,39 @@ fn map_weather_initial(
 }
 
 fn apply_weather_deltas(
-    presentation: &mut PresentationAdapter,
+    state: &mut SessionState,
     deltas: Vec<airmass_geojson::FeatureDelta>,
-) -> Vec<PointChange> {
-    deltas
-        .iter()
-        .filter_map(|delta| presentation.apply_weather_delta(delta))
-        .collect()
+) -> Result<Vec<PointChange>, FfiError> {
+    let mut changes = Vec::new();
+    for delta in &deltas {
+        let SessionState {
+            presentation,
+            terrain,
+            ..
+        } = &mut *state;
+        let change = presentation
+            .apply_weather_delta_with_terrain_blocking(delta, |coordinate| {
+                terrain_elevation_blocking(terrain, coordinate)
+            })?;
+        changes.extend(change);
+    }
+    Ok(changes)
+}
+
+fn terrain_elevation_blocking(
+    terrain: &mut Option<TerrainArchive>,
+    coordinate: Coordinate,
+) -> Result<Option<f64>, FfiError> {
+    let Some(terrain) = terrain else {
+        return Ok(None);
+    };
+    terrain
+        .elevation_m_blocking(coordinate.latitude_deg, coordinate.longitude_deg)
+        .map_err(|source| FfiError::TerrainElevation {
+            latitude_deg: coordinate.latitude_deg,
+            longitude_deg: coordinate.longitude_deg,
+            message: source.to_string(),
+        })
 }
 
 fn weather_position_catalog(

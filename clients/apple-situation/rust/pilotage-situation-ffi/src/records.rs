@@ -195,6 +195,8 @@ pub struct DisplayShape {
     pub base_above_terrain_m: Option<f64>,
     /// Ceiling of the shape, in metres above the terrain surface beneath it.
     pub top_above_terrain_m: Option<f64>,
+    /// Whether the height keeps a reported altitude because terrain was not available.
+    pub uses_reported_altitude_fallback: bool,
     /// Producer instance identity.
     pub producer_instance_id: u64,
     /// Snapshot revision.
@@ -404,6 +406,7 @@ impl From<pilotage_presentation::ShapeFeature> for DisplayShape {
             label: value.label,
             base_above_terrain_m: value.base_above_terrain_m,
             top_above_terrain_m: value.top_above_terrain_m,
+            uses_reported_altitude_fallback: value.uses_reported_altitude_fallback,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,
         }

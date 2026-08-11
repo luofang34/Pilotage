@@ -20,6 +20,7 @@ members = [
     "crates/pilotage-svs-db",
     "crates/pilotage-svs-build",
     "crates/pilotage-terrain-build",
+    "crates/pilotage-terrain-query",
     "crates/pilotage-mission",
     "crates/pilotage-instrument-runtime",
     "crates/pilotage-presentation",
@@ -121,6 +122,7 @@ pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
 pilotage-presentation = { path = "crates/pilotage-presentation" }
+pilotage-terrain-query = { path = "crates/pilotage-terrain-query" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

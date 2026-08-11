@@ -14,6 +14,11 @@ if grep -RInE 'MapLibre|MLN[A-Z]|GeoJSON|UIKit|SwiftUI' "$rust_root"; then
     status=1
 fi
 
+if grep -RInE 'pilotage[_-]terrain[_-]query|rusqlite|png::Decoder' "$rust_root/src"; then
+    echo "FORBIDDEN: the portable presentation adapter reads a terrain archive" >&2
+    status=1
+fi
+
 if [ -f "$traffic_source" ] && grep -nE 'surveillance[_-]core' "$traffic_source"; then
     echo "FORBIDDEN: traffic display policy bypasses the typed feature adapter" >&2
     status=1

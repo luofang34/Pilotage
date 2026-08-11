@@ -23,6 +23,13 @@ if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture"
 fi
 rm "$rust_root/backend.rs"
 
+printf '%s\n' 'use rusqlite::Connection;' > "$rust_root/terrain_archive.rs"
+if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then
+    echo "test failed: terrain archive input entered the portable adapter" >&2
+    exit 1
+fi
+rm "$rust_root/terrain_archive.rs"
+
 printf '%s\n' 'use surveillance_core::TrackSnapshot;' >> "$rust_root/traffic.rs"
 if bash "$repo_root/scripts/check-situation-presentation-boundary.sh" "$fixture" >/dev/null 2>&1; then
     echo "test failed: traffic policy bypassed the typed feature adapter" >&2

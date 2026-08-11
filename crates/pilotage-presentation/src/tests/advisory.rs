@@ -30,8 +30,9 @@ fn an_advisory_becomes_a_shape_with_its_type_and_band() {
     assert_eq!(shape.style_id, "advisory-convective");
     assert_eq!(
         shape.label.as_deref(),
-        Some("CONV SIGMET 2000 MSL-24000 MSL")
+        Some("CONV SIGMET 2000 MSL-24000 MSL\nREPORTED ALTITUDE")
     );
+    assert!(shape.uses_reported_altitude_fallback);
     assert_eq!(shape.rings.len(), 1);
     assert_eq!(shape.rings[0].coordinates.len(), 5);
     let style_ids: Vec<&str> = batch
@@ -92,7 +93,62 @@ fn a_band_states_each_limit_in_its_own_reference() {
     let batch = adapter.adapt();
 
     assert_eq!(batch.shapes.len(), 1);
-    assert_eq!(batch.shapes[0].label.as_deref(), Some("AIRMET SFC-FL240"));
+    assert_eq!(
+        batch.shapes[0].label.as_deref(),
+        Some("AIRMET SFC-FL240\nREPORTED ALTITUDE")
+    );
+}
+
+#[test]
+fn terrain_elevation_places_an_msl_advisory_above_the_surface() {
+    let mut adapter = PresentationAdapter::new();
+    for delta in advisory_deltas(WeatherAdvisoryType::Airmet) {
+        adapter
+            .apply_weather_delta_with_terrain_blocking(&delta, |_| {
+                Ok::<_, std::convert::Infallible>(Some(400.0))
+            })
+            .expect("terrain reader is infallible");
+    }
+
+    let batch = adapter.adapt();
+    let shape = &batch.shapes[0];
+    let base = shape
+        .base_above_terrain_m
+        .expect("an advisory states its floor");
+
+    assert!((base - (2_000.0 * 0.3048 - 400.0)).abs() < 1e-6);
+    assert!(!shape.uses_reported_altitude_fallback);
+    assert_eq!(shape.label.as_deref(), Some("AIRMET 2000 MSL-24000 MSL"));
+}
+
+#[test]
+fn an_agl_advisory_does_not_read_or_subtract_terrain() {
+    let band = AdvisoryAltitudeBand::new(
+        AdvisoryAltitude::new(2_000, AdvisoryAltitudeReference::AboveGroundLevel),
+        AdvisoryAltitude::new(3_000, AdvisoryAltitudeReference::AboveGroundLevel),
+    )
+    .expect("fixture band is ordered");
+    let mut adapter = PresentationAdapter::new();
+    let terrain_reads = Cell::new(0u32);
+    for delta in advisory_deltas_with_band(WeatherAdvisoryType::Airmet, band) {
+        adapter
+            .apply_weather_delta_with_terrain_blocking(&delta, |_| {
+                terrain_reads.set(terrain_reads.get().wrapping_add(1));
+                Ok::<_, std::convert::Infallible>(Some(400.0))
+            })
+            .expect("terrain reader is infallible");
+    }
+
+    let batch = adapter.adapt();
+    let shape = &batch.shapes[0];
+    let base = shape
+        .base_above_terrain_m
+        .expect("an advisory states its floor");
+
+    assert!((base - 2_000.0 * 0.3048).abs() < 1e-6);
+    assert_eq!(terrain_reads.get(), 0);
+    assert!(!shape.uses_reported_altitude_fallback);
+    assert_eq!(shape.label.as_deref(), Some("AIRMET 2000 AGL-3000 AGL"));
 }
 
 #[test]
@@ -147,9 +203,16 @@ fn advisory_layer_state(adapter: &PresentationAdapter) -> String {
 }
 
 fn advisory_deltas(advisory_type: WeatherAdvisoryType) -> Vec<FeatureDelta> {
+    advisory_deltas_with_band(advisory_type, band())
+}
+
+fn advisory_deltas_with_band(
+    advisory_type: WeatherAdvisoryType,
+    band: AdvisoryAltitudeBand,
+) -> Vec<FeatureDelta> {
     let mut store = weather_store();
     let current = store
-        .accept(advisory_ingress(advisory_type), time(100))
+        .accept(advisory_ingress_with_band(advisory_type, band), time(100))
         .expect("an advisory must be valid")
         .into_publication()
         .expect("an advisory must publish");
@@ -159,10 +222,6 @@ fn advisory_deltas(advisory_type: WeatherAdvisoryType) -> Vec<FeatureDelta> {
 fn weather_store() -> WeatherStore {
     WeatherStore::new(StoreConfig::default(), ProducerInstanceId::new(23))
         .expect("default weather store must be valid")
-}
-
-fn advisory_ingress(advisory_type: WeatherAdvisoryType) -> WeatherIngress {
-    advisory_ingress_with_band(advisory_type, band())
 }
 
 fn advisory_ingress_with_band(
@@ -267,3 +326,4 @@ const fn time(monotonic_micros: u64) -> EvaluationTime {
         MonotonicTime::from_micros(monotonic_micros),
     )
 }
+use std::cell::Cell;
