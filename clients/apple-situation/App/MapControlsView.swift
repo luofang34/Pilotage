@@ -26,7 +26,6 @@ struct MapControlsView<ModesContent: View>: View {
     let cycleFollow: () -> Void
     @Binding var modesPresented: Bool
     @ViewBuilder let modesContent: () -> ModesContent
-    @State private var levelling = false
     @State private var pillFlash = false
 
     var body: some View {
@@ -72,19 +71,17 @@ struct MapControlsView<ModesContent: View>: View {
                     }
                 }
                 .glassEffect(.clear.interactive(), in: .capsule)
-                .glassEffectUnion(id: "pilotage.map.pill", namespace: namespace)
                 .glassEffectID("pilotage.map.pill", in: namespace)
                 .brightness(pillFlash ? 0.22 : 0)
                 .animation(.easeOut(duration: 0.22), value: pillFlash)
 
                 if camera.isTilted {
-                    control(label: "Look straight down") {
-                        levelling = true
-                        resetPitch()
-                    } content: {
-                        // The control names the state it is about to reach as it goes, so
-                        // the press is acknowledged before the control leaves.
-                        Text(levelling ? "3D" : "2D")
+                    control(label: "Look straight down", action: resetPitch) {
+                        // The label arrives from below the control rather than fading in
+                        // on the spot, so the glass looks like it is filling with the
+                        // control rather than having one drawn on it.
+                        Text("2D")
+                            .transition(.blurReplace(.downUp))
                     }
                     .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.level", in: namespace)
@@ -97,7 +94,7 @@ struct MapControlsView<ModesContent: View>: View {
                     ) {
                         CompassRose(headingDegrees: camera.headingDegrees)
                     }
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.compass", in: namespace)
                     .glassEffectTransition(.matchedGeometry)
                 }
@@ -107,7 +104,7 @@ struct MapControlsView<ModesContent: View>: View {
         .animation(.easeInOut(duration: 0.3), value: camera.isRotated)
         .animation(.easeInOut(duration: 0.3), value: canLocate)
         .onChange(of: camera.isTilted) { _, tilted in
-            if !tilted { levelling = false; flashPill() }
+            if !tilted { flashPill() }
         }
         .onChange(of: camera.isRotated) { _, rotated in
             if !rotated { flashPill() }
