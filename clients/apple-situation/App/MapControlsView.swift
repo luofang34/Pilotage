@@ -90,14 +90,21 @@ struct MapControlsView<ModesContent: View>: View {
                     .glassEffectID("pilotage.map.level", in: namespace)
                     .glassEffectTransition(.matchedGeometry)
                     // A child inserted with its parent has no transition of its own to
-                    // run: the parent's covers the whole subtree. The label is given its
-                    // own appearance so it can arrive after the shape it sits in.
-                    .onAppear {
-                        withAnimation(.easeOut(duration: 0.22).delay(0.12)) {
+                    // run: the parent's covers the whole subtree. Delaying the animation
+                    // curve does not escape that, because the state still changes in the
+                    // cycle that inserts the parent and is folded into it. Waiting first
+                    // puts the change in a later cycle, where it is an insertion of its
+                    // own and the label's own transition runs.
+                    .task {
+                        // The state outlives the control, which comes and goes with the
+                        // camera, so a run starts from hidden rather than from whatever
+                        // the last one left.
+                        levelLabelShown = false
+                        try? await Task.sleep(for: .milliseconds(180))
+                        withAnimation(.easeOut(duration: 0.25)) {
                             levelLabelShown = true
                         }
                     }
-                    .onDisappear { levelLabelShown = false }
                 }
                 if camera.isRotated {
                     control(
