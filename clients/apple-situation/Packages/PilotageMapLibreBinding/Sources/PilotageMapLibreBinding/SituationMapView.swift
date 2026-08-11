@@ -132,21 +132,41 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
         mapView.setCenter(coordinate, animated: animated)
     }
 
+    /// How long a turn or a tilt the reader asked for takes to land.
+    ///
+    /// The renderer's own default eases for long enough to read as lag on a control that
+    /// should feel like a switch.
+    private static let cameraMoveDuration: TimeInterval = 0.22
+
     /// Face the map along a direction, keeping position, zoom and tilt.
     public func setHeading(_ degrees: Double, animated: Bool = true) {
-        mapView.setDirection(degrees, animated: animated)
+        let camera = mapView.camera
+        camera.heading = degrees
+        move(to: camera, animated: animated)
     }
 
     /// Turn the map back to north, keeping everything else.
     public func resetHeading(animated: Bool = true) {
-        mapView.setDirection(0, animated: animated)
+        setHeading(0, animated: animated)
     }
 
     /// Look straight down, keeping heading and position.
     public func resetPitch(animated: Bool = true) {
         let camera = mapView.camera
         camera.pitch = 0
-        mapView.setCamera(camera, animated: animated)
+        move(to: camera, animated: animated)
+    }
+
+    private func move(to camera: MLNMapCamera, animated: Bool) {
+        guard animated else {
+            mapView.setCamera(camera, animated: false)
+            return
+        }
+        mapView.setCamera(
+            camera,
+            withDuration: Self.cameraMoveDuration,
+            animationTimingFunction: CAMediaTimingFunction(name: .easeOut)
+        )
     }
 
     /// Apply one complete display batch when the base style is ready.

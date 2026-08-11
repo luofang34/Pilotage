@@ -88,13 +88,18 @@ struct MapControlsView<ModesContent: View>: View {
                     }
                     .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.level", in: namespace)
+                    .glassEffectTransition(.matchedGeometry)
                 }
                 if camera.isRotated {
-                    control(label: "Facing \(CompassRose.spokenHeading(camera.headingDegrees)), turn back to north", action: resetHeading) {
+                    control(
+                        label: "Facing \(CompassRose.spokenHeading(camera.headingDegrees)), turn back to north",
+                        action: resetHeading
+                    ) {
                         CompassRose(headingDegrees: camera.headingDegrees)
                     }
                     .glassEffect(.regular.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.compass", in: namespace)
+                    .glassEffectTransition(.matchedGeometry)
                 }
             }
         }
@@ -137,11 +142,17 @@ struct MapControlsView<ModesContent: View>: View {
 
 /// A compass that names the direction the map faces.
 ///
-/// The letter carries the answer at a glance and the needle carries the precision. A
-/// needle alone asks a reader to estimate an angle from a small shape; a letter alone
-/// loses everything between the eight points.
+/// The letter carries the answer at a glance and the dial carries the precision. A dial
+/// alone asks a reader to estimate an angle from a small shape; a letter alone loses
+/// everything between the eight points.
+///
+/// It is drawn to the control it sits in, not to a glyph box: a dial with a ring of air
+/// around it reads as a smaller control beside its neighbours even when the buttons match.
 struct CompassRose: View {
     let headingDegrees: Double
+    var diameter: CGFloat = Metrics.control
+
+    private var radius: CGFloat { diameter / 2 }
 
     var body: some View {
         ZStack {
@@ -151,20 +162,24 @@ struct CompassRose: View {
                 ForEach(0..<16, id: \.self) { tick in
                     Capsule()
                         .fill(.secondary.opacity(tick.isMultiple(of: 4) ? 0.9 : 0.45))
-                        .frame(width: 1.2, height: tick.isMultiple(of: 4) ? 4 : 2.5)
-                        .offset(y: -10)
+                        .frame(
+                            width: diameter * 0.03,
+                            height: diameter * (tick.isMultiple(of: 4) ? 0.13 : 0.08)
+                        )
+                        .offset(y: -radius * 0.74)
                         .rotationEffect(.degrees(Double(tick) * 22.5))
                 }
                 // The needle points at north, which is what the control offers to return to.
                 Triangle()
                     .fill(.red)
-                    .frame(width: 6, height: 5)
-                    .offset(y: -10)
+                    .frame(width: diameter * 0.13, height: diameter * 0.11)
+                    .offset(y: -radius * 0.78)
             }
             .rotationEffect(.degrees(-headingDegrees))
             Text(Self.cardinal(headingDegrees))
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: diameter * 0.34, weight: .semibold, design: .rounded))
         }
+        .frame(width: diameter, height: diameter)
     }
 
     /// The compass point the map faces, as a letter a reader reads without thinking.
@@ -186,6 +201,7 @@ struct CompassRose: View {
     }
 }
 
+
 /// A north needle.
 struct Triangle: Shape {
     func path(in rect: CGRect) -> Path {
@@ -195,17 +211,5 @@ struct Triangle: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
-    }
-}
-
-
-/// The platform's own treatment for a control that floats over a map.
-///
-/// The style is the system's, so these controls follow the platform as it changes rather
-/// than carrying a copy of one release's material.
-extension View {
-    /// Apply the platform's treatment for a map control.
-    func mapControlButton() -> some View {
-        buttonStyle(.glass).clipShape(Circle())
     }
 }
