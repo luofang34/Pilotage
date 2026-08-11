@@ -337,6 +337,17 @@ if [ -f "$coastline_archive" ]; then
     fi
 fi
 
+# Both archives are build artifacts the style refuses to resolve without. A generator that
+# builds one and not the other leaves a fresh checkout with a blank screen rather than a
+# map, and the failure appears only on a machine that has never built before.
+generator="$client/scripts/generate-project.sh"
+for builder in build-situation-terrain.sh build-situation-coastline.sh; do
+    if ! grep -Fq "$builder" "$generator"; then
+        echo "FORBIDDEN: project generation must build $builder" >&2
+        status=1
+    fi
+done
+
 if [ "$status" -ne 0 ]; then
     echo "Terrain base layer: FAILED" >&2
     exit 1

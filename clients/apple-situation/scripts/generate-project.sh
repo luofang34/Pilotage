@@ -6,10 +6,12 @@ client_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 : "${AERO_LINK_HOST_BUNDLE_IDENTIFIER:=org.luofang.pilotage.situation}"
 : "${AERO_LINK_DRIVER_BUNDLE_IDENTIFIER:=${AERO_LINK_HOST_BUNDLE_IDENTIFIER}.aerolink-driver}"
 
-# The terrain archive is a build artifact rather than a repository file, so a fresh
-# checkout has no base map until this runs. It exits at once when the archive already
-# matches its manifest.
+# The base map is built from artifacts rather than repository files, so a fresh checkout
+# has no map until these run. The style requires both archives and refuses to resolve
+# without either, so a missing one is a blank screen and not a degraded map. Each exits at
+# once when its archive already matches its manifest.
 sh "$client_root/scripts/build-situation-terrain.sh"
+sh "$client_root/scripts/build-situation-coastline.sh"
 
 case "${PILOTAGE_MAPLIBRE_TERRAIN:-0}" in
     0) PILOTAGE_MAPLIBRE_SWIFT_CONDITIONS='' ;;

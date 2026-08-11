@@ -34,6 +34,7 @@ cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
     "$root/clients/apple-situation/Resources/SituationTerrain.provenance.md" \
     "$fixture/clients/apple-situation/Resources/"
 cp "$root/clients/apple-situation/scripts/build-situation-terrain.sh" \
+    "$root/clients/apple-situation/scripts/generate-project.sh" \
     "$fixture/clients/apple-situation/scripts/"
 cp "$root/clients/apple-situation/scripts/build-situation-coastline.sh" \
     "$fixture/clients/apple-situation/scripts/"
@@ -211,6 +212,17 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
 fi
 cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
     "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
+
+# An archive the style requires but nothing builds is a blank screen on a fresh checkout.
+sed -i.bak '/build-situation-coastline.sh/d' \
+    "$fixture/clients/apple-situation/scripts/generate-project.sh"
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a generator that skips an archive the style needs" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/scripts/generate-project.sh" \
+    "$fixture/clients/apple-situation/scripts/"
 
 printf '\nbuild_package(source);\n' >> "$fixture/crates/pilotage-terrain-build/src/lib.rs"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
