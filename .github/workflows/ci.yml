@@ -89,6 +89,12 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Production Rust lint guard self-test
+        run: sh scripts/test-check-production-rust-lints.sh
+
+      - name: Production Rust lint guard
+        run: sh scripts/check-production-rust-lints.sh
+
       - name: cargo test
         run: cargo test --all-targets
 
