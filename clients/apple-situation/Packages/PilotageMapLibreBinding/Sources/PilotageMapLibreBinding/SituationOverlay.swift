@@ -164,6 +164,7 @@ final class SituationOverlay {
         let source = try addSource(data: data, identifier: sourceID("shape", shapeStyle.id), to: mapStyle)
         if shapeStyle.extruded {
             addFillExtrusionLayer(style: shapeStyle, source: source, to: mapStyle)
+            addBelowTerrainFillLayer(style: shapeStyle, source: source, to: mapStyle)
         } else {
             addFillLayer(style: shapeStyle, source: source, to: mapStyle)
         }
@@ -251,10 +252,23 @@ final class SituationOverlay {
         to mapStyle: MLNStyle
     ) {
         let layer = MLNFillExtrusionStyleLayer(identifier: layerID("fill", style.id), source: source)
+        layer.predicate = NSPredicate(format: "below_terrain == NO")
         layer.fillExtrusionColor = constant(color(style.fill))
         layer.fillExtrusionOpacity = constant(Double(style.fill.alpha) / 255.0)
         layer.fillExtrusionBase = NSExpression(forKeyPath: "base")
         layer.fillExtrusionHeight = NSExpression(forKeyPath: "top")
+        add(layer, to: mapStyle)
+    }
+
+    /// Draw a flat fill when MapLibre cannot use a negative extrusion height.
+    private func addBelowTerrainFillLayer(
+        style: DisplayShapeStyle,
+        source: MLNShapeSource,
+        to mapStyle: MLNStyle
+    ) {
+        let layer = MLNFillStyleLayer(identifier: layerID("below", style.id), source: source)
+        layer.predicate = NSPredicate(format: "below_terrain == YES")
+        layer.fillColor = constant(color(style.fill))
         add(layer, to: mapStyle)
     }
 
@@ -403,7 +417,8 @@ private extension GeoJSONPolygonFeature {
             },
             label: shape.label,
             baseAboveTerrainMetres: shape.baseAboveTerrainM,
-            topAboveTerrainMetres: shape.topAboveTerrainM
+            topAboveTerrainMetres: shape.topAboveTerrainM,
+            usesReportedAltitudeFallback: shape.usesReportedAltitudeFallback
         )
     }
 }

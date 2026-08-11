@@ -1,10 +1,13 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+use png::{BitDepth, ColorType, Encoder};
+use rusqlite::{Connection, params};
 use surveillance_core::{
     AddressNamespace, FieldProvenance, FieldQuality, ObservationOrigin, ObservationTime,
     ProducerInstanceId, RemovalReason, SnapshotRevision, SourceRef, TimedField, TrackDelta,
     TrackId, TrackKey, TrackRecord, TrackSnapshot, TrackSnapshotHandle, Wgs84Position,
 };
+use tempfile::NamedTempFile;
 
 use super::PresentationSession;
 use crate::{
@@ -26,6 +29,28 @@ fn versioned_track_record_crosses_the_facade() {
     assert_eq!(batch.points[0].altitude_ft, Some(5_500));
     assert_eq!(batch.point_changes.len(), 1);
     assert_eq!(batch.point_changes[0].kind, DisplayPointChangeKind::Upsert);
+}
+
+#[test]
+fn loaded_terrain_places_a_track_pad_above_the_surface() {
+    let archive = terrain_archive(400.0);
+    let session = PresentationSession::new();
+    session
+        .load_terrain_archive_blocking(archive.path().to_string_lossy().into_owned())
+        .expect("terrain archive must load");
+    let encoded =
+        serde_json::to_string(&track_record(9, 2, 42.36)).expect("track record must encode");
+
+    let batch = session
+        .accept_track_record(encoded, 10)
+        .expect("track record must be accepted");
+
+    let pad = &batch.shapes[0];
+    let base = pad
+        .base_above_terrain_m
+        .expect("traffic pad must state its floor");
+    assert!((base - (5_500.0 * 0.3048 - 400.0)).abs() < 1e-6);
+    assert!(!pad.uses_reported_altitude_fallback);
 }
 
 #[test]
@@ -184,4 +209,64 @@ fn layer<'a>(batch: &'a crate::DisplayBatch, id: &str) -> &'a crate::DisplayLaye
         .iter()
         .find(|layer| layer.id == id)
         .expect("expected layer must exist")
+}
+
+fn terrain_archive(elevation_m: f64) -> NamedTempFile {
+    let file = NamedTempFile::new().expect("create terrain fixture");
+    let connection = Connection::open(file.path()).expect("open terrain fixture");
+    connection
+        .execute_batch(
+            "CREATE TABLE metadata (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE tiles (
+                 zoom_level INTEGER NOT NULL,
+                 tile_column INTEGER NOT NULL,
+                 tile_row INTEGER NOT NULL,
+                 tile_data BLOB NOT NULL,
+                 PRIMARY KEY (zoom_level, tile_column, tile_row)
+             );",
+        )
+        .expect("create terrain fixture schema");
+    for (name, value) in [
+        ("encoding", "terrarium"),
+        ("format", "png"),
+        ("minzoom", "0"),
+        ("maxzoom", "0"),
+        ("tile_size", "2"),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO metadata (name, value) VALUES (?1, ?2)",
+                params![name, value],
+            )
+            .expect("insert terrain fixture metadata");
+    }
+    connection
+        .execute(
+            "INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data)
+             VALUES (0, 0, 0, ?1)",
+            [terrarium_png(elevation_m)],
+        )
+        .expect("insert terrain fixture tile");
+    drop(connection);
+    file
+}
+
+fn terrarium_png(elevation_m: f64) -> Vec<u8> {
+    let code = ((elevation_m + 32_768.0) * 256.0).round() as u32;
+    let pixel = [
+        ((code >> 16) & 0xff) as u8,
+        ((code >> 8) & 0xff) as u8,
+        (code & 0xff) as u8,
+    ];
+    let pixels = pixel.repeat(4);
+    let mut bytes = Vec::new();
+    let mut encoder = Encoder::new(&mut bytes, 2, 2);
+    encoder.set_color(ColorType::Rgb);
+    encoder.set_depth(BitDepth::Eight);
+    let mut writer = encoder.write_header().expect("write terrain PNG header");
+    writer
+        .write_image_data(&pixels)
+        .expect("write terrain PNG pixels");
+    writer.finish().expect("finish terrain PNG");
+    bytes
 }

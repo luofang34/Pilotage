@@ -38,6 +38,36 @@ func polygonEncoding() throws {
     #expect(rings == [[[-75.0, 40.0], [-75.0, 41.0], [-74.0, 41.0], [-75.0, 40.0]]])
 }
 
+@Test("Polygon encoding keeps negative terrain heights and fallback state")
+func negativeTerrainHeightEncoding() throws {
+    let ring = [
+        GeoJSONPosition(longitudeDegrees: -75.0, latitudeDegrees: 40.0),
+        GeoJSONPosition(longitudeDegrees: -75.0, latitudeDegrees: 41.0),
+        GeoJSONPosition(longitudeDegrees: -74.0, latitudeDegrees: 40.0),
+        GeoJSONPosition(longitudeDegrees: -75.0, latitudeDegrees: 40.0),
+    ]
+    let data = try GeoJSONFeatureCollectionEncoder.encode(
+        polygons: [
+            GeoJSONPolygonFeature(
+                id: "traffic-below-terrain",
+                rings: [ring],
+                label: "REPORTED ALTITUDE",
+                baseAboveTerrainMetres: -100,
+                topAboveTerrainMetres: -40,
+                usesReportedAltitudeFallback: true
+            ),
+        ]
+    )
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let features = try #require(object["features"] as? [[String: Any]])
+    let properties = try #require(features.first?["properties"] as? [String: Any])
+
+    #expect(properties["base"] as? Double == -100)
+    #expect(properties["top"] as? Double == -40)
+    #expect(properties["below_terrain"] as? Bool == true)
+    #expect(properties["uses_reported_altitude_fallback"] as? Bool == true)
+}
+
 private func firstCoordinate(in data: Data) throws -> [Double] {
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let features = try #require(object["features"] as? [[String: Any]])

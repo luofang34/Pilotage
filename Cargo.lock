@@ -2025,6 +2025,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-terrain-query"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "png",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-timing"
 version = "0.1.0"
 

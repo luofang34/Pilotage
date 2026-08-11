@@ -18,7 +18,10 @@ let package = Package(
         ),
         .target(
             name: "PilotageSituationCore",
-            dependencies: ["PilotageSituationFFI"]
+            dependencies: ["PilotageSituationFFI"],
+            linkerSettings: [
+                .linkedLibrary("sqlite3"),
+            ]
         ),
         .testTarget(
             name: "PilotageSituationCoreTests",

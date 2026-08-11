@@ -11,6 +11,9 @@ mkdir -p \
     "$client_fixture/App" \
     "$client_fixture/Configuration" \
     "$client_fixture/Packages/PilotageMapLibreBinding" \
+    "$client_fixture/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding" \
+    "$client_fixture/Packages/PilotageSituationCore" \
+    "$client_fixture/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge" \
     "$client_fixture/Packages/PilotageMapLibreTerrain" \
     "$client_fixture/rust/pilotage-situation-ffi/src/reception" \
     "$client_fixture/scripts" \
@@ -33,6 +36,12 @@ cp "$root/clients/apple-situation/Configuration/AeroLinkDriverDevelopment.entitl
     "$client_fixture/Configuration/"
 cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Package.swift" \
     "$client_fixture/Packages/PilotageMapLibreBinding/"
+cp "$root/clients/apple-situation/Packages/PilotageSituationCore/Package.swift" \
+    "$client_fixture/Packages/PilotageSituationCore/"
+cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift" \
+    "$client_fixture/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
+cp "$root/clients/apple-situation/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge/FeatureCollection.swift" \
+    "$client_fixture/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge/"
 cp "$root/clients/apple-situation/Packages/PilotageMapLibreTerrain/Package.swift" \
     "$client_fixture/Packages/PilotageMapLibreTerrain/"
 cp "$root/clients/apple-situation/scripts/build-maplibre-terrain.sh" "$client_fixture/scripts/"
@@ -49,6 +58,15 @@ cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/src/reception/traf
 cp "$root/scripts/check-apple-situation-client.sh" "$fixture/scripts/"
 
 bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null
+
+sed -i.bak 's/linkedLibrary("sqlite3")/linkedLibrary("removed-sqlite3")/' \
+    "$fixture/clients/apple-situation/Packages/PilotageSituationCore/Package.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted a missing SQLite link" >&2
+    exit 1
+fi
+sed -i.bak 's/linkedLibrary("removed-sqlite3")/linkedLibrary("sqlite3")/' \
+    "$fixture/clients/apple-situation/Packages/PilotageSituationCore/Package.swift"
 
 sed -i.bak 's/exact: "6\.28\.0"/exact: "6.27.0"/' \
     "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Package.swift"
@@ -178,6 +196,24 @@ fi
 sed -i.bak '/let handle = connection[.]handle/i\
         guard result.hasConsumedTransfer else { return }' \
     "$fixture/clients/apple-situation/App/AeroLinkRadioState.swift"
+
+sed -i.bak 's/loadTerrainArchiveBlocking/loadTerrainArchiveRemoved/' \
+    "$fixture/clients/apple-situation/App/SituationClientModel.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted missing terrain archive loading" >&2
+    exit 1
+fi
+sed -i.bak 's/loadTerrainArchiveRemoved/loadTerrainArchiveBlocking/' \
+    "$fixture/clients/apple-situation/App/SituationClientModel.swift"
+
+sed -i.bak 's/below_terrain == YES/below_terrain removed/' \
+    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted a missing negative-height fill" >&2
+    exit 1
+fi
+sed -i.bak 's/below_terrain removed/below_terrain == YES/' \
+    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift"
 printf '\nlet decoder = JSONDecoder()\n' \
     >> "$fixture/clients/apple-situation/App/AeroLinkRadioRuntime.swift"
 if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then

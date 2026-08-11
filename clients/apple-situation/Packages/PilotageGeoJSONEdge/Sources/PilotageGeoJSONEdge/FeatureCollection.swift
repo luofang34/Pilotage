@@ -51,6 +51,8 @@ public struct GeoJSONPolygonFeature: Equatable, Sendable {
     public let baseAboveTerrainMetres: Double?
     /// Ceiling of the shape, in metres above the terrain surface beneath it.
     public let topAboveTerrainMetres: Double?
+    /// Whether the height keeps a reported altitude because terrain was not available.
+    public let usesReportedAltitudeFallback: Bool
 
     /// Create one polygon feature.
     public init(
@@ -58,13 +60,15 @@ public struct GeoJSONPolygonFeature: Equatable, Sendable {
         rings: [[GeoJSONPosition]],
         label: String?,
         baseAboveTerrainMetres: Double? = nil,
-        topAboveTerrainMetres: Double? = nil
+        topAboveTerrainMetres: Double? = nil,
+        usesReportedAltitudeFallback: Bool = false
     ) {
         self.id = id
         self.rings = rings
         self.label = label
         self.baseAboveTerrainMetres = baseAboveTerrainMetres
         self.topAboveTerrainMetres = topAboveTerrainMetres
+        self.usesReportedAltitudeFallback = usesReportedAltitudeFallback
     }
 }
 
@@ -113,6 +117,11 @@ public enum GeoJSONFeatureCollectionEncoder {
         // no height to read, and the shape would vanish rather than lie flat.
         properties["base"] = polygon.baseAboveTerrainMetres ?? 0
         properties["top"] = polygon.topAboveTerrainMetres ?? 0
+        properties["uses_reported_altitude_fallback"] = polygon.usesReportedAltitudeFallback
+        properties["below_terrain"] = min(
+            polygon.baseAboveTerrainMetres ?? 0,
+            polygon.topAboveTerrainMetres ?? 0
+        ) < 0
         return [
             "geometry": [
                 "coordinates": polygon.rings.map { $0.map(positionObject) },

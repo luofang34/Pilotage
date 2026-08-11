@@ -354,6 +354,8 @@ fn a_track_with_an_altitude_draws_a_pad_at_that_height() {
     let top = pad.top_above_terrain_m.expect("a pad states its ceiling");
     assert!((base - 5_500.0 * 0.3048).abs() < 1e-6);
     assert!(top > base, "a pad must have thickness to be visible");
+    assert!(pad.uses_reported_altitude_fallback);
+    assert_eq!(pad.label.as_deref(), Some("REPORTED ALTITUDE"));
     assert_eq!(pad.rings.len(), 1);
     assert_eq!(pad.rings[0].coordinates.len(), 5);
     assert!(
@@ -366,6 +368,41 @@ fn a_track_with_an_altitude_draws_a_pad_at_that_height() {
 }
 
 #[test]
+fn terrain_elevation_places_a_traffic_pad_above_the_surface() {
+    let mut adapter = PresentationAdapter::new();
+    adapter
+        .apply_traffic_delta_with_terrain_blocking(&delta_with_altitude(42, 3, Some(5_500)), |_| {
+            Ok::<_, std::convert::Infallible>(Some(400.0))
+        })
+        .expect("terrain reader is infallible");
+
+    let batch = adapter.adapt();
+    let pad = &batch.shapes[0];
+    let base = pad.base_above_terrain_m.expect("a pad states its floor");
+
+    assert!((base - (5_500.0 * 0.3048 - 400.0)).abs() < 1e-6);
+    assert!(!pad.uses_reported_altitude_fallback);
+    assert_eq!(pad.label, None);
+}
+
+#[test]
+fn a_negative_terrain_height_keeps_the_traffic_pad() {
+    let mut adapter = PresentationAdapter::new();
+    adapter
+        .apply_traffic_delta_with_terrain_blocking(&delta_with_altitude(42, 3, Some(1_000)), |_| {
+            Ok::<_, std::convert::Infallible>(Some(400.0))
+        })
+        .expect("terrain reader is infallible");
+
+    let batch = adapter.adapt();
+    let base = batch.shapes[0]
+        .base_above_terrain_m
+        .expect("a pad states its floor");
+
+    assert!(base < 0.0);
+}
+
+#[test]
 fn a_track_without_an_altitude_stays_a_point() {
     // An invented height would claim knowledge the track never reported.
     let mut adapter = PresentationAdapter::new();
@@ -375,6 +412,18 @@ fn a_track_without_an_altitude_stays_a_point() {
 
     assert_eq!(batch.points.len(), 1);
     assert!(batch.shapes.is_empty());
+}
+
+#[test]
+fn a_track_without_an_altitude_does_not_read_terrain() {
+    let mut adapter = PresentationAdapter::new();
+    adapter
+        .apply_traffic_delta_with_terrain_blocking(&delta_with_altitude(42, 3, None), |_| {
+            Err::<Option<f64>, _>("terrain must not be read")
+        })
+        .expect("a point without a vertical shape does not need terrain");
+
+    assert_eq!(adapter.adapt().points.len(), 1);
 }
 
 #[test]

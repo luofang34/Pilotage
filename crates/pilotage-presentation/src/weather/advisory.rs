@@ -25,21 +25,23 @@ const MINIMUM_VOLUME_THICKNESS_M: f64 = 150.0;
 pub(crate) fn shape_for_advisory(
     id: String,
     feature: &AdvisoryShapeFeature,
+    terrain_elevation_m: Option<f64>,
 ) -> Option<ShapeFeature> {
     let rings: Vec<CoordinateRing> = feature.rings().iter().filter_map(ring).collect();
     if rings.is_empty() {
         return None;
     }
     let advisory = feature.advisory();
-    let (base_above_terrain_m, top_above_terrain_m) = extrusion(advisory);
+    let extrusion = extrusion(advisory, terrain_elevation_m);
     Some(ShapeFeature {
         id,
         layer_id: WEATHER_ADVISORY_LAYER_ID.into(),
         rings,
         style_id: style_for(advisory_type(advisory)).into(),
-        label: label(advisory),
-        base_above_terrain_m,
-        top_above_terrain_m,
+        label: label(advisory, extrusion.uses_reported_altitude_fallback),
+        base_above_terrain_m: extrusion.base_m,
+        top_above_terrain_m: extrusion.top_m,
+        uses_reported_altitude_fallback: extrusion.uses_reported_altitude_fallback,
         producer_instance_id: feature.id().producer_instance_id().get(),
         snapshot_revision: feature.revisions().snapshot_revision().get(),
     })
@@ -49,22 +51,75 @@ pub(crate) fn shape_for_advisory(
 ///
 /// An advisory without a band stays flat. A volume drawn from an invented band would
 /// state an altitude range the advisory never gave.
-fn extrusion(advisory: &WeatherAdvisory) -> (Option<f64>, Option<f64>) {
+fn extrusion(advisory: &WeatherAdvisory, terrain_elevation_m: Option<f64>) -> Extrusion {
     let Some(band) = advisory
         .altitude_band()
         .as_present()
         .map(|field| field.value)
     else {
-        return (None, None);
+        return Extrusion::default();
     };
-    let base = f64::from(band.base().feet()) * FEET_TO_METRES;
-    let top = f64::from(band.top().feet()) * FEET_TO_METRES;
+    let terrain_elevation_m = terrain_elevation_m.filter(|value| value.is_finite());
+    let (base, base_fallback) = height_above_terrain(band.base(), terrain_elevation_m);
+    let (top, top_fallback) = height_above_terrain(band.top(), terrain_elevation_m);
     // A band whose limits are equal draws nothing, and a surface-to-surface advisory is
     // still an area a pilot must see.
     if top - base < MINIMUM_VOLUME_THICKNESS_M {
-        return (Some(base), Some(base + MINIMUM_VOLUME_THICKNESS_M));
+        return Extrusion {
+            base_m: Some(base),
+            top_m: Some(base + MINIMUM_VOLUME_THICKNESS_M),
+            uses_reported_altitude_fallback: base_fallback || top_fallback,
+        };
     }
-    (Some(base), Some(top))
+    Extrusion {
+        base_m: Some(base),
+        top_m: Some(top),
+        uses_reported_altitude_fallback: base_fallback || top_fallback,
+    }
+}
+
+#[derive(Default)]
+struct Extrusion {
+    base_m: Option<f64>,
+    top_m: Option<f64>,
+    uses_reported_altitude_fallback: bool,
+}
+
+fn height_above_terrain(
+    altitude: AdvisoryAltitude,
+    terrain_elevation_m: Option<f64>,
+) -> (f64, bool) {
+    let reported_m = f64::from(altitude.feet()) * FEET_TO_METRES;
+    match altitude.reference() {
+        AdvisoryAltitudeReference::Surface => (0.0, false),
+        AdvisoryAltitudeReference::AboveGroundLevel => (reported_m, false),
+        AdvisoryAltitudeReference::MeanSeaLevel | AdvisoryAltitudeReference::FlightLevel => {
+            let placement = crate::vertical::reported_height(reported_m, terrain_elevation_m);
+            (placement.metres, placement.uses_reported_altitude_fallback)
+        }
+        _ => (reported_m, true),
+    }
+}
+
+pub(crate) fn terrain_coordinate(feature: &AdvisoryShapeFeature) -> Option<Coordinate> {
+    let band = feature
+        .advisory()
+        .altitude_band()
+        .as_present()
+        .map(|field| field.value)?;
+    let needs_terrain = [band.base(), band.top()].into_iter().any(|altitude| {
+        matches!(
+            altitude.reference(),
+            AdvisoryAltitudeReference::MeanSeaLevel | AdvisoryAltitudeReference::FlightLevel
+        )
+    });
+    if !needs_terrain {
+        return None;
+    }
+    // One extrusion has one height for its full footprint. An exterior-ring position is
+    // inside the stated footprint boundary and gives a stable sample for every renderer.
+    let position = feature.rings().first()?.positions().first()?;
+    Coordinate::checked(position.latitude_deg(), position.longitude_deg())
 }
 
 fn ring(source: &AdvisoryShapeRing) -> Option<CoordinateRing> {
@@ -108,11 +163,16 @@ const fn style_for(advisory_type: Option<WeatherAdvisoryType>) -> &'static str {
 ///
 /// An outline alone cannot answer "does this affect my cruise altitude", so the band
 /// travels with the label until the renderer draws the volume.
-fn label(advisory: &WeatherAdvisory) -> Option<String> {
+fn label(advisory: &WeatherAdvisory, uses_reported_altitude_fallback: bool) -> Option<String> {
     let name = type_name(advisory_type(advisory)?);
-    Some(match band(advisory) {
+    let label = match band(advisory) {
         Some(band) => format!("{name} {band}"),
         None => name.to_owned(),
+    };
+    Some(if uses_reported_altitude_fallback {
+        format!("{label}\nREPORTED ALTITUDE")
+    } else {
+        label
     })
 }
 

@@ -24,11 +24,25 @@ pub(crate) fn feature_id_for_delta(delta: &FeatureDelta) -> Option<String> {
 ///
 /// A text report and an advisory arrive through the same delta stream, so a caller asks
 /// for both and takes whichever the feature carries.
-pub(crate) fn shape_change(delta: &FeatureDelta) -> Option<ShapeFeature> {
+pub(crate) fn shape_change(
+    delta: &FeatureDelta,
+    terrain_elevation_m: Option<f64>,
+) -> Option<ShapeFeature> {
     let FeatureDelta::Upsert(feature) = delta else {
         return None;
     };
-    advisory::shape_for_advisory(feature_id(feature.id()), feature.advisory_shape()?)
+    advisory::shape_for_advisory(
+        feature_id(feature.id()),
+        feature.advisory_shape()?,
+        terrain_elevation_m,
+    )
+}
+
+pub(crate) fn terrain_coordinate(delta: &FeatureDelta) -> Option<Coordinate> {
+    let FeatureDelta::Upsert(feature) = delta else {
+        return None;
+    };
+    advisory::terrain_coordinate(feature.advisory_shape()?)
 }
 
 pub(crate) fn point_change(

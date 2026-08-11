@@ -34,12 +34,16 @@ final class SituationReplayRun {
     private let session: PresentationSession
     private let lines: [String]
 
-    init?(flight: Flight) {
+    init?(flight: Flight, terrainArchivePath: String?) {
         guard let text = try? String(contentsOf: flight.receptionURL, encoding: .utf8),
               let domain = try? RadioDomainSession() else { return nil }
+        let session = PresentationSession()
+        if let terrainArchivePath {
+            try? session.loadTerrainArchiveBlocking(archivePath: terrainArchivePath)
+        }
         self.flight = flight
         self.domain = domain
-        session = PresentationSession()
+        self.session = session
         lines = text.split(separator: "\n").map(String.init)
     }
 

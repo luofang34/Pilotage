@@ -33,6 +33,22 @@ pub enum FfiError {
         /// Validation or decode detail.
         message: String,
     },
+    /// A terrain archive could not be opened or validated.
+    #[error("terrain archive is not available: {message}")]
+    TerrainArchive {
+        /// Archive failure detail.
+        message: String,
+    },
+    /// Terrain elevation could not be read for one position.
+    #[error("terrain elevation is not available at ({latitude_deg}, {longitude_deg}): {message}")]
+    TerrainElevation {
+        /// Latitude in degrees.
+        latitude_deg: f64,
+        /// Longitude in degrees.
+        longitude_deg: f64,
+        /// Query failure detail.
+        message: String,
+    },
     /// A layer identity is not in the portable catalog.
     #[error("display layer is not known: {layer_id}")]
     UnknownLayer {

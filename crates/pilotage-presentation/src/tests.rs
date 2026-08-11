@@ -3,4 +3,5 @@
 mod advisory;
 mod layer;
 mod traffic;
+mod vertical;
 mod weather;

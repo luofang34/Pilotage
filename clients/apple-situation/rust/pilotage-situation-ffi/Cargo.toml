@@ -33,6 +33,7 @@ airmass-core = { path = ".build/airmass/crates/airmass-core", features = ["std"]
 airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }
 pilotage-navdata-cycle = { path = "../../../../crates/pilotage-navdata-cycle" }
 pilotage-presentation = { path = "../../../../crates/pilotage-presentation" }
+pilotage-terrain-query = { path = "../../../../crates/pilotage-terrain-query" }
 serde_json = "1.0"
 surveillance-aero-link = { path = ".build/surveillance/crates/surveillance-aero-link", features = ["std"] }
 surveillance-core = { path = ".build/surveillance/crates/surveillance-core", features = ["std"] }
@@ -47,6 +48,11 @@ airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }
 [patch."https://github.com/luofang34/Surveillance.git"]
 surveillance-core = { path = ".build/surveillance/crates/surveillance-core" }
 surveillance-geojson = { path = ".build/surveillance/crates/surveillance-geojson" }
+
+[dev-dependencies]
+png = "0.18.1"
+rusqlite = { version = "0.40.2", default-features = false }
+tempfile = "3.23.0"
 
 [workspace.lints.rust]
 missing_docs = "deny"

@@ -196,13 +196,13 @@ pub struct ShapeFeature {
     pub label: Option<String>,
     /// Floor of the shape, in metres above the terrain surface beneath it.
     ///
-    /// The renderer measures a raised shape from the terrain surface, and a reported
-    /// altitude is measured from mean sea level. The difference is the terrain elevation
-    /// under the feature, which this crate cannot read, so a shape over high ground rides
-    /// that much too high. The label carries the reported altitude and stays exact.
+    /// This value keeps the reported altitude when
+    /// [`uses_reported_altitude_fallback`](Self::uses_reported_altitude_fallback) is true.
     pub base_above_terrain_m: Option<f64>,
     /// Ceiling of the shape, in metres above the terrain surface beneath it.
     pub top_above_terrain_m: Option<f64>,
+    /// Whether the height keeps a reported altitude because terrain was not available.
+    pub uses_reported_altitude_fallback: bool,
     /// Producer instance identity.
     pub producer_instance_id: u64,
     /// Snapshot revision.
