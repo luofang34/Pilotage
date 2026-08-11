@@ -60,22 +60,28 @@ struct MapModesView: View {
     private var header: some View {
         ZStack {
             Text("Map Modes")
-                .font(.title2.weight(.semibold))
+                .font(.title3.weight(.bold))
             HStack {
                 Spacer()
-                // The role carries the dismissing meaning and the symbol carries the
-                // mark, because the role's own label is the word "Close". The symbol is
-                // already a filled disc, so a glass style around it draws a second ring
-                // outside the first.
+                // The disc and the cross are set apart, because the button they copy has
+                // a wider disc and a smaller cross than any one number gives.
+                //
+                // The role's own label answers to neither the image scale nor the control
+                // size, so naming the symbol is what makes it move at all. The font then
+                // sets the cross. The disc follows the label it is given, so a frame wider
+                // than the label sets the disc and leaves the cross alone: the disc comes
+                // out ten points above the frame. A frame narrower than the label does
+                // nothing at all, because the control size holds a floor under the disc,
+                // and that is what earlier frames were being swallowed by.
                 Button(role: .close, action: close) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(.circle)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 23, weight: .regular))
+                        .frame(width: 35, height: 35)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(.small)
+                .foregroundStyle(.secondary)
                 .accessibilityLabel("Close map modes")
             }
         }
@@ -143,8 +149,10 @@ struct MapModesView: View {
             attributionPresented = true
         } label: {
             Text(summary)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                // Small and dim on purpose. The credit is owed and has to be there; a
+                // reader looking at the map is not the one it is owed to.
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
         }
@@ -166,3 +174,5 @@ struct MapModesView: View {
             : "© \(first)"
     }
 }
+
+

@@ -18,6 +18,31 @@ if ! grep -q 'static func attributions' "$resource"; then
     status=1
 fi
 
+# The close button belongs to the platform, and two modifiers are what let it draw one.
+# The glass style supplies the disc, and the icon label style keeps the cross instead of
+# the word the role carries. Removing either leaves something that looks like the other
+# one is at fault: a bare tinted cross, or a glass button that says "Close".
+if ! grep -q 'Button(role: .close, action: close)' "$panel"; then
+    echo "FORBIDDEN: the panel must be closed by the platform's own close button" >&2
+    status=1
+fi
+if ! grep -A 6 'Button(role: .close, action: close)' "$panel" | grep -qF 'buttonStyle(.glass)'; then
+    echo "FORBIDDEN: the close button needs the glass style, or the role draws a bare cross on nothing" >&2
+    status=1
+fi
+# The role carries a text label of its own, and that label is the word "Close". Either
+# naming the symbol or asking for icons only keeps it off the panel; neither leaves it
+# free to appear.
+if ! grep -A 6 'Button(role: .close, action: close)' "$panel" \
+    | grep -Eq 'labelStyle\(.iconOnly\)|systemName: "xmark"'; then
+    echo "FORBIDDEN: the close button must name its symbol or ask for icons only, or it shows the word Close" >&2
+    status=1
+fi
+if grep -A 8 'Button(role: .close' "$panel" | grep -Eq 'secondarySystemFill|background\(.*in: .circle\)'; then
+    echo "FORBIDDEN: the close button must not be redrawn by hand over the platform's own" >&2
+    status=1
+fi
+
 python3 - "$style" "$panel" <<'PY' || status=1
 import json
 import sys
