@@ -137,26 +137,44 @@ fn replay(
         if line.trim().is_empty() {
             continue;
         }
-        run.tally.lines += 1;
-        utc_millis += 100;
-        monotonic_micros += 100_000;
+        run.tally.lines = run.tally.lines.wrapping_add(1);
+        utc_millis = utc_millis.wrapping_add(100);
+        monotonic_micros = monotonic_micros.wrapping_add(100_000);
 
         let batch = match radio.accept_reception_event(line, 1, utc_millis, monotonic_micros) {
             Ok(batch) => batch,
             Err(error) => {
-                run.tally.rejected += 1;
+                run.tally.rejected = run.tally.rejected.wrapping_add(1);
                 if run.first_rejection.is_none() {
                     run.first_rejection = Some(describe(&error));
                 }
                 continue;
             }
         };
-        run.tally.events_consumed += batch.events_consumed;
-        run.tally.traffic_observations += batch.traffic_observations;
-        run.tally.traffic_refusals += batch.traffic_refusals;
-        run.tally.weather_products += batch.weather_products;
-        run.tally.track_records += batch.track_records.len() as u64;
-        run.tally.weather_records += batch.weather_records.len() as u64;
+        run.tally.events_consumed = run
+            .tally
+            .events_consumed
+            .wrapping_add(batch.events_consumed);
+        run.tally.traffic_observations = run
+            .tally
+            .traffic_observations
+            .wrapping_add(batch.traffic_observations);
+        run.tally.traffic_refusals = run
+            .tally
+            .traffic_refusals
+            .wrapping_add(batch.traffic_refusals);
+        run.tally.weather_products = run
+            .tally
+            .weather_products
+            .wrapping_add(batch.weather_products);
+        run.tally.track_records = run
+            .tally
+            .track_records
+            .wrapping_add(batch.track_records.len() as u64);
+        run.tally.weather_records = run
+            .tally
+            .weather_records
+            .wrapping_add(batch.weather_records.len() as u64);
 
         for record in batch.track_records {
             run.display = Some(presentation.accept_track_record(record, monotonic_micros)?);
@@ -165,7 +183,7 @@ fn replay(
             // An advisory is what becomes a map shape, so counting the records that carry
             // one separates "the radio heard no advisory" from "the shape path dropped it".
             if record.contains("\"advisories\"") {
-                run.tally.advisory_records += 1;
+                run.tally.advisory_records = run.tally.advisory_records.wrapping_add(1);
             }
             count_products(&record, &mut run.products);
             if synthesize {
@@ -223,7 +241,8 @@ fn report(path: &Path, run: &Run) -> Result<(), Box<dyn std::error::Error>> {
             writeln!(out, "map points         {}", batch.points.len())?;
             let mut by_layer: std::collections::BTreeMap<&str, usize> = Default::default();
             for point in &batch.points {
-                *by_layer.entry(point.layer_id.as_str()).or_default() += 1;
+                let count = by_layer.entry(point.layer_id.as_str()).or_default();
+                *count = count.wrapping_add(1);
             }
             for (layer, count) in by_layer {
                 writeln!(out, "  layer {layer:<22} {count}")?;
@@ -256,7 +275,8 @@ fn count_products(record: &str, out: &mut std::collections::BTreeMap<String, u64
     let mut identities = std::collections::BTreeSet::new();
     collect_product_ids(&value, &mut identities);
     for identity in identities {
-        *out.entry(identity).or_default() += 1;
+        let count = out.entry(identity).or_default();
+        *count = count.wrapping_add(1);
     }
 }
 

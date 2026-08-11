@@ -1,0 +1,22 @@
+adapters/aviate/src/uplink.rs	*at += dt;
+adapters/aviate/src/uplink.rs	*v += (t - *v).clamp(-dv_max, dv_max);
+adapters/aviate/src/uplink.rs	r += 2.0 * core::f32::consts::PI;
+adapters/px4/src/gimbal.rs	*at += by;
+adapters/px4/src/uplink.rs	*at += by;
+adapters/px4/src/uplink.rs	wrapped += 2.0 * core::f32::consts::PI;
+crates/pilotage-camera-calibration/src/calibration/recovery.rs	sum_sq += err * err;
+crates/pilotage-geo/src/abi/codec.rs	self.off += b.len();
+crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Pressed => presses += 1,
+crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Released => releases += 1,
+crates/pilotage-navdata-tiles/src/mvt.rs	area += i64::from(points[index].0) * i64::from(points[next].1)
+crates/pilotage-navdata-tiles/src/tile.rs	area += i64::from(unique[index].0) * i64::from(unique[next].1)
+crates/pilotage-protocol/src/h264.rs	self.at += 1;
+crates/pilotage-svs-build/src/chain/terrain/prepare.rs	c += 1;
+crates/pilotage-svs-build/src/chain/terrain/prepare.rs	end += 1;
+crates/pilotage-svs-build/src/payload/decode.rs	off += 16;
+crates/pilotage-svs-build/src/payload/decode.rs	off += 25;
+crates/pilotage-svs-build/src/payload/decode.rs	off += 28;
+crates/pilotage-svs-build/src/payload/decode.rs	off += 34;
+crates/pilotage-svs-db/src/feature.rs	i += 1;
+crates/pilotage-svs-db/src/merkle.rs	i += 2;
+crates/pilotage-timing/src/latency.rs	self.len += 1;

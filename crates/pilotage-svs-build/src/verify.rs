@@ -270,8 +270,8 @@ fn decode_terrain_tile(
     let (min_lat, min_lon, spacing) = grid;
     let posts =
         decode_terrain(&tile.bytes).ok_or(VerifyError::PayloadDecode { reason: "terrain" })?;
-    state.counts.terrain_tiles += 1;
-    state.counts.terrain_posts += posts.len() as u32;
+    state.counts.terrain_tiles = state.counts.terrain_tiles.wrapping_add(1);
+    state.counts.terrain_posts = state.counts.terrain_posts.wrapping_add(posts.len() as u32);
     for post in &posts {
         let lat = min_lat + f64::from(post.i) * spacing;
         let lon = min_lon + f64::from(post.j) * spacing;
@@ -302,8 +302,8 @@ fn decode_obstacle_tile(
     let obstacles = decode_obstacles(&tile.bytes).ok_or(VerifyError::PayloadDecode {
         reason: "obstacles",
     })?;
-    state.counts.obstacle_tiles += 1;
-    state.counts.obstacles += obstacles.len() as u32;
+    state.counts.obstacle_tiles = state.counts.obstacle_tiles.wrapping_add(1);
+    state.counts.obstacles = state.counts.obstacles.wrapping_add(obstacles.len() as u32);
     for obstacle in &obstacles {
         state.seam_ok &= lands_in(li, lo, ctx, obstacle.lat_deg, obstacle.lon_deg);
         state.identities.push((
@@ -331,7 +331,7 @@ fn decode_aerodrome_tile(
     let aerodromes = decode_aerodromes(&tile.bytes).ok_or(VerifyError::PayloadDecode {
         reason: "aerodromes",
     })?;
-    state.counts.aerodrome_tiles += 1;
+    state.counts.aerodrome_tiles = state.counts.aerodrome_tiles.wrapping_add(1);
     for aerodrome in &aerodromes {
         state.seam_ok &= lands_in(li, lo, ctx, aerodrome.lat_deg, aerodrome.lon_deg);
         state.identities.push((
@@ -356,7 +356,7 @@ fn decode_runway_tile(
 ) -> Result<(), VerifyError> {
     let runways =
         decode_runways(&tile.bytes).ok_or(VerifyError::PayloadDecode { reason: "runways" })?;
-    state.counts.runway_tiles += 1;
+    state.counts.runway_tiles = state.counts.runway_tiles.wrapping_add(1);
     for runway in &runways {
         state.seam_ok &= lands_in(li, lo, ctx, runway.end_a_lat_deg, runway.end_a_lon_deg);
         state.identities.push((

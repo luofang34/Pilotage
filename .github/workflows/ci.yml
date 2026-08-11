@@ -95,6 +95,12 @@ jobs:
       - name: Production Rust lint guard
         run: sh scripts/check-production-rust-lints.sh
 
+      - name: Monotonic counter arithmetic guard self-test
+        run: bash scripts/test-check-monotonic-counter-arithmetic.sh
+
+      - name: Monotonic counter arithmetic guard
+        run: bash scripts/check-monotonic-counter-arithmetic.sh
+
       - name: cargo test
         run: cargo test --all-targets
 
