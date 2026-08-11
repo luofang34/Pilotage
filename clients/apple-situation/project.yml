@@ -2,7 +2,7 @@ name: PilotageSituation
 options:
   bundleIdPrefix: org.luofang.pilotage
   deploymentTarget:
-    iOS: "18.4"
+    iOS: "26.0"
 settings:
   base:
     AERO_LINK_DRIVER_BUNDLE_IDENTIFIER: ${AERO_LINK_DRIVER_BUNDLE_IDENTIFIER}

@@ -13,6 +13,11 @@ final class SituationClientModel: ObservableObject {
     @Published private(set) var replayDisplay: DisplayBatch?
     /// Recordings the container holds.
     @Published private(set) var flights: [Flight] = []
+    /// The notice each map source asks to be shown.
+    ///
+    /// Reported by the map once its style is loaded, because the style is what says which
+    /// sources are drawing and what each one asks for.
+    @Published private(set) var mapAttributions: [String] = []
     /// Whether the client claims the radios.
     @Published var adsbEnabled: Bool {
         didSet {
@@ -43,6 +48,10 @@ final class SituationClientModel: ObservableObject {
     private let terrainAvailable: Bool
     private let discovery = AeroLinkDiscoveryGate()
     private let evidenceWriter = SituationEvidenceWriter()
+    /// Receives the aircraft's own position whenever a batch carries one.
+    var onOwnship: ((DisplayOwnship?) -> Void)?
+    /// Reads the position the map may centre on, for the evidence file.
+    var currentOwnship: (() -> (OwnshipFix?, HeadingFix?, FollowMode, DeviceLocationAuthorisation, Bool))?
     private var replayTask: Task<Void, Never>?
     private var pendingDisplay: DisplayBatch?
     private var publishTask: Task<Void, Never>?
@@ -248,10 +257,29 @@ final class SituationClientModel: ObservableObject {
         pendingDisplay = nil
         lastPublishMicros = Self.monotonicMicros
         display = next
+        // The aircraft's own return is a position the client can be sure belongs to this
+        // aircraft, so it reaches the ownship model rather than stopping at the map.
+        onOwnship?(next.ownship)
         if let selected = selectedTraffic {
             selectedTraffic = next.trafficDetails.first { $0.id == selected.id }
         }
         recordEvidence()
+    }
+
+    /// Write the evidence again after the view has supplied its readers.
+    ///
+    /// The first write happens as the client activates, before the view is on screen, so
+    /// everything the view reports would otherwise stay absent until something else
+    /// changed. A file that says nothing because it was written too early is worse than
+    /// one that says nothing because there is nothing to say.
+    func refreshEvidence() {
+        recordEvidence()
+    }
+
+    /// Take the notices the loaded style asks to be shown.
+    func observeMapAttributions(_ notices: [String]) {
+        guard notices != mapAttributions else { return }
+        mapAttributions = notices
     }
 
     /// Recordings the container holds.
@@ -324,6 +352,11 @@ final class SituationClientModel: ObservableObject {
             SituationEvidence(
                 batch: display,
                 radioSource: radioSource,
+                ownship: currentOwnship?().0,
+                heading: currentOwnship?().1,
+                follow: currentOwnship?().2 ?? .idle,
+                deviceLocationAuthorisation: currentOwnship?().3 ?? .undetermined,
+                deviceLocationEnabled: currentOwnship?().4 ?? false,
                 replay: replayRun,
                 driverEnabled: discovery.driverIsEnabled(),
                 terrainArchiveAvailable: terrainAvailable,

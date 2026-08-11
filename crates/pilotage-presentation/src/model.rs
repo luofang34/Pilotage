@@ -209,6 +209,26 @@ pub struct ShapeFeature {
     pub snapshot_revision: u64,
 }
 
+/// Where the aircraft carrying this display is.
+///
+/// The receiver hears the aircraft's own transmission, and the surveillance domain marks
+/// that return so it is not drawn as traffic beside itself. The position in it is still a
+/// position, and it is the one a display should centre on: it is where the aircraft is,
+/// which a tablet on the back seat is not.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OwnshipFeature {
+    /// Reported position.
+    pub coordinate: Coordinate,
+    /// Direction of travel over the ground, in degrees from true north, when reported.
+    pub course_deg: Option<f64>,
+    /// Selected display altitude in feet.
+    pub altitude_ft: Option<i32>,
+    /// Producer instance identity.
+    pub producer_instance_id: u64,
+    /// Snapshot revision.
+    pub snapshot_revision: u64,
+}
+
 /// One complete set of display values and its style catalog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayBatch {
@@ -230,6 +250,8 @@ pub struct DisplayBatch {
     pub traffic_details: Vec<crate::detail::TrafficDetail>,
     /// Supported domain products that had no display value.
     pub omitted_products: u64,
+    /// Where the aircraft is, when its own return has been heard.
+    pub ownship: Option<OwnshipFeature>,
 }
 
 impl DisplayBatch {

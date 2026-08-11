@@ -21,7 +21,7 @@ pub use layer::{
     WEATHER_REPORT_LAYER_ID,
 };
 pub use model::{
-    Color, Coordinate, CoordinateRing, DisplayBatch, PointChange, PointFeature, PointStyle,
-    ShapeFeature, ShapeStyle,
+    Color, Coordinate, CoordinateRing, DisplayBatch, OwnshipFeature, PointChange, PointFeature,
+    PointStyle, ShapeFeature, ShapeStyle,
 };
 pub use policy::PresentationAdapter;

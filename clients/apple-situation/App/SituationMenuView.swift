@@ -96,6 +96,35 @@ struct SituationMenuView: View {
     }
 }
 
+/// The complete notice for every source the map draws.
+struct MapAttributionView: View {
+    let notices: [String]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if notices.isEmpty {
+                    Text("The map is drawing no source that states a notice.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(notices, id: \.self) { notice in
+                    Text(notice)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .navigationTitle("Map data")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 /// States that the map is a recording and not the air around the aircraft.
 struct ReplayBannerView: View {
     let flight: Flight

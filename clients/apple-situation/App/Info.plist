@@ -20,6 +20,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Pilotage centres the map on your aircraft and shows where you are against terrain, traffic and weather.</string>
 	<key>NSSystemExtensionUsageDescription</key>
 	<string>Pilotage uses its USB driver to receive traffic and weather data.</string>
 	<key>UILaunchScreen</key>

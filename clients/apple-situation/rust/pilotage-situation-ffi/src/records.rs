@@ -203,6 +203,33 @@ pub struct DisplayShape {
     pub snapshot_revision: u64,
 }
 
+/// Where the aircraft carrying this display is.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+pub struct DisplayOwnship {
+    /// Reported position.
+    pub coordinate: DisplayCoordinate,
+    /// Direction of travel over the ground in degrees from true north, when reported.
+    pub course_deg: Option<f64>,
+    /// Selected display altitude in feet.
+    pub altitude_ft: Option<i32>,
+    /// Producer instance identity.
+    pub producer_instance_id: u64,
+    /// Snapshot revision.
+    pub snapshot_revision: u64,
+}
+
+impl From<pilotage_presentation::OwnshipFeature> for DisplayOwnship {
+    fn from(value: pilotage_presentation::OwnshipFeature) -> Self {
+        Self {
+            coordinate: value.coordinate.into(),
+            course_deg: value.course_deg,
+            altitude_ft: value.altitude_ft,
+            producer_instance_id: value.producer_instance_id,
+            snapshot_revision: value.snapshot_revision,
+        }
+    }
+}
+
 /// One complete set of display values and styles.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct DisplayBatch {
@@ -224,6 +251,8 @@ pub struct DisplayBatch {
     pub traffic_details: Vec<DisplayTrafficDetail>,
     /// Products that had no display value.
     pub omitted_products: u64,
+    /// Where the aircraft is, when its own return has been heard.
+    pub ownship: Option<DisplayOwnship>,
 }
 
 /// Versioned domain records emitted for one radio operation.
@@ -259,6 +288,7 @@ impl From<pilotage_presentation::DisplayBatch> for DisplayBatch {
                 .collect(),
             traffic_details: value.traffic_details.into_iter().map(Into::into).collect(),
             omitted_products: value.omitted_products,
+            ownship: value.ownship.map(Into::into),
         }
     }
 }
