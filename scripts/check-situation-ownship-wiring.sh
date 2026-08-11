@@ -74,6 +74,14 @@ require_pattern '@Published var follow' "$app/OwnshipPosition.swift" \
 require_pattern 'GlassEffectContainer\(spacing: Metrics\.controlSpacing\)' "$app/MapControlsView.swift" \
     "the glass blend distance must equal the gap between controls, or a control cannot morph out of the group"
 
+# A view inserted alongside its parent is covered by the parent's transition and never
+# runs its own. Only a change made in a later cycle is an insertion the label can animate,
+# so the wait is load bearing and reads like a decoration.
+if ! grep -A 6 'levelLabelShown = false' "$app/MapControlsView.swift" | grep -q 'Task.sleep'; then
+    echo "FORBIDDEN: the label must change state in a later cycle than the control it sits in, or its own transition never runs" >&2
+    status=1
+fi
+
 # Following is a mode. A camera that only moves when the control is pressed is a jump
 # wearing the name of a mode, and it stops the moment the aircraft does anything.
 require_pattern 'onChange\(of: ownship\.fix\)' "$app/PilotageSituationApp.swift" \
