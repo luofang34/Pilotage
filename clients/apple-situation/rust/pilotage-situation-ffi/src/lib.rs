@@ -3,8 +3,12 @@
 //! This standalone crate links the Surveillance and Airmass domain crates.
 //! Generated bindings and binary artifacts stay outside the source tree.
 
+// UniFFI derive output uses a dynamic error.
+#[allow(clippy::disallowed_types)]
 mod error;
 mod reception;
+// UniFFI derive output uses a dynamic error.
+#[allow(clippy::disallowed_types)]
 mod records;
 mod session;
 

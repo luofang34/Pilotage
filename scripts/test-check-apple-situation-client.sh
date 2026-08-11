@@ -55,9 +55,66 @@ cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/src/lib.rs" \
 cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/src/reception/traffic.rs" \
     "$root/clients/apple-situation/rust/pilotage-situation-ffi/src/reception/weather.rs" \
     "$client_fixture/rust/pilotage-situation-ffi/src/reception/"
+cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/Cargo.toml" \
+    "$root/clients/apple-situation/rust/pilotage-situation-ffi/clippy.toml" \
+    "$client_fixture/rust/pilotage-situation-ffi/"
 cp "$root/scripts/check-apple-situation-client.sh" "$fixture/scripts/"
 
 bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null
+
+sed -i.bak 's/unsafe_code = "forbid"/unsafe_code = "deny"/' \
+    "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted an unsafe-code lint downgrade" >&2
+    exit 1
+fi
+sed -i.bak 's/unsafe_code = "deny"/unsafe_code = "forbid"/' \
+    "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
+
+sed -i.bak 's/disallowed_types = "deny"/disallowed_types = "warn"/' \
+    "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted a disallowed-type lint downgrade" >&2
+    exit 1
+fi
+sed -i.bak 's/disallowed_types = "warn"/disallowed_types = "deny"/' \
+    "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
+
+sed -i.bak 's/path = "anyhow::Error"/path = "removed::Error"/' \
+    "$client_fixture/rust/pilotage-situation-ffi/clippy.toml"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted the anyhow-error type" >&2
+    exit 1
+fi
+sed -i.bak 's/path = "removed::Error"/path = "anyhow::Error"/' \
+    "$client_fixture/rust/pilotage-situation-ffi/clippy.toml"
+
+sed -i.bak 's/^#\[allow(clippy::disallowed_types/#![allow(clippy::disallowed_types/' \
+    "$client_fixture/rust/pilotage-situation-ffi/src/lib.rs"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted a crate-wide UniFFI lint exemption" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/src/lib.rs" \
+    "$client_fixture/rust/pilotage-situation-ffi/src/"
+
+printf '%s\n' 'pub type DynamicError = uniffi::__anyhow::Error;' \
+    >> "$client_fixture/rust/pilotage-situation-ffi/src/lib.rs"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted anyhow in FFI source" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/src/lib.rs" \
+    "$client_fixture/rust/pilotage-situation-ffi/src/"
+
+printf '%s\n' 'anyhow = "1"' \
+    >> "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
+if bash "$fixture/scripts/check-apple-situation-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple situation client guard accepted an anyhow dependency" >&2
+    exit 1
+fi
+cp "$root/clients/apple-situation/rust/pilotage-situation-ffi/Cargo.toml" \
+    "$client_fixture/rust/pilotage-situation-ffi/"
 
 sed -i.bak 's/linkedLibrary("sqlite3")/linkedLibrary("removed-sqlite3")/' \
     "$fixture/clients/apple-situation/Packages/PilotageSituationCore/Package.swift"

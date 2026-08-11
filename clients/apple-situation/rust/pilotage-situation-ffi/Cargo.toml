@@ -56,11 +56,12 @@ tempfile = "3.23.0"
 
 [workspace.lints.rust]
 missing_docs = "deny"
-unsafe_code = "deny"
+unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 await_holding_lock = "deny"
 dbg_macro = "deny"
+disallowed_types = "deny"
 expect_used = "deny"
 let_underscore_future = "deny"
 let_underscore_must_use = "deny"
