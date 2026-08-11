@@ -21,6 +21,14 @@ enum Metrics {
     /// Gap between controls in a stack.
     static let controlSpacing: CGFloat = 10
 
+    /// How near two glass controls must be before their shapes start to blend.
+    ///
+    /// Below the gap between controls, so the group does not swell and blur every time a
+    /// control joins or leaves it. Apple's own example uses a blend distance equal to its
+    /// gap, but its controls sit a half diameter apart and these sit a fifth of one apart:
+    /// at that proximity an equal distance keeps the shapes blending at rest.
+    static let controlBlend: CGFloat = 4
+
     /// Distance from a control to the edge of the safe area.
     ///
     /// The map runs under the status bar and the home indicator, and the controls do not.
