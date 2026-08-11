@@ -3,7 +3,7 @@
 # rustc/clippy lints:
 #   - no mod.rs files
 #   - no utils.rs / helpers.rs / common.rs files
-#   - no tracked .rs file over 500 lines (excluding target/ and any
+#   - no first-party .rs file over 500 lines (excluding target/ and any
 #     /generated/ path)
 #   - no lib.rs over 100 lines
 #   - no function body over 80 lines
@@ -30,9 +30,8 @@ is_excluded_path() {
 }
 
 collect_rs_files() {
-    find . \
-        -type d \( -name target -o -name generated \) -prune -o \
-        -type f -name '*.rs' -print
+    git ls-files --cached --others --exclude-standard -- '*.rs' \
+        | sed 's#^#./#'
 }
 
 check_forbidden_filenames() {
@@ -217,12 +216,23 @@ check_indicate_pin_coherence() {
     fi
 }
 
-check_forbidden_filenames
-check_file_length
-check_function_length
-check_calibration_id_uniqueness
-check_safety_palette_aliases
-check_indicate_pin_coherence
+case "${1:-}" in
+    "")
+        check_forbidden_filenames
+        check_file_length
+        check_function_length
+        check_calibration_id_uniqueness
+        check_safety_palette_aliases
+        check_indicate_pin_coherence
+        ;;
+    --forbidden-filenames-only)
+        check_forbidden_filenames
+        ;;
+    *)
+        echo "usage: $0 [--forbidden-filenames-only]" >&2
+        exit 2
+        ;;
+esac
 
 if [ "$status" -ne 0 ]; then
     echo "check-structure: FAILED" >&2
