@@ -63,15 +63,19 @@ struct MapModesView: View {
                 .font(.title2.weight(.semibold))
             HStack {
                 Spacer()
-                // The role carries the dismissing meaning; the glyph carries the mark. The
-                // role's own label is the word "Close", and a panel this small is closed
-                // with a cross. No frame: the glass style pads its own label, and an outer
-                // frame pads it a second time, which is what made this one outsize.
+                // The role carries the dismissing meaning and the symbol carries the
+                // mark, because the role's own label is the word "Close". The symbol is
+                // already a filled disc, so a glass style around it draws a second ring
+                // outside the first.
                 Button(role: .close, action: close) {
-                    Image(systemName: "xmark")
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.circle)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .buttonStyle(.plain)
                 .accessibilityLabel("Close map modes")
             }
         }

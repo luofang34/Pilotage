@@ -58,7 +58,7 @@ struct MapControlsView<ModesContent: View>: View {
     /// into it. The group flashes as it takes one back, the way a surface does when
     /// something rejoins it.
     private var controls: some View {
-        GlassEffectContainer(spacing: Metrics.controlBlend) {
+        GlassEffectContainer(spacing: Metrics.controlSpacing) {
             VStack(spacing: Metrics.controlSpacing) {
                 VStack(spacing: 0) {
                     control(label: "Map modes") { modesPresented = true } content: {
@@ -79,8 +79,11 @@ struct MapControlsView<ModesContent: View>: View {
                         // carried along by the shape that grew it appears finished on
                         // arrival; this one reads as the control filling.
                         if levelLabelShown {
+                            // Stated as a rise rather than left to a named transition,
+                            // because the direction is the point: the label comes up into
+                            // the control from under it.
                             Text("2D")
-                                .transition(.blurReplace(.downUp))
+                                .transition(.offset(y: 10).combined(with: .opacity))
                         }
                     }
                     .glassEffect(.clear.interactive(), in: .circle)

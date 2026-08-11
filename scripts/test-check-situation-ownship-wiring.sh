@@ -49,6 +49,11 @@ sed -i.bak 's/applyFollow(animated: false)/applyFollow(animated: true)/' \
 reject "a camera eased on every reading"
 restore PilotageSituationApp.swift
 
+sed -i.bak 's/GlassEffectContainer(spacing: Metrics.controlSpacing)/GlassEffectContainer(spacing: 4)/' \
+    "$app/MapControlsView.swift"
+reject "a blend distance below the gap, which leaves each control its own island"
+restore MapControlsView.swift
+
 sed -i.bak 's/^        compass.start()$//' "$app/OwnshipPosition.swift"
 reject "a position request that leaves the compass stopped"
 restore OwnshipPosition.swift
