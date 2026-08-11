@@ -395,12 +395,7 @@ pub fn decode_action_command_envelope(
 /// (ADR-0014).
 #[must_use]
 pub fn encode_envelope_length_delimited(envelope: &wire::Envelope) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(envelope.encoded_len() + 10);
-    #[allow(clippy::expect_used)]
-    envelope
-        .encode_length_delimited(&mut buf)
-        .expect("encoding into a growable Vec<u8> cannot fail");
-    buf
+    envelope.encode_length_delimited_to_vec()
 }
 
 /// Decodes exactly one length-delimited [`wire::Envelope`] from the front of

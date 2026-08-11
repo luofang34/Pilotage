@@ -69,8 +69,7 @@ impl Histogram {
         sorted.sort_unstable();
         let p50 = percentile(&sorted, 50);
         let p95 = percentile(&sorted, 95);
-        #[allow(clippy::expect_used)]
-        let max = *sorted.last().expect("checked non-empty above");
+        let max = sorted.last().copied()?;
         Some((p50, p95, max))
     }
 }
