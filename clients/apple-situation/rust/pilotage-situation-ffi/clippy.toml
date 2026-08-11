@@ -1,5 +1,9 @@
 # UniFFI expands error derives through anyhow internally. The hand-written
 # facade uses typed thiserror variants and does not expose anyhow types.
+disallowed-types = [
+    { path = "anyhow::Error", reason = "typed errors only in this workspace; use thiserror enums" },
+]
+
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true

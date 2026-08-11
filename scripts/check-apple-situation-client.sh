@@ -12,6 +12,10 @@ terrain_revision_file="$client/MAPLIBRE_TERRAIN_REVISION"
 terrain_build="$client/scripts/build-maplibre-terrain.sh"
 geojson_edge="$client/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge/FeatureCollection.swift"
 map_overlay="$client/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift"
+ffi="$client/rust/pilotage-situation-ffi"
+ffi_manifest="$ffi/Cargo.toml"
+ffi_clippy_config="$ffi/clippy.toml"
+ffi_lib="$ffi/src/lib.rs"
 status=0
 
 require_pattern() {
@@ -47,10 +51,60 @@ check_revision() {
         "$name and the Apple job checkout must match"
 }
 
+check_ffi_lint_scope() {
+    local lint_exemption unexpected_exemptions
+    lint_exemption='#[allow(clippy::disallowed_types)]'
+    if ! awk -v expected="$lint_exemption" '
+        $0 == expected {
+            if ((getline module_line) <= 0) {
+                bad = 1
+                next
+            }
+            if (module_line == "mod error;" || module_line == "mod records;") {
+                seen[module_line]++
+            } else {
+                bad = 1
+            }
+            next
+        }
+        /clippy::disallowed_types/ { bad = 1 }
+        END {
+            if (seen["mod error;"] != 1 || seen["mod records;"] != 1) {
+                bad = 1
+            }
+            exit bad
+        }
+    ' "$ffi_lib"; then
+        echo "FORBIDDEN: the UniFFI lint exemption must apply only to the error and record modules" >&2
+        status=1
+    fi
+    unexpected_exemptions=$(grep -RInF 'clippy::disallowed_types' "$ffi/src" \
+        | grep -vF "$ffi_lib:" || true)
+    if [ -n "$unexpected_exemptions" ]; then
+        echo "FORBIDDEN: no other FFI source module can allow disallowed types" >&2
+        status=1
+    fi
+    if grep -RIn 'anyhow' "$ffi/src" >/dev/null; then
+        echo "FORBIDDEN: the FFI source must not name anyhow" >&2
+        status=1
+    fi
+    if grep -In 'anyhow' "$ffi_manifest" >/dev/null; then
+        echo "FORBIDDEN: the standalone FFI crate must not depend on anyhow" >&2
+        status=1
+    fi
+}
+
 check_revision "$client/AERO_LINK_REVISION" AERO_LINK_REVISION
 check_revision "$client/AIRMASS_REVISION" AIRMASS_REVISION
 check_revision "$client/SURVEILLANCE_REVISION" SURVEILLANCE_REVISION
 
+require_fixed 'unsafe_code = "forbid"' "$ffi_manifest" \
+    "the standalone FFI crate must forbid unsafe code"
+require_fixed 'disallowed_types = "deny"' "$ffi_manifest" \
+    "the standalone FFI crate must deny disallowed types"
+require_fixed 'path = "anyhow::Error"' "$ffi_clippy_config" \
+    "the standalone FFI crate must disallow anyhow errors"
+check_ffi_lint_scope
 require_pattern 'exact: "6\.28\.0"' \
     "$maplibre_manifest" \
     "the MapLibre Native package must use the reviewed exact version"
@@ -149,7 +203,6 @@ require_pattern 'SURVEILLANCE_SOURCE.*external/Surveillance' \
 runtime="$client/App/AeroLinkRadioRuntime.swift"
 model="$client/App/SituationClientModel.swift"
 radio_app="$client/App"
-ffi="$client/rust/pilotage-situation-ffi"
 if [ "$(grep -Rhc 'ALDriverDiscovery()' "$radio_app"/*.swift | awk '{ total += $1 } END { print total + 0 }')" -ne 1 ]; then
     echo "FORBIDDEN: the host process must create one ALDriverDiscovery" >&2
     status=1
