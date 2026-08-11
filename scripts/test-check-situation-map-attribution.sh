@@ -47,6 +47,18 @@ PY
 reject "notices no provider name in the panel matches"
 cp "$repo_root/clients/apple-situation/Resources/SituationStyle.json" "$resources/"
 
+sed -i.bak 's/Button(role: .close, action: close)/Button(action: close)/' "$app/MapModesView.swift"
+reject "a panel closed by something other than the platform's close button"
+cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+
+sed -i.bak 's/Image(systemName: "xmark")/Text(verbatim: "")/' "$app/MapModesView.swift"
+reject "a close button that renders the word the role carries"
+cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+
+sed -i.bak '/buttonStyle(.glass)/d' "$app/MapModesView.swift"
+reject "a close button with no disc under its cross"
+cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+
 sed -i.bak '/static func attributions/d' "$app/SituationStyleResource.swift"
 reject "notices read from a loaded map rather than from the style document"
 cp "$repo_root/clients/apple-situation/App/SituationStyleResource.swift" "$app/"
