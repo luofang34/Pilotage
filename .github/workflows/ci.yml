@@ -148,6 +148,12 @@ jobs:
       - name: situation layer controls
         run: bash scripts/check-situation-layer-controls.sh
 
+      - name: situation map attribution self-test
+        run: bash scripts/test-check-situation-map-attribution.sh
+
+      - name: situation map attribution
+        run: bash scripts/check-situation-map-attribution.sh
+
       - name: situation ownship wiring self-test
         run: bash scripts/test-check-situation-ownship-wiring.sh
 

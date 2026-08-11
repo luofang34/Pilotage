@@ -15,9 +15,11 @@ final class SituationClientModel: ObservableObject {
     @Published private(set) var flights: [Flight] = []
     /// The notice each map source asks to be shown.
     ///
-    /// Reported by the map once its style is loaded, because the style is what says which
-    /// sources are drawing and what each one asks for.
-    @Published private(set) var mapAttributions: [String] = []
+    /// Taken from the style document, which is what says which sources draw and what each
+    /// one asks for. The loaded map may report the same notices later and is welcome to,
+    /// but a credit that waits for a map to finish loading is a credit a reader can open
+    /// the panel and not find.
+    @Published private(set) var mapAttributions: [String] = SituationStyleResource.attributions()
     /// Whether the client claims the radios.
     @Published var adsbEnabled: Bool {
         didSet {
@@ -278,7 +280,8 @@ final class SituationClientModel: ObservableObject {
 
     /// Take the notices the loaded style asks to be shown.
     func observeMapAttributions(_ notices: [String]) {
-        guard notices != mapAttributions else { return }
+        // A map that reports nothing has not withdrawn the notices its style declares.
+        guard !notices.isEmpty, notices != mapAttributions else { return }
         mapAttributions = notices
     }
 
