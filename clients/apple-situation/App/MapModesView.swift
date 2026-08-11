@@ -60,18 +60,15 @@ struct MapModesView: View {
     private var header: some View {
         ZStack {
             Text("Map Modes")
-                .font(.title3.weight(.semibold))
+                .font(.title2.weight(.semibold))
             HStack {
                 Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        // The same target as every other control. A close button smaller
-                        // than the rest is the one a reader misses.
-                        .frame(width: Metrics.control, height: Metrics.control)
-                }
-                .buttonStyle(.glass)
-                .accessibilityLabel("Close map modes")
+                // The platform's own close button, sized by the platform. A frame here is
+                // what made this one larger than the title it sits beside: the glass style
+                // pads its own label, and an outer frame pads it a second time.
+                Button(role: .close, action: close)
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Close map modes")
             }
         }
     }
