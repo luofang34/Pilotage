@@ -130,6 +130,9 @@ jobs:
       - name: cargo build --release
         run: cargo build --release
 
+      - name: check-structure self-test
+        run: bash scripts/test-check-structure.sh
+
       - name: check-structure
         run: bash scripts/check-structure.sh
 
