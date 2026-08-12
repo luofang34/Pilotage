@@ -8,9 +8,9 @@
 set -euo pipefail
 
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-style="$root/clients/apple-situation/Resources/SituationStyle.json"
-panel="$root/clients/apple-situation/App/MapModesView.swift"
-resource="$root/clients/apple-situation/App/SituationStyleResource.swift"
+style="$root/clients/apple/Resources/SituationStyle.json"
+panel="$root/clients/apple/App/MapModesView.swift"
+resource="$root/clients/apple/App/SituationStyleResource.swift"
 status=0
 
 if ! grep -q 'static func attributions' "$resource"; then
@@ -22,13 +22,13 @@ fi
 # the control that opened it; too narrow for that, it comes up from the bottom edge at the
 # full width. Losing either leaves a panel that is correct at one window size and covers
 # the map it describes at the other, which no build failure reports.
-app_root="$root/clients/apple-situation/App"
-if ! grep -q 'horizontalSizeClass == .regular' "$app_root/PilotageSituationApp.swift"; then
+app_root="$root/clients/apple/App"
+if ! grep -q 'horizontalSizeClass == .regular' "$app_root/PilotageApp.swift"; then
     echo "FORBIDDEN: the panel must ask the platform whether there is room beside the map" >&2
     status=1
 fi
 for shape in 'modesGrowFromControls' 'presentationDetents'; do
-    if ! grep -qF "$shape" "$app_root/PilotageSituationApp.swift"; then
+    if ! grep -qF "$shape" "$app_root/PilotageApp.swift"; then
         echo "FORBIDDEN: the panel lost one of its two presentations ($shape)" >&2
         status=1
     fi
@@ -39,13 +39,13 @@ if ! grep -q 'fixedWidth' "$panel"; then
 fi
 # A sheet is already a card. A panel that draws its own inside one stacks two surfaces
 # with two sets of corners, which reads as something having failed to fill.
-if ! grep -q 'drawsSurface: false' "$app_root/PilotageSituationApp.swift"; then
+if ! grep -q 'drawsSurface: false' "$app_root/PilotageApp.swift"; then
     echo "FORBIDDEN: the panel must not draw a second surface inside the sheet that carries it" >&2
     status=1
 fi
 # A sheet takes the height its detent asks for, and a detent taller than the window crops
 # the panel at both ends instead of shrinking it. Short windows are where this shows.
-if ! grep -q 'min(modesHeight, windowHeight' "$app_root/PilotageSituationApp.swift"; then
+if ! grep -q 'min(modesHeight, windowHeight' "$app_root/PilotageApp.swift"; then
     echo "FORBIDDEN: the sheet must not ask to be taller than the window it opens in" >&2
     status=1
 fi

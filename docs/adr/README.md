@@ -32,10 +32,10 @@ One file per decision, numbered in acceptance order. See
 | [0023](0023-vehicle-side-decomposition-fc-navigate-communicate.md) | Vehicle-side decomposition: flight control, Navigate, and Communicate behind typed contracts | Proposed |
 | [0024](0024-navigation-authority-boundary.md) | Control-grade estimation stays with the flight controller; Navigate owns the global solution and guidance | Proposed |
 | [0025](0025-client-optional-operation-automation-principals.md) | Client-optional operation: mission execution and agents are automation-class principals | Proposed |
-| [0026](0026-host-capability-profiles.md) | Client posture follows discovered host capability: full-authority, data-gateway, or embedded | Proposed |
+| [0026](0026-host-capability-profiles.md) | Client posture follows discovered host capability: full-authority, data-gateway, or embedded | Superseded by ADR-0037 |
 | [0027](0027-optional-coordination-server.md) | Optional coordination server: identity, rendezvous, and entitlements — never the session data plane | Proposed |
 | [0028](0028-multi-vehicle-and-swarm-coordinator-hosts.md) | Multi-vehicle operation scales from roster attach to swarm aggregation via coordinator hosts | Proposed |
-| [0029](0029-panel-layout-look-plugins.md) | Panels, layout, and look are data-driven plugins over the scene and state contracts | Proposed |
+| [0029](0029-panel-layout-look-plugins.md) | Panels, layout, and look are data-driven plugins over the scene and state contracts | Accepted |
 | [0030](0030-communicate-navdata-provisioning.md) | The host consumes aeronautical navdata through Communicate's cycle-dated snapshot surface | Proposed |
 | [0031](0031-nav-guidance-telemetry-display.md) | Navigation guidance rides telemetry as its own stamped role; deviation scaling is display policy | Proposed |
 | [0032](0032-ipad-native-client-shared-cores.md) | The Apple instrument composition boundary — Indicate owns the contract, the shells stay thin | Accepted |
@@ -43,6 +43,7 @@ One file per decision, numbered in acceptance order. See
 | [0034](0034-extraction-boundary.md) | Keep instrument artifacts, gates, and pinned consumers at explicit repository boundaries | Accepted |
 | [0035](0035-source-neutral-situational-services.md) | Keep situational services source-neutral and compose them through Pilotage | Superseded by ADR-0036 |
 | [0036](0036-situational-domain-ownership.md) | Separate situational state by lifecycle | Accepted |
+| [0037](0037-modular-operator-client-composition.md) | Compose operator clients from shared function modules | Accepted |
 
 ## Provenance
 

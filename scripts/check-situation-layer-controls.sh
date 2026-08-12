@@ -4,9 +4,9 @@ set -euo pipefail
 
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 portable="$root/crates/pilotage-presentation/src"
-ffi="$root/clients/apple-situation/rust/pilotage-situation-ffi/src/session.rs"
-app="$root/clients/apple-situation/App"
-binding="$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources"
+ffi="$root/clients/apple/rust/pilotage-situation-ffi/src/session.rs"
+app="$root/clients/apple/App"
+binding="$root/clients/apple/Packages/PilotageMapLibreBinding/Sources"
 status=0
 
 require_pattern() {

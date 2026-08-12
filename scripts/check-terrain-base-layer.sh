@@ -4,7 +4,7 @@ set -euo pipefail
 
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 builder="$root/crates/pilotage-terrain-build"
-client="$root/clients/apple-situation"
+client="$root/clients/apple"
 style="$client/Resources/SituationStyle.json"
 archive="$client/Resources/SituationTerrain.mbtiles"
 plan="$client/Resources/SituationTerrain.plan.json"
@@ -206,8 +206,8 @@ if ! grep -Eq '^[[:space:]]*- path: Resources[[:space:]]*$' "$project"; then
     status=1
 fi
 
-if grep -Eq '^clients/apple-situation/Resources/SituationTerrain\.mbtiles$' "$root/.gitignore" \
-    && grep -Eq '^clients/apple-situation/Resources/SituationCoastline\.mbtiles$' "$root/.gitignore"; then
+if grep -Eq '^clients/apple/Resources/SituationTerrain\.mbtiles$' "$root/.gitignore" \
+    && grep -Eq '^clients/apple/Resources/SituationCoastline\.mbtiles$' "$root/.gitignore"; then
     :
 else
     echo "FORBIDDEN: map archives must stay build artifacts" >&2
