@@ -117,9 +117,9 @@ private struct SituationContentView: View {
             get: { modesPresented && !modesFitBesideTheMap },
             set: { presented in if !presented { modesPresented = false } }
         )) {
-            mapModes(fixedWidth: false)
+            mapModes(fixedWidth: false, drawsSurface: false)
                 .presentationSizing(.fitted)
-                .presentationBackground(.clear)
+                .presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $menuPresented) {
             SituationMenuView(model: model)
@@ -153,7 +153,7 @@ private extension SituationContentView {
     ///
     /// One view for both presentations, because a reader who learns it narrow should not
     /// have to learn it again wide.
-    @ViewBuilder func mapModes(fixedWidth: Bool) -> some View {
+    @ViewBuilder func mapModes(fixedWidth: Bool, drawsSurface: Bool = true) -> some View {
         MapModesView(
             modes: MapMode.available,
             selectedModeID: $selectedMapModeID,
@@ -161,7 +161,8 @@ private extension SituationContentView {
             setLayerEnabled: model.setLayerEnabled,
             attributions: model.mapAttributions,
             close: { modesPresented = false },
-            fixedWidth: fixedWidth
+            fixedWidth: fixedWidth,
+            drawsSurface: drawsSurface
         )
     }
 

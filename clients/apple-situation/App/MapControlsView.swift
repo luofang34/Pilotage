@@ -32,13 +32,17 @@ struct MapControlsView<ModesContent: View>: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            if modesPresented, modesGrowFromControls {
-                // The panel takes the corner the pill was in. It does not sit beside the
-                // control that opened it: the control became it.
-                modesContent()
-                    .transition(
-                        .scale(scale: 0.18, anchor: .topTrailing).combined(with: .opacity)
-                    )
+            if modesPresented {
+                // Beside the map the panel takes the corner the pill was in: it does not
+                // sit next to the control that opened it, the control became it. Brought
+                // up from an edge instead, the corner is simply given up, because a group
+                // of controls left floating over a panel is a second thing to read.
+                if modesGrowFromControls {
+                    modesContent()
+                        .transition(
+                            .scale(scale: 0.18, anchor: .topTrailing).combined(with: .opacity)
+                        )
+                }
             } else {
                 controls
                     .transition(
@@ -46,10 +50,7 @@ struct MapControlsView<ModesContent: View>: View {
                     )
             }
         }
-        .animation(
-            .spring(response: 0.34, dampingFraction: 0.82),
-            value: modesPresented && modesGrowFromControls
-        )
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: modesPresented)
     }
 
     /// One glass container holds every map control.
