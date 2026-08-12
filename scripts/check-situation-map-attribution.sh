@@ -27,7 +27,7 @@ if ! grep -q 'horizontalSizeClass == .regular' "$app_root/PilotageSituationApp.s
     echo "FORBIDDEN: the panel must ask the platform whether there is room beside the map" >&2
     status=1
 fi
-for shape in 'modesGrowFromControls' 'presentationSizing(.fitted)'; do
+for shape in 'modesGrowFromControls' 'presentationDetents'; do
     if ! grep -qF "$shape" "$app_root/PilotageSituationApp.swift"; then
         echo "FORBIDDEN: the panel lost one of its two presentations ($shape)" >&2
         status=1
@@ -41,6 +41,12 @@ fi
 # with two sets of corners, which reads as something having failed to fill.
 if ! grep -q 'drawsSurface: false' "$app_root/PilotageSituationApp.swift"; then
     echo "FORBIDDEN: the panel must not draw a second surface inside the sheet that carries it" >&2
+    status=1
+fi
+# A sheet takes the height its detent asks for, and a detent taller than the window crops
+# the panel at both ends instead of shrinking it. Short windows are where this shows.
+if ! grep -q 'min(modesHeight, windowHeight' "$app_root/PilotageSituationApp.swift"; then
+    echo "FORBIDDEN: the sheet must not ask to be taller than the window it opens in" >&2
     status=1
 fi
 
