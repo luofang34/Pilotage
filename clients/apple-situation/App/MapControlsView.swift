@@ -25,12 +25,14 @@ struct MapControlsView<ModesContent: View>: View {
     let resetPitch: () -> Void
     let cycleFollow: () -> Void
     @Binding var modesPresented: Bool
+    /// Whether the panel grows out of this group or arrives from the edge of the screen.
+    let modesGrowFromControls: Bool
     @ViewBuilder let modesContent: () -> ModesContent
     @State private var levelLabelShown = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            if modesPresented {
+            if modesPresented, modesGrowFromControls {
                 // The panel takes the corner the pill was in. It does not sit beside the
                 // control that opened it: the control became it.
                 modesContent()
@@ -44,7 +46,10 @@ struct MapControlsView<ModesContent: View>: View {
                     )
             }
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: modesPresented)
+        .animation(
+            .spring(response: 0.34, dampingFraction: 0.82),
+            value: modesPresented && modesGrowFromControls
+        )
     }
 
     /// One glass container holds every map control.

@@ -18,6 +18,26 @@ if ! grep -q 'static func attributions' "$resource"; then
     status=1
 fi
 
+# The panel is shown two ways and both have to survive. Beside the map it grows out of
+# the control that opened it; too narrow for that, it comes up from the bottom edge at the
+# full width. Losing either leaves a panel that is correct at one window size and covers
+# the map it describes at the other, which no build failure reports.
+app_root="$root/clients/apple-situation/App"
+if ! grep -q 'horizontalSizeClass == .regular' "$app_root/PilotageSituationApp.swift"; then
+    echo "FORBIDDEN: the panel must ask the platform whether there is room beside the map" >&2
+    status=1
+fi
+for shape in 'modesGrowFromControls' 'presentationSizing(.fitted)'; do
+    if ! grep -qF "$shape" "$app_root/PilotageSituationApp.swift"; then
+        echo "FORBIDDEN: the panel lost one of its two presentations ($shape)" >&2
+        status=1
+    fi
+done
+if ! grep -q 'fixedWidth' "$panel"; then
+    echo "FORBIDDEN: a panel brought up from the bottom edge must take the width it is given" >&2
+    status=1
+fi
+
 # The close button belongs to the platform, and two modifiers are what let it draw one.
 # The glass style supplies the disc, and the icon label style keeps the cross instead of
 # the word the role carries. Removing either leaves something that looks like the other

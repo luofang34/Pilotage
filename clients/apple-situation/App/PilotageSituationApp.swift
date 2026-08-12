@@ -14,6 +14,7 @@ struct PilotageSituationApp: App {
 
 private struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var model = SituationClientModel()
     @State private var menuPresented = false
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
@@ -61,16 +62,8 @@ private struct SituationContentView: View {
                     resetPitch: { mapCommands?.resetPitch() },
                     cycleFollow: cycleFollow,
                     modesPresented: $modesPresented,
-                    modesContent: {
-                        MapModesView(
-                            modes: MapMode.available,
-                            selectedModeID: $selectedMapModeID,
-                            layers: model.mapDisplay?.layers ?? [],
-                            setLayerEnabled: model.setLayerEnabled,
-                            attributions: model.mapAttributions,
-                            close: { modesPresented = false }
-                        )
-                    }
+                    modesGrowFromControls: modesFitBesideTheMap,
+                    modesContent: { mapModes(fixedWidth: true) }
                 )
                 .mapControlPlacement(.topTrailing)
                 PositionlessTrafficView(
@@ -117,6 +110,17 @@ private struct SituationContentView: View {
         .onChange(of: ownship.heading?.source) { _, _ in model.refreshEvidence() }
         .onChange(of: ownship.fix == nil) { _, _ in model.refreshEvidence() }
         .onChange(of: ownship.deviceAuthorisation) { _, _ in model.refreshEvidence() }
+        // Narrow, the panel would cover the map it describes, so it comes up from the
+        // bottom edge at the full width instead, which is where a reader's thumb is and
+        // what the platform does with anything that cannot fit beside its subject.
+        .sheet(isPresented: Binding(
+            get: { modesPresented && !modesFitBesideTheMap },
+            set: { presented in if !presented { modesPresented = false } }
+        )) {
+            mapModes(fixedWidth: false)
+                .presentationSizing(.fitted)
+                .presentationBackground(.clear)
+        }
         .sheet(isPresented: $menuPresented) {
             SituationMenuView(model: model)
         }
@@ -138,6 +142,29 @@ private struct SituationContentView: View {
 }
 
 private extension SituationContentView {
+    /// Whether the panel can sit beside the map rather than over it.
+    ///
+    /// The platform's own answer to "is there room for two things across", which is the
+    /// question being asked. A width in points would have to be picked and then re-picked
+    /// for every window size a reader can drag to.
+    var modesFitBesideTheMap: Bool { horizontalSizeClass == .regular }
+
+    /// The panel itself, wherever it is shown from.
+    ///
+    /// One view for both presentations, because a reader who learns it narrow should not
+    /// have to learn it again wide.
+    @ViewBuilder func mapModes(fixedWidth: Bool) -> some View {
+        MapModesView(
+            modes: MapMode.available,
+            selectedModeID: $selectedMapModeID,
+            layers: model.mapDisplay?.layers ?? [],
+            setLayerEnabled: model.setLayerEnabled,
+            attributions: model.mapAttributions,
+            close: { modesPresented = false },
+            fixedWidth: fixedWidth
+        )
+    }
+
     /// Step through not following, following, and turning with the aircraft.
     ///
     /// Following is a mode rather than a jump, so the map keeps up as the position moves

@@ -10,6 +10,7 @@ app="$fixture/clients/apple-situation/App"
 resources="$fixture/clients/apple-situation/Resources"
 mkdir -p "$app" "$resources" "$fixture/scripts"
 cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
 cp "$repo_root/clients/apple-situation/App/SituationStyleResource.swift" "$app/"
 cp "$repo_root/clients/apple-situation/Resources/SituationStyle.json" "$resources/"
 cp "$repo_root/scripts/check-situation-map-attribution.sh" "$fixture/scripts/"
@@ -63,5 +64,13 @@ sed -i.bak '/static func attributions/d' "$app/SituationStyleResource.swift"
 reject "notices read from a loaded map rather than from the style document"
 cp "$repo_root/clients/apple-situation/App/SituationStyleResource.swift" "$app/"
 
+sed -i.bak '/presentationSizing(.fitted)/d' "$app/PilotageSituationApp.swift"
+reject "a panel that lost its narrow presentation"
+cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+
+sed -i.bak 's/horizontalSizeClass == .regular/true/' "$app/PilotageSituationApp.swift"
+reject "a panel that never asks whether there is room beside the map"
+cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+
 bash "$gate" "$fixture" >/dev/null
-echo "attribution guard rejects an uncredited source"
+echo "attribution and presentation guards reject each loss"

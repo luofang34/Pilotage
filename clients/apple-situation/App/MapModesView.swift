@@ -32,6 +32,12 @@ struct MapModesView: View {
     let setLayerEnabled: (String, Bool) -> Void
     let attributions: [String]
     let close: () -> Void
+    /// Whether the panel carries its own width, or takes the width it is given.
+    ///
+    /// Beside the map it is a card of a set width. Brought up from the bottom edge it is
+    /// as wide as the screen, because a sheet that stops short of the sides reads as a
+    /// card that failed to load rather than as a deliberate width.
+    var fixedWidth: Bool = true
     @State private var attributionPresented = false
 
     var body: some View {
@@ -50,7 +56,8 @@ struct MapModesView: View {
         )
         // The panel is as big as what it holds. A fixed width leaves a column of empty
         // glass beside one tile, and a detent invites a drag the panel does not answer.
-        .frame(width: Metrics.panelWidth)
+        .frame(width: fixedWidth ? Metrics.panelWidth : nil)
+        .frame(maxWidth: fixedWidth ? nil : .infinity)
         .fixedSize(horizontal: false, vertical: true)
         .sheet(isPresented: $attributionPresented) {
             MapAttributionView(notices: attributions)
