@@ -1,6 +1,19 @@
 import PilotageSituationCore
 import SwiftUI
 
+/// The card a panel draws under itself, where it is its own card.
+private struct PanelSurface: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.glassEffect(.regular, in: .rect(cornerRadius: Metrics.panelCorner))
+        } else {
+            content
+        }
+    }
+}
+
 /// One way of drawing the ground.
 ///
 /// A mode is a base map, not a layer: exactly one is drawn, and the layers below the tiles
@@ -32,6 +45,18 @@ struct MapModesView: View {
     let setLayerEnabled: (String, Bool) -> Void
     let attributions: [String]
     let close: () -> Void
+    /// Whether the panel carries its own width, or takes the width it is given.
+    ///
+    /// Beside the map it is a card of a set width. Brought up from the bottom edge it is
+    /// as wide as the screen, because a sheet that stops short of the sides reads as a
+    /// card that failed to load rather than as a deliberate width.
+    var fixedWidth: Bool = true
+    /// Whether the panel draws the surface it sits on.
+    ///
+    /// Beside the map it is its own card. Brought up from an edge the sheet is already a
+    /// card, and drawing another inside it stacks two surfaces with two sets of corners,
+    /// which reads as the panel having failed to fill something.
+    var drawsSurface: Bool = true
     @State private var attributionPresented = false
 
     var body: some View {
@@ -44,13 +69,13 @@ struct MapModesView: View {
             attributionFooter
         }
         .padding(Metrics.panelPadding)
-        .glassEffect(
-            .regular,
-            in: .rect(cornerRadius: Metrics.panelCorner)
-        )
+        // Applied or not applied, never applied as an identity: asking for glass that
+        // changes nothing still lays a surface, and inside a sheet that is a second card.
+        .modifier(PanelSurface(active: drawsSurface))
         // The panel is as big as what it holds. A fixed width leaves a column of empty
         // glass beside one tile, and a detent invites a drag the panel does not answer.
-        .frame(width: Metrics.panelWidth)
+        .frame(width: fixedWidth ? Metrics.panelWidth : nil)
+        .frame(maxWidth: fixedWidth ? nil : .infinity)
         .fixedSize(horizontal: false, vertical: true)
         .sheet(isPresented: $attributionPresented) {
             MapAttributionView(notices: attributions)
@@ -60,17 +85,28 @@ struct MapModesView: View {
     private var header: some View {
         ZStack {
             Text("Map Modes")
-                .font(.title3.weight(.semibold))
+                .font(.title3.weight(.bold))
             HStack {
                 Spacer()
-                Button(action: close) {
+                // The disc and the cross are set apart, because the button they copy has
+                // a wider disc and a smaller cross than any one number gives.
+                //
+                // The role's own label answers to neither the image scale nor the control
+                // size, so naming the symbol is what makes it move at all. The font then
+                // sets the cross. The disc follows the label it is given, so a frame wider
+                // than the label sets the disc and leaves the cross alone: the disc comes
+                // out ten points above the frame. A frame narrower than the label does
+                // nothing at all, because the control size holds a floor under the disc,
+                // and that is what earlier frames were being swallowed by.
+                Button(role: .close, action: close) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        // The same target as every other control. A close button smaller
-                        // than the rest is the one a reader misses.
-                        .frame(width: Metrics.control, height: Metrics.control)
+                        .font(.system(size: 23, weight: .regular))
+                        .frame(width: 35, height: 35)
                 }
                 .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(.small)
+                .foregroundStyle(.secondary)
                 .accessibilityLabel("Close map modes")
             }
         }
@@ -138,8 +174,10 @@ struct MapModesView: View {
             attributionPresented = true
         } label: {
             Text(summary)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                // Small and dim on purpose. The credit is owed and has to be there; a
+                // reader looking at the map is not the one it is owed to.
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
         }
@@ -161,3 +199,5 @@ struct MapModesView: View {
             : "© \(first)"
     }
 }
+
+

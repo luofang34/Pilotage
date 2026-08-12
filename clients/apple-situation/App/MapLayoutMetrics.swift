@@ -19,6 +19,11 @@ enum Metrics {
     static let controlGlyphBox: CGFloat = 30
 
     /// Gap between controls in a stack.
+    ///
+    /// Also the blend distance of the glass container that holds them, and the two are
+    /// the same number on purpose. A container blends only the shapes that sit within its
+    /// spacing, so a distance below this gap leaves each control its own island: it stops
+    /// growing out of the group and starts arriving from nowhere.
     static let controlSpacing: CGFloat = 10
 
     /// Distance from a control to the edge of the safe area.
@@ -38,12 +43,25 @@ enum Metrics {
 }
 
 extension View {
-    /// Place a floating control against the safe area, with the standard margin.
+    /// Place a floating control against the window, clear of whatever the system reserves.
+    ///
+    /// The margin is the larger of the standard one and the system's own inset, not the
+    /// sum. Added to the inset instead, a control ends up further from the top edge than
+    /// from the side by exactly the height of the status bar, which reads as the corner
+    /// being weighted rather than as a margin. Taking the larger keeps the control clear
+    /// of the status bar where there is one, and square to the corner where there is not.
     ///
     /// Declared once rather than as a padding value repeated at each corner, so a control
     /// added later cannot sit at a different distance from the edge than the rest.
     func mapControlPlacement(_ alignment: Alignment) -> some View {
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-            .padding(Metrics.edgeInset)
+        GeometryReader { proxy in
+            let safe = proxy.safeAreaInsets
+            frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+                .padding(.top, max(Metrics.edgeInset, safe.top))
+                .padding(.bottom, max(Metrics.edgeInset, safe.bottom))
+                .padding(.leading, max(Metrics.edgeInset, safe.leading))
+                .padding(.trailing, max(Metrics.edgeInset, safe.trailing))
+        }
+        .ignoresSafeArea()
     }
 }

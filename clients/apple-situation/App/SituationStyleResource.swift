@@ -30,6 +30,25 @@ enum SituationStyleResource {
         return deepest + overzoomSteps
     }
 
+    /// The notice each source in the style asks to be shown.
+    ///
+    /// Read from the style document the map is built from, so a source added without its
+    /// notice cannot appear on the map. Taken from the document rather than from the
+    /// loaded map because the panel that shows these is opened before the map has
+    /// finished loading as often as after, and a credit that depends on timing is a
+    /// credit that is sometimes missing.
+    static func attributions(bundle: Bundle = .main) -> [String] {
+        guard let url = bundle.url(forResource: "SituationStyle", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let style = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sources = style["sources"] as? [String: Any] else { return [] }
+        return sources.values
+            .compactMap { ($0 as? [String: Any])?["attribution"] as? String }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
     static func load(bundle: Bundle = .main) throws -> String {
         guard let styleURL = bundle.url(forResource: "SituationStyle", withExtension: "json") else {
             throw SituationStyleResourceError.missingStyle

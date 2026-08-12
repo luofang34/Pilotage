@@ -25,19 +25,24 @@ struct MapControlsView<ModesContent: View>: View {
     let resetPitch: () -> Void
     let cycleFollow: () -> Void
     @Binding var modesPresented: Bool
+    /// Whether the panel grows out of this group or arrives from the edge of the screen.
+    let modesGrowFromControls: Bool
     @ViewBuilder let modesContent: () -> ModesContent
-    @State private var levelling = false
-    @State private var pillFlash = false
+    @State private var levelLabelShown = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             if modesPresented {
-                // The panel takes the corner the pill was in. It does not sit beside the
-                // control that opened it: the control became it.
-                modesContent()
-                    .transition(
-                        .scale(scale: 0.18, anchor: .topTrailing).combined(with: .opacity)
-                    )
+                // Beside the map the panel takes the corner the pill was in: it does not
+                // sit next to the control that opened it, the control became it. Brought
+                // up from an edge instead, the corner is simply given up, because a group
+                // of controls left floating over a panel is a second thing to read.
+                if modesGrowFromControls {
+                    modesContent()
+                        .transition(
+                            .scale(scale: 0.18, anchor: .topTrailing).combined(with: .opacity)
+                        )
+                }
             } else {
                 controls
                     .transition(
@@ -72,23 +77,38 @@ struct MapControlsView<ModesContent: View>: View {
                     }
                 }
                 .glassEffect(.clear.interactive(), in: .capsule)
-                .glassEffectUnion(id: "pilotage.map.pill", namespace: namespace)
                 .glassEffectID("pilotage.map.pill", in: namespace)
-                .brightness(pillFlash ? 0.22 : 0)
-                .animation(.easeOut(duration: 0.22), value: pillFlash)
 
                 if camera.isTilted {
-                    control(label: "Look straight down") {
-                        levelling = true
-                        resetPitch()
-                    } content: {
-                        // The control names the state it is about to reach as it goes, so
-                        // the press is acknowledged before the control leaves.
-                        Text(levelling ? "3D" : "2D")
+                    // The label sits over the control rather than inside it. A button
+                    // hands its label to its style, which is free to rebuild it, and a
+                    // view rebuilt by something else does not keep the transition it was
+                    // given. Over the top, the label answers to nothing but its own state.
+                    control(label: "Look straight down", action: resetPitch) {
+                        Color.clear
+                    }
+                    .overlay {
+                        risingLabel
                     }
                     .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.level", in: namespace)
                     .glassEffectTransition(.matchedGeometry)
+                    // A child inserted with its parent has no transition of its own to
+                    // run: the parent's covers the whole subtree. Delaying the animation
+                    // curve does not escape that, because the state still changes in the
+                    // cycle that inserts the parent and is folded into it. Waiting first
+                    // puts the change in a later cycle, where it is an insertion of its
+                    // own and the label's own transition runs.
+                    .task {
+                        // The state outlives the control, which comes and goes with the
+                        // camera, so a run starts from hidden rather than from whatever
+                        // the last one left.
+                        levelLabelShown = false
+                        try? await Task.sleep(for: .milliseconds(180))
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            levelLabelShown = true
+                        }
+                    }
                 }
                 if camera.isRotated {
                     control(
@@ -97,7 +117,7 @@ struct MapControlsView<ModesContent: View>: View {
                     ) {
                         CompassRose(headingDegrees: camera.headingDegrees)
                     }
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(.clear.interactive(), in: .circle)
                     .glassEffectID("pilotage.map.compass", in: namespace)
                     .glassEffectTransition(.matchedGeometry)
                 }
@@ -106,12 +126,25 @@ struct MapControlsView<ModesContent: View>: View {
         .animation(.easeInOut(duration: 0.3), value: camera.isTilted)
         .animation(.easeInOut(duration: 0.3), value: camera.isRotated)
         .animation(.easeInOut(duration: 0.3), value: canLocate)
-        .onChange(of: camera.isTilted) { _, tilted in
-            if !tilted { levelling = false; flashPill() }
+    }
+
+    /// The word the level control shows, arriving from under it.
+    ///
+    /// Clipped to the control it fills, so the word travels from the edge of the shape
+    /// rather than from wherever the layout would otherwise have started it. Without the
+    /// clip the direction belongs to whatever alignment the surrounding stack happens to
+    /// use, which is how a rise becomes a slide from the side.
+    private var risingLabel: some View {
+        ZStack {
+            if levelLabelShown {
+                Text("2D")
+                    .font(Metrics.controlGlyph)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-        .onChange(of: camera.isRotated) { _, rotated in
-            if !rotated { flashPill() }
-        }
+        .frame(width: Metrics.control, height: Metrics.control)
+        .clipShape(.circle)
+        .allowsHitTesting(false)
     }
 
     /// One control: the same square, the same glyph weight, the same target.
@@ -130,14 +163,6 @@ struct MapControlsView<ModesContent: View>: View {
         .accessibilityLabel(label)
     }
 
-    /// Mark the group taking a control back.
-    private func flashPill() {
-        pillFlash = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
-            pillFlash = false
-        }
-    }
 }
 
 /// A compass that names the direction the map faces.

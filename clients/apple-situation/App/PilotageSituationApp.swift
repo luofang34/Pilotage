@@ -12,13 +12,33 @@ struct PilotageSituationApp: App {
     }
 }
 
+/// What a launch asked the application to do before a hand touched it.
+///
+/// Only in a debug build. A screen that can be opened from outside is a way in, and the
+/// shipped application has no reason to offer one. It exists so a window at an awkward
+/// size can be photographed and measured without somebody holding the tablet.
+enum LaunchRequest {
+    static var openMapModes: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-OpenMapModes")
+        #else
+        false
+        #endif
+    }
+}
+
 private struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var model = SituationClientModel()
     @State private var menuPresented = false
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
-    @State private var modesPresented = false
+    @State private var modesPresented = LaunchRequest.openMapModes
+    /// How tall the panel wants to be, so a sheet can be exactly that tall.
+    @State private var modesHeight: CGFloat = 360
+    /// How tall the window is, so a sheet cannot ask to be taller than one.
+    @State private var windowHeight: CGFloat = 800
     @State private var selectedMapModeID = MapMode.available.first?.id ?? "terrain"
     @Namespace private var mapControlNamespace
     @StateObject private var ownship = OwnshipModel()
@@ -61,16 +81,8 @@ private struct SituationContentView: View {
                     resetPitch: { mapCommands?.resetPitch() },
                     cycleFollow: cycleFollow,
                     modesPresented: $modesPresented,
-                    modesContent: {
-                        MapModesView(
-                            modes: MapMode.available,
-                            selectedModeID: $selectedMapModeID,
-                            layers: model.mapDisplay?.layers ?? [],
-                            setLayerEnabled: model.setLayerEnabled,
-                            attributions: model.mapAttributions,
-                            close: { modesPresented = false }
-                        )
-                    }
+                    modesGrowFromControls: modesFitBesideTheMap,
+                    modesContent: { mapModes(fixedWidth: true) }
                 )
                 .mapControlPlacement(.topTrailing)
                 PositionlessTrafficView(
@@ -81,6 +93,11 @@ private struct SituationContentView: View {
                 menuButton
                     .mapControlPlacement(.bottomTrailing)
             }
+        }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            windowHeight = height
         }
         .task {
             // The controls report what they are doing through the model, so a run can be
@@ -117,6 +134,34 @@ private struct SituationContentView: View {
         .onChange(of: ownship.heading?.source) { _, _ in model.refreshEvidence() }
         .onChange(of: ownship.fix == nil) { _, _ in model.refreshEvidence() }
         .onChange(of: ownship.deviceAuthorisation) { _, _ in model.refreshEvidence() }
+        // Narrow, the panel would cover the map it describes, so it comes up from the
+        // bottom edge at the full width instead, which is where a reader's thumb is and
+        // what the platform does with anything that cannot fit beside its subject.
+        .sheet(isPresented: Binding(
+            get: { modesPresented && !modesFitBesideTheMap },
+            set: { presented in if !presented { modesPresented = false } }
+        )) {
+            // A sheet is sized by its detent, not by asking it to fit: left to itself it
+            // takes the whole screen and centres the panel in it, which is the empty band
+            // above and below that read as a second surface. The panel's own height is
+            // intrinsic, so measuring it cannot chase the sheet it is setting.
+            // Short, the panel wants more height than the window has, and a detent taller
+            // than its window crops the panel at both ends rather than shrinking it. The
+            // ask is capped at the window and the content scrolls for the rest, which it
+            // only does when there is a rest.
+            ScrollView {
+                mapModes(fixedWidth: false, drawsSurface: false)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        modesHeight = height
+                    }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .presentationDetents([.height(min(modesHeight, windowHeight * 0.92))])
+            .presentationBackground(.regularMaterial)
+            .presentationDragIndicator(.hidden)
+        }
         .sheet(isPresented: $menuPresented) {
             SituationMenuView(model: model)
         }
@@ -138,6 +183,30 @@ private struct SituationContentView: View {
 }
 
 private extension SituationContentView {
+    /// Whether the panel can sit beside the map rather than over it.
+    ///
+    /// The platform's own answer to "is there room for two things across", which is the
+    /// question being asked. A width in points would have to be picked and then re-picked
+    /// for every window size a reader can drag to.
+    var modesFitBesideTheMap: Bool { horizontalSizeClass == .regular }
+
+    /// The panel itself, wherever it is shown from.
+    ///
+    /// One view for both presentations, because a reader who learns it narrow should not
+    /// have to learn it again wide.
+    @ViewBuilder func mapModes(fixedWidth: Bool, drawsSurface: Bool = true) -> some View {
+        MapModesView(
+            modes: MapMode.available,
+            selectedModeID: $selectedMapModeID,
+            layers: model.mapDisplay?.layers ?? [],
+            setLayerEnabled: model.setLayerEnabled,
+            attributions: model.mapAttributions,
+            close: { modesPresented = false },
+            fixedWidth: fixedWidth,
+            drawsSurface: drawsSurface
+        )
+    }
+
     /// Step through not following, following, and turning with the aircraft.
     ///
     /// Following is a mode rather than a jump, so the map keeps up as the position moves
