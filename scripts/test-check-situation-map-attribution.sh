@@ -68,8 +68,12 @@ sed -i.bak 's/drawsSurface: false/drawsSurface: true/' "$app/PilotageSituationAp
 reject "a panel drawing a second surface inside the sheet"
 cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
 
-sed -i.bak '/presentationSizing(.fitted)/d' "$app/PilotageSituationApp.swift"
+sed -i.bak '/presentationDetents/d' "$app/PilotageSituationApp.swift"
 reject "a panel that lost its narrow presentation"
+cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+
+sed -i.bak 's/min(modesHeight, windowHeight \* 0.92)/modesHeight/' "$app/PilotageSituationApp.swift"
+reject "a sheet that may ask to be taller than its window"
 cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
 
 sed -i.bak 's/horizontalSizeClass == .regular/true/' "$app/PilotageSituationApp.swift"

@@ -1,6 +1,19 @@
 import PilotageSituationCore
 import SwiftUI
 
+/// The card a panel draws under itself, where it is its own card.
+private struct PanelSurface: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.glassEffect(.regular, in: .rect(cornerRadius: Metrics.panelCorner))
+        } else {
+            content
+        }
+    }
+}
+
 /// One way of drawing the ground.
 ///
 /// A mode is a base map, not a layer: exactly one is drawn, and the layers below the tiles
@@ -56,10 +69,9 @@ struct MapModesView: View {
             attributionFooter
         }
         .padding(Metrics.panelPadding)
-        .glassEffect(
-            drawsSurface ? .regular : .identity,
-            in: .rect(cornerRadius: drawsSurface ? Metrics.panelCorner : 0)
-        )
+        // Applied or not applied, never applied as an identity: asking for glass that
+        // changes nothing still lays a surface, and inside a sheet that is a second card.
+        .modifier(PanelSurface(active: drawsSurface))
         // The panel is as big as what it holds. A fixed width leaves a column of empty
         // glass beside one tile, and a detent invites a drag the panel does not answer.
         .frame(width: fixedWidth ? Metrics.panelWidth : nil)

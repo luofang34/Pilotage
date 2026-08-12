@@ -12,6 +12,21 @@ struct PilotageSituationApp: App {
     }
 }
 
+/// What a launch asked the application to do before a hand touched it.
+///
+/// Only in a debug build. A screen that can be opened from outside is a way in, and the
+/// shipped application has no reason to offer one. It exists so a window at an awkward
+/// size can be photographed and measured without somebody holding the tablet.
+enum LaunchRequest {
+    static var openMapModes: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-OpenMapModes")
+        #else
+        false
+        #endif
+    }
+}
+
 private struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -19,7 +34,11 @@ private struct SituationContentView: View {
     @State private var menuPresented = false
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
-    @State private var modesPresented = false
+    @State private var modesPresented = LaunchRequest.openMapModes
+    /// How tall the panel wants to be, so a sheet can be exactly that tall.
+    @State private var modesHeight: CGFloat = 360
+    /// How tall the window is, so a sheet cannot ask to be taller than one.
+    @State private var windowHeight: CGFloat = 800
     @State private var selectedMapModeID = MapMode.available.first?.id ?? "terrain"
     @Namespace private var mapControlNamespace
     @StateObject private var ownship = OwnshipModel()
@@ -75,6 +94,11 @@ private struct SituationContentView: View {
                     .mapControlPlacement(.bottomTrailing)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            windowHeight = height
+        }
         .task {
             // The controls report what they are doing through the model, so a run can be
             // read from the file it leaves rather than from the screen.
@@ -117,9 +141,26 @@ private struct SituationContentView: View {
             get: { modesPresented && !modesFitBesideTheMap },
             set: { presented in if !presented { modesPresented = false } }
         )) {
-            mapModes(fixedWidth: false, drawsSurface: false)
-                .presentationSizing(.fitted)
-                .presentationBackground(.regularMaterial)
+            // A sheet is sized by its detent, not by asking it to fit: left to itself it
+            // takes the whole screen and centres the panel in it, which is the empty band
+            // above and below that read as a second surface. The panel's own height is
+            // intrinsic, so measuring it cannot chase the sheet it is setting.
+            // Short, the panel wants more height than the window has, and a detent taller
+            // than its window crops the panel at both ends rather than shrinking it. The
+            // ask is capped at the window and the content scrolls for the rest, which it
+            // only does when there is a rest.
+            ScrollView {
+                mapModes(fixedWidth: false, drawsSurface: false)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        modesHeight = height
+                    }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .presentationDetents([.height(min(modesHeight, windowHeight * 0.92))])
+            .presentationBackground(.regularMaterial)
+            .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $menuPresented) {
             SituationMenuView(model: model)

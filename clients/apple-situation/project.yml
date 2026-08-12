@@ -39,7 +39,7 @@ targets:
         SUPPORTS_MACCATALYST: false
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ${PILOTAGE_MAPLIBRE_SWIFT_CONDITIONS}"
-        TARGETED_DEVICE_FAMILY: 2
+        TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - package: PilotageSituationCore
         product: PilotageSituationCore
