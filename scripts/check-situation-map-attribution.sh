@@ -37,6 +37,12 @@ if ! grep -q 'fixedWidth' "$panel"; then
     echo "FORBIDDEN: a panel brought up from the bottom edge must take the width it is given" >&2
     status=1
 fi
+# A sheet is already a card. A panel that draws its own inside one stacks two surfaces
+# with two sets of corners, which reads as something having failed to fill.
+if ! grep -q 'drawsSurface: false' "$app_root/PilotageSituationApp.swift"; then
+    echo "FORBIDDEN: the panel must not draw a second surface inside the sheet that carries it" >&2
+    status=1
+fi
 
 # The close button belongs to the platform, and two modifiers are what let it draw one.
 # The glass style supplies the disc, and the icon label style keeps the cross instead of

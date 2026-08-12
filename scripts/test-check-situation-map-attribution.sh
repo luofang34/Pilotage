@@ -64,6 +64,10 @@ sed -i.bak '/static func attributions/d' "$app/SituationStyleResource.swift"
 reject "notices read from a loaded map rather than from the style document"
 cp "$repo_root/clients/apple-situation/App/SituationStyleResource.swift" "$app/"
 
+sed -i.bak 's/drawsSurface: false/drawsSurface: true/' "$app/PilotageSituationApp.swift"
+reject "a panel drawing a second surface inside the sheet"
+cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+
 sed -i.bak '/presentationSizing(.fitted)/d' "$app/PilotageSituationApp.swift"
 reject "a panel that lost its narrow presentation"
 cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
