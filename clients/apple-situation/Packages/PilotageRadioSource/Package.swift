@@ -1,11 +1,11 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 
 import PackageDescription
 
 let package = Package(
     name: "PilotageRadioSource",
     platforms: [
-        .iOS(.v18),
+        .iOS(.v26),
         .macOS(.v15),
     ],
     products: [

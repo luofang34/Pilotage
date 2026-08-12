@@ -58,6 +58,29 @@ struct SituationEvidence: Codable, Equatable {
     var replayWeatherRecords: UInt64?
     /// Records the display refused during the replay.
     var replayRefusedRecords: UInt64?
+    /// Where the aircraft position came from, when one exists.
+    ///
+    /// The control that centres the map appears only when a position exists and fills only
+    /// while the map follows it, so a run that shows neither needs to say which.
+    var ownshipSource: String?
+    /// Whether this device answered when asked for a position.
+    var deviceLocationAuthorisation: String?
+    /// Whether the device's own location service is switched on at all.
+    var deviceLocationEnabled: Bool?
+    /// Whether the aircraft's own return carried a position this run.
+    var aircraftReportedPosition: Bool?
+    /// Which way the aircraft is pointing, and where that came from.
+    ///
+    /// A heading-up map that will not turn has one of three causes and they need
+    /// different work: the device has no magnetometer, it has one and reports nothing, or
+    /// the map is not in the mode.
+    var headingSource: String?
+    /// Heading in degrees from true north, when one is known.
+    var headingDegrees: Double?
+    /// Whether this device can report which way it is pointing at all.
+    var deviceHeadingAvailable: Bool?
+    /// Which way the map is tied to the aircraft.
+    var followMode: String?
     /// First error the client reported, if any.
     var errorMessage: String?
 }
@@ -68,6 +91,11 @@ extension SituationEvidence {
     init(
         batch: DisplayBatch?,
         radioSource: RadioSourceSnapshot,
+        ownship: OwnshipFix?,
+        heading: HeadingFix?,
+        follow: FollowMode,
+        deviceLocationAuthorisation: DeviceLocationAuthorisation,
+        deviceLocationEnabled: Bool,
         replay: SituationReplayRun?,
         driverEnabled: Bool?,
         terrainArchiveAvailable: Bool,
@@ -112,6 +140,14 @@ extension SituationEvidence {
         replayTrackRecords = replay?.trackRecords
         replayWeatherRecords = replay?.weatherRecords
         replayRefusedRecords = replay?.refusedRecords
+        ownshipSource = ownship?.source.rawValue
+        self.deviceLocationAuthorisation = String(describing: deviceLocationAuthorisation)
+        self.deviceLocationEnabled = deviceLocationEnabled
+        aircraftReportedPosition = batch?.ownship != nil
+        headingSource = heading?.source.rawValue
+        headingDegrees = heading?.trueDegrees
+        deviceHeadingAvailable = DeviceHeadingProvider.available
+        followMode = String(describing: follow)
         self.errorMessage = errorMessage
     }
 

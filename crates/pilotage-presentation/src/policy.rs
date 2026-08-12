@@ -10,7 +10,8 @@ use crate::layer::{
     WEATHER_REPORT_LAYER_ID,
 };
 use crate::{
-    Coordinate, DisplayBatch, PointChange, PointFeature, PointStyle, ShapeFeature, ShapeStyle,
+    Coordinate, DisplayBatch, OwnshipFeature, PointChange, PointFeature, PointStyle, ShapeFeature,
+    ShapeStyle,
 };
 
 pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
@@ -38,6 +39,7 @@ pub struct PresentationAdapter {
     traffic_tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
     weather_points: BTreeMap<String, PointFeature>,
     weather_shapes: BTreeMap<String, ShapeFeature>,
+    ownship: Option<OwnshipFeature>,
     now_micros: u64,
 }
 
@@ -65,6 +67,7 @@ impl PresentationAdapter {
             positionless_traffic: Vec::new(),
             traffic_details: Vec::new(),
             omitted_products: 0,
+            ownship: self.ownship,
         }
     }
 
@@ -232,6 +235,7 @@ impl PresentationAdapter {
         self.traffic_tracks.clear();
         self.weather_points.clear();
         self.weather_shapes.clear();
+        self.ownship = None;
     }
 
     /// Convert current traffic and weather values into one batch.
@@ -289,7 +293,10 @@ impl PresentationAdapter {
                     .now_micros
                     .max(handle.snapshot().last_observed_at_micros);
                 if handle.snapshot().ownship_shadow {
+                    // The aircraft's own return is not traffic, and it is not nothing
+                    // either: it carries where the aircraft is.
                     self.traffic_tracks.remove(&key);
+                    self.ownship = ownship_feature(handle);
                 } else {
                     self.traffic_tracks.insert(key, handle.clone());
                 }
@@ -333,6 +340,31 @@ impl PresentationAdapter {
             }
         }
     }
+}
+
+/// Read where the aircraft is from its own return.
+///
+/// A return with no position says the aircraft was heard and not where it was, so it
+/// yields nothing rather than a coordinate the track never carried.
+fn ownship_feature(handle: &surveillance_core::TrackSnapshotHandle) -> Option<OwnshipFeature> {
+    let snapshot = handle.snapshot();
+    let position = snapshot.position.as_ref()?;
+    let coordinate =
+        Coordinate::checked(position.value.latitude_deg, position.value.longitude_deg)?;
+    Some(OwnshipFeature {
+        coordinate,
+        course_deg: snapshot
+            .velocity
+            .as_ref()
+            .and_then(|value| value.value.track_angle_deg_true),
+        altitude_ft: snapshot
+            .pressure_altitude_ft
+            .as_ref()
+            .map(|field| field.value)
+            .or_else(|| snapshot.geometric_altitude_ft.as_ref().map(|f| f.value)),
+        producer_instance_id: handle.producer_instance_id().get(),
+        snapshot_revision: handle.snapshot_revision().get(),
+    })
 }
 
 fn point_styles() -> Vec<PointStyle> {

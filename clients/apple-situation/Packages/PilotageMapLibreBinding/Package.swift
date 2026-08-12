@@ -1,4 +1,4 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 
 import Foundation
 import PackageDescription
@@ -23,7 +23,7 @@ let mapLibrePackage = terrainRendererEnabled
 let package = Package(
     name: "PilotageMapLibreBinding",
     platforms: [
-        .iOS(.v18),
+        .iOS(.v26),
     ],
     products: [
         .library(name: "PilotageMapLibreBinding", targets: ["PilotageMapLibreBinding"]),

@@ -283,7 +283,7 @@ fn track_handle(
     )
 }
 
-fn complete_track(id: u64) -> TrackSnapshot {
+pub(super) fn complete_track(id: u64) -> TrackSnapshot {
     let mut track = TrackSnapshot::new(TrackId::new(id), track_key(id), 10);
     track.position = Some(radio_timed(Wgs84Position {
         latitude_deg: 42.3656,
