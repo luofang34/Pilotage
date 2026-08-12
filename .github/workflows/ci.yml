@@ -401,6 +401,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Select the newest Xcode on the runner
+        run: |
+          # The package declares a tools version the runner's default Xcode is older
+          # than, and the failure reads as a package problem rather than a runner one.
+          newest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$newest" ]; then sudo xcode-select -s "$newest"; fi
+          xcodebuild -version
+          swift --version
+
       - name: Authorize the private git dependency (Navigate)
         env:
           NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
@@ -449,6 +458,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Select the newest Xcode on the runner
+        run: |
+          # The package declares a tools version the runner's default Xcode is older
+          # than, and the failure reads as a package problem rather than a runner one.
+          newest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$newest" ]; then sudo xcode-select -s "$newest"; fi
+          xcodebuild -version
+          swift --version
 
       - name: Authorize the private situation domain dependencies
         env:
