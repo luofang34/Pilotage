@@ -148,6 +148,12 @@ jobs:
       - name: situation layer controls
         run: bash scripts/check-situation-layer-controls.sh
 
+      - name: situation ownship wiring self-test
+        run: bash scripts/test-check-situation-ownship-wiring.sh
+
+      - name: situation ownship wiring
+        run: bash scripts/check-situation-ownship-wiring.sh
+
       - name: Apple situation client guard self-test
         run: bash scripts/test-check-apple-situation-client.sh
 

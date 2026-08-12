@@ -18,7 +18,6 @@ private struct SituationContentView: View {
     @State private var menuPresented = false
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
-    @State private var follow: FollowMode = .idle
     @State private var modesPresented = false
     @State private var selectedMapModeID = MapMode.available.first?.id ?? "terrain"
     @Namespace private var mapControlNamespace
@@ -40,7 +39,7 @@ private struct SituationContentView: View {
                 onMovedByReader: {
                     // A hand on the map ends both the following and the panel: the reader
                     // has said what they want to look at.
-                    follow = .idle
+                    ownship.follow = .idle
                     modesPresented = false
                 }
             )
@@ -56,7 +55,7 @@ private struct SituationContentView: View {
                     camera: camera,
                     ownship: ownship.fix,
                     canLocate: ownship.canLocate,
-                    follow: follow,
+                    follow: ownship.follow,
                     namespace: mapControlNamespace,
                     resetHeading: { mapCommands?.resetHeading() },
                     resetPitch: { mapCommands?.resetPitch() },
@@ -83,6 +82,41 @@ private struct SituationContentView: View {
                     .mapControlPlacement(.bottomTrailing)
             }
         }
+        .task {
+            // The controls report what they are doing through the model, so a run can be
+            // read from the file it leaves rather than from the screen.
+            model.currentOwnship = { [ownship] in
+                (
+                    ownship.fix,
+                    ownship.heading,
+                    ownship.follow,
+                    ownship.deviceAuthorisation,
+                    ownship.deviceLocationEnabled
+                )
+            }
+            model.onOwnship = { [ownship] reported in
+                ownship.observeAircraft(reported.map(OwnshipFix.init))
+            }
+            ownship.startIfPermitted()
+            model.refreshEvidence()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIDevice.orientationDidChangeNotification
+            )
+        ) { _ in
+            ownship.refreshOrientation()
+        }
+        // Following is a mode, not a jump: the camera keeps up as the aircraft moves,
+        // without the ease a press gets, because a course correction eased on every
+        // reading leaves the map permanently behind the aircraft.
+        .onChange(of: ownship.fix) { _, _ in applyFollow(animated: false) }
+        .onChange(of: ownship.heading) { _, _ in applyFollow(animated: false) }
+        .onChange(of: ownship.follow) { _, _ in model.refreshEvidence() }
+        // The file records what changed about the answer, not every degree of it.
+        .onChange(of: ownship.heading?.source) { _, _ in model.refreshEvidence() }
+        .onChange(of: ownship.fix == nil) { _, _ in model.refreshEvidence() }
+        .onChange(of: ownship.deviceAuthorisation) { _, _ in model.refreshEvidence() }
         .sheet(isPresented: $menuPresented) {
             SituationMenuView(model: model)
         }
@@ -111,23 +145,25 @@ private extension SituationContentView {
     func cycleFollow() {
         // Pressing this is also how a reader asks for permission the first time.
         ownship.requestPositionIfNeeded()
-        follow = follow.next
-        applyFollow()
+        ownship.follow = ownship.follow.next
+        applyFollow(animated: true)
     }
 
     /// Put the camera where the current mode says it belongs.
-    func applyFollow() {
-        guard let fix = ownship.fix else { return }
-        if follow.followsPosition {
-            mapCommands?.centre(fix.coordinate)
+    func applyFollow(animated: Bool) {
+        // Position and heading are separate answers. Coupling them meant a map that would
+        // not turn with the aircraft until it also knew where the aircraft was, and indoors
+        // that is most of the time.
+        if ownship.follow.followsPosition, let fix = ownship.fix {
+            mapCommands?.centre(fix.coordinate, animated)
         }
-        switch follow {
+        switch ownship.follow {
         case .heading:
             // A heading if the device or the aircraft has one, and course over the ground
             // only when neither does. They differ in wind, and the map should turn to
             // where the aircraft points rather than where it is drifting.
             if let heading = ownship.heading {
-                mapCommands?.setHeading(heading.trueDegrees)
+                mapCommands?.setHeading(heading.trueDegrees, animated)
             }
         case .centred:
             mapCommands?.resetHeading()
@@ -174,8 +210,8 @@ private extension SituationContentView {
 struct SituationMapCommands {
     let resetHeading: () -> Void
     let resetPitch: () -> Void
-    let centre: (CLLocationCoordinate2D) -> Void
-    let setHeading: (Double) -> Void
+    let centre: (CLLocationCoordinate2D, Bool) -> Void
+    let setHeading: (Double, Bool) -> Void
 }
 
 private struct SituationMap: UIViewRepresentable {
@@ -210,8 +246,8 @@ private struct SituationMap: UIViewRepresentable {
                 SituationMapCommands(
                     resetHeading: { view.resetHeading() },
                     resetPitch: { view.resetPitch() },
-                    centre: { view.centre(on: $0) },
-                    setHeading: { view.setHeading($0) }
+                    centre: { view.centre(on: $0, animated: $1) },
+                    setHeading: { view.setHeading($0, animated: $1) }
                 )
             )
         }

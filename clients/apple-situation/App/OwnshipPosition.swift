@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import UIKit
 import PilotageSituationCore
 
 /// Where a position for the aircraft came from.
@@ -61,6 +62,15 @@ final class DeviceLocationProvider: NSObject, CLLocationManagerDelegate {
     var onFix: ((OwnshipFix) -> Void)?
     /// Receives the reader's answer to the permission request.
     var onAuthorisation: ((DeviceLocationAuthorisation) -> Void)?
+
+    /// What the platform answers right now, without waiting to be told.
+    ///
+    /// The published copy of this is only filled once the provider has been started, so a
+    /// decision about whether to start cannot be made from it without asking the question
+    /// the answer depends on.
+    var authorisation: DeviceLocationAuthorisation {
+        Self.reading(manager.authorizationStatus)
+    }
 
     private let manager = CLLocationManager()
     private var isRunning = false
@@ -136,13 +146,15 @@ final class DeviceLocationProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func report(_ status: CLAuthorizationStatus) {
+        onAuthorisation?(Self.reading(status))
+    }
+
+    /// Read one platform answer, in one place, so the pushed and the pulled answer agree.
+    private static func reading(_ status: CLAuthorizationStatus) -> DeviceLocationAuthorisation {
         switch status {
-        case .notDetermined:
-            onAuthorisation?(.undetermined)
-        case .authorizedWhenInUse, .authorizedAlways:
-            onAuthorisation?(.granted)
-        default:
-            onAuthorisation?(.denied)
+        case .notDetermined: .undetermined
+        case .authorizedWhenInUse, .authorizedAlways: .granted
+        default: .denied
         }
     }
 }
@@ -179,6 +191,13 @@ final class OwnshipModel: ObservableObject {
     /// Which way the aircraft is pointing, from the best source that has an answer.
     @Published private(set) var heading: HeadingFix?
 
+    /// How closely the map is tied to the aircraft.
+    ///
+    /// Held here rather than in the view because a closure that reads it outlives the
+    /// view value that created it, and a captured view value holds the mode as it was
+    /// when the closure was made rather than as it is when the closure runs.
+    @Published var follow: FollowMode = .idle
+
     private let device = DeviceLocationProvider()
     private let compass = DeviceHeadingProvider()
     private var deviceFix: OwnshipFix?
@@ -193,6 +212,9 @@ final class OwnshipModel: ObservableObject {
         }
         device.onAuthorisation = { [weak self] authorisation in
             self?.deviceAuthorisation = authorisation
+            // Permission granted part way through a run is the same situation as
+            // permission held at the start of one.
+            self?.startIfPermitted()
         }
         compass.onHeading = { [weak self] heading in
             self?.deviceHeading = heading
@@ -226,10 +248,26 @@ final class OwnshipModel: ObservableObject {
         compass.start()
     }
 
+    /// Take the orientation again, because a tablet is turned while it is being read.
+    func refreshOrientation() {
+        compass.refreshOrientation()
+    }
+
     /// Stop asking.
     func stop() {
         device.stop()
         compass.stop()
+    }
+
+    /// Start locating when the reader has already agreed to it.
+    ///
+    /// A reader who granted permission on an earlier run has not withdrawn it by closing
+    /// the application. Waiting for a press before asking the sensors anything means the
+    /// first press reports no position and no heading, and the control appears broken at
+    /// exactly the moment it is first used.
+    func startIfPermitted() {
+        guard device.authorisation == .granted else { return }
+        start()
     }
 
     /// Ask for permission if it has not been asked for, and start locating.
@@ -237,7 +275,7 @@ final class OwnshipModel: ObservableObject {
     /// A reader pressing the control is the request. The map follows as soon as there is
     /// a position, which may be after the reader answers a prompt.
     func requestPositionIfNeeded() {
-        device.start()
+        start()
     }
 
     /// Take a position reported by the aircraft over the radio link.
@@ -355,6 +393,7 @@ final class DeviceHeadingProvider: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var isRunning = false
 
+
     /// Whether this device can report which way it is pointing.
     nonisolated static var available: Bool { CLLocationManager.headingAvailable() }
 
@@ -362,19 +401,65 @@ final class DeviceHeadingProvider: NSObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         // A degree of filtering keeps a map from shivering while the aircraft holds course.
-        manager.headingFilter = 1
-        manager.headingOrientation = .portrait
+        manager.headingFilter = 3
+        // A tablet flown in landscape reads ninety degrees off if the platform is told it
+        // is upright, and the reading is plausible enough that nobody notices it is wrong.
+        applyOrientation()
+    }
+
+    /// Take the orientation again, because a tablet is turned while it is being read.
+    func refreshOrientation() {
+        applyOrientation()
+    }
+
+    /// Tell the platform which way the tablet is being held.
+    ///
+    /// The interface orientation rather than the device orientation, because the device
+    /// answers `unknown` until it has been moved, and a tablet started flat on a table in
+    /// landscape would be told it is upright and read ninety degrees off.
+    private func applyOrientation() {
+        // Landscape is named from opposite ends by the two enumerations: turning the
+        // tablet left turns the content right, so the platform's interface orientation and
+        // the location service's device orientation swap the two. Passing one straight
+        // through as the other reads a hundred and eighty degrees off.
+        manager.headingOrientation = switch Self.interfaceOrientation {
+        case .landscapeLeft: .landscapeRight
+        case .landscapeRight: .landscapeLeft
+        case .portraitUpsideDown: .portraitUpsideDown
+        default: .portrait
+        }
+    }
+
+    /// Which way the window is drawn, which is which way the reader holds the tablet.
+    private static var interfaceOrientation: UIInterfaceOrientation {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?
+            .interfaceOrientation ?? .portrait
     }
 
     func start() {
         guard Self.available, !isRunning else { return }
         isRunning = true
+        applyOrientation()
         manager.startUpdatingHeading()
     }
 
     func stop() {
         isRunning = false
         manager.stopUpdatingHeading()
+    }
+
+    /// Let the platform ask the reader to swing the tablet through a figure of eight.
+    ///
+    /// A magnetometer near a keyboard cover or a metal panel reports a negative accuracy,
+    /// which is the platform saying it does not know which way it is pointing. Refusing
+    /// the prompt leaves a compass that is present, started, and permanently silent, with
+    /// nothing on screen to say why.
+    nonisolated func locationManagerShouldDisplayHeadingCalibration(
+        _ manager: CLLocationManager
+    ) -> Bool {
+        true
     }
 
     nonisolated func locationManager(
