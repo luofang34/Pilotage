@@ -6,9 +6,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/pilotage-ownship-wiring.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
-app="$fixture/clients/apple-situation/App"
+app="$fixture/clients/apple/App"
 mkdir -p "$app" "$fixture/scripts"
-cp "$repo_root/clients/apple-situation/App/"*.swift "$app/"
+cp "$repo_root/clients/apple/App/"*.swift "$app/"
 cp "$repo_root/scripts/check-situation-ownship-wiring.sh" "$fixture/scripts/"
 
 gate="$fixture/scripts/check-situation-ownship-wiring.sh"
@@ -25,29 +25,38 @@ reject() {
 }
 
 restore() {
-    cp "$repo_root/clients/apple-situation/App/$1" "$app/$1"
+    cp "$repo_root/clients/apple/App/$1" "$app/$1"
 }
 
-sed -i.bak '/model.currentOwnship = /,+9d' "$app/PilotageSituationApp.swift"
+sed -i.bak '/model.currentOwnship = /,+9d' "$app/PilotageApp.swift"
 reject "a model whose ownship reader is never set"
-restore PilotageSituationApp.swift
+restore PilotageApp.swift
 
-sed -i.bak '/model.refreshEvidence()/d' "$app/PilotageSituationApp.swift"
+sed -i.bak '/model.refreshEvidence()/d' "$app/PilotageApp.swift"
 reject "an evidence write nothing asks for"
-restore PilotageSituationApp.swift
+restore PilotageApp.swift
 
-sed -i.bak '/ownship.refreshOrientation()/d' "$app/PilotageSituationApp.swift"
+sed -i.bak '/ownship.refreshOrientation()/d' "$app/PilotageApp.swift"
 reject "a turned tablet that never reaches the heading orientation"
-restore PilotageSituationApp.swift
+restore PilotageApp.swift
 
-sed -i.bak '/onChange(of: ownship.heading)/d' "$app/PilotageSituationApp.swift"
+sed -i.bak '/onChange(of: ownship.heading)/d' "$app/PilotageApp.swift"
 reject "a map that turns only when the control is pressed"
-restore PilotageSituationApp.swift
+restore PilotageApp.swift
 
 sed -i.bak 's/applyFollow(animated: false)/applyFollow(animated: true)/' \
-    "$app/PilotageSituationApp.swift"
+    "$app/PilotageApp.swift"
 reject "a camera eased on every reading"
-restore PilotageSituationApp.swift
+restore PilotageApp.swift
+
+sed -i.bak 's/try? await Task.sleep(for: .milliseconds(180))//' "$app/MapControlsView.swift"
+reject "a label whose state changes in the cycle that inserts its control"
+restore MapControlsView.swift
+
+sed -i.bak 's/GlassEffectContainer(spacing: Metrics.controlSpacing)/GlassEffectContainer(spacing: 4)/' \
+    "$app/MapControlsView.swift"
+reject "a blend distance below the gap, which leaves each control its own island"
+restore MapControlsView.swift
 
 sed -i.bak 's/try? await Task.sleep(for: .milliseconds(180))//' "$app/MapControlsView.swift"
 reject "a label whose state changes in the cycle that inserts its control"

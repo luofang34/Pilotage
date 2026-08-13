@@ -8,12 +8,12 @@ trap 'rm -rf "$fixture"' EXIT
 
 mkdir -p \
     "$fixture/scripts" \
-    "$fixture/clients/apple-situation/scripts" \
+    "$fixture/clients/apple/scripts" \
     "$fixture/crates/pilotage-terrain-build/src" \
     "$fixture/crates/pilotage-terrain-build/examples" \
-    "$fixture/clients/apple-situation/App" \
-    "$fixture/clients/apple-situation/Resources" \
-    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding"
+    "$fixture/clients/apple/App" \
+    "$fixture/clients/apple/Resources" \
+    "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding"
 
 cp "$root/scripts/check-terrain-base-layer.sh" "$fixture/scripts/"
 cp "$root/crates/pilotage-terrain-build/Cargo.toml" \
@@ -23,43 +23,43 @@ cp "$root/crates/pilotage-terrain-build/src/lib.rs" \
     "$fixture/crates/pilotage-terrain-build/src/"
 cp "$root/crates/pilotage-terrain-build/examples/build_situation_fixture.rs" \
     "$fixture/crates/pilotage-terrain-build/examples/"
-cp "$root/clients/apple-situation/App/SituationStyleResource.swift" \
-    "$fixture/clients/apple-situation/App/"
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$root/clients/apple-situation/Resources/SituationCoastline.plan.json" \
-    "$root/clients/apple-situation/Resources/SituationCoastline.manifest.json" \
-    "$root/clients/apple-situation/Resources/SituationCoastline.provenance.md" \
-    "$root/clients/apple-situation/Resources/SituationTerrain.plan.json" \
-    "$root/clients/apple-situation/Resources/SituationTerrain.manifest.json" \
-    "$root/clients/apple-situation/Resources/SituationTerrain.provenance.md" \
-    "$fixture/clients/apple-situation/Resources/"
-cp "$root/clients/apple-situation/scripts/build-situation-terrain.sh" \
-    "$root/clients/apple-situation/scripts/generate-project.sh" \
-    "$fixture/clients/apple-situation/scripts/"
-cp "$root/clients/apple-situation/scripts/build-situation-coastline.sh" \
-    "$fixture/clients/apple-situation/scripts/"
+cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$fixture/clients/apple/App/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$root/clients/apple/Resources/SituationCoastline.plan.json" \
+    "$root/clients/apple/Resources/SituationCoastline.manifest.json" \
+    "$root/clients/apple/Resources/SituationCoastline.provenance.md" \
+    "$root/clients/apple/Resources/SituationTerrain.plan.json" \
+    "$root/clients/apple/Resources/SituationTerrain.manifest.json" \
+    "$root/clients/apple/Resources/SituationTerrain.provenance.md" \
+    "$fixture/clients/apple/Resources/"
+cp "$root/clients/apple/scripts/build-situation-terrain.sh" \
+    "$root/clients/apple/scripts/generate-project.sh" \
+    "$fixture/clients/apple/scripts/"
+cp "$root/clients/apple/scripts/build-situation-coastline.sh" \
+    "$fixture/clients/apple/scripts/"
 cp "$root/.gitignore" "$fixture/"
-cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
-    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
-cp "$root/clients/apple-situation/project.yml" \
-    "$fixture/clients/apple-situation/"
+cp "$root/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
+    "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
+cp "$root/clients/apple/project.yml" \
+    "$fixture/clients/apple/"
 
 PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null
 
 sed -i.bak 's/#cfc9b4/#ff0000/' \
-    "$fixture/clients/apple-situation/Resources/SituationStyle.json"
+    "$fixture/clients/apple/Resources/SituationStyle.json"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted an unsafe colour" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$fixture/clients/apple/Resources/"
 
 # The polygon layers are the source of the coastline. The elevation ramp is not a
 # coastline source.
-python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'REMOVE_COASTLINE'
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'REMOVE_COASTLINE'
 import json, sys
 path = sys.argv[1]
 style = json.load(open(path))
@@ -84,11 +84,11 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     echo "the terrain guard accepted an elevation-only coastline" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$fixture/clients/apple/Resources/"
 
 # The ramp must not classify water at sea level.
-python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'THRESHOLD'
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'THRESHOLD'
 import json, sys
 path = sys.argv[1]
 style = json.load(open(path))
@@ -103,11 +103,11 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     echo "the terrain guard accepted a sea-level threshold" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$fixture/clients/apple/Resources/"
 
 # Height has to come from elevation. A constant colour is a flat wash that says nothing.
-python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'CONSTANT'
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'CONSTANT'
 import json, sys
 path = sys.argv[1]
 style = json.load(open(path))
@@ -122,43 +122,43 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     exit 1
 fi
 
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$fixture/clients/apple/Resources/"
 sed -i.bak 's/components.scheme = "mbtiles"/components.scheme = "file"/' \
-    "$fixture/clients/apple-situation/App/SituationStyleResource.swift"
+    "$fixture/clients/apple/App/SituationStyleResource.swift"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted a non-MBTiles resource URL" >&2
     exit 1
 fi
 
-cp "$root/clients/apple-situation/App/SituationStyleResource.swift" \
-    "$fixture/clients/apple-situation/App/"
+cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$fixture/clients/apple/App/"
 
 # A manifest that no longer describes the committed plan means the archive on disk was
 # built for different tiles than the ones the repository asks for.
 sed -i.bak 's/"min_zoom": 6/"min_zoom": 7/' \
-    "$fixture/clients/apple-situation/Resources/SituationTerrain.plan.json"
+    "$fixture/clients/apple/Resources/SituationTerrain.plan.json"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted a manifest that does not match its plan" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationTerrain.plan.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationTerrain.plan.json" \
+    "$fixture/clients/apple/Resources/"
 
 sed -i.bak 's/"closest_zoom": 15/"closest_zoom": 14/' \
-    "$fixture/clients/apple-situation/Resources/SituationCoastline.plan.json"
+    "$fixture/clients/apple/Resources/SituationCoastline.plan.json"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted a coastline plan below the closest zoom" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationCoastline.plan.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationCoastline.plan.json" \
+    "$fixture/clients/apple/Resources/"
 
 # Attribution is a licence condition of the tile source and has to reach the map.
-python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'STRIP'
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'STRIP'
 import json, sys
 path = sys.argv[1]
 style = json.load(open(path))
@@ -170,14 +170,14 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     echo "the terrain guard accepted a style with no source attribution" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$fixture/clients/apple/Resources/"
 
 # A committed archive would put a large build artifact in history and hide which tiles it
 # was built from.
-grep -v '^clients/apple-situation/Resources/SituationTerrain\.mbtiles$' \
+grep -v '^clients/apple/Resources/SituationTerrain\.mbtiles$' \
     "$root/.gitignore" | \
-    grep -v '^clients/apple-situation/Resources/SituationCoastline\.mbtiles$' \
+    grep -v '^clients/apple/Resources/SituationCoastline\.mbtiles$' \
     > "$fixture/.gitignore"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
@@ -187,7 +187,7 @@ fi
 cp "$root/.gitignore" "$fixture/"
 
 # The web renderer gets its globe from the same style file this one reads.
-python3 - "$fixture/clients/apple-situation/Resources/SituationStyle.json" <<'FLAT'
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'FLAT'
 import json, sys
 path = sys.argv[1]
 style = json.load(open(path))
@@ -199,30 +199,30 @@ if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     echo "the terrain guard accepted a style with no globe projection" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Resources/SituationStyle.json" \
-    "$fixture/clients/apple-situation/Resources/"
+cp "$root/clients/apple/Resources/SituationStyle.json" \
+    "$fixture/clients/apple/Resources/"
 
 # A map with no closest zoom stretches one elevation pixel across the screen.
 sed -i.bak 's/mapView.maximumZoomLevel = maximumZoomLevel//' \
-    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift"
+    "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted a map with no closest zoom" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
-    "$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
+cp "$root/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationMapView.swift" \
+    "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
 
 # An archive the style requires but nothing builds is a blank screen on a fresh checkout.
 sed -i.bak '/build-situation-coastline.sh/d' \
-    "$fixture/clients/apple-situation/scripts/generate-project.sh"
+    "$fixture/clients/apple/scripts/generate-project.sh"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted a generator that skips an archive the style needs" >&2
     exit 1
 fi
-cp "$root/clients/apple-situation/scripts/generate-project.sh" \
-    "$fixture/clients/apple-situation/scripts/"
+cp "$root/clients/apple/scripts/generate-project.sh" \
+    "$fixture/clients/apple/scripts/"
 
 printf '\nbuild_package(source);\n' >> "$fixture/crates/pilotage-terrain-build/src/lib.rs"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
@@ -244,15 +244,15 @@ fi
 cp "$root/crates/pilotage-terrain-build/examples/build_situation_fixture.rs" \
     "$fixture/crates/pilotage-terrain-build/examples/"
 sed -i.bak '/- path: Resources/d' \
-    "$fixture/clients/apple-situation/project.yml"
+    "$fixture/clients/apple/project.yml"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
     echo "the terrain guard accepted an application without the terrain resource" >&2
     exit 1
 fi
 
-cp "$root/clients/apple-situation/project.yml" \
-    "$fixture/clients/apple-situation/"
+cp "$root/clients/apple/project.yml" \
+    "$fixture/clients/apple/"
 printf '\npilotage-svs-db = "0.1"\n' >> "$fixture/crates/pilotage-terrain-build/Cargo.toml"
 if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
     bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then

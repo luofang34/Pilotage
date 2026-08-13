@@ -20,12 +20,12 @@ authoritative decisions.
                |                                |
    Operator client(s) <═ WebTransport (QUIC) ═> Pilotage host
    (web / iPadOS /      │  direct; opt-in       ├─ authority engine (leases, generations)
-    native; plugin      │  separately           ├─ vehicle adapter ── FC (Aviate | PX4)
-    panels/layout,      │  deployed relay       ├─ Navigate: navigation solution and guidance
-    ADR-0029; EFB or    │                       ├─ Surveillance: traffic fusion and tracks
-    terminal posture    │                       ├─ Airmass and AeronauticalUpdates
-    by discovery,       │                       ├─ Navdata, FlightPlanning, and Briefing
-    ADR-0026)           │                       └─ telemetry/control/media/advisory
+    native; modules     │  separately           ├─ vehicle adapter ── FC (Aviate | PX4)
+    selected from       │  deployed relay       ├─ Navigate: navigation solution and guidance
+    source catalog,     │                       ├─ Surveillance: traffic fusion and tracks
+    platform ports,     │                       ├─ Airmass and AeronauticalUpdates
+    and authorization,  │                       ├─ Navdata, FlightPlanning, and Briefing
+    ADR-0037)           │                       └─ telemetry/control/media/advisory
       video ◄───────────┤
       telemetry ◄───────┤
       advisory ◄────────┤
@@ -73,7 +73,7 @@ Planes are contract boundaries; deployables are a deployment decision.
 | Briefing | Immutable evidence results from fixed inputs | [ADR-0036](adr/0036-situational-domain-ownership.md) |
 | AeroContext (repository `v99n62`) | Temporary compatibility facade for existing consumers | [ADR-0036](adr/0036-situational-domain-ownership.md) |
 | Pilotage host | Composition, session and authority services, media endpoint, and read-only `SituationView` | [ADR-0003](adr/0003-separate-responsibility-planes.md), [ADR-0004](adr/0004-host-oriented-topology.md), [ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0036](adr/0036-situational-domain-ownership.md) |
-| Operator client | Control terminal ↔ EFB by discovered capability; plugin displays | [ADR-0026](adr/0026-host-capability-profiles.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
+| Operator client | Shared function modules selected from source data, platform ports, and authorization | [ADR-0037](adr/0037-modular-operator-client-composition.md), [ADR-0029](adr/0029-panel-layout-look-plugins.md) |
 | Coordination server (optional) | Identity, host registry, rendezvous, entitlement-gated data services | [ADR-0027](adr/0027-optional-coordination-server.md) |
 
 ## Situational services
@@ -101,6 +101,18 @@ retainable handles, field evidence, absence, and schema-version rules.
 The [SituationView V1 contract](situation-view-contract.md) defines the
 versioned query and result. It defines clock correspondence, best-available
 consistency, age assessment, and the shared conformance corpus.
+
+## Operator client composition
+
+[ADR-0037](adr/0037-modular-operator-client-composition.md) defines one modular
+operator-client architecture. The web and iPadOS user interfaces can use
+different layouts and module sets. The installed modules use shared semantic
+cores and versioned data contracts.
+
+The source catalog, installed platform ports, and authorization state determine
+which modules are available. A local adapter and a remote host feed the same
+typed module inputs. The architecture decision contains the durable composition
+graph and the read-only iPadOS instrument slice.
 
 ## Load-bearing principles
 
@@ -147,13 +159,14 @@ consistency, age assessment, and the shared conformance corpus.
 
 ### Next increments (component build-out)
 
-Increment 8 is committed as the next slice; the order beyond it is indicative.
+The GitHub architecture project controls execution order. This table shows
+capability dependencies.
 
 | # | Deliverable | Acceptance signal |
 |---|---|---|
 | 8 | Navigate skeleton: new repository with a sans-IO fusion/flight-plan core; flight-plan execution flies Aviate SITL through the FC's declared setpoint surface as an automation-class principal ([ADR-0023](adr/0023-vehicle-side-decomposition-fc-navigate-communicate.md), [ADR-0024](adr/0024-navigation-authority-boundary.md), [ADR-0025](adr/0025-client-optional-operation-automation-principals.md)); the FC-side guidance command-surface RFC below is a prerequisite | A preloaded plan flies headless in SITL with no client attached; a joining client sees automation as holder and takes over via the authority machinery |
 | 9 | Authority completion: handover/override wire vocabulary, identity/admission service, observer admission | Two operators transfer a scope with positive confirmation; a supervisor overrides; a monitor observes with no grantable scopes |
-| 10 | EFB slice: client embeds AeroContext cores; briefing on a live map; data-gateway host profile ([ADR-0026](adr/0026-host-capability-profiles.md)) | Preflight brief and pack-for-flight on a client with no host process; the same client is a full terminal against a full-authority host |
+| 10 | Modular operator client: source catalog, portable client-session core, and read-only iPadOS instruments while the local situation module stays host-optional ([ADR-0037](adr/0037-modular-operator-client-composition.md)) | The iPadOS client renders live instruments as an observer; one telemetry fixture gives the same canonical state and scene identity on web and Apple paths; the local situation view works with no host |
 | 11 | Coordination server: registry + rendezvous + entitlement gate ([ADR-0027](adr/0027-optional-coordination-server.md)) | A WAN session forms behind NAT with no session data transiting the server |
 | 12 | Coordinator host: aggregate scopes decomposed over member hosts ([ADR-0028](adr/0028-multi-vehicle-and-swarm-coordinator-hosts.md)) | A swarm command reaches members under end-to-end fencing; displacing the coordinator on one member affects exactly that member |
 

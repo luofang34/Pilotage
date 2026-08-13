@@ -161,10 +161,10 @@ jobs:
         run: bash scripts/check-situation-ownship-wiring.sh
 
       - name: Apple situation client guard self-test
-        run: bash scripts/test-check-apple-situation-client.sh
+        run: bash scripts/test-check-apple-client.sh
 
       - name: Apple situation client guard
-        run: bash scripts/check-apple-situation-client.sh
+        run: bash scripts/check-apple-client.sh
 
       - name: Terrain base layer guard self-test
         run: bash scripts/test-check-terrain-base-layer.sh
@@ -465,7 +465,7 @@ jobs:
       - name: Generate the bridge and test the Apple consumer
         run: bash scripts/check-apple-instrument-consumer.sh
 
-  apple-situation-client:
+  apple-client:
     runs-on: macos-15
     steps:
       - name: Checkout
@@ -512,7 +512,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: luofang34/aero-link
-          ref: 36b1bc9265cf7da881e6bd21816e19f8feba5431
+          ref: 241970ee918aa51aa90eb84e62544874c22f79b1
           path: external/aero-link
           ssh-key: ${{ secrets.AERO_LINK_DEPLOY_KEY }}
 
@@ -550,4 +550,4 @@ jobs:
           AERO_LINK_SOURCE: ${{ github.workspace }}/external/aero-link
           AIRMASS_SOURCE: ${{ github.workspace }}/external/Airmass
           SURVEILLANCE_SOURCE: ${{ github.workspace }}/external/Surveillance
-        run: sh clients/apple-situation/scripts/ci-ios.sh
+        run: sh clients/apple/scripts/ci-ios.sh

@@ -6,13 +6,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/pilotage-attribution.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
-app="$fixture/clients/apple-situation/App"
-resources="$fixture/clients/apple-situation/Resources"
+app="$fixture/clients/apple/App"
+resources="$fixture/clients/apple/Resources"
 mkdir -p "$app" "$resources" "$fixture/scripts"
-cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
-cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
-cp "$repo_root/clients/apple-situation/App/SituationStyleResource.swift" "$app/"
-cp "$repo_root/clients/apple-situation/Resources/SituationStyle.json" "$resources/"
+cp "$repo_root/clients/apple/App/MapModesView.swift" "$app/"
+cp "$repo_root/clients/apple/App/PilotageApp.swift" "$app/"
+cp "$repo_root/clients/apple/App/SituationStyleResource.swift" "$app/"
+cp "$repo_root/clients/apple/Resources/SituationStyle.json" "$resources/"
 cp "$repo_root/scripts/check-situation-map-attribution.sh" "$fixture/scripts/"
 
 gate="$fixture/scripts/check-situation-map-attribution.sh"
@@ -34,7 +34,7 @@ style["sources"]["pilotage-uncredited"] = {"type": "raster", "tiles": ["http://x
 json.dump(style, open(path, "w"))
 PY
 reject "a source that draws without a notice"
-cp "$repo_root/clients/apple-situation/Resources/SituationStyle.json" "$resources/"
+cp "$repo_root/clients/apple/Resources/SituationStyle.json" "$resources/"
 
 python3 - "$resources/SituationStyle.json" <<'PY'
 import json
@@ -46,39 +46,39 @@ style["sources"]["pilotage-terrain"]["attribution"] = "Heights from a renamed pr
 json.dump(style, open(path, "w"))
 PY
 reject "notices no provider name in the panel matches"
-cp "$repo_root/clients/apple-situation/Resources/SituationStyle.json" "$resources/"
+cp "$repo_root/clients/apple/Resources/SituationStyle.json" "$resources/"
 
 sed -i.bak 's/Button(role: .close, action: close)/Button(action: close)/' "$app/MapModesView.swift"
 reject "a panel closed by something other than the platform's close button"
-cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+cp "$repo_root/clients/apple/App/MapModesView.swift" "$app/"
 
 sed -i.bak 's/Image(systemName: "xmark")/Text(verbatim: "")/' "$app/MapModesView.swift"
 reject "a close button that renders the word the role carries"
-cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+cp "$repo_root/clients/apple/App/MapModesView.swift" "$app/"
 
 sed -i.bak '/buttonStyle(.glass)/d' "$app/MapModesView.swift"
 reject "a close button with no disc under its cross"
-cp "$repo_root/clients/apple-situation/App/MapModesView.swift" "$app/"
+cp "$repo_root/clients/apple/App/MapModesView.swift" "$app/"
 
 sed -i.bak '/static func attributions/d' "$app/SituationStyleResource.swift"
 reject "notices read from a loaded map rather than from the style document"
-cp "$repo_root/clients/apple-situation/App/SituationStyleResource.swift" "$app/"
+cp "$repo_root/clients/apple/App/SituationStyleResource.swift" "$app/"
 
-sed -i.bak 's/drawsSurface: false/drawsSurface: true/' "$app/PilotageSituationApp.swift"
+sed -i.bak 's/drawsSurface: false/drawsSurface: true/' "$app/PilotageApp.swift"
 reject "a panel drawing a second surface inside the sheet"
-cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+cp "$repo_root/clients/apple/App/PilotageApp.swift" "$app/"
 
-sed -i.bak '/presentationDetents/d' "$app/PilotageSituationApp.swift"
+sed -i.bak '/presentationDetents/d' "$app/PilotageApp.swift"
 reject "a panel that lost its narrow presentation"
-cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+cp "$repo_root/clients/apple/App/PilotageApp.swift" "$app/"
 
-sed -i.bak 's/min(modesHeight, windowHeight \* 0.92)/modesHeight/' "$app/PilotageSituationApp.swift"
+sed -i.bak 's/min(modesHeight, windowHeight \* 0.92)/modesHeight/' "$app/PilotageApp.swift"
 reject "a sheet that may ask to be taller than its window"
-cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+cp "$repo_root/clients/apple/App/PilotageApp.swift" "$app/"
 
-sed -i.bak 's/horizontalSizeClass == .regular/true/' "$app/PilotageSituationApp.swift"
+sed -i.bak 's/horizontalSizeClass == .regular/true/' "$app/PilotageApp.swift"
 reject "a panel that never asks whether there is room beside the map"
-cp "$repo_root/clients/apple-situation/App/PilotageSituationApp.swift" "$app/"
+cp "$repo_root/clients/apple/App/PilotageApp.swift" "$app/"
 
 bash "$gate" "$fixture" >/dev/null
 echo "attribution and presentation guards reject each loss"

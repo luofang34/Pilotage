@@ -7,9 +7,9 @@ fixture="$(mktemp -d "${TMPDIR:-/tmp}/pilotage-layer-controls.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
 portable="$fixture/crates/pilotage-presentation/src"
-ffi="$fixture/clients/apple-situation/rust/pilotage-situation-ffi/src"
-app="$fixture/clients/apple-situation/App"
-binding="$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding"
+ffi="$fixture/clients/apple/rust/pilotage-situation-ffi/src"
+app="$fixture/clients/apple/App"
+binding="$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding"
 mkdir -p "$portable/tests" "$ffi" "$app" "$binding" "$fixture/scripts"
 
 cp "$repo_root/crates/pilotage-presentation/src/layer.rs" "$portable/"
@@ -17,9 +17,9 @@ cp "$repo_root/crates/pilotage-presentation/src/model.rs" "$portable/"
 cp "$repo_root/crates/pilotage-presentation/src/policy.rs" "$portable/"
 cp "$repo_root/crates/pilotage-presentation/src/detail.rs" "$portable/"
 cp "$repo_root/crates/pilotage-presentation/src/tests/traffic.rs" "$portable/tests/"
-cp "$repo_root/clients/apple-situation/rust/pilotage-situation-ffi/src/session.rs" "$ffi/"
-cp "$repo_root/clients/apple-situation/App/"*.swift "$app/"
-cp "$repo_root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"*.swift "$binding/"
+cp "$repo_root/clients/apple/rust/pilotage-situation-ffi/src/session.rs" "$ffi/"
+cp "$repo_root/clients/apple/App/"*.swift "$app/"
+cp "$repo_root/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"*.swift "$binding/"
 cp "$repo_root/scripts/check-situation-layer-controls.sh" "$fixture/scripts/"
 
 bash "$fixture/scripts/check-situation-layer-controls.sh" "$fixture" >/dev/null

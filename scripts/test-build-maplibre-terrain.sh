@@ -5,7 +5,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
-client="$fixture/clients/apple-situation"
+client="$fixture/clients/apple"
 source_root="$fixture/maplibre-native"
 mock_bin="$fixture/bin"
 execution_root="$fixture/bazel-execution"
@@ -19,8 +19,8 @@ mkdir -p \
     "$mock_bin" \
     "$execution_root/out" \
     "$archive_source/MapLibre.xcframework"
-cp "$root/clients/apple-situation/MAPLIBRE_TERRAIN_REVISION" "$client/"
-cp "$root/clients/apple-situation/scripts/build-maplibre-terrain.sh" "$client/scripts/"
+cp "$root/clients/apple/MAPLIBRE_TERRAIN_REVISION" "$client/"
+cp "$root/clients/apple/scripts/build-maplibre-terrain.sh" "$client/scripts/"
 printf '%s\n' 'MapLibre test license' > "$source_root/LICENSE.md"
 printf '%s\n' 'test framework' > "$archive_source/MapLibre.xcframework/Info.plist"
 (

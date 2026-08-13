@@ -1,6 +1,6 @@
 # ADR-0026: Client posture follows discovered host capability: full-authority, data-gateway, or embedded
 
-- Status: Proposed
+- Status: Superseded by ADR-0037
 - Date: 2026-07-29
 
 ## Context

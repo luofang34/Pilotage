@@ -7,7 +7,7 @@ fixture="$(mktemp -d "${TMPDIR:-/tmp}/pilotage-presentation-boundary.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
 rust_root="$fixture/crates/pilotage-presentation/src"
-swift_root="$fixture/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources/Binding"
+swift_root="$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/Binding"
 mkdir -p "$rust_root" "$swift_root"
 printf '%s\n' 'pub struct DisplayValue;' > "$rust_root/lib.rs"
 printf '%s\n' 'use surveillance_geojson::FeatureDelta;' > "$rust_root/traffic.rs"

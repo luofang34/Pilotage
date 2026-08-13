@@ -4,7 +4,7 @@ set -euo pipefail
 
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 rust_root="$root/crates/pilotage-presentation"
-swift_root="$root/clients/apple-situation/Packages/PilotageMapLibreBinding/Sources"
+swift_root="$root/clients/apple/Packages/PilotageMapLibreBinding/Sources"
 traffic_source="$rust_root/src/traffic.rs"
 weather_source="$rust_root/src/weather.rs"
 status=0
