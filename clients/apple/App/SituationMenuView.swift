@@ -159,13 +159,26 @@ struct SituationMenuView: View {
                     model.startReplay(flight)
                     dismiss()
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(flight.title)
-                        Text(flight.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    // A row that opens something reads as content with an affordance, not
+                    // as a line of tinted text. A button in a list paints its whole label
+                    // in the accent colour, which says "link" where this says "flight".
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(flight.title)
+                                .foregroundStyle(.primary)
+                            Text(flight.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        if model.replayingFlight == flight {
+                            Image(systemName: "play.circle.fill")
+                                .foregroundStyle(.tint)
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .disabled(model.replayingFlight == flight)
                 .swipeActions(edge: .trailing) {
                     // Refused while it is being replayed, so the swipe is not offered then

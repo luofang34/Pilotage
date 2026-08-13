@@ -257,7 +257,10 @@ final class SituationOverlay {
         layer.fillExtrusionOpacity = constant(Double(style.fill.alpha) / 255.0)
         layer.fillExtrusionBase = NSExpression(forKeyPath: "base")
         layer.fillExtrusionHeight = NSExpression(forKeyPath: "top")
-        add(layer, to: mapStyle)
+        // The pad is what a reader sees of an aircraft that reports a height, so it is
+        // what they press. Left out of the interactive set, the only part of the target
+        // on screen is the one part that answers nothing.
+        add(layer, to: mapStyle, interactive: true)
     }
 
     /// Draw a flat fill when MapLibre cannot use a negative extrusion height.
@@ -269,7 +272,8 @@ final class SituationOverlay {
         let layer = MLNFillStyleLayer(identifier: layerID("below", style.id), source: source)
         layer.predicate = NSPredicate(format: "below_terrain == YES")
         layer.fillColor = constant(color(style.fill))
-        add(layer, to: mapStyle)
+        // An aircraft below the terrain is still an aircraft to press.
+        add(layer, to: mapStyle, interactive: true)
     }
 
     private func addLineLayer(

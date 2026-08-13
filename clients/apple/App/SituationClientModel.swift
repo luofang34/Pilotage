@@ -229,8 +229,17 @@ final class SituationClientModel: ObservableObject {
     }
 
     func selectTraffic(id: String) {
-        selectedTraffic = display?.trafficDetails.first { $0.id == id }
+        // A press lands on whichever layer was drawn there, and an aircraft that reports
+        // a height is drawn twice: the mark and the pad it floats on. The pad carries the
+        // mark's identity with a suffix, so the mark is what is looked up either way.
+        let owner = id.hasSuffix(Self.padIdentifierSuffix)
+            ? String(id.dropLast(Self.padIdentifierSuffix.count))
+            : id
+        selectedTraffic = display?.trafficDetails.first { $0.id == owner }
     }
+
+    /// What the portable layer appends to a mark's identity to name its pad.
+    static let padIdentifierSuffix = "-pad"
 
     func clearTrafficSelection() {
         selectedTraffic = nil

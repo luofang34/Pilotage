@@ -447,3 +447,25 @@ fn delta_with_altitude(id: u64, revision: u64, pressure_altitude_ft: Option<i32>
         track,
     ))
 }
+
+#[test]
+fn a_pad_carries_the_identity_of_the_mark_it_belongs_to() {
+    // The client resolves a press on a pad back to the aircraft by removing this suffix.
+    // Changed here alone, a press on the only part of the target a reader sees would
+    // stop finding anything, and nothing would fail.
+    let mut adapter = PresentationAdapter::new();
+    adapter.apply_traffic_delta(&delta_with_altitude(42, 3, Some(3500)));
+
+    let batch = adapter.adapt();
+
+    let point = batch
+        .points
+        .first()
+        .expect("an aircraft with a height draws a mark");
+    let pad = batch
+        .shapes
+        .iter()
+        .find(|shape| shape.id.ends_with("-pad"))
+        .expect("an aircraft with a height draws a pad");
+    assert_eq!(pad.id, format!("{}-pad", point.id));
+}
