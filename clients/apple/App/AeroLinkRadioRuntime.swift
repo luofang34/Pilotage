@@ -31,6 +31,11 @@ final class AeroLinkRadioRuntime: @unchecked Sendable {
         )
     }
 
+    /// Take every reception event as it arrives, or stop taking them.
+    func observeReceptionLines(_ observer: (@Sendable ([String]) -> Void)?) async {
+        await state.observeReceptionLines(observer)
+    }
+
     func activate() async {
         await state.activate()
     }

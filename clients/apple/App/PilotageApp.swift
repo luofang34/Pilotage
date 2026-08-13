@@ -214,7 +214,14 @@ private extension SituationContentView {
     func cycleFollow() {
         // Pressing this is also how a reader asks for permission the first time.
         ownship.requestPositionIfNeeded()
+        let wasIdle = ownship.follow == .idle
         ownship.follow = ownship.follow.next
+        // Only the press that starts following sets the width. A reader who has zoomed
+        // out to look ahead and then presses again to turn the map with the aircraft has
+        // not asked to be zoomed back in.
+        if wasIdle, let fix = ownship.fix {
+            mapCommands?.centreAndFrame(fix.coordinate, true)
+        }
         applyFollow(animated: true)
     }
 
@@ -280,6 +287,8 @@ struct SituationMapCommands {
     let resetHeading: () -> Void
     let resetPitch: () -> Void
     let centre: (CLLocationCoordinate2D, Bool) -> Void
+    /// Centre and set how much ground is on screen, for a reader who asked to be found.
+    let centreAndFrame: (CLLocationCoordinate2D, Bool) -> Void
     let setHeading: (Double, Bool) -> Void
 }
 
@@ -316,6 +325,13 @@ private struct SituationMap: UIViewRepresentable {
                     resetHeading: { view.resetHeading() },
                     resetPitch: { view.resetPitch() },
                     centre: { view.centre(on: $0, animated: $1) },
+                    centreAndFrame: {
+                        view.centre(
+                            on: $0,
+                            widthNauticalMiles: SituationMapView.ownshipWidthNauticalMiles,
+                            animated: $1
+                        )
+                    },
                     setHeading: { view.setHeading($0, animated: $1) }
                 )
             )

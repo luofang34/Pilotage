@@ -36,6 +36,8 @@ actor AeroLinkRadioState {
     private let session: PresentationSession
     private let domain: RadioDomainSession
     private let publish: @Sendable (RadioRuntimeEmission) async -> Void
+    /// Receives every reception event, as received, for whoever is recording.
+    private var onReceptionLines: (@Sendable ([String]) -> Void)?
     private var active = false
     private var cycle: UInt64 = 0
     private var connections: [UInt32: LiveAeroLinkConnection] = [:]
@@ -53,6 +55,11 @@ actor AeroLinkRadioState {
         self.session = session
         self.domain = domain
         self.publish = publish
+    }
+
+    /// Take the reception events as they arrive, or stop taking them.
+    func observeReceptionLines(_ observer: (@Sendable ([String]) -> Void)?) {
+        onReceptionLines = observer
     }
 
     func activate() async {
@@ -243,6 +250,8 @@ actor AeroLinkRadioState {
         if result.limitExhausted {
             live.diagnostics.drainLimitExhaustions &+= 1
         }
+        // Recorded as received, before the first decision is taken about them.
+        onReceptionLines?(result.eventLines)
         var display = DisplayAccumulator()
         var acceptedLine = false
         var rejectedLine = false
