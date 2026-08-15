@@ -84,5 +84,22 @@ sed -i.bak 's/@Published var follow/var follow/' "$app/OwnshipPosition.swift"
 reject "a follow mode a closure would read as it was rather than as it is"
 restore OwnshipPosition.swift
 
+sed -i.bak 's/projectionTask = Task/unusedTask = Task/' "$app/SituationClientModel.swift"
+reject "a beat nothing starts, which leaves traffic at its last reported position"
+restore SituationClientModel.swift
+
+sed -i.bak 's/projectionTask?.cancel()//' "$app/SituationClientModel.swift"
+reject "a beat that outlives the radio it draws for"
+restore SituationClientModel.swift
+
+sed -i.bak 's/session.currentDisplay(nowMicros: Self.monotonicMicros)/pendingDisplay!/' \
+    "$app/SituationClientModel.swift"
+reject "a beat that republishes the batch it already holds"
+restore SituationClientModel.swift
+
+sed -i.bak 's/filter(\\.positionIsExtrapolated)/filter { _ in false }/' "$app/SituationEvidence.swift"
+reject "an evidence file that cannot say whether the projection fired"
+restore SituationEvidence.swift
+
 bash "$gate" "$fixture" >/dev/null
 echo "ownship wiring guard rejects each cut wire"

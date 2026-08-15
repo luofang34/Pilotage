@@ -71,8 +71,8 @@ indicate-instrument-feeder = { git = "https://github.com/luofang34/Indicate.git"
 indicate-instrument-registry = { git = "https://github.com/luofang34/Indicate.git", rev = "985eb3390d3e09abf83d730f356668fe6499d01e" }
 # The presentation input crates use exact revisions. The FFI facade and the
 # portable adapter must read the same snapshot schemas.
-surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "a563bd2eb8774892791af4d2e2de31f2b9ac3ab9", default-features = false }
-surveillance-geojson = { git = "https://github.com/luofang34/Surveillance.git", rev = "a563bd2eb8774892791af4d2e2de31f2b9ac3ab9", default-features = false }
+surveillance-core = { git = "https://github.com/luofang34/Surveillance.git", rev = "36b5d96052e817da92fc62d383196d11e449df10", default-features = false }
+surveillance-geojson = { git = "https://github.com/luofang34/Surveillance.git", rev = "36b5d96052e817da92fc62d383196d11e449df10", default-features = false }
 airmass-core = { git = "https://github.com/luofang34/Airmass.git", rev = "58b525a7beb35cf3ca721ccb511b895a1d1221dc", default-features = false }
 airmass-geojson = { git = "https://github.com/luofang34/Airmass.git", rev = "58b525a7beb35cf3ca721ccb511b895a1d1221dc", default-features = false }
 aerocontext-core = "0.4.5"

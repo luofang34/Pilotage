@@ -7,7 +7,7 @@ use airmass_core::{
 use airmass_geojson::{AdvisoryShapeFeature, AdvisoryShapeRing};
 
 use crate::layer::WEATHER_ADVISORY_LAYER_ID;
-use crate::policy::{
+use crate::style::{
     ADVISORY_AIRMET_STYLE, ADVISORY_CONVECTIVE_STYLE, ADVISORY_CWA_STYLE, ADVISORY_G_AIRMET_STYLE,
     ADVISORY_SIGMET_STYLE,
 };

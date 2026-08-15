@@ -528,7 +528,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: luofang34/Surveillance
-          ref: a563bd2eb8774892791af4d2e2de31f2b9ac3ab9
+          ref: 36b5d96052e817da92fc62d383196d11e449df10
           path: external/Surveillance
           ssh-key: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
 

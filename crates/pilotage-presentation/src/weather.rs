@@ -6,7 +6,7 @@ use airmass_core::{FlightCategory, WeatherReportType};
 use airmass_geojson::{FeatureDelta, TextReportFeature, WeatherFeatureId, WeatherFeatureKey};
 
 use crate::layer::WEATHER_REPORT_LAYER_ID;
-use crate::policy::{
+use crate::style::{
     WEATHER_IFR_STYLE, WEATHER_LIFR_STYLE, WEATHER_MVFR_STYLE, WEATHER_UNKNOWN_STYLE,
     WEATHER_VFR_STYLE,
 };
@@ -71,6 +71,7 @@ fn point_for_report(feature: &TextReportFeature) -> Option<PointFeature> {
     let coordinate = Coordinate::checked(position.latitude_deg(), position.longitude_deg())?;
     let revisions = feature.revisions();
     Some(PointFeature {
+        position_is_extrapolated: false,
         id: feature_id(feature.id()),
         layer_id: WEATHER_REPORT_LAYER_ID.into(),
         coordinate,

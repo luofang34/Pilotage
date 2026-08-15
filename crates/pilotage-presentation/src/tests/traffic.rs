@@ -1,8 +1,9 @@
 use surveillance_core::{
     AddressNamespace, AirGroundState, Band, Callsign, DeliveryPath, EmergencyState,
-    FieldProvenance, FieldQuality, ObservationOrigin, ObservationTime, ProducerInstanceId,
-    RemovalReason, SnapshotRevision, SourceRef, Squawk, TimedField, TrackDelta, TrackId, TrackKey,
-    TrackPhase, TrackSnapshot, TrackSnapshotHandle, VelocityObservation, Wgs84Position,
+    FieldProvenance, FieldQuality, ObservationOrigin, ObservationTime, PositionStatus,
+    ProducerInstanceId, RemovalReason, SnapshotRevision, SourceRef, Squawk, TimedField, TrackDelta,
+    TrackId, TrackKey, TrackPhase, TrackSnapshot, TrackSnapshotHandle, VelocityObservation,
+    Wgs84Position,
 };
 
 use crate::{PointChange, PresentationAdapter, TRAFFIC_LAYER_ID};
@@ -136,6 +137,7 @@ fn disabled_traffic_retains_the_newest_state_without_replay() {
 #[test]
 fn positionless_track_has_a_list_item_and_complete_absence_reasons() {
     let mut track = TrackSnapshot::new(TrackId::new(51), track_key(51), 10);
+    track.position_status = PositionStatus::Current;
     track.callsign = Some(radio_timed(Callsign::new("MODESONLY")));
     track.pressure_altitude_ft = Some(radio_timed(7_000));
     let delta = TrackDelta::Updated(TrackSnapshotHandle::new(
@@ -264,6 +266,14 @@ fn track_handle(
     emergency: EmergencyState,
 ) -> TrackSnapshotHandle {
     let mut track = TrackSnapshot::new(TrackId::new(id), track_key(id), 10);
+    // Whether the position is usable is now a separate answer from whether the track is
+    // coasting: a coasting track whose position is still current is drawn where it is.
+    // These fixtures are about the pair going stale together.
+    track.position_status = if phase == TrackPhase::Coasting {
+        PositionStatus::Stale
+    } else {
+        PositionStatus::Current
+    };
     track.phase = phase;
     track.ownship_shadow = ownship_shadow;
     track.position = Some(timed(Wgs84Position {
@@ -285,6 +295,10 @@ fn track_handle(
 
 pub(super) fn complete_track(id: u64) -> TrackSnapshot {
     let mut track = TrackSnapshot::new(TrackId::new(id), track_key(id), 10);
+    track.position_status = PositionStatus::Current;
+    // A snapshot defaults to reporting no usable position, and a feature is only mapped
+    // from one that does. A fixture that leaves this alone tests nothing being drawn.
+    track.position_status = PositionStatus::Current;
     track.position = Some(radio_timed(Wgs84Position {
         latitude_deg: 42.3656,
         longitude_deg: -71.0096,
@@ -321,7 +335,7 @@ fn timed<T>(value: T) -> TimedField<T> {
     )
 }
 
-fn radio_timed<T>(value: T) -> TimedField<T> {
+pub(super) fn radio_timed<T>(value: T) -> TimedField<T> {
     TimedField::new(
         value,
         ObservationTime::local(10),

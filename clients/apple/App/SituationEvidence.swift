@@ -40,6 +40,12 @@ struct SituationEvidence: Codable, Equatable {
     var positionlessTraffic: Int
     /// Tracks the client is holding, placed or not.
     var trackedAircraft: Int
+    /// Marks drawn where the engine says the track is rather than where it last reported.
+    ///
+    /// A run that shows traffic and never counts one of these has a projection that is
+    /// not firing: the guess is bounded by the producer, and every bound that refuses
+    /// leaves the reported position in place without saying so.
+    var extrapolatedPoints: Int
     /// Shapes the renderer raises above the terrain surface.
     var extrudedShapes: Int
     /// Lowest floor among raised shapes, in metres.
@@ -127,6 +133,7 @@ extension SituationEvidence {
         shapesByStyle = Self.tally(batch?.shapes ?? [], by: \.styleId)
         positionlessTraffic = batch?.positionlessTraffic.count ?? 0
         trackedAircraft = batch?.trafficDetails.count ?? 0
+        extrapolatedPoints = (batch?.points ?? []).filter(\.positionIsExtrapolated).count
         let raised = (batch?.shapes ?? []).filter { extruded.contains($0.styleId) }
         extrudedShapes = raised.count
         lowestBaseM = raised.compactMap(\.baseAboveTerrainM).min()

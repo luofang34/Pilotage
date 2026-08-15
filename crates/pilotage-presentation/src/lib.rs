@@ -7,6 +7,7 @@ mod detail;
 mod layer;
 mod model;
 mod policy;
+mod style;
 mod traffic;
 mod vertical;
 mod weather;

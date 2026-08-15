@@ -3,7 +3,7 @@
 use surveillance_geojson::{AircraftFeature, FeatureDelta};
 
 use crate::layer::TRAFFIC_LAYER_ID;
-use crate::policy::{
+use crate::style::{
     TRAFFIC_ACTIVE_STYLE, TRAFFIC_ALTITUDE_STYLE, TRAFFIC_COASTING_STYLE, TRAFFIC_EMERGENCY_STYLE,
 };
 use crate::{Coordinate, CoordinateRing, PointChange, PointFeature, ShapeFeature};
@@ -98,7 +98,7 @@ pub(crate) fn point_change(
         FeatureDelta::Upsert(feature) => {
             point_for_feature(feature).map(|point| PointChange::Upsert { point })
         }
-        FeatureDelta::Stale { id } => {
+        FeatureDelta::Stale { id, revision } => {
             let point = current?;
             let style_id = if point.style_id == TRAFFIC_EMERGENCY_STYLE {
                 TRAFFIC_EMERGENCY_STYLE
@@ -106,17 +106,22 @@ pub(crate) fn point_change(
                 TRAFFIC_COASTING_STYLE
             };
             Some(PointChange::Stale {
-                id: traffic_id(producer_instance_id, id.get()),
+                id: traffic_id(producer_instance_id, id.track_id().get()),
                 style_id: style_id.into(),
                 producer_instance_id,
-                snapshot_revision,
+                snapshot_revision: revision.get(),
             })
         }
-        FeatureDelta::Remove { id, transfer_to } => Some(PointChange::Remove {
-            id: traffic_id(producer_instance_id, id.get()),
-            transfer_to: transfer_to.map(|target| traffic_id(producer_instance_id, target.get())),
+        FeatureDelta::Remove {
+            id,
+            transfer_to,
+            revision,
+        } => Some(PointChange::Remove {
+            id: traffic_id(producer_instance_id, id.track_id().get()),
+            transfer_to: transfer_to
+                .map(|target| traffic_id(producer_instance_id, target.track_id().get())),
             producer_instance_id,
-            snapshot_revision,
+            snapshot_revision: revision.get(),
         }),
         _ => None,
     }
@@ -139,6 +144,7 @@ fn point_for_feature(feature: &AircraftFeature) -> Option<PointFeature> {
             .as_ref()
             .and_then(|value| value.value.track_angle_deg_true)
             .unwrap_or(0.0),
+        position_is_extrapolated: false,
         producer_instance_id: feature.producer_instance_id().get(),
         snapshot_revision: feature.snapshot_revision().get(),
     })

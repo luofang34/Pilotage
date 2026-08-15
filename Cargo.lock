@@ -2824,7 +2824,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "surveillance-core"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
+source = "git+https://github.com/luofang34/Surveillance.git?rev=36b5d96052e817da92fc62d383196d11e449df10#36b5d96052e817da92fc62d383196d11e449df10"
 dependencies = [
  "libm",
  "serde",
@@ -2834,7 +2834,7 @@ dependencies = [
 [[package]]
 name = "surveillance-geojson"
 version = "0.1.0"
-source = "git+https://github.com/luofang34/Surveillance.git?rev=a563bd2eb8774892791af4d2e2de31f2b9ac3ab9#a563bd2eb8774892791af4d2e2de31f2b9ac3ab9"
+source = "git+https://github.com/luofang34/Surveillance.git?rev=36b5d96052e817da92fc62d383196d11e449df10#36b5d96052e817da92fc62d383196d11e449df10"
 dependencies = [
  "surveillance-core",
 ]

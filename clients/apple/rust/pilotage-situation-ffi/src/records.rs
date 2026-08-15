@@ -142,6 +142,8 @@ pub struct DisplayPoint {
     pub altitude_ft: Option<i32>,
     /// Clockwise rotation from geographic north.
     pub rotation_deg: f64,
+    /// Whether the position was advanced from the newest report rather than reported.
+    pub position_is_extrapolated: bool,
     /// Producer instance identity.
     pub producer_instance_id: u64,
     /// Snapshot revision.
@@ -365,6 +367,7 @@ impl From<pilotage_presentation::PointFeature> for DisplayPoint {
             label: value.label,
             altitude_ft: value.altitude_ft,
             rotation_deg: value.rotation_deg,
+            position_is_extrapolated: value.position_is_extrapolated,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,
         }

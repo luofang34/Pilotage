@@ -9,25 +9,8 @@ use crate::layer::{
     LayerPolicy, SourceObservation, TRAFFIC_LAYER_ID, WEATHER_ADVISORY_LAYER_ID,
     WEATHER_REPORT_LAYER_ID,
 };
-use crate::{
-    Coordinate, DisplayBatch, OwnshipFeature, PointChange, PointFeature, PointStyle, ShapeFeature,
-    ShapeStyle,
-};
-
-pub(crate) const TRAFFIC_ACTIVE_STYLE: &str = "traffic-active";
-pub(crate) const TRAFFIC_COASTING_STYLE: &str = "traffic-coasting";
-pub(crate) const TRAFFIC_EMERGENCY_STYLE: &str = "traffic-emergency";
-pub(crate) const TRAFFIC_ALTITUDE_STYLE: &str = "traffic-altitude";
-pub(crate) const WEATHER_VFR_STYLE: &str = "weather-vfr";
-pub(crate) const WEATHER_MVFR_STYLE: &str = "weather-mvfr";
-pub(crate) const WEATHER_IFR_STYLE: &str = "weather-ifr";
-pub(crate) const WEATHER_LIFR_STYLE: &str = "weather-lifr";
-pub(crate) const WEATHER_UNKNOWN_STYLE: &str = "weather-unknown";
-pub(crate) const ADVISORY_SIGMET_STYLE: &str = "advisory-sigmet";
-pub(crate) const ADVISORY_CONVECTIVE_STYLE: &str = "advisory-convective";
-pub(crate) const ADVISORY_AIRMET_STYLE: &str = "advisory-airmet";
-pub(crate) const ADVISORY_G_AIRMET_STYLE: &str = "advisory-g-airmet";
-pub(crate) const ADVISORY_CWA_STYLE: &str = "advisory-cwa";
+use crate::style::{point_styles, shape_styles};
+use crate::{Coordinate, DisplayBatch, OwnshipFeature, PointChange, PointFeature, ShapeFeature};
 
 /// Converts typed domain feature changes to display values.
 #[derive(Clone, Debug, Default)]
@@ -37,6 +20,9 @@ pub struct PresentationAdapter {
     traffic_pads: BTreeMap<(u64, u64), ShapeFeature>,
     traffic_revisions: BTreeMap<(u64, u64), u64>,
     traffic_tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
+    /// Ground height under each track, kept so a pad can be rebuilt where the track is
+    /// projected to be rather than only where it last reported.
+    traffic_terrain_m: BTreeMap<(u64, u64), Option<f64>>,
     weather_points: BTreeMap<String, PointFeature>,
     weather_shapes: BTreeMap<String, ShapeFeature>,
     ownship: Option<OwnshipFeature>,
@@ -233,6 +219,7 @@ impl PresentationAdapter {
         self.traffic_pads.clear();
         self.traffic_revisions.clear();
         self.traffic_tracks.clear();
+        self.traffic_terrain_m.clear();
         self.weather_points.clear();
         self.weather_shapes.clear();
         self.ownship = None;
@@ -243,8 +230,19 @@ impl PresentationAdapter {
     pub fn adapt(&self) -> DisplayBatch {
         let mut batch = self.empty_batch();
         if self.layers.is_enabled(TRAFFIC_LAYER_ID) {
-            batch.points.extend(self.traffic_points.values().cloned());
-            batch.shapes.extend(self.traffic_pads.values().cloned());
+            // Drawn where the track is now, not where it last said it was. A map redraws
+            // far more often than reports arrive, so a reported position alone makes a
+            // target step from one report to the next.
+            for (key, point) in &self.traffic_points {
+                let drawn = self.projected_point(*key, point);
+                if let Some(pad) = crate::traffic::altitude_pad(
+                    &drawn,
+                    self.traffic_terrain_m.get(key).copied().flatten(),
+                ) {
+                    batch.shapes.push(pad);
+                }
+                batch.points.push(drawn);
+            }
             batch.positionless_traffic = self
                 .traffic_tracks
                 .values()
@@ -263,6 +261,37 @@ impl PresentationAdapter {
             .map(|track| crate::detail::detail_for(track, self.now_micros))
             .collect();
         batch
+    }
+
+    /// The point as it should be drawn now.
+    ///
+    /// Returns the point unchanged when the engine will not project: the guess is
+    /// bounded there, and a display that projects further than the producer allows is
+    /// inventing a position rather than showing one.
+    fn projected_point(&self, key: (u64, u64), point: &PointFeature) -> PointFeature {
+        let Some(track) = self.traffic_tracks.get(&key) else {
+            return point.clone();
+        };
+        let Some(projection) =
+            surveillance_core::project_position(track.snapshot(), self.now_micros)
+        else {
+            return point.clone();
+        };
+        if projection.basis != surveillance_core::ProjectionBasis::Extrapolated {
+            return point.clone();
+        }
+        let Some(coordinate) = Coordinate::checked(
+            projection.position.latitude_deg,
+            projection.position.longitude_deg,
+        ) else {
+            return point.clone();
+        };
+        PointFeature {
+            coordinate,
+            altitude_ft: projection.pressure_altitude_ft.or(point.altitude_ft),
+            position_is_extrapolated: true,
+            ..point.clone()
+        }
     }
 
     fn apply_weather_shape(
@@ -323,6 +352,7 @@ impl PresentationAdapter {
                     None => self.traffic_pads.remove(&key),
                 };
                 self.traffic_points.insert(key, point.clone());
+                self.traffic_terrain_m.insert(key, terrain_elevation_m);
             }
             PointChange::Stale {
                 style_id,
@@ -365,125 +395,4 @@ fn ownship_feature(handle: &surveillance_core::TrackSnapshotHandle) -> Option<Ow
         producer_instance_id: handle.producer_instance_id().get(),
         snapshot_revision: handle.snapshot_revision().get(),
     })
-}
-
-fn point_styles() -> Vec<PointStyle> {
-    vec![
-        traffic_point(TRAFFIC_ACTIVE_STYLE, [0, 229, 255, 255], 14.0, 40),
-        traffic_point(TRAFFIC_COASTING_STYLE, [255, 179, 0, 255], 14.0, 30),
-        traffic_point(TRAFFIC_EMERGENCY_STYLE, [255, 45, 45, 255], 18.0, 60),
-        weather_point(WEATHER_VFR_STYLE, [0, 166, 81, 255], 8.0, 20),
-        weather_point(WEATHER_MVFR_STYLE, [0, 102, 255, 255], 8.0, 20),
-        weather_point(WEATHER_IFR_STYLE, [229, 57, 53, 255], 8.0, 20),
-        weather_point(WEATHER_LIFR_STYLE, [176, 0, 181, 255], 8.0, 20),
-        weather_point(WEATHER_UNKNOWN_STYLE, [117, 117, 117, 255], 8.0, 10),
-    ]
-}
-
-fn traffic_point(id: &str, fill: [u8; 4], marker_size_points: f64, order: i32) -> PointStyle {
-    point(id, fill, 0.0, Some("▲"), marker_size_points, order)
-}
-
-fn weather_point(id: &str, fill: [u8; 4], radius_points: f64, order: i32) -> PointStyle {
-    point(id, fill, radius_points, None, 0.0, order)
-}
-
-fn point(
-    id: &str,
-    fill: [u8; 4],
-    radius_points: f64,
-    marker_text: Option<&str>,
-    marker_size_points: f64,
-    order: i32,
-) -> PointStyle {
-    PointStyle {
-        id: id.into(),
-        fill: crate::Color::rgba(fill[0], fill[1], fill[2], fill[3]),
-        outline: crate::Color::rgba(255, 255, 255, 230),
-        outline_width_points: 1.5,
-        radius_points,
-        marker_text: marker_text.map(str::to_owned),
-        marker_size_points,
-        marker_font_names: font_names(),
-        marker_allows_overlap: true,
-        label_color: crate::Color::rgba(255, 255, 255, 255),
-        label_size_points: 12.0,
-        label_font_names: font_names(),
-        label_offset_x: 0.0,
-        label_offset_y: 1.4,
-        label_allows_overlap: false,
-        order,
-    }
-}
-
-fn shape_styles() -> Vec<ShapeStyle> {
-    vec![
-        extruded_shape(
-            TRAFFIC_ALTITUDE_STYLE,
-            [0, 229, 255, 150],
-            [0, 229, 255, 255],
-            60,
-        ),
-        extruded_shape(
-            ADVISORY_AIRMET_STYLE,
-            [255, 193, 7, 70],
-            [255, 193, 7, 255],
-            10,
-        ),
-        extruded_shape(
-            ADVISORY_G_AIRMET_STYLE,
-            [255, 152, 0, 70],
-            [255, 152, 0, 255],
-            20,
-        ),
-        extruded_shape(
-            ADVISORY_CWA_STYLE,
-            [156, 39, 176, 70],
-            [206, 147, 216, 255],
-            30,
-        ),
-        extruded_shape(
-            ADVISORY_SIGMET_STYLE,
-            [244, 67, 54, 75],
-            [244, 67, 54, 255],
-            40,
-        ),
-        extruded_shape(
-            ADVISORY_CONVECTIVE_STYLE,
-            [213, 0, 0, 85],
-            [255, 82, 82, 255],
-            50,
-        ),
-    ]
-}
-
-fn extruded_shape(id: &str, fill: [u8; 4], outline: [u8; 4], order: i32) -> ShapeStyle {
-    ShapeStyle {
-        extruded: true,
-        ..shape(id, fill, outline, order)
-    }
-}
-
-fn shape(id: &str, fill: [u8; 4], outline: [u8; 4], order: i32) -> ShapeStyle {
-    ShapeStyle {
-        id: id.into(),
-        fill: crate::Color::rgba(fill[0], fill[1], fill[2], fill[3]),
-        outline: crate::Color::rgba(outline[0], outline[1], outline[2], outline[3]),
-        outline_width_points: 2.0,
-        label_color: crate::Color::rgba(255, 255, 255, 255),
-        label_size_points: 12.0,
-        label_font_names: font_names(),
-        label_offset_x: 0.0,
-        label_offset_y: 0.0,
-        label_allows_overlap: false,
-        extruded: false,
-        order,
-    }
-}
-
-fn font_names() -> Vec<String> {
-    vec![
-        "Open Sans Regular".into(),
-        "Arial Unicode MS Regular".into(),
-    ]
 }
