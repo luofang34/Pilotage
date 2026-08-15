@@ -70,6 +70,7 @@ final class SituationClientModel: ObservableObject {
     private var runtime: AeroLinkRadioRuntime?
     private var maintenanceTask: Task<Void, Never>?
     private var drainTask: Task<Void, Never>?
+    private var projectionTask: Task<Void, Never>?
     private var cleanupTask: (generation: UInt64, task: Task<Void, Never>)?
     private var cleanupGeneration: UInt64 = 0
     private var startupError: String?
@@ -163,6 +164,9 @@ final class SituationClientModel: ObservableObject {
         drainTask = Task.detached(priority: .userInitiated) {
             await runtime.drainLoop()
         }
+        projectionTask = Task { [weak self] in
+            await self?.projectionLoop()
+        }
     }
 
     func suspend() async {
@@ -176,8 +180,10 @@ final class SituationClientModel: ObservableObject {
         let drain = drainTask
         maintenance?.cancel()
         drain?.cancel()
+        projectionTask?.cancel()
         maintenanceTask = nil
         drainTask = nil
+        projectionTask = nil
         cleanupGeneration &+= 1
         let generation = cleanupGeneration
         let cleanup = Task.detached(priority: .utility) {
@@ -243,6 +249,33 @@ final class SituationClientModel: ObservableObject {
 
     func clearTrafficSelection() {
         selectedTraffic = nil
+    }
+
+    /// Ask again where the traffic is, between one report and the next.
+    ///
+    /// A report arrives about once a second and an aircraft crosses the screen the whole
+    /// time between two of them. The engine states where a track is at any instant, so
+    /// the map asks on a steady beat instead of holding the last reported position until
+    /// the next report lands. Without this beat the display only ever redraws when a
+    /// record arrives, which is the one instant at which a projection has nothing to add.
+    ///
+    /// A picture with nothing drawn on it has nothing to advance, so the beat costs
+    /// nothing until traffic exists.
+    private func projectionLoop() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: Self.publishIntervalMicros * 1_000)
+            } catch {
+                return
+            }
+            guard isActive else { return }
+            guard display?.points.isEmpty == false else { continue }
+            do {
+                applyDisplay(try session.currentDisplay(nowMicros: Self.monotonicMicros))
+            } catch {
+                errorMessage = Self.join(startupError, error.localizedDescription)
+            }
+        }
     }
 
     /// Hold one batch for the map, at a rate a screen can show.

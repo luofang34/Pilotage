@@ -91,4 +91,26 @@ require_pattern 'onChange\(of: ownship\.heading\)' "$app/PilotageApp.swift" \
 require_pattern 'applyFollow\(animated: false\)' "$app/PilotageApp.swift" \
     "a camera eased on every reading trails the aircraft, so continuous following must not animate"
 
+# Traffic moves between reports and the display only redraws when something asks it to.
+# A record arriving is the one instant at which a projection has nothing to add, so a
+# beat that nothing starts leaves every target standing still until the next report.
+require_pattern 'projectionTask = Task' "$app/SituationClientModel.swift" \
+    "something must drive the beat that redraws traffic between reports"
+require_pattern 'projectionTask\?\.cancel\(\)' "$app/SituationClientModel.swift" \
+    "the beat must stop with the radio, or a suspended client keeps redrawing"
+
+# The beat must ask the engine again. Republishing the batch already held advances
+# nothing, and it looks identical from every angle except the map.
+if ! grep -A 20 'func projectionLoop()' "$app/SituationClientModel.swift" \
+    | grep -q 'session\.currentDisplay'; then
+    echo "FORBIDDEN: the beat must ask the engine where the traffic is now, not republish the last batch" >&2
+    status=1
+fi
+
+# A bounded guess is refused silently: every refusal leaves the reported position in
+# place and reports nothing. Counting the advanced marks is how a run on hardware proves
+# the projection fires at all.
+require_pattern 'positionIsExtrapolated' "$app/SituationEvidence.swift" \
+    "the evidence must count the marks the engine advanced, or a projection that never fires looks the same as one that does"
+
 exit "$status"

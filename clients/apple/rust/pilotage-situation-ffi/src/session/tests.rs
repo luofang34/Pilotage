@@ -3,9 +3,10 @@
 use png::{BitDepth, ColorType, Encoder};
 use rusqlite::{Connection, params};
 use surveillance_core::{
-    AddressNamespace, FieldProvenance, FieldQuality, ObservationOrigin, ObservationTime,
-    PositionStatus, ProducerInstanceId, RemovalReason, SnapshotRevision, SourceRef, TimedField,
-    TrackDelta, TrackId, TrackKey, TrackRecord, TrackSnapshot, TrackSnapshotHandle, Wgs84Position,
+    AddressNamespace, FieldProvenance, FieldQuality, FreshnessPolicy, ObservationOrigin,
+    ObservationTime, PositionStatus, ProducerInstanceId, ProjectionBounds, RemovalReason,
+    SnapshotRevision, SourceRef, TimedField, TrackDelta, TrackId, TrackKey, TrackRecord,
+    TrackSnapshot, TrackSnapshotHandle, VelocityObservation, Wgs84Position,
 };
 use tempfile::NamedTempFile;
 
@@ -171,7 +172,58 @@ fn positionless_track_crosses_as_a_list_item() {
     assert_eq!(batch.traffic_details[0].fields.len(), 8);
 }
 
+#[test]
+fn asking_the_display_again_moves_a_track_without_a_new_report() {
+    // The map redraws many times between two reports, and it redraws by asking for the
+    // current display rather than by waiting for a record. That call must advance the
+    // clock the projection reads, or a target holds still until the next report lands.
+    let session = PresentationSession::new();
+    let encoded = serde_json::to_string(&moving_track_record()).expect("track record must encode");
+    let reported = session
+        .accept_track_record(encoded, 10)
+        .expect("track record must be accepted");
+    let at_report = reported.points[0].clone();
+    assert!(!at_report.position_is_extrapolated);
+
+    let later = session
+        .current_display(5_000_010)
+        .expect("display batch must be available");
+
+    assert!(later.points[0].position_is_extrapolated);
+    assert!(
+        later.points[0].coordinate.longitude_deg > at_report.coordinate.longitude_deg,
+        "a track heading east must be drawn further east than it last reported"
+    );
+}
+
+/// A track the engine is willing to advance: it states where it is, how fast it goes,
+/// and the bounds the producer sets on a guess.
+fn moving_track_record() -> TrackRecord {
+    let mut track = positioned_track(9, 42.36);
+    // Taken from the producer's own defaults rather than written here, so the test moves
+    // with the bounds the engine actually ships.
+    track.projection_bounds = Some(ProjectionBounds::from_freshness(&FreshnessPolicy::default()));
+    let velocity: VelocityObservation =
+        serde_json::from_str(r#"{"track_angle_deg_true":90.0,"ground_speed_kt":300.0}"#)
+            .expect("velocity fixture must decode");
+    track.velocity = Some(timed(velocity));
+    TrackRecord::new(TrackDelta::Updated(TrackSnapshotHandle::new(
+        ProducerInstanceId::new(8),
+        SnapshotRevision::new(2),
+        track,
+    )))
+}
+
 fn track_record(id: u64, revision: u64, latitude_deg: f64) -> TrackRecord {
+    let handle = TrackSnapshotHandle::new(
+        ProducerInstanceId::new(8),
+        SnapshotRevision::new(revision),
+        positioned_track(id, latitude_deg),
+    );
+    TrackRecord::new(TrackDelta::Updated(handle))
+}
+
+fn positioned_track(id: u64, latitude_deg: f64) -> TrackSnapshot {
     let mut track = TrackSnapshot::new(TrackId::new(id), track_key(id), 10);
     track.position = Some(timed(Wgs84Position {
         latitude_deg,
@@ -181,12 +233,7 @@ fn track_record(id: u64, revision: u64, latitude_deg: f64) -> TrackRecord {
     // carries one and leaves the status alone describes a track no producer publishes.
     track.position_status = PositionStatus::Current;
     track.pressure_altitude_ft = Some(timed(5_500));
-    let handle = TrackSnapshotHandle::new(
-        ProducerInstanceId::new(8),
-        SnapshotRevision::new(revision),
-        track,
-    );
-    TrackRecord::new(TrackDelta::Updated(handle))
+    track
 }
 
 fn timed<T>(value: T) -> TimedField<T> {
