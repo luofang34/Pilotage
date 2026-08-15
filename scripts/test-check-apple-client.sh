@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prove that the Apple situation client guard rejects dependency drift.
+# Prove that the Apple client guard rejects dependency drift.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,7 +65,7 @@ bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null
 sed -i.bak 's/unsafe_code = "forbid"/unsafe_code = "deny"/' \
     "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted an unsafe-code lint downgrade" >&2
+    echo "the Apple client guard accepted an unsafe-code lint downgrade" >&2
     exit 1
 fi
 sed -i.bak 's/unsafe_code = "deny"/unsafe_code = "forbid"/' \
@@ -74,7 +74,7 @@ sed -i.bak 's/unsafe_code = "deny"/unsafe_code = "forbid"/' \
 sed -i.bak 's/disallowed_types = "deny"/disallowed_types = "warn"/' \
     "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a disallowed-type lint downgrade" >&2
+    echo "the Apple client guard accepted a disallowed-type lint downgrade" >&2
     exit 1
 fi
 sed -i.bak 's/disallowed_types = "warn"/disallowed_types = "deny"/' \
@@ -83,7 +83,7 @@ sed -i.bak 's/disallowed_types = "warn"/disallowed_types = "deny"/' \
 sed -i.bak 's/path = "anyhow::Error"/path = "removed::Error"/' \
     "$client_fixture/rust/pilotage-situation-ffi/clippy.toml"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted the anyhow-error type" >&2
+    echo "the Apple client guard accepted the anyhow-error type" >&2
     exit 1
 fi
 sed -i.bak 's/path = "removed::Error"/path = "anyhow::Error"/' \
@@ -92,7 +92,7 @@ sed -i.bak 's/path = "removed::Error"/path = "anyhow::Error"/' \
 sed -i.bak 's/^#\[allow(clippy::disallowed_types/#![allow(clippy::disallowed_types/' \
     "$client_fixture/rust/pilotage-situation-ffi/src/lib.rs"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a crate-wide UniFFI lint exemption" >&2
+    echo "the Apple client guard accepted a crate-wide UniFFI lint exemption" >&2
     exit 1
 fi
 cp "$root/clients/apple/rust/pilotage-situation-ffi/src/lib.rs" \
@@ -101,7 +101,7 @@ cp "$root/clients/apple/rust/pilotage-situation-ffi/src/lib.rs" \
 printf '%s\n' 'pub type DynamicError = uniffi::__anyhow::Error;' \
     >> "$client_fixture/rust/pilotage-situation-ffi/src/lib.rs"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted anyhow in FFI source" >&2
+    echo "the Apple client guard accepted anyhow in FFI source" >&2
     exit 1
 fi
 cp "$root/clients/apple/rust/pilotage-situation-ffi/src/lib.rs" \
@@ -110,7 +110,7 @@ cp "$root/clients/apple/rust/pilotage-situation-ffi/src/lib.rs" \
 printf '%s\n' 'anyhow = "1"' \
     >> "$client_fixture/rust/pilotage-situation-ffi/Cargo.toml"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted an anyhow dependency" >&2
+    echo "the Apple client guard accepted an anyhow dependency" >&2
     exit 1
 fi
 cp "$root/clients/apple/rust/pilotage-situation-ffi/Cargo.toml" \
@@ -119,7 +119,7 @@ cp "$root/clients/apple/rust/pilotage-situation-ffi/Cargo.toml" \
 sed -i.bak 's/linkedLibrary("sqlite3")/linkedLibrary("removed-sqlite3")/' \
     "$fixture/clients/apple/Packages/PilotageCore/Package.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a missing SQLite link" >&2
+    echo "the Apple client guard accepted a missing SQLite link" >&2
     exit 1
 fi
 sed -i.bak 's/linkedLibrary("removed-sqlite3")/linkedLibrary("sqlite3")/' \
@@ -128,7 +128,7 @@ sed -i.bak 's/linkedLibrary("removed-sqlite3")/linkedLibrary("sqlite3")/' \
 sed -i.bak 's/exact: "6\.28\.0"/exact: "6.27.0"/' \
     "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Package.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted dependency drift" >&2
+    echo "the Apple client guard accepted dependency drift" >&2
     exit 1
 fi
 
@@ -137,7 +137,7 @@ sed -i.bak 's/exact: "6\.27\.0"/exact: "6.28.0"/' \
 sed -i.bak 's#../PilotageMapLibreTerrain#../UnreviewedTerrain#' \
     "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Package.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted an unreviewed terrain package" >&2
+    echo "the Apple client guard accepted an unreviewed terrain package" >&2
     exit 1
 fi
 
@@ -146,7 +146,7 @@ sed -i.bak 's#../UnreviewedTerrain#../PilotageMapLibreTerrain#' \
 sed -i.bak 's/--\/\/:renderer=metal/--\/\/:renderer=opengl/' \
     "$fixture/clients/apple/scripts/build-maplibre-terrain.sh"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a non-Metal terrain build" >&2
+    echo "the Apple client guard accepted a non-Metal terrain build" >&2
     exit 1
 fi
 
@@ -155,7 +155,7 @@ sed -i.bak 's/--\/\/:renderer=opengl/--\/\/:renderer=metal/' \
 sed -i.bak 's/#if PILOTAGE_MAPLIBRE_TERRAIN/#if true/' \
     "$fixture/clients/apple/App/SituationStyleResource.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted an unflagged terrain style" >&2
+    echo "the Apple client guard accepted an unflagged terrain style" >&2
     exit 1
 fi
 
@@ -164,7 +164,7 @@ sed -i.bak 's/#if true/#if PILOTAGE_MAPLIBRE_TERRAIN/' \
 sed -i.bak 's/brew install xcodegen/brew install removed-xcodegen/' \
     "$fixture/.github/workflows/ci.yml"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a missing XcodeGen install" >&2
+    echo "the Apple client guard accepted a missing XcodeGen install" >&2
     exit 1
 fi
 
@@ -173,7 +173,7 @@ sed -i.bak 's/brew install removed-xcodegen/brew install xcodegen/' \
 sed -i.bak 's/ARCHS=arm64/ARCHS=x86_64/' \
     "$fixture/clients/apple/scripts/ci-ios.sh"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted an unavailable simulator architecture" >&2
+    echo "the Apple client guard accepted an unavailable simulator architecture" >&2
     exit 1
 fi
 
@@ -182,7 +182,7 @@ sed -i.bak 's/ARCHS=x86_64/ARCHS=arm64/' \
 sed -i.bak 's/<string>\*<\/string>/<integer>3034<\/integer>/' \
     "$fixture/clients/apple/Configuration/AeroLinkDriverDevelopment.entitlements"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted incompatible DriverKit entitlements" >&2
+    echo "the Apple client guard accepted incompatible DriverKit entitlements" >&2
     exit 1
 fi
 
@@ -191,7 +191,7 @@ sed -i.bak 's/<integer>3034<\/integer>/<string>*<\/string>/' \
 sed -i.bak 's/maximumTransfersPerCycle = 32/maximumTransfersPerCycle = 31/' \
     "$fixture/clients/apple/App/AeroLinkRadioRuntime.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted an unbounded drain change" >&2
+    echo "the Apple client guard accepted an unbounded drain change" >&2
     exit 1
 fi
 
@@ -200,7 +200,7 @@ sed -i.bak 's/maximumTransfersPerCycle = 31/maximumTransfersPerCycle = 32/' \
 sed -i.bak 's/WeatherSnapshotRecord::new/WeatherSnapshotRecord::invented/' \
     "$fixture/clients/apple/rust/pilotage-situation-ffi/src/reception/weather.rs"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a noncanonical weather record" >&2
+    echo "the Apple client guard accepted a noncanonical weather record" >&2
     exit 1
 fi
 
@@ -210,7 +210,7 @@ sed -i.bak '/var result = AeroLinkDrainResult()/a\
         let _ = try handle.value.status()' \
     "$fixture/clients/apple/App/AeroLinkRadioRuntime.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a blocking call on the drain worker" >&2
+    echo "the Apple client guard accepted a blocking call on the drain worker" >&2
     exit 1
 fi
 
@@ -219,7 +219,7 @@ sed -i.bak '/let _ = try handle.value.status()/d' \
 sed -i.bak 's/await maintenance[.]value/await Task.yield()/' \
     "$fixture/clients/apple/App/SituationClientModel.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted incomplete worker shutdown" >&2
+    echo "the Apple client guard accepted incomplete worker shutdown" >&2
     exit 1
 fi
 
@@ -228,7 +228,7 @@ sed -i.bak 's/await Task[.]yield()/await maintenance.value/' \
 sed -i.bak 's/reconnectRequiredAfterScan[(]/discardReconnectRequest(/' \
     "$fixture/clients/apple/App/AeroLinkRadioState.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a lost reconnect request" >&2
+    echo "the Apple client guard accepted a lost reconnect request" >&2
     exit 1
 fi
 
@@ -237,7 +237,7 @@ sed -i.bak 's/discardReconnectRequest[(]/reconnectRequiredAfterScan(/' \
 sed -i.bak 's/if let cleanup = cleanupTask/if false/' \
     "$fixture/clients/apple/App/SituationClientModel.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted overlapping lifecycle work" >&2
+    echo "the Apple client guard accepted overlapping lifecycle work" >&2
     exit 1
 fi
 
@@ -246,7 +246,7 @@ sed -i.bak 's/if false/if let cleanup = cleanupTask/' \
 sed -i.bak '/guard result[.]hasConsumedTransfer else { return }/d' \
     "$fixture/clients/apple/App/AeroLinkRadioState.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted counter loss after an empty poll" >&2
+    echo "the Apple client guard accepted counter loss after an empty poll" >&2
     exit 1
 fi
 
@@ -257,7 +257,7 @@ sed -i.bak '/let handle = connection[.]handle/i\
 sed -i.bak 's/loadTerrainArchiveBlocking/loadTerrainArchiveRemoved/' \
     "$fixture/clients/apple/App/SituationClientModel.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted missing terrain archive loading" >&2
+    echo "the Apple client guard accepted missing terrain archive loading" >&2
     exit 1
 fi
 sed -i.bak 's/loadTerrainArchiveRemoved/loadTerrainArchiveBlocking/' \
@@ -266,7 +266,7 @@ sed -i.bak 's/loadTerrainArchiveRemoved/loadTerrainArchiveBlocking/' \
 sed -i.bak 's/below_terrain == YES/below_terrain removed/' \
     "$fixture/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted a missing negative-height fill" >&2
+    echo "the Apple client guard accepted a missing negative-height fill" >&2
     exit 1
 fi
 sed -i.bak 's/below_terrain removed/below_terrain == YES/' \
@@ -274,9 +274,18 @@ sed -i.bak 's/below_terrain removed/below_terrain == YES/' \
 printf '\nlet decoder = JSONDecoder()\n' \
     >> "$fixture/clients/apple/App/AeroLinkRadioRuntime.swift"
 if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
-    echo "the Apple situation client guard accepted payload parsing in Swift" >&2
+    echo "the Apple client guard accepted payload parsing in Swift" >&2
     exit 1
 fi
 
+mkdir -p "$fixture/clients/apple-situation/App"
+printf 'import PilotageSituationCore\n' \
+    > "$fixture/clients/apple-situation/App/SituationClientModel.swift"
+if bash "$fixture/scripts/check-apple-client.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the Apple client guard accepted a second copy of the client" >&2
+    exit 1
+fi
+\rm -rf "$fixture/clients/apple-situation"
+
 bash "$root/scripts/test-build-maplibre-terrain.sh"
-echo "Apple situation client guard self-test: OK"
+echo "Apple client guard self-test: OK"

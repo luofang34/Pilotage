@@ -94,6 +94,14 @@ check_ffi_lint_scope() {
     fi
 }
 
+# The client lives at one path. A branch cut before the rename and merged after it
+# brings the old path back with the whole tree under it, and both copies then compile:
+# the stale one is never built and never noticed, and an edit made there is lost.
+if [ -e "$root/clients/apple-situation" ]; then
+    echo "FORBIDDEN: the Apple client has one home, and clients/apple-situation is not it" >&2
+    status=1
+fi
+
 check_revision "$client/AERO_LINK_REVISION" AERO_LINK_REVISION
 check_revision "$client/AIRMASS_REVISION" AIRMASS_REVISION
 check_revision "$client/SURVEILLANCE_REVISION" SURVEILLANCE_REVISION
@@ -183,7 +191,7 @@ require_pattern '"[$]AERO_LINK_HOST_BUNDLE_IDENTIFIER"[.][*]' \
     "the project generator must require a nested driver App ID"
 require_pattern 'brew install xcodegen' \
     "$root/.github/workflows/ci.yml" \
-    "the Apple situation client job must install XcodeGen"
+    "the Apple client job must install XcodeGen"
 require_pattern 'ARCHS=arm64' \
     "$client/scripts/ci-ios.sh" \
     "the simulator build must use the available Rust architecture"
@@ -314,8 +322,8 @@ require_pattern 'drainLimitExhaustions' "$client/App/RadioStatusView.swift" \
     "the application must show bounded-drain exhaustion"
 
 if [ "$status" -ne 0 ]; then
-    echo "Apple situation client: FAILED" >&2
+    echo "Apple client: FAILED" >&2
     exit 1
 fi
 
-echo "Apple situation client: OK"
+echo "Apple client: OK"
