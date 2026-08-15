@@ -160,10 +160,10 @@ jobs:
       - name: situation ownship wiring
         run: bash scripts/check-situation-ownship-wiring.sh
 
-      - name: Apple situation client guard self-test
+      - name: Apple client guard self-test
         run: bash scripts/test-check-apple-client.sh
 
-      - name: Apple situation client guard
+      - name: Apple client guard
         run: bash scripts/check-apple-client.sh
 
       - name: Terrain base layer guard self-test
@@ -545,7 +545,7 @@ jobs:
       - name: Install GDAL
         run: brew install gdal
 
-      - name: Test the Apple situation client
+      - name: Test the Apple client
         env:
           AERO_LINK_SOURCE: ${{ github.workspace }}/external/aero-link
           AIRMASS_SOURCE: ${{ github.workspace }}/external/Airmass
