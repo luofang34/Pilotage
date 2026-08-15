@@ -3,7 +3,7 @@
 use airmass_aero_link::AdapterError;
 use airmass_core::StoreError;
 use surveillance_aero_link::NormalizeError;
-use surveillance_core::{IngestError, SnapshotPublicationError};
+use surveillance_core::{EngineConfigError, IngestError, SnapshotPublicationError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -47,6 +47,12 @@ pub(crate) enum ReceptionError {
         monotonic_micros: u64,
         #[source]
         source: SnapshotPublicationError,
+    },
+    #[error("Surveillance state could not start for producer {producer_instance_id}")]
+    TrafficConfiguration {
+        producer_instance_id: u64,
+        #[source]
+        source: Box<EngineConfigError>,
     },
     #[error("Airmass state could not start for producer {producer_instance_id}")]
     WeatherConfiguration {

@@ -19,13 +19,16 @@ pub(super) struct TrafficPipeline {
 }
 
 impl TrafficPipeline {
-    pub(super) fn new(producer_instance_id: u64) -> Self {
-        Self {
-            engine: SurveillanceEngine::new(
-                EngineConfig::default(),
-                ProducerInstanceId::new(producer_instance_id),
-            ),
-        }
+    pub(super) fn new(producer_instance_id: u64) -> Result<Self, ReceptionError> {
+        let engine = SurveillanceEngine::new(
+            EngineConfig::default(),
+            ProducerInstanceId::new(producer_instance_id),
+        )
+        .map_err(|source| ReceptionError::TrafficConfiguration {
+            producer_instance_id,
+            source: Box::new(source),
+        })?;
+        Ok(Self { engine })
     }
 
     pub(super) fn accept(
@@ -39,7 +42,10 @@ impl TrafficPipeline {
                 source,
             })?;
         let tally = match outcome {
-            ReceptionOutcome::Ingested => TrafficTally {
+            // A field the engine could not read is not a refused observation: the rest
+            // of the report was taken. Counting it as a refusal would say the reception
+            // failed when it did not.
+            ReceptionOutcome::Ingested { .. } => TrafficTally {
                 observations: 1,
                 refusals: 0,
             },

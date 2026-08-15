@@ -144,6 +144,7 @@ fn point_for_feature(feature: &AircraftFeature) -> Option<PointFeature> {
             .as_ref()
             .and_then(|value| value.value.track_angle_deg_true)
             .unwrap_or(0.0),
+        position_is_extrapolated: false,
         producer_instance_id: feature.producer_instance_id().get(),
         snapshot_revision: feature.snapshot_revision().get(),
     })

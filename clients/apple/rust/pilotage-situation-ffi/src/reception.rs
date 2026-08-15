@@ -40,7 +40,7 @@ struct ReceptionPipeline {
 impl ReceptionPipeline {
     fn new(producer_instance_id: u64) -> Result<Self, ReceptionError> {
         Ok(Self {
-            traffic: TrafficPipeline::new(producer_instance_id),
+            traffic: TrafficPipeline::new(producer_instance_id)?,
             weather: WeatherPipeline::new(producer_instance_id)?,
             last_monotonic_micros: 0,
         })

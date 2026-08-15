@@ -4,8 +4,8 @@ use png::{BitDepth, ColorType, Encoder};
 use rusqlite::{Connection, params};
 use surveillance_core::{
     AddressNamespace, FieldProvenance, FieldQuality, ObservationOrigin, ObservationTime,
-    ProducerInstanceId, RemovalReason, SnapshotRevision, SourceRef, TimedField, TrackDelta,
-    TrackId, TrackKey, TrackRecord, TrackSnapshot, TrackSnapshotHandle, Wgs84Position,
+    PositionStatus, ProducerInstanceId, RemovalReason, SnapshotRevision, SourceRef, TimedField,
+    TrackDelta, TrackId, TrackKey, TrackRecord, TrackSnapshot, TrackSnapshotHandle, Wgs84Position,
 };
 use tempfile::NamedTempFile;
 
@@ -177,6 +177,9 @@ fn track_record(id: u64, revision: u64, latitude_deg: f64) -> TrackRecord {
         latitude_deg,
         longitude_deg: -71.0,
     }));
+    // The producer states whether a carried position may still be drawn. A fixture that
+    // carries one and leaves the status alone describes a track no producer publishes.
+    track.position_status = PositionStatus::Current;
     track.pressure_altitude_ft = Some(timed(5_500));
     let handle = TrackSnapshotHandle::new(
         ProducerInstanceId::new(8),

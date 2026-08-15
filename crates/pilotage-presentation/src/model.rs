@@ -143,6 +143,11 @@ pub struct PointFeature {
     pub altitude_ft: Option<i32>,
     /// Clockwise rotation from geographic north.
     pub rotation_deg: f64,
+    /// Whether the position was advanced from the newest report rather than reported.
+    ///
+    /// A projection is a guess between two facts. A display that draws it identically to
+    /// a report tells a reader that an aircraft is somewhere it has not said it is.
+    pub position_is_extrapolated: bool,
     /// Producer instance identity.
     pub producer_instance_id: u64,
     /// Snapshot revision.

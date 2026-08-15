@@ -37,6 +37,9 @@ pub struct PresentationAdapter {
     traffic_pads: BTreeMap<(u64, u64), ShapeFeature>,
     traffic_revisions: BTreeMap<(u64, u64), u64>,
     traffic_tracks: BTreeMap<(u64, u64), TrackSnapshotHandle>,
+    /// Ground height under each track, kept so a pad can be rebuilt where the track is
+    /// projected to be rather than only where it last reported.
+    traffic_terrain_m: BTreeMap<(u64, u64), Option<f64>>,
     weather_points: BTreeMap<String, PointFeature>,
     weather_shapes: BTreeMap<String, ShapeFeature>,
     ownship: Option<OwnshipFeature>,
@@ -233,6 +236,7 @@ impl PresentationAdapter {
         self.traffic_pads.clear();
         self.traffic_revisions.clear();
         self.traffic_tracks.clear();
+        self.traffic_terrain_m.clear();
         self.weather_points.clear();
         self.weather_shapes.clear();
         self.ownship = None;
@@ -243,8 +247,19 @@ impl PresentationAdapter {
     pub fn adapt(&self) -> DisplayBatch {
         let mut batch = self.empty_batch();
         if self.layers.is_enabled(TRAFFIC_LAYER_ID) {
-            batch.points.extend(self.traffic_points.values().cloned());
-            batch.shapes.extend(self.traffic_pads.values().cloned());
+            // Drawn where the track is now, not where it last said it was. A map redraws
+            // far more often than reports arrive, so a reported position alone makes a
+            // target step from one report to the next.
+            for (key, point) in &self.traffic_points {
+                let drawn = self.projected_point(*key, point);
+                if let Some(pad) = crate::traffic::altitude_pad(
+                    &drawn,
+                    self.traffic_terrain_m.get(key).copied().flatten(),
+                ) {
+                    batch.shapes.push(pad);
+                }
+                batch.points.push(drawn);
+            }
             batch.positionless_traffic = self
                 .traffic_tracks
                 .values()
@@ -263,6 +278,37 @@ impl PresentationAdapter {
             .map(|track| crate::detail::detail_for(track, self.now_micros))
             .collect();
         batch
+    }
+
+    /// The point as it should be drawn now.
+    ///
+    /// Returns the point unchanged when the engine will not project: the guess is
+    /// bounded there, and a display that projects further than the producer allows is
+    /// inventing a position rather than showing one.
+    fn projected_point(&self, key: (u64, u64), point: &PointFeature) -> PointFeature {
+        let Some(track) = self.traffic_tracks.get(&key) else {
+            return point.clone();
+        };
+        let Some(projection) =
+            surveillance_core::project_position(track.snapshot(), self.now_micros)
+        else {
+            return point.clone();
+        };
+        if projection.basis != surveillance_core::ProjectionBasis::Extrapolated {
+            return point.clone();
+        }
+        let Some(coordinate) = Coordinate::checked(
+            projection.position.latitude_deg,
+            projection.position.longitude_deg,
+        ) else {
+            return point.clone();
+        };
+        PointFeature {
+            coordinate,
+            altitude_ft: projection.pressure_altitude_ft.or(point.altitude_ft),
+            position_is_extrapolated: true,
+            ..point.clone()
+        }
     }
 
     fn apply_weather_shape(
@@ -323,6 +369,7 @@ impl PresentationAdapter {
                     None => self.traffic_pads.remove(&key),
                 };
                 self.traffic_points.insert(key, point.clone());
+                self.traffic_terrain_m.insert(key, terrain_elevation_m);
             }
             PointChange::Stale {
                 style_id,
