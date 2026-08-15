@@ -69,6 +69,15 @@ enum FlightsLibrary {
             .sorted { $0.startedAtUtcMillis > $1.startedAtUtcMillis }
     }
 
+    /// Remove one recording from the container.
+    ///
+    /// The container is the only copy: a recording is written here and read from here, so
+    /// this is a deletion and not an unlink from a list.
+    @discardableResult
+    static func delete(_ flight: Flight) -> Bool {
+        (try? FileManager.default.removeItem(at: flight.receptionURL)) != nil
+    }
+
     /// Read `replay-receptions-YYYY-MM-DDTHH-MM-SSZ.ndjson`.
     ///
     /// A recording carries no wall clock inside it, and an advisory states its validity in

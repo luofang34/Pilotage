@@ -50,6 +50,11 @@ final class SituationClientModel: ObservableObject {
     private let terrainAvailable: Bool
     private let discovery = AeroLinkDiscoveryGate()
     private let evidenceWriter = SituationEvidenceWriter()
+    private let recorder = FlightRecorder()
+    /// Whether the radios' receptions are being written to a recording.
+    @Published private(set) var isRecording = false
+    /// How many reception events the recording in progress holds.
+    @Published private(set) var recordedEvents: UInt64 = 0
     /// Receives the aircraft's own position whenever a batch carries one.
     var onOwnship: ((DisplayOwnship?) -> Void)?
     /// Reads the position the map may centre on, for the evidence file.
@@ -224,8 +229,17 @@ final class SituationClientModel: ObservableObject {
     }
 
     func selectTraffic(id: String) {
-        selectedTraffic = display?.trafficDetails.first { $0.id == id }
+        // A press lands on whichever layer was drawn there, and an aircraft that reports
+        // a height is drawn twice: the mark and the pad it floats on. The pad carries the
+        // mark's identity with a suffix, so the mark is what is looked up either way.
+        let owner = id.hasSuffix(Self.padIdentifierSuffix)
+            ? String(id.dropLast(Self.padIdentifierSuffix.count))
+            : id
+        selectedTraffic = display?.trafficDetails.first { $0.id == owner }
     }
+
+    /// What the portable layer appends to a mark's identity to name its pad.
+    static let padIdentifierSuffix = "-pad"
 
     func clearTrafficSelection() {
         selectedTraffic = nil
@@ -288,6 +302,52 @@ final class SituationClientModel: ObservableObject {
     /// Recordings the container holds.
     func reloadFlights() {
         flights = FlightsLibrary.flights()
+    }
+
+    /// Throw a recording away.
+    ///
+    /// Refused while it is being replayed, because deleting the file a replay is reading
+    /// leaves the map showing a flight that no longer exists.
+    func deleteFlight(_ flight: Flight) {
+        guard replayingFlight != flight else { return }
+        FlightsLibrary.delete(flight)
+        reloadFlights()
+    }
+
+    /// Begin writing what the radios receive.
+    func startRecording() {
+        guard !isRecording, adsbEnabled else { return }
+        guard recorder.start() else { return }
+        isRecording = true
+        recordedEvents = 0
+        Task { [weak self, recorder] in
+            await self?.runtime?.observeReceptionLines { lines in
+                recorder.append(lines)
+            }
+            await MainActor.run { self?.pollRecording() }
+        }
+    }
+
+    /// Stop writing, and let the new recording appear in the list.
+    func stopRecording() {
+        guard isRecording else { return }
+        Task { [weak self] in
+            await self?.runtime?.observeReceptionLines(nil)
+        }
+        recorder.stop()
+        isRecording = false
+        recordedEvents = recorder.events
+        reloadFlights()
+    }
+
+    /// Show the recording growing, so a reader can see it is taking something.
+    private func pollRecording() {
+        guard isRecording else { return }
+        recordedEvents = recorder.events
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            self?.pollRecording()
+        }
     }
 
     /// Open one recorded flight.

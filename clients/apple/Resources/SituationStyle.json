@@ -1,5 +1,6 @@
 {
   "version": 8,
+  "glyphs": "__PILOTAGE_GLYPHS_URL__/{fontstack}/{range}.pbf",
   "name": "Pilotage situation base",
   "projection": {
     "type": "globe"

@@ -5,6 +5,7 @@ enum SituationStyleResource {
     {"version":8,"name":"Pilotage terrain unavailable","sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#0b1721"}}]}
     """
 
+    private static let glyphsToken = "__PILOTAGE_GLYPHS_URL__"
     private static let coastlineArchiveToken = "__PILOTAGE_COASTLINE_MBTILES_URL__"
     private static let terrainArchiveToken = "__PILOTAGE_TERRAIN_MBTILES_URL__"
 
@@ -80,6 +81,22 @@ enum SituationStyleResource {
         sources["pilotage-coastline"] = coastline
         sources["pilotage-terrain"] = terrain
         style["sources"] = sources
+        // Without a glyph source the renderer draws no text at all, whatever a layer
+        // asks for. The fonts ship in the bundle because the map is read where there is
+        // no network, and a label that needs fetching is a label that is not there.
+        // A missing font costs the labels, not the map. Refusing the whole style would
+        // trade every layer for the one thing that draws text, and the fallback is a
+        // blank background: the map a reader flies with would be gone.
+        if (style["glyphs"] as? String) == glyphsToken {
+            if let fontsURL = bundle.url(forResource: "Fonts", withExtension: nil) {
+                style["glyphs"] = fontsURL.appendingPathComponent("{fontstack}/{range}.pbf")
+                    .absoluteString
+                    .replacingOccurrences(of: "%7Bfontstack%7D", with: "{fontstack}")
+                    .replacingOccurrences(of: "%7Brange%7D", with: "{range}")
+            } else {
+                style.removeValue(forKey: "glyphs")
+            }
+        }
 #if PILOTAGE_MAPLIBRE_TERRAIN
         style["terrain"] = [
             "source": "pilotage-terrain",

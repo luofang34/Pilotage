@@ -1,0 +1,7 @@
+Open Sans is licensed under the Apache License, Version 2.0.
+Copyright 2020 The Open Sans Project Authors
+https://github.com/googlefonts/opensans
+
+The .pbf files here are signed distance fields generated from OpenSans-Regular.ttf.
+They are the only way MapLibre can draw text: without a glyph source no label of any
+kind appears on the map, whatever a style asks for.

@@ -132,6 +132,40 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
         mapView.setCenter(coordinate, animated: animated)
     }
 
+    /// How wide the map reads when a reader asks to be shown where they are.
+    ///
+    /// Sixty miles is about twenty minutes ahead in a light aircraft, which is the
+    /// distance a decision is made over. Zoomed further out the aircraft is a dot among
+    /// country; further in and the next airfield is off the screen.
+    public static let ownshipWidthNauticalMiles: Double = 60
+
+    /// Centre on a position and set the width of ground the map shows.
+    ///
+    /// The zoom is computed from the width rather than stored as a level, because a level
+    /// means a different distance at every latitude and on every size of window.
+    public func centre(
+        on coordinate: CLLocationCoordinate2D,
+        widthNauticalMiles width: Double,
+        animated: Bool = true
+    ) {
+        let metres = width * 1852
+        let points = Double(max(mapView.bounds.width, 1))
+        let latitude = coordinate.latitude * .pi / 180
+        // Web mercator: the ground each point covers shrinks with the cosine of latitude
+        // and halves with every zoom level.
+        let metresPerPointAtZoomZero = 156_543.033_928 * cos(latitude) / mapView.contentScaleFactor
+        let zoom = log2(metresPerPointAtZoomZero * points / metres)
+        let clamped = min(max(zoom, mapView.minimumZoomLevel), mapView.maximumZoomLevel)
+        // The direction is carried through so that centring does not also turn the map:
+        // where the aircraft is and which way it points are two separate answers.
+        mapView.setCenter(
+            coordinate,
+            zoomLevel: clamped,
+            direction: mapView.direction,
+            animated: animated
+        )
+    }
+
     /// How long a turn or a tilt the reader asked for takes to land.
     ///
     /// The renderer's own default eases for long enough to read as lag on a control that

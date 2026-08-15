@@ -32,6 +32,28 @@ enum Metrics {
     /// This is the margin between the two.
     static let edgeInset: CGFloat = 12
 
+    /// How tall the system's own bar is, where it is drawn over this application.
+    ///
+    /// Asked of the scene rather than taken from the safe area, because the two do not
+    /// agree: a window carries a safe area with no bar in it, and a full screen carries a
+    /// bar that a control has to clear rather than merely start beneath.
+    static var systemBarHeight: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?
+            .statusBarManager?
+            .statusBarFrame.height ?? 0
+    }
+
+    /// Room the window's own controls take at the top of the leading edge.
+    ///
+    /// A windowed application is given a grabber and a close control there, and they are
+    /// drawn over whatever the application puts underneath. The system does not always
+    /// reserve the space in the safe area, so anything the application floats in that one
+    /// corner keeps clear of it by hand. Only that corner: reserving it across the width
+    /// would push the far side down for a control that is not there.
+    static let windowControlAllowance: CGFloat = 44
+
     /// Corner radius of a floating panel.
     static let panelCorner: CGFloat = 26
 
@@ -54,10 +76,21 @@ extension View {
     /// Declared once rather than as a padding value repeated at each corner, so a control
     /// added later cannot sit at a different distance from the edge than the rest.
     func mapControlPlacement(_ alignment: Alignment) -> some View {
-        GeometryReader { proxy in
+        // The window's controls sit in the top leading corner and are drawn over the
+        // application. Only what shares that corner gives way to them.
+        let sharesTheWindowControls = alignment == .topLeading
+        return GeometryReader { proxy in
             let safe = proxy.safeAreaInsets
+            // Under a system bar the margin goes below it, so a control clears the bar
+            // rather than beginning where it ends. Without one the plain margin applies,
+            // which is what keeps the corner square where nothing is reserved.
+            let bar = Metrics.systemBarHeight
+            let top = bar > 0 ? bar + Metrics.edgeInset : max(Metrics.edgeInset, safe.top)
             frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-                .padding(.top, max(Metrics.edgeInset, safe.top))
+                .padding(
+                    .top,
+                    sharesTheWindowControls ? top + Metrics.windowControlAllowance : top
+                )
                 .padding(.bottom, max(Metrics.edgeInset, safe.bottom))
                 .padding(.leading, max(Metrics.edgeInset, safe.leading))
                 .padding(.trailing, max(Metrics.edgeInset, safe.trailing))
