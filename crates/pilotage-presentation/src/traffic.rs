@@ -98,7 +98,7 @@ pub(crate) fn point_change(
         FeatureDelta::Upsert(feature) => {
             point_for_feature(feature).map(|point| PointChange::Upsert { point })
         }
-        FeatureDelta::Stale { id } => {
+        FeatureDelta::Stale { id, revision } => {
             let point = current?;
             let style_id = if point.style_id == TRAFFIC_EMERGENCY_STYLE {
                 TRAFFIC_EMERGENCY_STYLE
@@ -106,17 +106,22 @@ pub(crate) fn point_change(
                 TRAFFIC_COASTING_STYLE
             };
             Some(PointChange::Stale {
-                id: traffic_id(producer_instance_id, id.get()),
+                id: traffic_id(producer_instance_id, id.track_id().get()),
                 style_id: style_id.into(),
                 producer_instance_id,
-                snapshot_revision,
+                snapshot_revision: revision.get(),
             })
         }
-        FeatureDelta::Remove { id, transfer_to } => Some(PointChange::Remove {
-            id: traffic_id(producer_instance_id, id.get()),
-            transfer_to: transfer_to.map(|target| traffic_id(producer_instance_id, target.get())),
+        FeatureDelta::Remove {
+            id,
+            transfer_to,
+            revision,
+        } => Some(PointChange::Remove {
+            id: traffic_id(producer_instance_id, id.track_id().get()),
+            transfer_to: transfer_to
+                .map(|target| traffic_id(producer_instance_id, target.track_id().get())),
             producer_instance_id,
-            snapshot_revision,
+            snapshot_revision: revision.get(),
         }),
         _ => None,
     }
