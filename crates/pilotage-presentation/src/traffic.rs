@@ -3,7 +3,7 @@
 use surveillance_geojson::{AircraftFeature, FeatureDelta};
 
 use crate::layer::TRAFFIC_LAYER_ID;
-use crate::policy::{
+use crate::style::{
     TRAFFIC_ACTIVE_STYLE, TRAFFIC_ALTITUDE_STYLE, TRAFFIC_COASTING_STYLE, TRAFFIC_EMERGENCY_STYLE,
 };
 use crate::{Coordinate, CoordinateRing, PointChange, PointFeature, ShapeFeature};
