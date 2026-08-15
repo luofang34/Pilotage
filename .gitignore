@@ -62,3 +62,7 @@ clients/apple/.build/
 clients/apple/Pilotage.xcodeproj/
 clients/apple/Resources/SituationCoastline.mbtiles
 clients/apple/Resources/SituationTerrain.mbtiles
+
+# Xcode writes one of these for each person who opens a package, under their own
+# account name, and rewrites it whenever a scheme is shown or hidden.
+xcuserdata/
