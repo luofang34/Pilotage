@@ -16,6 +16,44 @@ struct InstrumentRackView: View {
     /// because the rack is what remains either way.
     @Binding var mapVisible: Bool
     @State private var connectPresented = false
+    /// The video source the operator switched to, overriding the
+    /// profile's own until the profile changes.
+    @AppStorage("pilotageVideoSource") private var videoSourceOverride = ""
+    /// The tile shown wall-to-wall, when one is.
+    @State private var enlargedTile: InstrumentTile?
+
+    /// Sources a vehicle can offer today. A source catalog will replace
+    /// this list; the switcher's shape stays.
+    static let videoSources = ["gimbal", "fpv", "chase"]
+
+    /// The width at which the profile's whole stack fits `windowHeight`,
+    /// clamped to at most half the window and at least a readable tile.
+    static func idealWidth(
+        for profile: InstrumentProfile,
+        model: HostLinkModel,
+        windowHeight: CGFloat,
+        windowWidth: CGFloat
+    ) -> CGFloat {
+        // Header, control bar, paddings and inter-tile gaps, measured from
+        // the layout's own constants rather than the rendered view: the
+        // width must be decided before the rack exists.
+        let chrome: CGFloat = 96 + CGFloat(max(profile.tiles.count - 1, 0)) * 8
+        let stackHeight = max(windowHeight - chrome, 200)
+        let aspectSum = profile.tiles.reduce(CGFloat(0)) { sum, tile in
+            switch tile {
+            case .video:
+                return sum + 9.0 / 16.0
+            case .panel(let id):
+                guard let choice = model.panelChoice(forTileId: id),
+                      choice.descriptor.designWidth > 0
+                else { return sum + 3.0 / 4.0 }
+                return sum + CGFloat(choice.descriptor.designHeight)
+                    / CGFloat(choice.descriptor.designWidth)
+            }
+        }
+        guard aspectSum > 0 else { return min(360, windowWidth / 2) }
+        return min(max(stackHeight / aspectSum, 280), windowWidth / 2)
+    }
 
     private var profile: InstrumentProfile {
         InstrumentProfile.selected(storedId: profileId)
@@ -46,6 +84,26 @@ struct InstrumentRackView: View {
         .onAppear { model.prepareInstruments() }
         .sheet(isPresented: $connectPresented) {
             HostConnectSheet(model: model)
+        }
+        .fullScreenCover(item: $enlargedTile) { tile in
+            ZStack(alignment: .topTrailing) {
+                Color.black.ignoresSafeArea()
+                GeometryReader { proxy in
+                    VStack {
+                        Spacer(minLength: 0)
+                        tileView(tile, width: proxy.size.width)
+                        Spacer(minLength: 0)
+                    }
+                }
+                Button {
+                    enlargedTile = nil
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.title3)
+                        .padding(10)
+                }
+                .foregroundStyle(.white)
+            }
         }
     }
 
@@ -87,12 +145,43 @@ struct InstrumentRackView: View {
     private func tileView(_ tile: InstrumentTile, width: CGFloat) -> some View {
         switch tile {
         case .video(let source):
+            let shown = videoSourceOverride.isEmpty ? source : videoSourceOverride
             // The native link does not carry media streams yet; the slot
-            // states that rather than implying a camera exists.
-            UnavailableTile(
-                title: "Video · \(source)",
-                reason: "this link does not carry media streams yet"
-            )
+            // states that rather than implying a camera exists. The source
+            // switcher and the enlarge control are the tile's own, so a
+            // live feed changes what fills it, not how it is worked.
+            ZStack(alignment: .topTrailing) {
+                UnavailableTile(
+                    title: "Video · \(shown)",
+                    reason: "this link does not carry media streams yet"
+                )
+                HStack(spacing: 4) {
+                    Menu {
+                        ForEach(Self.videoSources, id: \.self) { candidate in
+                            Button {
+                                videoSourceOverride = candidate
+                            } label: {
+                                if candidate == shown {
+                                    Label(candidate, systemImage: "checkmark")
+                                } else {
+                                    Text(candidate)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "video.badge.ellipsis")
+                            .padding(6)
+                    }
+                    Button {
+                        enlargedTile = tile
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .padding(6)
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.white)
+            }
             .frame(width: width, height: width * 9 / 16)
         case .panel(let id):
             if let choice = model.panelChoice(forTileId: id),

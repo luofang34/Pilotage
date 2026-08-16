@@ -48,6 +48,7 @@ private struct SituationContentView: View {
     @AppStorage("pilotageRackPresented") private var rackPresented = false
     /// Whether the map holds its half; the rack owns the toggle.
     @AppStorage("pilotageMapVisible") private var mapVisible = true
+    @AppStorage("pilotageInstrumentProfile") private var rackProfileId = "px4-flight"
     @State private var windowWidth: CGFloat = 1000
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
@@ -62,21 +63,22 @@ private struct SituationContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            if rackPresented {
+                InstrumentRackView(model: hostLink, mapVisible: $mapVisible)
+                    .frame(maxWidth: mapVisible ? rackWidth : .infinity)
+                    .transition(.move(edge: .leading))
+            }
             if mapVisible {
                 mapSurface
                     .frame(maxWidth: .infinity)
             }
-            if rackPresented {
-                InstrumentRackView(model: hostLink, mapVisible: $mapVisible)
-                    .frame(maxWidth: mapVisible ? rackWidth : .infinity)
-                    .transition(.move(edge: .trailing))
-            }
         }
         .background(.black)
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.width
-        } action: { width in
-            windowWidth = width
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            windowWidth = size.width
+            windowHeight = size.height
         }
         .onAppear {
             if LaunchRequest.openInstruments {
@@ -90,10 +92,17 @@ private struct SituationContentView: View {
         }
     }
 
-    /// Half the screen when the rack is beside the map. The map keeps the
-    /// rest; a rack alone keeps it all. The map cannot be stood down while
-    /// the rack is away, so the screen is never empty.
-    private var rackWidth: CGFloat { windowWidth / 2 }
+    /// Wide enough that the selected profile's whole stack fits the window
+    /// height, no wider than half the screen: the rack is sized by what it
+    /// shows, and the map keeps the rest.
+    private var rackWidth: CGFloat {
+        InstrumentRackView.idealWidth(
+            for: InstrumentProfile.selected(storedId: rackProfileId),
+            model: hostLink,
+            windowHeight: windowHeight,
+            windowWidth: windowWidth
+        )
+    }
 
     private var mapSurface: some View {
         // The map owns its half. Status, layers, reception and flights live in the

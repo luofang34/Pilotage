@@ -1,11 +1,19 @@
 import Foundation
 
 /// One tile in an instrument rack, in stack order.
-enum InstrumentTile: Codable, Hashable {
+enum InstrumentTile: Codable, Hashable, Identifiable {
     /// Live video from the vehicle, by source name.
     case video(source: String)
     /// One registry panel, by its stable descriptor id.
     case panel(id: String)
+
+    /// Stable identity for presentation APIs.
+    var id: String {
+        switch self {
+        case .video(let source): "video-\(source)"
+        case .panel(let id): "panel-\(id)"
+        }
+    }
 }
 
 /// One named composition of the rack: what the operator sees beside the
