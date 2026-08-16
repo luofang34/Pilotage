@@ -1851,6 +1851,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-instrument-feed"
+version = "0.1.0"
+dependencies = [
+ "indicate-instrument-feeder",
+ "indicate-instrument-state",
+ "pilotage-instrument-runtime",
+ "pilotage-protocol",
+]
+
+[[package]]
 name = "pilotage-instrument-runtime"
 version = "0.1.0"
 dependencies = [

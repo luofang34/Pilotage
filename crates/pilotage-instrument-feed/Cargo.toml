@@ -1,0 +1,15 @@
+[package]
+name = "pilotage-instrument-feed"
+description = "The shared telemetry-to-instrument feed: wire samples through the feeder lanes into encoded state frames, one implementation for every operator client (ADR-0037)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+indicate-instrument-feeder = { workspace = true }
+indicate-instrument-state = { workspace = true }
+pilotage-instrument-runtime = { workspace = true }
+pilotage-protocol = { workspace = true }
