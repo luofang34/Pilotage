@@ -130,10 +130,10 @@ fn stamp_skew_the_browser_accepts_does_not_flag_coherence() {
         sim_accept_unseen: true,
     });
     let mut sample = wire_sample(1, 0.0);
-    if let Some(avionics) = sample.avionics.as_mut() {
-        if let Some(stamp) = avionics.kinematics_stamp.as_mut() {
-            stamp.acquired_at_ns += 200_000_000;
-        }
+    if let Some(avionics) = sample.avionics.as_mut()
+        && let Some(stamp) = avionics.kinematics_stamp.as_mut()
+    {
+        stamp.acquired_at_ns += 200_000_000;
     }
     assert!(feed.ingest(&sample, 100.0));
 
@@ -147,5 +147,25 @@ fn stamp_skew_the_browser_accepts_does_not_flag_coherence() {
         report.state.snapshot.coherence,
         indicate_instrument_state::SnapshotCoherence::Coherent,
         "200 ms of skew is inside the shared budget"
+    );
+}
+
+#[test]
+fn the_heading_bug_carries_a_declared_reference() {
+    // A bug against an Unknown north fail-closes invisible; the feed
+    // declares the simulation north the way the browser does.
+    let mut feed = InstrumentFeed::new(&FeedParams {
+        vehicle_id: 1,
+        sim_accept_unseen: true,
+    });
+    feed.ingest(&wire_sample(1, 0.0), 100.0);
+    let mut buf = vec![0_u8; Runtime::state_capacity()];
+    let len = feed.state_frame(120.0, &mut buf).expect("frame encodes");
+    let report =
+        indicate_instrument_state::abi::v7::decode_state(&buf[..len]).expect("frame decodes");
+    assert_eq!(
+        report.state.selections.heading_bug_reference,
+        indicate_instrument_state::HeadingReference::SimLocalTrue,
+        "the bug must state which north it is measured from"
     );
 }

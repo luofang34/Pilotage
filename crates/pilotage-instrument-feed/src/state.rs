@@ -146,6 +146,14 @@ impl InstrumentFeed {
                 generation: snapshot.generation,
                 coherence: coherence_from_report(snapshot),
             },
+            // The bug renders only against a declared north; the default
+            // Unknown reference fail-closes it invisible. The browser
+            // declares the simulation north, and so does this feed.
+            selections: indicate_instrument_state::Selections {
+                heading_bug_rad: 0.0,
+                heading_bug_reference: HeadingReference::SimLocalTrue,
+                ..Default::default()
+            },
             ..AircraftState::default()
         }
     }
