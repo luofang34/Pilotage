@@ -43,7 +43,12 @@ private struct SituationContentView: View {
     @StateObject private var model = SituationClientModel()
     @StateObject private var hostLink = HostLinkModel()
     @State private var menuPresented = false
-    @State private var instrumentsPresented = LaunchRequest.openInstruments
+    /// Whether the instrument rack shares the screen. Persisted: a cockpit
+    /// arrangement is a decision, not a session accident.
+    @AppStorage("pilotageRackPresented") private var rackPresented = false
+    /// Whether the map holds its half; the rack owns the toggle.
+    @AppStorage("pilotageMapVisible") private var mapVisible = true
+    @State private var windowWidth: CGFloat = 1000
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
     @State private var modesPresented = LaunchRequest.openMapModes
@@ -56,7 +61,42 @@ private struct SituationContentView: View {
     @StateObject private var ownship = OwnshipModel()
 
     var body: some View {
-        // The map owns the screen. Status, layers, reception and flights live in the
+        HStack(spacing: 0) {
+            if mapVisible {
+                mapSurface
+                    .frame(maxWidth: .infinity)
+            }
+            if rackPresented {
+                InstrumentRackView(model: hostLink, mapVisible: $mapVisible)
+                    .frame(maxWidth: mapVisible ? rackWidth : .infinity)
+                    .transition(.move(edge: .trailing))
+            }
+        }
+        .background(.black)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            windowWidth = width
+        }
+        .onAppear {
+            if LaunchRequest.openInstruments {
+                rackPresented = true
+                hostLink.connect(
+                    url: UserDefaults.standard.string(forKey: "pilotageHostUrl") ?? "",
+                    certificateSha256Hex:
+                        UserDefaults.standard.string(forKey: "pilotageHostCertHash") ?? ""
+                )
+            }
+        }
+    }
+
+    /// Half the screen when the rack is beside the map. The map keeps the
+    /// rest; a rack alone keeps it all. The map cannot be stood down while
+    /// the rack is away, so the screen is never empty.
+    private var rackWidth: CGFloat { windowWidth / 2 }
+
+    private var mapSurface: some View {
+        // The map owns its half. Status, layers, reception and flights live in the
         // drawer, because a map covered in text answers "where" worse than a bare one.
         ZStack {
             // The map is the document, so it runs to the glass. A safe-area inset here
@@ -176,16 +216,6 @@ private struct SituationContentView: View {
         }
         .sheet(isPresented: $menuPresented) {
             SituationMenuView(model: model, hostLink: hostLink)
-        }
-        .fullScreenCover(isPresented: $instrumentsPresented) {
-            NavigationStack {
-                InstrumentsView(model: hostLink)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { instrumentsPresented = false }
-                        }
-                    }
-            }
         }
         .sheet(
             isPresented: Binding(

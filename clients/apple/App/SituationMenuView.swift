@@ -44,13 +44,21 @@ struct SituationMenuView: View {
         }
     }
 
-    /// The doorway to the host-linked instrument and control screen.
+    /// The rack shares the screen with the map; this is its switch.
     private var instrumentsSection: some View {
         Section {
-            NavigationLink("Instruments") {
-                InstrumentsView(model: hostLink)
-            }
+            Toggle("Instrument rack", isOn: rackPresented)
+        } footer: {
+            Text("A vertical stack of live instruments beside the map. "
+                + "Pick the profile and the host connection on the rack itself.")
         }
+    }
+
+    private var rackPresented: Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.bool(forKey: "pilotageRackPresented") },
+            set: { UserDefaults.standard.set($0, forKey: "pilotageRackPresented") }
+        )
     }
 
     /// What the radios are doing, said before it is explained.

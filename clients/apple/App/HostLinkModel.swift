@@ -12,6 +12,18 @@ import SwiftUI
 /// game-controller demands. It decodes nothing and derives nothing.
 @MainActor
 final class HostLinkModel: ObservableObject {
+    /// Where the link stands, for interface state.
+    enum Phase: Equatable {
+        case idle
+        case connecting(host: String)
+        case observing(host: String)
+        case controlling(scope: String)
+        case reconnecting
+        case stopped(reason: String)
+    }
+
+    /// Where the link stands now.
+    @Published private(set) var phase: Phase = .idle
     /// What the link screen shows about the session.
     @Published private(set) var status = "not connected"
     /// Offered vehicles once admitted, in the host's order.
@@ -113,6 +125,7 @@ final class HostLinkModel: ObservableObject {
     /// certificate and exists for loopback development only.
     func connect(url: String, certificateSha256Hex: String) {
         disconnect()
+        phase = .connecting(host: Self.hostName(of: url))
         status = "connecting to \(url)"
         do {
             link = try LinkSession.connect(
@@ -143,7 +156,21 @@ final class HostLinkModel: ObservableObject {
         link = nil
         catalog = nil
         leaseHeld = false
+        phase = .idle
         status = "not connected"
+    }
+
+    private static func hostName(of url: String) -> String {
+        URL(string: url)?.host ?? url
+    }
+
+    /// The registry panel matching one profile tile id, by descriptor id
+    /// first and title second, case-insensitively. The registry is the
+    /// only source of what exists; a miss is the caller's typed reason.
+    func panelChoice(forTileId id: String) -> PanelChoice? {
+        let wanted = id.lowercased()
+        return panels.first { $0.descriptor.id.lowercased() == wanted }
+            ?? panels.first { $0.descriptor.title.lowercased() == wanted }
     }
 
     /// Asks for control of the first advertised scope.
@@ -199,9 +226,15 @@ final class HostLinkModel: ObservableObject {
         switch event {
         case .admitted(let catalog):
             self.catalog = catalog
+            phase = .observing(host: catalog.hostVersion)
             status = "admitted by \(catalog.hostVersion)"
         case .leaseChanged(let held, let scope, let detail):
             leaseHeld = held
+            if held {
+                phase = .controlling(scope: scope)
+            } else if let catalog {
+                phase = .observing(host: catalog.hostVersion)
+            }
             status = held ? "controlling \(scope)" : "observing (\(detail))"
             held ? startControlLoop() : stopControlLoop()
         case .controlRejected(let sequence):
@@ -209,10 +242,12 @@ final class HostLinkModel: ObservableObject {
         case .down(let retryAtMs):
             leaseHeld = false
             stopControlLoop()
+            phase = retryAtMs == nil ? .idle : .reconnecting
             status = retryAtMs == nil ? "disconnected" : "reconnecting…"
         case .stopped(let reason):
             leaseHeld = false
             stopControlLoop()
+            phase = .stopped(reason: reason)
             status = "stopped: \(reason)"
         }
     }
