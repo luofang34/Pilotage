@@ -33,6 +33,17 @@ struct Link {
     started: Instant,
     retry_at_ms: Option<u64>,
     stopped: bool,
+    stats: LinkStats,
+}
+
+/// One second of link accounting, reset on report.
+#[derive(Debug, Default)]
+struct LinkStats {
+    telemetry: u32,
+    state_frames: u32,
+    control_frames: u32,
+    rejected: u32,
+    action_results: u32,
 }
 
 impl Link {
@@ -90,6 +101,7 @@ impl Link {
                 });
             }
             ModuleEvent::Telemetry(sample) => {
+                self.stats.telemetry = self.stats.telemetry.wrapping_add(1);
                 let now_ms = self.now_ms();
                 if let Some(feed) = self.feed.as_mut() {
                     #[allow(clippy::cast_precision_loss)]
@@ -125,6 +137,7 @@ impl Link {
                 });
             }
             ModuleEvent::ControlRejected(rejected) => {
+                self.stats.rejected = self.stats.rejected.wrapping_add(1);
                 self.observer.on_event(LinkEvent::ControlRejected {
                     sequence: rejected.sequence.as_ref().map_or(0, |s| s.value),
                 });
@@ -146,8 +159,21 @@ impl Link {
         #[allow(clippy::cast_precision_loss)]
         if let Ok(len) = feed.state_frame(now_ms as f64, &mut buf) {
             buf.truncate(len);
+            self.stats.state_frames = self.stats.state_frames.wrapping_add(1);
             self.observer.on_state_frame(buf, now_ms);
         }
+    }
+
+    /// Reports and resets one second of accounting.
+    fn report_stats(&mut self) {
+        let stats = std::mem::take(&mut self.stats);
+        self.observer.on_event(LinkEvent::Stats {
+            telemetry_per_second: stats.telemetry,
+            state_frames_per_second: stats.state_frames,
+            control_frames_per_second: stats.control_frames,
+            rejected_per_second: stats.rejected,
+            action_results_per_second: stats.action_results,
+        });
     }
 
     /// Builds and sends one fenced motion frame, or nothing without a
@@ -164,9 +190,19 @@ impl Link {
         let Some(intent) = velocity_intent(demand, capability) else {
             return Vec::new();
         };
+        self.stats.control_frames = self.stats.control_frames.wrapping_add(1);
         let sampled_at_nanos = self.now_ms().saturating_mul(1_000_000);
         self.engine
             .control_frame(ControlCommand::Intent(intent), sampled_at_nanos)
+    }
+
+    /// Builds a discrete action command under the held lease.
+    fn action_actions(&mut self, code: i32) -> Vec<ClientAction> {
+        self.engine.control_action(wire::ControlActionRequest {
+            action: code,
+            mode_target: 0,
+            action_id: 0,
+        })
     }
 }
 
@@ -187,6 +223,7 @@ pub(crate) async fn run(
         started: Instant::now(),
         retry_at_ms: None,
         stopped: false,
+        stats: LinkStats::default(),
     };
     loop {
         match connect(&config, pinned).await {
@@ -297,6 +334,7 @@ async fn drive(
 
     let mut ticker =
         tokio::time::interval(std::time::Duration::from_millis(STATE_FRAME_INTERVAL_MS));
+    let mut stats_ticker = tokio::time::interval(std::time::Duration::from_secs(1));
     loop {
         tokio::select! {
             event = events.recv() => {
@@ -330,10 +368,15 @@ async fn drive(
                         });
                         link.execute(actions, &mut send, connection).await;
                     }
+                    Some(LinkCommand::Action { code }) => {
+                        let actions = link.action_actions(code);
+                        link.execute(actions, &mut send, connection).await;
+                    }
                     Some(LinkCommand::Shutdown) | None => return true,
                 }
             }
             _ = ticker.tick() => link.deliver_state_frame(),
+            _ = stats_ticker.tick() => link.report_stats(),
         }
     }
 }

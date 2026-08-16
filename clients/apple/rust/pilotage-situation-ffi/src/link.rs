@@ -37,6 +37,9 @@ pub(crate) enum LinkCommand {
         throttle: f32,
         yaw: f32,
     },
+    Action {
+        code: i32,
+    },
     Shutdown,
 }
 
@@ -104,6 +107,13 @@ impl LinkSession {
                 yaw,
             })
             .ok();
+    }
+
+    /// Sends one discrete action under the held lease: 1 arms, 2
+    /// disarms (the wire `ControlAction` codes). Without a lease the
+    /// action dies in the shared core.
+    pub fn send_action(&self, code: i32) {
+        self.commands.send(LinkCommand::Action { code }).ok();
     }
 
     /// Stops the driver and the connection.

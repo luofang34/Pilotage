@@ -41,8 +41,12 @@ impl InstrumentFeed {
                 source_id: None,
                 incarnation: None,
                 sim_accept_unseen: params.sim_accept_unseen,
-                maximum_seen_incarnations: 4,
-                maximum_skew_nanos: 50_000_000,
+                // The browser viewer's own parameters, mirrored exactly: a
+                // tighter budget here flags coherence the web accepts, and
+                // the two clients disagreeing about one telemetry stream is
+                // the drift this crate exists to prevent.
+                maximum_seen_incarnations: 8,
+                maximum_skew_nanos: 300_000_000,
             }),
             turn: Turn::new(),
             nav: NavGuidance::new(),

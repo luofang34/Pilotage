@@ -205,20 +205,33 @@ struct InstrumentRackView: View {
     }
 
     private var controlBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: model.controllerAttached
-                ? "gamecontroller.fill"
-                : "gamecontroller")
-                .foregroundStyle(model.controllerAttached ? .green : .secondary)
-            Spacer()
-            if model.leaseHeld {
-                Button("Release control", role: .destructive) { model.releaseLease() }
-            } else {
-                Button("Request control") { model.requestLease() }
-                    .disabled(model.catalog == nil)
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: model.controllerAttached
+                    ? "gamecontroller.fill"
+                    : "gamecontroller")
+                    .foregroundStyle(model.controllerAttached ? .green : .secondary)
+                Spacer()
+                if model.leaseHeld {
+                    // Motion setpoints move nothing until the vehicle is
+                    // armed; the pair sits where the sticks are worked.
+                    Button("Arm") { model.arm() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Disarm", role: .destructive) { model.disarm() }
+                    Button("Release", role: .destructive) { model.releaseLease() }
+                } else {
+                    Button("Request control") { model.requestLease() }
+                        .disabled(model.catalog == nil)
+                }
+            }
+            .font(.callout)
+            if !model.linkStats.isEmpty {
+                Text(model.linkStats)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .font(.callout)
         .foregroundStyle(.white)
     }
 }

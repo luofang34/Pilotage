@@ -119,3 +119,33 @@ fn absence_of_avionics_feeds_nothing() {
         "no attitude group may appear before one is admitted"
     );
 }
+
+#[test]
+fn stamp_skew_the_browser_accepts_does_not_flag_coherence() {
+    // The browser admits up to 300 ms of attitude/kinematics acquisition
+    // skew. A tighter budget here made the native panels flag coherence
+    // the web accepted — and flap as real skew wandered across it.
+    let mut feed = InstrumentFeed::new(&FeedParams {
+        vehicle_id: 1,
+        sim_accept_unseen: true,
+    });
+    let mut sample = wire_sample(1, 0.0);
+    if let Some(avionics) = sample.avionics.as_mut() {
+        if let Some(stamp) = avionics.kinematics_stamp.as_mut() {
+            stamp.acquired_at_ns += 200_000_000;
+        }
+    }
+    assert!(feed.ingest(&sample, 100.0));
+
+    let mut buf = vec![0_u8; Runtime::state_capacity()];
+    let len = feed
+        .state_frame(120.0, &mut buf)
+        .expect("the frame encodes");
+    let report =
+        indicate_instrument_state::abi::v7::decode_state(&buf[..len]).expect("the frame decodes");
+    assert_eq!(
+        report.state.snapshot.coherence,
+        indicate_instrument_state::SnapshotCoherence::Coherent,
+        "200 ms of skew is inside the shared budget"
+    );
+}

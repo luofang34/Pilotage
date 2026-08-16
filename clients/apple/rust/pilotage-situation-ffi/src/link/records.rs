@@ -95,6 +95,22 @@ pub enum LinkEvent {
         /// The typed fault, formatted.
         reason: String,
     },
+    /// One second of link accounting. What blinks on screen shows up
+    /// here as a number: telemetry that arrives in bursts, frames the
+    /// host rejected, actions that never got a result.
+    Stats {
+        /// Telemetry samples ingested this second.
+        telemetry_per_second: u32,
+        /// State frames delivered to the shell this second.
+        state_frames_per_second: u32,
+        /// Control frames sent this second.
+        control_frames_per_second: u32,
+        /// Control frames the host rejected this second.
+        rejected_per_second: u32,
+        /// Discrete action results seen this second, `granted` counting
+        /// accepted ones.
+        action_results_per_second: u32,
+    },
 }
 
 impl LinkCatalog {

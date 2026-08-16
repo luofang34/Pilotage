@@ -40,6 +40,8 @@ final class HostLinkModel: ObservableObject {
     }
     /// Whether a game controller is attached.
     @Published private(set) var controllerAttached = false
+    /// One second of link accounting, verbatim from the driver.
+    @Published private(set) var linkStats = ""
 
     /// One registry panel with the index the runtime addresses it by.
     struct PanelChoice: Identifiable {
@@ -186,6 +188,18 @@ final class HostLinkModel: ObservableObject {
         link?.releaseLease()
     }
 
+    /// Arms the vehicle under the held lease. A disarmed vehicle ignores
+    /// motion setpoints, so this is the gate between holding control and
+    /// the sticks doing anything.
+    func arm() {
+        link?.sendAction(code: 1)
+    }
+
+    /// Disarms the vehicle under the held lease.
+    func disarm() {
+        link?.sendAction(code: 2)
+    }
+
     /// Fetches the session manifest xtask serves and connects with it:
     /// the same three facts the browser reads, taken from the same file,
     /// so a hand-typed hash is never the price of pinning.
@@ -249,6 +263,15 @@ final class HostLinkModel: ObservableObject {
             stopControlLoop()
             phase = .stopped(reason: reason)
             status = "stopped: \(reason)"
+        case .stats(
+            let telemetry,
+            let stateFrames,
+            let controlFrames,
+            let rejected,
+            let actionResults
+        ):
+            linkStats = "tlm \(telemetry)/s · state \(stateFrames)/s · ctl "
+                + "\(controlFrames)/s · rej \(rejected) · act \(actionResults)"
         }
     }
 
@@ -257,8 +280,10 @@ final class HostLinkModel: ObservableObject {
         lastFrameClockMs = acceptedAtMs
         lastFrameWallMs = Self.wallMs()
         do {
-            try composition.writeState(stateFrame, acceptedAtMs: acceptedAtMs)
-            try composition.compose(nowMs: acceptedAtMs, pathHealthy: true)
+            // One lock scope for the write and the recompose: the panel
+            // render worker is free-running, and a render landing between
+            // the two would fail, latch, and flap the whole panel.
+            try composition.ingest(stateFrame, acceptedAtMs: acceptedAtMs, pathHealthy: true)
             instrumentFault = nil
         } catch {
             // The panel's own health latch covers the screen; this is the
