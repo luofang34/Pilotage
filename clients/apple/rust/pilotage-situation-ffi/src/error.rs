@@ -61,4 +61,10 @@ pub enum FfiError {
         /// Lock failure detail.
         message: String,
     },
+    /// A host link could not be configured.
+    #[error("host link is not available: {message}")]
+    HostLink {
+        /// Configuration failure detail.
+        message: String,
+    },
 }
