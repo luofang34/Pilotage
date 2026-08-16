@@ -44,6 +44,7 @@ pub struct ClientEngine {
     authority: AuthorityMirror,
     lane: Option<ControlLane>,
     pending_lease: Option<(u64, String)>,
+    activation_announced: bool,
     reconnect: ReconnectState,
 }
 
@@ -60,6 +61,7 @@ impl ClientEngine {
             authority: AuthorityMirror::default(),
             lane: None,
             pending_lease: None,
+            activation_announced: false,
             reconnect: ReconnectState::default(),
         }
     }
@@ -238,20 +240,31 @@ impl ClientEngine {
             .pending_lease
             .as_ref()
             .is_some_and(|(v, s)| *v == vehicle_id && *s == scope);
+        let mut actions = Vec::new();
         if response.granted
             && matches_pending
             && let Some(admission) = self.admission.as_ref()
         {
             self.pending_lease = None;
             let generation = response.generation.as_ref().map_or(0, |g| g.value);
-            self.lane = Some(ControlLane::new(
-                admission.session_id,
-                vehicle_id,
-                scope,
-                generation,
-            ));
+            let mut lane = ControlLane::new(admission.session_id, vehicle_id, scope, generation);
+            // The host refuses actions and typed frames from a connection
+            // that never announced its control profile; the announcement
+            // travels with the first grant and the lane binds to it.
+            if !self.activation_announced {
+                self.activation_announced = true;
+                actions.push(ClientAction::SendBootstrap(bootstrap::profile_activation(
+                    admission.session_id,
+                )));
+            }
+            lane.bind_profile(
+                bootstrap::NATIVE_PROFILE_REVISION,
+                bootstrap::NATIVE_ACTIVATION_REVISION,
+            );
+            self.lane = Some(lane);
         }
-        vec![ClientAction::Emit(ModuleEvent::Lease(response))]
+        actions.push(ClientAction::Emit(ModuleEvent::Lease(response)));
+        actions
     }
 
     fn on_session_event(&mut self, envelope: wire::Envelope) -> Vec<ClientAction> {
@@ -294,6 +307,7 @@ impl ClientEngine {
         self.lane = None;
         self.pending_lease = None;
         self.admission = None;
+        self.activation_announced = false;
         self.streams.reset();
         self.bootstrap_pending.clear();
         self.phase = ClientPhase::Disconnected;

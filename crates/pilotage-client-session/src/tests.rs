@@ -470,3 +470,44 @@ fn a_full_climb_demand_scales_onto_the_fixture_envelope() {
         .is_none()
     );
 }
+
+#[test]
+fn the_first_grant_announces_the_profile_and_binds_the_lane() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, "vehicle.motion");
+    let actions = grant(&mut engine, 4);
+
+    // The grant's actions carry exactly one activation announcement.
+    let activation = actions
+        .iter()
+        .find_map(|action| match action {
+            ClientAction::SendBootstrap(bytes) => {
+                let (envelope, _) =
+                    pilotage_protocol::decode_envelope_length_delimited(bytes).ok()?;
+                match envelope.payload {
+                    Some(wire::envelope::Payload::ProfileActivation(activation)) => {
+                        Some(activation)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .expect("the first grant announces the control profile");
+    assert_eq!(activation.session.map(|s| s.value), Some(7));
+    assert_eq!(activation.activation_revision, 1);
+    assert_eq!(activation.digest.len(), 32);
+
+    // Every later frame binds to the announced activation, or the host
+    // rejects the press with "activation revision does not match".
+    let actions = engine.control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 10);
+    let ClientAction::SendDatagram(bytes) = &actions[0] else {
+        panic!("a held lease produces a datagram");
+    };
+    let envelope = wire::Envelope::decode(bytes.as_slice()).expect("frame decodes");
+    let Some(wire::envelope::Payload::ControlFrame(frame)) = envelope.payload else {
+        panic!("the datagram is a control frame");
+    };
+    assert_eq!(frame.activation_revision, 1);
+}

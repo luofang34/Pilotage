@@ -1781,6 +1781,7 @@ dependencies = [
 name = "pilotage-client-session"
 version = "0.1.0"
 dependencies = [
+ "pilotage-input",
  "pilotage-protocol",
  "prost",
  "serde",

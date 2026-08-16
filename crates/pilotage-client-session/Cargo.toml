@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+pilotage-input = { workspace = true }
 pilotage-protocol = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }

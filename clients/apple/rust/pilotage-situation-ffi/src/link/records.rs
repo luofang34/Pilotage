@@ -95,6 +95,15 @@ pub enum LinkEvent {
         /// The typed fault, formatted.
         reason: String,
     },
+    /// One discrete action's outcome, correlated to the press.
+    ActionResult {
+        /// The wire `ControlAction` code the result answers.
+        action: i32,
+        /// Whether the vehicle executed it.
+        accepted: bool,
+        /// Adapter-supplied reason when not accepted; empty on acceptance.
+        detail: String,
+    },
     /// One second of link accounting. What blinks on screen shows up
     /// here as a number: telemetry that arrives in bursts, frames the
     /// host rejected, actions that never got a result.

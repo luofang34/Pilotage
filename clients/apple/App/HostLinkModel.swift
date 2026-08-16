@@ -263,6 +263,9 @@ final class HostLinkModel: ObservableObject {
             stopControlLoop()
             phase = .stopped(reason: reason)
             status = "stopped: \(reason)"
+        case .actionResult(let action, let accepted, let detail):
+            let name = action == 1 ? "arm" : action == 2 ? "disarm" : "action \(action)"
+            status = accepted ? "\(name) accepted" : "\(name) rejected: \(detail)"
         case .stats(
             let telemetry,
             let stateFrames,

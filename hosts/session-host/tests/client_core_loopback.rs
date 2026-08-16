@@ -265,6 +265,31 @@ async fn the_client_core_drives_admission_lease_and_an_applied_control_frame() {
         "the authority mirror sees this principal as the holder"
     );
 
+    // Arm through the fenced reliable action path. The result must come
+    // back accepted: an unannounced profile activation would reject it,
+    // which is exactly the fault this leg pins down.
+    let actions = driver.engine.control_action(wire::ControlActionRequest {
+        action: 1,
+        mode_target: 0,
+        action_id: 0,
+    });
+    driver.execute(actions).await;
+    let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
+    let mut armed = false;
+    while !armed {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the arm result must arrive before the timeout"
+        );
+        driver.pump_bootstrap().await;
+        for event in driver.take_events() {
+            if let ModuleEvent::ActionResult(result) = event {
+                assert!(result.accepted, "arm must be accepted: {}", result.detail);
+                armed = true;
+            }
+        }
+    }
+
     // Control: full throttle through the engine's fenced lane, applied by
     // the reference adapter and observed as nonzero speed in telemetry.
     driver.drive_until_moving().await;
