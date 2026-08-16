@@ -16,6 +16,20 @@ use crate::event::StreamId;
 /// video-delivery state). Mirrors the host's `stream_tag::SESSION_EVENTS`.
 pub(crate) const SESSION_EVENTS_TAG: u8 = 0x01;
 
+/// Tag prefixing a long-lived per-source video stream: repeated
+/// big-endian u32 byte counts, each followed by one v2 frame body.
+/// Mirrors the host's `stream_tag::VIDEO_STREAM_V3`.
+pub(crate) const VIDEO_STREAM_V3_TAG: u8 = 0x04;
+
+/// What one read of a stream produced.
+#[derive(Debug, Default)]
+pub(crate) struct StreamOutput {
+    /// Complete session-event envelopes.
+    pub envelopes: Vec<wire::Envelope>,
+    /// Complete video frame bodies (v2 layout), in arrival order.
+    pub video_bodies: Vec<Vec<u8>>,
+}
+
 /// What one host-initiated stream turned out to be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StreamKind {
@@ -23,6 +37,8 @@ enum StreamKind {
     Untagged,
     /// Reliable session events: length-delimited envelopes follow.
     SessionEvents,
+    /// A per-source video stream: length-prefixed v2 frame bodies.
+    Video,
     /// A kind this engine does not consume. Bytes are discarded; the
     /// stream stays classified so it cannot be misread later.
     Unsupported(u8),
@@ -51,21 +67,23 @@ impl StreamTable {
         self.streams.clear();
     }
 
-    /// Feeds received bytes and returns every complete session-event
-    /// envelope they finish. Bytes on unsupported streams are dropped.
-    pub(crate) fn receive(&mut self, stream: StreamId, bytes: &[u8]) -> Vec<wire::Envelope> {
+    /// Feeds received bytes and returns what they completed. Bytes on
+    /// unsupported streams are dropped.
+    pub(crate) fn receive(&mut self, stream: StreamId, bytes: &[u8]) -> StreamOutput {
         let entry = self
             .streams
             .entry(stream)
             .or_insert((StreamKind::Untagged, Vec::new()));
         let (kind, pending) = entry;
         let mut bytes = bytes;
+        let mut output = StreamOutput::default();
         if *kind == StreamKind::Untagged {
             let Some((&tag, rest)) = bytes.split_first() else {
-                return Vec::new();
+                return output;
             };
             *kind = match tag {
                 SESSION_EVENTS_TAG => StreamKind::SessionEvents,
+                VIDEO_STREAM_V3_TAG => StreamKind::Video,
                 other => StreamKind::Unsupported(other),
             };
             bytes = rest;
@@ -73,10 +91,32 @@ impl StreamTable {
         match kind {
             StreamKind::SessionEvents => {
                 pending.extend_from_slice(bytes);
-                drain_envelopes(pending)
+                output.envelopes = drain_envelopes(pending);
             }
-            _ => Vec::new(),
+            StreamKind::Video => {
+                pending.extend_from_slice(bytes);
+                output.video_bodies = drain_video_records(pending);
+            }
+            _ => {}
         }
+        output
+    }
+}
+
+/// Pops every complete `[u32 BE length][body]` video record off the
+/// front of `pending`, leaving any partial tail in place.
+pub(crate) fn drain_video_records(pending: &mut Vec<u8>) -> Vec<Vec<u8>> {
+    let mut bodies = Vec::new();
+    loop {
+        let Some(prefix) = pending.get(..4) else {
+            return bodies;
+        };
+        let len = u32::from_be_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as usize;
+        let Some(body) = pending.get(4..4 + len) else {
+            return bodies;
+        };
+        bodies.push(body.to_vec());
+        pending.drain(..4 + len);
     }
 }
 

@@ -42,6 +42,10 @@ final class HostLinkModel: ObservableObject {
     @Published private(set) var controllerAttached = false
     /// One second of link accounting, verbatim from the driver.
     @Published private(set) var linkStats = ""
+    /// The latest decoded picture per video source id.
+    @Published private(set) var videoImages: [UInt8: UIImage] = [:]
+    /// When each source last produced a picture, on the wall clock.
+    @Published private(set) var videoSeenAtMs: [UInt8: UInt64] = [:]
 
     /// One registry panel with the index the runtime addresses it by.
     struct PanelChoice: Identifiable {
@@ -278,6 +282,11 @@ final class HostLinkModel: ObservableObject {
         }
     }
 
+    fileprivate func accept(videoImage: UIImage, sourceId: UInt8) {
+        videoImages[sourceId] = videoImage
+        videoSeenAtMs[sourceId] = Self.wallMs()
+    }
+
     fileprivate func accept(stateFrame: [UInt8], acceptedAtMs: UInt64) {
         guard let composition else { return }
         lastFrameClockMs = acceptedAtMs
@@ -381,11 +390,31 @@ final class HostLinkModel: ObservableObject {
 }
 
 /// Hops link callbacks from the driver's thread onto the main actor.
+/// Video decodes here, off the interface thread; only pictures cross.
 private final class LinkRelay: LinkObserver, @unchecked Sendable {
     private weak var model: HostLinkModel?
+    private let decoders = NSMutableDictionary()
+    private let decoderLock = NSLock()
 
     init(model: HostLinkModel) {
         self.model = model
+    }
+
+    func onVideoFrame(sourceId: UInt8, codec: String, payload: Data) {
+        decoderLock.lock()
+        let key = NSNumber(value: sourceId)
+        let decoder: VideoTileDecoder
+        if let existing = decoders[key] as? VideoTileDecoder {
+            decoder = existing
+        } else {
+            decoder = VideoTileDecoder()
+            decoders[key] = decoder
+        }
+        decoderLock.unlock()
+        guard let image = decoder.decode(codec: codec, payload: Array(payload)) else { return }
+        Task { @MainActor [model] in
+            model?.accept(videoImage: image, sourceId: sourceId)
+        }
     }
 
     func onEvent(event: LinkEvent) {

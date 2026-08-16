@@ -511,3 +511,29 @@ fn the_first_grant_announces_the_profile_and_binds_the_lane() {
     };
     assert_eq!(frame.activation_revision, 1);
 }
+
+#[test]
+fn a_video_stream_yields_frame_bodies_across_split_reads() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.handle(TransportEvent::UniStreamOpened(StreamId(3)), 0);
+
+    let body = vec![0xAB_u8; 10];
+    let mut wire_bytes = vec![0x04];
+    wire_bytes.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    wire_bytes.extend_from_slice(&body);
+
+    let first = engine.handle(
+        TransportEvent::UniStreamReceived(StreamId(3), wire_bytes[..6].to_vec()),
+        0,
+    );
+    assert!(first.is_empty(), "a partial record emits nothing");
+    let rest = engine.handle(
+        TransportEvent::UniStreamReceived(StreamId(3), wire_bytes[6..].to_vec()),
+        0,
+    );
+    let ClientAction::Emit(ModuleEvent::VideoFrame(received)) = &rest[0] else {
+        panic!("a completed record emits one video frame body");
+    };
+    assert_eq!(received, &body);
+}

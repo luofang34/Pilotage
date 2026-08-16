@@ -13,4 +13,8 @@ pub trait LinkObserver: Send + Sync {
     /// from admitted telemetry. `accepted_at_ms` is the link's monotonic
     /// clock at assembly.
     fn on_state_frame(&self, frame: Vec<u8>, accepted_at_ms: u64);
+    /// One decoded video frame: which source, which codec (a FourCC such
+    /// as "H264" or "MJPG"), and the encoded payload. The platform owns
+    /// the decoder and the surface (ADR-0037).
+    fn on_video_frame(&self, source_id: u8, codec: String, payload: Vec<u8>);
 }

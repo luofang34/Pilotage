@@ -108,11 +108,19 @@ impl ClientEngine {
                 Vec::new()
             }
             TransportEvent::UniStreamReceived(stream, bytes) => {
-                let envelopes = self.streams.receive(stream, &bytes);
-                envelopes
+                let output = self.streams.receive(stream, &bytes);
+                let mut actions: Vec<ClientAction> = output
+                    .envelopes
                     .into_iter()
                     .flat_map(|envelope| self.on_session_event(envelope))
-                    .collect()
+                    .collect();
+                actions.extend(
+                    output
+                        .video_bodies
+                        .into_iter()
+                        .map(|body| ClientAction::Emit(ModuleEvent::VideoFrame(body))),
+                );
+                actions
             }
             TransportEvent::UniStreamClosed(stream) => {
                 self.streams.closed(stream);

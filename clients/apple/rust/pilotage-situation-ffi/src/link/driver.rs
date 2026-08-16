@@ -145,7 +145,27 @@ impl Link {
             ModuleEvent::ConnectionDown { retry_at_ms } => {
                 self.observer.on_event(LinkEvent::Down { retry_at_ms });
             }
-            ModuleEvent::Authority(_) | ModuleEvent::ActionResult(_) | ModuleEvent::Pong(_) => {}
+            ModuleEvent::ActionResult(result) => {
+                self.stats.action_results = self.stats.action_results.wrapping_add(1);
+                self.observer.on_event(LinkEvent::ActionResult {
+                    action: result.action,
+                    accepted: result.accepted,
+                    detail: result.detail,
+                });
+            }
+            ModuleEvent::VideoFrame(body) => {
+                // Structural decode only; a body that does not parse is
+                // dropped and the next one stands alone.
+                if let Ok(frame) = pilotage_protocol::video_frame::decode_v2(&body) {
+                    let codec = String::from_utf8_lossy(&frame.codec).into_owned();
+                    self.observer.on_video_frame(
+                        frame.header.source_id,
+                        codec,
+                        frame.payload.to_vec(),
+                    );
+                }
+            }
+            ModuleEvent::Authority(_) | ModuleEvent::Pong(_) => {}
         }
     }
 

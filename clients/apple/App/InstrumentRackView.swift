@@ -146,15 +146,29 @@ struct InstrumentRackView: View {
         switch tile {
         case .video(let source):
             let shown = videoSourceOverride.isEmpty ? source : videoSourceOverride
+            let liveSource = selectedVideoId(for: shown)
             // The native link does not carry media streams yet; the slot
             // states that rather than implying a camera exists. The source
             // switcher and the enlarge control are the tile's own, so a
             // live feed changes what fills it, not how it is worked.
             ZStack(alignment: .topTrailing) {
-                UnavailableTile(
-                    title: "Video · \(shown)",
-                    reason: "this link does not carry media streams yet"
-                )
+                if let id = liveSource, let image = model.videoImages[id] {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .bottomLeading) {
+                            Text("source \(id) · \(shown)")
+                                .font(.caption2)
+                                .padding(4)
+                                .background(.black.opacity(0.5))
+                        }
+                } else {
+                    UnavailableTile(
+                        title: "Video · \(shown)",
+                        reason: "no frames from this session yet"
+                    )
+                }
                 HStack(spacing: 4) {
                     Menu {
                         ForEach(Self.videoSources, id: \.self) { candidate in
@@ -202,6 +216,15 @@ struct InstrumentRackView: View {
                 .frame(width: width, height: width * 3 / 4)
             }
         }
+    }
+
+    /// The wire source id shown for a named source: the names map onto
+    /// arriving ids in order until a source catalog names them itself.
+    private func selectedVideoId(for name: String) -> UInt8? {
+        let arrived = model.videoImages.keys.sorted()
+        guard !arrived.isEmpty else { return nil }
+        let index = Self.videoSources.firstIndex(of: name) ?? 0
+        return arrived.indices.contains(index) ? arrived[index] : arrived[0]
     }
 
     private var controlBar: some View {
