@@ -4,7 +4,7 @@ use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
 // Source identity moved to `pilotage-ingress` so the ingress rules can be
-// applied where no wire exists (ADR-0018, ADR-0026's host-absent posture).
+// applied where no wire exists (ADR-0018, ADR-0037's local-source path).
 // Re-exported here because this crate is the adapter-facing vocabulary.
 pub use pilotage_ingress::{
     MeasurementClock, MeasurementStamp, SourceIncarnation, SourceIntegrity, SourceRole,

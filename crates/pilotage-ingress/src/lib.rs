@@ -8,8 +8,8 @@
 //! refresh its age.
 //!
 //! Those rules are stated here in types that carry no wire dependency, because
-//! they are needed in postures where no wire exists. ADR-0026's host-absent
-//! `embedded` posture — a tablet talking straight to a panel — still has source
+//! they are needed in compositions where no wire exists. ADR-0037's local-source
+//! path — a tablet talking straight to a panel — still has source
 //! identity: the panel boots, reconnects, and can be swapped. Expressing
 //! identity only in protocol types would make the rules unavailable exactly
 //! where there is no protocol.
