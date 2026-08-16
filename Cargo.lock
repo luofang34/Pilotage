@@ -1778,6 +1778,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-client-session"
+version = "0.1.0"
+dependencies = [
+ "pilotage-protocol",
+ "prost",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-conformance"
 version = "0.1.0"
 dependencies = [
@@ -1980,6 +1991,7 @@ dependencies = [
  "pilotage-adapter-px4",
  "pilotage-adapter-reference",
  "pilotage-authority",
+ "pilotage-client-session",
  "pilotage-mission",
  "pilotage-protocol",
  "pilotage-session",
