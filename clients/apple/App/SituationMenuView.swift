@@ -19,12 +19,14 @@ struct ReceptionSummary {
 
 struct SituationMenuView: View {
     @ObservedObject var model: SituationClientModel
+    @ObservedObject var hostLink: HostLinkModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
                 receptionSection
+                instrumentsSection
                 flightsSection
                 if let message = model.errorMessage {
                     Section("Problems") {
@@ -38,6 +40,15 @@ struct SituationMenuView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+
+    /// The doorway to the host-linked instrument and control screen.
+    private var instrumentsSection: some View {
+        Section {
+            NavigationLink("Instruments") {
+                InstrumentsView(model: hostLink)
             }
         }
     }

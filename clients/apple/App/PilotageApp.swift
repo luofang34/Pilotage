@@ -25,13 +25,25 @@ enum LaunchRequest {
         false
         #endif
     }
+
+    /// Open the Instruments destination and connect with the persisted
+    /// facts, so a headless harness can photograph a live panel.
+    static var openInstruments: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-OpenInstruments")
+        #else
+        false
+        #endif
+    }
 }
 
 private struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var model = SituationClientModel()
+    @StateObject private var hostLink = HostLinkModel()
     @State private var menuPresented = false
+    @State private var instrumentsPresented = LaunchRequest.openInstruments
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
     @State private var modesPresented = LaunchRequest.openMapModes
@@ -163,7 +175,17 @@ private struct SituationContentView: View {
             .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $menuPresented) {
-            SituationMenuView(model: model)
+            SituationMenuView(model: model, hostLink: hostLink)
+        }
+        .fullScreenCover(isPresented: $instrumentsPresented) {
+            NavigationStack {
+                InstrumentsView(model: hostLink)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { instrumentsPresented = false }
+                        }
+                    }
+            }
         }
         .sheet(
             isPresented: Binding(
