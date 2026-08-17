@@ -390,6 +390,7 @@ async fn viewer_server_sets_cache_control_no_store() {
         viewer_port: free_port(),
         profile: Profile::Simulation,
         log_dir: repo_root.clone(),
+        lan: false,
     };
     let stage = viewer_stage(&ctx).expect("the viewer stage plans");
     let mut child = ManagedChild::spawn(&stage.spec).expect("the viewer server spawns");

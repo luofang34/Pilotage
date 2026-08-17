@@ -12,9 +12,7 @@ use crate::cli::SimArgs;
 use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::{ManagedChild, ProcessSpec};
-use crate::readiness::{
-    Readiness, ReadySignal, await_ready, session_manifest, stage_log, viewer_url,
-};
+use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log};
 use preflight::{build_host, prepare_web_assets};
 
 pub(crate) mod preflight;
@@ -43,6 +41,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
         viewer_port: args.viewer_port,
         profile: args.profile,
         log_dir: log_dir.clone(),
+        lan: args.lan,
     };
 
     refuse_stale_session(backend.stale_process_patterns())?;
@@ -96,8 +95,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     let pid_file = log_dir.join("supervisor.pid");
     claim_supervisor(&pid_file, &mut children)?;
 
-    write_session_manifest(&ctx, actual_port, &certificate);
-    announce_ready(args, actual_port, &certificate);
+    announce::publish_connect_facts(args, &ctx, actual_port, &certificate);
 
     let outcome = supervise(&mut children, &stages, &mut cancel).await;
     std::fs::remove_file(&pid_file).ok();
@@ -107,32 +105,6 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     std::fs::remove_file(ctx.repo_root.join("clients/web/session.json")).ok();
     teardown(&mut children);
     outcome
-}
-
-/// Prints the ready URL and opens it in the default browser when asked.
-fn announce_ready(args: &SimArgs, actual_port: u16, certificate: &str) {
-    let url = viewer_url(args.viewer_port, actual_port, certificate);
-    print_line("");
-    print_line(&format!("session ready: {url}"));
-    print_line("press ctrl-c to stop the session");
-    if args.open {
-        open_in_browser(&url);
-    }
-}
-
-/// Writes the served session manifest (`clients/web/session.json`): any
-/// viewer tab — including one whose URL pins an older session's
-/// certificate — re-reads it after a failed connect and converges on
-/// THIS session. Best-effort: a failed write only loses stale-tab
-/// convergence, never the session.
-fn write_session_manifest(ctx: &SessionContext, port: u16, certificate: &str) {
-    let path = ctx.repo_root.join("clients/web/session.json");
-    if let Err(error) = std::fs::write(&path, session_manifest(port, certificate)) {
-        print_line(&format!(
-            "warning: could not write {}: {error}",
-            path.display()
-        ));
-    }
 }
 
 /// Registers the SIGINT handler and returns a receiver that flips to
@@ -382,8 +354,11 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
          \tdef end_headers(self):\n\
          \t\tself.send_header('Cache-Control', 'no-store')\n\
          \t\tsuper().end_headers()\n\
-         http.server.test(HandlerClass=H, port={port}, bind='127.0.0.1')\n",
-        port = ctx.viewer_port
+         http.server.test(HandlerClass=H, port={port}, bind='{bind}')\n",
+        port = ctx.viewer_port,
+        // Loopback by default: serving the working tree to the network is
+        // an explicit request, never a side effect of running a sim.
+        bind = if ctx.lan { "0.0.0.0" } else { "127.0.0.1" }
     );
     Ok(Stage {
         spec: ProcessSpec {
@@ -481,6 +456,8 @@ fn open_in_browser(url: &str) {
         tracing::warn!(%error, opener, "could not open the browser; use the printed URL");
     }
 }
+
+mod announce;
 
 #[cfg(test)]
 mod tests;

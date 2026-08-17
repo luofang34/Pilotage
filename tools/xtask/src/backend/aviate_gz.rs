@@ -215,6 +215,7 @@ mod tests {
             viewer_port: 8080,
             profile: Profile::Simulation,
             log_dir,
+            lan: false,
         }
     }
 

@@ -184,8 +184,8 @@ pub fn viewer_url(viewer_port: u16, host_port: u16, cert: &str) -> String {
 /// CURRENT session's connect parameters. A viewer tab whose URL pins an
 /// older session's certificate re-reads this after a failed connect and
 /// converges on the live session instead of retrying a dead hash forever.
-pub fn session_manifest(host_port: u16, cert: &str) -> String {
-    format!("{{\"host\":\"127.0.0.1\",\"port\":{host_port},\"certHash\":\"{cert}\"}}\n")
+pub fn session_manifest(host: &str, host_port: u16, cert: &str) -> String {
+    format!("{{\"host\":\"{host}\",\"port\":{host_port},\"certHash\":\"{cert}\"}}\n")
 }
 
 /// The log file a stage writes under `log_dir`.
@@ -238,7 +238,7 @@ mod tests {
         // The viewer's validator requires this exact shape (host string,
         // integer port, 64-hex certHash); a drift here strands stale tabs.
         assert_eq!(
-            super::session_manifest(4433, &cert),
+            super::session_manifest("127.0.0.1", 4433, &cert),
             format!("{{\"host\":\"127.0.0.1\",\"port\":4433,\"certHash\":\"{cert}\"}}\n")
         );
     }

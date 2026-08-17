@@ -50,6 +50,10 @@ pub struct SimArgs {
     /// Open the ready URL in the default browser (default on;
     /// `--no-open` suppresses it, `--open` states it explicitly).
     pub open: bool,
+    /// Serve the session to the local network (`--lan`): the viewer and
+    /// its connect manifest become reachable from another device, and the
+    /// native connect facts are printed.
+    pub lan: bool,
 }
 
 /// A parsed xtask invocation.
@@ -113,6 +117,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
     let mut host_port: u16 = 4433;
     let mut viewer_port: u16 = 8080;
     let mut open = true;
+    let mut lan = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -122,6 +127,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
             "--viewer-port" => viewer_port = required_port(&mut iter, "--viewer-port")?,
             "--open" => open = true,
             "--no-open" => open = false,
+            "--lan" => lan = true,
             other => {
                 return Err(XtaskError::Usage {
                     message: format!("unknown sim flag {other:?}"),
@@ -135,6 +141,7 @@ fn parse_sim(args: &[String]) -> Result<SimArgs, XtaskError> {
         host_port,
         viewer_port,
         open,
+        lan,
     })
 }
 
@@ -183,6 +190,7 @@ commands:
       --viewer-port <port> static viewer port (default: 8080)
       --open               open the ready URL (default)
       --no-open            do not open the ready URL
+      --lan                serve the session to the local network
 
   reset [options]
       Reset the running simulation world and restart its FC.
@@ -212,6 +220,7 @@ mod tests {
         assert_eq!(sim.host_port, 4433);
         assert_eq!(sim.viewer_port, 8080);
         assert!(sim.open, "the browser opens by default");
+        assert!(!sim.lan, "the session serves loopback only by default");
     }
 
     #[test]
@@ -236,6 +245,7 @@ mod tests {
         assert!(sim_help.contains("default: 8080"));
         assert!(sim_help.contains("--open"));
         assert!(sim_help.contains("--no-open"));
+        assert!(sim_help.contains("--lan"));
 
         let reset_help = &USAGE[reset_start..help_start];
         assert!(reset_help.contains("--fc <name>"));
@@ -245,10 +255,12 @@ mod tests {
 
     #[test]
     fn no_open_suppresses_the_browser() {
-        let Command::Sim(sim) = parse_args(&args(&["sim", "--no-open"])).expect("parses") else {
+        let Command::Sim(sim) = parse_args(&args(&["sim", "--no-open", "--lan"])).expect("parses")
+        else {
             panic!("expected sim");
         };
         assert!(!sim.open);
+        assert!(sim.lan, "--lan is honored");
     }
 
     #[test]

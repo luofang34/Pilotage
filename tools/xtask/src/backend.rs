@@ -26,6 +26,8 @@ pub struct SessionContext {
     pub profile: Profile,
     /// Directory stage logs are written under.
     pub log_dir: PathBuf,
+    /// Serve the session to the local network rather than loopback only.
+    pub lan: bool,
 }
 
 /// One plannable launch step: a process and the signal proving it is up.

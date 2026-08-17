@@ -18,6 +18,7 @@ fn context(repo_root: PathBuf) -> SessionContext {
         viewer_port: 8080,
         profile: Profile::Simulation,
         log_dir: std::env::temp_dir(),
+        lan: false,
     }
 }
 
