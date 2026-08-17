@@ -166,6 +166,7 @@ struct InstrumentRackView: View {
             // live feed changes what fills it, not how it is worked.
             ZStack(alignment: .topTrailing) {
                 if let id = liveSource, let image = model.videoImages[id] {
+                    // The named source's own feed, never a stand-in.
                     Image(uiImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -231,13 +232,19 @@ struct InstrumentRackView: View {
         }
     }
 
-    /// The wire source id shown for a named source: the names map onto
-    /// arriving ids in order until a source catalog names them itself.
+    /// The one binding table between source names and wire ids, the same
+    /// values the browser's video routing pins. A source must never be
+    /// silently redirected to another camera, so an absent source shows
+    /// its absence rather than whichever feed arrived first.
+    private static let videoSourceIds: [String: UInt8] = [
+        "fpv": 0,
+        "chase": 1,
+        "gimbal": 2,
+    ]
+
     private func selectedVideoId(for name: String) -> UInt8? {
-        let arrived = model.videoImages.keys.sorted()
-        guard !arrived.isEmpty else { return nil }
-        let index = Self.videoSources.firstIndex(of: name) ?? 0
-        return arrived.indices.contains(index) ? arrived[index] : arrived[0]
+        guard let id = Self.videoSourceIds[name] else { return nil }
+        return model.videoImages.keys.contains(id) ? id : nil
     }
 
     private var controlBar: some View {

@@ -425,6 +425,13 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     private weak var model: HostLinkModel?
     private let decoders = NSMutableDictionary()
     private let decoderLock = NSLock()
+    /// Sources with a decode-and-publish in flight. Video is droppable
+    /// by design: decoding every frame while the interface lags queued
+    /// unbounded bitmaps until the process hit its memory limit — the
+    /// operator saw the application vanish, and the jetsam record saw a
+    /// five-gigabyte footprint. One frame in flight per source, the
+    /// rest dropped; the next kept frame is always the newest.
+    private var inFlight: Set<UInt8> = []
 
     init(model: HostLinkModel) {
         self.model = model
@@ -432,6 +439,11 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
 
     func onVideoFrame(sourceId: UInt8, codec: String, payload: Data) {
         decoderLock.lock()
+        if inFlight.contains(sourceId) {
+            decoderLock.unlock()
+            return
+        }
+        inFlight.insert(sourceId)
         let key = NSNumber(value: sourceId)
         let decoder: VideoTileDecoder
         if let existing = decoders[key] as? VideoTileDecoder {
@@ -441,10 +453,19 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
             decoders[key] = decoder
         }
         decoderLock.unlock()
-        guard let image = decoder.decode(codec: codec, payload: Array(payload)) else { return }
+        let image = decoder.decode(codec: codec, payload: Array(payload))
         Task { @MainActor [model] in
-            model?.accept(videoImage: image, sourceId: sourceId)
+            if let image {
+                model?.accept(videoImage: image, sourceId: sourceId)
+            }
+            self.clearInFlight(sourceId)
         }
+    }
+
+    private nonisolated func clearInFlight(_ sourceId: UInt8) {
+        decoderLock.lock()
+        inFlight.remove(sourceId)
+        decoderLock.unlock()
     }
 
     func onEvent(event: LinkEvent) {
