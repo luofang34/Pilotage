@@ -1343,6 +1343,7 @@ dependencies = [
  "pilotage-protocol",
  "pilotage-terrain-query",
  "png",
+ "prost",
  "rusqlite",
  "serde_json",
  "surveillance-aero-link",

@@ -9,12 +9,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use pilotage_client_session::{
-    ClientAction, ClientConfig, ClientEngine, ControlCommand, MotionDemand, ProfileIdentity,
-    ReconnectPolicy, StreamId, TransportEvent, intent_capability, velocity_intent,
+    ClientAction, ClientConfig, ClientEngine, MotionDemand, ProfileIdentity, ReconnectPolicy,
+    StreamId, TransportEvent,
 };
-use pilotage_control_web::{ControlCoordinator, DEFAULT_PROFILE_BYTES};
+use pilotage_control_web::{ControlCoordinator, DEFAULT_PROFILE_BYTES, GIMBAL_SCOPE, MOTION_SCOPE};
 use pilotage_instrument_feed::InstrumentFeed;
-use pilotage_protocol::wire;
 use tokio::sync::mpsc;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
 
@@ -116,42 +115,6 @@ impl Link {
             rejected_per_second: stats.rejected,
             action_results_per_second: stats.action_results,
         });
-    }
-
-    /// Builds and sends one fenced motion frame, or nothing without a
-    /// lease and an advertised envelope.
-    pub(super) fn motion_actions(&mut self, demand: MotionDemand) -> Vec<ClientAction> {
-        let Some((vehicle_id, scope)) = self.engine.control_target() else {
-            return Vec::new();
-        };
-        let Some(admission) = self.engine.admission().cloned() else {
-            return Vec::new();
-        };
-        let capability =
-            intent_capability(&admission, vehicle_id, &scope, wire::IntentFamily::Velocity);
-        let Some(intent) = velocity_intent(demand, capability) else {
-            return Vec::new();
-        };
-        self.stats.control_frames = self.stats.control_frames.wrapping_add(1);
-        let sampled_at_nanos = self.now_ms().saturating_mul(1_000_000);
-        self.engine
-            .control_frame(vehicle_id, &scope, ControlCommand::Intent(intent), sampled_at_nanos)
-    }
-
-    /// Builds a discrete action command under the held lease.
-    pub(super) fn action_actions(&mut self, code: i32) -> Vec<ClientAction> {
-        let Some((vehicle_id, scope)) = self.engine.control_target() else {
-            return Vec::new();
-        };
-        self.engine.control_action(
-            vehicle_id,
-            &scope,
-            wire::ControlActionRequest {
-                action: code,
-                mode_target: 0,
-                action_id: 0,
-            },
-        )
     }
 }
 
@@ -335,10 +298,23 @@ async fn handle_command(
         Some(LinkCommand::RequestLease { vehicle_id, scope }) => {
             link.engine.request_lease(vehicle_id, &scope)
         }
-        Some(LinkCommand::ReleaseLease) => match link.engine.control_target() {
-            Some((vehicle_id, scope)) => link.engine.release_lease(vehicle_id, &scope),
-            None => Vec::new(),
-        },
+        Some(LinkCommand::ReleaseLease) => {
+            // Releasing control gives back everything held: the motion
+            // lane and the gimbal lane the runtime leased alongside it.
+            match link
+                .engine
+                .admission()
+                .and_then(|admission| admission.vehicles.first())
+                .map(|vehicle| vehicle.vehicle_id)
+            {
+                Some(vehicle_id) => {
+                    let mut actions = link.engine.release_lease(vehicle_id, MOTION_SCOPE);
+                    actions.extend(link.engine.release_lease(vehicle_id, GIMBAL_SCOPE));
+                    actions
+                }
+                None => Vec::new(),
+            }
+        }
         Some(LinkCommand::Motion {
             roll,
             pitch,
@@ -368,9 +344,10 @@ async fn handle_command(
         Some(LinkCommand::Takeover { vehicle_id, scope }) => {
             link.engine.request_takeover(vehicle_id, &scope)
         }
-        Some(LinkCommand::Offer { to_principal, scope }) => {
-            link.engine.offer_transfer(to_principal, &scope)
-        }
+        Some(LinkCommand::Offer {
+            to_principal,
+            scope,
+        }) => link.engine.offer_transfer(to_principal, &scope),
         Some(LinkCommand::Shutdown) | None => return true,
     };
     link.execute(actions, send, connection).await;

@@ -57,6 +57,7 @@ surveillance-core = { path = ".build/surveillance/crates/surveillance-core" }
 surveillance-geojson = { path = ".build/surveillance/crates/surveillance-geojson" }
 
 [dev-dependencies]
+prost = "0.14"
 png = "0.18.1"
 rusqlite = { version = "0.40.2", default-features = false }
 tempfile = "3.23.0"

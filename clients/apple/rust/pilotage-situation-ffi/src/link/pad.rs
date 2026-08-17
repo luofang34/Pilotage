@@ -6,8 +6,8 @@
 
 use pilotage_client_session::{ClientAction, MotionDemand, gimbal_rate_intent, intent_capability};
 use pilotage_control_web::{
-    AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ButtonSample, ControlPlan, Frame,
-    GIMBAL_SCOPE, LeaseAction, MOTION_SCOPE, Mode, RawSample, SessionState,
+    AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ButtonSample, ControlPlan, Frame, GIMBAL_SCOPE,
+    LeaseAction, MOTION_SCOPE, Mode, RawSample, SessionState,
 };
 use pilotage_protocol::wire;
 
@@ -89,10 +89,12 @@ impl Link {
             actions.extend(self.action_actions(2));
         }
         if plan.arm_suppressed {
-            self.delivery.event(LinkEvent::PressSuppressed { action: 1 });
+            self.delivery
+                .event(LinkEvent::PressSuppressed { action: 1 });
         }
         if plan.disarm_suppressed {
-            self.delivery.event(LinkEvent::PressSuppressed { action: 2 });
+            self.delivery
+                .event(LinkEvent::PressSuppressed { action: 2 });
         }
         if plan.capture_active != self.capture_active {
             self.capture_active = plan.capture_active;

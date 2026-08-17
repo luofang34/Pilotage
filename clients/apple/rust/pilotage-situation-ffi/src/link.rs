@@ -9,11 +9,14 @@
 //! ADR-0037).
 
 mod delivery;
+mod demand;
 mod driver;
 mod events;
-mod pad;
 mod observer;
+mod pad;
 mod records;
+#[cfg(test)]
+mod tests;
 
 pub use observer::LinkObserver;
 pub use records::{
@@ -147,7 +150,10 @@ impl LinkSession {
     /// holder's half of a cooperative handover.
     pub fn offer_transfer(&self, to_principal: u64, scope: String) {
         self.commands
-            .send(LinkCommand::Offer { to_principal, scope })
+            .send(LinkCommand::Offer {
+                to_principal,
+                scope,
+            })
             .ok();
     }
 
