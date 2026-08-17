@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use pilotage_client_session::{
-    ClientAction, ClientConfig, ClientEngine, ControlCommand, MotionDemand, ReconnectPolicy,
-    StreamId, TransportEvent, intent_capability, velocity_intent,
+    ClientAction, ClientConfig, ClientEngine, ControlCommand, MotionDemand, ProfileIdentity,
+    ReconnectPolicy, StreamId, TransportEvent, intent_capability, velocity_intent,
 };
+use pilotage_control_web::{ControlCoordinator, DEFAULT_PROFILE_BYTES};
 use pilotage_instrument_feed::InstrumentFeed;
 use pilotage_protocol::wire;
 use tokio::sync::mpsc;
@@ -29,12 +30,19 @@ const STATE_FRAME_INTERVAL_MS: u64 = 33;
 /// The driver's owned state across one connection.
 pub(super) struct Link {
     pub(super) engine: ClientEngine,
+    /// The shared control runtime: the same profile bytes, curves,
+    /// quasimode, and edge logic the browser executes.
+    pub(super) control: ControlCoordinator,
     pub(super) feed: Option<InstrumentFeed>,
     pub(super) delivery: DeliveryQueue,
     pub(super) started: Instant,
     pub(super) retry_at_ms: Option<u64>,
     pub(super) stopped: bool,
     pub(super) stats: LinkStats,
+    /// Whether the gimbal quasimode captured the stick last tick.
+    pub(super) capture_active: bool,
+    /// Consecutive pad ticks gated under a held motion lease.
+    pub(super) gated_ticks: u32,
 }
 
 /// One second of link accounting, reset on report.
@@ -112,7 +120,7 @@ impl Link {
 
     /// Builds and sends one fenced motion frame, or nothing without a
     /// lease and an advertised envelope.
-    fn motion_actions(&mut self, demand: MotionDemand) -> Vec<ClientAction> {
+    pub(super) fn motion_actions(&mut self, demand: MotionDemand) -> Vec<ClientAction> {
         let Some((vehicle_id, scope)) = self.engine.control_target() else {
             return Vec::new();
         };
@@ -131,7 +139,7 @@ impl Link {
     }
 
     /// Builds a discrete action command under the held lease.
-    fn action_actions(&mut self, code: i32) -> Vec<ClientAction> {
+    pub(super) fn action_actions(&mut self, code: i32) -> Vec<ClientAction> {
         let Some((vehicle_id, scope)) = self.engine.control_target() else {
             return Vec::new();
         };
@@ -154,17 +162,32 @@ pub(crate) async fn run(
     observer: Arc<dyn LinkObserver>,
     mut commands: mpsc::UnboundedReceiver<LinkCommand>,
 ) {
+    let mut engine = ClientEngine::new(ClientConfig {
+        client_name: config.client_name.clone(),
+        reconnect: ReconnectPolicy::default(),
+    });
+    // The runtime compiles the same built-in profile bytes the browser
+    // activates, and the engine announces that runtime's own identity:
+    // both clients bind their frames to one mapping, verifiably.
+    let mut control = ControlCoordinator::new();
+    control.activate_scheme(DEFAULT_PROFILE_BYTES);
+    engine.set_profile_identity(ProfileIdentity {
+        profile_id: control.profile_id().to_owned(),
+        profile_revision: control.profile_revision(),
+        activation_revision: control.activation_revision(),
+        digest: control.profile_digest(),
+    });
     let mut link = Link {
-        engine: ClientEngine::new(ClientConfig {
-            client_name: config.client_name.clone(),
-            reconnect: ReconnectPolicy::default(),
-        }),
+        engine,
+        control,
         feed: None,
         delivery: DeliveryQueue::start(observer),
         started: Instant::now(),
         retry_at_ms: None,
         stopped: false,
         stats: LinkStats::default(),
+        capture_active: false,
+        gated_ticks: 0,
     };
     loop {
         match connect(&config, pinned).await {
@@ -328,6 +351,20 @@ async fn handle_command(
             yaw,
         }),
         Some(LinkCommand::Action { code }) => link.action_actions(code),
+        Some(LinkCommand::PadSample {
+            axes,
+            values,
+            pressed,
+        }) => link.pad_actions(&axes, &values, &pressed),
+        Some(LinkCommand::SelectPad { id }) => {
+            link.control.select_device(&id);
+            link.delivery.event(LinkEvent::PadSelected {
+                label: link.control.device_label().to_owned(),
+                arm_hint: link.control.arm_hint(),
+                disarm_hint: link.control.disarm_hint(),
+            });
+            Vec::new()
+        }
         Some(LinkCommand::Takeover { vehicle_id, scope }) => {
             link.engine.request_takeover(vehicle_id, &scope)
         }

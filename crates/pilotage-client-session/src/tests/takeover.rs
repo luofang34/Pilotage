@@ -8,7 +8,37 @@ use pilotage_protocol::wire;
 use prost::Message;
 
 use super::{WELCOME_FIXTURE, admit, engine, fixture_hex, grant};
-use crate::{ClientAction, ClientEngine, ControlCommand, ModuleEvent, StreamId, TransportEvent};
+use crate::{
+    ClientAction, ClientEngine, ControlCommand, ModuleEvent, StreamId, TransportEvent,
+    gimbal_rate_intent,
+};
+
+#[test]
+fn a_gimbal_intent_scales_onto_the_advertised_envelope() {
+    let capability = wire::IntentCapability {
+        family: wire::IntentFamily::GimbalRate as i32,
+        max_angular: 0.8,
+        ..Default::default()
+    };
+    let intent =
+        gimbal_rate_intent(-1.0, 0.5, Some(&capability)).expect("advertised family builds");
+    let Some(wire::control_intent::Family::GimbalRate(rate)) = intent.family else {
+        panic!("gimbal rate family expected");
+    };
+    assert!((rate.pitch_rate + 0.8).abs() < f32::EPSILON);
+    assert!((rate.yaw_rate - 0.4).abs() < f32::EPSILON);
+}
+
+#[test]
+fn a_scope_without_a_gimbal_advertisement_gets_no_intent() {
+    let capability = wire::IntentCapability {
+        family: wire::IntentFamily::Velocity as i32,
+        max_angular: 0.9,
+        ..Default::default()
+    };
+    assert!(gimbal_rate_intent(1.0, 1.0, Some(&capability)).is_none());
+    assert!(gimbal_rate_intent(1.0, 1.0, None).is_none());
+}
 
 /// Feeds one authority event through the session-events stream.
 fn authority_event(

@@ -11,6 +11,7 @@
 mod delivery;
 mod driver;
 mod events;
+mod pad;
 mod observer;
 mod records;
 
@@ -41,6 +42,14 @@ pub(crate) enum LinkCommand {
     },
     Action {
         code: i32,
+    },
+    PadSample {
+        axes: Vec<f32>,
+        values: Vec<f32>,
+        pressed: Vec<bool>,
+    },
+    SelectPad {
+        id: String,
     },
     Takeover {
         vehicle_id: u64,
@@ -140,6 +149,26 @@ impl LinkSession {
         self.commands
             .send(LinkCommand::Offer { to_principal, scope })
             .ok();
+    }
+
+    /// Feeds one raw pad sample in Standard Gamepad order (axes:
+    /// left X/Y, right X/Y with down positive; buttons in W3C order,
+    /// triggers analog). The shared control runtime — the same profile,
+    /// curves, quasimode, and edges the browser runs — turns it into
+    /// fenced frames, lease plans, and typed arm edges.
+    pub fn send_pad_sample(&self, axes: Vec<f32>, values: Vec<f32>, pressed: Vec<bool>) {
+        self.commands
+            .send(LinkCommand::PadSample {
+                axes,
+                values,
+                pressed,
+            })
+            .ok();
+    }
+
+    /// Resolves a connected pad against the layered profile registry.
+    pub fn select_pad(&self, id: String) {
+        self.commands.send(LinkCommand::SelectPad { id }).ok();
     }
 
     /// Stops the driver and the connection.

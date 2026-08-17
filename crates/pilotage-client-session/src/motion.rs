@@ -64,6 +64,29 @@ pub fn velocity_intent(
     })
 }
 
+/// Builds the typed gimbal-rate intent (rad/s) from normalized LOS
+/// rates and the scope's advertised gimbal capability. Returns `None`
+/// without an advertisement: an unadvertised intent must not be sent.
+#[must_use]
+pub fn gimbal_rate_intent(
+    pitch: f32,
+    yaw: f32,
+    capability: Option<&wire::IntentCapability>,
+) -> Option<wire::ControlIntent> {
+    let capability = capability?;
+    if capability.family != wire::IntentFamily::GimbalRate as i32 {
+        return None;
+    }
+    Some(wire::ControlIntent {
+        family: Some(wire::control_intent::Family::GimbalRate(
+            wire::GimbalRateIntent {
+                pitch_rate: pitch * capability.max_angular,
+                yaw_rate: yaw * capability.max_angular,
+            },
+        )),
+    })
+}
+
 /// The advertised capability of `family` for `(vehicle, scope)` in an
 /// admission catalog, or `None`. The vehicle participates in the match:
 /// two vehicles may publish the same scope name with different envelopes.

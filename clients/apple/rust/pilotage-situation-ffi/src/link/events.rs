@@ -4,6 +4,7 @@
 //! loop moves bytes; this file decides what the shell hears.
 
 use pilotage_client_session::ModuleEvent;
+use pilotage_control_web::AuthorityEvent;
 use pilotage_instrument_feed::{FeedParams, InstrumentFeed};
 use pilotage_protocol::wire;
 
@@ -13,13 +14,30 @@ use super::records::{LinkCatalog, LinkEvent};
 impl Link {
     /// Translates one module event for the shell, feeding telemetry into
     /// the shared instrument feed on the way.
-    /// One lease outcome, with the denial named for the operator.
-    fn emit_lease(&self, response: &wire::LeaseResponse) {
+    /// One lease outcome: the runtime's authority mirror learns it
+    /// first — a mirror that misses a grant gates the plan into the
+    /// exact silence the host revokes — then the shell hears it, with
+    /// the denial named for the operator.
+    fn emit_lease(&mut self, response: &wire::LeaseResponse) {
         let scope = response
             .scope
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
+        let generation = response.generation.as_ref().map_or(0, |g| g.value);
+        self.mirror_authority(
+            &scope,
+            if response.granted {
+                AuthorityEvent::LeaseGranted { generation }
+            } else {
+                // Any not-granted lands the slot back at idle, so a
+                // later grant (or the gimbal plan's own retry) stands.
+                AuthorityEvent::Revoked { generation }
+            },
+        );
+        if response.granted {
+            self.control.begin_control_run();
+        }
         self.delivery.event(LinkEvent::LeaseChanged {
             held: response.granted,
             scope,
@@ -36,9 +54,54 @@ impl Link {
         });
     }
 
+    /// A stale-generation or no-holder rejection is the host saying the
+    /// fence moved; the mirror follows it exactly as the browser's does.
+    fn emit_rejection(&mut self, rejected: &wire::FrameRejected) {
+        self.stats.rejected = self.stats.rejected.wrapping_add(1);
+        if rejected.reason == 1 || rejected.reason == 2 {
+            let scope = rejected
+                .scope
+                .as_ref()
+                .map(|s| s.value.clone())
+                .unwrap_or_default();
+            let generation = rejected.current_generation.as_ref().map_or(0, |g| g.value);
+            self.mirror_authority(&scope, AuthorityEvent::Revoked { generation });
+        }
+        self.delivery.event(LinkEvent::ControlRejected {
+            sequence: rejected.sequence.as_ref().map_or(0, |s| s.value),
+            reason: rejected.reason,
+        });
+    }
+
+    /// The action verdict feeds the runtime's mirror (arm state gates
+    /// its plans) and then the shell.
+    fn emit_action_result(&mut self, result: wire::ControlActionResult) {
+        self.stats.action_results = self.stats.action_results.wrapping_add(1);
+        let scope = result
+            .scope
+            .as_ref()
+            .map(|s| s.value.clone())
+            .unwrap_or_default();
+        self.mirror_authority(
+            &scope,
+            AuthorityEvent::ActionResult {
+                action: u32::try_from(result.action).unwrap_or(0),
+                accepted: result.accepted,
+            },
+        );
+        self.delivery.event(LinkEvent::ActionResult {
+            action: result.action,
+            accepted: result.accepted,
+            detail: result.detail,
+        });
+    }
+
     pub(super) fn emit(&mut self, event: ModuleEvent) {
         match event {
             ModuleEvent::Admitted(admission) => {
+                // A fresh admission is a fresh transport session for the
+                // runtime's mirror too.
+                self.control.begin_session();
                 // The feed follows the first offered vehicle until a lease
                 // narrows the interest; a multi-vehicle chooser is shell
                 // work over this same catalog.
@@ -73,24 +136,11 @@ impl Link {
                     detail: "released".to_owned(),
                 });
             }
-            ModuleEvent::ControlRejected(rejected) => {
-                self.stats.rejected = self.stats.rejected.wrapping_add(1);
-                self.delivery.event(LinkEvent::ControlRejected {
-                    sequence: rejected.sequence.as_ref().map_or(0, |s| s.value),
-                    reason: rejected.reason,
-                });
-            }
+            ModuleEvent::ControlRejected(rejected) => self.emit_rejection(&rejected),
             ModuleEvent::ConnectionDown { retry_at_ms } => {
                 self.delivery.event(LinkEvent::Down { retry_at_ms });
             }
-            ModuleEvent::ActionResult(result) => {
-                self.stats.action_results = self.stats.action_results.wrapping_add(1);
-                self.delivery.event(LinkEvent::ActionResult {
-                    action: result.action,
-                    accepted: result.accepted,
-                    detail: result.detail,
-                });
-            }
+            ModuleEvent::ActionResult(result) => self.emit_action_result(result),
             ModuleEvent::VideoFrame(body) => {
                 // Structural decode only; a body that does not parse is
                 // dropped and the next one stands alone.

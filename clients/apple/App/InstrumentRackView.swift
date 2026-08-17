@@ -270,6 +270,19 @@ struct InstrumentRackView: View {
                 }
             }
             .font(.callout)
+            if model.gimbalCaptured {
+                Label("Gimbal captured — right stick points the camera",
+                      systemImage: "camera.rotate")
+                    .font(.caption2)
+                    .foregroundStyle(.cyan)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !model.padHints.isEmpty {
+                Text(model.padHints)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if !model.linkStats.isEmpty {
                 Text(model.linkStats)
                     .font(.caption2.monospaced())

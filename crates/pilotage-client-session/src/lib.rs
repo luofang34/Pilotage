@@ -35,5 +35,5 @@ pub use catalog::{Admission, ScopeCatalog, VehicleCatalog};
 pub use control::{ControlCommand, ControlLane};
 pub use engine::{ClientConfig, ClientEngine, ClientPhase};
 pub use event::{StreamId, TransportEvent};
-pub use motion::{MotionDemand, intent_capability, velocity_intent};
+pub use motion::{MotionDemand, gimbal_rate_intent, intent_capability, velocity_intent};
 pub use reconnect::ReconnectPolicy;

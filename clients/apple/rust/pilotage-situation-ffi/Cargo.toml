@@ -32,6 +32,7 @@ airmass-aero-link = { path = ".build/airmass/crates/airmass-aero-link", features
 airmass-core = { path = ".build/airmass/crates/airmass-core", features = ["std"] }
 airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }
 pilotage-client-session = { path = "../../../../crates/pilotage-client-session" }
+pilotage-control-web = { path = "../../../web-control" }
 pilotage-instrument-apple-bridge = { path = "../../../apple-instrument-bridge" }
 pilotage-instrument-feed = { path = "../../../../crates/pilotage-instrument-feed" }
 pilotage-navdata-cycle = { path = "../../../../crates/pilotage-navdata-cycle" }

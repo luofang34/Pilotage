@@ -41,6 +41,10 @@ final class HostLinkModel: ObservableObject {
     @Published private(set) var catalog: LinkCatalog?
     /// Whether control is held now.
     @Published private(set) var leaseHeld = false
+    /// The resolved pad profile and its arm/disarm control names.
+    @Published private(set) var padHints = ""
+    /// Whether the gimbal quasimode holds the right stick now.
+    @Published private(set) var gimbalCaptured = false
     /// Why the instruments cannot paint, when they cannot.
     @Published private(set) var instrumentFault: String?
     /// The panel the operator selected, by registry index; persisted so
@@ -233,7 +237,7 @@ final class HostLinkModel: ObservableObject {
     /// Hands control to the principal who asked.
     func confirmHandover() {
         guard let ask = takeoverAsk else { return }
-        link?.offerTransfer(toPrincipal: ask.fromPrincipal)
+        link?.offerTransfer(toPrincipal: ask.fromPrincipal, scope: ask.scope)
         takeoverAsk = nil
     }
 
@@ -287,10 +291,20 @@ final class HostLinkModel: ObservableObject {
             self.catalog = catalog
             phase = .observing(host: catalog.hostVersion)
             status = "admitted by \(catalog.hostVersion)"
+            if controllerAttached {
+                selectPad(vendorName: lastPadVendor)
+            }
             if LaunchRequest.autoControl {
                 requestLease()
             }
         case .leaseChanged(let held, let scope, let detail):
+            // The gimbal lane is the runtime's own business: its grant
+            // must not flip the shell into "controlling", nor its
+            // release stop the demand loop that keeps motion alive.
+            guard scope == "vehicle.motion" else {
+                if !held && !detail.isEmpty { status = "gimbal: \(detail)" }
+                return
+            }
             leaseHeld = held
             holderPresent = !held && detail.contains("another operator")
             if holderPresent {
@@ -312,6 +326,16 @@ final class HostLinkModel: ObservableObject {
                     self?.arm()
                 }
             }
+        case .padSelected(let label, let armHint, let disarmHint):
+            padHints = "\(label): arm \(armHint) · disarm \(disarmHint)"
+        case .pressSuppressed(let action):
+            status = action == 1
+                ? "arm press ignored — request control first"
+                : "disarm press ignored — request control first"
+        case .gimbalCapture(let active):
+            gimbalCaptured = active
+        case .notice(let text):
+            status = text
         case .controlRejected(let sequence, let reason):
             status = "control frame \(sequence) rejected (reason \(reason))"
         case .down(let retryAtMs):
@@ -400,10 +424,19 @@ final class HostLinkModel: ObservableObject {
 
     private func watchControllers() {
         controllerAttached = GCController.controllers().contains { $0.extendedGamepad != nil }
+        if let pad = GCController.controllers().first(where: { $0.extendedGamepad != nil }) {
+            selectPad(vendorName: pad.vendorName)
+        }
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.controllerAttached = true }
+        ) { [weak self] note in
+            // Only the name crosses the isolation hop; the controller
+            // object itself stays on the posting side.
+            let vendorName = (note.object as? GCController)?.vendorName
+            Task { @MainActor in
+                self?.controllerAttached = true
+                self?.selectPad(vendorName: vendorName)
+            }
         }
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidDisconnect, object: nil, queue: .main
@@ -414,6 +447,18 @@ final class HostLinkModel: ObservableObject {
             }
         }
     }
+
+    /// Resolves the pad against the runtime's layered profile registry;
+    /// the hints that come back name the arm control in the operator's
+    /// terms, proving the button packing reads as intended.
+    private func selectPad(vendorName: String?) {
+        lastPadVendor = vendorName ?? lastPadVendor
+        link?.selectPad(id: lastPadVendor ?? "gamepad")
+    }
+
+    /// The most recent pad's name, replayed into a link that connects
+    /// after the pad did.
+    private var lastPadVendor: String?
 
     /// Sends the current stick demand at a fixed cadence while control is
     /// held. The demand is normalized here and scaled by the ADVERTISED
@@ -433,8 +478,6 @@ final class HostLinkModel: ObservableObject {
         controlTimer = nil
     }
 
-    private var armPressed = false
-    private var disarmPressed = false
     /// Harness climb window; the demand loop climbs until it passes.
     private var climbUntil = Date.distantPast
     /// Harness demand-tick counter, printed to prove the loop runs.
@@ -461,25 +504,39 @@ final class HostLinkModel: ObservableObject {
             link?.sendMotion(roll: 0, pitch: 0, throttle: climb, yaw: 0)
             return
         }
-        // The browser's default profile arms on button 9 and disarms on
-        // button 8 — Menu and Options here. Edge-triggered: a press is
-        // one command, not a stream of them.
-        let menuDown = pad.buttonMenu.isPressed
-        if menuDown && !armPressed { arm() }
-        armPressed = menuDown
-        let optionsDown = pad.buttonOptions?.isPressed ?? false
-        if optionsDown && !disarmPressed { disarm() }
-        disarmPressed = optionsDown
-        // Left stick: throttle up / yaw right. Right stick: pitch forward /
-        // roll right. The GameController framework already normalizes and
-        // deadzones the axes.
-        // The harness climb rides the no-pad path only; with a stick in
-        // hand the operator's demand is the demand, descent included.
-        link?.sendMotion(
-            roll: pad.rightThumbstick.xAxis.value,
-            pitch: pad.rightThumbstick.yAxis.value,
-            throttle: pad.leftThumbstick.yAxis.value,
-            yaw: pad.leftThumbstick.xAxis.value
+        // The raw sample in Standard Gamepad terms; every mapping,
+        // curve, edge, and the gimbal quasimode live in the shared
+        // runtime the browser also runs — nothing is bound here.
+        // W3C sticks read down as positive; GameController reads up as
+        // positive, so the Y axes flip.
+        let axes: [Float] = [
+            pad.leftThumbstick.xAxis.value,
+            -pad.leftThumbstick.yAxis.value,
+            pad.rightThumbstick.xAxis.value,
+            -pad.rightThumbstick.yAxis.value,
+        ]
+        let buttons: [(Float, Bool)] = [
+            (pad.buttonA.value, pad.buttonA.isPressed),
+            (pad.buttonB.value, pad.buttonB.isPressed),
+            (pad.buttonX.value, pad.buttonX.isPressed),
+            (pad.buttonY.value, pad.buttonY.isPressed),
+            (pad.leftShoulder.value, pad.leftShoulder.isPressed),
+            (pad.rightShoulder.value, pad.rightShoulder.isPressed),
+            (pad.leftTrigger.value, pad.leftTrigger.isPressed),
+            (pad.rightTrigger.value, pad.rightTrigger.isPressed),
+            (pad.buttonOptions?.value ?? 0, pad.buttonOptions?.isPressed ?? false),
+            (pad.buttonMenu.value, pad.buttonMenu.isPressed),
+            (pad.leftThumbstickButton?.value ?? 0, pad.leftThumbstickButton?.isPressed ?? false),
+            (pad.rightThumbstickButton?.value ?? 0, pad.rightThumbstickButton?.isPressed ?? false),
+            (pad.dpad.up.value, pad.dpad.up.isPressed),
+            (pad.dpad.down.value, pad.dpad.down.isPressed),
+            (pad.dpad.left.value, pad.dpad.left.isPressed),
+            (pad.dpad.right.value, pad.dpad.right.isPressed),
+        ]
+        link?.sendPadSample(
+            axes: axes,
+            values: buttons.map(\.0),
+            pressed: buttons.map(\.1)
         )
     }
 }

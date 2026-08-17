@@ -79,6 +79,33 @@ pub enum LinkEvent {
         /// Denial or release detail, empty on a grant.
         detail: String,
     },
+    /// A pad was selected and resolved against the profile registry;
+    /// the hints name the arm and disarm controls in the operator's
+    /// terms, from profile data.
+    PadSelected {
+        /// The resolved device profile's label.
+        label: String,
+        /// The operator-facing name of the arm control.
+        arm_hint: String,
+        /// The operator-facing name of the disarm control.
+        disarm_hint: String,
+    },
+    /// An arm or disarm press fired while control output was gated; the
+    /// press is consumed, so the operator is owed the explanation.
+    PressSuppressed {
+        /// 1 arm, 2 disarm.
+        action: i32,
+    },
+    /// The gimbal quasimode started or stopped capturing the stick.
+    GimbalCapture {
+        /// Whether the right stick is captured for the gimbal now.
+        active: bool,
+    },
+    /// A link-side observation worth the operator's eye, in words.
+    Notice {
+        /// The observation.
+        text: String,
+    },
     /// The host rejected a control frame; fencing feedback.
     ControlRejected {
         /// The rejected frame's sequence.
