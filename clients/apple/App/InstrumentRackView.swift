@@ -304,8 +304,9 @@ struct InstrumentRackView: View {
         .foregroundStyle(.white)
     }
 
-    /// The one caption line under the bar: a telegraph grievance wins
-    /// over the routine link figures.
+    /// The one caption line under the bar, present only when the
+    /// telegraph has a grievance. The link figures are diagnostics and
+    /// live on the connection sheet, not under the operator's thumbs.
     private var barCaption: (text: String, warning: Bool)? {
         if model.armPhase == 2 {
             return ("arm refused: \(model.armDetail)", true)
@@ -313,8 +314,7 @@ struct InstrumentRackView: View {
         if model.armPhase == 3 {
             return ("vehicle disarmed itself — lever is back on SAFE", true)
         }
-        if model.linkStats.isEmpty { return nil }
-        return (model.linkStats, false)
+        return nil
     }
 }
 
