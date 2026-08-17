@@ -67,6 +67,11 @@ struct HostConnectSheet: View {
                     Text(model.status)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if !model.padHints.isEmpty {
+                        Text(model.padHints)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Connect to a session")

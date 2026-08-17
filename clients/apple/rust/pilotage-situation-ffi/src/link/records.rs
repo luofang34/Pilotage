@@ -79,6 +79,20 @@ pub enum LinkEvent {
         /// Denial or release detail, empty on a grant.
         detail: String,
     },
+    /// The arm telegraph moved: the operator's order, the flight
+    /// controller's own answer, and where the two stand. Phase 0 is in
+    /// sync, 1 awaiting the FC's answer, 2 refused (detail says why),
+    /// 3 dropped — the vehicle left the ordered state on its own.
+    ArmTelegraph {
+        /// Whether the lever orders the vehicle live.
+        ordered_armed: bool,
+        /// The FC's report: 0 unknown, 1 disarmed, 2 armed.
+        confirmed: u32,
+        /// The reconciliation phase code.
+        phase: u32,
+        /// The refusal reason, when phase is 2.
+        detail: String,
+    },
     /// A pad was selected and resolved against the profile registry;
     /// the hints name the arm and disarm controls in the operator's
     /// terms, from profile data.

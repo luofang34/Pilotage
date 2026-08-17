@@ -45,6 +45,13 @@ final class HostLinkModel: ObservableObject {
     @Published private(set) var padHints = ""
     /// Whether the gimbal quasimode holds the right stick now.
     @Published private(set) var gimbalCaptured = false
+    /// The arm telegraph: the lever's order, the FC's answer, and the
+    /// reconciliation phase (0 in sync, 1 awaiting, 2 refused,
+    /// 3 dropped) with the refusal reason.
+    @Published private(set) var armOrdered = false
+    @Published private(set) var armConfirmed: UInt32 = 0
+    @Published private(set) var armPhase: UInt32 = 0
+    @Published private(set) var armDetail = ""
     /// Why the instruments cannot paint, when they cannot.
     @Published private(set) var instrumentFault: String?
     /// The panel the operator selected, by registry index; persisted so
@@ -212,16 +219,16 @@ final class HostLinkModel: ObservableObject {
         link?.releaseLease()
     }
 
-    /// Arms the vehicle under the held lease. A disarmed vehicle ignores
-    /// motion setpoints, so this is the gate between holding control and
-    /// the sticks doing anything.
+    /// Orders the vehicle live. The telegraph sends one command and
+    /// then answers only to the flight controller's own report; a
+    /// refusal or a failsafe disarm snaps the lever back to safe.
     func arm() {
-        link?.sendAction(code: 1)
+        link?.setArmOrder(armed: true)
     }
 
-    /// Disarms the vehicle under the held lease.
+    /// Orders the vehicle safe.
     func disarm() {
-        link?.sendAction(code: 2)
+        link?.setArmOrder(armed: false)
     }
 
     /// Asks the present holder to hand control over; the handover
@@ -326,6 +333,11 @@ final class HostLinkModel: ObservableObject {
                     self?.arm()
                 }
             }
+        case .armTelegraph(let orderedArmed, let confirmed, let phase, let detail):
+            armOrdered = orderedArmed
+            armConfirmed = confirmed
+            armPhase = phase
+            armDetail = detail
         case .padSelected(let label, let armHint, let disarmHint):
             padHints = "\(label): arm \(armHint) · disarm \(disarmHint)"
         case .pressSuppressed(let action):

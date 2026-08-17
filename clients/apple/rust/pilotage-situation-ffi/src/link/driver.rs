@@ -12,7 +12,9 @@ use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, MotionDemand, ProfileIdentity, ReconnectPolicy,
     StreamId, TransportEvent,
 };
-use pilotage_control_web::{ControlCoordinator, DEFAULT_PROFILE_BYTES, GIMBAL_SCOPE, MOTION_SCOPE};
+use pilotage_control_web::{
+    ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES, GIMBAL_SCOPE, MOTION_SCOPE,
+};
 use pilotage_instrument_feed::InstrumentFeed;
 use tokio::sync::mpsc;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
@@ -43,6 +45,11 @@ pub(super) struct Link {
     /// The device label last announced to the shell; the resolved map
     /// lands transactionally, so the announcement follows the swap.
     pub(super) announced_device: String,
+    /// The arm order telegraph: the operator's lever against the FC's
+    /// own answer, reconciled in the shared runtime's terms.
+    pub(super) telegraph: ArmTelegraph,
+    /// The last telegraph picture the shell heard, re-sent on change.
+    pub(super) telegraph_shown: Option<(bool, u32, u32, String)>,
     /// Consecutive pad ticks gated under a held motion lease.
     pub(super) gated_ticks: u32,
 }
@@ -155,6 +162,8 @@ pub(crate) async fn run(
         stats: LinkStats::default(),
         capture_active: false,
         announced_device: String::new(),
+        telegraph: ArmTelegraph::default(),
+        telegraph_shown: None,
         gated_ticks: 0,
     };
     loop {
@@ -332,6 +341,7 @@ async fn handle_command(
             yaw,
         }),
         Some(LinkCommand::Action { code }) => link.action_actions(code),
+        Some(LinkCommand::ArmOrder { armed }) => link.order_actions(armed),
         Some(LinkCommand::PadSample {
             axes,
             values,

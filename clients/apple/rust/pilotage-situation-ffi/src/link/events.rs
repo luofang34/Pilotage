@@ -74,9 +74,15 @@ impl Link {
     }
 
     /// The action verdict feeds the runtime's mirror (arm state gates
-    /// its plans) and then the shell.
+    /// its plans), the telegraph, and then the shell.
     fn emit_action_result(&mut self, result: wire::ControlActionResult) {
         self.stats.action_results = self.stats.action_results.wrapping_add(1);
+        self.telegraph.on_action_result(
+            u32::try_from(result.action).unwrap_or(0),
+            result.accepted,
+            &result.detail,
+        );
+        self.publish_telegraph();
         let scope = result
             .scope
             .as_ref()
@@ -96,12 +102,29 @@ impl Link {
         });
     }
 
+    /// Telemetry feeds the instrument feed, and its FC arm report is
+    /// the only thing that moves the telegraph's lamp.
+    fn emit_telemetry(&mut self, sample: &wire::TelemetrySample) {
+        self.stats.telemetry = self.stats.telemetry.wrapping_add(1);
+        let now_ms = self.now_ms();
+        if let Some(fc) = sample.fc_state.as_ref() {
+            self.telegraph.on_fc_arm_state(fc.arm_state);
+            self.publish_telegraph();
+        }
+        if let Some(feed) = self.feed.as_mut() {
+            #[allow(clippy::cast_precision_loss)]
+            feed.ingest(sample, now_ms as f64);
+        }
+    }
+
     pub(super) fn emit(&mut self, event: ModuleEvent) {
         match event {
             ModuleEvent::Admitted(admission) => {
                 // A fresh admission is a fresh transport session for the
-                // runtime's mirror too.
+                // runtime's mirror and the telegraph alike.
                 self.control.begin_session();
+                self.telegraph.reset();
+                self.publish_telegraph();
                 // The feed follows the first offered vehicle until a lease
                 // narrows the interest; a multi-vehicle chooser is shell
                 // work over this same catalog.
@@ -115,14 +138,7 @@ impl Link {
                     catalog: LinkCatalog::from_admission(&admission),
                 });
             }
-            ModuleEvent::Telemetry(sample) => {
-                self.stats.telemetry = self.stats.telemetry.wrapping_add(1);
-                let now_ms = self.now_ms();
-                if let Some(feed) = self.feed.as_mut() {
-                    #[allow(clippy::cast_precision_loss)]
-                    feed.ingest(&sample, now_ms as f64);
-                }
-            }
+            ModuleEvent::Telemetry(sample) => self.emit_telemetry(&sample),
             ModuleEvent::Lease(response) => self.emit_lease(&response),
             ModuleEvent::LeaseReleased(released) => {
                 let scope = released

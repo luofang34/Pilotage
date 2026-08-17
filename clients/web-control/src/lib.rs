@@ -23,6 +23,7 @@ mod profile;
 mod quasimode;
 mod runtime;
 mod sample;
+mod telegraph;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -44,3 +45,4 @@ pub use profile::{
 };
 pub use runtime::ControlRuntime;
 pub use sample::{ButtonSample, Mode, RawSample, SessionState};
+pub use telegraph::{ArmConfirmed, ArmOrder, ArmTelegraph, OrderAction, TelegraphPhase};

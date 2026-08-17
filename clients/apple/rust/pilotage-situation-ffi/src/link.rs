@@ -46,6 +46,9 @@ pub(crate) enum LinkCommand {
     Action {
         code: i32,
     },
+    ArmOrder {
+        armed: bool,
+    },
     PadSample {
         axes: Vec<f32>,
         values: Vec<f32>,
@@ -155,6 +158,14 @@ impl LinkSession {
                 scope,
             })
             .ok();
+    }
+
+    /// Moves the arm order lever. The telegraph sends at most one
+    /// command per move and reconciles against the flight controller's
+    /// own report; a refusal or a unilateral disarm snaps the lever
+    /// back to safe — nothing ever re-arms on its own.
+    pub fn set_arm_order(&self, armed: bool) {
+        self.commands.send(LinkCommand::ArmOrder { armed }).ok();
     }
 
     /// Feeds one raw pad sample in Standard Gamepad order (axes:

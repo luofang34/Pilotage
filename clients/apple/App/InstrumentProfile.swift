@@ -32,11 +32,14 @@ struct InstrumentProfile: Codable, Identifiable, Hashable {
     /// The rack's tiles, top to bottom.
     let tiles: [InstrumentTile]
 
-    /// The built-in profiles, until operator-defined ones arrive.
+    /// The built-in layouts, until operator-defined ones arrive. Each
+    /// name says what the stack shows — a layout names PANELS, never a
+    /// vehicle or a control scheme, so the future control-profile
+    /// chooser is a different affordance with a different vocabulary.
     static let builtIn: [InstrumentProfile] = [
         InstrumentProfile(
             id: "px4-flight",
-            name: "PX4 flight",
+            name: "Camera · PFD · HSI",
             tiles: [
                 .video(source: "gimbal"),
                 .panel(id: "pfd"),
@@ -45,7 +48,7 @@ struct InstrumentProfile: Codable, Identifiable, Hashable {
         ),
         InstrumentProfile(
             id: "flight",
-            name: "Flight",
+            name: "PFD · HSI",
             tiles: [
                 .panel(id: "pfd"),
                 .panel(id: "hsi"),
@@ -53,7 +56,7 @@ struct InstrumentProfile: Codable, Identifiable, Hashable {
         ),
         InstrumentProfile(
             id: "primary",
-            name: "Primary only",
+            name: "PFD",
             tiles: [
                 .panel(id: "pfd")
             ]

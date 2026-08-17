@@ -6,8 +6,9 @@
 
 use pilotage_client_session::{ClientAction, MotionDemand, gimbal_rate_intent, intent_capability};
 use pilotage_control_web::{
-    AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ButtonSample, ControlPlan, Frame, GIMBAL_SCOPE,
-    LeaseAction, MOTION_SCOPE, Mode, RawSample, SessionState,
+    AXIS_PITCH, AXIS_ROLL, AXIS_THROTTLE, AXIS_YAW, ArmConfirmed, ArmOrder, ButtonSample,
+    ControlPlan, Frame, GIMBAL_SCOPE, LeaseAction, MOTION_SCOPE, Mode, RawSample, SessionState,
+    TelegraphPhase,
 };
 use pilotage_protocol::wire;
 
@@ -100,10 +101,10 @@ impl Link {
         // which the single built-in profile never maps; motion leases
         // stay operator-pressed on this shell.
         if plan.arm {
-            actions.extend(self.action_actions(1));
+            actions.extend(self.order_actions(true));
         }
         if plan.disarm {
-            actions.extend(self.action_actions(2));
+            actions.extend(self.order_actions(false));
         }
         if plan.arm_suppressed {
             self.delivery
@@ -205,6 +206,53 @@ impl Link {
         } else {
             self.gated_ticks = 0;
         }
+    }
+
+    /// Moves the arm order lever and sends the one command the move
+    /// asks for. Button edge and screen control land here alike: the
+    /// telegraph is the only writer of arm intents.
+    pub(super) fn order_actions(&mut self, armed: bool) -> Vec<ClientAction> {
+        let order = if armed {
+            ArmOrder::Armed
+        } else {
+            ArmOrder::Safe
+        };
+        let sent = self.telegraph.set_order(order);
+        let actions = match sent {
+            Some(order_action) => {
+                self.action_actions(i32::try_from(order_action.action).unwrap_or(0))
+            }
+            None => Vec::new(),
+        };
+        self.publish_telegraph();
+        actions
+    }
+
+    /// Tells the shell where order and answer stand, when that changed.
+    pub(super) fn publish_telegraph(&mut self) {
+        let confirmed = match self.telegraph.confirmed() {
+            ArmConfirmed::Unknown => 0,
+            ArmConfirmed::Disarmed => 1,
+            ArmConfirmed::Armed => 2,
+        };
+        let (phase, detail) = match self.telegraph.phase() {
+            TelegraphPhase::InSync => (0, String::new()),
+            TelegraphPhase::AwaitingAnswer => (1, String::new()),
+            TelegraphPhase::Refused(reason) => (2, reason.clone()),
+            TelegraphPhase::Dropped => (3, String::new()),
+        };
+        let ordered_armed = self.telegraph.order() == ArmOrder::Armed;
+        let picture = (ordered_armed, confirmed, phase, detail);
+        if self.telegraph_shown.as_ref() == Some(&picture) {
+            return;
+        }
+        self.telegraph_shown = Some(picture.clone());
+        self.delivery.event(LinkEvent::ArmTelegraph {
+            ordered_armed,
+            confirmed,
+            phase,
+            detail: picture.3,
+        });
     }
 
     /// Mirrors one engine authority fact into the runtime, so its plan

@@ -127,6 +127,8 @@ fn admitted_link_with_two_lanes() -> Link {
         stats: LinkStats::default(),
         capture_active: false,
         announced_device: String::new(),
+        telegraph: pilotage_control_web::ArmTelegraph::default(),
+        telegraph_shown: None,
         gated_ticks: 0,
     }
 }

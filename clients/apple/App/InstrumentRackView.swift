@@ -123,14 +123,19 @@ struct InstrumentRackView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Menu {
-                ForEach(InstrumentProfile.builtIn) { candidate in
-                    Button {
-                        profileId = candidate.id
-                    } label: {
-                        if candidate.id == profile.id {
-                            Label(candidate.name, systemImage: "checkmark")
-                        } else {
-                            Text(candidate.name)
+                // The menu picks what the rack SHOWS. Control schemes
+                // (device profiles, flight modes) will be their own
+                // chooser; this one never grows a second vocabulary.
+                Section("Panel layout") {
+                    ForEach(InstrumentProfile.builtIn) { candidate in
+                        Button {
+                            profileId = candidate.id
+                        } label: {
+                            if candidate.id == profile.id {
+                                Label(candidate.name, systemImage: "checkmark")
+                            } else {
+                                Text(candidate.name)
+                            }
                         }
                     }
                 }
@@ -183,6 +188,13 @@ struct InstrumentRackView: View {
                     )
                 }
                 HStack(spacing: 4) {
+                    if model.gimbalCaptured {
+                        // The quasimode holds the stick for THIS camera;
+                        // the badge lives where the picture is.
+                        Image(systemName: "camera.rotate.fill")
+                            .foregroundStyle(.cyan)
+                            .padding(6)
+                    }
                     Menu {
                         ForEach(Self.videoSources, id: \.self) { candidate in
                             Button {
@@ -248,6 +260,11 @@ struct InstrumentRackView: View {
         return model.videoImages.keys.contains(id) ? id : nil
     }
 
+    /// One row and one caption: the bar must never eat into the
+    /// instruments it serves. The telegraph is the row's centerpiece;
+    /// everything narrational lives in the caption or moved out — pad
+    /// hints to the connect sheet, the capture badge onto the video
+    /// tile itself.
     private var controlBar: some View {
         VStack(spacing: 4) {
             HStack(spacing: 10) {
@@ -255,15 +272,12 @@ struct InstrumentRackView: View {
                     ? "gamecontroller.fill"
                     : "gamecontroller")
                     .foregroundStyle(model.controllerAttached ? .green : .secondary)
-                Spacer()
                 if model.leaseHeld {
-                    // Motion setpoints move nothing until the vehicle is
-                    // armed; the pair sits where the sticks are worked.
-                    Button("Arm") { model.arm() }
-                        .buttonStyle(.borderedProminent)
-                    Button("Disarm", role: .destructive) { model.disarm() }
+                    ArmTelegraphControl(model: model)
+                    Spacer()
                     Button("Release", role: .destructive) { model.releaseLease() }
                 } else {
+                    Spacer()
                     // One intent, one button: a denial with a standing
                     // holder escalates to the ask on its own.
                     Button("Request control") { model.requestLease() }
@@ -271,27 +285,85 @@ struct InstrumentRackView: View {
                 }
             }
             .font(.callout)
-            if model.gimbalCaptured {
-                Label("Gimbal captured — right stick points the camera",
-                      systemImage: "camera.rotate")
-                    .font(.caption2)
-                    .foregroundStyle(.cyan)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !model.padHints.isEmpty {
-                Text(model.padHints)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !model.linkStats.isEmpty {
-                Text(model.linkStats)
+            if let caption = barCaption {
+                Text(caption.text)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(caption.warning ? .orange : .secondary)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .foregroundStyle(.white)
+    }
+
+    /// The one caption line under the bar: a telegraph grievance wins
+    /// over the routine link figures.
+    private var barCaption: (text: String, warning: Bool)? {
+        if model.armPhase == 2 {
+            return ("arm refused: \(model.armDetail)", true)
+        }
+        if model.armPhase == 3 {
+            return ("the vehicle disarmed on its own — re-arm is your call", true)
+        }
+        if model.linkStats.isEmpty { return nil }
+        return (model.linkStats, false)
+    }
+}
+
+/// The arm order telegraph: a two-position lever the operator sets and
+/// a lamp only the flight controller's own report moves. Amber between
+/// order and answer; the lever never re-sends on its own.
+private struct ArmTelegraphControl: View {
+    @ObservedObject var model: HostLinkModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 0) {
+                lever("SAFE", ordersArmed: false)
+                lever("ARM", ordersArmed: true)
+            }
+            .background(Capsule().fill(Color(white: 0.18)))
+            lamp
+        }
+    }
+
+    private func lever(_ title: String, ordersArmed: Bool) -> some View {
+        let selected = model.armOrdered == ordersArmed
+        return Button {
+            if ordersArmed { model.arm() } else { model.disarm() }
+        } label: {
+            Text(title)
+                .font(.callout.weight(selected ? .bold : .regular))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(selected ? leverTint(ordersArmed: ordersArmed) : .clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func leverTint(ordersArmed: Bool) -> Color {
+        // Amber while the FC has not answered the order; the settled
+        // colors say what the vehicle IS, in the order's terms.
+        if model.armPhase == 1 { return .orange }
+        return ordersArmed ? .red : Color(white: 0.35)
+    }
+
+    /// The FC's answer, and nothing else: the lamp never moves on a
+    /// press.
+    private var lamp: some View {
+        let (tint, label): (Color, String) = switch model.armConfirmed {
+        case 2: (.red, "ARMED")
+        case 1: (.green, "SAFE")
+        default: (.gray, "—")
+        }
+        return HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 8, height: 8)
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+        }
     }
 }
 
