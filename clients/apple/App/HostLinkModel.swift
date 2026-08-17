@@ -22,8 +22,19 @@ final class HostLinkModel: ObservableObject {
         case stopped(reason: String)
     }
 
-    /// Where the link stands now.
-    @Published private(set) var phase: Phase = .idle
+    /// Where the link stands now. A live link pins the idle timer: a
+    /// locked screen suspends the app, the demand loop with it, and the
+    /// host's silence watchdog then hands the vehicle to the link-loss
+    /// failsafe mid-flight.
+    @Published private(set) var phase: Phase = .idle {
+        didSet {
+            let live = switch phase {
+            case .idle, .stopped: false
+            case .connecting, .observing, .controlling, .reconnecting: true
+            }
+            UIApplication.shared.isIdleTimerDisabled = live
+        }
+    }
     /// What the link screen shows about the session.
     @Published private(set) var status = "not connected"
     /// Offered vehicles once admitted, in the host's order.
