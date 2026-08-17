@@ -83,6 +83,8 @@ pub enum LinkEvent {
     ControlRejected {
         /// The rejected frame's sequence.
         sequence: u32,
+        /// The host's typed rejection reason, as the wire enum's number.
+        reason: i32,
     },
     /// The transport is down.
     Down {

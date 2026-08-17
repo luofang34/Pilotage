@@ -279,11 +279,17 @@ final class HostLinkModel: ObservableObject {
     // MARK: - Link relay targets (main actor)
 
     fileprivate func accept(_ event: LinkEvent) {
+        #if DEBUG
+        if LaunchRequest.autoControl { print("harness event: \(event)") }
+        #endif
         switch event {
         case .admitted(let catalog):
             self.catalog = catalog
             phase = .observing(host: catalog.hostVersion)
             status = "admitted by \(catalog.hostVersion)"
+            if LaunchRequest.autoControl {
+                requestLease()
+            }
         case .leaseChanged(let held, let scope, let detail):
             leaseHeld = held
             holderPresent = !held && detail.contains("another operator")
@@ -301,8 +307,13 @@ final class HostLinkModel: ObservableObject {
             }
             status = held ? "controlling \(scope)" : "observing (\(detail))"
             held ? startControlLoop() : stopControlLoop()
-        case .controlRejected(let sequence):
-            status = "control frame \(sequence) rejected"
+            if held && LaunchRequest.autoArm {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.arm()
+                }
+            }
+        case .controlRejected(let sequence, let reason):
+            status = "control frame \(sequence) rejected (reason \(reason))"
         case .down(let retryAtMs):
             leaseHeld = false
             stopControlLoop()
@@ -318,6 +329,9 @@ final class HostLinkModel: ObservableObject {
         case .actionResult(let action, let accepted, let detail):
             let name = action == 1 ? "arm" : action == 2 ? "disarm" : "action \(action)"
             status = accepted ? "\(name) accepted" : "\(name) rejected: \(detail)"
+            if action == 1, accepted, LaunchRequest.autoClimb {
+                climbUntil = Date().addingTimeInterval(15)
+            }
         case .stats(
             let telemetry,
             let stateFrames,
@@ -421,6 +435,10 @@ final class HostLinkModel: ObservableObject {
 
     private var armPressed = false
     private var disarmPressed = false
+    /// Harness climb window; the demand loop climbs until it passes.
+    private var climbUntil = Date.distantPast
+    /// Harness demand-tick counter, printed to prove the loop runs.
+    private var demandTicks = 0
 
     private func sendDemand() {
         guard leaseHeld else { return }
@@ -429,11 +447,18 @@ final class HostLinkModel: ObservableObject {
         // still said "controlling". Frames flow at rate for as long as
         // the lease is held — a neutral demand when no stick is attached
         // is the holder's liveness, exactly as the browser streams it.
+        let climb: Float = climbUntil > Date() ? 0.6 : 0
+        #if DEBUG
+        demandTicks += 1
+        if LaunchRequest.autoControl && demandTicks % 20 == 0 {
+            print("harness demand: tick \(demandTicks) held=\(leaseHeld) climb=\(climb)")
+        }
+        #endif
         guard let pad = GCController.controllers()
             .compactMap(\.extendedGamepad)
             .first
         else {
-            link?.sendMotion(roll: 0, pitch: 0, throttle: 0, yaw: 0)
+            link?.sendMotion(roll: 0, pitch: 0, throttle: climb, yaw: 0)
             return
         }
         // The browser's default profile arms on button 9 and disarms on
@@ -451,7 +476,7 @@ final class HostLinkModel: ObservableObject {
         link?.sendMotion(
             roll: pad.rightThumbstick.xAxis.value,
             pitch: pad.rightThumbstick.yAxis.value,
-            throttle: pad.leftThumbstick.yAxis.value,
+            throttle: max(pad.leftThumbstick.yAxis.value, climb),
             yaw: pad.leftThumbstick.xAxis.value
         )
     }

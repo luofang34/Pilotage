@@ -35,6 +35,34 @@ enum LaunchRequest {
         false
         #endif
     }
+
+    /// Ask for control as soon as the session admits (harness only).
+    static var autoControl: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-AutoControl")
+        #else
+        false
+        #endif
+    }
+
+    /// Arm one second after control is held (harness only).
+    static var autoArm: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-AutoArm")
+        #else
+        false
+        #endif
+    }
+
+    /// Climb through a takeoff window once the arm is accepted
+    /// (harness only).
+    static var autoClimb: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-AutoClimb")
+        #else
+        false
+        #endif
+    }
 }
 
 private struct SituationContentView: View {

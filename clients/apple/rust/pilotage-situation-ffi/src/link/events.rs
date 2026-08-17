@@ -77,6 +77,7 @@ impl Link {
                 self.stats.rejected = self.stats.rejected.wrapping_add(1);
                 self.delivery.event(LinkEvent::ControlRejected {
                     sequence: rejected.sequence.as_ref().map_or(0, |s| s.value),
+                    reason: rejected.reason,
                 });
             }
             ModuleEvent::ConnectionDown { retry_at_ms } => {
