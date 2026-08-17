@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use pilotage_client_session::{
-    ClientAction, ClientConfig, ClientEngine, ControlCommand, ModuleEvent, ReconnectPolicy,
-    StreamId, TransportEvent,
+    ClientAction, ClientConfig, ClientEngine, ControlCommand, ModuleEvent, MotionDemand,
+    ReconnectPolicy, StreamId, TransportEvent, intent_capability, velocity_intent,
 };
 use pilotage_protocol::wire;
 use pilotage_session_host::cli::AdapterKind;
@@ -179,21 +179,27 @@ impl Driver {
         }
     }
 
-    /// Sends fenced full-throttle frames until telemetry reports movement.
+    /// Sends fenced typed forward-demand frames until telemetry reports
+    /// movement — the same intent construction the device driver uses, so
+    /// a frame the advertisement would reject cannot pass unnoticed here.
     async fn drive_until_moving(&mut self) {
-        let throttle = wire::ControlPayload {
-            axes: vec![
-                wire::AxisSample {
-                    axis_id: u32::from(pilotage_adapter_reference::THROTTLE_AXIS),
-                    value: 1.0,
-                },
-                wire::AxisSample {
-                    axis_id: u32::from(pilotage_adapter_reference::STEERING_AXIS),
-                    value: 0.0,
-                },
-            ],
-            edges: Vec::new(),
+        let (vehicle_id, scope) = self.engine.control_target().expect("holds control");
+        let demand = MotionDemand {
+            roll: 0.0,
+            pitch: 1.0,
+            throttle: 0.0,
+            yaw: 0.0,
         };
+        let intent = velocity_intent(
+            demand,
+            intent_capability(
+                self.engine.admission().expect("admitted"),
+                vehicle_id,
+                &scope,
+                wire::IntentFamily::Velocity,
+            ),
+        )
+        .expect("the advertised envelope admits a body-frame velocity");
         let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
         let mut speed = 0.0_f64;
         while speed <= 0.0 {
@@ -201,9 +207,7 @@ impl Driver {
                 tokio::time::Instant::now() < deadline,
                 "telemetry must report the applied frame before the timeout"
             );
-            let actions = self
-                .engine
-                .control_frame(ControlCommand::Legacy(throttle.clone()), 1);
+            let actions = self.engine.control_frame(ControlCommand::Intent(intent), 1);
             self.execute(actions).await;
             self.pump_datagram().await;
             for event in self.take_events() {

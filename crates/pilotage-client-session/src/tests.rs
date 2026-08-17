@@ -11,7 +11,7 @@ use prost::Message;
 
 use crate::{
     ClientAction, ClientConfig, ClientEngine, ClientPhase, ControlCommand, ControlLane,
-    ModuleEvent, ReconnectPolicy, StreamId, TransportEvent,
+    ModuleEvent, MotionDemand, ReconnectPolicy, StreamId, TransportEvent, velocity_intent,
 };
 
 pub(super) const WELCOME_FIXTURE: &str =
@@ -165,6 +165,50 @@ fn the_shared_typed_frame_fixture_is_reproduced_byte_for_byte() {
         bytes, expected,
         "native frame bytes must equal the browser's"
     );
+}
+
+#[test]
+fn a_velocity_intent_speaks_the_advertised_body_frame() {
+    let capability = wire::IntentCapability {
+        family: wire::IntentFamily::Velocity as i32,
+        frames: vec![wire::ReferenceFrame::BodyFrd as i32],
+        max_linear: 3.0,
+        max_angular: 0.9,
+        max_vertical: 1.5,
+        ..Default::default()
+    };
+    let demand = MotionDemand {
+        roll: 0.0,
+        pitch: 1.0,
+        throttle: 0.5,
+        yaw: 0.0,
+    };
+    let intent = velocity_intent(demand, Some(&capability)).expect("advertised body frame");
+    let Some(wire::control_intent::Family::Velocity(v)) = intent.family else {
+        panic!("velocity family expected");
+    };
+    assert_eq!(v.frame, wire::ReferenceFrame::BodyFrd as i32);
+    assert!((v.vx - 3.0).abs() < f32::EPSILON);
+    assert!((v.vz + 0.75).abs() < f32::EPSILON, "climb is negative vz");
+}
+
+#[test]
+fn a_scope_without_the_body_frame_gets_no_velocity_intent() {
+    // Sticks are body demands; a world-frame-only advertisement must not
+    // have them relabeled as north/east/down setpoints.
+    let capability = wire::IntentCapability {
+        family: wire::IntentFamily::Velocity as i32,
+        frames: vec![wire::ReferenceFrame::LocalNed as i32],
+        max_linear: 3.0,
+        ..Default::default()
+    };
+    let demand = MotionDemand {
+        roll: 0.0,
+        pitch: 1.0,
+        throttle: 0.0,
+        yaw: 0.0,
+    };
+    assert!(velocity_intent(demand, Some(&capability)).is_none());
 }
 
 #[test]

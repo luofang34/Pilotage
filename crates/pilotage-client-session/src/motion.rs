@@ -26,6 +26,12 @@ pub struct MotionDemand {
 /// Builds the typed velocity intent (m/s, rad/s) from a normalized
 /// demand and the scope's advertised velocity capability. Returns `None`
 /// without an advertisement: an unadvertised intent must not be sent.
+///
+/// Stick demands are body-relative (forward, right, climb), so the only
+/// frame that states them faithfully is Body-FRD. A capability that does
+/// not advertise Body-FRD gets no intent at all: the host's gate would
+/// reject any other frame, and relabeling body demands as world axes
+/// would steer the vehicle wrong.
 #[must_use]
 pub fn velocity_intent(
     demand: MotionDemand,
@@ -33,6 +39,10 @@ pub fn velocity_intent(
 ) -> Option<wire::ControlIntent> {
     let capability = capability?;
     if capability.family != wire::IntentFamily::Velocity as i32 {
+        return None;
+    }
+    let body_frd = wire::ReferenceFrame::BodyFrd as i32;
+    if !capability.frames.contains(&body_frd) {
         return None;
     }
     let max_vertical = if capability.max_vertical > 0.0 {
@@ -43,7 +53,7 @@ pub fn velocity_intent(
     Some(wire::ControlIntent {
         family: Some(wire::control_intent::Family::Velocity(
             wire::VelocityIntent {
-                frame: wire::ReferenceFrame::LocalNed as i32,
+                frame: body_frd,
                 vx: demand.pitch * capability.max_linear,
                 vy: demand.roll * capability.max_linear,
                 // Body-FRD +z is down; a climb demand is a negative vz.
