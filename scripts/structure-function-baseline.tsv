@@ -1,4 +1,4 @@
 # path	function	exact_body_lines
 ./crates/pilotage-conformance/src/fixture.rs	increment_zero_script	89
-./crates/pilotage-authority/src/wire.rs	from	88
+./crates/pilotage-authority/src/wire.rs	from	93
 ./hosts/session-host/tests/loopback.rs	hello_lease_frame_and_stale_generation_rejection	97

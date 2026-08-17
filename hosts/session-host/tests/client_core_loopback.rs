@@ -268,6 +268,105 @@ async fn the_client_core_drives_admission_lease_and_an_applied_control_frame() {
     // Arm through the fenced reliable action path. The result must come
     // back accepted: an unannounced profile activation would reject it,
     // which is exactly the fault this leg pins down.
+    arm_and_expect_accepted(&mut driver).await;
+
+    // Control: full throttle through the engine's fenced lane, applied by
+    // the reference adapter and observed as nonzero speed in telemetry.
+    driver.drive_until_moving().await;
+
+    host.shutdown().await;
+}
+
+/// Pumps the holder's session events until another principal's ask
+/// arrives, returning who asked.
+async fn await_transfer_ask(holder: &mut Driver) -> u64 {
+    loop {
+        holder.pump_session_events().await;
+        let requested = holder.take_events().into_iter().find_map(|event| {
+            if let ModuleEvent::Authority(authority) = event
+                && let Some(wire::authority_event::Event::ScopeTransferRequested(requested)) =
+                    authority.event
+            {
+                return requested.from_principal.map(|p| p.value);
+            }
+            None
+        });
+        if let Some(from) = requested {
+            return from;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_cooperative_handover_moves_control_between_two_engine_clients() {
+    let host = runtime::start_with_options(
+        0,
+        AdapterKind::Reference,
+        runtime::RuntimeOptions {
+            legacy_compatibility: true,
+            mission: None,
+        },
+    )
+    .await
+    .expect("host starts on an ephemeral port");
+
+    // A holds; B wants.
+    let mut holder = Driver::connect(host.local_addr).await;
+    let admission_a = holder.await_admission().await;
+    let vehicle_id = admission_a.vehicles[0].vehicle_id;
+    let scope = admission_a.vehicles[0].scopes[0].scope.clone();
+    holder.accept_session_events().await;
+    holder.acquire_lease(vehicle_id, &scope).await;
+
+    let mut asker = Driver::connect(host.local_addr).await;
+    let admission_b = asker.await_admission().await;
+    asker.accept_session_events().await;
+
+    // B asks. A sees the ask on the authority stream.
+    let actions = asker.engine.request_takeover(vehicle_id, &scope);
+    asker.execute(actions).await;
+    let requested_from = await_transfer_ask(&mut holder).await;
+    assert_eq!(
+        requested_from, admission_b.principal_id,
+        "the ask names the principal who asked"
+    );
+
+    // A confirms by offering; B auto-accepts; the commit arms B.
+    let actions = holder.engine.offer_transfer(requested_from);
+    holder.execute(actions).await;
+    let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
+    while !asker.engine.holds_control() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the committed transfer must arm the asker before the timeout"
+        );
+        asker.pump_session_events().await;
+        let actions = asker.engine.handle(
+            pilotage_client_session::TransportEvent::BootstrapReceived(Vec::new()),
+            0,
+        );
+        asker.execute(actions).await;
+    }
+
+    // A's lane is gone the moment the same commit reaches it.
+    let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
+    while holder.engine.holds_control() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the commit must close the old holder's lane before the timeout"
+        );
+        holder.pump_session_events().await;
+    }
+
+    // The new holder flies: an accepted arm proves the whole rebind
+    // (activation announcement included) followed the transfer.
+    arm_and_expect_accepted(&mut asker).await;
+
+    host.shutdown().await;
+}
+
+/// Sends an arm through the engine and pumps until its accepted result.
+async fn arm_and_expect_accepted(driver: &mut Driver) {
     let actions = driver.engine.control_action(wire::ControlActionRequest {
         action: 1,
         mode_target: 0,
@@ -275,8 +374,7 @@ async fn the_client_core_drives_admission_lease_and_an_applied_control_frame() {
     });
     driver.execute(actions).await;
     let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
-    let mut armed = false;
-    while !armed {
+    loop {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the arm result must arrive before the timeout"
@@ -285,14 +383,8 @@ async fn the_client_core_drives_admission_lease_and_an_applied_control_frame() {
         for event in driver.take_events() {
             if let ModuleEvent::ActionResult(result) = event {
                 assert!(result.accepted, "arm must be accepted: {}", result.detail);
-                armed = true;
+                return;
             }
         }
     }
-
-    // Control: full throttle through the engine's fenced lane, applied by
-    // the reference adapter and observed as nonzero speed in telemetry.
-    driver.drive_until_moving().await;
-
-    host.shutdown().await;
 }

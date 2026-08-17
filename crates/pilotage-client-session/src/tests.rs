@@ -4,6 +4,8 @@
 //! execute (`clients/web-control/*.json`), so the native and web paths
 //! cannot drift: a divergence reddens exactly one of them.
 
+mod takeover;
+
 use pilotage_protocol::wire;
 use prost::Message;
 
@@ -12,12 +14,12 @@ use crate::{
     ModuleEvent, ReconnectPolicy, StreamId, TransportEvent,
 };
 
-const WELCOME_FIXTURE: &str =
+pub(super) const WELCOME_FIXTURE: &str =
     include_str!("../../../clients/web-control/server-welcome-fixture.json");
 const TYPED_FRAME_FIXTURE: &str =
     include_str!("../../../clients/web-control/typed-frame-fixture.json");
 
-fn engine() -> ClientEngine {
+pub(super) fn engine() -> ClientEngine {
     ClientEngine::new(ClientConfig {
         client_name: "test-client".into(),
         reconnect: ReconnectPolicy::default(),
@@ -31,14 +33,14 @@ fn hex_bytes(hex: &str) -> Vec<u8> {
         .collect()
 }
 
-fn fixture_hex(doc: &str, key: &str) -> Vec<u8> {
+pub(super) fn fixture_hex(doc: &str, key: &str) -> Vec<u8> {
     let value: serde_json::Value = serde_json::from_str(doc).expect("fixture parses");
     hex_bytes(value[key].as_str().expect("fixture key present"))
 }
 
 /// Admits the engine with a minimal host-shaped welcome and returns the
 /// emitted actions.
-fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> Vec<ClientAction> {
+pub(super) fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> Vec<ClientAction> {
     let welcome = wire::Envelope {
         schema_version: 1,
         payload: Some(wire::envelope::Payload::ServerWelcome(
@@ -70,7 +72,7 @@ fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> Vec<ClientA
 }
 
 /// Grants the pending lease at `generation` through the bootstrap stream.
-fn grant(engine: &mut ClientEngine, generation: u64) -> Vec<ClientAction> {
+pub(super) fn grant(engine: &mut ClientEngine, generation: u64) -> Vec<ClientAction> {
     let response = wire::Envelope {
         schema_version: 1,
         payload: Some(wire::envelope::Payload::LeaseResponse(
@@ -418,122 +420,4 @@ fn telemetry_and_rejections_arrive_as_typed_module_events() {
         actions[0],
         ClientAction::Emit(ModuleEvent::ControlRejected(_))
     ));
-}
-
-#[test]
-fn a_full_climb_demand_scales_onto_the_fixture_envelope() {
-    // The shared typed-frame fixture was produced by the browser from a
-    // full climb demand against the 3.0/1.5/0.9 advertised envelope; the
-    // native scaling must reach the same setpoint.
-    let envelope_bytes = fixture_hex(WELCOME_FIXTURE, "envelopeHex");
-    let mut engine = engine();
-    engine.handle(TransportEvent::Connected, 0);
-    engine.handle(TransportEvent::BootstrapReceived(envelope_bytes), 0);
-    let admission = engine.admission().expect("fixture admits").clone();
-
-    let capability = crate::intent_capability(
-        &admission,
-        1,
-        "vehicle.motion",
-        wire::IntentFamily::Velocity,
-    );
-    let intent = crate::velocity_intent(
-        crate::MotionDemand {
-            roll: 0.0,
-            pitch: 0.0,
-            throttle: 1.0,
-            yaw: 0.0,
-        },
-        capability,
-    )
-    .expect("the advertised scope builds an intent");
-    let Some(wire::control_intent::Family::Velocity(velocity)) = intent.family else {
-        panic!("a velocity capability builds a velocity intent");
-    };
-    assert!(
-        (velocity.vz - (-1.5)).abs() < f32::EPSILON,
-        "full climb is -maxVertical"
-    );
-    assert!((velocity.vx).abs() < f32::EPSILON);
-
-    // No advertisement, no intent: fail closed.
-    assert!(
-        crate::velocity_intent(
-            crate::MotionDemand {
-                roll: 0.0,
-                pitch: 0.0,
-                throttle: 1.0,
-                yaw: 0.0
-            },
-            None
-        )
-        .is_none()
-    );
-}
-
-#[test]
-fn the_first_grant_announces_the_profile_and_binds_the_lane() {
-    let mut engine = engine();
-    admit(&mut engine, 7, 42);
-    engine.request_lease(1, "vehicle.motion");
-    let actions = grant(&mut engine, 4);
-
-    // The grant's actions carry exactly one activation announcement.
-    let activation = actions
-        .iter()
-        .find_map(|action| match action {
-            ClientAction::SendBootstrap(bytes) => {
-                let (envelope, _) =
-                    pilotage_protocol::decode_envelope_length_delimited(bytes).ok()?;
-                match envelope.payload {
-                    Some(wire::envelope::Payload::ProfileActivation(activation)) => {
-                        Some(activation)
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        })
-        .expect("the first grant announces the control profile");
-    assert_eq!(activation.session.map(|s| s.value), Some(7));
-    assert_eq!(activation.activation_revision, 1);
-    assert_eq!(activation.digest.len(), 32);
-
-    // Every later frame binds to the announced activation, or the host
-    // rejects the press with "activation revision does not match".
-    let actions = engine.control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 10);
-    let ClientAction::SendDatagram(bytes) = &actions[0] else {
-        panic!("a held lease produces a datagram");
-    };
-    let envelope = wire::Envelope::decode(bytes.as_slice()).expect("frame decodes");
-    let Some(wire::envelope::Payload::ControlFrame(frame)) = envelope.payload else {
-        panic!("the datagram is a control frame");
-    };
-    assert_eq!(frame.activation_revision, 1);
-}
-
-#[test]
-fn a_video_stream_yields_frame_bodies_across_split_reads() {
-    let mut engine = engine();
-    admit(&mut engine, 7, 42);
-    engine.handle(TransportEvent::UniStreamOpened(StreamId(3)), 0);
-
-    let body = vec![0xAB_u8; 10];
-    let mut wire_bytes = vec![0x04];
-    wire_bytes.extend_from_slice(&(body.len() as u32).to_be_bytes());
-    wire_bytes.extend_from_slice(&body);
-
-    let first = engine.handle(
-        TransportEvent::UniStreamReceived(StreamId(3), wire_bytes[..6].to_vec()),
-        0,
-    );
-    assert!(first.is_empty(), "a partial record emits nothing");
-    let rest = engine.handle(
-        TransportEvent::UniStreamReceived(StreamId(3), wire_bytes[6..].to_vec()),
-        0,
-    );
-    let ClientAction::Emit(ModuleEvent::VideoFrame(received)) = &rest[0] else {
-        panic!("a completed record emits one video frame body");
-    };
-    assert_eq!(received, &body);
 }

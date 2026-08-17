@@ -9,6 +9,7 @@
 //! ADR-0037).
 
 mod driver;
+mod events;
 mod observer;
 mod records;
 
@@ -39,6 +40,13 @@ pub(crate) enum LinkCommand {
     },
     Action {
         code: i32,
+    },
+    Takeover {
+        vehicle_id: u64,
+        scope: String,
+    },
+    Offer {
+        to_principal: u64,
     },
     Shutdown,
 }
@@ -114,6 +122,20 @@ impl LinkSession {
     /// action dies in the shared core.
     pub fn send_action(&self, code: i32) {
         self.commands.send(LinkCommand::Action { code }).ok();
+    }
+
+    /// Asks the present holder to hand the scope over; the handover
+    /// completes without another press if the holder confirms.
+    pub fn request_takeover(&self, vehicle_id: u64, scope: String) {
+        self.commands
+            .send(LinkCommand::Takeover { vehicle_id, scope })
+            .ok();
+    }
+
+    /// Hands the held scope to the asking principal — the holder's half
+    /// of a cooperative handover.
+    pub fn offer_transfer(&self, to_principal: u64) {
+        self.commands.send(LinkCommand::Offer { to_principal }).ok();
     }
 
     /// Stops the driver and the connection.

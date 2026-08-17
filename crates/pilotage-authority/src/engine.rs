@@ -66,6 +66,11 @@ impl AuthorityEngine {
                 self.handle_register(vehicle, scope)
             }
             AuthorityCommand::Grant { vehicle, scope, to } => self.handle_grant(vehicle, scope, to),
+            AuthorityCommand::RequestTransfer {
+                vehicle,
+                scope,
+                from,
+            } => self.handle_request_transfer(vehicle, scope, from),
             AuthorityCommand::Offer {
                 vehicle,
                 scope,

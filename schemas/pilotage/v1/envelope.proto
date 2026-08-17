@@ -38,5 +38,9 @@ message Envelope {
     ControlActionCommand control_action_command = 18;
     MediaAttachRequest media_attach_request = 19;
     VideoDeliveryState video_delivery_state = 20;
+    // Cooperative handover (CLIENT-09); additive arms.
+    ScopeTransferRequest scope_transfer_request = 21;
+    ScopeTransferOffer scope_transfer_offer = 22;
+    ScopeTransferAccept scope_transfer_accept = 23;
   }
 }

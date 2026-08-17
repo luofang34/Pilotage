@@ -42,6 +42,11 @@ final class HostLinkModel: ObservableObject {
     @Published private(set) var controllerAttached = false
     /// One second of link accounting, verbatim from the driver.
     @Published private(set) var linkStats = ""
+    /// A pending ask from another operator, while this client holds.
+    @Published var takeoverAsk: (fromPrincipal: UInt64, scope: String)?
+    /// Whether the last denial named a standing holder, so the screen can
+    /// offer the ask instead of a dead button.
+    @Published private(set) var holderPresent = false
     /// The latest decoded picture per video source id.
     @Published private(set) var videoImages: [UInt8: UIImage] = [:]
     /// When each source last produced a picture, on the wall clock.
@@ -204,6 +209,28 @@ final class HostLinkModel: ObservableObject {
         link?.sendAction(code: 2)
     }
 
+    /// Asks the present holder to hand control over; the handover
+    /// finishes without another press here if they confirm.
+    func requestTakeover() {
+        guard let vehicle = catalog?.vehicles.first,
+              let scope = vehicle.scopes.first
+        else { return }
+        status = "asked the holder for control"
+        link?.requestTakeover(vehicleId: vehicle.vehicleId, scope: scope.scope)
+    }
+
+    /// Hands control to the principal who asked.
+    func confirmHandover() {
+        guard let ask = takeoverAsk else { return }
+        link?.offerTransfer(toPrincipal: ask.fromPrincipal)
+        takeoverAsk = nil
+    }
+
+    /// Keeps control; the ask expires host-side.
+    func declineHandover() {
+        takeoverAsk = nil
+    }
+
     /// Fetches the session manifest xtask serves and connects with it:
     /// the same three facts the browser reads, taken from the same file,
     /// so a hand-typed hash is never the price of pinning.
@@ -248,6 +275,7 @@ final class HostLinkModel: ObservableObject {
             status = "admitted by \(catalog.hostVersion)"
         case .leaseChanged(let held, let scope, let detail):
             leaseHeld = held
+            holderPresent = !held && detail.contains("another operator")
             if held {
                 phase = .controlling(scope: scope)
             } else if let catalog {
@@ -267,6 +295,8 @@ final class HostLinkModel: ObservableObject {
             stopControlLoop()
             phase = .stopped(reason: reason)
             status = "stopped: \(reason)"
+        case .takeoverAsked(let fromPrincipal, let scope):
+            takeoverAsk = (fromPrincipal, scope)
         case .actionResult(let action, let accepted, let detail):
             let name = action == 1 ? "arm" : action == 2 ? "disarm" : "action \(action)"
             status = accepted ? "\(name) accepted" : "\(name) rejected: \(detail)"

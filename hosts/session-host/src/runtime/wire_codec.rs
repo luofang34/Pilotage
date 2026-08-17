@@ -137,6 +137,24 @@ pub fn decode_bootstrap_message(
                 pilotage_protocol::LeaseRelease::try_from(release).map_err(DecodeError::from)?,
             ))
         }
+        Some(wire::envelope::Payload::ScopeTransferRequest(request)) => {
+            InboundBootstrap::Engine(DomainEnvelope::TransferRequest(
+                pilotage_protocol::ScopeTransferRequest::try_from(request)
+                    .map_err(DecodeError::from)?,
+            ))
+        }
+        Some(wire::envelope::Payload::ScopeTransferOffer(offer)) => {
+            InboundBootstrap::Engine(DomainEnvelope::TransferOffer(
+                pilotage_protocol::ScopeTransferOffer::try_from(offer)
+                    .map_err(DecodeError::from)?,
+            ))
+        }
+        Some(wire::envelope::Payload::ScopeTransferAccept(accept)) => {
+            InboundBootstrap::Engine(DomainEnvelope::TransferAccept(
+                pilotage_protocol::ScopeTransferAccept::try_from(accept)
+                    .map_err(DecodeError::from)?,
+            ))
+        }
         Some(wire::envelope::Payload::ProfileActivation(activation)) => {
             InboundBootstrap::Engine(DomainEnvelope::ProfileActivation(
                 pilotage_protocol::ProfileActivation::try_from(activation)

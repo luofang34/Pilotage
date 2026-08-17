@@ -5,6 +5,7 @@ import {
   encodeControlActionCommandEnvelope,
   encodeControlFrameEnvelope,
 } from "./wire.js";
+import { handleTransferRequest } from "./transfer-handover.js";
 import {
   ACTION_TIMEOUT_MS,
   enqueueAction,
@@ -367,6 +368,17 @@ export function createControlLoop({
         applyAuthorityTransition(state.controlShell, log, slot, message.kind, {
           generation: message.generation,
         });
+      } else if (
+        handleTransferRequest({
+          message,
+          vehicleId,
+          granted: authorityFor(message.scope).granted,
+          writer: state.sessionWriter,
+          frame: lengthDelimit,
+          log,
+        })
+      ) {
+        // Handled (or declined) as a cooperative handover ask.
       } else {
         // Not one of OUR table transitions (an override, a warning, a
         // transfer, or another principal's lease traffic): still a

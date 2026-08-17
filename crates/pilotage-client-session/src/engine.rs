@@ -44,6 +44,7 @@ pub struct ClientEngine {
     authority: AuthorityMirror,
     lane: Option<ControlLane>,
     pending_lease: Option<(u64, String)>,
+    pending_takeover: Option<(u64, String)>,
     activation_announced: bool,
     reconnect: ReconnectState,
 }
@@ -61,6 +62,7 @@ impl ClientEngine {
             authority: AuthorityMirror::default(),
             lane: None,
             pending_lease: None,
+            pending_takeover: None,
             activation_announced: false,
             reconnect: ReconnectState::default(),
         }
@@ -141,6 +143,36 @@ impl ClientEngine {
         vec![ClientAction::SendBootstrap(bootstrap::lease_request(
             vehicle_id, scope,
         ))]
+    }
+
+    /// Asks the present holder to hand a scope over. The ask changes
+    /// nothing until the holder offers; the engine then accepts the offer
+    /// addressed to it and opens the lane on the committed transfer.
+    pub fn request_takeover(&mut self, vehicle_id: u64, scope: &str) -> Vec<ClientAction> {
+        if self.phase != ClientPhase::Admitted {
+            return Vec::new();
+        }
+        self.pending_takeover = Some((vehicle_id, scope.to_owned()));
+        vec![ClientAction::SendBootstrap(bootstrap::transfer_request(
+            vehicle_id, scope,
+        ))]
+    }
+
+    /// Offers the held scope to another principal — the holder's half of
+    /// a cooperative handover. Without a lane there is nothing to offer.
+    pub fn offer_transfer(&mut self, to_principal: u64) -> Vec<ClientAction> {
+        let Some((vehicle_id, scope)) = self.engine_control_target() else {
+            return Vec::new();
+        };
+        vec![ClientAction::SendBootstrap(bootstrap::transfer_offer(
+            vehicle_id,
+            &scope,
+            to_principal,
+        ))]
+    }
+
+    fn engine_control_target(&self) -> Option<(u64, String)> {
+        self.control_target()
     }
 
     /// Releases the held lease, if any.
@@ -280,10 +312,120 @@ impl ClientEngine {
             Some(wire::envelope::Payload::AuthorityEvent(event)) => {
                 let principal = self.admission.as_ref().map_or(0, |a| a.principal_id);
                 self.authority.apply(&event, principal);
-                vec![ClientAction::Emit(ModuleEvent::Authority(event))]
+                let mut actions = self.on_transfer_progress(&event, principal);
+                actions.push(ClientAction::Emit(ModuleEvent::Authority(event)));
+                actions
             }
             _ => Vec::new(),
         }
+    }
+
+    /// Moves a pending takeover along, and closes a lane whose authority
+    /// went to someone else — whichever way it went.
+    fn on_transfer_progress(
+        &mut self,
+        event: &wire::AuthorityEvent,
+        principal_id: u64,
+    ) -> Vec<ClientAction> {
+        match event.event.as_ref() {
+            Some(wire::authority_event::Event::ScopeTransferOffered(offered)) => {
+                self.on_transfer_offered(offered, principal_id)
+            }
+            Some(wire::authority_event::Event::ScopeTransferCommitted(committed)) => {
+                self.on_transfer_committed(committed, principal_id)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Accepts the offer that answers this engine's own pending ask, and
+    /// no other.
+    fn on_transfer_offered(
+        &mut self,
+        offered: &wire::ScopeTransferOffered,
+        principal_id: u64,
+    ) -> Vec<ClientAction> {
+        let to = offered.to_principal.as_ref().map(|p| p.value);
+        let vehicle = offered.vehicle.as_ref().map_or(0, |v| v.value);
+        let scope = offered
+            .scope
+            .as_ref()
+            .map(|s| s.value.clone())
+            .unwrap_or_default();
+        let pending = self
+            .pending_takeover
+            .as_ref()
+            .is_some_and(|(v, s)| *v == vehicle && *s == scope);
+        if to == Some(principal_id) && pending {
+            vec![ClientAction::SendBootstrap(bootstrap::transfer_accept(
+                vehicle, &scope,
+            ))]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Opens the lane on a commit to this principal; closes it when the
+    /// lane's authority went to someone else.
+    fn on_transfer_committed(
+        &mut self,
+        committed: &wire::ScopeTransferCommitted,
+        principal_id: u64,
+    ) -> Vec<ClientAction> {
+        let mut actions = Vec::new();
+        let to = committed.to_principal.as_ref().map(|p| p.value);
+        let vehicle = committed.vehicle.as_ref().map_or(0, |v| v.value);
+        let scope = committed
+            .scope
+            .as_ref()
+            .map(|s| s.value.clone())
+            .unwrap_or_default();
+        let generation = committed.generation.as_ref().map_or(0, |g| g.value);
+        if to == Some(principal_id) {
+            if let Some(admission) = self.admission.as_ref() {
+                self.pending_takeover = None;
+                let mut lane =
+                    ControlLane::new(admission.session_id, vehicle, scope.clone(), generation);
+                if !self.activation_announced {
+                    self.activation_announced = true;
+                    actions.push(ClientAction::SendBootstrap(bootstrap::profile_activation(
+                        admission.session_id,
+                    )));
+                }
+                lane.bind_profile(
+                    bootstrap::NATIVE_PROFILE_REVISION,
+                    bootstrap::NATIVE_ACTIVATION_REVISION,
+                );
+                self.lane = Some(lane);
+                actions.push(ClientAction::Emit(ModuleEvent::Lease(
+                    wire::LeaseResponse {
+                        vehicle: Some(wire::VehicleId { value: vehicle }),
+                        scope: Some(wire::ScopeId { value: scope }),
+                        granted: true,
+                        generation: Some(wire::Generation { value: generation }),
+                        reason: 0,
+                    },
+                )));
+            }
+        } else if self
+            .lane
+            .as_ref()
+            .is_some_and(|lane| lane.vehicle_id() == vehicle && lane.scope() == scope)
+        {
+            // Authority moved away from this lane: it is gone, and
+            // saying so beats a stream of fenced rejections.
+            self.lane = None;
+            actions.push(ClientAction::Emit(ModuleEvent::Lease(
+                wire::LeaseResponse {
+                    vehicle: Some(wire::VehicleId { value: vehicle }),
+                    scope: Some(wire::ScopeId { value: scope }),
+                    granted: false,
+                    generation: Some(wire::Generation { value: generation }),
+                    reason: 1,
+                },
+            )));
+        }
+        actions
     }
 
     fn on_datagram(&mut self, bytes: &[u8]) -> Vec<ClientAction> {
@@ -314,6 +456,7 @@ impl ClientEngine {
         // restores. The lane is dropped and never rebuilt by reconnect.
         self.lane = None;
         self.pending_lease = None;
+        self.pending_takeover = None;
         self.admission = None;
         self.activation_announced = false;
         self.streams.reset();

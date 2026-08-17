@@ -9,45 +9,45 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use pilotage_client_session::{
-    ClientAction, ClientConfig, ClientEngine, ControlCommand, ModuleEvent, MotionDemand,
-    ReconnectPolicy, StreamId, TransportEvent, intent_capability, velocity_intent,
+    ClientAction, ClientConfig, ClientEngine, ControlCommand, MotionDemand, ReconnectPolicy,
+    StreamId, TransportEvent, intent_capability, velocity_intent,
 };
-use pilotage_instrument_feed::{FeedParams, InstrumentFeed};
+use pilotage_instrument_feed::InstrumentFeed;
 use pilotage_protocol::wire;
 use tokio::sync::mpsc;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
 
 use super::LinkCommand;
 use super::observer::LinkObserver;
-use super::records::{LinkCatalog, LinkConfig, LinkEvent};
+use super::records::{LinkConfig, LinkEvent};
 
 /// State-frame cadence: one assembly per display-ish interval. The scene
 /// pace is the shell's display link; this only bounds staleness.
 const STATE_FRAME_INTERVAL_MS: u64 = 33;
 
 /// The driver's owned state across one connection.
-struct Link {
-    engine: ClientEngine,
-    feed: Option<InstrumentFeed>,
-    observer: Arc<dyn LinkObserver>,
-    started: Instant,
-    retry_at_ms: Option<u64>,
-    stopped: bool,
-    stats: LinkStats,
+pub(super) struct Link {
+    pub(super) engine: ClientEngine,
+    pub(super) feed: Option<InstrumentFeed>,
+    pub(super) observer: Arc<dyn LinkObserver>,
+    pub(super) started: Instant,
+    pub(super) retry_at_ms: Option<u64>,
+    pub(super) stopped: bool,
+    pub(super) stats: LinkStats,
 }
 
 /// One second of link accounting, reset on report.
 #[derive(Debug, Default)]
-struct LinkStats {
-    telemetry: u32,
-    state_frames: u32,
-    control_frames: u32,
-    rejected: u32,
-    action_results: u32,
+pub(super) struct LinkStats {
+    pub(super) telemetry: u32,
+    pub(super) state_frames: u32,
+    pub(super) control_frames: u32,
+    pub(super) rejected: u32,
+    pub(super) action_results: u32,
 }
 
 impl Link {
-    fn now_ms(&self) -> u64 {
+    pub(super) fn now_ms(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
@@ -79,93 +79,6 @@ impl Link {
                     });
                 }
             }
-        }
-    }
-
-    /// Translates one module event for the shell, feeding telemetry into
-    /// the shared instrument feed on the way.
-    fn emit(&mut self, event: ModuleEvent) {
-        match event {
-            ModuleEvent::Admitted(admission) => {
-                // The feed follows the first offered vehicle until a lease
-                // narrows the interest; a multi-vehicle chooser is shell
-                // work over this same catalog.
-                if let Some(vehicle) = admission.vehicles.first() {
-                    self.feed = Some(InstrumentFeed::new(&FeedParams {
-                        vehicle_id: vehicle.vehicle_id,
-                        sim_accept_unseen: true,
-                    }));
-                }
-                self.observer.on_event(LinkEvent::Admitted {
-                    catalog: LinkCatalog::from_admission(&admission),
-                });
-            }
-            ModuleEvent::Telemetry(sample) => {
-                self.stats.telemetry = self.stats.telemetry.wrapping_add(1);
-                let now_ms = self.now_ms();
-                if let Some(feed) = self.feed.as_mut() {
-                    #[allow(clippy::cast_precision_loss)]
-                    feed.ingest(&sample, now_ms as f64);
-                }
-            }
-            ModuleEvent::Lease(response) => {
-                let scope = response
-                    .scope
-                    .as_ref()
-                    .map(|s| s.value.clone())
-                    .unwrap_or_default();
-                self.observer.on_event(LinkEvent::LeaseChanged {
-                    held: response.granted,
-                    scope,
-                    detail: if response.granted {
-                        String::new()
-                    } else {
-                        format!("denied ({})", response.reason)
-                    },
-                });
-            }
-            ModuleEvent::LeaseReleased(released) => {
-                let scope = released
-                    .scope
-                    .as_ref()
-                    .map(|s| s.value.clone())
-                    .unwrap_or_default();
-                self.observer.on_event(LinkEvent::LeaseChanged {
-                    held: false,
-                    scope,
-                    detail: "released".to_owned(),
-                });
-            }
-            ModuleEvent::ControlRejected(rejected) => {
-                self.stats.rejected = self.stats.rejected.wrapping_add(1);
-                self.observer.on_event(LinkEvent::ControlRejected {
-                    sequence: rejected.sequence.as_ref().map_or(0, |s| s.value),
-                });
-            }
-            ModuleEvent::ConnectionDown { retry_at_ms } => {
-                self.observer.on_event(LinkEvent::Down { retry_at_ms });
-            }
-            ModuleEvent::ActionResult(result) => {
-                self.stats.action_results = self.stats.action_results.wrapping_add(1);
-                self.observer.on_event(LinkEvent::ActionResult {
-                    action: result.action,
-                    accepted: result.accepted,
-                    detail: result.detail,
-                });
-            }
-            ModuleEvent::VideoFrame(body) => {
-                // Structural decode only; a body that does not parse is
-                // dropped and the next one stands alone.
-                if let Ok(frame) = pilotage_protocol::video_frame::decode_v2(&body) {
-                    let codec = String::from_utf8_lossy(&frame.codec).into_owned();
-                    self.observer.on_video_frame(
-                        frame.header.source_id,
-                        codec,
-                        frame.payload.to_vec(),
-                    );
-                }
-            }
-            ModuleEvent::Authority(_) | ModuleEvent::Pong(_) => {}
         }
     }
 
@@ -370,35 +283,48 @@ async fn drive(
                 }
             }
             command = commands.recv() => {
-                match command {
-                    Some(LinkCommand::RequestLease { vehicle_id, scope }) => {
-                        let actions = link.engine.request_lease(vehicle_id, &scope);
-                        link.execute(actions, &mut send, connection).await;
-                    }
-                    Some(LinkCommand::ReleaseLease) => {
-                        let actions = link.engine.release_lease();
-                        link.execute(actions, &mut send, connection).await;
-                    }
-                    Some(LinkCommand::Motion { roll, pitch, throttle, yaw }) => {
-                        let actions = link.motion_actions(MotionDemand {
-                            roll,
-                            pitch,
-                            throttle,
-                            yaw,
-                        });
-                        link.execute(actions, &mut send, connection).await;
-                    }
-                    Some(LinkCommand::Action { code }) => {
-                        let actions = link.action_actions(code);
-                        link.execute(actions, &mut send, connection).await;
-                    }
-                    Some(LinkCommand::Shutdown) | None => return true,
+                if handle_command(link, command, &mut send, connection).await {
+                    return true;
                 }
             }
             _ = ticker.tick() => link.deliver_state_frame(),
             _ = stats_ticker.tick() => link.report_stats(),
         }
     }
+}
+
+/// Executes one shell command against the engine; `true` means shutdown.
+async fn handle_command(
+    link: &mut Link,
+    command: Option<LinkCommand>,
+    send: &mut wtransport::SendStream,
+    connection: &Connection,
+) -> bool {
+    let actions = match command {
+        Some(LinkCommand::RequestLease { vehicle_id, scope }) => {
+            link.engine.request_lease(vehicle_id, &scope)
+        }
+        Some(LinkCommand::ReleaseLease) => link.engine.release_lease(),
+        Some(LinkCommand::Motion {
+            roll,
+            pitch,
+            throttle,
+            yaw,
+        }) => link.motion_actions(MotionDemand {
+            roll,
+            pitch,
+            throttle,
+            yaw,
+        }),
+        Some(LinkCommand::Action { code }) => link.action_actions(code),
+        Some(LinkCommand::Takeover { vehicle_id, scope }) => {
+            link.engine.request_takeover(vehicle_id, &scope)
+        }
+        Some(LinkCommand::Offer { to_principal }) => link.engine.offer_transfer(to_principal),
+        Some(LinkCommand::Shutdown) | None => return true,
+    };
+    link.execute(actions, send, connection).await;
+    false
 }
 
 /// Reads the bootstrap stream until it ends.

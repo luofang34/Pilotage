@@ -29,7 +29,8 @@ pub use intent::{
 pub use session::{
     ClientHello, ControlActionCommand, ControlActionResult, FrameRejected, FrameRejectionReason,
     LeaseDenialReason, LeaseRelease, LeaseReleased, LeaseRequest, LeaseResponse, LinkLossCleared,
-    Ping, Pong, ProfileActivation, SESSION_PROTOCOL_VERSION, ScopeHolderSnapshot, ServerWelcome,
+    Ping, Pong, ProfileActivation, SESSION_PROTOCOL_VERSION, ScopeHolderSnapshot,
+    ScopeTransferAccept, ScopeTransferOffer, ScopeTransferRequest, ServerWelcome,
 };
 pub use video_frame::{
     CaptureHeader, ContractFault, DecodedFrame, Offsets, encode_v2 as encode_video_frame_v2,

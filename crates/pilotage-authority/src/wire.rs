@@ -35,6 +35,8 @@ pub enum WireEventKind {
     ScopeRegistered,
     /// A lease was granted (`ScopeLeaseGranted`).
     ScopeLeaseGranted,
+    /// A transfer was asked for (`ScopeTransferRequested`).
+    ScopeTransferRequested,
     /// A transfer was offered (`ScopeTransferOffered`).
     ScopeTransferOffered,
     /// A transfer was committed (`ScopeTransferCommitted`).
@@ -70,6 +72,7 @@ impl AuthorityEffect {
         match self {
             AuthorityEffect::ScopeRegistered { .. } => WireEventKind::ScopeRegistered,
             AuthorityEffect::ScopeLeaseGranted { .. } => WireEventKind::ScopeLeaseGranted,
+            AuthorityEffect::ScopeTransferRequested { .. } => WireEventKind::ScopeTransferRequested,
             AuthorityEffect::ScopeTransferOffered { .. } => WireEventKind::ScopeTransferOffered,
             AuthorityEffect::ScopeTransferCommitted { .. } => WireEventKind::ScopeTransferCommitted,
             AuthorityEffect::ScopeTransferExpired { .. } => WireEventKind::ScopeTransferExpired,
@@ -106,6 +109,11 @@ impl From<&AuthorityEffect> for proto::AuthorityEvent {
                 holder,
                 generation,
             } => granted(*vehicle, scope, *holder, *generation),
+            E::ScopeTransferRequested {
+                vehicle,
+                scope,
+                from,
+            } => requested(*vehicle, scope, *from),
             E::ScopeTransferOffered {
                 vehicle,
                 scope,
@@ -249,6 +257,14 @@ fn granted(
         generation: Some(wire_generation(generation)),
         reason: String::new(),
         authority_class: proto::AuthorityClass::Unspecified as i32,
+    })
+}
+
+fn requested(vehicle: VehicleId, scope: &ScopeId, from: PrincipalId) -> Event {
+    Event::ScopeTransferRequested(proto::ScopeTransferRequested {
+        from_principal: Some(wire_principal(from)),
+        vehicle: Some(wire_vehicle(vehicle)),
+        scope: Some(wire_scope(scope)),
     })
 }
 

@@ -68,6 +68,57 @@ pub(crate) fn profile_activation(session_id: u64) -> Vec<u8> {
     pilotage_protocol::encode_envelope_length_delimited(&envelope)
 }
 
+/// A non-holder's ask for a held scope (CLIENT-09).
+pub(crate) fn transfer_request(vehicle_id: u64, scope: &str) -> Vec<u8> {
+    let envelope = wire::Envelope {
+        schema_version: SCHEMA_VERSION,
+        payload: Some(wire::envelope::Payload::ScopeTransferRequest(
+            wire::ScopeTransferRequest {
+                vehicle: Some(wire::VehicleId { value: vehicle_id }),
+                scope: Some(wire::ScopeId {
+                    value: scope.to_owned(),
+                }),
+            },
+        )),
+    };
+    pilotage_protocol::encode_envelope_length_delimited(&envelope)
+}
+
+/// The holder's offer of its held scope to another principal.
+pub(crate) fn transfer_offer(vehicle_id: u64, scope: &str, to_principal: u64) -> Vec<u8> {
+    let envelope = wire::Envelope {
+        schema_version: SCHEMA_VERSION,
+        payload: Some(wire::envelope::Payload::ScopeTransferOffer(
+            wire::ScopeTransferOffer {
+                vehicle: Some(wire::VehicleId { value: vehicle_id }),
+                scope: Some(wire::ScopeId {
+                    value: scope.to_owned(),
+                }),
+                to_principal: Some(wire::PrincipalId {
+                    value: to_principal,
+                }),
+            },
+        )),
+    };
+    pilotage_protocol::encode_envelope_length_delimited(&envelope)
+}
+
+/// The offered principal's acceptance, committing the transfer.
+pub(crate) fn transfer_accept(vehicle_id: u64, scope: &str) -> Vec<u8> {
+    let envelope = wire::Envelope {
+        schema_version: SCHEMA_VERSION,
+        payload: Some(wire::envelope::Payload::ScopeTransferAccept(
+            wire::ScopeTransferAccept {
+                vehicle: Some(wire::VehicleId { value: vehicle_id }),
+                scope: Some(wire::ScopeId {
+                    value: scope.to_owned(),
+                }),
+            },
+        )),
+    };
+    pilotage_protocol::encode_envelope_length_delimited(&envelope)
+}
+
 /// A voluntary release of one held (vehicle, scope).
 pub(crate) fn lease_release(vehicle_id: u64, scope: &str) -> Vec<u8> {
     let envelope = wire::Envelope {

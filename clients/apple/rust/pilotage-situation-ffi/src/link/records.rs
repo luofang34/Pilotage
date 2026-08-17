@@ -95,6 +95,14 @@ pub enum LinkEvent {
         /// The typed fault, formatted.
         reason: String,
     },
+    /// Another principal asked for the scope this client holds. The
+    /// operator decides; nothing changes hands until they do.
+    TakeoverAsked {
+        /// The principal asking.
+        from_principal: u64,
+        /// The scope asked for.
+        scope: String,
+    },
     /// One discrete action's outcome, correlated to the press.
     ActionResult {
         /// The wire `ControlAction` code the result answers.

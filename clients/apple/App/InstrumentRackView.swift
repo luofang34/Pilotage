@@ -85,6 +85,19 @@ struct InstrumentRackView: View {
         .sheet(isPresented: $connectPresented) {
             HostConnectSheet(model: model)
         }
+        .alert(
+            "Hand over control?",
+            isPresented: Binding(
+                get: { model.takeoverAsk != nil },
+                set: { presented in if !presented { model.declineHandover() } }
+            )
+        ) {
+            Button("Hand over") { model.confirmHandover() }
+            Button("Keep control", role: .cancel) { model.declineHandover() }
+        } message: {
+            Text("Operator \(model.takeoverAsk?.fromPrincipal ?? 0) asks for "
+                + (model.takeoverAsk?.scope ?? ""))
+        }
         .fullScreenCover(item: $enlargedTile) { tile in
             ZStack(alignment: .topTrailing) {
                 Color.black.ignoresSafeArea()
@@ -242,6 +255,8 @@ struct InstrumentRackView: View {
                         .buttonStyle(.borderedProminent)
                     Button("Disarm", role: .destructive) { model.disarm() }
                     Button("Release", role: .destructive) { model.releaseLease() }
+                } else if model.holderPresent {
+                    Button("Ask to take over") { model.requestTakeover() }
                 } else {
                     Button("Request control") { model.requestLease() }
                         .disabled(model.catalog == nil)

@@ -78,3 +78,51 @@ fn current_generation(engine: &AuthorityEngine) -> Generation {
 fn reason() -> OverrideReason {
     OverrideReason::new("test override")
 }
+
+#[test]
+fn a_request_reaches_the_holder_and_never_the_asker_itself() {
+    let (mut engine, _generation) = engine_held_by(PrincipalId::new(1));
+
+    // A stranger's ask becomes information for the holder.
+    let effects = engine.handle(
+        AuthorityCommand::RequestTransfer {
+            vehicle: vehicle(),
+            scope: scope(),
+            from: PrincipalId::new(2),
+        },
+        at(1),
+    );
+    assert!(matches!(
+        effects.as_slice(),
+        [AuthorityEffect::ScopeTransferRequested { from, .. }]
+            if *from == PrincipalId::new(2)
+    ));
+
+    // The holder asking itself is a broken client, not a request.
+    let effects = engine.handle(
+        AuthorityCommand::RequestTransfer {
+            vehicle: vehicle(),
+            scope: scope(),
+            from: PrincipalId::new(1),
+        },
+        at(2),
+    );
+    assert!(matches!(
+        effects.as_slice(),
+        [AuthorityEffect::CommandRejected { .. }]
+    ));
+
+    // Asking changed nothing: the same ask still just informs.
+    let effects = engine.handle(
+        AuthorityCommand::RequestTransfer {
+            vehicle: vehicle(),
+            scope: scope(),
+            from: PrincipalId::new(2),
+        },
+        at(3),
+    );
+    assert!(matches!(
+        effects.as_slice(),
+        [AuthorityEffect::ScopeTransferRequested { .. }]
+    ));
+}
