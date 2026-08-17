@@ -473,10 +473,12 @@ final class HostLinkModel: ObservableObject {
         // Left stick: throttle up / yaw right. Right stick: pitch forward /
         // roll right. The GameController framework already normalizes and
         // deadzones the axes.
+        // The harness climb rides the no-pad path only; with a stick in
+        // hand the operator's demand is the demand, descent included.
         link?.sendMotion(
             roll: pad.rightThumbstick.xAxis.value,
             pitch: pad.rightThumbstick.yAxis.value,
-            throttle: max(pad.leftThumbstick.yAxis.value, climb),
+            throttle: pad.leftThumbstick.yAxis.value,
             yaw: pad.leftThumbstick.xAxis.value
         )
     }
