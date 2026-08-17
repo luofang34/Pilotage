@@ -181,3 +181,101 @@ fn arm_rides_the_motion_lane_even_with_a_gimbal_lease_held() {
         1
     );
 }
+
+/// The delivery thread is a raw Rust thread with no autorelease pool of
+/// its own; the loop brackets each batch in one. If that bracket ever
+/// disappears, everything an observer's frameworks autorelease lives
+/// forever — this probe autoreleases an object during one batch and
+/// requires it dead once the next batch proves the first one's pool
+/// popped. The weak handle never leaves the delivery thread: only the
+/// verdict does.
+#[cfg(target_vendor = "apple")]
+mod pool {
+    use std::cell::RefCell;
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::Duration;
+
+    use objc2::rc::{Retained, Weak};
+    use objc2::runtime::NSObject;
+
+    use super::super::delivery::DeliveryQueue;
+    use super::super::observer::LinkObserver;
+    use super::super::records::LinkEvent;
+
+    thread_local! {
+        static PLANTED: RefCell<Option<Weak<NSObject>>> = const { RefCell::new(None) };
+    }
+
+    struct PoolProbe {
+        verdict: Mutex<Option<bool>>,
+        delivered: Mutex<u32>,
+        signal: Condvar,
+    }
+
+    impl LinkObserver for PoolProbe {
+        fn on_event(&self, _event: LinkEvent) {
+            PLANTED.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                match slot.take() {
+                    None => {
+                        let object = NSObject::new();
+                        *slot = Some(Weak::from_retained(&object));
+                        // Ownership moves into the CURRENT thread pool:
+                        // the one the delivery loop must hold open. The
+                        // pointer itself is the pool's business now.
+                        let parked = Retained::autorelease_ptr(object);
+                        assert!(!parked.is_null());
+                    }
+                    Some(weak) => {
+                        let mut verdict = self.verdict.lock().unwrap_or_else(|e| e.into_inner());
+                        *verdict = Some(weak.load().is_some());
+                    }
+                }
+            });
+            let mut delivered = self.delivered.lock().unwrap_or_else(|e| e.into_inner());
+            *delivered += 1;
+            self.signal.notify_all();
+        }
+        fn on_state_frame(&self, _frame: Vec<u8>, _accepted_at_ms: u64) {}
+        fn on_video_frame(&self, _source_id: u8, _codec: String, _payload: Vec<u8>) {}
+    }
+
+    impl PoolProbe {
+        fn wait_for(&self, count: u32) {
+            let mut delivered = self.delivered.lock().unwrap_or_else(|e| e.into_inner());
+            while *delivered < count {
+                let (next, timeout) = self
+                    .signal
+                    .wait_timeout(delivered, Duration::from_secs(5))
+                    .unwrap_or_else(|e| e.into_inner());
+                assert!(!timeout.timed_out(), "delivery must reach {count}");
+                delivered = next;
+            }
+        }
+    }
+
+    #[test]
+    fn a_delivery_batch_drains_what_the_observer_autoreleases() {
+        let probe = Arc::new(PoolProbe {
+            verdict: Mutex::new(None),
+            delivered: Mutex::new(0),
+            signal: Condvar::new(),
+        });
+        let queue = DeliveryQueue::start(probe.clone());
+        queue.event(LinkEvent::Down { retry_at_ms: None });
+        probe.wait_for(1);
+        // The second batch cannot begin until the first one's pool
+        // popped; the probe then reads its weak on the same thread.
+        queue.event(LinkEvent::Down { retry_at_ms: None });
+        probe.wait_for(2);
+        let verdict = probe
+            .verdict
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expect("the second batch judged the first");
+        assert!(
+            !verdict,
+            "the autoreleased object must die with its batch's pool"
+        );
+    }
+}

@@ -364,10 +364,14 @@ final class HostLinkModel: ObservableObject {
             let stateFrames,
             let controlFrames,
             let rejected,
-            let actionResults
+            let actionResults,
+            let streamPendingBytes
         ):
             linkStats = "tlm \(telemetry)/s · state \(stateFrames)/s · ctl "
                 + "\(controlFrames)/s · rej \(rejected) · act \(actionResults)"
+            if streamPendingBytes > 1_048_576 {
+                linkStats += " · buf \(streamPendingBytes / 1_048_576) MB"
+            }
         }
     }
 
@@ -604,14 +608,6 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     }
 
     func onVideoFrame(sourceId: UInt8, codec: String, payload: Data) {
-        // This callback arrives on the link's own raw thread, which has
-        // no autorelease pool: without one here, every object the
-        // decoders autorelease outlives the process's whole memory
-        // budget, forty megabytes a second of them.
-        autoreleasepool { onVideoFrameInner(sourceId: sourceId, codec: codec, payload: payload) }
-    }
-
-    private func onVideoFrameInner(sourceId: UInt8, codec: String, payload: Data) {
         if LaunchRequest.noVideoDecode { return }
         decoderLock.lock()
         if inFlight.contains(sourceId) {
@@ -629,7 +625,7 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
         }
         decoderLock.unlock()
         let image = decoder.decode(codec: codec, payload: Array(payload))
-            .flatMap(Self.flattened)
+            .flatMap(Self.plausible)
         if LaunchRequest.decodeNoPublish {
             clearInFlight(sourceId)
             return
@@ -642,22 +638,14 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
         }
     }
 
-    /// Redraws a decoded frame into a plain bitmap. The decoder's own
-    /// output wraps exotic backings — VideoToolbox pixel buffers,
-    /// ImageIO's lazy JPEG — and committing a fresh such image to the
-    /// render server sixty times a second pinned a surface cache the
-    /// size of the whole process budget. A flat bitmap dies when the
-    /// image does.
-    private nonisolated static func flattened(_ image: UIImage) -> UIImage? {
+    /// Refuses a decoded frame whose dimensions no camera produces: a
+    /// desynchronized stream can decode into garbage geometry, and the
+    /// renderer must never be handed a gigapixel to rasterize.
+    private nonisolated static func plausible(_ image: UIImage) -> UIImage? {
         let size = image.size
         guard size.width >= 1, size.height >= 1, size.width <= 8192, size.height <= 8192
         else { return nil }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-        }
+        return image
     }
 
     private nonisolated func clearInFlight(_ sourceId: UInt8) {
@@ -667,16 +655,12 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     }
 
     func onEvent(event: LinkEvent) {
-        autoreleasepool {
-            Task { @MainActor [model] in model?.accept(event) }
-        }
+        Task { @MainActor [model] in model?.accept(event) }
     }
 
     func onStateFrame(frame: Data, acceptedAtMs: UInt64) {
-        autoreleasepool {
-            Task { @MainActor [model] in
-                model?.accept(stateFrame: Array(frame), acceptedAtMs: acceptedAtMs)
-            }
+        Task { @MainActor [model] in
+            model?.accept(stateFrame: Array(frame), acceptedAtMs: acceptedAtMs)
         }
     }
 }

@@ -156,6 +156,9 @@ pub enum LinkEvent {
         /// Discrete action results seen this second, `granted` counting
         /// accepted ones.
         action_results_per_second: u32,
+        /// Bytes parked in stream reassembly buffers right now. A
+        /// figure that keeps climbing is a desynchronized stream.
+        stream_pending_bytes: u64,
     },
 }
 

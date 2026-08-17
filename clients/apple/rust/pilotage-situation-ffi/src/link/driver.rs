@@ -117,6 +117,7 @@ impl Link {
             control_frames_per_second: stats.control_frames,
             rejected_per_second: stats.rejected,
             action_results_per_second: stats.action_results,
+            stream_pending_bytes: self.engine.stream_pending_bytes() as u64,
         });
     }
 }
