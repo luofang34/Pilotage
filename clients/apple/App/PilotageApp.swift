@@ -96,11 +96,16 @@ private struct SituationContentView: View {
     @StateObject private var model = SituationClientModel()
     @StateObject private var hostLink = HostLinkModel()
     @State private var menuPresented = false
-    /// Whether the instrument rack shares the screen. Persisted: a cockpit
-    /// arrangement is a decision, not a session accident.
-    @AppStorage("pilotageRackPresented") private var rackPresented = false
-    /// Whether the map holds its half; the rack owns the toggle.
-    @AppStorage("pilotageMapVisible") private var mapVisible = true
+    /// Which regions show is the platform's own affordance: the split
+    /// view's column state, never a custom toggle (draft ADR-0038).
+    @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
+    /// Which section the first sidebar level selects; the second level
+    /// shows that section's content, in the two-level idiom of Mail.
+    @AppStorage("pilotageSection") private var sectionRaw = OperatorSection.instruments.rawValue
+    /// The tile promoted to the primary surface, empty for the map.
+    @AppStorage("pilotagePrimarySurface") private var primaryTileId = ""
+    /// Whether the flight control unit strip stands over the map.
+    @AppStorage("pilotageFcuShown") private var fcuShown = false
     @AppStorage("pilotageInstrumentProfile") private var rackProfileId = "px4-flight"
     @State private var windowWidth: CGFloat = 1000
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
@@ -115,17 +120,23 @@ private struct SituationContentView: View {
     @StateObject private var ownship = OwnshipModel()
 
     var body: some View {
-        HStack(spacing: 0) {
-            if rackPresented {
-                InstrumentRackView(model: hostLink, mapVisible: $mapVisible)
-                    .frame(maxWidth: mapVisible ? rackWidth : .infinity)
-                    .transition(.move(edge: .leading))
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            List(selection: sectionSelection) {
+                ForEach(OperatorSection.allCases) { section in
+                    Label(section.title, systemImage: section.symbol)
+                        .tag(section)
+                }
             }
-            if mapVisible {
-                mapSurface
-                    .frame(maxWidth: .infinity)
-            }
+            .navigationTitle("Pilotage")
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+        } content: {
+            sectionContent
+                .navigationSplitViewColumnWidth(min: 320, ideal: 400, max: 560)
+        } detail: {
+            primarySurface
+                .toolbar(.hidden, for: .navigationBar)
         }
+        .navigationSplitViewStyle(.balanced)
         .background(.black)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -135,7 +146,8 @@ private struct SituationContentView: View {
         }
         .onAppear {
             if LaunchRequest.openInstruments {
-                rackPresented = true
+                columnVisibility = .doubleColumn
+                sectionRaw = OperatorSection.instruments.rawValue
                 hostLink.connect(
                     url: UserDefaults.standard.string(forKey: "pilotageHostUrl") ?? "",
                     certificateSha256Hex:
@@ -145,21 +157,74 @@ private struct SituationContentView: View {
         }
     }
 
-    /// Wide enough that the selected profile's whole stack fits the window
-    /// height, no wider than half the screen: the rack is sized by what it
-    /// shows, and the map keeps the rest.
-    private var rackWidth: CGFloat {
-        InstrumentRackView.idealWidth(
-            for: InstrumentProfile.selected(storedId: rackProfileId),
-            model: hostLink,
-            windowHeight: windowHeight,
-            windowWidth: windowWidth
+    /// The panel collapse in Apple's own idiom: one floating glass
+    /// circle whose arrows point the way the layout will move.
+    private var columnsToggle: some View {
+        Button {
+            withAnimation {
+                columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+            }
+        } label: {
+            Image(systemName: columnVisibility == .detailOnly
+                ? "arrow.up.left.and.arrow.down.right"
+                : "arrow.down.right.and.arrow.up.left")
+                .font(Metrics.controlGlyph)
+                .frame(width: Metrics.control, height: Metrics.control)
+                .glassEffect(.regular, in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sectionSelection: Binding<OperatorSection?> {
+        Binding(
+            get: { OperatorSection(rawValue: sectionRaw) ?? .instruments },
+            set: { sectionRaw = ($0 ?? .instruments).rawValue }
         )
+    }
+
+    /// The second sidebar level: the selected section's own content.
+    @ViewBuilder
+    private var sectionContent: some View {
+        switch OperatorSection(rawValue: sectionRaw) ?? .instruments {
+        case .instruments:
+            InstrumentRackView(
+                model: hostLink,
+                primaryTileId: $primaryTileId,
+                fcuShown: $fcuShown
+            )
+            .navigationTitle("Instruments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+        case .mission:
+            MissionPlannerView(controllable: hostLink.catalog?.offersFlightControl == true)
+                .navigationTitle("Mission Planner")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    /// The primary surface: the map, or whichever tile the operator
+    /// swapped into it. The way back floats where the leaving control
+    /// sat.
+    @ViewBuilder
+    private var primarySurface: some View {
+        let profile = InstrumentProfile.selected(storedId: rackProfileId)
+        if let tile = profile.tiles.first(where: { $0.id == primaryTileId }) {
+            PromotedSurfaceView(model: hostLink, tile: tile) {
+                withAnimation { primaryTileId = "" }
+            }
+        } else {
+            mapSurface
+        }
     }
 
     private var mapSurface: some View {
         // The map owns its half. Status, layers, reception and flights live in the
         // drawer, because a map covered in text answers "where" worse than a bare one.
+        mapStack
+    }
+
+    private var mapStack: some View {
         ZStack {
             // The map is the document, so it runs to the glass. A safe-area inset here
             // leaves a black band above and below that reads as a broken screen rather
@@ -206,6 +271,21 @@ private struct SituationContentView: View {
                 .mapControlPlacement(.bottomLeading)
                 menuButton
                     .mapControlPlacement(.bottomTrailing)
+                // Aligned with the top control row, not the top-leading
+                // slot: that slot's extra allowance is for window
+                // controls, and this button must sit level with its
+                // neighbors across the map.
+                HStack {
+                    columnsToggle
+                    Spacer()
+                }
+                .mapControlPlacement(.top)
+                MissionPlannerBar(model: hostLink)
+                    .mapControlPlacement(.bottom)
+                if fcuShown, hostLink.catalog?.offersFlightControl == true {
+                    FlightControlUnit { withAnimation { fcuShown = false } }
+                        .mapControlPlacement(.top)
+                }
             }
         }
         .onGeometryChange(for: CGFloat.self) { proxy in

@@ -12,9 +12,11 @@ import SwiftUI
 struct InstrumentRackView: View {
     @ObservedObject var model: HostLinkModel
     @AppStorage("pilotageInstrumentProfile") private var profileId = "px4-flight"
-    /// Whether the map shares the screen; the rack owns the toggle
-    /// because the rack is what remains either way.
-    @Binding var mapVisible: Bool
+    /// The tile promoted to the primary surface, empty for the map.
+    /// The column offers the swap; the split view renders the result.
+    @Binding var primaryTileId: String
+    /// Whether the flight control unit strip stands over the map.
+    @Binding var fcuShown: Bool
     @State private var connectPresented = false
     /// The video source the operator switched to, overriding the
     /// profile's own until the profile changes.
@@ -27,26 +29,6 @@ struct InstrumentRackView: View {
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
     static let videoSources = ["gimbal", "fpv", "chase"]
-
-    /// The width at which the profile's whole stack fits `windowHeight`,
-    /// clamped to at most half the window and at least a readable tile.
-    static func idealWidth(
-        for profile: InstrumentProfile,
-        model: HostLinkModel,
-        windowHeight: CGFloat,
-        windowWidth: CGFloat
-    ) -> CGFloat {
-        // Header, control bar, paddings and inter-tile gaps, estimated
-        // from the layout's own constants. The estimate only sizes the
-        // COLUMN; the tiles themselves fit the measured area, so an
-        // estimate a few points off wastes a sliver of width and can
-        // never clip an instrument.
-        let chrome: CGFloat = 116 + CGFloat(max(profile.tiles.count - 1, 0)) * 8
-        let stackHeight = max(windowHeight - chrome, 200)
-        let aspectSum = Self.aspectSum(for: profile, model: model)
-        guard aspectSum > 0 else { return min(360, windowWidth / 2) }
-        return min(max(stackHeight / aspectSum, 280), windowWidth / 2)
-    }
 
     /// The stack's total height per point of width: each tile's own
     /// height-over-width, summed.
@@ -154,14 +136,6 @@ struct InstrumentRackView: View {
             }
             Spacer()
             ConnectionChip(phase: model.phase) { connectPresented = true }
-            Button {
-                withAnimation { mapVisible.toggle() }
-            } label: {
-                Image(systemName: mapVisible
-                    ? "rectangle.leadinghalf.inset.filled"
-                    : "map")
-            }
-            .help(mapVisible ? "Hide the map" : "Show the map")
         }
         .foregroundStyle(.white)
     }
@@ -181,7 +155,7 @@ struct InstrumentRackView: View {
                     // The named source's own feed, never a stand-in. The
                     // frames flow hub-to-layer; this view never rebuilds
                     // for a picture.
-                    VideoLayerView(hub: model.videoHub, source: id)
+                    VideoSurfaceView(hub: model.videoHub, source: id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(alignment: .bottomLeading) {
                             Text("source \(id) · \(shown)")
@@ -227,6 +201,15 @@ struct InstrumentRackView: View {
                             : "arrow.up.left.and.arrow.down.right")
                             .padding(6)
                     }
+                    Button {
+                        withAnimation {
+                            primaryTileId = primaryTileId == tile.id ? "" : tile.id
+                        }
+                    } label: {
+                        Image(systemName: "rectangle.2.swap")
+                            .padding(6)
+                    }
+                    .help("Swap with the primary surface")
                 }
                 .font(.callout)
                 .foregroundStyle(.white)
@@ -257,7 +240,7 @@ struct InstrumentRackView: View {
     /// values the browser's video routing pins. A source must never be
     /// silently redirected to another camera, so an absent source shows
     /// its absence rather than whichever feed arrived first.
-    private static let videoSourceIds: [String: UInt8] = [
+    static let videoSourceIds: [String: UInt8] = [
         "fpv": 0,
         "chase": 1,
         "gimbal": 2,
@@ -280,6 +263,24 @@ struct InstrumentRackView: View {
                     ? "gamecontroller.fill"
                     : "gamecontroller")
                     .foregroundStyle(model.controllerAttached ? .green : .secondary)
+                if model.catalog?.offersFlightControl == true {
+                    // The autopilot face exists only for a host that
+                    // commands a flight computer; a plan-input panel
+                    // never grows one.
+                    Button {
+                        withAnimation { fcuShown.toggle() }
+                    } label: {
+                        Text("FCU")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(fcuShown ? Color.cyan.opacity(0.3) : Color(white: 0.2))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
                 if model.leaseHeld {
                     ArmTelegraphControl(model: model)
                     Spacer()
@@ -375,25 +376,6 @@ private struct ArmTelegraphControl: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(tint)
         }
-    }
-}
-
-/// Hosts one video source's picture in a plain layer the frame hub
-/// paints directly: no picture ever crosses SwiftUI, so a sixty-hertz
-/// feed re-evaluates nothing but its own layer contents.
-private struct VideoLayerView: UIViewRepresentable {
-    let hub: VideoFrameHub
-    let source: UInt8
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.layer.contentsGravity = .resizeAspect
-        hub.attach(layer: view.layer, source: source)
-        return view
-    }
-
-    func updateUIView(_ view: UIView, context: Context) {
-        hub.attach(layer: view.layer, source: source)
     }
 }
 

@@ -1,4 +1,5 @@
 import QuartzCore
+import SwiftUI
 import UIKit
 
 /// Routes decoded video frames straight into layers, entirely outside
@@ -57,5 +58,25 @@ final class VideoFrameHub: @unchecked Sendable {
         for (layer, image) in work {
             layer.contents = image?.cgImage
         }
+    }
+}
+
+
+/// Hosts one video source's picture in a plain layer the frame hub
+/// paints directly: no picture ever crosses SwiftUI, so a sixty-hertz
+/// feed re-evaluates nothing but its own layer contents.
+struct VideoSurfaceView: UIViewRepresentable {
+    let hub: VideoFrameHub
+    let source: UInt8
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.layer.contentsGravity = .resizeAspect
+        hub.attach(layer: view.layer, source: source)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        hub.attach(layer: view.layer, source: source)
     }
 }
