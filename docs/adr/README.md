@@ -45,6 +45,7 @@ One file per decision, numbered in acceptance order. See
 | [0036](0036-situational-domain-ownership.md) | Separate situational state by lifecycle | Accepted |
 | [0037](0037-modular-operator-client-composition.md) | Compose operator clients from shared function modules | Accepted |
 | [0038](0038-operator-surface-model.md) | One surface model for operator screens | Proposed |
+| [0039](0039-fleet-authority-model.md) | The fleet model: sets of sessions, cells of authority | Proposed |
 
 ## Provenance
 
