@@ -173,3 +173,46 @@ fn a_quiet_denial_reports_and_never_asks_the_holder() {
         ClientAction::Emit(ModuleEvent::Lease(response)) if !response.granted
     )));
 }
+
+#[test]
+fn actions_across_lanes_share_one_correlation_id_space() {
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, "vehicle.motion");
+    grant(&mut engine, 4);
+    engine.request_lease_quiet(1, "vehicle.gimbal");
+    grant_scope(&mut engine, "vehicle.gimbal", 9);
+
+    let id_of = |actions: &[ClientAction]| {
+        let ClientAction::SendBootstrap(bytes) = &actions[0] else {
+            panic!("actions ride the reliable stream");
+        };
+        let (envelope, _) =
+            pilotage_protocol::decode_envelope_length_delimited(bytes).expect("action decodes");
+        let Some(wire::envelope::Payload::ControlActionCommand(command)) = envelope.payload else {
+            panic!("a control action command");
+        };
+        command.request.expect("request present").action_id
+    };
+    let arm = engine.control_action(
+        1,
+        "vehicle.motion",
+        wire::ControlActionRequest {
+            action: 1,
+            mode_target: 0,
+            action_id: 0,
+        },
+    );
+    let recenter = engine.control_action(
+        1,
+        "vehicle.gimbal",
+        wire::ControlActionRequest {
+            action: 4,
+            mode_target: 0,
+            action_id: 0,
+        },
+    );
+    // The host correlates per client, not per lane: the same id from a
+    // second lane reads as a replay with different content.
+    assert_ne!(id_of(&arm), id_of(&recenter));
+}

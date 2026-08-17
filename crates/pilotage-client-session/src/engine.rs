@@ -49,6 +49,11 @@ pub struct ClientEngine {
     pub(crate) pending_takeover: Option<(u64, String)>,
     pub(crate) activation_announced: bool,
     pub(crate) profile: bootstrap::ProfileIdentity,
+    /// One correlation-id space for the whole client: the host pairs
+    /// results to (client, action id), so two lanes each counting from
+    /// one would reuse an id the host already saw with different
+    /// content, and the second press dies as a replay.
+    next_action_id: u32,
     reconnect: ReconnectState,
 }
 
@@ -79,6 +84,7 @@ impl ClientEngine {
             pending_takeover: None,
             activation_announced: false,
             profile: bootstrap::ProfileIdentity::default(),
+            next_action_id: 0,
             reconnect: ReconnectState::default(),
         }
     }
@@ -248,17 +254,23 @@ impl ClientEngine {
         }
     }
 
-    /// Builds a reliable discrete-action command under the named lease.
+    /// Builds a reliable discrete-action command under the named lease,
+    /// correlated in the client's one id space regardless of lane.
     pub fn control_action(
         &mut self,
         vehicle_id: u64,
         scope: &str,
         request: wire::ControlActionRequest,
     ) -> Vec<ClientAction> {
-        match self.lanes.get_mut(&(vehicle_id, scope.to_owned())) {
-            Some(lane) => vec![ClientAction::SendBootstrap(lane.action_command(request))],
-            None => Vec::new(),
+        let Some(lane) = self.lanes.get_mut(&(vehicle_id, scope.to_owned())) else {
+            return Vec::new();
+        };
+        let mut request = request;
+        if request.action_id == 0 {
+            self.next_action_id = self.next_action_id.wrapping_add(1);
+            request.action_id = self.next_action_id;
         }
+        vec![ClientAction::SendBootstrap(lane.action_command(request))]
     }
 
     fn on_connected(&mut self) -> Vec<ClientAction> {
