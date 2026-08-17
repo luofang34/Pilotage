@@ -104,7 +104,7 @@ struct InstrumentRackView: View {
                 GeometryReader { proxy in
                     VStack {
                         Spacer(minLength: 0)
-                        tileView(tile, width: proxy.size.width)
+                        tileView(tile, width: proxy.size.width, enlarged: true)
                         Spacer(minLength: 0)
                     }
                 }
@@ -155,7 +155,7 @@ struct InstrumentRackView: View {
     }
 
     @ViewBuilder
-    private func tileView(_ tile: InstrumentTile, width: CGFloat) -> some View {
+    private func tileView(_ tile: InstrumentTile, width: CGFloat, enlarged: Bool = false) -> some View {
         switch tile {
         case .video(let source):
             let shown = videoSourceOverride.isEmpty ? source : videoSourceOverride
@@ -200,11 +200,13 @@ struct InstrumentRackView: View {
                         Image(systemName: "video.badge.ellipsis")
                             .padding(6)
                     }
-                    Button {
-                        enlargedTile = tile
-                    } label: {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .padding(6)
+                    if !enlarged {
+                        Button {
+                            enlargedTile = tile
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .padding(6)
+                        }
                     }
                 }
                 .font(.callout)

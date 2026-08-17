@@ -351,7 +351,10 @@ final class HostLinkModel: ObservableObject {
         case .takeoverAsked(let fromPrincipal, let scope):
             takeoverAsk = (fromPrincipal, scope)
         case .actionResult(let action, let accepted, let detail):
-            let name = action == 1 ? "arm" : action == 2 ? "disarm" : "action \(action)"
+            let name = action == 1 ? "arm"
+                : action == 2 ? "disarm"
+                : action == 4 ? "gimbal recenter"
+                : "action \(action)"
             status = accepted ? "\(name) accepted" : "\(name) rejected: \(detail)"
             if action == 1, accepted, LaunchRequest.autoClimb {
                 climbUntil = Date().addingTimeInterval(15)
@@ -482,6 +485,8 @@ final class HostLinkModel: ObservableObject {
     private var climbUntil = Date.distantPast
     /// Harness demand-tick counter, printed to prove the loop runs.
     private var demandTicks = 0
+    /// The pressed-button set last printed by the harness.
+    private var lastPressedPrint: [Int] = []
 
     private func sendDemand() {
         guard leaseHeld else { return }
@@ -533,6 +538,13 @@ final class HostLinkModel: ObservableObject {
             (pad.dpad.left.value, pad.dpad.left.isPressed),
             (pad.dpad.right.value, pad.dpad.right.isPressed),
         ]
+        #if DEBUG
+        let pressedNow = buttons.enumerated().filter(\.element.1).map(\.offset)
+        if LaunchRequest.autoControl && pressedNow != lastPressedPrint {
+            lastPressedPrint = pressedNow
+            print("harness pad: pressed \(pressedNow)")
+        }
+        #endif
         link?.sendPadSample(
             axes: axes,
             values: buttons.map(\.0),
