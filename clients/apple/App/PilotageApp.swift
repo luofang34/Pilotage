@@ -60,36 +60,6 @@ enum LaunchRequest {
         #endif
     }
 
-    /// Store frames normally but never render them (harness bisect
-    /// only): separates storage retention from render-side caching.
-    static var storeNoRender: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-StoreNoRender")
-        #else
-        false
-        #endif
-    }
-
-    /// Store only the seen-clock per frame, dropping the picture: the
-    /// bisect that separates published-churn cost from image retention.
-    static var storeClockOnly: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-StoreClockOnly")
-        #else
-        false
-        #endif
-    }
-
-    /// Publish video to the main actor but never store it (harness
-    /// bisect only).
-    static var publishNoStore: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-PublishNoStore")
-        #else
-        false
-        #endif
-    }
-
     /// Decode video but discard the image unpublished (harness bisect
     /// only).
     static var decodeNoPublish: Bool {

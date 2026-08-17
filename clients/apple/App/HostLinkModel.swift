@@ -69,10 +69,12 @@ final class HostLinkModel: ObservableObject {
     /// Whether the last denial named a standing holder, so the screen can
     /// offer the ask instead of a dead button.
     @Published private(set) var holderPresent = false
-    /// The latest decoded picture per video source id.
-    @Published private(set) var videoImages: [UInt8: UIImage] = [:]
-    /// When each source last produced a picture, on the wall clock.
-    @Published private(set) var videoSeenAtMs: [UInt8: UInt64] = [:]
+    /// Sources that have produced at least one picture this session.
+    /// Membership changes are rare; the pictures themselves never pass
+    /// through SwiftUI at all.
+    @Published private(set) var liveVideoSources: Set<UInt8> = []
+    /// The per-layer frame router; tiles attach their layers to it.
+    let videoHub = VideoFrameHub()
 
     /// One registry panel with the index the runtime addresses it by.
     struct PanelChoice: Identifiable {
@@ -387,19 +389,8 @@ final class HostLinkModel: ObservableObject {
         }
     }
 
-    fileprivate func accept(videoImage: UIImage, sourceId: UInt8) {
-        if LaunchRequest.publishNoStore {
-            // The image crossed the hop and dies here: the bisect run
-            // that separates the hop from the store-and-render side.
-            _ = videoImage.size
-            return
-        }
-        if LaunchRequest.storeClockOnly {
-            videoSeenAtMs[sourceId] = Self.wallMs()
-            return
-        }
-        videoImages[sourceId] = videoImage
-        videoSeenAtMs[sourceId] = Self.wallMs()
+    fileprivate func accept(liveSource sourceId: UInt8) {
+        liveVideoSources.insert(sourceId)
     }
 
     fileprivate func accept(stateFrame: [UInt8], acceptedAtMs: UInt64) {
@@ -607,6 +598,9 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     private weak var model: HostLinkModel?
     private let decoders = NSMutableDictionary()
     private let decoderLock = NSLock()
+    /// Sources that have delivered at least one frame; SwiftUI learns
+    /// about a source once, not per frame.
+    private var seen: Set<UInt8> = []
     /// Sources with a decode-and-publish in flight. Video is droppable
     /// by design: decoding every frame while the interface lags queued
     /// unbounded bitmaps until the process hit its memory limit — the
@@ -642,12 +636,16 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
             clearInFlight(sourceId)
             return
         }
-        Task { @MainActor [model] in
-            if let image {
-                model?.accept(videoImage: image, sourceId: sourceId)
+        if let image {
+            // Straight to the layer; SwiftUI hears only the FIRST frame
+            // of a source, when the tile flips from absent to live.
+            let hub = model?.videoHub
+            hub?.publish(image, source: sourceId)
+            if seen.insert(sourceId).inserted {
+                Task { @MainActor [model] in model?.accept(liveSource: sourceId) }
             }
-            self.clearInFlight(sourceId)
         }
+        clearInFlight(sourceId)
     }
 
     /// Refuses a decoded frame whose dimensions no camera produces: a

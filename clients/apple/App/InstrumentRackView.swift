@@ -19,8 +19,10 @@ struct InstrumentRackView: View {
     /// The video source the operator switched to, overriding the
     /// profile's own until the profile changes.
     @AppStorage("pilotageVideoSource") private var videoSourceOverride = ""
-    /// The tile shown wall-to-wall, when one is.
-    @State private var enlargedTile: InstrumentTile?
+    /// The tile granted the whole rack column, when one is. One
+    /// affordance, in place, reversible: the same button grants and
+    /// returns the focus, and the map split stays a separate switch.
+    @State private var focusedTileId: String?
 
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
@@ -69,10 +71,18 @@ struct InstrumentRackView: View {
                     .lineLimit(2)
             }
             GeometryReader { proxy in
-                ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(Array(profile.tiles.enumerated()), id: \.offset) { _, tile in
-                            tileView(tile, width: proxy.size.width)
+                if let focused = profile.tiles.first(where: { $0.id == focusedTileId }) {
+                    VStack {
+                        Spacer(minLength: 0)
+                        tileView(focused, width: proxy.size.width)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(Array(profile.tiles.enumerated()), id: \.offset) { _, tile in
+                                tileView(tile, width: proxy.size.width)
+                            }
                         }
                     }
                 }
@@ -97,26 +107,6 @@ struct InstrumentRackView: View {
         } message: {
             Text("Operator \(model.takeoverAsk?.fromPrincipal ?? 0) asks for "
                 + (model.takeoverAsk?.scope ?? ""))
-        }
-        .fullScreenCover(item: $enlargedTile) { tile in
-            ZStack(alignment: .topTrailing) {
-                Color.black.ignoresSafeArea()
-                GeometryReader { proxy in
-                    VStack {
-                        Spacer(minLength: 0)
-                        tileView(tile, width: proxy.size.width, enlarged: true)
-                        Spacer(minLength: 0)
-                    }
-                }
-                Button {
-                    enlargedTile = nil
-                } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.title3)
-                        .padding(10)
-                }
-                .foregroundStyle(.white)
-            }
         }
     }
 
@@ -160,7 +150,7 @@ struct InstrumentRackView: View {
     }
 
     @ViewBuilder
-    private func tileView(_ tile: InstrumentTile, width: CGFloat, enlarged: Bool = false) -> some View {
+    private func tileView(_ tile: InstrumentTile, width: CGFloat) -> some View {
         switch tile {
         case .video(let source):
             let shown = videoSourceOverride.isEmpty ? source : videoSourceOverride
@@ -170,10 +160,11 @@ struct InstrumentRackView: View {
             // switcher and the enlarge control are the tile's own, so a
             // live feed changes what fills it, not how it is worked.
             ZStack(alignment: .topTrailing) {
-                if let id = liveSource, let image = model.videoImages[id],
-                   !LaunchRequest.storeNoRender {
-                    // The named source's own feed, never a stand-in.
-                    VideoLayerView(image: image)
+                if let id = liveSource {
+                    // The named source's own feed, never a stand-in. The
+                    // frames flow hub-to-layer; this view never rebuilds
+                    // for a picture.
+                    VideoLayerView(hub: model.videoHub, source: id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(alignment: .bottomLeading) {
                             Text("source \(id) · \(shown)")
@@ -211,13 +202,13 @@ struct InstrumentRackView: View {
                         Image(systemName: "video.badge.ellipsis")
                             .padding(6)
                     }
-                    if !enlarged {
-                        Button {
-                            enlargedTile = tile
-                        } label: {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .padding(6)
-                        }
+                    Button {
+                        withAnimation { focusedTileId = focusedTileId == tile.id ? nil : tile.id }
+                    } label: {
+                        Image(systemName: focusedTileId == tile.id
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right")
+                            .padding(6)
                     }
                 }
                 .font(.callout)
@@ -257,7 +248,7 @@ struct InstrumentRackView: View {
 
     private func selectedVideoId(for name: String) -> UInt8? {
         guard let id = Self.videoSourceIds[name] else { return nil }
-        return model.videoImages.keys.contains(id) ? id : nil
+        return model.liveVideoSources.contains(id) ? id : nil
     }
 
     /// One row and one caption: the bar must never eat into the
@@ -303,7 +294,7 @@ struct InstrumentRackView: View {
             return ("arm refused: \(model.armDetail)", true)
         }
         if model.armPhase == 3 {
-            return ("the vehicle disarmed on its own — re-arm is your call", true)
+            return ("vehicle disarmed itself — lever is back on SAFE", true)
         }
         if model.linkStats.isEmpty { return nil }
         return (model.linkStats, false)
@@ -334,6 +325,8 @@ private struct ArmTelegraphControl: View {
         } label: {
             Text(title)
                 .font(.callout.weight(selected ? .bold : .regular))
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
                 .background(
@@ -344,18 +337,19 @@ private struct ArmTelegraphControl: View {
     }
 
     private func leverTint(ordersArmed: Bool) -> Color {
-        // Amber while the FC has not answered the order; the settled
-        // colors say what the vehicle IS, in the order's terms.
+        // Cockpit colors: amber is an unanswered order, green is the
+        // system engaged as ordered, gray is quiet. Red stays reserved
+        // for what has actually gone wrong.
         if model.armPhase == 1 { return .orange }
-        return ordersArmed ? .red : Color(white: 0.35)
+        return ordersArmed ? .green : Color(white: 0.35)
     }
 
     /// The FC's answer, and nothing else: the lamp never moves on a
     /// press.
     private var lamp: some View {
         let (tint, label): (Color, String) = switch model.armConfirmed {
-        case 2: (.red, "ARMED")
-        case 1: (.green, "SAFE")
+        case 2: (.green, "ARMED")
+        case 1: (Color(white: 0.7), "SAFE")
         default: (.gray, "—")
         }
         return HStack(spacing: 4) {
@@ -367,22 +361,22 @@ private struct ArmTelegraphControl: View {
     }
 }
 
-/// Hosts one video source's picture in a plain layer. SwiftUI's
-/// `Image` pins a fresh render-server texture for every distinct
-/// picture, and sixty distinct pictures a second pinned the process's
-/// whole five-gigabyte budget in under two minutes; a layer swaps its
-/// contents in place and the old texture dies with the swap.
+/// Hosts one video source's picture in a plain layer the frame hub
+/// paints directly: no picture ever crosses SwiftUI, so a sixty-hertz
+/// feed re-evaluates nothing but its own layer contents.
 private struct VideoLayerView: UIViewRepresentable {
-    let image: UIImage
+    let hub: VideoFrameHub
+    let source: UInt8
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.layer.contentsGravity = .resizeAspect
+        hub.attach(layer: view.layer, source: source)
         return view
     }
 
     func updateUIView(_ view: UIView, context: Context) {
-        view.layer.contents = image.cgImage
+        hub.attach(layer: view.layer, source: source)
     }
 }
 
