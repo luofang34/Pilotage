@@ -59,7 +59,7 @@ const SIZE_CAPS = {
   "video-identity.js": 291,
   "video-routing.js": 37,
   "wire-bounds.js": 120,
-  "transfer-handover.js": 42,
+  "transfer-handover.js": 84,
   "wire.js": 1239,
 };
 

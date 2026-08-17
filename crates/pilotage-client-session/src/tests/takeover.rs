@@ -268,3 +268,45 @@ fn a_committed_transfer_opens_the_lane_and_a_departing_one_closes_it() {
         ClientAction::Emit(ModuleEvent::Lease(response)) if !response.granted
     )));
 }
+
+#[test]
+fn a_freed_scope_turns_a_pending_ask_into_a_plain_lease_request() {
+    // The holder can stand down instead of offering — a blur latch, a
+    // release button, a disconnect. The asker must not wait forever for
+    // an offer no one is left to make.
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_takeover(1, "vehicle.motion");
+
+    let actions = authority_event(
+        &mut engine,
+        wire::authority_event::Event::ScopeLeaseRevoked(wire::ScopeLeaseRevoked {
+            principal: Some(wire::PrincipalId { value: 9 }),
+            vehicle: Some(wire::VehicleId { value: 1 }),
+            scope: Some(wire::ScopeId {
+                value: "vehicle.motion".into(),
+            }),
+            generation: Some(wire::Generation { value: 2 }),
+            reason: String::new(),
+            authority_class: 0,
+        }),
+    );
+    let requested = actions.iter().any(|action| match action {
+        ClientAction::SendBootstrap(bytes) => {
+            pilotage_protocol::decode_envelope_length_delimited(bytes)
+                .ok()
+                .is_some_and(|(envelope, _)| {
+                    matches!(
+                        envelope.payload,
+                        Some(wire::envelope::Payload::LeaseRequest(_))
+                    )
+                })
+        }
+        _ => false,
+    });
+    assert!(requested, "the pending ask becomes a lease request");
+
+    // The grant then arms control exactly like a first-hand lease.
+    grant(&mut engine, 3);
+    assert!(engine.holds_control());
+}

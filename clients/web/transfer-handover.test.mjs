@@ -6,6 +6,13 @@ import test from "node:test";
 
 import { handleTransferRequest } from "./transfer-handover.js";
 
+/** Runs the handler and lets its decision promise settle. */
+async function handleTransferRequestSettled(input) {
+  const handled = handleTransferRequest(input);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return handled;
+}
+
 function varint(bytes, at) {
   let value = 0n;
   let shift = 0n;
@@ -22,7 +29,7 @@ function varint(bytes, at) {
 test("a confirmed ask becomes a ScopeTransferOffer to the asker", async () => {
   const written = [];
   const writer = { write: (frame) => (written.push(frame), Promise.resolve()) };
-  const handled = handleTransferRequest({
+  const handled = await handleTransferRequestSettled({
     message: {
       kind: "transferRequest",
       principalId: 7n,
@@ -55,9 +62,9 @@ test("a confirmed ask becomes a ScopeTransferOffer to the asker", async () => {
   assert.ok(text.includes("1a020807"), `field 3 must carry principal 7: ${text}`);
 });
 
-test("a declined ask writes nothing and still counts as handled", () => {
+test("a declined ask writes nothing and still counts as handled", async () => {
   const written = [];
-  const handled = handleTransferRequest({
+  const handled = await handleTransferRequestSettled({
     message: { kind: "transferRequest", principalId: 7n, vehicleId: 1n, scope: "s" },
     vehicleId: 1n,
     granted: true,
