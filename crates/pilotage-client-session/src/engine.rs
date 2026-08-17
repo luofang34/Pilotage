@@ -1,5 +1,7 @@
 //! The client-session state machine.
 
+use std::collections::BTreeMap;
+
 use pilotage_protocol::wire;
 
 use crate::action::{ClientAction, ClientFault, ModuleEvent};
@@ -42,11 +44,23 @@ pub struct ClientEngine {
     bootstrap_pending: Vec<u8>,
     pub(crate) admission: Option<Admission>,
     authority: AuthorityMirror,
-    pub(crate) lane: Option<ControlLane>,
-    pub(crate) pending_lease: Option<(u64, String)>,
+    pub(crate) lanes: BTreeMap<(u64, String), ControlLane>,
+    pub(crate) pending_leases: BTreeMap<(u64, String), Escalation>,
     pub(crate) pending_takeover: Option<(u64, String)>,
     pub(crate) activation_announced: bool,
+    pub(crate) profile: bootstrap::ProfileIdentity,
     reconnect: ReconnectState,
+}
+
+/// What a denied lease request escalates to. A holder-denied cooperative
+/// request becomes the ask; a quiet one (a runtime-planned gimbal lease)
+/// only reports the denial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Escalation {
+    /// Escalate a holder-present denial into a transfer ask.
+    Cooperative,
+    /// Surface the denial and stop.
+    Quiet,
 }
 
 impl ClientEngine {
@@ -60,10 +74,11 @@ impl ClientEngine {
             bootstrap_pending: Vec::new(),
             admission: None,
             authority: AuthorityMirror::default(),
-            lane: None,
-            pending_lease: None,
+            lanes: BTreeMap::new(),
+            pending_leases: BTreeMap::new(),
             pending_takeover: None,
             activation_announced: false,
+            profile: bootstrap::ProfileIdentity::default(),
             reconnect: ReconnectState::default(),
         }
     }
@@ -86,18 +101,31 @@ impl ClientEngine {
         &self.authority
     }
 
-    /// Whether a control lane is open (a lease is held).
+    /// Whether any control lane is open (some lease is held).
     #[must_use]
     pub fn holds_control(&self) -> bool {
-        self.lane.is_some()
+        !self.lanes.is_empty()
     }
 
-    /// The (vehicle, scope) the open control lane is fenced to.
+    /// Whether the lane for this exact (vehicle, scope) is open.
+    #[must_use]
+    pub fn holds(&self, vehicle_id: u64, scope: &str) -> bool {
+        self.lanes.contains_key(&(vehicle_id, scope.to_owned()))
+    }
+
+    /// The (vehicle, scope) of the first open lane — the whole story for
+    /// a single-lease client, and only a starting point for one holding
+    /// several scopes.
     #[must_use]
     pub fn control_target(&self) -> Option<(u64, String)> {
-        self.lane
-            .as_ref()
-            .map(|lane| (lane.vehicle_id(), lane.scope().to_owned()))
+        self.lanes.keys().next().cloned()
+    }
+
+    /// Announces the given profile identity on the first grant and binds
+    /// every lane's frames to it. Set before control is requested; the
+    /// announcement has already left once a lane is open.
+    pub fn set_profile_identity(&mut self, profile: bootstrap::ProfileIdentity) {
+        self.profile = profile;
     }
 
     /// Consumes one transport event.
@@ -133,13 +161,31 @@ impl ClientEngine {
         }
     }
 
-    /// Requests a lease. Only an admitted, explicitly asked-for lease is
+    /// Requests a lease that escalates a holder-present denial into the
+    /// cooperative ask. Only an admitted, explicitly asked-for lease is
     /// ever sent: recovery never calls this.
     pub fn request_lease(&mut self, vehicle_id: u64, scope: &str) -> Vec<ClientAction> {
+        self.request_lease_with(vehicle_id, scope, Escalation::Cooperative)
+    }
+
+    /// Requests a lease whose denial is only reported — the path for a
+    /// runtime-planned auxiliary scope (the gimbal), where asking a
+    /// standing holder to hand over is not this press's intent.
+    pub fn request_lease_quiet(&mut self, vehicle_id: u64, scope: &str) -> Vec<ClientAction> {
+        self.request_lease_with(vehicle_id, scope, Escalation::Quiet)
+    }
+
+    fn request_lease_with(
+        &mut self,
+        vehicle_id: u64,
+        scope: &str,
+        escalation: Escalation,
+    ) -> Vec<ClientAction> {
         if self.phase != ClientPhase::Admitted {
             return Vec::new();
         }
-        self.pending_lease = Some((vehicle_id, scope.to_owned()));
+        self.pending_leases
+            .insert((vehicle_id, scope.to_owned()), escalation);
         vec![ClientAction::SendBootstrap(bootstrap::lease_request(
             vehicle_id, scope,
         ))]
@@ -158,26 +204,24 @@ impl ClientEngine {
         ))]
     }
 
-    /// Offers the held scope to another principal — the holder's half of
-    /// a cooperative handover. Without a lane there is nothing to offer.
-    pub fn offer_transfer(&mut self, to_principal: u64) -> Vec<ClientAction> {
-        let Some((vehicle_id, scope)) = self.engine_control_target() else {
+    /// Offers the named held scope to another principal — the holder's
+    /// half of a cooperative handover. Without that lane there is
+    /// nothing to offer.
+    pub fn offer_transfer(&mut self, to_principal: u64, scope: &str) -> Vec<ClientAction> {
+        let Some(key) = self.lanes.keys().find(|(_, held)| held == scope).cloned() else {
             return Vec::new();
         };
+        self.lanes.remove(&key);
         vec![ClientAction::SendBootstrap(bootstrap::transfer_offer(
-            vehicle_id,
-            &scope,
+            key.0,
+            &key.1,
             to_principal,
         ))]
     }
 
-    fn engine_control_target(&self) -> Option<(u64, String)> {
-        self.control_target()
-    }
-
-    /// Releases the held lease, if any.
-    pub fn release_lease(&mut self) -> Vec<ClientAction> {
-        let Some(lane) = self.lane.take() else {
+    /// Releases the named held lease, if open.
+    pub fn release_lease(&mut self, vehicle_id: u64, scope: &str) -> Vec<ClientAction> {
+        let Some(lane) = self.lanes.remove(&(vehicle_id, scope.to_owned())) else {
             return Vec::new();
         };
         vec![ClientAction::SendBootstrap(bootstrap::lease_release(
@@ -186,14 +230,17 @@ impl ClientEngine {
         ))]
     }
 
-    /// Builds and returns the next fenced control-frame datagram, or
-    /// nothing when no lease is held — a shell cannot send unfenced input.
+    /// Builds the next fenced control-frame datagram on the named lane,
+    /// or nothing when that lease is not held — a shell cannot send
+    /// unfenced input, and a frame must never ride a sibling's fencing.
     pub fn control_frame(
         &mut self,
+        vehicle_id: u64,
+        scope: &str,
         command: ControlCommand,
         sampled_at_nanos: u64,
     ) -> Vec<ClientAction> {
-        match self.lane.as_mut() {
+        match self.lanes.get_mut(&(vehicle_id, scope.to_owned())) {
             Some(lane) => vec![ClientAction::SendDatagram(
                 lane.frame(command, sampled_at_nanos),
             )],
@@ -201,18 +248,16 @@ impl ClientEngine {
         }
     }
 
-    /// Builds a reliable discrete-action command under the held lease.
-    pub fn control_action(&mut self, request: wire::ControlActionRequest) -> Vec<ClientAction> {
-        match self.lane.as_mut() {
+    /// Builds a reliable discrete-action command under the named lease.
+    pub fn control_action(
+        &mut self,
+        vehicle_id: u64,
+        scope: &str,
+        request: wire::ControlActionRequest,
+    ) -> Vec<ClientAction> {
+        match self.lanes.get_mut(&(vehicle_id, scope.to_owned())) {
             Some(lane) => vec![ClientAction::SendBootstrap(lane.action_command(request))],
             None => Vec::new(),
-        }
-    }
-
-    /// Binds the activated control profile to the lane's frames.
-    pub fn bind_profile(&mut self, profile_revision: u32, activation_revision: u32) {
-        if let Some(lane) = self.lane.as_mut() {
-            lane.bind_profile(profile_revision, activation_revision);
         }
     }
 
@@ -276,15 +321,13 @@ impl ClientEngine {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
-        let matches_pending = self
-            .pending_lease
-            .as_ref()
-            .is_some_and(|(v, s)| *v == vehicle_id && *s == scope);
-        // One operator intent, one flow: a request denied because someone
-        // holds the scope becomes the cooperative ask, without a second
-        // press. The operator already said what they want.
-        if !response.granted && matches_pending && response.reason == 1 {
-            self.pending_lease = None;
+        let key = (vehicle_id, scope.clone());
+        let pending = self.pending_leases.get(&key).copied();
+        // One operator intent, one flow: a cooperative request denied
+        // because someone holds the scope becomes the ask, without a
+        // second press. A quiet request only reports its denial.
+        if !response.granted && pending == Some(Escalation::Cooperative) && response.reason == 1 {
+            self.pending_leases.remove(&key);
             self.pending_takeover = Some((vehicle_id, scope.clone()));
             return vec![
                 ClientAction::SendBootstrap(bootstrap::transfer_request(vehicle_id, &scope)),
@@ -292,29 +335,43 @@ impl ClientEngine {
             ];
         }
         let mut actions = Vec::new();
-        if response.granted
-            && matches_pending
-            && let Some(admission) = self.admission.as_ref()
-        {
-            self.pending_lease = None;
+        if response.granted && pending.is_some() {
+            self.pending_leases.remove(&key);
             let generation = response.generation.as_ref().map_or(0, |g| g.value);
-            let mut lane = ControlLane::new(admission.session_id, vehicle_id, scope, generation);
-            // The host refuses actions and typed frames from a connection
-            // that never announced its control profile; the announcement
-            // travels with the first grant and the lane binds to it.
-            if !self.activation_announced {
-                self.activation_announced = true;
-                actions.push(ClientAction::SendBootstrap(bootstrap::profile_activation(
-                    admission.session_id,
-                )));
-            }
-            lane.bind_profile(
-                bootstrap::NATIVE_PROFILE_REVISION,
-                bootstrap::NATIVE_ACTIVATION_REVISION,
-            );
-            self.lane = Some(lane);
+            actions = self.open_lane(vehicle_id, scope, generation);
         }
         actions.push(ClientAction::Emit(ModuleEvent::Lease(response)));
+        actions
+    }
+
+    /// Opens (or re-fences) the lane for a granted scope: the activation
+    /// announcement travels with the first grant, and every lane binds
+    /// its frames to that announced identity. The host refuses actions
+    /// and typed frames from a connection that never announced one.
+    pub(crate) fn open_lane(
+        &mut self,
+        vehicle_id: u64,
+        scope: String,
+        generation: u64,
+    ) -> Vec<ClientAction> {
+        let Some(admission) = self.admission.as_ref() else {
+            return Vec::new();
+        };
+        let mut actions = Vec::new();
+        let mut lane =
+            ControlLane::new(admission.session_id, vehicle_id, scope.clone(), generation);
+        if !self.activation_announced {
+            self.activation_announced = true;
+            actions.push(ClientAction::SendBootstrap(bootstrap::profile_activation(
+                admission.session_id,
+                &self.profile,
+            )));
+        }
+        lane.bind_profile(
+            self.profile.profile_revision,
+            self.profile.activation_revision,
+        );
+        self.lanes.insert((vehicle_id, scope), lane);
         actions
     }
 
@@ -356,9 +413,9 @@ impl ClientEngine {
             return Vec::new();
         }
         // Authority does not survive the loss; observation is what recovery
-        // restores. The lane is dropped and never rebuilt by reconnect.
-        self.lane = None;
-        self.pending_lease = None;
+        // restores. The lanes are dropped and never rebuilt by reconnect.
+        self.lanes.clear();
+        self.pending_leases.clear();
         self.pending_takeover = None;
         self.admission = None;
         self.activation_announced = false;

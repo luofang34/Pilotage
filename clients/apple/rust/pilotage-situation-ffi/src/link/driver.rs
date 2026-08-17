@@ -127,16 +127,23 @@ impl Link {
         self.stats.control_frames = self.stats.control_frames.wrapping_add(1);
         let sampled_at_nanos = self.now_ms().saturating_mul(1_000_000);
         self.engine
-            .control_frame(ControlCommand::Intent(intent), sampled_at_nanos)
+            .control_frame(vehicle_id, &scope, ControlCommand::Intent(intent), sampled_at_nanos)
     }
 
     /// Builds a discrete action command under the held lease.
     fn action_actions(&mut self, code: i32) -> Vec<ClientAction> {
-        self.engine.control_action(wire::ControlActionRequest {
-            action: code,
-            mode_target: 0,
-            action_id: 0,
-        })
+        let Some((vehicle_id, scope)) = self.engine.control_target() else {
+            return Vec::new();
+        };
+        self.engine.control_action(
+            vehicle_id,
+            &scope,
+            wire::ControlActionRequest {
+                action: code,
+                mode_target: 0,
+                action_id: 0,
+            },
+        )
     }
 }
 
@@ -305,7 +312,10 @@ async fn handle_command(
         Some(LinkCommand::RequestLease { vehicle_id, scope }) => {
             link.engine.request_lease(vehicle_id, &scope)
         }
-        Some(LinkCommand::ReleaseLease) => link.engine.release_lease(),
+        Some(LinkCommand::ReleaseLease) => match link.engine.control_target() {
+            Some((vehicle_id, scope)) => link.engine.release_lease(vehicle_id, &scope),
+            None => Vec::new(),
+        },
         Some(LinkCommand::Motion {
             roll,
             pitch,
@@ -321,7 +331,9 @@ async fn handle_command(
         Some(LinkCommand::Takeover { vehicle_id, scope }) => {
             link.engine.request_takeover(vehicle_id, &scope)
         }
-        Some(LinkCommand::Offer { to_principal }) => link.engine.offer_transfer(to_principal),
+        Some(LinkCommand::Offer { to_principal, scope }) => {
+            link.engine.offer_transfer(to_principal, &scope)
+        }
         Some(LinkCommand::Shutdown) | None => return true,
     };
     link.execute(actions, send, connection).await;

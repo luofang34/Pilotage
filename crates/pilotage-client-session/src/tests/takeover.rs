@@ -109,7 +109,12 @@ fn the_first_grant_announces_the_profile_and_binds_the_lane() {
 
     // Every later frame binds to the announced activation, or the host
     // rejects the press with "activation revision does not match".
-    let actions = engine.control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 10);
+    let actions = engine.control_frame(
+        1,
+        "vehicle.motion",
+        ControlCommand::Legacy(wire::ControlPayload::default()),
+        10,
+    );
     let ClientAction::SendDatagram(bytes) = &actions[0] else {
         panic!("a held lease produces a datagram");
     };
@@ -236,8 +241,12 @@ fn a_committed_transfer_opens_the_lane_and_a_departing_one_closes_it() {
         engine.holds_control(),
         "the committed transfer arms control"
     );
-    let frame_actions =
-        engine.control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 10);
+    let frame_actions = engine.control_frame(
+        1,
+        "vehicle.motion",
+        ControlCommand::Legacy(wire::ControlPayload::default()),
+        10,
+    );
     let ClientAction::SendDatagram(bytes) = &frame_actions[0] else {
         panic!("the transferred lane sends frames");
     };
@@ -401,7 +410,12 @@ fn a_revoked_lane_closes_instead_of_commanding_a_stale_generation() {
     )));
     assert!(
         engine
-            .control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 1)
+            .control_frame(
+                1,
+                "vehicle.motion",
+                ControlCommand::Legacy(wire::ControlPayload::default()),
+                1
+            )
             .is_empty(),
         "no frame leaves under a dead generation"
     );

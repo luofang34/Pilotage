@@ -32,33 +32,52 @@ pub(crate) fn lease_request(vehicle_id: u64, scope: &str) -> Vec<u8> {
     pilotage_protocol::encode_envelope_length_delimited(&envelope)
 }
 
-/// The native client's control-profile identity: the built-in game
-/// controller mapping, versioned. The digest is the content digest of
-/// this identity, so control evidence binds every frame to exactly the
-/// mapping that produced it (INPUT-01).
-pub(crate) const NATIVE_PROFILE_ID: &str = "pilotage-native-sticks/v1";
+/// The control-profile identity a client announces: the id, revisions,
+/// and content digest of the mapping that produces its frames, so
+/// control evidence binds every frame to exactly that mapping
+/// (INPUT-01). The default names the fixed built-in stick mapping; a
+/// shell running the shared control runtime replaces it with the
+/// runtime's own compiled identity before the first grant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileIdentity {
+    /// Stable profile document id.
+    pub profile_id: String,
+    /// The profile document's revision.
+    pub profile_revision: u32,
+    /// The session's activation revision for this mapping.
+    pub activation_revision: u32,
+    /// Content digest of the mapping that produces the frames.
+    pub digest: [u8; 32],
+}
 
-/// The revisions announced for the built-in mapping. Both advance only
-/// when the mapping itself changes.
-pub(crate) const NATIVE_PROFILE_REVISION: u32 = 1;
-pub(crate) const NATIVE_ACTIVATION_REVISION: u32 = 1;
+impl Default for ProfileIdentity {
+    fn default() -> Self {
+        let profile_id = "pilotage-native-sticks/v1".to_owned();
+        Self {
+            digest: pilotage_input::content_digest(profile_id.as_bytes()),
+            profile_id,
+            profile_revision: 1,
+            activation_revision: 1,
+        }
+    }
+}
 
 /// The activation announcement that binds this connection's control to
-/// the built-in mapping. The host refuses actions and typed frames from
-/// a connection that never announced one.
-pub(crate) fn profile_activation(session_id: u64) -> Vec<u8> {
+/// its announced mapping. The host refuses actions and typed frames
+/// from a connection that never announced one.
+pub(crate) fn profile_activation(session_id: u64, profile: &ProfileIdentity) -> Vec<u8> {
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,
         payload: Some(wire::envelope::Payload::ProfileActivation(
             wire::ProfileActivation {
                 session: Some(wire::SessionId { value: session_id }),
-                profile_id: NATIVE_PROFILE_ID.to_owned(),
-                profile_revision: NATIVE_PROFILE_REVISION,
-                activation_revision: NATIVE_ACTIVATION_REVISION,
-                digest: pilotage_input::content_digest(NATIVE_PROFILE_ID.as_bytes()).to_vec(),
-                // The game-controller mapping is a fixed built-in of the
-                // client binary, like the browser's keyboard profile: no
-                // separate device-profile document exists to name.
+                profile_id: profile.profile_id.clone(),
+                profile_revision: profile.profile_revision,
+                activation_revision: profile.activation_revision,
+                digest: profile.digest.to_vec(),
+                // The device mapping is part of the announced identity's
+                // own digest today, like the browser's keyboard profile:
+                // no separate device-profile document exists to name.
                 device_profile_id: String::new(),
                 device_profile_revision: 0,
                 device_digest: Vec::new(),

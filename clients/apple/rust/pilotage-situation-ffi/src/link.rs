@@ -48,6 +48,7 @@ pub(crate) enum LinkCommand {
     },
     Offer {
         to_principal: u64,
+        scope: String,
     },
     Shutdown,
 }
@@ -133,10 +134,12 @@ impl LinkSession {
             .ok();
     }
 
-    /// Hands the held scope to the asking principal — the holder's half
-    /// of a cooperative handover.
-    pub fn offer_transfer(&self, to_principal: u64) {
-        self.commands.send(LinkCommand::Offer { to_principal }).ok();
+    /// Hands the named held scope to the asking principal — the
+    /// holder's half of a cooperative handover.
+    pub fn offer_transfer(&self, to_principal: u64, scope: String) {
+        self.commands
+            .send(LinkCommand::Offer { to_principal, scope })
+            .ok();
     }
 
     /// Stops the driver and the connection.

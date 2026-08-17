@@ -30,6 +30,7 @@ mod tests;
 
 pub use action::{ClientAction, ClientFault, ModuleEvent};
 pub use authority::AuthorityMirror;
+pub use bootstrap::ProfileIdentity;
 pub use catalog::{Admission, ScopeCatalog, VehicleCatalog};
 pub use control::{ControlCommand, ControlLane};
 pub use engine::{ClientConfig, ClientEngine, ClientPhase};

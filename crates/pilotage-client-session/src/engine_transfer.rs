@@ -7,8 +7,7 @@ use pilotage_protocol::wire;
 
 use crate::action::{ClientAction, ModuleEvent};
 use crate::bootstrap;
-use crate::control::ControlLane;
-use crate::engine::ClientEngine;
+use crate::engine::{ClientEngine, Escalation};
 
 impl ClientEngine {
     /// Moves a pending takeover along, and closes a lane whose authority
@@ -44,13 +43,8 @@ impl ClientEngine {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
-        if self
-            .lane
-            .as_ref()
-            .is_some_and(|lane| lane.vehicle_id() == vehicle && lane.scope() == scope)
-        {
+        if self.lanes.remove(&(vehicle, scope.clone())).is_some() {
             let generation = revoked.generation.as_ref().map_or(0, |g| g.value);
-            self.lane = None;
             return vec![ClientAction::Emit(ModuleEvent::Lease(
                 wire::LeaseResponse {
                     vehicle: Some(wire::VehicleId { value: vehicle }),
@@ -69,7 +63,8 @@ impl ClientEngine {
             return Vec::new();
         }
         self.pending_takeover = None;
-        self.pending_lease = Some((vehicle, scope.clone()));
+        self.pending_leases
+            .insert((vehicle, scope.clone()), Escalation::Cooperative);
         vec![ClientAction::SendBootstrap(bootstrap::lease_request(
             vehicle, &scope,
         ))]
@@ -119,21 +114,9 @@ impl ClientEngine {
             .unwrap_or_default();
         let generation = committed.generation.as_ref().map_or(0, |g| g.value);
         if to == Some(principal_id) {
-            if let Some(admission) = self.admission.as_ref() {
+            if self.admission.is_some() {
                 self.pending_takeover = None;
-                let mut lane =
-                    ControlLane::new(admission.session_id, vehicle, scope.clone(), generation);
-                if !self.activation_announced {
-                    self.activation_announced = true;
-                    actions.push(ClientAction::SendBootstrap(bootstrap::profile_activation(
-                        admission.session_id,
-                    )));
-                }
-                lane.bind_profile(
-                    bootstrap::NATIVE_PROFILE_REVISION,
-                    bootstrap::NATIVE_ACTIVATION_REVISION,
-                );
-                self.lane = Some(lane);
+                actions = self.open_lane(vehicle, scope.clone(), generation);
                 actions.push(ClientAction::Emit(ModuleEvent::Lease(
                     wire::LeaseResponse {
                         vehicle: Some(wire::VehicleId { value: vehicle }),
@@ -144,14 +127,9 @@ impl ClientEngine {
                     },
                 )));
             }
-        } else if self
-            .lane
-            .as_ref()
-            .is_some_and(|lane| lane.vehicle_id() == vehicle && lane.scope() == scope)
-        {
+        } else if self.lanes.remove(&(vehicle, scope.clone())).is_some() {
             // Authority moved away from this lane: it is gone, and
             // saying so beats a stream of fenced rejections.
-            self.lane = None;
             actions.push(ClientAction::Emit(ModuleEvent::Lease(
                 wire::LeaseResponse {
                     vehicle: Some(wire::VehicleId { value: vehicle }),

@@ -4,6 +4,7 @@
 //! execute (`clients/web-control/*.json`), so the native and web paths
 //! cannot drift: a divergence reddens exactly one of them.
 
+mod lanes;
 mod takeover;
 
 use pilotage_protocol::wire;
@@ -73,13 +74,22 @@ pub(super) fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> 
 
 /// Grants the pending lease at `generation` through the bootstrap stream.
 pub(super) fn grant(engine: &mut ClientEngine, generation: u64) -> Vec<ClientAction> {
+    grant_scope(engine, "vehicle.motion", generation)
+}
+
+/// Grants the pending lease on `scope` at `generation`.
+pub(super) fn grant_scope(
+    engine: &mut ClientEngine,
+    scope: &str,
+    generation: u64,
+) -> Vec<ClientAction> {
     let response = wire::Envelope {
         schema_version: 1,
         payload: Some(wire::envelope::Payload::LeaseResponse(
             wire::LeaseResponse {
                 vehicle: Some(wire::VehicleId { value: 1 }),
                 scope: Some(wire::ScopeId {
-                    value: "vehicle.motion".into(),
+                    value: scope.into(),
                 }),
                 granted: true,
                 generation: Some(wire::Generation { value: generation }),
@@ -238,6 +248,8 @@ fn control_frames_carry_the_grant_fencing_and_advance_sequence() {
     let mut frames = Vec::new();
     for _ in 0..2 {
         let actions = engine.control_frame(
+            1,
+            "vehicle.motion",
             ControlCommand::Legacy(wire::ControlPayload {
                 axes: vec![wire::AxisSample {
                     axis_id: 0,
@@ -266,7 +278,12 @@ fn control_frames_carry_the_grant_fencing_and_advance_sequence() {
 fn without_a_lease_no_control_frame_leaves_the_engine() {
     let mut engine = engine();
     admit(&mut engine, 7, 42);
-    let actions = engine.control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 10);
+    let actions = engine.control_frame(
+        1,
+        "vehicle.motion",
+        ControlCommand::Legacy(wire::ControlPayload::default()),
+        10,
+    );
     assert!(actions.is_empty(), "unfenced input must not be sendable");
 }
 

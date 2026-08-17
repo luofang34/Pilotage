@@ -207,7 +207,9 @@ impl Driver {
                 tokio::time::Instant::now() < deadline,
                 "telemetry must report the applied frame before the timeout"
             );
-            let actions = self.engine.control_frame(ControlCommand::Intent(intent), 1);
+            let actions =
+                self.engine
+                    .control_frame(vehicle_id, &scope, ControlCommand::Intent(intent), 1);
             self.execute(actions).await;
             self.pump_datagram().await;
             for event in self.take_events() {
@@ -336,7 +338,7 @@ async fn a_cooperative_handover_moves_control_between_two_engine_clients() {
     );
 
     // A confirms by offering; B auto-accepts; the commit arms B.
-    let actions = holder.engine.offer_transfer(requested_from);
+    let actions = holder.engine.offer_transfer(requested_from, &scope);
     holder.execute(actions).await;
     let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
     while !asker.engine.holds_control() {
@@ -371,11 +373,16 @@ async fn a_cooperative_handover_moves_control_between_two_engine_clients() {
 
 /// Sends an arm through the engine and pumps until its accepted result.
 async fn arm_and_expect_accepted(driver: &mut Driver) {
-    let actions = driver.engine.control_action(wire::ControlActionRequest {
-        action: 1,
-        mode_target: 0,
-        action_id: 0,
-    });
+    let (vehicle_id, scope) = driver.engine.control_target().expect("holds control");
+    let actions = driver.engine.control_action(
+        vehicle_id,
+        &scope,
+        wire::ControlActionRequest {
+            action: 1,
+            mode_target: 0,
+            action_id: 0,
+        },
+    );
     driver.execute(actions).await;
     let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
     loop {
