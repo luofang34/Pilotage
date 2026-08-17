@@ -161,6 +161,14 @@ impl Link {
                     });
                 }
             }
+            ModuleEvent::VideoStreamCorrupt { claimed_bytes } => {
+                self.delivery.event(LinkEvent::Notice {
+                    text: format!(
+                        "a video stream went bad (claimed {claimed_bytes} bytes) and was \
+                         stopped; its picture resumes when the host cycles it"
+                    ),
+                });
+            }
             ModuleEvent::Pong(_) => {}
         }
     }

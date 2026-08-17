@@ -49,6 +49,12 @@ pub enum ModuleEvent {
     /// One video frame body (the v2 capture layout) from a per-source
     /// media stream. Decode and display are the platform port's.
     VideoFrame(Vec<u8>),
+    /// A video stream claimed an impossible record length and was
+    /// failed closed; its picture stops until the host cycles it.
+    VideoStreamCorrupt {
+        /// The claimed record length that broke the bound.
+        claimed_bytes: usize,
+    },
     /// The transport is down. When recovery is scheduled, `retry_at_ms`
     /// carries the instant; control authority is gone either way.
     ConnectionDown {

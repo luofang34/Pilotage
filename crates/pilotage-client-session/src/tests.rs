@@ -5,6 +5,7 @@
 //! cannot drift: a divergence reddens exactly one of them.
 
 mod lanes;
+mod stream_bounds;
 mod takeover;
 
 use pilotage_protocol::wire;

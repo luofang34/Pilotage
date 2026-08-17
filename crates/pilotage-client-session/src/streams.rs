@@ -21,6 +21,14 @@ pub(crate) const SESSION_EVENTS_TAG: u8 = 0x01;
 /// Mirrors the host's `stream_tag::VIDEO_STREAM_V3`.
 pub(crate) const VIDEO_STREAM_V3_TAG: u8 = 0x04;
 
+/// The largest video record a stream may claim. A desynchronized parse
+/// reads arbitrary bytes as the length prefix, and an unbounded claim
+/// makes the reassembly buffer grow at line rate forever — then the
+/// one record that finally completes is handed across the FFI as a
+/// gigabyte allocation the process dies inside. No real frame comes
+/// within two orders of magnitude of this bound.
+pub(crate) const MAX_VIDEO_RECORD_BYTES: usize = 32 * 1024 * 1024;
+
 /// What one read of a stream produced.
 #[derive(Debug, Default)]
 pub(crate) struct StreamOutput {
@@ -28,6 +36,9 @@ pub(crate) struct StreamOutput {
     pub envelopes: Vec<wire::Envelope>,
     /// Complete video frame bodies (v2 layout), in arrival order.
     pub video_bodies: Vec<Vec<u8>>,
+    /// A video stream claimed a record of this many bytes and was
+    /// failed closed for it.
+    pub corrupt_video_claim: Option<usize>,
 }
 
 /// What one host-initiated stream turned out to be.
@@ -42,6 +53,10 @@ enum StreamKind {
     /// A kind this engine does not consume. Bytes are discarded; the
     /// stream stays classified so it cannot be misread later.
     Unsupported(u8),
+    /// A stream whose framing went bad (an impossible record length).
+    /// Its bytes cannot be trusted again; everything further is
+    /// discarded until the host cycles the stream.
+    Corrupt,
 }
 
 /// Per-stream reassembly state.
@@ -95,7 +110,17 @@ impl StreamTable {
             }
             StreamKind::Video => {
                 pending.extend_from_slice(bytes);
-                output.video_bodies = drain_video_records(pending);
+                match drain_video_records(pending) {
+                    Ok(bodies) => output.video_bodies = bodies,
+                    Err(claimed) => {
+                        // Fail this one stream closed and give its
+                        // memory back; other streams stand.
+                        *kind = StreamKind::Corrupt;
+                        pending.clear();
+                        pending.shrink_to_fit();
+                        output.corrupt_video_claim = Some(claimed);
+                    }
+                }
             }
             _ => {}
         }
@@ -105,15 +130,24 @@ impl StreamTable {
 
 /// Pops every complete `[u32 BE length][body]` video record off the
 /// front of `pending`, leaving any partial tail in place.
-pub(crate) fn drain_video_records(pending: &mut Vec<u8>) -> Vec<Vec<u8>> {
+///
+/// # Errors
+///
+/// Returns the claimed length when it exceeds
+/// [`MAX_VIDEO_RECORD_BYTES`]: the framing is broken and nothing after
+/// it on this stream can be trusted.
+pub(crate) fn drain_video_records(pending: &mut Vec<u8>) -> Result<Vec<Vec<u8>>, usize> {
     let mut bodies = Vec::new();
     loop {
         let Some(prefix) = pending.get(..4) else {
-            return bodies;
+            return Ok(bodies);
         };
         let len = u32::from_be_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as usize;
+        if len > MAX_VIDEO_RECORD_BYTES {
+            return Err(len);
+        }
         let Some(body) = pending.get(4..4 + len) else {
-            return bodies;
+            return Ok(bodies);
         };
         bodies.push(body.to_vec());
         pending.drain(..4 + len);
@@ -134,4 +168,15 @@ pub(crate) fn drain_envelopes(pending: &mut Vec<u8>) -> Vec<wire::Envelope> {
         envelopes.push(envelope);
     }
     envelopes
+}
+
+/// The total bytes parked in reassembly buffers, the gauge a leak hunt
+/// reads first.
+impl StreamTable {
+    pub(crate) fn pending_bytes(&self) -> usize {
+        self.streams
+            .values()
+            .map(|(_, pending)| pending.len())
+            .sum()
+    }
 }

@@ -107,6 +107,13 @@ impl ClientEngine {
         &self.authority
     }
 
+    /// Bytes parked in stream reassembly buffers right now — the gauge
+    /// a leak hunt reads first.
+    #[must_use]
+    pub fn stream_pending_bytes(&self) -> usize {
+        self.streams.pending_bytes()
+    }
+
     /// Whether any control lane is open (some lease is held).
     #[must_use]
     pub fn holds_control(&self) -> bool {
@@ -156,6 +163,11 @@ impl ClientEngine {
                         .into_iter()
                         .map(|body| ClientAction::Emit(ModuleEvent::VideoFrame(body))),
                 );
+                if let Some(claimed_bytes) = output.corrupt_video_claim {
+                    actions.push(ClientAction::Emit(ModuleEvent::VideoStreamCorrupt {
+                        claimed_bytes,
+                    }));
+                }
                 actions
             }
             TransportEvent::UniStreamClosed(stream) => {
