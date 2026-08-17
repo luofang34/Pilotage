@@ -48,6 +48,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 uniffi = { version = "0.32", features = ["cli"] }
 wtransport = { version = "0.7.1", features = ["dangerous-configuration", "quinn"] }
 
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2 = "0.6"
+
+
 [patch."https://github.com/luofang34/Airmass.git"]
 airmass-core = { path = ".build/airmass/crates/airmass-core" }
 airmass-geojson = { path = ".build/airmass/crates/airmass-geojson" }

@@ -9,6 +9,15 @@
 //! One dedicated thread makes every observer call. Events queue without
 //! loss; state frames and video frames are latest-wins per lane, because
 //! a newer picture supersedes an older one by definition.
+//!
+//! This thread is also where Rust hands control to foreign code, and a
+//! raw thread has no autorelease pool: Objective-C frameworks called
+//! from an observer park their temporaries in the current thread's
+//! pool, and with nobody draining it those temporaries outlive the
+//! process's whole memory budget. Every delivery batch therefore runs
+//! inside its own pool, HERE, at the one place all observer calls pass
+//! through — an observer implementation cannot forget what it never
+//! had to remember.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -145,14 +154,30 @@ fn deliver_loop(shared: &(Mutex<Pending>, Condvar), observer: &dyn LinkObserver)
         // The lock is released: the shell can take as long as it likes
         // without holding up a single driver enqueue.
         let (events, state_frame, video) = batch;
-        for event in events {
-            observer.on_event(event);
-        }
-        if let Some((frame, accepted_at_ms)) = state_frame {
-            observer.on_state_frame(frame, accepted_at_ms);
-        }
-        for (source_id, (codec, payload)) in video {
-            observer.on_video_frame(source_id, codec, payload);
-        }
+        with_autorelease_pool(|| {
+            for event in events {
+                observer.on_event(event);
+            }
+            if let Some((frame, accepted_at_ms)) = state_frame {
+                observer.on_state_frame(frame, accepted_at_ms);
+            }
+            for (source_id, (codec, payload)) in video {
+                observer.on_video_frame(source_id, codec, payload);
+            }
+        });
     }
+}
+
+/// Runs one delivery batch inside an Objective-C autorelease pool, so
+/// whatever the shell's frameworks park there is freed when the batch
+/// ends instead of never.
+#[cfg(target_vendor = "apple")]
+fn with_autorelease_pool<R>(deliver: impl FnOnce() -> R) -> R {
+    objc2::rc::autoreleasepool(|_| deliver())
+}
+
+/// On targets without an Objective-C runtime there is no pool to drain.
+#[cfg(not(target_vendor = "apple"))]
+fn with_autorelease_pool<R>(deliver: impl FnOnce() -> R) -> R {
+    deliver()
 }

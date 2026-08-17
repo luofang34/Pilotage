@@ -3,8 +3,11 @@
 use super::records::LinkEvent;
 
 /// What the shell implements to receive the link's output. Every call
-/// arrives from a background task; the implementation owns its own
-/// dispatch to the interface thread.
+/// arrives on the link's own delivery thread; the implementation owns
+/// its own dispatch to the interface thread. The link brackets every
+/// delivery batch in an autorelease pool, so an implementation may call
+/// Objective-C frameworks freely — long work still belongs off this
+/// thread, because the next batch waits for it.
 #[uniffi::export(with_foreign)]
 pub trait LinkObserver: Send + Sync {
     /// One typed link event.
