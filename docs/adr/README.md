@@ -44,6 +44,7 @@ One file per decision, numbered in acceptance order. See
 | [0035](0035-source-neutral-situational-services.md) | Keep situational services source-neutral and compose them through Pilotage | Superseded by ADR-0036 |
 | [0036](0036-situational-domain-ownership.md) | Separate situational state by lifecycle | Accepted |
 | [0037](0037-modular-operator-client-composition.md) | Compose operator clients from shared function modules | Accepted |
+| [0038](0038-operator-surface-model.md) | One surface model for operator screens | Proposed |
 
 ## Provenance
 
