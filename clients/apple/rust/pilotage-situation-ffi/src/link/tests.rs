@@ -130,6 +130,7 @@ fn admitted_link_with_two_lanes() -> Link {
         telegraph: pilotage_control_web::ArmTelegraph::default(),
         telegraph_shown: None,
         gated_ticks: 0,
+        last_demand_ms: 0,
     }
 }
 
@@ -181,6 +182,30 @@ fn arm_rides_the_motion_lane_even_with_a_gimbal_lease_held() {
     assert_eq!(
         command.request.expect("command carries the request").action,
         1
+    );
+}
+
+#[test]
+fn a_quiet_shell_gets_a_neutral_keepalive_on_the_motion_lane() {
+    let mut link = admitted_link_with_two_lanes();
+    link.started = Instant::now() - std::time::Duration::from_secs(1);
+    link.last_demand_ms = 0;
+    let actions = link.keepalive_actions();
+    assert_eq!(
+        datagram_scope(&actions),
+        "vehicle.motion",
+        "the link speaks for a stalled shell"
+    );
+}
+
+#[test]
+fn a_talking_shell_needs_no_keepalive() {
+    let mut link = admitted_link_with_two_lanes();
+    link.started = Instant::now() - std::time::Duration::from_secs(1);
+    link.last_demand_ms = link.now_ms();
+    assert!(
+        link.keepalive_actions().is_empty(),
+        "a fresh demand already carries liveness"
     );
 }
 

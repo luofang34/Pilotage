@@ -52,6 +52,8 @@ pub(super) struct Link {
     pub(super) telegraph_shown: Option<(bool, u32, u32, String)>,
     /// Consecutive pad ticks gated under a held motion lease.
     pub(super) gated_ticks: u32,
+    /// When the shell last spoke a motion demand, on the link clock.
+    pub(super) last_demand_ms: u64,
 }
 
 /// One second of link accounting, reset on report.
@@ -165,6 +167,7 @@ pub(crate) async fn run(
         telegraph: ArmTelegraph::default(),
         telegraph_shown: None,
         gated_ticks: 0,
+        last_demand_ms: 0,
     };
     loop {
         match connect(&config, pinned).await {
@@ -295,7 +298,11 @@ async fn drive(
                     return true;
                 }
             }
-            _ = ticker.tick() => link.deliver_state_frame(),
+            _ = ticker.tick() => {
+                link.deliver_state_frame();
+                let keepalive = link.keepalive_actions();
+                link.execute(keepalive, &mut send, connection).await;
+            }
             _ = stats_ticker.tick() => link.report_stats(),
         }
     }

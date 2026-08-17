@@ -9,6 +9,13 @@ use pilotage_client_session::{
     ClientAction, ControlCommand, MotionDemand, intent_capability, velocity_intent,
 };
 use pilotage_control_web::MOTION_SCOPE;
+
+/// How long the shell may stay silent before the link speaks a neutral
+/// frame for it. The host's silence watchdog revokes a holder after one
+/// quiet second; an interface thread stalled by a busy frame must never
+/// cost the operator the lease, so the link — whose loop no interface
+/// stall can touch — fills the gap well inside the window.
+const DEMAND_SILENCE_FILL_MS: u64 = 150;
 use pilotage_protocol::wire;
 
 use super::driver::Link;
@@ -20,6 +27,37 @@ impl Link {
     /// first" silently routes flight demands into the gimbal's fencing
     /// and the silence watchdog takes the motion lease one second later.
     pub(super) fn motion_actions(&mut self, demand: MotionDemand) -> Vec<ClientAction> {
+        self.last_demand_ms = self.now_ms();
+        self.send_motion(demand)
+    }
+
+    /// Speaks a neutral frame when the shell has gone quiet while the
+    /// motion lease is held: holder liveness belongs to the link, not
+    /// to the interface thread's fortunes.
+    pub(super) fn keepalive_actions(&mut self) -> Vec<ClientAction> {
+        let Some(vehicle_id) = self
+            .engine
+            .admission()
+            .and_then(|admission| admission.vehicles.first())
+            .map(|vehicle| vehicle.vehicle_id)
+        else {
+            return Vec::new();
+        };
+        if !self.engine.holds(vehicle_id, MOTION_SCOPE) {
+            return Vec::new();
+        }
+        if self.now_ms().saturating_sub(self.last_demand_ms) < DEMAND_SILENCE_FILL_MS {
+            return Vec::new();
+        }
+        self.send_motion(MotionDemand {
+            roll: 0.0,
+            pitch: 0.0,
+            throttle: 0.0,
+            yaw: 0.0,
+        })
+    }
+
+    fn send_motion(&mut self, demand: MotionDemand) -> Vec<ClientAction> {
         let Some(admission) = self.engine.admission().cloned() else {
             return Vec::new();
         };
