@@ -165,11 +165,10 @@ struct InstrumentRackView: View {
             // switcher and the enlarge control are the tile's own, so a
             // live feed changes what fills it, not how it is worked.
             ZStack(alignment: .topTrailing) {
-                if let id = liveSource, let image = model.videoImages[id] {
+                if let id = liveSource, let image = model.videoImages[id],
+                   !LaunchRequest.storeNoRender {
                     // The named source's own feed, never a stand-in.
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    VideoLayerView(image: image)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(alignment: .bottomLeading) {
                             Text("source \(id) · \(shown)")
@@ -293,6 +292,25 @@ struct InstrumentRackView: View {
             }
         }
         .foregroundStyle(.white)
+    }
+}
+
+/// Hosts one video source's picture in a plain layer. SwiftUI's
+/// `Image` pins a fresh render-server texture for every distinct
+/// picture, and sixty distinct pictures a second pinned the process's
+/// whole five-gigabyte budget in under two minutes; a layer swaps its
+/// contents in place and the old texture dies with the swap.
+private struct VideoLayerView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.layer.contentsGravity = .resizeAspect
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        view.layer.contents = image.cgImage
     }
 }
 

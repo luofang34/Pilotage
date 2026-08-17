@@ -372,6 +372,16 @@ final class HostLinkModel: ObservableObject {
     }
 
     fileprivate func accept(videoImage: UIImage, sourceId: UInt8) {
+        if LaunchRequest.publishNoStore {
+            // The image crossed the hop and dies here: the bisect run
+            // that separates the hop from the store-and-render side.
+            _ = videoImage.size
+            return
+        }
+        if LaunchRequest.storeClockOnly {
+            videoSeenAtMs[sourceId] = Self.wallMs()
+            return
+        }
         videoImages[sourceId] = videoImage
         videoSeenAtMs[sourceId] = Self.wallMs()
     }
@@ -488,6 +498,28 @@ final class HostLinkModel: ObservableObject {
     /// The pressed-button set last printed by the harness.
     private var lastPressedPrint: [Int] = []
 
+    #if DEBUG
+    /// Prints the process physical footprint once per interval, so a
+    /// console-attached run shows a leak as a slope, not a surprise.
+    static func startFootprintProbe() {
+        guard LaunchRequest.openInstruments else { return }
+        Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
+            var info = task_vm_info_data_t()
+            var count = mach_msg_type_number_t(
+                MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+            let result = withUnsafeMutablePointer(to: &info) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+                }
+            }
+            if result == KERN_SUCCESS {
+                let mb = Double(info.phys_footprint) / 1_048_576
+                print("harness memory: footprint \(Int(mb)) MB")
+            }
+        }
+    }
+    #endif
+
     private func sendDemand() {
         guard leaseHeld else { return }
         // The host's silence watchdog revokes a holder that stops
@@ -572,6 +604,15 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     }
 
     func onVideoFrame(sourceId: UInt8, codec: String, payload: Data) {
+        // This callback arrives on the link's own raw thread, which has
+        // no autorelease pool: without one here, every object the
+        // decoders autorelease outlives the process's whole memory
+        // budget, forty megabytes a second of them.
+        autoreleasepool { onVideoFrameInner(sourceId: sourceId, codec: codec, payload: payload) }
+    }
+
+    private func onVideoFrameInner(sourceId: UInt8, codec: String, payload: Data) {
+        if LaunchRequest.noVideoDecode { return }
         decoderLock.lock()
         if inFlight.contains(sourceId) {
             decoderLock.unlock()
@@ -588,11 +629,34 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
         }
         decoderLock.unlock()
         let image = decoder.decode(codec: codec, payload: Array(payload))
+            .flatMap(Self.flattened)
+        if LaunchRequest.decodeNoPublish {
+            clearInFlight(sourceId)
+            return
+        }
         Task { @MainActor [model] in
             if let image {
                 model?.accept(videoImage: image, sourceId: sourceId)
             }
             self.clearInFlight(sourceId)
+        }
+    }
+
+    /// Redraws a decoded frame into a plain bitmap. The decoder's own
+    /// output wraps exotic backings — VideoToolbox pixel buffers,
+    /// ImageIO's lazy JPEG — and committing a fresh such image to the
+    /// render server sixty times a second pinned a surface cache the
+    /// size of the whole process budget. A flat bitmap dies when the
+    /// image does.
+    private nonisolated static func flattened(_ image: UIImage) -> UIImage? {
+        let size = image.size
+        guard size.width >= 1, size.height >= 1, size.width <= 8192, size.height <= 8192
+        else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 
@@ -603,12 +667,16 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     }
 
     func onEvent(event: LinkEvent) {
-        Task { @MainActor [model] in model?.accept(event) }
+        autoreleasepool {
+            Task { @MainActor [model] in model?.accept(event) }
+        }
     }
 
     func onStateFrame(frame: Data, acceptedAtMs: UInt64) {
-        Task { @MainActor [model] in
-            model?.accept(stateFrame: Array(frame), acceptedAtMs: acceptedAtMs)
+        autoreleasepool {
+            Task { @MainActor [model] in
+                model?.accept(stateFrame: Array(frame), acceptedAtMs: acceptedAtMs)
+            }
         }
     }
 }
