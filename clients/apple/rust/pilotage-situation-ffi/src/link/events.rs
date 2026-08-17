@@ -20,7 +20,7 @@ impl Link {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
-        self.observer.on_event(LinkEvent::LeaseChanged {
+        self.delivery.event(LinkEvent::LeaseChanged {
             held: response.granted,
             scope,
             detail: if response.granted {
@@ -48,7 +48,7 @@ impl Link {
                         sim_accept_unseen: true,
                     }));
                 }
-                self.observer.on_event(LinkEvent::Admitted {
+                self.delivery.event(LinkEvent::Admitted {
                     catalog: LinkCatalog::from_admission(&admission),
                 });
             }
@@ -67,7 +67,7 @@ impl Link {
                     .as_ref()
                     .map(|s| s.value.clone())
                     .unwrap_or_default();
-                self.observer.on_event(LinkEvent::LeaseChanged {
+                self.delivery.event(LinkEvent::LeaseChanged {
                     held: false,
                     scope,
                     detail: "released".to_owned(),
@@ -75,16 +75,16 @@ impl Link {
             }
             ModuleEvent::ControlRejected(rejected) => {
                 self.stats.rejected = self.stats.rejected.wrapping_add(1);
-                self.observer.on_event(LinkEvent::ControlRejected {
+                self.delivery.event(LinkEvent::ControlRejected {
                     sequence: rejected.sequence.as_ref().map_or(0, |s| s.value),
                 });
             }
             ModuleEvent::ConnectionDown { retry_at_ms } => {
-                self.observer.on_event(LinkEvent::Down { retry_at_ms });
+                self.delivery.event(LinkEvent::Down { retry_at_ms });
             }
             ModuleEvent::ActionResult(result) => {
                 self.stats.action_results = self.stats.action_results.wrapping_add(1);
-                self.observer.on_event(LinkEvent::ActionResult {
+                self.delivery.event(LinkEvent::ActionResult {
                     action: result.action,
                     accepted: result.accepted,
                     detail: result.detail,
@@ -95,11 +95,8 @@ impl Link {
                 // dropped and the next one stands alone.
                 if let Ok(frame) = pilotage_protocol::video_frame::decode_v2(&body) {
                     let codec = String::from_utf8_lossy(&frame.codec).into_owned();
-                    self.observer.on_video_frame(
-                        frame.header.source_id,
-                        codec,
-                        frame.payload.to_vec(),
-                    );
+                    self.delivery
+                        .video(frame.header.source_id, codec, frame.payload.to_vec());
                 }
             }
             ModuleEvent::Authority(event) => {
@@ -107,7 +104,7 @@ impl Link {
                     event.event
                     && self.engine.holds_control()
                 {
-                    self.observer.on_event(LinkEvent::TakeoverAsked {
+                    self.delivery.event(LinkEvent::TakeoverAsked {
                         from_principal: requested.from_principal.map_or(0, |p| p.value),
                         scope: requested.scope.map(|s| s.value).unwrap_or_default(),
                     });

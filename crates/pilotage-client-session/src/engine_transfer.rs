@@ -32,10 +32,11 @@ impl ClientEngine {
         }
     }
 
-    /// A holder stood down while this engine's ask was pending: the scope
-    /// is free, so the ask becomes an ordinary lease request. Without
-    /// this, an operator who asked waits forever for an offer no one is
-    /// left to make.
+    /// A revocation lands two ways. This engine's own lane revoked — a
+    /// silence watchdog, an override — closes the lane and says so: an
+    /// operator must never work a control surface the host already took
+    /// back. A stranger's revocation while this engine's ask is pending
+    /// frees the scope, so the ask becomes an ordinary lease request.
     fn on_scope_freed(&mut self, revoked: &wire::ScopeLeaseRevoked) -> Vec<ClientAction> {
         let vehicle = revoked.vehicle.as_ref().map_or(0, |v| v.value);
         let scope = revoked
@@ -43,6 +44,23 @@ impl ClientEngine {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
+        if self
+            .lane
+            .as_ref()
+            .is_some_and(|lane| lane.vehicle_id() == vehicle && lane.scope() == scope)
+        {
+            let generation = revoked.generation.as_ref().map_or(0, |g| g.value);
+            self.lane = None;
+            return vec![ClientAction::Emit(ModuleEvent::Lease(
+                wire::LeaseResponse {
+                    vehicle: Some(wire::VehicleId { value: vehicle }),
+                    scope: Some(wire::ScopeId { value: scope }),
+                    granted: false,
+                    generation: Some(wire::Generation { value: generation }),
+                    reason: 0,
+                },
+            ))];
+        }
         let pending = self
             .pending_takeover
             .as_ref()

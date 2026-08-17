@@ -8,6 +8,7 @@
 //! requests. Every session decision stays in the shared cores (ADR-0032,
 //! ADR-0037).
 
+mod delivery;
 mod driver;
 mod events;
 mod observer;

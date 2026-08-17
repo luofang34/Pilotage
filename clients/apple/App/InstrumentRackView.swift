@@ -262,9 +262,9 @@ struct InstrumentRackView: View {
                         .buttonStyle(.borderedProminent)
                     Button("Disarm", role: .destructive) { model.disarm() }
                     Button("Release", role: .destructive) { model.releaseLease() }
-                } else if model.holderPresent {
-                    Button("Ask to take over") { model.requestTakeover() }
                 } else {
+                    // One intent, one button: a denial with a standing
+                    // holder escalates to the ask on its own.
                     Button("Request control") { model.requestLease() }
                         .disabled(model.catalog == nil)
                 }

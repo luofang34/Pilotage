@@ -276,6 +276,13 @@ final class HostLinkModel: ObservableObject {
         case .leaseChanged(let held, let scope, let detail):
             leaseHeld = held
             holderPresent = !held && detail.contains("another operator")
+            if holderPresent {
+                // The engine already escalated the denial into the ask;
+                // the operator's one press keeps working on its own.
+                status = "asked the holder of \(scope) to hand over"
+                held ? startControlLoop() : stopControlLoop()
+                return
+            }
             if held {
                 phase = .controlling(scope: scope)
             } else if let catalog {
@@ -401,12 +408,32 @@ final class HostLinkModel: ObservableObject {
         controlTimer = nil
     }
 
+    private var armPressed = false
+    private var disarmPressed = false
+
     private func sendDemand() {
-        guard leaseHeld,
-              let pad = GCController.controllers()
-                  .compactMap(\.extendedGamepad)
-                  .first
-        else { return }
+        guard leaseHeld else { return }
+        // The host's silence watchdog revokes a holder that stops
+        // sending: one second of quiet cost the lease while the screen
+        // still said "controlling". Frames flow at rate for as long as
+        // the lease is held — a neutral demand when no stick is attached
+        // is the holder's liveness, exactly as the browser streams it.
+        guard let pad = GCController.controllers()
+            .compactMap(\.extendedGamepad)
+            .first
+        else {
+            link?.sendMotion(roll: 0, pitch: 0, throttle: 0, yaw: 0)
+            return
+        }
+        // The browser's default profile arms on button 9 and disarms on
+        // button 8 — Menu and Options here. Edge-triggered: a press is
+        // one command, not a stream of them.
+        let menuDown = pad.buttonMenu.isPressed
+        if menuDown && !armPressed { arm() }
+        armPressed = menuDown
+        let optionsDown = pad.buttonOptions?.isPressed ?? false
+        if optionsDown && !disarmPressed { disarm() }
+        disarmPressed = optionsDown
         // Left stick: throttle up / yaw right. Right stick: pitch forward /
         // roll right. The GameController framework already normalizes and
         // deadzones the axes.

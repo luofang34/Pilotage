@@ -280,6 +280,17 @@ impl ClientEngine {
             .pending_lease
             .as_ref()
             .is_some_and(|(v, s)| *v == vehicle_id && *s == scope);
+        // One operator intent, one flow: a request denied because someone
+        // holds the scope becomes the cooperative ask, without a second
+        // press. The operator already said what they want.
+        if !response.granted && matches_pending && response.reason == 1 {
+            self.pending_lease = None;
+            self.pending_takeover = Some((vehicle_id, scope.clone()));
+            return vec![
+                ClientAction::SendBootstrap(bootstrap::transfer_request(vehicle_id, &scope)),
+                ClientAction::Emit(ModuleEvent::Lease(response)),
+            ];
+        }
         let mut actions = Vec::new();
         if response.granted
             && matches_pending

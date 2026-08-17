@@ -310,3 +310,99 @@ fn a_freed_scope_turns_a_pending_ask_into_a_plain_lease_request() {
     grant(&mut engine, 3);
     assert!(engine.holds_control());
 }
+
+#[test]
+fn a_denied_request_becomes_the_ask_without_a_second_press() {
+    // One operator intent, one flow: request control; if someone holds
+    // it, the ask goes out by itself, and the holder's offer finishes
+    // the job.
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, "vehicle.motion");
+
+    let denial = wire::Envelope {
+        schema_version: 1,
+        payload: Some(wire::envelope::Payload::LeaseResponse(
+            wire::LeaseResponse {
+                vehicle: Some(wire::VehicleId { value: 1 }),
+                scope: Some(wire::ScopeId {
+                    value: "vehicle.motion".into(),
+                }),
+                granted: false,
+                generation: Some(wire::Generation { value: 2 }),
+                reason: 1,
+            },
+        )),
+    };
+    let bytes = pilotage_protocol::encode_envelope_length_delimited(&denial);
+    let actions = engine.handle(TransportEvent::BootstrapReceived(bytes), 0);
+    let asked = actions.iter().any(|action| match action {
+        ClientAction::SendBootstrap(sent) => {
+            pilotage_protocol::decode_envelope_length_delimited(sent)
+                .ok()
+                .is_some_and(|(envelope, _)| {
+                    matches!(
+                        envelope.payload,
+                        Some(wire::envelope::Payload::ScopeTransferRequest(_))
+                    )
+                })
+        }
+        _ => None::<()>.is_some(),
+    });
+    assert!(asked, "the holder-present denial escalates to the ask");
+
+    // The committed transfer then arms control, end of the same flow.
+    authority_event(
+        &mut engine,
+        wire::authority_event::Event::ScopeTransferCommitted(wire::ScopeTransferCommitted {
+            from_principal: Some(wire::PrincipalId { value: 9 }),
+            to_principal: Some(wire::PrincipalId { value: 42 }),
+            vehicle: Some(wire::VehicleId { value: 1 }),
+            scope: Some(wire::ScopeId {
+                value: "vehicle.motion".into(),
+            }),
+            generation: Some(wire::Generation { value: 3 }),
+            reason: String::new(),
+            authority_class: 0,
+        }),
+    );
+    assert!(engine.holds_control());
+}
+
+#[test]
+fn a_revoked_lane_closes_instead_of_commanding_a_stale_generation() {
+    // The host's silence watchdog revoked the lease one second after a
+    // grant that never produced a frame; the operator's screen kept
+    // saying "controlling" and every later press carried the dead
+    // generation.
+    let mut engine = engine();
+    admit(&mut engine, 7, 42);
+    engine.request_lease(1, "vehicle.motion");
+    grant(&mut engine, 4);
+    assert!(engine.holds_control());
+
+    let actions = authority_event(
+        &mut engine,
+        wire::authority_event::Event::ScopeLeaseRevoked(wire::ScopeLeaseRevoked {
+            principal: Some(wire::PrincipalId { value: 42 }),
+            vehicle: Some(wire::VehicleId { value: 1 }),
+            scope: Some(wire::ScopeId {
+                value: "vehicle.motion".into(),
+            }),
+            generation: Some(wire::Generation { value: 5 }),
+            reason: "holder silence".into(),
+            authority_class: 0,
+        }),
+    );
+    assert!(!engine.holds_control(), "the revoked lane is gone");
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        ClientAction::Emit(ModuleEvent::Lease(response)) if !response.granted
+    )));
+    assert!(
+        engine
+            .control_frame(ControlCommand::Legacy(wire::ControlPayload::default()), 1)
+            .is_empty(),
+        "no frame leaves under a dead generation"
+    );
+}

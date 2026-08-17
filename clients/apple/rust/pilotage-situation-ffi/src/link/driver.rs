@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
 
 use super::LinkCommand;
+use super::delivery::DeliveryQueue;
 use super::observer::LinkObserver;
 use super::records::{LinkConfig, LinkEvent};
 
@@ -29,7 +30,7 @@ const STATE_FRAME_INTERVAL_MS: u64 = 33;
 pub(super) struct Link {
     pub(super) engine: ClientEngine,
     pub(super) feed: Option<InstrumentFeed>,
-    pub(super) observer: Arc<dyn LinkObserver>,
+    pub(super) delivery: DeliveryQueue,
     pub(super) started: Instant,
     pub(super) retry_at_ms: Option<u64>,
     pub(super) stopped: bool,
@@ -74,7 +75,7 @@ impl Link {
                 }
                 ClientAction::Stop(fault) => {
                     self.stopped = true;
-                    self.observer.on_event(LinkEvent::Stopped {
+                    self.delivery.event(LinkEvent::Stopped {
                         reason: fault.to_string(),
                     });
                 }
@@ -93,14 +94,14 @@ impl Link {
         if let Ok(len) = feed.state_frame(now_ms as f64, &mut buf) {
             buf.truncate(len);
             self.stats.state_frames = self.stats.state_frames.wrapping_add(1);
-            self.observer.on_state_frame(buf, now_ms);
+            self.delivery.state_frame(buf, now_ms);
         }
     }
 
     /// Reports and resets one second of accounting.
     fn report_stats(&mut self) {
         let stats = std::mem::take(&mut self.stats);
-        self.observer.on_event(LinkEvent::Stats {
+        self.delivery.event(LinkEvent::Stats {
             telemetry_per_second: stats.telemetry,
             state_frames_per_second: stats.state_frames,
             control_frames_per_second: stats.control_frames,
@@ -152,7 +153,7 @@ pub(crate) async fn run(
             reconnect: ReconnectPolicy::default(),
         }),
         feed: None,
-        observer,
+        delivery: DeliveryQueue::start(observer),
         started: Instant::now(),
         retry_at_ms: None,
         stopped: false,
@@ -202,7 +203,7 @@ impl Link {
                 ClientAction::ScheduleReconnect { at_ms } => self.retry_at_ms = Some(at_ms),
                 ClientAction::Stop(fault) => {
                     self.stopped = true;
-                    self.observer.on_event(LinkEvent::Stopped {
+                    self.delivery.event(LinkEvent::Stopped {
                         reason: fault.to_string(),
                     });
                 }
