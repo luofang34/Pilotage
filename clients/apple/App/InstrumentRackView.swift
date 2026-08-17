@@ -36,12 +36,22 @@ struct InstrumentRackView: View {
         windowHeight: CGFloat,
         windowWidth: CGFloat
     ) -> CGFloat {
-        // Header, control bar, paddings and inter-tile gaps, measured from
-        // the layout's own constants rather than the rendered view: the
-        // width must be decided before the rack exists.
-        let chrome: CGFloat = 96 + CGFloat(max(profile.tiles.count - 1, 0)) * 8
+        // Header, control bar, paddings and inter-tile gaps, estimated
+        // from the layout's own constants. The estimate only sizes the
+        // COLUMN; the tiles themselves fit the measured area, so an
+        // estimate a few points off wastes a sliver of width and can
+        // never clip an instrument.
+        let chrome: CGFloat = 116 + CGFloat(max(profile.tiles.count - 1, 0)) * 8
         let stackHeight = max(windowHeight - chrome, 200)
-        let aspectSum = profile.tiles.reduce(CGFloat(0)) { sum, tile in
+        let aspectSum = Self.aspectSum(for: profile, model: model)
+        guard aspectSum > 0 else { return min(360, windowWidth / 2) }
+        return min(max(stackHeight / aspectSum, 280), windowWidth / 2)
+    }
+
+    /// The stack's total height per point of width: each tile's own
+    /// height-over-width, summed.
+    static func aspectSum(for profile: InstrumentProfile, model: HostLinkModel) -> CGFloat {
+        profile.tiles.reduce(CGFloat(0)) { sum, tile in
             switch tile {
             case .video:
                 return sum + 9.0 / 16.0
@@ -53,8 +63,6 @@ struct InstrumentRackView: View {
                     / CGFloat(choice.descriptor.designWidth)
             }
         }
-        guard aspectSum > 0 else { return min(360, windowWidth / 2) }
-        return min(max(stackHeight / aspectSum, 280), windowWidth / 2)
     }
 
     private var profile: InstrumentProfile {
@@ -78,12 +86,21 @@ struct InstrumentRackView: View {
                         Spacer(minLength: 0)
                     }
                 } else {
+                    // The tiles fit the MEASURED area: the width column
+                    // estimate can drift without ever clipping a panel
+                    // or leaving a dead band under the bar.
+                    let aspects = Self.aspectSum(for: profile, model: model)
+                    let gaps = CGFloat(max(profile.tiles.count - 1, 0)) * 8
+                    let fitted = aspects > 0
+                        ? min(proxy.size.width, (proxy.size.height - gaps) / aspects)
+                        : proxy.size.width
                     ScrollView {
                         VStack(spacing: 8) {
                             ForEach(Array(profile.tiles.enumerated()), id: \.offset) { _, tile in
-                                tileView(tile, width: proxy.size.width)
+                                tileView(tile, width: fitted)
                             }
                         }
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
