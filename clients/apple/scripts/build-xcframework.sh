@@ -26,8 +26,14 @@ artifact="$package_root/artifacts/PilotageFFI.xcframework"
 rm -rf "$generated" "$headers" "$artifact"
 mkdir -p "$generated" "$headers" "$package_root/artifacts"
 cp target/swift-bindings/pilotage_situation_ffi.swift "$generated/"
+cp target/swift-bindings/pilotage_instrument_apple_bridge.swift "$generated/"
 cp target/swift-bindings/pilotage_situation_ffiFFI.h "$headers/"
-cp target/swift-bindings/pilotage_situation_ffiFFI.modulemap "$headers/module.modulemap"
+cp target/swift-bindings/pilotage_instrument_apple_bridgeFFI.h "$headers/"
+# One static library carries both UniFFI namespaces; the module map
+# declares both so either generated file can import its own C surface.
+cat target/swift-bindings/pilotage_situation_ffiFFI.modulemap \
+    target/swift-bindings/pilotage_instrument_apple_bridgeFFI.modulemap \
+    > "$headers/module.modulemap"
 
 xcodebuild -create-xcframework \
     -library target/aarch64-apple-ios/release/libpilotage_situation_ffi.a -headers "$headers" \

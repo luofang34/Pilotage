@@ -76,6 +76,39 @@ pub struct LeaseRelease {
     pub scope: ScopeId,
 }
 
+/// A non-holder asks the present holder to hand a scope over
+/// (CLIENT-09). Information only; nothing changes hands until the
+/// holder offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeTransferRequest {
+    /// Vehicle the wanted scope belongs to.
+    pub vehicle: VehicleId,
+    /// Control scope being asked for.
+    pub scope: ScopeId,
+}
+
+/// The holder offers its held scope to another principal (normal
+/// handover, phase one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeTransferOffer {
+    /// Vehicle the offered scope belongs to.
+    pub vehicle: VehicleId,
+    /// Control scope being offered.
+    pub scope: ScopeId,
+    /// The principal offered authority.
+    pub to: PrincipalId,
+}
+
+/// The offered principal accepts, committing the transfer atomically
+/// (normal handover, phase two).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeTransferAccept {
+    /// Vehicle the accepted scope belongs to.
+    pub vehicle: VehicleId,
+    /// Control scope being accepted.
+    pub scope: ScopeId,
+}
+
 /// The host's acknowledgement of a [`LeaseRelease`]: authority is
 /// relinquished the moment this arrives (the host silence watchdog remains
 /// the independent backup if it never does).

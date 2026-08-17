@@ -60,7 +60,7 @@ check_ffi_lint_scope() {
                 bad = 1
                 next
             }
-            if (module_line == "mod error;" || module_line == "mod records;") {
+            if (module_line == "mod error;" || module_line == "mod records;" || module_line == "mod link;") {
                 seen[module_line]++
             } else {
                 bad = 1
@@ -69,7 +69,7 @@ check_ffi_lint_scope() {
         }
         /clippy::disallowed_types/ { bad = 1 }
         END {
-            if (seen["mod error;"] != 1 || seen["mod records;"] != 1) {
+            if (seen["mod error;"] != 1 || seen["mod records;"] != 1 || seen["mod link;"] != 1) {
                 bad = 1
             }
             exit bad

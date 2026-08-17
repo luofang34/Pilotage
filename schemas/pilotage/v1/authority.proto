@@ -58,6 +58,14 @@ message ScopeLeaseGranted {
   AuthorityClass authority_class = 6;
 }
 
+// A non-holder asked the present holder for the scope. Information for
+// the holder's operator; nothing changes hands until the holder offers.
+message ScopeTransferRequested {
+  PrincipalId from_principal = 1;
+  VehicleId vehicle = 2;
+  ScopeId scope = 3;
+}
+
 // A scope-lease holder offered to transfer the scope to another principal.
 message ScopeTransferOffered {
   PrincipalId from_principal = 1;
@@ -165,5 +173,6 @@ message AuthorityEvent {
     ScopeTransferExpired scope_transfer_expired = 8;
     LinkStateChanged link_state_changed = 9;
     WarningRaised warning_raised = 10;
+    ScopeTransferRequested scope_transfer_requested = 11;
   }
 }

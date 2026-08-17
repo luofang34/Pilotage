@@ -6,7 +6,8 @@ use crate::convert::ConvertError;
 use crate::ids::{Generation, PrincipalId, ScopeId, SessionId, VehicleId};
 use crate::session::{
     ClientHello, LeaseDenialReason, LeaseRelease, LeaseReleased, LeaseRequest, LeaseResponse,
-    LinkLossCleared, Ping, Pong, ScopeHolderSnapshot, ServerWelcome,
+    LinkLossCleared, Ping, Pong, ScopeHolderSnapshot, ScopeTransferAccept, ScopeTransferOffer,
+    ScopeTransferRequest, ServerWelcome,
 };
 use crate::wire;
 use pilotage_timing::MonoTimestamp;
@@ -153,6 +154,59 @@ impl TryFrom<wire::LeaseRelease> for LeaseRelease {
         let vehicle = release.vehicle.ok_or_else(|| missing("vehicle"))?;
         let scope = release.scope.ok_or_else(|| missing("scope"))?;
         Ok(LeaseRelease {
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
+        })
+    }
+}
+
+impl TryFrom<wire::ScopeTransferRequest> for ScopeTransferRequest {
+    type Error = ConvertError;
+
+    fn try_from(request: wire::ScopeTransferRequest) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.ScopeTransferRequest",
+            field,
+        };
+        let vehicle = request.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = request.scope.ok_or_else(|| missing("scope"))?;
+        Ok(ScopeTransferRequest {
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
+        })
+    }
+}
+
+impl TryFrom<wire::ScopeTransferOffer> for ScopeTransferOffer {
+    type Error = ConvertError;
+
+    fn try_from(offer: wire::ScopeTransferOffer) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.ScopeTransferOffer",
+            field,
+        };
+        let vehicle = offer.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = offer.scope.ok_or_else(|| missing("scope"))?;
+        let to = offer.to_principal.ok_or_else(|| missing("to_principal"))?;
+        Ok(ScopeTransferOffer {
+            vehicle: VehicleId::new(vehicle.value),
+            scope: ScopeId::new(scope.value),
+            to: PrincipalId::new(to.value),
+        })
+    }
+}
+
+impl TryFrom<wire::ScopeTransferAccept> for ScopeTransferAccept {
+    type Error = ConvertError;
+
+    fn try_from(accept: wire::ScopeTransferAccept) -> Result<Self, Self::Error> {
+        let missing = |field: &'static str| ConvertError::MissingField {
+            message: "pilotage.v1.ScopeTransferAccept",
+            field,
+        };
+        let vehicle = accept.vehicle.ok_or_else(|| missing("vehicle"))?;
+        let scope = accept.scope.ok_or_else(|| missing("scope"))?;
+        Ok(ScopeTransferAccept {
             vehicle: VehicleId::new(vehicle.value),
             scope: ScopeId::new(scope.value),
         })

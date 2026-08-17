@@ -5,6 +5,12 @@ import SwiftUI
 
 @main
 struct PilotageApp: App {
+    init() {
+        #if DEBUG
+        HostLinkModel.startFootprintProbe()
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             SituationContentView()
@@ -25,13 +31,78 @@ enum LaunchRequest {
         false
         #endif
     }
+
+    /// Open the Instruments destination and connect with the persisted
+    /// facts, so a headless harness can photograph a live panel.
+    static var openInstruments: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-OpenInstruments")
+        #else
+        false
+        #endif
+    }
+
+    /// Ask for control as soon as the session admits (harness only).
+    static var autoControl: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-AutoControl")
+        #else
+        false
+        #endif
+    }
+
+    /// Arm one second after control is held (harness only).
+    static var autoArm: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-AutoArm")
+        #else
+        false
+        #endif
+    }
+
+    /// Decode video but discard the image unpublished (harness bisect
+    /// only).
+    static var decodeNoPublish: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-DecodeNoPublish")
+        #else
+        false
+        #endif
+    }
+
+    /// Drop every video frame before decode (harness bisect only).
+    static var noVideoDecode: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-NoVideoDecode")
+        #else
+        false
+        #endif
+    }
+
+    /// Climb through a takeoff window once the arm is accepted
+    /// (harness only).
+    static var autoClimb: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-AutoClimb")
+        #else
+        false
+        #endif
+    }
 }
 
 private struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var model = SituationClientModel()
+    @StateObject private var hostLink = HostLinkModel()
     @State private var menuPresented = false
+    /// Whether the instrument rack shares the screen. Persisted: a cockpit
+    /// arrangement is a decision, not a session accident.
+    @AppStorage("pilotageRackPresented") private var rackPresented = false
+    /// Whether the map holds its half; the rack owns the toggle.
+    @AppStorage("pilotageMapVisible") private var mapVisible = true
+    @AppStorage("pilotageInstrumentProfile") private var rackProfileId = "px4-flight"
+    @State private var windowWidth: CGFloat = 1000
     @State private var camera = SituationCamera(headingDegrees: 0, pitchDegrees: 0)
     @State private var mapCommands: SituationMapCommands?
     @State private var modesPresented = LaunchRequest.openMapModes
@@ -44,7 +115,50 @@ private struct SituationContentView: View {
     @StateObject private var ownship = OwnshipModel()
 
     var body: some View {
-        // The map owns the screen. Status, layers, reception and flights live in the
+        HStack(spacing: 0) {
+            if rackPresented {
+                InstrumentRackView(model: hostLink, mapVisible: $mapVisible)
+                    .frame(maxWidth: mapVisible ? rackWidth : .infinity)
+                    .transition(.move(edge: .leading))
+            }
+            if mapVisible {
+                mapSurface
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .background(.black)
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            windowWidth = size.width
+            windowHeight = size.height
+        }
+        .onAppear {
+            if LaunchRequest.openInstruments {
+                rackPresented = true
+                hostLink.connect(
+                    url: UserDefaults.standard.string(forKey: "pilotageHostUrl") ?? "",
+                    certificateSha256Hex:
+                        UserDefaults.standard.string(forKey: "pilotageHostCertHash") ?? ""
+                )
+            }
+        }
+    }
+
+    /// Wide enough that the selected profile's whole stack fits the window
+    /// height, no wider than half the screen: the rack is sized by what it
+    /// shows, and the map keeps the rest.
+    private var rackWidth: CGFloat {
+        InstrumentRackView.idealWidth(
+            for: InstrumentProfile.selected(storedId: rackProfileId),
+            model: hostLink,
+            windowHeight: windowHeight,
+            windowWidth: windowWidth
+        )
+    }
+
+    private var mapSurface: some View {
+        // The map owns its half. Status, layers, reception and flights live in the
         // drawer, because a map covered in text answers "where" worse than a bare one.
         ZStack {
             // The map is the document, so it runs to the glass. A safe-area inset here
@@ -163,7 +277,7 @@ private struct SituationContentView: View {
             .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $menuPresented) {
-            SituationMenuView(model: model)
+            SituationMenuView(model: model, hostLink: hostLink)
         }
         .sheet(
             isPresented: Binding(

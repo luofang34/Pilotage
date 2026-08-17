@@ -74,6 +74,15 @@ pub enum DomainEnvelope {
     /// fencing generation, and announced activation revision, answered with
     /// a `ControlActionResult`, and only then delivered to the adapter.
     ActionCommand(pilotage_protocol::ControlActionCommand),
+    /// A non-holder asks the present holder to hand a scope over; the
+    /// engine broadcasts the ask as an authority event (CLIENT-09).
+    TransferRequest(pilotage_protocol::ScopeTransferRequest),
+    /// The holder offers its held scope to another principal, phase one
+    /// of a normal handover.
+    TransferOffer(pilotage_protocol::ScopeTransferOffer),
+    /// The offered principal accepts, committing the transfer atomically
+    /// under an advanced fencing generation.
+    TransferAccept(pilotage_protocol::ScopeTransferAccept),
     /// The driver observed the client's transport link drop; the engine
     /// releases every scope the client held via the authority engine's
     /// link-loss path.

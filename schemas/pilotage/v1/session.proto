@@ -164,6 +164,30 @@ message Ping {
   MonoTimestamp sender_sent_at = 2;
 }
 
+// A non-holder asks the present holder to hand a scope over. The host
+// validates admission and broadcasts `ScopeTransferRequested`; whether a
+// handover follows is the holder's decision alone (CLIENT-09).
+message ScopeTransferRequest {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+}
+
+// The holder offers its held scope to another principal (normal handover,
+// phase one). Routed to the authority engine's offer machinery; the offer
+// expires host-side if never accepted.
+message ScopeTransferOffer {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+  PrincipalId to_principal = 3;
+}
+
+// The offered principal accepts, committing the transfer atomically under
+// an advanced fencing generation (normal handover, phase two).
+message ScopeTransferAccept {
+  VehicleId vehicle = 1;
+  ScopeId scope = 2;
+}
+
 // The reply to a `Ping`, echoing its nonce and sender timestamp and adding
 // the responder's own local transport-time sample at the moment of reply.
 //

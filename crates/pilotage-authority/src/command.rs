@@ -74,6 +74,20 @@ pub enum AuthorityCommand {
         /// Principal that becomes the effective holder.
         to: PrincipalId,
     },
+    /// Ask the present holder to hand the scope over (CLIENT-09).
+    ///
+    /// Stateless information for the holder's operator: the engine emits
+    /// [`crate::AuthorityEffect::ScopeTransferRequested`] when the scope is
+    /// held by someone else, and nothing changes hands until the holder
+    /// offers.
+    RequestTransfer {
+        /// Vehicle owning the scope.
+        vehicle: VehicleId,
+        /// Scope being asked for.
+        scope: ScopeId,
+        /// The principal asking.
+        from: PrincipalId,
+    },
     /// Offer a held scope to another principal (normal handover, phase one).
     ///
     /// The offering principal remains the effective holder until the recipient

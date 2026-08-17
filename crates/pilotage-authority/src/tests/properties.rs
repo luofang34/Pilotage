@@ -216,6 +216,7 @@ fn effect_targets(effect: &AuthorityEffect, target: &ScopeId) -> bool {
     let scope = match effect {
         AuthorityEffect::ScopeRegistered { scope, .. }
         | AuthorityEffect::ScopeLeaseGranted { scope, .. }
+        | AuthorityEffect::ScopeTransferRequested { scope, .. }
         | AuthorityEffect::ScopeTransferOffered { scope, .. }
         | AuthorityEffect::ScopeTransferCommitted { scope, .. }
         | AuthorityEffect::ScopeTransferExpired { scope, .. }

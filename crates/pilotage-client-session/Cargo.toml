@@ -1,0 +1,19 @@
+[package]
+name = "pilotage-client-session"
+description = "Portable sans-IO client-session core: bootstrap, admission, stream classification, authority mirror, control fencing, and reconnect (ADR-0037)"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-input = { workspace = true }
+pilotage-protocol = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

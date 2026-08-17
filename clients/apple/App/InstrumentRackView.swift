@@ -1,0 +1,468 @@
+import IndicateAppleDisplay
+import PilotageCore
+import SwiftUI
+
+/// The instrument rack: a configurable vertical stack of live tiles
+/// beside the map, in the operator's chosen profile.
+///
+/// The rack is a working surface, not a page: it shares the screen with
+/// the map, and the map itself can be stood down when the flight is all
+/// instruments. Each tile resolves against the registry at paint time;
+/// what this build cannot show states its reason in place.
+struct InstrumentRackView: View {
+    @ObservedObject var model: HostLinkModel
+    @AppStorage("pilotageInstrumentProfile") private var profileId = "px4-flight"
+    /// Whether the map shares the screen; the rack owns the toggle
+    /// because the rack is what remains either way.
+    @Binding var mapVisible: Bool
+    @State private var connectPresented = false
+    /// The video source the operator switched to, overriding the
+    /// profile's own until the profile changes.
+    @AppStorage("pilotageVideoSource") private var videoSourceOverride = ""
+    /// The tile granted the whole rack column, when one is. One
+    /// affordance, in place, reversible: the same button grants and
+    /// returns the focus, and the map split stays a separate switch.
+    @State private var focusedTileId: String?
+
+    /// Sources a vehicle can offer today. A source catalog will replace
+    /// this list; the switcher's shape stays.
+    static let videoSources = ["gimbal", "fpv", "chase"]
+
+    /// The width at which the profile's whole stack fits `windowHeight`,
+    /// clamped to at most half the window and at least a readable tile.
+    static func idealWidth(
+        for profile: InstrumentProfile,
+        model: HostLinkModel,
+        windowHeight: CGFloat,
+        windowWidth: CGFloat
+    ) -> CGFloat {
+        // Header, control bar, paddings and inter-tile gaps, estimated
+        // from the layout's own constants. The estimate only sizes the
+        // COLUMN; the tiles themselves fit the measured area, so an
+        // estimate a few points off wastes a sliver of width and can
+        // never clip an instrument.
+        let chrome: CGFloat = 116 + CGFloat(max(profile.tiles.count - 1, 0)) * 8
+        let stackHeight = max(windowHeight - chrome, 200)
+        let aspectSum = Self.aspectSum(for: profile, model: model)
+        guard aspectSum > 0 else { return min(360, windowWidth / 2) }
+        return min(max(stackHeight / aspectSum, 280), windowWidth / 2)
+    }
+
+    /// The stack's total height per point of width: each tile's own
+    /// height-over-width, summed.
+    static func aspectSum(for profile: InstrumentProfile, model: HostLinkModel) -> CGFloat {
+        profile.tiles.reduce(CGFloat(0)) { sum, tile in
+            switch tile {
+            case .video:
+                return sum + 9.0 / 16.0
+            case .panel(let id):
+                guard let choice = model.panelChoice(forTileId: id),
+                      choice.descriptor.designWidth > 0
+                else { return sum + 3.0 / 4.0 }
+                return sum + CGFloat(choice.descriptor.designHeight)
+                    / CGFloat(choice.descriptor.designWidth)
+            }
+        }
+    }
+
+    private var profile: InstrumentProfile {
+        InstrumentProfile.selected(storedId: profileId)
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            header
+            if let fault = model.instrumentFault {
+                Label(fault, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+            GeometryReader { proxy in
+                if let focused = profile.tiles.first(where: { $0.id == focusedTileId }) {
+                    VStack {
+                        Spacer(minLength: 0)
+                        tileView(focused, width: proxy.size.width)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    // The tiles fit the MEASURED area: the width column
+                    // estimate can drift without ever clipping a panel
+                    // or leaving a dead band under the bar.
+                    let aspects = Self.aspectSum(for: profile, model: model)
+                    let gaps = CGFloat(max(profile.tiles.count - 1, 0)) * 8
+                    let fitted = aspects > 0
+                        ? min(proxy.size.width, (proxy.size.height - gaps) / aspects)
+                        : proxy.size.width
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(Array(profile.tiles.enumerated()), id: \.offset) { _, tile in
+                                tileView(tile, width: fitted)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            controlBar
+        }
+        .padding(10)
+        .background(.black)
+        .onAppear { model.prepareInstruments() }
+        .sheet(isPresented: $connectPresented) {
+            HostConnectSheet(model: model)
+        }
+        .alert(
+            "Hand over control?",
+            isPresented: Binding(
+                get: { model.takeoverAsk != nil },
+                set: { presented in if !presented { model.declineHandover() } }
+            )
+        ) {
+            Button("Hand over") { model.confirmHandover() }
+            Button("Keep control", role: .cancel) { model.declineHandover() }
+        } message: {
+            Text("Operator \(model.takeoverAsk?.fromPrincipal ?? 0) asks for "
+                + (model.takeoverAsk?.scope ?? ""))
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Menu {
+                // The menu picks what the rack SHOWS. Control schemes
+                // (device profiles, flight modes) will be their own
+                // chooser; this one never grows a second vocabulary.
+                Section("Panel layout") {
+                    ForEach(InstrumentProfile.builtIn) { candidate in
+                        Button {
+                            profileId = candidate.id
+                        } label: {
+                            if candidate.id == profile.id {
+                                Label(candidate.name, systemImage: "checkmark")
+                            } else {
+                                Text(candidate.name)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label(profile.name, systemImage: "rectangle.stack")
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            }
+            Spacer()
+            ConnectionChip(phase: model.phase) { connectPresented = true }
+            Button {
+                withAnimation { mapVisible.toggle() }
+            } label: {
+                Image(systemName: mapVisible
+                    ? "rectangle.leadinghalf.inset.filled"
+                    : "map")
+            }
+            .help(mapVisible ? "Hide the map" : "Show the map")
+        }
+        .foregroundStyle(.white)
+    }
+
+    @ViewBuilder
+    private func tileView(_ tile: InstrumentTile, width: CGFloat) -> some View {
+        switch tile {
+        case .video(let source):
+            let shown = videoSourceOverride.isEmpty ? source : videoSourceOverride
+            let liveSource = selectedVideoId(for: shown)
+            // The native link does not carry media streams yet; the slot
+            // states that rather than implying a camera exists. The source
+            // switcher and the enlarge control are the tile's own, so a
+            // live feed changes what fills it, not how it is worked.
+            ZStack(alignment: .topTrailing) {
+                if let id = liveSource {
+                    // The named source's own feed, never a stand-in. The
+                    // frames flow hub-to-layer; this view never rebuilds
+                    // for a picture.
+                    VideoLayerView(hub: model.videoHub, source: id)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .bottomLeading) {
+                            Text("source \(id) · \(shown)")
+                                .font(.caption2)
+                                .padding(4)
+                                .background(.black.opacity(0.5))
+                        }
+                } else {
+                    UnavailableTile(
+                        title: "Video · \(shown)",
+                        reason: "no frames from this session yet"
+                    )
+                }
+                HStack(spacing: 4) {
+                    if model.gimbalCaptured {
+                        // The quasimode holds the stick for THIS camera;
+                        // the badge lives where the picture is.
+                        Image(systemName: "camera.rotate.fill")
+                            .foregroundStyle(.cyan)
+                            .padding(6)
+                    }
+                    Menu {
+                        ForEach(Self.videoSources, id: \.self) { candidate in
+                            Button {
+                                videoSourceOverride = candidate
+                            } label: {
+                                if candidate == shown {
+                                    Label(candidate, systemImage: "checkmark")
+                                } else {
+                                    Text(candidate)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "video.badge.ellipsis")
+                            .padding(6)
+                    }
+                    Button {
+                        withAnimation { focusedTileId = focusedTileId == tile.id ? nil : tile.id }
+                    } label: {
+                        Image(systemName: focusedTileId == tile.id
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right")
+                            .padding(6)
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.white)
+            }
+            .frame(width: width, height: width * 9 / 16)
+        case .panel(let id):
+            if let choice = model.panelChoice(forTileId: id),
+               let display = model.display(for: choice.index) {
+                InstrumentPanel(display: display)
+                    .frame(
+                        width: width,
+                        height: width * CGFloat(choice.descriptor.designHeight)
+                            / CGFloat(max(choice.descriptor.designWidth, 1))
+                    )
+            } else {
+                UnavailableTile(
+                    title: id.uppercased(),
+                    reason: model.instrumentFault == nil
+                        ? "no such panel in the linked registry"
+                        : "instrument runtime unavailable"
+                )
+                .frame(width: width, height: width * 3 / 4)
+            }
+        }
+    }
+
+    /// The one binding table between source names and wire ids, the same
+    /// values the browser's video routing pins. A source must never be
+    /// silently redirected to another camera, so an absent source shows
+    /// its absence rather than whichever feed arrived first.
+    private static let videoSourceIds: [String: UInt8] = [
+        "fpv": 0,
+        "chase": 1,
+        "gimbal": 2,
+    ]
+
+    private func selectedVideoId(for name: String) -> UInt8? {
+        guard let id = Self.videoSourceIds[name] else { return nil }
+        return model.liveVideoSources.contains(id) ? id : nil
+    }
+
+    /// One row and one caption: the bar must never eat into the
+    /// instruments it serves. The telegraph is the row's centerpiece;
+    /// everything narrational lives in the caption or moved out — pad
+    /// hints to the connect sheet, the capture badge onto the video
+    /// tile itself.
+    private var controlBar: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: model.controllerAttached
+                    ? "gamecontroller.fill"
+                    : "gamecontroller")
+                    .foregroundStyle(model.controllerAttached ? .green : .secondary)
+                if model.leaseHeld {
+                    ArmTelegraphControl(model: model)
+                    Spacer()
+                    Button("Release", role: .destructive) { model.releaseLease() }
+                } else {
+                    Spacer()
+                    // One intent, one button: a denial with a standing
+                    // holder escalates to the ask on its own.
+                    Button("Request control") { model.requestLease() }
+                        .disabled(model.catalog == nil)
+                }
+            }
+            .font(.callout)
+            if let caption = barCaption {
+                Text(caption.text)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(caption.warning ? .orange : .secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .foregroundStyle(.white)
+    }
+
+    /// The one caption line under the bar, present only when the
+    /// telegraph has a grievance. The link figures are diagnostics and
+    /// live on the connection sheet, not under the operator's thumbs.
+    private var barCaption: (text: String, warning: Bool)? {
+        if model.armPhase == 2 {
+            return ("arm refused: \(model.armDetail)", true)
+        }
+        if model.armPhase == 3 {
+            return ("vehicle disarmed itself — lever is back on SAFE", true)
+        }
+        return nil
+    }
+}
+
+/// The arm order telegraph: a two-position lever the operator sets and
+/// a lamp only the flight controller's own report moves. Amber between
+/// order and answer; the lever never re-sends on its own.
+private struct ArmTelegraphControl: View {
+    @ObservedObject var model: HostLinkModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 0) {
+                lever("SAFE", ordersArmed: false)
+                lever("ARM", ordersArmed: true)
+            }
+            .background(Capsule().fill(Color(white: 0.18)))
+            lamp
+        }
+    }
+
+    private func lever(_ title: String, ordersArmed: Bool) -> some View {
+        let selected = model.armOrdered == ordersArmed
+        return Button {
+            if ordersArmed { model.arm() } else { model.disarm() }
+        } label: {
+            Text(title)
+                .font(.callout.weight(selected ? .bold : .regular))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(selected ? leverTint(ordersArmed: ordersArmed) : .clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func leverTint(ordersArmed: Bool) -> Color {
+        // Cockpit colors: amber is an unanswered order, green is the
+        // system engaged as ordered, gray is quiet. Red stays reserved
+        // for what has actually gone wrong.
+        if model.armPhase == 1 { return .orange }
+        return ordersArmed ? .green : Color(white: 0.35)
+    }
+
+    /// The FC's answer, and nothing else: the lamp never moves on a
+    /// press.
+    private var lamp: some View {
+        let (tint, label): (Color, String) = switch model.armConfirmed {
+        case 2: (.green, "ARMED")
+        case 1: (Color(white: 0.7), "SAFE")
+        default: (.gray, "—")
+        }
+        return HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 8, height: 8)
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+        }
+    }
+}
+
+/// Hosts one video source's picture in a plain layer the frame hub
+/// paints directly: no picture ever crosses SwiftUI, so a sixty-hertz
+/// feed re-evaluates nothing but its own layer contents.
+private struct VideoLayerView: UIViewRepresentable {
+    let hub: VideoFrameHub
+    let source: UInt8
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.layer.contentsGravity = .resizeAspect
+        hub.attach(layer: view.layer, source: source)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        hub.attach(layer: view.layer, source: source)
+    }
+}
+
+/// A tile slot this build cannot fill, saying why in place. It never
+/// paints a picture that implies the data exists.
+private struct UnavailableTile: View {
+    let title: String
+    let reason: String
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(white: 0.12))
+            VStack(spacing: 6) {
+                Text(title)
+                    .font(.headline)
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(.white)
+            .padding(8)
+        }
+    }
+}
+
+/// One glanceable statement of where the link stands. Tapping opens the
+/// connection sheet — the chip is the door to the flow, not the flow.
+struct ConnectionChip: View {
+    let phase: HostLinkModel.Phase
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 8, height: 8)
+                Text(label)
+                    .font(.footnote.weight(.medium))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color(white: 0.18)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+    }
+
+    private var label: String {
+        // One word each: the chip is a glance, and the sheet carries the
+        // host and scope in full.
+        switch phase {
+        case .idle: "Connect"
+        case .connecting: "Connecting…"
+        case .observing: "Observing"
+        case .controlling: "Controlling"
+        case .reconnecting: "Reconnecting…"
+        case .stopped: "Stopped"
+        }
+    }
+
+    private var tint: Color {
+        switch phase {
+        case .idle: .gray
+        case .connecting, .reconnecting: .yellow
+        case .observing: .green
+        case .controlling: .blue
+        case .stopped: .red
+        }
+    }
+}

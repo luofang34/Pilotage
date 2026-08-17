@@ -16,8 +16,30 @@ public final class PilotageInstrumentComposition: @unchecked Sendable {
     public func writeState(_ bytes: [UInt8], acceptedAtMs: UInt64) throws {
         lock.lock()
         defer { lock.unlock() }
+        try writeStateLocked(bytes, acceptedAtMs: acceptedAtMs)
+    }
+
+    private func writeStateLocked(_ bytes: [UInt8], acceptedAtMs: UInt64) throws {
         panels.removeAll(keepingCapacity: true)
         try verifiedRuntime.writeState(bytes, acceptedAtMs: acceptedAtMs)
+    }
+
+    /// Accepts one state frame and commits its composition in one lock
+    /// scope, so a renderer on another thread never observes the window
+    /// between an invalidated scene and its replacement. The two-step
+    /// `writeState` + `compose` pair leaves that window open by
+    /// construction; a display host paced by its own display link must
+    /// use this call instead.
+    @discardableResult
+    public func ingest(
+        _ bytes: [UInt8],
+        acceptedAtMs: UInt64,
+        pathHealthy: Bool
+    ) throws -> UInt32 {
+        lock.lock()
+        defer { lock.unlock() }
+        try writeStateLocked(bytes, acceptedAtMs: acceptedAtMs)
+        return try composeLocked(nowMs: acceptedAtMs, pathHealthy: pathHealthy)
     }
 
     /// Produces and commits all composition panels with one runtime call.
@@ -25,6 +47,10 @@ public final class PilotageInstrumentComposition: @unchecked Sendable {
     public func compose(nowMs: UInt64, pathHealthy: Bool) throws -> UInt32 {
         lock.lock()
         defer { lock.unlock() }
+        return try composeLocked(nowMs: nowMs, pathHealthy: pathHealthy)
+    }
+
+    private func composeLocked(nowMs: UInt64, pathHealthy: Bool) throws -> UInt32 {
         panels.removeAll(keepingCapacity: true)
         let frame = verifiedRuntime.compositionFrame(
             nowMs: nowMs,

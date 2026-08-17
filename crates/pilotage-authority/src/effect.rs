@@ -39,6 +39,16 @@ pub enum AuthorityEffect {
         /// Generation in effect after the grant.
         generation: Generation,
     },
+    /// A non-holder asked for the scope (ADR-0012 `ScopeTransferRequested`).
+    /// Information for the holder's operator; no state changed.
+    ScopeTransferRequested {
+        /// Vehicle owning the scope.
+        vehicle: VehicleId,
+        /// The scope asked for.
+        scope: ScopeId,
+        /// The principal asking.
+        from: PrincipalId,
+    },
     /// A transfer was offered from `from` to `to` (ADR-0012
     /// `ScopeTransferOffered`); `from` remains the effective holder until the
     /// offer is accepted or expires.

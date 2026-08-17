@@ -23,6 +23,8 @@ members = [
     "crates/pilotage-terrain-query",
     "crates/pilotage-mission",
     "crates/pilotage-instrument-runtime",
+    "crates/pilotage-client-session",
+    "crates/pilotage-instrument-feed",
     "crates/pilotage-presentation",
     "adapters/reference-headless",
     "adapters/aviate",
@@ -102,6 +104,8 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 uniffi = "0.32"
 pilotage-timing = { path = "crates/pilotage-timing" }
 pilotage-protocol = { path = "crates/pilotage-protocol" }
+pilotage-client-session = { path = "crates/pilotage-client-session" }
+pilotage-instrument-feed = { path = "crates/pilotage-instrument-feed" }
 pilotage-authority = { path = "crates/pilotage-authority" }
 pilotage-ingress = { path = "crates/pilotage-ingress" }
 pilotage-input = { path = "crates/pilotage-input" }

@@ -274,6 +274,7 @@ const ENVELOPE_FIELD = {
   controlActionCommand: 18,
   mediaAttachRequest: 19,
   videoDeliveryState: 20,
+  scopeTransferOffer: 22,
 };
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
@@ -306,6 +307,24 @@ function encodeLeaseRelease({ vehicleId, scope }) {
 /** Encodes a `LeaseRelease` as a bare `Envelope` (payload field 13). */
 export function encodeLeaseReleaseEnvelope(release) {
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.leaseRelease, encodeLeaseRelease(release)));
+}
+
+// ---- session.proto: ScopeTransferOffer (vehicle=1, scope=2, to_principal=3)
+// The holder's half of a cooperative handover (CLIENT-09): offers the held
+// scope to the principal who asked.
+function encodeScopeTransferOffer({ vehicleId, scope, toPrincipal }) {
+  const bytes = [];
+  fieldBytes(bytes, 1, encodeVehicleId(vehicleId));
+  fieldBytes(bytes, 2, encodeScopeId(scope));
+  fieldBytes(bytes, 3, encodeVehicleId(toPrincipal));
+  return bytes;
+}
+
+/** Encodes a `ScopeTransferOffer` as a bare `Envelope` (payload field 22). */
+export function encodeScopeTransferOfferEnvelope(offer) {
+  return new Uint8Array(
+    encodeEnvelope(ENVELOPE_FIELD.scopeTransferOffer, encodeScopeTransferOffer(offer)),
+  );
 }
 
 /** Encodes an idempotent media attachment request for the live session. */
@@ -1171,7 +1190,7 @@ function decodeIncarnation(bytes) {
 const AUTHORITY_ARM_NAMES = [
   null, "ScopeLeaseGranted", "ScopeTransferOffered", "ScopeTransferAccepted", "ScopeTransferCommitted",
   "ScopeLeaseRevoked", "EmergencyOverrideApplied", "ScopeRegistered", "ScopeTransferExpired",
-  "LinkStateChanged", "WarningRaised",
+  "LinkStateChanged", "WarningRaised", "ScopeTransferRequested",
 ];
 
 function decodeAuthorityEvent(bytes) {
@@ -1180,6 +1199,18 @@ function decodeAuthorityEvent(bytes) {
   for (const fieldNumber of fields.keys()) {
     const arm = AUTHORITY_ARM_NAMES[fieldNumber];
     if (!arm) continue;
+    if (fieldNumber === 11) {
+      // ScopeTransferRequested: from_principal=1, vehicle=2, scope=3. The
+      // holder's client needs the asker's identity to answer.
+      const event = parseFields(firstBytes(fields, fieldNumber));
+      return {
+        arm,
+        kind: "transferRequest",
+        principalId: decodeUint64Message(firstBytes(event, 1)),
+        vehicleId: decodeUint64Message(firstBytes(event, 2)),
+        scope: decodeStringMessage(firstBytes(event, 3)),
+      };
+    }
     if (fieldNumber !== 1 && fieldNumber !== 5) return { arm };
     const event = parseFields(firstBytes(fields, fieldNumber));
     return {

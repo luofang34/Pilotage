@@ -15,6 +15,7 @@ mod action_command;
 mod frame_ingress;
 mod handlers;
 mod link_loss;
+mod transfer;
 
 use pilotage_adapter_api::AdapterCapabilities;
 use pilotage_authority::{AuthorityCommand, AuthorityEffect, AuthorityEngine, LinkState};
@@ -188,6 +189,15 @@ impl SessionEngine {
             }
             DomainEnvelope::ActionCommand(command) => {
                 self.on_action_command(client, command, now, &mut actions);
+            }
+            DomainEnvelope::TransferRequest(request) => {
+                self.on_transfer_request(client, request, now, &mut actions);
+            }
+            DomainEnvelope::TransferOffer(offer) => {
+                self.on_transfer_offer(client, offer, now, &mut actions);
+            }
+            DomainEnvelope::TransferAccept(accept) => {
+                self.on_transfer_accept(client, accept, now, &mut actions);
             }
             DomainEnvelope::Disconnect => self.on_disconnect(client, &mut actions),
         }

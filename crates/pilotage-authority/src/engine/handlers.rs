@@ -66,6 +66,42 @@ impl AuthorityEngine {
     }
 
     /// Offers a held scope to another principal (handover phase one).
+    /// A non-holder asks for the scope: pure information for the holder,
+    /// emitted only when there is a holder to ask and it is not the asker.
+    pub(super) fn handle_request_transfer(
+        &mut self,
+        vehicle: VehicleId,
+        scope: ScopeId,
+        from: PrincipalId,
+    ) -> Vec<AuthorityEffect> {
+        let Some(state) = self.scopes.get(&(vehicle, scope.clone())) else {
+            return reject_unknown(vehicle, scope);
+        };
+        let holder = match &state.holder {
+            HolderState::Held { principal, .. } => *principal,
+            HolderState::Offered { from: holder, .. } => *holder,
+            HolderState::Unassigned => {
+                return reject(vehicle, scope, RejectReason::ScopeUnassigned);
+            }
+        };
+        if holder == from {
+            // The holder asking itself is a broken client, not a request.
+            return reject(
+                vehicle,
+                scope,
+                RejectReason::NotCurrentHolder {
+                    actor: from,
+                    current_holder: Some(holder),
+                },
+            );
+        }
+        vec![AuthorityEffect::ScopeTransferRequested {
+            vehicle,
+            scope,
+            from,
+        }]
+    }
+
     pub(super) fn handle_offer(
         &mut self,
         vehicle: VehicleId,

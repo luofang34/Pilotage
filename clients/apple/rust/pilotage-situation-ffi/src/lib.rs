@@ -6,6 +6,9 @@
 // UniFFI derive output uses a dynamic error.
 #[allow(clippy::disallowed_types)]
 mod error;
+// UniFFI derive output uses a dynamic error.
+#[allow(clippy::disallowed_types)]
+mod link;
 mod reception;
 // UniFFI derive output uses a dynamic error.
 #[allow(clippy::disallowed_types)]
@@ -13,6 +16,14 @@ mod records;
 mod session;
 
 pub use error::FfiError;
+pub use link::{
+    LinkCatalog, LinkConfig, LinkEvent, LinkIntentCapability, LinkObserver, LinkScope, LinkSession,
+    LinkVehicle,
+};
+// Links the instrument bridge's scaffolding into this library, so one
+// static library carries both namespaces and one bindgen run over it
+// generates both Swift surfaces (ADR-0032's single-app composition).
+pub use pilotage_instrument_apple_bridge as instrument_bridge;
 pub use reception::RadioDomainSession;
 pub use records::{
     DisplayBatch, DisplayColor, DisplayCoordinate, DisplayCoordinateRing, DisplayLayerControl,
