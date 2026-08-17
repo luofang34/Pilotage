@@ -50,7 +50,24 @@ impl Link {
             input_lost: false,
         };
         let plan = self.control.evaluate(&sample, &session);
+        self.announce_device();
         self.execute_plan(&plan)
+    }
+
+    /// Announces the resolved device once its transactional swap lands:
+    /// the label and the arm/disarm hints then describe the map that is
+    /// actually reading the sticks, not the source it replaced.
+    fn announce_device(&mut self) {
+        let label = self.control.device_label();
+        if label.is_empty() || label == self.announced_device {
+            return;
+        }
+        self.announced_device = label.to_owned();
+        self.delivery.event(LinkEvent::PadSelected {
+            label: self.announced_device.clone(),
+            arm_hint: self.control.arm_hint(),
+            disarm_hint: self.control.disarm_hint(),
+        });
     }
 
     fn execute_plan(&mut self, plan: &ControlPlan) -> Vec<ClientAction> {

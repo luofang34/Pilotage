@@ -126,6 +126,7 @@ fn admitted_link_with_two_lanes() -> Link {
         stopped: false,
         stats: LinkStats::default(),
         capture_active: false,
+        announced_device: String::new(),
         gated_ticks: 0,
     }
 }

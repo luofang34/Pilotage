@@ -40,6 +40,9 @@ pub(super) struct Link {
     pub(super) stats: LinkStats,
     /// Whether the gimbal quasimode captured the stick last tick.
     pub(super) capture_active: bool,
+    /// The device label last announced to the shell; the resolved map
+    /// lands transactionally, so the announcement follows the swap.
+    pub(super) announced_device: String,
     /// Consecutive pad ticks gated under a held motion lease.
     pub(super) gated_ticks: u32,
 }
@@ -150,6 +153,7 @@ pub(crate) async fn run(
         stopped: false,
         stats: LinkStats::default(),
         capture_active: false,
+        announced_device: String::new(),
         gated_ticks: 0,
     };
     loop {
@@ -333,12 +337,15 @@ async fn handle_command(
             pressed,
         }) => link.pad_actions(&axes, &values, &pressed),
         Some(LinkCommand::SelectPad { id }) => {
-            link.control.select_device(&id);
-            link.delivery.event(LinkEvent::PadSelected {
-                label: link.control.device_label().to_owned(),
-                arm_hint: link.control.arm_hint(),
-                disarm_hint: link.control.disarm_hint(),
-            });
+            // The resolved map installs at a transaction boundary; the
+            // shell hears about it from the tick that lands it. Only a
+            // refusal is worth a word right now — a refused pad feeds
+            // empty samples, which is a silent dead stick otherwise.
+            if link.control.select_device(&id) == pilotage_control_web::SelectOutcome::Refused {
+                link.delivery.event(LinkEvent::Notice {
+                    text: format!("pad refused (ambiguous device registry): {id}"),
+                });
+            }
             Vec::new()
         }
         Some(LinkCommand::Takeover { vehicle_id, scope }) => {
