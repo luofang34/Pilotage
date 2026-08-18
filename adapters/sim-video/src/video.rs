@@ -31,26 +31,32 @@ use crate::wire::BridgeFrame;
 pub struct FrameStamper {
     incarnation: SourceIncarnation,
     epoch: u32,
+    clock: MeasurementClock,
     mapping: CaptureClockMapping,
     calibrations: BTreeMap<u32, CalibrationId>,
     next_sequence: BTreeMap<u8, u32>,
 }
 
 impl FrameStamper {
-    /// Builds a stamper for one attachment identified by `incarnation`, whose
-    /// frames map to the flight-state clock via `mapping`. `calibrations` binds
-    /// a camera id to its published calibration id; a camera absent from the
-    /// map stamps [`CalibrationId::NONE`], so a conformal consumer keeps its
-    /// gate closed for it.
+    /// Builds a stamper for one attachment identified by `incarnation`.
+    /// `clock` declares the domain of the producer's `sim_time_ns` capture
+    /// stamps — a physics engine reports simulation time, a window-capture
+    /// producer reports the host monotonic clock — and `mapping` maps that
+    /// domain to the flight-state clock. `calibrations` binds a camera id
+    /// to its published calibration id; a camera absent from the map stamps
+    /// [`CalibrationId::NONE`], so a conformal consumer keeps its gate
+    /// closed for it.
     #[must_use]
     pub fn new(
         incarnation: SourceIncarnation,
+        clock: MeasurementClock,
         mapping: CaptureClockMapping,
         calibrations: BTreeMap<u32, CalibrationId>,
     ) -> Self {
         Self {
             incarnation,
             epoch: 0,
+            clock,
             mapping,
             calibrations,
             next_sequence: BTreeMap::new(),
@@ -81,14 +87,14 @@ impl FrameStamper {
         let sequence = self.take_sequence(source_id);
         let stamp = MeasurementStamp {
             role: SourceRole::VideoCapture,
-            // Sim camera frames arrive over unauthenticated gz transport.
+            // Sim camera frames arrive over an unauthenticated local link.
             integrity: SourceIntegrity::Unprotected,
             source_id: u64::from(source_id),
             source_incarnation: self.incarnation,
             source_epoch: self.epoch,
             sequence,
             acquired_at_ns: frame.sim_time_ns,
-            clock: MeasurementClock::Simulation,
+            clock: self.clock,
         };
         RawVideoFrame {
             source_id,
@@ -156,6 +162,7 @@ mod tests {
     fn stamper() -> FrameStamper {
         FrameStamper::new(
             SourceIncarnation::new([9; 16]),
+            MeasurementClock::Simulation,
             CaptureClockMapping::identity(MeasurementClock::Simulation),
             calibrations(),
         )
@@ -228,6 +235,7 @@ mod tests {
     fn unavailable_mapping_is_carried_verbatim() {
         let mut stamper = FrameStamper::new(
             SourceIncarnation::new([1; 16]),
+            MeasurementClock::HostMonotonic,
             CaptureClockMapping::Unavailable,
             BTreeMap::new(),
         );

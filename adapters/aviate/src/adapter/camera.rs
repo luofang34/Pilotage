@@ -46,6 +46,7 @@ pub(crate) async fn spawn_camera_bridge() -> (
             // publishes no camera calibration.
             let mut stamper = FrameStamper::new(
                 incarnation,
+                pilotage_adapter_api::MeasurementClock::Simulation,
                 pilotage_adapter_api::CaptureClockMapping::Unavailable,
                 std::collections::BTreeMap::new(),
             );

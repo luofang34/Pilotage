@@ -74,6 +74,7 @@ impl GazeboAdapter {
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(depth);
         let stamper = FrameStamper::new(
             new_incarnation()?,
+            MeasurementClock::Simulation,
             sim_capture_mapping(),
             sim_calibrations(),
         );
@@ -97,6 +98,7 @@ impl GazeboAdapter {
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(4);
         let stamper = FrameStamper::new(
             SourceIncarnation::new([0; 16]),
+            MeasurementClock::Simulation,
             sim_capture_mapping(),
             sim_calibrations(),
         );
