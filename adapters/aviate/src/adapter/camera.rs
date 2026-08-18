@@ -9,7 +9,7 @@
 //! the image. The capture identity itself (source, epoch, sequence, sim
 //! capture time) is still preserved honestly.
 
-use pilotage_adapter_gazebo::FrameStamper;
+use pilotage_sim_video::FrameStamper;
 
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 
@@ -18,8 +18,8 @@ use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 /// (`PILOTAGE_AVIATE_CAMERA=off` disables the attempt).
 #[allow(clippy::type_complexity)]
 pub(crate) async fn spawn_camera_bridge() -> (
-    Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
-    Option<pilotage_adapter_gazebo::BridgeClient>,
+    Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
+    Option<pilotage_sim_video::BridgeClient>,
     Option<tokio::task::JoinHandle<()>>,
 ) {
     if std::env::var("PILOTAGE_AVIATE_CAMERA").as_deref() == Ok("off") {
@@ -37,8 +37,8 @@ pub(crate) async fn spawn_camera_bridge() -> (
         .and_then(std::path::Path::parent)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
     let bin = workspace_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge");
-    let config = pilotage_adapter_gazebo::BridgeConfig::new("x500", bin);
-    match pilotage_adapter_gazebo::BridgeClient::spawn_and_connect(config).await {
+    let config = pilotage_sim_video::BridgeConfig::new("x500", bin);
+    match pilotage_sim_video::BridgeClient::spawn_and_connect(config).await {
         Ok(mut bridge) => {
             let (tx, rx) = tokio::sync::mpsc::channel(4);
             // Aviate has no correlation between the sim capture clock and the

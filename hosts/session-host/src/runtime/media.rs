@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
-use pilotage_adapter_gazebo::RawVideoFrame;
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
+use pilotage_sim_video::RawVideoFrame;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;

@@ -10,7 +10,7 @@
 use prost::Message;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::error::GazeboAdapterError;
+use crate::error::SimVideoError;
 use crate::wire::BridgeEnvelope;
 
 /// Upper bound on an inbound envelope body, matching the sidecar's own cap. A
@@ -26,11 +26,11 @@ const MAX_ENVELOPE_BYTES: u64 = 16 * 1024 * 1024;
 ///
 /// # Errors
 ///
-/// Returns [`GazeboAdapterError::BridgeRead`] on an I/O error or a truncated
-/// frame, and [`GazeboAdapterError::BridgeDecode`] if the body is not a valid
-/// envelope. A length prefix over [`MAX_ENVELOPE_BYTES`] is reported as a read
-/// error rather than triggering a huge allocation.
-pub async fn read_envelope<R>(reader: &mut R) -> Result<Option<BridgeEnvelope>, GazeboAdapterError>
+/// Returns [`SimVideoError::BridgeRead`] on an I/O error or a truncated
+/// frame, and [`SimVideoError::BridgeDecode`] if the body is not a valid
+/// envelope. A length prefix over the 16 MiB envelope cap is reported as a
+/// read error rather than triggering a huge allocation.
+pub async fn read_envelope<R>(reader: &mut R) -> Result<Option<BridgeEnvelope>, SimVideoError>
 where
     R: AsyncRead + Unpin,
 {
@@ -38,7 +38,7 @@ where
         return Ok(None);
     };
     if body_len > MAX_ENVELOPE_BYTES {
-        return Err(GazeboAdapterError::BridgeRead {
+        return Err(SimVideoError::BridgeRead {
             source: std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "bridge envelope length prefix exceeds maximum",
@@ -50,18 +50,18 @@ where
     reader
         .read_exact(&mut body)
         .await
-        .map_err(|source| GazeboAdapterError::BridgeRead { source })?;
+        .map_err(|source| SimVideoError::BridgeRead { source })?;
 
     BridgeEnvelope::decode(body.as_slice())
         .map(Some)
-        .map_err(|source| GazeboAdapterError::BridgeDecode { source })
+        .map_err(|source| SimVideoError::BridgeDecode { source })
 }
 
 /// Reads a base-128 varint from `reader`.
 ///
 /// Returns `Ok(None)` if EOF is seen before the first byte; a partial varint
 /// (EOF mid-value) is a truncation error.
-async fn read_varint<R>(reader: &mut R) -> Result<Option<u64>, GazeboAdapterError>
+async fn read_varint<R>(reader: &mut R) -> Result<Option<u64>, SimVideoError>
 where
     R: AsyncRead + Unpin,
 {
@@ -75,7 +75,7 @@ where
                 if first {
                     return Ok(None);
                 }
-                return Err(GazeboAdapterError::BridgeRead {
+                return Err(SimVideoError::BridgeRead {
                     source: std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
                         "eof in the middle of a bridge length prefix",
@@ -83,7 +83,7 @@ where
                 });
             }
             Ok(_) => {}
-            Err(source) => return Err(GazeboAdapterError::BridgeRead { source }),
+            Err(source) => return Err(SimVideoError::BridgeRead { source }),
         }
         first = false;
         value |= u64::from(byte[0] & 0x7F) << shift;
@@ -92,7 +92,7 @@ where
         }
         shift = shift.wrapping_add(7);
         if shift >= 64 {
-            return Err(GazeboAdapterError::BridgeRead {
+            return Err(SimVideoError::BridgeRead {
                 source: std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "malformed bridge length prefix varint",

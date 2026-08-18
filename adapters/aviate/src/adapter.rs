@@ -104,8 +104,8 @@ pub struct AviateAdapter {
     uplink: Option<FlightUplink>,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
-    frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
-    _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
+    frames: Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
+    _camera_bridge: Option<pilotage_sim_video::BridgeClient>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
     // Latest FC arm report from uplink heartbeats, with its receive
     // metadata; `None` until the FC has reported at least once.
@@ -135,7 +135,7 @@ impl AviateAdapter {
     /// are up and it has not been taken.
     pub fn subscribe_frames(
         &mut self,
-    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>> {
+    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>> {
         self.frames.take()
     }
 
@@ -405,11 +405,11 @@ impl VehicleAdapter for AviateAdapter {
         }
         vec![
             VideoSource {
-                id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
+                id: pilotage_sim_video::FPV_SOURCE_ID.to_owned(),
                 description: "onboard forward camera".to_owned(),
             },
             VideoSource {
-                id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
+                id: pilotage_sim_video::CHASE_SOURCE_ID.to_owned(),
                 description: "chase camera".to_owned(),
             },
         ]

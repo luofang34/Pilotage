@@ -8,15 +8,15 @@ use super::{
     GazeboAdapter, MAX_ANGULAR_RPS, MAX_LINEAR_MPS, MOTION_SCOPE, clamp_axis, control_from_intent,
     telemetry_from_odometry,
 };
-use crate::bridge_client::BridgeClient;
 use crate::error::GazeboAdapterError;
-use crate::framing::read_envelope;
-use crate::wire::{BridgeEnvelope, BridgeFrame, BridgeOdometry, bridge_envelope};
 use pilotage_adapter_api::{Disposition, RejectReason, VehicleAdapter};
 use pilotage_protocol::{
     ControlIntent, ControlPayload, Generation, ReferenceFrame, ScopeId, ScopedControlFrame,
     SequenceNum, SessionId, VehicleId, VelocityIntent,
 };
+use pilotage_sim_video::BridgeClient;
+use pilotage_sim_video::read_envelope;
+use pilotage_sim_video::wire::{BridgeEnvelope, BridgeFrame, BridgeOdometry, bridge_envelope};
 use pilotage_timing::MonoTimestamp;
 use prost::Message;
 use tokio::io::AsyncWriteExt;
@@ -333,7 +333,12 @@ async fn reader_death_surfaces_liveness_and_withholds_stale_telemetry() {
         health = adapter.reader_health();
     }
     assert!(
-        matches!(health, Err(GazeboAdapterError::ReaderTaskEnded { .. })),
+        matches!(
+            health,
+            Err(GazeboAdapterError::Video(
+                pilotage_sim_video::SimVideoError::ReaderTaskEnded { .. }
+            ))
+        ),
         "reader death must surface as ReaderTaskEnded, got {health:?}"
     );
     // The stale sample must no longer be presented as live telemetry.

@@ -18,7 +18,7 @@ use pilotage_adapter_api::{
 };
 use pilotage_timing::SimTick;
 
-use crate::adapter::RawVideoFrame;
+use crate::frame::RawVideoFrame;
 use crate::wire::BridgeFrame;
 
 /// Assigns capture identity to every frame of one adapter attachment.

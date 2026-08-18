@@ -1692,9 +1692,9 @@ dependencies = [
  "aviate-xil-shm",
  "getrandom 0.3.4",
  "pilotage-adapter-api",
- "pilotage-adapter-gazebo",
  "pilotage-mavlink",
  "pilotage-protocol",
+ "pilotage-sim-video",
  "pilotage-timing",
  "thiserror",
  "tokio",
@@ -1708,9 +1708,9 @@ dependencies = [
  "getrandom 0.3.4",
  "pilotage-adapter-api",
  "pilotage-protocol",
+ "pilotage-sim-video",
  "pilotage-timing",
  "prost",
- "prost-build",
  "thiserror",
  "tokio",
  "tracing",
@@ -1721,9 +1721,9 @@ name = "pilotage-adapter-px4"
 version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
- "pilotage-adapter-gazebo",
  "pilotage-mavlink",
  "pilotage-protocol",
+ "pilotage-sim-video",
  "pilotage-timing",
  "thiserror",
  "tokio",
@@ -2006,6 +2006,7 @@ dependencies = [
  "pilotage-mission",
  "pilotage-protocol",
  "pilotage-session",
+ "pilotage-sim-video",
  "pilotage-timing",
  "prost",
  "serde_json",
@@ -2014,6 +2015,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wtransport",
+]
+
+[[package]]
+name = "pilotage-sim-video"
+version = "0.1.0"
+dependencies = [
+ "pilotage-adapter-api",
+ "pilotage-timing",
+ "prost",
+ "prost-build",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

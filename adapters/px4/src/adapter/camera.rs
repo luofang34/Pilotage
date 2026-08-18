@@ -9,7 +9,7 @@
 //! rather than draw against a state it cannot align to the image.
 
 use pilotage_adapter_api::SourceIncarnation;
-use pilotage_adapter_gazebo::FrameStamper;
+use pilotage_sim_video::FrameStamper;
 
 /// Builds the sidecar bridge configuration. FPV (source 0) and chase
 /// (source 1) stay the world rig's fixed `/camera` and `/chase_camera` (the
@@ -24,8 +24,8 @@ use pilotage_adapter_gazebo::FrameStamper;
 pub(crate) fn bridge_config(
     gimbal: bool,
     bin: std::path::PathBuf,
-) -> pilotage_adapter_gazebo::BridgeConfig {
-    let config = pilotage_adapter_gazebo::BridgeConfig::new("x500", bin);
+) -> pilotage_sim_video::BridgeConfig {
+    let config = pilotage_sim_video::BridgeConfig::new("x500", bin);
     if gimbal {
         config.with_gimbal_camera_topic(
             "/world/default/model/x500_0/link/camera_link/sensor/camera/image",
@@ -43,8 +43,8 @@ pub(crate) fn bridge_config(
 pub(crate) async fn spawn_camera_bridge(
     gimbal: bool,
 ) -> (
-    Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
-    Option<pilotage_adapter_gazebo::BridgeClient>,
+    Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
+    Option<pilotage_sim_video::BridgeClient>,
     Option<tokio::task::JoinHandle<()>>,
 ) {
     if std::env::var("PILOTAGE_PX4_CAMERA").as_deref() == Ok("off") {
@@ -57,7 +57,7 @@ pub(crate) async fn spawn_camera_bridge(
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
     let bin = workspace_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge");
     let config = bridge_config(gimbal, bin);
-    match pilotage_adapter_gazebo::BridgeClient::spawn_and_connect(config).await {
+    match pilotage_sim_video::BridgeClient::spawn_and_connect(config).await {
         Ok(mut bridge) => {
             let (tx, rx) = tokio::sync::mpsc::channel(4);
             // No correlation between the sim capture clock and PX4's

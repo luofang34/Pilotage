@@ -7,7 +7,7 @@ use pilotage_adapter_api::{
     CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
     SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
 };
-use pilotage_adapter_gazebo::RawVideoFrame;
+use pilotage_sim_video::RawVideoFrame;
 use pilotage_timing::SimTick;
 
 fn capture_stamp() -> VideoCaptureStamp {

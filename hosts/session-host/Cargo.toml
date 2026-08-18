@@ -18,6 +18,7 @@ pilotage-authority = { workspace = true }
 pilotage-adapter-api = { workspace = true }
 pilotage-adapter-reference = { workspace = true }
 pilotage-adapter-gazebo = { workspace = true }
+pilotage-sim-video = { workspace = true }
 pilotage-adapter-aviate = { workspace = true }
 pilotage-adapter-px4 = { workspace = true }
 pilotage-mission = { workspace = true }

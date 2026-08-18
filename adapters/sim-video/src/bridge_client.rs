@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
-use crate::error::GazeboAdapterError;
+use crate::error::SimVideoError;
 use crate::framing::read_envelope;
 use crate::wire::{BridgeControl, BridgeEnvelope, BridgeFrame, BridgeOdometry, bridge_envelope};
 
@@ -137,15 +137,15 @@ impl BridgeClient {
     ///
     /// # Errors
     ///
-    /// Returns a [`GazeboAdapterError`] if the listener cannot bind, the child
+    /// Returns a [`SimVideoError`] if the listener cannot bind, the child
     /// cannot be spawned, or the inbound connection cannot be accepted.
-    pub async fn spawn_and_connect(config: BridgeConfig) -> Result<Self, GazeboAdapterError> {
+    pub async fn spawn_and_connect(config: BridgeConfig) -> Result<Self, SimVideoError> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
-            .map_err(|source| GazeboAdapterError::ListenerBind { source })?;
+            .map_err(|source| SimVideoError::ListenerBind { source })?;
         let local_addr = listener
             .local_addr()
-            .map_err(|source| GazeboAdapterError::ListenerAddr { source })?;
+            .map_err(|source| SimVideoError::ListenerAddr { source })?;
 
         let child = Self::spawn_child(&config, local_addr.port())?;
         let stream = Self::accept(&listener, local_addr).await?;
@@ -213,12 +213,12 @@ impl BridgeClient {
         command
     }
 
-    fn spawn_child(config: &BridgeConfig, port: u16) -> Result<Child, GazeboAdapterError> {
+    fn spawn_child(config: &BridgeConfig, port: u16) -> Result<Child, SimVideoError> {
         Self::bridge_command(config, port)
             .stdin(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|source| GazeboAdapterError::BridgeSpawn {
+            .map_err(|source| SimVideoError::BridgeSpawn {
                 path: config.bridge_bin.display().to_string(),
                 source,
             })
@@ -227,12 +227,12 @@ impl BridgeClient {
     async fn accept(
         listener: &TcpListener,
         local_addr: SocketAddr,
-    ) -> Result<tokio::net::TcpStream, GazeboAdapterError> {
+    ) -> Result<tokio::net::TcpStream, SimVideoError> {
         let (stream, _peer) =
             listener
                 .accept()
                 .await
-                .map_err(|source| GazeboAdapterError::BridgeAccept {
+                .map_err(|source| SimVideoError::BridgeAccept {
                     addr: local_addr.to_string(),
                     source,
                 })?;
@@ -255,13 +255,13 @@ impl BridgeClient {
     ///
     /// # Errors
     ///
-    /// Returns [`GazeboAdapterError::ReaderTaskEnded`] once the reader loop has
+    /// Returns [`SimVideoError::ReaderTaskEnded`] once the reader loop has
     /// exited (bridge EOF, a read/decode error, or the sidecar child dying),
     /// carrying the reason it ended.
-    pub fn reader_health(&self) -> Result<(), GazeboAdapterError> {
+    pub fn reader_health(&self) -> Result<(), SimVideoError> {
         match &*self.reader_health_rx.borrow() {
             ReaderHealth::Alive => Ok(()),
-            ReaderHealth::Ended(reason) => Err(GazeboAdapterError::ReaderTaskEnded {
+            ReaderHealth::Ended(reason) => Err(SimVideoError::ReaderTaskEnded {
                 reason: reason.clone(),
             }),
         }
@@ -369,11 +369,14 @@ fn handle_envelope(
     }
 }
 
-#[cfg(test)]
 impl BridgeClient {
     /// Wires a client around a caller-supplied stream with no child process,
-    /// for in-process fake-bridge tests.
-    pub(crate) fn connect_stream_for_test(stream: tokio::net::TcpStream) -> Self {
+    /// for in-process fake-bridge tests. Not a production entry point:
+    /// adapters connect through [`BridgeClient::spawn_and_connect`], which
+    /// owns the sidecar child's lifecycle.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn connect_stream_for_test(stream: tokio::net::TcpStream) -> Self {
         Self::from_stream(stream, None, DEFAULT_FRAME_CHANNEL_DEPTH)
     }
 }
