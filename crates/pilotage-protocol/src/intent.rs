@@ -50,6 +50,13 @@ pub enum ControlAction {
     },
     /// Recenter the gimbal to its stowed/neutral orientation.
     GimbalRecenter,
+    /// Step the camera one detent toward a narrower field of view. Zoom is
+    /// DETENTED, not continuous: each detent is a distinct camera model with
+    /// its own published calibration, so a consumer that reprojects the
+    /// picture always holds intrinsics for the frame it received.
+    CameraZoomIn,
+    /// Step the camera one detent toward a wider field of view.
+    CameraZoomOut,
     /// Reset the simulation (SIM-01 lifecycle, not a flight intent):
     /// advertised only by simulation adapters, never by a physical-vehicle
     /// gateway.
@@ -68,6 +75,10 @@ pub enum ActionKind {
     ModeRequest,
     /// Recenter the gimbal.
     GimbalRecenter,
+    /// Step the camera one detent toward a narrower field of view.
+    CameraZoomIn,
+    /// Step the camera one detent toward a wider field of view.
+    CameraZoomOut,
     /// Reset the simulation.
     SimReset,
 }
@@ -81,6 +92,8 @@ impl ControlAction {
             Self::Disarm => ActionKind::Disarm,
             Self::ModeRequest { .. } => ActionKind::ModeRequest,
             Self::GimbalRecenter => ActionKind::GimbalRecenter,
+            Self::CameraZoomIn => ActionKind::CameraZoomIn,
+            Self::CameraZoomOut => ActionKind::CameraZoomOut,
             Self::SimReset => ActionKind::SimReset,
         }
     }

@@ -65,6 +65,13 @@ enum ControlAction {
   // Reset the simulation (SIM-01 lifecycle, not a flight intent): advertised
   // only by simulation adapters, never by a physical-vehicle gateway.
   CONTROL_ACTION_SIM_RESET = 5;
+  // Step the camera one detent toward a narrower field of view. Zoom is
+  // DETENTED, not continuous: each detent is a distinct camera model with its
+  // own published calibration, so a consumer that reprojects the picture
+  // always holds intrinsics for the frame it received (ADR-0021).
+  CONTROL_ACTION_CAMERA_ZOOM_IN = 6;
+  // Step the camera one detent toward a wider field of view.
+  CONTROL_ACTION_CAMERA_ZOOM_OUT = 7;
 }
 
 // The explicit target of a MODE_REQUEST action (CTRL-01). Targets are typed

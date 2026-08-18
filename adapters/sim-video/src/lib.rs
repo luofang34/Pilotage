@@ -15,6 +15,7 @@ mod bridge_client;
 mod convert;
 mod error;
 mod framing;
+mod pump;
 pub mod wire;
 
 pub use bridge_client::{BRIDGE_BIN_ENV, BridgeClient, BridgeConfig, LatestBridgeState};

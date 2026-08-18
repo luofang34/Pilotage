@@ -385,6 +385,8 @@ export const CONTROL_ACTION = {
   disarm: 2,
   modeRequest: 3,
   gimbalRecenter: 4,
+  cameraZoomIn: 6,
+  cameraZoomOut: 7,
   simReset: 5,
 };
 export const MODE_TARGET = {

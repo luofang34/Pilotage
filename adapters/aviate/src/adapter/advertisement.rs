@@ -9,10 +9,14 @@ use pilotage_adapter_api::{
 };
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
+#[cfg(feature = "sim")]
+use super::pointing::MAX_PITCH_RATE_RPS;
 use super::{
     ARM_BUTTON, AviateAdapter, DIRECT_SCOPE, DISARM_BUTTON, FLIGHT_SCOPE, PITCH_AXIS, ROLL_AXIS,
     THROTTLE_AXIS, YAW_AXIS,
 };
+#[cfg(feature = "sim")]
+use super::{GIMBAL_NEUTRAL_BUTTON, GIMBAL_SCOPE};
 
 impl AviateAdapter {
     /// The capability report `VehicleAdapter::capabilities` returns.
@@ -20,25 +24,37 @@ impl AviateAdapter {
         AdapterCapabilities {
             execution: ExecutionMode {
                 real_time: true,
-                render_capable: self._camera_bridge.is_some(),
+                render_capable: self.camera_bridge.is_some(),
                 ..ExecutionMode::default()
             },
             // Without a working velocity-control uplink, the adapter stays
             // telemetry-only as required by ADR-0018.
             vehicles: vec![VehicleDescriptor {
                 id: self.vehicle,
-                scopes: if self.uplink.is_some() {
-                    let mut scopes = vec![flight_scope_descriptor(), direct_scope_descriptor()];
-                    // STRUCTURALLY simulation-only (SIM-01): the lifecycle
-                    // scope exists only under the Simulation profile — a
-                    // physical/RF vehicle neither advertises nor accepts
-                    // it, uplink or no uplink.
-                    if self.profile == super::AviateProfile::Simulation {
-                        scopes.push(pilotage_adapter_api::sim_lifecycle_descriptor());
+                scopes: {
+                    #[cfg_attr(not(feature = "sim"), allow(unused_mut))]
+                    let mut scopes = if self.uplink.is_some() {
+                        let mut flight = vec![flight_scope_descriptor(), direct_scope_descriptor()];
+                        // STRUCTURALLY simulation-only (SIM-01): the lifecycle
+                        // scope exists only under the Simulation profile — a
+                        // physical/RF vehicle neither advertises nor accepts
+                        // it, uplink or no uplink.
+                        if self.profile == super::AviateProfile::Simulation {
+                            flight.push(pilotage_adapter_api::sim_lifecycle_descriptor());
+                        }
+                        flight
+                    } else {
+                        vec![]
+                    };
+                    // Pointing is independent of flight: a telemetry-only
+                    // session still aims its payload view. The scope exists
+                    // exactly while a producer accepts commands — never as
+                    // an affordance with nothing behind it.
+                    #[cfg(feature = "sim")]
+                    if self.pointing.is_some() {
+                        scopes.push(gimbal_scope_descriptor());
                     }
                     scopes
-                } else {
-                    vec![]
                 },
                 link_loss_actions: if self.uplink.is_some() {
                     vec![LinkLossPolicy::Neutralize]
@@ -137,6 +153,56 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             }),
             arm_button: Some(ARM_BUTTON),
             disarm_button: Some(DISARM_BUTTON),
+        }),
+    }
+}
+
+/// The gimbal pointing scope. `max_angular` is the rate this adapter
+/// actually integrates, so a client scales its normalized stick against
+/// the enacted envelope rather than a borrowed constant.
+#[cfg(feature = "sim")]
+fn gimbal_scope_descriptor() -> ScopeDescriptor {
+    ScopeDescriptor {
+        // Its own authority group: pointing is leased and fenced apart
+        // from flight, so losing one never disturbs the other.
+        authority_group: None,
+        scope: ScopeId::new(GIMBAL_SCOPE),
+        axes: vec![LogicalAxisId::new(PITCH_AXIS), LogicalAxisId::new(YAW_AXIS)],
+        intents: vec![IntentCapability {
+            family: IntentFamily::GimbalRate,
+            frames: vec![],
+            max_linear: 0.0,
+            max_vertical: 0.0,
+            max_yaw_rate: 0.0,
+            max_angular: MAX_PITCH_RATE_RPS,
+        }],
+        actions: vec![
+            ActionCapability {
+                action: ActionKind::GimbalRecenter,
+                mode_targets: vec![],
+            },
+            // Zoom is DETENTED: each step selects a distinct camera model
+            // whose calibration the frames carry (ADR-0021). A continuous
+            // zoom would publish pictures with no resolvable intrinsics.
+            ActionCapability {
+                action: ActionKind::CameraZoomIn,
+                mode_targets: vec![],
+            },
+            ActionCapability {
+                action: ActionKind::CameraZoomOut,
+                mode_targets: vec![],
+            },
+        ],
+        legacy: Some(LegacyCommandMap::GimbalRate {
+            pitch: Some(LegacyAxisRoute {
+                axis: PITCH_AXIS,
+                sign: 1.0,
+            }),
+            yaw: Some(LegacyAxisRoute {
+                axis: YAW_AXIS,
+                sign: 1.0,
+            }),
+            recenter_button: Some(GIMBAL_NEUTRAL_BUTTON),
         }),
     }
 }

@@ -134,6 +134,8 @@ fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
         Domain::Disarm => wire::ControlAction::Disarm,
         Domain::ModeRequest => wire::ControlAction::ModeRequest,
         Domain::GimbalRecenter => wire::ControlAction::GimbalRecenter,
+        Domain::CameraZoomIn => wire::ControlAction::CameraZoomIn,
+        Domain::CameraZoomOut => wire::ControlAction::CameraZoomOut,
         Domain::SimReset => wire::ControlAction::SimReset,
     }
 }

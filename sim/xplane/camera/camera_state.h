@@ -27,17 +27,19 @@ enum class CameraMode : std::uint32_t {
 struct ZoomDetent {
     /// Horizontal field of view, degrees.
     float field_of_view_deg;
-    /// Published calibration id for this detent.
-    std::uint64_t calibration_id;
+    /// Published calibration id for this detent. Mirrors the host
+    /// adapter's detent table; the two MUST agree, or a frame would
+    /// carry a camera model it was not captured with.
+    std::uint32_t calibration_id;
 };
 
 /// The detent table. Entry 0 is the wide FPV framing a head-mounted
 /// display needs for head-look reprojection room.
 constexpr ZoomDetent kZoomDetents[] = {
-    {100.0F, 0x5850'4657'0001ULL},
-    {60.0F, 0x5850'4657'0002ULL},
-    {30.0F, 0x5850'4657'0003ULL},
-    {12.0F, 0x5850'4657'0004ULL},
+    {100.0F, 0x5850'0001U},
+    {60.0F, 0x5850'0002U},
+    {30.0F, 0x5850'0003U},
+    {12.0F, 0x5850'0004U},
 };
 constexpr int kZoomDetentCount =
     static_cast<int>(sizeof(kZoomDetents) / sizeof(kZoomDetents[0]));

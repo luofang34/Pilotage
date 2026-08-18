@@ -9,6 +9,16 @@ pub(super) type CameraBridge = pilotage_sim_video::BridgeClient;
 #[cfg(not(feature = "sim"))]
 pub(super) type CameraBridge = std::convert::Infallible;
 
+/// The commanded pointing of a producer-rendered payload view. A flight
+/// vehicle's gimbal is a real device on its own link, not a rendered
+/// view, so this attachment is simulation-only and the type is
+/// uninhabited in a flight build.
+#[cfg(feature = "sim")]
+pub(super) type Pointing = super::pointing::PointingState;
+/// A flight build renders no view to aim.
+#[cfg(not(feature = "sim"))]
+pub(super) type Pointing = std::convert::Infallible;
+
 /// The simulation-truth oracle handle in a simulation build.
 #[cfg(feature = "sim")]
 pub(super) type TruthOracle = super::shm_sampling::ShmSource;

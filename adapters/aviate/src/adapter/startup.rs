@@ -78,7 +78,16 @@ impl AviateAdapter {
             truth,
             uplink,
             frames,
-            _camera_bridge: camera_bridge,
+            // A flight vehicle's gimbal is a real device on its own link,
+            // not a rendered view, so the pointing attachment exists only
+            // in a simulation build.
+            #[cfg(feature = "sim")]
+            pointing: camera_bridge
+                .is_some()
+                .then(super::pointing::PointingState::default),
+            #[cfg(not(feature = "sim"))]
+            pointing: None,
+            camera_bridge,
             _frame_forwarder: frame_forwarder,
             arm: None,
             arm_incarnation,
