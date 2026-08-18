@@ -46,7 +46,7 @@ collect_swift_files() {
 # recorded count and may only shrink.
 swift_length_ceiling() {
     case "$1" in
-        ./clients/apple/App/HostLinkModel.swift) echo 676 ;;
+        ./clients/apple/App/HostLinkModel.swift) echo 674 ;;
         *) echo 500 ;;
     esac
 }

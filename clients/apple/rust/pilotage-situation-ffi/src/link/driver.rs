@@ -12,9 +12,7 @@ use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, MotionDemand, ProfileIdentity, ReconnectPolicy,
     StreamId, TransportEvent,
 };
-use pilotage_control_web::{
-    ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES, GIMBAL_SCOPE, MOTION_SCOPE,
-};
+use pilotage_control_web::{ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES};
 use pilotage_instrument_feed::InstrumentFeed;
 use tokio::sync::mpsc;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
@@ -54,6 +52,10 @@ pub(super) struct Link {
     pub(super) gated_ticks: u32,
     /// When the shell last spoke a motion demand, on the link clock.
     pub(super) last_demand_ms: u64,
+    /// A motion-lease ask is in flight from a control press; further
+    /// presses wait for the host's answer instead of re-asking the
+    /// holder on every edge.
+    pub(super) motion_request_pending: bool,
 }
 
 /// One second of link accounting, reset on report.
@@ -168,6 +170,7 @@ pub(crate) async fn run(
         telegraph_shown: None,
         gated_ticks: 0,
         last_demand_ms: 0,
+        motion_request_pending: false,
     };
     loop {
         match connect(&config, pinned).await {
@@ -319,23 +322,7 @@ async fn handle_command(
         Some(LinkCommand::RequestLease { vehicle_id, scope }) => {
             link.engine.request_lease(vehicle_id, &scope)
         }
-        Some(LinkCommand::ReleaseLease) => {
-            // Releasing control gives back everything held: the motion
-            // lane and the gimbal lane the runtime leased alongside it.
-            match link
-                .engine
-                .admission()
-                .and_then(|admission| admission.vehicles.first())
-                .map(|vehicle| vehicle.vehicle_id)
-            {
-                Some(vehicle_id) => {
-                    let mut actions = link.engine.release_lease(vehicle_id, MOTION_SCOPE);
-                    actions.extend(link.engine.release_lease(vehicle_id, GIMBAL_SCOPE));
-                    actions
-                }
-                None => Vec::new(),
-            }
-        }
+        Some(LinkCommand::ReleaseLease) => link.release_held_actions(),
         Some(LinkCommand::Motion {
             roll,
             pitch,
@@ -354,6 +341,15 @@ async fn handle_command(
             values,
             pressed,
         }) => link.pad_actions(&axes, &values, &pressed),
+        Some(LinkCommand::KeyEvent { key, pressed }) => {
+            link.control.key_event(&key, pressed);
+            Vec::new()
+        }
+        Some(LinkCommand::ClearKeys) => {
+            link.control.clear_keys();
+            Vec::new()
+        }
+        Some(LinkCommand::KeySample) => link.key_actions(),
         Some(LinkCommand::SelectPad { id }) => {
             // The resolved map installs at a transaction boundary; the
             // shell hears about it from the tick that lands it. Only a

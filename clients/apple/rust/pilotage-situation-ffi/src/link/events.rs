@@ -4,7 +4,7 @@
 //! loop moves bytes; this file decides what the shell hears.
 
 use pilotage_client_session::ModuleEvent;
-use pilotage_control_web::AuthorityEvent;
+use pilotage_control_web::{AuthorityEvent, MOTION_SCOPE};
 use pilotage_instrument_feed::{FeedParams, InstrumentFeed};
 use pilotage_protocol::wire;
 
@@ -24,6 +24,11 @@ impl Link {
             .as_ref()
             .map(|s| s.value.clone())
             .unwrap_or_default();
+        if scope == MOTION_SCOPE {
+            // The answer arrived, whatever it says: the next press may
+            // ask again.
+            self.motion_request_pending = false;
+        }
         let generation = response.generation.as_ref().map_or(0, |g| g.value);
         self.mirror_authority(
             &scope,
@@ -117,6 +122,29 @@ impl Link {
         }
     }
 
+    /// The host's recovery ack into the runtime's authority mirror:
+    /// regranted live output stays gated behind this signal (the
+    /// browser resumes on the same one). It must be the admitted
+    /// vehicle's, and the mirror itself rejects a generation that is
+    /// not the granted one.
+    fn emit_link_loss_cleared(&mut self, cleared: &wire::LinkLossCleared) {
+        let vehicle_id = cleared.vehicle.as_ref().map_or(0, |v| v.value);
+        let ours = self
+            .engine
+            .admission()
+            .and_then(|admission| admission.vehicles.first())
+            .is_some_and(|vehicle| vehicle.vehicle_id == vehicle_id);
+        if ours {
+            let scope = cleared
+                .scope
+                .as_ref()
+                .map(|s| s.value.clone())
+                .unwrap_or_default();
+            let generation = cleared.generation.as_ref().map_or(0, |g| g.value);
+            self.mirror_authority(&scope, AuthorityEvent::LinkLossCleared { generation });
+        }
+    }
+
     pub(super) fn emit(&mut self, event: ModuleEvent) {
         match event {
             ModuleEvent::Admitted(admission) => {
@@ -154,6 +182,7 @@ impl Link {
             }
             ModuleEvent::ControlRejected(rejected) => self.emit_rejection(&rejected),
             ModuleEvent::ConnectionDown { retry_at_ms } => {
+                self.motion_request_pending = false;
                 self.delivery.event(LinkEvent::Down { retry_at_ms });
             }
             ModuleEvent::ActionResult(result) => self.emit_action_result(result),
@@ -177,6 +206,7 @@ impl Link {
                     });
                 }
             }
+            ModuleEvent::LinkLossCleared(cleared) => self.emit_link_loss_cleared(&cleared),
             ModuleEvent::VideoStreamCorrupt { claimed_bytes } => {
                 self.delivery.event(LinkEvent::Notice {
                     text: format!(

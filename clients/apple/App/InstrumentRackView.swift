@@ -295,13 +295,23 @@ struct InstrumentRackView: View {
                 if model.leaseHeld {
                     ArmTelegraphControl(model: model)
                     Spacer()
+                    // One word, never wrapped: the chip above already
+                    // says "Controlling", so this button only carries
+                    // the verb. The pad speaks it too — a disarm press
+                    // with the lever settled on SAFE stands down.
                     Button("Release", role: .destructive) { model.releaseLease() }
+                        .lineLimit(1)
+                        .fixedSize()
                 } else {
                     Spacer()
                     // One intent, one button: a denial with a standing
-                    // holder escalates to the ask on its own.
+                    // holder escalates to the ask on its own, and an
+                    // arm press on the pad or keyboard is this same
+                    // ask without reaching for the screen.
                     Button("Request control") { model.requestLease() }
                         .disabled(model.catalog == nil)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
             .font(.callout)

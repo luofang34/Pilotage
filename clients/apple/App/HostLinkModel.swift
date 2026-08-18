@@ -108,7 +108,15 @@ final class HostLinkModel: ObservableObject {
         }
         panels = choices
         watchControllers()
+        // The keyboard feeds the same runtime the pad does; the
+        // monitor only canonicalizes and guards, it binds nothing.
+        keyboardMonitor.start(
+            onKey: { [weak self] key, pressed in self?.link?.keyEvent(key: key, pressed: pressed) },
+            onClear: { [weak self] in self?.link?.clearKeys() }
+        )
     }
+
+    private let keyboardMonitor = KeyboardControlMonitor()
 
     /// Verifies and builds the paint pipeline on first use, so a map-only
     /// launch never pays for the glyph atlas or the gate. A refusal shows
@@ -303,6 +311,11 @@ final class HostLinkModel: ObservableObject {
             if controllerAttached {
                 selectPad(vendorName: lastPadVendor)
             }
+            // The tick loop runs for the whole admitted session, not
+            // just under a lease: the shared runtime gates what may
+            // not leave, and an arm press on the pad or keyboard is
+            // how an operator asks for control in the first place.
+            startControlLoop()
             if LaunchRequest.autoControl {
                 requestLease()
             }
@@ -320,7 +333,6 @@ final class HostLinkModel: ObservableObject {
                 // The engine already escalated the denial into the ask;
                 // the operator's one press keeps working on its own.
                 status = "asked the holder of \(scope) to hand over"
-                held ? startControlLoop() : stopControlLoop()
                 return
             }
             if held {
@@ -329,7 +341,6 @@ final class HostLinkModel: ObservableObject {
                 phase = .observing(host: catalog.hostVersion)
             }
             status = held ? "controlling \(scope)" : "observing (\(detail))"
-            held ? startControlLoop() : stopControlLoop()
             if held && LaunchRequest.autoArm {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     self?.arm()
@@ -343,9 +354,12 @@ final class HostLinkModel: ObservableObject {
         case .padSelected(let label, let armHint, let disarmHint):
             padHints = "\(label): arm \(armHint) · disarm \(disarmHint)"
         case .pressSuppressed(let action):
+            // An unleased arm press asks for control on its own, so a
+            // suppressed one means the ask is already in flight or the
+            // motion path is still recovering.
             status = action == 1
-                ? "arm press ignored — request control first"
-                : "disarm press ignored — request control first"
+                ? "arm press ignored — control is not live yet"
+                : "disarm press ignored — nothing is held"
         case .gimbalCapture(let active):
             gimbalCaptured = active
         case .notice(let text):
@@ -505,35 +519,12 @@ final class HostLinkModel: ObservableObject {
     /// The pressed-button set last printed by the harness.
     private var lastPressedPrint: [Int] = []
 
-    #if DEBUG
-    /// Prints the process physical footprint once per interval, so a
-    /// console-attached run shows a leak as a slope, not a surprise.
-    static func startFootprintProbe() {
-        guard LaunchRequest.openInstruments else { return }
-        Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
-            var info = task_vm_info_data_t()
-            var count = mach_msg_type_number_t(
-                MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
-            let result = withUnsafeMutablePointer(to: &info) {
-                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                    task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
-                }
-            }
-            if result == KERN_SUCCESS {
-                let mb = Double(info.phys_footprint) / 1_048_576
-                print("harness memory: footprint \(Int(mb)) MB")
-            }
-        }
-    }
-    #endif
-
     private func sendDemand() {
-        guard leaseHeld else { return }
-        // The host's silence watchdog revokes a holder that stops
-        // sending: one second of quiet cost the lease while the screen
-        // still said "controlling". Frames flow at rate for as long as
-        // the lease is held — a neutral demand when no stick is attached
-        // is the holder's liveness, exactly as the browser streams it.
+        guard catalog != nil else { return }
+        // The tick runs whether or not control is held: the shared
+        // runtime gates what an observer may not send, turns an arm
+        // press into the ask for control, and — under a held lease —
+        // streams the liveness the host's silence watchdog demands.
         let climb: Float = climbUntil > Date() ? 0.6 : 0
         #if DEBUG
         demandTicks += 1
@@ -541,11 +532,18 @@ final class HostLinkModel: ObservableObject {
             print("harness demand: tick \(demandTicks) held=\(leaseHeld) climb=\(climb)")
         }
         #endif
+        if climb > 0 {
+            link?.sendMotion(roll: 0, pitch: 0, throttle: climb, yaw: 0)
+            return
+        }
         guard let pad = GCController.controllers()
             .compactMap(\.extendedGamepad)
             .first
         else {
-            link?.sendMotion(roll: 0, pitch: 0, throttle: climb, yaw: 0)
+            // No pad: the held keys drive the same runtime — and with
+            // nothing held, this is the neutral tick that keeps a held
+            // lease alive.
+            link?.sendKeySample()
             return
         }
         // The raw sample in Standard Gamepad terms; every mapping,
