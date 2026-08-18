@@ -78,11 +78,18 @@ pub const OFFSET: Offsets = Offsets {
 pub const META_LEN: usize = OFFSET.codec;
 
 /// The v2 header's clock codes match the `pilotage.v1` [`MeasurementClock`]
-/// enum: 1 vehicle-boot, 2 simulation. 0 (unspecified) is reserved for an
-/// absent target clock; the encoder never emits it for a real capture clock.
+/// enum: 1 vehicle-boot, 2 simulation, 3 host-monotonic. 0 (unspecified) is
+/// reserved for an absent target clock; the encoder never emits it for a real
+/// capture clock.
 const CLOCK_VEHICLE_BOOT: u8 = MeasurementClock::VehicleBoot as u8;
 const CLOCK_SIMULATION: u8 = MeasurementClock::Simulation as u8;
 const CLOCK_ABSENT: u8 = MeasurementClock::Unspecified as u8;
+/// The clock a producer stamps when it renders a view rather than
+/// measuring the vehicle: it can attest to when the host received the
+/// picture and to nothing else. Admissible as a CAPTURE clock — a frame
+/// is still a frame — while the association path refuses it separately,
+/// which is where picture-to-state correspondence is decided.
+const CLOCK_HOST_MONOTONIC: u8 = MeasurementClock::HostMonotonic as u8;
 
 /// Wire code for a [`MeasurementClock`], for a clock that is actually present
 /// (never [`MeasurementClock::Unspecified`]).
@@ -183,6 +190,12 @@ impl CaptureHeader {
     /// is rejected. A mapping declared unavailable legitimately carries target
     /// clock 0 (the absent-clock sentinel), so that case is accepted: the
     /// target clock is bound to the availability flag, never checked alone.
+    ///
+    /// Admissibility is not association. A frame captured on a clock no
+    /// consumer can relate to the flight state passes here and is refused
+    /// downstream, where that correspondence is actually required —
+    /// dropping it here would discard a picture the operator can see for
+    /// a property only an overlay needs.
     #[must_use]
     pub fn contract_fault(&self) -> Option<ContractFault> {
         if !is_present_clock(self.capture_clock) {
@@ -207,7 +220,7 @@ impl CaptureHeader {
 }
 
 fn is_present_clock(code: u8) -> bool {
-    code == CLOCK_VEHICLE_BOOT || code == CLOCK_SIMULATION
+    code == CLOCK_VEHICLE_BOOT || code == CLOCK_SIMULATION || code == CLOCK_HOST_MONOTONIC
 }
 
 /// Serializes a v2 body: the fixed capture-identity header, the codec FourCC, a
@@ -327,7 +340,8 @@ fn le_i64(bytes: &[u8], at: usize) -> i64 {
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{
-        CLOCK_SIMULATION, CLOCK_VEHICLE_BOOT, CaptureHeader, DecodeError, META_LEN, OFFSET,
+        CLOCK_HOST_MONOTONIC, CLOCK_SIMULATION, CLOCK_VEHICLE_BOOT, CaptureHeader, DecodeError,
+        META_LEN, OFFSET,
         decode_v2, encode_v2,
     };
 
@@ -417,6 +431,24 @@ mod tests {
             header.contract_fault().expect("fault").field,
             "captureClock"
         );
+    }
+
+    #[test]
+    fn a_view_rendered_on_the_host_clock_is_admissible() {
+        // A producer that renders a view has no clock relatable to the
+        // flight state and stamps the host's own. Rejecting that here
+        // would blank the operator's picture for a property only a
+        // conformal overlay needs, and which the association path
+        // enforces on its own.
+        let header = CaptureHeader {
+            capture_clock: CLOCK_HOST_MONOTONIC,
+            mapping_available: false,
+            mapping_target_clock: 0,
+            mapping_offset_ns: 0,
+            clock_error_bound_ns: 0,
+            ..bounded_header()
+        };
+        assert_eq!(header.contract_fault(), None);
     }
 
     #[test]

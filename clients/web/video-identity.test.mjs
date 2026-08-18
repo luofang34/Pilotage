@@ -439,6 +439,24 @@ check(
   );
 }
 
+// A producer that renders a view — a simulator window, not an instrument —
+// has no clock relatable to the flight state and stamps the host's own
+// monotonic clock. That frame is admissible; what it may NOT do is claim a
+// mapping into another clock, which the mapping rules above already refuse.
+{
+  const CLOCK_HOST_MONOTONIC = 3;
+  check(
+    "a frame captured on the host's monotonic clock is admitted",
+    metaFault(
+      meta({ captureClock: CLOCK_HOST_MONOTONIC, mappingAvailable: false, mappingTargetClock: 0 }),
+    ) === null,
+  );
+  check(
+    "a clock outside the declared set is still refused",
+    metaFault(meta({ captureClock: 9 }))?.field === "captureClock",
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);
