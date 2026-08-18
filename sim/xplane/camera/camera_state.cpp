@@ -23,17 +23,18 @@ void CameraState::apply(const CameraCommand* command) {
         return;
     }
     switch (command->mode) {
-        case 0:
+        case static_cast<std::uint32_t>(CameraMode::Fpv):
             mode_ = CameraMode::Fpv;
             break;
-        case 1:
+        case static_cast<std::uint32_t>(CameraMode::Gimbal):
             mode_ = CameraMode::Gimbal;
             break;
-        case 2:
+        case static_cast<std::uint32_t>(CameraMode::Free):
             mode_ = CameraMode::Free;
             break;
         default:
-            // An unknown mode keeps the current one: a producer must not
+            // Zero means the host said nothing about the view, and an
+            // unknown value keeps the current one: a producer must not
             // invent a view the host did not ask for.
             break;
     }

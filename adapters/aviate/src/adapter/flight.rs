@@ -95,6 +95,10 @@ impl AviateAdapter {
 
     /// Assembles this tick's telemetry from every bound source role.
     pub(super) fn collect_telemetry(&mut self) -> TelemetryBatch {
+        // One rendered view: return it to the vehicle's forward camera
+        // when the operator stops aiming the payload.
+        #[cfg(feature = "sim")]
+        self.maintain_camera_view();
         if let Some(uplink) = self.uplink.as_mut()
             && let Some(armed) = uplink.poll_fc()
         {

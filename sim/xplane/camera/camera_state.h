@@ -11,12 +11,16 @@ namespace pilotage_camera {
 
 /// Which vehicle camera the single rendered view embodies.
 enum class CameraMode : std::uint32_t {
+    /// The host said nothing about the view; keep the current one.
+    /// Zero carries this meaning because a protobuf sender omits
+    /// zero-valued scalars, so no other mode could ever use it.
+    Unchanged = 0,
     /// Body-fixed forward view at the nose station (video source 0).
-    Fpv = 0,
+    Fpv = 1,
     /// Steerable payload view (video source 2).
-    Gimbal = 1,
+    Gimbal = 2,
     /// The view belongs to the operator; the producer streams nothing.
-    Free = 2,
+    Free = 3,
 };
 
 /// One zoom detent: its horizontal field of view, and the calibration

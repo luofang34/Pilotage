@@ -44,8 +44,16 @@ message BridgeFrame {
 // view (the X-Plane camera plugin): which vehicle camera the view
 // embodies, the gimbal orientation, and the zoom detent.
 message BridgeCameraCommand {
-  // 0 = FPV (body-fixed forward view), 1 = gimbal payload view,
-  // 2 = free (the producer releases the view to its operator).
+  // Which vehicle camera the single rendered view embodies.
+  //
+  // The values are 1-based BECAUSE proto3 omits zero-valued scalars
+  // from the wire: a zero-numbered mode could never be transmitted, and
+  // a producer that treats a partial command as a delta would silently
+  // keep whichever view it was already rendering. Zero therefore means
+  // "unchanged", which is what an absent field already means.
+  //   1 = FPV (body-fixed forward view)
+  //   2 = gimbal payload view
+  //   3 = free (the producer releases the view to its operator)
   uint32 mode = 1;
   // Gimbal pan, radians, positive right, relative to the vehicle body
   // heading (follow mode).

@@ -166,3 +166,42 @@ fn the_detent_table_matches_the_producer_s_own() {
         );
     }
 }
+
+#[test]
+fn the_view_starts_forward_and_follows_the_aim() {
+    // One rendered view: showing the payload means NOT showing the
+    // vehicle's forward camera, so the forward view is the resting
+    // state and aiming is what selects the payload.
+    let mut state = PointingState::default();
+    assert_eq!(state.command().mode, 1, "the forward view is the default");
+    assert!(
+        state.view_is_stale(),
+        "a producer outlives a session, so the view is stated, not assumed"
+    );
+    state.note_published();
+    assert!(!state.view_is_stale(), "nothing to republish once stated");
+
+    state.aim();
+    assert_eq!(state.command().mode, 2, "aiming selects the payload view");
+    assert!(state.view_is_stale(), "the producer must be told");
+    state.note_published();
+    assert!(!state.view_is_stale());
+}
+
+#[test]
+fn the_view_returns_forward_after_aiming_stops() {
+    let mut state = PointingState::default();
+    state.aim();
+    state.note_published();
+    // Age the aim past the hold without sleeping.
+    state.aimed_at = Some(std::time::Instant::now() - super::PAYLOAD_VIEW_HOLD);
+    assert_eq!(
+        state.command().mode,
+        1,
+        "a released quasimode returns the forward feed"
+    );
+    assert!(
+        state.view_is_stale(),
+        "the producer still renders the payload until it is told otherwise"
+    );
+}

@@ -16,6 +16,8 @@
 //! is; it does not slew it to level) and refuses to report success it
 //! did not achieve.
 
+use std::time::{Duration, Instant};
+
 use pilotage_sim_video::wire::BridgeCameraCommand;
 
 /// Loopback port the in-simulator camera plugin dials.
@@ -75,8 +77,23 @@ pub(crate) const MAX_YAW_RATE_RPS: f32 = 0.8;
 /// a stalled client slew the payload on resume.
 const INTEGRATION_STEP_S: f32 = 1.0 / 30.0;
 
-/// Producer camera modes, matching `BridgeCameraCommand.mode`.
-const MODE_GIMBAL: u32 = 1;
+/// Producer camera modes, matching `BridgeCameraCommand.mode`. The
+/// values are 1-based: proto3 omits a zero-valued scalar, so a
+/// zero-numbered mode could never travel and the producer would keep
+/// whichever view it was already rendering.
+const MODE_FPV: u32 = 1;
+const MODE_GIMBAL: u32 = 2;
+
+/// How long the payload view stays selected after the last pointing
+/// command.
+///
+/// The producer renders ONE view, so showing the payload means NOT
+/// showing the forward view. The operator's gimbal control is a
+/// quasimode — held while aiming, released otherwise — so the view
+/// follows it and returns to the vehicle's forward camera when aiming
+/// stops. Without this the first pointing command of a session (or a
+/// link-loss freeze) would leave the forward feed dark for good.
+const PAYLOAD_VIEW_HOLD: Duration = Duration::from_secs(2);
 
 /// The commanded pointing state of a producer-rendered payload view.
 #[derive(Debug, Clone, Copy)]
@@ -84,6 +101,15 @@ pub(crate) struct PointingState {
     pan_rad: f32,
     tilt_rad: f32,
     zoom_detent: u32,
+    /// When the payload view was last commanded; `None` means the
+    /// producer shows the vehicle's forward view.
+    aimed_at: Option<Instant>,
+    /// The view the producer was last told to render, so the adapter
+    /// republishes exactly when that changes rather than every tick.
+    /// `None` until the first publish: a producer outlives a session
+    /// and keeps whatever view the PREVIOUS one left it on, so the
+    /// adapter states the view rather than assuming it.
+    published_mode: Option<u32>,
 }
 
 impl Default for PointingState {
@@ -92,6 +118,8 @@ impl Default for PointingState {
             pan_rad: 0.0,
             tilt_rad: 0.0,
             zoom_detent: 0,
+            aimed_at: None,
+            published_mode: None,
         }
     }
 }
@@ -154,10 +182,24 @@ impl PointingState {
             .unwrap_or(ZOOM_DETENTS[0])
     }
 
+    /// Marks the payload view as commanded, so the producer shows it
+    /// for as long as the operator keeps aiming.
+    pub(crate) fn aim(&mut self) {
+        self.aimed_at = Some(Instant::now());
+    }
+
+    /// Which view the producer should render right now.
+    pub(crate) fn mode(&self) -> u32 {
+        match self.aimed_at {
+            Some(at) if at.elapsed() < PAYLOAD_VIEW_HOLD => MODE_GIMBAL,
+            _ => MODE_FPV,
+        }
+    }
+
     /// The producer command for the current state.
     pub(crate) fn command(&self) -> BridgeCameraCommand {
         BridgeCameraCommand {
-            mode: MODE_GIMBAL,
+            mode: self.mode(),
             pan_rad: self.pan_rad,
             tilt_rad: self.tilt_rad,
             zoom_detent: self.zoom_detent,
@@ -213,6 +255,21 @@ fn process_pointing_actions(
         .collect()
 }
 
+impl PointingState {
+    /// Records the view the producer has been told to render.
+    fn note_published(&mut self) {
+        self.published_mode = Some(self.mode());
+    }
+
+    /// Whether the producer may be rendering a different view than the
+    /// commanded state calls for — including the case where it has
+    /// never been told, and is therefore on whatever the last session
+    /// left it on.
+    fn view_is_stale(&self) -> bool {
+        self.published_mode != Some(self.mode())
+    }
+}
+
 impl super::AviateAdapter {
     /// Enacts one gimbal-scope frame: recenter and zoom actions, then the
     /// integrated pointing. The scope consumes TYPED commands only — a
@@ -239,6 +296,9 @@ impl super::AviateAdapter {
             return super::rejected_control(tick, RejectReason::UnknownScope);
         };
 
+        // Any command on this scope selects the payload view; it
+        // reverts to the forward view once aiming stops.
+        pointing.aim();
         let action_results = process_pointing_actions(&frame.actions, pointing);
 
         let mut constrained = false;
@@ -258,6 +318,7 @@ impl super::AviateAdapter {
         }
 
         let command = pointing.command();
+        pointing.note_published();
         if !self.publish_camera_command(command) {
             return super::rejected_control(
                 tick,
@@ -298,6 +359,25 @@ impl super::AviateAdapter {
             Err(pilotage_adapter_api::LinkLossEnactError::ChannelRejected {
                 detail: "the pointing freeze could not be published".to_owned(),
             })
+        }
+    }
+
+    /// Returns the producer to the vehicle's forward view once aiming
+    /// stops, so one rendered view does not stay stuck on the payload
+    /// after the operator lets go. Runs on the telemetry tick, and
+    /// publishes only on a change.
+    pub(super) fn maintain_camera_view(&mut self) {
+        let Some(pointing) = self.pointing.as_ref() else {
+            return;
+        };
+        if !pointing.view_is_stale() {
+            return;
+        }
+        let command = pointing.command();
+        if self.publish_camera_command(command)
+            && let Some(pointing) = self.pointing.as_mut()
+        {
+            pointing.note_published();
         }
     }
 
