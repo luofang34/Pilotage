@@ -101,18 +101,11 @@ impl SimBackend for Px4XPlane {
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
         vec![
             ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
-            // No gimbal device exists in the X-Plane bridge; the scope
-            // must not be advertised. X-Plane exposes no camera topic, so
-            // the FPV source is the rendered window, captured by the
-            // window sidecar on the host clock.
-            ("PILOTAGE_PX4_CAMERA".to_owned(), "window".to_owned()),
-            (
-                "PILOTAGE_SIM_VIDEO_BIN".to_owned(),
-                ctx.repo_root
-                    .join("target/xplane-capture/pilotage-xplane-capture")
-                    .display()
-                    .to_string(),
-            ),
+            // No gimbal device exists in the X-Plane HIL bridge; the
+            // scope must not be advertised. X-Plane exposes no camera
+            // topic either, so the vehicle view comes from the
+            // in-simulator camera plugin, which dials the host.
+            ("PILOTAGE_PX4_CAMERA".to_owned(), "xplane-plugin".to_owned()),
             (
                 "PILOTAGE_RESET_CMD".to_owned(),
                 ctx.repo_root
@@ -149,7 +142,6 @@ impl SimBackend for Px4XPlane {
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         ensure_xplane_plugins(&ctx.repo_root);
-        ensure_xplane_capture(&ctx.repo_root);
         let Ok(airframe) = selected_airframe() else {
             // plan() re-runs the same resolution and reports the error.
             return Ok(());
@@ -160,10 +152,13 @@ impl SimBackend for Px4XPlane {
         set_active_config_name(&root, airframe);
         if xplane_running() {
             // A running X-Plane never inherits the autoflight
-            // environment; arm the SITL listener directly. Best-effort:
-            // the datagram is lost when no flight is loaded yet.
+            // environment; arm the SITL listener directly. The command
+            // is the idempotent px4xplane/connect (a local px4xplane
+            // patch): a no-op when already armed or connected.
+            // Best-effort: the datagram is lost when no flight is
+            // loaded yet.
             print_line("X-Plane is already running; arming the SITL listener...");
-            send_xplane_command("px4xplane/toggleEnable");
+            send_xplane_command("px4xplane/connect");
             print_line("if PX4 cannot connect: Plugins > PX4 X-Plane > Connect to SITL");
         } else {
             launch_xplane(&root, airframe, &ctx.log_dir);
@@ -249,6 +244,14 @@ fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Result<(), Xtask
             hint: "run scripts/build-xplane-plugins.sh",
         });
     }
+    let camera = root.join("Resources/plugins/PilotageCamera/64/mac.xpl");
+    if !camera.is_file() {
+        return Err(XtaskError::MissingArtifact {
+            what: "PilotageCamera plugin",
+            path: camera,
+            hint: "run scripts/build-xplane-plugins.sh",
+        });
+    }
     let aircraft = root.join(airframe.acf_path);
     if !aircraft.is_file() {
         return Err(XtaskError::MissingArtifact {
@@ -265,8 +268,11 @@ fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Result<(), Xtask
 const XPLANE_PLUGINS_STAMP: &str = "target/xtask-stamps/xplane-plugins.stamp";
 
 /// The working-tree inputs whose content decides plugin staleness.
-const XPLANE_PLUGINS_SOURCES: [&str; 2] =
-    ["sim/xplane/autoflight", "scripts/build-xplane-plugins.sh"];
+const XPLANE_PLUGINS_SOURCES: [&str; 3] = [
+    "sim/xplane/autoflight",
+    "sim/xplane/camera",
+    "scripts/build-xplane-plugins.sh",
+];
 
 /// Best-effort, content-stamped build + install of the two X-Plane
 /// plugins and the packaged aircraft. Non-fatal by contract: `plan`
@@ -300,46 +306,6 @@ fn ensure_xplane_plugins(repo_root: &Path) {
         Ok(_) | Err(_) => print_line(
             "X-Plane plugin build failed (see build-xplane-plugins output); \
              the session will fail closed if a required plugin is missing",
-        ),
-    }
-}
-
-/// Where the capture sidecar's content stamp lives.
-const XPLANE_CAPTURE_STAMP: &str = "target/xtask-stamps/xplane-capture.stamp";
-
-/// The working-tree inputs whose content decides capture staleness.
-const XPLANE_CAPTURE_SOURCES: [&str; 2] = ["sim/xplane/capture", "scripts/build-xplane-capture.sh"];
-
-/// Best-effort, content-stamped build of the window-capture video
-/// sidecar. Deliberately non-fatal: the camera path degrades to
-/// no-video when the sidecar is absent, so a Swift toolchain problem
-/// costs the picture, never the flight.
-fn ensure_xplane_capture(repo_root: &Path) {
-    use crate::session::preflight::stamp;
-    let exists = repo_root
-        .join("target/xplane-capture/pilotage-xplane-capture")
-        .is_file();
-    let current = stamp::source_stamp(repo_root, &XPLANE_CAPTURE_SOURCES, &[]);
-    let stamp_path = repo_root.join(XPLANE_CAPTURE_STAMP);
-    let stored = stamp::read_stamp(&stamp_path);
-    if stamp::artifact_is_fresh(exists, stored.as_deref(), current.as_deref()) {
-        return;
-    }
-    print_line("building the X-Plane window-capture sidecar...");
-    let built = std::process::Command::new("bash")
-        .arg(repo_root.join("scripts/build-xplane-capture.sh"))
-        .current_dir(repo_root)
-        .status();
-    match built {
-        Ok(status) if status.success() => {
-            if let Some(current) = current {
-                stamp::write_stamp(&stamp_path, &current);
-            }
-            print_line("X-Plane window-capture sidecar built");
-        }
-        Ok(_) | Err(_) => print_line(
-            "window-capture sidecar unavailable (see build-xplane-capture \
-             output); continuing without video",
         ),
     }
 }
@@ -396,6 +362,11 @@ fn launch_xplane(root: &Path, airframe: &Airframe, log_dir: &Path) {
         .current_dir(root)
         .env("PILOTAGE_XPLANE_ACF", airframe.acf_path)
         .env("PILOTAGE_XPLANE_CONNECT", "1")
+        // A cold simulator start plus a flight-controller boot can
+        // exceed the bridge's default one-minute connect window, and an
+        // expired window needs an operator click. Wait without a
+        // deadline instead (a local px4xplane patch).
+        .env("PX4XPLANE_CONNECT_TIMEOUT_S", "0")
         .stdout(log)
         .stderr(std::process::Stdio::null())
         .spawn();

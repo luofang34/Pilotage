@@ -87,15 +87,14 @@ fn host_environment_declares_profile_and_reset_but_no_gimbal() {
     // No gimbal device exists in the X-Plane bridge; advertising the
     // scope would offer a control surface with no enactment behind it.
     assert!(env.iter().all(|(key, _)| key != "PILOTAGE_PX4_GIMBAL"));
-    // The FPV source is the captured window; the adapter needs both the
-    // mode and the sidecar path.
+    // The vehicle view comes from the in-simulator camera plugin, which
+    // dials the host: no producer binary path belongs in the host's
+    // environment.
     assert!(
         env.iter()
-            .any(|(key, value)| key == "PILOTAGE_PX4_CAMERA" && value == "window")
+            .any(|(key, value)| key == "PILOTAGE_PX4_CAMERA" && value == "xplane-plugin")
     );
-    assert!(env.iter().any(|(key, value)| {
-        key == "PILOTAGE_SIM_VIDEO_BIN" && value.ends_with("pilotage-xplane-capture")
-    }));
+    assert!(env.iter().all(|(key, _)| key != "PILOTAGE_SIM_VIDEO_BIN"));
 }
 
 #[test]
@@ -120,8 +119,8 @@ fn install_validation_hints_at_the_build_script() {
         }
         other => panic!("expected a missing-plugin refusal, got {other:?}"),
     }
-    // With both plugins present, the missing aircraft is the next hint.
-    for plugin in ["px4xplane", "PilotageAutoFlight"] {
+    // With every plugin present, the missing aircraft is the next hint.
+    for plugin in ["px4xplane", "PilotageAutoFlight", "PilotageCamera"] {
         let dir = root.join(format!("Resources/plugins/{plugin}/64"));
         std::fs::create_dir_all(&dir).expect("plugin dir");
         std::fs::write(dir.join("mac.xpl"), b"stub").expect("plugin stub");

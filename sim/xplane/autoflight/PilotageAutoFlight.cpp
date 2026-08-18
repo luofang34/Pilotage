@@ -10,10 +10,14 @@
 //   PILOTAGE_XPLANE_CONNECT  "1" starts the px4xplane SITL listener
 //                            after the aircraft is loaded (optional)
 //
+// The listener command is the idempotent px4xplane/connect (a local
+// px4xplane patch, upstreamable): unlike toggleEnable it can never
+// cancel a wait that is already armed.
+//
 // Sequence: wait for the simulator to settle, load the aircraft, wait
 // for XPLM_MSG_PLANE_LOADED for the user aircraft, wait for the run
 // loop to run without multi-second stalls (texture and scenery loading
-// after a cold boot), then trigger px4xplane/toggleEnable so PX4 (or
+// after a cold boot), then trigger px4xplane/connect so PX4 (or
 // an other HIL FC) can connect without operator input. The stall gate
 // matters: the px4xplane bridge disconnects on actuator-feedback
 // deadline misses, so arming it during load-stall churn wedges the
@@ -74,12 +78,12 @@ float OnStableFramesTick() {
     if (stable_seconds < kStableSecondsRequired) {
         return 1.0f;
     }
-    XPLMCommandRef cmd = XPLMFindCommand("px4xplane/toggleEnable");
+    XPLMCommandRef cmd = XPLMFindCommand("px4xplane/connect");
     if (cmd == nullptr) {
-        log_line("px4xplane/toggleEnable not found; retrying");
+        log_line("px4xplane/connect not found; retrying");
         return 2.0f;
     }
-    log_line("run loop is stable; triggering px4xplane/toggleEnable");
+    log_line("run loop is stable; triggering px4xplane/connect");
     XPLMCommandOnce(cmd);
     phase = Phase::Done;
     return 0.0f;

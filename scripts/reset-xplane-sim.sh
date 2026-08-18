@@ -36,7 +36,7 @@ pkill -9 -f "${PX4_DIR}/build/px4_sitl_default/bin/px4" 2>/dev/null || true
 # its listener can arm again.
 sleep 3
 echo "re-arming the SITL listener..."
-send_cmnd "px4xplane/toggleEnable"
+send_cmnd "px4xplane/connect"
 
 # When `cargo xtask sim` supervises the session, the supervisor restarts
 # the flight-controller stage itself; a script-spawned second px4 would

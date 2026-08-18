@@ -6,6 +6,8 @@
 #                       PX4XPLANE_DIR, default ../px4xplane)
 #   2. PilotageAutoFlight - this repository's unattended flight starter
 #                       (sim/xplane/autoflight)
+#   3. PilotageCamera  - this repository's vehicle camera export
+#                       (sim/xplane/camera)
 #
 # The install target is the X-Plane root: XPLANE_ROOT, else the first
 # entry of the official installer registry that holds X-Plane.app.
@@ -62,6 +64,24 @@ clang++ -std=c++17 -O2 -shared -fPIC \
   -undefined dynamic_lookup \
   -o "${AUTOFLIGHT_BUILD}/mac.xpl"
 
+# --- Build PilotageCamera ------------------------------------------------
+echo "building PilotageCamera..."
+CAMERA_BUILD="${REPO_ROOT}/target/xplane-camera"
+CAMERA_SRC="${REPO_ROOT}/sim/xplane/camera"
+mkdir -p "${CAMERA_BUILD}"
+clang++ -std=c++17 -O2 -shared -fPIC \
+  -DAPL=1 -DIBM=0 -DLIN=0 -DXPLM200 -DXPLM210 -DXPLM300 -DXPLM301 -DXPLM303 \
+  -DGL_SILENCE_DEPRECATION \
+  -I "${PX4XPLANE_DIR}/lib/SDK/CHeaders/XPLM" -I "${CAMERA_SRC}" \
+  "${CAMERA_SRC}/PilotageCamera.cpp" \
+  "${CAMERA_SRC}/camera_state.cpp" \
+  "${CAMERA_SRC}/view.cpp" \
+  "${CAMERA_SRC}/link.cpp" \
+  "${CAMERA_SRC}/capture.cpp" \
+  "${CAMERA_SRC}/hud.cpp" \
+  -undefined dynamic_lookup -framework OpenGL \
+  -o "${CAMERA_BUILD}/mac.xpl"
+
 # --- Install -------------------------------------------------------------
 echo "installing plugins and aircraft..."
 PLUGINS="${XPLANE_ROOT}/Resources/plugins"
@@ -99,6 +119,9 @@ done
 mkdir -p "${PLUGINS}/PilotageAutoFlight/64"
 cp "${AUTOFLIGHT_BUILD}/mac.xpl" "${PLUGINS}/PilotageAutoFlight/64/mac.xpl"
 
+mkdir -p "${PLUGINS}/PilotageCamera/64"
+cp "${CAMERA_BUILD}/mac.xpl" "${PLUGINS}/PilotageCamera/64/mac.xpl"
+
 mkdir -p "${XPLANE_ROOT}/Aircraft/Extra Aircraft"
 rm -rf "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter"
 cp -R "${PX4XPLANE_DIR}/aircraft/QuadTailsitter" "${XPLANE_ROOT}/Aircraft/Extra Aircraft/"
@@ -111,4 +134,4 @@ if [[ -d "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter/Airfoil" ]]; the
     "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter/airfoils/"
 fi
 
-echo "done: px4xplane + PilotageAutoFlight + QuadTailsitter installed"
+echo "done: px4xplane + PilotageAutoFlight + PilotageCamera + QuadTailsitter installed"
