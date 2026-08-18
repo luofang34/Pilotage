@@ -34,6 +34,36 @@ collect_rs_files() {
         | sed 's#^#./#'
 }
 
+collect_swift_files() {
+    git ls-files --cached --others --exclude-standard -- '*.swift' \
+        | sed 's#^#./#'
+}
+
+# Swift sources obey the same file-length ceiling as Rust. Function
+# bodies are not measured here: Swift's syntax needs a real parser, and
+# a wrong count is worse than none. Files named here carried the debt
+# before the ceiling watched Swift at all; each is pinned at its
+# recorded count and may only shrink.
+swift_length_ceiling() {
+    case "$1" in
+        ./clients/apple/App/HostLinkModel.swift) echo 676 ;;
+        *) echo 500 ;;
+    esac
+}
+
+check_swift_file_lengths() {
+    local file lines limit
+    while IFS= read -r file; do
+        is_excluded_path "$file" && continue
+        limit="$(swift_length_ceiling "$file")"
+        lines="$(wc -l < "$file" | tr -d ' ')"
+        if [ "$lines" -gt "$limit" ]; then
+            echo "FORBIDDEN: $file has $lines lines (limit $limit)" >&2
+            status=1
+        fi
+    done < <(collect_swift_files)
+}
+
 check_forbidden_filenames() {
     local file base
     while IFS= read -r file; do
@@ -220,6 +250,7 @@ case "${1:-}" in
     "")
         check_forbidden_filenames
         check_file_length
+        check_swift_file_lengths
         check_function_length
         check_calibration_id_uniqueness
         check_safety_palette_aliases
