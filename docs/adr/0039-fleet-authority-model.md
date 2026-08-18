@@ -1,6 +1,7 @@
 # ADR-0039: The fleet model — sets of sessions, cells of authority
 
-- Status: Proposed (design only; implementation deferred)
+- Status: Proposed
+- Scope: design only; implementation deferred
 - Date: 2026-08-17
 - Depends on: [ADR-0037](0037-modular-operator-client-composition.md)
 

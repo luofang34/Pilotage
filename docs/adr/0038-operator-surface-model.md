@@ -1,6 +1,7 @@
 # ADR-0038: One surface model for operator screens
 
-- Status: Proposed (design only; implementation deferred)
+- Status: Proposed
+- Scope: design only; implementation deferred
 - Date: 2026-08-17
 - Depends on: [ADR-0037](0037-modular-operator-client-composition.md)
 
