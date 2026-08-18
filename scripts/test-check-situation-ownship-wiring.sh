@@ -28,26 +28,26 @@ restore() {
     cp "$repo_root/clients/apple/App/$1" "$app/$1"
 }
 
-sed -i.bak '/model.currentOwnship = /,+9d' "$app/PilotageApp.swift"
+sed -i.bak '/model.currentOwnship = /,+9d' "$app/SituationContentView.swift"
 reject "a model whose ownship reader is never set"
-restore PilotageApp.swift
+restore SituationContentView.swift
 
-sed -i.bak '/model.refreshEvidence()/d' "$app/PilotageApp.swift"
+sed -i.bak '/model.refreshEvidence()/d' "$app/SituationContentView.swift"
 reject "an evidence write nothing asks for"
-restore PilotageApp.swift
+restore SituationContentView.swift
 
-sed -i.bak '/ownship.refreshOrientation()/d' "$app/PilotageApp.swift"
+sed -i.bak '/ownship.refreshOrientation()/d' "$app/SituationContentView.swift"
 reject "a turned tablet that never reaches the heading orientation"
-restore PilotageApp.swift
+restore SituationContentView.swift
 
-sed -i.bak '/onChange(of: ownship.heading)/d' "$app/PilotageApp.swift"
+sed -i.bak '/onChange(of: ownship.heading)/d' "$app/SituationContentView.swift"
 reject "a map that turns only when the control is pressed"
-restore PilotageApp.swift
+restore SituationContentView.swift
 
 sed -i.bak 's/applyFollow(animated: false)/applyFollow(animated: true)/' \
-    "$app/PilotageApp.swift"
+    "$app/SituationContentView.swift"
 reject "a camera eased on every reading"
-restore PilotageApp.swift
+restore SituationContentView.swift
 
 sed -i.bak 's/try? await Task.sleep(for: .milliseconds(180))//' "$app/MapControlsView.swift"
 reject "a label whose state changes in the cycle that inserts its control"

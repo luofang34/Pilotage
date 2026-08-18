@@ -84,11 +84,11 @@ fi
 
 # Following is a mode. A camera that only moves when the control is pressed is a jump
 # wearing the name of a mode, and it stops the moment the aircraft does anything.
-require_pattern 'onChange\(of: ownship\.fix\)' "$app/PilotageApp.swift" \
+require_pattern 'onChange\(of: ownship\.fix\)' "$app/SituationContentView.swift" \
     "the map must follow the position as it changes, not only when the control is pressed"
-require_pattern 'onChange\(of: ownship\.heading\)' "$app/PilotageApp.swift" \
+require_pattern 'onChange\(of: ownship\.heading\)' "$app/SituationContentView.swift" \
     "the map must turn with the aircraft as the heading changes"
-require_pattern 'applyFollow\(animated: false\)' "$app/PilotageApp.swift" \
+require_pattern 'applyFollow\(animated: false\)' "$app/SituationContentView.swift" \
     "a camera eased on every reading trails the aircraft, so continuous following must not animate"
 
 # Traffic moves between reports and the display only redraws when something asks it to.
