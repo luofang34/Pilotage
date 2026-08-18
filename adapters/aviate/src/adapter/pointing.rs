@@ -374,9 +374,16 @@ impl super::AviateAdapter {
             return;
         }
         let command = pointing.command();
-        if self.publish_camera_command(command)
-            && let Some(pointing) = self.pointing.as_mut()
-        {
+        let published = self.publish_camera_command(command);
+        // The producer renders ONE view, so which view it is showing is
+        // operator-visible state, not a detail. It changes rarely, and a
+        // change that did not reach the producer is why a feed goes dark.
+        tracing::info!(
+            mode = command.mode,
+            published,
+            "payload view selection sent to the producer"
+        );
+        if published && let Some(pointing) = self.pointing.as_mut() {
             pointing.note_published();
         }
     }
