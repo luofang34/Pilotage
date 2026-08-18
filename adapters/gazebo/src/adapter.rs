@@ -10,16 +10,15 @@
 use std::collections::BTreeMap;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, CalibrationId, CaptureClockMapping, Disposition,
-    LinkLossEnactError, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason,
-    SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, SourceIncarnation, StepBudget, StepOutcome,
-    TelemetryBatch, TelemetrySample, VehicleAdapter, VideoSource,
+    AdapterCapabilities, ApplyOutcome, CHASE_SOURCE_ID, CalibrationId, CaptureClockMapping,
+    Disposition, FPV_SOURCE_ID, FrameStamper, LinkLossEnactError, LinkLossPolicy, MeasurementClock,
+    Pose2d, RawVideoFrame, RejectReason, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter,
+    VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_sim_video::wire::{BridgeControl, BridgeFrame, BridgeOdometry};
-use pilotage_sim_video::{
-    BridgeClient, BridgeConfig, CHASE_SOURCE_ID, FPV_SOURCE_ID, FrameStamper, RawVideoFrame,
-};
+use pilotage_sim_video::{BridgeClient, BridgeConfig};
 use pilotage_timing::SimTick;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -269,7 +268,7 @@ async fn forward_frames(
     mut stamper: FrameStamper,
 ) {
     while let Some(frame) = bridge_rx.recv().await {
-        if raw_tx.send(stamper.stamp(frame)).await.is_err() {
+        if raw_tx.send(stamper.stamp(frame.into())).await.is_err() {
             return;
         }
     }

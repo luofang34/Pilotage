@@ -9,6 +9,7 @@ mod automation;
 mod aviate_profile;
 mod connection;
 mod engine_actor;
+#[cfg(feature = "sim")]
 mod gazebo_launch;
 mod media;
 mod options;
@@ -19,9 +20,9 @@ mod stream_tag;
 mod wire_codec;
 // The mission rig is exported for the in-process integration test: the
 // same actor/principal wiring the runtime uses, without a transport.
-pub use automation::{
-    AutomationStatus, MissionRig, TelemetryObserver, spawn_reference_mission_rig,
-};
+#[cfg(feature = "sim")]
+pub use automation::spawn_reference_mission_rig;
+pub use automation::{AutomationStatus, MissionRig, TelemetryObserver};
 pub use options::{DEFAULT_MISSION_ANCHOR, MissionNavdataSource, MissionOptions, RuntimeOptions};
 // The envelope encoder is exported for the wire-fixture test: the committed
 // browser fixture must be THIS host's bytes, not a hand-maintained copy.
@@ -32,6 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use pilotage_adapter_api::VehicleAdapter;
+#[cfg(feature = "sim")]
 use pilotage_adapter_reference::ReferenceAdapter;
 use pilotage_protocol::VehicleId;
 use pilotage_session::{ClientKey, SessionConfig, SessionEngine};
@@ -52,6 +54,7 @@ use media::MediaHandle;
 const HOST_VEHICLE: VehicleId = VehicleId::new(1);
 
 /// Deterministic seed for the embedded reference adapter's initial state.
+#[cfg(feature = "sim")]
 const ADAPTER_SEED: u64 = 0;
 
 /// Maximum age a control frame may have before the engine rejects it as
@@ -88,6 +91,7 @@ impl RunningHost {
 
 /// Builds the embedded [`SessionEngine`] and [`ReferenceAdapter`] pair this
 /// increment's host serves.
+#[cfg(feature = "sim")]
 fn build_reference(options: RuntimeOptions) -> (SessionEngine, ReferenceAdapter) {
     let adapter = ReferenceAdapter::from_seed(HOST_VEHICLE, ADAPTER_SEED);
     let engine = build_engine(&adapter, options);

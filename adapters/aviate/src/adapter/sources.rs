@@ -10,6 +10,7 @@ use pilotage_adapter_api::{
 };
 
 use super::AviateProfile;
+#[cfg(feature = "sim")]
 use super::shm_sampling::ShmSource;
 use crate::error::AviateAdapterError;
 use crate::incarnation::IncarnationProvider;
@@ -47,12 +48,13 @@ pub(super) async fn bind_sources<P: IncarnationProvider>(
     profile: AviateProfile,
     config: LinkConfig,
     provider: &mut P,
-) -> Result<(Option<EstimateSource>, Option<Box<ShmSource>>), AviateAdapterError> {
+) -> Result<(Option<EstimateSource>, Option<Box<super::TruthOracle>>), AviateAdapterError> {
     match profile {
         AviateProfile::Physical => {
             let incarnation = provider.next_incarnation_blocking()?;
             Ok((Some(estimate_source(config, incarnation).await?), None))
         }
+        #[cfg(feature = "sim")]
         AviateProfile::Simulation => {
             let truth = match provider
                 .next_incarnation_blocking()
@@ -70,9 +72,16 @@ pub(super) async fn bind_sources<P: IncarnationProvider>(
             let incarnation = provider.next_incarnation_blocking()?;
             Ok((Some(estimate_source(config, incarnation).await?), truth))
         }
+        #[cfg(feature = "sim")]
         AviateProfile::OracleOnly => {
             let incarnation = provider.next_incarnation_blocking()?;
             Ok((None, Some(Box::new(ShmSource::open(0, incarnation)?))))
+        }
+        // A flight build has no simulator: the simulation profiles are
+        // structurally absent rather than rejected case by case.
+        #[cfg(not(feature = "sim"))]
+        AviateProfile::Simulation | AviateProfile::OracleOnly => {
+            Err(AviateAdapterError::ProfileNotInBuild { profile })
         }
     }
 }

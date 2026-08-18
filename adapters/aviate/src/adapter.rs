@@ -26,15 +26,23 @@ use crate::error::AviateAdapterError;
 use crate::uplink::FlightUplink;
 
 mod advertisement;
+#[cfg(feature = "sim")]
 mod camera;
+mod profile;
+mod sim_attachments;
+pub use profile::AviateProfile;
+#[cfg(not(feature = "sim"))]
+use sim_attachments::no_camera;
+use sim_attachments::{CameraBridge, TruthOracle};
+
 mod control;
 mod sampling;
+#[cfg(feature = "sim")]
 mod shm_sampling;
 mod sources;
 mod startup;
 use control::{rejected_control, sticks_from_velocity};
 use sampling::mavlink_batch;
-use shm_sampling::ShmSource;
 use sources::{ArmReport, EstimateSource, fc_state_sample};
 
 /// The control scope exposes four canonical flight axes as DJI-style
@@ -63,25 +71,6 @@ pub const DISARM_BUTTON: u16 = 1;
 /// the Gazebo adapter's dead-reader path).
 const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
 
-/// Which session profile the adapter runs (LINK-04). A profile binds
-/// source ROLES — the MAVLink link carries the FC operational estimate,
-/// the shm block carries simulation truth — and transports are never
-/// alternatives for one another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AviateProfile {
-    /// Physical vehicle: FC estimate + FC state. A truth source must not
-    /// exist and is never synthesized.
-    Physical,
-    /// Simulation: FC estimate + FC state, plus the simulation-truth
-    /// oracle while the co-located shm block is attachable.
-    #[default]
-    Simulation,
-    /// Oracle-only diagnostics: the truth stream alone. No uplink is
-    /// bound and no motion-control scope is advertised — operational
-    /// control is structurally absent, not merely rejected.
-    OracleOnly,
-}
-
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
 ///
 /// Real-time (ADR-0013): the FC/simulation advances on its own clock;
@@ -100,12 +89,12 @@ pub struct AviateAdapter {
     // other: a missing estimate rejects state-dependent control instead
     // of borrowing truth.
     estimate: Option<EstimateSource>,
-    truth: Option<Box<ShmSource>>,
+    truth: Option<Box<TruthOracle>>,
     uplink: Option<FlightUplink>,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
-    frames: Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
-    _camera_bridge: Option<pilotage_sim_video::BridgeClient>,
+    frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
+    _camera_bridge: Option<CameraBridge>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
     // Latest FC arm report from uplink heartbeats, with its receive
     // metadata; `None` until the FC has reported at least once.
@@ -135,17 +124,8 @@ impl AviateAdapter {
     /// are up and it has not been taken.
     pub fn subscribe_frames(
         &mut self,
-    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>> {
+    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>> {
         self.frames.take()
-    }
-
-    /// The typed fault that has fail-closed the simulation-truth source,
-    /// if any. A faulted source publishes no telemetry and does not
-    /// re-attach. Only the shared-memory truth source carries a
-    /// fail-closed fault state; the MAVLink estimate link reports `None`
-    /// here.
-    pub fn shm_fault(&self) -> Option<&AviateAdapterError> {
-        self.truth.as_ref().and_then(|source| source.fault())
     }
 
     /// Wires an adapter around a caller-supplied state cache, for tests.
@@ -359,7 +339,7 @@ impl VehicleAdapter for AviateAdapter {
             });
         }
         let fc_state = fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
-        let truth = self.truth.as_mut().and_then(|source| source.truth_sample());
+        let truth = self.take_truth_sample();
         let mut batch = match &self.estimate {
             Some(source) => mavlink_batch(self.vehicle, &source.state),
             None => TelemetryBatch::default(),
@@ -405,11 +385,11 @@ impl VehicleAdapter for AviateAdapter {
         }
         vec![
             VideoSource {
-                id: pilotage_sim_video::FPV_SOURCE_ID.to_owned(),
+                id: pilotage_adapter_api::FPV_SOURCE_ID.to_owned(),
                 description: "onboard forward camera".to_owned(),
             },
             VideoSource {
-                id: pilotage_sim_video::CHASE_SOURCE_ID.to_owned(),
+                id: pilotage_adapter_api::CHASE_SOURCE_ID.to_owned(),
                 description: "chase camera".to_owned(),
             },
         ]
@@ -475,8 +455,8 @@ impl VehicleAdapter for AviateAdapter {
         // The simulation clock is sim infrastructure, not vehicle state:
         // when the truth oracle is bound its time drives the session
         // tick; otherwise the estimate's source time does.
-        let tick = if let Some(source) = &self.truth {
-            source.tick()
+        let tick = if let Some(tick) = self.truth_tick_ns() {
+            tick
         } else if let Some(source) = &self.estimate {
             source
                 .state

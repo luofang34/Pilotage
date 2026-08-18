@@ -24,7 +24,13 @@ use crate::error::Px4AdapterError;
 use crate::uplink::{Px4Uplink, StickFrameDisposition};
 
 mod advertisement;
+#[cfg(feature = "sim")]
 mod camera;
+mod camera_link;
+use camera_link::CameraBridge;
+#[cfg(not(feature = "sim"))]
+use camera_link::no_camera;
+
 mod control;
 #[cfg(test)]
 mod gimbal_link_loss_tests;
@@ -80,8 +86,8 @@ pub struct Px4Adapter {
     gimbal: Option<crate::gimbal::Px4GimbalControl>,
     // Pilotage's gz sidecar bridges the flight-deck rig's camera topics;
     // the adapter remains usable without video when it cannot spawn.
-    frames: Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
-    _camera_bridge: Option<pilotage_sim_video::BridgeClient>,
+    frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
+    _camera_bridge: Option<CameraBridge>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
     // Latest heartbeat-reported arm state; re-acquired per heartbeat so
     // its freshness honestly tracks the FC's liveness.
@@ -173,8 +179,11 @@ impl Px4Adapter {
                 None
             }
         };
+        #[cfg(feature = "sim")]
         let (frames, camera_bridge, frame_forwarder) =
             camera::spawn_camera_bridge(config.gimbal).await;
+        #[cfg(not(feature = "sim"))]
+        let (frames, camera_bridge, frame_forwarder) = no_camera();
         Ok(Self {
             vehicle,
             estimate: Some(EstimateSource {
@@ -230,7 +239,7 @@ impl Px4Adapter {
     /// are up and it has not been taken.
     pub fn subscribe_frames(
         &mut self,
-    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>> {
+    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>> {
         self.frames.take()
     }
 
@@ -305,17 +314,17 @@ fn advertised_video_sources(bridge_up: bool, gimbal: bool) -> Vec<VideoSource> {
     }
     let mut sources = vec![
         VideoSource {
-            id: pilotage_sim_video::FPV_SOURCE_ID.to_owned(),
+            id: pilotage_adapter_api::FPV_SOURCE_ID.to_owned(),
             description: "onboard forward camera".to_owned(),
         },
         VideoSource {
-            id: pilotage_sim_video::CHASE_SOURCE_ID.to_owned(),
+            id: pilotage_adapter_api::CHASE_SOURCE_ID.to_owned(),
             description: "chase camera".to_owned(),
         },
     ];
     if gimbal {
         sources.push(VideoSource {
-            id: pilotage_sim_video::GIMBAL_SOURCE_ID.to_owned(),
+            id: pilotage_adapter_api::GIMBAL_SOURCE_ID.to_owned(),
             description: "gimbal payload camera".to_owned(),
         });
     }

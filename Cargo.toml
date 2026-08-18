@@ -122,8 +122,8 @@ pilotage-svs-db = { path = "crates/pilotage-svs-db" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
 pilotage-sim-video = { path = "adapters/sim-video" }
-pilotage-adapter-aviate = { path = "adapters/aviate" }
-pilotage-adapter-px4 = { path = "adapters/px4" }
+pilotage-adapter-aviate = { path = "adapters/aviate", default-features = false }
+pilotage-adapter-px4 = { path = "adapters/px4", default-features = false }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }

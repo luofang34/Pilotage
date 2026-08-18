@@ -10,9 +10,11 @@ use crate::error::HostError;
 
 use super::engine_actor::ToEngine;
 use super::{
-    HOST_VEHICLE, MAX_CONTROL_AGE, RuntimeOptions, aviate_profile, build_engine, build_reference,
-    gazebo_launch, media, px4_config, run_until_shutdown, run_with_media_until_shutdown,
+    HOST_VEHICLE, RuntimeOptions, aviate_profile, build_engine, media, px4_config,
+    run_until_shutdown, run_with_media_until_shutdown,
 };
+#[cfg(feature = "sim")]
+use super::{MAX_CONTROL_AGE, build_reference, gazebo_launch};
 
 /// Builds the chosen adapter (and, for Gazebo, its media task) and spawns the
 /// per-adapter `run_until_shutdown` task.
@@ -26,6 +28,7 @@ pub(super) async fn spawn_adapter_runtime(
     start: tokio::time::Instant,
 ) -> Result<tokio::task::JoinHandle<()>, HostError> {
     match adapter {
+        #[cfg(feature = "sim")]
         AdapterKind::Reference => {
             let (engine, adapter) = build_reference(options);
             Ok(tokio::spawn(run_until_shutdown(
@@ -39,6 +42,7 @@ pub(super) async fn spawn_adapter_runtime(
                 start,
             )))
         }
+        #[cfg(feature = "sim")]
         AdapterKind::Gazebo => {
             let (engine, adapter, frames) =
                 gazebo_launch::build_gazebo(HOST_VEHICLE, MAX_CONTROL_AGE).await?;
@@ -55,6 +59,12 @@ pub(super) async fn spawn_adapter_runtime(
                 start,
             )))
         }
+        #[cfg(not(feature = "sim"))]
+        AdapterKind::Reference => Err(HostError::AdapterNotInBuild {
+            adapter: "reference",
+        }),
+        #[cfg(not(feature = "sim"))]
+        AdapterKind::Gazebo => Err(HostError::AdapterNotInBuild { adapter: "gazebo" }),
         AdapterKind::Aviate => {
             spawn_aviate_runtime(endpoint, options, engine_tx, engine_rx, shutdown_rx, start).await
         }

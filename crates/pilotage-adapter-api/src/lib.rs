@@ -41,4 +41,8 @@ pub use telemetry::{
     SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
+pub use video::stamping::{
+    CHASE_CAMERA, CHASE_SOURCE_ID, FPV_CAMERA, FPV_SOURCE_ID, FrameStamper, GIMBAL_CAMERA,
+    GIMBAL_SOURCE_ID, RawVideoFrame, UnstampedFrame,
+};
 pub use video::{CalibrationId, CameraId, CaptureClockMapping, VideoCaptureStamp};

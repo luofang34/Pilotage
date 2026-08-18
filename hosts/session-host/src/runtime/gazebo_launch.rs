@@ -6,11 +6,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use pilotage_adapter_api::RawVideoFrame;
 use pilotage_adapter_api::VehicleAdapter;
 use pilotage_adapter_gazebo::GazeboAdapter;
 use pilotage_protocol::VehicleId;
 use pilotage_session::{SessionConfig, SessionEngine};
-use pilotage_sim_video::{BridgeConfig, RawVideoFrame};
+use pilotage_sim_video::BridgeConfig;
 use pilotage_timing::StalenessPolicy;
 use tokio::sync::mpsc;
 

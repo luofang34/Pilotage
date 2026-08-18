@@ -19,8 +19,8 @@
 //! consumer must gate conformal overlay off rather than draw against a
 //! state it cannot align to the image.
 
+use pilotage_adapter_api::FrameStamper;
 use pilotage_adapter_api::{MeasurementClock, SourceIncarnation};
-use pilotage_sim_video::FrameStamper;
 
 /// How this session sources camera frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +102,7 @@ fn producer_for(
 pub(crate) async fn spawn_camera_bridge(
     gimbal: bool,
 ) -> (
-    Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
+    Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
     Option<pilotage_sim_video::BridgeClient>,
     Option<tokio::task::JoinHandle<()>>,
 ) {
@@ -132,7 +132,7 @@ pub(crate) async fn spawn_camera_bridge(
             let forwarder = bridge.take_frame_rx().map(|mut bridge_rx| {
                 tokio::spawn(async move {
                     while let Some(frame) = bridge_rx.recv().await {
-                        if tx.send(stamper.stamp(frame)).await.is_err() {
+                        if tx.send(stamper.stamp(frame.into())).await.is_err() {
                             return;
                         }
                     }

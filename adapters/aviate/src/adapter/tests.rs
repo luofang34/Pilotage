@@ -13,6 +13,8 @@ use pilotage_mavlink::link::KinematicsUpdate;
 mod direct_flight;
 mod fixtures;
 mod flight_control;
+// The source-role suite exercises the simulation-truth oracle.
+#[cfg(feature = "sim")]
 mod source_roles;
 use fixtures::{flight_frame, state_with, state_with_acquisition_skew};
 

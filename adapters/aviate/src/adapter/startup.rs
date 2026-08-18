@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 
 use pilotage_protocol::VehicleId;
 
-use super::{AviateAdapter, AviateProfile, camera, sources::bind_sources};
+#[cfg(feature = "sim")]
+use super::camera;
+use super::{AviateAdapter, AviateProfile, sources::bind_sources};
 use crate::error::AviateAdapterError;
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 use crate::uplink::FlightUplink;
@@ -65,7 +67,10 @@ impl AviateAdapter {
                 }
             }
         };
+        #[cfg(feature = "sim")]
         let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
+        #[cfg(not(feature = "sim"))]
+        let (frames, camera_bridge, frame_forwarder) = super::no_camera();
         Ok(Self {
             vehicle,
             profile,

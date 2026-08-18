@@ -12,6 +12,7 @@
 //! watch or the broadcast datagrams under a bounded timeout — never a
 //! sleep-and-poll.
 
+#![cfg(feature = "sim")]
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::time::Duration;

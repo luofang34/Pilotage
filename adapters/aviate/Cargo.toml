@@ -9,12 +9,12 @@ publish = false
 workspace = true
 
 [dependencies]
-aviate-xil-contract = { workspace = true }
-aviate-xil-shm = { workspace = true }
+aviate-xil-contract = { workspace = true, optional = true }
+aviate-xil-shm = { workspace = true, optional = true }
 getrandom = { version = "0.3.4", features = ["std"] }
 pilotage-adapter-api = { workspace = true }
 pilotage-mavlink = { workspace = true }
-pilotage-sim-video = { workspace = true }
+pilotage-sim-video = { workspace = true, optional = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 thiserror = { workspace = true }
@@ -23,3 +23,10 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }
+
+[features]
+default = ["sim"]
+# Simulation-only code: the camera sidecar client and the XIL
+# truth-oracle attachment. A flight build turns this off; the adapter
+# then has no video producer and no simulation profile at all.
+sim = ["dep:pilotage-sim-video", "dep:aviate-xil-contract", "dep:aviate-xil-shm"]

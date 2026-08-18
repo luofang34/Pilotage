@@ -16,6 +16,7 @@
 mod adapter;
 mod error;
 mod incarnation;
+#[cfg(feature = "sim")]
 pub mod shm;
 mod uplink;
 

@@ -9,7 +9,7 @@
 //! the image. The capture identity itself (source, epoch, sequence, sim
 //! capture time) is still preserved honestly.
 
-use pilotage_sim_video::FrameStamper;
+use pilotage_adapter_api::FrameStamper;
 
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 
@@ -18,7 +18,7 @@ use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 /// (`PILOTAGE_AVIATE_CAMERA=off` disables the attempt).
 #[allow(clippy::type_complexity)]
 pub(crate) async fn spawn_camera_bridge() -> (
-    Option<tokio::sync::mpsc::Receiver<pilotage_sim_video::RawVideoFrame>>,
+    Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
     Option<pilotage_sim_video::BridgeClient>,
     Option<tokio::task::JoinHandle<()>>,
 ) {
@@ -53,7 +53,7 @@ pub(crate) async fn spawn_camera_bridge() -> (
             let forwarder = bridge.take_frame_rx().map(|mut bridge_rx| {
                 tokio::spawn(async move {
                     while let Some(frame) = bridge_rx.recv().await {
-                        if tx.send(stamper.stamp(frame)).await.is_err() {
+                        if tx.send(stamper.stamp(frame.into())).await.is_err() {
                             return;
                         }
                     }

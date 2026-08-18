@@ -23,10 +23,14 @@ use tracing::info;
 
 use crate::error::HostError;
 use crate::mission_navdata::{self, LoadedNavdata};
+use crate::runtime::MissionOptions;
+#[cfg(feature = "sim")]
+use crate::runtime::RuntimeOptions;
 use crate::runtime::connection::ToConnection;
-use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor, ToEngine};
+use crate::runtime::engine_actor::ToEngine;
+#[cfg(feature = "sim")]
+use crate::runtime::engine_actor::{ENGINE_QUEUE_CAPACITY, EngineActor};
 use crate::runtime::registry::OUTBOUND_QUEUE_CAPACITY;
-use crate::runtime::{MissionOptions, RuntimeOptions};
 
 /// The mission principal's driver-assigned client key. The accept loop
 /// allocates keys from zero with a `fetch_add`, so `u64::MAX` can only
@@ -226,6 +230,7 @@ impl MissionRig {
 /// # Errors
 ///
 /// [`HostError`] when the fixture snapshot or demo route fails to build.
+#[cfg(feature = "sim")]
 pub fn spawn_reference_mission_rig() -> Result<MissionRig, HostError> {
     let options = MissionOptions {
         route: pilotage_mission::fixture::DEMO_ROUTE.to_owned(),

@@ -69,8 +69,15 @@ pub enum HostError {
         source: std::env::VarError,
     },
     /// Spawning or connecting the Gazebo sidecar bridge failed.
+    #[cfg(feature = "sim")]
     #[error("failed to start the Gazebo adapter: {0}")]
     GazeboAdapter(#[source] pilotage_adapter_gazebo::GazeboAdapterError),
+    /// The selected adapter is simulation-only and absent from this build.
+    #[error("adapter {adapter:?} is not in this build (built without the sim feature)")]
+    AdapterNotInBuild {
+        /// The requested adapter name.
+        adapter: &'static str,
+    },
     /// Starting the Aviate MAVLink telemetry link failed.
     #[error("failed to start the Aviate adapter: {0}")]
     AviateAdapter(#[source] pilotage_adapter_aviate::AviateAdapterError),
