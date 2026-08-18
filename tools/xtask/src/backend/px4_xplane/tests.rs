@@ -87,6 +87,15 @@ fn host_environment_declares_profile_and_reset_but_no_gimbal() {
     // No gimbal device exists in the X-Plane bridge; advertising the
     // scope would offer a control surface with no enactment behind it.
     assert!(env.iter().all(|(key, _)| key != "PILOTAGE_PX4_GIMBAL"));
+    // The FPV source is the captured window; the adapter needs both the
+    // mode and the sidecar path.
+    assert!(
+        env.iter()
+            .any(|(key, value)| key == "PILOTAGE_PX4_CAMERA" && value == "window")
+    );
+    assert!(env.iter().any(|(key, value)| {
+        key == "PILOTAGE_SIM_VIDEO_BIN" && value.ends_with("pilotage-xplane-capture")
+    }));
 }
 
 #[test]

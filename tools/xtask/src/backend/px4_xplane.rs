@@ -102,10 +102,17 @@ impl SimBackend for Px4XPlane {
         vec![
             ("PILOTAGE_PX4_PROFILE".to_owned(), "simulation".to_owned()),
             // No gimbal device exists in the X-Plane bridge; the scope
-            // must not be advertised. The gz camera sidecar has no gz
-            // server to read from here, so the camera stays off until an
-            // X-Plane frame source exists.
-            ("PILOTAGE_PX4_CAMERA".to_owned(), "off".to_owned()),
+            // must not be advertised. X-Plane exposes no camera topic, so
+            // the FPV source is the rendered window, captured by the
+            // window sidecar on the host clock.
+            ("PILOTAGE_PX4_CAMERA".to_owned(), "window".to_owned()),
+            (
+                "PILOTAGE_SIM_VIDEO_BIN".to_owned(),
+                ctx.repo_root
+                    .join("target/xplane-capture/pilotage-xplane-capture")
+                    .display()
+                    .to_string(),
+            ),
             (
                 "PILOTAGE_RESET_CMD".to_owned(),
                 ctx.repo_root
@@ -142,6 +149,7 @@ impl SimBackend for Px4XPlane {
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         ensure_xplane_plugins(&ctx.repo_root);
+        ensure_xplane_capture(&ctx.repo_root);
         let Ok(airframe) = selected_airframe() else {
             // plan() re-runs the same resolution and reports the error.
             return Ok(());
@@ -292,6 +300,46 @@ fn ensure_xplane_plugins(repo_root: &Path) {
         Ok(_) | Err(_) => print_line(
             "X-Plane plugin build failed (see build-xplane-plugins output); \
              the session will fail closed if a required plugin is missing",
+        ),
+    }
+}
+
+/// Where the capture sidecar's content stamp lives.
+const XPLANE_CAPTURE_STAMP: &str = "target/xtask-stamps/xplane-capture.stamp";
+
+/// The working-tree inputs whose content decides capture staleness.
+const XPLANE_CAPTURE_SOURCES: [&str; 2] = ["sim/xplane/capture", "scripts/build-xplane-capture.sh"];
+
+/// Best-effort, content-stamped build of the window-capture video
+/// sidecar. Deliberately non-fatal: the camera path degrades to
+/// no-video when the sidecar is absent, so a Swift toolchain problem
+/// costs the picture, never the flight.
+fn ensure_xplane_capture(repo_root: &Path) {
+    use crate::session::preflight::stamp;
+    let exists = repo_root
+        .join("target/xplane-capture/pilotage-xplane-capture")
+        .is_file();
+    let current = stamp::source_stamp(repo_root, &XPLANE_CAPTURE_SOURCES, &[]);
+    let stamp_path = repo_root.join(XPLANE_CAPTURE_STAMP);
+    let stored = stamp::read_stamp(&stamp_path);
+    if stamp::artifact_is_fresh(exists, stored.as_deref(), current.as_deref()) {
+        return;
+    }
+    print_line("building the X-Plane window-capture sidecar...");
+    let built = std::process::Command::new("bash")
+        .arg(repo_root.join("scripts/build-xplane-capture.sh"))
+        .current_dir(repo_root)
+        .status();
+    match built {
+        Ok(status) if status.success() => {
+            if let Some(current) = current {
+                stamp::write_stamp(&stamp_path, &current);
+            }
+            print_line("X-Plane window-capture sidecar built");
+        }
+        Ok(_) | Err(_) => print_line(
+            "window-capture sidecar unavailable (see build-xplane-capture \
+             output); continuing without video",
         ),
     }
 }
