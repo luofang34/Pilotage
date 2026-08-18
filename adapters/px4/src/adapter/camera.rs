@@ -4,9 +4,10 @@
 //!
 //! - unset or `on`: Pilotage's C++ gz-transport sidecar delivers the
 //!   flight-deck rig's `/camera` and `/chase_camera` frames (px4-gz).
-//! - `window`: a window-capture sidecar (`PILOTAGE_SIM_VIDEO_BIN`)
-//!   delivers the simulator's rendered window as the FPV source — the
-//!   px4-xplane path, where the engine exposes no camera topic.
+//! - `xplane-plugin`: the in-simulator Pilotage camera plugin dials
+//!   this process and delivers the vehicle camera view (FPV or gimbal
+//!   payload) — the px4-xplane path, where the engine exposes no
+//!   camera topic and the simulator owns the producer's lifetime.
 //! - `off`: no video.
 //!
 //! Every producer speaks the same `pilotage.bridge.v1` protocol, so the
@@ -27,18 +28,25 @@ use pilotage_adapter_api::{MeasurementClock, SourceIncarnation};
 enum CameraMode {
     /// The gz-transport sidecar (FPV + chase, plus gimbal when configured).
     Gazebo,
-    /// A window-capture sidecar: one FPV source on the host clock.
-    Window,
+    /// The in-simulator camera plugin, which dials this process.
+    XPlanePlugin,
     /// No video.
     Off,
 }
+
+/// Loopback port the X-Plane camera plugin dials.
+const XPLANE_CAMERA_PORT: u16 = 45990;
+
+/// Bounded frame-channel depth: small, so a slow media consumer drops
+/// stale frames instead of growing latency.
+const FRAME_CHANNEL_DEPTH: usize = 4;
 
 /// Resolves `PILOTAGE_PX4_CAMERA` — an unknown value degrades to no
 /// video with a warning rather than inventing a producer.
 fn camera_mode() -> CameraMode {
     match std::env::var("PILOTAGE_PX4_CAMERA").as_deref() {
         Err(_) | Ok("on") => CameraMode::Gazebo,
-        Ok("window") => CameraMode::Window,
+        Ok("xplane-plugin") => CameraMode::XPlanePlugin,
         Ok("off") => CameraMode::Off,
         Ok(other) => {
             tracing::warn!(value = other, "unknown PILOTAGE_PX4_CAMERA; no video");
@@ -71,27 +79,36 @@ pub(crate) fn bridge_config(
     }
 }
 
-/// The producer binary and capture clock for `mode`; `None` means no
-/// video. The window producer's path comes from `PILOTAGE_SIM_VIDEO_BIN`
-/// (no useful in-repo default exists for a deployment-specific capture
-/// tool), and its capture stamps are host-monotonic.
+/// How a producer attaches, and the clock its capture stamps carry.
+enum Producer {
+    /// This process spawns the producer and accepts its dial-back.
+    Spawned(pilotage_sim_video::BridgeConfig, MeasurementClock),
+    /// The producer lives inside the simulator and dials this port;
+    /// its lifetime belongs to the simulator, not to the session.
+    Accepted(u16, MeasurementClock),
+}
+
+/// The producer attachment for `mode`; `None` means no video.
 fn producer_for(
     mode: CameraMode,
     gimbal: bool,
     workspace_root: &std::path::Path,
-) -> Option<(pilotage_sim_video::BridgeConfig, MeasurementClock)> {
+) -> Option<Producer> {
     match mode {
         CameraMode::Gazebo => {
             let bin = workspace_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge");
-            Some((bridge_config(gimbal, bin), MeasurementClock::Simulation))
-        }
-        CameraMode::Window => {
-            let bin = std::env::var_os("PILOTAGE_SIM_VIDEO_BIN").map(std::path::PathBuf::from)?;
-            Some((
-                pilotage_sim_video::BridgeConfig::new("window", bin),
-                MeasurementClock::HostMonotonic,
+            Some(Producer::Spawned(
+                bridge_config(gimbal, bin),
+                MeasurementClock::Simulation,
             ))
         }
+        // The plugin stamps frames with the capture host's monotonic
+        // clock: a simulator window has no clock a consumer can relate
+        // to the flight state.
+        CameraMode::XPlanePlugin => Some(Producer::Accepted(
+            XPLANE_CAMERA_PORT,
+            MeasurementClock::HostMonotonic,
+        )),
         CameraMode::Off => None,
     }
 }
@@ -111,14 +128,24 @@ pub(crate) async fn spawn_camera_bridge(
         .parent()
         .and_then(std::path::Path::parent)
         .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
-    let Some((config, clock)) = producer_for(mode, gimbal, &workspace_root) else {
-        if mode == CameraMode::Window {
-            tracing::warn!("PILOTAGE_SIM_VIDEO_BIN not set; no video");
-        }
+    let Some(producer) = producer_for(mode, gimbal, &workspace_root) else {
         return (None, None, None);
     };
     let incarnation = SourceIncarnation::new(super::rand_incarnation());
-    match pilotage_sim_video::BridgeClient::spawn_and_connect(config).await {
+    let (attached, clock) = match producer {
+        Producer::Spawned(config, clock) => (
+            pilotage_sim_video::BridgeClient::spawn_and_connect(config).await,
+            clock,
+        ),
+        Producer::Accepted(port, clock) => {
+            tracing::info!(port, "waiting for the in-simulator camera plugin");
+            (
+                pilotage_sim_video::BridgeClient::accept_producer(port, FRAME_CHANNEL_DEPTH).await,
+                clock,
+            )
+        }
+    };
+    match attached {
         Ok(mut bridge) => {
             let (tx, rx) = tokio::sync::mpsc::channel(4);
             // No correlation between the capture clock and PX4's boot
@@ -151,7 +178,7 @@ pub(crate) async fn spawn_camera_bridge(
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{CameraMode, bridge_config, producer_for};
+    use super::{CameraMode, Producer, XPLANE_CAMERA_PORT, bridge_config, producer_for};
     use pilotage_adapter_api::MeasurementClock;
 
     #[test]
@@ -170,13 +197,26 @@ mod tests {
     }
 
     #[test]
-    fn producers_declare_their_capture_clock() {
+    fn producers_declare_their_attachment_and_clock() {
         let root = std::path::Path::new("/repo");
-        let (_, clock) = producer_for(CameraMode::Gazebo, false, root).expect("gz producer");
-        assert_eq!(clock, MeasurementClock::Simulation);
-        // The window producer path depends on PILOTAGE_SIM_VIDEO_BIN, an
-        // env var tests cannot set (set_var is unsafe under edition 2024);
-        // Off must always resolve to no producer.
+        // The gz sidecar is spawned by this process and stamps frames on
+        // the simulation clock.
+        match producer_for(CameraMode::Gazebo, false, root) {
+            Some(Producer::Spawned(_, clock)) => {
+                assert_eq!(clock, MeasurementClock::Simulation);
+            }
+            other => panic!("expected a spawned gz producer, got {:?}", other.is_some()),
+        }
+        // The in-simulator plugin dials in and stamps on the host clock:
+        // a simulator window has no clock a consumer can relate to the
+        // flight state.
+        match producer_for(CameraMode::XPlanePlugin, false, root) {
+            Some(Producer::Accepted(port, clock)) => {
+                assert_eq!(port, XPLANE_CAMERA_PORT);
+                assert_eq!(clock, MeasurementClock::HostMonotonic);
+            }
+            other => panic!("expected an accepted producer, got {:?}", other.is_some()),
+        }
         assert!(producer_for(CameraMode::Off, false, root).is_none());
     }
 }

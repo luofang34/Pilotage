@@ -156,6 +156,32 @@ impl BridgeClient {
         ))
     }
 
+    /// Binds `port` on loopback and waits for a producer this process does
+    /// NOT own to dial in — the shape an in-simulator plugin needs, since
+    /// the simulator (not the host) decides when the producer exists.
+    ///
+    /// The listener is bound before the wait, so a producer that dials
+    /// during host startup connects rather than failing; a producer that
+    /// reconnects later is accepted by a subsequent call.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SimVideoError`] if the listener cannot bind or the
+    /// inbound connection cannot be accepted.
+    pub async fn accept_producer(
+        port: u16,
+        frame_channel_depth: usize,
+    ) -> Result<Self, SimVideoError> {
+        let listener = TcpListener::bind(("127.0.0.1", port))
+            .await
+            .map_err(|source| SimVideoError::ListenerBind { source })?;
+        let local_addr = listener
+            .local_addr()
+            .map_err(|source| SimVideoError::ListenerAddr { source })?;
+        let stream = Self::accept(&listener, local_addr).await?;
+        Ok(Self::from_stream(stream, None, frame_channel_depth))
+    }
+
     /// Wires the reader/writer tasks around an already-connected stream. Shared
     /// by [`Self::spawn_and_connect`] and, in tests, an in-process fake bridge.
     fn from_stream(
