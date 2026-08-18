@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use pilotage_client_session::{
-    ClientAction, ClientConfig, ClientEngine, MotionDemand, ReconnectPolicy, TransportEvent,
+    ClientAction, ClientConfig, ClientEngine, ModuleEvent, MotionDemand, ReconnectPolicy,
+    TransportEvent,
 };
 use pilotage_control_web::ControlCoordinator;
 use pilotage_protocol::wire;
@@ -21,6 +22,8 @@ use super::delivery::DeliveryQueue;
 use super::driver::{Link, LinkStats};
 use super::observer::LinkObserver;
 use super::records::LinkEvent;
+
+mod lifecycle;
 
 struct SilentObserver;
 
@@ -81,7 +84,20 @@ fn two_scope_welcome() -> wire::Envelope {
     }
 }
 
-fn admitted_link_with_two_lanes() -> Link {
+fn lease_response(scope: &str, granted: bool, generation: u64) -> wire::LeaseResponse {
+    wire::LeaseResponse {
+        vehicle: Some(wire::VehicleId { value: 1 }),
+        scope: Some(wire::ScopeId {
+            value: scope.into(),
+        }),
+        granted,
+        generation: Some(wire::Generation { value: generation }),
+        reason: i32::from(!granted),
+    }
+}
+
+/// An admitted link holding nothing yet: the observer's seat.
+fn admitted_link() -> Link {
     let mut engine = ClientEngine::new(ClientConfig {
         client_name: "routing-test".into(),
         reconnect: ReconnectPolicy::default(),
@@ -93,32 +109,11 @@ fn admitted_link_with_two_lanes() -> Link {
         )),
         0,
     );
-    for (scope, generation) in [("vehicle.motion", 4), ("vehicle.gimbal", 9)] {
-        engine.request_lease(1, scope);
-        let grant = wire::Envelope {
-            schema_version: 1,
-            payload: Some(wire::envelope::Payload::LeaseResponse(
-                wire::LeaseResponse {
-                    vehicle: Some(wire::VehicleId { value: 1 }),
-                    scope: Some(wire::ScopeId {
-                        value: scope.into(),
-                    }),
-                    granted: true,
-                    generation: Some(wire::Generation { value: generation }),
-                    reason: 0,
-                },
-            )),
-        };
-        engine.handle(
-            TransportEvent::BootstrapReceived(pilotage_protocol::encode_envelope_length_delimited(
-                &grant,
-            )),
-            0,
-        );
-    }
+    let mut control = ControlCoordinator::new();
+    control.activate_scheme(pilotage_control_web::DEFAULT_PROFILE_BYTES);
     Link {
         engine,
-        control: ControlCoordinator::new(),
+        control,
         feed: None,
         delivery: DeliveryQueue::start(Arc::new(SilentObserver)),
         started: Instant::now(),
@@ -131,7 +126,35 @@ fn admitted_link_with_two_lanes() -> Link {
         telegraph_shown: None,
         gated_ticks: 0,
         last_demand_ms: 0,
+        motion_request_pending: false,
+        motion_ask_at_ms: None,
     }
+}
+
+/// Grants one scope through both halves the driver keeps in step: the
+/// engine's lane and the runtime's authority mirror.
+fn grant(link: &mut Link, scope: &str, generation: u64) {
+    link.engine.request_lease(1, scope);
+    let envelope = wire::Envelope {
+        schema_version: 1,
+        payload: Some(wire::envelope::Payload::LeaseResponse(lease_response(
+            scope, true, generation,
+        ))),
+    };
+    link.engine.handle(
+        TransportEvent::BootstrapReceived(pilotage_protocol::encode_envelope_length_delimited(
+            &envelope,
+        )),
+        0,
+    );
+    link.emit(ModuleEvent::Lease(lease_response(scope, true, generation)));
+}
+
+fn admitted_link_with_two_lanes() -> Link {
+    let mut link = admitted_link();
+    grant(&mut link, "vehicle.motion", 4);
+    grant(&mut link, "vehicle.gimbal", 9);
+    link
 }
 
 /// The scope inside the first datagram action, or a panic that names

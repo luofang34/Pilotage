@@ -24,6 +24,12 @@ const ACTION_GIMBAL_RECENTER: i32 = 4;
 /// silence that costs the lease one second later.
 const GATED_TICKS_REPORTED: u32 = 20;
 
+/// How long one ask for control owns the press. Long enough that a
+/// thumb on the button cannot prompt a standing holder over and over,
+/// short enough that a holder who never answers costs the operator one
+/// pause rather than the rest of the session.
+const ASK_HOLDS_MS: u64 = 10_000;
+
 impl Link {
     /// Runs one raw pad sample through the shared runtime and executes
     /// the plan. The iPad has no mode picker yet; the pilot scheme is
@@ -44,13 +50,28 @@ impl Link {
             .collect();
         let mut sample = RawSample::default();
         self.control.pad_sample(axes, &raw, &mut sample);
+        self.runtime_actions(&sample)
+    }
+
+    /// Runs one tick synthesized from the held keys — the keyboard is
+    /// a device layer of the same runtime, so curves, edges, and the
+    /// quasimode apply to it unchanged.
+    pub(super) fn key_actions(&mut self) -> Vec<ClientAction> {
+        let mut sample = RawSample::default();
+        self.control.key_sample(&mut sample);
+        self.runtime_actions(&sample)
+    }
+
+    /// One canonical sample through the shared runtime and out as
+    /// engine actions, whatever device produced it.
+    fn runtime_actions(&mut self, sample: &RawSample) -> Vec<ClientAction> {
         let session = SessionState {
             now_ms: self.now_ms() as f64,
             mode: Mode::QuadPilot,
             connected: self.engine.admission().is_some(),
             input_lost: false,
         };
-        let plan = self.control.evaluate(&sample, &session);
+        let plan = self.control.evaluate(sample, &session);
         self.announce_device();
         self.execute_plan(&plan)
     }
@@ -89,26 +110,29 @@ impl Link {
             actions.extend(self.gimbal_plan_actions(vehicle_id, frame));
         }
         match plan.lease {
-            Some(LeaseAction::Request) => {
+            // The quasimode's auxiliary scope follows a HELD motion
+            // lease. An admitted observer's ticks must lease nothing:
+            // a bystander holding the gimbal is a camera nobody at the
+            // sticks can move.
+            Some(LeaseAction::Request) if self.engine.holds(vehicle_id, MOTION_SCOPE) => {
                 actions.extend(self.engine.request_lease_quiet(vehicle_id, GIMBAL_SCOPE));
             }
             Some(LeaseAction::Release) => {
                 actions.extend(self.engine.release_lease(vehicle_id, GIMBAL_SCOPE));
             }
-            None => {}
+            Some(LeaseAction::Request) | None => {}
         }
-        // A motion-lease plan only fires on a scope-member transfer,
-        // which the single built-in profile never maps; motion leases
-        // stay operator-pressed on this shell.
+        // The runtime's own motion-lease plan stays unexecuted: on this
+        // shell control is taken by a person, never by a reconnecting
+        // state machine, so acquisition rides the arm press below.
         if plan.arm {
             actions.extend(self.order_actions(true));
         }
         if plan.disarm {
-            actions.extend(self.order_actions(false));
+            actions.extend(self.standdown_actions());
         }
         if plan.arm_suppressed {
-            self.delivery
-                .event(LinkEvent::PressSuppressed { action: 1 });
+            actions.extend(self.arm_press_while_gated(vehicle_id));
         }
         if plan.disarm_suppressed {
             self.delivery
@@ -121,6 +145,116 @@ impl Link {
             });
         }
         actions
+    }
+
+    /// The shell's own ask for control, from the screen. It keeps the
+    /// press's bookkeeping, so the two doors onto one ask cannot put
+    /// two prompts in front of the same holder.
+    pub(super) fn request_lease_actions(
+        &mut self,
+        vehicle_id: u64,
+        scope: &str,
+    ) -> Vec<ClientAction> {
+        let actions = self.engine.request_lease(vehicle_id, scope);
+        if scope == MOTION_SCOPE && !actions.is_empty() {
+            self.motion_request_pending = true;
+            self.motion_ask_at_ms = Some(self.now_ms());
+        }
+        actions
+    }
+
+    /// An arm edge the runtime consumed while motion output was gated.
+    /// Without the lease this press is the operator reaching for
+    /// control, so it becomes the cooperative ask itself — one ask per
+    /// answer, later presses wait. Holding the lease while gated
+    /// (recovery in progress) keeps the loud suppression report: a
+    /// swallowed safety press that stays silent is indistinguishable
+    /// from a dead control.
+    fn arm_press_while_gated(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
+        if self.engine.holds(vehicle_id, MOTION_SCOPE) {
+            self.delivery
+                .event(LinkEvent::PressSuppressed { action: 1 });
+            return Vec::new();
+        }
+        // One ask owns the control for a while. The lease answer that
+        // escalated into a handover arrives within the round trip, so
+        // watching only the unanswered request would let every press
+        // prompt another pilot again — and watching the handover alone
+        // would cost the operator the sticks for the whole session
+        // against a holder who never answers. The ask expires instead.
+        let asking =
+            self.motion_request_pending || self.engine.takeover_pending(vehicle_id, MOTION_SCOPE);
+        let waiting = self
+            .motion_ask_at_ms
+            .is_some_and(|asked_at| self.now_ms().saturating_sub(asked_at) < ASK_HOLDS_MS);
+        if asking && waiting {
+            self.delivery
+                .event(LinkEvent::PressSuppressed { action: 1 });
+            return Vec::new();
+        }
+        let actions = self.engine.request_lease(vehicle_id, MOTION_SCOPE);
+        if actions.is_empty() {
+            // Not admitted: the press cannot become an ask, so it must
+            // still be surfaced rather than vanish.
+            self.delivery
+                .event(LinkEvent::PressSuppressed { action: 1 });
+            return actions;
+        }
+        self.motion_request_pending = true;
+        self.motion_ask_at_ms = Some(self.now_ms());
+        self.delivery.event(LinkEvent::Notice {
+            text: "asking for vehicle.motion".to_owned(),
+        });
+        actions
+    }
+
+    /// A live disarm edge. With the lever already on SAFE and the
+    /// vehicle confirmed disarmed there is nothing left to stop, so
+    /// the press means "stand down": the held scopes go back to the
+    /// host. The screen lever never lands here — a redundant tap on
+    /// SAFE is a no-op there — so only a deliberate control press
+    /// releases.
+    ///
+    /// The lever also snaps to SAFE without anyone ordering it: a
+    /// refused arm and a vehicle that drops out of arm on its own both
+    /// land there. Neither is the operator standing down, so only a
+    /// telegraph in sync with the vehicle qualifies — the two
+    /// involuntary paths carry their own phase and keep the press a
+    /// plain disarm.
+    fn standdown_actions(&mut self) -> Vec<ClientAction> {
+        let vehicle_id = self
+            .engine
+            .admission()
+            .and_then(|admission| admission.vehicles.first())
+            .map(|vehicle| vehicle.vehicle_id);
+        let settled_safe = self.telegraph.order() == ArmOrder::Safe
+            && self.telegraph.confirmed() == ArmConfirmed::Disarmed
+            && matches!(self.telegraph.phase(), TelegraphPhase::InSync);
+        if settled_safe
+            && let Some(vehicle_id) = vehicle_id
+            && self.engine.holds(vehicle_id, MOTION_SCOPE)
+        {
+            return self.release_held_actions();
+        }
+        self.order_actions(false)
+    }
+
+    /// Releasing control gives back everything held: the motion lane
+    /// and the gimbal lane the runtime leased alongside it.
+    pub(super) fn release_held_actions(&mut self) -> Vec<ClientAction> {
+        match self
+            .engine
+            .admission()
+            .and_then(|admission| admission.vehicles.first())
+            .map(|vehicle| vehicle.vehicle_id)
+        {
+            Some(vehicle_id) => {
+                let mut actions = self.engine.release_lease(vehicle_id, MOTION_SCOPE);
+                actions.extend(self.engine.release_lease(vehicle_id, GIMBAL_SCOPE));
+                actions
+            }
+            None => Vec::new(),
+        }
     }
 
     /// The plan's motion frame through the typed velocity path — the

@@ -57,6 +57,12 @@ pub(crate) enum LinkCommand {
     SelectPad {
         id: String,
     },
+    KeyEvent {
+        key: String,
+        pressed: bool,
+    },
+    ClearKeys,
+    KeySample,
     Takeover {
         vehicle_id: u64,
         scope: String,
@@ -186,6 +192,29 @@ impl LinkSession {
     /// Resolves a connected pad against the layered profile registry.
     pub fn select_pad(&self, id: String) {
         self.commands.send(LinkCommand::SelectPad { id }).ok();
+    }
+
+    /// Records one hardware-keyboard transition. `key` is the canonical
+    /// `KeyboardEvent.key` value with single letters lower-cased — the
+    /// convention the shared keyboard profile speaks, so the same
+    /// bindings drive the browser and this shell.
+    pub fn key_event(&self, key: String, pressed: bool) {
+        self.commands
+            .send(LinkCommand::KeyEvent { key, pressed })
+            .ok();
+    }
+
+    /// Drops every held key (a text field took focus, the scene left
+    /// the foreground, or the keyboard detached), so a key released
+    /// out of sight cannot keep flying the vehicle.
+    pub fn clear_keys(&self) {
+        self.commands.send(LinkCommand::ClearKeys).ok();
+    }
+
+    /// Runs one control tick synthesized from the held keys through
+    /// the same shared runtime the pad sample rides.
+    pub fn send_key_sample(&self) {
+        self.commands.send(LinkCommand::KeySample).ok();
     }
 
     /// Stops the driver and the connection.

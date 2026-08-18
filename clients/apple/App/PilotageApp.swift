@@ -7,7 +7,7 @@ import SwiftUI
 struct PilotageApp: App {
     init() {
         #if DEBUG
-        HostLinkModel.startFootprintProbe()
+        FootprintProbe.start()
         #endif
     }
 

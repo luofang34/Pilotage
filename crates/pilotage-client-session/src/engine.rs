@@ -222,6 +222,17 @@ impl ClientEngine {
         ))]
     }
 
+    /// Whether a handover for this scope is still in flight: the ask
+    /// reached a standing holder and no answer has come back. A shell
+    /// that repeats the ask on every press would prompt that holder
+    /// again for each one.
+    #[must_use]
+    pub fn takeover_pending(&self, vehicle_id: u64, scope: &str) -> bool {
+        self.pending_takeover
+            .as_ref()
+            .is_some_and(|(vehicle, pending)| *vehicle == vehicle_id && pending == scope)
+    }
+
     /// Offers the named held scope to another principal — the holder's
     /// half of a cooperative handover. Without that lane there is
     /// nothing to offer.
@@ -407,6 +418,13 @@ impl ClientEngine {
                 let mut actions = self.on_transfer_progress(&event, principal);
                 actions.push(ClientAction::Emit(ModuleEvent::Authority(event)));
                 actions
+            }
+            // The recovery ack must reach the shell's authority mirror:
+            // a regrant after any holder loss stays in neutral
+            // activation until this confirmation arrives, so dropping
+            // it here leaves live output gated forever.
+            Some(wire::envelope::Payload::LinkLossCleared(cleared)) => {
+                vec![ClientAction::Emit(ModuleEvent::LinkLossCleared(cleared))]
             }
             _ => Vec::new(),
         }
