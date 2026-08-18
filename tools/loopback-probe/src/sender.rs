@@ -265,8 +265,8 @@ fn handle_event(
             }
             fold_telemetry(&observation, state, metrics);
         }
-        ReceiverEvent::FrameRejected(_) => {
-            metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+        ReceiverEvent::FrameRejected(rejected) => {
+            metrics.note_rejection(&rejected.reason);
         }
         ReceiverEvent::Pong { pong, received_at } => {
             let rtt = estimated_age(received_at, pong.echoed_sender_sent_at, ZERO_OFFSET);

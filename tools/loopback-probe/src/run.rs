@@ -197,7 +197,7 @@ async fn wait_for_rejection(
         };
         match tokio::time::timeout(remaining, events_rx.recv()).await {
             Ok(Some(ReceiverEvent::FrameRejected(rejected))) => {
-                metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+                metrics.note_rejection(&rejected.reason);
                 if rejected.sequence == sequence {
                     return true;
                 }
@@ -241,8 +241,8 @@ fn drain_pending_events(
                     metrics.last_pose = observation.pose;
                 }
             }
-            ReceiverEvent::FrameRejected(_) => {
-                metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+            ReceiverEvent::FrameRejected(rejected) => {
+                metrics.note_rejection(&rejected.reason);
             }
             ReceiverEvent::VideoFrame { source_id, jpeg } => {
                 fold_video_frame(source_id, &jpeg, video, &mut last_video_at);
