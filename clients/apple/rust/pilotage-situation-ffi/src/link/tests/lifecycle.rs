@@ -160,6 +160,28 @@ fn a_press_while_a_handover_is_pending_does_not_ask_the_holder_again() {
     );
 }
 
+/// A holder who never answers must cost the operator one pause, not
+/// the session: the ask expires and a later press asks again.
+#[test]
+fn an_unanswered_handover_lets_the_sticks_ask_again_later() {
+    let mut link = admitted_link();
+    link.control.select_device("gamepad");
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let _ = pad_tick(&mut link, [0.0; 4], &[9]);
+    let _ = deliver(&mut link, &lease_envelope("vehicle.motion", false, 5));
+    // The holder says nothing at all; the ask ages out.
+    link.motion_ask_at_ms = Some(0);
+    link.started = Instant::now() - std::time::Duration::from_secs(30);
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let again = pad_tick(&mut link, [0.0; 4], &[9]);
+    assert_eq!(
+        bootstrap_payloads(&again),
+        vec!["lease-request"],
+        "an ask nobody answered must not lock the sticks out for good"
+    );
+}
+
 /// Standing down must leave a way back from the sticks. The runtime
 /// gates on its OWN mirror of authority: a release it never hears
 /// leaves output "live", so the next press takes the send path, dies

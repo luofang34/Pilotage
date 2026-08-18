@@ -70,6 +70,21 @@ impl ClientEngine {
         ))]
     }
 
+    /// Drops a pending ask this scope's outcome has settled. An ask
+    /// that outlives the handover it belongs to is a shell told to keep
+    /// waiting for an answer that can no longer come.
+    fn clear_pending_takeover(&mut self, vehicle: u64, scope: &str) {
+        if self
+            .pending_takeover
+            .as_ref()
+            .is_some_and(|(pending_vehicle, pending_scope)| {
+                *pending_vehicle == vehicle && pending_scope == scope
+            })
+        {
+            self.pending_takeover = None;
+        }
+    }
+
     /// Accepts the offer that answers this engine's own pending ask, and
     /// no other.
     fn on_transfer_offered(
@@ -130,6 +145,7 @@ impl ClientEngine {
         } else if self.lanes.remove(&(vehicle, scope.clone())).is_some() {
             // Authority moved away from this lane: it is gone, and
             // saying so beats a stream of fenced rejections.
+            self.clear_pending_takeover(vehicle, &scope);
             actions.push(ClientAction::Emit(ModuleEvent::Lease(
                 wire::LeaseResponse {
                     vehicle: Some(wire::VehicleId { value: vehicle }),

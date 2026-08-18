@@ -24,6 +24,12 @@ const ACTION_GIMBAL_RECENTER: i32 = 4;
 /// silence that costs the lease one second later.
 const GATED_TICKS_REPORTED: u32 = 20;
 
+/// How long one ask for control owns the press. Long enough that a
+/// thumb on the button cannot prompt a standing holder over and over,
+/// short enough that a holder who never answers costs the operator one
+/// pause rather than the rest of the session.
+const ASK_HOLDS_MS: u64 = 10_000;
+
 impl Link {
     /// Runs one raw pad sample through the shared runtime and executes
     /// the plan. The iPad has no mode picker yet; the pilot scheme is
@@ -149,15 +155,23 @@ impl Link {
     /// swallowed safety press that stays silent is indistinguishable
     /// from a dead control.
     fn arm_press_while_gated(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
-        // A standing holder is asked once. The lease answer that
-        // escalated into the handover arrives within the round trip, so
-        // the in-flight ask — not the unanswered request — is what a
-        // further press must wait on; otherwise every press prompts
-        // another pilot again.
-        if self.engine.holds(vehicle_id, MOTION_SCOPE)
-            || self.motion_request_pending
-            || self.engine.takeover_pending(vehicle_id, MOTION_SCOPE)
-        {
+        if self.engine.holds(vehicle_id, MOTION_SCOPE) {
+            self.delivery
+                .event(LinkEvent::PressSuppressed { action: 1 });
+            return Vec::new();
+        }
+        // One ask owns the control for a while. The lease answer that
+        // escalated into a handover arrives within the round trip, so
+        // watching only the unanswered request would let every press
+        // prompt another pilot again — and watching the handover alone
+        // would cost the operator the sticks for the whole session
+        // against a holder who never answers. The ask expires instead.
+        let asking =
+            self.motion_request_pending || self.engine.takeover_pending(vehicle_id, MOTION_SCOPE);
+        let waiting = self
+            .motion_ask_at_ms
+            .is_some_and(|asked_at| self.now_ms().saturating_sub(asked_at) < ASK_HOLDS_MS);
+        if asking && waiting {
             self.delivery
                 .event(LinkEvent::PressSuppressed { action: 1 });
             return Vec::new();
@@ -171,6 +185,7 @@ impl Link {
             return actions;
         }
         self.motion_request_pending = true;
+        self.motion_ask_at_ms = Some(self.now_ms());
         self.delivery.event(LinkEvent::Notice {
             text: "asking for vehicle.motion".to_owned(),
         });

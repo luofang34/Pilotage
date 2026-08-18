@@ -56,6 +56,9 @@ pub(super) struct Link {
     /// presses wait for the host's answer instead of re-asking the
     /// holder on every edge.
     pub(super) motion_request_pending: bool,
+    /// When that ask left, on the link clock. An ask nobody answers
+    /// expires, so the sticks are never locked out for good.
+    pub(super) motion_ask_at_ms: Option<u64>,
 }
 
 /// One second of link accounting, reset on report.
@@ -171,6 +174,7 @@ pub(crate) async fn run(
         gated_ticks: 0,
         last_demand_ms: 0,
         motion_request_pending: false,
+        motion_ask_at_ms: None,
     };
     loop {
         match connect(&config, pinned).await {
