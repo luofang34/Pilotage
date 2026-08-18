@@ -6,10 +6,11 @@
 
 use std::path::PathBuf;
 
-use super::{
-    Airframe, Px4XPlane, airframe_for, command_datagram, set_active_config_name,
-    validate_xplane_install, xplane_root_from,
+use super::super::xplane_simulator::{
+    Airframe, airframe_for, command_datagram, set_active_config_name, validate_xplane_install,
+    xplane_root_from,
 };
+use super::Px4XPlane;
 use crate::backend::{SessionContext, SimBackend};
 use crate::cli::Profile;
 use crate::error::XtaskError;

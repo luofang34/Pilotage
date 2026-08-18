@@ -184,7 +184,8 @@ commands:
       tear it down on ctrl-c.
 
       --fc <name>          FC backend: aviate-gz (alias aviate, default),
-                           px4-gz (alias px4), or px4-xplane
+                           px4-gz (alias px4), px4-xplane, or
+                           aviate-xplane
       --profile <profile>  physical | simulation (default) | oracle-only
       --port <port>        host WebTransport port (default: 4433)
       --viewer-port <port> static viewer port (default: 8080)

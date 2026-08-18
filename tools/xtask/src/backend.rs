@@ -11,8 +11,10 @@ use crate::process::ProcessSpec;
 use crate::readiness::Readiness;
 
 pub(crate) mod aviate_gz;
+mod aviate_xplane;
 pub(crate) mod px4_gz;
 mod px4_xplane;
+mod xplane_simulator;
 
 /// Everything a backend may need to plan its stages.
 #[derive(Debug)]
@@ -95,6 +97,7 @@ pub fn backend_for(name: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
         "aviate-gz" | "aviate" => Ok(Box::new(aviate_gz::AviateGz)),
         "px4-gz" | "px4" => Ok(Box::new(px4_gz::Px4Gz)),
         "px4-xplane" => Ok(Box::new(px4_xplane::Px4XPlane)),
+        "aviate-xplane" => Ok(Box::new(aviate_xplane::AviateXPlane)),
         _ => Err(XtaskError::UnknownBackend {
             name: name.to_owned(),
         }),
@@ -116,6 +119,10 @@ mod tests {
         assert_eq!(
             backend_for("px4-xplane").expect("known").name(),
             "px4-xplane"
+        );
+        assert_eq!(
+            backend_for("aviate-xplane").expect("known").name(),
+            "aviate-xplane"
         );
         let refusal = backend_for("px4-jsbsim");
         assert!(matches!(refusal, Err(XtaskError::UnknownBackend { .. })));
