@@ -122,6 +122,7 @@ struct PreviewWaypoint: Identifiable {
 /// performance, and upload), and it says so.
 struct MissionPlannerBar: View {
     @ObservedObject var model: HostLinkModel
+    @ObservedObject var plan: MissionPlanModel
     @State private var planPresented = false
 
     var body: some View {
@@ -133,11 +134,13 @@ struct MissionPlannerBar: View {
                     .foregroundStyle(.cyan)
                 // Collapsed, the bar answers the glance questions only:
                 // where from, where to, how far, how long.
-                Text("KTTN → KJFK")
+                Text(plan.summary.endpoints)
                     .font(.body.monospaced().weight(.semibold))
-                Text("41 NM · 0+22")
+                    .lineLimit(1)
+                Text(plan.summary.detail)
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
                 Text("Preview")
                     .font(.caption2.weight(.semibold))
@@ -162,7 +165,10 @@ struct MissionPlannerBar: View {
         .animation(.easeInOut(duration: 0.15), value: planPresented)
         .sheet(isPresented: $planPresented) {
             NavigationStack {
-                MissionPlannerView(controllable: model.catalog?.offersFlightControl == true)
+                MissionPlannerView(
+                    controllable: model.catalog?.offersFlightControl == true,
+                    plan: plan
+                )
                     .navigationTitle("Mission Planner")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {

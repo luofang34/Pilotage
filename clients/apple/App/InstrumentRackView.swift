@@ -71,14 +71,18 @@ struct InstrumentRackView: View {
                     // The tiles fit the MEASURED area: the width column
                     // estimate can drift without ever clipping a panel
                     // or leaving a dead band under the bar.
+                    // The promoted tile lives on the primary surface; the
+                    // column must not mount a second copy — one video
+                    // source owns exactly one layer slot.
+                    let shown = profile.tiles.filter { $0.id != primaryTileId }
                     let aspects = Self.aspectSum(for: profile, model: model)
-                    let gaps = CGFloat(max(profile.tiles.count - 1, 0)) * 8
+                    let gaps = CGFloat(max(shown.count - 1, 0)) * 8
                     let fitted = aspects > 0
                         ? min(proxy.size.width, (proxy.size.height - gaps) / aspects)
                         : proxy.size.width
                     ScrollView {
                         VStack(spacing: 8) {
-                            ForEach(Array(profile.tiles.enumerated()), id: \.offset) { _, tile in
+                            ForEach(Array(shown.enumerated()), id: \.offset) { _, tile in
                                 tileView(tile, width: fitted)
                             }
                         }

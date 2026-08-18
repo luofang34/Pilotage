@@ -91,14 +91,17 @@ extension LinkCatalog {
     /// Whether this host commands a flight computer, rather than only
     /// accepting a plan: some scope advertises a typed motion intent.
     /// The FCU exists exactly when this holds.
+    /// The `pilotage.v1.IntentFamily` codes that command the VEHICLE:
+    /// velocity, position-hold, attitude-thrust, and body-rate. The
+    /// gimbal family moves a camera, and zero is the unspecified
+    /// sentinel; neither makes a host controllable.
+    private static let vehicleCommandFamilies: ClosedRange<Int32> = 1...4
+
     var offersFlightControl: Bool {
         vehicles.contains { vehicle in
             vehicle.scopes.contains { scope in
                 scope.intents.contains { intent in
-                    // Velocity, position-hold, attitude-thrust, and
-                    // body-rate are command families; a gimbal-only
-                    // advertisement moves a camera, not the vehicle.
-                    (1...4).contains(intent.family)
+                    Self.vehicleCommandFamilies.contains(intent.family)
                 }
             }
         }

@@ -6,15 +6,34 @@ import UniformTypeIdentifiers
 /// log, in a page-wide sheet. Everything is a preview — the editor
 /// accepts tokens and the log shows the standard columns, but nothing
 /// reaches a vehicle and the exporter is a door not yet opened.
+/// The one working route, owned above every planner face so the
+/// column, the sheet, and the pill all speak about the same plan.
+final class MissionPlanModel: ObservableObject {
+    @Published var tokens: [RouteToken] = RouteToken.sample
+
+    /// The glance summary: where from, where to, how many in between.
+    var summary: (endpoints: String, detail: String) {
+        guard let first = tokens.first else {
+            return ("No route", "")
+        }
+        let last = tokens.last?.label ?? ""
+        let between = max(tokens.count - 2, 0)
+        return (
+            tokens.count == 1 ? first.label : "\(first.label) → \(last)",
+            between > 0 ? "\(between) between · 41 NM · 0+22" : "41 NM · 0+22"
+        )
+    }
+}
+
 struct MissionPlannerView: View {
     /// Whether the connected host commands a flight computer directly.
     /// Direct control executes a mission itself; a panel-style host
     /// (a Garmin navigator) exchanges plans instead.
     let controllable: Bool
+    /// The shared plan every planner face edits.
+    @ObservedObject var plan: MissionPlanModel
     /// Which face is up: the editor or the log.
     @State private var page: Page = .edit
-    /// The working route tokens; typing appends, deletion removes.
-    @State private var tokens: [RouteToken] = RouteToken.sample
     /// The in-progress token entry.
     @State private var entry = ""
 
@@ -78,7 +97,7 @@ struct MissionPlannerView: View {
                     // same flowing line, like words in a sentence —
                     // typing continues where the route ends, and a chip
                     // drags to its new place in the order.
-                    RouteWorkspace(tokens: $tokens, entry: $entry)
+                    RouteWorkspace(tokens: $plan.tokens, entry: $entry)
                     Divider()
                     HStack(spacing: 0) {
                         metric("DIST", "41 nm")
@@ -218,7 +237,7 @@ private struct RouteWorkspace: View {
     /// admit hand-typed coordinate points. Everything else — spaces,
     /// accents, any non-ASCII — never enters the field.
     private static let identifierAlphabet = Set(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./°'\"+-\u{200B}"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./°'\"+- \u{200B}"
     )
 
     @FocusState private var entryFocused: Bool
@@ -265,9 +284,12 @@ private struct RouteWorkspace: View {
                 .onAppear {
                     if entry.isEmpty { entry = Self.sentinel }
                 }
-                .onChange(of: entry) { _, value in
+                .onChange(of: entry) { previous, value in
                     if value.isEmpty {
-                        if !tokens.isEmpty {
+                        // Only the backspace that ate the sentinel means
+                        // "delete the last chip"; clearing typed text
+                        // (select-all, cut) only empties the field.
+                        if previous == Self.sentinel, !tokens.isEmpty {
                             withAnimation { tokens.removeLast() }
                         }
                         entry = Self.sentinel
@@ -369,100 +391,5 @@ private struct WaypointChipMenu: View {
                 .padding(.vertical, 10)
         }
         .disabled(true)
-    }
-}
-
-/// Reorders the dragged chip as it passes over its neighbors, the
-/// standard flowing drag-to-reorder choreography.
-private struct ChipReorderDelegate: DropDelegate {
-    let target: RouteToken.ID
-    @Binding var tokens: [RouteToken]
-    @Binding var dragged: RouteToken.ID?
-
-    func dropEntered(info: DropInfo) {
-        guard let dragged,
-              dragged != target,
-              let from = tokens.firstIndex(where: { $0.id == dragged }),
-              let to = tokens.firstIndex(where: { $0.id == target })
-        else { return }
-        withAnimation {
-            tokens.move(
-                fromOffsets: IndexSet(integer: from),
-                toOffset: to > from ? to + 1 : to
-            )
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        dragged = nil
-        return true
-    }
-}
-
-/// Ends the drag when the drop lands on the workspace but not on a
-/// chip, so nothing is left half-lifted.
-private struct ChipDropEndDelegate: DropDelegate {
-    @Binding var dragged: RouteToken.ID?
-
-    func performDrop(info: DropInfo) -> Bool {
-        dragged = nil
-        return true
-    }
-}
-
-/// A minimal wrapping layout: rows fill left to right and break where
-/// the width ends, like words in a paragraph.
-private struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) -> CGSize {
-        arrange(proposal: proposal, subviews: subviews).size
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) {
-        let arrangement = arrange(proposal: proposal, subviews: subviews)
-        for (subview, position) in zip(subviews, arrangement.positions) {
-            subview.place(
-                at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y),
-                proposal: .unspecified
-            )
-        }
-    }
-
-    private func arrange(
-        proposal: ProposedViewSize,
-        subviews: Subviews
-    ) -> (positions: [CGPoint], size: CGSize) {
-        let limit = proposal.width ?? .infinity
-        var positions: [CGPoint] = []
-        var cursor = CGPoint.zero
-        var rowHeight: CGFloat = 0
-        var width: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if cursor.x > 0, cursor.x + size.width > limit {
-                cursor.x = 0
-                cursor.y += rowHeight + spacing
-                rowHeight = 0
-            }
-            positions.append(cursor)
-            cursor.x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-            width = max(width, cursor.x - spacing)
-        }
-        return (positions, CGSize(width: width, height: cursor.y + rowHeight))
     }
 }
