@@ -205,3 +205,40 @@ fn the_view_returns_forward_after_aiming_stops() {
         "the producer still renders the payload until it is told otherwise"
     );
 }
+
+#[test]
+fn a_held_lease_is_not_an_aim() {
+    use pilotage_protocol::{ControlAction, ControlIntent, GimbalRateIntent};
+
+    use super::demands_payload_view;
+
+    // A client streams every scope it holds, so a neutral frame arrives
+    // ~30 times a second for as long as the operator holds the lease.
+    // Reading that as aiming would select the payload view once and
+    // never release it, leaving the forward feed dark for the session.
+    let neutral = GimbalRateIntent {
+        pitch_rate: 0.0,
+        yaw_rate: 0.0,
+    };
+    assert!(!demands_payload_view(
+        &[],
+        Some(ControlIntent::GimbalRate(neutral))
+    ));
+    assert!(!demands_payload_view(&[], None));
+
+    let moving = GimbalRateIntent {
+        pitch_rate: 0.0,
+        yaw_rate: -0.4,
+    };
+    assert!(demands_payload_view(
+        &[],
+        Some(ControlIntent::GimbalRate(moving))
+    ));
+    // A discrete press is a demand even with the stick centered:
+    // recentering or stepping a detent is something to look at.
+    assert!(demands_payload_view(
+        &[ControlAction::GimbalRecenter],
+        Some(ControlIntent::GimbalRate(neutral))
+    ));
+    assert!(demands_payload_view(&[ControlAction::CameraZoomIn], None));
+}

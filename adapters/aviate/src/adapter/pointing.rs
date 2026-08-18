@@ -218,6 +218,29 @@ fn sanitize(value: f32, limit: f32) -> (f32, bool) {
     (clamped, (clamped - value).abs() > f32::EPSILON)
 }
 
+/// Whether one frame is the operator ASKING for the payload view.
+///
+/// A client streams its held scopes every tick, so the arrival of a
+/// gimbal frame says only that the lease is held. Treating that as
+/// aiming selects the payload once and never gives the forward view
+/// back — the quasimode would have no release. A demand is a nonzero
+/// rate or a discrete action; a neutral frame is the operator holding
+/// the control without moving it.
+fn demands_payload_view(
+    actions: &[pilotage_protocol::ControlAction],
+    intent: Option<pilotage_protocol::ControlIntent>,
+) -> bool {
+    if !actions.is_empty() {
+        return true;
+    }
+    match intent {
+        Some(pilotage_protocol::ControlIntent::GimbalRate(rate)) => {
+            rate.pitch_rate != 0.0 || rate.yaw_rate != 0.0
+        }
+        _ => false,
+    }
+}
+
 /// Enacts the gimbal scope's discrete actions, one explicit result per
 /// action: a press is answered, never silently dropped (CTRL-01).
 fn process_pointing_actions(
@@ -296,9 +319,9 @@ impl super::AviateAdapter {
             return super::rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        // Any command on this scope selects the payload view; it
-        // reverts to the forward view once aiming stops.
-        pointing.aim();
+        if demands_payload_view(&frame.actions, frame.intent) {
+            pointing.aim();
+        }
         let action_results = process_pointing_actions(&frame.actions, pointing);
 
         let mut constrained = false;
