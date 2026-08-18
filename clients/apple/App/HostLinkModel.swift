@@ -357,9 +357,8 @@ final class HostLinkModel: ObservableObject {
             // An unleased arm press asks for control on its own, so a
             // suppressed one means the ask is already in flight or the
             // motion path is still recovering.
-            status = action == 1
-                ? "arm press ignored — control is not live yet"
-                : "disarm press ignored — nothing is held"
+            let control = action == 1 ? "arm" : "disarm"
+            status = "\(control) press ignored — control is not live yet"
         case .gimbalCapture(let active):
             gimbalCaptured = active
         case .notice(let text):
@@ -532,18 +531,19 @@ final class HostLinkModel: ObservableObject {
             print("harness demand: tick \(demandTicks) held=\(leaseHeld) climb=\(climb)")
         }
         #endif
-        if climb > 0 {
-            link?.sendMotion(roll: 0, pitch: 0, throttle: climb, yaw: 0)
-            return
-        }
         guard let pad = GCController.controllers()
             .compactMap(\.extendedGamepad)
             .first
         else {
-            // No pad: the held keys drive the same runtime — and with
-            // nothing held, this is the neutral tick that keeps a held
-            // lease alive.
-            link?.sendKeySample()
+            // No pad: the held keys drive the same runtime, exactly as
+            // the browser falls back to its keyboard profile. With
+            // nothing held this is the neutral tick that keeps a held
+            // lease alive; the harness climb overrides it.
+            if climb > 0 {
+                link?.sendMotion(roll: 0, pitch: 0, throttle: climb, yaw: 0)
+            } else {
+                link?.sendKeySample()
+            }
             return
         }
         // The raw sample in Standard Gamepad terms; every mapping,

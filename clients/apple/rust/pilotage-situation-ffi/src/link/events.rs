@@ -122,6 +122,27 @@ impl Link {
         }
     }
 
+    /// A confirmed release, into the mirror before the shell. The
+    /// runtime gates output on its own mirror of authority: a release
+    /// the mirror never hears leaves it reporting a granted, recovered
+    /// lease, so output stays "live" and a press takes the send path
+    /// instead of the ask path — dying with no lane to ride, and
+    /// leaving no way back from the sticks.
+    fn emit_lease_released(&mut self, released: &wire::LeaseReleased) {
+        let scope = released
+            .scope
+            .as_ref()
+            .map(|s| s.value.clone())
+            .unwrap_or_default();
+        let generation = released.generation.as_ref().map_or(0, |g| g.value);
+        self.mirror_authority(&scope, AuthorityEvent::LeaseReleased { generation });
+        self.delivery.event(LinkEvent::LeaseChanged {
+            held: false,
+            scope,
+            detail: "released".to_owned(),
+        });
+    }
+
     /// The host's recovery ack into the runtime's authority mirror:
     /// regranted live output stays gated behind this signal (the
     /// browser resumes on the same one). It must be the admitted
@@ -149,7 +170,10 @@ impl Link {
         match event {
             ModuleEvent::Admitted(admission) => {
                 // A fresh admission is a fresh transport session for the
-                // runtime's mirror and the telegraph alike.
+                // runtime's mirror and the telegraph alike. Any ask the
+                // last session left in flight is void with it, so the
+                // sticks may ask again.
+                self.motion_request_pending = false;
                 self.control.begin_session();
                 self.telegraph.reset();
                 self.publish_telegraph();
@@ -168,18 +192,7 @@ impl Link {
             }
             ModuleEvent::Telemetry(sample) => self.emit_telemetry(&sample),
             ModuleEvent::Lease(response) => self.emit_lease(&response),
-            ModuleEvent::LeaseReleased(released) => {
-                let scope = released
-                    .scope
-                    .as_ref()
-                    .map(|s| s.value.clone())
-                    .unwrap_or_default();
-                self.delivery.event(LinkEvent::LeaseChanged {
-                    held: false,
-                    scope,
-                    detail: "released".to_owned(),
-                });
-            }
+            ModuleEvent::LeaseReleased(released) => self.emit_lease_released(&released),
             ModuleEvent::ControlRejected(rejected) => self.emit_rejection(&rejected),
             ModuleEvent::ConnectionDown { retry_at_ms } => {
                 self.motion_request_pending = false;

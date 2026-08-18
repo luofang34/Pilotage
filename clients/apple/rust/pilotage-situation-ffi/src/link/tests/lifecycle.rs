@@ -3,6 +3,8 @@
 //! cooperative ask; a regrant resumes live output only on the host's
 //! recovery ack; held keys ride the pad's own runtime and lanes.
 
+use pilotage_control_web::ArmOrder;
+
 use super::*;
 
 /// One pad tick in Standard Gamepad terms: sixteen buttons, the named
@@ -38,10 +40,41 @@ fn bootstrap_payloads(actions: &[ClientAction]) -> Vec<&'static str> {
                 Some(wire::envelope::Payload::LeaseRequest(_)) => "lease-request",
                 Some(wire::envelope::Payload::LeaseRelease(_)) => "lease-release",
                 Some(wire::envelope::Payload::ControlActionCommand(_)) => "action",
+                Some(wire::envelope::Payload::ScopeTransferRequest(_)) => "transfer-request",
                 _ => "other",
             })
         })
         .collect()
+}
+
+/// Feeds one reliable envelope to the engine and routes the module
+/// events it answers with into the shell, exactly as the driver does.
+/// Tests that skip this step prove only what the shell believes, not
+/// what the engine actually did.
+fn deliver(link: &mut Link, envelope: &wire::Envelope) -> Vec<ClientAction> {
+    let actions = link.engine.handle(
+        TransportEvent::BootstrapReceived(pilotage_protocol::encode_envelope_length_delimited(
+            envelope,
+        )),
+        0,
+    );
+    let mut rest = Vec::new();
+    for action in actions {
+        match action {
+            ClientAction::Emit(event) => link.emit(event),
+            other => rest.push(other),
+        }
+    }
+    rest
+}
+
+fn lease_envelope(scope: &str, granted: bool, generation: u64) -> wire::Envelope {
+    wire::Envelope {
+        schema_version: 1,
+        payload: Some(wire::envelope::Payload::LeaseResponse(lease_response(
+            scope, granted, generation,
+        ))),
+    }
 }
 
 /// An admitted observer's ticks must lease nothing and send nothing:
@@ -98,9 +131,96 @@ fn an_arm_press_without_the_lease_becomes_one_cooperative_ask() {
     );
 }
 
+/// The ask that reached a standing holder is asked ONCE. The lease
+/// answer that escalated it arrives within the round trip and re-arms
+/// the press, so a shell that watches only its own unanswered request
+/// prompts the other pilot again for every press.
+#[test]
+fn a_press_while_a_handover_is_pending_does_not_ask_the_holder_again() {
+    let mut link = admitted_link();
+    link.control.select_device("gamepad");
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let ask = pad_tick(&mut link, [0.0; 4], &[9]);
+    assert_eq!(bootstrap_payloads(&ask), vec!["lease-request"]);
+    // The host answers that another operator holds it; the engine
+    // turns the ask into the handover request on its own.
+    let escalation = deliver(&mut link, &lease_envelope("vehicle.motion", false, 5));
+    assert_eq!(
+        bootstrap_payloads(&escalation),
+        vec!["transfer-request"],
+        "the denial escalates into one ask to the holder"
+    );
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let again = pad_tick(&mut link, [0.0; 4], &[9]);
+    assert!(
+        bootstrap_payloads(&again).is_empty(),
+        "a further press must not prompt the holder a second time, got {:?}",
+        bootstrap_payloads(&again)
+    );
+}
+
+/// Standing down must leave a way back from the sticks. The runtime
+/// gates on its OWN mirror of authority: a release it never hears
+/// leaves output "live", so the next press takes the send path, dies
+/// with no lane to ride, and answers nothing at all.
+#[test]
+fn the_sticks_can_take_control_again_after_standing_down() {
+    let mut link = admitted_link_with_two_lanes();
+    link.telegraph.on_fc_arm_state(1);
+    link.control.select_device("gamepad");
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let standdown = pad_tick(&mut link, [0.0; 4], &[8]);
+    assert_eq!(
+        bootstrap_payloads(&standdown),
+        vec!["lease-release", "lease-release"]
+    );
+    // The host confirms both releases.
+    for scope in ["vehicle.motion", "vehicle.gimbal"] {
+        link.emit(ModuleEvent::LeaseReleased(wire::LeaseReleased {
+            vehicle: Some(wire::VehicleId { value: 1 }),
+            scope: Some(wire::ScopeId {
+                value: scope.into(),
+            }),
+            released: true,
+            generation: Some(wire::Generation { value: 11 }),
+        }));
+    }
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let retake = pad_tick(&mut link, [0.0; 4], &[9]);
+    assert_eq!(
+        bootstrap_payloads(&retake),
+        vec!["lease-request"],
+        "the arm press must ask for control again, got {:?}",
+        bootstrap_payloads(&retake)
+    );
+}
+
+/// A vehicle that drops out of arm on its own snaps the lever to SAFE
+/// without anyone ordering it. That is not the operator standing down,
+/// so the press stays a plain disarm and control is kept.
+#[test]
+fn an_uncommanded_disarm_does_not_hand_back_control() {
+    let mut link = admitted_link_with_two_lanes();
+    link.telegraph.set_order(ArmOrder::Armed);
+    link.telegraph.on_fc_arm_state(2);
+    // The vehicle leaves arm by itself: lever snaps to SAFE, dropped.
+    link.telegraph.on_fc_arm_state(1);
+    link.control.select_device("gamepad");
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let press = pad_tick(&mut link, [0.0; 4], &[8]);
+    assert!(
+        !bootstrap_payloads(&press).contains(&"lease-release"),
+        "an involuntary SAFE must not stand down control, got {:?}",
+        bootstrap_payloads(&press)
+    );
+}
+
 /// Denial fences the mirror; the regrant must walk neutral activation
-/// and resume live only on the host's cleared ack — the browser's own
-/// recovery contract, which this shell once dropped on the floor.
+/// and resume live only on the host's cleared ack — the recovery
+/// contract the browser has always honoured.
 #[test]
 fn a_regrant_after_denial_recovers_through_the_cleared_ack() {
     let mut link = admitted_link();

@@ -47,6 +47,23 @@ final class KeyboardControlMonitor {
         ) { [weak self] _ in
             Task { @MainActor in self?.onClear?() }
         }
+        // A field taking focus is itself the release: a key held at
+        // that moment sends no further event, so waiting for one would
+        // leave it commanding the vehicle for as long as the operator
+        // types.
+        for began in [
+            UITextField.textDidBeginEditingNotification,
+            UITextView.textDidBeginEditingNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                forName: began, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.typing = true
+                    self?.onClear?()
+                }
+            }
+        }
     }
 
     private func attach(_ keyboard: GCKeyboard) {

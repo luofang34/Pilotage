@@ -149,7 +149,15 @@ impl Link {
     /// swallowed safety press that stays silent is indistinguishable
     /// from a dead control.
     fn arm_press_while_gated(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
-        if self.engine.holds(vehicle_id, MOTION_SCOPE) || self.motion_request_pending {
+        // A standing holder is asked once. The lease answer that
+        // escalated into the handover arrives within the round trip, so
+        // the in-flight ask — not the unanswered request — is what a
+        // further press must wait on; otherwise every press prompts
+        // another pilot again.
+        if self.engine.holds(vehicle_id, MOTION_SCOPE)
+            || self.motion_request_pending
+            || self.engine.takeover_pending(vehicle_id, MOTION_SCOPE)
+        {
             self.delivery
                 .event(LinkEvent::PressSuppressed { action: 1 });
             return Vec::new();
@@ -175,6 +183,13 @@ impl Link {
     /// host. The screen lever never lands here — a redundant tap on
     /// SAFE is a no-op there — so only a deliberate control press
     /// releases.
+    ///
+    /// The lever also snaps to SAFE without anyone ordering it: a
+    /// refused arm and a vehicle that drops out of arm on its own both
+    /// land there. Neither is the operator standing down, so only a
+    /// telegraph in sync with the vehicle qualifies — the two
+    /// involuntary paths carry their own phase and keep the press a
+    /// plain disarm.
     fn standdown_actions(&mut self) -> Vec<ClientAction> {
         let vehicle_id = self
             .engine
@@ -182,7 +197,8 @@ impl Link {
             .and_then(|admission| admission.vehicles.first())
             .map(|vehicle| vehicle.vehicle_id);
         let settled_safe = self.telegraph.order() == ArmOrder::Safe
-            && self.telegraph.confirmed() == ArmConfirmed::Disarmed;
+            && self.telegraph.confirmed() == ArmConfirmed::Disarmed
+            && matches!(self.telegraph.phase(), TelegraphPhase::InSync);
         if settled_safe
             && let Some(vehicle_id) = vehicle_id
             && self.engine.holds(vehicle_id, MOTION_SCOPE)
