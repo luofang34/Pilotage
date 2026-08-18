@@ -40,6 +40,38 @@ fn a_scope_without_a_gimbal_advertisement_gets_no_intent() {
     assert!(gimbal_rate_intent(1.0, 1.0, None).is_none());
 }
 
+/// The recovery ack must reach the module layer: a shell that never
+/// hears it keeps regranted live output gated forever, so dropping
+/// the envelope here is a dead-stick bug wearing a clean log.
+#[test]
+fn the_recovery_ack_is_forwarded_to_the_modules() {
+    let mut engine = engine();
+    let cleared = wire::LinkLossCleared {
+        vehicle: Some(wire::VehicleId { value: 1 }),
+        scope: Some(wire::ScopeId {
+            value: "vehicle.motion".into(),
+        }),
+        generation: Some(wire::Generation { value: 6 }),
+    };
+    let envelope = wire::Envelope {
+        schema_version: 1,
+        payload: Some(wire::envelope::Payload::LinkLossCleared(cleared.clone())),
+    };
+    let bytes = pilotage_protocol::encode_envelope_length_delimited(&envelope);
+    engine.handle(TransportEvent::UniStreamOpened(StreamId(9)), 0);
+    let mut tagged = vec![0x01];
+    tagged.extend_from_slice(&bytes);
+    let actions = engine.handle(TransportEvent::UniStreamReceived(StreamId(9), tagged), 0);
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
+            ClientAction::Emit(ModuleEvent::LinkLossCleared(forwarded))
+                if *forwarded == cleared
+        )),
+        "the cleared ack must surface as a module event, got {actions:?}"
+    );
+}
+
 /// Feeds one authority event through the session-events stream.
 fn authority_event(
     engine: &mut ClientEngine,

@@ -408,6 +408,13 @@ impl ClientEngine {
                 actions.push(ClientAction::Emit(ModuleEvent::Authority(event)));
                 actions
             }
+            // The recovery ack must reach the shell's authority mirror:
+            // a regrant after any holder loss stays in neutral
+            // activation until this confirmation arrives, so dropping
+            // it here leaves live output gated forever.
+            Some(wire::envelope::Payload::LinkLossCleared(cleared)) => {
+                vec![ClientAction::Emit(ModuleEvent::LinkLossCleared(cleared))]
+            }
             _ => Vec::new(),
         }
     }

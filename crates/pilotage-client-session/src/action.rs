@@ -42,6 +42,9 @@ pub enum ModuleEvent {
     LeaseReleased(wire::LeaseReleased),
     /// The host rejected a control frame. Fencing feedback, not noise.
     ControlRejected(wire::FrameRejected),
+    /// The host confirmed a scope's link-loss recovery: the vehicle's
+    /// brake is off this generation, so gated live output may resume.
+    LinkLossCleared(wire::LinkLossCleared),
     /// The host answered a discrete control action.
     ActionResult(wire::ControlActionResult),
     /// The host echoed a ping.
