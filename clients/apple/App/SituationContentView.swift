@@ -70,7 +70,9 @@ struct SituationContentView: View {
     }
 
     /// The panel collapse in Apple's own idiom: one floating glass
-    /// circle whose arrows point the way the layout will move.
+    /// circle whose arrows say what pressing does to the MAP — outward
+    /// when it would take the whole window, inward when it would give
+    /// the columns back. The tile focus control speaks the same way.
     private var columnsToggle: some View {
         Button {
             withAnimation {
@@ -78,8 +80,8 @@ struct SituationContentView: View {
             }
         } label: {
             Image(systemName: columnVisibility == .detailOnly
-                ? "arrow.up.left.and.arrow.down.right"
-                : "arrow.down.right.and.arrow.up.left")
+                ? "arrow.down.right.and.arrow.up.left"
+                : "arrow.up.left.and.arrow.down.right")
                 .font(Metrics.controlGlyph)
                 .frame(width: Metrics.control, height: Metrics.control)
                 .glassEffect(.regular, in: Circle())
@@ -164,10 +166,6 @@ struct SituationContentView: View {
             // Each floating control is placed against the safe area by the same rule, so
             // none of them sits at a different distance from an edge than the others.
             ZStack {
-                if let flight = model.replayingFlight {
-                    ReplayBannerView(flight: flight, stop: model.stopReplay)
-                        .mapControlPlacement(.topLeading)
-                }
                 MapControlsView(
                     camera: camera,
                     ownship: ownship.fix,
@@ -194,6 +192,9 @@ struct SituationContentView: View {
                 // strip centers in what remains.
                 HStack(spacing: 12) {
                     columnsToggle
+                    if let flight = model.replayingFlight {
+                        ReplayBannerView(flight: flight, stop: model.stopReplay)
+                    }
                     Spacer(minLength: 12)
                     if fcuShown, hostLink.catalog?.offersFlightControl == true {
                         FlightControlUnit { withAnimation { fcuShown = false } }
