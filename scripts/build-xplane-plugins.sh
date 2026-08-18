@@ -110,9 +110,17 @@ for CONFIG in "${PLUGINS}/px4xplane/64/config.ini" "${XPLANE_ROOT}/config.ini"; 
   if [[ -n "${ACTIVE_CONFIG}" ]]; then
     sed -i '' "s/^config_name.*/${ACTIVE_CONFIG}/" "${CONFIG}"
   fi
+  # The bridge holds each sensor sample until the flight controller
+  # answers it, and allows itself only a slice of each simulator frame
+  # to drain the samples that frame produced. The stock 200 Hz assumes a
+  # simulator running near 50 fps; a desktop X-Plane rendering a live
+  # payload view runs far slower, so the queue outgrows the drain and
+  # the bridge drops the link. 100 Hz is above the resampler's own
+  # ~66 Hz interpolation floor and halves what each frame must drain.
   sed -i '' \
     -e 's/^hil_sensor_feedback_timeout_ms.*/hil_sensor_feedback_timeout_ms = 5000/' \
     -e 's/^hil_sensor_feedback_startup_timeout_ms.*/hil_sensor_feedback_startup_timeout_ms = 60000/' \
+    -e 's/^mavlink_sensor_rate_hz.*/mavlink_sensor_rate_hz = 100/' \
     "${CONFIG}"
 done
 
