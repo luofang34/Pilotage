@@ -12,7 +12,7 @@ use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, MotionDemand, ProfileIdentity, ReconnectPolicy,
     StreamId, TransportEvent,
 };
-use pilotage_control_web::{ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES, MOTION_SCOPE};
+use pilotage_control_web::{ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES};
 use pilotage_instrument_feed::InstrumentFeed;
 use tokio::sync::mpsc;
 use wtransport::{ClientConfig as WtClientConfig, Connection, Endpoint};
@@ -324,13 +324,7 @@ async fn handle_command(
 ) -> bool {
     let actions = match command {
         Some(LinkCommand::RequestLease { vehicle_id, scope }) => {
-            let actions = link.engine.request_lease(vehicle_id, &scope);
-            // The screen and the sticks make ONE ask: a press must not
-            // send a second one to a holder already deciding on this.
-            if scope == MOTION_SCOPE && !actions.is_empty() {
-                link.motion_request_pending = true;
-            }
-            actions
+            link.request_lease_actions(vehicle_id, &scope)
         }
         Some(LinkCommand::ReleaseLease) => link.release_held_actions(),
         Some(LinkCommand::Motion {

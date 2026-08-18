@@ -147,6 +147,22 @@ impl Link {
         actions
     }
 
+    /// The shell's own ask for control, from the screen. It keeps the
+    /// press's bookkeeping, so the two doors onto one ask cannot put
+    /// two prompts in front of the same holder.
+    pub(super) fn request_lease_actions(
+        &mut self,
+        vehicle_id: u64,
+        scope: &str,
+    ) -> Vec<ClientAction> {
+        let actions = self.engine.request_lease(vehicle_id, scope);
+        if scope == MOTION_SCOPE && !actions.is_empty() {
+            self.motion_request_pending = true;
+            self.motion_ask_at_ms = Some(self.now_ms());
+        }
+        actions
+    }
+
     /// An arm edge the runtime consumed while motion output was gated.
     /// Without the lease this press is the operator reaching for
     /// control, so it becomes the cooperative ask itself — one ask per

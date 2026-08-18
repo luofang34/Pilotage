@@ -27,6 +27,20 @@ impl ClientEngine {
             Some(wire::authority_event::Event::ScopeLeaseRevoked(revoked)) => {
                 self.on_scope_freed(revoked)
             }
+            // The offer's time ran out and the scope stayed where it
+            // was: nothing is pending any more, so a later ask is a
+            // fresh one rather than a wait for an answer that will
+            // never come.
+            Some(wire::authority_event::Event::ScopeTransferExpired(expired)) => {
+                let vehicle = expired.vehicle.as_ref().map_or(0, |v| v.value);
+                let scope = expired
+                    .scope
+                    .as_ref()
+                    .map(|s| s.value.clone())
+                    .unwrap_or_default();
+                self.clear_pending_takeover(vehicle, &scope);
+                Vec::new()
+            }
             _ => Vec::new(),
         }
     }
@@ -142,19 +156,22 @@ impl ClientEngine {
                     },
                 )));
             }
-        } else if self.lanes.remove(&(vehicle, scope.clone())).is_some() {
-            // Authority moved away from this lane: it is gone, and
-            // saying so beats a stream of fenced rejections.
+        } else {
+            // The scope went to someone else. Whatever this engine was
+            // waiting for is settled either way, and only a lane it
+            // actually held is worth reporting as lost.
             self.clear_pending_takeover(vehicle, &scope);
-            actions.push(ClientAction::Emit(ModuleEvent::Lease(
-                wire::LeaseResponse {
-                    vehicle: Some(wire::VehicleId { value: vehicle }),
-                    scope: Some(wire::ScopeId { value: scope }),
-                    granted: false,
-                    generation: Some(wire::Generation { value: generation }),
-                    reason: 1,
-                },
-            )));
+            if self.lanes.remove(&(vehicle, scope.clone())).is_some() {
+                actions.push(ClientAction::Emit(ModuleEvent::Lease(
+                    wire::LeaseResponse {
+                        vehicle: Some(wire::VehicleId { value: vehicle }),
+                        scope: Some(wire::ScopeId { value: scope }),
+                        granted: false,
+                        generation: Some(wire::Generation { value: generation }),
+                        reason: 1,
+                    },
+                )));
+            }
         }
         actions
     }

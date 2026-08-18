@@ -161,7 +161,9 @@ fn a_press_while_a_handover_is_pending_does_not_ask_the_holder_again() {
 }
 
 /// A holder who never answers must cost the operator one pause, not
-/// the session: the ask expires and a later press asks again.
+/// the session: the ask expires and a later press asks again. Only the
+/// clock moves here — the ask itself is the one the press really made,
+/// so a shell that stopped timing its asks fails this.
 #[test]
 fn an_unanswered_handover_lets_the_sticks_ask_again_later() {
     let mut link = admitted_link();
@@ -171,14 +173,34 @@ fn an_unanswered_handover_lets_the_sticks_ask_again_later() {
     let _ = pad_tick(&mut link, [0.0; 4], &[9]);
     let _ = deliver(&mut link, &lease_envelope("vehicle.motion", false, 5));
     // The holder says nothing at all; the ask ages out.
-    link.motion_ask_at_ms = Some(0);
-    link.started = Instant::now() - std::time::Duration::from_secs(30);
+    link.started -= std::time::Duration::from_secs(30);
     let _ = pad_tick(&mut link, [0.0; 4], &[]);
     let again = pad_tick(&mut link, [0.0; 4], &[9]);
     assert_eq!(
         bootstrap_payloads(&again),
         vec!["lease-request"],
         "an ask nobody answered must not lock the sticks out for good"
+    );
+}
+
+/// The screen and the sticks are two doors onto one ask. A press that
+/// follows the button must not put a second prompt in front of the
+/// holder for the same operator intent.
+#[test]
+fn a_press_after_the_screen_asked_does_not_ask_the_holder_again() {
+    let mut link = admitted_link();
+    link.control.select_device("gamepad");
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    let _ = pad_tick(&mut link, [0.0; 4], &[]);
+    // The operator taps "Request control" on the screen — the same
+    // path the driver runs for that command.
+    let screen = link.request_lease_actions(1, "vehicle.motion");
+    assert_eq!(bootstrap_payloads(&screen), vec!["lease-request"]);
+    let press = pad_tick(&mut link, [0.0; 4], &[9]);
+    assert!(
+        bootstrap_payloads(&press).is_empty(),
+        "the press must defer to the ask the screen already made, got {:?}",
+        bootstrap_payloads(&press)
     );
 }
 
