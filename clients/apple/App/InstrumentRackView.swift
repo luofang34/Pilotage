@@ -31,9 +31,9 @@ struct InstrumentRackView: View {
     static let videoSources = ["gimbal", "fpv", "chase"]
 
     /// The stack's total height per point of width: each tile's own
-    /// height-over-width, summed.
-    static func aspectSum(for profile: InstrumentProfile, model: HostLinkModel) -> CGFloat {
-        profile.tiles.reduce(CGFloat(0)) { sum, tile in
+    /// height-over-width, summed over the tiles that actually render.
+    static func aspectSum(of tiles: [InstrumentTile], model: HostLinkModel) -> CGFloat {
+        tiles.reduce(CGFloat(0)) { sum, tile in
             switch tile {
             case .video:
                 return sum + 9.0 / 16.0
@@ -61,7 +61,11 @@ struct InstrumentRackView: View {
                     .lineLimit(2)
             }
             GeometryReader { proxy in
-                if let focused = profile.tiles.first(where: { $0.id == focusedTileId }) {
+                // The promoted tile is on the primary surface; neither
+                // rack branch may mount a second copy of it.
+                if let focused = profile.tiles.first(where: {
+                    $0.id == focusedTileId && $0.id != primaryTileId
+                }) {
                     VStack {
                         Spacer(minLength: 0)
                         tileView(focused, width: proxy.size.width)
@@ -75,7 +79,7 @@ struct InstrumentRackView: View {
                     // column must not mount a second copy — one video
                     // source owns exactly one layer slot.
                     let shown = profile.tiles.filter { $0.id != primaryTileId }
-                    let aspects = Self.aspectSum(for: profile, model: model)
+                    let aspects = Self.aspectSum(of: shown, model: model)
                     let gaps = CGFloat(max(shown.count - 1, 0)) * 8
                     let fitted = aspects > 0
                         ? min(proxy.size.width, (proxy.size.height - gaps) / aspects)
@@ -208,6 +212,9 @@ struct InstrumentRackView: View {
                     Button {
                         withAnimation {
                             primaryTileId = primaryTileId == tile.id ? "" : tile.id
+                            // A tile cannot be focused here and promoted
+                            // there at once.
+                            if focusedTileId == tile.id { focusedTileId = nil }
                         }
                     } label: {
                         Image(systemName: "rectangle.2.swap")

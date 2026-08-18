@@ -26,7 +26,7 @@ struct SituationMenuView: View {
         NavigationStack {
             List {
                 receptionSection
-                    flightsSection
+                flightsSection
                 if let message = model.errorMessage {
                     Section("Problems") {
                         Text(message).font(.footnote)

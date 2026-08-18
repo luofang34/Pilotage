@@ -2,10 +2,6 @@ import PilotageCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The mission planner's full face: the route editor and the navigation
-/// log, in a page-wide sheet. Everything is a preview — the editor
-/// accepts tokens and the log shows the standard columns, but nothing
-/// reaches a vehicle and the exporter is a door not yet opened.
 /// The one working route, owned above every planner face so the
 /// column, the sheet, and the pill all speak about the same plan.
 final class MissionPlanModel: ObservableObject {
@@ -25,6 +21,10 @@ final class MissionPlanModel: ObservableObject {
     }
 }
 
+/// The mission planner's full face: the route editor and the navigation
+/// log, in a page-wide sheet. Everything is a preview — the editor
+/// accepts tokens and the log shows the standard columns, but nothing
+/// reaches a vehicle and the exporter is a door not yet opened.
 struct MissionPlannerView: View {
     /// Whether the connected host commands a flight computer directly.
     /// Direct control executes a mission itself; a panel-style host
