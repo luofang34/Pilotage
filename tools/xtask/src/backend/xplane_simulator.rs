@@ -200,6 +200,48 @@ pub(super) fn ensure_xplane_plugins(repo_root: &Path) {
 /// Points the installed px4xplane config at the selected airframe's
 /// channel map. Best-effort: a missing config fails closed later, at
 /// connect time, inside the plugin.
+/// Sets the bridge's ground-stationary sensor contract on or off.
+///
+/// The contract fabricates zero-motion sensors while the vehicle sits
+/// still — a crutch PX4's EKF wants on a jittery simulator floor.
+/// Aviate's estimator must see REAL sensors from boot to touchdown: the
+/// fabricated-to-live handoff at liftoff is a step change in every
+/// channel at the worst possible moment, and a missing measurement is
+/// the client's to display as missing, never to paper over. Each
+/// backend states its choice at prepare time, so lane switches cannot
+/// inherit the other flight controller's crutch.
+pub(super) fn set_ground_sensor_contract(root: &Path, enabled: bool) {
+    let value = if enabled { "true" } else { "false" };
+    for config in [
+        root.join("Resources/plugins/px4xplane/64/config.ini"),
+        root.join("config.ini"),
+    ] {
+        let Ok(content) = std::fs::read_to_string(&config) else {
+            continue;
+        };
+        let rewritten: String = content
+            .lines()
+            .map(|line| {
+                let key = line.trim_start();
+                if key.starts_with("ground_stationary_accel_guard_enabled") {
+                    format!("ground_stationary_accel_guard_enabled = {value}")
+                } else if key.starts_with("ground_stationary_kinematics_guard_enabled") {
+                    format!("ground_stationary_kinematics_guard_enabled = {value}")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("
+")
+            + "
+";
+        if rewritten != content && std::fs::write(&config, rewritten).is_err() {
+            print_line("could not update the px4xplane ground-contract keys; check config.ini");
+        }
+    }
+}
+
 pub(super) fn set_active_config_name(root: &Path, airframe: &Airframe) {
     for config in [
         root.join("Resources/plugins/px4xplane/64/config.ini"),

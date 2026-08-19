@@ -18,7 +18,7 @@ use std::path::Path;
 
 use super::xplane_simulator::{
     Airframe, ensure_xplane_plugins, launch_xplane, selected_airframe, send_xplane_command,
-    set_active_config_name, validate_xplane_install, xplane_root, xplane_running,
+    set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root, xplane_running,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
@@ -92,6 +92,9 @@ impl SimBackend for Px4XPlane {
             return Ok(());
         };
         set_active_config_name(&root, airframe);
+        // PX4's EKF wants the bridge's ground-stationary contract; the
+        // aviate lane turns it off, so this lane must turn it back on.
+        set_ground_sensor_contract(&root, true);
         if xplane_running() {
             // A running X-Plane never inherits the autoflight
             // environment; arm the SITL listener directly. The command

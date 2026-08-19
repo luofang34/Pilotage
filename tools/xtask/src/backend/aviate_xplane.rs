@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 
 use super::xplane_simulator::{
     airframe_for, ensure_xplane_plugins, launch_xplane, send_xplane_command,
-    set_active_config_name, validate_xplane_install, xplane_root, xplane_running,
+    set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root,
+    xplane_running,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
@@ -29,7 +30,13 @@ use crate::readiness::{Readiness, stage_log};
 const APP_BINARY: &str = "target/debug/sitl-xplane-alia250";
 
 /// The px4xplane airframe whose channel map matches that application.
+/// `PILOTAGE_XPLANE_AIRFRAME` overrides it, so a tuning session can fly
+/// the same four-rotor channel map on a different simulator aircraft.
 const AIRFRAME: &str = "alia250";
+
+fn airframe_key() -> String {
+    std::env::var("PILOTAGE_XPLANE_AIRFRAME").unwrap_or_else(|_| AIRFRAME.to_owned())
+}
 
 /// The Aviate + X-Plane SITL backend.
 #[derive(Debug)]
@@ -75,7 +82,7 @@ impl SimBackend for AviateXPlane {
                 ),
             });
         }
-        let airframe = airframe_for(Some(AIRFRAME))?;
+        let airframe = airframe_for(Some(&airframe_key()))?;
         let root = xplane_root()?;
         validate_xplane_install(&root, airframe)?;
         let aviate = aviate_dir(&ctx.repo_root);
@@ -113,13 +120,17 @@ impl SimBackend for AviateXPlane {
         // The airframe the flight controller mixes decides which channel
         // map the bridge must load, so this backend PINS it rather than
         // trusting whatever the last session left behind.
-        let Ok(airframe) = airframe_for(Some(AIRFRAME)) else {
+        let Ok(airframe) = airframe_for(Some(&airframe_key())) else {
             return Ok(());
         };
         let Ok(root) = xplane_root() else {
             return Ok(());
         };
         set_active_config_name(&root, airframe);
+        // Aviate's estimator consumes REAL sensors from boot to
+        // touchdown; the bridge's fabricated ground-stationary contract
+        // is a PX4-specific crutch this lane refuses.
+        set_ground_sensor_contract(&root, false);
         if xplane_running() {
             print_line("X-Plane is already running; arming the SITL listener...");
             send_xplane_command("px4xplane/connect");
