@@ -26,7 +26,10 @@ pub use error::LinkError;
 use estimator::EstimatorStatusUpdate;
 pub use outbound::{GimbalRateDemand, OutboundCommand};
 use outbound::{send_gimbal_rate, send_outbound_command};
-pub use updates::{AttitudeUpdate, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate};
+pub use updates::{
+    AttitudeUpdate, BaroUpdate, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate,
+    SimTruthUpdate, TruthOrigin,
+};
 
 /// Which message carries the estimator authorization for cached numeric
 /// groups.
@@ -177,6 +180,13 @@ pub struct LinkState {
     pub kinematics: Option<KinematicsUpdate>,
     /// Latest accepted lossless estimator authorization report.
     pub estimator_status: Option<EstimatorStatusUpdate>,
+    /// Latest accepted static-pressure acquisition.
+    pub baro: Option<BaroUpdate>,
+    /// Latest simulator ground-truth report (SITL only). Cached outside
+    /// the estimate measurement discipline like the gimbal report.
+    pub sim_truth: Option<SimTruthUpdate>,
+    /// Origin the truth stream projects against, latched on its first fix.
+    pub truth_origin: Option<TruthOrigin>,
     /// Latest gimbal-device orientation report. Cached outside the
     /// estimate measurement discipline: it is payload-device status,
     /// never an input to vehicle state or control validation.
@@ -236,6 +246,9 @@ impl Default for LinkState {
             attitude: None,
             kinematics: None,
             estimator_status: None,
+            baro: None,
+            sim_truth: None,
+            truth_origin: None,
             gimbal_device: None,
             last_command_ack: None,
             gimbal_configure_ack: None,

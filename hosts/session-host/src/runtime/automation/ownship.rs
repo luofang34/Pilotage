@@ -169,6 +169,8 @@ mod tests {
     fn stamped_kinematics(role: wire::SourceRole) -> wire::TelemetrySample {
         wire::TelemetrySample {
             avionics: Some(wire::AvionicsState {
+            baro_alt_m: 0.0,
+            baro_stamp: None,
                 pos_n_m: 1.0,
                 pos_e_m: 2.0,
                 pos_d_m: -3.0,

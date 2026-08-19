@@ -27,6 +27,8 @@ fn wire_sample(sequence: u32, yaw_rad: f64) -> wire::TelemetrySample {
     let half = yaw_rad / 2.0;
     #[allow(clippy::cast_possible_truncation, deprecated)]
     let avionics = wire::AvionicsState {
+            baro_alt_m: 0.0,
+            baro_stamp: None,
         quat_w: half.cos() as f32,
         quat_x: 0.0,
         quat_y: 0.0,

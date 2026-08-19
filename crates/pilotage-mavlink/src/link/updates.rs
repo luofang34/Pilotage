@@ -26,6 +26,60 @@ pub struct AttitudeUpdate {
     pub received_at: Instant,
 }
 
+/// One accepted static-pressure acquisition, stamped like every other
+/// measurement group.
+#[derive(Debug, Clone, Copy)]
+pub struct BaroUpdate {
+    /// Pressure altitude against the ISA standard datum, meters. It
+    /// approximates true altitude only after a local pressure
+    /// correction; the display must say which it shows.
+    pub pressure_alt_m: f32,
+    /// Absolute pressure, hectopascals, as measured.
+    pub press_abs_hpa: f32,
+    /// Milliseconds since FC boot.
+    pub time_boot_ms: u32,
+    /// Identity and acquisition stamp for this group update.
+    pub stamp: MeasurementStamp,
+    /// When this update was received.
+    pub received_at: Instant,
+}
+
+/// The simulator's ground-truth report, cached OUTSIDE the estimate
+/// measurement discipline: truth is an oracle for judging estimates,
+/// never an estimate itself, and it must not be able to influence the
+/// estimate groups' epoch machinery.
+#[derive(Debug, Clone, Copy)]
+pub struct SimTruthUpdate {
+    /// Attitude quaternion (w, x, y, z), body FRD → world NED.
+    pub quat_wxyz: [f32; 4],
+    /// True NED position, meters, against the origin latched from the
+    /// first truth fix of this link.
+    pub pos_ned_m: [f32; 3],
+    /// True NED velocity, m/s.
+    pub vel_ned_mps: [f32; 3],
+    /// Microseconds on the simulation clock.
+    pub time_usec: u64,
+    /// Wrapping publication sequence for the truth stream.
+    pub sequence: u32,
+    /// When this update was received.
+    pub received_at: Instant,
+}
+
+/// The latched geodetic origin for truth projection: latched once per
+/// link so the frame cannot teleport mid-session, with the longitude
+/// scale held at the origin latitude.
+#[derive(Debug, Clone, Copy)]
+pub struct TruthOrigin {
+    /// Origin latitude, degrees·1e7 as the wire carries it.
+    pub lat_1e7: i32,
+    /// Origin longitude, degrees·1e7.
+    pub lon_1e7: i32,
+    /// Origin altitude, millimeters.
+    pub alt_mm: i32,
+    /// Meters per degree of longitude at the origin latitude.
+    pub lon_scale: f64,
+}
+
 /// One kinematics update with its receive stamp.
 #[derive(Debug, Clone, Copy)]
 pub struct KinematicsUpdate {

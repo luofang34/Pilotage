@@ -130,6 +130,8 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         attitude_stamp: attitude.map(|group| measurement_stamp_to_wire(group.stamp)),
         kinematics_stamp: kinematics.map(|group| measurement_stamp_to_wire(group.stamp)),
         estimator_status_stamp: sample.estimator_status_stamp.map(measurement_stamp_to_wire),
+        baro_alt_m: sample.baro.map_or(0.0, |group| group.pressure_alt_m),
+        baro_stamp: sample.baro.map(|group| measurement_stamp_to_wire(group.stamp)),
     }
 }
 

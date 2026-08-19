@@ -27,6 +27,11 @@ pub const HEARTBEAT_ID: u32 = 0;
 pub const ATTITUDE_QUATERNION_ID: u32 = 31;
 /// LOCAL_POSITION_NED message id.
 pub const LOCAL_POSITION_NED_ID: u32 = 32;
+/// SCALED_PRESSURE: the static source's absolute pressure.
+pub const SCALED_PRESSURE_ID: u32 = 29;
+/// HIL_STATE_QUATERNION: simulator ground truth, forwarded by a SITL
+/// flight controller beside its estimates. Never sent by a real vehicle.
+pub const HIL_STATE_QUATERNION_ID: u32 = 115;
 /// COMMAND_ACK message id (arm/disarm feedback).
 pub const COMMAND_ACK_ID: u32 = 77;
 /// Standard ESTIMATOR_STATUS message id.
@@ -66,6 +71,28 @@ pub enum FcMessage {
         quat_wxyz: [f32; 4],
         /// Body rates (roll, pitch, yaw) in radians/second.
         rates_rps: [f32; 3],
+    },
+    /// Static pressure sample, from which pressure altitude derives.
+    ScaledPressure {
+        /// Milliseconds since FC boot.
+        time_boot_ms: u32,
+        /// Absolute pressure, hectopascals.
+        press_abs_hpa: f32,
+        /// Temperature, centidegrees Celsius.
+        temperature_cdeg: i16,
+    },
+    /// Simulator ground truth (SITL only): attitude, position, velocity
+    /// as the simulation oracle reports them.
+    SimTruth {
+        /// Microseconds on the simulation clock.
+        time_usec: u64,
+        /// Attitude quaternion (w, x, y, z), body FRD → world NED.
+        quat_wxyz: [f32; 4],
+        /// True NED velocity, m/s.
+        vel_ned_mps: [f32; 3],
+        /// True geodetic position: latitude/longitude in degrees·1e7,
+        /// altitude in millimeters.
+        lat_lon_alt: [i32; 3],
     },
     /// NED position/velocity estimate (4 Hz).
     LocalPositionNed {
@@ -162,6 +189,8 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         HEARTBEAT_ID => Some(50),
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
+        SCALED_PRESSURE_ID => Some(115),
+        HIL_STATE_QUATERNION_ID => Some(4),
         COMMAND_ACK_ID => Some(143),
         ESTIMATOR_STATUS_ID => Some(163),
         AVIATE_ESTIMATOR_STATUS_ID => Some(171),

@@ -55,6 +55,8 @@ pub struct AvionicsSample {
     pub attitude: Option<AvionicsAttitudeSample>,
     /// Position/velocity group, or `None` when it was not supplied.
     pub kinematics: Option<AvionicsKinematicsSample>,
+    /// Barometric group, or `None` when it was not supplied.
+    pub baro: Option<AvionicsBaroSample>,
     /// Identity and acquisition time of the estimator status observation
     /// backing the effective authorization, or `None` when no explicit
     /// authorization was supplied.
@@ -69,6 +71,18 @@ pub struct AvionicsSample {
     /// observation and is meaningful only when
     /// [`Self::estimator_status_stamp`] is present.
     pub quality: u32,
+}
+
+/// The barometric group of one avionics publication: pressure altitude
+/// against the ISA standard datum. It approximates true altitude only
+/// after a local pressure correction, and the display must label which
+/// it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AvionicsBaroSample {
+    /// Pressure altitude, meters, standard datum (1013.25 hPa).
+    pub pressure_alt_m: f32,
+    /// Identity and acquisition stamp for this group update.
+    pub stamp: MeasurementStamp,
 }
 
 /// One coherent simulator ground-truth sample: a simulation oracle for

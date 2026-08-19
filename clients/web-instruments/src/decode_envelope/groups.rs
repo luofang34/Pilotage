@@ -55,6 +55,10 @@ pub(super) struct Avionics {
     attitude_stamp: Option<Stamp>,
     kinematics_stamp: Option<Stamp>,
     estimator_status_stamp: Option<Stamp>,
+    /// Pressure altitude (ISA standard datum), meters; `None` without
+    /// its stamp — an absent measurement is never a zero reading.
+    baro_alt_m: Option<f32>,
+    baro_stamp: Option<Stamp>,
 }
 
 /// Simulation-truth oracle sample in the browser's shape: the simulator's
@@ -201,6 +205,7 @@ pub(super) fn avionics_message(state: wire::AvionicsState) -> Avionics {
     let attitude_stamp = state.attitude_stamp.map(stamp_message);
     let kinematics_stamp = state.kinematics_stamp.map(stamp_message);
     let estimator_status_stamp = state.estimator_status_stamp.map(stamp_message);
+    let baro_stamp = state.baro_stamp.map(stamp_message);
     // A group's values are meaningful only when its acquisition stamp is
     // present; absent that, the group is null, never proto3 zero displayed as a
     // measurement (ADR-0018).
@@ -222,6 +227,8 @@ pub(super) fn avionics_message(state: wire::AvionicsState) -> Avionics {
         rates: attitude.map(|attitude| attitude.rates),
         pos_ned: kinematics.map(|kinematics| kinematics.pos_ned),
         vel_ned: kinematics.map(|kinematics| kinematics.vel_ned),
+        baro_alt_m: baro_stamp.as_ref().map(|_| state.baro_alt_m),
+        baro_stamp,
         attitude,
         kinematics,
         valid_flags: state.valid_flags,

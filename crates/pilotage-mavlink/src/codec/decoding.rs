@@ -2,8 +2,7 @@
 
 use super::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, COMMAND_ACK_ID, ESTIMATOR_STATUS_ID,
-    FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, HEARTBEAT_ID, LOCAL_POSITION_NED_ID,
-};
+    FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, HEARTBEAT_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID, HIL_STATE_QUATERNION_ID,};
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
     let mut bytes = [0_u8; 4];
@@ -65,6 +64,34 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
                 f32_at(payload, 20),
                 f32_at(payload, 24),
                 f32_at(payload, 28),
+            ],
+        }),
+        SCALED_PRESSURE_ID => Some(FcMessage::ScaledPressure {
+            time_boot_ms: u32_at(payload, 0),
+            press_abs_hpa: f32_at(payload, 4),
+            temperature_cdeg: u16_at(payload, 12) as i16,
+        }),
+        // HIL_STATE_QUATERNION wire order (64-bit first, then arrays,
+        // then 32-bit, then 16-bit): time_usec @0, q[4] @8..24,
+        // roll/pitch/yawspeed @24..36, lat/lon/alt @36..48,
+        // vx/vy/vz i16 cm/s @48..54, then acceleration fields.
+        HIL_STATE_QUATERNION_ID => Some(FcMessage::SimTruth {
+            time_usec: u64_at(payload, 0),
+            quat_wxyz: [
+                f32_at(payload, 8),
+                f32_at(payload, 12),
+                f32_at(payload, 16),
+                f32_at(payload, 20),
+            ],
+            vel_ned_mps: [
+                f32::from(u16_at(payload, 48) as i16) / 100.0,
+                f32::from(u16_at(payload, 50) as i16) / 100.0,
+                f32::from(u16_at(payload, 52) as i16) / 100.0,
+            ],
+            lat_lon_alt: [
+                u32_at(payload, 36) as i32,
+                u32_at(payload, 40) as i32,
+                u32_at(payload, 44) as i32,
             ],
         }),
         LOCAL_POSITION_NED_ID => Some(FcMessage::LocalPositionNed {
