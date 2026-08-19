@@ -173,10 +173,12 @@ pub fn parse_listening(line: &str) -> Option<(u16, String)> {
 
 /// The pinned viewer URL for a ready session. `autoconnect=1` tells the
 /// viewer to connect on load — the URL already pins host, port, and
-/// certificate, so a Connect click would add nothing.
-pub fn viewer_url(viewer_port: u16, host_port: u16, cert: &str) -> String {
+/// certificate, so a Connect click would add nothing. `host` is the
+/// address the CLIENT reaches this machine at: loopback for the local
+/// browser, the LAN address for a tablet on the same network.
+pub fn viewer_url(host: &str, viewer_port: u16, host_port: u16, cert: &str) -> String {
     format!(
-        "http://127.0.0.1:{viewer_port}/index.html?host=127.0.0.1&port={host_port}&cert={cert}&autoconnect=1"
+        "http://{host}:{viewer_port}/index.html?host={host}&port={host_port}&cert={cert}&autoconnect=1"
     )
 }
 
@@ -225,9 +227,23 @@ mod tests {
     fn viewer_url_pins_host_port_certificate_and_autoconnect() {
         let cert = "0f".repeat(32);
         assert_eq!(
-            viewer_url(8080, 4433, &cert),
+            viewer_url("127.0.0.1", 8080, 4433, &cert),
             format!(
                 "http://127.0.0.1:8080/index.html?host=127.0.0.1&port=4433&cert={cert}&autoconnect=1"
+            )
+        );
+    }
+
+    #[test]
+    fn viewer_url_reaches_the_session_from_another_device() {
+        // The LAN banner hands an iPad the whole story in one URL: the
+        // page origin AND the WebTransport host must both be the
+        // address that device can actually reach.
+        let cert = "0f".repeat(32);
+        assert_eq!(
+            viewer_url("192.168.4.17", 8080, 4433, &cert),
+            format!(
+                "http://192.168.4.17:8080/index.html?host=192.168.4.17&port=4433&cert={cert}&autoconnect=1"
             )
         );
     }

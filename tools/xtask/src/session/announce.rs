@@ -30,10 +30,17 @@ pub(super) fn publish_connect_facts(
 /// browser takes from the query string, for a client that takes them from
 /// a settings screen instead.
 fn announce_ready(args: &SimArgs, session_host: &str, actual_port: u16, certificate: &str) {
-    let url = viewer_url(args.viewer_port, actual_port, certificate);
+    let url = viewer_url("127.0.0.1", args.viewer_port, actual_port, certificate);
     print_line("");
     print_line(&format!("session ready: {url}"));
     if args.lan {
+        // The same session from another device on this network — an
+        // iPad's browser takes the whole story from the URL, exactly
+        // like the local one.
+        print_line(&format!(
+            "on the LAN:    {}",
+            viewer_url(session_host, args.viewer_port, actual_port, certificate)
+        ));
         print_line(&format!(
             "native clients: https://{session_host}:{actual_port}/pilotage"
         ));
