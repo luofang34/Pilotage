@@ -22,6 +22,7 @@ use crate::runtime::wire_codec::{
 };
 
 mod command;
+mod recorder;
 mod telemetry;
 pub use command::ToEngine;
 use telemetry::sample_to_wire;
@@ -79,6 +80,9 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// guidance to show: its telemetry carries the field absent rather
     /// than a centered or zeroed one.
     nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
+    /// The simulation flight recorder, when `PILOTAGE_RECORD_DIR` asks
+    /// for one.
+    recorder: Option<recorder::Recorder>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -106,6 +110,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
             nav_guidance: BTreeMap::new(),
+            recorder: recorder::Recorder::from_env(),
             start,
         }
     }
@@ -211,6 +216,9 @@ impl<A: VehicleAdapter> EngineActor<A> {
         let batch = self.adapter.sample_telemetry();
         for sample in batch.samples {
             let vehicle = sample.vehicle;
+            if let Some(recorder) = self.recorder.as_mut() {
+                recorder.record(&sample, now);
+            }
             let mut wire_sample = sample_to_wire(sample, now);
             // Guidance is a host-internal side input, not adapter output
             // (ADR-0031): the assembly attaches the vehicle's latest

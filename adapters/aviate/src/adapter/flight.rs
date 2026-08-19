@@ -119,7 +119,12 @@ impl AviateAdapter {
             None => TelemetryBatch::default(),
         };
         if let Some(sample) = batch.samples.first_mut() {
-            sample.sim_truth = truth;
+            // The shm oracle outranks the estimate-stream truth when both
+            // exist, but an ABSENT shm oracle must not erase the truth the
+            // estimate stream carried (the X-Plane lane's only truth path).
+            if truth.is_some() {
+                sample.sim_truth = truth;
+            }
             sample.fc_state = fc_state;
             return batch;
         }
