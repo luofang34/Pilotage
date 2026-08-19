@@ -213,11 +213,13 @@ impl SendBudget {
     }
 
     fn decrease(&mut self, now_ns: u64) {
-        self.rate = if self.rate <= MIN_BYTES_PER_SECOND {
-            0
-        } else {
-            (self.rate / 2).max(MIN_BYTES_PER_SECOND)
-        };
+        // The floor HOLDS: a reader that is merely slow keeps a trickle
+        // of frames (the bucket makes the skipping graceful), because a
+        // budget cut to zero turns "video is behind" into "video is
+        // gone" for a viewer who is still watching. A peer that has
+        // actually stopped reading is detected and handled by the
+        // stream lifecycle, not by starving the budget.
+        self.rate = (self.rate / 2).max(MIN_BYTES_PER_SECOND);
         self.tokens = 0;
         for source in self.sources.values_mut() {
             source.tokens = 0;

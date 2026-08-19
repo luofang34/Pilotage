@@ -143,7 +143,7 @@ pub async fn start_with_options(
     adapter: AdapterKind,
     options: RuntimeOptions,
 ) -> Result<RunningHost, HostError> {
-    let dev_identity = build_dev_identity()?;
+    let dev_identity = build_dev_identity().await?;
     let identity: Identity = dev_identity.identity;
     let cert_hash_hex = dev_identity.cert_hash_hex.clone();
 
