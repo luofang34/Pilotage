@@ -21,8 +21,13 @@ namespace {
 /// its downward travel is unobstructed.
 constexpr float kFpvForwardM = 2.4F;
 constexpr float kFpvUpM = 0.25F;
-constexpr float kGimbalForwardM = 0.6F;
-constexpr float kGimbalUpM = -0.6F;
+// The payload eye must sit CLEAR of the airframe model: an eye inside
+// the hull renders the cabin's interior surfaces, which reads as "the
+// gimbal shows the inside of the plane". A three-tonne airframe's
+// belly is well over a metre below its reference point, so the gimbal
+// hangs chin-style ahead of and beneath it.
+constexpr float kGimbalForwardM = 1.6F;
+constexpr float kGimbalUpM = -2.0F;
 
 XPLMDataRef local_x_ref = nullptr;
 XPLMDataRef local_y_ref = nullptr;
