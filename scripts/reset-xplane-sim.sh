@@ -23,18 +23,87 @@ socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(
 PY
 }
 
+# Where the vehicle parks between attempts. Captured once per X-Plane
+# boot (the launcher deletes the file when it starts a fresh X-Plane):
+# reset_flight reloads the flight WHERE THE VEHICLE IS, so a reset
+# after a flyaway would otherwise restart the session in a field.
+HOME_FILE="${HOME}/.pilotage/xplane-home.json"
+python3 - "$HOME_FILE" <<'PY_HOME'
+import json, os, socket, struct, sys, time
+path = sys.argv[1]
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(("0.0.0.0", 0)); sock.settimeout(0.5)
+REFS = [(1, "sim/flightmodel/position/local_x"),
+        (2, "sim/flightmodel/position/local_y"),
+        (3, "sim/flightmodel/position/local_z")]
+def read_all():
+    for idx, ref in REFS:
+        sock.sendto(struct.pack("<4sxii400s", b"RREF", 5, idx, ref.encode()), ("127.0.0.1", 49000))
+    got, end = {}, time.time() + 2
+    while time.time() < end and len(got) < 3:
+        try: data, _ = sock.recvfrom(4096)
+        except socket.timeout: continue
+        if not data.startswith(b"RREF"): continue
+        body = data[5:]
+        for off in range(0, len(body) - 7, 8):
+            idx, val = struct.unpack_from("<if", body, off)
+            got[idx] = val
+    for idx, ref in REFS:
+        sock.sendto(struct.pack("<4sxii400s", b"RREF", 0, idx, ref.encode()), ("127.0.0.1", 49000))
+    return got
+if not os.path.exists(path):
+    got = read_all()
+    if len(got) == 3:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        json.dump({"x": got[1], "y": got[2], "z": got[3]}, open(path, "w"))
+        print(f"saved home position to {path}")
+PY_HOME
+
 echo "reloading the X-Plane flight..."
 send_cmnd "sim/operation/reset_flight"
 
-echo "restarting PX4..."
-# Match ONLY this checkout's SITL binary: a bare "bin/px4" pattern
-# would kill unrelated PX4 sessions on the machine.
+echo "restarting the flight controller..."
+# Match ONLY this checkout's SITL binaries: bare patterns would kill
+# unrelated sessions on the machine. The AVIATE binary must restart on
+# reset too — its telemetry clock anchors at process boot, and the
+# adapter's reset latch clears only when a FRESH boot clock opens a new
+# source epoch.
 PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot}"
 pkill -9 -f "${PX4_DIR}/build/px4_sitl_default/bin/px4" 2>/dev/null || true
+pkill -TERM -f "Aviate/target/debug/sitl-xplane-alia250" 2>/dev/null || true
 
 # The bridge needs a moment to observe the rewind and disconnect before
-# its listener can arm again.
+# its listener can arm again; the reloaded flight needs one to settle
+# before a teleport sticks.
 sleep 3
+
+# Return the vehicle to its parking spot with its velocity zeroed, so a
+# reset after a flyaway is a reset, not a relocation.
+python3 - "$HOME_FILE" <<'PY_TELEPORT'
+import json, os, socket, struct, sys
+path = sys.argv[1]
+if os.path.exists(path):
+    home = json.load(open(path))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    def write(ref, value):
+        req = bytearray(b"DREF\x00") + struct.pack("<f", value)
+        name = ref.encode().ljust(500, b" ")
+        name = name[: len(ref)] + b"\x00" + name[len(ref) + 1 :]
+        sock.sendto(bytes(req) + name, ("127.0.0.1", 49000))
+    # Daylight: the demo camera is worthless over a midnight
+    # airfield, and X-Plane follows the wall clock unless told
+    # otherwise. Zulu is the writable dataref; local_time_sec is
+    # derived from it.
+    write("sim/time/use_system_time", 0.0)
+    write("sim/time/zulu_time_sec", 61200.0)
+    for axis in ("local_vx", "local_vy", "local_vz"):
+        write(f"sim/flightmodel/position/{axis}", 0.0)
+    write("sim/flightmodel/position/local_x", home["x"])
+    write("sim/flightmodel/position/local_y", home["y"])
+    write("sim/flightmodel/position/local_z", home["z"])
+    print("vehicle returned to its parking spot")
+PY_TELEPORT
+
 echo "re-arming the SITL listener..."
 send_cmnd "px4xplane/connect"
 

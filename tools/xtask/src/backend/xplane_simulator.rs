@@ -282,6 +282,15 @@ pub(super) fn xplane_running() -> bool {
 /// minutes, and the operator owns its window.
 pub(super) fn launch_xplane(root: &Path, airframe: &Airframe, log_dir: &Path) {
     print_line("starting X-Plane (a cold boot takes minutes)...");
+    // A fresh simulator gets a fresh parking spot: the reset script
+    // captures the vehicle's home position once per X-Plane boot and
+    // teleports back to it on every reset.
+    if let Some(home) = std::env::var_os("HOME") {
+        std::fs::remove_file(
+            std::path::PathBuf::from(home).join(".pilotage/xplane-home.json"),
+        )
+        .ok();
+    }
     let log = std::fs::File::create(stage_log(log_dir, "xplane"))
         .ok()
         .map_or(std::process::Stdio::null(), std::process::Stdio::from);
