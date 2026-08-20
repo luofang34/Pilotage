@@ -36,7 +36,26 @@ final class HostLinkModel: ObservableObject {
         }
     }
     /// What the link screen shows about the session.
-    @Published private(set) var status = "not connected"
+    @Published private(set) var status = "not connected" {
+        didSet {
+            guard status != oldValue else { return }
+            statusLog.append(StatusEntry(text: status))
+            if statusLog.count > Self.statusLogCapacity {
+                statusLog.removeFirst(statusLog.count - Self.statusLogCapacity)
+            }
+        }
+    }
+    /// The recent status lines, oldest first — the session's own log,
+    /// bounded so it can live in memory for the whole run.
+    @Published private(set) var statusLog: [StatusEntry] = []
+    private static let statusLogCapacity = 200
+
+    /// One remembered status line.
+    struct StatusEntry: Identifiable {
+        let id = UUID()
+        let at = Date()
+        let text: String
+    }
     /// Offered vehicles once admitted, in the host's order.
     @Published private(set) var catalog: LinkCatalog?
     /// Whether control is held now.

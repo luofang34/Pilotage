@@ -28,14 +28,16 @@ struct InstrumentRackView: View {
     /// A reset press awaiting its confirmation; a simulation rewind
     /// mid-flight is one accidental thumb away on a touch screen.
     @State private var resetAsked = false
+    /// The session log sheet, opened from the status line.
+    @State private var logShown = false
 
     /// Fixed control-bar button widths. The bar must not reflow when a
     /// state swap changes a label (Release ↔ Request control), and a
     /// squeezed rack column must clip a button rather than fold its
     /// title into a one-letter-per-line column.
-    private static let fcuButtonWidth: CGFloat = 40
-    private static let resetButtonWidth: CGFloat = 52
-    private static let leaseButtonWidth: CGFloat = 72
+    private static let fcuButtonWidth: CGFloat = 44
+    private static let resetButtonWidth: CGFloat = 48
+    private static let leaseButtonWidth: CGFloat = 64
 
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
@@ -304,22 +306,56 @@ struct InstrumentRackView: View {
     /// tile itself.
     private var controlBar: some View {
         VStack(spacing: 4) {
-            // Fixed-width controls do not compress; when the rack is
-            // narrower than the row, the bar scrolls sideways instead
-            // of clipping controls out of reach.
-            ViewThatFits(in: .horizontal) {
-                barRow(fills: true)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    barRow(fills: false)
+            // EVERY control is fixed: nothing in this bar scrolls,
+            // compresses, or reflows. What the operator's thumb knows
+            // stays where the thumb knows it.
+            HStack(spacing: 8) {
+                Image(systemName: model.controllerAttached
+                    ? "gamecontroller.fill"
+                    : "gamecontroller")
+                    .foregroundStyle(model.controllerAttached ? .green : .secondary)
+                leaseChip
+                if model.leaseHeld {
+                    ArmTelegraphControl(model: model)
                 }
+                if model.catalog?.offersFlightControl == true {
+                    // The autopilot face exists only for a host that
+                    // commands a flight computer; a plan-input panel
+                    // never grows one.
+                    barChip("FCU", width: Self.fcuButtonWidth,
+                            tint: fcuShown ? .cyan : Color(white: 0.7),
+                            filled: fcuShown) {
+                        withAnimation { fcuShown.toggle() }
+                    }
+                }
+                if model.catalog?.offersSimReset == true {
+                    // Only a simulator host advertises the lifecycle
+                    // reset; a real vehicle's bar never grows a button
+                    // that could not mean anything there.
+                    barChip("Reset", width: Self.resetButtonWidth, tint: .red, filled: false) {
+                        resetAsked = true
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            if let caption = barCaption {
-                Text(caption.text)
+            .font(.callout)
+            // The status line owns exactly one caption row at a fixed
+            // height whether or not it has anything to say: a line that
+            // appears by pushing the instruments around teaches the
+            // operator to distrust the layout. It always shows the
+            // newest session line and opens the full log.
+            Button {
+                logShown = true
+            } label: {
+                Text(barCaption?.text ?? model.status)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(caption.warning ? .orange : .secondary)
+                    .foregroundStyle(barCaption?.warning == true ? .orange : .secondary)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
         .confirmationDialog(
@@ -332,69 +368,37 @@ struct InstrumentRackView: View {
         } message: {
             Text("The vehicle returns to its parking spot and the flight controller restarts.")
         }
+        .sheet(isPresented: $logShown) {
+            StatusLogSheet(model: model)
+        }
     }
 
-    /// The bar's one row. `fills` right-aligns the lease button with a
-    /// spacer — only meaningful when the row owns the full width; the
-    /// scrolling fallback lays controls edge to edge instead.
-    private func barRow(fills: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: model.controllerAttached
-                ? "gamecontroller.fill"
-                : "gamecontroller")
-                .foregroundStyle(model.controllerAttached ? .green : .secondary)
-            // The lease chip LEADS the row: it is the bar's most
-            // consequential control, and a control that must be
-            // scrolled into view might as well not exist. One slot,
-            // three faces, the arm telegraph's idiom — the ask is the
-            // operator's order, the grant is the host's answer, and
-            // the chip never re-sends while an answer is outstanding.
-            leaseChip
-            if model.leaseHeld {
-                ArmTelegraphControl(model: model)
-            }
-            if model.catalog?.offersFlightControl == true {
-                // The autopilot face exists only for a host that
-                // commands a flight computer; a plan-input panel
-                // never grows one.
-                Button {
-                    withAnimation { fcuShown.toggle() }
-                } label: {
-                    Text("FCU")
-                        .font(.caption.weight(.bold))
-                        .lineLimit(1)
-                        .frame(width: Self.fcuButtonWidth)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(fcuShown ? Color.cyan.opacity(0.3) : Color(white: 0.2))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-            if model.catalog?.offersSimReset == true {
-                // Only a simulator host advertises the lifecycle
-                // reset; a real vehicle's bar never grows a button
-                // that could not mean anything there.
-                Button {
-                    resetAsked = true
-                } label: {
-                    Text("Reset")
-                        .font(.caption.weight(.bold))
-                        .lineLimit(1)
-                        .frame(width: Self.resetButtonWidth)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.2))
-                        )
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.red)
-            }
-            if fills { Spacer(minLength: 0) }
+    /// One fixed-width bar chip: caption-bold title, rounded fill, a
+    /// full-height hit area regardless of its visual size.
+    private func barChip(
+        _ title: String,
+        width: CGFloat,
+        tint: Color,
+        filled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .frame(width: width)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(filled ? tint.opacity(0.3) : Color(white: 0.2))
+                )
+                .frame(minHeight: 40)
+                .contentShape(Rectangle())
         }
-        .font(.callout)
+        .buttonStyle(.plain)
+        .foregroundStyle(tint)
     }
+
 
     /// The lease control's three faces, one fixed-width chip: blue to
     /// ask, amber while the host owes an answer, red to stand down.
@@ -443,14 +447,16 @@ private struct ArmTelegraphControl: View {
     @ObservedObject var model: HostLinkModel
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 0) {
-                lever("SAFE", ordersArmed: false)
-                lever("ARM", ordersArmed: true)
-            }
-            .background(Capsule().fill(Color(white: 0.18)))
-            lamp
+        // The levers carry the whole story: pressing one is the
+        // operator's intent, amber is an order the flight controller
+        // has not answered, green is the controller confirming that
+        // state. No separate lamp — the answer lives where the order
+        // was given.
+        HStack(spacing: 0) {
+            lever("SAFE", ordersArmed: false)
+            lever("ARM", ordersArmed: true)
         }
+        .background(Capsule().fill(Color(white: 0.18)))
     }
 
     /// One lever width for both positions: SAFE and ARM must read as
@@ -476,28 +482,16 @@ private struct ArmTelegraphControl: View {
     }
 
     private func leverTint(ordersArmed: Bool) -> Color {
-        // Cockpit colors: amber is an unanswered order, green is the
-        // system engaged as ordered, gray is quiet. Red stays reserved
-        // for what has actually gone wrong.
+        // Amber is an unanswered order; green is the flight
+        // controller's own report confirming the ordered state; gray
+        // is a selection the controller has not (or no longer)
+        // confirmed. Red stays reserved for what has actually gone
+        // wrong.
         if model.armPhase == 1 { return .orange }
-        return ordersArmed ? .green : Color(white: 0.35)
+        let confirmed = model.armConfirmed == (ordersArmed ? 2 : 1)
+        return confirmed ? .green : Color(white: 0.35)
     }
 
-    /// The FC's answer, and nothing else: the lamp never moves on a
-    /// press.
-    private var lamp: some View {
-        let (tint, label): (Color, String) = switch model.armConfirmed {
-        case 2: (.green, "ARMED")
-        case 1: (Color(white: 0.7), "SAFE")
-        default: (.gray, "—")
-        }
-        return HStack(spacing: 4) {
-            Circle().fill(tint).frame(width: 8, height: 8)
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-        }
-    }
 }
 
 /// A tile slot this build cannot fill, saying why in place. It never
@@ -568,4 +562,44 @@ struct ConnectionChip: View {
         case .stopped: .red
         }
     }
+}
+
+/// The session's own log in a standard sheet: one selectable text
+/// block (a single selection copies any number of lines), timestamps
+/// leading, newest last — the status line above shows the tail, this
+/// shows the whole tape.
+private struct StatusLogSheet: View {
+    @ObservedObject var model: HostLinkModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(joined)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle("Session log")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var joined: String {
+        model.statusLog
+            .map { "\(Self.clock.string(from: $0.at))  \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 }
