@@ -16,31 +16,94 @@ pub(super) fn publish_connect_facts(
     actual_port: u16,
     certificate: &str,
 ) {
-    let session_host = if ctx.lan {
-        lan_address().unwrap_or_else(|| "127.0.0.1".to_owned())
-    } else {
-        "127.0.0.1".to_owned()
+    let lan_ip = if ctx.lan { lan_address() } else { None };
+    // The mDNS name is the LAN identity that SURVIVES: DHCP renumbers
+    // the address between sessions, and every stale URL then reads as
+    // a dead host. The name is pure discovery — the certificate is
+    // pinned by digest, never by name, so what resolves the host can
+    // change freely without touching the trust anchor.
+    let mdns = if ctx.lan { mdns_hostname() } else { None };
+    let session_host = mdns
+        .clone()
+        .or_else(|| lan_ip.clone())
+        .unwrap_or_else(|| "127.0.0.1".to_owned());
+    write_session_manifest(
+        ctx,
+        &session_host,
+        lan_ip.as_deref(),
+        actual_port,
+        certificate,
+    );
+    announce_ready(
+        args,
+        &session_host,
+        lan_ip.as_deref(),
+        actual_port,
+        certificate,
+    );
+}
+
+/// This machine's mDNS name (`<name>.local`), the LAN identity Bonjour
+/// already publishes. On macOS that identity is the LOCAL host name
+/// (`scutil --get LocalHostName`), which can differ from the kernel
+/// hostname — mDNS answers only for the advertised one, so publishing
+/// the kernel name would hand out a URL no other device can resolve.
+/// `None` when no usable name exists; the caller falls back to the
+/// numeric address.
+fn mdns_hostname() -> Option<String> {
+    let advertised = std::process::Command::new("scutil")
+        .args(["--get", "LocalHostName"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok());
+    let fallback = || {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
     };
-    write_session_manifest(ctx, &session_host, actual_port, certificate);
-    announce_ready(args, &session_host, actual_port, certificate);
+    let name = advertised.or_else(fallback)?.trim().to_owned();
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(if name.ends_with(".local") {
+        name
+    } else {
+        format!("{name}.local")
+    })
 }
 
 /// Prints the ready URL and opens it in the default browser when asked.
 /// Under `--lan` the native connect facts follow: the same three values a
 /// browser takes from the query string, for a client that takes them from
 /// a settings screen instead.
-fn announce_ready(args: &SimArgs, session_host: &str, actual_port: u16, certificate: &str) {
+fn announce_ready(
+    args: &SimArgs,
+    session_host: &str,
+    lan_ip: Option<&str>,
+    actual_port: u16,
+    certificate: &str,
+) {
     let url = viewer_url("127.0.0.1", args.viewer_port, actual_port, certificate);
     print_line("");
     print_line(&format!("session ready: {url}"));
     if args.lan {
         // The same session from another device on this network — an
         // iPad's browser takes the whole story from the URL, exactly
-        // like the local one.
+        // like the local one. The mDNS name leads because it survives
+        // DHCP renumbering; the numeric address follows for a client
+        // that cannot resolve it.
         print_line(&format!(
             "on the LAN:    {}",
             viewer_url(session_host, args.viewer_port, actual_port, certificate)
         ));
+        if let Some(ip) = lan_ip.filter(|ip| *ip != session_host) {
+            print_line(&format!(
+                "  by address:  {}",
+                viewer_url(ip, args.viewer_port, actual_port, certificate)
+            ));
+        }
         print_line(&format!(
             "native clients: https://{session_host}:{actual_port}/pilotage"
         ));
@@ -71,9 +134,18 @@ fn lan_address() -> Option<String> {
 /// certificate — re-reads it after a failed connect and converges on
 /// THIS session. Best-effort: a failed write only loses stale-tab
 /// convergence, never the session.
-fn write_session_manifest(ctx: &SessionContext, session_host: &str, port: u16, certificate: &str) {
+fn write_session_manifest(
+    ctx: &SessionContext,
+    session_host: &str,
+    lan_ip: Option<&str>,
+    port: u16,
+    certificate: &str,
+) {
     let path = ctx.repo_root.join("clients/web/session.json");
-    if let Err(error) = std::fs::write(&path, session_manifest(session_host, port, certificate)) {
+    if let Err(error) = std::fs::write(
+        &path,
+        session_manifest(session_host, lan_ip, port, certificate),
+    ) {
         print_line(&format!(
             "warning: could not write {}: {error}",
             path.display()
