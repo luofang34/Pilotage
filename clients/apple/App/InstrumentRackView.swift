@@ -188,7 +188,7 @@ struct InstrumentRackView: View {
                         reason: "no frames from this session yet"
                     )
                 }
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     if model.gimbalCaptured {
                         // The quasimode holds the stick for THIS camera;
                         // the badge lives where the picture is.
@@ -196,21 +196,32 @@ struct InstrumentRackView: View {
                             .foregroundStyle(.cyan)
                             .padding(6)
                     }
+                    // The switcher names the CURRENT source and each
+                    // candidate states whether it has frames: picking a
+                    // dead source is allowed (never silently redirected)
+                    // but must read as "that source is dark", not as a
+                    // switch that did not respond.
                     Menu {
                         ForEach(Self.videoSources, id: \.self) { candidate in
                             Button {
                                 videoSourceOverride = candidate
                             } label: {
                                 if candidate == shown {
-                                    Label(candidate, systemImage: "checkmark")
+                                    Label(sourceMenuTitle(candidate), systemImage: "checkmark")
                                 } else {
-                                    Text(candidate)
+                                    Text(sourceMenuTitle(candidate))
                                 }
                             }
                         }
                     } label: {
-                        Image(systemName: "video.badge.ellipsis")
-                            .padding(6)
+                        HStack(spacing: 4) {
+                            Image(systemName: "video.badge.ellipsis")
+                            Text(shown)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     Button {
                         withAnimation { focusedTileId = focusedTileId == tile.id ? nil : tile.id }
@@ -218,7 +229,8 @@ struct InstrumentRackView: View {
                         Image(systemName: focusedTileId == tile.id
                             ? "arrow.down.right.and.arrow.up.left"
                             : "arrow.up.left.and.arrow.down.right")
-                            .padding(6)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     Button {
                         withAnimation {
@@ -229,7 +241,8 @@ struct InstrumentRackView: View {
                         }
                     } label: {
                         Image(systemName: "rectangle.2.swap")
-                            .padding(6)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .help("Swap with the primary surface")
                 }
@@ -273,6 +286,12 @@ struct InstrumentRackView: View {
         return model.liveVideoSources.contains(id) ? id : nil
     }
 
+    /// One menu row's title: the source name plus whether the session
+    /// has actually delivered frames for it.
+    private func sourceMenuTitle(_ name: String) -> String {
+        selectedVideoId(for: name) != nil ? "\(name) · live" : "\(name) · no frames"
+    }
+
     /// One row and one caption: the bar must never eat into the
     /// instruments it serves. The telegraph is the row's centerpiece;
     /// everything narrational lives in the caption or moved out — pad
@@ -280,7 +299,41 @@ struct InstrumentRackView: View {
     /// tile itself.
     private var controlBar: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 10) {
+            // Fixed-width controls do not compress; when the rack is
+            // narrower than the row, the bar scrolls sideways instead
+            // of clipping controls out of reach.
+            ViewThatFits(in: .horizontal) {
+                barRow(fills: true)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    barRow(fills: false)
+                }
+            }
+            if let caption = barCaption {
+                Text(caption.text)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(caption.warning ? .orange : .secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .foregroundStyle(.white)
+        .confirmationDialog(
+            "Reset the simulation?",
+            isPresented: $resetAsked,
+            titleVisibility: .visible
+        ) {
+            Button("Reset the simulation", role: .destructive) { model.resetSim() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The vehicle returns to its parking spot and the flight controller restarts.")
+        }
+    }
+
+    /// The bar's one row. `fills` right-aligns the lease button with a
+    /// spacer — only meaningful when the row owns the full width; the
+    /// scrolling fallback lays controls edge to edge instead.
+    private func barRow(fills: Bool) -> some View {
+        HStack(spacing: 10) {
                 Image(systemName: model.controllerAttached
                     ? "gamecontroller.fill"
                     : "gamecontroller")
@@ -325,7 +378,7 @@ struct InstrumentRackView: View {
                 }
                 if model.leaseHeld {
                     ArmTelegraphControl(model: model)
-                    Spacer(minLength: 0)
+                    if fills { Spacer(minLength: 0) }
                     // One word, never wrapped: the chip above already
                     // says "Controlling", so this button only carries
                     // the verb. The pad speaks it too — a disarm press
@@ -334,7 +387,7 @@ struct InstrumentRackView: View {
                         .lineLimit(1)
                         .frame(width: Self.leaseButtonWidth)
                 } else {
-                    Spacer(minLength: 0)
+                    if fills { Spacer(minLength: 0) }
                     // One intent, one button: a denial with a standing
                     // holder escalates to the ask on its own, and an
                     // arm press on the pad or keyboard is this same
@@ -344,27 +397,8 @@ struct InstrumentRackView: View {
                         .lineLimit(1)
                         .frame(width: Self.leaseButtonWidth)
                 }
-            }
-            .font(.callout)
-            if let caption = barCaption {
-                Text(caption.text)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(caption.warning ? .orange : .secondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
-        .foregroundStyle(.white)
-        .confirmationDialog(
-            "Reset the simulation?",
-            isPresented: $resetAsked,
-            titleVisibility: .visible
-        ) {
-            Button("Reset the simulation", role: .destructive) { model.resetSim() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The vehicle returns to its parking spot and the flight controller restarts.")
-        }
+        .font(.callout)
     }
 
     /// The one caption line under the bar, present only when the
