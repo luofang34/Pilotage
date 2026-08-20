@@ -25,6 +25,17 @@ struct InstrumentRackView: View {
     /// affordance, in place, reversible: the same button grants and
     /// returns the focus, and the map split stays a separate switch.
     @State private var focusedTileId: String?
+    /// A reset press awaiting its confirmation; a simulation rewind
+    /// mid-flight is one accidental thumb away on a touch screen.
+    @State private var resetAsked = false
+
+    /// Fixed control-bar button widths. The bar must not reflow when a
+    /// state swap changes a label (Release ↔ Request control), and a
+    /// squeezed rack column must clip a button rather than fold its
+    /// title into a one-letter-per-line column.
+    private static let fcuButtonWidth: CGFloat = 40
+    private static let resetButtonWidth: CGFloat = 52
+    private static let leaseButtonWidth: CGFloat = 124
 
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
@@ -283,7 +294,8 @@ struct InstrumentRackView: View {
                     } label: {
                         Text("FCU")
                             .font(.caption.weight(.bold))
-                            .padding(.horizontal, 6)
+                            .lineLimit(1)
+                            .frame(width: Self.fcuButtonWidth)
                             .padding(.vertical, 4)
                             .background(
                                 RoundedRectangle(cornerRadius: 5)
@@ -292,18 +304,37 @@ struct InstrumentRackView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if model.catalog?.offersSimReset == true {
+                    // Only a simulator host advertises the lifecycle
+                    // reset; a real vehicle's bar never grows a button
+                    // that could not mean anything there.
+                    Button {
+                        resetAsked = true
+                    } label: {
+                        Text("Reset")
+                            .font(.caption.weight(.bold))
+                            .lineLimit(1)
+                            .frame(width: Self.resetButtonWidth)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.2))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.red)
+                }
                 if model.leaseHeld {
                     ArmTelegraphControl(model: model)
-                    Spacer()
+                    Spacer(minLength: 0)
                     // One word, never wrapped: the chip above already
                     // says "Controlling", so this button only carries
                     // the verb. The pad speaks it too — a disarm press
                     // with the lever settled on SAFE stands down.
                     Button("Release", role: .destructive) { model.releaseLease() }
                         .lineLimit(1)
-                        .fixedSize()
+                        .frame(width: Self.leaseButtonWidth)
                 } else {
-                    Spacer()
+                    Spacer(minLength: 0)
                     // One intent, one button: a denial with a standing
                     // holder escalates to the ask on its own, and an
                     // arm press on the pad or keyboard is this same
@@ -311,7 +342,7 @@ struct InstrumentRackView: View {
                     Button("Request control") { model.requestLease() }
                         .disabled(model.catalog == nil)
                         .lineLimit(1)
-                        .fixedSize()
+                        .frame(width: Self.leaseButtonWidth)
                 }
             }
             .font(.callout)
@@ -324,6 +355,16 @@ struct InstrumentRackView: View {
             }
         }
         .foregroundStyle(.white)
+        .confirmationDialog(
+            "Reset the simulation?",
+            isPresented: $resetAsked,
+            titleVisibility: .visible
+        ) {
+            Button("Reset the simulation", role: .destructive) { model.resetSim() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The vehicle returns to its parking spot and the flight controller restarts.")
+        }
     }
 
     /// The one caption line under the bar, present only when the
@@ -357,6 +398,11 @@ private struct ArmTelegraphControl: View {
         }
     }
 
+    /// One lever width for both positions: SAFE and ARM must read as
+    /// the two ends of one control, and the capsule must not change
+    /// shape when the weight of the selected title differs.
+    private static let leverWidth: CGFloat = 56
+
     private func lever(_ title: String, ordersArmed: Bool) -> some View {
         let selected = model.armOrdered == ordersArmed
         return Button {
@@ -365,8 +411,7 @@ private struct ArmTelegraphControl: View {
             Text(title)
                 .font(.callout.weight(selected ? .bold : .regular))
                 .lineLimit(1)
-                .fixedSize()
-                .padding(.horizontal, 12)
+                .frame(width: Self.leverWidth)
                 .padding(.vertical, 5)
                 .background(
                     Capsule().fill(selected ? leverTint(ordersArmed: ordersArmed) : .clear)
