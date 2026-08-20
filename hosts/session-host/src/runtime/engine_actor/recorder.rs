@@ -169,7 +169,7 @@ impl Recorder {
             }
             return;
         }
-        self.segment_bytes += line.len() as u64;
+        self.segment_bytes = self.segment_bytes.saturating_add(line.len() as u64);
         if self.segment_bytes >= SEGMENT_BYTES {
             self.roll();
         }
