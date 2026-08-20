@@ -25,12 +25,12 @@ pub(super) fn publish_connect_facts(
     let mdns = if ctx.lan { mdns_hostname() } else { None };
     // The DEDICATED alias outranks the machine name: `pilotage.local`
     // is the same on every machine that runs a session, so a client's
-    // saved manifest URL is device-independent. Best-effort — a failed
-    // registration (dns-sd absent, name conflict on this network)
-    // falls back to the machine's own advertised name.
+    // saved manifest URL is device-independent. Best-effort covers a
+    // machine without dns-sd; a NAME CONFLICT on the network surfaces
+    // asynchronously after spawn and is not detected here — the
+    // machine-name URL printed beside the alias is the recovery.
     let alias = lan_ip
         .as_deref()
-        .filter(|_| ctx.lan)
         .and_then(|ip| register_mdns_alias(ip, args.viewer_port));
     let session_host = alias
         .as_ref()
