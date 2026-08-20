@@ -11,9 +11,13 @@
 //! fields without a schema of its own.
 //!
 //! `PILOTAGE_RECORD_DIR` names the directory; unset means no recording.
-//! Each host run appends to `flight-<pid>.jsonl` there. Writes are
-//! best-effort and buffered — a full disk degrades to a warning, never
-//! to a telemetry stall.
+//! The recorder is a rolling FDR: each host run writes numbered
+//! segments (`flight-<pid>-<seq>.jsonl`), rolls to a new segment at a
+//! fixed size, and deletes the oldest beyond a fixed count — the
+//! recording holds the RECENT window, bounded, the way a flight data
+//! recorder does. An unbounded recording once filled the disk and took
+//! the whole session down with it. Writes are best-effort and buffered
+//! — a full disk degrades to a warning, never to a telemetry stall.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -21,9 +25,22 @@ use std::path::PathBuf;
 use pilotage_adapter_api::TelemetrySample;
 use pilotage_timing::MonoTimestamp;
 
+/// One segment's size ceiling. At the nominal ~50 KB/s sample stream a
+/// segment holds roughly ten minutes.
+const SEGMENT_BYTES: u64 = 32 * 1024 * 1024;
+/// Segments retained, current one included: the recording's whole
+/// footprint stays under `KEEP_SEGMENTS x SEGMENT_BYTES` (~128 MB,
+/// covering the last forty-ish minutes).
+const KEEP_SEGMENTS: u32 = 4;
+
 /// The per-run recorder, or `None` when recording is off.
 pub(super) struct Recorder {
+    dir: PathBuf,
     file: std::io::BufWriter<std::fs::File>,
+    /// Bytes written into the CURRENT segment.
+    segment_bytes: u64,
+    /// The current segment's sequence number.
+    sequence: u32,
     /// One warning per run, so a failing disk does not storm the log.
     warned: bool,
 }
@@ -32,16 +49,19 @@ impl Recorder {
     /// Opens the recorder when `PILOTAGE_RECORD_DIR` names a directory.
     pub(super) fn from_env() -> Option<Self> {
         let dir = std::env::var_os("PILOTAGE_RECORD_DIR").map(PathBuf::from)?;
-        let path = dir.join(format!("flight-{}.jsonl", std::process::id()));
+        let path = dir.join(Self::segment_name(0));
         let open = || -> std::io::Result<std::fs::File> {
             std::fs::create_dir_all(&dir)?;
-            std::fs::OpenOptions::new().create(true).append(true).open(&path)
+            std::fs::File::create(&path)
         };
         match open() {
             Ok(file) => {
-                tracing::info!(path = %path.display(), "flight recorder on");
+                tracing::info!(path = %path.display(), "flight recorder on (rolling FDR)");
                 Some(Self {
+                    dir,
                     file: std::io::BufWriter::new(file),
+                    segment_bytes: 0,
+                    sequence: 0,
                     warned: false,
                 })
             }
@@ -49,6 +69,35 @@ impl Recorder {
                 tracing::warn!(%error, "flight recorder could not open; recording off");
                 None
             }
+        }
+    }
+
+    fn segment_name(sequence: u32) -> String {
+        format!("flight-{}-{sequence}.jsonl", std::process::id())
+    }
+
+    /// Rolls to the next segment and drops the one falling out of the
+    /// retained window. Best-effort like every other disk touch here.
+    fn roll(&mut self) {
+        use std::io::Write as _;
+        self.file.flush().ok();
+        self.sequence = self.sequence.wrapping_add(1);
+        let path = self.dir.join(Self::segment_name(self.sequence));
+        match std::fs::File::create(&path) {
+            Ok(file) => {
+                self.file = std::io::BufWriter::new(file);
+                self.segment_bytes = 0;
+            }
+            Err(error) => {
+                if !self.warned {
+                    self.warned = true;
+                    tracing::warn!(%error, "FDR segment roll failed; further failures are silent");
+                }
+                return;
+            }
+        }
+        if let Some(expired) = self.sequence.checked_sub(KEEP_SEGMENTS) {
+            std::fs::remove_file(self.dir.join(Self::segment_name(expired))).ok();
         }
     }
 
@@ -102,9 +151,16 @@ impl Recorder {
             ));
         }
         line.push_str("}\n");
-        if self.file.write_all(line.as_bytes()).is_err() && !self.warned {
-            self.warned = true;
-            tracing::warn!("flight recorder write failed; further failures are silent");
+        if self.file.write_all(line.as_bytes()).is_err() {
+            if !self.warned {
+                self.warned = true;
+                tracing::warn!("flight recorder write failed; further failures are silent");
+            }
+            return;
+        }
+        self.segment_bytes += line.len() as u64;
+        if self.segment_bytes >= SEGMENT_BYTES {
+            self.roll();
         }
     }
 }
