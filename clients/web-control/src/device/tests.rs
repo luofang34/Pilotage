@@ -160,11 +160,24 @@ fn keyboard_synthesis_matches_the_retired_shell_table() {
     stage.key_event("ArrowRight", true);
     stage.key_event("Enter", true);
     let (axis_count, button_count) = stage.key_sample(&mut out);
-    assert_eq!((axis_count, button_count), (4, 10));
+    // Twelve buttons: the retired shell's ten plus the payload pair
+    // (g -> button6 quasimode, h -> button11 recenter).
+    assert_eq!((axis_count, button_count), (4, 12));
     assert_eq!(out.axes[1], -1.0, "w climbs");
     assert_eq!(out.axes[2], 1.0, "ArrowRight yaws right");
     assert!(out.buttons[9].pressed, "Enter arms");
     assert_eq!(out.buttons[9].value, 1.0);
+
+    stage.key_event("g", true);
+    stage.key_event("h", true);
+    stage.key_sample(&mut out);
+    assert!(out.buttons[6].pressed, "g holds the gimbal quasimode");
+    assert!(out.buttons[11].pressed, "h presses the recenter");
+    stage.key_event("g", false);
+    stage.key_event("h", false);
+    stage.key_sample(&mut out);
+    assert!(!out.buttons[6].pressed);
+    assert!(!out.buttons[11].pressed);
 
     // s and w both held: w is the later entry on slot1 and wins.
     stage.key_event("s", true);
