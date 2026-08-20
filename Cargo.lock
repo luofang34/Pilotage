@@ -1804,6 +1804,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-control-feel"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-control-web"
 version = "0.1.0"
 dependencies = [
