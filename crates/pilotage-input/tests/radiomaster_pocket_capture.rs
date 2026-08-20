@@ -60,8 +60,10 @@ fn decode_report(bytes: &[u8], t_ms: u64) -> RawDeviceSample {
         buttons |= u64::from(*byte) << (8 * byte_index);
     }
     let axes: Vec<f32> = bytes[BUTTON_BYTE_COUNT..]
-        .chunks_exact(2)
-        .map(|pair| f32::from(u16::from_le_bytes([pair[0], pair[1]])))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| f32::from(u16::from_le_bytes(*pair)))
         .collect();
     RawDeviceSample::new(axes, buttons, MonoTimestamp::from_nanos(t_ms * 1_000_000))
 }

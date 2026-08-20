@@ -223,7 +223,7 @@ pub(crate) fn parse_certificate_hash(hex: &str) -> Result<Option<[u8; 32]>, FfiE
         });
     }
     let mut digest = [0_u8; 32];
-    for (index, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
+    for (index, chunk) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let high = char::from(chunk[0]).to_digit(16).unwrap_or(0);
         let low = char::from(chunk[1]).to_digit(16).unwrap_or(0);
         digest[index] = u8::try_from((high << 4) | low).unwrap_or(0);

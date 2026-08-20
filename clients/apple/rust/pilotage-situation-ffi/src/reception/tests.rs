@@ -102,7 +102,9 @@ fn invalid_event_line_fails_before_domain_ingestion() {
 fn decode_adsb(hex: &str) -> Adsb1090Message {
     let bytes = hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let text = core::str::from_utf8(pair).expect("frame must contain ASCII hex");
             u8::from_str_radix(text, 16).expect("frame must contain valid hex")
