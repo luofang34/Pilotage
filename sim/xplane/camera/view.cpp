@@ -19,8 +19,8 @@ namespace {
 /// of the airframe so the picture is the vehicle's forward view, not
 /// the inside of a cockpit; the gimbal station sits under the belly, so
 /// its downward travel is unobstructed.
-constexpr float kFpvForwardM = 2.4F;
-constexpr float kFpvUpM = 0.25F;
+constexpr float kFpvForwardM = 2.8F;
+constexpr float kFpvUpM = 0.4F;
 // The payload eye must sit CLEAR of the airframe model: an eye inside
 // the hull renders the cabin's interior surfaces, which reads as "the
 // gimbal shows the inside of the plane". A three-tonne airframe's
@@ -74,16 +74,41 @@ int CameraFunc(XPLMCameraPosition_t* out_position, int is_losing, void*) {
     const float forward_m = gimbal ? kGimbalForwardM : kFpvForwardM;
     const float up_m = gimbal ? kGimbalUpM : kFpvUpM;
 
+    // The station rides the AIRFRAME, so its offset rotates by the
+    // full attitude, not the heading alone: a heading-only offset
+    // leaves the eye at its level-flight height while the hull pitches
+    // through it, which renders as the airframe's interior sweeping
+    // across the picture on every pitch oscillation.
     const float heading_rad = heading_deg * kDegToRad;
+    const float pitch_rad = pitch_deg * kDegToRad;
+    const float roll_rad = roll_deg * kDegToRad;
     const float sin_h = std::sin(heading_rad);
     const float cos_h = std::cos(heading_rad);
-    // Forward in the local frame at zero pitch: +x is east, -z is
-    // north, so a heading of zero (north) points along -z.
-    out_position->x =
-        (local_x_ref ? XPLMGetDataf(local_x_ref) : 0.0F) + forward_m * sin_h;
-    out_position->y = (local_y_ref ? XPLMGetDataf(local_y_ref) : 0.0F) + up_m;
-    out_position->z =
-        (local_z_ref ? XPLMGetDataf(local_z_ref) : 0.0F) - forward_m * cos_h;
+    const float sin_p = std::sin(pitch_rad);
+    const float cos_p = std::cos(pitch_rad);
+    const float sin_r = std::sin(roll_rad);
+    const float cos_r = std::cos(roll_rad);
+    // Local frame: +x east, +y up, -z north. Body axes at heading psi,
+    // pitch theta, roll phi:
+    const float fwd_x = sin_h * cos_p;
+    const float fwd_y = sin_p;
+    const float fwd_z = -cos_h * cos_p;
+    const float right_x = cos_h;
+    const float right_y = 0.0F;
+    const float right_z = sin_h;
+    // up = right x forward, then rolled about the forward axis.
+    const float up0_x = -sin_h * sin_p;
+    const float up0_y = cos_p;
+    const float up0_z = cos_h * sin_p;
+    const float up_x = up0_x * cos_r - right_x * sin_r;
+    const float up_y = up0_y * cos_r - right_y * sin_r;
+    const float up_z = up0_z * cos_r - right_z * sin_r;
+    out_position->x = (local_x_ref ? XPLMGetDataf(local_x_ref) : 0.0F)
+        + forward_m * fwd_x + up_m * up_x;
+    out_position->y = (local_y_ref ? XPLMGetDataf(local_y_ref) : 0.0F)
+        + forward_m * fwd_y + up_m * up_y;
+    out_position->z = (local_z_ref ? XPLMGetDataf(local_z_ref) : 0.0F)
+        + forward_m * fwd_z + up_m * up_z;
 
     if (gimbal) {
         // Pan follows the vehicle heading; tilt is world-stabilized, so
