@@ -121,6 +121,10 @@ pub struct AviateAdapter {
     // Zero point of the host-monotonic acquisition clock.
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
+    /// Whether the last payload-view publish failed, so a dead
+    /// producer link logs one transition line instead of storming the
+    /// telemetry tick.
+    view_publish_failed: bool,
     // Per-scope link-loss latch (ADR-0008): a gimbal-scope policy must not
     // suppress or neutralize motion, so the latch is keyed by scope.
     link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
@@ -162,6 +166,7 @@ impl AviateAdapter {
             arm_incarnation: SourceIncarnation::new([0; 16]),
             started_at: std::time::Instant::now(),
             last_reset: None,
+            view_publish_failed: false,
             reset_latch: None,
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),

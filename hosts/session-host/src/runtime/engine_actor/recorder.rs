@@ -43,6 +43,9 @@ pub(super) struct Recorder {
     sequence: u32,
     /// One warning per run, so a failing disk does not storm the log.
     warned: bool,
+    /// A recorder that could not roll: writing stopped for good, so
+    /// the footprint guarantee outlives the disk fault.
+    dead: bool,
 }
 
 impl Recorder {
@@ -63,6 +66,7 @@ impl Recorder {
                     segment_bytes: 0,
                     sequence: 0,
                     warned: false,
+                    dead: false,
                 })
             }
             Err(error) => {
@@ -77,22 +81,26 @@ impl Recorder {
     }
 
     /// Rolls to the next segment and drops the one falling out of the
-    /// retained window. Best-effort like every other disk touch here.
+    /// retained window. A roll that cannot create its next segment
+    /// STOPS the recorder: the sequence must not advance past files
+    /// that never existed (the retained-window deletion would drift
+    /// off the real files), and retrying into the old segment would
+    /// grow it without bound — the one guarantee this recorder makes
+    /// is its footprint.
     fn roll(&mut self) {
         use std::io::Write as _;
         self.file.flush().ok();
-        self.sequence = self.sequence.wrapping_add(1);
-        let path = self.dir.join(Self::segment_name(self.sequence));
+        let next = self.sequence.wrapping_add(1);
+        let path = self.dir.join(Self::segment_name(next));
         match std::fs::File::create(&path) {
             Ok(file) => {
+                self.sequence = next;
                 self.file = std::io::BufWriter::new(file);
                 self.segment_bytes = 0;
             }
             Err(error) => {
-                if !self.warned {
-                    self.warned = true;
-                    tracing::warn!(%error, "FDR segment roll failed; further failures are silent");
-                }
+                self.dead = true;
+                tracing::warn!(%error, "FDR segment roll failed; recording stopped");
                 return;
             }
         }
@@ -104,6 +112,9 @@ impl Recorder {
     /// Appends one sample. Truth and estimate ride the same line so a
     /// consumer never has to re-associate them by time.
     pub(super) fn record(&mut self, sample: &TelemetrySample, now: MonoTimestamp) {
+        if self.dead {
+            return;
+        }
         let mut line = String::with_capacity(512);
         line.push_str(&format!(
             "{{\"t_ns\":{},\"tick\":{}",

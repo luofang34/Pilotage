@@ -186,12 +186,15 @@ void HostLink::pump() {
             if (read_varint(envelope, static_cast<std::size_t>(envelope_len),
                             &inner, &body_len) &&
                 inner + body_len <= envelope_len) {
+                // Decode over DEFAULTS, never over current state:
+                // proto3 omits zero-valued scalars, so a recenter
+                // (pan=0, tilt=0) or the widest zoom detent arrives
+                // with those fields ABSENT — seeded from the current
+                // state they become permanent no-ops while the
+                // adapter reports them accepted. The one field where
+                // absent must mean "keep" is mode, and its enum is
+                // 1-based with 0 = Unchanged for exactly this reason.
                 command_ = CameraCommand{};
-                command_.mode = static_cast<std::uint32_t>(state().mode());
-                command_.zoom_detent =
-                    static_cast<std::uint32_t>(state().zoom_detent());
-                command_.pan_rad = state().pan_rad();
-                command_.tilt_rad = state().tilt_rad();
                 decode_camera_command(envelope + inner,
                                       static_cast<std::size_t>(body_len),
                                       &command_);

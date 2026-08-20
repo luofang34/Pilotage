@@ -84,15 +84,18 @@ const INTEGRATION_STEP_S: f32 = 1.0 / 30.0;
 const MODE_FPV: u32 = 1;
 const MODE_GIMBAL: u32 = 2;
 
-/// How long the payload view stays selected after the last pointing
-/// command.
+/// How long the payload view survives without ANY frame on the
+/// gimbal scope.
 ///
 /// The producer renders ONE view, so showing the payload means NOT
-/// showing the forward view. The operator's gimbal control is a
-/// quasimode — held while aiming, released otherwise — so the view
-/// follows it and returns to the vehicle's forward camera when aiming
-/// stops. Without this the first pointing command of a session (or a
-/// link-loss freeze) would leave the forward feed dark for good.
+/// showing the forward view. An aimed view is SUSTAINED by the held
+/// scope's own stream — neutral frames included, so a parked
+/// selection does not decay underneath its keepalive — and lapses
+/// this long after the stream stops: a scope release, a link loss,
+/// or a disconnect returns the forward camera. A client that holds
+/// the scope and streams neutrally without ever aiming never selects
+/// the payload view at all; once it aims, its route back to the
+/// forward view is releasing the scope.
 const PAYLOAD_VIEW_HOLD: Duration = Duration::from_secs(2);
 
 /// The commanded pointing state of a producer-rendered payload view.
@@ -409,18 +412,25 @@ impl super::AviateAdapter {
             return;
         };
         if !pointing.view_is_stale() {
+            self.view_publish_failed = false;
             return;
         }
         let command = pointing.command();
         let published = self.publish_camera_command(command);
         // The producer renders ONE view, so which view it is showing is
         // operator-visible state, not a detail. It changes rarely, and a
-        // change that did not reach the producer is why a feed goes dark.
-        tracing::info!(
-            mode = command.mode,
-            published,
-            "payload view selection sent to the producer"
-        );
+        // change that did not reach the producer is why a feed goes
+        // dark — but this runs on the telemetry tick, and a DEAD
+        // producer link stays dead: one line per transition, not fifty
+        // a second for the rest of the session.
+        if published || !self.view_publish_failed {
+            tracing::info!(
+                mode = command.mode,
+                published,
+                "payload view selection sent to the producer"
+            );
+        }
+        self.view_publish_failed = !published;
         if published && let Some(pointing) = self.pointing.as_mut() {
             pointing.note_published();
         }

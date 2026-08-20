@@ -109,11 +109,24 @@ pub(crate) async fn spawn_camera_bridge() -> (
                 "waiting for the in-simulator camera plugin"
             );
             (
-                pilotage_sim_video::BridgeClient::accept_producer(
-                    XPLANE_CAMERA_PORT,
-                    FRAME_CHANNEL_DEPTH,
+                // Bounded wait: a plugin that never dials (X-Plane not
+                // running, wrong port) must degrade this session to
+                // no-video like every other camera path, not hang the
+                // host's startup with no telemetry and no control.
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    pilotage_sim_video::BridgeClient::accept_producer(
+                        XPLANE_CAMERA_PORT,
+                        FRAME_CHANNEL_DEPTH,
+                    ),
                 )
-                .await,
+                .await
+                {
+                    Ok(attached) => attached,
+                    Err(_) => Err(pilotage_sim_video::SimVideoError::ReaderTaskEnded {
+                        reason: "no camera producer dialed within 30 s".to_owned(),
+                    }),
+                },
                 // A simulator window has no clock a consumer can relate
                 // to the flight state.
                 MeasurementClock::HostMonotonic,

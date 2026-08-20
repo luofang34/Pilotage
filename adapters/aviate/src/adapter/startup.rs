@@ -80,10 +80,13 @@ impl AviateAdapter {
             frames,
             // A flight vehicle's gimbal is a real device on its own link,
             // not a rendered view, so the pointing attachment exists only
-            // in a simulation build.
+            // in a simulation build — and only for the producer that
+            // actually renders a payload view. A Gazebo session has a
+            // camera but no gimbal behind it: advertising the scope
+            // there is a control surface with nothing on the other end.
             #[cfg(feature = "sim")]
-            pointing: camera_bridge
-                .is_some()
+            pointing: (camera_bridge.is_some()
+                && camera::camera_mode() == camera::CameraMode::XPlanePlugin)
                 .then(super::pointing::PointingState::default),
             #[cfg(not(feature = "sim"))]
             pointing: None,
@@ -93,6 +96,7 @@ impl AviateAdapter {
             arm_incarnation,
             started_at: std::time::Instant::now(),
             last_reset: None,
+            view_publish_failed: false,
             reset_latch: None,
             #[cfg(test)]
             reset_spawns: 0,

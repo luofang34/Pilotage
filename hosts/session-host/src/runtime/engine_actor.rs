@@ -22,6 +22,7 @@ use crate::runtime::wire_codec::{
 };
 
 mod command;
+#[cfg(feature = "sim")]
 mod recorder;
 mod telemetry;
 pub use command::ToEngine;
@@ -81,7 +82,9 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// than a centered or zeroed one.
     nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
     /// The simulation flight recorder, when `PILOTAGE_RECORD_DIR` asks
-    /// for one.
+    /// for one. Simulation-only by construction (ADR-0040): a flight
+    /// build does not carry the module, not merely leave it idle.
+    #[cfg(feature = "sim")]
     recorder: Option<recorder::Recorder>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
@@ -110,6 +113,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
             adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
             nav_guidance: BTreeMap::new(),
+            #[cfg(feature = "sim")]
             recorder: recorder::Recorder::from_env(),
             start,
         }
@@ -216,6 +220,7 @@ impl<A: VehicleAdapter> EngineActor<A> {
         let batch = self.adapter.sample_telemetry();
         for sample in batch.samples {
             let vehicle = sample.vehicle;
+            #[cfg(feature = "sim")]
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record(&sample, now);
             }

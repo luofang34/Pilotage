@@ -95,17 +95,37 @@ fn identity_store() -> Option<(PathBuf, PathBuf)> {
     Some((dir.join("dev-cert.pem"), dir.join("dev-key.pem")))
 }
 
-/// Whether the persisted certificate is young enough to reuse.
-fn fresh((cert, _): &(PathBuf, PathBuf)) -> bool {
-    std::fs::metadata(cert)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|age| age < REUSE_LIMIT)
+/// The issuance marker beside the PEM pair: the moment `persist` wrote
+/// the identity, as seconds since the UNIX epoch. A file mtime is NOT
+/// an issuance record — a copied or touched certificate reads young
+/// while the certificate itself is past its validity, and the host
+/// then serves an expired identity that fails every handshake.
+fn issued_at_path(cert: &std::path::Path) -> PathBuf {
+    cert.with_file_name("issued-at")
 }
 
-/// Best-effort persistence: the key is written before the certificate,
-/// so a `fresh` certificate always has its key beside it.
+/// Whether the persisted certificate is young enough to reuse, judged
+/// by the issuance marker written beside it. No marker means the pair
+/// predates the marker scheme or was copied in: regenerate.
+fn fresh((cert, _): &(PathBuf, PathBuf)) -> bool {
+    std::fs::read_to_string(issued_at_path(cert))
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .zip(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok(),
+        )
+        .is_some_and(|(issued, now)| now.as_secs().saturating_sub(issued) < REUSE_LIMIT.as_secs())
+}
+
+/// Best-effort persistence, atomic per file: each PEM lands under a
+/// temporary name and renames into place, so two hosts racing a cold
+/// store cannot interleave one's certificate with the other's key —
+/// a mismatched pair would reload cleanly on every later start and
+/// fail every handshake until it aged out. Order still matters: the
+/// key renames before the certificate, and the issuance marker lands
+/// last, so a `fresh` certificate always has its key beside it.
 fn persist(identity: &Identity, (cert_path, key_path): &(PathBuf, PathBuf)) {
     let Some(cert) = identity.certificate_chain().as_slice().first() else {
         return;
@@ -114,13 +134,30 @@ fn persist(identity: &Identity, (cert_path, key_path): &(PathBuf, PathBuf)) {
         if let Some(dir) = cert_path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(key_path, identity.private_key().to_secret_pem())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))?;
-        }
-        std::fs::write(cert_path, cert.to_pem())?;
+        let pid = std::process::id();
+        let atomic = |path: &std::path::Path, bytes: &[u8], mode: Option<u32>| {
+            let tmp = path.with_extension(format!("tmp.{pid}"));
+            std::fs::write(&tmp, bytes)?;
+            #[cfg(unix)]
+            if let Some(mode) = mode {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+            }
+            #[cfg(not(unix))]
+            let _ = mode;
+            std::fs::rename(&tmp, path)
+        };
+        atomic(
+            key_path,
+            identity.private_key().to_secret_pem().as_bytes(),
+            Some(0o600),
+        )?;
+        atomic(cert_path, cert.to_pem().as_bytes(), None)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| std::io::Error::other("clock before the epoch"))?
+            .as_secs();
+        atomic(&issued_at_path(cert_path), now.to_string().as_bytes(), None)?;
         Ok(())
     };
     if let Err(error) = write() {
