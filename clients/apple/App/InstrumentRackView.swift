@@ -306,18 +306,26 @@ struct InstrumentRackView: View {
     /// tile itself.
     private var controlBar: some View {
         VStack(spacing: 4) {
-            // EVERY control is fixed: nothing in this bar scrolls,
-            // compresses, or reflows. What the operator's thumb knows
-            // stays where the thumb knows it.
+            // Row one, flight authority, every slot permanent: the
+            // lease chip and the arm telegraph are ALWAYS present —
+            // the telegraph reads the flight controller's state for
+            // an observer and becomes the control under a lease, so
+            // gaining or losing authority never adds, removes, or
+            // moves a single element.
             HStack(spacing: 8) {
                 Image(systemName: model.controllerAttached
                     ? "gamecontroller.fill"
                     : "gamecontroller")
                     .foregroundStyle(model.controllerAttached ? .green : .secondary)
                 leaseChip
-                if model.leaseHeld {
-                    ArmTelegraphControl(model: model)
-                }
+                ArmTelegraphControl(model: model, interactive: model.leaseHeld)
+                Spacer(minLength: 0)
+            }
+            .font(.callout)
+            // Row two, session tools: what the catalog offers is
+            // fixed for the session, so this row's shape never
+            // changes mid-flight either.
+            HStack(spacing: 8) {
                 if model.catalog?.offersFlightControl == true {
                     // The autopilot face exists only for a host that
                     // commands a flight computer; a plan-input panel
@@ -330,8 +338,8 @@ struct InstrumentRackView: View {
                 }
                 if model.catalog?.offersSimReset == true {
                     // Only a simulator host advertises the lifecycle
-                    // reset; a real vehicle's bar never grows a button
-                    // that could not mean anything there.
+                    // reset; a real vehicle's bar never grows a
+                    // button that could not mean anything there.
                     barChip("Reset", width: Self.resetButtonWidth, tint: .red, filled: false) {
                         resetAsked = true
                     }
@@ -340,10 +348,10 @@ struct InstrumentRackView: View {
             }
             .font(.callout)
             // The status line owns exactly one caption row at a fixed
-            // height whether or not it has anything to say: a line that
-            // appears by pushing the instruments around teaches the
-            // operator to distrust the layout. It always shows the
-            // newest session line and opens the full log.
+            // height whether or not it has anything to say: a line
+            // that appears by pushing the instruments around teaches
+            // the operator to distrust the layout. It always shows
+            // the newest session line and opens the full log.
             Button {
                 logShown = true
             } label: {
@@ -445,6 +453,11 @@ struct InstrumentRackView: View {
 /// order and answer; the lever never re-sends on its own.
 private struct ArmTelegraphControl: View {
     @ObservedObject var model: HostLinkModel
+    /// Whether the operator holds the authority to move the levers.
+    /// Without it the telegraph is a gauge: it shows the flight
+    /// controller's own armed state, at reduced emphasis, in the same
+    /// place it will be a control once authority is granted.
+    let interactive: Bool
 
     var body: some View {
         // The levers carry the whole story: pressing one is the
@@ -457,6 +470,7 @@ private struct ArmTelegraphControl: View {
             lever("ARM", ordersArmed: true)
         }
         .background(Capsule().fill(Color(white: 0.18)))
+        .opacity(interactive ? 1.0 : 0.55)
     }
 
     /// One lever width for both positions: SAFE and ARM must read as
@@ -465,7 +479,12 @@ private struct ArmTelegraphControl: View {
     private static let leverWidth: CGFloat = 56
 
     private func lever(_ title: String, ordersArmed: Bool) -> some View {
-        let selected = model.armOrdered == ordersArmed
+        // Under authority the highlight tracks the operator's ORDER;
+        // as a gauge it tracks the flight controller's ANSWER — an
+        // observer sees the vehicle's state, never a stale order.
+        let selected = interactive
+            ? model.armOrdered == ordersArmed
+            : model.armConfirmed == (ordersArmed ? 2 : 1)
         return Button {
             if ordersArmed { model.arm() } else { model.disarm() }
         } label: {
@@ -479,6 +498,7 @@ private struct ArmTelegraphControl: View {
                 )
         }
         .buttonStyle(.plain)
+        .disabled(!interactive)
     }
 
     private func leverTint(ordersArmed: Bool) -> Color {
@@ -487,7 +507,7 @@ private struct ArmTelegraphControl: View {
         // is a selection the controller has not (or no longer)
         // confirmed. Red stays reserved for what has actually gone
         // wrong.
-        if model.armPhase == 1 { return .orange }
+        if interactive && model.armPhase == 1 { return .orange }
         let confirmed = model.armConfirmed == (ordersArmed ? 2 : 1)
         return confirmed ? .green : Color(white: 0.35)
     }
