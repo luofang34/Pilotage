@@ -95,7 +95,9 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     let pid_file = log_dir.join("supervisor.pid");
     claim_supervisor(&pid_file, &mut children)?;
 
-    announce::publish_connect_facts(args, &ctx, actual_port, &certificate);
+    // Held for the session's lifetime: dropping it (any exit path from
+    // here) unregisters the `pilotage.local` alias with the session.
+    let _mdns_alias = announce::publish_connect_facts(args, &ctx, actual_port, &certificate);
 
     let outcome = supervise(&mut children, &stages, &mut cancel).await;
     std::fs::remove_file(&pid_file).ok();

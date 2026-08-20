@@ -15,7 +15,7 @@ pub(super) fn publish_connect_facts(
     ctx: &SessionContext,
     actual_port: u16,
     certificate: &str,
-) {
+) -> Option<MdnsAlias> {
     let lan_ip = if ctx.lan { lan_address() } else { None };
     // The mDNS name is the LAN identity that SURVIVES: DHCP renumbers
     // the address between sessions, and every stale URL then reads as
@@ -23,8 +23,19 @@ pub(super) fn publish_connect_facts(
     // pinned by digest, never by name, so what resolves the host can
     // change freely without touching the trust anchor.
     let mdns = if ctx.lan { mdns_hostname() } else { None };
-    let session_host = mdns
-        .clone()
+    // The DEDICATED alias outranks the machine name: `pilotage.local`
+    // is the same on every machine that runs a session, so a client's
+    // saved manifest URL is device-independent. Best-effort — a failed
+    // registration (dns-sd absent, name conflict on this network)
+    // falls back to the machine's own advertised name.
+    let alias = lan_ip
+        .as_deref()
+        .filter(|_| ctx.lan)
+        .and_then(|ip| register_mdns_alias(ip, args.viewer_port));
+    let session_host = alias
+        .as_ref()
+        .map(|_| MDNS_ALIAS_HOST.to_owned())
+        .or(mdns)
         .or_else(|| lan_ip.clone())
         .unwrap_or_else(|| "127.0.0.1".to_owned());
     write_session_manifest(
@@ -41,6 +52,43 @@ pub(super) fn publish_connect_facts(
         actual_port,
         certificate,
     );
+    alias
+}
+
+/// The device-independent LAN name a session answers to while it runs.
+const MDNS_ALIAS_HOST: &str = "pilotage.local";
+
+/// A best-effort mDNS host alias held for the session's lifetime: the
+/// spawned `dns-sd -P` proxy keeps the registration alive, and dropping
+/// this kills it, so the name never outlives the session it names.
+pub(super) struct MdnsAlias {
+    child: std::process::Child,
+}
+
+impl Drop for MdnsAlias {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
+/// Registers `pilotage.local` as a proxy for this machine's address.
+fn register_mdns_alias(ip: &str, viewer_port: u16) -> Option<MdnsAlias> {
+    let child = std::process::Command::new("dns-sd")
+        .args([
+            "-P",
+            "Pilotage",
+            "_pilotage._tcp",
+            "local",
+            &viewer_port.to_string(),
+            MDNS_ALIAS_HOST,
+            ip,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    Some(MdnsAlias { child })
 }
 
 /// This machine's mDNS name (`<name>.local`), the LAN identity Bonjour
