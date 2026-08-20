@@ -59,6 +59,8 @@ pub(super) struct Link {
     /// When that ask left, on the link clock. An ask nobody answers
     /// expires, so the sticks are never locked out for good.
     pub(super) motion_ask_at_ms: Option<u64>,
+    /// A reset press waiting on the lifecycle scope's authority grant.
+    pub(super) pending_sim_reset: bool,
 }
 
 /// One second of link accounting, reset on report.
@@ -175,6 +177,7 @@ pub(crate) async fn run(
         last_demand_ms: 0,
         motion_request_pending: false,
         motion_ask_at_ms: None,
+        pending_sim_reset: false,
     };
     loop {
         match connect(&config, pinned).await {
@@ -309,6 +312,8 @@ async fn drive(
                 link.deliver_state_frame();
                 let keepalive = link.keepalive_actions();
                 link.execute(keepalive, &mut send, connection).await;
+                let reset = link.pending_sim_reset_actions();
+                link.execute(reset, &mut send, connection).await;
             }
             _ = stats_ticker.tick() => link.report_stats(),
         }
@@ -339,6 +344,7 @@ async fn handle_command(
             yaw,
         }),
         Some(LinkCommand::Action { code }) => link.action_actions(code),
+        Some(LinkCommand::SimReset) => link.sim_reset_actions(),
         Some(LinkCommand::ArmOrder { armed }) => link.order_actions(armed),
         Some(LinkCommand::PadSample {
             axes,

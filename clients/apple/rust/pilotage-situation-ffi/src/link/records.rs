@@ -36,6 +36,10 @@ pub struct LinkScope {
     pub scope: String,
     /// Typed intent families the scope accepts.
     pub intents: Vec<LinkIntentCapability>,
+    /// Typed discrete action codes the scope accepts (the wire
+    /// `ControlAction` values), so the shell can show a control
+    /// exactly when the host offers its action.
+    pub actions: Vec<i32>,
 }
 
 /// One offered vehicle.
@@ -203,6 +207,7 @@ impl LinkCatalog {
                                     max_angular: intent.max_angular,
                                 })
                                 .collect(),
+                            actions: scope.actions.iter().map(|action| action.action).collect(),
                         })
                         .collect(),
                 })

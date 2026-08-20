@@ -106,4 +106,22 @@ extension LinkCatalog {
             }
         }
     }
+
+    /// The simulator lifecycle scope and its reset action code — the
+    /// same identities the browser client names. Only a simulator host
+    /// advertises them.
+    private static let lifecycleScope = "sim.lifecycle"
+    private static let simResetAction: Int32 = 5
+
+    /// Whether this host is a simulator offering a flight reset. The
+    /// Reset control exists exactly when this holds; a real vehicle
+    /// never shows one.
+    var offersSimReset: Bool {
+        vehicles.contains { vehicle in
+            vehicle.scopes.contains { scope in
+                scope.scope == Self.lifecycleScope
+                    && scope.actions.contains(Self.simResetAction)
+            }
+        }
+    }
 }

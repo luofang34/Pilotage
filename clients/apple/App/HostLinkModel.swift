@@ -241,6 +241,14 @@ final class HostLinkModel: ObservableObject {
         link?.setArmOrder(armed: false)
     }
 
+    /// Asks the simulator host to reset the flight. The driver
+    /// acquires the lifecycle scope's authority when it is not yet
+    /// held; on a host that never advertised the action nothing is
+    /// sent — the button gating makes that unreachable from here.
+    func resetSim() {
+        link?.requestSimReset()
+    }
+
     /// Asks the present holder to hand control over; the handover
     /// finishes without another press here if they confirm.
     func requestTakeover() {

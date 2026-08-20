@@ -128,6 +128,7 @@ fn admitted_link() -> Link {
         last_demand_ms: 0,
         motion_request_pending: false,
         motion_ask_at_ms: None,
+        pending_sim_reset: false,
     }
 }
 

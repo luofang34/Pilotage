@@ -19,6 +19,7 @@ const DEMAND_SILENCE_FILL_MS: u64 = 150;
 use pilotage_protocol::wire;
 
 use super::driver::Link;
+use super::records::LinkEvent;
 
 impl Link {
     /// Builds and sends one fenced motion frame, or nothing without a
@@ -77,6 +78,82 @@ impl Link {
             &scope,
             ControlCommand::Intent(intent),
             sampled_at_nanos,
+        )
+    }
+
+    /// The auxiliary scope carrying simulator lifecycle actions — the
+    /// same identity the browser's SIM_LIFECYCLE_SCOPE names. Only a
+    /// simulator host advertises it.
+    const LIFECYCLE_SCOPE: &'static str = "sim.lifecycle";
+    /// The wire `ControlAction` code for a simulation reset.
+    const ACTION_SIM_RESET: i32 = 5;
+
+    /// Requests a simulation reset: sends the action when the
+    /// lifecycle scope's authority is already held, otherwise asks for
+    /// that authority and leaves the press pending for the grant. A
+    /// host that does not advertise the action gets nothing.
+    pub(super) fn sim_reset_actions(&mut self) -> Vec<ClientAction> {
+        let Some(vehicle_id) = self.lifecycle_vehicle() else {
+            self.delivery.event(LinkEvent::Notice {
+                text: "sim reset not advertised by this host; not sent".to_owned(),
+            });
+            return Vec::new();
+        };
+        if self.engine.holds(vehicle_id, Self::LIFECYCLE_SCOPE) {
+            self.pending_sim_reset = false;
+            return self.sim_reset_command(vehicle_id);
+        }
+        self.pending_sim_reset = true;
+        self.engine.request_lease(vehicle_id, Self::LIFECYCLE_SCOPE)
+    }
+
+    /// Completes a pending reset once the lifecycle grant lands; the
+    /// tick calls this, so the press survives the authority round trip.
+    pub(super) fn pending_sim_reset_actions(&mut self) -> Vec<ClientAction> {
+        if !self.pending_sim_reset {
+            return Vec::new();
+        }
+        let Some(vehicle_id) = self.lifecycle_vehicle() else {
+            return Vec::new();
+        };
+        if !self.engine.holds(vehicle_id, Self::LIFECYCLE_SCOPE) {
+            return Vec::new();
+        }
+        self.pending_sim_reset = false;
+        self.sim_reset_command(vehicle_id)
+    }
+
+    /// The vehicle whose catalog advertises the reset action, if any.
+    fn lifecycle_vehicle(&self) -> Option<u64> {
+        self.engine.admission().and_then(|admission| {
+            admission.vehicles.iter().find_map(|vehicle| {
+                vehicle
+                    .scopes
+                    .iter()
+                    .any(|scope| {
+                        scope.scope == Self::LIFECYCLE_SCOPE
+                            && scope
+                                .actions
+                                .iter()
+                                .any(|action| action.action == Self::ACTION_SIM_RESET)
+                    })
+                    .then_some(vehicle.vehicle_id)
+            })
+        })
+    }
+
+    fn sim_reset_command(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
+        self.delivery.event(LinkEvent::Notice {
+            text: "simulation reset requested".to_owned(),
+        });
+        self.engine.control_action(
+            vehicle_id,
+            Self::LIFECYCLE_SCOPE,
+            wire::ControlActionRequest {
+                action: Self::ACTION_SIM_RESET,
+                mode_target: 0,
+                action_id: 0,
+            },
         )
     }
 
