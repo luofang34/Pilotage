@@ -100,9 +100,15 @@ int CameraFunc(XPLMCameraPosition_t* out_position, int is_losing, void*) {
     const float up0_x = -sin_h * sin_p;
     const float up0_y = cos_p;
     const float up0_z = cos_h * sin_p;
-    const float up_x = up0_x * cos_r - right_x * sin_r;
-    const float up_y = up0_y * cos_r - right_y * sin_r;
-    const float up_z = up0_z * cos_r - right_z * sin_r;
+    // X-Plane's phi is positive-RIGHT (the FPV branch passes it
+    // straight into the camera's own roll): rolling right tips the
+    // body-up vector TOWARD the right wing, so the right axis enters
+    // with a plus. The wrong sign swings a station to the wrong side
+    // of the hull by |up_m|*sin(phi) — two meters of gimbal mast at a
+    // thirty-degree bank.
+    const float up_x = up0_x * cos_r + right_x * sin_r;
+    const float up_y = up0_y * cos_r + right_y * sin_r;
+    const float up_z = up0_z * cos_r + right_z * sin_r;
     out_position->x = (local_x_ref ? XPLMGetDataf(local_x_ref) : 0.0F)
         + forward_m * fwd_x + up_m * up_x;
     out_position->y = (local_y_ref ? XPLMGetDataf(local_y_ref) : 0.0F)
