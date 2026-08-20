@@ -318,7 +318,11 @@ final class HostLinkModel: ObservableObject {
     /// the same three facts the browser reads, taken from the same file,
     /// so a hand-typed hash is never the price of pinning.
     func connectFromManifest(_ manifestUrl: String) {
-        guard let url = URL(string: manifestUrl) else {
+        // Keyboards append spaces and autocorrect pads pastes; a URL
+        // API that percent-encodes them turns one invisible character
+        // into a 404 nobody can see the cause of.
+        let trimmed = manifestUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed) else {
             status = "manifest url is invalid"
             return
         }
