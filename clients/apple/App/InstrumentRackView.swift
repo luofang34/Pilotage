@@ -35,7 +35,7 @@ struct InstrumentRackView: View {
     /// title into a one-letter-per-line column.
     private static let fcuButtonWidth: CGFloat = 40
     private static let resetButtonWidth: CGFloat = 52
-    private static let leaseButtonWidth: CGFloat = 88
+    private static let leaseButtonWidth: CGFloat = 72
 
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
@@ -339,75 +339,87 @@ struct InstrumentRackView: View {
     /// scrolling fallback lays controls edge to edge instead.
     private func barRow(fills: Bool) -> some View {
         HStack(spacing: 10) {
-                Image(systemName: model.controllerAttached
-                    ? "gamecontroller.fill"
-                    : "gamecontroller")
-                    .foregroundStyle(model.controllerAttached ? .green : .secondary)
-                if model.catalog?.offersFlightControl == true {
-                    // The autopilot face exists only for a host that
-                    // commands a flight computer; a plan-input panel
-                    // never grows one.
-                    Button {
-                        withAnimation { fcuShown.toggle() }
-                    } label: {
-                        Text("FCU")
-                            .font(.caption.weight(.bold))
-                            .lineLimit(1)
-                            .frame(width: Self.fcuButtonWidth)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .fill(fcuShown ? Color.cyan.opacity(0.3) : Color(white: 0.2))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-                if model.catalog?.offersSimReset == true {
-                    // Only a simulator host advertises the lifecycle
-                    // reset; a real vehicle's bar never grows a button
-                    // that could not mean anything there.
-                    Button {
-                        resetAsked = true
-                    } label: {
-                        Text("Reset")
-                            .font(.caption.weight(.bold))
-                            .lineLimit(1)
-                            .frame(width: Self.resetButtonWidth)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.2))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.red)
-                }
-                if model.leaseHeld {
-                    ArmTelegraphControl(model: model)
-                }
-                if fills { Spacer(minLength: 0) }
-                // One slot, three states, the arm telegraph's idiom:
-                // the ask is the operator's order, the grant is the
-                // host's answer, and the lever never re-sends while an
-                // answer is outstanding. One word per state so the
-                // slot's width never moves.
-                if model.leaseHeld {
-                    Button("Release", role: .destructive) { model.releaseLease() }
+            Image(systemName: model.controllerAttached
+                ? "gamecontroller.fill"
+                : "gamecontroller")
+                .foregroundStyle(model.controllerAttached ? .green : .secondary)
+            // The lease chip LEADS the row: it is the bar's most
+            // consequential control, and a control that must be
+            // scrolled into view might as well not exist. One slot,
+            // three faces, the arm telegraph's idiom — the ask is the
+            // operator's order, the grant is the host's answer, and
+            // the chip never re-sends while an answer is outstanding.
+            leaseChip
+            if model.leaseHeld {
+                ArmTelegraphControl(model: model)
+            }
+            if model.catalog?.offersFlightControl == true {
+                // The autopilot face exists only for a host that
+                // commands a flight computer; a plan-input panel
+                // never grows one.
+                Button {
+                    withAnimation { fcuShown.toggle() }
+                } label: {
+                    Text("FCU")
+                        .font(.caption.weight(.bold))
                         .lineLimit(1)
-                        .frame(width: Self.leaseButtonWidth)
-                } else if model.leaseAsked {
-                    Button("Asked…") {}
-                        .disabled(true)
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
-                        .frame(width: Self.leaseButtonWidth)
-                } else {
-                    Button("Request") { model.requestLease() }
-                        .disabled(model.catalog == nil)
-                        .lineLimit(1)
-                        .frame(width: Self.leaseButtonWidth)
+                        .frame(width: Self.fcuButtonWidth)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(fcuShown ? Color.cyan.opacity(0.3) : Color(white: 0.2))
+                        )
                 }
+                .buttonStyle(.plain)
+            }
+            if model.catalog?.offersSimReset == true {
+                // Only a simulator host advertises the lifecycle
+                // reset; a real vehicle's bar never grows a button
+                // that could not mean anything there.
+                Button {
+                    resetAsked = true
+                } label: {
+                    Text("Reset")
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                        .frame(width: Self.resetButtonWidth)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.2))
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.red)
+            }
+            if fills { Spacer(minLength: 0) }
         }
         .font(.callout)
+    }
+
+    /// The lease control's three faces, one fixed-width chip: blue to
+    /// ask, amber while the host owes an answer, red to stand down.
+    @ViewBuilder
+    private var leaseChip: some View {
+        let (title, tint): (String, Color) = model.leaseHeld
+            ? ("Release", .red)
+            : model.leaseAsked ? ("Asked…", .orange) : ("Request", .cyan)
+        Button {
+            if model.leaseHeld {
+                model.releaseLease()
+            } else if !model.leaseAsked {
+                model.requestLease()
+            }
+        } label: {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .frame(width: Self.leaseButtonWidth)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 5).fill(tint.opacity(0.3)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tint)
+        .disabled(model.catalog == nil || model.leaseAsked)
     }
 
     /// The one caption line under the bar, present only when the
