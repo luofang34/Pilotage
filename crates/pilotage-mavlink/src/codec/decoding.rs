@@ -38,6 +38,56 @@ fn u16_at(payload: &[u8], off: usize) -> u16 {
     u16::from_le_bytes(bytes)
 }
 
+/// HIL_STATE_QUATERNION wire order (64-bit first, then arrays,
+/// then 32-bit, then 16-bit): time_usec @0, q[4] @8..24,
+/// roll/pitch/yawspeed @24..36, lat/lon/alt @36..48,
+/// vx/vy/vz i16 cm/s @48..54, then acceleration fields.
+fn decode_sim_truth(payload: &[u8]) -> FcMessage {
+    FcMessage::SimTruth {
+        time_usec: u64_at(payload, 0),
+        quat_wxyz: [
+            f32_at(payload, 8),
+            f32_at(payload, 12),
+            f32_at(payload, 16),
+            f32_at(payload, 20),
+        ],
+        vel_ned_mps: [
+            f32::from(u16_at(payload, 48) as i16) / 100.0,
+            f32::from(u16_at(payload, 50) as i16) / 100.0,
+            f32::from(u16_at(payload, 52) as i16) / 100.0,
+        ],
+        lat_lon_alt: [
+            u32_at(payload, 36) as i32,
+            u32_at(payload, 40) as i32,
+            u32_at(payload, 44) as i32,
+        ],
+    }
+}
+
+/// Wire order: time_boot_ms u32 @0, q[4] @4..20, angular
+/// velocity x/y/z @20..32, failure_flags u32 @32, flags u16
+/// @36, targets @38..40, then v2 extension fields this decoder
+/// ignores (zero-truncated payloads shorter than 40 still
+/// decode via the zero-extending accessors).
+fn decode_gimbal_status(payload: &[u8]) -> FcMessage {
+    FcMessage::GimbalDeviceAttitudeStatus {
+        time_boot_ms: u32_at(payload, 0),
+        quat_wxyz: [
+            f32_at(payload, 4),
+            f32_at(payload, 8),
+            f32_at(payload, 12),
+            f32_at(payload, 16),
+        ],
+        rates_rps: [
+            f32_at(payload, 20),
+            f32_at(payload, 24),
+            f32_at(payload, 28),
+        ],
+        failure_flags: u32_at(payload, 32),
+        flags: u16_at(payload, 36),
+    }
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
         HEARTBEAT_ID => Some(FcMessage::Heartbeat {
@@ -73,29 +123,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             press_abs_hpa: f32_at(payload, 4),
             temperature_cdeg: u16_at(payload, 12) as i16,
         }),
-        // HIL_STATE_QUATERNION wire order (64-bit first, then arrays,
-        // then 32-bit, then 16-bit): time_usec @0, q[4] @8..24,
-        // roll/pitch/yawspeed @24..36, lat/lon/alt @36..48,
-        // vx/vy/vz i16 cm/s @48..54, then acceleration fields.
-        HIL_STATE_QUATERNION_ID => Some(FcMessage::SimTruth {
-            time_usec: u64_at(payload, 0),
-            quat_wxyz: [
-                f32_at(payload, 8),
-                f32_at(payload, 12),
-                f32_at(payload, 16),
-                f32_at(payload, 20),
-            ],
-            vel_ned_mps: [
-                f32::from(u16_at(payload, 48) as i16) / 100.0,
-                f32::from(u16_at(payload, 50) as i16) / 100.0,
-                f32::from(u16_at(payload, 52) as i16) / 100.0,
-            ],
-            lat_lon_alt: [
-                u32_at(payload, 36) as i32,
-                u32_at(payload, 40) as i32,
-                u32_at(payload, 44) as i32,
-            ],
-        }),
+        HIL_STATE_QUATERNION_ID => Some(decode_sim_truth(payload)),
         LOCAL_POSITION_NED_ID => Some(FcMessage::LocalPositionNed {
             time_boot_ms: u32_at(payload, 0),
             pos_ned_m: [f32_at(payload, 4), f32_at(payload, 8), f32_at(payload, 12)],
@@ -114,27 +142,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             valid_flags: payload.get(8).copied().unwrap_or(0),
             quality: payload.get(9).copied().unwrap_or(0),
         }),
-        // Wire order: time_boot_ms u32 @0, q[4] @4..20, angular
-        // velocity x/y/z @20..32, failure_flags u32 @32, flags u16
-        // @36, targets @38..40, then v2 extension fields this decoder
-        // ignores (zero-truncated payloads shorter than 40 still
-        // decode via the zero-extending accessors).
-        GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(FcMessage::GimbalDeviceAttitudeStatus {
-            time_boot_ms: u32_at(payload, 0),
-            quat_wxyz: [
-                f32_at(payload, 4),
-                f32_at(payload, 8),
-                f32_at(payload, 12),
-                f32_at(payload, 16),
-            ],
-            rates_rps: [
-                f32_at(payload, 20),
-                f32_at(payload, 24),
-                f32_at(payload, 28),
-            ],
-            failure_flags: u32_at(payload, 32),
-            flags: u16_at(payload, 36),
-        }),
+        GIMBAL_DEVICE_ATTITUDE_STATUS_ID => Some(decode_gimbal_status(payload)),
         _ => None,
     }
 }

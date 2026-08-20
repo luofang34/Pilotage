@@ -112,6 +112,32 @@ fn effective_authorization(
     (flags, quality)
 }
 
+/// The fresh simulation-truth sample, stamped with its own source role so
+/// a consumer can never mistake it for the FC's operational estimate.
+fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruthSample> {
+    latest
+        .sim_truth
+        .filter(|truth| truth.received_at.elapsed() <= WITHHOLD_AFTER)
+        .map(|truth| pilotage_adapter_api::SimTruthSample {
+            quat_wxyz: truth.quat_wxyz,
+            pos_ned_m: truth.pos_ned_m,
+            vel_ned_mps: truth.vel_ned_mps,
+            // Attitude, position, and velocity are all carried;
+            // the truth stream has no body-rate report.
+            valid_flags: 0b1101,
+            stamp: pilotage_adapter_api::MeasurementStamp {
+                role: pilotage_adapter_api::SourceRole::SimulationTruth,
+                integrity: pilotage_adapter_api::SourceIntegrity::ChecksummedOnly,
+                source_id: latest.source_id,
+                source_incarnation: latest.source_incarnation,
+                source_epoch: 0,
+                sequence: truth.sequence,
+                acquired_at_ns: truth.time_usec.wrapping_mul(1_000),
+                clock: pilotage_adapter_api::MeasurementClock::Simulation,
+            },
+        })
+}
+
 pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -> TelemetryBatch {
     let Ok(latest) = state.lock() else {
         return TelemetryBatch::default();
@@ -168,27 +194,7 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
             pose: planar_pose,
             speed: planar_speed,
             avionics,
-            sim_truth: latest
-                .sim_truth
-                .filter(|truth| truth.received_at.elapsed() <= WITHHOLD_AFTER)
-                .map(|truth| pilotage_adapter_api::SimTruthSample {
-                    quat_wxyz: truth.quat_wxyz,
-                    pos_ned_m: truth.pos_ned_m,
-                    vel_ned_mps: truth.vel_ned_mps,
-                    // Attitude, position, and velocity are all carried;
-                    // the truth stream has no body-rate report.
-                    valid_flags: 0b1101,
-                    stamp: pilotage_adapter_api::MeasurementStamp {
-                        role: pilotage_adapter_api::SourceRole::SimulationTruth,
-                        integrity: pilotage_adapter_api::SourceIntegrity::ChecksummedOnly,
-                        source_id: latest.source_id,
-                        source_incarnation: latest.source_incarnation,
-                        source_epoch: 0,
-                        sequence: truth.sequence,
-                        acquired_at_ns: truth.time_usec.wrapping_mul(1_000),
-                        clock: pilotage_adapter_api::MeasurementClock::Simulation,
-                    },
-                }),
+            sim_truth: sim_truth_sample(&latest),
             fc_state: None,
             gimbal: None,
         }],

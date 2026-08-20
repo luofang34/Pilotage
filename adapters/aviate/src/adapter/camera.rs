@@ -69,26 +69,18 @@ fn detent_calibrations() -> BTreeMap<u32, CalibrationId> {
     BTreeMap::new()
 }
 
-/// Attaches the session's camera producer, degrading to no-video when it
-/// can't (`PILOTAGE_AVIATE_CAMERA=off` disables the attempt).
+/// Attaches the producer for one camera mode: the spawned gz bridge, or a
+/// bounded wait for the in-simulator plugin to dial in. Returns the attach
+/// result beside the mode's measurement clock and calibration map.
 #[allow(clippy::type_complexity)]
-pub(crate) async fn spawn_camera_bridge() -> (
-    Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
-    Option<pilotage_sim_video::BridgeClient>,
-    Option<tokio::task::JoinHandle<()>>,
+async fn attach_by_mode(
+    mode: CameraMode,
+) -> (
+    Result<pilotage_sim_video::BridgeClient, pilotage_sim_video::SimVideoError>,
+    MeasurementClock,
+    BTreeMap<u32, CalibrationId>,
 ) {
-    let mode = camera_mode();
-    if mode == CameraMode::Off {
-        return (None, None, None);
-    }
-    let incarnation = match OsIncarnationProvider.next_incarnation_blocking() {
-        Ok(incarnation) => incarnation,
-        Err(error) => {
-            tracing::warn!(%error, "no capture incarnation available; no video");
-            return (None, None, None);
-        }
-    };
-    let (attached, clock, calibrations) = match mode {
+    match mode {
         CameraMode::Gazebo => {
             let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .parent()
@@ -134,7 +126,29 @@ pub(crate) async fn spawn_camera_bridge() -> (
             )
         }
         CameraMode::Off => unreachable!("the off mode returned above"),
+    }
+}
+
+/// Attaches the session's camera producer, degrading to no-video when it
+/// can't (`PILOTAGE_AVIATE_CAMERA=off` disables the attempt).
+#[allow(clippy::type_complexity)]
+pub(crate) async fn spawn_camera_bridge() -> (
+    Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
+    Option<pilotage_sim_video::BridgeClient>,
+    Option<tokio::task::JoinHandle<()>>,
+) {
+    let mode = camera_mode();
+    if mode == CameraMode::Off {
+        return (None, None, None);
+    }
+    let incarnation = match OsIncarnationProvider.next_incarnation_blocking() {
+        Ok(incarnation) => incarnation,
+        Err(error) => {
+            tracing::warn!(%error, "no capture incarnation available; no video");
+            return (None, None, None);
+        }
     };
+    let (attached, clock, calibrations) = attach_by_mode(mode).await;
     match attached {
         Ok(mut bridge) => {
             let (tx, rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_DEPTH);

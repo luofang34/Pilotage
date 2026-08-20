@@ -95,6 +95,21 @@ fn envelope_roundtrips_for_authority_event_arm() {
     );
 }
 
+/// One operational-estimate stamp from the fixture's source identity;
+/// the lanes differ only in sequence and acquisition time.
+fn estimate_stamp(sequence: u32, acquired_at_ns: u64) -> wire::MeasurementStamp {
+    wire::MeasurementStamp {
+        source_id: 7,
+        source_incarnation: vec![0xA5; 16],
+        source_epoch: 3,
+        sequence,
+        acquired_at_ns,
+        clock: wire::MeasurementClock::VehicleBoot as i32,
+        role: wire::SourceRole::OperationalEstimate as i32,
+        integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
+    }
+}
+
 #[test]
 // The deprecated legacy arm lane must keep round-tripping unchanged for
 // as long as the field exists on the wire.
@@ -133,36 +148,9 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             valid_flags: 0b1111,
             quality: 0,
             arm_state: 2,
-            attitude_stamp: Some(wire::MeasurementStamp {
-                source_id: 7,
-                source_incarnation: vec![0xA5; 16],
-                source_epoch: 3,
-                sequence: 10,
-                acquired_at_ns: 1_000_000,
-                clock: wire::MeasurementClock::VehicleBoot as i32,
-                role: wire::SourceRole::OperationalEstimate as i32,
-                integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
-            }),
-            kinematics_stamp: Some(wire::MeasurementStamp {
-                source_id: 7,
-                source_incarnation: vec![0xA5; 16],
-                source_epoch: 3,
-                sequence: 5,
-                acquired_at_ns: 900_000,
-                clock: wire::MeasurementClock::VehicleBoot as i32,
-                role: wire::SourceRole::OperationalEstimate as i32,
-                integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
-            }),
-            estimator_status_stamp: Some(wire::MeasurementStamp {
-                source_id: 7,
-                source_incarnation: vec![0xA5; 16],
-                source_epoch: 3,
-                sequence: 11,
-                acquired_at_ns: 1_000_000,
-                clock: wire::MeasurementClock::VehicleBoot as i32,
-                role: wire::SourceRole::OperationalEstimate as i32,
-                integrity: wire::SourceIntegrity::ChecksummedOnly as i32,
-            }),
+            attitude_stamp: Some(estimate_stamp(10, 1_000_000)),
+            kinematics_stamp: Some(estimate_stamp(5, 900_000)),
+            estimator_status_stamp: Some(estimate_stamp(11, 1_000_000)),
         }),
         sim_truth: None,
         fc_state: None,
