@@ -131,7 +131,6 @@ fn admitted_link() -> Link {
         pending_sim_reset: false,
         pending_gimbal_engage: false,
         selected_video_source: None,
-        r3_was_pressed: false,
         gimbal_engage_attempt_ms: 0,
     }
 }
@@ -333,4 +332,31 @@ mod pool {
             "the autoreleased object must die with its batch's pool"
         );
     }
+}
+
+#[test]
+fn a_video_pick_acquires_quietly_and_any_other_source_tears_down() {
+    let mut link = admitted_link();
+    // Picking the payload source asks for its scope and leaves the
+    // engage pending for the grant.
+    let actions = link.select_video_source_actions(2);
+    assert!(!actions.is_empty(), "the pick must ask for the gimbal scope");
+    assert!(link.pending_gimbal_selected());
+    assert!(link.pending_gimbal_engage);
+    // Any non-gimbal pick clears the payload machinery.
+    let actions = link.select_video_source_actions(1);
+    assert!(actions.is_empty(), "no scope held yet, nothing to release");
+    assert!(!link.pending_gimbal_selected());
+    assert!(!link.pending_gimbal_engage);
+}
+
+#[test]
+fn the_parked_keepalive_yields_to_an_active_capture() {
+    let mut link = admitted_link();
+    link.selected_video_source = Some(2);
+    // While the quasimode captures the stick the runtime streams
+    // commanded rates on this lane; the parked keepalive must not
+    // interleave zero-rate frames with a live aim.
+    link.capture_active = true;
+    assert!(link.gimbal_keepalive_actions().is_empty());
 }

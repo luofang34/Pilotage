@@ -50,35 +50,7 @@ impl Link {
             .collect();
         let mut sample = RawSample::default();
         self.control.pad_sample(axes, &raw, &mut sample);
-        // R3 recenters the gimbal WITHOUT the quasimode too: an
-        // operator who parked the producer on the payload view (no LT
-        // held) still owns the aim. The edge fires only outside an
-        // active capture — inside one, the runtime's own edge tracker
-        // owns the press, and two trackers would double the command.
-        let r3_now = pressed.get(11).copied().unwrap_or(false);
-        let r3_edge = r3_now && !self.r3_was_pressed;
-        self.r3_was_pressed = r3_now;
-        let mut actions = self.runtime_actions(&sample);
-        if r3_edge
-            && !self.capture_active
-            && let Some(vehicle_id) = self
-                .engine
-                .admission()
-                .and_then(|admission| admission.vehicles.first())
-                .map(|vehicle| vehicle.vehicle_id)
-                .filter(|vehicle_id| self.engine.holds(*vehicle_id, GIMBAL_SCOPE))
-        {
-            actions.extend(self.engine.control_action(
-                vehicle_id,
-                GIMBAL_SCOPE,
-                wire::ControlActionRequest {
-                    action: ACTION_GIMBAL_RECENTER,
-                    mode_target: 0,
-                    action_id: 0,
-                },
-            ));
-        }
-        actions
+        self.runtime_actions(&sample)
     }
 
     /// Runs one tick synthesized from the held keys — the keyboard is

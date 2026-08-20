@@ -66,8 +66,6 @@ pub(super) struct Link {
     /// The operator's chosen video source, driving what the producer
     /// renders and which auxiliary scope stays alive.
     pub(super) selected_video_source: Option<u8>,
-    /// The R3 press state last tick, for the standalone recenter edge.
-    pub(super) r3_was_pressed: bool,
     /// When the last payload engage left, for pacing its retries.
     pub(super) gimbal_engage_attempt_ms: u64,
 }
@@ -193,7 +191,6 @@ pub(crate) async fn run(
         pending_sim_reset: false,
         pending_gimbal_engage: false,
         selected_video_source: None,
-        r3_was_pressed: false,
         gimbal_engage_attempt_ms: 0,
     };
     loop {

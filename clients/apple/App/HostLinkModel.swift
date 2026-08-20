@@ -64,6 +64,7 @@ final class HostLinkModel: ObservableObject {
     /// not answered yet. The bar shows this as its own lever state, the
     /// way the arm telegraph separates the order from the answer.
     @Published private(set) var leaseAsked = false
+    private var leaseAskExpiry: Task<Void, Never>?
     /// A camera pick awaiting its first frame. The switcher shows the
     /// ask immediately; the DISPLAYED source changes only when the
     /// picked source actually delivers — a black tile is not a switch.
@@ -234,6 +235,20 @@ final class HostLinkModel: ObservableObject {
         link = nil
         catalog = nil
         leaseHeld = false
+        leaseAsked = false
+        leaseAskExpiry?.cancel()
+        leaseAskExpiry = nil
+        // Video bookkeeping is per-session: the next session must not
+        // inherit live/stale source sets, a pending pick's timeout, or
+        // the staleness sweep of a link that no longer exists.
+        liveVideoSources = []
+        staleSources = []
+        videoFreshAt = [:]
+        pendingVideoSource = nil
+        pendingVideoTimeout?.cancel()
+        pendingVideoTimeout = nil
+        staleSweep?.invalidate()
+        staleSweep = nil
         phase = .idle
         status = "not connected"
     }
@@ -258,6 +273,15 @@ final class HostLinkModel: ObservableObject {
         else { return }
         leaseAsked = true
         link?.requestLease(vehicleId: vehicle.vehicleId, scope: scope.scope)
+        // A host that never answers must not pin the chip on "Asked…"
+        // forever; the pad-press ask expires host-side at ten seconds,
+        // and the chip follows the same clock.
+        leaseAskExpiry?.cancel()
+        leaseAskExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, !Task.isCancelled, !self.leaseHeld else { return }
+            self.leaseAsked = false
+        }
     }
 
     /// Stands down from control.
@@ -423,7 +447,10 @@ final class HostLinkModel: ObservableObject {
             // must not flip the shell into "controlling", nor its
             // release stop the demand loop that keeps motion alive.
             guard scope == "vehicle.motion" else {
-                if !held && !detail.isEmpty { status = "gimbal: \(detail)" }
+                // Name the scope that answered: a lifecycle denial
+                // labeled "gimbal" sends the operator debugging the
+                // wrong subsystem.
+                if !held && !detail.isEmpty { status = "\(scope): \(detail)" }
                 return
             }
             leaseHeld = held

@@ -4,7 +4,7 @@
 //! loop moves bytes; this file decides what the shell hears.
 
 use pilotage_client_session::ModuleEvent;
-use pilotage_control_web::{AuthorityEvent, MOTION_SCOPE};
+use pilotage_control_web::{AuthorityEvent, GIMBAL_SCOPE, MOTION_SCOPE};
 use pilotage_instrument_feed::{FeedParams, InstrumentFeed};
 use pilotage_protocol::wire;
 
@@ -87,7 +87,16 @@ impl Link {
         // protection is still clearing, and an engage that gives up on
         // one refusal leaves the operator's selection dark forever.
         // The pending flush paces the retries.
-        if result.action == 4 && !result.accepted && self.pending_gimbal_selected() {
+        let result_scope = result
+            .scope
+            .as_ref()
+            .map(|scope| scope.value.as_str())
+            .unwrap_or_default();
+        if result.action == 4
+            && result_scope == GIMBAL_SCOPE
+            && !result.accepted
+            && self.pending_gimbal_selected()
+        {
             self.pending_gimbal_engage = true;
         }
         self.telegraph.on_action_result(

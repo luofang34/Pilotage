@@ -86,9 +86,8 @@ impl Link {
     /// discrete press that AIMS the payload (a held lease alone is not
     /// an aim), which is what makes the producer render its view.
     const ACTION_GIMBAL_RECENTER: i32 = 4;
-    /// The video source ids the shells bind, the same table the
-    /// browser pins: 0 forward (FPV), 2 payload (gimbal).
-    const SOURCE_FPV: u8 = 0;
+    /// The payload source id the shells bind, the same value the
+    /// browser pins; every other id needs nothing from the host.
     pub(super) const SOURCE_GIMBAL: u8 = 2;
 
     /// Steers the producer toward one source. The simulator host
@@ -97,6 +96,9 @@ impl Link {
     /// acquire-and-aim, forward = release. Any other source is a local
     /// display choice with nothing to ask of the host.
     pub(super) fn select_video_source_actions(&mut self, source: u8) -> Vec<ClientAction> {
+        // The selection sticks even unadmitted: a pick made during a
+        // reconnect is an intent, and admission re-acquires it.
+        self.selected_video_source = Some(source);
         let Some(vehicle_id) = self
             .engine
             .admission()
@@ -105,7 +107,6 @@ impl Link {
         else {
             return Vec::new();
         };
-        self.selected_video_source = Some(source);
         match source {
             Self::SOURCE_GIMBAL => {
                 if self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
@@ -117,17 +118,18 @@ impl Link {
                 // engine's control target away from flight.
                 self.engine.request_lease_quiet(vehicle_id, GIMBAL_SCOPE)
             }
-            Self::SOURCE_FPV => {
+            // Every non-gimbal pick tears the payload machinery down:
+            // releasing the scope clears the payload view (the host's
+            // fail-closed clear returns the forward picture), and a
+            // pick of a source with no auxiliary scope (chase) must
+            // not leave the gimbal parked with nobody wanting it.
+            _ => {
                 self.pending_gimbal_engage = false;
                 if self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
-                    // Releasing the scope clears the payload view; the
-                    // host's fail-closed clear returns the forward
-                    // picture without a second command.
                     return self.engine.release_lease(vehicle_id, GIMBAL_SCOPE);
                 }
                 Vec::new()
             }
-            _ => Vec::new(),
         }
     }
 
@@ -160,7 +162,6 @@ impl Link {
             return Vec::new();
         }
         self.pending_gimbal_engage = false;
-        self.gimbal_engage_attempt_ms = self.now_ms();
         self.gimbal_engage_command(vehicle_id)
     }
 
@@ -180,6 +181,18 @@ impl Link {
             return Vec::new();
         };
         if !self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
+            // Self-heal at a polite pace: a reconnect drops every lane
+            // and a revocation takes this one, but the operator's
+            // selection stands until they change it. A five-second
+            // cadence re-asks without storming a present holder with
+            // takeover prompts.
+            if !self.pending_gimbal_engage
+                && self.now_ms().saturating_sub(self.gimbal_engage_attempt_ms) >= 5000
+            {
+                self.gimbal_engage_attempt_ms = self.now_ms();
+                self.pending_gimbal_engage = true;
+                return self.engine.request_lease_quiet(vehicle_id, GIMBAL_SCOPE);
+            }
             return Vec::new();
         }
         let capability = intent_capability(
@@ -201,6 +214,7 @@ impl Link {
     }
 
     fn gimbal_engage_command(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
+        self.gimbal_engage_attempt_ms = self.now_ms();
         self.engine.control_action(
             vehicle_id,
             GIMBAL_SCOPE,
