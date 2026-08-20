@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, MotionDemand, ProfileIdentity, ReconnectPolicy,
-    StreamId, TransportEvent,
+    TransportEvent,
 };
 use pilotage_control_web::{ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES};
 use pilotage_instrument_feed::InstrumentFeed;
@@ -21,6 +21,9 @@ use super::LinkCommand;
 use super::delivery::DeliveryQueue;
 use super::observer::LinkObserver;
 use super::records::{LinkConfig, LinkEvent};
+
+mod readers;
+use readers::{spawn_bootstrap_reader, spawn_datagram_reader, spawn_uni_acceptor};
 
 /// State-frame cadence: one assembly per display-ish interval. The scene
 /// pace is the shell's display link; this only bounds staleness.
@@ -402,101 +405,4 @@ async fn handle_command(
     };
     link.execute(actions, send, connection).await;
     false
-}
-
-/// Reads the bootstrap stream until it ends.
-fn spawn_bootstrap_reader(
-    mut recv: wtransport::RecvStream,
-    events: mpsc::UnboundedSender<ReaderEvent>,
-) {
-    tokio::spawn(async move {
-        let mut buf = vec![0_u8; 8192];
-        loop {
-            match recv.read(&mut buf).await {
-                Ok(Some(read)) => {
-                    let event = TransportEvent::BootstrapReceived(buf[..read].to_vec());
-                    if events.send(ReaderEvent::Transport(event)).is_err() {
-                        return;
-                    }
-                }
-                Ok(None) | Err(_) => {
-                    events
-                        .send(ReaderEvent::Transport(TransportEvent::TransportLost {
-                            detail: "bootstrap stream ended".to_owned(),
-                        }))
-                        .ok();
-                    return;
-                }
-            }
-        }
-    });
-}
-
-/// Accepts host-initiated uni streams and spawns a reader per stream.
-fn spawn_uni_acceptor(connection: Connection, events: mpsc::UnboundedSender<ReaderEvent>) {
-    tokio::spawn(async move {
-        let mut next_stream = 0_u64;
-        loop {
-            let Ok(mut recv) = connection.accept_uni().await else {
-                return;
-            };
-            next_stream = next_stream.wrapping_add(1);
-            let stream = StreamId(next_stream);
-            if events
-                .send(ReaderEvent::Transport(TransportEvent::UniStreamOpened(
-                    stream,
-                )))
-                .is_err()
-            {
-                return;
-            }
-            let events = events.clone();
-            tokio::spawn(async move {
-                let mut buf = vec![0_u8; 8192];
-                loop {
-                    match recv.read(&mut buf).await {
-                        Ok(Some(read)) => {
-                            let event =
-                                TransportEvent::UniStreamReceived(stream, buf[..read].to_vec());
-                            if events.send(ReaderEvent::Transport(event)).is_err() {
-                                return;
-                            }
-                        }
-                        Ok(None) | Err(_) => {
-                            events
-                                .send(ReaderEvent::Transport(TransportEvent::UniStreamClosed(
-                                    stream,
-                                )))
-                                .ok();
-                            return;
-                        }
-                    }
-                }
-            });
-        }
-    });
-}
-
-/// Reads datagrams until the connection ends.
-fn spawn_datagram_reader(connection: Connection, events: mpsc::UnboundedSender<ReaderEvent>) {
-    tokio::spawn(async move {
-        loop {
-            match connection.receive_datagram().await {
-                Ok(datagram) => {
-                    let event = TransportEvent::DatagramReceived(datagram.payload().to_vec());
-                    if events.send(ReaderEvent::Transport(event)).is_err() {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    events
-                        .send(ReaderEvent::Transport(TransportEvent::TransportLost {
-                            detail: "connection closed".to_owned(),
-                        }))
-                        .ok();
-                    return;
-                }
-            }
-        }
-    });
 }

@@ -281,7 +281,8 @@ impl Link {
         self.pending_sim_reset = true;
         // Quiet, as above: lifecycle authority rides beside flight
         // control, never in its seat.
-        self.engine.request_lease_quiet(vehicle_id, Self::LIFECYCLE_SCOPE)
+        self.engine
+            .request_lease_quiet(vehicle_id, Self::LIFECYCLE_SCOPE)
     }
 
     /// Completes a pending reset once the lifecycle grant lands; the

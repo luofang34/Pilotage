@@ -344,7 +344,10 @@ fn a_video_pick_acquires_quietly_and_any_other_source_tears_down() {
     // Picking the payload source asks for its scope and leaves the
     // engage pending for the grant.
     let actions = link.select_video_source_actions(2);
-    assert!(!actions.is_empty(), "the pick must ask for the gimbal scope");
+    assert!(
+        !actions.is_empty(),
+        "the pick must ask for the gimbal scope"
+    );
     assert!(link.pending_gimbal_selected());
     assert!(link.pending_gimbal_engage);
     // Any non-gimbal pick clears the payload machinery.
