@@ -159,6 +159,37 @@ window.addEventListener("pagehide", readout.dispose, { once: true });
 window.addEventListener("keydown", (event) => control.forwardKey(event, true));
 window.addEventListener("keyup", (event) => control.forwardKey(event, false));
 window.addEventListener("gamepaddisconnected", control.gamepadDisconnected);
+// The arm button drives the SAME path as the keyboard: it synthesizes
+// the bound key, so every gate, lease, and profile rule between a key
+// press and the vehicle applies unchanged. Arming asks once to confirm
+// — a click is easier to land by accident than an Enter press.
+{
+  const armBtn = document.getElementById("armBtn");
+  const disarmBtn = document.getElementById("disarmBtn");
+  let armPending = null;
+  const pressKey = (key) => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    window.setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+    }, 60);
+  };
+  armBtn.addEventListener("click", () => {
+    if (armPending === null) {
+      armBtn.textContent = "confirm ARM?";
+      armPending = window.setTimeout(() => {
+        armPending = null;
+        armBtn.textContent = "ARM";
+      }, 3000);
+      return;
+    }
+    window.clearTimeout(armPending);
+    armPending = null;
+    armBtn.textContent = "ARM";
+    pressKey("Enter");
+  });
+  disarmBtn.addEventListener("click", () => pressKey("Backspace"));
+}
+
 document.getElementById("fpvBtn").addEventListener("click", () => {
   state.pendingFpvToggle = true;
 });

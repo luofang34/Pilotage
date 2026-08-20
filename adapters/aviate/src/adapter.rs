@@ -7,14 +7,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    ActionResult, AdapterCapabilities, ApplyOutcome, Disposition, LinkLossPolicy, RejectReason,
-    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter,
-    VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, LinkLossPolicy, RejectReason,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
 };
-use pilotage_protocol::{
-    ControlAction, ControlIntent, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId,
-};
-use pilotage_timing::SimTick;
+use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -26,16 +22,27 @@ use crate::error::AviateAdapterError;
 use crate::uplink::FlightUplink;
 
 mod advertisement;
+#[cfg(feature = "sim")]
 mod camera;
+mod profile;
+mod sim_attachments;
+pub use profile::AviateProfile;
+#[cfg(not(feature = "sim"))]
+use sim_attachments::no_camera;
+use sim_attachments::{CameraBridge, Pointing, TruthOracle};
+
 mod control;
+mod flight;
+#[cfg(feature = "sim")]
+mod pointing;
 mod sampling;
+#[cfg(feature = "sim")]
 mod shm_sampling;
 mod sources;
 mod startup;
-use control::{rejected_control, sticks_from_velocity};
+use control::rejected_control;
 use sampling::mavlink_batch;
-use shm_sampling::ShmSource;
-use sources::{ArmReport, EstimateSource, fc_state_sample};
+use sources::{ArmReport, EstimateSource};
 
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
@@ -44,6 +51,16 @@ pub const FLIGHT_SCOPE: &str = "vehicle.motion";
 /// OWN lease and authority generation — never a reinterpretation of the
 /// velocity scope's numbers.
 pub const DIRECT_SCOPE: &str = "vehicle.motion.direct";
+/// The gimbal pointing scope (GIM-01, ADR-0006 vocabulary): pitch/yaw
+/// line-of-sight rate demands, leased and fenced independently of flight.
+/// Here the payload is a producer-rendered view, not a servo gimbal — the
+/// adapter integrates the commanded rate into the pointing angle the
+/// producer consumes.
+#[cfg(feature = "sim")]
+pub const GIMBAL_SCOPE: &str = "vehicle.gimbal";
+/// Gimbal-scope button whose press recenters the payload view.
+#[cfg(feature = "sim")]
+pub const GIMBAL_NEUTRAL_BUTTON: u16 = 0;
 /// Canonical `roll` axis (0): lateral velocity, + = right.
 pub const ROLL_AXIS: u16 = 0;
 /// Canonical `pitch` axis (1): forward velocity, + = forward.
@@ -63,25 +80,6 @@ pub const DISARM_BUTTON: u16 = 1;
 /// the Gazebo adapter's dead-reader path).
 const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
 
-/// Which session profile the adapter runs (LINK-04). A profile binds
-/// source ROLES — the MAVLink link carries the FC operational estimate,
-/// the shm block carries simulation truth — and transports are never
-/// alternatives for one another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AviateProfile {
-    /// Physical vehicle: FC estimate + FC state. A truth source must not
-    /// exist and is never synthesized.
-    Physical,
-    /// Simulation: FC estimate + FC state, plus the simulation-truth
-    /// oracle while the co-located shm block is attachable.
-    #[default]
-    Simulation,
-    /// Oracle-only diagnostics: the truth stream alone. No uplink is
-    /// bound and no motion-control scope is advertised — operational
-    /// control is structurally absent, not merely rejected.
-    OracleOnly,
-}
-
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
 ///
 /// Real-time (ADR-0013): the FC/simulation advances on its own clock;
@@ -100,12 +98,20 @@ pub struct AviateAdapter {
     // other: a missing estimate rejects state-dependent control instead
     // of borrowing truth.
     estimate: Option<EstimateSource>,
-    truth: Option<Box<ShmSource>>,
+    truth: Option<Box<TruthOracle>>,
     uplink: Option<FlightUplink>,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
-    frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>>,
-    _camera_bridge: Option<pilotage_adapter_gazebo::BridgeClient>,
+    frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
+    // The producer link. Held (not underscore-parked) because the gimbal
+    // scope enacts through it: pointing and zoom are commands to the
+    // producer that renders the payload view.
+    camera_bridge: Option<CameraBridge>,
+    // The commanded pointing of the payload view, integrated from the
+    // scope's rate demands. `None` when no producer accepts commands,
+    // and structurally uninhabited in a flight build.
+    #[cfg_attr(not(feature = "sim"), allow(dead_code))]
+    pointing: Option<Pointing>,
     _frame_forwarder: Option<tokio::task::JoinHandle<()>>,
     // Latest FC arm report from uplink heartbeats, with its receive
     // metadata; `None` until the FC has reported at least once.
@@ -115,6 +121,10 @@ pub struct AviateAdapter {
     // Zero point of the host-monotonic acquisition clock.
     started_at: std::time::Instant,
     last_reset: Option<std::time::Instant>,
+    /// Whether the last payload-view publish failed, so a dead
+    /// producer link logs one transition line instead of storming the
+    /// telemetry tick.
+    view_publish_failed: bool,
     // Per-scope link-loss latch (ADR-0008): a gimbal-scope policy must not
     // suppress or neutralize motion, so the latch is keyed by scope.
     link_loss_policy: BTreeMap<ScopeId, LinkLossPolicy>,
@@ -135,17 +145,8 @@ impl AviateAdapter {
     /// are up and it has not been taken.
     pub fn subscribe_frames(
         &mut self,
-    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_gazebo::RawVideoFrame>> {
+    ) -> Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>> {
         self.frames.take()
-    }
-
-    /// The typed fault that has fail-closed the simulation-truth source,
-    /// if any. A faulted source publishes no telemetry and does not
-    /// re-attach. Only the shared-memory truth source carries a
-    /// fail-closed fault state; the MAVLink estimate link reports `None`
-    /// here.
-    pub fn shm_fault(&self) -> Option<&AviateAdapterError> {
-        self.truth.as_ref().and_then(|source| source.fault())
     }
 
     /// Wires an adapter around a caller-supplied state cache, for tests.
@@ -158,12 +159,14 @@ impl AviateAdapter {
             truth: None,
             uplink: None,
             frames: None,
-            _camera_bridge: None,
+            camera_bridge: None,
+            pointing: None,
             _frame_forwarder: None,
             arm: None,
             arm_incarnation: SourceIncarnation::new([0; 16]),
             started_at: std::time::Instant::now(),
             last_reset: None,
+            view_publish_failed: false,
             reset_latch: None,
             reset_spawns: 0,
             link_loss_policy: BTreeMap::new(),
@@ -255,7 +258,11 @@ fn process_flight_actions(
                     "no mode requests: direct flight is the vehicle.motion.direct scope",
                 ));
             }
-            ControlAction::SimReset | ControlAction::Disarm | ControlAction::GimbalRecenter => {
+            ControlAction::SimReset
+            | ControlAction::Disarm
+            | ControlAction::GimbalRecenter
+            | ControlAction::CameraZoomIn
+            | ControlAction::CameraZoomOut => {
                 action_results.push(ActionResult::rejected(
                     *action,
                     "not supported on the flight scope",
@@ -276,143 +283,24 @@ impl VehicleAdapter for AviateAdapter {
         if frame.scope.as_str() == pilotage_adapter_api::SIM_LIFECYCLE_SCOPE {
             return self.apply_sim_lifecycle(frame, tick);
         }
-        if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
-            return outcome;
+        // Per-scope link-loss latch (ADR-0010): a frame is suppressed
+        // only while ITS scope has a policy engaged, so a gimbal failsafe
+        // never suppresses motion and the reverse.
+        if self.link_loss_policy.contains_key(&frame.scope) {
+            return rejected_control(tick, RejectReason::LinkLossEngaged);
         }
-        let Some((current_yaw, current_pos, current_vel)) = self.current_pose() else {
-            return rejected_control(tick, RejectReason::MeasurementUnavailable);
-        };
-        let Some(uplink) = self.uplink.as_mut() else {
-            return rejected_control(tick, RejectReason::UnknownScope);
-        };
-
-        let action_results = process_flight_actions(
-            &frame.actions,
-            |yaw| {
-                uplink.send_arm(yaw);
-            },
-            current_yaw,
-        );
-
-        // Each scope consumes ITS OWN intent family — the gate already
-        // rejected any other family against the advertisement, so these
-        // rejections are defensive, not reachable paths.
-        let constrained = match (frame.scope.as_str(), frame.intent) {
-            (_, None) => {
-                // An actions-only frame (arm) carries no motion demand; the
-                // setpoint stream continues from the next frame.
-                return ApplyOutcome {
-                    tick,
-                    disposition: Disposition::Accepted,
-                    action_results,
-                };
-            }
-            (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
-                let (sticks, constrained) = sticks_from_velocity(&velocity);
-                uplink.send_stick_frame(
-                    sticks[0],
-                    sticks[1],
-                    sticks[2],
-                    sticks[3],
-                    current_yaw,
-                    current_pos,
-                    current_vel,
-                );
-                constrained
-            }
-            (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
-                let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);
-                let tilt_limit = crate::uplink::FPV_MAX_TILT_RAD;
-                uplink.send_attitude_frame(roll, pitch, yaw, attitude.thrust);
-                roll.abs() > tilt_limit || pitch.abs() > tilt_limit
-            }
-            _ => {
-                return rejected_control(
-                    tick,
-                    RejectReason::Other("intent family does not belong to this scope".to_owned()),
-                );
-            }
-        };
-        ApplyOutcome {
-            tick,
-            disposition: if constrained {
-                Disposition::Constrained
-            } else {
-                Disposition::Accepted
-            },
-            action_results,
+        #[cfg(feature = "sim")]
+        if frame.scope.as_str() == GIMBAL_SCOPE {
+            // Pointing sits outside the flight gate chain: aiming a
+            // payload view is not a flight demand and must not wait on
+            // an estimate or an uplink.
+            return self.apply_gimbal(frame, tick);
         }
-    }
-
-    fn sample_telemetry(&mut self) -> TelemetryBatch {
-        if let Some(uplink) = self.uplink.as_mut()
-            && let Some(armed) = uplink.poll_fc()
-        {
-            let (system_id, component_id) = uplink.expected_source();
-            let sequence = self.arm.map_or(0, |report| report.sequence.wrapping_add(1));
-            self.arm = Some(ArmReport {
-                armed,
-                system_id,
-                component_id,
-                sequence,
-                acquired_at: std::time::Instant::now(),
-            });
-        }
-        let fc_state = fc_state_sample(self.arm, self.arm_incarnation, self.started_at);
-        let truth = self.truth.as_mut().and_then(|source| source.truth_sample());
-        let mut batch = match &self.estimate {
-            Some(source) => mavlink_batch(self.vehicle, &source.state),
-            None => TelemetryBatch::default(),
-        };
-        if let Some(sample) = batch.samples.first_mut() {
-            sample.sim_truth = truth;
-            sample.fc_state = fc_state;
-            return batch;
-        }
-        // No estimate sample this tick: the truth oracle and the FC's
-        // stamped state report still publish under their own identities —
-        // with the panels' avionics estimate honestly absent, never
-        // synthesized from truth. A healthy FC heartbeat alone is a
-        // publishable observation; it must not vanish because no other
-        // source produced a sample.
-        if truth.is_some() || fc_state.is_some() {
-            return TelemetryBatch {
-                samples: vec![TelemetrySample {
-                    vehicle: self.vehicle,
-                    // Without a simulation clock the tick has no source;
-                    // FC-state freshness reasoning uses its stamp, never
-                    // this transport tick.
-                    tick: SimTick::new(
-                        truth
-                            .as_ref()
-                            .map_or(0, |sample| sample.stamp.acquired_at_ns),
-                    ),
-                    pose: None,
-                    speed: None,
-                    avionics: None,
-                    sim_truth: truth,
-                    fc_state,
-                    gimbal: None,
-                }],
-            };
-        }
-        batch
+        self.apply_flight(frame, tick)
     }
 
     fn video_sources(&self) -> Vec<VideoSource> {
-        if self._camera_bridge.is_none() {
-            return vec![];
-        }
-        vec![
-            VideoSource {
-                id: pilotage_adapter_gazebo::FPV_SOURCE_ID.to_owned(),
-                description: "onboard forward camera".to_owned(),
-            },
-            VideoSource {
-                id: pilotage_adapter_gazebo::CHASE_SOURCE_ID.to_owned(),
-                description: "chase camera".to_owned(),
-            },
-        ]
+        self.advertised_video_sources()
     }
 
     fn set_link_loss_policy(
@@ -421,76 +309,15 @@ impl VehicleAdapter for AviateAdapter {
         scope: &ScopeId,
         policy: Option<LinkLossPolicy>,
     ) -> Result<(), pilotage_adapter_api::LinkLossEnactError> {
-        if vehicle != self.vehicle {
-            return Err(pilotage_adapter_api::LinkLossEnactError::UnknownVehicle { vehicle });
-        }
-        // Latch first, fail after: even an unenactable engage suppresses this
-        // scope's control frames. The latch is per-scope so another scope's
-        // link-loss never suppresses this one.
-        match &policy {
-            Some(policy) => {
-                self.link_loss_policy.insert(scope.clone(), *policy);
-            }
-            None => {
-                self.link_loss_policy.remove(scope);
-            }
-        }
-        // Only the MOTION scopes actuate flight: a gimbal-scope link-loss
-        // must NOT touch the FC or the motion hold context, so the
-        // neutralize and the hold-invalidation below are gated on them.
-        if scope.as_str() != FLIGHT_SCOPE && scope.as_str() != DIRECT_SCOPE {
-            return Ok(());
-        }
-        // Any motion link-loss transition invalidates the captured
-        // position-hold context — a hold point captured under the lost lease
-        // is obsolete, and letting it survive would command recovery back
-        // toward it the instant control resumes.
-        if let Some(uplink) = self.uplink.as_mut() {
-            uplink.clear_hold_state();
-        }
-        if policy.is_some() {
-            // Engaging any policy sends a zero-velocity setpoint: the FC's
-            // velocity mode brakes to a hover, which is the only safe action
-            // a camera drone has (`Neutralize`). Clearing (link recovery)
-            // leaves the FC hovering until the operator commands again.
-            let Some(uplink) = self.uplink.as_mut() else {
-                return Err(pilotage_adapter_api::LinkLossEnactError::NoActuationChannel);
-            };
-            // Success is only claimed for a datagram the socket accepted;
-            // a refused send must reach the host's fail-closed counter,
-            // not vanish into a log line. The uplink counts refused sends,
-            // so an increment across this send IS the refusal.
-            let failures_before = uplink.send_failures();
-            uplink.send_neutral();
-            if uplink.send_failures() != failures_before {
-                return Err(pilotage_adapter_api::LinkLossEnactError::ChannelRejected {
-                    detail: "the neutral setpoint datagram was not sent".to_owned(),
-                });
-            }
-        }
-        Ok(())
+        self.enact_link_loss(vehicle, scope, policy)
     }
 
-    fn step(&mut self, _budget: StepBudget) -> StepOutcome {
-        // The simulation clock is sim infrastructure, not vehicle state:
-        // when the truth oracle is bound its time drives the session
-        // tick; otherwise the estimate's source time does.
-        let tick = if let Some(source) = &self.truth {
-            source.tick()
-        } else if let Some(source) = &self.estimate {
-            source
-                .state
-                .lock()
-                .ok()
-                .and_then(|latest| latest.kinematics)
-                .map_or(0, |kin| u64::from(kin.time_boot_ms).wrapping_mul(1_000_000))
-        } else {
-            0
-        };
-        StepOutcome {
-            advanced: 0,
-            now: SimTick::new(tick),
-        }
+    fn step(&mut self, budget: StepBudget) -> StepOutcome {
+        self.advance(budget)
+    }
+
+    fn sample_telemetry(&mut self) -> TelemetryBatch {
+        self.collect_telemetry()
     }
 }
 

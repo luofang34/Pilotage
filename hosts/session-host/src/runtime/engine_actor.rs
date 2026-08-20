@@ -17,13 +17,15 @@ use tracing::{debug, error, info, warn};
 
 use crate::runtime::connection::{DatagramClass, ToConnection};
 use crate::runtime::registry::ClientRegistry;
-use crate::runtime::wire_codec::{
-    encode_envelope_message, encode_pong_datagram, encode_telemetry_datagram,
-};
+use crate::runtime::wire_codec::encode_telemetry_datagram;
 
 mod command;
+mod outbound;
+#[cfg(feature = "sim")]
+mod recorder;
 mod telemetry;
 pub use command::ToEngine;
+use outbound::{targets_reliable_stream, to_connection_message};
 use telemetry::sample_to_wire;
 
 #[cfg(test)]
@@ -79,6 +81,11 @@ pub struct EngineActor<A: VehicleAdapter> {
     /// guidance to show: its telemetry carries the field absent rather
     /// than a centered or zeroed one.
     nav_guidance: BTreeMap<VehicleId, wire::NavGuidanceState>,
+    /// The simulation flight recorder, when `PILOTAGE_RECORD_DIR` asks
+    /// for one. Simulation-only by construction (ADR-0040): a flight
+    /// build does not carry the module, not merely leave it idle.
+    #[cfg(feature = "sim")]
+    recorder: Option<recorder::Recorder>,
     /// The single monotonic origin shared with every connection task's
     /// client-message stamps (ADR-0009: one `host_time` reference domain).
     /// Passed in rather than sampled here so tick-driven timestamps and
@@ -106,6 +113,8 @@ impl<A: VehicleAdapter> EngineActor<A> {
             adapter_rejection_dedup: RejectionDedup::default(),
             link_loss_enact_failures: 0,
             nav_guidance: BTreeMap::new(),
+            #[cfg(feature = "sim")]
+            recorder: recorder::Recorder::from_env(),
             start,
         }
     }
@@ -211,6 +220,10 @@ impl<A: VehicleAdapter> EngineActor<A> {
         let batch = self.adapter.sample_telemetry();
         for sample in batch.samples {
             let vehicle = sample.vehicle;
+            #[cfg(feature = "sim")]
+            if let Some(recorder) = self.recorder.as_mut() {
+                recorder.record(&sample, now);
+            }
             let mut wire_sample = sample_to_wire(sample, now);
             // Guidance is a host-internal side input, not adapter output
             // (ADR-0031): the assembly attaches the vehicle's latest
@@ -452,44 +465,6 @@ impl<A: VehicleAdapter> EngineActor<A> {
 /// an implausibly long-running process.
 fn u64_nanos_since(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
-}
-
-/// Whether `message` is destined for one of the reliable ordered streams
-/// (bootstrap or authority-events, ADR-0005), where a dropped message would
-/// break the stream's ordering guarantee. Best-effort datagrams and the
-/// `Close` signal are not.
-fn targets_reliable_stream(message: &ToConnection) -> bool {
-    matches!(
-        message,
-        ToConnection::BootstrapMessage { .. } | ToConnection::AuthorityMessage(_)
-    )
-}
-
-/// Encodes an [`OutboundMessage`] on its [`ToConnection`] arm (ADR-0005); `Pong`
-/// is a datagram; `Authority` uses the dedicated event stream so bootstrap
-/// traffic cannot block it; every other arm uses the bootstrap stream.
-fn to_connection_message(envelope: &pilotage_session::OutboundMessage) -> ToConnection {
-    match envelope {
-        pilotage_session::OutboundMessage::Pong(pong) => ToConnection::Datagram {
-            class: DatagramClass::Pong,
-            bytes: encode_pong_datagram(pong),
-        },
-        // The link-loss-cleared notice is a reliable broadcast; it rides the
-        // dedicated authority-events stream alongside authority events so a
-        // bulk/bootstrap transfer cannot head-of-line-block a recovery ack.
-        pilotage_session::OutboundMessage::Authority(_)
-        | pilotage_session::OutboundMessage::LinkLossCleared(_) => {
-            ToConnection::AuthorityMessage(encode_envelope_message(envelope))
-        }
-        pilotage_session::OutboundMessage::Welcome(_)
-        | pilotage_session::OutboundMessage::LeaseResponse(_)
-        | pilotage_session::OutboundMessage::LeaseReleased(_)
-        | pilotage_session::OutboundMessage::ControlActionResult(_)
-        | pilotage_session::OutboundMessage::FrameRejected(_) => ToConnection::BootstrapMessage {
-            bytes: encode_envelope_message(envelope),
-            opens_media: matches!(envelope, pilotage_session::OutboundMessage::Welcome(_)),
-        },
-    }
 }
 
 /// Lowercase-hex rendering of a profile content digest for the evidence log.

@@ -277,8 +277,9 @@ impl Runtime {
     ) -> RenderStatus {
         let payload = (vne > 0.0).then(|| {
             let mut bytes = [0u8; 20];
-            for (slot, value) in bytes.chunks_exact_mut(4).zip([vs0, vs, vfe, vno, vne]) {
-                slot.copy_from_slice(&value.to_le_bytes());
+            let (slots, _) = bytes.as_chunks_mut::<4>();
+            for (slot, value) in slots.iter_mut().zip([vs0, vs, vfe, vno, vne]) {
+                *slot = value.to_le_bytes();
             }
             bytes
         });

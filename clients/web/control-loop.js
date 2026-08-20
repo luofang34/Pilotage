@@ -449,8 +449,33 @@ export function createControlLoop({
     return key.length === 1 ? key.toLowerCase() : key;
   }
 
+  // Zoom is a DETENTED discrete action on the gimbal scope, not an axis:
+  // each detent is a distinct camera model whose calibration the frames
+  // carry. Stepping it is a keypress, so it rides the reliable action
+  // path beside recenter rather than the per-frame control plan.
+  const ZOOM_KEYS = new Map([
+    ["[", CONTROL_ACTION.cameraZoomOut],
+    ["]", CONTROL_ACTION.cameraZoomIn],
+  ]);
+
+  function forwardZoomKey(key) {
+    const action = ZOOM_KEYS.get(key);
+    if (action === undefined) return false;
+    // Fails closed on discovery: a host whose payload cannot zoom never
+    // advertises the action, and the press is reported as unavailable
+    // rather than silently dropped.
+    if (requestAction(gimbalScope, action)) {
+      log(action === CONTROL_ACTION.cameraZoomIn ? "zoom in requested" : "zoom out requested");
+    }
+    return true;
+  }
+
   function forwardKey(event, pressed) {
     if (!state.controlShell) return;
+    if (pressed && forwardZoomKey(event.key)) {
+      event.preventDefault();
+      return;
+    }
     const key = canonicalKey(event.key);
     const bound = state.controlShell.boundKey(key);
     // A RELEASE must always reach the runtime: bindings can re-resolve

@@ -15,17 +15,15 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use prost::Message;
-use tokio::io::{AsyncWriteExt, WriteHalf};
 use tokio::net::TcpListener;
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tracing::{debug, warn};
+use tracing::warn;
 
-use crate::error::GazeboAdapterError;
-use crate::framing::read_envelope;
-use crate::wire::{BridgeControl, BridgeEnvelope, BridgeFrame, BridgeOdometry, bridge_envelope};
+use crate::error::SimVideoError;
+use crate::pump::{reader_loop, writer_loop};
+use crate::wire::{BridgeCameraCommand, BridgeControl, BridgeFrame, BridgeOdometry};
 
 /// Environment variable overriding the sidecar bridge binary path.
 pub const BRIDGE_BIN_ENV: &str = "PILOTAGE_GZ_BRIDGE_BIN";
@@ -106,7 +104,7 @@ pub struct LatestBridgeState {
 /// [`BridgeClient::reader_health`] to distinguish a live-but-idle cache from a
 /// permanently frozen one, so stale telemetry is not mistaken for current.
 #[derive(Debug, Clone)]
-enum ReaderHealth {
+pub(crate) enum ReaderHealth {
     /// The reader loop is still running.
     Alive,
     /// The reader loop has exited; the string describes why.
@@ -124,6 +122,7 @@ pub struct BridgeClient {
     reader_task: JoinHandle<()>,
     writer_task: JoinHandle<()>,
     control_tx: watch::Sender<Option<BridgeControl>>,
+    camera_tx: watch::Sender<Option<BridgeCameraCommand>>,
     state_rx: watch::Receiver<LatestBridgeState>,
     reader_health_rx: watch::Receiver<ReaderHealth>,
     frame_rx: Option<mpsc::Receiver<BridgeFrame>>,
@@ -137,15 +136,15 @@ impl BridgeClient {
     ///
     /// # Errors
     ///
-    /// Returns a [`GazeboAdapterError`] if the listener cannot bind, the child
+    /// Returns a [`SimVideoError`] if the listener cannot bind, the child
     /// cannot be spawned, or the inbound connection cannot be accepted.
-    pub async fn spawn_and_connect(config: BridgeConfig) -> Result<Self, GazeboAdapterError> {
+    pub async fn spawn_and_connect(config: BridgeConfig) -> Result<Self, SimVideoError> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
-            .map_err(|source| GazeboAdapterError::ListenerBind { source })?;
+            .map_err(|source| SimVideoError::ListenerBind { source })?;
         let local_addr = listener
             .local_addr()
-            .map_err(|source| GazeboAdapterError::ListenerAddr { source })?;
+            .map_err(|source| SimVideoError::ListenerAddr { source })?;
 
         let child = Self::spawn_child(&config, local_addr.port())?;
         let stream = Self::accept(&listener, local_addr).await?;
@@ -154,6 +153,32 @@ impl BridgeClient {
             Some(child),
             config.frame_channel_depth,
         ))
+    }
+
+    /// Binds `port` on loopback and waits for a producer this process does
+    /// NOT own to dial in — the shape an in-simulator plugin needs, since
+    /// the simulator (not the host) decides when the producer exists.
+    ///
+    /// The listener is bound before the wait, so a producer that dials
+    /// during host startup connects rather than failing; a producer that
+    /// reconnects later is accepted by a subsequent call.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SimVideoError`] if the listener cannot bind or the
+    /// inbound connection cannot be accepted.
+    pub async fn accept_producer(
+        port: u16,
+        frame_channel_depth: usize,
+    ) -> Result<Self, SimVideoError> {
+        let listener = TcpListener::bind(("127.0.0.1", port))
+            .await
+            .map_err(|source| SimVideoError::ListenerBind { source })?;
+        let local_addr = listener
+            .local_addr()
+            .map_err(|source| SimVideoError::ListenerAddr { source })?;
+        let stream = Self::accept(&listener, local_addr).await?;
+        Ok(Self::from_stream(stream, None, frame_channel_depth))
     }
 
     /// Wires the reader/writer tasks around an already-connected stream. Shared
@@ -167,6 +192,10 @@ impl BridgeClient {
         let (state_tx, state_rx) = watch::channel(LatestBridgeState::default());
         let (frame_tx, frame_rx) = mpsc::channel(frame_channel_depth.max(1));
         let (control_tx, control_rx) = watch::channel::<Option<BridgeControl>>(None);
+        // Camera commands ride their own latest-value lane: a camera
+        // command must never displace a pending motion command, nor the
+        // reverse.
+        let (camera_tx, camera_rx) = watch::channel::<Option<BridgeCameraCommand>>(None);
         let (reader_health_tx, reader_health_rx) = watch::channel(ReaderHealth::Alive);
         let dropped_frames = Arc::new(AtomicU64::new(0));
 
@@ -177,13 +206,14 @@ impl BridgeClient {
             reader_health_tx,
             Arc::clone(&dropped_frames),
         ));
-        let writer_task = tokio::spawn(writer_loop(write_half, control_rx));
+        let writer_task = tokio::spawn(writer_loop(write_half, control_rx, camera_rx));
 
         Self {
             child,
             reader_task,
             writer_task,
             control_tx,
+            camera_tx,
             state_rx,
             reader_health_rx,
             frame_rx: Some(frame_rx),
@@ -213,12 +243,12 @@ impl BridgeClient {
         command
     }
 
-    fn spawn_child(config: &BridgeConfig, port: u16) -> Result<Child, GazeboAdapterError> {
+    fn spawn_child(config: &BridgeConfig, port: u16) -> Result<Child, SimVideoError> {
         Self::bridge_command(config, port)
             .stdin(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|source| GazeboAdapterError::BridgeSpawn {
+            .map_err(|source| SimVideoError::BridgeSpawn {
                 path: config.bridge_bin.display().to_string(),
                 source,
             })
@@ -227,12 +257,12 @@ impl BridgeClient {
     async fn accept(
         listener: &TcpListener,
         local_addr: SocketAddr,
-    ) -> Result<tokio::net::TcpStream, GazeboAdapterError> {
+    ) -> Result<tokio::net::TcpStream, SimVideoError> {
         let (stream, _peer) =
             listener
                 .accept()
                 .await
-                .map_err(|source| GazeboAdapterError::BridgeAccept {
+                .map_err(|source| SimVideoError::BridgeAccept {
                     addr: local_addr.to_string(),
                     source,
                 })?;
@@ -255,13 +285,13 @@ impl BridgeClient {
     ///
     /// # Errors
     ///
-    /// Returns [`GazeboAdapterError::ReaderTaskEnded`] once the reader loop has
+    /// Returns [`SimVideoError::ReaderTaskEnded`] once the reader loop has
     /// exited (bridge EOF, a read/decode error, or the sidecar child dying),
     /// carrying the reason it ended.
-    pub fn reader_health(&self) -> Result<(), GazeboAdapterError> {
+    pub fn reader_health(&self) -> Result<(), SimVideoError> {
         match &*self.reader_health_rx.borrow() {
             ReaderHealth::Alive => Ok(()),
-            ReaderHealth::Ended(reason) => Err(GazeboAdapterError::ReaderTaskEnded {
+            ReaderHealth::Ended(reason) => Err(SimVideoError::ReaderTaskEnded {
                 reason: reason.clone(),
             }),
         }
@@ -281,6 +311,16 @@ impl BridgeClient {
         self.control_tx.send(Some(control)).is_ok()
     }
 
+    /// Publishes an outbound `BridgeCameraCommand` as the single latest
+    /// camera command for the writer task without blocking on the socket.
+    /// Returns `false` once the writer path is gone (the producer
+    /// disconnected), so callers can surface a rejection instead of
+    /// reporting an enactment that never left.
+    #[must_use]
+    pub fn try_send_camera_command(&self, command: BridgeCameraCommand) -> bool {
+        self.camera_tx.send(Some(command)).is_ok()
+    }
+
     /// Takes the raw-frame receiver, if not already taken. Frames are exposed
     /// here rather than through `sample_telemetry` because streaming video is
     /// backpressure-sensitive and does not fit the pull-based trait model.
@@ -295,6 +335,18 @@ impl BridgeClient {
     }
 }
 
+impl BridgeClient {
+    /// Wires a client around a caller-supplied stream with no child process,
+    /// for in-process fake-bridge tests. Not a production entry point:
+    /// adapters connect through [`BridgeClient::spawn_and_connect`], which
+    /// owns the sidecar child's lifecycle.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn connect_stream_for_test(stream: tokio::net::TcpStream) -> Self {
+        Self::from_stream(stream, None, DEFAULT_FRAME_CHANNEL_DEPTH)
+    }
+}
+
 impl Drop for BridgeClient {
     fn drop(&mut self) {
         // Abort the tasks first so neither races the socket teardown, then let
@@ -305,98 +357,6 @@ impl Drop for BridgeClient {
             && let Err(err) = child.start_kill()
         {
             warn!(error = %err, "failed to signal sidecar bridge child on drop");
-        }
-    }
-}
-
-/// Reads length-delimited envelopes until EOF or error: odometry updates the
-/// shared latest-value state; frames go to the bounded channel, counting drops.
-///
-/// On every exit path it publishes an [`ReaderHealth::Ended`] status carrying
-/// the reason, so `reader_health` can surface the liveness loss instead of
-/// letting `sample_telemetry` return a frozen odometry cache forever.
-async fn reader_loop(
-    mut read_half: tokio::io::ReadHalf<tokio::net::TcpStream>,
-    state_tx: watch::Sender<LatestBridgeState>,
-    frame_tx: mpsc::Sender<BridgeFrame>,
-    reader_health_tx: watch::Sender<ReaderHealth>,
-    dropped_frames: Arc<AtomicU64>,
-) {
-    let reason = loop {
-        match read_envelope(&mut read_half).await {
-            Ok(Some(envelope)) => {
-                handle_envelope(envelope, &state_tx, &frame_tx, &dropped_frames);
-            }
-            Ok(None) => {
-                debug!("sidecar bridge closed the connection");
-                break "sidecar bridge closed the connection".to_owned();
-            }
-            Err(err) => {
-                warn!(error = %err, "sidecar bridge read failed; stopping reader");
-                break format!("sidecar bridge read failed: {err}");
-            }
-        }
-    };
-    // A closed receiver is impossible while the client is alive: the client
-    // owns the sole `reader_health_rx`, and dropping it aborts this task. So
-    // this publish is the client's one liveness signal for a self-terminated
-    // reader.
-    reader_health_tx.send_replace(ReaderHealth::Ended(reason));
-}
-
-fn handle_envelope(
-    envelope: BridgeEnvelope,
-    state_tx: &watch::Sender<LatestBridgeState>,
-    frame_tx: &mpsc::Sender<BridgeFrame>,
-    dropped_frames: &Arc<AtomicU64>,
-) {
-    match envelope.payload {
-        Some(bridge_envelope::Payload::Odometry(odometry)) => {
-            // A closed receiver is impossible here: the client owns the sole
-            // `state_rx`, so `send` only fails after the client is dropped,
-            // which also aborts this task.
-            state_tx.send_replace(LatestBridgeState {
-                odometry: Some(odometry),
-            });
-        }
-        Some(bridge_envelope::Payload::Frame(frame)) => {
-            if let Err(mpsc::error::TrySendError::Full(_)) = frame_tx.try_send(frame) {
-                dropped_frames.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        // The host never receives control envelopes; ignore anything else.
-        _ => {}
-    }
-}
-
-#[cfg(test)]
-impl BridgeClient {
-    /// Wires a client around a caller-supplied stream with no child process,
-    /// for in-process fake-bridge tests.
-    pub(crate) fn connect_stream_for_test(stream: tokio::net::TcpStream) -> Self {
-        Self::from_stream(stream, None, DEFAULT_FRAME_CHANNEL_DEPTH)
-    }
-}
-
-/// Writes the latest published control as a length-delimited envelope whenever
-/// it changes. A slow socket coalesces intervening updates to the newest value
-/// (latest-valid-value, ADR-0009). Exits on channel close (client dropped) or a
-/// socket write error.
-async fn writer_loop(
-    mut write_half: WriteHalf<tokio::net::TcpStream>,
-    mut control_rx: watch::Receiver<Option<BridgeControl>>,
-) {
-    while control_rx.changed().await.is_ok() {
-        let Some(control) = *control_rx.borrow_and_update() else {
-            continue;
-        };
-        let envelope = BridgeEnvelope {
-            payload: Some(bridge_envelope::Payload::Control(control)),
-        };
-        let bytes = envelope.encode_length_delimited_to_vec();
-        if let Err(err) = write_half.write_all(&bytes).await {
-            warn!(error = %err, "sidecar bridge write failed; stopping writer");
-            return;
         }
     }
 }

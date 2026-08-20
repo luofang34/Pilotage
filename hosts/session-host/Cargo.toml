@@ -16,8 +16,9 @@ pilotage-session = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-authority = { workspace = true }
 pilotage-adapter-api = { workspace = true }
-pilotage-adapter-reference = { workspace = true }
-pilotage-adapter-gazebo = { workspace = true }
+pilotage-adapter-reference = { workspace = true, optional = true }
+pilotage-adapter-gazebo = { workspace = true, optional = true }
+pilotage-sim-video = { workspace = true, optional = true }
 pilotage-adapter-aviate = { workspace = true }
 pilotage-adapter-px4 = { workspace = true }
 pilotage-mission = { workspace = true }
@@ -33,6 +34,20 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 prost.workspace = true
 jpeg-encoder = "0.7.0"
+
+[features]
+default = ["sim"]
+# Simulation-only surface: the simulator adapters, the sidecar video
+# client, and the FC adapters' camera paths. A flight build
+# (--no-default-features) carries none of it; clients still adapt by
+# discovery, never by build variants (ADR-0026).
+sim = [
+    "dep:pilotage-adapter-reference",
+    "dep:pilotage-adapter-gazebo",
+    "dep:pilotage-sim-video",
+    "pilotage-adapter-aviate/sim",
+    "pilotage-adapter-px4/sim",
+]
 
 [dev-dependencies]
 pilotage-adapter-reference.workspace = true

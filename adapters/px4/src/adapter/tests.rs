@@ -453,9 +453,9 @@ fn video_sources_follow_the_gimbal_configuration() {
             .map(|source| source.id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            pilotage_adapter_gazebo::FPV_SOURCE_ID,
-            pilotage_adapter_gazebo::CHASE_SOURCE_ID,
-            pilotage_adapter_gazebo::GIMBAL_SOURCE_ID,
+            pilotage_adapter_api::FPV_SOURCE_ID,
+            pilotage_adapter_api::CHASE_SOURCE_ID,
+            pilotage_adapter_api::GIMBAL_SOURCE_ID,
         ],
     );
     let gimbal_less = super::advertised_video_sources(true, false);
@@ -465,8 +465,8 @@ fn video_sources_follow_the_gimbal_configuration() {
             .map(|source| source.id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            pilotage_adapter_gazebo::FPV_SOURCE_ID,
-            pilotage_adapter_gazebo::CHASE_SOURCE_ID,
+            pilotage_adapter_api::FPV_SOURCE_ID,
+            pilotage_adapter_api::CHASE_SOURCE_ID,
         ],
     );
     assert!(

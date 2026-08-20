@@ -14,6 +14,7 @@ import { RULE, firstFault, isIncarnation, isU32 } from "./wire-bounds.js";
 const CLOCK_UNSPECIFIED = 0;
 const CLOCK_VEHICLE_BOOT = 1;
 const CLOCK_SIMULATION = 2;
+const CLOCK_HOST_MONOTONIC = 3;
 const U64_MAX = (1n << 64n) - 1n;
 
 // Maximum clock-mapping error a conformal overlay tolerates. A bounded mapping
@@ -112,7 +113,13 @@ export function conformalGate(meta, snapshotIdentity, options = {}) {
   });
 }
 
-const KNOWN_CLOCKS = new Set([CLOCK_VEHICLE_BOOT, CLOCK_SIMULATION]);
+// Clocks a frame may be captured on. The host's own monotonic clock
+// belongs here: a producer that renders a view has no clock relatable to
+// the flight state, so it stamps the arrival it can honestly attest to.
+// Admitting the frame is not the same as trusting it for association —
+// snapshot-association.js refuses that clock separately, which is where
+// the picture-to-state correspondence is actually decided.
+const KNOWN_CLOCKS = new Set([CLOCK_VEHICLE_BOOT, CLOCK_SIMULATION, CLOCK_HOST_MONOTONIC]);
 
 /**
  * The first frame-metadata field to violate its exact wire type and range, as a

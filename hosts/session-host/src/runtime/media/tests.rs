@@ -3,11 +3,11 @@ use super::encode_jpeg;
 use crate::runtime::stream_tag::{
     FOURCC_MJPEG, VIDEO_RECORD_PREFIX_LEN, VIDEO_STREAM_V3, frame_video_payload_v2,
 };
+use pilotage_adapter_api::RawVideoFrame;
 use pilotage_adapter_api::{
     CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
     SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
 };
-use pilotage_adapter_gazebo::RawVideoFrame;
 use pilotage_timing::SimTick;
 
 fn capture_stamp() -> VideoCaptureStamp {

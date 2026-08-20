@@ -9,13 +9,13 @@ workspace = true
 
 [dependencies]
 pilotage-adapter-api = { workspace = true }
+pilotage-sim-video = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "sync", "io-util", "time", "process"] }
-prost = { workspace = true }
 getrandom = { version = "0.3.4", features = ["std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-[build-dependencies]
-prost-build = { workspace = true }
+[dev-dependencies]
+prost = { workspace = true }

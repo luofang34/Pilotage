@@ -385,6 +385,8 @@ export const CONTROL_ACTION = {
   disarm: 2,
   modeRequest: 3,
   gimbalRecenter: 4,
+  cameraZoomIn: 6,
+  cameraZoomOut: 7,
   simReset: 5,
 };
 export const MODE_TARGET = {
@@ -1110,7 +1112,8 @@ function decodeVelocity2d(bytes) {
 // telemetry.proto AvionicsState (ADR-0018): quat_w..z=1..4,
 // rate_p/q/r_rad_s=5..7, pos_n/e/d_m=8..10, vel_n/e/d_mps=11..13 (float),
 // valid_flags=14, quality=15, arm_state=16 (varint), attitude and kinematics
-// stamps=17/18, estimator authorization stamp=19.
+// stamps=17/18, estimator authorization stamp=19, baro_alt_m=20 (float)
+// with baro_stamp=21.
 // Raw estimate; display derivation
 // happens in the instrument runtime (ADR-0017).
 function decodeAvionicsState(bytes) {
@@ -1119,6 +1122,7 @@ function decodeAvionicsState(bytes) {
   const attitudeStamp = decodeMeasurementStamp(firstBytes(f, 17));
   const kinematicsStamp = decodeMeasurementStamp(firstBytes(f, 18));
   const estimatorStatusStamp = decodeMeasurementStamp(firstBytes(f, 19));
+  const baroStamp = decodeMeasurementStamp(firstBytes(f, 21));
   const attitude = attitudeStamp === null ? null : {
     quat: {
       w: decodeFloat32(firstBytes(f, 1)),
@@ -1158,6 +1162,10 @@ function decodeAvionicsState(bytes) {
     attitudeStamp,
     kinematicsStamp,
     estimatorStatusStamp,
+    // Pressure altitude (ISA standard datum): null without its stamp,
+    // because an absent measurement must never read as zero altitude.
+    baroAltM: baroStamp === null ? null : decodeFloat32(firstBytes(f, 20)),
+    baroStamp,
   };
 }
 

@@ -36,9 +36,14 @@ pub use pilotage_camera_calibration::{
 };
 pub use step::{StepBudget, StepOutcome};
 pub use telemetry::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, FcCommandAck, FcStateSample,
-    GimbalAttitudeSample, MeasurementClock, MeasurementStamp, Pose2d, SimTruthSample,
-    SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch, TelemetrySample, VideoSource,
+    AvionicsAttitudeSample, AvionicsBaroSample, AvionicsKinematicsSample, AvionicsSample,
+    FcCommandAck, FcStateSample, GimbalAttitudeSample, MeasurementClock, MeasurementStamp, Pose2d,
+    SimTruthSample, SourceIncarnation, SourceIntegrity, SourceRole, TelemetryBatch,
+    TelemetrySample, VideoSource,
 };
 pub use vehicle_adapter::VehicleAdapter;
+pub use video::stamping::{
+    CHASE_CAMERA, CHASE_SOURCE_ID, FPV_CAMERA, FPV_SOURCE_ID, FrameStamper, GIMBAL_CAMERA,
+    GIMBAL_SOURCE_ID, RawVideoFrame, UnstampedFrame,
+};
 pub use video::{CalibrationId, CameraId, CaptureClockMapping, VideoCaptureStamp};

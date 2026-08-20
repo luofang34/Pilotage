@@ -13,9 +13,17 @@ pub enum AviateAdapterError {
     /// The MAVLink receive link could not start.
     #[error(transparent)]
     Link(#[from] pilotage_mavlink::LinkError),
+    /// The requested profile needs a simulator and this build carries
+    /// none (built without the sim feature).
+    #[error("Aviate profile {profile:?} is not in this build (no sim feature)")]
+    ProfileNotInBuild {
+        /// The refused profile.
+        profile: crate::AviateProfile,
+    },
     /// Attaching to the XIL shm object failed at the operating-system
     /// level: the object does not exist (no simulation writer is up) or
     /// the kernel refused the read-only mapping.
+    #[cfg(feature = "sim")]
     #[error("Aviate XIL shm {name} attach failed: {source}")]
     ShmAttachIo {
         /// The POSIX shm object name.
@@ -28,6 +36,7 @@ pub enum AviateAdapterError {
     /// compiled against (foreign magic, layout version, declared size, or
     /// a truncated mapping). Reading it would be plausible garbage, so the
     /// attachment fails closed.
+    #[cfg(feature = "sim")]
     #[error("Aviate XIL shm {name} contract violation: {violation:?}")]
     ShmContractMismatch {
         /// The POSIX shm object name.
@@ -38,6 +47,7 @@ pub enum AviateAdapterError {
     /// The block validates but the simulation writer has not published
     /// readiness yet (writer mid-initialization). Retryable: attach again
     /// once the writer is up; payload fields must not be read before then.
+    #[cfg(feature = "sim")]
     #[error("Aviate XIL shm {name} writer not ready")]
     ShmWriterNotReady {
         /// The POSIX shm object name.

@@ -294,7 +294,9 @@ fn decode_tile(compressed: &[u8]) -> proto::Tile {
 fn properties(layer: &proto::Layer, feature: &proto::Feature) -> BTreeMap<String, String> {
     feature
         .tags
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let key = layer.keys[pair[0] as usize].clone();
             let value = layer.values[pair[1] as usize]

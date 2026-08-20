@@ -92,6 +92,14 @@ pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::Con
             wire::ControlAction::GimbalRecenter,
             wire::ModeTarget::Unspecified,
         ),
+        ControlAction::CameraZoomIn => (
+            wire::ControlAction::CameraZoomIn,
+            wire::ModeTarget::Unspecified,
+        ),
+        ControlAction::CameraZoomOut => (
+            wire::ControlAction::CameraZoomOut,
+            wire::ModeTarget::Unspecified,
+        ),
         ControlAction::SimReset => (wire::ControlAction::SimReset, wire::ModeTarget::Unspecified),
     };
     wire::ControlActionRequest {
@@ -136,6 +144,8 @@ pub(crate) fn action_from_wire(
         wire::ControlAction::GimbalRecenter => {
             Ok((ControlAction::GimbalRecenter, request.action_id))
         }
+        wire::ControlAction::CameraZoomIn => Ok((ControlAction::CameraZoomIn, request.action_id)),
+        wire::ControlAction::CameraZoomOut => Ok((ControlAction::CameraZoomOut, request.action_id)),
         wire::ControlAction::SimReset => Ok((ControlAction::SimReset, request.action_id)),
         // ModeRequest returned above; Unspecified/unknown rejected above. A
         // total match keeps this panic-free if the wire enum ever grows.

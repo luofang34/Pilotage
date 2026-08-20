@@ -115,6 +115,7 @@ pub(super) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
         (0, QUALITY_UNUSABLE)
     };
     let avionics = Some(AvionicsSample {
+        baro: None,
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
             rates_rps: att.rates_rps,

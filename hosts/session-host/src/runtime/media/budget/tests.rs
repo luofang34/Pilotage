@@ -49,11 +49,18 @@ fn three_full_rate_sources_share_a_bounded_aggregate() {
 }
 
 #[test]
-fn writer_pressure_can_suspend_then_quietly_probe_upward() {
+fn writer_pressure_degrades_to_the_floor_then_quietly_probes_upward() {
     let signals = PressureSignals::default();
     let mut budget = SendBudget::new(0, TransportSnapshot::default());
     let mut now_ns = FEEDBACK_INTERVAL_NS;
-    while budget.rate > 0 {
+    // Bounded walk, not `while rate > x`: an open-ended loop turns a
+    // broken convergence invariant into a silent infinite spin, and a
+    // test that hangs reports nothing. Halving from the ceiling reaches
+    // the floor in a handful of steps; far more than that is a failure.
+    for _ in 0..64 {
+        if budget.rate <= MIN_BYTES_PER_SECOND {
+            break;
+        }
         signals.record_busy_drop();
         budget.admit(
             now_ns,
@@ -64,7 +71,23 @@ fn writer_pressure_can_suspend_then_quietly_probe_upward() {
         );
         now_ns = now_ns.saturating_add(FEEDBACK_INTERVAL_NS);
     }
-    assert_eq!(budget.published.mode, DeliveryMode::Suspended);
+    assert_eq!(
+        budget.rate, MIN_BYTES_PER_SECOND,
+        "sustained pressure converges to the floor within the bound"
+    );
+    // The floor HOLDS under further pressure: a slow reader keeps a
+    // trickle of frames rather than losing the picture entirely, so
+    // sustained pressure lands on Degraded, never Suspended.
+    signals.record_busy_drop();
+    budget.admit(
+        now_ns,
+        0,
+        1,
+        signals.snapshot(),
+        TransportSnapshot::default(),
+    );
+    assert_eq!(budget.rate, MIN_BYTES_PER_SECOND);
+    assert_eq!(budget.published.mode, DeliveryMode::Degraded);
 
     now_ns = now_ns.saturating_add(QUIET_RECOVERY_NS);
     budget.admit(
@@ -74,7 +97,11 @@ fn writer_pressure_can_suspend_then_quietly_probe_upward() {
         signals.snapshot(),
         TransportSnapshot::default(),
     );
-    assert_eq!(budget.rate, MIN_BYTES_PER_SECOND);
+    assert_eq!(
+        budget.rate,
+        MIN_BYTES_PER_SECOND + RECOVERY_STEP_BYTES_PER_SECOND,
+        "a quiet interval earns one recovery step off the floor"
+    );
     assert_eq!(budget.published.mode, DeliveryMode::Degraded);
 }
 

@@ -5,11 +5,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use pilotage_adapter_api::RawVideoFrame;
 use pilotage_adapter_api::{
     CalibrationId, CameraId, CaptureClockMapping, MeasurementClock, MeasurementStamp,
     SourceIncarnation, SourceIntegrity, SourceRole, VideoCaptureStamp,
 };
-use pilotage_adapter_gazebo::RawVideoFrame;
 use pilotage_protocol::wire;
 use pilotage_session::ClientKey;
 use pilotage_timing::SimTick;

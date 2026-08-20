@@ -19,7 +19,8 @@ use pilotage_protocol::{Generation, LinkLossCleared, ScopeId, VehicleId};
 use pilotage_session::{OutboundMessage, SessionAction};
 use tracing::{error, info, warn};
 
-use super::{EngineActor, MessageClass, to_connection_message};
+use super::outbound::to_connection_message;
+use super::{EngineActor, MessageClass};
 
 impl<A: VehicleAdapter> EngineActor<A> {
     /// Enacts one `EngageLinkLoss` / `ClearLinkLoss` action on the adapter.

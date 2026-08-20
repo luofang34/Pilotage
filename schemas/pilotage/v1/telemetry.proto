@@ -143,6 +143,12 @@ message AvionicsState {
   // quality. Absence means no explicit estimator authorization was supplied
   // and consumers fail closed.
   MeasurementStamp estimator_status_stamp = 19;
+  // Barometric group: pressure altitude against the ISA standard datum
+  // (1013.25 hPa), from the vehicle's static source. It approximates
+  // true altitude only after a local pressure correction; displays must
+  // label which they show. Meaningful only when baro_stamp is present.
+  float baro_alt_m = 20;
+  MeasurementStamp baro_stamp = 21;
 }
 
 // One coherent simulator ground-truth sample: the simulation oracle for

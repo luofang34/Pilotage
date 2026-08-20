@@ -52,6 +52,20 @@ export function formatTelemetrySummary(sample, fcView = null) {
       ? `v=${sample.velocity.linearXMps.toFixed(2)}m/s w=${sample.velocity.angularRadS.toFixed(2)}rad/s`
       : "velocity Invalid";
   }
+  // Altitude is the BARO group: pressure altitude against the ISA
+  // standard datum, which approximates true altitude only after a
+  // local pressure correction — the label says so. It renders an
+  // explicit ✗ when the stream does not carry it: an absent
+  // measurement must look absent, never like zero altitude.
+  let alt = "alt(baro) ✗";
+  const baroAltM = sample.avionics?.baroAltM;
+  if (Number.isFinite(baroAltM)) {
+    alt = `alt(baro)=${baroAltM.toFixed(1)}m`;
+    const velNed = sample.avionics?.kinematics?.velNed;
+    if (Array.isArray(velNed) && Number.isFinite(velNed[2])) {
+      alt += ` vz=${(-velNed[2]).toFixed(1)}`;
+    }
+  }
   // Simulator truth renders only under an explicit oracle label — it is
   // not the operational pose and must never look like one — and only
   // when the COMPLETE role-specific stamp validates (simulation-truth
@@ -71,5 +85,5 @@ export function formatTelemetrySummary(sample, fcView = null) {
         ? ` | SIM truth (oracle): n=${posNed[0].toFixed(2)}m e=${posNed[1].toFixed(2)}m d=${posNed[2].toFixed(2)}m`
         : " | SIM truth (oracle): Unavailable";
   }
-  return `${arm} | ${pose} | ${velocity}${truth}`;
+  return `${arm} | ${pose} | ${alt} | ${velocity}${truth}`;
 }

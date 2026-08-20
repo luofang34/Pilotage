@@ -40,6 +40,31 @@ message BridgeFrame {
   uint32 camera_id = 6;
 }
 
+// A camera command from the host to a producer that owns a controllable
+// view (the X-Plane camera plugin): which vehicle camera the view
+// embodies, the gimbal orientation, and the zoom detent.
+message BridgeCameraCommand {
+  // Which vehicle camera the single rendered view embodies.
+  //
+  // The values are 1-based BECAUSE proto3 omits zero-valued scalars
+  // from the wire: a zero-numbered mode could never be transmitted, and
+  // a producer that treats a partial command as a delta would silently
+  // keep whichever view it was already rendering. Zero therefore means
+  // "unchanged", which is what an absent field already means.
+  //   1 = FPV (body-fixed forward view)
+  //   2 = gimbal payload view
+  //   3 = free (the producer releases the view to its operator)
+  uint32 mode = 1;
+  // Gimbal pan, radians, positive right, relative to the vehicle body
+  // heading (follow mode).
+  float pan_rad = 2;
+  // Gimbal tilt, radians, positive up, world-stabilized.
+  float tilt_rad = 3;
+  // Zoom detent index into the producer's published detent table; each
+  // detent maps to one published camera calibration.
+  uint32 zoom_detent = 4;
+}
+
 // Wraps exactly one bridge payload for length-delimited framing over the
 // host<->sidecar TCP connection.
 message BridgeEnvelope {
@@ -47,5 +72,6 @@ message BridgeEnvelope {
     BridgeControl control = 1;
     BridgeOdometry odometry = 2;
     BridgeFrame frame = 3;
+    BridgeCameraCommand camera_command = 4;
   }
 }

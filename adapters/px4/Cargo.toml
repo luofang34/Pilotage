@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 pilotage-adapter-api = { workspace = true }
-pilotage-adapter-gazebo = { workspace = true }
+pilotage-sim-video = { workspace = true, optional = true }
 pilotage-mavlink = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-timing = { workspace = true }
@@ -20,3 +20,9 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }
+
+[features]
+default = ["sim"]
+# Simulation-only code: the camera sidecar client. A flight build turns
+# this off; the adapter then has no video producer path at all.
+sim = ["dep:pilotage-sim-video"]

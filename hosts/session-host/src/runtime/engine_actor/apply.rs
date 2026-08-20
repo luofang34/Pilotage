@@ -4,6 +4,7 @@
 use pilotage_adapter_api::{Disposition, RejectReason};
 use pilotage_protocol::{FrameRejected, FrameRejectionReason};
 
+use super::outbound::to_connection_message;
 use super::*;
 
 impl<A: VehicleAdapter> EngineActor<A> {

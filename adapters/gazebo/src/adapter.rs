@@ -10,20 +10,20 @@
 use std::collections::BTreeMap;
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, CalibrationId, CaptureClockMapping, Disposition,
-    LinkLossEnactError, LinkLossPolicy, MeasurementClock, Pose2d, RejectReason,
-    SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID, SourceIncarnation, StepBudget, StepOutcome,
-    TelemetryBatch, TelemetrySample, VehicleAdapter, VideoCaptureStamp, VideoSource,
+    AdapterCapabilities, ApplyOutcome, CHASE_SOURCE_ID, CalibrationId, CaptureClockMapping,
+    Disposition, FPV_SOURCE_ID, FrameStamper, LinkLossEnactError, LinkLossPolicy, MeasurementClock,
+    Pose2d, RawVideoFrame, RejectReason, SIM_FPV_CALIBRATION_ID, SIM_FPV_CAMERA_ID,
+    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, TelemetrySample, VehicleAdapter,
+    VideoSource,
 };
 use pilotage_protocol::{LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_sim_video::wire::{BridgeControl, BridgeFrame, BridgeOdometry};
+use pilotage_sim_video::{BridgeClient, BridgeConfig};
 use pilotage_timing::SimTick;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::bridge_client::{BridgeClient, BridgeConfig};
 use crate::error::GazeboAdapterError;
-use crate::video::FrameStamper;
-use crate::wire::{BridgeControl, BridgeFrame, BridgeOdometry};
 
 /// The control scope this adapter exposes for the diff-drive vehicle.
 pub const MOTION_SCOPE: &str = "vehicle.motion";
@@ -35,49 +35,6 @@ pub const YAW_AXIS: u16 = 3;
 pub const MAX_LINEAR_MPS: f32 = 1.0;
 /// Full-scale turn-rate command of the unit twist envelope.
 pub const MAX_ANGULAR_RPS: f32 = 1.0;
-/// Identifier of the onboard FPV camera video source (source id 0).
-pub const FPV_SOURCE_ID: &str = "onboard-fpv";
-/// Identifier of the chase camera video source (source id 1).
-pub const CHASE_SOURCE_ID: &str = "chase";
-/// Identifier of the gimbal payload camera video source (source id 2).
-pub const GIMBAL_SOURCE_ID: &str = "gimbal";
-/// Wire source id of the onboard FPV camera.
-pub const FPV_CAMERA: u8 = 0;
-/// Wire source id of the chase camera.
-pub const CHASE_CAMERA: u8 = 1;
-/// Wire source id of the gimbal payload camera.
-pub const GIMBAL_CAMERA: u8 = 2;
-
-/// A decoded raw camera frame from the sidecar bridge, carrying the capture
-/// identity and clock mapping needed to trace it back to the aircraft state
-/// (ADR-0020).
-///
-/// Exposed via [`GazeboAdapter::subscribe_frames`] alongside the
-/// `VehicleAdapter` trait rather than through it: frame delivery is a
-/// streaming, backpressure-sensitive concern that does not fit the pull-based
-/// `sample_telemetry` shape (ADR-0008). A frame is only ever built by a
-/// [`FrameStamper`], so its [`capture`](Self::capture) is always fully formed.
-#[derive(Debug, Clone)]
-pub struct RawVideoFrame {
-    /// Video source this frame came from: 0 = onboard FPV, 1 = chase, 2 =
-    /// gimbal payload. Carried end to end so the host media pipeline and every
-    /// reader can route each frame to the right video source (the wire
-    /// `source_id` byte).
-    pub source_id: u8,
-    /// Frame width in pixels.
-    pub width: u32,
-    /// Frame height in pixels.
-    pub height: u32,
-    /// Sidecar-reported pixel format (e.g. `"RGB_INT8"`).
-    pub pixel_format: String,
-    /// Simulation tick this frame was captured at (sidecar sim time, ns). Also
-    /// carried in [`Self::capture`] as the capture stamp's acquisition time.
-    pub tick: SimTick,
-    /// Raw pixel bytes, row-major, no padding.
-    pub rgb: Vec<u8>,
-    /// Capture identity and clock mapping for this frame (ADR-0020).
-    pub capture: VideoCaptureStamp,
-}
 
 /// `VehicleAdapter` implementation that drives a real Gazebo diff-drive
 /// vehicle through the gz-transport sidecar bridge.
@@ -116,6 +73,7 @@ impl GazeboAdapter {
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(depth);
         let stamper = FrameStamper::new(
             new_incarnation()?,
+            MeasurementClock::Simulation,
             sim_capture_mapping(),
             sim_calibrations(),
         );
@@ -139,6 +97,7 @@ impl GazeboAdapter {
         let (raw_tx, raw_rx) = mpsc::channel::<RawVideoFrame>(4);
         let stamper = FrameStamper::new(
             SourceIncarnation::new([0; 16]),
+            MeasurementClock::Simulation,
             sim_capture_mapping(),
             sim_calibrations(),
         );
@@ -183,10 +142,11 @@ impl GazeboAdapter {
     ///
     /// # Errors
     ///
-    /// Returns [`GazeboAdapterError::ReaderTaskEnded`] once the bridge reader
-    /// has exited, carrying the reason.
+    /// Returns [`pilotage_sim_video::SimVideoError::ReaderTaskEnded`] (wrapped
+    /// in [`GazeboAdapterError::Video`]) once the bridge reader has exited,
+    /// carrying the reason.
     pub fn reader_health(&self) -> Result<(), GazeboAdapterError> {
-        self.bridge.reader_health()
+        Ok(self.bridge.reader_health()?)
     }
 
     fn validate_frame(&self, frame: &ScopedControlFrame) -> Result<(), RejectReason> {
@@ -308,7 +268,7 @@ async fn forward_frames(
     mut stamper: FrameStamper,
 ) {
     while let Some(frame) = bridge_rx.recv().await {
-        if raw_tx.send(stamper.stamp(frame)).await.is_err() {
+        if raw_tx.send(stamper.stamp(frame.into())).await.is_err() {
             return;
         }
     }

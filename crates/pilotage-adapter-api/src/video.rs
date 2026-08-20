@@ -14,6 +14,8 @@
 //! correlation to the flight-state clock is new, expressed by
 //! [`CaptureClockMapping`].
 
+pub mod stamping;
+
 use crate::telemetry::{MeasurementClock, MeasurementStamp};
 
 /// The one canonical calibration identity, owned by the dependency-free `no_std`

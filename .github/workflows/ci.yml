@@ -130,6 +130,9 @@ jobs:
       - name: cargo build --release
         run: cargo build --release
 
+      - name: flight build carries no simulation-only code
+        run: bash scripts/check-flight-build.sh
+
       - name: check-structure self-test
         run: bash scripts/test-check-structure.sh
 

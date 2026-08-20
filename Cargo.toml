@@ -34,6 +34,7 @@ members = [
     "tools/xtask",
     "hosts/session-host",
     "adapters/gazebo",
+    "adapters/sim-video",
     "clients/web-instruments",
     "clients/web-instrument-shell",
     "clients/web-control",
@@ -120,8 +121,9 @@ pilotage-geo = { path = "crates/pilotage-geo" }
 pilotage-svs-db = { path = "crates/pilotage-svs-db" }
 pilotage-adapter-reference = { path = "adapters/reference-headless" }
 pilotage-adapter-gazebo = { path = "adapters/gazebo" }
-pilotage-adapter-aviate = { path = "adapters/aviate" }
-pilotage-adapter-px4 = { path = "adapters/px4" }
+pilotage-sim-video = { path = "adapters/sim-video" }
+pilotage-adapter-aviate = { path = "adapters/aviate", default-features = false }
+pilotage-adapter-px4 = { path = "adapters/px4", default-features = false }
 pilotage-session = { path = "crates/pilotage-session" }
 pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }

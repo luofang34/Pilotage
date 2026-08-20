@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 
 use pilotage_protocol::VehicleId;
 
-use super::{AviateAdapter, AviateProfile, camera, sources::bind_sources};
+#[cfg(feature = "sim")]
+use super::camera;
+use super::{AviateAdapter, AviateProfile, sources::bind_sources};
 use crate::error::AviateAdapterError;
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 use crate::uplink::FlightUplink;
@@ -65,7 +67,10 @@ impl AviateAdapter {
                 }
             }
         };
+        #[cfg(feature = "sim")]
         let (frames, camera_bridge, frame_forwarder) = camera::spawn_camera_bridge().await;
+        #[cfg(not(feature = "sim"))]
+        let (frames, camera_bridge, frame_forwarder) = super::no_camera();
         Ok(Self {
             vehicle,
             profile,
@@ -73,12 +78,25 @@ impl AviateAdapter {
             truth,
             uplink,
             frames,
-            _camera_bridge: camera_bridge,
+            // A flight vehicle's gimbal is a real device on its own link,
+            // not a rendered view, so the pointing attachment exists only
+            // in a simulation build — and only for the producer that
+            // actually renders a payload view. A Gazebo session has a
+            // camera but no gimbal behind it: advertising the scope
+            // there is a control surface with nothing on the other end.
+            #[cfg(feature = "sim")]
+            pointing: (camera_bridge.is_some()
+                && camera::camera_mode() == camera::CameraMode::XPlanePlugin)
+                .then(super::pointing::PointingState::default),
+            #[cfg(not(feature = "sim"))]
+            pointing: None,
+            camera_bridge,
             _frame_forwarder: frame_forwarder,
             arm: None,
             arm_incarnation,
             started_at: std::time::Instant::now(),
             last_reset: None,
+            view_publish_failed: false,
             reset_latch: None,
             #[cfg(test)]
             reset_spawns: 0,

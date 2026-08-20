@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use jpeg_encoder::{ColorType, Encoder};
+use pilotage_adapter_api::RawVideoFrame;
 use pilotage_adapter_api::VideoCaptureStamp;
-use pilotage_adapter_gazebo::RawVideoFrame;
 use tracing::warn;
 
 /// JPEG quality for the teleoperation preview.

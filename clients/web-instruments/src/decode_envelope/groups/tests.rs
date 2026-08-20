@@ -28,6 +28,8 @@ fn stamp_with_role(role: wire::SourceRole) -> wire::MeasurementStamp {
 #[allow(deprecated)]
 fn full_avionics() -> wire::AvionicsState {
     wire::AvionicsState {
+        baro_alt_m: 0.0,
+        baro_stamp: None,
         quat_w: 1.0,
         quat_x: 0.2,
         quat_y: 0.3,

@@ -6,10 +6,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use pilotage_adapter_api::RawVideoFrame;
 use pilotage_adapter_api::VehicleAdapter;
-use pilotage_adapter_gazebo::{BridgeConfig, GazeboAdapter, RawVideoFrame};
+use pilotage_adapter_gazebo::GazeboAdapter;
 use pilotage_protocol::VehicleId;
 use pilotage_session::{SessionConfig, SessionEngine};
+use pilotage_sim_video::BridgeConfig;
 use pilotage_timing::StalenessPolicy;
 use tokio::sync::mpsc;
 
@@ -64,9 +66,10 @@ fn workspace_root() -> PathBuf {
 /// case: `build_gazebo` is the sole caller of `subscribe_frames`, so this is a
 /// defensive guard, not an expected path.
 fn gazebo_frames_already_taken() -> pilotage_adapter_gazebo::GazeboAdapterError {
-    pilotage_adapter_gazebo::GazeboAdapterError::ReaderTaskEnded {
+    pilotage_sim_video::SimVideoError::ReaderTaskEnded {
         reason: "frame receiver already taken before the media task started".to_owned(),
     }
+    .into()
 }
 
 /// Builds the session engine from the adapter's advertised capabilities.
