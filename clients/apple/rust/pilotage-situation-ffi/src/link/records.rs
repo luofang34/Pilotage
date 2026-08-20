@@ -177,6 +177,10 @@ pub enum LinkEvent {
         /// Bytes parked in stream reassembly buffers right now. A
         /// figure that keeps climbing is a desynchronized stream.
         stream_pending_bytes: u64,
+        /// Video frames received this second, across every source.
+        video_frames_per_second: u32,
+        /// Encoded video bytes received this second.
+        video_bytes_per_second: u64,
     },
 }
 

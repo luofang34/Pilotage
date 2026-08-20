@@ -73,6 +73,8 @@ pub(super) struct LinkStats {
     pub(super) control_frames: u32,
     pub(super) rejected: u32,
     pub(super) action_results: u32,
+    pub(super) video_frames: u32,
+    pub(super) video_bytes: u64,
 }
 
 impl Link {
@@ -136,6 +138,8 @@ impl Link {
             rejected_per_second: stats.rejected,
             action_results_per_second: stats.action_results,
             stream_pending_bytes: self.engine.stream_pending_bytes() as u64,
+            video_frames_per_second: stats.video_frames,
+            video_bytes_per_second: stats.video_bytes,
         });
     }
 }

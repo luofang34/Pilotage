@@ -46,7 +46,6 @@ struct PromotedSurfaceView: View {
         return Menu {
             ForEach(InstrumentRackView.videoSources, id: \.self) { candidate in
                 Button {
-                    videoSourceOverride = candidate
                     model.selectVideoSource(named: candidate)
                 } label: {
                     if candidate == shown {
@@ -59,10 +58,11 @@ struct PromotedSurfaceView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "video.badge.ellipsis")
-                Text(shown)
+                Text(model.pendingVideoSource.map { "\($0)…" } ?? shown)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
             }
+            .foregroundStyle(model.pendingVideoSource == nil ? .white : .orange)
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
             .padding(.horizontal, 8)

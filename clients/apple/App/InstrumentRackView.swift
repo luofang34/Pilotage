@@ -204,11 +204,10 @@ struct InstrumentRackView: View {
                     Menu {
                         ForEach(Self.videoSources, id: \.self) { candidate in
                             Button {
-                                videoSourceOverride = candidate
-                                // The pick also steers the producer:
-                                // the simulator renders one camera at
-                                // a time, and the payload view follows
-                                // the gimbal scope's engagement.
+                                // The pick steers the producer (the
+                                // simulator renders one camera at a
+                                // time); the DISPLAY switches when the
+                                // source's first frame confirms it.
                                 model.selectVideoSource(named: candidate)
                             } label: {
                                 if candidate == shown {
@@ -221,10 +220,11 @@ struct InstrumentRackView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "video.badge.ellipsis")
-                            Text(shown)
+                            Text(model.pendingVideoSource.map { "\($0)…" } ?? shown)
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(1)
                         }
+                        .foregroundStyle(model.pendingVideoSource == nil ? .white : .orange)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                     }

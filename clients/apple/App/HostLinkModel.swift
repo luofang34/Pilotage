@@ -45,6 +45,11 @@ final class HostLinkModel: ObservableObject {
     /// not answered yet. The bar shows this as its own lever state, the
     /// way the arm telegraph separates the order from the answer.
     @Published private(set) var leaseAsked = false
+    /// A camera pick awaiting its first frame. The switcher shows the
+    /// ask immediately; the DISPLAYED source changes only when the
+    /// picked source actually delivers — a black tile is not a switch.
+    @Published private(set) var pendingVideoSource: String?
+    private var pendingVideoTimeout: Task<Void, Never>?
     /// The resolved pad profile and its arm/disarm control names.
     @Published private(set) var padHints = ""
     /// Whether the gimbal quasimode holds the right stick now.
@@ -254,6 +259,29 @@ final class HostLinkModel: ObservableObject {
     func selectVideoSource(named name: String) {
         guard let id = InstrumentRackView.videoSourceIds[name] else { return }
         link?.selectVideoSource(source: id)
+        pendingVideoTimeout?.cancel()
+        if liveVideoSources.contains(id) {
+            // Already delivering: the switch is real now.
+            commitVideoSource(name)
+            return
+        }
+        pendingVideoSource = name
+        pendingVideoTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard let self, !Task.isCancelled, self.pendingVideoSource == name else { return }
+            self.pendingVideoSource = nil
+            self.status = "\(name): no frames arrived after the switch"
+        }
+    }
+
+    /// Lands a confirmed pick where every surface reads it. The shared
+    /// default is the views' @AppStorage key, so the rack tile and the
+    /// promoted surface flip together.
+    private func commitVideoSource(_ name: String) {
+        pendingVideoSource = nil
+        pendingVideoTimeout?.cancel()
+        pendingVideoTimeout = nil
+        UserDefaults.standard.set(name, forKey: "pilotageVideoSource")
     }
 
     /// Asks the simulator host to reset the flight. The driver
@@ -418,10 +446,13 @@ final class HostLinkModel: ObservableObject {
             let controlFrames,
             let rejected,
             let actionResults,
-            let streamPendingBytes
+            let streamPendingBytes,
+            let videoFrames,
+            let videoBytes
         ):
             linkStats = "tlm \(telemetry)/s · state \(stateFrames)/s · ctl "
                 + "\(controlFrames)/s · rej \(rejected) · act \(actionResults)"
+                + " · vid \(videoFrames)/s \(videoBytes / 1024) KB/s"
             if streamPendingBytes > 1_048_576 {
                 linkStats += " · buf \(streamPendingBytes / 1_048_576) MB"
             }
@@ -430,6 +461,10 @@ final class HostLinkModel: ObservableObject {
 
     fileprivate func accept(liveSource sourceId: UInt8) {
         liveVideoSources.insert(sourceId)
+        if let pending = pendingVideoSource,
+           InstrumentRackView.videoSourceIds[pending] == sourceId {
+            commitVideoSource(pending)
+        }
     }
 
     fileprivate func accept(stateFrame: [UInt8], acceptedAtMs: UInt64) {

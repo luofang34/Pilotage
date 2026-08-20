@@ -204,6 +204,9 @@ impl Link {
                 // dropped and the next one stands alone.
                 if let Ok(frame) = pilotage_protocol::video_frame::decode_v2(&body) {
                     let codec = String::from_utf8_lossy(&frame.codec).into_owned();
+                    self.stats.video_frames = self.stats.video_frames.wrapping_add(1);
+                    self.stats.video_bytes =
+                        self.stats.video_bytes.wrapping_add(frame.payload.len() as u64);
                     self.delivery
                         .video(frame.header.source_id, codec, frame.payload.to_vec());
                 }
