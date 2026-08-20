@@ -113,7 +113,9 @@ impl Link {
                     return self.gimbal_engage_command(vehicle_id);
                 }
                 self.pending_gimbal_engage = true;
-                self.engine.request_lease(vehicle_id, GIMBAL_SCOPE)
+                // Quiet: an auxiliary scope must not repoint the
+                // engine's control target away from flight.
+                self.engine.request_lease_quiet(vehicle_id, GIMBAL_SCOPE)
             }
             Self::SOURCE_FPV => {
                 self.pending_gimbal_engage = false;
@@ -233,7 +235,9 @@ impl Link {
             return self.sim_reset_command(vehicle_id);
         }
         self.pending_sim_reset = true;
-        self.engine.request_lease(vehicle_id, Self::LIFECYCLE_SCOPE)
+        // Quiet, as above: lifecycle authority rides beside flight
+        // control, never in its seat.
+        self.engine.request_lease_quiet(vehicle_id, Self::LIFECYCLE_SCOPE)
     }
 
     /// Completes a pending reset once the lifecycle grant lands; the
