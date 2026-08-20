@@ -4,7 +4,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::{
-    MAX_PITCH_RATE_RPS, PAN_LIMIT_RAD, PointingState, TILT_MAX_RAD, TILT_MIN_RAD, ZOOM_DETENTS,
+    MAX_PITCH_RATE_RPS, MODE_FPV, MODE_GIMBAL, PAN_LIMIT_RAD, PAYLOAD_VIEW_HOLD, PointingState,
+    TILT_MAX_RAD, TILT_MIN_RAD, ZOOM_DETENTS,
 };
 
 #[test]
@@ -241,4 +242,31 @@ fn a_held_lease_is_not_an_aim() {
         Some(ControlIntent::GimbalRate(neutral))
     ));
     assert!(demands_payload_view(&[ControlAction::CameraZoomIn], None));
+}
+
+#[test]
+fn a_neutral_stream_sustains_an_aimed_view_but_never_starts_one() {
+    let mut pointing = PointingState::default();
+    // A held lease is not an aim: neutral sustain on a never-aimed
+    // pointing selects nothing.
+    pointing.sustain_aim();
+    assert_eq!(pointing.mode(), MODE_FPV);
+    // An aim selects the payload view, and the held scope's neutral
+    // liveness stream keeps it selected past the hold window.
+    pointing.aim();
+    assert_eq!(pointing.mode(), MODE_GIMBAL);
+    pointing.sustain_aim();
+    assert_eq!(pointing.mode(), MODE_GIMBAL);
+}
+
+#[test]
+fn an_expired_view_is_not_resurrected_by_neutral_frames() {
+    let mut pointing = PointingState::default();
+    pointing.aim();
+    // Simulate the stream stopping past the hold window by aging the
+    // stamp directly: sustain must NOT re-arm an expired view.
+    pointing.aimed_at = Some(std::time::Instant::now() - PAYLOAD_VIEW_HOLD * 2);
+    assert_eq!(pointing.mode(), MODE_FPV);
+    pointing.sustain_aim();
+    assert_eq!(pointing.mode(), MODE_FPV);
 }

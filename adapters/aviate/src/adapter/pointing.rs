@@ -188,6 +188,19 @@ impl PointingState {
         self.aimed_at = Some(Instant::now());
     }
 
+    /// Extends an ACTIVE payload view without demanding one: a neutral
+    /// frame on a held scope is the stream's liveness, and a view the
+    /// operator parked the producer on must not decay underneath it.
+    /// An expired view stays expired — neutral frames never resurrect
+    /// a view nobody demanded, so a held lease still is not an aim.
+    pub(crate) fn sustain_aim(&mut self) {
+        if let Some(at) = self.aimed_at
+            && at.elapsed() < PAYLOAD_VIEW_HOLD
+        {
+            self.aimed_at = Some(Instant::now());
+        }
+    }
+
     /// Which view the producer should render right now.
     pub(crate) fn mode(&self) -> u32 {
         match self.aimed_at {
@@ -321,6 +334,8 @@ impl super::AviateAdapter {
 
         if demands_payload_view(&frame.actions, frame.intent) {
             pointing.aim();
+        } else {
+            pointing.sustain_aim();
         }
         let action_results = process_pointing_actions(&frame.actions, pointing);
 
