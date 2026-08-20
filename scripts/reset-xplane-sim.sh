@@ -10,9 +10,6 @@
 # arguments.
 set -euo pipefail
 
-# X-Plane's UDP command port on the local machine.
-XPLANE_UDP_PORT=49000
-
 # Sends one X-Plane CMND datagram: "CMND\0" + command path + NUL.
 send_cmnd() {
   python3 - "$1" <<'PY'
@@ -74,9 +71,14 @@ echo "restarting the flight controller..."
 # reset too — its telemetry clock anchors at process boot, and the
 # adapter's reset latch clears only when a FRESH boot clock opens a new
 # source epoch.
-PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot}"
+# The launcher passes both checkout roots; the fallbacks mirror the
+# launcher's own defaults (sibling checkouts of this repo) so a
+# hand-run script kills the same processes the launcher would.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PX4_DIR="${PX4_DIR:-${REPO_ROOT}/../PX4-Autopilot}"
+AVIATE_DIR="${AVIATE_DIR:-${REPO_ROOT}/../Aviate}"
 pkill -9 -f "${PX4_DIR}/build/px4_sitl_default/bin/px4" 2>/dev/null || true
-pkill -TERM -f "Aviate/target/debug/sitl-xplane-alia250" 2>/dev/null || true
+pkill -TERM -f "${AVIATE_DIR}/target/debug/sitl-xplane-alia250" 2>/dev/null || true
 
 # The bridge needs a moment to observe the rewind and disconnect before
 # its listener can arm again; the reloaded flight needs one to settle
@@ -116,7 +118,6 @@ send_cmnd "px4xplane/connect"
 # When `cargo xtask sim` supervises the session, the supervisor restarts
 # the flight-controller stage itself; a script-spawned second px4 would
 # fight it over the MAVLink ports.
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUPERVISOR_PID_FILE="${REPO_ROOT}/target/xtask-sim/supervisor.pid"
 if [[ -f "${SUPERVISOR_PID_FILE}" ]] && kill -0 "$(cat "${SUPERVISOR_PID_FILE}")" 2>/dev/null; then
   echo "done - the xtask supervisor restarts PX4; re-arm from the browser once it logs ready"

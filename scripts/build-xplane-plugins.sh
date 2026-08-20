@@ -31,6 +31,11 @@ fi
 
 if [[ -z "${XPLANE_ROOT:-}" ]]; then
   REGISTRY="${HOME}/Library/Preferences/x-plane_install_12.txt"
+  if [[ ! -f "${REGISTRY}" ]]; then
+    echo "no X-Plane installer registry at ${REGISTRY}" >&2
+    echo "set XPLANE_ROOT to the X-Plane 12 folder" >&2
+    exit 1
+  fi
   while IFS= read -r line; do
     line="${line%"${line##*[![:space:]]}"}"
     if [[ -n "${line}" && -d "${line}/X-Plane.app" ]]; then
