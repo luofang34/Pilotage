@@ -149,6 +149,11 @@ impl SimBackend for AviateXPlane {
         let script = repo_root.join("scripts/reset-xplane-sim.sh");
         let status = std::process::Command::new("bash")
             .arg(&script)
+            // The script kills THIS checkout's flight controller by
+            // path; a checkout resolved through AVIATE_DIR would
+            // silently escape a hardcoded pattern and the reset latch
+            // would never clear.
+            .env("AVIATE_DIR", aviate_dir(repo_root))
             .status()
             .map_err(|source| XtaskError::Io {
                 context: "running the X-Plane reset script",
