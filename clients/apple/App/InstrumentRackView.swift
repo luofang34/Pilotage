@@ -35,7 +35,7 @@ struct InstrumentRackView: View {
     /// title into a one-letter-per-line column.
     private static let fcuButtonWidth: CGFloat = 40
     private static let resetButtonWidth: CGFloat = 52
-    private static let leaseButtonWidth: CGFloat = 124
+    private static let leaseButtonWidth: CGFloat = 88
 
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
@@ -205,6 +205,11 @@ struct InstrumentRackView: View {
                         ForEach(Self.videoSources, id: \.self) { candidate in
                             Button {
                                 videoSourceOverride = candidate
+                                // The pick also steers the producer:
+                                // the simulator renders one camera at
+                                // a time, and the payload view follows
+                                // the gimbal scope's engagement.
+                                model.selectVideoSource(named: candidate)
                             } label: {
                                 if candidate == shown {
                                     Label(sourceMenuTitle(candidate), systemImage: "checkmark")
@@ -378,21 +383,25 @@ struct InstrumentRackView: View {
                 }
                 if model.leaseHeld {
                     ArmTelegraphControl(model: model)
-                    if fills { Spacer(minLength: 0) }
-                    // One word, never wrapped: the chip above already
-                    // says "Controlling", so this button only carries
-                    // the verb. The pad speaks it too — a disarm press
-                    // with the lever settled on SAFE stands down.
+                }
+                if fills { Spacer(minLength: 0) }
+                // One slot, three states, the arm telegraph's idiom:
+                // the ask is the operator's order, the grant is the
+                // host's answer, and the lever never re-sends while an
+                // answer is outstanding. One word per state so the
+                // slot's width never moves.
+                if model.leaseHeld {
                     Button("Release", role: .destructive) { model.releaseLease() }
                         .lineLimit(1)
                         .frame(width: Self.leaseButtonWidth)
+                } else if model.leaseAsked {
+                    Button("Asked…") {}
+                        .disabled(true)
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .frame(width: Self.leaseButtonWidth)
                 } else {
-                    if fills { Spacer(minLength: 0) }
-                    // One intent, one button: a denial with a standing
-                    // holder escalates to the ask on its own, and an
-                    // arm press on the pad or keyboard is this same
-                    // ask without reaching for the screen.
-                    Button("Request control") { model.requestLease() }
+                    Button("Request") { model.requestLease() }
                         .disabled(model.catalog == nil)
                         .lineLimit(1)
                         .frame(width: Self.leaseButtonWidth)

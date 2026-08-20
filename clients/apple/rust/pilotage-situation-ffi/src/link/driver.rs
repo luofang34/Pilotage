@@ -61,6 +61,8 @@ pub(super) struct Link {
     pub(super) motion_ask_at_ms: Option<u64>,
     /// A reset press waiting on the lifecycle scope's authority grant.
     pub(super) pending_sim_reset: bool,
+    /// A payload-view pick waiting on the gimbal scope's grant.
+    pub(super) pending_gimbal_engage: bool,
 }
 
 /// One second of link accounting, reset on report.
@@ -178,6 +180,7 @@ pub(crate) async fn run(
         motion_request_pending: false,
         motion_ask_at_ms: None,
         pending_sim_reset: false,
+        pending_gimbal_engage: false,
     };
     loop {
         match connect(&config, pinned).await {
@@ -314,6 +317,8 @@ async fn drive(
                 link.execute(keepalive, &mut send, connection).await;
                 let reset = link.pending_sim_reset_actions();
                 link.execute(reset, &mut send, connection).await;
+                let engage = link.pending_gimbal_engage_actions();
+                link.execute(engage, &mut send, connection).await;
             }
             _ = stats_ticker.tick() => link.report_stats(),
         }
@@ -345,6 +350,9 @@ async fn handle_command(
         }),
         Some(LinkCommand::Action { code }) => link.action_actions(code),
         Some(LinkCommand::SimReset) => link.sim_reset_actions(),
+        Some(LinkCommand::SelectVideoSource { source }) => {
+            link.select_video_source_actions(source)
+        }
         Some(LinkCommand::ArmOrder { armed }) => link.order_actions(armed),
         Some(LinkCommand::PadSample {
             axes,

@@ -8,7 +8,7 @@
 use pilotage_client_session::{
     ClientAction, ControlCommand, MotionDemand, intent_capability, velocity_intent,
 };
-use pilotage_control_web::MOTION_SCOPE;
+use pilotage_control_web::{GIMBAL_SCOPE, MOTION_SCOPE};
 
 /// How long the shell may stay silent before the link speaks a neutral
 /// frame for it. The host's silence watchdog revokes a holder after one
@@ -78,6 +78,85 @@ impl Link {
             &scope,
             ControlCommand::Intent(intent),
             sampled_at_nanos,
+        )
+    }
+
+    /// The wire `ControlAction` code for a gimbal recenter — the
+    /// discrete press that AIMS the payload (a held lease alone is not
+    /// an aim), which is what makes the producer render its view.
+    const ACTION_GIMBAL_RECENTER: i32 = 4;
+    /// The video source ids the shells bind, the same table the
+    /// browser pins: 0 forward (FPV), 2 payload (gimbal).
+    const SOURCE_FPV: u8 = 0;
+    const SOURCE_GIMBAL: u8 = 2;
+
+    /// Steers the producer toward one source. The simulator host
+    /// renders one camera at a time and the payload view follows the
+    /// gimbal scope's engagement, so this drives THAT: gimbal =
+    /// acquire-and-aim, forward = release. Any other source is a local
+    /// display choice with nothing to ask of the host.
+    pub(super) fn select_video_source_actions(&mut self, source: u8) -> Vec<ClientAction> {
+        let Some(vehicle_id) = self
+            .engine
+            .admission()
+            .and_then(|admission| admission.vehicles.first())
+            .map(|vehicle| vehicle.vehicle_id)
+        else {
+            return Vec::new();
+        };
+        match source {
+            Self::SOURCE_GIMBAL => {
+                if self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
+                    self.pending_gimbal_engage = false;
+                    return self.gimbal_engage_command(vehicle_id);
+                }
+                self.pending_gimbal_engage = true;
+                self.engine.request_lease(vehicle_id, GIMBAL_SCOPE)
+            }
+            Self::SOURCE_FPV => {
+                self.pending_gimbal_engage = false;
+                if self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
+                    // Releasing the scope clears the payload view; the
+                    // host's fail-closed clear returns the forward
+                    // picture without a second command.
+                    return self.engine.release_lease(vehicle_id, GIMBAL_SCOPE);
+                }
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Completes a pending payload engagement once the gimbal grant
+    /// lands; the tick calls this alongside the reset counterpart.
+    pub(super) fn pending_gimbal_engage_actions(&mut self) -> Vec<ClientAction> {
+        if !self.pending_gimbal_engage {
+            return Vec::new();
+        }
+        let Some(vehicle_id) = self
+            .engine
+            .admission()
+            .and_then(|admission| admission.vehicles.first())
+            .map(|vehicle| vehicle.vehicle_id)
+        else {
+            return Vec::new();
+        };
+        if !self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
+            return Vec::new();
+        }
+        self.pending_gimbal_engage = false;
+        self.gimbal_engage_command(vehicle_id)
+    }
+
+    fn gimbal_engage_command(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
+        self.engine.control_action(
+            vehicle_id,
+            GIMBAL_SCOPE,
+            wire::ControlActionRequest {
+                action: Self::ACTION_GIMBAL_RECENTER,
+                mode_target: 0,
+                action_id: 0,
+            },
         )
     }
 

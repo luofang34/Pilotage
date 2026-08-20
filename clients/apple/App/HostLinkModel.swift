@@ -41,6 +41,10 @@ final class HostLinkModel: ObservableObject {
     @Published private(set) var catalog: LinkCatalog?
     /// Whether control is held now.
     @Published private(set) var leaseHeld = false
+    /// A control ask is in flight: the request left and the host has
+    /// not answered yet. The bar shows this as its own lever state, the
+    /// way the arm telegraph separates the order from the answer.
+    @Published private(set) var leaseAsked = false
     /// The resolved pad profile and its arm/disarm control names.
     @Published private(set) var padHints = ""
     /// Whether the gimbal quasimode holds the right stick now.
@@ -221,6 +225,7 @@ final class HostLinkModel: ObservableObject {
         guard let vehicle = catalog?.vehicles.first,
               let scope = vehicle.scopes.first
         else { return }
+        leaseAsked = true
         link?.requestLease(vehicleId: vehicle.vehicleId, scope: scope.scope)
     }
 
@@ -239,6 +244,16 @@ final class HostLinkModel: ObservableObject {
     /// Orders the vehicle safe.
     func disarm() {
         link?.setArmOrder(armed: false)
+    }
+
+    /// Steers the session's video producer toward one named source.
+    /// The simulator renders one camera at a time: the payload view
+    /// follows the gimbal scope's engagement, so picking gimbal
+    /// engages it and picking fpv releases it. Unknown names change
+    /// only what the tile listens to.
+    func selectVideoSource(named name: String) {
+        guard let id = InstrumentRackView.videoSourceIds[name] else { return }
+        link?.selectVideoSource(source: id)
     }
 
     /// Asks the simulator host to reset the flight. The driver
@@ -336,6 +351,7 @@ final class HostLinkModel: ObservableObject {
                 return
             }
             leaseHeld = held
+            leaseAsked = false
             holderPresent = !held && detail.contains("another operator")
             if holderPresent {
                 // The engine already escalated the denial into the ask;
@@ -375,11 +391,13 @@ final class HostLinkModel: ObservableObject {
             status = "control frame \(sequence) rejected (reason \(reason))"
         case .down(let retryAtMs):
             leaseHeld = false
+            leaseAsked = false
             stopControlLoop()
             phase = retryAtMs == nil ? .idle : .reconnecting
             status = retryAtMs == nil ? "disconnected" : "reconnecting…"
         case .stopped(let reason):
             leaseHeld = false
+            leaseAsked = false
             stopControlLoop()
             phase = .stopped(reason: reason)
             status = "stopped: \(reason)"
