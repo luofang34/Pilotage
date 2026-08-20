@@ -29,7 +29,14 @@ if grep -RInE 'anyhow(::Error)?' "$client_root/rust/pilotage-situation-ffi/src";
     echo "the hand-written FFI facade must use typed errors" >&2
     exit 1
 fi
-cargo clippy --manifest-path "$manifest" --locked --all-targets -- -D warnings
+# --no-deps: clippy's workspace wrapper otherwise lints every LOCAL path
+# dependency — including the pinned external sources synced under
+# .build/ — with this job's floating stable toolchain, so a lint born in
+# a newer clippy reddens this repo for code it cannot fix. The externals
+# are judged by their own repositories' gates at the pin they are pinned
+# to; first-party workspace crates are gated by the repo-wide clippy in
+# quality-gates. This invocation gates the facade crate itself.
+cargo clippy --manifest-path "$manifest" --locked --all-targets --no-deps -- -D warnings
 cargo test --manifest-path "$manifest" --locked
 sh "$client_root/scripts/build-xcframework.sh"
 swift build --disable-sandbox --package-path "$package"
