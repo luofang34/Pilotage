@@ -150,11 +150,9 @@ fn apply_sim_truth(
             lat_1e7: lat_lon_alt[0],
             lon_1e7: lat_lon_alt[1],
             alt_mm: lat_lon_alt[2],
-            lon_scale: METRES_PER_DEGREE
-                * (f64::from(lat_lon_alt[0]) * 1e-7).to_radians().cos(),
+            lon_scale: METRES_PER_DEGREE * (f64::from(lat_lon_alt[0]) * 1e-7).to_radians().cos(),
         });
-    let north =
-        f64::from(lat_lon_alt[0] - origin.lat_1e7) * 1e-7 * METRES_PER_DEGREE;
+    let north = f64::from(lat_lon_alt[0] - origin.lat_1e7) * 1e-7 * METRES_PER_DEGREE;
     let east = f64::from(lat_lon_alt[1] - origin.lon_1e7) * 1e-7 * origin.lon_scale;
     let down = f64::from(origin.alt_mm - lat_lon_alt[2]) * 1e-3;
     let sequence = latest

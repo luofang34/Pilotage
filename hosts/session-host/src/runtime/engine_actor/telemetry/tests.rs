@@ -30,7 +30,7 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let kinematics = with(19, 1_200_000);
     let estimator_status = with(20, 1_234_567);
     let avionics = AvionicsSample {
-                baro: None,
+        baro: None,
         attitude: Some(AvionicsAttitudeSample {
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
             rates_rps: [0.0; 3],
@@ -108,7 +108,7 @@ fn simulation_stamp(sequence: u32) -> MeasurementStamp {
 #[test]
 fn estimator_authorization_is_normalized_at_wire_boundary() {
     let avionics = avionics_to_wire(AvionicsSample {
-                baro: None,
+        baro: None,
         attitude: None,
         kinematics: None,
         estimator_status_stamp: Some(simulation_stamp(1)),
@@ -128,7 +128,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
         pose: None,
         speed: None,
         avionics: Some(AvionicsSample {
-                baro: None,
+            baro: None,
             attitude: None,
             kinematics: Some(AvionicsKinematicsSample {
                 pos_ned_m: [12.0, 3.0, -40.0],
@@ -168,7 +168,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         pose: None,
         speed: None,
         avionics: Some(AvionicsSample {
-                baro: None,
+            baro: None,
             attitude: Some(AvionicsAttitudeSample {
                 quat_wxyz: [0.7, 0.0, 0.0, 0.7],
                 rates_rps: [0.1, 0.2, 0.3],

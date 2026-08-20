@@ -150,7 +150,9 @@ mod tests {
     #[tokio::test]
     async fn dev_identity_builds_and_hashes() {
         // No store: ephemeral, touching nothing on disk.
-        let dev = build_with_store(None).await.expect("self-signed identity builds");
+        let dev = build_with_store(None)
+            .await
+            .expect("self-signed identity builds");
         assert_eq!(dev.cert_hash_hex.len(), 64);
         assert!(dev.cert_hash_hex.chars().all(|c| c.is_ascii_hexdigit()));
     }
@@ -159,7 +161,9 @@ mod tests {
     async fn the_identity_survives_a_restart() {
         let dir = std::env::temp_dir().join(format!("pilotage-tls-test-{}", std::process::id()));
         let store = Some((dir.join("dev-cert.pem"), dir.join("dev-key.pem")));
-        let first = build_with_store(store.clone()).await.expect("first identity");
+        let first = build_with_store(store.clone())
+            .await
+            .expect("first identity");
         let second = build_with_store(store).await.expect("second identity");
         assert_eq!(
             first.cert_hash_hex, second.cert_hash_hex,

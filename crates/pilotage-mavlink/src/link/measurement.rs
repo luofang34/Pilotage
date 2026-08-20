@@ -210,7 +210,9 @@ pub(super) fn next_baro_stamp(
     time_boot_ms: u32,
     now: Instant,
 ) -> Option<MeasurementStamp> {
-    let current = latest.baro.map(|update| (update.time_boot_ms, update.stamp));
+    let current = latest
+        .baro
+        .map(|update| (update.time_boot_ms, update.stamp));
     next_group_stamp(current, latest, MeasurementGroup::Baro, time_boot_ms, now)
 }
 

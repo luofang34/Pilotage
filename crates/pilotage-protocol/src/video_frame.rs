@@ -341,8 +341,7 @@ fn le_i64(bytes: &[u8], at: usize) -> i64 {
 mod tests {
     use super::{
         CLOCK_HOST_MONOTONIC, CLOCK_SIMULATION, CLOCK_VEHICLE_BOOT, CaptureHeader, DecodeError,
-        META_LEN, OFFSET,
-        decode_v2, encode_v2,
+        META_LEN, OFFSET, decode_v2, encode_v2,
     };
 
     fn bounded_header() -> CaptureHeader {
