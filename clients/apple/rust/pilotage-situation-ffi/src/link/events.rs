@@ -29,6 +29,13 @@ impl Link {
             // ask again.
             self.motion_request_pending = false;
         }
+        if scope == GIMBAL_SCOPE && !response.granted {
+            // A denial ends this ask: leaving the engage pending would
+            // turn the selection's five-second self-heal into a
+            // one-shot that never re-asks when the holder later lets
+            // go.
+            self.pending_gimbal_engage = false;
+        }
         let generation = response.generation.as_ref().map_or(0, |g| g.value);
         self.mirror_authority(
             &scope,

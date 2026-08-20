@@ -171,28 +171,43 @@ impl Link {
     /// silence watchdog revokes the authority within a second and the
     /// fail-closed clear snaps the producer back to the forward view.
     pub(super) fn gimbal_keepalive_actions(&mut self) -> Vec<ClientAction> {
-        if self.selected_video_source != Some(Self::SOURCE_GIMBAL) {
-            return Vec::new();
-        }
         let Some(admission) = self.engine.admission().cloned() else {
             return Vec::new();
         };
         let Some(vehicle_id) = admission.vehicles.first().map(|vehicle| vehicle.vehicle_id) else {
             return Vec::new();
         };
+        if self.selected_video_source != Some(Self::SOURCE_GIMBAL) {
+            // A late grant for a selection the operator already moved
+            // off must be released, not sustained by idle frames.
+            if self.engine.holds(vehicle_id, GIMBAL_SCOPE) && !self.capture_active {
+                return self.engine.release_lease(vehicle_id, GIMBAL_SCOPE);
+            }
+            return Vec::new();
+        }
         if !self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
             // Self-heal at a polite pace: a reconnect drops every lane
             // and a revocation takes this one, but the operator's
             // selection stands until they change it. A five-second
             // cadence re-asks without storming a present holder with
-            // takeover prompts.
+            // takeover prompts — and only on a host whose catalog
+            // advertises the scope at all, so a persisted selection
+            // against a scope-less host does not drum a denial line.
             if !self.pending_gimbal_engage
+                && self.gimbal_scope_advertised(vehicle_id)
                 && self.now_ms().saturating_sub(self.gimbal_engage_attempt_ms) >= 5000
             {
                 self.gimbal_engage_attempt_ms = self.now_ms();
                 self.pending_gimbal_engage = true;
                 return self.engine.request_lease_quiet(vehicle_id, GIMBAL_SCOPE);
             }
+            return Vec::new();
+        }
+        // While the quasimode captures the stick, the runtime streams
+        // COMMANDED rates on this lane; zero-rate frames interleaved
+        // with them stutter a live aim under latest-wins sampling. The
+        // runtime's own stream is the liveness during a capture.
+        if self.capture_active {
             return Vec::new();
         }
         let capability = intent_capability(
@@ -211,6 +226,21 @@ impl Link {
             ControlCommand::Intent(intent),
             sampled_at_nanos,
         )
+    }
+
+    /// Whether the admitted catalog advertises the gimbal scope for
+    /// this vehicle — the self-heal must not drum denials against a
+    /// host that never offered the scope.
+    fn gimbal_scope_advertised(&self, vehicle_id: u64) -> bool {
+        self.engine.admission().is_some_and(|admission| {
+            admission.vehicles.iter().any(|vehicle| {
+                vehicle.vehicle_id == vehicle_id
+                    && vehicle
+                        .scopes
+                        .iter()
+                        .any(|scope| scope.scope == GIMBAL_SCOPE)
+            })
+        })
     }
 
     fn gimbal_engage_command(&mut self, vehicle_id: u64) -> Vec<ClientAction> {

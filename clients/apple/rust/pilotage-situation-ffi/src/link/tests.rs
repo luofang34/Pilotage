@@ -137,6 +137,10 @@ fn admitted_link() -> Link {
 
 /// Grants one scope through both halves the driver keeps in step: the
 /// engine's lane and the runtime's authority mirror.
+fn deny(link: &mut Link, scope: &str) {
+    link.emit(ModuleEvent::Lease(lease_response(scope, false, 0)));
+}
+
 fn grant(link: &mut Link, scope: &str, generation: u64) {
     link.engine.request_lease(1, scope);
     let envelope = wire::Envelope {
@@ -351,12 +355,33 @@ fn a_video_pick_acquires_quietly_and_any_other_source_tears_down() {
 }
 
 #[test]
-fn the_parked_keepalive_yields_to_an_active_capture() {
+fn the_parked_keepalive_streams_when_held_and_yields_to_an_active_capture() {
     let mut link = admitted_link();
     link.selected_video_source = Some(2);
+    grant(&mut link, "vehicle.gimbal", 7);
+    // Fail-before: with the scope held and no capture, the keepalive
+    // MUST emit — this half is what proves the gated assert below can
+    // fail at all.
+    assert!(
+        !link.gimbal_keepalive_actions().is_empty(),
+        "a parked selection on a held scope must stream its liveness"
+    );
     // While the quasimode captures the stick the runtime streams
     // commanded rates on this lane; the parked keepalive must not
     // interleave zero-rate frames with a live aim.
     link.capture_active = true;
     assert!(link.gimbal_keepalive_actions().is_empty());
+}
+
+#[test]
+fn a_gimbal_denial_re_arms_the_selections_self_heal() {
+    let mut link = admitted_link();
+    let actions = link.select_video_source_actions(2);
+    assert!(!actions.is_empty());
+    assert!(link.pending_gimbal_engage);
+    // The host says no (another holder): the ask is over, and the
+    // five-second self-heal owns the retry — a pending flag left set
+    // would turn it into a one-shot.
+    deny(&mut link, "vehicle.gimbal");
+    assert!(!link.pending_gimbal_engage);
 }

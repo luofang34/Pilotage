@@ -246,8 +246,16 @@ impl Link {
     }
 
     /// Releasing control gives back everything held: the motion lane
-    /// and the gimbal lane the runtime leased alongside it.
+    /// and the gimbal lane the runtime leased alongside it. An
+    /// explicit surrender also stands down the parked payload
+    /// selection — five seconds later the self-heal would otherwise
+    /// quietly re-take the camera the operator just gave up, and deny
+    /// the next pilot's quasimode with an idle observer's hold.
     pub(super) fn release_held_actions(&mut self) -> Vec<ClientAction> {
+        if self.pending_gimbal_selected() {
+            self.selected_video_source = None;
+            self.pending_gimbal_engage = false;
+        }
         match self
             .engine
             .admission()
