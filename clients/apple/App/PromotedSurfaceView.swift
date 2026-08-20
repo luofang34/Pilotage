@@ -76,7 +76,7 @@ struct PromotedSurfaceView: View {
         guard let id = InstrumentRackView.videoSourceIds[name],
               model.liveVideoSources.contains(id)
         else { return "\(name) · no frames" }
-        return "\(name) · live"
+        return model.staleSources.contains(id) ? "\(name) · paused" : "\(name) · live"
     }
 
     @ViewBuilder
@@ -88,6 +88,17 @@ struct PromotedSurfaceView: View {
                model.liveVideoSources.contains(id) {
                 VideoSurfaceView(hub: model.videoHub, source: id)
                     .ignoresSafeArea()
+                    .overlay {
+                        if model.staleSources.contains(id) {
+                            ZStack {
+                                Color.black.opacity(0.45)
+                                Label("paused — the producer is on another view",
+                                      systemImage: "pause.circle")
+                                    .font(.callout)
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                    }
             } else {
                 Text("Video · \(shown) — no frames from this session yet")
                     .font(.footnote)

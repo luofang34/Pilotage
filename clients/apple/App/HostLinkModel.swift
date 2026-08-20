@@ -69,6 +69,13 @@ final class HostLinkModel: ObservableObject {
     /// picked source actually delivers — a black tile is not a switch.
     @Published private(set) var pendingVideoSource: String?
     private var pendingVideoTimeout: Task<Void, Never>?
+    /// Sources that were delivering and have stopped: the producer
+    /// renders one camera at a time, so the source it left behind goes
+    /// stale — and a tile silently freezing on its last frame reads as
+    /// a broken feed, not as a switched camera.
+    @Published private(set) var staleSources: Set<UInt8> = []
+    private var videoFreshAt: [UInt8: Date] = [:]
+    private var staleSweep: Timer?
     /// The resolved pad profile and its arm/disarm control names.
     @Published private(set) var padHints = ""
     /// Whether the gimbal quasimode holds the right stick now.
@@ -500,6 +507,24 @@ final class HostLinkModel: ObservableObject {
         }
     }
 
+    /// One throttled freshness note per source from the video relay.
+    fileprivate func noteVideoFresh(_ sourceId: UInt8) {
+        videoFreshAt[sourceId] = Date()
+        staleSources.remove(sourceId)
+        if staleSweep == nil {
+            staleSweep = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) {
+                [weak self] _ in
+                Task { @MainActor [weak self] in self?.sweepStaleSources() }
+            }
+        }
+    }
+
+    private func sweepStaleSources() {
+        let now = Date()
+        let stale = Set(videoFreshAt.filter { now.timeIntervalSince($0.value) > 2.0 }.keys)
+        if stale != staleSources { staleSources = stale }
+    }
+
     fileprivate func accept(liveSource sourceId: UInt8) {
         liveVideoSources.insert(sourceId)
         if let pending = pendingVideoSource,
@@ -698,6 +723,8 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     private weak var model: HostLinkModel?
     private let decoders = NSMutableDictionary()
     private let decoderLock = NSLock()
+    private var lastFreshNote: [UInt8: CFAbsoluteTime] = [:]
+    private let freshLock = NSLock()
     /// Sources that have delivered at least one frame; SwiftUI learns
     /// about a source once, not per frame.
     private var seen: Set<UInt8> = []
@@ -743,6 +770,17 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
             hub?.publish(image, source: sourceId)
             if seen.insert(sourceId).inserted {
                 Task { @MainActor [model] in model?.accept(liveSource: sourceId) }
+            }
+            // One freshness note per source per half second, so the
+            // staleness sweep sees a heartbeat without the main actor
+            // hearing every frame.
+            let now = CFAbsoluteTimeGetCurrent()
+            freshLock.lock()
+            let due = now - (lastFreshNote[sourceId] ?? 0) > 0.5
+            if due { lastFreshNote[sourceId] = now }
+            freshLock.unlock()
+            if due {
+                Task { @MainActor [model] in model?.noteVideoFresh(sourceId) }
             }
         }
         clearInFlight(sourceId)

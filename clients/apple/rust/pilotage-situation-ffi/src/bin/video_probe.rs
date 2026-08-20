@@ -15,13 +15,16 @@ struct Counter {
     bytes: AtomicU64,
     events: AtomicU64,
     states: AtomicU64,
+    gimbal_frames: AtomicU64,
 }
 
 impl LinkObserver for Counter {
     fn on_event(&self, event: LinkEvent) {
         self.events.fetch_add(1, Ordering::Relaxed);
-        if let LinkEvent::Admitted { .. } = event {
-            println!("admitted");
+        match &event {
+            LinkEvent::Admitted { .. } => println!("admitted"),
+            LinkEvent::Stats { .. } => {}
+            other => println!("event: {other:?}"),
         }
     }
     fn on_state_frame(&self, _frame: Vec<u8>, _at: u64) {
@@ -29,9 +32,19 @@ impl LinkObserver for Counter {
     }
     fn on_video_frame(&self, source_id: u8, codec: String, payload: Vec<u8>) {
         let n = self.frames.fetch_add(1, Ordering::Relaxed) + 1;
-        self.bytes.fetch_add(payload.len() as u64, Ordering::Relaxed);
-        if n <= 3 || n % 100 == 0 {
-            println!("frame {n}: source={source_id} codec={codec} bytes={}", payload.len());
+        self.bytes
+            .fetch_add(payload.len() as u64, Ordering::Relaxed);
+        if source_id == 2 {
+            let g = self.gimbal_frames.fetch_add(1, Ordering::Relaxed) + 1;
+            if g <= 3 {
+                println!("GIMBAL frame {g}: bytes={}", payload.len());
+            }
+        }
+        if n <= 3 || n.is_multiple_of(100) {
+            println!(
+                "frame {n}: source={source_id} codec={codec} bytes={}",
+                payload.len()
+            );
         }
     }
 }
@@ -47,13 +60,20 @@ fn main() {
         observer.clone(),
     )
     .expect("connect");
-    std::thread::sleep(std::time::Duration::from_secs(15));
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    println!("selecting the gimbal source (cold: producer renders fpv)");
+    session.select_video_source(2);
+    std::thread::sleep(std::time::Duration::from_secs(8));
+    println!("selecting fpv back");
+    session.select_video_source(0);
+    std::thread::sleep(std::time::Duration::from_secs(3));
     println!(
-        "15s totals: frames={} bytes={} states={} events={}",
+        "totals: frames={} bytes={} states={} events={} gimbal={}",
         observer.frames.load(Ordering::Relaxed),
         observer.bytes.load(Ordering::Relaxed),
         observer.states.load(Ordering::Relaxed),
         observer.events.load(Ordering::Relaxed),
+        observer.gimbal_frames.load(Ordering::Relaxed),
     );
     session.shutdown();
 }

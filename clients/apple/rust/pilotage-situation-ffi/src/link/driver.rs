@@ -63,6 +63,13 @@ pub(super) struct Link {
     pub(super) pending_sim_reset: bool,
     /// A payload-view pick waiting on the gimbal scope's grant.
     pub(super) pending_gimbal_engage: bool,
+    /// The operator's chosen video source, driving what the producer
+    /// renders and which auxiliary scope stays alive.
+    pub(super) selected_video_source: Option<u8>,
+    /// The R3 press state last tick, for the standalone recenter edge.
+    pub(super) r3_was_pressed: bool,
+    /// When the last payload engage left, for pacing its retries.
+    pub(super) gimbal_engage_attempt_ms: u64,
 }
 
 /// One second of link accounting, reset on report.
@@ -185,6 +192,9 @@ pub(crate) async fn run(
         motion_ask_at_ms: None,
         pending_sim_reset: false,
         pending_gimbal_engage: false,
+        selected_video_source: None,
+        r3_was_pressed: false,
+        gimbal_engage_attempt_ms: 0,
     };
     loop {
         match connect(&config, pinned).await {
@@ -323,6 +333,8 @@ async fn drive(
                 link.execute(reset, &mut send, connection).await;
                 let engage = link.pending_gimbal_engage_actions();
                 link.execute(engage, &mut send, connection).await;
+                let keepalive = link.gimbal_keepalive_actions();
+                link.execute(keepalive, &mut send, connection).await;
             }
             _ = stats_ticker.tick() => link.report_stats(),
         }
@@ -354,9 +366,7 @@ async fn handle_command(
         }),
         Some(LinkCommand::Action { code }) => link.action_actions(code),
         Some(LinkCommand::SimReset) => link.sim_reset_actions(),
-        Some(LinkCommand::SelectVideoSource { source }) => {
-            link.select_video_source_actions(source)
-        }
+        Some(LinkCommand::SelectVideoSource { source }) => link.select_video_source_actions(source),
         Some(LinkCommand::ArmOrder { armed }) => link.order_actions(armed),
         Some(LinkCommand::PadSample {
             axes,

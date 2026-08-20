@@ -184,6 +184,21 @@ struct InstrumentRackView: View {
                                 .padding(4)
                                 .background(.black.opacity(0.5))
                         }
+                        .overlay {
+                            // A frozen last frame reads as a broken
+                            // feed; a paused badge reads as what it
+                            // is — the producer rendering another
+                            // view.
+                            if model.staleSources.contains(id) {
+                                ZStack {
+                                    Color.black.opacity(0.45)
+                                    Label("paused — the producer is on another view",
+                                          systemImage: "pause.circle")
+                                        .font(.caption)
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                        }
                 } else {
                     UnavailableTile(
                         title: "Video · \(shown)",
@@ -294,9 +309,10 @@ struct InstrumentRackView: View {
     }
 
     /// One menu row's title: the source name plus whether the session
-    /// has actually delivered frames for it.
+    /// is delivering frames for it right now.
     private func sourceMenuTitle(_ name: String) -> String {
-        selectedVideoId(for: name) != nil ? "\(name) · live" : "\(name) · no frames"
+        guard let id = selectedVideoId(for: name) else { return "\(name) · no frames" }
+        return model.staleSources.contains(id) ? "\(name) · paused" : "\(name) · live"
     }
 
     /// One row and one caption: the bar must never eat into the

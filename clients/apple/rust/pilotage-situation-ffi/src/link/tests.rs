@@ -130,6 +130,9 @@ fn admitted_link() -> Link {
         motion_ask_at_ms: None,
         pending_sim_reset: false,
         pending_gimbal_engage: false,
+        selected_video_source: None,
+        r3_was_pressed: false,
+        gimbal_engage_attempt_ms: 0,
     }
 }
 

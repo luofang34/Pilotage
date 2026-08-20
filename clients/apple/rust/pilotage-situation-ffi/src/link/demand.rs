@@ -6,7 +6,8 @@
 //! flowed on.
 
 use pilotage_client_session::{
-    ClientAction, ControlCommand, MotionDemand, intent_capability, velocity_intent,
+    ClientAction, ControlCommand, MotionDemand, gimbal_rate_intent, intent_capability,
+    velocity_intent,
 };
 use pilotage_control_web::{GIMBAL_SCOPE, MOTION_SCOPE};
 
@@ -88,7 +89,7 @@ impl Link {
     /// The video source ids the shells bind, the same table the
     /// browser pins: 0 forward (FPV), 2 payload (gimbal).
     const SOURCE_FPV: u8 = 0;
-    const SOURCE_GIMBAL: u8 = 2;
+    pub(super) const SOURCE_GIMBAL: u8 = 2;
 
     /// Steers the producer toward one source. The simulator host
     /// renders one camera at a time and the payload view follows the
@@ -104,6 +105,7 @@ impl Link {
         else {
             return Vec::new();
         };
+        self.selected_video_source = Some(source);
         match source {
             Self::SOURCE_GIMBAL => {
                 if self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
@@ -127,10 +129,21 @@ impl Link {
         }
     }
 
+    /// Whether the operator's current selection is the payload view.
+    pub(super) fn pending_gimbal_selected(&self) -> bool {
+        self.selected_video_source == Some(Self::SOURCE_GIMBAL)
+    }
+
     /// Completes a pending payload engagement once the gimbal grant
-    /// lands; the tick calls this alongside the reset counterpart.
+    /// lands; the tick calls this alongside the reset counterpart,
+    /// paced so a refusal (a scope still clearing its link-loss
+    /// protection) retries without storming the host.
     pub(super) fn pending_gimbal_engage_actions(&mut self) -> Vec<ClientAction> {
         if !self.pending_gimbal_engage {
+            return Vec::new();
+        }
+        let now = self.now_ms();
+        if now.saturating_sub(self.gimbal_engage_attempt_ms) < 500 {
             return Vec::new();
         }
         let Some(vehicle_id) = self
@@ -145,7 +158,44 @@ impl Link {
             return Vec::new();
         }
         self.pending_gimbal_engage = false;
+        self.gimbal_engage_attempt_ms = self.now_ms();
         self.gimbal_engage_command(vehicle_id)
+    }
+
+    /// Sustains a parked payload selection: while the operator's chosen
+    /// source is the gimbal and its scope is held, one zero-rate frame
+    /// per tick is the scope's liveness — without it the host's
+    /// silence watchdog revokes the authority within a second and the
+    /// fail-closed clear snaps the producer back to the forward view.
+    pub(super) fn gimbal_keepalive_actions(&mut self) -> Vec<ClientAction> {
+        if self.selected_video_source != Some(Self::SOURCE_GIMBAL) {
+            return Vec::new();
+        }
+        let Some(admission) = self.engine.admission().cloned() else {
+            return Vec::new();
+        };
+        let Some(vehicle_id) = admission.vehicles.first().map(|vehicle| vehicle.vehicle_id) else {
+            return Vec::new();
+        };
+        if !self.engine.holds(vehicle_id, GIMBAL_SCOPE) {
+            return Vec::new();
+        }
+        let capability = intent_capability(
+            &admission,
+            vehicle_id,
+            GIMBAL_SCOPE,
+            wire::IntentFamily::GimbalRate,
+        );
+        let Some(intent) = gimbal_rate_intent(0.0, 0.0, capability) else {
+            return Vec::new();
+        };
+        let sampled_at_nanos = self.now_ms().saturating_mul(1_000_000);
+        self.engine.control_frame(
+            vehicle_id,
+            GIMBAL_SCOPE,
+            ControlCommand::Intent(intent),
+            sampled_at_nanos,
+        )
     }
 
     fn gimbal_engage_command(&mut self, vehicle_id: u64) -> Vec<ClientAction> {
