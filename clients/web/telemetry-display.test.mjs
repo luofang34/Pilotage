@@ -7,19 +7,21 @@ function completeSample() {
 
     pose: { xM: 1.25, yM: -2.5, headingRad: 0.75 },
     velocity: { linearXMps: 3.5, angularRadS: -0.25 },
+    avionics: { baroAltM: 12.34, kinematics: { velNed: [0, 0, -1.5] } },
   };
 }
 
 function testCompleteSampleFormatsMeasuredValues() {
   assert.equal(
     formatTelemetrySummary(completeSample(), { armState: 2, ageMs: 100, stale: false }),
-    "ARMED | pose x=1.25m y=-2.50m heading=0.75rad | v=3.50m/s w=-0.25rad/s",
+    "ARMED | pose x=1.25m y=-2.50m heading=0.75rad | alt(baro)=12.3m vz=1.5 | v=3.50m/s w=-0.25rad/s",
   );
 }
 
 function testMissingGroupsNeverBecomeZeroMeasurements() {
   const text = formatTelemetrySummary({ pose: null, velocity: null }, { armState: 1, ageMs: 100, stale: false });
-  assert.equal(text, "DISARMED | pose Missing | velocity Missing");
+  // The absent baro group renders an explicit dead face, never a zero.
+  assert.equal(text, "DISARMED | pose Missing | alt(baro) \u2717 | velocity Missing");
   assert.equal(text.includes("0.00"), false);
 }
 
@@ -29,7 +31,7 @@ function testNonFiniteLegacyValuesFailVisibly() {
   sample.velocity.linearXMps = Number.POSITIVE_INFINITY;
   assert.equal(
     formatTelemetrySummary(sample, { armState: 2, ageMs: 100, stale: false }),
-    "ARMED | pose Invalid | velocity Invalid",
+    "ARMED | pose Invalid | alt(baro)=12.3m vz=1.5 | velocity Invalid",
   );
 }
 
@@ -137,7 +139,7 @@ function testFcRefusalVerdictSurfacesInTheArmReadout() {
       { pose: null, velocity: null },
       { armState: 1, ageMs: 100, stale: false, lastCommand: { arm: true, result: 4 } },
     ),
-    "DISARMED (FC refused arm: result 4) | pose Missing | velocity Missing",
+    "DISARMED (FC refused arm: result 4) | pose Missing | alt(baro) \u2717 | velocity Missing",
   );
   // An accepted verdict adds nothing: the arm state already shows it.
   assert.equal(
@@ -145,7 +147,7 @@ function testFcRefusalVerdictSurfacesInTheArmReadout() {
       { pose: null, velocity: null },
       { armState: 2, ageMs: 100, stale: false, lastCommand: { arm: true, result: 0 } },
     ),
-    "ARMED | pose Missing | velocity Missing",
+    "ARMED | pose Missing | alt(baro) \u2717 | velocity Missing",
   );
   // A stale report suppresses the verdict along with the arm state.
   assert.equal(
@@ -153,7 +155,7 @@ function testFcRefusalVerdictSurfacesInTheArmReadout() {
       { pose: null, velocity: null },
       { armState: 1, ageMs: 9000, stale: true, lastCommand: { arm: true, result: 4 } },
     ),
-    "arm: stale | pose Missing | velocity Missing",
+    "arm: stale | pose Missing | alt(baro) \u2717 | velocity Missing",
   );
 }
 testFcRefusalVerdictSurfacesInTheArmReadout();
