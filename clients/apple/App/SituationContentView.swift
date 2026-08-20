@@ -189,8 +189,12 @@ struct SituationContentView: View {
                     .mapControlPlacement(.bottomTrailing)
                 // One top row holds every top-center control, so nothing
                 // can occupy the same slot twice. The toggle leads; the
-                // strip centers in what remains.
-                HStack(spacing: 12) {
+                // strip centers in what remains. TOP-aligned: the FCU
+                // strip is taller than the toggle, and a center-aligned
+                // row would shove every neighbor down each time the
+                // strip appears — controls hold their positions no
+                // matter what joins the row.
+                HStack(alignment: .top, spacing: 12) {
                     columnsToggle
                     if let flight = model.replayingFlight {
                         ReplayBannerView(flight: flight, stop: model.stopReplay)

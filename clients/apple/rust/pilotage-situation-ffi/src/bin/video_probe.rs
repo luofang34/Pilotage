@@ -61,9 +61,16 @@ fn main() {
     )
     .expect("connect");
     std::thread::sleep(std::time::Duration::from_secs(4));
-    println!("selecting the gimbal source (cold: producer renders fpv)");
+    println!("selecting the gimbal source, then idling 30s");
     session.select_video_source(2);
-    std::thread::sleep(std::time::Duration::from_secs(8));
+    for i in 0..6 {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        println!(
+            "t+{}s gimbal frames so far: {}",
+            (i + 1) * 5,
+            observer.gimbal_frames.load(Ordering::Relaxed)
+        );
+    }
     println!("selecting fpv back");
     session.select_video_source(0);
     std::thread::sleep(std::time::Duration::from_secs(3));
