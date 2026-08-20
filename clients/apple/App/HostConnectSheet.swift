@@ -7,7 +7,10 @@ import SwiftUI
 struct HostConnectSheet: View {
     @ObservedObject var model: HostLinkModel
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("pilotageManifestUrl") private var manifestUrl = "http://192.168.1.224:8080/session.json"
+    // The dedicated LAN alias every session registers: the same
+    // default reaches a session on ANY development machine, so a
+    // fresh install connects without typing.
+    @AppStorage("pilotageManifestUrl") private var manifestUrl = "http://pilotage.local:8080/session.json"
     @AppStorage("pilotageHostUrl") private var hostUrl = "https://192.168.1.224:4433/pilotage"
     @AppStorage("pilotageHostCertHash") private var certificateHash = ""
     @State private var manualExpanded = false

@@ -325,8 +325,26 @@ final class HostLinkModel: ObservableObject {
         status = "fetching \(manifestUrl)"
         Task { [weak self] in
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                let manifest = try JSONDecoder().decode(SessionManifest.self, from: data)
+                let (data, response) = try await URLSession.shared.data(from: url)
+                // A session being torn down serves a 404 page here, and
+                // a wrong responder serves whatever it serves: the
+                // status must show WHAT came back, or every mismatch
+                // reads as the same opaque "format" complaint.
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    await MainActor.run {
+                        self?.status = "manifest fetch failed: HTTP \(http.statusCode)"
+                            + " — is the session running?"
+                    }
+                    return
+                }
+                guard let manifest = try? JSONDecoder().decode(SessionManifest.self, from: data)
+                else {
+                    let head = String(decoding: data.prefix(120), as: UTF8.self)
+                    await MainActor.run {
+                        self?.status = "manifest is not the session's JSON; got: \(head)"
+                    }
+                    return
+                }
                 await MainActor.run {
                     self?.connect(
                         url: "https://\(manifest.host):\(manifest.port)/pilotage",
