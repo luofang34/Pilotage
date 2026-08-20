@@ -180,7 +180,7 @@ fn ensure_camera_bridge(repo_root: &Path) {
 /// Where the PX4-Autopilot checkout lives: `PX4_DIR`, else
 /// `../PX4-Autopilot` next to this repository. A directory convention,
 /// never a source dependency.
-fn px4_dir(repo_root: &Path) -> PathBuf {
+pub(crate) fn px4_dir(repo_root: &Path) -> PathBuf {
     let dir = std::env::var_os("PX4_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| repo_root.join("../PX4-Autopilot"));

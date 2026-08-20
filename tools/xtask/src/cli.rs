@@ -183,8 +183,9 @@ commands:
       Launch a full SITL session, print its ready URL, supervise it, and
       tear it down on ctrl-c.
 
-      --fc <name>          FC backend: aviate-gz (alias aviate, default)
-                           or px4-gz (alias px4)
+      --fc <name>          FC backend: aviate-gz (alias aviate, default),
+                           px4-gz (alias px4), px4-xplane, or
+                           aviate-xplane
       --profile <profile>  physical | simulation (default) | oracle-only
       --port <port>        host WebTransport port (default: 4433)
       --viewer-port <port> static viewer port (default: 8080)
@@ -240,6 +241,7 @@ mod tests {
 
         let sim_help = &USAGE[sim_start..reset_start];
         assert!(sim_help.contains("aviate-gz (alias aviate, default)"));
+        assert!(sim_help.contains("px4-xplane"));
         assert!(sim_help.contains("simulation (default)"));
         assert!(sim_help.contains("default: 4433"));
         assert!(sim_help.contains("default: 8080"));
