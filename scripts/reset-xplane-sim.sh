@@ -33,14 +33,18 @@ import json, os, socket, struct, sys, time
 path = sys.argv[1]
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(("0.0.0.0", 0)); sock.settimeout(0.5)
+# onground_any guards the capture: a reset can run while the vehicle
+# is airborne, and a home captured mid-air makes every later reset
+# spawn the vehicle at altitude and drop it.
 REFS = [(1, "sim/flightmodel/position/local_x"),
         (2, "sim/flightmodel/position/local_y"),
-        (3, "sim/flightmodel/position/local_z")]
+        (3, "sim/flightmodel/position/local_z"),
+        (4, "sim/flightmodel/failures/onground_any")]
 def read_all():
     for idx, ref in REFS:
         sock.sendto(struct.pack("<4sxii400s", b"RREF", 5, idx, ref.encode()), ("127.0.0.1", 49000))
     got, end = {}, time.time() + 2
-    while time.time() < end and len(got) < 3:
+    while time.time() < end and len(got) < len(REFS):
         try: data, _ = sock.recvfrom(4096)
         except socket.timeout: continue
         if not data.startswith(b"RREF"): continue
@@ -53,10 +57,12 @@ def read_all():
     return got
 if not os.path.exists(path):
     got = read_all()
-    if len(got) == 3:
+    if len(got) == len(REFS) and got[4] >= 0.5:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         json.dump({"x": got[1], "y": got[2], "z": got[3]}, open(path, "w"))
         print(f"saved home position to {path}")
+    elif len(got) == len(REFS):
+        print("vehicle is airborne; home capture deferred to a grounded reset")
 PY_HOME
 
 echo "reloading the X-Plane flight..."
