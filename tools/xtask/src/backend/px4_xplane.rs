@@ -18,7 +18,8 @@ use std::path::Path;
 
 use super::xplane_simulator::{
     Airframe, ensure_xplane_plugins, launch_xplane, selected_airframe, send_xplane_command,
-    set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root, xplane_running,
+    set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root,
+    xplane_running,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;

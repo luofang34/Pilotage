@@ -232,8 +232,10 @@ pub(super) fn set_ground_sensor_contract(root: &Path, enabled: bool) {
                 }
             })
             .collect::<Vec<_>>()
-            .join("
-")
+            .join(
+                "
+",
+            )
             + "
 ";
         if rewritten != content && std::fs::write(&config, rewritten).is_err() {
@@ -286,10 +288,8 @@ pub(super) fn launch_xplane(root: &Path, airframe: &Airframe, log_dir: &Path) {
     // captures the vehicle's home position once per X-Plane boot and
     // teleports back to it on every reset.
     if let Some(home) = std::env::var_os("HOME") {
-        std::fs::remove_file(
-            std::path::PathBuf::from(home).join(".pilotage/xplane-home.json"),
-        )
-        .ok();
+        std::fs::remove_file(std::path::PathBuf::from(home).join(".pilotage/xplane-home.json"))
+            .ok();
     }
     let log = std::fs::File::create(stage_log(log_dir, "xplane"))
         .ok()
