@@ -173,10 +173,12 @@ pub fn parse_listening(line: &str) -> Option<(u16, String)> {
 
 /// The pinned viewer URL for a ready session. `autoconnect=1` tells the
 /// viewer to connect on load — the URL already pins host, port, and
-/// certificate, so a Connect click would add nothing.
-pub fn viewer_url(viewer_port: u16, host_port: u16, cert: &str) -> String {
+/// certificate, so a Connect click would add nothing. `host` is the
+/// address the CLIENT reaches this machine at: loopback for the local
+/// browser, the LAN address for a tablet on the same network.
+pub fn viewer_url(host: &str, viewer_port: u16, host_port: u16, cert: &str) -> String {
     format!(
-        "http://127.0.0.1:{viewer_port}/index.html?host=127.0.0.1&port={host_port}&cert={cert}&autoconnect=1"
+        "http://{host}:{viewer_port}/index.html?host={host}&port={host_port}&cert={cert}&autoconnect=1"
     )
 }
 
@@ -184,8 +186,16 @@ pub fn viewer_url(viewer_port: u16, host_port: u16, cert: &str) -> String {
 /// CURRENT session's connect parameters. A viewer tab whose URL pins an
 /// older session's certificate re-reads this after a failed connect and
 /// converges on the live session instead of retrying a dead hash forever.
-pub fn session_manifest(host: &str, host_port: u16, cert: &str) -> String {
-    format!("{{\"host\":\"{host}\",\"port\":{host_port},\"certHash\":\"{cert}\"}}\n")
+pub fn session_manifest(host: &str, host_ip: Option<&str>, host_port: u16, cert: &str) -> String {
+    // `host` is the name a client should dial (the mDNS name on a LAN
+    // session); `hostIp` rides along for a client that cannot resolve
+    // it. Decoders that know only the three original fields ignore it.
+    match host_ip.filter(|ip| *ip != host) {
+        Some(ip) => format!(
+            "{{\"host\":\"{host}\",\"hostIp\":\"{ip}\",\"port\":{host_port},\"certHash\":\"{cert}\"}}\n"
+        ),
+        None => format!("{{\"host\":\"{host}\",\"port\":{host_port},\"certHash\":\"{cert}\"}}\n"),
+    }
 }
 
 /// The log file a stage writes under `log_dir`.
@@ -225,9 +235,34 @@ mod tests {
     fn viewer_url_pins_host_port_certificate_and_autoconnect() {
         let cert = "0f".repeat(32);
         assert_eq!(
-            viewer_url(8080, 4433, &cert),
+            viewer_url("127.0.0.1", 8080, 4433, &cert),
             format!(
                 "http://127.0.0.1:8080/index.html?host=127.0.0.1&port=4433&cert={cert}&autoconnect=1"
+            )
+        );
+    }
+
+    #[test]
+    fn viewer_url_reaches_the_session_from_another_device() {
+        // The LAN banner hands an iPad the whole story in one URL: the
+        // page origin AND the WebTransport host must both be the
+        // address that device can actually reach.
+        let cert = "0f".repeat(32);
+        assert_eq!(
+            viewer_url("192.168.4.17", 8080, 4433, &cert),
+            format!(
+                "http://192.168.4.17:8080/index.html?host=192.168.4.17&port=4433&cert={cert}&autoconnect=1"
+            )
+        );
+    }
+
+    #[test]
+    fn session_manifest_names_the_host_and_keeps_the_address_beside_it() {
+        let cert = "c".repeat(64);
+        assert_eq!(
+            super::session_manifest("mac.local", Some("192.168.4.17"), 4433, &cert),
+            format!(
+                "{{\"host\":\"mac.local\",\"hostIp\":\"192.168.4.17\",\"port\":4433,\"certHash\":\"{cert}\"}}\n"
             )
         );
     }
@@ -238,7 +273,7 @@ mod tests {
         // The viewer's validator requires this exact shape (host string,
         // integer port, 64-hex certHash); a drift here strands stale tabs.
         assert_eq!(
-            super::session_manifest("127.0.0.1", 4433, &cert),
+            super::session_manifest("127.0.0.1", None, 4433, &cert),
             format!("{{\"host\":\"127.0.0.1\",\"port\":4433,\"certHash\":\"{cert}\"}}\n")
         );
     }
