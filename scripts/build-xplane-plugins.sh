@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds and installs the two X-Plane plugins the px4-xplane backend
+# Builds and installs the X-Plane plugins the px4-xplane backend
 # needs, plus the packaged QuadTailsitter aircraft:
 #
 #   1. px4xplane      - the MAVLink HIL bridge (external checkout,
@@ -8,6 +8,8 @@
 #                       (sim/xplane/autoflight)
 #   3. PilotageCamera  - this repository's vehicle camera export
 #                       (sim/xplane/camera)
+#   4. PilotageWeather - deterministic wind control and readback
+#                       (sim/xplane/weather)
 #
 # The install target is the X-Plane root: XPLANE_ROOT, else the first
 # entry of the official installer registry that holds X-Plane.app.
@@ -87,6 +89,26 @@ clang++ -std=c++17 -O2 -shared -fPIC \
   -undefined dynamic_lookup -framework OpenGL \
   -o "${CAMERA_BUILD}/mac.xpl"
 
+# --- Build PilotageWeather -----------------------------------------------
+echo "building PilotageWeather..."
+WEATHER_BUILD="${REPO_ROOT}/target/xplane-weather"
+WEATHER_SRC="${REPO_ROOT}/sim/xplane/weather"
+mkdir -p "${WEATHER_BUILD}"
+clang++ -std=c++17 -O2 -shared -fPIC \
+  -DAPL=1 -DIBM=0 -DLIN=0 -DXPLM200 -DXPLM210 -DXPLM300 -DXPLM301 -DXPLM303 \
+  -I "${PX4XPLANE_DIR}/lib/SDK/CHeaders/XPLM" -I "${WEATHER_SRC}" \
+  "${WEATHER_SRC}/PilotageWeather.cpp" \
+  "${WEATHER_SRC}/weather_state.cpp" \
+  -undefined dynamic_lookup \
+  -o "${WEATHER_BUILD}/mac.xpl"
+
+clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
+  -I "${WEATHER_SRC}" \
+  "${WEATHER_SRC}/weather_state_tests.cpp" \
+  "${WEATHER_SRC}/weather_state.cpp" \
+  -o "${WEATHER_BUILD}/weather_state_tests"
+"${WEATHER_BUILD}/weather_state_tests"
+
 # --- Install -------------------------------------------------------------
 echo "installing plugins and aircraft..."
 PLUGINS="${XPLANE_ROOT}/Resources/plugins"
@@ -135,6 +157,9 @@ cp "${AUTOFLIGHT_BUILD}/mac.xpl" "${PLUGINS}/PilotageAutoFlight/64/mac.xpl"
 mkdir -p "${PLUGINS}/PilotageCamera/64"
 cp "${CAMERA_BUILD}/mac.xpl" "${PLUGINS}/PilotageCamera/64/mac.xpl"
 
+mkdir -p "${PLUGINS}/PilotageWeather/64"
+cp "${WEATHER_BUILD}/mac.xpl" "${PLUGINS}/PilotageWeather/64/mac.xpl"
+
 mkdir -p "${XPLANE_ROOT}/Aircraft/Extra Aircraft"
 rm -rf "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter"
 cp -R "${PX4XPLANE_DIR}/aircraft/QuadTailsitter" "${XPLANE_ROOT}/Aircraft/Extra Aircraft/"
@@ -147,4 +172,4 @@ if [[ -d "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter/Airfoil" ]]; the
     "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter/airfoils/"
 fi
 
-echo "done: px4xplane + PilotageAutoFlight + PilotageCamera + QuadTailsitter installed"
+echo "done: px4xplane + PilotageAutoFlight + PilotageCamera + PilotageWeather + QuadTailsitter installed"

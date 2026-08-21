@@ -120,12 +120,24 @@ fn install_validation_hints_at_the_build_script() {
         }
         other => panic!("expected a missing-plugin refusal, got {other:?}"),
     }
-    // With every plugin present, the missing aircraft is the next hint.
     for plugin in ["px4xplane", "PilotageAutoFlight", "PilotageCamera"] {
         let dir = root.join(format!("Resources/plugins/{plugin}/64"));
         std::fs::create_dir_all(&dir).expect("plugin dir");
         std::fs::write(dir.join("mac.xpl"), b"stub").expect("plugin stub");
     }
+    let refusal = validate_xplane_install(&root, qtailsitter());
+    match refusal {
+        Err(XtaskError::MissingArtifact { what, hint, .. }) => {
+            assert_eq!(what, "Pilotage X-Plane weather plugin");
+            assert!(hint.contains("build-xplane-plugins"));
+        }
+        other => panic!("expected a missing-weather-plugin refusal, got {other:?}"),
+    }
+    let weather = root.join("Resources/plugins/PilotageWeather/64");
+    std::fs::create_dir_all(&weather).expect("weather plugin dir");
+    std::fs::write(weather.join("mac.xpl"), b"stub").expect("weather plugin stub");
+
+    // With every plugin present, the missing aircraft is the next hint.
     let refusal = validate_xplane_install(&root, qtailsitter());
     match refusal {
         Err(XtaskError::MissingArtifact { what, path, .. }) => {

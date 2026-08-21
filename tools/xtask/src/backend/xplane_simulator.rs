@@ -139,6 +139,14 @@ pub(super) fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Resul
             hint: "run scripts/build-xplane-plugins.sh",
         });
     }
+    let weather = root.join("Resources/plugins/PilotageWeather/64/mac.xpl");
+    if !weather.is_file() {
+        return Err(XtaskError::MissingArtifact {
+            what: "Pilotage X-Plane weather plugin",
+            path: weather,
+            hint: "run scripts/build-xplane-plugins.sh",
+        });
+    }
     let aircraft = root.join(airframe.acf_path);
     if !aircraft.is_file() {
         return Err(XtaskError::MissingArtifact {
@@ -155,21 +163,27 @@ pub(super) fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Resul
 const XPLANE_PLUGINS_STAMP: &str = "target/xtask-stamps/xplane-plugins.stamp";
 
 /// The working-tree inputs whose content decides plugin staleness.
-const XPLANE_PLUGINS_SOURCES: [&str; 3] = [
+const XPLANE_PLUGINS_SOURCES: [&str; 4] = [
     "sim/xplane/autoflight",
     "sim/xplane/camera",
+    "sim/xplane/weather",
     "scripts/build-xplane-plugins.sh",
 ];
 
-/// Best-effort, content-stamped build + install of the two X-Plane
-/// plugins and the packaged aircraft. Non-fatal by contract: `plan`
-/// fails closed with hints when a required artifact is still absent.
+/// Build and install the required X-Plane plugins when an input changes.
+/// The caller checks all required artifacts before it starts a session.
 pub(super) fn ensure_xplane_plugins(repo_root: &Path) {
     use crate::session::preflight::stamp;
     let installed = xplane_root()
         .map(|root| {
-            root.join("Resources/plugins/PilotageAutoFlight/64/mac.xpl")
-                .is_file()
+            [
+                "Resources/plugins/px4xplane/64/mac.xpl",
+                "Resources/plugins/PilotageAutoFlight/64/mac.xpl",
+                "Resources/plugins/PilotageCamera/64/mac.xpl",
+                "Resources/plugins/PilotageWeather/64/mac.xpl",
+            ]
+            .iter()
+            .all(|path| root.join(path).is_file())
         })
         .unwrap_or(false);
     let current = stamp::source_stamp(repo_root, &XPLANE_PLUGINS_SOURCES, &[]);
