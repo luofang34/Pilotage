@@ -1,93 +1,151 @@
-//! `capture` subcommand: record raw input reports from the target device to
-//! a JSON fixture file for later use as a `pilotage-input` test fixture.
+//! Guided native HID capture for automatic characterization.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use hidapi::HidApi;
-use serde::Serialize;
+use hidapi::{HidApi, HidDevice};
+use pilotage_input::{
+    CHARACTERIZATION_CAPTURE_SCHEMA_VERSION, CaptureSample, CaptureSegment, CaptureSegmentKind,
+    CharacterizationCapture, DeadzoneEvidence, DeadzoneEvidenceMethod, DeadzoneEvidenceStatus,
+    DeviceInfo, SamplingSource, TimestampSource,
+};
 
+use crate::artifact_file;
 use crate::decode::to_hex;
-use crate::device::{TARGET_PRODUCT_ID, TARGET_VENDOR_ID};
+use crate::device::{REPORT_LEN, TARGET_PRODUCT_ID, TARGET_VENDOR_ID, decode_axes};
 use crate::error::ProbeError;
+use crate::output::print_line;
 use crate::read_cmd::REPORT_BUF_LEN;
 
-/// Per-read timeout in milliseconds, matching `read_cmd`.
 const READ_TIMEOUT_MS: i32 = 200;
 
-/// One captured HID input report.
-#[derive(Debug, Serialize)]
-struct CapturedReport {
-    /// Milliseconds since capture start when this report was read.
-    t_ms: u128,
-    /// Raw report bytes as lowercase hex pairs, e.g. `"01 ff 00"`.
-    bytes_hex: String,
+struct Recorder {
+    start: Instant,
+    next_sequence: u64,
+    samples: Vec<CaptureSample>,
+    segments: Vec<CaptureSegment>,
 }
 
-/// Device identity recorded alongside the captured reports.
-#[derive(Debug, Serialize)]
-struct CapturedDevice {
-    /// USB vendor ID of the captured device.
-    vendor_id: u16,
-    /// USB product ID of the captured device.
-    product_id: u16,
-    /// Product string reported by the device, if any.
-    product: Option<String>,
+impl Recorder {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            next_sequence: 0,
+            samples: Vec::new(),
+            segments: Vec::new(),
+        }
+    }
+
+    fn record_segment(
+        &mut self,
+        device: &HidDevice,
+        seconds: u64,
+        action: CaptureSegmentKind,
+    ) -> Result<(), ProbeError> {
+        let first = self.next_sequence;
+        let deadline = Duration::from_secs(seconds);
+        let phase_start = Instant::now();
+        let mut report = [0u8; REPORT_BUF_LEN];
+        while phase_start.elapsed() < deadline {
+            let read = device.read_timeout(&mut report, READ_TIMEOUT_MS)?;
+            if read == 0 {
+                continue;
+            }
+            let axes =
+                decode_axes(&report[..read]).map_err(|actual| ProbeError::InvalidReportLength {
+                    actual,
+                    expected: REPORT_LEN,
+                })?;
+            self.samples.push(CaptureSample {
+                sequence: self.next_sequence,
+                observed_at_us: elapsed_micros(self.start),
+                source_at_us: None,
+                axes,
+                report_hex: Some(to_hex(&report[..read])),
+            });
+            self.next_sequence = self.next_sequence.wrapping_add(1);
+        }
+        let end_sequence =
+            self.next_sequence
+                .checked_sub(1)
+                .ok_or_else(|| ProbeError::InvalidCapture {
+                    detail: "a guided segment received no HID report".to_owned(),
+                })?;
+        self.segments.push(CaptureSegment {
+            action,
+            start_sequence: first,
+            end_sequence,
+        });
+        Ok(())
+    }
 }
 
-/// Top-level JSON shape written to the `--out` path.
-#[derive(Debug, Serialize)]
-struct Capture {
-    /// Identity of the device the reports were captured from.
-    device: CapturedDevice,
-    /// Reports in capture order.
-    reports: Vec<CapturedReport>,
-}
-
-/// Opens the RadioMaster Pocket, records input reports for `seconds`
-/// wall-clock seconds, and writes them as JSON to `out`.
+/// Records an idle segment and one positive-first movement segment per axis.
 ///
 /// # Errors
 ///
-/// Returns [`ProbeError::Hid`] if the backend fails to initialize, open, or
-/// read the device; [`ProbeError::CaptureSerialize`] if the recorded
-/// reports fail to serialize; [`ProbeError::CaptureWrite`] if writing `out`
-/// fails.
-pub fn run(seconds: u64, out: &Path) -> Result<(), ProbeError> {
+/// Returns [`ProbeError`] when the HID port, report decoder, serializer, or
+/// output file fails.
+pub fn run(
+    idle_seconds: u64,
+    movement_seconds: u64,
+    logical_axes: &[String],
+    out: &Path,
+) -> Result<(), ProbeError> {
     let api = HidApi::new()?;
     let device = api.open(TARGET_VENDOR_ID, TARGET_PRODUCT_ID)?;
     let product = device.get_product_string()?;
-    let start = Instant::now();
-    let budget = Duration::from_secs(seconds);
-    let mut buf = [0u8; REPORT_BUF_LEN];
-    let mut reports = Vec::new();
-    while start.elapsed() < budget {
-        let read = device.read_timeout(&mut buf, READ_TIMEOUT_MS)?;
-        if read == 0 {
-            continue;
-        }
-        reports.push(CapturedReport {
-            t_ms: start.elapsed().as_millis(),
-            bytes_hex: to_hex(&buf[..read]),
-        });
+    let mut recorder = Recorder::new();
+    print_line("Keep all controls at rest.");
+    recorder.record_segment(&device, idle_seconds, CaptureSegmentKind::Idle)?;
+    for logical in logical_axes {
+        print_line(&format!(
+            "Move only {logical}. Move positive first. Use the full range. Return to center."
+        ));
+        recorder.record_segment(
+            &device,
+            movement_seconds,
+            CaptureSegmentKind::Movement {
+                logical: logical.clone(),
+                positive_first: true,
+            },
+        )?;
     }
-    let capture = Capture {
-        device: CapturedDevice {
+    let sample_count = u64::try_from(recorder.samples.len()).unwrap_or(u64::MAX);
+    let capture = CharacterizationCapture {
+        schema_version: CHARACTERIZATION_CAPTURE_SCHEMA_VERSION,
+        device: DeviceInfo {
             vendor_id: TARGET_VENDOR_ID,
             product_id: TARGET_PRODUCT_ID,
             product,
         },
-        reports,
+        source: native_source(),
+        timestamp_source: TimestampSource::Arrival,
+        deadzone_evidence: DeadzoneEvidence {
+            status: DeadzoneEvidenceStatus::NotObserved,
+            method: DeadzoneEvidenceMethod::RawHidReports,
+            sample_count,
+        },
+        samples: recorder.samples,
+        segments: recorder.segments,
     };
     write_capture(&capture, out)
 }
 
-/// Serializes `capture` as pretty JSON and writes it to `out`.
-fn write_capture(capture: &Capture, out: &Path) -> Result<(), ProbeError> {
+fn native_source() -> SamplingSource {
+    if cfg!(target_vendor = "apple") {
+        SamplingSource::AppleHid
+    } else {
+        SamplingSource::NativeHid
+    }
+}
+
+fn elapsed_micros(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
+}
+
+fn write_capture(capture: &CharacterizationCapture, out: &Path) -> Result<(), ProbeError> {
     let json = serde_json::to_string_pretty(capture)
         .map_err(|source| ProbeError::CaptureSerialize { source })?;
-    std::fs::write(out, json).map_err(|source| ProbeError::CaptureWrite {
-        path: out.to_path_buf(),
-        source,
-    })
+    artifact_file::write_new(out, format!("{json}\n").as_bytes())
 }

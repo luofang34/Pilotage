@@ -6,6 +6,7 @@
 // Build the wasm first: scripts/build-web-instruments.sh
 
 import { readFileSync } from "node:fs";
+import "./hid-characterization-sampling.test.mjs";
 import { loadControlShell } from "./control-shell.js";
 import { applyAuthorityTransition } from "./authority-transition.js";
 

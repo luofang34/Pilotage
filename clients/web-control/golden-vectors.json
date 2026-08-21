@@ -721,6 +721,100 @@
       ]
     },
     {
+      "name": "accepted HID candidates normalize identically in native and wasm paths",
+      "steps": [
+        {
+          "addDeviceProfile": {
+            "layer": "user",
+            "profile": {
+              "schema_version": 1,
+              "revision": 8,
+              "device": {
+                "vendor_id": 4660,
+                "product_id": 22136,
+                "product": "Synthetic accepted HID"
+              },
+              "description": "Calibration values from the synthetic HID characterization golden.",
+              "axes": [
+                {
+                  "source_index": 0,
+                  "logical": "slot0",
+                  "invert": false,
+                  "deadzone": 0.0,
+                  "expo": 0.0,
+                  "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 }
+                },
+                {
+                  "source_index": 1,
+                  "logical": "slot1",
+                  "invert": true,
+                  "deadzone": 0.0,
+                  "expo": 0.0,
+                  "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 }
+                }
+              ],
+              "buttons": [],
+              "keys": []
+            }
+          },
+          "expect": {
+            "added": true
+          }
+        },
+        {
+          "selectDevice": "Synthetic accepted HID (Vendor: 1234 Product: 5678)",
+          "expect": {
+            "select": "exact"
+          }
+        },
+        {
+          "pad": { "axes": [0.0, 0.0], "pressed": [] },
+          "session": { "mode": "quad-pilot" },
+          "expect": {
+            "motionGated": true
+          }
+        },
+        {
+          "pad": { "axes": [0.0, 0.0], "pressed": [] },
+          "session": { "mode": "quad-pilot", "motionRecovered": false },
+          "expect": {
+            "motionThrottle": 0.0,
+            "motionYaw": 0.0,
+            "activationRevision": 2,
+            "label": "Synthetic accepted HID"
+          }
+        },
+        {
+          "pad": { "axes": [0.0, 0.0], "pressed": [] },
+          "session": { "mode": "quad-pilot", "motionRecovered": false },
+          "expect": { "motionThrottle": 0.0, "motionYaw": 0.0 }
+        },
+        {
+          "pad": { "axes": [0.0, 0.0], "pressed": [] },
+          "session": { "mode": "quad-pilot" },
+          "expect": { "motionThrottle": 0.0, "motionYaw": 0.0 }
+        },
+        {
+          "pad": { "axes": [1.0, 1.0], "pressed": [] },
+          "session": { "mode": "quad-pilot" },
+          "expect": {
+            "motionLive": true,
+            "motionThrottle": 1.0,
+            "motionYaw": 1.0
+          }
+        },
+        {
+          "pad": { "axes": [-1.0, -1.0], "pressed": [] },
+          "session": { "mode": "quad-pilot" },
+          "expect": {
+            "motionLive": true,
+            "motionThrottle": -1.0,
+            "motionYaw": -1.0
+          }
+        }
+      ]
+    },
+    {
       "name": "a gated arm or disarm press reports suppression, never silence",
       "steps": [
         {
