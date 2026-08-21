@@ -6,7 +6,7 @@ use super::{BackendCapability, Waveform};
 use crate::{
     ArtifactIdentity, MAX_CAPABILITIES, MAX_CONDITION_VALUES, MAX_PHASE_CONDITIONS, MAX_TEXT_BYTES,
     ValidationError,
-    validation::{count, duration, finite, text, unique},
+    validation::{count, duration, finite, range, text, unique},
 };
 
 /// A control channel for a stimulus.
@@ -182,7 +182,10 @@ pub enum PhaseAction {
     /// Arm the vehicle.
     Arm,
     /// Move the vehicle to the test start state.
-    ReachStartState,
+    ReachStartState {
+        /// The target state relative to the reset observation.
+        target: StartState,
+    },
     /// Hold the start state before the stimulus.
     Settle,
     /// Apply one control stimulus.
@@ -254,6 +257,7 @@ impl Phase {
             PhaseAction::ApplyConditions { condition_set } => {
                 condition_set.validate(&format!("{field}.action.condition_set"))
             }
+            PhaseAction::ReachStartState { target } => target.validate(field),
             PhaseAction::Stimulus { waveform, .. } => {
                 waveform.validate(&format!("{field}.action.waveform"))
             }
@@ -291,6 +295,60 @@ impl Phase {
             phase: self.id.clone(),
             capability: format!("{} (not declared in {field})", capability.as_str()),
         })
+    }
+}
+
+/// A test start state relative to the first observation after reset.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartState {
+    /// The north-east-down position offset in meters.
+    pub relative_position_ned_m: [f64; 3],
+    /// The target heading.
+    pub heading: StartHeading,
+}
+
+/// The heading reference for a test start state.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StartHeading {
+    /// Add an offset to the first heading after reset.
+    ResetOffset {
+        /// The clockwise heading offset in radians.
+        radians: f64,
+    },
+    /// Use a true heading clockwise from north.
+    True {
+        /// The true heading in radians.
+        radians: f64,
+    },
+}
+
+impl StartState {
+    fn validate(&self, field: &str) -> Result<(), ValidationError> {
+        for (index, value) in self.relative_position_ned_m.iter().enumerate() {
+            range(
+                &format!("{field}.action.target.relative_position_ned_m[{index}]"),
+                *value,
+                -1_000.0,
+                1_000.0,
+            )?;
+        }
+        self.heading.validate(field)
+    }
+}
+
+impl StartHeading {
+    fn validate(self, field: &str) -> Result<(), ValidationError> {
+        let radians = match self {
+            Self::ResetOffset { radians } | Self::True { radians } => radians,
+        };
+        range(
+            &format!("{field}.action.target.heading.radians"),
+            radians,
+            -core::f64::consts::PI,
+            core::f64::consts::PI,
+        )
     }
 }
 
@@ -340,6 +398,7 @@ const fn action_capability(action: &PhaseAction) -> Option<BackendCapability> {
         PhaseAction::WaitReady => Some(BackendCapability::LifecycleState),
         PhaseAction::ApplyConditions { .. } => Some(BackendCapability::ConditionControl),
         PhaseAction::Arm | PhaseAction::Disarm => Some(BackendCapability::ArmDisarm),
+        PhaseAction::ReachStartState { .. } => Some(BackendCapability::KinematicTruth),
         _ => None,
     }
 }

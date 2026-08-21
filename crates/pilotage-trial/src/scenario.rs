@@ -15,6 +15,7 @@ use crate::{
 pub use backend::{BackendCapabilities, BackendCapability};
 pub use phase::{
     Comparison, ControlChannel, Phase, PhaseAction, PhaseCondition, SignalSelector, SignalSource,
+    StartHeading, StartState,
 };
 pub use waveform::{SineComponent, Waveform};
 
@@ -92,3 +93,6 @@ impl Scenario {
             .map(|bytes| canonical::digest(&bytes))
     }
 }
+
+#[cfg(test)]
+mod tests;
