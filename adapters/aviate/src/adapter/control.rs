@@ -4,13 +4,12 @@
 use std::time::{Duration, Instant};
 
 use pilotage_adapter_api::{ApplyOutcome, Disposition, RejectReason};
+use pilotage_control_feel::DemandEnvelope;
 use pilotage_protocol::{ActionKind, ControlIntent, ScopedControlFrame, VelocityIntent};
 
-use crate::uplink::FPV_MAX_TILT_RAD;
 use pilotage_timing::SimTick;
 
 use super::AviateAdapter;
-use crate::uplink::{MAX_HORIZONTAL_MPS, MAX_VERTICAL_MPS, MAX_YAW_RATE_RPS};
 
 /// Reset clearance uses the same 5%-of-full-envelope scale as host recovery.
 const RESET_CLEAR_DEADBAND: f32 = 0.05;
@@ -29,21 +28,21 @@ pub(super) struct ResetLatch {
 /// no discrete action riding it — every velocity component inside the
 /// envelope-scaled deadband, or (direct flight) level tilt at the mid
 /// collective. A frame without an intent demonstrates nothing.
-fn frame_is_neutral(frame: &ScopedControlFrame) -> bool {
+fn frame_is_neutral(frame: &ScopedControlFrame, envelope: DemandEnvelope) -> bool {
     if !frame.actions.is_empty() {
         return false;
     }
     match &frame.intent {
         Some(ControlIntent::Velocity(v)) => {
-            v.vx.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
-                && v.vy.abs() <= MAX_HORIZONTAL_MPS * RESET_CLEAR_DEADBAND
-                && v.vz.abs() <= MAX_VERTICAL_MPS * RESET_CLEAR_DEADBAND
-                && v.yaw_rate.abs() <= MAX_YAW_RATE_RPS * RESET_CLEAR_DEADBAND
+            v.vx.abs() <= envelope.horizontal_speed_mps * RESET_CLEAR_DEADBAND
+                && v.vy.abs() <= envelope.horizontal_speed_mps * RESET_CLEAR_DEADBAND
+                && v.vz.abs() <= envelope.vertical_speed_mps * RESET_CLEAR_DEADBAND
+                && v.yaw_rate.abs() <= envelope.yaw_rate_rps * RESET_CLEAR_DEADBAND
         }
         Some(ControlIntent::AttitudeThrust(a)) => {
             let (roll, pitch, _) = pilotage_adapter_api::attitude_euler(a);
-            roll.abs() <= FPV_MAX_TILT_RAD * RESET_CLEAR_DEADBAND
-                && pitch.abs() <= FPV_MAX_TILT_RAD * RESET_CLEAR_DEADBAND
+            roll.abs() <= envelope.direct_tilt_rad * RESET_CLEAR_DEADBAND
+                && pitch.abs() <= envelope.direct_tilt_rad * RESET_CLEAR_DEADBAND
                 && (a.thrust - 0.5).abs() <= 0.5 * RESET_CLEAR_DEADBAND
         }
         _ => false,
@@ -123,7 +122,10 @@ fn action_result_for_disarm_frame(
 /// the normalized sticks the uplink's setpoint shaping consumes: the exact
 /// inverse of the envelope scaling a client applies, so a full-envelope
 /// command flies exactly like full stick. Out-of-envelope values clamp.
-pub(super) fn sticks_from_velocity(velocity: &VelocityIntent) -> ([f32; 4], bool) {
+pub(super) fn sticks_from_velocity(
+    velocity: &VelocityIntent,
+    envelope: DemandEnvelope,
+) -> ([f32; 4], bool) {
     let normalize = |value: f32, limit: f32| {
         let normalized = value / limit;
         let clamped = if normalized.is_nan() {
@@ -133,11 +135,11 @@ pub(super) fn sticks_from_velocity(velocity: &VelocityIntent) -> ([f32; 4], bool
         };
         (clamped, clamped != normalized)
     };
-    let (roll, c0) = normalize(velocity.vy, MAX_HORIZONTAL_MPS);
-    let (pitch, c1) = normalize(velocity.vx, MAX_HORIZONTAL_MPS);
+    let (roll, c0) = normalize(velocity.vy, envelope.horizontal_speed_mps);
+    let (pitch, c1) = normalize(velocity.vx, envelope.horizontal_speed_mps);
     // + throttle stick = climb; body-FRD +z is down.
-    let (throttle, c2) = normalize(-velocity.vz, MAX_VERTICAL_MPS);
-    let (yaw, c3) = normalize(velocity.yaw_rate, MAX_YAW_RATE_RPS);
+    let (throttle, c2) = normalize(-velocity.vz, envelope.vertical_speed_mps);
+    let (yaw, c3) = normalize(velocity.yaw_rate, envelope.yaw_rate_rps);
     ([roll, pitch, throttle, yaw], c0 || c1 || c2 || c3)
 }
 
@@ -156,6 +158,9 @@ impl AviateAdapter {
             return;
         }
         self.last_reset = Some(now);
+        if let Some(uplink) = self.uplink.as_mut() {
+            uplink.reset_for_vehicle_reset();
+        }
         // The restarted FC re-reports arm state under fresh heartbeats;
         // the pre-reset report must not survive as current.
         self.arm = None;
@@ -250,7 +255,14 @@ impl AviateAdapter {
             (latch.engaged_epoch, self.observed_source_epoch()),
             (Some(engaged), Some(current)) if current != engaged
         );
-        if epoch_advanced && frame_is_neutral(frame) && self.current_pose().is_some() {
+        let envelope = self
+            .uplink
+            .as_ref()
+            .map(crate::uplink::FlightUplink::envelope);
+        if epoch_advanced
+            && envelope.is_some_and(|value| frame_is_neutral(frame, value))
+            && self.current_pose().is_some()
+        {
             tracing::info!("reset latch cleared: fresh FC stream and neutral input");
             self.reset_latch = None;
             return false;

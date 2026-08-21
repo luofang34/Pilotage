@@ -29,7 +29,7 @@ const SECOND_PROFILE: &str = r#"{
   "flight": {
     "arm_button": 9, "disarm_button": 8,
     "left_x": 0, "left_y": 1, "right_x": 2, "right_y": 3,
-    "trigger_left": 6, "trigger_right": 7, "deadzone": 0.06, "expo": 0.0
+    "trigger_left": 6, "trigger_right": 7, "deadzone": 0.0, "expo": 0.0
   }
 }"#;
 
@@ -309,7 +309,7 @@ fn arm_and_disarm_are_typed_and_follow_the_profile_binding() {
         "pitch": { "source_index": 3, "logical": "pitch", "invert": true, "deadzone": 0.1, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } },
         "yaw":   { "source_index": 2, "logical": "yaw",   "invert": false, "deadzone": 0.1, "expo": 0.0, "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 } }
       },
-      "flight": { "arm_button": 4, "disarm_button": 5, "left_x": 0, "left_y": 1, "right_x": 2, "right_y": 3, "trigger_left": 6, "trigger_right": 7, "deadzone": 0.06, "expo": 0.0 }
+      "flight": { "arm_button": 4, "disarm_button": 5, "left_x": 0, "left_y": 1, "right_x": 2, "right_y": 3, "trigger_left": 6, "trigger_right": 7, "deadzone": 0.0, "expo": 0.0 }
     }"#;
     let mut runtime = ControlRuntime::new();
     runtime.activate(ProfileRuntime::compile(REBOUND.as_bytes()).expect("compiles"));

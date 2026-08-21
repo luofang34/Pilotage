@@ -3,6 +3,26 @@
 /// Why the Aviate adapter could not start or has stopped.
 #[derive(Debug, thiserror::Error)]
 pub enum AviateAdapterError {
+    /// The compatibility control-feel profile is not valid.
+    #[error("the Aviate compatibility control-feel profile is invalid: {source}")]
+    InvalidControlFeel {
+        /// The profile validation error.
+        #[source]
+        source: pilotage_control_feel::ValidationError,
+    },
+    /// The profile requires a signal that this adapter cannot prove.
+    #[error("the Aviate control-feel profile is not supported: {detail}")]
+    UnsupportedControlFeel {
+        /// The unavailable profile requirement.
+        detail: String,
+    },
+    /// The selected control-feel artifact identity could not be calculated.
+    #[error("the Aviate control-feel identity is unavailable: {source}")]
+    ControlFeelIdentity {
+        /// The identity calculation failure.
+        #[source]
+        source: pilotage_control_feel::FeelDigestError,
+    },
     /// The attachment identity provider could not obtain a new incarnation.
     #[error("creating an Aviate source incarnation failed: {source}")]
     IncarnationUnavailable {

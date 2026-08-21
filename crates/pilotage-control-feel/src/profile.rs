@@ -149,7 +149,7 @@ pub struct FlightFeelProfile {
 }
 
 impl FlightFeelProfile {
-    /// Return a profile that reproduces the current static constants.
+    /// Return the fixed compatibility profile.
     #[must_use]
     pub fn legacy_compatibility() -> Self {
         let axis = AxisResponse {

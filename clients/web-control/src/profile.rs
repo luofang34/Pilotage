@@ -87,6 +87,12 @@ pub enum ProfileError {
         /// Which field.
         field: &'static str,
     },
+    /// The flight scheme contains a second response layer.
+    #[error("{field} must be zero because control feel owns flight response shaping")]
+    FlightResponseNotLinear {
+        /// Flight response field that is not zero.
+        field: &'static str,
+    },
 }
 
 /// The runtime's fixed axis-buffer slot count; an axis index must fit it.
@@ -231,12 +237,23 @@ fn validate(doc: &ProfileDoc) -> Result<(), ProfileError> {
         "flight",
         &flight_stick_config(doc.flight.deadzone, doc.flight.expo),
     )?;
+    validate_linear_flight_response(&doc.flight)?;
     Ok(())
 }
 
-/// The flight-stick shaping config: one config (the flight deadzone/expo over a
-/// `[-1, 0, 1]` calibration) reused for every flight stick, built here so
-/// compilation and validation shape the sticks identically.
+fn validate_linear_flight_response(flight: &FlightDoc) -> Result<(), ProfileError> {
+    for (field, value) in [
+        ("flight.deadzone", flight.deadzone),
+        ("flight.expo", flight.expo),
+    ] {
+        if value != 0.0 {
+            return Err(ProfileError::FlightResponseNotLinear { field });
+        }
+    }
+    Ok(())
+}
+
+/// The linear flight-stick config reused for every flight stick.
 fn flight_stick_config(deadzone: f32, expo: f32) -> AxisConfig {
     AxisConfig {
         source_index: 0,
