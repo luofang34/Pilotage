@@ -26,6 +26,9 @@ pub fn print_summary(
         metrics.frames_accepted()
     ));
     print_line(&format!("frames rejected:     {}", metrics.frames_rejected));
+    for (reason, count) in &metrics.rejection_reasons {
+        print_line(&format!("  rejected as {reason}: {count}"));
+    }
     print_line(&format!(
         "telemetry received:  {}",
         metrics.telemetry_received

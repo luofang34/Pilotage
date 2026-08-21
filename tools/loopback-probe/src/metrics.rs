@@ -100,6 +100,13 @@ pub struct RunMetrics {
     pub frames_sent: u64,
     /// `FrameRejected` notices received from the host.
     pub frames_rejected: u64,
+    /// How many rejections carried each reason, in first-seen order.
+    ///
+    /// A count alone says a run failed; the REASON says whether the
+    /// vehicle refused the demand, the session lost its lease, or the
+    /// measurement the adapter needs never arrived. Without it a
+    /// diagnosis costs a whole run.
+    pub rejection_reasons: Vec<(String, u64)>,
     /// Telemetry samples received.
     pub telemetry_received: u64,
     /// The most recently observed telemetry pose (`x_m`, `y_m`,
@@ -126,9 +133,25 @@ impl RunMetrics {
             rtt: RttEstimator::new(),
             frames_sent: 0,
             frames_rejected: 0,
+            rejection_reasons: Vec::new(),
             telemetry_received: 0,
             last_pose: None,
             dropped_events: 0,
+        }
+    }
+
+    /// Records one rejection and the reason the host gave for it.
+    pub fn note_rejection(&mut self, reason: &pilotage_protocol::FrameRejectionReason) {
+        self.frames_rejected = self.frames_rejected.saturating_add(1);
+        let label = format!("{reason:?}");
+        if let Some(entry) = self
+            .rejection_reasons
+            .iter_mut()
+            .find(|(seen, _)| *seen == label)
+        {
+            entry.1 = entry.1.saturating_add(1);
+        } else {
+            self.rejection_reasons.push((label, 1));
         }
     }
 
