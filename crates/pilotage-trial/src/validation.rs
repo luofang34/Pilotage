@@ -115,3 +115,12 @@ pub(crate) fn range(
         maximum,
     })
 }
+
+pub(crate) fn duration(field: &str, value: u64) -> Result<(), ValidationError> {
+    if value > 0 {
+        return Ok(());
+    }
+    Err(ValidationError::ZeroDuration {
+        field: field.to_owned(),
+    })
+}
