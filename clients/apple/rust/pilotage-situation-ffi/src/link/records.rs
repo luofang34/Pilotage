@@ -36,6 +36,10 @@ pub struct LinkScope {
     pub scope: String,
     /// Typed intent families the scope accepts.
     pub intents: Vec<LinkIntentCapability>,
+    /// Typed discrete action codes the scope accepts (the wire
+    /// `ControlAction` values), so the shell can show a control
+    /// exactly when the host offers its action.
+    pub actions: Vec<i32>,
 }
 
 /// One offered vehicle.
@@ -173,6 +177,10 @@ pub enum LinkEvent {
         /// Bytes parked in stream reassembly buffers right now. A
         /// figure that keeps climbing is a desynchronized stream.
         stream_pending_bytes: u64,
+        /// Video frames received this second, across every source.
+        video_frames_per_second: u32,
+        /// Encoded video bytes received this second.
+        video_bytes_per_second: u64,
     },
 }
 
@@ -203,6 +211,7 @@ impl LinkCatalog {
                                     max_angular: intent.max_angular,
                                 })
                                 .collect(),
+                            actions: scope.actions.iter().map(|action| action.action).collect(),
                         })
                         .collect(),
                 })

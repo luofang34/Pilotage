@@ -4,7 +4,7 @@
 //! loop moves bytes; this file decides what the shell hears.
 
 use pilotage_client_session::ModuleEvent;
-use pilotage_control_web::{AuthorityEvent, MOTION_SCOPE};
+use pilotage_control_web::{AuthorityEvent, GIMBAL_SCOPE, MOTION_SCOPE};
 use pilotage_instrument_feed::{FeedParams, InstrumentFeed};
 use pilotage_protocol::wire;
 
@@ -28,6 +28,13 @@ impl Link {
             // The answer arrived, whatever it says: the next press may
             // ask again.
             self.motion_request_pending = false;
+        }
+        if scope == GIMBAL_SCOPE && !response.granted {
+            // A denial ends this ask: leaving the engage pending would
+            // turn the selection's five-second self-heal into a
+            // one-shot that never re-asks when the holder later lets
+            // go.
+            self.pending_gimbal_engage = false;
         }
         let generation = response.generation.as_ref().map_or(0, |g| g.value);
         self.mirror_authority(
@@ -82,6 +89,23 @@ impl Link {
     /// its plans), the telegraph, and then the shell.
     fn emit_action_result(&mut self, result: wire::ControlActionResult) {
         self.stats.action_results = self.stats.action_results.wrapping_add(1);
+        // A refused payload engage re-arms itself: the first engage
+        // after a grant commonly lands while the scope's link-loss
+        // protection is still clearing, and an engage that gives up on
+        // one refusal leaves the operator's selection dark forever.
+        // The pending flush paces the retries.
+        let result_scope = result
+            .scope
+            .as_ref()
+            .map(|scope| scope.value.as_str())
+            .unwrap_or_default();
+        if result.action == 4
+            && result_scope == GIMBAL_SCOPE
+            && !result.accepted
+            && self.pending_gimbal_selected()
+        {
+            self.pending_gimbal_engage = true;
+        }
         self.telegraph.on_action_result(
             u32::try_from(result.action).unwrap_or(0),
             result.accepted,
@@ -204,6 +228,11 @@ impl Link {
                 // dropped and the next one stands alone.
                 if let Ok(frame) = pilotage_protocol::video_frame::decode_v2(&body) {
                     let codec = String::from_utf8_lossy(&frame.codec).into_owned();
+                    self.stats.video_frames = self.stats.video_frames.wrapping_add(1);
+                    self.stats.video_bytes = self
+                        .stats
+                        .video_bytes
+                        .wrapping_add(frame.payload.len() as u64);
                     self.delivery
                         .video(frame.header.source_id, codec, frame.payload.to_vec());
                 }

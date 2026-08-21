@@ -46,6 +46,10 @@ pub(crate) enum LinkCommand {
     Action {
         code: i32,
     },
+    SimReset,
+    SelectVideoSource {
+        source: u8,
+    },
     ArmOrder {
         armed: bool,
     },
@@ -145,6 +149,26 @@ impl LinkSession {
     /// action dies in the shared core.
     pub fn send_action(&self, code: i32) {
         self.commands.send(LinkCommand::Action { code }).ok();
+    }
+
+    /// Requests a simulation reset on the host's `sim.lifecycle`
+    /// scope. The driver acquires that scope's authority first when it
+    /// is not yet held; on a host that does not advertise the action
+    /// (not a simulator) nothing leaves the client.
+    pub fn request_sim_reset(&self) {
+        self.commands.send(LinkCommand::SimReset).ok();
+    }
+
+    /// Steers the session's video producer to the named source. The
+    /// simulator host renders ONE camera at a time: the payload view
+    /// exists while the gimbal scope is engaged, and clears when it is
+    /// released — so picking the gimbal source acquires that scope and
+    /// aims it (a recenter press), and picking the forward source
+    /// releases it. A source the host never advertised changes nothing.
+    pub fn select_video_source(&self, source: u8) {
+        self.commands
+            .send(LinkCommand::SelectVideoSource { source })
+            .ok();
     }
 
     /// Asks the present holder to hand the scope over; the handover

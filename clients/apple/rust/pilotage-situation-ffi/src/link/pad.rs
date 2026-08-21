@@ -118,7 +118,13 @@ impl Link {
                 actions.extend(self.engine.request_lease_quiet(vehicle_id, GIMBAL_SCOPE));
             }
             Some(LeaseAction::Release) => {
-                actions.extend(self.engine.release_lease(vehicle_id, GIMBAL_SCOPE));
+                // An explicit payload-view selection outlives the
+                // quasimode: letting go of the aim must not tear down
+                // the view the operator parked the producer on. The
+                // selection's own fpv pick is what releases it.
+                if self.selected_video_source != Some(Self::SOURCE_GIMBAL) {
+                    actions.extend(self.engine.release_lease(vehicle_id, GIMBAL_SCOPE));
+                }
             }
             Some(LeaseAction::Request) | None => {}
         }
@@ -240,8 +246,16 @@ impl Link {
     }
 
     /// Releasing control gives back everything held: the motion lane
-    /// and the gimbal lane the runtime leased alongside it.
+    /// and the gimbal lane the runtime leased alongside it. An
+    /// explicit surrender also stands down the parked payload
+    /// selection — five seconds later the self-heal would otherwise
+    /// quietly re-take the camera the operator just gave up, and deny
+    /// the next pilot's quasimode with an idle observer's hold.
     pub(super) fn release_held_actions(&mut self) -> Vec<ClientAction> {
+        if self.pending_gimbal_selected() {
+            self.selected_video_source = None;
+            self.pending_gimbal_engage = false;
+        }
         match self
             .engine
             .admission()

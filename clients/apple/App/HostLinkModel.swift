@@ -36,11 +36,47 @@ final class HostLinkModel: ObservableObject {
         }
     }
     /// What the link screen shows about the session.
-    @Published private(set) var status = "not connected"
+    @Published private(set) var status = "not connected" {
+        didSet {
+            guard status != oldValue else { return }
+            statusLog.append(StatusEntry(text: status))
+            if statusLog.count > Self.statusLogCapacity {
+                statusLog.removeFirst(statusLog.count - Self.statusLogCapacity)
+            }
+        }
+    }
+    /// The recent status lines, oldest first — the session's own log,
+    /// bounded so it can live in memory for the whole run.
+    @Published private(set) var statusLog: [StatusEntry] = []
+    private static let statusLogCapacity = 200
+
+    /// One remembered status line.
+    struct StatusEntry: Identifiable {
+        let id = UUID()
+        let at = Date()
+        let text: String
+    }
     /// Offered vehicles once admitted, in the host's order.
     @Published private(set) var catalog: LinkCatalog?
     /// Whether control is held now.
     @Published private(set) var leaseHeld = false
+    /// A control ask is in flight: the request left and the host has
+    /// not answered yet. The bar shows this as its own lever state, the
+    /// way the arm telegraph separates the order from the answer.
+    @Published private(set) var leaseAsked = false
+    private var leaseAskExpiry: Task<Void, Never>?
+    /// A camera pick awaiting its first frame. The switcher shows the
+    /// ask immediately; the DISPLAYED source changes only when the
+    /// picked source actually delivers — a black tile is not a switch.
+    @Published private(set) var pendingVideoSource: String?
+    private var pendingVideoTimeout: Task<Void, Never>?
+    /// Sources that were delivering and have stopped: the producer
+    /// renders one camera at a time, so the source it left behind goes
+    /// stale — and a tile silently freezing on its last frame reads as
+    /// a broken feed, not as a switched camera.
+    @Published private(set) var staleSources: Set<UInt8> = []
+    private var videoFreshAt: [UInt8: Date] = [:]
+    private var staleSweep: Timer?
     /// The resolved pad profile and its arm/disarm control names.
     @Published private(set) var padHints = ""
     /// Whether the gimbal quasimode holds the right stick now.
@@ -199,6 +235,20 @@ final class HostLinkModel: ObservableObject {
         link = nil
         catalog = nil
         leaseHeld = false
+        leaseAsked = false
+        leaseAskExpiry?.cancel()
+        leaseAskExpiry = nil
+        // Video bookkeeping is per-session: the next session must not
+        // inherit live/stale source sets, a pending pick's timeout, or
+        // the staleness sweep of a link that no longer exists.
+        liveVideoSources = []
+        staleSources = []
+        videoFreshAt = [:]
+        pendingVideoSource = nil
+        pendingVideoTimeout?.cancel()
+        pendingVideoTimeout = nil
+        staleSweep?.invalidate()
+        staleSweep = nil
         phase = .idle
         status = "not connected"
     }
@@ -221,7 +271,17 @@ final class HostLinkModel: ObservableObject {
         guard let vehicle = catalog?.vehicles.first,
               let scope = vehicle.scopes.first
         else { return }
+        leaseAsked = true
         link?.requestLease(vehicleId: vehicle.vehicleId, scope: scope.scope)
+        // A host that never answers must not pin the chip on "Asked…"
+        // forever; the pad-press ask expires host-side at ten seconds,
+        // and the chip follows the same clock.
+        leaseAskExpiry?.cancel()
+        leaseAskExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, !Task.isCancelled, !self.leaseHeld else { return }
+            self.leaseAsked = false
+        }
     }
 
     /// Stands down from control.
@@ -239,6 +299,47 @@ final class HostLinkModel: ObservableObject {
     /// Orders the vehicle safe.
     func disarm() {
         link?.setArmOrder(armed: false)
+    }
+
+    /// Steers the session's video producer toward one named source.
+    /// The simulator renders one camera at a time: the payload view
+    /// follows the gimbal scope's engagement, so picking gimbal
+    /// engages it and picking fpv releases it. Unknown names change
+    /// only what the tile listens to.
+    func selectVideoSource(named name: String) {
+        guard let id = InstrumentRackView.videoSourceIds[name] else { return }
+        link?.selectVideoSource(source: id)
+        pendingVideoTimeout?.cancel()
+        if liveVideoSources.contains(id) {
+            // Already delivering: the switch is real now.
+            commitVideoSource(name)
+            return
+        }
+        pendingVideoSource = name
+        pendingVideoTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard let self, !Task.isCancelled, self.pendingVideoSource == name else { return }
+            self.pendingVideoSource = nil
+            self.status = "\(name): no frames arrived after the switch"
+        }
+    }
+
+    /// Lands a confirmed pick where every surface reads it. The shared
+    /// default is the views' @AppStorage key, so the rack tile and the
+    /// promoted surface flip together.
+    private func commitVideoSource(_ name: String) {
+        pendingVideoSource = nil
+        pendingVideoTimeout?.cancel()
+        pendingVideoTimeout = nil
+        UserDefaults.standard.set(name, forKey: "pilotageVideoSource")
+    }
+
+    /// Asks the simulator host to reset the flight. The driver
+    /// acquires the lifecycle scope's authority when it is not yet
+    /// held; on a host that never advertised the action nothing is
+    /// sent — the button gating makes that unreachable from here.
+    func resetSim() {
+        link?.requestSimReset()
     }
 
     /// Asks the present holder to hand control over; the handover
@@ -267,15 +368,37 @@ final class HostLinkModel: ObservableObject {
     /// the same three facts the browser reads, taken from the same file,
     /// so a hand-typed hash is never the price of pinning.
     func connectFromManifest(_ manifestUrl: String) {
-        guard let url = URL(string: manifestUrl) else {
+        // Keyboards append spaces and autocorrect pads pastes; a URL
+        // API that percent-encodes them turns one invisible character
+        // into a 404 nobody can see the cause of.
+        let trimmed = manifestUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed) else {
             status = "manifest url is invalid"
             return
         }
         status = "fetching \(manifestUrl)"
         Task { [weak self] in
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                let manifest = try JSONDecoder().decode(SessionManifest.self, from: data)
+                let (data, response) = try await URLSession.shared.data(from: url)
+                // A session being torn down serves a 404 page here, and
+                // a wrong responder serves whatever it serves: the
+                // status must show WHAT came back, or every mismatch
+                // reads as the same opaque "format" complaint.
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    await MainActor.run {
+                        self?.status = "manifest fetch failed: HTTP \(http.statusCode)"
+                            + " — is the session running?"
+                    }
+                    return
+                }
+                guard let manifest = try? JSONDecoder().decode(SessionManifest.self, from: data)
+                else {
+                    let head = String(decoding: data.prefix(120), as: UTF8.self)
+                    await MainActor.run {
+                        self?.status = "manifest is not the session's JSON; got: \(head)"
+                    }
+                    return
+                }
                 await MainActor.run {
                     self?.connect(
                         url: "https://\(manifest.host):\(manifest.port)/pilotage",
@@ -324,10 +447,14 @@ final class HostLinkModel: ObservableObject {
             // must not flip the shell into "controlling", nor its
             // release stop the demand loop that keeps motion alive.
             guard scope == "vehicle.motion" else {
-                if !held && !detail.isEmpty { status = "gimbal: \(detail)" }
+                // Name the scope that answered: a lifecycle denial
+                // labeled "gimbal" sends the operator debugging the
+                // wrong subsystem.
+                if !held && !detail.isEmpty { status = "\(scope): \(detail)" }
                 return
             }
             leaseHeld = held
+            leaseAsked = false
             holderPresent = !held && detail.contains("another operator")
             if holderPresent {
                 // The engine already escalated the denial into the ask;
@@ -367,11 +494,13 @@ final class HostLinkModel: ObservableObject {
             status = "control frame \(sequence) rejected (reason \(reason))"
         case .down(let retryAtMs):
             leaseHeld = false
+            leaseAsked = false
             stopControlLoop()
             phase = retryAtMs == nil ? .idle : .reconnecting
             status = retryAtMs == nil ? "disconnected" : "reconnecting…"
         case .stopped(let reason):
             leaseHeld = false
+            leaseAsked = false
             stopControlLoop()
             phase = .stopped(reason: reason)
             status = "stopped: \(reason)"
@@ -392,18 +521,43 @@ final class HostLinkModel: ObservableObject {
             let controlFrames,
             let rejected,
             let actionResults,
-            let streamPendingBytes
+            let streamPendingBytes,
+            let videoFrames,
+            let videoBytes
         ):
             linkStats = "tlm \(telemetry)/s · state \(stateFrames)/s · ctl "
                 + "\(controlFrames)/s · rej \(rejected) · act \(actionResults)"
+                + " · vid \(videoFrames)/s \(videoBytes / 1024) KB/s"
             if streamPendingBytes > 1_048_576 {
                 linkStats += " · buf \(streamPendingBytes / 1_048_576) MB"
             }
         }
     }
 
+    /// One throttled freshness note per source from the video relay.
+    fileprivate func noteVideoFresh(_ sourceId: UInt8) {
+        videoFreshAt[sourceId] = Date()
+        staleSources.remove(sourceId)
+        if staleSweep == nil {
+            staleSweep = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) {
+                [weak self] _ in
+                Task { @MainActor [weak self] in self?.sweepStaleSources() }
+            }
+        }
+    }
+
+    private func sweepStaleSources() {
+        let now = Date()
+        let stale = Set(videoFreshAt.filter { now.timeIntervalSince($0.value) > 2.0 }.keys)
+        if stale != staleSources { staleSources = stale }
+    }
+
     fileprivate func accept(liveSource sourceId: UInt8) {
         liveVideoSources.insert(sourceId)
+        if let pending = pendingVideoSource,
+           InstrumentRackView.videoSourceIds[pending] == sourceId {
+            commitVideoSource(pending)
+        }
     }
 
     fileprivate func accept(stateFrame: [UInt8], acceptedAtMs: UInt64) {
@@ -596,6 +750,8 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
     private weak var model: HostLinkModel?
     private let decoders = NSMutableDictionary()
     private let decoderLock = NSLock()
+    private var lastFreshNote: [UInt8: CFAbsoluteTime] = [:]
+    private let freshLock = NSLock()
     /// Sources that have delivered at least one frame; SwiftUI learns
     /// about a source once, not per frame.
     private var seen: Set<UInt8> = []
@@ -641,6 +797,17 @@ private final class LinkRelay: LinkObserver, @unchecked Sendable {
             hub?.publish(image, source: sourceId)
             if seen.insert(sourceId).inserted {
                 Task { @MainActor [model] in model?.accept(liveSource: sourceId) }
+            }
+            // One freshness note per source per half second, so the
+            // staleness sweep sees a heartbeat without the main actor
+            // hearing every frame.
+            let now = CFAbsoluteTimeGetCurrent()
+            freshLock.lock()
+            let due = now - (lastFreshNote[sourceId] ?? 0) > 0.5
+            if due { lastFreshNote[sourceId] = now }
+            freshLock.unlock()
+            if due {
+                Task { @MainActor [model] in model?.noteVideoFresh(sourceId) }
             }
         }
         clearInFlight(sourceId)

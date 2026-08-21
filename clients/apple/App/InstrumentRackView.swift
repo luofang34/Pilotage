@@ -25,6 +25,19 @@ struct InstrumentRackView: View {
     /// affordance, in place, reversible: the same button grants and
     /// returns the focus, and the map split stays a separate switch.
     @State private var focusedTileId: String?
+    /// A reset press awaiting its confirmation; a simulation rewind
+    /// mid-flight is one accidental thumb away on a touch screen.
+    @State private var resetAsked = false
+    /// The session log sheet, opened from the status line.
+    @State private var logShown = false
+
+    /// Fixed control-bar button widths. The bar must not reflow when a
+    /// state swap changes a label (Release ↔ Request control), and a
+    /// squeezed rack column must clip a button rather than fold its
+    /// title into a one-letter-per-line column.
+    private static let fcuButtonWidth: CGFloat = 44
+    private static let resetButtonWidth: CGFloat = 48
+    private static let leaseButtonWidth: CGFloat = 64
 
     /// Sources a vehicle can offer today. A source catalog will replace
     /// this list; the switcher's shape stays.
@@ -171,13 +184,28 @@ struct InstrumentRackView: View {
                                 .padding(4)
                                 .background(.black.opacity(0.5))
                         }
+                        .overlay {
+                            // A frozen last frame reads as a broken
+                            // feed; a paused badge reads as what it
+                            // is — the producer rendering another
+                            // view.
+                            if model.staleSources.contains(id) {
+                                ZStack {
+                                    Color.black.opacity(0.45)
+                                    Label("paused — the producer is on another view",
+                                          systemImage: "pause.circle")
+                                        .font(.caption)
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                        }
                 } else {
                     UnavailableTile(
                         title: "Video · \(shown)",
                         reason: "no frames from this session yet"
                     )
                 }
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     if model.gimbalCaptured {
                         // The quasimode holds the stick for THIS camera;
                         // the badge lives where the picture is.
@@ -185,21 +213,37 @@ struct InstrumentRackView: View {
                             .foregroundStyle(.cyan)
                             .padding(6)
                     }
+                    // The switcher names the CURRENT source and each
+                    // candidate states whether it has frames: picking a
+                    // dead source is allowed (never silently redirected)
+                    // but must read as "that source is dark", not as a
+                    // switch that did not respond.
                     Menu {
                         ForEach(Self.videoSources, id: \.self) { candidate in
                             Button {
-                                videoSourceOverride = candidate
+                                // The pick steers the producer (the
+                                // simulator renders one camera at a
+                                // time); the DISPLAY switches when the
+                                // source's first frame confirms it.
+                                model.selectVideoSource(named: candidate)
                             } label: {
                                 if candidate == shown {
-                                    Label(candidate, systemImage: "checkmark")
+                                    Label(sourceMenuTitle(candidate), systemImage: "checkmark")
                                 } else {
-                                    Text(candidate)
+                                    Text(sourceMenuTitle(candidate))
                                 }
                             }
                         }
                     } label: {
-                        Image(systemName: "video.badge.ellipsis")
-                            .padding(6)
+                        HStack(spacing: 4) {
+                            Image(systemName: "video.badge.ellipsis")
+                            Text(model.pendingVideoSource.map { "\($0)…" } ?? shown)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(model.pendingVideoSource == nil ? .white : .orange)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     Button {
                         withAnimation { focusedTileId = focusedTileId == tile.id ? nil : tile.id }
@@ -207,7 +251,8 @@ struct InstrumentRackView: View {
                         Image(systemName: focusedTileId == tile.id
                             ? "arrow.down.right.and.arrow.up.left"
                             : "arrow.up.left.and.arrow.down.right")
-                            .padding(6)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     Button {
                         withAnimation {
@@ -218,7 +263,8 @@ struct InstrumentRackView: View {
                         }
                     } label: {
                         Image(systemName: "rectangle.2.swap")
-                            .padding(6)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .help("Swap with the primary surface")
                 }
@@ -262,6 +308,13 @@ struct InstrumentRackView: View {
         return model.liveVideoSources.contains(id) ? id : nil
     }
 
+    /// One menu row's title: the source name plus whether the session
+    /// is delivering frames for it right now.
+    private func sourceMenuTitle(_ name: String) -> String {
+        guard let id = selectedVideoId(for: name) else { return "\(name) · no frames" }
+        return model.staleSources.contains(id) ? "\(name) · paused" : "\(name) · live"
+    }
+
     /// One row and one caption: the bar must never eat into the
     /// instruments it serves. The telegraph is the row's centerpiece;
     /// everything narrational lives in the caption or moved out — pad
@@ -269,61 +322,132 @@ struct InstrumentRackView: View {
     /// tile itself.
     private var controlBar: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 10) {
+            // Row one, flight authority, every slot permanent: the
+            // lease chip and the arm telegraph are ALWAYS present —
+            // the telegraph reads the flight controller's state for
+            // an observer and becomes the control under a lease, so
+            // gaining or losing authority never adds, removes, or
+            // moves a single element.
+            HStack(spacing: 8) {
                 Image(systemName: model.controllerAttached
                     ? "gamecontroller.fill"
                     : "gamecontroller")
                     .foregroundStyle(model.controllerAttached ? .green : .secondary)
+                leaseChip
+                ArmTelegraphControl(model: model, interactive: model.leaseHeld)
+                Spacer(minLength: 0)
+            }
+            .font(.callout)
+            // Row two, session tools: what the catalog offers is
+            // fixed for the session, so this row's shape never
+            // changes mid-flight either.
+            HStack(spacing: 8) {
                 if model.catalog?.offersFlightControl == true {
                     // The autopilot face exists only for a host that
                     // commands a flight computer; a plan-input panel
                     // never grows one.
-                    Button {
+                    barChip("FCU", width: Self.fcuButtonWidth,
+                            tint: fcuShown ? .cyan : Color(white: 0.7),
+                            filled: fcuShown) {
                         withAnimation { fcuShown.toggle() }
-                    } label: {
-                        Text("FCU")
-                            .font(.caption.weight(.bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .fill(fcuShown ? Color.cyan.opacity(0.3) : Color(white: 0.2))
-                            )
                     }
-                    .buttonStyle(.plain)
                 }
-                if model.leaseHeld {
-                    ArmTelegraphControl(model: model)
-                    Spacer()
-                    // One word, never wrapped: the chip above already
-                    // says "Controlling", so this button only carries
-                    // the verb. The pad speaks it too — a disarm press
-                    // with the lever settled on SAFE stands down.
-                    Button("Release", role: .destructive) { model.releaseLease() }
-                        .lineLimit(1)
-                        .fixedSize()
-                } else {
-                    Spacer()
-                    // One intent, one button: a denial with a standing
-                    // holder escalates to the ask on its own, and an
-                    // arm press on the pad or keyboard is this same
-                    // ask without reaching for the screen.
-                    Button("Request control") { model.requestLease() }
-                        .disabled(model.catalog == nil)
-                        .lineLimit(1)
-                        .fixedSize()
+                if model.catalog?.offersSimReset == true {
+                    // Only a simulator host advertises the lifecycle
+                    // reset; a real vehicle's bar never grows a
+                    // button that could not mean anything there.
+                    barChip("Reset", width: Self.resetButtonWidth, tint: .red, filled: false) {
+                        resetAsked = true
+                    }
                 }
+                Spacer(minLength: 0)
             }
             .font(.callout)
-            if let caption = barCaption {
-                Text(caption.text)
+            // The status line owns exactly one caption row at a fixed
+            // height whether or not it has anything to say: a line
+            // that appears by pushing the instruments around teaches
+            // the operator to distrust the layout. It always shows
+            // the newest session line and opens the full log.
+            Button {
+                logShown = true
+            } label: {
+                Text(barCaption?.text ?? model.status)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(caption.warning ? .orange : .secondary)
+                    .foregroundStyle(barCaption?.warning == true ? .orange : .secondary)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
+        .confirmationDialog(
+            "Reset the simulation?",
+            isPresented: $resetAsked,
+            titleVisibility: .visible
+        ) {
+            Button("Reset the simulation", role: .destructive) { model.resetSim() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The vehicle returns to its parking spot and the flight controller restarts.")
+        }
+        .sheet(isPresented: $logShown) {
+            StatusLogSheet(model: model)
+        }
+    }
+
+    /// One fixed-width bar chip: caption-bold title, rounded fill, a
+    /// full-height hit area regardless of its visual size.
+    private func barChip(
+        _ title: String,
+        width: CGFloat,
+        tint: Color,
+        filled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .frame(width: width)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(filled ? tint.opacity(0.3) : Color(white: 0.2))
+                )
+                .frame(minHeight: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tint)
+    }
+
+
+    /// The lease control's three faces, one fixed-width chip: blue to
+    /// ask, amber while the host owes an answer, red to stand down.
+    @ViewBuilder
+    private var leaseChip: some View {
+        let (title, tint): (String, Color) = model.leaseHeld
+            ? ("Release", .red)
+            : model.leaseAsked ? ("Asked…", .orange) : ("Request", .cyan)
+        Button {
+            if model.leaseHeld {
+                model.releaseLease()
+            } else if !model.leaseAsked {
+                model.requestLease()
+            }
+        } label: {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .frame(width: Self.leaseButtonWidth)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 5).fill(tint.opacity(0.3)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tint)
+        .disabled(model.catalog == nil || model.leaseAsked)
     }
 
     /// The one caption line under the bar, present only when the
@@ -337,135 +461,5 @@ struct InstrumentRackView: View {
             return ("vehicle disarmed itself — lever is back on SAFE", true)
         }
         return nil
-    }
-}
-
-/// The arm order telegraph: a two-position lever the operator sets and
-/// a lamp only the flight controller's own report moves. Amber between
-/// order and answer; the lever never re-sends on its own.
-private struct ArmTelegraphControl: View {
-    @ObservedObject var model: HostLinkModel
-
-    var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 0) {
-                lever("SAFE", ordersArmed: false)
-                lever("ARM", ordersArmed: true)
-            }
-            .background(Capsule().fill(Color(white: 0.18)))
-            lamp
-        }
-    }
-
-    private func lever(_ title: String, ordersArmed: Bool) -> some View {
-        let selected = model.armOrdered == ordersArmed
-        return Button {
-            if ordersArmed { model.arm() } else { model.disarm() }
-        } label: {
-            Text(title)
-                .font(.callout.weight(selected ? .bold : .regular))
-                .lineLimit(1)
-                .fixedSize()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(selected ? leverTint(ordersArmed: ordersArmed) : .clear)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func leverTint(ordersArmed: Bool) -> Color {
-        // Cockpit colors: amber is an unanswered order, green is the
-        // system engaged as ordered, gray is quiet. Red stays reserved
-        // for what has actually gone wrong.
-        if model.armPhase == 1 { return .orange }
-        return ordersArmed ? .green : Color(white: 0.35)
-    }
-
-    /// The FC's answer, and nothing else: the lamp never moves on a
-    /// press.
-    private var lamp: some View {
-        let (tint, label): (Color, String) = switch model.armConfirmed {
-        case 2: (.green, "ARMED")
-        case 1: (Color(white: 0.7), "SAFE")
-        default: (.gray, "—")
-        }
-        return HStack(spacing: 4) {
-            Circle().fill(tint).frame(width: 8, height: 8)
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-        }
-    }
-}
-
-/// A tile slot this build cannot fill, saying why in place. It never
-/// paints a picture that implies the data exists.
-private struct UnavailableTile: View {
-    let title: String
-    let reason: String
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(white: 0.12))
-            VStack(spacing: 6) {
-                Text(title)
-                    .font(.headline)
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .foregroundStyle(.white)
-            .padding(8)
-        }
-    }
-}
-
-/// One glanceable statement of where the link stands. Tapping opens the
-/// connection sheet — the chip is the door to the flow, not the flow.
-struct ConnectionChip: View {
-    let phase: HostLinkModel.Phase
-    let open: () -> Void
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 6) {
-                Circle().fill(tint).frame(width: 8, height: 8)
-                Text(label)
-                    .font(.footnote.weight(.medium))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color(white: 0.18)))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white)
-    }
-
-    private var label: String {
-        // One word each: the chip is a glance, and the sheet carries the
-        // host and scope in full.
-        switch phase {
-        case .idle: "Connect"
-        case .connecting: "Connecting…"
-        case .observing: "Observing"
-        case .controlling: "Controlling"
-        case .reconnecting: "Reconnecting…"
-        case .stopped: "Stopped"
-        }
-    }
-
-    private var tint: Color {
-        switch phase {
-        case .idle: .gray
-        case .connecting, .reconnecting: .yellow
-        case .observing: .green
-        case .controlling: .blue
-        case .stopped: .red
-        }
     }
 }

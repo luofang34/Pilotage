@@ -128,11 +128,19 @@ fn admitted_link() -> Link {
         last_demand_ms: 0,
         motion_request_pending: false,
         motion_ask_at_ms: None,
+        pending_sim_reset: false,
+        pending_gimbal_engage: false,
+        selected_video_source: None,
+        gimbal_engage_attempt_ms: 0,
     }
 }
 
 /// Grants one scope through both halves the driver keeps in step: the
 /// engine's lane and the runtime's authority mirror.
+fn deny(link: &mut Link, scope: &str) {
+    link.emit(ModuleEvent::Lease(lease_response(scope, false, 0)));
+}
+
 fn grant(link: &mut Link, scope: &str, generation: u64) {
     link.engine.request_lease(1, scope);
     let envelope = wire::Envelope {
@@ -328,4 +336,55 @@ mod pool {
             "the autoreleased object must die with its batch's pool"
         );
     }
+}
+
+#[test]
+fn a_video_pick_acquires_quietly_and_any_other_source_tears_down() {
+    let mut link = admitted_link();
+    // Picking the payload source asks for its scope and leaves the
+    // engage pending for the grant.
+    let actions = link.select_video_source_actions(2);
+    assert!(
+        !actions.is_empty(),
+        "the pick must ask for the gimbal scope"
+    );
+    assert!(link.pending_gimbal_selected());
+    assert!(link.pending_gimbal_engage);
+    // Any non-gimbal pick clears the payload machinery.
+    let actions = link.select_video_source_actions(1);
+    assert!(actions.is_empty(), "no scope held yet, nothing to release");
+    assert!(!link.pending_gimbal_selected());
+    assert!(!link.pending_gimbal_engage);
+}
+
+#[test]
+fn the_parked_keepalive_streams_when_held_and_yields_to_an_active_capture() {
+    let mut link = admitted_link();
+    link.selected_video_source = Some(2);
+    grant(&mut link, "vehicle.gimbal", 7);
+    // Fail-before: with the scope held and no capture, the keepalive
+    // MUST emit — this half is what proves the gated assert below can
+    // fail at all.
+    assert!(
+        !link.gimbal_keepalive_actions().is_empty(),
+        "a parked selection on a held scope must stream its liveness"
+    );
+    // While the quasimode captures the stick the runtime streams
+    // commanded rates on this lane; the parked keepalive must not
+    // interleave zero-rate frames with a live aim.
+    link.capture_active = true;
+    assert!(link.gimbal_keepalive_actions().is_empty());
+}
+
+#[test]
+fn a_gimbal_denial_re_arms_the_selections_self_heal() {
+    let mut link = admitted_link();
+    let actions = link.select_video_source_actions(2);
+    assert!(!actions.is_empty());
+    assert!(link.pending_gimbal_engage);
+    // The host says no (another holder): the ask is over, and the
+    // five-second self-heal owns the retry — a pending flag left set
+    // would turn it into a one-shot.
+    deny(&mut link, "vehicle.gimbal");
+    assert!(!link.pending_gimbal_engage);
 }

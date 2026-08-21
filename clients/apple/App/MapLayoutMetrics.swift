@@ -62,6 +62,13 @@ enum Metrics {
 
     /// Width of a floating panel.
     static let panelWidth: CGFloat = 320
+
+    /// Height of the system navigation band the neighboring panes draw
+    /// their bar buttons in. The map pane has no bar of its own, but
+    /// its floating top controls sit ON THE SAME LINE as the sidebar's
+    /// bar buttons — one shared row across every pane, the way the
+    /// platform's own split applications align theirs.
+    static let navigationBand: CGFloat = 50
 }
 
 extension View {
@@ -85,7 +92,13 @@ extension View {
             // rather than beginning where it ends. Without one the plain margin applies,
             // which is what keeps the corner square where nothing is reserved.
             let bar = Metrics.systemBarHeight
-            let top = bar > 0 ? bar + Metrics.edgeInset : max(Metrics.edgeInset, safe.top)
+            // Top-edge controls center on the navigation band beside
+            // them rather than hanging a margin below the status bar:
+            // the sidebar's bar buttons and the map's floating controls
+            // read as one row across the window.
+            let bandTop = max(bar, safe.top)
+                + (Metrics.navigationBand - Metrics.control) / 2
+            let top = max(Metrics.edgeInset, bandTop)
             frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
                 .padding(
                     .top,

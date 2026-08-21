@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use pilotage_client_session::{
     ClientAction, ClientConfig, ClientEngine, MotionDemand, ProfileIdentity, ReconnectPolicy,
-    StreamId, TransportEvent,
+    TransportEvent,
 };
 use pilotage_control_web::{ArmTelegraph, ControlCoordinator, DEFAULT_PROFILE_BYTES};
 use pilotage_instrument_feed::InstrumentFeed;
@@ -21,6 +21,9 @@ use super::LinkCommand;
 use super::delivery::DeliveryQueue;
 use super::observer::LinkObserver;
 use super::records::{LinkConfig, LinkEvent};
+
+mod readers;
+use readers::{spawn_bootstrap_reader, spawn_datagram_reader, spawn_uni_acceptor};
 
 /// State-frame cadence: one assembly per display-ish interval. The scene
 /// pace is the shell's display link; this only bounds staleness.
@@ -59,6 +62,15 @@ pub(super) struct Link {
     /// When that ask left, on the link clock. An ask nobody answers
     /// expires, so the sticks are never locked out for good.
     pub(super) motion_ask_at_ms: Option<u64>,
+    /// A reset press waiting on the lifecycle scope's authority grant.
+    pub(super) pending_sim_reset: bool,
+    /// A payload-view pick waiting on the gimbal scope's grant.
+    pub(super) pending_gimbal_engage: bool,
+    /// The operator's chosen video source, driving what the producer
+    /// renders and which auxiliary scope stays alive.
+    pub(super) selected_video_source: Option<u8>,
+    /// When the last payload engage left, for pacing its retries.
+    pub(super) gimbal_engage_attempt_ms: u64,
 }
 
 /// One second of link accounting, reset on report.
@@ -69,6 +81,8 @@ pub(super) struct LinkStats {
     pub(super) control_frames: u32,
     pub(super) rejected: u32,
     pub(super) action_results: u32,
+    pub(super) video_frames: u32,
+    pub(super) video_bytes: u64,
 }
 
 impl Link {
@@ -132,6 +146,8 @@ impl Link {
             rejected_per_second: stats.rejected,
             action_results_per_second: stats.action_results,
             stream_pending_bytes: self.engine.stream_pending_bytes() as u64,
+            video_frames_per_second: stats.video_frames,
+            video_bytes_per_second: stats.video_bytes,
         });
     }
 }
@@ -175,6 +191,10 @@ pub(crate) async fn run(
         last_demand_ms: 0,
         motion_request_pending: false,
         motion_ask_at_ms: None,
+        pending_sim_reset: false,
+        pending_gimbal_engage: false,
+        selected_video_source: None,
+        gimbal_engage_attempt_ms: 0,
     };
     loop {
         match connect(&config, pinned).await {
@@ -309,6 +329,12 @@ async fn drive(
                 link.deliver_state_frame();
                 let keepalive = link.keepalive_actions();
                 link.execute(keepalive, &mut send, connection).await;
+                let reset = link.pending_sim_reset_actions();
+                link.execute(reset, &mut send, connection).await;
+                let engage = link.pending_gimbal_engage_actions();
+                link.execute(engage, &mut send, connection).await;
+                let keepalive = link.gimbal_keepalive_actions();
+                link.execute(keepalive, &mut send, connection).await;
             }
             _ = stats_ticker.tick() => link.report_stats(),
         }
@@ -339,6 +365,8 @@ async fn handle_command(
             yaw,
         }),
         Some(LinkCommand::Action { code }) => link.action_actions(code),
+        Some(LinkCommand::SimReset) => link.sim_reset_actions(),
+        Some(LinkCommand::SelectVideoSource { source }) => link.select_video_source_actions(source),
         Some(LinkCommand::ArmOrder { armed }) => link.order_actions(armed),
         Some(LinkCommand::PadSample {
             axes,
@@ -377,101 +405,4 @@ async fn handle_command(
     };
     link.execute(actions, send, connection).await;
     false
-}
-
-/// Reads the bootstrap stream until it ends.
-fn spawn_bootstrap_reader(
-    mut recv: wtransport::RecvStream,
-    events: mpsc::UnboundedSender<ReaderEvent>,
-) {
-    tokio::spawn(async move {
-        let mut buf = vec![0_u8; 8192];
-        loop {
-            match recv.read(&mut buf).await {
-                Ok(Some(read)) => {
-                    let event = TransportEvent::BootstrapReceived(buf[..read].to_vec());
-                    if events.send(ReaderEvent::Transport(event)).is_err() {
-                        return;
-                    }
-                }
-                Ok(None) | Err(_) => {
-                    events
-                        .send(ReaderEvent::Transport(TransportEvent::TransportLost {
-                            detail: "bootstrap stream ended".to_owned(),
-                        }))
-                        .ok();
-                    return;
-                }
-            }
-        }
-    });
-}
-
-/// Accepts host-initiated uni streams and spawns a reader per stream.
-fn spawn_uni_acceptor(connection: Connection, events: mpsc::UnboundedSender<ReaderEvent>) {
-    tokio::spawn(async move {
-        let mut next_stream = 0_u64;
-        loop {
-            let Ok(mut recv) = connection.accept_uni().await else {
-                return;
-            };
-            next_stream = next_stream.wrapping_add(1);
-            let stream = StreamId(next_stream);
-            if events
-                .send(ReaderEvent::Transport(TransportEvent::UniStreamOpened(
-                    stream,
-                )))
-                .is_err()
-            {
-                return;
-            }
-            let events = events.clone();
-            tokio::spawn(async move {
-                let mut buf = vec![0_u8; 8192];
-                loop {
-                    match recv.read(&mut buf).await {
-                        Ok(Some(read)) => {
-                            let event =
-                                TransportEvent::UniStreamReceived(stream, buf[..read].to_vec());
-                            if events.send(ReaderEvent::Transport(event)).is_err() {
-                                return;
-                            }
-                        }
-                        Ok(None) | Err(_) => {
-                            events
-                                .send(ReaderEvent::Transport(TransportEvent::UniStreamClosed(
-                                    stream,
-                                )))
-                                .ok();
-                            return;
-                        }
-                    }
-                }
-            });
-        }
-    });
-}
-
-/// Reads datagrams until the connection ends.
-fn spawn_datagram_reader(connection: Connection, events: mpsc::UnboundedSender<ReaderEvent>) {
-    tokio::spawn(async move {
-        loop {
-            match connection.receive_datagram().await {
-                Ok(datagram) => {
-                    let event = TransportEvent::DatagramReceived(datagram.payload().to_vec());
-                    if events.send(ReaderEvent::Transport(event)).is_err() {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    events
-                        .send(ReaderEvent::Transport(TransportEvent::TransportLost {
-                            detail: "connection closed".to_owned(),
-                        }))
-                        .ok();
-                    return;
-                }
-            }
-        }
-    });
 }

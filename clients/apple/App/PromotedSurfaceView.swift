@@ -11,6 +11,12 @@ struct PromotedSurfaceView: View {
     let tile: InstrumentTile
     /// Returns the primary surface to the map.
     let restoreMap: () -> Void
+    /// The operator's source choice, shared with the rack tile: the
+    /// promoted surface shows the SAME selection, and switching here
+    /// works the same as switching there — a full screen that locks
+    /// its camera would send the operator back to the rack to change
+    /// views.
+    @AppStorage("pilotageVideoSource") private var videoSourceOverride = ""
 
     var body: some View {
         ZStack {
@@ -25,19 +31,76 @@ struct PromotedSurfaceView: View {
             }
             .buttonStyle(.plain)
             .mapControlPlacement(.bottomTrailing)
+            if case .video(let source) = tile {
+                sourceSwitcher(profileSource: source)
+                    .mapControlPlacement(.topTrailing)
+            }
         }
+    }
+
+    /// The same switcher the rack tile offers: current source on its
+    /// face, each candidate stating whether it has frames, and a pick
+    /// steering the producer.
+    private func sourceSwitcher(profileSource: String) -> some View {
+        let shown = videoSourceOverride.isEmpty ? profileSource : videoSourceOverride
+        return Menu {
+            ForEach(InstrumentRackView.videoSources, id: \.self) { candidate in
+                Button {
+                    model.selectVideoSource(named: candidate)
+                } label: {
+                    if candidate == shown {
+                        Label(sourceMenuTitle(candidate), systemImage: "checkmark")
+                    } else {
+                        Text(sourceMenuTitle(candidate))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "video.badge.ellipsis")
+                Text(model.pendingVideoSource.map { "\($0)…" } ?? shown)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(model.pendingVideoSource == nil ? .white : .orange)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+            .padding(.horizontal, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+    }
+
+    private func sourceMenuTitle(_ name: String) -> String {
+        guard let id = InstrumentRackView.videoSourceIds[name],
+              model.liveVideoSources.contains(id)
+        else { return "\(name) · no frames" }
+        return model.staleSources.contains(id) ? "\(name) · paused" : "\(name) · live"
     }
 
     @ViewBuilder
     private var content: some View {
         switch tile {
         case .video(let source):
-            if let id = InstrumentRackView.videoSourceIds[source],
+            let shown = videoSourceOverride.isEmpty ? source : videoSourceOverride
+            if let id = InstrumentRackView.videoSourceIds[shown],
                model.liveVideoSources.contains(id) {
                 VideoSurfaceView(hub: model.videoHub, source: id)
                     .ignoresSafeArea()
+                    .overlay {
+                        if model.staleSources.contains(id) {
+                            ZStack {
+                                Color.black.opacity(0.45)
+                                Label("paused — the producer is on another view",
+                                      systemImage: "pause.circle")
+                                    .font(.callout)
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                    }
             } else {
-                Text("Video · \(source) — no frames from this session yet")
+                Text("Video · \(shown) — no frames from this session yet")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
