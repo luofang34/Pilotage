@@ -78,6 +78,101 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
 }
 
 #[test]
+fn promotion_rejects_an_improvement_below_the_relative_floor() {
+    let directory = TestDirectory::new("relative-promotion-floor");
+    let state = FakeHandle::new();
+    let mut tuner = open(
+        directory.path(),
+        state,
+        SequenceStrategy::new(vec![0.1]),
+        2.0,
+    )
+    .expect("open tuner");
+
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run training");
+    tuner.freeze_candidate().expect("freeze candidate");
+
+    assert!(matches!(
+        tuner.run_promotion_once_blocking().expect("run promotion"),
+        PromotionDecision::RejectedNoImprovement { .. }
+    ));
+    assert!(matches!(
+        tuner
+            .run_final_qualification_once_blocking()
+            .expect("run final qualification"),
+        FinalQualificationOutcome::FailedObjective { .. }
+    ));
+}
+
+#[test]
+fn final_qualification_rejects_a_named_objective_limit() {
+    let directory = TestDirectory::new("named-final-objective");
+    let state = FakeHandle::new();
+    let mut tuner = open(
+        directory.path(),
+        state,
+        SequenceStrategy::new(vec![1.0]),
+        2.0,
+    )
+    .expect("open tuner");
+
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run training");
+    tuner.freeze_candidate().expect("freeze candidate");
+    assert!(matches!(
+        tuner.run_promotion_once_blocking().expect("run promotion"),
+        PromotionDecision::Promoted { .. }
+    ));
+    assert_eq!(
+        tuner
+            .run_final_qualification_once_blocking()
+            .expect("run final qualification"),
+        FinalQualificationOutcome::FailedObjective {
+            metric: "test.response".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn final_qualification_rejects_a_missing_named_objective() {
+    let directory = TestDirectory::new("missing-final-objective");
+    let state = FakeHandle::new();
+    let mut policy = stage();
+    policy
+        .qualification
+        .objective_maxima
+        .insert("required.missing".to_owned(), 1.0);
+    let mut tuner = open_stage(
+        directory.path(),
+        state,
+        SequenceStrategy::new(vec![0.5]),
+        2.0,
+        policy,
+    )
+    .expect("open tuner");
+
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run training");
+    tuner.freeze_candidate().expect("freeze candidate");
+    assert!(matches!(
+        tuner.run_promotion_once_blocking().expect("run promotion"),
+        PromotionDecision::Promoted { .. }
+    ));
+    assert_eq!(
+        tuner
+            .run_final_qualification_once_blocking()
+            .expect("run final qualification"),
+        FinalQualificationOutcome::FailedObjective {
+            metric: "required.missing".to_owned(),
+        }
+    );
+}
+
+#[test]
 fn a_streaming_gate_stops_before_metric_scoring_and_saves_failure_first() {
     let directory = TestDirectory::new("stream-gate");
     let state = FakeHandle::new();
@@ -327,9 +422,19 @@ fn open(
     strategy: SequenceStrategy,
     gate_limit: f64,
 ) -> Result<TestTuner, TuneError> {
+    open_stage(path, state, strategy, gate_limit, stage())
+}
+
+fn open_stage(
+    path: &Path,
+    state: FakeHandle,
+    strategy: SequenceStrategy,
+    gate_limit: f64,
+    stage: flight_tune::SearchStage,
+) -> Result<TestTuner, TuneError> {
     Tuner::open_or_resume(
         path,
-        stage(),
+        stage,
         91,
         candidate(0.0),
         FakeBackend::new(state.clone()),

@@ -112,6 +112,7 @@ impl MetricEvaluator for FlightQualityMetricEvaluator {
         let values = MetricValues {
             loss: report.dimensionless_loss,
             control_effort: report.control.effort_rms.clamp(0.0, 1.0),
+            objectives: objective_values(&report),
         };
         self.last_report = Some(report);
         Ok(values)
@@ -121,6 +122,105 @@ impl MetricEvaluator for FlightQualityMetricEvaluator {
         self.active = None;
         Ok(())
     }
+}
+
+fn objective_values(report: &FlightQualityReport) -> BTreeMap<String, f64> {
+    let mut values = BTreeMap::from([
+        (
+            "jerk.peak_acceleration_mps2".to_owned(),
+            report.jerk.peak_acceleration_mps2,
+        ),
+        ("jerk.peak_mps3".to_owned(), report.jerk.peak_jerk_mps3),
+        ("jerk.p95_mps3".to_owned(), report.jerk.jerk_p95_mps3),
+        ("jerk.rms_mps3".to_owned(), report.jerk.jerk_rms_mps3),
+        ("control.effort_rms".to_owned(), report.control.effort_rms),
+        (
+            "control.saturation_fraction".to_owned(),
+            report.control.saturation_fraction,
+        ),
+        (
+            "control.longest_saturation_s".to_owned(),
+            report.control.longest_saturation_s,
+        ),
+    ]);
+    insert_step_objectives(&mut values, report.step_response);
+    insert_release_objectives(&mut values, report.release);
+    insert_hold_objectives(&mut values, report.hold);
+    insert_wind_objectives(&mut values, report.wind_position);
+    values
+}
+
+fn insert_step_objectives(values: &mut BTreeMap<String, f64>, step: Option<ResponseMetrics>) {
+    let Some(step) = step else { return };
+    values.extend([
+        (
+            "step.command_delay_s".to_owned(),
+            required(step.input_to_command_delay_s),
+        ),
+        (
+            "step.response_delay_s".to_owned(),
+            required(step.input_to_response_delay_s),
+        ),
+        ("step.rise_time_s".to_owned(), required(step.rise_time_s)),
+        (
+            "step.settling_time_s".to_owned(),
+            required(step.settling_time_s),
+        ),
+        (
+            "step.overshoot_fraction".to_owned(),
+            step.overshoot_fraction,
+        ),
+        ("step.undershoot".to_owned(), step.undershoot),
+    ]);
+}
+
+fn insert_release_objectives(values: &mut BTreeMap<String, f64>, release: Option<ReleaseMetrics>) {
+    let Some(release) = release else { return };
+    values.extend([
+        (
+            "release.stop_time_s".to_owned(),
+            required(release.release_to_stop_s),
+        ),
+        (
+            "release.brake_distance_m".to_owned(),
+            required(release.brake_distance_m),
+        ),
+        (
+            "release.return_toward_release_m".to_owned(),
+            release.return_toward_release_m,
+        ),
+        (
+            "release.opposite_velocity_peak_mps".to_owned(),
+            release.opposite_velocity_peak_mps,
+        ),
+    ]);
+}
+
+fn insert_hold_objectives(values: &mut BTreeMap<String, f64>, hold: Option<HoldMetrics>) {
+    let Some(hold) = hold else { return };
+    values.extend([
+        (
+            "hold.rebound_distance_m".to_owned(),
+            hold.rebound_distance_m,
+        ),
+        (
+            "hold.zero_crossings".to_owned(),
+            f64::from(hold.zero_crossings),
+        ),
+    ]);
+}
+
+fn insert_wind_objectives(values: &mut BTreeMap<String, f64>, wind: Option<SignalStats>) {
+    let Some(wind) = wind else { return };
+    values.extend([
+        ("wind.position_rms_m".to_owned(), wind.rms),
+        ("wind.position_p95_m".to_owned(), wind.p95_abs),
+        ("wind.position_peak_m".to_owned(), wind.peak_abs),
+    ]);
+}
+
+fn required(value: Option<f64>) -> f64 {
+    value.unwrap_or(f64::MAX)
 }
 
 fn validate_sample(
@@ -362,3 +462,4 @@ fn metric_error(error: pilotage_flight_quality::MetricError) -> EvaluatorError {
 fn invalid(detail: impl Into<String>) -> EvaluatorError {
     EvaluatorError::new(detail)
 }
+use std::collections::BTreeMap;

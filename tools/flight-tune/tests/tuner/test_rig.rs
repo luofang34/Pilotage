@@ -6,10 +6,11 @@ use std::time::Duration;
 use flight_tune::{
     AdapterError, ArtifactIdentity, Candidate, CandidateLineage, CandidateReceipt, Digest,
     EvaluatorError, GateEvaluator, GateOutcome, MetricEvaluator, MetricValues, ParameterBounds,
-    PromotionPolicy, Proposal, ProposalContext, ProposalError, ProposalStrategy, SampleEvent,
-    ScenarioRef, ScenarioStartReceipt, SearchStage, SessionChallenge, SimulatorBackend,
-    SimulatorCapability, SimulatorSessionReceipt, SimulatorVehicleAdapter, SimulatorVehicleFactory,
-    TelemetrySample, TrainingObservation, TuneError, VehicleBinding, VehicleBindingReceipt,
+    PromotionPolicy, Proposal, ProposalContext, ProposalError, ProposalStrategy,
+    QualificationPolicy, SampleEvent, ScenarioRef, ScenarioStartReceipt, SearchStage,
+    SessionChallenge, SimulatorBackend, SimulatorCapability, SimulatorSessionReceipt,
+    SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample, TrainingObservation,
+    TuneError, VehicleBinding, VehicleBindingReceipt,
 };
 
 #[derive(Debug, Default)]
@@ -340,6 +341,7 @@ impl MetricEvaluator for QuadraticMetric {
         Ok(MetricValues {
             loss: (gain - 1.0).powi(2),
             control_effort: gain.abs() / 2.0,
+            objectives: BTreeMap::from([("test.response".to_owned(), gain.abs())]),
         })
     }
 
@@ -432,7 +434,14 @@ pub fn stage() -> SearchStage {
         repetitions: 2,
         promotion: PromotionPolicy {
             minimum_loss_improvement: 0.0,
+            minimum_relative_loss_improvement: 0.2,
             maximum_control_effort_increase: 1.0,
+        },
+        qualification: QualificationPolicy {
+            maximum_loss_confidence_upper: 0.5,
+            maximum_p95_loss: 0.5,
+            maximum_mean_control_effort: 1.0,
+            objective_maxima: BTreeMap::from([("test.response".to_owned(), 0.75)]),
         },
     }
 }

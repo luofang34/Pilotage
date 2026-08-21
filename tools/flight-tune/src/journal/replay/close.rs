@@ -52,11 +52,12 @@ pub(super) fn seal(
     candidate: Digest,
     outcome: &FinalQualificationOutcome,
     initial: Digest,
+    stage: &SearchStage,
 ) -> Result<(), TuneError> {
     if state.phase != CampaignPhase::PromotionClosed
         || state.pending.is_some()
         || candidate != state.selected_release_candidate(initial)
-        || !final_shape_matches(state.final_evaluation.as_ref(), outcome)
+        || !final_shape_matches(state.final_evaluation.as_ref(), outcome, stage)
     {
         return Err(invalid("the final seal does not match qualification"));
     }
@@ -117,19 +118,9 @@ fn promotion_numbers_are_finite(decision: &PromotionDecision) -> bool {
 fn final_shape_matches(
     evaluation: Option<&CandidateEvaluation>,
     outcome: &FinalQualificationOutcome,
+    stage: &SearchStage,
 ) -> bool {
-    match (evaluation, outcome) {
-        (Some(CandidateEvaluation::Passed { .. }), FinalQualificationOutcome::Qualified) => true,
-        (
-            Some(CandidateEvaluation::HardGateFailed { failure, .. }),
-            FinalQualificationOutcome::FailedHardGate { gate_id },
-        ) => failure.gate.id == *gate_id,
-        (
-            Some(CandidateEvaluation::Quarantined { .. }) | None,
-            FinalQualificationOutcome::Indeterminate { reason },
-        ) => !reason.trim().is_empty(),
-        _ => false,
-    }
+    crate::engine::final_outcome(stage, evaluation) == *outcome
 }
 
 fn invalid(detail: impl Into<String>) -> TuneError {

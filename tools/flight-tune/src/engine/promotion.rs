@@ -37,7 +37,12 @@ pub(super) fn decide(
             .zip(frozen_runs)
             .map(|(baseline, frozen)| frozen.control_effort - baseline.control_effort),
     )?;
-    if loss.upper_95 <= -policy.minimum_loss_improvement
+    let baseline_mean_loss =
+        baseline_runs.iter().map(|run| run.loss).sum::<f64>() / baseline_runs.len() as f64;
+    let required_loss_improvement = policy
+        .minimum_loss_improvement
+        .max(baseline_mean_loss * policy.minimum_relative_loss_improvement);
+    if loss.upper_95 <= -required_loss_improvement
         && effort.mean <= policy.maximum_control_effort_increase
     {
         return Ok(PromotionDecision::Promoted {

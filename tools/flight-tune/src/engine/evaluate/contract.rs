@@ -132,6 +132,7 @@ pub(super) fn run_record(
         seed: context.seed,
         loss: values.loss,
         control_effort: values.control_effort,
+        objectives: values.objectives,
         passed_hard_gates: stage.required_hard_gates.clone(),
     }
 }

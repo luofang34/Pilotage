@@ -38,7 +38,9 @@ pub use journal::{
     AttemptRole, CampaignPhase, FinalQualificationOutcome, Journal, JournalEntry, JournalEvent,
     OperationStatus, PromotionDecision, SessionIdentity,
 };
-pub use model::{Candidate, ParameterBounds, PromotionPolicy, ScenarioRef, SearchStage};
+pub use model::{
+    Candidate, ParameterBounds, PromotionPolicy, QualificationPolicy, ScenarioRef, SearchStage,
+};
 pub use pilotage_trial::Digest;
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,

@@ -186,7 +186,7 @@ fn apply_event(
         } => close::freeze(state, *baseline, *candidate, initial),
         JournalEvent::PromotionClosed { decision } => close::promotion(state, decision, stage),
         JournalEvent::Sealed { candidate, outcome } => {
-            close::seal(state, *candidate, outcome, initial)
+            close::seal(state, *candidate, outcome, initial, stage)
         }
     }
 }

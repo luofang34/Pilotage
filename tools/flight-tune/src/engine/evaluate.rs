@@ -314,7 +314,7 @@ where
             };
         }
     };
-    if let Err(error) = validate_metric(values) {
+    if let Err(error) = validate_metric(&values) {
         return RunTerminal::Failed {
             error,
             started: false,

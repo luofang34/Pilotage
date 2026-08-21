@@ -141,6 +141,11 @@ pub enum FinalQualificationOutcome {
         /// The first failed hard gate identity.
         gate_id: String,
     },
+    /// The selected candidate exceeded a declared final objective limit.
+    FailedObjective {
+        /// Stable name of the first failed objective.
+        metric: String,
+    },
     /// Recovery or an execution failure made qualification incomplete.
     Indeterminate {
         /// The stable reason.

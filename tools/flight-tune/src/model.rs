@@ -116,8 +116,24 @@ pub struct ScenarioRef {
 pub struct PromotionPolicy {
     /// The required reduction in paired mean loss.
     pub minimum_loss_improvement: f64,
+    /// The required reduction as a fraction of baseline mean loss.
+    pub minimum_relative_loss_improvement: f64,
     /// The largest permitted paired increase in mean control effort.
     pub maximum_control_effort_increase: f64,
+}
+
+/// Absolute release limits for the untouched final partition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualificationPolicy {
+    /// Largest permitted upper 95 percent confidence limit for mean loss.
+    pub maximum_loss_confidence_upper: f64,
+    /// Largest permitted 95th percentile loss.
+    pub maximum_p95_loss: f64,
+    /// Largest permitted mean normalized control effort.
+    pub maximum_mean_control_effort: f64,
+    /// Maximum value for each required named objective.
+    pub objective_maxima: BTreeMap<String, f64>,
 }
 
 /// One bounded search and qualification stage.
@@ -142,6 +158,8 @@ pub struct SearchStage {
     pub repetitions: u32,
     /// The limits for the one promotion decision.
     pub promotion: PromotionPolicy,
+    /// Absolute limits for the final release decision.
+    pub qualification: QualificationPolicy,
 }
 
 impl SearchStage {
@@ -156,7 +174,8 @@ impl SearchStage {
         self.validate_counts()?;
         self.validate_parameters()?;
         self.validate_scenarios()?;
-        self.validate_promotion()
+        self.validate_promotion()?;
+        self.validate_qualification()
     }
 
     /// Validates one candidate against its current training incumbent.
@@ -252,10 +271,31 @@ impl SearchStage {
         let policy = self.promotion;
         if !policy.minimum_loss_improvement.is_finite()
             || policy.minimum_loss_improvement < 0.0
+            || !policy.minimum_relative_loss_improvement.is_finite()
+            || !(0.0..=1.0).contains(&policy.minimum_relative_loss_improvement)
             || !policy.maximum_control_effort_increase.is_finite()
             || policy.maximum_control_effort_increase < 0.0
         {
             return Err(invalid_stage("the promotion policy is not valid"));
+        }
+        Ok(())
+    }
+
+    fn validate_qualification(&self) -> Result<(), TuneError> {
+        let policy = &self.qualification;
+        if !policy.maximum_loss_confidence_upper.is_finite()
+            || policy.maximum_loss_confidence_upper < 0.0
+            || !policy.maximum_p95_loss.is_finite()
+            || policy.maximum_p95_loss < 0.0
+            || !policy.maximum_mean_control_effort.is_finite()
+            || !(0.0..=1.0).contains(&policy.maximum_mean_control_effort)
+            || policy.objective_maxima.iter().any(|(name, maximum)| {
+                validate_name(name, "qualification objective").is_err()
+                    || !maximum.is_finite()
+                    || *maximum < 0.0
+            })
+        {
+            return Err(invalid_stage("the qualification policy is not valid"));
         }
         Ok(())
     }

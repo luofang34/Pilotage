@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -61,12 +61,14 @@ pub trait GateEvaluator {
 }
 
 /// Final continuous values from one completed scenario run.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MetricValues {
     /// Continuous loss, where a smaller value is better.
     pub loss: f64,
     /// Normalized control effort in the inclusive range from zero to one.
     pub control_effort: f64,
+    /// Named nonnegative objective values for release qualification.
+    pub objectives: BTreeMap<String, f64>,
 }
 
 /// A streaming continuous metric evaluator.
@@ -115,6 +117,8 @@ pub struct RunRecord {
     pub loss: f64,
     /// The normalized control effort.
     pub control_effort: f64,
+    /// Named objective values emitted by the metric implementation.
+    pub objectives: BTreeMap<String, f64>,
     /// The hard gate identities that passed for all samples.
     pub passed_hard_gates: Vec<String>,
 }
@@ -268,12 +272,22 @@ pub(crate) fn validate_gate_outcomes(
     }
 }
 
-pub(crate) fn validate_metric(values: MetricValues) -> Result<(), TuneError> {
+pub(crate) fn validate_metric(values: &MetricValues) -> Result<(), TuneError> {
     if !values.loss.is_finite() || values.loss < 0.0 {
         return Err(invalid_score("loss must be finite and nonnegative"));
     }
     if !values.control_effort.is_finite() || !(0.0..=1.0).contains(&values.control_effort) {
         return Err(invalid_score("control effort must be in zero to one"));
+    }
+    if values.objectives.iter().any(|(name, value)| {
+        name.trim().is_empty()
+            || name.chars().any(char::is_whitespace)
+            || !value.is_finite()
+            || *value < 0.0
+    }) {
+        return Err(invalid_score(
+            "a named objective is empty, non-finite, or negative",
+        ));
     }
     Ok(())
 }
@@ -364,9 +378,10 @@ impl OnlineStats {
 
 fn validate_runs(runs: &[RunRecord], set: ScenarioSet) -> Result<(), TuneError> {
     for run in runs {
-        validate_metric(MetricValues {
+        validate_metric(&MetricValues {
             loss: run.loss,
             control_effort: run.control_effort,
+            objectives: run.objectives.clone(),
         })?;
         if run.scenario_set != set || run.passed_hard_gates.is_empty() {
             return Err(invalid_score(
