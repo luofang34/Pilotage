@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "device": {
+    "vendor_id": 4617,
+    "product_id": 20308,
+    "product": "RadioMaster Pocket"
+  },
+  "raw_report_layout": {
+    "report_byte_count": 19,
+    "report_id": null,
+    "axes": [
+      { "source_index": 0, "bit_offset": 24, "bit_width": 16, "signed": false },
+      { "source_index": 1, "bit_offset": 40, "bit_width": 16, "signed": false },
+      { "source_index": 2, "bit_offset": 56, "bit_width": 16, "signed": false },
+      { "source_index": 3, "bit_offset": 72, "bit_width": 16, "signed": false },
+      { "source_index": 4, "bit_offset": 88, "bit_width": 16, "signed": false },
+      { "source_index": 5, "bit_offset": 104, "bit_width": 16, "signed": false },
+      { "source_index": 6, "bit_offset": 120, "bit_width": 16, "signed": false },
+      { "source_index": 7, "bit_offset": 136, "bit_width": 16, "signed": false }
+    ]
+  },
+  "axes": [
+    { "source_index": 0, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "centered" },
+    { "source_index": 1, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "centered" },
+    { "source_index": 2, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "minimum" },
+    { "source_index": 3, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "centered" },
+    { "source_index": 4, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "minimum" },
+    { "source_index": 5, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "minimum" },
+    { "source_index": 6, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "minimum" },
+    { "source_index": 7, "minimum": 0.0, "maximum": 2047.0, "neutral_position": "minimum" }
+  ]
+}

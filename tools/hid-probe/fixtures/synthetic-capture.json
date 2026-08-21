@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "device": {
+    "vendor_id": 4660,
+    "product_id": 22136,
+    "product": "Synthetic HID"
+  },
+  "device_instance_id": "synthetic-hid-instance-1",
+  "source": "synthetic",
+  "timestamp_source": "arrival",
+  "timing_observation": "injected_samples",
+  "deadzone_evidence": {
+    "status": "unknown",
+    "method": "unmeasured",
+    "sample_count": 0
+  },
+  "source_contract_digest": "00c2e800bf7201cf3c927a4c3e6633ad28325e0a0c28771d4dab1af69155f20a",
+  "source_axes": [
+    { "source_index": 0, "minimum": 0.0, "maximum": 2000.0, "neutral_position": "centered" },
+    { "source_index": 1, "minimum": 0.0, "maximum": 1000.0, "neutral_position": "centered" }
+  ],
+  "samples": [
+    { "sequence": 0, "observed_at_us": 0, "source_at_us": null, "axes": [998.0, 500.0], "report_hex": null },
+    { "sequence": 1, "observed_at_us": 4000, "source_at_us": null, "axes": [999.0, 503.0], "report_hex": null },
+    { "sequence": 2, "observed_at_us": 8000, "source_at_us": null, "axes": [1000.0, 503.0], "report_hex": null },
+    { "sequence": 3, "observed_at_us": 12000, "source_at_us": null, "axes": [1001.0, 505.0], "report_hex": null },
+    { "sequence": 4, "observed_at_us": 16000, "source_at_us": null, "axes": [1002.0, 508.0], "report_hex": null },
+    { "sequence": 5, "observed_at_us": 20000, "source_at_us": null, "axes": [1001.0, 511.0], "report_hex": null },
+    { "sequence": 6, "observed_at_us": 24000, "source_at_us": null, "axes": [1000.0, 511.0], "report_hex": null },
+    { "sequence": 7, "observed_at_us": 28000, "source_at_us": null, "axes": [999.0, 513.0], "report_hex": null },
+    { "sequence": 8, "observed_at_us": 36000, "source_at_us": null, "axes": [998.0, 516.0], "report_hex": null },
+    { "sequence": 9, "observed_at_us": 40000, "source_at_us": null, "axes": [999.0, 519.0], "report_hex": null },
+    { "sequence": 10, "observed_at_us": 44000, "source_at_us": null, "axes": [1000.0, 519.0], "report_hex": null },
+    { "sequence": 11, "observed_at_us": 48000, "source_at_us": null, "axes": [1001.0, 521.0], "report_hex": null },
+    { "sequence": 12, "observed_at_us": 52000, "source_at_us": null, "axes": [1002.0, 524.0], "report_hex": null },
+    { "sequence": 13, "observed_at_us": 56000, "source_at_us": null, "axes": [1001.0, 527.0], "report_hex": null },
+    { "sequence": 14, "observed_at_us": 60000, "source_at_us": null, "axes": [1000.0, 527.0], "report_hex": null },
+    { "sequence": 15, "observed_at_us": 64000, "source_at_us": null, "axes": [999.0, 529.0], "report_hex": null },
+    { "sequence": 16, "observed_at_us": 68000, "source_at_us": null, "axes": [1000.0, 515.0], "report_hex": null },
+    { "sequence": 17, "observed_at_us": 72000, "source_at_us": null, "axes": [1400.0, 516.0], "report_hex": null },
+    { "sequence": 18, "observed_at_us": 76000, "source_at_us": null, "axes": [2000.0, 515.0], "report_hex": null },
+    { "sequence": 19, "observed_at_us": 80000, "source_at_us": null, "axes": [1800.0, 514.0], "report_hex": null },
+    { "sequence": 20, "observed_at_us": 84000, "source_at_us": null, "axes": [1200.0, 515.0], "report_hex": null },
+    { "sequence": 21, "observed_at_us": 88000, "source_at_us": null, "axes": [1000.0, 516.0], "report_hex": null },
+    { "sequence": 22, "observed_at_us": 92000, "source_at_us": null, "axes": [500.0, 515.0], "report_hex": null },
+    { "sequence": 23, "observed_at_us": 96000, "source_at_us": null, "axes": [0.0, 514.0], "report_hex": null },
+    { "sequence": 24, "observed_at_us": 100000, "source_at_us": null, "axes": [200.0, 515.0], "report_hex": null },
+    { "sequence": 25, "observed_at_us": 104000, "source_at_us": null, "axes": [800.0, 516.0], "report_hex": null },
+    { "sequence": 26, "observed_at_us": 108000, "source_at_us": null, "axes": [1000.0, 515.0], "report_hex": null },
+    { "sequence": 27, "observed_at_us": 112000, "source_at_us": null, "axes": [1000.0, 514.0], "report_hex": null },
+    { "sequence": 28, "observed_at_us": 116000, "source_at_us": null, "axes": [1000.0, 515.0], "report_hex": null },
+    { "sequence": 29, "observed_at_us": 120000, "source_at_us": null, "axes": [1001.0, 300.0], "report_hex": null },
+    { "sequence": 30, "observed_at_us": 124000, "source_at_us": null, "axes": [1000.0, 0.0], "report_hex": null },
+    { "sequence": 31, "observed_at_us": 128000, "source_at_us": null, "axes": [999.0, 100.0], "report_hex": null },
+    { "sequence": 32, "observed_at_us": 132000, "source_at_us": null, "axes": [1000.0, 400.0], "report_hex": null },
+    { "sequence": 33, "observed_at_us": 136000, "source_at_us": null, "axes": [1001.0, 515.0], "report_hex": null },
+    { "sequence": 34, "observed_at_us": 140000, "source_at_us": null, "axes": [1000.0, 800.0], "report_hex": null },
+    { "sequence": 35, "observed_at_us": 144000, "source_at_us": null, "axes": [999.0, 1000.0], "report_hex": null },
+    { "sequence": 36, "observed_at_us": 148000, "source_at_us": null, "axes": [1000.0, 900.0], "report_hex": null },
+    { "sequence": 37, "observed_at_us": 152000, "source_at_us": null, "axes": [1001.0, 600.0], "report_hex": null },
+    { "sequence": 38, "observed_at_us": 156000, "source_at_us": null, "axes": [1000.0, 515.0], "report_hex": null },
+    { "sequence": 39, "observed_at_us": 160000, "source_at_us": null, "axes": [999.0, 514.0], "report_hex": null }
+  ],
+  "segments": [
+    { "action": { "kind": "idle" }, "start_sequence": 0, "end_sequence": 15 },
+    { "action": { "kind": "movement", "logical": "roll", "positive_first": true }, "start_sequence": 16, "end_sequence": 27 },
+    { "action": { "kind": "movement", "logical": "pitch", "positive_first": true }, "start_sequence": 28, "end_sequence": 39 }
+  ]
+}

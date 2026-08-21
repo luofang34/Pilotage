@@ -12,6 +12,7 @@
 //! [`DeviceProfile`] produced by [`merge_layers`].
 
 mod button_tracker;
+mod characterization;
 mod digest;
 mod logical;
 mod normalize;
@@ -20,6 +21,18 @@ mod registry;
 mod sample;
 
 pub use button_tracker::ButtonTracker;
+pub use characterization::{
+    AnalysisError, AxisCharacterization, CALIBRATION_CANDIDATE_SCHEMA_VERSION,
+    CHARACTERIZATION_CAPTURE_SCHEMA_VERSION, CalibrationCandidate, CaptureSample, CaptureSegment,
+    CaptureSegmentKind, CenterBehavior, CharacterizationCapture, CharacterizationError,
+    DeadzoneEvidence, DeadzoneEvidenceMethod, DeadzoneEvidenceStatus,
+    MAX_CHARACTERIZATION_CAPTURE_BYTES, MAX_CHARACTERIZATION_CAPTURE_SAMPLES,
+    MAX_CHARACTERIZATION_PRODUCT_NAME_BYTES, MAX_CHARACTERIZATION_RAW_REPORT_BYTES,
+    NeutralPosition, PromotionConfirmation, RawReportAxisField, RawReportDecoder, RawReportError,
+    RawReportLayout, SOURCE_AXIS_CONTRACT_SCHEMA_VERSION, SamplingSource, SourceAxisContract,
+    SourceAxisRange, TimestampSource, TimingCharacterization, TimingObservation,
+    canonical_candidate_digest, characterize_capture, promote_calibration_candidate,
+};
 pub use digest::{DIGEST_LEN, content_digest};
 pub use logical::{SLOT_AXIS_BASE, SLOT_AXIS_COUNT};
 pub use logical::{axis_id_for_name, button_id_for_name};

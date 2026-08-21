@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Ranges need not be symmetric around `center`; the normalization pipeline
 /// (`crate::normalize`) scales each side of center independently.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AxisCalibration {
     /// Raw value at minimum (most negative) deflection.
     pub min: f32,
@@ -20,6 +21,7 @@ pub struct AxisCalibration {
 /// Configuration for a single physical axis, as declared in a device
 /// profile's `axes` array.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AxisConfig {
     /// Index of this axis in `RawDeviceSample::axes`.
     pub source_index: usize,

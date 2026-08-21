@@ -29,6 +29,8 @@ const SIZE_CAPS = {
   "envelope-fields.js": 24,
   "envelope-framing.js": 19,
   "feeder-wasm.js": 44,
+  "hid-characterization-contract.js": 104,
+  "hid-characterization-sampling.js": 115,
   "instrument-compatibility.js": 46,
   "instrument-health.js": 423,
   "instrument-startup.js": 51,

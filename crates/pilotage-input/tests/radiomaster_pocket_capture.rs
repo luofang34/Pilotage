@@ -3,20 +3,22 @@
 //! `radiomaster-pocket.json` profile, and checks the pipeline never
 //! produces a non-finite or out-of-range axis value.
 //!
-//! The raw-report-to-[`RawDeviceSample`] decoder below is intentionally
-//! duplicated from `tools/hid-probe` rather than imported: this crate's
-//! tests exercise only the public API of `pilotage-input` plus fixture
-//! data, never a `tools/` binary (ADR-0002 keeps the sans-IO core
-//! independent of native platform tooling).
+//! The test uses the same declarative source-axis contract as the native
+//! producer and the characterization verifier.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use pilotage_input::{DeviceProfile, RawDeviceSample, normalize_axis, parse_profile_str};
+use pilotage_input::{
+    DeviceProfile, RawDeviceSample, RawReportDecoder, SourceAxisContract, normalize_axis,
+    parse_profile_str,
+};
 use pilotage_timing::MonoTimestamp;
 use serde::Deserialize;
 
 const PROFILE_JSON: &str = include_str!("../registry/radiomaster-pocket.json");
 const CAPTURE_JSON: &str = include_str!("../registry/fixtures/radiomaster-pocket-capture.json");
+const SOURCE_CONTRACT_JSON: &str =
+    include_str!("../registry/radiomaster-pocket-source-contract.json");
 
 /// Number of packed button bytes preceding the axis fields in a RadioMaster
 /// Pocket input report, per the HID report descriptor verified with
@@ -53,18 +55,15 @@ fn parse_hex(hex: &str) -> Vec<u8> {
 /// are little-endian `u16` axis words, exactly matching the on-wire layout
 /// `tools/hid-probe` observed for this device (see
 /// `registry/radiomaster-pocket.json`'s description field).
-fn decode_report(bytes: &[u8], t_ms: u64) -> RawDeviceSample {
+fn decode_report(bytes: &[u8], t_ms: u64, decoder: &RawReportDecoder) -> RawDeviceSample {
     let button_bytes = &bytes[..BUTTON_BYTE_COUNT];
     let mut buttons: u64 = 0;
     for (byte_index, byte) in button_bytes.iter().enumerate() {
         buttons |= u64::from(*byte) << (8 * byte_index);
     }
-    let axes: Vec<f32> = bytes[BUTTON_BYTE_COUNT..]
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| f32::from(u16::from_le_bytes(*pair)))
-        .collect();
+    let axes = decoder
+        .decode(bytes)
+        .expect("source contract decodes report");
     RawDeviceSample::new(axes, buttons, MonoTimestamp::from_nanos(t_ms * 1_000_000))
 }
 
@@ -76,11 +75,26 @@ fn load_profile() -> DeviceProfile {
 /// Loads and decodes the capture fixture into raw samples.
 fn load_capture() -> Vec<RawDeviceSample> {
     let capture: Capture = serde_json::from_str(CAPTURE_JSON).expect("capture fixture parses");
+    let contract: SourceAxisContract =
+        serde_json::from_str(SOURCE_CONTRACT_JSON).expect("source contract parses");
+    let decoder = RawReportDecoder::new(&contract).expect("source contract has a valid decoder");
     capture
         .reports
         .iter()
-        .map(|report| decode_report(&parse_hex(&report.bytes_hex), report.t_ms))
+        .map(|report| decode_report(&parse_hex(&report.bytes_hex), report.t_ms, &decoder))
         .collect()
+}
+
+#[test]
+fn shared_contract_decodes_the_known_idle_report() {
+    let contract: SourceAxisContract =
+        serde_json::from_str(SOURCE_CONTRACT_JSON).expect("source contract parses");
+    let decoder = RawReportDecoder::new(&contract).expect("source contract has a valid decoder");
+    let report = parse_hex("00 00 00 00 04 00 04 00 00 00 04 00 00 00 00 00 00 00 00");
+    assert_eq!(
+        decoder.decode(&report).expect("known report decodes"),
+        [1024.0, 1024.0, 0.0, 1024.0, 0.0, 0.0, 0.0, 0.0]
+    );
 }
 
 #[test]

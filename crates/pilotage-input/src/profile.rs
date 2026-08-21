@@ -406,4 +406,28 @@ mod tests {
         let err = parse_profile_str(&json).expect_err("should fail");
         assert!(matches!(err, ProfileError::MalformedJson { .. }));
     }
+
+    #[test]
+    fn rejects_unknown_nested_axis_and_button_fields() {
+        let axis = GOLDEN.replace(
+            r#""source_index": 0,
+                "logical": "roll","#,
+            r#""source_index": 0,
+                "vehicle_limit": 10,
+                "logical": "roll","#,
+        );
+        assert!(matches!(
+            parse_profile_str(&axis),
+            Err(ProfileError::MalformedJson { .. })
+        ));
+
+        let button = GOLDEN.replace(
+            r#"{ "source_index": 0, "logical": "button0" }"#,
+            r#"{ "source_index": 0, "logical": "button0", "vehicle_limit": 10 }"#,
+        );
+        assert!(matches!(
+            parse_profile_str(&button),
+            Err(ProfileError::MalformedJson { .. })
+        ));
+    }
 }
