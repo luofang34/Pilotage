@@ -13,7 +13,7 @@ fn the_builtin_default_compiles() {
     let compiled = ProfileRuntime::compile(DEFAULT_PROFILE_BYTES).expect("default compiles");
     assert_eq!(compiled.id(), "builtin.gimbal.default");
     assert_eq!(compiled.schema_version(), SCHEMA_VERSION);
-    assert_eq!(compiled.revision(), 3);
+    assert_eq!(compiled.revision(), 4);
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn the_digest_is_stable_and_content_bound() {
     let a = ProfileRuntime::compile(DEFAULT_PROFILE_BYTES).expect("compiles");
     let b = ProfileRuntime::compile(DEFAULT_PROFILE_BYTES).expect("compiles");
     assert_eq!(a.digest(), b.digest(), "same bytes hash identically");
-    let mutated = valid_json().replace("\"revision\": 3", "\"revision\": 4");
+    let mutated = valid_json().replace("\"revision\": 4", "\"revision\": 5");
     let c = ProfileRuntime::compile(mutated.as_bytes()).expect("compiles");
     assert_ne!(a.digest(), c.digest(), "different bytes hash differently");
 }
@@ -76,7 +76,7 @@ fn a_non_finite_value_is_rejected() {
     // JSON has no NaN literal; a non-finite reaches the schema only as an
     // out-of-range/parse path, so inject it as a bare token the number
     // parser rejects structurally OR a value serde reads as non-finite.
-    let json = valid_json().replace("\"deadzone\": 0.06", "\"deadzone\": 1e400");
+    let json = valid_json().replace("\"deadzone\": 0.0", "\"deadzone\": 1e400");
     let err = ProfileRuntime::compile(json.as_bytes()).expect_err("non-finite");
     // 1e400 overflows f32 to +inf on deserialize; the finiteness gate catches it.
     assert!(matches!(
@@ -134,14 +134,27 @@ fn a_trigger_firing_a_discrete_action_is_rejected() {
 
 #[test]
 fn an_unreasonable_deadzone_or_expo_is_rejected() {
-    let big_dz = valid_json().replace("\"deadzone\": 0.06", "\"deadzone\": 1.5");
+    let big_dz = valid_json().replace("\"deadzone\": 0.0", "\"deadzone\": 1.5");
     assert!(matches!(
         ProfileRuntime::compile(big_dz.as_bytes()).expect_err("deadzone >= 1"),
         ProfileError::OutOfRange { .. }
     ));
-    let big_expo = valid_json().replace("\"expo\": 0.35", "\"expo\": 25.0");
+    let big_expo = valid_json().replace("\"expo\": 0.0", "\"expo\": 25.0");
     assert!(matches!(
         ProfileRuntime::compile(big_expo.as_bytes()).expect_err("expo too large"),
         ProfileError::OutOfRange { .. }
     ));
+}
+
+#[test]
+fn a_second_flight_response_layer_is_rejected() {
+    for json in [
+        valid_json().replace("\"deadzone\": 0.0", "\"deadzone\": 0.05"),
+        valid_json().replace("\"expo\": 0.0", "\"expo\": 0.2"),
+    ] {
+        assert!(matches!(
+            ProfileRuntime::compile(json.as_bytes()),
+            Err(ProfileError::FlightResponseNotLinear { .. })
+        ));
+    }
 }

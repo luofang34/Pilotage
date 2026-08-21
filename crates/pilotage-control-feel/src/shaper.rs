@@ -2,6 +2,8 @@
 
 use crate::{AxisDynamics, AxisResponse, HoldTransition, NeutralBand};
 
+const TARGET_EPSILON: f32 = 1.0e-6;
+
 /// Whether the operator applies or releases a demand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DemandPhase {
@@ -44,6 +46,7 @@ impl NeutralLatch {
 pub struct JerkLimitedAxis {
     value: f32,
     rate: f32,
+    phase: Option<DemandPhase>,
 }
 
 /// Output from one normalized input axis.
@@ -122,7 +125,7 @@ impl JerkLimitedAxis {
         phase: DemandPhase,
         limits: AxisDynamics,
     ) -> f32 {
-        if !target.is_finite() || !dt_s.is_finite() || dt_s <= 0.0 {
+        if !target.is_finite() || !dt_s.is_finite() || dt_s <= 0.0 || !limits_are_usable(limits) {
             return self.value;
         }
         let target = target.clamp(-100.0, 100.0);
@@ -130,7 +133,22 @@ impl JerkLimitedAxis {
             DemandPhase::Apply => (limits.apply_accel, limits.apply_jerk),
             DemandPhase::Release => (limits.release_accel, limits.release_jerk),
         };
+        if self.phase.is_some() && self.phase != Some(phase) {
+            self.rate = 0.0;
+        }
         let error = target - self.value;
+        if error.abs() <= TARGET_EPSILON {
+            self.value = target;
+            self.rate = 0.0;
+            self.phase = Some(phase);
+            return self.value;
+        }
+        if self.rate != 0.0 && self.rate.signum() != error.signum() {
+            // A demand filter has no physical momentum. Keeping an outward
+            // derivative after the operator changes the target would increase
+            // the command during release and cause a second vehicle input.
+            self.rate = 0.0;
+        }
         let step_jerk = jerk * dt_s;
         let stopping_rate =
             ((step_jerk * step_jerk + 2.0 * jerk * error.abs()).sqrt() - step_jerk).max(0.0);
@@ -144,6 +162,7 @@ impl JerkLimitedAxis {
         } else {
             self.value = candidate;
         }
+        self.phase = Some(phase);
         self.value
     }
 
@@ -163,12 +182,24 @@ impl JerkLimitedAxis {
     pub fn seed(&mut self, value: f32) {
         self.value = if value.is_finite() { value } else { 0.0 };
         self.rate = 0.0;
+        self.phase = None;
     }
 
     /// Clear the state.
     pub fn reset(&mut self) {
         self.seed(0.0);
     }
+}
+
+fn limits_are_usable(limits: AxisDynamics) -> bool {
+    [
+        limits.apply_accel,
+        limits.release_accel,
+        limits.apply_jerk,
+        limits.release_jerk,
+    ]
+    .into_iter()
+    .all(|value| value.is_finite() && value > 0.0)
 }
 
 /// Stable-dwell detector for a brake-to-hold transition.

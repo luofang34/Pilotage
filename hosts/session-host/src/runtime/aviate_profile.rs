@@ -2,8 +2,11 @@
 //! fail-closed environment parsing and per-profile link configuration.
 
 use std::env::VarError;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use pilotage_adapter_aviate::{AviateProfile, LinkConfig};
+use pilotage_control_feel::ValidatedFlightFeelProfile;
 
 use crate::error::HostError;
 
@@ -40,6 +43,34 @@ pub(crate) fn link_config(profile: AviateProfile) -> LinkConfig {
     }
 }
 
+/// Loads the explicit Aviate control-feel artifact from the environment.
+///
+/// # Errors
+///
+/// Returns a typed error when the path is absent, unreadable, or invalid.
+pub(crate) fn control_feel_from_env_blocking(
+    value: Option<OsString>,
+) -> Result<ValidatedFlightFeelProfile, HostError> {
+    let path = value
+        .map(PathBuf::from)
+        .ok_or(HostError::AviateControlFeelMissing)?;
+    control_feel_from_path_blocking(&path)
+}
+
+fn control_feel_from_path_blocking(path: &Path) -> Result<ValidatedFlightFeelProfile, HostError> {
+    let text =
+        std::fs::read_to_string(path).map_err(|source| HostError::AviateControlFeelRead {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    ValidatedFlightFeelProfile::from_json_str(&text).map_err(|source| {
+        HostError::AviateControlFeelInvalid {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
@@ -48,7 +79,7 @@ mod tests {
 
     use pilotage_adapter_aviate::{AviateProfile, ResetPolicy};
 
-    use super::{link_config, profile_from_env};
+    use super::{control_feel_from_env_blocking, link_config, profile_from_env};
     use crate::error::HostError;
 
     #[test]
@@ -104,5 +135,62 @@ mod tests {
             link_config(AviateProfile::Simulation).reset_policy,
             ResetPolicy::SimulatorHeuristic
         );
+    }
+
+    #[test]
+    fn missing_control_feel_artifact_fails_closed() {
+        assert!(matches!(
+            control_feel_from_env_blocking(None),
+            Err(HostError::AviateControlFeelMissing)
+        ));
+    }
+
+    #[test]
+    fn explicit_control_feel_artifact_is_loaded_and_validated() {
+        let path = std::env::temp_dir().join(format!(
+            "pilotage-feel-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        let profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+        let text = serde_json::to_string(&profile).expect("profile JSON");
+        std::fs::write(&path, text).expect("write profile");
+
+        let loaded = control_feel_from_env_blocking(Some(path.clone().into_os_string()))
+            .expect("load profile");
+
+        assert_eq!(loaded.profile(), &profile);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn an_unknown_control_feel_field_fails_closed() {
+        let path = std::env::temp_dir().join(format!(
+            "pilotage-invalid-feel-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        let profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+        let mut value = serde_json::to_value(profile).expect("profile value");
+        value
+            .as_object_mut()
+            .expect("profile object")
+            .insert("unknown".to_owned(), serde_json::Value::Bool(true));
+        std::fs::write(&path, serde_json::to_vec(&value).expect("profile JSON"))
+            .expect("write profile");
+
+        let result = control_feel_from_env_blocking(Some(path.clone().into_os_string()));
+
+        assert!(matches!(
+            result,
+            Err(HostError::AviateControlFeelInvalid { .. })
+        ));
+        std::fs::remove_file(path).ok();
     }
 }

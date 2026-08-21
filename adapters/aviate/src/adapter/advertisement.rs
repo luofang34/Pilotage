@@ -34,7 +34,16 @@ impl AviateAdapter {
                 scopes: {
                     #[cfg_attr(not(feature = "sim"), allow(unused_mut))]
                     let mut scopes = if self.uplink.is_some() {
-                        let mut flight = vec![flight_scope_descriptor(), direct_scope_descriptor()];
+                        let envelope = self
+                            .uplink
+                            .as_ref()
+                            .map(crate::uplink::FlightUplink::envelope);
+                        let mut flight = envelope.map_or_else(Vec::new, |value| {
+                            vec![
+                                flight_scope_descriptor(value),
+                                direct_scope_descriptor(value),
+                            ]
+                        });
                         // STRUCTURALLY simulation-only (SIM-01): the lifecycle
                         // scope exists only under the Simulation profile — a
                         // physical/RF vehicle neither advertises nor accepts
@@ -62,9 +71,19 @@ impl AviateAdapter {
                     vec![]
                 },
             }],
-            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+            adapter_version: adapter_version(self),
         }
     }
+}
+
+fn adapter_version(adapter: &AviateAdapter) -> String {
+    let Some((profile_id, schema, digest)) = adapter.feel_identity() else {
+        return env!("CARGO_PKG_VERSION").to_owned();
+    };
+    format!(
+        "{};feel-schema={schema};feel-id={profile_id};feel-sha256={digest}",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 /// Both flight scopes take the same discrete actions. There is NO mode
@@ -91,7 +110,7 @@ fn flight_actions() -> Vec<ActionCapability> {
 /// slew the CLIENT integrates its yaw stick with, matching the velocity
 /// scope's yaw envelope so direct flight turns no faster than camera
 /// flight.
-fn direct_scope_descriptor() -> ScopeDescriptor {
+fn direct_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> ScopeDescriptor {
     ScopeDescriptor {
         // One FC, one authority: velocity and direct flight can never be
         // held at once, and share generation, latch, and recovery.
@@ -103,15 +122,15 @@ fn direct_scope_descriptor() -> ScopeDescriptor {
             frames: vec![ReferenceFrame::LocalNed],
             max_linear: 0.0,
             max_vertical: 0.0,
-            max_angular: crate::uplink::FPV_MAX_TILT_RAD,
-            max_yaw_rate: crate::uplink::MAX_YAW_RATE_RPS,
+            max_angular: envelope.direct_tilt_rad,
+            max_yaw_rate: envelope.yaw_rate_rps,
         }],
         actions: flight_actions(),
         legacy: None,
     }
 }
 
-fn flight_scope_descriptor() -> ScopeDescriptor {
+fn flight_scope_descriptor(envelope: pilotage_control_feel::DemandEnvelope) -> ScopeDescriptor {
     ScopeDescriptor {
         authority_group: Some(FLIGHT_SCOPE.to_owned()),
         scope: ScopeId::new(FLIGHT_SCOPE),
@@ -128,9 +147,9 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             max_yaw_rate: 0.0,
             family: IntentFamily::Velocity,
             frames: vec![ReferenceFrame::BodyFrd],
-            max_linear: crate::uplink::MAX_HORIZONTAL_MPS,
-            max_vertical: crate::uplink::MAX_VERTICAL_MPS,
-            max_angular: crate::uplink::MAX_YAW_RATE_RPS,
+            max_linear: envelope.horizontal_speed_mps,
+            max_vertical: envelope.vertical_speed_mps,
+            max_angular: envelope.yaw_rate_rps,
         }],
         actions: flight_actions(),
         legacy: Some(LegacyCommandMap::Velocity {
