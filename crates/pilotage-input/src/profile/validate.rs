@@ -69,10 +69,30 @@ pub fn validate_axis_config(axis: &AxisConfig) -> Result<(), ProfileError> {
     Ok(())
 }
 
+/// Validates one physical axis without a response curve.
+///
+/// A physical axis can calibrate, invert, and suppress device noise. The
+/// control-feel profile applies the operator response curve.
+///
+/// # Errors
+///
+/// Returns the errors from [`validate_axis_config`]. Returns
+/// [`ProfileError::PhysicalAxisExpo`] when `expo` is not zero.
+pub fn validate_physical_axis_config(axis: &AxisConfig) -> Result<(), ProfileError> {
+    validate_axis_config(axis)?;
+    if axis.expo != 0.0 {
+        return Err(ProfileError::PhysicalAxisExpo {
+            source_index: axis.source_index,
+            value: axis.expo,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::validate_axis_config;
+    use super::{validate_axis_config, validate_physical_axis_config};
     use crate::profile::{AxisCalibration, AxisConfig, ProfileError};
 
     fn axis(deadzone: f32, expo: f32, calibration: AxisCalibration) -> AxisConfig {
@@ -97,6 +117,18 @@ mod tests {
     #[test]
     fn a_well_formed_axis_validates() {
         assert!(validate_axis_config(&axis(0.05, 0.35, unit())).is_ok());
+    }
+
+    #[test]
+    fn a_physical_axis_rejects_a_response_curve() {
+        assert!(matches!(
+            validate_physical_axis_config(&axis(0.05, 0.35, unit())),
+            Err(ProfileError::PhysicalAxisExpo {
+                source_index: 2,
+                value
+            }) if value == 0.35
+        ));
+        assert!(validate_physical_axis_config(&axis(0.05, 0.0, unit())).is_ok());
     }
 
     #[test]

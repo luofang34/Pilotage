@@ -2,7 +2,7 @@
 //!
 //! The browser owns only Gamepad API sampling, DOM, WebTransport, and the
 //! execution of returned actions. This crate owns everything else: device
-//! identity resolution and per-device routing (the [`device`] stage, driven
+//! identity resolution and per-device routing (the device stage, driven
 //! by shared-engine profile data), deadzone/expo/inversion, the gimbal
 //! quasimode (modifier capture, flight-input masking, R3 edge detection,
 //! entry/exit neutralization), lease planning, and the runtime state —

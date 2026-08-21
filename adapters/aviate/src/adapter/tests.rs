@@ -13,9 +13,66 @@ use pilotage_mavlink::link::KinematicsUpdate;
 mod direct_flight;
 mod fixtures;
 mod flight_control;
+mod hid_pipeline;
 // The source-role suite exercises the simulation-truth oracle.
 #[cfg(feature = "sim")]
 mod source_roles;
+
+#[test]
+fn a_profile_that_requires_unavailable_acceleration_fails_closed() {
+    let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+    profile.hold.require_accel = true;
+    let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
+        .expect("valid generic profile");
+
+    let result = super::startup::validate_adapter_control_feel(&profile);
+
+    assert!(matches!(
+        result,
+        Err(crate::AviateAdapterError::UnsupportedControlFeel { .. })
+    ));
+}
+
+#[test]
+fn the_control_feel_profile_owns_the_response_curve() {
+    let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+    profile.mode = pilotage_control_feel::FeelMode::Balanced;
+    profile.horizontal.curve.expo = 0.2;
+    let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
+        .expect("valid generic profile");
+
+    let result = super::startup::validate_adapter_control_feel(&profile);
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn telemetry_only_advertisement_keeps_the_control_feel_identity() {
+    let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+    profile.profile_id = "telemetry-only-feel".to_owned();
+    let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
+        .expect("valid control-feel profile");
+    let expected_digest =
+        pilotage_control_feel::FeelDigest::calculate(&profile).expect("control-feel digest");
+    let identity =
+        super::ControlFeelIdentity::from_profile(&profile).expect("control-feel identity");
+    let mut adapter = super::AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with(Duration::ZERO, Duration::ZERO),
+    );
+    adapter.control_feel_identity = Some(identity);
+
+    let capabilities = adapter.capabilities();
+
+    assert!(capabilities.vehicles[0].scopes.is_empty());
+    assert_eq!(
+        capabilities.adapter_version,
+        format!(
+            "{};feel-schema=1;feel-id=telemetry-only-feel;feel-sha256={expected_digest}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+}
 use fixtures::{flight_frame, state_with, state_with_acquisition_skew};
 
 use super::{AviateAdapter, sampling::measurement_pair_is_coherent};

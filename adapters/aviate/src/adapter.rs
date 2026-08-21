@@ -10,6 +10,7 @@ use pilotage_adapter_api::{
     ActionResult, AdapterCapabilities, ApplyOutcome, LinkLossPolicy, RejectReason,
     SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
 };
+use pilotage_control_feel::{FeelDigest, ValidatedFlightFeelProfile};
 use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 
 #[cfg(test)]
@@ -80,6 +81,25 @@ pub const DISARM_BUTTON: u16 = 1;
 /// the Gazebo adapter's dead-reader path).
 const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
 
+/// Identity of the selected control-feel artifact.
+#[derive(Debug, Clone)]
+struct ControlFeelIdentity {
+    profile_id: String,
+    schema: u16,
+    digest: FeelDigest,
+}
+
+impl ControlFeelIdentity {
+    fn from_profile(profile: &ValidatedFlightFeelProfile) -> Result<Self, AviateAdapterError> {
+        Ok(Self {
+            profile_id: profile.profile().profile_id.clone(),
+            schema: profile.profile().schema_version,
+            digest: FeelDigest::calculate(profile)
+                .map_err(|source| AviateAdapterError::ControlFeelIdentity { source })?,
+        })
+    }
+}
+
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
 ///
 /// Real-time (ADR-0013): the FC/simulation advances on its own clock;
@@ -100,6 +120,7 @@ pub struct AviateAdapter {
     estimate: Option<EstimateSource>,
     truth: Option<Box<TruthOracle>>,
     uplink: Option<FlightUplink>,
+    control_feel_identity: Option<ControlFeelIdentity>,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
@@ -158,6 +179,7 @@ impl AviateAdapter {
             estimate: Some(EstimateSource { state, _link: None }),
             truth: None,
             uplink: None,
+            control_feel_identity: None,
             frames: None,
             camera_bridge: None,
             pointing: None,
@@ -202,8 +224,24 @@ impl AviateAdapter {
     /// Installs a test uplink, for tests.
     #[cfg(test)]
     pub(crate) fn with_uplink(mut self, uplink: FlightUplink) -> Self {
+        let (profile_id, schema, digest) = uplink.feel_identity();
+        self.control_feel_identity = Some(ControlFeelIdentity {
+            profile_id: profile_id.to_owned(),
+            schema,
+            digest,
+        });
         self.uplink = Some(uplink);
         self
+    }
+
+    fn feel_identity(&self) -> Option<(&str, u16, FeelDigest)> {
+        self.control_feel_identity.as_ref().map(|identity| {
+            (
+                identity.profile_id.as_str(),
+                identity.schema,
+                identity.digest,
+            )
+        })
     }
 
     /// The bound uplink, for tests that drive its manual clock.

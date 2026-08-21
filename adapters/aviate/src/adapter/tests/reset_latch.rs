@@ -155,6 +155,20 @@ fn reset_press_engages_the_latch_and_debounces_the_script() {
 }
 
 #[test]
+fn reset_press_clears_the_complete_uplink_state() {
+    let (mut adapter, _fc, _state) = adapter_with_fake_fc();
+    adapter
+        .uplink_mut()
+        .expect("uplink")
+        .seed_hold_for_test([10.0, 20.0, -30.0]);
+    assert!(adapter.uplink_hold_captured());
+
+    adapter.apply_control(&lifecycle_reset_frame());
+
+    assert!(!adapter.uplink_hold_captured());
+}
+
+#[test]
 fn stale_epoch_measurements_cannot_revalidate_arm_or_motion() {
     // The core hazard: the cached estimate is FRESH by age (received
     // moments ago) but belongs to the pre-reset FC — the source epoch

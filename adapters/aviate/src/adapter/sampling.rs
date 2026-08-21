@@ -25,6 +25,30 @@ pub(crate) fn yaw_of(q: [f32; 4]) -> f64 {
     (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
 }
 
+fn attitude_euler_of(q: [f32; 4]) -> Option<[f32; 3]> {
+    if !q.iter().all(|component| component.is_finite()) {
+        return None;
+    }
+    let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
+    let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
+    let pitch = (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin();
+    let yaw = yaw_of(q) as f32;
+    [roll, pitch, yaw]
+        .iter()
+        .all(|angle| angle.is_finite())
+        .then_some([roll, pitch, yaw])
+}
+
+/// One coherent operational pose for control seeding.
+pub(super) struct CurrentPose {
+    /// Roll, pitch, and yaw in radians.
+    pub(super) attitude_rad: [f32; 3],
+    /// NED position in meters.
+    pub(super) pos_ned_m: [f32; 3],
+    /// Independently validated NED velocity in meters per second.
+    pub(super) velocity_ned_mps: Option<[f32; 3]>,
+}
+
 pub(super) fn measurement_pair_is_coherent(
     attitude: AttitudeUpdate,
     kinematics: KinematicsUpdate,
@@ -202,8 +226,8 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
 }
 
 impl super::AviateAdapter {
-    /// The vehicle's current measured yaw (radians clockwise from
-    /// north), NED position, and independently validated NED velocity,
+    /// The vehicle's current measured attitude, NED position, and
+    /// independently validated NED velocity,
     /// FROM THE FC OPERATIONAL ESTIMATE ONLY (LINK-04): simulation truth
     /// is never eligible to seed command construction, so without a live
     /// authorized estimate there is no pose and state-dependent control
@@ -213,7 +237,7 @@ impl super::AviateAdapter {
     /// declare the velocity group valid or any component is non-finite.
     /// A pose can be usable while velocity is not; a caller must never
     /// infer "stopped" from a missing velocity.
-    pub(super) fn current_pose(&mut self) -> Option<(f32, [f32; 3], Option<[f32; 3]>)> {
+    pub(super) fn current_pose(&mut self) -> Option<CurrentPose> {
         let latest = self.estimate.as_ref()?.state.lock().ok()?;
         let status_stamp = latest.estimator_status_stamp()?;
         let attitude = latest
@@ -237,11 +261,11 @@ impl super::AviateAdapter {
         {
             return None;
         }
-        Some((
-            yaw_of(attitude.quat_wxyz) as f32,
-            kinematics.pos_ned_m,
-            validated_velocity(kinematics),
-        ))
+        Some(CurrentPose {
+            attitude_rad: attitude_euler_of(attitude.quat_wxyz)?,
+            pos_ned_m: kinematics.pos_ned_m,
+            velocity_ned_mps: validated_velocity(kinematics),
+        })
     }
 }
 

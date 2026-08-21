@@ -27,7 +27,7 @@ pub use normalize::{NormalizedAxis, normalize_axis};
 pub use profile::{
     AxisCalibration, AxisConfig, ButtonConfig, DeviceIdentity, DeviceInfo, DeviceProfile,
     KeyAxisBinding, KeyBinding, ProfileError, SCHEMA_VERSION, parse_profile_bytes,
-    parse_profile_str, validate_axis_config,
+    parse_profile_str, validate_axis_config, validate_physical_axis_config,
 };
 pub use registry::{
     GENERIC_GAMEPAD_JSON, LayeredProfile, ProfileLayer, SelectError, layered,

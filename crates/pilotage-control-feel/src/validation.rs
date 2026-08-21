@@ -132,6 +132,11 @@ fn validate_envelope(profile: &FlightFeelProfile) -> Result<(), ValidationError>
     unit_interval("envelope.direct_hover_thrust", envelope.direct_hover_thrust)?;
     unit_interval("envelope.direct_min_thrust", envelope.direct_min_thrust)?;
     unit_interval("envelope.takeoff_input", envelope.takeoff_input)?;
+    if envelope.takeoff_input >= 1.0 {
+        return Err(ValidationError::FieldOutOfRange {
+            field: "envelope.takeoff_input",
+        });
+    }
     if envelope.direct_min_thrust > envelope.direct_hover_thrust {
         return Err(ValidationError::InvalidOrder {
             lower: "envelope.direct_min_thrust",
@@ -173,6 +178,18 @@ fn validate_dynamics(dynamics: AxisDynamics) -> Result<(), ValidationError> {
         ("axis.dynamics.release_jerk", dynamics.release_jerk),
     ] {
         positive_bounded(field, value, MAX_DYNAMIC_LIMIT)?;
+    }
+    if dynamics.release_accel < dynamics.apply_accel {
+        return Err(ValidationError::InvalidOrder {
+            lower: "axis.dynamics.apply_accel",
+            upper: "axis.dynamics.release_accel",
+        });
+    }
+    if dynamics.release_jerk < dynamics.apply_jerk {
+        return Err(ValidationError::InvalidOrder {
+            lower: "axis.dynamics.apply_jerk",
+            upper: "axis.dynamics.release_jerk",
+        });
     }
     Ok(())
 }
