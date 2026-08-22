@@ -51,6 +51,21 @@ fn a_different_seed_changes_the_turbulence_schedule() {
 }
 
 #[test]
+fn a_run_seed_is_repeatable_and_separates_repetitions() {
+    let value = condition(42);
+    let first = value.wind_at_for_run(7, 250_000_000);
+    let repeated = value.wind_at_for_run(7, 250_000_000);
+    let other = value.wind_at_for_run(8, 250_000_000);
+
+    assert_eq!(first, repeated);
+    assert_ne!(first, other);
+    assert_eq!(
+        value.wind_at(250_000_000),
+        value.wind_at_for_run(0, 250_000_000)
+    );
+}
+
+#[test]
 fn a_gust_uses_rise_hold_and_fall_intervals() {
     let mut value = condition(1);
     value.wind.turbulence = TurbulenceModel::None;

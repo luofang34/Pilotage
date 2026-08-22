@@ -134,6 +134,16 @@ impl ConditionSet {
     /// Resolve the wind request at one simulator-time offset.
     #[must_use]
     pub fn wind_at(&self, elapsed_ns: u64) -> AppliedWind {
+        self.wind_at_for_run(0, elapsed_ns)
+    }
+
+    /// Resolve the wind for one recorded run seed and simulator-time offset.
+    ///
+    /// The artifact seed defines the condition. The run seed gives each
+    /// repetition a separate deterministic disturbance without changing the
+    /// condition artifact identity.
+    #[must_use]
+    pub fn wind_at_for_run(&self, run_seed: u64, elapsed_ns: u64) -> AppliedWind {
         let mut vector = WindVector::from(self.wind.steady);
         for gust in &self.wind.gusts {
             vector.add_scaled(
@@ -144,7 +154,8 @@ impl ConditionSet {
                 gust.scale_at(elapsed_ns),
             );
         }
-        let turbulence = self.wind.turbulence.sample(self.seed, elapsed_ns);
+        let seed = self.seed ^ run_seed.rotate_left(17);
+        let turbulence = self.wind.turbulence.sample(seed, elapsed_ns);
         vector.add_scaled(turbulence, 1.0);
         vector.applied(turbulence.magnitude())
     }
