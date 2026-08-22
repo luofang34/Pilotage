@@ -11,7 +11,9 @@ mod digest;
 mod error;
 mod identity;
 mod limits;
+mod manifest;
 mod sample;
+mod scenario;
 mod validation;
 
 pub use condition::{
@@ -30,8 +32,13 @@ pub use limits::{
     MAX_SAMPLE_BYTES, MAX_TEXT_BYTES, MAX_WAVE_COMPONENTS, SCENARIO_SCHEMA_VERSION,
     TRIAL_MANIFEST_SCHEMA_VERSION, TRIAL_SAMPLE_SCHEMA_VERSION,
 };
+pub use manifest::TrialManifest;
 pub use sample::{
     ActuatorState, AdapterDisposition, ConditionState, ControlAxes, ControlValue, HealthState,
     KinematicState, LifecycleObservation, LifecycleState, MissingReason, MissingSignal, NamedValue,
     Observed, Quaternion, RawInput, ReferenceFrame, SampleTime, TrialSample, Vector3,
+};
+pub use scenario::{
+    BackendCapabilities, BackendCapability, Comparison, ControlChannel, Phase, PhaseAction,
+    PhaseCondition, Scenario, SignalSelector, SignalSource, SineComponent, Waveform,
 };
