@@ -4,6 +4,10 @@ use core::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
 
+mod timing;
+
+pub use timing::{DelayJitter, TimingCondition};
+
 use crate::{
     CONDITION_SET_SCHEMA_VERSION, CodecError, Digest, MAX_GUST_EVENTS, MAX_MANIFEST_BYTES,
     MAX_TEXT_BYTES, ValidationError, canonical,
@@ -82,6 +86,8 @@ pub struct ConditionSet {
     pub seed: u64,
     /// Wind and turbulence definition.
     pub wind: WindCondition,
+    /// Deterministic source timing perturbation.
+    pub timing: TimingCondition,
 }
 
 /// One resolved wind sample for a simulator backend.
@@ -116,7 +122,8 @@ impl ConditionSet {
             CONDITION_SET_SCHEMA_VERSION,
         )?;
         text("condition_set.id", &self.id, MAX_TEXT_BYTES)?;
-        self.wind.validate()
+        self.wind.validate()?;
+        self.timing.validate()
     }
 
     /// Encode canonical compact JSON after validation.
@@ -158,6 +165,12 @@ impl ConditionSet {
         let turbulence = self.wind.turbulence.sample(seed, elapsed_ns);
         vector.add_scaled(turbulence, 1.0);
         vector.applied(turbulence.magnitude())
+    }
+
+    /// Resolves the requested vehicle-source delay for one run and time.
+    #[must_use]
+    pub fn source_delay_ns_for_run(&self, run_seed: u64, elapsed_ns: u64) -> u64 {
+        self.timing.delay_ns(self.seed, run_seed, elapsed_ns)
     }
 }
 

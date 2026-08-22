@@ -12,7 +12,8 @@ mod sample;
 mod validation;
 
 pub use condition::{
-    AppliedWind, ConditionSet, GustEvent, HorizontalWind, TurbulenceModel, WindCondition,
+    AppliedWind, ConditionSet, DelayJitter, GustEvent, HorizontalWind, TimingCondition,
+    TurbulenceModel, WindCondition,
 };
 pub use digest::Digest;
 pub use error::{CodecError, ValidationError};

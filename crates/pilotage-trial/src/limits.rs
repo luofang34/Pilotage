@@ -9,7 +9,7 @@ pub const BACKEND_CAPABILITIES_SCHEMA_VERSION: u16 = 1;
 /// The supported trial sample schema version.
 pub const TRIAL_SAMPLE_SCHEMA_VERSION: u16 = 1;
 /// The supported environmental condition schema version.
-pub const CONDITION_SET_SCHEMA_VERSION: u16 = 1;
+pub const CONDITION_SET_SCHEMA_VERSION: u16 = 2;
 
 /// The maximum trial manifest JSON size.
 pub const MAX_MANIFEST_BYTES: usize = 256 * 1024;
