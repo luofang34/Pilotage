@@ -63,6 +63,7 @@ pub(super) fn admit(engine: &mut ClientEngine, session: u64, principal: u64) -> 
                         supported_modes: Vec::new(),
                     }],
                     supported_modes: Vec::new(),
+                    control_feel: None,
                 }),
                 scope_holders: Vec::new(),
             },
@@ -130,6 +131,15 @@ fn the_shared_welcome_fixture_admits_with_the_negotiated_capabilities() {
     assert!((velocity.max_linear - 3.0).abs() < f32::EPSILON);
     assert!((velocity.max_vertical - 1.5).abs() < f32::EPSILON);
     assert!((velocity.max_angular - 0.9).abs() < f32::EPSILON);
+    let feel = admission
+        .control_feel
+        .as_ref()
+        .expect("control feel identity");
+    assert_eq!(feel.profile_id, "alia250.legacy.v1");
+    assert_eq!(feel.mode, wire::ControlFeelMode::LegacyCompatibility as i32);
+    assert_eq!(feel.profile_sha256, vec![0x11; 32]);
+    assert_eq!(feel.device_profile_sha256, vec![0x22; 32]);
+    assert_eq!(feel.flight_controller_sha256, vec![0x33; 32]);
     assert!(admission.offers_control());
 }
 

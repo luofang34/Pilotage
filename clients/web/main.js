@@ -64,6 +64,7 @@ const state = {
   lastDirectFrameMs: 0,
   lifecycle: { pendingPress: false },
   advertisedScopes: [],
+  controlFeel: null,
   connected: false,
   controlCompletion: null,
   stopControlRun: null,

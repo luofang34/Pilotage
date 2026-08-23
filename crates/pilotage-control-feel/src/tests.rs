@@ -20,14 +20,20 @@ fn digest_profile() -> FlightFeelProfile {
         &mut profile.vertical,
         &mut profile.yaw,
     ] {
-        response.curve.expo = 0.2;
+        response.curve.center_expo = 0.2;
+        response.curve.outer_expo = 0.1;
+        response.curve.outer_start = 0.6;
+        response.curve.deadzone = 0.08;
         response.neutral.active_enter = 0.08;
         response.neutral.active_exit = 0.04;
+        response.neutral.dwell_ms = 20;
         response.dynamics = AxisDynamics {
             apply_accel: 2.0,
             release_accel: 4.0,
             apply_jerk: 8.0,
             release_jerk: 16.0,
+            reversal_accel: 4.0,
+            reversal_jerk: 16.0,
         };
     }
     profile.direct.tilt_rate_rps = 2.0;
@@ -43,13 +49,21 @@ fn digest_profile() -> FlightFeelProfile {
 
 macro_rules! assert_axis_fields_change_digest {
     ($assertion:ident, $axis:ident) => {
-        $assertion!(|p: &mut FlightFeelProfile| p.$axis.curve.expo += 0.01);
+        $assertion!(|p: &mut FlightFeelProfile| {
+            p.$axis.curve.deadzone -= 0.01;
+        });
+        $assertion!(|p: &mut FlightFeelProfile| p.$axis.curve.center_expo += 0.01);
+        $assertion!(|p: &mut FlightFeelProfile| p.$axis.curve.outer_expo += 0.01);
+        $assertion!(|p: &mut FlightFeelProfile| p.$axis.curve.outer_start += 0.01);
         $assertion!(|p: &mut FlightFeelProfile| p.$axis.neutral.active_enter += 0.01);
         $assertion!(|p: &mut FlightFeelProfile| p.$axis.neutral.active_exit += 0.01);
+        $assertion!(|p: &mut FlightFeelProfile| p.$axis.neutral.dwell_ms += 1);
         $assertion!(|p: &mut FlightFeelProfile| p.$axis.dynamics.apply_accel += 0.1);
         $assertion!(|p: &mut FlightFeelProfile| p.$axis.dynamics.release_accel += 0.1);
         $assertion!(|p: &mut FlightFeelProfile| p.$axis.dynamics.apply_jerk += 0.1);
         $assertion!(|p: &mut FlightFeelProfile| p.$axis.dynamics.release_jerk += 0.1);
+        $assertion!(|p: &mut FlightFeelProfile| p.$axis.dynamics.reversal_accel -= 0.1);
+        $assertion!(|p: &mut FlightFeelProfile| p.$axis.dynamics.reversal_jerk -= 0.1);
     };
 }
 
@@ -60,6 +74,41 @@ fn legacy_profile_is_valid_and_has_a_stable_digest() {
     let second = FeelDigest::calculate(&profile).expect("digest");
     assert_eq!(first, second);
     assert_eq!(first.to_string().len(), 64);
+}
+
+#[test]
+fn center_and_outer_curve_is_symmetric_monotonic_and_bounded() {
+    let curve = crate::AxisCurve {
+        deadzone: 0.1,
+        center_expo: 0.6,
+        outer_expo: 0.1,
+        outer_start: 0.7,
+    };
+    let mut prior = 0.0;
+    for index in 0_u16..=100 {
+        let input = f32::from(index) / 100.0;
+        let output = curve.apply(input);
+        assert!(output >= prior - 1e-6, "{output} followed {prior}");
+        assert!((curve.apply(-input) + output).abs() < 1e-6);
+        assert!((0.0..=1.0).contains(&output));
+        prior = output;
+    }
+    assert_eq!(curve.apply(0.1), 0.0);
+    assert!((curve.apply(1.0) - 1.0).abs() < f32::EPSILON);
+    let scaled = (0.9_f32 - 0.1) / (1.0 - 0.1);
+    assert!(curve.apply(0.9) > scaled.powf(1.6));
+}
+
+#[test]
+fn binding_digests_use_strict_fixed_width_hex() {
+    let profile = FlightFeelProfile::legacy_compatibility();
+    let text = serde_json::to_string(&profile).expect("profile JSON");
+    assert!(text.contains("328573856547b1646ecae8743815be16"));
+    let short = text.replace(
+        "328573856547b1646ecae8743815be161d5aba9b974aaafdf9756ce3046d0d17",
+        "00",
+    );
+    assert!(ValidatedFlightFeelProfile::from_json_str(&short).is_err());
 }
 
 #[test]
@@ -79,6 +128,12 @@ fn every_profile_field_changes_the_identity() {
     }
     assert_field_changes_digest!(|p: &mut FlightFeelProfile| p.profile_id = "digest-other".into());
     assert_field_changes_digest!(|p: &mut FlightFeelProfile| p.mode = crate::FeelMode::Agile);
+    assert_field_changes_digest!(|p: &mut FlightFeelProfile| {
+        p.bindings.device_profile_sha256 = crate::DeviceProfileDigest::from_bytes([1_u8; 32]);
+    });
+    assert_field_changes_digest!(|p: &mut FlightFeelProfile| {
+        p.bindings.flight_controller_sha256 = crate::FlightControllerDigest::from_bytes([2_u8; 32]);
+    });
     assert_field_changes_digest!(
         |p: &mut FlightFeelProfile| p.envelope.horizontal_speed_mps += 0.1
     );
@@ -108,12 +163,14 @@ fn neutral_latch_uses_hysteresis() {
     let band = NeutralBand {
         active_enter: 0.08,
         active_exit: 0.04,
+        dwell_ms: 20,
     };
     let mut latch = NeutralLatch::default();
-    assert!(!latch.update(0.06, band));
-    assert!(latch.update(0.09, band));
-    assert!(latch.update(0.06, band));
-    assert!(!latch.update(0.03, band));
+    assert!(!latch.update(0.06, 0.01, band));
+    assert!(latch.update(0.09, 0.01, band));
+    assert!(latch.update(0.06, 0.01, band));
+    assert!(latch.update(0.03, 0.01, band));
+    assert!(!latch.update(0.03, 0.01, band));
 }
 
 #[test]
@@ -123,6 +180,8 @@ fn jerk_limiter_bounds_rate_change_and_does_not_overshoot() {
         release_accel: 4.0,
         apply_jerk: 10.0,
         release_jerk: 20.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 20.0,
     };
     let mut axis = JerkLimitedAxis::default();
     let mut prior_rate = 0.0;
@@ -141,6 +200,8 @@ fn release_can_use_a_different_limit() {
         release_accel: 4.0,
         apply_jerk: 10.0,
         release_jerk: 40.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 40.0,
     };
     let mut axis = JerkLimitedAxis::default();
     axis.seed(1.0);
@@ -152,16 +213,24 @@ fn release_can_use_a_different_limit() {
 #[test]
 fn axis_demand_shaper_releases_only_after_exit_threshold() {
     let response = AxisResponse {
-        curve: crate::AxisCurve { expo: 0.0 },
+        curve: crate::AxisCurve {
+            deadzone: 0.0,
+            center_expo: 0.0,
+            outer_expo: 0.0,
+            outer_start: 1.0,
+        },
         neutral: NeutralBand {
             active_enter: 0.08,
             active_exit: 0.04,
+            dwell_ms: 0,
         },
         dynamics: AxisDynamics {
             apply_accel: 100.0,
             release_accel: 100.0,
             apply_jerk: 1_000.0,
             release_jerk: 1_000.0,
+            reversal_accel: 100.0,
+            reversal_jerk: 1_000.0,
         },
     };
     let mut shaper = AxisDemandShaper::default();
@@ -190,6 +259,7 @@ fn validation_rejects_reversed_neutral_thresholds() {
     let mut profile = FlightFeelProfile::legacy_compatibility();
     profile.horizontal.neutral.active_exit = 0.08;
     profile.horizontal.neutral.active_enter = 0.04;
+    profile.horizontal.curve.deadzone = 0.04;
     assert!(matches!(
         ValidatedFlightFeelProfile::new(profile),
         Err(ValidationError::InvalidOrder { .. })
@@ -219,63 +289,139 @@ fn strict_json_rejects_unknown_fields() {
 }
 
 #[test]
-fn release_never_increases_command_magnitude() {
+fn release_preserves_jerk_continuity_and_converges() {
     let limits = AxisDynamics {
         apply_accel: 1.0,
         release_accel: 2.0,
         apply_jerk: 4.0,
         release_jerk: 8.0,
+        reversal_accel: 2.0,
+        reversal_jerk: 8.0,
     };
     let mut axis = JerkLimitedAxis::default();
     for _ in 0..30 {
         assert!(axis.step(3.0, 0.02, DemandPhase::Apply, limits).is_finite());
     }
-    let mut prior = axis.value().abs();
-    for _ in 0..100 {
+    let initial = axis.value().abs();
+    let mut prior_rate = axis.rate();
+    let mut largest = initial;
+    for _ in 0..2_000 {
         let value = axis.step(0.0, 0.02, DemandPhase::Release, limits);
-        assert!(value.abs() <= prior + 1e-6, "{value} followed {prior}");
-        prior = value.abs();
+        assert!((axis.rate() - prior_rate).abs() <= limits.release_jerk * 0.02 + 1e-6);
+        largest = largest.max(value.abs());
+        prior_rate = axis.rate();
     }
-    assert_eq!(axis.value(), 0.0);
+    assert!(largest <= initial + 0.3, "release excursion {largest}");
+    assert!(axis.value().abs() < 1e-5);
+    assert!(axis.rate().abs() < 1e-5);
 }
 
 #[test]
-fn a_reversed_target_does_not_move_farther_from_the_new_target() {
+fn reversal_preserves_jerk_continuity_and_converges() {
     let limits = AxisDynamics {
         apply_accel: 2.0,
         release_accel: 4.0,
         apply_jerk: 10.0,
         release_jerk: 20.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 20.0,
     };
     let mut axis = JerkLimitedAxis::default();
     for _ in 0..20 {
         assert!(axis.step(1.0, 0.02, DemandPhase::Apply, limits).is_finite());
     }
-    let before = (axis.value() + 1.0).abs();
-    let after = (axis.step(-1.0, 0.02, DemandPhase::Apply, limits) + 1.0).abs();
-    assert!(after <= before);
+    let before_rate = axis.rate();
+    assert!(
+        axis.step(-1.0, 0.02, DemandPhase::Reversal, limits)
+            .is_finite()
+    );
+    assert!((axis.rate() - before_rate).abs() <= limits.reversal_jerk * 0.02 + 1e-6);
+    let mut prior_rate = axis.rate();
+    for _ in 0..2_000 {
+        assert!(
+            axis.step(-1.0, 0.02, DemandPhase::Reversal, limits)
+                .is_finite()
+        );
+        assert!((axis.rate() - prior_rate).abs() <= limits.reversal_jerk * 0.02 + 1e-6);
+        prior_rate = axis.rate();
+    }
+    assert!((axis.value() + 1.0).abs() < 1e-5);
+    assert!(axis.rate().abs() < 1e-5);
 }
 
 #[test]
-fn release_phase_starts_toward_neutral_with_release_limits() {
+fn phase_rate_caps_do_not_break_jerk_continuity() {
+    let base = AxisDynamics {
+        apply_accel: 1.0,
+        release_accel: 4.0,
+        apply_jerk: 2.0,
+        release_jerk: 8.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 2.0,
+    };
+    let mut reversal_to_apply = JerkLimitedAxis::default();
+    for _ in 0..120 {
+        assert!(
+            reversal_to_apply
+                .step(-100.0, 0.02, DemandPhase::Reversal, base)
+                .is_finite()
+        );
+    }
+    let before_apply = reversal_to_apply.rate();
+    assert!(
+        reversal_to_apply
+            .step(-100.0, 0.02, DemandPhase::Apply, base)
+            .is_finite()
+    );
+    assert!((reversal_to_apply.rate() - before_apply).abs() <= base.apply_jerk * 0.02 + 1e-6);
+
+    let gentle_reversal = AxisDynamics {
+        reversal_accel: 0.2,
+        ..base
+    };
+    let mut apply_to_reversal = JerkLimitedAxis::default();
+    for _ in 0..40 {
+        assert!(
+            apply_to_reversal
+                .step(100.0, 0.02, DemandPhase::Apply, gentle_reversal)
+                .is_finite()
+        );
+    }
+    let before_reversal = apply_to_reversal.rate();
+    assert!(
+        apply_to_reversal
+            .step(-100.0, 0.02, DemandPhase::Reversal, gentle_reversal)
+            .is_finite()
+    );
+    assert!(
+        (apply_to_reversal.rate() - before_reversal).abs()
+            <= gentle_reversal.reversal_jerk * 0.02 + 1e-6
+    );
+}
+
+#[test]
+fn release_phase_changes_rate_only_through_the_release_jerk() {
     let limits = AxisDynamics {
         apply_accel: 2.0,
         release_accel: 4.0,
         apply_jerk: 10.0,
         release_jerk: 20.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 20.0,
     };
     let mut axis = JerkLimitedAxis::default();
     for _ in 0..20 {
         assert!(axis.step(1.0, 0.02, DemandPhase::Apply, limits).is_finite());
     }
     let before = axis.value();
+    let before_rate = axis.rate();
 
     let after = axis.step(0.0, 0.02, DemandPhase::Release, limits);
 
-    assert!(after <= before);
-    assert!(axis.rate() <= 0.0);
-    assert!(axis.rate().abs() <= limits.release_jerk * 0.02 + f32::EPSILON);
+    assert!(axis.rate() < before_rate);
+    assert!((axis.rate() - before_rate).abs() <= limits.release_jerk * 0.02 + f32::EPSILON);
     assert!(axis.rate().abs() <= limits.release_accel);
+    assert!((after - before - axis.rate() * 0.02).abs() < 1e-6);
 }
 
 #[test]
@@ -285,6 +431,8 @@ fn invalid_time_steps_and_limits_keep_finite_state() {
         release_accel: 4.0,
         apply_jerk: 10.0,
         release_jerk: 20.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 20.0,
     };
     for dt in [0.0, -0.1, f32::NAN, f32::INFINITY] {
         let mut axis = JerkLimitedAxis::default();
@@ -304,6 +452,8 @@ fn equal_wall_time_is_nearly_invariant_to_sample_rate() {
         release_accel: 4.0,
         apply_jerk: 10.0,
         release_jerk: 20.0,
+        reversal_accel: 4.0,
+        reversal_jerk: 20.0,
     };
     let run = |hz: usize| {
         let mut axis = JerkLimitedAxis::default();

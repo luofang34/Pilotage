@@ -49,7 +49,8 @@ impl FlightUplink {
         let thrust_constrained = !thrust_norm.is_finite() || !(0.0..=1.0).contains(&thrust_norm);
         let thrust_norm = finite_unit(thrust_norm);
         let throttle = thrust_norm * 2.0 - 1.0;
-        if !self.open_takeoff_gate(throttle, "direct") {
+        let takeoff_entry = !self.airborne;
+        if !self.takeoff_requested(throttle) {
             return attitude_constrained || thrust_constrained;
         }
         self.ensure_heading(seed_attitude_rad[2]);
@@ -58,12 +59,27 @@ impl FlightUplink {
             && !self.feel.is_legacy()
             && self
                 .feel
-                .seed_direct([seed_attitude_rad[0], seed_attitude_rad[1]]);
+                .seed_direct([seed_attitude_rad[0], seed_attitude_rad[1]], takeoff_entry);
         let (dt_s, shape_dt_s) = self.frame_times(now);
         let demand = self
             .feel
             .step_direct(roll_rad, pitch_rad, throttle, shape_dt_s);
-        let yaw_constrained = self.limit_direct_heading(yaw_rad, dt_s);
+        if !self.commit_direct_takeoff(demand.thrust) {
+            return demand.constrained
+                || attitude_constrained
+                || thrust_constrained
+                || seed_constrained;
+        }
+        let yaw_constrained = if self.feel.is_legacy() {
+            if yaw_rad.is_finite() {
+                self.heading_sp_rad = wrap_pi(yaw_rad);
+                false
+            } else {
+                true
+            }
+        } else {
+            self.limit_direct_heading(yaw_rad, dt_s)
+        };
         let frame = encode_attitude_setpoint(
             self.seq,
             self.time_boot_ms(),
@@ -104,7 +120,8 @@ impl FlightUplink {
         let input_constrained = [roll, pitch, throttle, yaw]
             .iter()
             .any(|axis| !axis.is_finite() || !(-1.0..=1.0).contains(axis));
-        if !self.open_takeoff_gate(throttle, "normal") {
+        let takeoff_entry = !self.airborne;
+        if !self.takeoff_requested(throttle) {
             return input_constrained;
         }
         self.ensure_heading(current_yaw_rad);
@@ -114,10 +131,16 @@ impl FlightUplink {
             && self
                 .feel
                 .seed_normal_velocity(current_yaw_rad, current_vel_ned_mps);
+        if changed_mode && takeoff_entry && !self.feel.is_legacy() {
+            self.feel.seed_normal_takeoff();
+        }
         let (dt_s, shape_dt_s) = self.frame_times(now);
         let demand =
             self.feel
                 .step_normal([roll, pitch, throttle, yaw], current_yaw_rad, shape_dt_s);
+        if !self.commit_normal_takeoff(demand.velocity_ned_mps[2]) {
+            return demand.constrained || input_constrained || seed_constrained;
+        }
         if demand.settled {
             self.send_brake_or_hold(
                 current_pos_ned_m,
@@ -205,15 +228,49 @@ impl FlightUplink {
         false
     }
 
-    fn open_takeoff_gate(&mut self, throttle: f32, mode: &'static str) -> bool {
+    fn takeoff_requested(&mut self, throttle: f32) -> bool {
         if self.airborne {
             return true;
         }
         if !throttle.is_finite() || throttle <= self.feel.envelope().takeoff_input {
+            self.reset_temporal_state();
+            return false;
+        }
+        true
+    }
+
+    fn commit_normal_takeoff(&mut self, down_velocity_mps: f32) -> bool {
+        if self.airborne {
+            return true;
+        }
+        let envelope = self.feel.envelope();
+        let minimum_climb_mps = envelope.takeoff_input * envelope.vertical_speed_mps;
+        if !down_velocity_mps.is_finite() || -down_velocity_mps < minimum_climb_mps {
             return false;
         }
         self.airborne = true;
-        tracing::info!(mode, "climb input opens the setpoint stream");
+        tracing::info!(
+            mode = "normal",
+            "safe climb output opens the setpoint stream"
+        );
+        true
+    }
+
+    fn commit_direct_takeoff(&mut self, thrust: f32) -> bool {
+        if self.airborne {
+            return true;
+        }
+        let envelope = self.feel.envelope();
+        let minimum = envelope.direct_hover_thrust
+            + envelope.takeoff_input * (1.0 - envelope.direct_hover_thrust);
+        if !thrust.is_finite() || thrust < minimum {
+            return false;
+        }
+        self.airborne = true;
+        tracing::info!(
+            mode = "direct",
+            "safe thrust output opens the setpoint stream"
+        );
         true
     }
 

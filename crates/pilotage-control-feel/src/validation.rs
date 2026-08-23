@@ -58,6 +58,7 @@ impl ValidatedFlightFeelProfile {
     /// Returns the first invalid field or cross-field rule.
     pub fn new(profile: FlightFeelProfile) -> Result<Self, ValidationError> {
         validate_identity(&profile)?;
+        validate_bindings(&profile)?;
         validate_envelope(&profile)?;
         validate_axis("horizontal", profile.horizontal)?;
         validate_axis("vertical", profile.vertical)?;
@@ -116,6 +117,20 @@ fn validate_identity(profile: &FlightFeelProfile) -> Result<(), ValidationError>
     Ok(())
 }
 
+fn validate_bindings(profile: &FlightFeelProfile) -> Result<(), ValidationError> {
+    if profile.bindings.device_profile_sha256.as_bytes() == &[0_u8; 32] {
+        return Err(ValidationError::FieldOutOfRange {
+            field: "bindings.device_profile_sha256",
+        });
+    }
+    if profile.bindings.flight_controller_sha256.as_bytes() == &[0_u8; 32] {
+        return Err(ValidationError::FieldOutOfRange {
+            field: "bindings.flight_controller_sha256",
+        });
+    }
+    Ok(())
+}
+
 fn validate_envelope(profile: &FlightFeelProfile) -> Result<(), ValidationError> {
     let envelope = profile.envelope;
     for (field, value) in [
@@ -147,13 +162,29 @@ fn validate_envelope(profile: &FlightFeelProfile) -> Result<(), ValidationError>
 }
 
 fn validate_axis(prefix: &'static str, axis: AxisResponse) -> Result<(), ValidationError> {
-    if !axis.curve.expo.is_finite() || !(0.0..=0.8).contains(&axis.curve.expo) {
-        return Err(ValidationError::FieldOutOfRange {
-            field: match prefix {
-                "horizontal" => "horizontal.curve.expo",
-                "vertical" => "vertical.curve.expo",
-                _ => "yaw.curve.expo",
-            },
+    for (suffix, value, inclusive_upper) in [
+        ("curve.deadzone", axis.curve.deadzone, false),
+        ("curve.center_expo", axis.curve.center_expo, true),
+        ("curve.outer_expo", axis.curve.outer_expo, true),
+        ("curve.outer_start", axis.curve.outer_start, true),
+    ] {
+        let valid = value.is_finite()
+            && value >= 0.0
+            && if inclusive_upper {
+                value <= 1.0
+            } else {
+                value < 1.0
+            };
+        if !valid {
+            return Err(ValidationError::FieldOutOfRange {
+                field: axis_field(prefix, suffix),
+            });
+        }
+    }
+    if axis.curve.outer_expo > axis.curve.center_expo {
+        return Err(ValidationError::InvalidOrder {
+            lower: axis_field(prefix, "curve.outer_expo"),
+            upper: axis_field(prefix, "curve.center_expo"),
         });
     }
     if !axis.neutral.active_enter.is_finite()
@@ -167,7 +198,29 @@ fn validate_axis(prefix: &'static str, axis: AxisResponse) -> Result<(), Validat
             upper: "axis.neutral.active_enter",
         });
     }
+    if axis.neutral.dwell_ms > 10_000 {
+        return Err(ValidationError::FieldOutOfRange {
+            field: "axis.neutral.dwell_ms",
+        });
+    }
     validate_dynamics(axis.dynamics)
+}
+
+fn axis_field(prefix: &'static str, suffix: &'static str) -> &'static str {
+    match (prefix, suffix) {
+        ("horizontal", "curve.deadzone") => "horizontal.curve.deadzone",
+        ("horizontal", "curve.center_expo") => "horizontal.curve.center_expo",
+        ("horizontal", "curve.outer_expo") => "horizontal.curve.outer_expo",
+        ("horizontal", _) => "horizontal.curve.outer_start",
+        ("vertical", "curve.deadzone") => "vertical.curve.deadzone",
+        ("vertical", "curve.center_expo") => "vertical.curve.center_expo",
+        ("vertical", "curve.outer_expo") => "vertical.curve.outer_expo",
+        ("vertical", _) => "vertical.curve.outer_start",
+        ("yaw", "curve.deadzone") => "yaw.curve.deadzone",
+        ("yaw", "curve.center_expo") => "yaw.curve.center_expo",
+        ("yaw", "curve.outer_expo") => "yaw.curve.outer_expo",
+        _ => "yaw.curve.outer_start",
+    }
 }
 
 fn validate_dynamics(dynamics: AxisDynamics) -> Result<(), ValidationError> {
@@ -176,6 +229,8 @@ fn validate_dynamics(dynamics: AxisDynamics) -> Result<(), ValidationError> {
         ("axis.dynamics.release_accel", dynamics.release_accel),
         ("axis.dynamics.apply_jerk", dynamics.apply_jerk),
         ("axis.dynamics.release_jerk", dynamics.release_jerk),
+        ("axis.dynamics.reversal_accel", dynamics.reversal_accel),
+        ("axis.dynamics.reversal_jerk", dynamics.reversal_jerk),
     ] {
         positive_bounded(field, value, MAX_DYNAMIC_LIMIT)?;
     }
@@ -188,6 +243,18 @@ fn validate_dynamics(dynamics: AxisDynamics) -> Result<(), ValidationError> {
     if dynamics.release_jerk < dynamics.apply_jerk {
         return Err(ValidationError::InvalidOrder {
             lower: "axis.dynamics.apply_jerk",
+            upper: "axis.dynamics.release_jerk",
+        });
+    }
+    if dynamics.reversal_accel > dynamics.release_accel {
+        return Err(ValidationError::InvalidOrder {
+            lower: "axis.dynamics.reversal_accel",
+            upper: "axis.dynamics.release_accel",
+        });
+    }
+    if dynamics.reversal_jerk > dynamics.release_jerk {
+        return Err(ValidationError::InvalidOrder {
+            lower: "axis.dynamics.reversal_jerk",
             upper: "axis.dynamics.release_jerk",
         });
     }

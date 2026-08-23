@@ -21,7 +21,7 @@ use prost::Message;
 use super::delivery::DeliveryQueue;
 use super::driver::{Link, LinkStats};
 use super::observer::LinkObserver;
-use super::records::LinkEvent;
+use super::records::{LinkCatalog, LinkControlFeelMode, LinkEvent};
 
 mod lifecycle;
 
@@ -77,6 +77,14 @@ fn two_scope_welcome() -> wire::Envelope {
                         supported_modes: Vec::new(),
                     }],
                     supported_modes: Vec::new(),
+                    control_feel: Some(wire::ControlFeelIdentity {
+                        profile_id: "alia250.legacy.v1".into(),
+                        mode: wire::ControlFeelMode::LegacyCompatibility as i32,
+                        schema_version: 1,
+                        profile_sha256: vec![0x11; 32],
+                        device_profile_sha256: vec![0x22; 32],
+                        flight_controller_sha256: vec![0x33; 32],
+                    }),
                 }),
                 ..Default::default()
             },
@@ -133,6 +141,21 @@ fn admitted_link() -> Link {
         selected_video_source: None,
         gimbal_engage_attempt_ms: 0,
     }
+}
+
+#[test]
+fn admitted_catalog_preserves_the_control_feel_identity() {
+    let link = admitted_link();
+    let admission = link.engine.admission().expect("admission");
+    let catalog = LinkCatalog::from_admission(admission);
+    let identity = catalog.control_feel.expect("control-feel identity");
+
+    assert_eq!(identity.profile_id, "alia250.legacy.v1");
+    assert_eq!(identity.mode, LinkControlFeelMode::LegacyCompatibility);
+    assert_eq!(identity.schema_version, 1);
+    assert_eq!(identity.profile_sha256, vec![0x11; 32]);
+    assert_eq!(identity.device_profile_sha256, vec![0x22; 32]);
+    assert_eq!(identity.flight_controller_sha256, vec![0x33; 32]);
 }
 
 /// Grants one scope through both halves the driver keeps in step: the

@@ -83,6 +83,7 @@ export function createSessionBootstrap({
       state.sessionId = decoded.message.sessionId;
       state.principalId = decoded.message.principalId;
       state.advertisedScopes = decoded.message.advertisedScopes ?? [];
+      state.controlFeel = decoded.message.controlFeel ?? null;
       state.actionTracker = createActionTracker();
       state.announcedActivationRevision = null;
       state.motionScope = motionScope;
@@ -90,6 +91,9 @@ export function createSessionBootstrap({
       state.fpvActive = false;
       state.lifecycle = { pendingPress: false };
       log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
+      if (state.controlFeel) {
+        log(`control feel: ${state.controlFeel.profileId} (${state.controlFeel.mode})`);
+      }
       for (const scope of state.advertisedScopes) {
         const families = scope.intents.map((intent) => intent.family).join(",");
         log(`capability: ${scope.scope} intents=[${families}] actions=${scope.actions.length}`);

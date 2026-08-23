@@ -72,6 +72,7 @@ fn capabilities() -> AdapterCapabilities {
             link_loss_actions: vec![],
         }],
         adapter_version: "typed-e2e".to_owned(),
+        control_feel: None,
     }
 }
 

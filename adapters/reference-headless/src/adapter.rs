@@ -197,6 +197,7 @@ impl VehicleAdapter for ReferenceAdapter {
                 ],
             }],
             adapter_version: ADAPTER_VERSION.to_owned(),
+            control_feel: None,
         }
     }
 

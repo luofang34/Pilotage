@@ -54,6 +54,10 @@ impl NormalShapers {
         self.vertical.seed(body_velocity_mps[2]);
         self.yaw.seed(0.0);
     }
+
+    fn seed_takeoff(&mut self, climb_mps: f32) {
+        self.vertical.seed(climb_mps);
+    }
 }
 
 #[derive(Debug, Default)]
@@ -113,13 +117,18 @@ impl UplinkFeel {
         }
     }
 
+    pub(super) fn install(&mut self, profile: ValidatedFlightFeelProfile) {
+        self.profile = profile;
+        self.reset();
+    }
+
     pub(super) fn envelope(&self) -> DemandEnvelope {
         self.profile.profile().envelope
     }
 
     #[cfg(test)]
-    pub(super) fn profile(&self) -> &pilotage_control_feel::FlightFeelProfile {
-        self.profile.profile()
+    pub(super) fn validated_profile(&self) -> &ValidatedFlightFeelProfile {
+        &self.profile
     }
 
     pub(super) fn is_legacy(&self) -> bool {
@@ -135,7 +144,7 @@ impl UplinkFeel {
         true
     }
 
-    pub(super) fn seed_direct(&mut self, attitude_rad: [f32; 2]) -> bool {
+    pub(super) fn seed_direct(&mut self, attitude_rad: [f32; 2], takeoff_entry: bool) -> bool {
         let envelope = self.profile.profile().envelope;
         let limit = envelope.direct_tilt_rad;
         let finite = attitude_rad.map(|angle| if angle.is_finite() { angle } else { 0.0 });
@@ -146,7 +155,12 @@ impl UplinkFeel {
                 finite[0].clamp(-limit, limit),
                 finite[1].clamp(-limit, limit),
             ],
-            envelope.direct_hover_thrust,
+            if takeoff_entry {
+                envelope.direct_hover_thrust
+                    + envelope.takeoff_input * (1.0 - envelope.direct_hover_thrust)
+            } else {
+                envelope.direct_hover_thrust
+            },
         );
         constrained
     }
@@ -179,6 +193,12 @@ impl UplinkFeel {
         ];
         self.normal.seed(bounded);
         bounded != raw
+    }
+
+    pub(super) fn seed_normal_takeoff(&mut self) {
+        let envelope = self.profile.profile().envelope;
+        self.normal
+            .seed_takeoff(envelope.takeoff_input * envelope.vertical_speed_mps);
     }
 
     pub(super) fn step_normal(
@@ -269,7 +289,13 @@ impl UplinkFeel {
     ) -> NormalDemand {
         let profile = self.profile.profile();
         let dt_s = dt_s.max(1.0 / 60.0);
-        let active = axes.iter().map(|value| value.abs()).fold(0.0, f32::max)
+        let curved = [
+            profile.horizontal.curve.apply(axes[0]),
+            profile.horizontal.curve.apply(axes[1]),
+            profile.vertical.curve.apply(axes[2]),
+            profile.yaw.curve.apply(axes[3]),
+        ];
+        let active = curved.iter().map(|value| value.abs()).fold(0.0, f32::max)
             > profile.horizontal.neutral.active_enter;
         if !active {
             self.normal.reset();
@@ -281,10 +307,8 @@ impl UplinkFeel {
                 constrained: false,
             };
         }
-        let forward =
-            profile.horizontal.curve.apply(axes[1]) * profile.envelope.horizontal_speed_mps;
-        let lateral =
-            profile.horizontal.curve.apply(axes[0]) * profile.envelope.horizontal_speed_mps;
+        let forward = curved[1] * profile.envelope.horizontal_speed_mps;
+        let lateral = curved[0] * profile.envelope.horizontal_speed_mps;
         let (sin_yaw, cos_yaw) = current_yaw_rad.sin_cos();
         let north_target = forward * cos_yaw - lateral * sin_yaw;
         let east_target = forward * sin_yaw + lateral * cos_yaw;
@@ -302,9 +326,9 @@ impl UplinkFeel {
                     DemandPhase::Apply,
                     profile.horizontal.dynamics,
                 ),
-                -profile.vertical.curve.apply(axes[2]) * profile.envelope.vertical_speed_mps,
+                -curved[2] * profile.envelope.vertical_speed_mps,
             ],
-            yaw_rate_rps: profile.yaw.curve.apply(axes[3]) * profile.envelope.yaw_rate_rps,
+            yaw_rate_rps: curved[3] * profile.envelope.yaw_rate_rps,
             settled: false,
             constrained: false,
         }
@@ -341,18 +365,21 @@ impl UplinkFeel {
                 constrained: direct_input_constrained(roll_rad, pitch_rad, throttle, envelope),
             };
         }
+        let roll_phase = phase(&self.direct.roll, roll_target);
+        let pitch_phase = phase(&self.direct.pitch, pitch_target);
+        let thrust_phase = phase(&self.direct.thrust, thrust_target);
         let roll = self
             .direct
             .roll
-            .step(roll_target, dt_s, phase(roll_target), tilt_dynamics);
+            .step(roll_target, dt_s, roll_phase, tilt_dynamics);
         let pitch = self
             .direct
             .pitch
-            .step(pitch_target, dt_s, phase(pitch_target), tilt_dynamics);
-        let thrust =
-            self.direct
-                .thrust
-                .step(thrust_target, dt_s, DemandPhase::Apply, thrust_dynamics);
+            .step(pitch_target, dt_s, pitch_phase, tilt_dynamics);
+        let thrust = self
+            .direct
+            .thrust
+            .step(thrust_target, dt_s, thrust_phase, thrust_dynamics);
         let bounded_thrust = thrust.clamp(envelope.direct_min_thrust, 1.0);
         DirectDemand {
             roll_rad: roll.clamp(-envelope.direct_tilt_rad, envelope.direct_tilt_rad),
@@ -402,12 +429,20 @@ fn direct_dynamics(rate: f32, acceleration: f32) -> AxisDynamics {
         release_accel: rate,
         apply_jerk: acceleration,
         release_jerk: acceleration,
+        reversal_accel: rate,
+        reversal_jerk: acceleration,
     }
 }
 
-fn phase(target: f32) -> DemandPhase {
+fn phase(axis: &JerkLimitedAxis, target: f32) -> DemandPhase {
+    let error = target - axis.value();
     if target == 0.0 {
         DemandPhase::Release
+    } else if error.abs() > f32::EPSILON
+        && axis.rate().abs() > f32::EPSILON
+        && axis.rate().signum() != error.signum()
+    {
+        DemandPhase::Reversal
     } else {
         DemandPhase::Apply
     }

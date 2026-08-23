@@ -813,6 +813,7 @@ function decodeServerWelcome(bytes) {
     // with its intent families, limits, and actions, so the control path
     // scales by the vehicle's REAL envelope and fails closed without one.
     advertisedScopes: decodeAdvertisedScopes(firstBytes(fields, 3)),
+    controlFeel: decodeControlFeelIdentity(firstBytes(fields, 3)),
   };
 }
 
@@ -940,6 +941,28 @@ function decodeAdvertisedScopes(hostCapabilitiesBytes) {
     }
   }
   return scopes;
+}
+
+// capability.proto HostCapabilities.control_feel=4;
+// ControlFeelIdentity fields are profile_id=1, mode=2, schema_version=3,
+// profile_sha256=4, device_profile_sha256=5, flight_controller_sha256=6.
+function decodeControlFeelIdentity(hostCapabilitiesBytes) {
+  if (!hostCapabilitiesBytes) return null;
+  const caps = parseFields(hostCapabilitiesBytes);
+  const identityBytes = firstBytes(caps, 4);
+  if (!identityBytes) return null;
+  const identity = parseFields(identityBytes);
+  const mode = ["unspecified", "precision", "balanced", "agile", "legacyCompatibility"]
+    [firstVarint(identity, 2)] ?? "unspecified";
+  const text = firstBytes(identity, 1);
+  return {
+    profileId: text ? new TextDecoder().decode(text) : "",
+    mode,
+    schemaVersion: firstVarint(identity, 3),
+    profileSha256: firstBytes(identity, 4) ?? new Uint8Array(0),
+    deviceProfileSha256: firstBytes(identity, 5) ?? new Uint8Array(0),
+    flightControllerSha256: firstBytes(identity, 6) ?? new Uint8Array(0),
+  };
 }
 
 // telemetry.proto TelemetrySample: vehicle=1, tick=2, observed_at=3, pose=4,

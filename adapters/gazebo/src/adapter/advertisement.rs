@@ -61,6 +61,7 @@ impl GazeboAdapter {
                 link_loss_actions: vec![LinkLossPolicy::Neutralize],
             }],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+            control_feel: None,
         }
     }
 }

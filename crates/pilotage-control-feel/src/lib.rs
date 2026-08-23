@@ -1,5 +1,6 @@
 //! Versioned operator control-feel profiles and pure demand shaping.
 
+mod binding;
 mod digest;
 mod profile;
 mod shaper;
@@ -17,3 +18,4 @@ pub use validation::{ProfileLoadError, ValidatedFlightFeelProfile, ValidationErr
 
 #[cfg(test)]
 mod tests;
+pub use binding::{DeviceProfileDigest, FlightControllerDigest, ProfileBindings};

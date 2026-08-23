@@ -38,6 +38,7 @@ pub(super) fn capabilities() -> AdapterCapabilities {
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],
         adapter_version: "test".to_owned(),
+        control_feel: None,
     }
 }
 
