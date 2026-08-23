@@ -4,6 +4,7 @@ import {
   encodeProfileActivationEnvelope, SESSION_PROTOCOL_VERSION,
 } from "./wire.js";
 import { createActionTracker } from "./action-tracker.js";
+import { lengthDelimit } from "./envelope-framing.js";
 
 /** Builds the reliable-session bootstrap and activation announcer. */
 export function createSessionBootstrap({
@@ -19,25 +20,6 @@ export function createSessionBootstrap({
   handleActionResult,
   applyLeaseResponse,
 }) {
-  function lengthDelimit(envelopeBytes) {
-    const prefix = [];
-    let v = envelopeBytes.length;
-    for (;;) {
-      let byte = v & 0x7f;
-      v >>>= 7;
-      if (v !== 0) {
-        prefix.push(byte | 0x80);
-      } else {
-        prefix.push(byte);
-        break;
-      }
-    }
-    const out = new Uint8Array(prefix.length + envelopeBytes.length);
-    out.set(prefix, 0);
-    out.set(envelopeBytes, prefix.length);
-    return out;
-  }
-
   async function sendClientHello(writer, token) {
     if (!transportSessions.isActive(token)) return false;
     const hello = encodeClientHelloEnvelope({

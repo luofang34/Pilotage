@@ -10,6 +10,7 @@ use pilotage_protocol::{ButtonEdge, LogicalButtonId, VehicleId};
 
 use pilotage_mavlink::link::KinematicsUpdate;
 
+mod control_feel;
 mod direct_flight;
 mod fixtures;
 mod flight_control;
@@ -37,7 +38,8 @@ fn a_profile_that_requires_unavailable_acceleration_fails_closed() {
 fn the_control_feel_profile_owns_the_response_curve() {
     let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
     profile.mode = pilotage_control_feel::FeelMode::Balanced;
-    profile.horizontal.curve.expo = 0.2;
+    profile.horizontal.curve.center_expo = 0.2;
+    profile.horizontal.curve.outer_expo = 0.1;
     let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
         .expect("valid generic profile");
 
@@ -54,24 +56,22 @@ fn telemetry_only_advertisement_keeps_the_control_feel_identity() {
         .expect("valid control-feel profile");
     let expected_digest =
         pilotage_control_feel::FeelDigest::calculate(&profile).expect("control-feel digest");
-    let identity =
-        super::ControlFeelIdentity::from_profile(&profile).expect("control-feel identity");
     let mut adapter = super::AviateAdapter::from_state(
         VehicleId::new(1),
         state_with(Duration::ZERO, Duration::ZERO),
     );
-    adapter.control_feel_identity = Some(identity);
+    adapter.control_feel_profiles = Some(
+        super::control_feel::ControlFeelProfiles::new(profile).expect("control-feel profiles"),
+    );
 
     let capabilities = adapter.capabilities();
 
     assert!(capabilities.vehicles[0].scopes.is_empty());
-    assert_eq!(
-        capabilities.adapter_version,
-        format!(
-            "{};feel-schema=1;feel-id=telemetry-only-feel;feel-sha256={expected_digest}",
-            env!("CARGO_PKG_VERSION")
-        )
-    );
+    assert_eq!(capabilities.adapter_version, env!("CARGO_PKG_VERSION"));
+    let identity = capabilities.control_feel.expect("control-feel identity");
+    assert_eq!(identity.profile_id, "telemetry-only-feel");
+    assert_eq!(identity.schema_version, 1);
+    assert_eq!(identity.profile_sha256, *expected_digest.as_bytes());
 }
 use fixtures::{flight_frame, state_with, state_with_acquisition_skew};
 

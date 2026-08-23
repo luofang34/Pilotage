@@ -26,7 +26,7 @@ mod tests;
 
 /// Longest believable gap between control frames when integrating the
 /// yaw-rate stick; anything longer is a stall, not a dt.
-const MAX_DT_S: f32 = 0.1;
+pub(crate) const MAX_DT_S: f32 = 0.1;
 /// Stick frames are suppressed this long after an arm/disarm send: the
 /// FC stages inbound commands in a single slot, so a setpoint arriving
 /// in the same poll batch would overwrite the arm before the control
@@ -74,8 +74,6 @@ pub struct FlightUplink {
     // is centered.
     hold_pos_ned: Option<[f32; 3]>,
     feel: feel::UplinkFeel,
-    #[cfg(test)]
-    feel_digest: FeelDigest,
     started: Instant,
     clock: UplinkClock,
     send_failures: u64,
@@ -90,7 +88,7 @@ impl FlightUplink {
     ///
     /// # Errors
     ///
-    /// Returns the socket bind error.
+    /// Returns an error if the default profile or socket cannot initialize.
     pub fn new() -> std::io::Result<Self> {
         let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility())
             .map_err(std::io::Error::other)?;
@@ -101,8 +99,11 @@ impl FlightUplink {
     ///
     /// # Errors
     ///
-    /// Returns the socket bind error.
-    pub fn new_with_profile(profile: ValidatedFlightFeelProfile) -> std::io::Result<Self> {
+    /// Returns an error if the profile does not match Alia or the socket
+    /// cannot initialize.
+    pub(crate) fn new_with_profile(profile: ValidatedFlightFeelProfile) -> std::io::Result<Self> {
+        crate::adapter::validate_aviate_profile_bindings(&profile)
+            .map_err(std::io::Error::other)?;
         let feel_digest = FeelDigest::calculate(&profile).map_err(std::io::Error::other)?;
         let target = std::env::var("PILOTAGE_AVIATE_FC_ADDR")
             .ok()
@@ -128,8 +129,6 @@ impl FlightUplink {
             airborne: false,
             hold_pos_ned: None,
             feel: feel::UplinkFeel::new(profile),
-            #[cfg(test)]
-            feel_digest,
             started: Instant::now(),
             clock: UplinkClock::System,
             send_failures: 0,
@@ -151,6 +150,10 @@ impl FlightUplink {
         if let UplinkClock::Manual(at) = &mut self.clock {
             *at += dt;
         }
+    }
+
+    pub(crate) fn monotonic_now(&self) -> Instant {
+        self.clock.now()
     }
 
     /// Selects the MAVLink system/component whose replies may affect state.
@@ -268,6 +271,12 @@ impl FlightUplink {
         self.hold_pos_ned = Some(pos_ned_m);
     }
 
+    /// Returns the heading state for activation rollback tests.
+    #[cfg(test)]
+    pub(crate) const fn heading_state_for_test(&self) -> (f32, bool) {
+        (self.heading_sp_rad, self.heading_valid)
+    }
+
     /// Expires the post-arm quiet window immediately, so tests advance
     /// past it deterministically instead of sleeping wall-clock time.
     #[cfg(test)]
@@ -294,14 +303,14 @@ impl FlightUplink {
         self.feel.envelope()
     }
 
+    pub(crate) fn install_profile(&mut self, profile: ValidatedFlightFeelProfile) {
+        self.reset_temporal_state();
+        self.feel.install(profile);
+    }
+
     #[cfg(test)]
-    pub(crate) fn feel_identity(&self) -> (&str, u16, FeelDigest) {
-        let profile = self.feel.profile();
-        (
-            &profile.profile_id,
-            profile.schema_version,
-            self.feel_digest,
-        )
+    pub(crate) fn active_profile_for_test(&self) -> &ValidatedFlightFeelProfile {
+        self.feel.validated_profile()
     }
 
     fn reset_temporal_state(&mut self) {

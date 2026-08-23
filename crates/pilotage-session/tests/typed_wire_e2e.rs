@@ -110,7 +110,7 @@ fn welcome_and_grant(
         DomainEnvelope::ProfileActivation(pilotage_protocol::ProfileActivation {
             session,
             profile_id: "builtin.flight.default".to_owned(),
-            profile_revision: 3,
+            profile_revision: frame.profile_revision,
             activation_revision: frame.activation_revision,
             digest: [0x11; 32],
             device_profile_id: String::new(),

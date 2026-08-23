@@ -16,6 +16,12 @@ pub enum AviateAdapterError {
         /// The unavailable profile requirement.
         detail: String,
     },
+    /// A physical adapter cannot use an unqualified control-feel artifact.
+    #[error("the Aviate physical profile refuses control-feel artifact {profile_id:?}")]
+    PhysicalControlFeelOverride {
+        /// The refused artifact identity.
+        profile_id: String,
+    },
     /// The selected control-feel artifact identity could not be calculated.
     #[error("the Aviate control-feel identity is unavailable: {source}")]
     ControlFeelIdentity {

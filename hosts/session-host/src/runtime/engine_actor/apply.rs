@@ -33,6 +33,14 @@ impl<A: VehicleAdapter> EngineActor<A> {
         }
         let apply_start = Instant::now();
         let outcome = self.adapter.apply_control(&frame);
+        if let Some(control_feel) = self.adapter.take_control_feel_change() {
+            info!(
+                profile_id = %control_feel.profile_id,
+                profile_sha256 = %hex_digest(&control_feel.profile_sha256),
+                "session control-feel capability updated"
+            );
+            self.engine.update_control_feel(control_feel);
+        }
         self.record_stage(Stage::Apply, apply_start.elapsed());
         debug!(?outcome, "control frame applied to adapter");
         self.report_adapter_rejection(client, &frame, &outcome.disposition);

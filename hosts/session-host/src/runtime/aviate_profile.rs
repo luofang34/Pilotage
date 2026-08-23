@@ -5,7 +5,7 @@ use std::env::VarError;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use pilotage_adapter_aviate::{AviateProfile, LinkConfig};
+use pilotage_adapter_aviate::{ALIA250_DEFAULT_CONTROL_FEEL_JSON, AviateProfile, LinkConfig};
 use pilotage_control_feel::ValidatedFlightFeelProfile;
 
 use crate::error::HostError;
@@ -43,18 +43,26 @@ pub(crate) fn link_config(profile: AviateProfile) -> LinkConfig {
     }
 }
 
-/// Loads the explicit Aviate control-feel artifact from the environment.
+/// Loads the selected Aviate control-feel artifact.
 ///
 /// # Errors
 ///
-/// Returns a typed error when the path is absent, unreadable, or invalid.
+/// This function returns a typed error if a physical session selects an
+/// explicit path.
+/// It returns a typed error if the host cannot read the path.
+/// It returns a typed error if the artifact is invalid.
 pub(crate) fn control_feel_from_env_blocking(
+    profile: AviateProfile,
     value: Option<OsString>,
 ) -> Result<ValidatedFlightFeelProfile, HostError> {
-    let path = value
-        .map(PathBuf::from)
-        .ok_or(HostError::AviateControlFeelMissing)?;
-    control_feel_from_path_blocking(&path)
+    match value.map(PathBuf::from) {
+        Some(path) if profile == AviateProfile::Physical => {
+            Err(HostError::AviatePhysicalControlFeelOverride { path })
+        }
+        Some(path) => control_feel_from_path_blocking(&path),
+        None => ValidatedFlightFeelProfile::from_json_str(ALIA250_DEFAULT_CONTROL_FEEL_JSON)
+            .map_err(|source| HostError::AviateDefaultControlFeelInvalid { source }),
+    }
 }
 
 fn control_feel_from_path_blocking(path: &Path) -> Result<ValidatedFlightFeelProfile, HostError> {
@@ -138,10 +146,26 @@ mod tests {
     }
 
     #[test]
-    fn missing_control_feel_artifact_fails_closed() {
+    fn absent_override_selects_the_checked_default_artifact() {
+        let loaded = control_feel_from_env_blocking(AviateProfile::Simulation, None)
+            .expect("checked default");
+        assert_eq!(
+            loaded.profile(),
+            &pilotage_control_feel::FlightFeelProfile::legacy_compatibility()
+        );
+    }
+
+    #[test]
+    fn physical_refuses_an_explicit_control_feel_path_before_io() {
+        let path = std::path::PathBuf::from("unqualified-control-feel.json");
+        let result = control_feel_from_env_blocking(
+            AviateProfile::Physical,
+            Some(path.clone().into_os_string()),
+        );
         assert!(matches!(
-            control_feel_from_env_blocking(None),
-            Err(HostError::AviateControlFeelMissing)
+            result,
+            Err(HostError::AviatePhysicalControlFeelOverride { path: refused })
+                if refused == path
         ));
     }
 
@@ -159,8 +183,11 @@ mod tests {
         let text = serde_json::to_string(&profile).expect("profile JSON");
         std::fs::write(&path, text).expect("write profile");
 
-        let loaded = control_feel_from_env_blocking(Some(path.clone().into_os_string()))
-            .expect("load profile");
+        let loaded = control_feel_from_env_blocking(
+            AviateProfile::Simulation,
+            Some(path.clone().into_os_string()),
+        )
+        .expect("load profile");
 
         assert_eq!(loaded.profile(), &profile);
         std::fs::remove_file(path).ok();
@@ -185,7 +212,10 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&value).expect("profile JSON"))
             .expect("write profile");
 
-        let result = control_feel_from_env_blocking(Some(path.clone().into_os_string()));
+        let result = control_feel_from_env_blocking(
+            AviateProfile::Simulation,
+            Some(path.clone().into_os_string()),
+        );
 
         assert!(matches!(
             result,

@@ -4,7 +4,6 @@
 // no generated bindings). Field numbers below are read directly from
 // schemas/pilotage/v1/*.proto — see the comment above each builder/parser for
 // the exact (message, field) pairs relied on.
-//
 // Wire layout this file implements (matches hosts/session-host exactly):
 //   - Datagrams carry exactly one bare `Envelope` proto message, no length
 //     prefix (ADR-0014, ADR-0005).
@@ -17,6 +16,8 @@
 //     events (authority and delivery state), 0x02 = one video frame
 //     (`[source_id: u8][fourcc: 4 bytes][u32 LE len][jpeg]` after the tag,
 //     ADR-0016, not an Envelope at all). source_id 0 = onboard FPV, 1 = chase.
+
+import { ENVELOPE_FIELD } from "./envelope-fields.js";
 
 export const STREAM_KIND_AUTHORITY = 0x01;
 export const STREAM_KIND_VIDEO = 0x02;
@@ -247,35 +248,6 @@ function encodeLeaseRequest({ vehicleId, scope }) {
   fieldBytes(bytes, 2, encodeScopeId(scope));
   return bytes;
 }
-
-// ---- envelope.proto: Envelope oneof arm numbers ----------------------------
-// (envelope.proto): schema_version = 1; oneof payload: control_frame=2,
-// authority_event=3, telemetry_sample=4, host_capabilities=5, client_hello=6,
-// server_welcome=7, lease_request=8, lease_response=9, ping=10, pong=11,
-// frame_rejected=12, lease_release=13, lease_released=14.
-const ENVELOPE_FIELD = {
-  schemaVersion: 1,
-  controlFrame: 2,
-  authorityEvent: 3,
-  telemetrySample: 4,
-  hostCapabilities: 5,
-  clientHello: 6,
-  serverWelcome: 7,
-  leaseRequest: 8,
-  leaseResponse: 9,
-  ping: 10,
-  pong: 11,
-  frameRejected: 12,
-  leaseRelease: 13,
-  leaseReleased: 14,
-  linkLossCleared: 15,
-  profileActivation: 16,
-  controlActionResult: 17,
-  controlActionCommand: 18,
-  mediaAttachRequest: 19,
-  videoDeliveryState: 20,
-  scopeTransferOffer: 22,
-};
 
 /** Wraps an already-encoded payload submessage bytes in an `Envelope`. */
 function encodeEnvelope(payloadFieldNumber, payloadBytes) {
