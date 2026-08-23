@@ -9,8 +9,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_adapter_api::{
-    ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyCommandMap,
-    LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
+    ActionCapability, AdapterCapabilities, ControlFeelDescriptor, ControlFeelMode, ExecutionMode,
+    IntentCapability, LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
 };
 use pilotage_protocol::{
     ActionKind, ClientHello, IntentFamily, LogicalAxisId, ModeTarget, ReferenceFrame, ScopeId,
@@ -93,6 +93,14 @@ fn capabilities() -> AdapterCapabilities {
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],
         adapter_version: "welcome-fixture".to_owned(),
+        control_feel: Some(ControlFeelDescriptor {
+            profile_id: "alia250.legacy.v1".to_owned(),
+            mode: ControlFeelMode::LegacyCompatibility,
+            schema_version: 1,
+            profile_sha256: [0x11; 32],
+            device_profile_sha256: [0x22; 32],
+            flight_controller_sha256: [0x33; 32],
+        }),
     }
 }
 

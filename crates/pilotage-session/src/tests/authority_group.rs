@@ -56,6 +56,7 @@ fn grouped_engine() -> SessionEngine {
             link_loss_actions: vec![LinkLossPolicy::Neutralize],
         }],
         adapter_version: "test".to_owned(),
+        control_feel: None,
     };
     SessionEngine::new(
         capabilities,

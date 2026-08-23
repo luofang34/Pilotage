@@ -45,6 +45,7 @@ impl Px4Adapter {
                 },
             }],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+            control_feel: None,
         }
     }
 }

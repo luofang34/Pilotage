@@ -11,33 +11,49 @@ pub enum DemandPhase {
     Apply,
     /// The input is neutral.
     Release,
+    /// The input requests the opposite direction.
+    Reversal,
 }
 
 /// Hysteretic classification of one normalized input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct NeutralLatch {
     active: bool,
+    neutral_s: f32,
 }
 
 impl NeutralLatch {
     /// Update the classification and return whether the input is active.
-    pub fn update(&mut self, magnitude: f32, band: NeutralBand) -> bool {
+    pub fn update(&mut self, magnitude: f32, dt_s: f32, band: NeutralBand) -> bool {
         let magnitude = if magnitude.is_finite() {
             magnitude.abs()
         } else {
             0.0
         };
-        self.active = if self.active {
-            magnitude > band.active_exit
-        } else {
-            magnitude > band.active_enter
-        };
+        if !self.active {
+            self.active = magnitude > band.active_enter;
+            self.neutral_s = 0.0;
+            return self.active;
+        }
+        if magnitude > band.active_exit {
+            self.neutral_s = 0.0;
+            return true;
+        }
+        if !dt_s.is_finite() || dt_s < 0.0 {
+            return true;
+        }
+        self.neutral_s += dt_s;
+        if self.neutral_s * 1_000.0 >= band.dwell_ms as f32 {
+            self.active = false;
+            self.neutral_s = 0.0;
+        }
         self.active
     }
 
     /// Clear the classification state.
     pub fn reset(&mut self) {
         self.active = false;
+        self.neutral_s = 0.0;
     }
 }
 
@@ -56,6 +72,8 @@ pub struct ShapedDemand {
     pub value: f32,
     /// Whether the physical input is in the active hysteresis state.
     pub input_active: bool,
+    /// Time-domain state used for this sample.
+    pub phase: DemandPhase,
 }
 
 /// Static and time-domain shaping for one input axis.
@@ -80,20 +98,19 @@ impl AxisDemandShaper {
         } else {
             0.0
         };
-        let input_active = self.neutral.update(normalized.abs(), response.neutral);
-        let target = if input_active {
-            response.curve.apply(normalized) * scale
-        } else {
-            0.0
-        };
-        let phase = if input_active {
-            DemandPhase::Apply
-        } else {
-            DemandPhase::Release
-        };
+        let curved = response.curve.apply(normalized);
+        let input_active = self.neutral.update(curved.abs(), dt_s, response.neutral);
+        let target = if input_active { curved * scale } else { 0.0 };
+        let phase = demand_phase(
+            input_active,
+            target,
+            self.demand.value(),
+            self.demand.rate(),
+        );
         ShapedDemand {
             value: self.demand.step(target, dt_s, phase, response.dynamics),
             input_active,
+            phase,
         }
     }
 
@@ -132,35 +149,32 @@ impl JerkLimitedAxis {
         let (accel, jerk) = match phase {
             DemandPhase::Apply => (limits.apply_accel, limits.apply_jerk),
             DemandPhase::Release => (limits.release_accel, limits.release_jerk),
+            DemandPhase::Reversal => (limits.reversal_accel, limits.reversal_jerk),
         };
-        if self.phase.is_some() && self.phase != Some(phase) {
-            self.rate = 0.0;
-        }
         let error = target - self.value;
-        if error.abs() <= TARGET_EPSILON {
+        let step_jerk = jerk * dt_s;
+        if error.abs() <= TARGET_EPSILON && self.rate.abs() <= step_jerk {
             self.value = target;
             self.rate = 0.0;
             self.phase = Some(phase);
             return self.value;
         }
-        if self.rate != 0.0 && self.rate.signum() != error.signum() {
-            // A demand filter has no physical momentum. Keeping an outward
-            // derivative after the operator changes the target would increase
-            // the command during release and cause a second vehicle input.
-            self.rate = 0.0;
-        }
-        let step_jerk = jerk * dt_s;
         let stopping_rate =
             ((step_jerk * step_jerk + 2.0 * jerk * error.abs()).sqrt() - step_jerk).max(0.0);
-        let desired_rate = error.signum() * stopping_rate.min(accel);
+        let desired_rate = if error.abs() <= TARGET_EPSILON {
+            0.0
+        } else {
+            error.signum() * stopping_rate.min(accel)
+        };
         let rate_delta = (desired_rate - self.rate).clamp(-jerk * dt_s, jerk * dt_s);
-        self.rate = (self.rate + rate_delta).clamp(-accel, accel);
-        let candidate = self.value + self.rate * dt_s;
-        if crossed_target(self.value, candidate, target) {
+        self.rate += rate_delta;
+        let next = self.value + self.rate * dt_s;
+        let crossed_target = error != 0.0 && (target - next).signum() != error.signum();
+        if crossed_target && self.rate.abs() <= step_jerk {
             self.value = target;
             self.rate = 0.0;
         } else {
-            self.value = candidate;
+            self.value = next;
         }
         self.phase = Some(phase);
         self.value
@@ -197,6 +211,8 @@ fn limits_are_usable(limits: AxisDynamics) -> bool {
         limits.release_accel,
         limits.apply_jerk,
         limits.release_jerk,
+        limits.reversal_accel,
+        limits.reversal_jerk,
     ]
     .into_iter()
     .all(|value| value.is_finite() && value > 0.0)
@@ -241,6 +257,20 @@ fn finite_within(value: Option<f32>, limit: f32) -> bool {
     value.is_some_and(|value| value.is_finite() && value.abs() <= limit)
 }
 
-fn crossed_target(before: f32, after: f32, target: f32) -> bool {
-    (before <= target && after >= target) || (before >= target && after <= target)
+fn demand_phase(input_active: bool, target: f32, value: f32, rate: f32) -> DemandPhase {
+    if !input_active {
+        return DemandPhase::Release;
+    }
+    let direction = if value.abs() > TARGET_EPSILON {
+        value.signum()
+    } else if rate.abs() > TARGET_EPSILON {
+        rate.signum()
+    } else {
+        target.signum()
+    };
+    if target != 0.0 && direction != target.signum() {
+        DemandPhase::Reversal
+    } else {
+        DemandPhase::Apply
+    }
 }

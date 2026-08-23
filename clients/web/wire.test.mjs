@@ -798,6 +798,17 @@ check(
   const message = decoded.message;
   const expected = fixture.expected;
   check("welcome session id decodes", Number(message.sessionId) === expected.sessionId);
+  const hexDigest = (value) => Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const feel = message.controlFeel;
+  check("control-feel identity decodes", feel?.profileId === expected.controlFeel.profileId
+    && feel?.mode === expected.controlFeel.mode
+    && feel?.schemaVersion === expected.controlFeel.schemaVersion);
+  check("control-feel artifact digest decodes", hexDigest(feel?.profileSha256 ?? [])
+    === expected.controlFeel.profileSha256);
+  check("control-feel device binding decodes", hexDigest(feel?.deviceProfileSha256 ?? [])
+    === expected.controlFeel.deviceProfileSha256);
+  check("control-feel FC binding decodes", hexDigest(feel?.flightControllerSha256 ?? [])
+    === expected.controlFeel.flightControllerSha256);
   const scopes = message.advertisedScopes ?? [];
   check("both scopes decode", scopes.length === expected.scopes.length);
   const motion = scopes.find((scope) => scope.scope === "vehicle.motion");

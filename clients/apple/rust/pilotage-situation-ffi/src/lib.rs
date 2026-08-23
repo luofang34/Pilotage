@@ -17,8 +17,8 @@ mod session;
 
 pub use error::FfiError;
 pub use link::{
-    LinkCatalog, LinkConfig, LinkEvent, LinkIntentCapability, LinkObserver, LinkScope, LinkSession,
-    LinkVehicle,
+    LinkCatalog, LinkConfig, LinkControlFeelIdentity, LinkControlFeelMode, LinkEvent,
+    LinkIntentCapability, LinkObserver, LinkScope, LinkSession, LinkVehicle,
 };
 // Links the instrument bridge's scaffolding into this library, so one
 // static library carries both namespaces and one bindgen run over it

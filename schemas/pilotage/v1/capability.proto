@@ -18,6 +18,25 @@ enum ExecutionMode {
   EXECUTION_MODE_REPLAY = 5;
 }
 
+// One supported control-feel mode.
+enum ControlFeelMode {
+  CONTROL_FEEL_MODE_UNSPECIFIED = 0;
+  CONTROL_FEEL_MODE_PRECISION = 1;
+  CONTROL_FEEL_MODE_BALANCED = 2;
+  CONTROL_FEEL_MODE_AGILE = 3;
+  CONTROL_FEEL_MODE_LEGACY_COMPATIBILITY = 4;
+}
+
+// Identity of the active control-feel artifact and its bindings.
+message ControlFeelIdentity {
+  string profile_id = 1;
+  ControlFeelMode mode = 2;
+  uint32 schema_version = 3;
+  bytes profile_sha256 = 4;
+  bytes device_profile_sha256 = 5;
+  bytes flight_controller_sha256 = 6;
+}
+
 // What the host does to a vehicle's outstanding control when the link to
 // its current authority holder is lost.
 enum LinkLossAction {
@@ -94,4 +113,5 @@ message HostCapabilities {
   string host_version = 1;
   repeated VehicleDescriptor vehicles = 2;
   repeated ExecutionMode supported_modes = 3;
+  ControlFeelIdentity control_feel = 4;
 }

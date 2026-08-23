@@ -148,6 +148,23 @@ fn the_radiomaster_profile_reroutes_aetr_to_canonical_slots() {
     assert_eq!(out.axes[3], -0.5, "slot3 (right Y) <- elevator, inverted");
 }
 
+#[test]
+fn the_radiomaster_effective_profile_has_the_configured_digest() {
+    let mut stage = DeviceStage::new();
+    assert_eq!(
+        stage.select_pad("1209-4f54-RadioMaster Pocket"),
+        SelectOutcome::Exact
+    );
+    assert_eq!(
+        stage.pad_digest(),
+        Some([
+            0x32, 0x85, 0x73, 0x85, 0x65, 0x47, 0xb1, 0x64, 0x6e, 0xca, 0xe8, 0x74, 0x38, 0x15,
+            0xbe, 0x16, 0x1d, 0x5a, 0xba, 0x9b, 0x97, 0x4a, 0xaa, 0xfd, 0xf9, 0x75, 0x6c, 0xe3,
+            0x04, 0x6d, 0x0d, 0x17,
+        ])
+    );
+}
+
 /// Keyboard synthesis reproduces the retired shell table bit-for-bit: the
 /// same slots, the same deflections, the same axis/button counts, and the
 /// same later-entry-wins rule for two held keys on one slot.

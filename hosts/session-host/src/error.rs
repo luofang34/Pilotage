@@ -32,9 +32,13 @@ pub enum HostError {
         /// The rejected value, lossily decoded for this message.
         value: String,
     },
-    /// The Aviate control-feel artifact path is not set.
-    #[error("PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE is required for the Aviate adapter")]
-    AviateControlFeelMissing,
+    /// The checked Aviate control-feel artifact violates its strict schema.
+    #[error("invalid checked Aviate control-feel profile: {source}")]
+    AviateDefaultControlFeelInvalid {
+        /// The parse or validation failure.
+        #[source]
+        source: pilotage_control_feel::ProfileLoadError,
+    },
     /// The Aviate control-feel artifact could not be read.
     #[error("failed to read Aviate control-feel profile {path}: {source}")]
     AviateControlFeelRead {

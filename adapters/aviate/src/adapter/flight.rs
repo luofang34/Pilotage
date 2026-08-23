@@ -71,6 +71,19 @@ impl AviateAdapter {
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
+        match self.activate_pending_control_feel(frame) {
+            Ok(true) => {
+                return ApplyOutcome {
+                    tick,
+                    disposition: Disposition::Accepted,
+                    action_results: Vec::new(),
+                };
+            }
+            Err(detail) => {
+                return rejected_control(tick, RejectReason::Other(detail.to_owned()));
+            }
+            Ok(false) => {}
+        }
         let Some(current) = self.current_pose() else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };

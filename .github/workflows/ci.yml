@@ -101,6 +101,12 @@ jobs:
       - name: Monotonic counter arithmetic guard
         run: bash scripts/check-monotonic-counter-arithmetic.sh
 
+      - name: Aviate control-feel boundary guard self-test
+        run: bash scripts/test-check-aviate-control-feel-boundary.sh
+
+      - name: Aviate control-feel boundary guard
+        run: bash scripts/check-aviate-control-feel-boundary.sh
+
       - name: cargo test
         run: cargo test --all-targets
 

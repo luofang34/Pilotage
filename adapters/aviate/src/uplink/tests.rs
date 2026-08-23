@@ -1,12 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::net::UdpSocket;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pilotage_adapter_api::VehicleAdapter;
 use pilotage_control_feel::{FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
-use pilotage_protocol::VehicleId;
 
 use super::FlightUplink;
 
@@ -20,10 +17,13 @@ fn tuned_profile() -> ValidatedFlightFeelProfile {
     profile.mode = FeelMode::Balanced;
     profile.horizontal.neutral.active_enter = 0.10;
     profile.horizontal.neutral.active_exit = 0.05;
+    profile.horizontal.curve.deadzone = 0.10;
     profile.horizontal.dynamics.apply_accel = 1.0;
     profile.horizontal.dynamics.apply_jerk = 4.0;
     profile.horizontal.dynamics.release_accel = 2.0;
     profile.horizontal.dynamics.release_jerk = 8.0;
+    profile.horizontal.dynamics.reversal_accel = 2.0;
+    profile.horizontal.dynamics.reversal_jerk = 8.0;
     profile.direct.tilt_rate_rps = 0.5;
     profile.direct.tilt_accel_rps2 = 1.0;
     profile.direct.thrust_rate_per_s = 1.0;
@@ -113,14 +113,19 @@ fn compatibility_profile_reproduces_the_velocity_samples() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("read timeout");
-    let profile = validated(FlightFeelProfile::legacy_compatibility());
+    let legacy = FlightFeelProfile::legacy_compatibility();
+    let expected_vertical = -legacy.vertical.curve.apply(0.5) * legacy.envelope.vertical_speed_mps;
+    let profile = validated(legacy);
     let mut uplink = ready_uplink(&fc, profile);
 
     send_normal(&mut uplink, 1.0, None);
     let first = receive(&fc);
     assert!((field(&first, 20) - 5.0 / 60.0).abs() < 1e-5);
     let vertical = field(&first, 24);
-    assert!((vertical + 0.75).abs() < 1e-5, "vertical {vertical}");
+    assert!(
+        (vertical - expected_vertical).abs() < 1e-5,
+        "vertical {vertical}"
+    );
 
     uplink.advance_clock(Duration::from_millis(20));
     send_normal(&mut uplink, 1.0, None);
@@ -151,11 +156,12 @@ fn compatibility_profile_reproduces_direct_mapping() {
     let profile = validated(FlightFeelProfile::legacy_compatibility());
     let mut uplink = ready_uplink(&fc, profile);
 
-    assert!(!uplink.send_attitude_frame(0.2, -0.1, 0.0, 0.9));
+    assert!(!uplink.send_attitude_frame(0.2, -0.1, 0.8, 0.9));
     let frame = receive(&fc);
 
     assert!((direct_roll(&frame) - 0.2).abs() < 1e-5);
     assert!((direct_pitch(&frame) + 0.1).abs() < 1e-5);
+    assert!((direct_yaw(&frame) - 0.8).abs() < 1e-5);
     assert!((field(&frame, 32) - 0.944).abs() < 1e-5);
 }
 
@@ -166,16 +172,16 @@ fn normal_control_uses_apply_release_and_hysteresis() {
         .expect("read timeout");
     let mut uplink = ready_uplink(&fc, tuned_profile());
 
-    send_normal(&mut uplink, 0.20, None);
+    send_normal(&mut uplink, 0.30, None);
     let first = field(&receive(&fc), 20);
     uplink.advance_clock(Duration::from_millis(20));
-    send_normal(&mut uplink, 0.20, None);
+    send_normal(&mut uplink, 0.30, None);
     let entered = field(&receive(&fc), 20);
     uplink.advance_clock(Duration::from_millis(20));
-    send_normal(&mut uplink, 0.07, None);
+    send_normal(&mut uplink, 0.25, None);
     let hysteresis = field(&receive(&fc), 20);
     uplink.advance_clock(Duration::from_millis(20));
-    send_normal(&mut uplink, 0.04, None);
+    send_normal(&mut uplink, 0.15, None);
     let released = field(&receive(&fc), 20);
 
     assert_eq!(first, 0.0, "zero elapsed time cannot advance the shaper");
@@ -184,7 +190,7 @@ fn normal_control_uses_apply_release_and_hysteresis() {
         hysteresis > entered,
         "exit threshold keeps the input active"
     );
-    assert!(released > 0.0 && released < hysteresis);
+    assert!(released > 0.0 && released <= hysteresis);
 }
 
 #[test]
@@ -268,42 +274,6 @@ fn vehicle_reset_reseeds_heading_from_the_next_measurement() {
 }
 
 #[test]
-fn adapter_advertises_the_injected_profile_envelope() {
-    let mut profile = FlightFeelProfile::legacy_compatibility();
-    profile.profile_id = "advertised-envelope".to_owned();
-    profile.envelope.horizontal_speed_mps = 4.0;
-    profile.envelope.vertical_speed_mps = 2.0;
-    profile.envelope.yaw_rate_rps = 0.7;
-    profile.envelope.direct_tilt_rad = 0.4;
-    let uplink = FlightUplink::new_with_profile(validated(profile)).expect("uplink");
-    let state = Arc::new(Mutex::new(pilotage_mavlink::link::LinkState::default()));
-    let adapter = crate::AviateAdapter::from_state(VehicleId::new(1), state).with_uplink(uplink);
-
-    let capabilities = adapter.capabilities();
-    let scopes = &capabilities.vehicles[0].scopes;
-    let normal = scopes
-        .iter()
-        .find(|scope| scope.scope.as_str() == crate::adapter::FLIGHT_SCOPE)
-        .expect("normal scope");
-    let direct = scopes
-        .iter()
-        .find(|scope| scope.scope.as_str() == crate::adapter::DIRECT_SCOPE)
-        .expect("direct scope");
-    assert_eq!(normal.intents[0].max_linear, 4.0);
-    assert_eq!(normal.intents[0].max_vertical, 2.0);
-    assert_eq!(normal.intents[0].max_angular, 0.7);
-    assert_eq!(direct.intents[0].max_angular, 0.4);
-    assert_eq!(direct.intents[0].max_yaw_rate, 0.7);
-    assert!(capabilities.adapter_version.contains("feel-schema=1"));
-    assert!(
-        capabilities
-            .adapter_version
-            .contains("feel-id=advertised-envelope")
-    );
-    assert!(capabilities.adapter_version.contains("feel-sha256="));
-}
-
-#[test]
 fn direct_entry_and_mode_switch_keep_thrust_above_the_profile_floor() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
@@ -312,7 +282,7 @@ fn direct_entry_and_mode_switch_keep_thrust_above_the_profile_floor() {
 
     assert!(uplink.send_attitude_frame(0.5, 0.0, 1.0, 1.0));
     let first = receive(&fc);
-    assert!(field(&first, 32) >= 0.30);
+    assert!(field(&first, 32) >= 0.762);
 
     uplink.advance_clock(Duration::from_millis(20));
     send_normal(&mut uplink, 0.5, None);
@@ -334,11 +304,11 @@ fn direct_entry_starts_from_the_measured_attitude() {
     let first = receive(&fc);
     assert!((direct_roll(&first) - 0.2).abs() < 1e-5);
     assert!((direct_pitch(&first) + 0.1).abs() < 1e-5);
-    assert!(field(&first, 32) >= 0.30);
+    assert!(field(&first, 32) >= 0.762);
 }
 
 #[test]
-fn normal_entry_starts_from_the_measured_velocity() {
+fn normal_mode_switch_starts_from_the_measured_velocity() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("read timeout");
@@ -380,24 +350,38 @@ fn direct_heading_is_limited_by_the_advertised_rate() {
 }
 
 #[test]
-fn normal_release_never_increases_the_velocity_command() {
+fn normal_release_preserves_rate_continuity_and_converges() {
     let fc = UdpSocket::bind("127.0.0.1:0").expect("fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(2)))
         .expect("read timeout");
     let mut uplink = ready_uplink(&fc, tuned_profile());
+    let mut before_prior = 0.0;
     let mut prior = 0.0;
     for _ in 0..30 {
         uplink.advance_clock(Duration::from_millis(20));
         send_normal(&mut uplink, 1.0, None);
+        before_prior = prior;
         prior = field(&receive(&fc), 20).abs();
     }
-    for _ in 0..30 {
+    uplink.advance_clock(Duration::from_millis(20));
+    send_normal(&mut uplink, 0.0, None);
+    let first_release = field(&receive(&fc), 20).abs();
+    let apply_step = prior - before_prior;
+    let release_step = first_release - prior;
+    let maximum_step_change = 8.0 * 0.02 * 0.02;
+    assert!(
+        first_release > prior,
+        "release cannot reset a positive rate"
+    );
+    assert!((release_step - apply_step).abs() <= maximum_step_change + 1e-5);
+
+    let mut value = first_release;
+    for _ in 0..60 {
         uplink.advance_clock(Duration::from_millis(20));
         send_normal(&mut uplink, 0.0, None);
-        let value = field(&receive(&fc), 20).abs();
-        assert!(value <= prior + 1e-5, "{value} followed {prior}");
-        prior = value;
+        value = field(&receive(&fc), 20).abs();
     }
+    assert!(value < 1e-5, "release ended at {value}");
 }
 
 #[test]

@@ -1,0 +1,18 @@
+{
+  "device_id": "1209-4f54-RadioMaster Pocket",
+  "raw_axes": [0.25, 0.5, 0.75, -0.5],
+  "expected_frames": [
+    {
+      "north_mps": -0.083333336,
+      "east_mps": 0.083333336,
+      "down_mps": -0.98813194,
+      "yaw_rad": 1.5707964
+    },
+    {
+      "north_mps": -0.18333334,
+      "east_mps": 0.18333334,
+      "down_mps": -0.98813194,
+      "yaw_rad": 1.5643367
+    }
+  ]
+}

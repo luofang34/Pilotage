@@ -2,6 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ProfileBindings;
+
+const LEGACY_DEVICE_PROFILE_SHA256: [u8; 32] = [
+    0x32, 0x85, 0x73, 0x85, 0x65, 0x47, 0xb1, 0x64, 0x6e, 0xca, 0xe8, 0x74, 0x38, 0x15, 0xbe, 0x16,
+    0x1d, 0x5a, 0xba, 0x9b, 0x97, 0x4a, 0xaa, 0xfd, 0xf9, 0x75, 0x6c, 0xe3, 0x04, 0x6d, 0x0d, 0x17,
+];
+const LEGACY_FLIGHT_CONTROLLER_SHA256: [u8; 32] = [
+    0x06, 0x69, 0xf5, 0x34, 0x45, 0x32, 0xba, 0xe5, 0xff, 0x81, 0x71, 0x93, 0xe0, 0xec, 0xbd, 0x33,
+    0x67, 0xe2, 0x35, 0xa4, 0x1d, 0x06, 0x44, 0x36, 0xfc, 0xff, 0x45, 0xe2, 0x7c, 0xed, 0x55, 0xcd,
+];
+
 /// The supported control-feel schema version.
 pub const SCHEMA_VERSION: u16 = 1;
 
@@ -43,8 +54,14 @@ pub struct DemandEnvelope {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AxisCurve {
-    /// Curve exponent offset. Zero gives a linear response.
-    pub expo: f32,
+    /// Input magnitude at which the curve starts.
+    pub deadzone: f32,
+    /// Exponent offset near the center. Zero gives a linear response.
+    pub center_expo: f32,
+    /// Exponent offset near full input. Zero gives a linear response.
+    pub outer_expo: f32,
+    /// Input magnitude at which the outer curve starts to blend.
+    pub outer_start: f32,
 }
 
 impl AxisCurve {
@@ -55,19 +72,33 @@ impl AxisCurve {
             return 0.0;
         }
         let bounded = value.clamp(-1.0, 1.0);
-        let exponent = 1.0 + self.expo.clamp(0.0, 0.8);
-        bounded.signum() * bounded.abs().powf(exponent)
+        let deadzone = self.deadzone.clamp(0.0, 1.0 - f32::EPSILON);
+        let magnitude = bounded.abs();
+        if magnitude <= deadzone {
+            return 0.0;
+        }
+        let scaled = (magnitude - deadzone) / (1.0 - deadzone);
+        let center = scaled.powf(1.0 + self.center_expo);
+        let outer = scaled.powf(1.0 + self.outer_expo);
+        let blend = if self.outer_start >= 1.0 {
+            0.0
+        } else {
+            ((scaled - self.outer_start) / (1.0 - self.outer_start)).clamp(0.0, 1.0)
+        };
+        bounded.signum() * (center + (outer - center) * blend)
     }
 }
 
-/// Hysteresis for active and neutral input states.
+/// Hysteresis for curved demand and neutral states.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NeutralBand {
-    /// Magnitude that changes a neutral input to active.
+    /// Curved magnitude that changes a neutral input to active.
     pub active_enter: f32,
-    /// Magnitude that changes an active input to neutral.
+    /// Curved magnitude that changes an active input to neutral.
     pub active_exit: f32,
+    /// Continuous neutral interval before release, in milliseconds.
+    pub dwell_ms: u32,
 }
 
 /// Time-domain limits for one demand axis.
@@ -82,6 +113,10 @@ pub struct AxisDynamics {
     pub apply_jerk: f32,
     /// Maximum demand jerk while input is neutral.
     pub release_jerk: f32,
+    /// Maximum demand acceleration during a direction reversal.
+    pub reversal_accel: f32,
+    /// Maximum demand jerk during a direction reversal.
+    pub reversal_jerk: f32,
 }
 
 /// Curve, hysteresis, and time response for one demand family.
@@ -134,6 +169,8 @@ pub struct FlightFeelProfile {
     pub profile_id: String,
     /// Named operator mode.
     pub mode: FeelMode,
+    /// Artifact identities required by this profile.
+    pub bindings: ProfileBindings,
     /// Full-input demand limits.
     pub envelope: DemandEnvelope,
     /// Horizontal demand response.
@@ -153,22 +190,38 @@ impl FlightFeelProfile {
     #[must_use]
     pub fn legacy_compatibility() -> Self {
         let axis = AxisResponse {
-            curve: AxisCurve { expo: 0.0 },
+            curve: AxisCurve {
+                deadzone: 0.06,
+                center_expo: 0.35,
+                outer_expo: 0.35,
+                outer_start: 1.0,
+            },
             neutral: NeutralBand {
                 active_enter: 0.02,
                 active_exit: 0.02,
+                dwell_ms: 0,
             },
             dynamics: AxisDynamics {
                 apply_accel: 5.0,
                 release_accel: 10_000.0,
                 apply_jerk: 100_000.0,
                 release_jerk: 100_000.0,
+                reversal_accel: 10_000.0,
+                reversal_jerk: 100_000.0,
             },
         };
         Self {
             schema_version: SCHEMA_VERSION,
             profile_id: "alia250-legacy-v1".to_owned(),
             mode: FeelMode::LegacyCompatibility,
+            bindings: ProfileBindings {
+                device_profile_sha256: crate::DeviceProfileDigest::from_bytes(
+                    LEGACY_DEVICE_PROFILE_SHA256,
+                ),
+                flight_controller_sha256: crate::FlightControllerDigest::from_bytes(
+                    LEGACY_FLIGHT_CONTROLLER_SHA256,
+                ),
+            },
             envelope: DemandEnvelope {
                 horizontal_speed_mps: 3.0,
                 vertical_speed_mps: 1.5,

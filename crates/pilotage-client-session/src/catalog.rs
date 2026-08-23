@@ -17,6 +17,8 @@ pub struct Admission {
     pub host_version: String,
     /// Every vehicle the host offers, with its control scopes.
     pub vehicles: Vec<VehicleCatalog>,
+    /// Active control-feel identity, when the host has one.
+    pub control_feel: Option<wire::ControlFeelIdentity>,
     /// Present holders at the moment of admission, so ownership renders
     /// without waiting for the next authority event.
     pub scope_holders: Vec<wire::ScopeHolderSnapshot>,
@@ -80,6 +82,7 @@ impl Admission {
             principal_id,
             host_version: capabilities.host_version,
             vehicles,
+            control_feel: capabilities.control_feel,
             scope_holders: welcome.scope_holders.clone(),
         })
     }

@@ -1,6 +1,7 @@
 //! FFI records and events for the host link.
 
 use pilotage_client_session::Admission;
+use pilotage_protocol::wire;
 
 use crate::error::FfiError;
 
@@ -53,6 +54,38 @@ pub struct LinkVehicle {
     pub scopes: Vec<LinkScope>,
 }
 
+/// Identity of the active control-feel artifact.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct LinkControlFeelIdentity {
+    /// Stable profile identity.
+    pub profile_id: String,
+    /// Selected control-feel mode.
+    pub mode: LinkControlFeelMode,
+    /// Profile schema version.
+    pub schema_version: u32,
+    /// SHA-256 of the complete profile artifact.
+    pub profile_sha256: Vec<u8>,
+    /// SHA-256 of the bound input-device profile.
+    pub device_profile_sha256: Vec<u8>,
+    /// SHA-256 of the bound flight-controller artifact.
+    pub flight_controller_sha256: Vec<u8>,
+}
+
+/// One control-feel mode from the host.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
+pub enum LinkControlFeelMode {
+    /// The host sent no supported mode.
+    Unspecified,
+    /// The response gives priority to exact small inputs.
+    Precision,
+    /// The response balances small inputs and full inputs.
+    Balanced,
+    /// The response gives priority to fast full inputs.
+    Agile,
+    /// The response keeps the established command behavior.
+    LegacyCompatibility,
+}
+
 /// What an admitted session offers, in the shell's vocabulary.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LinkCatalog {
@@ -64,6 +97,8 @@ pub struct LinkCatalog {
     pub host_version: String,
     /// Offered vehicles.
     pub vehicles: Vec<LinkVehicle>,
+    /// Active control-feel identity, when the host has one.
+    pub control_feel: Option<LinkControlFeelIdentity>,
 }
 
 /// One typed link event for the shell.
@@ -190,6 +225,17 @@ impl LinkCatalog {
             session_id: admission.session_id,
             principal_id: admission.principal_id,
             host_version: admission.host_version.clone(),
+            control_feel: admission
+                .control_feel
+                .as_ref()
+                .map(|identity| LinkControlFeelIdentity {
+                    profile_id: identity.profile_id.clone(),
+                    mode: control_feel_mode(identity.mode),
+                    schema_version: identity.schema_version,
+                    profile_sha256: identity.profile_sha256.clone(),
+                    device_profile_sha256: identity.device_profile_sha256.clone(),
+                    flight_controller_sha256: identity.flight_controller_sha256.clone(),
+                }),
             vehicles: admission
                 .vehicles
                 .iter()
@@ -217,6 +263,16 @@ impl LinkCatalog {
                 })
                 .collect(),
         }
+    }
+}
+
+fn control_feel_mode(value: i32) -> LinkControlFeelMode {
+    match wire::ControlFeelMode::try_from(value) {
+        Ok(wire::ControlFeelMode::Precision) => LinkControlFeelMode::Precision,
+        Ok(wire::ControlFeelMode::Balanced) => LinkControlFeelMode::Balanced,
+        Ok(wire::ControlFeelMode::Agile) => LinkControlFeelMode::Agile,
+        Ok(wire::ControlFeelMode::LegacyCompatibility) => LinkControlFeelMode::LegacyCompatibility,
+        Ok(wire::ControlFeelMode::Unspecified) | Err(_) => LinkControlFeelMode::Unspecified,
     }
 }
 
