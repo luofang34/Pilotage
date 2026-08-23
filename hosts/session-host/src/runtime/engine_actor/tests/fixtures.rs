@@ -57,11 +57,22 @@ pub(super) struct RecordingAdapter {
     /// The discrete actions of every `apply_control` call, in call order —
     /// the exactly-once observable for the dedup tests.
     pub(super) applied_actions: Vec<Vec<pilotage_protocol::ControlAction>>,
+    /// Control-feel identity returned by the adapter's capability report.
+    pub(super) control_feel: Option<ControlFeelDescriptor>,
+    /// Candidate that a successful control apply activates.
+    pub(super) next_control_feel: Option<ControlFeelDescriptor>,
+    pub(super) control_feel_change: Option<ControlFeelDescriptor>,
 }
 
 impl VehicleAdapter for RecordingAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
-        capabilities()
+        let mut capabilities = capabilities();
+        capabilities.control_feel = self.control_feel.clone();
+        capabilities
+    }
+
+    fn take_control_feel_change(&mut self) -> Option<ControlFeelDescriptor> {
+        self.control_feel_change.take()
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {
@@ -73,6 +84,12 @@ impl VehicleAdapter for RecordingAdapter {
         } else {
             Disposition::Accepted
         };
+        if !matches!(disposition, Disposition::Rejected(_))
+            && let Some(next) = self.next_control_feel.take()
+        {
+            self.control_feel = Some(next.clone());
+            self.control_feel_change = Some(next);
+        }
         ApplyOutcome {
             tick: SimTick::new(0),
             disposition,

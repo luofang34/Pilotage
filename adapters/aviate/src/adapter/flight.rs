@@ -60,6 +60,15 @@ fn send_motion_intent(
     }
 }
 
+fn intent_belongs_to_scope(frame: &ScopedControlFrame) -> bool {
+    matches!(
+        (frame.scope.as_str(), frame.intent.as_ref()),
+        (_, None)
+            | (FLIGHT_SCOPE, Some(ControlIntent::Velocity(_)))
+            | (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(_)))
+    )
+}
+
 impl AviateAdapter {
     /// Enacts one flight-scope frame: the gate chain, then the velocity
     /// or attitude demand the scope's family carries.
@@ -71,7 +80,16 @@ impl AviateAdapter {
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
-        match self.activate_pending_control_feel(frame) {
+        if !intent_belongs_to_scope(frame) {
+            return rejected_control(
+                tick,
+                RejectReason::Other("intent family does not belong to this scope".to_owned()),
+            );
+        }
+        let Some(current) = self.current_pose() else {
+            return rejected_control(tick, RejectReason::MeasurementUnavailable);
+        };
+        match self.activate_pending_control_feel(frame, current.attitude_rad[2]) {
             Ok(true) => {
                 return ApplyOutcome {
                     tick,
@@ -84,9 +102,6 @@ impl AviateAdapter {
             }
             Ok(false) => {}
         }
-        let Some(current) = self.current_pose() else {
-            return rejected_control(tick, RejectReason::MeasurementUnavailable);
-        };
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };

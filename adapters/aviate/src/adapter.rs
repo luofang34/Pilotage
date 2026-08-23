@@ -7,8 +7,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use pilotage_adapter_api::{
-    ActionResult, AdapterCapabilities, ApplyOutcome, LinkLossPolicy, RejectReason,
-    SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter, VideoSource,
+    ActionResult, AdapterCapabilities, ApplyOutcome, ControlFeelDescriptor, LinkLossPolicy,
+    RejectReason, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
+    VideoSource,
 };
 use pilotage_control_feel::{FeelDigest, ValidatedFlightFeelProfile};
 use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
@@ -33,6 +34,7 @@ use sim_attachments::no_camera;
 use sim_attachments::{CameraBridge, Pointing, TruthOracle};
 
 mod control;
+mod control_feel;
 mod flight;
 #[cfg(feature = "sim")]
 mod pointing;
@@ -44,6 +46,7 @@ mod startup;
 use control::rejected_control;
 use sampling::mavlink_batch;
 use sources::{ArmReport, EstimateSource};
+pub(crate) use startup::validate_aviate_profile_bindings;
 
 /// The control scope exposes four canonical flight axes as DJI-style
 /// velocity demands.
@@ -81,25 +84,6 @@ pub const DISARM_BUTTON: u16 = 1;
 /// the Gazebo adapter's dead-reader path).
 const WITHHOLD_AFTER: Duration = Duration::from_secs(3);
 
-/// Identity of the selected control-feel artifact.
-#[derive(Debug, Clone)]
-struct ControlFeelIdentity {
-    profile_id: String,
-    schema: u16,
-    digest: FeelDigest,
-}
-
-impl ControlFeelIdentity {
-    fn from_profile(profile: &ValidatedFlightFeelProfile) -> Result<Self, AviateAdapterError> {
-        Ok(Self {
-            profile_id: profile.profile().profile_id.clone(),
-            schema: profile.profile().schema_version,
-            digest: FeelDigest::calculate(profile)
-                .map_err(|source| AviateAdapterError::ControlFeelIdentity { source })?,
-        })
-    }
-}
-
 /// Telemetry-only adapter for the Aviate flight controller (ADR-0018).
 ///
 /// Real-time (ADR-0013): the FC/simulation advances on its own clock;
@@ -120,7 +104,8 @@ pub struct AviateAdapter {
     estimate: Option<EstimateSource>,
     truth: Option<Box<TruthOracle>>,
     uplink: Option<FlightUplink>,
-    control_feel_identity: Option<ControlFeelIdentity>,
+    control_feel_profiles: Option<control_feel::ControlFeelProfiles>,
+    control_feel_changed: bool,
     // Pilotage's Gazebo sidecar bridges the flight world's camera topics;
     // the adapter remains usable without video when the sidecar cannot spawn.
     frames: Option<tokio::sync::mpsc::Receiver<pilotage_adapter_api::RawVideoFrame>>,
@@ -162,6 +147,76 @@ pub struct AviateAdapter {
 }
 
 impl AviateAdapter {
+    /// Stages one validated control-feel artifact.
+    ///
+    /// The active artifact does not change until a flight frame is neutral
+    /// under both artifacts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the artifact does not match this adapter.
+    pub fn stage_control_feel(
+        &mut self,
+        candidate: ValidatedFlightFeelProfile,
+    ) -> Result<FeelDigest, AviateAdapterError> {
+        if self.profile == AviateProfile::Physical {
+            return Err(AviateAdapterError::PhysicalControlFeelOverride {
+                profile_id: candidate.profile().profile_id.clone(),
+            });
+        }
+        startup::validate_adapter_control_feel(&candidate)?;
+        self.control_feel_profiles
+            .as_mut()
+            .ok_or_else(|| AviateAdapterError::UnsupportedControlFeel {
+                detail: "the adapter has no active control-feel artifact".to_owned(),
+            })?
+            .stage(candidate)
+    }
+
+    /// Stages the complete prior artifact for rollback.
+    ///
+    /// The rollback uses the same neutral boundary as a forward activation.
+    #[must_use]
+    pub fn stage_control_feel_rollback(&mut self) -> bool {
+        if self.profile == AviateProfile::Physical {
+            return false;
+        }
+        self.control_feel_profiles
+            .as_mut()
+            .is_some_and(control_feel::ControlFeelProfiles::stage_rollback)
+    }
+
+    fn activate_pending_control_feel(
+        &mut self,
+        frame: &ScopedControlFrame,
+        current_yaw_rad: f32,
+    ) -> Result<bool, &'static str> {
+        let (Some(profiles), Some(uplink)) = (&mut self.control_feel_profiles, &mut self.uplink)
+        else {
+            return Ok(false);
+        };
+        if !profiles.pending_is_neutral(frame, uplink.monotonic_now()) {
+            return Ok(false);
+        }
+        match uplink.prepare_control_feel_activation(current_yaw_rad) {
+            Ok(true) => {}
+            Ok(false) => return Ok(false),
+            Err(detail) => return Err(detail),
+        }
+        let Some(next) = profiles.commit_pending() else {
+            return Err("the pending control-feel artifact was not available");
+        };
+        uplink.install_profile(next.profile);
+        self.control_feel_changed = true;
+        tracing::info!(
+            feel_profile_id = %next.identity.profile_id,
+            feel_schema = next.identity.schema,
+            feel_digest = %next.identity.digest,
+            "Aviate control-feel profile activated"
+        );
+        Ok(true)
+    }
+
     /// Takes the raw-frame receiver for the host media task, if cameras
     /// are up and it has not been taken.
     pub fn subscribe_frames(
@@ -179,7 +234,8 @@ impl AviateAdapter {
             estimate: Some(EstimateSource { state, _link: None }),
             truth: None,
             uplink: None,
-            control_feel_identity: None,
+            control_feel_profiles: None,
+            control_feel_changed: false,
             frames: None,
             camera_bridge: None,
             pointing: None,
@@ -224,24 +280,16 @@ impl AviateAdapter {
     /// Installs a test uplink, for tests.
     #[cfg(test)]
     pub(crate) fn with_uplink(mut self, uplink: FlightUplink) -> Self {
-        let (profile_id, schema, digest) = uplink.feel_identity();
-        self.control_feel_identity = Some(ControlFeelIdentity {
-            profile_id: profile_id.to_owned(),
-            schema,
-            digest,
-        });
+        self.control_feel_profiles =
+            control_feel::ControlFeelProfiles::new(uplink.active_profile_for_test().clone()).ok();
         self.uplink = Some(uplink);
         self
     }
 
-    fn feel_identity(&self) -> Option<(&str, u16, FeelDigest)> {
-        self.control_feel_identity.as_ref().map(|identity| {
-            (
-                identity.profile_id.as_str(),
-                identity.schema,
-                identity.digest,
-            )
-        })
+    fn feel_entry(&self) -> Option<&control_feel::ControlFeelEntry> {
+        self.control_feel_profiles
+            .as_ref()
+            .map(control_feel::ControlFeelProfiles::active)
     }
 
     /// The bound uplink, for tests that drive its manual clock.
@@ -314,6 +362,14 @@ fn process_flight_actions(
 impl VehicleAdapter for AviateAdapter {
     fn capabilities(&self) -> AdapterCapabilities {
         self.advertised_capabilities()
+    }
+
+    fn take_control_feel_change(&mut self) -> Option<ControlFeelDescriptor> {
+        if !core::mem::take(&mut self.control_feel_changed) {
+            return None;
+        }
+        self.feel_entry()
+            .map(advertisement::control_feel_descriptor)
     }
 
     fn apply_control(&mut self, frame: &ScopedControlFrame) -> ApplyOutcome {

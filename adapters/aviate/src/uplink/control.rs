@@ -10,6 +10,46 @@ use super::feel::UplinkMode;
 use super::{FlightUplink, MAX_DT_S};
 
 impl FlightUplink {
+    /// Prepares one neutral control-feel activation.
+    ///
+    /// `Ok(false)` means that the active command sequence is not ready.
+    /// `Ok(true)` means that the adapter can commit the candidate.
+    pub(crate) fn prepare_control_feel_activation(
+        &mut self,
+        current_yaw_rad: f32,
+    ) -> Result<bool, &'static str> {
+        if !current_yaw_rad.is_finite() {
+            return Err("the measured heading is not finite");
+        }
+        let now = self.clock.now();
+        if self.in_quiet_interval(now) {
+            return Ok(false);
+        }
+        let prior_heading = self.heading_sp_rad;
+        let prior_heading_valid = self.heading_valid;
+        self.heading_sp_rad = wrap_pi(current_yaw_rad);
+        self.heading_valid = true;
+        if !self.airborne {
+            return Ok(true);
+        }
+        let failures_before = self.send_failures();
+        let frame = encode_velocity_setpoint(
+            self.seq,
+            self.time_boot_ms(),
+            [0.0; 3],
+            self.heading_sp_rad,
+            self.expected_system_id,
+            self.expected_component_id,
+        );
+        self.send(&frame);
+        if self.send_failures() != failures_before {
+            self.heading_sp_rad = prior_heading;
+            self.heading_valid = prior_heading_valid;
+            return Err("the neutral activation setpoint was not sent");
+        }
+        Ok(true)
+    }
+
     /// Sends one direct attitude and thrust setpoint.
     pub fn send_attitude_frame(
         &mut self,

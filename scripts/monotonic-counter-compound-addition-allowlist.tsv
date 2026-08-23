@@ -4,6 +4,8 @@ adapters/px4/src/gimbal.rs	*at += by;
 adapters/px4/src/uplink.rs	*at += by;
 adapters/px4/src/uplink.rs	wrapped += 2.0 * core::f32::consts::PI;
 crates/pilotage-camera-calibration/src/calibration/recovery.rs	sum_sq += err * err;
+crates/pilotage-control-feel/src/shaper.rs	self.neutral_s += dt_s;
+crates/pilotage-control-feel/src/shaper.rs	self.rate += rate_delta;
 crates/pilotage-control-feel/src/shaper.rs	self.stable_s += dt_s;
 crates/pilotage-geo/src/abi/codec.rs	self.off += b.len();
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Pressed => presses += 1,

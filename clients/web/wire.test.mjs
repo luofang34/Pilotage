@@ -10,6 +10,7 @@
 // required fields are emitted even when their ids are zero.
 
 import { readFileSync } from "node:fs";
+import { lengthDelimit } from "./envelope-framing.js";
 import {
   encodeControlFrameEnvelope,
   encodeMediaAttachRequestEnvelope,
@@ -34,6 +35,19 @@ function check(name, cond) {
 check(
   "current clients advertise the multiplexed-video session capability",
   SESSION_PROTOCOL_VERSION === 2,
+);
+
+const mediaAttachEnvelope = encodeMediaAttachRequestEnvelope();
+const framedMediaAttach = lengthDelimit(mediaAttachEnvelope);
+check(
+  "length framing preserves an envelope",
+  framedMediaAttach[0] === mediaAttachEnvelope.length &&
+    framedMediaAttach.subarray(1).every((byte, index) => byte === mediaAttachEnvelope[index]),
+);
+const framedBoundary = lengthDelimit(new Uint8Array(128));
+check(
+  "length framing uses a canonical multi-byte varint",
+  framedBoundary[0] === 0x80 && framedBoundary[1] === 0x01,
 );
 
 // Minimal protobuf field walker: returns a Map of field number -> the raw bytes

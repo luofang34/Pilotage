@@ -1699,6 +1699,8 @@ dependencies = [
  "pilotage-protocol",
  "pilotage-sim-video",
  "pilotage-timing",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

@@ -1,13 +1,18 @@
 //! Control-feel artifact and activation transaction tests.
 
+mod neutral_boundary;
+mod notifications;
+
 use std::time::Duration;
 
 use pilotage_adapter_api::{Disposition, VehicleAdapter};
 use pilotage_control_feel::{FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
-use pilotage_protocol::{LogicalAxisId, VehicleId};
+use pilotage_protocol::{ButtonEdge, LogicalAxisId, LogicalButtonId, ScopeId, VehicleId};
 
-use super::super::{AviateAdapter, PITCH_AXIS};
-use super::fixtures::{flight_frame, state_with};
+use super::super::{
+    ARM_BUTTON, AviateAdapter, AviateProfile, DIRECT_SCOPE, FLIGHT_SCOPE, PITCH_AXIS, THROTTLE_AXIS,
+};
+use super::fixtures::{direct_frame, flight_frame, state_with};
 
 fn candidate(id: &str) -> ValidatedFlightFeelProfile {
     let mut profile = FlightFeelProfile::legacy_compatibility();
@@ -31,6 +36,37 @@ fn adapter_with_fc(fc: &std::net::UdpSocket) -> AviateAdapter {
     .with_uplink(uplink)
 }
 
+fn airborne_adapter_with_fc(fc: &std::net::UdpSocket) -> AviateAdapter {
+    let mut adapter = adapter_with_fc(fc);
+    make_airborne(&mut adapter, fc);
+    adapter
+}
+
+fn make_airborne(adapter: &mut AviateAdapter, fc: &std::net::UdpSocket) {
+    fc.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read timeout");
+    let arm = flight_frame(
+        vec![],
+        vec![(LogicalButtonId::new(ARM_BUTTON), ButtonEdge::Pressed)],
+    );
+    assert_eq!(
+        adapter.apply_control(&arm).disposition,
+        Disposition::Accepted
+    );
+    let mut frame = [0_u8; 128];
+    fc.recv_from(&mut frame).expect("arm frame");
+    adapter
+        .uplink_mut()
+        .expect("uplink")
+        .advance_clock(Duration::from_millis(200));
+    let climb = flight_frame(vec![(LogicalAxisId::new(THROTTLE_AXIS), 0.5)], vec![]);
+    assert_eq!(
+        adapter.apply_control(&climb).disposition,
+        Disposition::Accepted
+    );
+    fc.recv_from(&mut frame).expect("takeoff frame");
+}
+
 fn active_digest(adapter: &AviateAdapter) -> [u8; 32] {
     adapter
         .capabilities()
@@ -50,6 +86,21 @@ fn field(frame: &[u8; 128], offset: usize) -> f32 {
         frame[12 + offset],
         frame[13 + offset],
     ])
+}
+
+fn assert_no_frame(fc: &std::net::UdpSocket) {
+    let mut frame = [0_u8; 128];
+    let error = fc.recv_from(&mut frame).expect_err("no FC frame");
+    assert!(matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ));
+}
+
+fn receive_frame(fc: &std::net::UdpSocket, detail: &str) -> [u8; 128] {
+    let mut frame = [0_u8; 128];
+    fc.recv_from(&mut frame).expect(detail);
+    frame
 }
 
 #[test]
@@ -99,13 +150,7 @@ fn uplink_refuses_a_changed_envelope_and_advertises_the_required_artifact() {
     assert_eq!(normal.intents[0].max_angular, 0.9);
     assert_eq!(direct.intents[0].max_angular, 0.6);
     assert_eq!(direct.intents[0].max_yaw_rate, 0.9);
-    assert_eq!(
-        capabilities.adapter_version,
-        format!(
-            "{};control-clock=system-monotonic-v1",
-            env!("CARGO_PKG_VERSION")
-        )
-    );
+    assert_eq!(capabilities.adapter_version, env!("CARGO_PKG_VERSION"));
     let feel = capabilities.control_feel.expect("typed feel identity");
     assert_eq!(
         feel.device_profile_sha256,
@@ -149,7 +194,7 @@ fn activation_waits_for_union_neutral_and_sends_neutral_first() {
     let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(1)))
         .expect("read timeout");
-    let mut adapter = adapter_with_fc(&fc);
+    let mut adapter = airborne_adapter_with_fc(&fc);
     let before = active_digest(&adapter);
     let next = candidate("alia250-balanced-test");
     let expected = *FeelDigest::calculate(&next).expect("digest").as_bytes();
@@ -160,11 +205,16 @@ fn activation_waits_for_union_neutral_and_sends_neutral_first() {
         adapter.apply_control(&active).disposition,
         Disposition::Accepted
     );
+    receive_frame(&fc, "active response frame");
     assert_eq!(active_digest(&adapter), before);
 
     let neutral_only_for_active =
         flight_frame(vec![(LogicalAxisId::new(PITCH_AXIS), 0.08)], vec![]);
-    adapter.apply_control(&neutral_only_for_active);
+    assert_eq!(
+        adapter.apply_control(&neutral_only_for_active).disposition,
+        Disposition::Accepted
+    );
+    receive_frame(&fc, "partial-neutral response frame");
     assert_eq!(active_digest(&adapter), before);
 
     adapter
@@ -178,17 +228,34 @@ fn activation_waits_for_union_neutral_and_sends_neutral_first() {
     assert_eq!(active_digest(&adapter), expected);
     assert!(!adapter.uplink_hold_captured());
 
-    let mut frame = [0_u8; 128];
-    fc.recv_from(&mut frame).expect("activation neutral frame");
+    let frame = receive_frame(&fc, "activation neutral frame");
     for offset in [16, 20, 24] {
         assert!(field(&frame, offset).abs() < f32::EPSILON);
     }
 }
 
 #[test]
+fn a_fresh_ground_neutral_activation_commits_without_an_fc_packet() {
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_millis(20)))
+        .expect("read timeout");
+    let mut adapter = adapter_with_fc(&fc);
+    let next = candidate("alia250-balanced-ground");
+    let expected = *FeelDigest::calculate(&next).expect("digest").as_bytes();
+    adapter.stage_control_feel(next).expect("stage candidate");
+
+    assert_eq!(
+        adapter.apply_control(&neutral_frame()).disposition,
+        Disposition::Accepted
+    );
+    assert_eq!(active_digest(&adapter), expected);
+    assert_no_frame(&fc);
+}
+
+#[test]
 fn rejection_preserves_active_and_rollback_restores_the_complete_artifact() {
     let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
-    let mut adapter = adapter_with_fc(&fc);
+    let mut adapter = airborne_adapter_with_fc(&fc);
     let original = active_digest(&adapter);
 
     let mut unsafe_profile = FlightFeelProfile::legacy_compatibility();
@@ -212,8 +279,25 @@ fn a_rejected_neutral_output_preserves_active_and_pending_artifacts() {
     let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
     fc.set_read_timeout(Some(Duration::from_secs(1)))
         .expect("read timeout");
-    let mut adapter = adapter_with_fc(&fc);
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    let mut uplink = crate::FlightUplink::new().expect("uplink");
+    uplink.set_target(fc.local_addr().expect("FC address"));
+    uplink.use_manual_clock();
+    let mut adapter =
+        AviateAdapter::from_state(VehicleId::new(1), state.clone()).with_uplink(uplink);
+    make_airborne(&mut adapter, &fc);
     let original = active_digest(&adapter);
+    let prior_heading = adapter
+        .uplink_mut()
+        .expect("uplink")
+        .heading_state_for_test();
+    state
+        .lock()
+        .expect("state lock")
+        .attitude
+        .as_mut()
+        .expect("attitude")
+        .quat_wxyz = [1.0, 0.0, 0.0, 0.0];
     let next = candidate("alia250-balanced-send-retry");
     let expected = *FeelDigest::calculate(&next).expect("digest").as_bytes();
     adapter.stage_control_feel(next).expect("stage candidate");
@@ -225,6 +309,13 @@ fn a_rejected_neutral_output_preserves_active_and_pending_artifacts() {
     let failed = adapter.apply_control(&neutral_frame());
     assert!(matches!(failed.disposition, Disposition::Rejected(_)));
     assert_eq!(active_digest(&adapter), original);
+    assert_eq!(
+        adapter
+            .uplink_mut()
+            .expect("uplink")
+            .heading_state_for_test(),
+        prior_heading
+    );
 
     adapter
         .uplink_mut()
@@ -235,6 +326,159 @@ fn a_rejected_neutral_output_preserves_active_and_pending_artifacts() {
         Disposition::Accepted
     );
     assert_eq!(active_digest(&adapter), expected);
+    let (heading, valid) = adapter
+        .uplink_mut()
+        .expect("uplink")
+        .heading_state_for_test();
+    assert!(valid);
+    assert!(heading.abs() < f32::EPSILON);
     let mut frame = [0_u8; 128];
     fc.recv_from(&mut frame).expect("activation neutral frame");
+}
+
+#[test]
+fn a_neutral_intent_in_the_wrong_scope_does_not_activate_a_candidate() {
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    let mut adapter = airborne_adapter_with_fc(&fc);
+    let original = active_digest(&adapter);
+    let velocity_candidate = candidate("alia250-balanced-scope-velocity");
+    let velocity_digest = *FeelDigest::calculate(&velocity_candidate)
+        .expect("velocity candidate digest")
+        .as_bytes();
+    adapter
+        .stage_control_feel(velocity_candidate)
+        .expect("stage velocity candidate");
+
+    let mut velocity_in_direct = neutral_frame();
+    velocity_in_direct.scope = ScopeId::new(DIRECT_SCOPE);
+    assert!(matches!(
+        adapter.apply_control(&velocity_in_direct).disposition,
+        Disposition::Rejected(_)
+    ));
+    assert_eq!(active_digest(&adapter), original);
+    assert_eq!(
+        adapter.apply_control(&neutral_frame()).disposition,
+        Disposition::Accepted
+    );
+    assert_eq!(active_digest(&adapter), velocity_digest);
+
+    let attitude_candidate = candidate("alia250-balanced-scope-attitude");
+    let attitude_digest = *FeelDigest::calculate(&attitude_candidate)
+        .expect("attitude candidate digest")
+        .as_bytes();
+    adapter
+        .stage_control_feel(attitude_candidate)
+        .expect("stage attitude candidate");
+    let mut attitude_in_velocity = direct_frame(0.0, 0.0, 0.0, 0.5);
+    attitude_in_velocity.scope = ScopeId::new(FLIGHT_SCOPE);
+    assert!(matches!(
+        adapter.apply_control(&attitude_in_velocity).disposition,
+        Disposition::Rejected(_)
+    ));
+    assert_eq!(active_digest(&adapter), velocity_digest);
+    assert_eq!(
+        adapter
+            .apply_control(&direct_frame(0.0, 0.0, 0.0, 0.5))
+            .disposition,
+        Disposition::Accepted
+    );
+    assert_eq!(active_digest(&adapter), attitude_digest);
+}
+
+#[test]
+fn activation_waits_for_the_complete_arm_quiet_window() {
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_millis(20)))
+        .expect("read timeout");
+    let mut adapter = adapter_with_fc(&fc);
+    let original = active_digest(&adapter);
+    let arm = flight_frame(
+        vec![],
+        vec![(LogicalButtonId::new(ARM_BUTTON), ButtonEdge::Pressed)],
+    );
+    assert_eq!(
+        adapter.apply_control(&arm).disposition,
+        Disposition::Accepted
+    );
+    let mut frame = [0_u8; 128];
+    fc.recv_from(&mut frame).expect("arm frame");
+    let next = candidate("alia250-balanced-arm-quiet");
+    let expected = *FeelDigest::calculate(&next).expect("digest").as_bytes();
+    adapter.stage_control_feel(next).expect("stage candidate");
+    assert_eq!(
+        adapter.apply_control(&neutral_frame()).disposition,
+        Disposition::Accepted
+    );
+    assert_eq!(active_digest(&adapter), original);
+    assert_no_frame(&fc);
+
+    adapter
+        .uplink_mut()
+        .expect("uplink")
+        .advance_clock(Duration::from_millis(200));
+    assert_eq!(
+        adapter.apply_control(&neutral_frame()).disposition,
+        Disposition::Accepted
+    );
+    assert_eq!(active_digest(&adapter), expected);
+    assert_no_frame(&fc);
+}
+
+#[tokio::test]
+async fn a_physical_start_refuses_an_unqualified_control_feel_artifact() {
+    let result = AviateAdapter::start_with_control_feel(
+        VehicleId::new(1),
+        AviateProfile::Physical,
+        crate::LinkConfig::physical(),
+        candidate("alia250-balanced-physical-start"),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(crate::AviateAdapterError::PhysicalControlFeelOverride { .. })
+    ));
+}
+
+#[test]
+fn a_physical_adapter_refuses_runtime_stage_and_rollback() {
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    let mut adapter = adapter_with_fc(&fc);
+    adapter
+        .stage_control_feel(candidate("alia250-balanced-prior"))
+        .expect("stage prior candidate");
+    assert_eq!(
+        adapter.apply_control(&neutral_frame()).disposition,
+        Disposition::Accepted
+    );
+    adapter.profile = AviateProfile::Physical;
+
+    assert!(matches!(
+        adapter.stage_control_feel(candidate("alia250-balanced-physical-stage")),
+        Err(crate::AviateAdapterError::PhysicalControlFeelOverride { .. })
+    ));
+    assert!(!adapter.stage_control_feel_rollback());
+}
+
+#[test]
+fn activation_with_an_unavailable_pose_preserves_the_pending_candidate() {
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_millis(20)))
+        .expect("read timeout");
+    let mut uplink = crate::FlightUplink::new().expect("uplink");
+    uplink.set_target(fc.local_addr().expect("FC address"));
+    uplink.use_manual_clock();
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    state.lock().expect("state lock").attitude = None;
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state).with_uplink(uplink);
+    let original = active_digest(&adapter);
+    adapter
+        .stage_control_feel(candidate("alia250-balanced-missing-pose"))
+        .expect("stage candidate");
+
+    assert_eq!(
+        adapter.apply_control(&neutral_frame()).disposition,
+        Disposition::Rejected(pilotage_adapter_api::RejectReason::MeasurementUnavailable)
+    );
+    assert_eq!(active_digest(&adapter), original);
+    assert_no_frame(&fc);
 }

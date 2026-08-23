@@ -8,7 +8,9 @@ use pilotage_protocol::VehicleId;
 
 #[cfg(feature = "sim")]
 use super::camera;
-use super::{AviateAdapter, AviateProfile, ControlFeelIdentity, sources::bind_sources};
+use super::{
+    AviateAdapter, AviateProfile, control_feel::ControlFeelProfiles, sources::bind_sources,
+};
 use crate::error::AviateAdapterError;
 use crate::incarnation::{IncarnationProvider, OsIncarnationProvider};
 use crate::uplink::FlightUplink;
@@ -93,6 +95,7 @@ impl AviateAdapter {
         provider: &mut P,
     ) -> Result<Self, AviateAdapterError> {
         validate_adapter_control_feel(&control_feel)?;
+        validate_profile_control_feel(profile, &control_feel)?;
         Self::start_bound(vehicle, profile, config, control_feel, provider).await
     }
 
@@ -103,7 +106,8 @@ impl AviateAdapter {
         control_feel: ValidatedFlightFeelProfile,
         provider: &mut P,
     ) -> Result<Self, AviateAdapterError> {
-        let control_feel_identity = ControlFeelIdentity::from_profile(&control_feel)?;
+        let control_feel_profiles = ControlFeelProfiles::new(control_feel.clone())?;
+        let control_feel_identity = &control_feel_profiles.active().identity;
         tracing::info!(
             feel_profile_id = %control_feel_identity.profile_id,
             feel_schema = control_feel_identity.schema,
@@ -142,7 +146,8 @@ impl AviateAdapter {
             estimate,
             truth,
             uplink,
-            control_feel_identity: Some(control_feel_identity),
+            control_feel_profiles: Some(control_feel_profiles),
+            control_feel_changed: false,
             frames,
             // A flight vehicle's gimbal is a real device on its own link,
             // not a rendered view, so the pointing attachment exists only
@@ -176,12 +181,44 @@ fn compatibility_control_feel() -> Result<ValidatedFlightFeelProfile, AviateAdap
         .map_err(|source| AviateAdapterError::InvalidControlFeel { source })
 }
 
-pub(super) fn validate_adapter_control_feel(
+pub(crate) fn validate_adapter_control_feel(
     control_feel: &ValidatedFlightFeelProfile,
 ) -> Result<(), AviateAdapterError> {
+    validate_aviate_profile_bindings(control_feel)?;
     if control_feel.profile().hold.require_accel {
         return Err(AviateAdapterError::UnsupportedControlFeel {
             detail: "hold.require_accel needs an acceleration source with provenance".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_profile_control_feel(
+    profile: AviateProfile,
+    control_feel: &ValidatedFlightFeelProfile,
+) -> Result<(), AviateAdapterError> {
+    if profile == AviateProfile::Physical
+        && control_feel.profile() != &FlightFeelProfile::legacy_compatibility()
+    {
+        return Err(AviateAdapterError::PhysicalControlFeelOverride {
+            profile_id: control_feel.profile().profile_id.clone(),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_aviate_profile_bindings(
+    control_feel: &ValidatedFlightFeelProfile,
+) -> Result<(), AviateAdapterError> {
+    let trusted = FlightFeelProfile::legacy_compatibility();
+    if control_feel.profile().envelope != trusted.envelope {
+        return Err(AviateAdapterError::UnsupportedControlFeel {
+            detail: "the demand envelope does not match the required Alia envelope".to_owned(),
+        });
+    }
+    if control_feel.profile().bindings != trusted.bindings {
+        return Err(AviateAdapterError::UnsupportedControlFeel {
+            detail: "the device or flight-controller identity does not match Alia".to_owned(),
         });
     }
     Ok(())

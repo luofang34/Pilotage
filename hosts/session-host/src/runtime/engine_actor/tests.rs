@@ -5,9 +5,9 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use pilotage_adapter_api::{
-    AdapterCapabilities, ApplyOutcome, Disposition, ExecutionMode, LinkLossEnactError,
-    LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget, StepOutcome, TelemetryBatch,
-    VehicleAdapter, VehicleDescriptor, VideoSource,
+    AdapterCapabilities, ApplyOutcome, ControlFeelDescriptor, ControlFeelMode, Disposition,
+    ExecutionMode, LinkLossEnactError, LinkLossPolicy, RejectReason, ScopeDescriptor, StepBudget,
+    StepOutcome, TelemetryBatch, VehicleAdapter, VehicleDescriptor, VideoSource,
 };
 use pilotage_protocol::{
     ClientHello, ControlPayload, Generation, LeaseRelease, LeaseRequest, LogicalAxisId, ScopeId,
@@ -31,6 +31,7 @@ const MOTION: &str = "vehicle.motion";
 // Shared fixtures live in a sibling submodule to stay under the file-size
 // gate; a child module reads this parent's imports via `use super::*`.
 mod adapter_rejections;
+mod control_feel;
 mod fixtures;
 mod reliable_actions;
 use fixtures::*;

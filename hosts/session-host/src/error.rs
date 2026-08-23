@@ -39,6 +39,12 @@ pub enum HostError {
         #[source]
         source: pilotage_control_feel::ProfileLoadError,
     },
+    /// A physical session cannot load an unqualified local artifact.
+    #[error("PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE cannot select {path} for a physical session")]
+    AviatePhysicalControlFeelOverride {
+        /// The refused local artifact path.
+        path: std::path::PathBuf,
+    },
     /// The Aviate control-feel artifact could not be read.
     #[error("failed to read Aviate control-feel profile {path}: {source}")]
     AviateControlFeelRead {

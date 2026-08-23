@@ -4,8 +4,9 @@
 //! boundary interprets numeric payloads through (CTRL-01).
 
 use pilotage_adapter_api::{
-    ActionCapability, AdapterCapabilities, ExecutionMode, IntentCapability, LegacyAxisRoute,
-    LegacyCommandMap, LinkLossPolicy, ScopeDescriptor, VehicleDescriptor,
+    ActionCapability, AdapterCapabilities, ControlFeelDescriptor, ControlFeelMode, ExecutionMode,
+    IntentCapability, LegacyAxisRoute, LegacyCommandMap, LinkLossPolicy, ScopeDescriptor,
+    VehicleDescriptor,
 };
 use pilotage_protocol::{ActionKind, IntentFamily, LogicalAxisId, ReferenceFrame, ScopeId};
 
@@ -72,18 +73,38 @@ impl AviateAdapter {
                 },
             }],
             adapter_version: adapter_version(self),
+            control_feel: self.feel_entry().map(control_feel_descriptor),
         }
     }
 }
 
-fn adapter_version(adapter: &AviateAdapter) -> String {
-    let Some((profile_id, schema, digest)) = adapter.feel_identity() else {
-        return env!("CARGO_PKG_VERSION").to_owned();
-    };
-    format!(
-        "{};feel-schema={schema};feel-id={profile_id};feel-sha256={digest}",
-        env!("CARGO_PKG_VERSION")
-    )
+fn adapter_version(_adapter: &AviateAdapter) -> String {
+    env!("CARGO_PKG_VERSION").to_owned()
+}
+
+pub(super) fn control_feel_descriptor(
+    entry: &super::control_feel::ControlFeelEntry,
+) -> ControlFeelDescriptor {
+    let bindings = entry.profile.profile().bindings;
+    ControlFeelDescriptor {
+        profile_id: entry.identity.profile_id.clone(),
+        mode: control_feel_mode(entry.identity.mode),
+        schema_version: entry.identity.schema,
+        profile_sha256: *entry.identity.digest.as_bytes(),
+        device_profile_sha256: *bindings.device_profile_sha256.as_bytes(),
+        flight_controller_sha256: *bindings.flight_controller_sha256.as_bytes(),
+    }
+}
+
+fn control_feel_mode(mode: pilotage_control_feel::FeelMode) -> ControlFeelMode {
+    match mode {
+        pilotage_control_feel::FeelMode::Precision => ControlFeelMode::Precision,
+        pilotage_control_feel::FeelMode::Balanced => ControlFeelMode::Balanced,
+        pilotage_control_feel::FeelMode::Agile => ControlFeelMode::Agile,
+        pilotage_control_feel::FeelMode::LegacyCompatibility => {
+            ControlFeelMode::LegacyCompatibility
+        }
+    }
 }
 
 /// Both flight scopes take the same discrete actions. There is NO mode
