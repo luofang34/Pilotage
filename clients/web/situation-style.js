@@ -52,9 +52,16 @@ export const STYLE_REASON = Object.freeze({
 export function deriveMaximumZoom(manifest) {
   if (typeof manifest !== "object" || manifest === null) return 14;
   const bands = manifest.bands;
-  if (!Array.isArray(bands)) return 14;
+  // The Swift resolver casts bands to a list of dictionaries as a whole;
+  // one entry of another shape makes the manifest unreadable.
+  if (
+    !Array.isArray(bands) ||
+    bands.some((band) => typeof band !== "object" || band === null || Array.isArray(band))
+  ) {
+    return 14;
+  }
   const depths = bands
-    .map((band) => band?.max_zoom)
+    .map((band) => band.max_zoom)
     .filter((depth) => typeof depth === "number" && Number.isFinite(depth));
   const deepest = depths.length > 0 ? Math.max(...depths) : 13;
   return deepest + OVERZOOM_STEPS;

@@ -110,7 +110,7 @@ png = (
 )
 
 
-def archive(path, tile, fmt):
+def archive(path, rows, fmt):
     connection = sqlite3.connect(path)
     connection.execute("CREATE TABLE metadata (name text, value text)")
     connection.execute(
@@ -121,15 +121,22 @@ def archive(path, tile, fmt):
         "INSERT INTO metadata VALUES (?, ?)",
         [("name", "fixture"), ("format", fmt)],
     )
-    connection.execute("INSERT INTO tiles VALUES (0, 0, 0, ?)", (tile,))
+    connection.executemany("INSERT INTO tiles VALUES (?, ?, ?, ?)", rows)
     connection.commit()
     connection.close()
 
 
 # An empty vector tile is a valid tile with no layers; stored gzipped
-# exactly as the real archives store theirs.
-archive(fixture / "SituationCoastline.mbtiles", gzip.compress(b""), "pbf")
-archive(fixture / "SituationTerrain.mbtiles", png, "png")
+# exactly as the real archives store theirs. The second tile sits at a
+# zoom where the TMS row flip is observable: row 0 at zoom 1 must export
+# as y=1, never y=0.
+empty = gzip.compress(b"")
+archive(
+    fixture / "SituationCoastline.mbtiles",
+    [(0, 0, 0, empty), (1, 0, 0, empty)],
+    "pbf",
+)
+archive(fixture / "SituationTerrain.mbtiles", [(0, 0, 0, png)], "png")
 `,
       encoding: "utf8",
     },
@@ -155,6 +162,21 @@ archive(fixture / "SituationTerrain.mbtiles", png, "png")
   }
 }
 
+// The export contract, pinned on the files themselves: the TMS row flip
+// and the vector-tile decompression.
+check(
+  "export: zoom-1 row 0 lands at y=1 (TMS row flip)",
+  existsSync(join(fixtureAssets, "coastline", "1", "0", "1.pbf")) &&
+    !existsSync(join(fixtureAssets, "coastline", "1", "0", "0.pbf")),
+);
+{
+  const tile = readFileSync(join(fixtureAssets, "coastline", "0", "0", "0.pbf"));
+  check(
+    "export: vector tiles are stored decompressed",
+    !(tile.length >= 2 && tile[0] === 0x1f && tile[1] === 0x8b),
+  );
+}
+
 const contentTypes = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -176,7 +198,7 @@ addEventListener("unhandledrejection", (e) => window.__bootErrors.push("unhandle
 // the map stage, then waits for the stage to reach ready or a typed
 // unavailable state and reports what the page actually shows.
 const resultProbe = `<script type="module">
-const deadline = Date.now() + 40000;
+let deadline = Date.now() + 40000;
 const statusText = () => document.getElementById("status")?.textContent ?? "";
 const bootSettled = () =>
   statusText().includes("instrument panels ready") ||
@@ -184,6 +206,8 @@ const bootSettled = () =>
 while (!bootSettled() && Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
+// The map wait gets its own budget; a slow viewer boot must not eat it.
+deadline = Date.now() + 40000;
 const select = document.getElementById("mainView");
 const figure = document.getElementById("stage-map");
 let optionPresent = false;

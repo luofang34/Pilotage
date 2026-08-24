@@ -141,8 +141,13 @@ function testMaximumZoomDerivesFromTheManifest() {
   assert.equal(deriveMaximumZoom(null), 14);
   assert.equal(deriveMaximumZoom({}), 14);
   assert.equal(deriveMaximumZoom({ bands: "not-a-list" }), 14);
+  // The Swift cast refuses the whole band list when one entry is not a
+  // dictionary.
+  assert.equal(deriveMaximumZoom({ bands: [null] }), 14);
+  assert.equal(deriveMaximumZoom({ bands: [{ max_zoom: 13 }, 7] }), 14);
   // Bands without depths fall back to the Swift default deepest of 13.
   assert.equal(deriveMaximumZoom({ bands: [] }), 13 + OVERZOOM_STEPS);
+  assert.equal(deriveMaximumZoom({ bands: [{}] }), 13 + OVERZOOM_STEPS);
 }
 testMaximumZoomDerivesFromTheManifest();
 console.log("ok - testMaximumZoomDerivesFromTheManifest");

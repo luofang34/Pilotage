@@ -49,17 +49,35 @@ for path in "$style" "$terrain_manifest" "$coastline_archive" "$terrain_archive"
     fi
 done
 
-# Refuse to replace a directory this script did not produce.
+# Refuse to replace a directory this script did not produce. The manifest
+# content is checked, not only the file name: a foreign directory that
+# happens to hold a file with this name must survive.
 if [ -e "$out" ]; then
-    if [ ! -f "$out/assets-manifest.json" ]; then
+    if ! python3 - "$out/assets-manifest.json" <<'EOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        manifest = json.load(handle)
+except (OSError, ValueError):
+    sys.exit(1)
+sys.exit(0 if manifest.get("schema_version") == 1
+    and manifest.get("style") == "SituationStyle.json" else 1)
+EOF
+    then
         echo "REFUSED: $out exists and is not a situation-assets export" >&2
         exit 1
     fi
-    rm -rf "$out"
 fi
 
+# Export into a staging directory, then swap. A failure mid-export must not
+# destroy the previous usable export.
+staging="$out.new"
+rm -rf "$staging"
+
 python3 - "$style" "$terrain_manifest" "$coastline_archive" "$terrain_archive" \
-    "$fonts" "$out" <<'EOF'
+    "$fonts" "$staging" <<'EOF'
 import gzip
 import json
 import shutil
@@ -186,8 +204,9 @@ with open(out_path / "assets-manifest.json", "w", encoding="utf-8") as handle:
     json.dump(manifest, handle, indent=2, sort_keys=True)
     handle.write("\n")
 
-print(
-    f"Exported {coastline_count} coastline tiles and {terrain_count} terrain tiles"
-    f" into {out_path}"
-)
+print(f"Exported {coastline_count} coastline tiles and {terrain_count} terrain tiles")
 EOF
+
+rm -rf "$out"
+mv "$staging" "$out"
+echo "Situation assets ready at $out"

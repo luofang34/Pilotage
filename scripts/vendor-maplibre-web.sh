@@ -25,16 +25,34 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dest="$root/clients/web/vendor/maplibre-gl"
 stamp="$dest/VENDOR.json"
 
-if [ -f "$stamp" ]; then
-    stamped_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$stamp" 2>/dev/null || true)"
-    complete=1
-    for file in "${RUNTIME_FILES[@]}"; do
-        [ -f "$dest/$file" ] || complete=0
-    done
-    if [ "$stamped_version" = "$MAPLIBRE_VERSION" ] && [ "$complete" = "1" ]; then
-        echo "maplibre-gl ${MAPLIBRE_VERSION} already vendored at $dest"
-        exit 0
-    fi
+# The fast path accepts an existing vendor directory only when every
+# runtime file still matches the digest the stamp recorded at install.
+if [ -f "$stamp" ] && python3 - "$stamp" "$dest" "$MAPLIBRE_VERSION" <<'EOF'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+stamp_path, dest, version = sys.argv[1:4]
+try:
+    with open(stamp_path, encoding="utf-8") as handle:
+        record = json.load(handle)
+except (OSError, ValueError):
+    sys.exit(1)
+files = record.get("files")
+if record.get("version") != version or not isinstance(files, dict) or not files:
+    sys.exit(1)
+for name, digest in files.items():
+    try:
+        actual = hashlib.sha256((Path(dest) / name).read_bytes()).hexdigest()
+    except OSError:
+        sys.exit(1)
+    if actual != digest:
+        sys.exit(1)
+EOF
+then
+    echo "maplibre-gl ${MAPLIBRE_VERSION} already vendored at $dest"
+    exit 0
 fi
 
 work="$(mktemp -d)"
@@ -62,14 +80,26 @@ for file in "${RUNTIME_FILES[@]}"; do
 done
 cp "$work/package/LICENSE.txt" "$dest/LICENSE.txt"
 
-python3 - "$stamp" "$MAPLIBRE_VERSION" "$MAPLIBRE_TARBALL_SHA256" <<'EOF'
+python3 - "$stamp" "$dest" "$MAPLIBRE_VERSION" "$MAPLIBRE_TARBALL_SHA256" \
+    "${RUNTIME_FILES[@]}" <<'EOF'
+import hashlib
 import json
 import sys
+from pathlib import Path
 
-path, version, sha256 = sys.argv[1:4]
+path, dest, version, sha256 = sys.argv[1:5]
+files = {
+    name: hashlib.sha256((Path(dest) / name).read_bytes()).hexdigest()
+    for name in sys.argv[5:]
+}
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(
-        {"name": "maplibre-gl", "version": version, "tarball_sha256": sha256},
+        {
+            "name": "maplibre-gl",
+            "version": version,
+            "tarball_sha256": sha256,
+            "files": files,
+        },
         handle,
         indent=2,
         sort_keys=True,
