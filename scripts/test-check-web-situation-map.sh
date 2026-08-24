@@ -50,10 +50,24 @@ sed -i.bak '/^clients\/web\/vendor\/$/d' "$fixture/.gitignore"
 reject "a vendor directory that is no longer a build artifact"
 restore .gitignore
 
+sed -i.bak '/^clients\/web\/situation-assets\.new\/$/d' "$fixture/.gitignore"
+reject "an export staging directory that is no longer a build artifact"
+restore .gitignore
+
 printf 'import "./vendor/maplibre-gl/maplibre-gl.mjs";\n%s' \
     "$(cat "$web/situation-map.js")" >"$web/situation-map.js"
 reject "a static renderer import on the boot path"
 restore clients/web/situation-map.js
+
+printf 'import {\n  Map as VendorMap,\n} from "./vendor/maplibre-gl/maplibre-gl.mjs";\n%s' \
+    "$(cat "$web/situation-map.js")" >"$web/situation-map.js"
+reject "a static renderer import split over lines"
+restore clients/web/situation-map.js
+
+printf '%s\nexport const VENDOR_HINT = "vendor/maplibre-gl";\n' \
+    "$(cat "$web/situation-style.js")" >"$web/situation-style.js"
+reject "a vendor reference in the style module"
+restore clients/web/situation-style.js
 
 sed -i.bak 's/await import(VENDOR_MODULE)/globalThis.maplibregl/' "$web/situation-map.js"
 reject "a renderer that no longer loads through the vendored module"
@@ -62,6 +76,11 @@ restore clients/web/situation-map.js
 sed -i.bak 's|const ASSETS_BASE|const REMOTE = "https://tiles.example.com/"; const ASSETS_BASE|' \
     "$web/situation-map.js"
 reject "a run-time network URL in the map module"
+restore clients/web/situation-map.js
+
+sed -i.bak 's|const ASSETS_BASE|const REMOTE = "//tiles.example.com/"; const ASSETS_BASE|' \
+    "$web/situation-map.js"
+reject "a protocol-relative network URL in the map module"
 restore clients/web/situation-map.js
 
 sed -i.bak 's/maxZoom: deriveMaximumZoom(terrainManifest)/maxZoom: 15/' \
@@ -80,6 +99,11 @@ restore scripts/vendor-maplibre-web.sh
 
 sed -i.bak '/situation-map.browser.test.mjs/d' "$fixture/.github/workflows/ci.yml"
 reject "a CI workflow that no longer boots the map stage"
+restore .github/workflows/ci.yml
+
+sed -i.bak 's|run: node clients/web/situation-map.browser.test.mjs|# &|' \
+    "$fixture/.github/workflows/ci.yml"
+reject "a commented-out browser-test step"
 restore .github/workflows/ci.yml
 
 sed -i.bak 's|<script type="module" src="./main.js"></script>|<script type="module" src="./vendor/maplibre-gl/maplibre-gl.mjs"></script>\n<script type="module" src="./main.js"></script>|' \

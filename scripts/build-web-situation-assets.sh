@@ -72,9 +72,11 @@ EOF
 fi
 
 # Export into a staging directory, then swap. A failure mid-export must not
-# destroy the previous usable export.
+# destroy the previous usable export, and must not leave the staging tree
+# behind for a later commit to sweep up.
 staging="$out.new"
 rm -rf "$staging"
+trap 'rm -rf "$staging"' EXIT
 
 python3 - "$style" "$terrain_manifest" "$coastline_archive" "$terrain_archive" \
     "$fonts" "$staging" <<'EOF'

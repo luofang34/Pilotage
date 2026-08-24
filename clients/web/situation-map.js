@@ -15,8 +15,9 @@ import {
 } from "./situation-style.js";
 
 /** Camera the map opens with. The values match the Apple client's
- *  SituationMap defaults (scripts/check-web-situation-map.sh holds the two
- *  in step); the closest zoom derives from the terrain manifest. */
+ *  SituationMap defaults (situation-style.test.mjs reads the Swift source
+ *  and holds the two in step); the closest zoom derives from the terrain
+ *  manifest. */
 export const INITIAL_CAMERA = Object.freeze({
   centerLatitudeDeg: 40.5,
   centerLongitudeDeg: -76.5,

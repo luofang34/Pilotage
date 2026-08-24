@@ -40,14 +40,16 @@ if ! grep -Fq 'clients/apple/Resources' "$assets_script" \
     status=1
 fi
 
-# The renderer and the exported assets are build artifacts.
+# The renderer and the exported assets are build artifacts, and so is the
+# export's staging directory.
 if ! grep -Eq '^clients/web/vendor/$' "$root/.gitignore" \
-    || ! grep -Eq '^clients/web/situation-assets/$' "$root/.gitignore"; then
+    || ! grep -Eq '^clients/web/situation-assets/$' "$root/.gitignore" \
+    || ! grep -Eq '^clients/web/situation-assets\.new/$' "$root/.gitignore"; then
     echo "FORBIDDEN: vendor and situation assets must stay build artifacts" >&2
     status=1
 fi
 if git -C "$root" ls-files -- 'clients/web/vendor' 'clients/web/situation-assets' \
-    | grep -q .; then
+    'clients/web/situation-assets.new' | grep -q .; then
     echo "FORBIDDEN: a vendored or exported file is committed" >&2
     status=1
 fi
@@ -61,7 +63,9 @@ fi
 
 # Viewer boot must complete without the vendor directory: the renderer
 # import stays dynamic, inside the map module, behind the stage selection.
-if grep -Eq '^import[^(]*vendor/' "$map_module"; then
+# The from-clause grep also catches a static import split over lines.
+if grep -Eq '^import[^(]*vendor/' "$map_module" \
+    || grep -Eq 'from[[:space:]]*["'\''][^"'\'']*vendor/' "$map_module"; then
     echo "FORBIDDEN: the renderer must load through a dynamic import" >&2
     status=1
 fi
@@ -69,13 +73,16 @@ if ! grep -Fq 'await import(VENDOR_MODULE)' "$map_module"; then
     echo "FORBIDDEN: the map module must import the vendored renderer lazily" >&2
     status=1
 fi
-if grep -Eq 'vendor/maplibre' "$web/index.html" "$web/main.js" "$web/layout.js"; then
+if grep -Eq 'vendor/' "$web/index.html" "$web/main.js" "$web/layout.js" \
+    "$style_module"; then
     echo "FORBIDDEN: boot-path files must not reference the vendor directory" >&2
     status=1
 fi
 
-# The web client loads no external resource at run time.
-if grep -Eqi 'https?://' "$map_module" "$style_module"; then
+# The web client loads no external resource at run time. The second
+# pattern catches a protocol-relative URL.
+if grep -Eqi 'https?://' "$map_module" "$style_module" \
+    || grep -Eq '["'\'']//' "$map_module" "$style_module"; then
     echo "FORBIDDEN: the situation modules must have no network URL" >&2
     status=1
 fi
@@ -96,12 +103,14 @@ for reason in MAP_LIBRARY_MISSING MAP_ASSETS_MISSING MAP_STYLE_INVALID \
     fi
 done
 
-# The guardrails only hold while CI runs them.
+# The guardrails only hold while CI runs them. The step must sit on a
+# live run: line; a commented-out step does not count.
 for step in 'clients/web/situation-style.test.mjs' \
     'clients/web/situation-map.browser.test.mjs' \
     'scripts/vendor-maplibre-web.sh' \
-    'scripts/check-web-situation-map.sh'; do
-    if ! grep -Fq "$step" "$ci"; then
+    'scripts/check-web-situation-map.sh' \
+    'scripts/test-check-web-situation-map.sh'; do
+    if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
         echo "FORBIDDEN: CI must run $step" >&2
         status=1
     fi

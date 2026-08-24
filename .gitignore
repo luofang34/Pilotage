@@ -26,6 +26,7 @@ clients/web/control-runtime_bg.wasm.d.ts
 # scripts/vendor-maplibre-web.sh and scripts/build-web-situation-assets.sh)
 clients/web/vendor/
 clients/web/situation-assets/
+clients/web/situation-assets.new/
 
 # Generated protobuf code (generated at build time; schemas/ is the source of truth)
 **/src/generated/

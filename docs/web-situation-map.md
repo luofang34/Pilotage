@@ -3,8 +3,7 @@
 The web client shows the situation map as a main-view stage. The stage uses
 MapLibre GL JS. The Apple client uses MapLibre Native. One style file drives
 both renderers: `clients/apple/Resources/SituationStyle.json`. The style
-declares the globe projection, and the web renderer draws the globe by
-default.
+declares the globe projection. The web renderer draws the globe by default.
 
 ## One style, two renderers
 
@@ -28,9 +27,9 @@ fails when one side changes a value without the other.
 
 ## Build steps
 
-MapLibre GL JS cannot read an MBTiles archive, and the web client loads no
+MapLibre GL JS cannot read an MBTiles archive. The web client loads no
 external resource at run time. Two scripts prepare the local files. Both
-outputs are build artifacts and are not committed.
+outputs are build artifacts. Do not commit them.
 
 1. `scripts/vendor-maplibre-web.sh` downloads one pinned MapLibre GL JS
    release archive, verifies its SHA-256 digest, and copies the four runtime
@@ -68,17 +67,19 @@ during viewer boot. When a part is missing, the stage shows a typed reason
 - `MAP_ASSETS_MISSING` — run `scripts/build-web-situation-assets.sh`.
 - `MAP_LIBRARY_MISSING` — run `scripts/vendor-maplibre-web.sh`.
 - `MAP_STYLE_INVALID` — the style template or the export is not usable.
-- `MAP_RENDER_FAILED` — the browser refused the renderer, for example
-  without WebGL2.
+- `MAP_RENDER_FAILED` — the browser refuses the renderer, for example
+  without WebGL2, or the boot fails in an unexpected way.
 
 ## Guards
 
-- `scripts/check-web-situation-map.sh` — the boundary: no style fork, no
-  committed build artifact, a pinned renderer digest, a dynamic renderer
-  import, no run-time network URL, a derived closest zoom, and the typed
-  unavailable states.
-- `scripts/test-check-web-situation-map.sh` — proves the guard rejects each
-  loss.
-- `clients/web/situation-map.browser.test.mjs` — a real Chromium selects the
-  stage and must see the globe, the shared camera, and the source notices;
-  without assets or renderer it must see the typed reason.
+`scripts/check-web-situation-map.sh` holds the boundary. It rejects a style
+fork under `clients/web`, a committed build artifact, an unpinned renderer
+digest, a static renderer import, a network URL in the situation modules, a
+hand-written closest zoom, a lost typed state, and a CI workflow that no
+longer runs these guards. `scripts/test-check-web-situation-map.sh` proves
+that the guard rejects each loss.
+
+`clients/web/situation-map.browser.test.mjs` boots the stage in a real
+Chromium. With exported assets the test must see the globe, the shared
+camera, and the source notices. Without the assets or without the renderer
+the test must see the typed reason.

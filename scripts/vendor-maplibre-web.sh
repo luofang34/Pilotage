@@ -8,7 +8,7 @@
 set -euo pipefail
 
 MAPLIBRE_VERSION="6.6.0"
-# Digest of the npm release archive for maplibre-gl 6.6.0.
+# Digest of the pinned npm release archive.
 MAPLIBRE_TARBALL_SHA256="d329c597381ab52589260d89914c80fb53ef32ba07647e9f2c71f58fdf7b606e"
 MAPLIBRE_TARBALL_URL="https://registry.npmjs.org/maplibre-gl/-/maplibre-gl-${MAPLIBRE_VERSION}.tgz"
 
