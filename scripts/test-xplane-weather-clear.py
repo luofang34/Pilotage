@@ -152,13 +152,29 @@ class MockXPlane:
     def close(self) -> None:
         """Stop the peer and surface its thread failure."""
         self.stop.set()
+        self.thread.join(timeout=2.0)
         self.socket.close()
         self.response_socket.close()
-        self.thread.join(timeout=2.0)
         if self.thread.is_alive():
             raise AssertionError("mock X-Plane peer did not stop")
         if not self.failures.empty():
             raise self.failures.get_nowait()
+
+
+class BlockedPublishXPlane(MockXPlane):
+    """A peer that exposes one deterministic publisher shutdown boundary."""
+
+    def __init__(self) -> None:
+        self.publish_entered = threading.Event()
+        self.release_publish = threading.Event()
+        super().__init__()
+
+    def publish(self) -> None:
+        """Hold the worker before it can use its response socket."""
+        self.publish_entered.set()
+        if not self.release_publish.wait(2.0):
+            raise AssertionError("the test did not release the publisher")
+        super().publish()
 
 
 def run_clear(
@@ -194,6 +210,53 @@ def run_clear(
 
 class WeatherClearTests(unittest.TestCase):
     """Weather clear protocol behavior tests."""
+
+    def test_close_keeps_the_response_socket_open_until_publish_exits(self) -> None:
+        peer = BlockedPublishXPlane()
+        close_done = threading.Event()
+        join_entered = threading.Event()
+        close_failures: queue.Queue[BaseException] = queue.Queue()
+        real_join = peer.thread.join
+
+        def close_peer() -> None:
+            try:
+                peer.close()
+            except BaseException as error:
+                close_failures.put(error)
+            finally:
+                close_done.set()
+
+        def observed_join(timeout: float | None = None) -> None:
+            join_entered.set()
+            real_join(timeout=timeout)
+
+        close_thread = threading.Thread(target=close_peer, daemon=True)
+        close_started = False
+        try:
+            self.assertTrue(peer.publish_entered.wait(1.0))
+            with mock.patch.object(
+                peer.thread, "join", side_effect=observed_join
+            ):
+                close_thread.start()
+                close_started = True
+                self.assertTrue(join_entered.wait(1.0))
+                self.assertFalse(close_done.is_set())
+                self.assertGreaterEqual(peer.socket.fileno(), 0)
+                self.assertGreaterEqual(peer.response_socket.fileno(), 0)
+                peer.release_publish.set()
+                self.assertTrue(close_done.wait(3.0))
+        finally:
+            peer.release_publish.set()
+            if close_started:
+                close_done.wait(3.0)
+                close_thread.join(timeout=1.0)
+            else:
+                peer.close()
+        self.assertFalse(close_thread.is_alive())
+        self.assertEqual(peer.socket.fileno(), -1)
+        self.assertEqual(peer.response_socket.fileno(), -1)
+        if not close_failures.empty():
+            raise close_failures.get_nowait()
 
     def test_clear_requires_fresh_actual_samples_after_ack(self) -> None:
         peer = MockXPlane()
