@@ -12,7 +12,15 @@ use std::path::{Path, PathBuf};
 
 use crate::error::XtaskError;
 use crate::output::print_line;
-use crate::readiness::stage_log;
+
+mod readiness;
+
+#[cfg(test)]
+pub(super) use readiness::{
+    classify_xplane_probe_status, run_xplane_prepare_sequence, verify_weather_plugin_blocking,
+    xplane_running_with_program_blocking,
+};
+pub(super) use readiness::{prepare_xplane_runtime_blocking, xplane_running_blocking};
 
 /// X-Plane's UDP command/data port on the local machine.
 const XPLANE_UDP_PORT: u16 = 49000;
@@ -139,6 +147,14 @@ pub(super) fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Resul
             hint: "run scripts/build-xplane-plugins.sh",
         });
     }
+    let weather = root.join("Resources/plugins/PilotageWeather/64/mac.xpl");
+    if !weather.is_file() {
+        return Err(XtaskError::MissingArtifact {
+            what: "Pilotage X-Plane weather plugin",
+            path: weather,
+            hint: "run scripts/build-xplane-plugins.sh",
+        });
+    }
     let aircraft = root.join(airframe.acf_path);
     if !aircraft.is_file() {
         return Err(XtaskError::MissingArtifact {
@@ -152,49 +168,108 @@ pub(super) fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Resul
 }
 
 /// Where the plugin build script's content stamp lives.
-const XPLANE_PLUGINS_STAMP: &str = "target/xtask-stamps/xplane-plugins.stamp";
+const XPLANE_PLUGINS_STAMP: &str = "target/xtask-stamps/xplane-plugins-stopped-simulator.stamp";
 
 /// The working-tree inputs whose content decides plugin staleness.
-const XPLANE_PLUGINS_SOURCES: [&str; 3] = [
+const XPLANE_PLUGINS_SOURCES: [&str; 4] = [
     "sim/xplane/autoflight",
     "sim/xplane/camera",
+    "sim/xplane/weather",
     "scripts/build-xplane-plugins.sh",
 ];
 
-/// Best-effort, content-stamped build + install of the two X-Plane
-/// plugins and the packaged aircraft. Non-fatal by contract: `plan`
-/// fails closed with hints when a required artifact is still absent.
-pub(super) fn ensure_xplane_plugins(repo_root: &Path) {
+/// Whether the prepare step changed the installed plugin files.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum XPlanePluginInstall {
+    /// The content stamp and all installed artifacts were current.
+    Current,
+    /// The prepare step built and installed the plugin set.
+    Rebuilt,
+}
+
+pub(super) fn plugin_install_required(
+    plugins_current: bool,
+    simulator_running: bool,
+) -> Result<bool, XtaskError> {
+    if plugins_current {
+        return Ok(false);
+    }
+    if simulator_running {
+        return Err(XtaskError::SimulatorCapability {
+            capability: "loaded X-Plane plugin set",
+            detail: "plugin files need an update while X-Plane is running; stop X-Plane and retry"
+                .to_owned(),
+        });
+    }
+    Ok(true)
+}
+
+/// Builds and installs the required X-Plane plugins when an input changes.
+/// The caller checks all required artifacts before it starts a session.
+pub(super) fn ensure_xplane_plugins_blocking(
+    repo_root: &Path,
+    simulator_running: bool,
+) -> Result<XPlanePluginInstall, XtaskError> {
     use crate::session::preflight::stamp;
     let installed = xplane_root()
         .map(|root| {
-            root.join("Resources/plugins/PilotageAutoFlight/64/mac.xpl")
-                .is_file()
+            [
+                "Resources/plugins/px4xplane/64/mac.xpl",
+                "Resources/plugins/PilotageAutoFlight/64/mac.xpl",
+                "Resources/plugins/PilotageCamera/64/mac.xpl",
+                "Resources/plugins/PilotageWeather/64/mac.xpl",
+            ]
+            .iter()
+            .all(|path| root.join(path).is_file())
         })
         .unwrap_or(false);
     let current = stamp::source_stamp(repo_root, &XPLANE_PLUGINS_SOURCES, &[]);
     let stamp_path = repo_root.join(XPLANE_PLUGINS_STAMP);
     let stored = stamp::read_stamp(&stamp_path);
-    if stamp::artifact_is_fresh(installed, stored.as_deref(), current.as_deref()) {
-        return;
+    let plugins_current =
+        stamp::artifact_is_fresh(installed, stored.as_deref(), current.as_deref());
+    if !plugin_install_required(plugins_current, simulator_running)? {
+        return Ok(XPlanePluginInstall::Current);
     }
     print_line("building and installing the X-Plane plugins...");
-    let built = std::process::Command::new("bash")
+    run_plugin_build_blocking(repo_root, Path::new("bash"))?;
+    record_plugin_install_stamp(&stamp_path, current.as_deref(), xplane_running_blocking()?)?;
+    print_line("X-Plane plugins installed");
+    Ok(XPlanePluginInstall::Rebuilt)
+}
+
+pub(super) fn record_plugin_install_stamp(
+    stamp_path: &Path,
+    current: Option<&str>,
+    simulator_running: bool,
+) -> Result<(), XtaskError> {
+    plugin_install_required(false, simulator_running)?;
+    if let Some(current) = current {
+        crate::session::preflight::stamp::write_stamp(stamp_path, current);
+    }
+    Ok(())
+}
+
+/// Run the plugin build with an explicit program for failure testing.
+pub(super) fn run_plugin_build_blocking(
+    repo_root: &Path,
+    program: &Path,
+) -> Result<(), XtaskError> {
+    let status = std::process::Command::new(program)
         .arg(repo_root.join("scripts/build-xplane-plugins.sh"))
         .current_dir(repo_root)
-        .status();
-    match built {
-        Ok(status) if status.success() => {
-            if let Some(current) = current {
-                stamp::write_stamp(&stamp_path, &current);
-            }
-            print_line("X-Plane plugins installed");
-        }
-        Ok(_) | Err(_) => print_line(
-            "X-Plane plugin build failed (see build-xplane-plugins output); \
-             the session will fail closed if a required plugin is missing",
-        ),
+        .status()
+        .map_err(|source| XtaskError::Io {
+            context: "starting the X-Plane plugin build",
+            source,
+        })?;
+    if !status.success() {
+        return Err(XtaskError::CommandFailed {
+            context: "X-Plane plugin build and install",
+            status: status.to_string(),
+        });
     }
+    Ok(())
 }
 
 /// Points the installed px4xplane config at the selected airframe's
@@ -267,49 +342,6 @@ pub(super) fn set_active_config_name(root: &Path, airframe: &Airframe) {
         if rewritten != content && std::fs::write(&config, rewritten).is_err() {
             print_line("could not update the px4xplane config_name; check config.ini");
         }
-    }
-}
-
-/// True when an X-Plane simulator process is running on this machine.
-pub(super) fn xplane_running() -> bool {
-    std::process::Command::new("pgrep")
-        .args(["-f", "X-Plane.app/Contents/MacOS/X-Plane"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Starts X-Plane detached with the PilotageAutoFlight environment. The
-/// process deliberately outlives the session: booting X-Plane costs
-/// minutes, and the operator owns its window.
-pub(super) fn launch_xplane(root: &Path, airframe: &Airframe, log_dir: &Path) {
-    print_line("starting X-Plane (a cold boot takes minutes)...");
-    // A fresh simulator gets a fresh parking spot: the reset script
-    // captures the vehicle's home position once per X-Plane boot and
-    // teleports back to it on every reset.
-    if let Some(home) = std::env::var_os("HOME") {
-        std::fs::remove_file(std::path::PathBuf::from(home).join(".pilotage/xplane-home.json"))
-            .ok();
-    }
-    let log = std::fs::File::create(stage_log(log_dir, "xplane"))
-        .ok()
-        .map_or(std::process::Stdio::null(), std::process::Stdio::from);
-    let spawned = std::process::Command::new(root.join("X-Plane.app/Contents/MacOS/X-Plane"))
-        .arg("--window=1400x900")
-        .arg("--pref:_show_qfl_on_start=0")
-        .current_dir(root)
-        .env("PILOTAGE_XPLANE_ACF", airframe.acf_path)
-        .env("PILOTAGE_XPLANE_CONNECT", "1")
-        // A cold simulator start plus a flight-controller boot can
-        // exceed the bridge's default one-minute connect window, and an
-        // expired window needs an operator click. Wait without a
-        // deadline instead (a local px4xplane patch).
-        .env("PX4XPLANE_CONNECT_TIMEOUT_S", "0")
-        .stdout(log)
-        .stderr(std::process::Stdio::null())
-        .spawn();
-    if spawned.is_err() {
-        print_line("could not start X-Plane; start it by hand and rerun");
     }
 }
 
