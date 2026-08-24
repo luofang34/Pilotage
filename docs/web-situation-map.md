@@ -47,6 +47,11 @@ from the south and the web tile URL scheme counts from the north. The export
 also decompresses each vector tile, because a static file server sends no
 `Content-Encoding` header.
 
+The archives hold zoom bands: a world band plus deeper regional bands. A
+view outside a deep band shows no coastline fill at that zoom, and the
+terrain stretches its deepest world tile. Both renderers show a banded
+archive the same way.
+
 Serve the repository root statically and open the viewer:
 
     python3 -m http.server 8000

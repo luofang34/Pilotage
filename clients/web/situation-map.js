@@ -36,10 +36,16 @@ const VENDOR_MODULE = "./vendor/maplibre-gl/maplibre-gl.mjs";
 const VENDOR_STYLESHEET = new URL("./vendor/maplibre-gl/maplibre-gl.css", import.meta.url);
 const ASSETS_BASE = new URL("./situation-assets/", import.meta.url).href;
 
-/** How many distinct renderer error messages are logged before the rest are
- *  dropped. A sparse tile band answers many fetches with 404, and one line
- *  per missing tile would bury every other log entry. */
+/** How many distinct renderer failure classes are logged before the rest
+ *  are dropped. Failure messages carry tile URLs, so the class key strips
+ *  them; without the cap a misconfigured server would bury every other log
+ *  entry with one line per tile. */
 const MAX_LOGGED_RENDER_ERRORS = 20;
+
+/** How long the renderer may take to reach its load event before the stage
+ *  declares failure. A renderer whose worker died never errors and never
+ *  loads; without a deadline the stage would show "loading" forever. */
+const LOAD_DEADLINE_MS = 60_000;
 
 async function fetchJson(url) {
   const response = await fetch(url);
@@ -89,7 +95,19 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     bootPromise.then((map) => map?.resize()).catch(() => {});
   };
 
+  // Every boot failure ends in a typed state (ADR-0037): an unexpected
+  // rejection — a fetch cut off mid-flight, a renderer construct throw —
+  // must not strand the stage on the loading notice.
   const boot = async () => {
+    try {
+      return await bootStage();
+    } catch (error) {
+      setUnavailable(MAP_REASON.RENDER_FAILED, String(error));
+      return null;
+    }
+  };
+
+  const bootStage = async () => {
     figure.dataset.mapState = "loading";
     notice.textContent = "situation map loading…";
 
@@ -160,17 +178,35 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     }
 
     const loggedErrors = new Set();
+    let suppressionAnnounced = false;
     map.on("error", (event) => {
       const message = String(event?.error ?? "unknown renderer error");
-      if (loggedErrors.size >= MAX_LOGGED_RENDER_ERRORS || loggedErrors.has(message)) {
+      // Tile URLs make each failure unique; the class key strips them so
+      // one failure class logs once.
+      const failureClass = message.replace(/\bhttps?:[^\s]*|\/[^\s]*/g, "<url>");
+      if (loggedErrors.has(failureClass)) return;
+      if (loggedErrors.size >= MAX_LOGGED_RENDER_ERRORS) {
+        if (!suppressionAnnounced) {
+          suppressionAnnounced = true;
+          log("situation map: further renderer errors suppressed");
+        }
         return;
       }
-      loggedErrors.add(message);
+      loggedErrors.add(failureClass);
       log(`situation map: ${message}`);
     });
 
     return new Promise((resolve) => {
+      const deadline = setTimeout(() => {
+        map.remove();
+        setUnavailable(
+          MAP_REASON.RENDER_FAILED,
+          `the renderer did not reach load within ${LOAD_DEADLINE_MS / 1000} s`,
+        );
+        resolve(null);
+      }, LOAD_DEADLINE_MS);
       map.once("load", () => {
+        clearTimeout(deadline);
         figure.dataset.mapState = "ready";
         delete figure.dataset.mapReason;
         // Observability for tests and for a reader checking behaviour

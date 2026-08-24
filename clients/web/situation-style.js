@@ -13,10 +13,11 @@ export const GLYPHS_TOKEN = "__PILOTAGE_GLYPHS_URL__";
 export const COASTLINE_TOKEN = "__PILOTAGE_COASTLINE_MBTILES_URL__";
 export const TERRAIN_TOKEN = "__PILOTAGE_TERRAIN_MBTILES_URL__";
 
-/** Doublings of stretch allowed past the deepest terrain tile. A raster-dem
- *  source draws past its deepest tile by stretching the one it has; past two
- *  doublings the picture is invention. Matches the Apple client's
- *  overzoomSteps. */
+/** Zoom levels the camera may go past the deepest terrain tile. A
+ *  raster-dem source draws past its deepest tile by stretching the one it
+ *  has, and far past it the picture is invention. The value matches the
+ *  Apple client's overzoomSteps, so both renderers stop at the same
+ *  closest zoom. */
 export const OVERZOOM_STEPS = 2;
 
 /** The style shown when the situation style cannot be resolved. Matches the
