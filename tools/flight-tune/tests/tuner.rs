@@ -2,6 +2,8 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+#[path = "tuner/journal_storage.rs"]
+mod journal_storage;
 #[path = "tuner/no_samples.rs"]
 mod no_samples;
 #[path = "tuner/reconciliation.rs"]
@@ -9,8 +11,7 @@ mod reconciliation;
 #[path = "tuner/test_rig.rs"]
 mod test_rig;
 
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
 use flight_tune::{
     CampaignPhase, CandidateEvaluation, FinalQualificationOutcome, JournalEvent, PromotionDecision,
@@ -18,7 +19,7 @@ use flight_tune::{
 };
 use test_rig::{
     EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, FakeVehicle, QuadraticMetric,
-    SequenceStrategy, assert_receipt_error, candidate, stage,
+    SequenceStrategy, TestDirectory, assert_receipt_error, candidate, stage,
 };
 
 type TestTuner = Tuner<FakeBackend, FakeVehicle, EnvelopeGates, QuadraticMetric, SequenceStrategy>;
@@ -280,7 +281,7 @@ fn candidate_readback_mismatch_is_quarantined_before_cleanup() {
         2.0,
     )
     .expect("open tuner");
-    state.0.borrow_mut().bad_candidate_readback_on_ensure = Some(3);
+    state.0.borrow_mut().bad_candidate_readback_on_ensure = Some(2);
 
     let error = tuner
         .run_training_attempts_blocking(0)
@@ -465,30 +466,4 @@ fn assert_promotion_uses_paired_seeds(state: &FakeHandle) {
     assert_eq!(promotion.len(), 4);
     assert_eq!(promotion[0].1, promotion[2].1);
     assert_eq!(promotion[1].1, promotion[3].1);
-}
-
-struct TestDirectory {
-    path: PathBuf,
-}
-
-impl TestDirectory {
-    fn new(label: &str) -> Self {
-        let time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("flight-tune-{label}-{}-{time}", std::process::id()));
-        Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.path).ok();
-    }
 }
