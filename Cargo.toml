@@ -33,6 +33,7 @@ members = [
     "adapters/aviate",
     "adapters/px4",
     "tools/hid-probe",
+    "tools/flight-tune",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",
