@@ -16,7 +16,9 @@ use flight_tune::{
 #[derive(Debug, Default)]
 pub struct FakeState {
     pub gain: f64,
+    pub active_candidate_digest: Option<Digest>,
     pub prepare_count: usize,
+    pub ensure_count: usize,
     pub apply_count: usize,
     pub start_count: usize,
     pub sample_count: usize,
@@ -29,9 +31,12 @@ pub struct FakeState {
     pub current_seed: u64,
     pub next_sequence: u64,
     pub panic_on_prepare: Option<usize>,
-    pub bad_candidate_readback: bool,
+    pub panic_on_start: Option<usize>,
+    pub bad_candidate_readback_on_ensure: Option<usize>,
+    pub bad_candidate_readback_on_apply: Option<usize>,
     pub bad_scenario_readback: bool,
     pub timeout_next_sample: bool,
+    pub complete_without_sample: bool,
 }
 
 #[derive(Clone)]
@@ -113,6 +118,9 @@ impl SimulatorBackend for FakeBackend {
         let mut state = self.state.0.borrow_mut();
         state.start_count = state.start_count.wrapping_add(1);
         state.lifecycle.push("start".to_owned());
+        if state.panic_on_start == Some(state.start_count) {
+            panic!("simulated process stop after candidate activation");
+        }
         let scenario = state
             .current_scenario
             .clone()
@@ -134,6 +142,9 @@ impl SimulatorBackend for FakeBackend {
 
     fn sample_blocking(&mut self, _timeout: Duration) -> Result<SampleEvent, AdapterError> {
         let mut state = self.state.0.borrow_mut();
+        if state.complete_without_sample {
+            return Ok(SampleEvent::Complete);
+        }
         if state.timeout_next_sample {
             state.timeout_next_sample = false;
             return Ok(SampleEvent::TimedOut);
@@ -172,7 +183,7 @@ pub struct FakeVehicle {
 }
 
 impl SimulatorVehicleAdapter for FakeVehicle {
-    fn apply_candidate_blocking(
+    fn ensure_candidate_blocking(
         &mut self,
         capability: &SimulatorCapability,
         candidate: &Candidate,
@@ -184,10 +195,18 @@ impl SimulatorVehicleAdapter for FakeVehicle {
             .copied()
             .ok_or_else(|| AdapterError::new("candidate has no gain"))?;
         let mut state = self.state.0.borrow_mut();
-        state.gain = gain;
-        state.apply_count = state.apply_count.wrapping_add(1);
-        state.lifecycle.push("apply".to_owned());
-        let readback = if state.bad_candidate_readback {
+        state.ensure_count = state.ensure_count.wrapping_add(1);
+        let wrote_candidate = state.active_candidate_digest != Some(candidate_digest);
+        if wrote_candidate {
+            state.gain = gain;
+            state.active_candidate_digest = Some(candidate_digest);
+            state.apply_count = state.apply_count.wrapping_add(1);
+            state.lifecycle.push("apply".to_owned());
+        }
+        let bad_readback = state.bad_candidate_readback_on_ensure == Some(state.ensure_count)
+            || (wrote_candidate
+                && state.bad_candidate_readback_on_apply == Some(state.apply_count));
+        let readback = if bad_readback {
             Digest::from_bytes([99; 32])
         } else {
             candidate_digest

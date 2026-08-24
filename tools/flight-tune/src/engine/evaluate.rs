@@ -32,6 +32,22 @@ pub(super) fn candidate_digest(candidate: &Candidate) -> Result<Digest, TuneErro
     Ok(digest_bytes(&bytes))
 }
 
+pub(super) fn ensure_candidate_blocking<V>(
+    vehicle: &mut VehicleBinding<V>,
+    capability: &SimulatorCapability,
+    candidate: &Candidate,
+    candidate_digest: Digest,
+) -> Result<(), TuneError>
+where
+    V: SimulatorVehicleAdapter,
+{
+    let receipt =
+        vehicle
+            .adapter_mut()
+            .ensure_candidate_blocking(capability, candidate, candidate_digest);
+    validate_candidate_receipt(receipt, capability, candidate_digest)
+}
+
 pub(super) fn recover_pending_blocking<B, G, M>(
     journal: &mut Journal,
     backend: &mut B,
@@ -157,11 +173,8 @@ where
             started: false,
         };
     }
-    let receipt =
-        vehicle
-            .adapter_mut()
-            .apply_candidate_blocking(capability, candidate, candidate_digest);
-    if let Err(error) = validate_candidate_receipt(receipt, capability, candidate_digest) {
+    if let Err(error) = ensure_candidate_blocking(vehicle, capability, candidate, candidate_digest)
+    {
         return RunTerminal::Failed {
             error,
             started: false,
@@ -242,7 +255,7 @@ where
                 }
             }
             Ok(SampleEvent::Complete) => {
-                return finish_normal_run(backend, gates, metric);
+                return finish_stream_blocking(context, expected_sequence, backend, gates, metric);
             }
             Ok(SampleEvent::TimedOut) => {
                 return hard_failure(
@@ -263,6 +276,32 @@ where
             }
         }
     }
+}
+
+fn finish_stream_blocking<B, G, M>(
+    context: &RunContext<'_>,
+    sample_count: u64,
+    backend: &mut B,
+    gates: &mut G,
+    metric: &mut M,
+) -> RunTerminal
+where
+    B: SimulatorBackend,
+    G: GateEvaluator,
+    M: MetricEvaluator,
+{
+    if sample_count == 0 {
+        return hard_failure(
+            context,
+            0,
+            0,
+            GateOutcome::fail(
+                "core.no_samples",
+                "the simulator completed without telemetry samples",
+            ),
+        );
+    }
+    finish_normal_run_blocking(backend, gates, metric)
 }
 
 fn evaluate_sample<G, M>(
@@ -287,7 +326,11 @@ where
     Ok(None)
 }
 
-fn finish_normal_run<B, G, M>(backend: &mut B, gates: &mut G, metric: &mut M) -> RunTerminal
+fn finish_normal_run_blocking<B, G, M>(
+    backend: &mut B,
+    gates: &mut G,
+    metric: &mut M,
+) -> RunTerminal
 where
     B: SimulatorBackend,
     G: GateEvaluator,

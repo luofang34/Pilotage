@@ -5,6 +5,10 @@ use crate::{
     TuneError,
 };
 
+#[cfg(test)]
+#[path = "plan/tests.rs"]
+mod tests;
+
 pub(super) fn validate_evaluation(
     evaluation: &CandidateEvaluation,
     role: AttemptRole,
@@ -77,24 +81,29 @@ fn validate_failure(
         .required_hard_gates
         .iter()
         .any(|gate| gate == &failure.gate.id);
-    let core_gate_is_valid = match failure.gate.id.as_str() {
-        "core.sample_limit" => failure.sample_sequence == u64::from(scenario.max_samples),
-        "core.sample_timeout" => failure.sample_sequence <= u64::from(scenario.max_samples),
-        _ => false,
-    };
+    let gate_is_valid = core_gate_is_valid(failure, scenario)
+        .unwrap_or(gate_is_required && failure.sample_sequence < u64::from(scenario.max_samples));
     if failure.scenario_set != set
         || failure.scenario_id != scenario.id
         || failure.repetition != repetition
         || failure.seed != derive_seed(fixed_seed, set, scenario, repetition)
         || failure.gate.detail.trim().is_empty()
-        || (!gate_is_required && !core_gate_is_valid)
-        || (gate_is_required && failure.sample_sequence >= u64::from(scenario.max_samples))
+        || !gate_is_valid
     {
         return Err(invalid(
             "a hard gate failure does not match the prepared run plan",
         ));
     }
     Ok(())
+}
+
+fn core_gate_is_valid(failure: &HardGateFailure, scenario: &ScenarioRef) -> Option<bool> {
+    match failure.gate.id.as_str() {
+        "core.no_samples" => Some(failure.sample_sequence == 0 && failure.elapsed_ms == 0),
+        "core.sample_limit" => Some(failure.sample_sequence == u64::from(scenario.max_samples)),
+        "core.sample_timeout" => Some(failure.sample_sequence <= u64::from(scenario.max_samples)),
+        _ => None,
+    }
 }
 
 fn expected_run(

@@ -56,6 +56,19 @@ pub enum TuneError {
         #[source]
         source: AdapterError,
     },
+    /// An operation and the required candidate reconciliation both failed.
+    #[error(
+        "{operation} failed: {primary}; candidate reconciliation also failed: {reconciliation}"
+    )]
+    OperationAndReconciliationFailed {
+        /// The operation that failed before reconciliation.
+        operation: &'static str,
+        /// The primary operation error.
+        primary: Box<TuneError>,
+        /// The reconciliation error.
+        #[source]
+        reconciliation: Box<TuneError>,
+    },
     /// A gate or metric evaluator operation failed.
     #[error("{implementation} failed during {operation}: {source}")]
     Evaluator {

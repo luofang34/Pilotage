@@ -2,6 +2,7 @@
 
 mod evaluate;
 mod promotion;
+mod reconcile;
 mod session;
 
 use std::path::Path;
@@ -114,7 +115,7 @@ where
             })?;
         session::validate_vehicle_binding(&journal, &vehicle)?;
         evaluate::recover_pending_blocking(&mut journal, &mut backend, &mut gates, &mut metric)?;
-        Ok(Self {
+        let mut tuner = Self {
             stage,
             backend,
             vehicle,
@@ -123,7 +124,9 @@ where
             metric,
             strategy,
             journal,
-        })
+        };
+        tuner.reconcile_settled_candidate_blocking()?;
+        Ok(tuner)
     }
 
     /// Evaluates at most `attempt_limit` adaptive training challengers.
@@ -158,7 +161,9 @@ where
         self.require_phase(CampaignPhase::Searching, "freeze training candidate")?;
         self.recover_pending_blocking()?;
         self.ensure_safe_baseline()?;
-        self.journal.freeze()
+        let candidate = self.journal.freeze()?;
+        self.reconcile_settled_candidate_blocking()?;
+        Ok(candidate)
     }
 
     /// Runs the one hidden paired promotion comparison.
@@ -170,6 +175,7 @@ where
     /// Returns [`TuneError`] when training is not frozen or execution fails.
     pub fn run_promotion_once_blocking(&mut self) -> Result<PromotionDecision, TuneError> {
         if let Some(decision) = self.journal.state().promotion_decision.clone() {
+            self.reconcile_settled_candidate_blocking()?;
             return Ok(decision);
         }
         self.require_phase(CampaignPhase::Frozen, "run promotion")?;
@@ -194,6 +200,7 @@ where
             self.journal.state().promotion_frozen.as_ref(),
         )?;
         self.journal.close_promotion(decision.clone())?;
+        self.reconcile_settled_candidate_blocking()?;
         Ok(decision)
     }
 
@@ -208,6 +215,7 @@ where
         &mut self,
     ) -> Result<FinalQualificationOutcome, TuneError> {
         if let Some(outcome) = self.journal.state().final_outcome.clone() {
+            self.reconcile_settled_candidate_blocking()?;
             return Ok(outcome);
         }
         self.require_phase(CampaignPhase::PromotionClosed, "run final qualification")?;
@@ -218,6 +226,7 @@ where
         }
         let outcome = final_outcome(&self.stage, self.journal.state().final_evaluation.as_ref());
         self.journal.seal(candidate, outcome.clone())?;
+        self.reconcile_settled_candidate_blocking()?;
         Ok(outcome)
     }
 
@@ -323,7 +332,7 @@ where
         if stored_digest != digest {
             return Err(TuneError::DigestMismatch { expected: digest });
         }
-        evaluate::run_prepared_blocking(
+        let result = evaluate::run_prepared_blocking(
             &mut self.journal,
             &self.stage,
             trial_id,
@@ -335,16 +344,18 @@ where
             &self.capability,
             &mut self.gates,
             &mut self.metric,
-        )
+        );
+        self.finish_with_candidate_reconciliation_blocking("evaluate candidate", result)
     }
 
     fn recover_pending_blocking(&mut self) -> Result<(), TuneError> {
-        evaluate::recover_pending_blocking(
+        let result = evaluate::recover_pending_blocking(
             &mut self.journal,
             &mut self.backend,
             &mut self.gates,
             &mut self.metric,
-        )
+        );
+        self.finish_with_candidate_reconciliation_blocking("recover pending attempt", result)
     }
 
     fn selected_release_candidate(&self) -> Digest {

@@ -2,6 +2,10 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+#[path = "tuner/no_samples.rs"]
+mod no_samples;
+#[path = "tuner/reconciliation.rs"]
+mod reconciliation;
 #[path = "tuner/test_rig.rs"]
 mod test_rig;
 
@@ -46,6 +50,7 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
     tuner.freeze_candidate().expect("freeze candidate");
     let promotion = tuner.run_promotion_once_blocking().expect("run promotion");
     assert!(matches!(promotion, PromotionDecision::Promoted { .. }));
+    assert_eq!(state.0.borrow().gain, 0.5);
     let runs_after_promotion = state.0.borrow().scenario_runs.len();
     assert_eq!(
         tuner.run_promotion_once_blocking().expect("read promotion"),
@@ -71,6 +76,7 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
         tuner.qualified_candidate().expect("qualified candidate"),
         candidate(0.5)
     );
+    assert_eq!(state.0.borrow().gain, 0.5);
     assert!(matches!(
         tuner.run_training_attempts_blocking(1),
         Err(TuneError::InvalidState { .. })
@@ -83,7 +89,7 @@ fn promotion_rejects_an_improvement_below_the_relative_floor() {
     let state = FakeHandle::new();
     let mut tuner = open(
         directory.path(),
-        state,
+        state.clone(),
         SequenceStrategy::new(vec![0.1]),
         2.0,
     )
@@ -112,7 +118,7 @@ fn final_qualification_rejects_a_named_objective_limit() {
     let state = FakeHandle::new();
     let mut tuner = open(
         directory.path(),
-        state,
+        state.clone(),
         SequenceStrategy::new(vec![1.0]),
         2.0,
     )
@@ -134,6 +140,7 @@ fn final_qualification_rejects_a_named_objective_limit() {
             metric: "test.response".to_owned(),
         }
     );
+    assert_eq!(state.0.borrow().gain, 0.0);
 }
 
 #[test]
@@ -235,13 +242,13 @@ fn recovery_quarantines_a_prepared_candidate_without_replaying_it() {
     }));
     assert!(stopped.is_err());
     drop(tuner);
-    assert_eq!(state.0.borrow().apply_count, 2);
+    assert_eq!(state.0.borrow().apply_count, 1);
     state.0.borrow_mut().panic_on_prepare = None;
 
     let mut resumed = open(directory.path(), state.clone(), strategy, 2.0).expect("resume tuner");
 
     assert_eq!(resumed.journal().training_attempt_count(), 1);
-    assert_eq!(state.0.borrow().apply_count, 2);
+    assert_eq!(state.0.borrow().apply_count, 1);
     assert!(
         resumed
             .journal()
@@ -266,7 +273,6 @@ fn recovery_quarantines_a_prepared_candidate_without_replaying_it() {
 fn candidate_readback_mismatch_is_quarantined_before_cleanup() {
     let directory = TestDirectory::new("readback");
     let state = FakeHandle::new();
-    state.0.borrow_mut().bad_candidate_readback = true;
     let mut tuner = open(
         directory.path(),
         state.clone(),
@@ -274,6 +280,7 @@ fn candidate_readback_mismatch_is_quarantined_before_cleanup() {
         2.0,
     )
     .expect("open tuner");
+    state.0.borrow_mut().bad_candidate_readback_on_ensure = Some(3);
 
     let error = tuner
         .run_training_attempts_blocking(0)
@@ -359,6 +366,7 @@ fn changed_strategy_identity_cannot_resume_the_session() {
     )
     .expect("open tuner");
     drop(tuner);
+    let apply_count = state.0.borrow().apply_count;
 
     let result = open(
         directory.path(),
@@ -368,7 +376,7 @@ fn changed_strategy_identity_cannot_resume_the_session() {
     );
 
     assert!(matches!(result, Err(TuneError::JournalSessionMismatch)));
-    assert_eq!(state.0.borrow().apply_count, 0);
+    assert_eq!(state.0.borrow().apply_count, apply_count);
 }
 
 #[test]

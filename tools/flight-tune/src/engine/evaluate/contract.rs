@@ -66,7 +66,7 @@ pub(super) fn validate_candidate_receipt(
 ) -> Result<(), TuneError> {
     let receipt = receipt.map_err(|source| TuneError::Adapter {
         adapter: "bound simulator vehicle".to_owned(),
-        operation: "apply candidate",
+        operation: "ensure candidate",
         source,
     })?;
     if receipt.session_digest != capability.session_digest()
@@ -75,7 +75,7 @@ pub(super) fn validate_candidate_receipt(
         || receipt.readback_digest != expected
     {
         return Err(TuneError::ReceiptMismatch {
-            operation: "apply candidate",
+            operation: "ensure candidate",
             detail: "applied or readback candidate digest does not match".to_owned(),
         });
     }

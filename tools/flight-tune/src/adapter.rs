@@ -235,10 +235,14 @@ pub trait SimulatorBackend {
     fn cleanup_blocking(&mut self) -> Result<(), AdapterError>;
 }
 
-/// A vehicle adapter that can apply a candidate only with a simulator binding.
+/// A vehicle adapter that can activate a candidate only with a simulator binding.
 pub trait SimulatorVehicleAdapter {
-    /// Applies a candidate and returns the applied and readback digests.
-    fn apply_candidate_blocking(
+    /// Ensures that a candidate is active and returns exact readback digests.
+    ///
+    /// The operation must not write controller state when the requested
+    /// candidate is already active. This rule makes restart reconciliation
+    /// safe to repeat.
+    fn ensure_candidate_blocking(
         &mut self,
         capability: &SimulatorCapability,
         candidate: &Candidate,
