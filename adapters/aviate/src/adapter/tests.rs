@@ -49,6 +49,33 @@ fn the_control_feel_profile_owns_the_response_curve() {
 }
 
 #[test]
+fn legacy_json_cannot_declare_dynamics_that_the_compatibility_law_bypasses() {
+    for pointer in [
+        "/direct/tilt_rate_rps",
+        "/vertical/dynamics/apply_accel",
+        "/yaw/dynamics/apply_jerk",
+    ] {
+        let mut document: serde_json::Value =
+            serde_json::from_str(crate::ALIA250_DEFAULT_CONTROL_FEEL_JSON)
+                .expect("checked compatibility JSON");
+        *document.pointer_mut(pointer).expect("profile field") = serde_json::json!(0.1);
+        let text = serde_json::to_string(&document).expect("custom compatibility JSON");
+        let profile = pilotage_control_feel::ValidatedFlightFeelProfile::from_json_str(&text)
+            .expect("valid generic profile");
+
+        let result = super::startup::validate_adapter_control_feel(&profile);
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::AviateAdapterError::UnsupportedControlFeel { .. })
+            ),
+            "legacy mode accepted changed field {pointer}"
+        );
+    }
+}
+
+#[test]
 fn telemetry_only_advertisement_keeps_the_control_feel_identity() {
     let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
     profile.profile_id = "telemetry-only-feel".to_owned();

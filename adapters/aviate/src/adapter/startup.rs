@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use pilotage_control_feel::{FlightFeelProfile, ValidatedFlightFeelProfile};
+use pilotage_control_feel::{FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
 use pilotage_protocol::VehicleId;
 
 #[cfg(feature = "sim")]
@@ -185,9 +185,28 @@ pub(crate) fn validate_adapter_control_feel(
     control_feel: &ValidatedFlightFeelProfile,
 ) -> Result<(), AviateAdapterError> {
     validate_aviate_profile_bindings(control_feel)?;
+    validate_legacy_compatibility_response(control_feel)?;
     if control_feel.profile().hold.require_accel {
         return Err(AviateAdapterError::UnsupportedControlFeel {
             detail: "hold.require_accel needs an acceleration source with provenance".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_legacy_compatibility_response(
+    control_feel: &ValidatedFlightFeelProfile,
+) -> Result<(), AviateAdapterError> {
+    let profile = control_feel.profile();
+    if profile.mode != FeelMode::LegacyCompatibility {
+        return Ok(());
+    }
+    let mut required = FlightFeelProfile::legacy_compatibility();
+    required.profile_id.clone_from(&profile.profile_id);
+    if profile != &required {
+        return Err(AviateAdapterError::UnsupportedControlFeel {
+            detail: "legacy-compatibility mode requires the fixed Aviate response fields"
+                .to_owned(),
         });
     }
     Ok(())
