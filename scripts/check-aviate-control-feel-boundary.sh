@@ -8,7 +8,7 @@ response_name='(^|_)(HORIZONTAL|VERTICAL|YAW|TILT|THRUST|THROTTLE|TAKEOFF|ACCEL|
 response_type='(^|[^[:alnum:]_])(f32|f64|Duration)([^[:alnum:]_]|$)'
 exemptions_seen=$'\n'
 
-if rg -q \
+if grep -Eq \
     '^[[:space:]]*pub[[:space:]]+((async|const)[[:space:]]+)*fn[[:space:]]+(new_with_profile|install_profile)[[:space:]]*\(' \
     "$root_dir/adapters/aviate/src/uplink.rs"; then
     echo "adapters/aviate/src/uplink.rs:custom-profile-entry" >&2
@@ -53,10 +53,10 @@ is_allowed() {
 }
 
 set +e
-matches="$(cd "$root_dir" && rg -n \
-    --glob '*.rs' \
-    --glob '!**/tests.rs' \
-    --glob '!**/tests/**' \
+matches="$(cd "$root_dir" && grep -RInE \
+    --include='*.rs' \
+    --exclude='tests.rs' \
+    --exclude-dir='tests' \
     "$declaration_pattern" \
     'adapters/aviate/src')"
 status=$?
