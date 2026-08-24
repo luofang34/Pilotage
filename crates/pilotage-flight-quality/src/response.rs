@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::series::{
     integral_abs_linear, interpolate, timed_window, validate_event, validate_metric_results,
-    validate_optional_metric_results, validate_timed_values,
+    validate_optional_metric_results, validate_timed_values, validate_values,
 };
 use crate::{MetricError, TimedValue};
 
@@ -70,7 +70,13 @@ pub fn measure_step_response(
 ) -> Result<ResponseMetrics, MetricError> {
     validate_inputs(command, response, spec)?;
     let command_progress = progress_window(command, spec);
+    validate_values(&command_progress, "response.command_progress", |sample| {
+        sample.value
+    })?;
     let response_progress = progress_window(response, spec);
+    validate_values(&response_progress, "response.response_progress", |sample| {
+        sample.value
+    })?;
     let command_delay =
         first_crossing(&command_progress, DELAY_FRACTION).map(|time_s| time_s - spec.input_time_s);
     let response_delay =
@@ -79,6 +85,7 @@ pub fn measure_step_response(
     let settling_time = settling_time(&response_progress).map(|time_s| time_s - spec.input_time_s);
     let (overshoot, undershoot) = excursions(&response_progress, spec);
     let response_error = response_error(response, spec);
+    validate_values(&response_error, "response.error", |sample| sample.value)?;
     let amplitude = (spec.target_value - spec.initial_value).abs();
     let metrics = ResponseMetrics {
         input_to_command_delay_s: command_delay,
@@ -139,6 +146,10 @@ fn validate_inputs(
     if spec.initial_value == spec.target_value {
         return Err(MetricError::ZeroStep);
     }
+    validate_metric_results(&[(
+        "response.step_delta",
+        spec.target_value - spec.initial_value,
+    )])?;
     validate_event(command, "input", spec.input_time_s, |sample| sample.time_s)?;
     validate_event(response, "input", spec.input_time_s, |sample| sample.time_s)?;
     if spec.input_time_s >= command[command.len() - 1].time_s

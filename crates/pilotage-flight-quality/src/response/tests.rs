@@ -196,7 +196,7 @@ fn a_non_finite_derived_response_metric_is_a_typed_error() {
         },
     ];
 
-    assert!(matches!(
+    assert_eq!(
         measure_step_response(
             &samples,
             &samples,
@@ -206,6 +206,156 @@ fn a_non_finite_derived_response_metric_is_a_typed_error() {
                 target_value: -f64::MAX,
             },
         ),
-        Err(MetricError::NonFiniteResult { .. })
-    ));
+        Err(MetricError::NonFiniteResult {
+            field: "response.step_delta",
+        })
+    );
+}
+
+#[test]
+fn signed_zero_input_time_is_the_first_step_sample() {
+    let samples = [
+        TimedValue {
+            time_s: 0.0,
+            value: 0.0,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: 1.0,
+        },
+    ];
+
+    let metrics = measure_step_response(
+        &samples,
+        &samples,
+        StepSpec {
+            input_time_s: -0.0,
+            initial_value: 0.0,
+            target_value: 1.0,
+        },
+    )
+    .expect("signed zero identifies the first sample");
+
+    assert_eq!(metrics.input_to_command_delay_s, Some(0.02));
+    assert_eq!(metrics.input_to_response_delay_s, Some(0.02));
+}
+
+#[test]
+fn non_finite_command_progress_has_typed_context() {
+    let command = [
+        TimedValue {
+            time_s: 0.0,
+            value: -f64::MAX,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: f64::MAX,
+        },
+    ];
+    let response = [
+        TimedValue {
+            time_s: 0.0,
+            value: -f64::MAX,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: 0.0,
+        },
+    ];
+
+    assert_eq!(
+        measure_step_response(
+            &command,
+            &response,
+            StepSpec {
+                input_time_s: 0.0,
+                initial_value: -f64::MAX,
+                target_value: 0.0,
+            },
+        ),
+        Err(MetricError::NonFiniteValue {
+            index: 1,
+            field: "response.command_progress",
+        })
+    );
+}
+
+#[test]
+fn non_finite_response_progress_has_typed_context() {
+    let command = [
+        TimedValue {
+            time_s: 0.0,
+            value: -f64::MAX,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: 0.0,
+        },
+    ];
+    let response = [
+        TimedValue {
+            time_s: 0.0,
+            value: -f64::MAX,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: f64::MAX,
+        },
+    ];
+
+    assert_eq!(
+        measure_step_response(
+            &command,
+            &response,
+            StepSpec {
+                input_time_s: 0.0,
+                initial_value: -f64::MAX,
+                target_value: 0.0,
+            },
+        ),
+        Err(MetricError::NonFiniteValue {
+            index: 1,
+            field: "response.response_progress",
+        })
+    );
+}
+
+#[test]
+fn non_finite_response_error_has_typed_context() {
+    let command = [
+        TimedValue {
+            time_s: 0.0,
+            value: 0.0,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: -f64::MAX,
+        },
+    ];
+    let response = [
+        TimedValue {
+            time_s: 0.0,
+            value: 0.0,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: f64::MAX,
+        },
+    ];
+
+    assert_eq!(
+        measure_step_response(
+            &command,
+            &response,
+            StepSpec {
+                input_time_s: 0.0,
+                initial_value: 0.0,
+                target_value: -f64::MAX,
+            },
+        ),
+        Err(MetricError::NonFiniteValue {
+            index: 1,
+            field: "response.error",
+        })
+    );
 }

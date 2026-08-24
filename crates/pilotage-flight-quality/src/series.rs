@@ -90,7 +90,14 @@ pub(crate) fn linear_value_at<T>(
     time: impl Fn(&T) -> f64,
     value: impl Fn(&T) -> f64,
 ) -> f64 {
-    match samples.binary_search_by(|sample| time(sample).total_cmp(&at_s)) {
+    match samples.binary_search_by(|sample| {
+        let sample_time = time(sample);
+        if sample_time == at_s {
+            std::cmp::Ordering::Equal
+        } else {
+            sample_time.total_cmp(&at_s)
+        }
+    }) {
         Ok(index) => value(&samples[index]),
         Err(index) => {
             let before = &samples[index - 1];

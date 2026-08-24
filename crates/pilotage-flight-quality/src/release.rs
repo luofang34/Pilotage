@@ -58,7 +58,7 @@ pub fn measure_release(
         return Err(MetricError::NoReleaseDirection);
     }
     let direction = release_velocity.signum();
-    let stop_time = confirmed_stop_time(motion, release_time_s, hold_start_s);
+    let stop_time = confirmed_stop_time(motion, release_time_s, hold_start_s)?;
     let release_position = value_at(motion, release_time_s, |point| point.position_m);
     validate_metric_results(&[("release.position_m", release_position)])?;
     let brake_distance = stop_time.map(|time_s| {
@@ -79,7 +79,7 @@ pub fn measure_release(
             hold_start_s,
             release_position,
             direction,
-        ),
+        )?,
         opposite_velocity_peak_mps: opposite_velocity_peak(
             motion,
             release_time_s,
@@ -162,7 +162,7 @@ fn confirmed_stop_time(
     motion: &[MotionPoint],
     release_time_s: f64,
     hold_start_s: f64,
-) -> Option<f64> {
+) -> Result<Option<f64>, MetricError> {
     let mut low_intervals = Vec::new();
     for pair in motion.windows(2) {
         let start = pair[0].time_s.max(release_time_s);
@@ -172,11 +172,12 @@ fn confirmed_stop_time(
         }
         let v0 = value_at(motion, start, |point| point.velocity_mps);
         let v1 = value_at(motion, end, |point| point.velocity_mps);
+        validate_metric_results(&[("release.stop_velocity_delta_mps", v1 - v0)])?;
         if let Some(interval) = low_speed_interval(start, v0, end, v1) {
             low_intervals.push(interval);
         }
     }
-    first_dwell_interval(&low_intervals, STOP_DWELL_S)
+    Ok(first_dwell_interval(&low_intervals, STOP_DWELL_S))
 }
 
 fn low_speed_interval(t0: f64, v0: f64, t1: f64, v1: f64) -> Option<(f64, f64)> {
@@ -222,17 +223,20 @@ fn release_return(
     hold_start_s: f64,
     release_position: f64,
     direction: f64,
-) -> f64 {
+) -> Result<f64, MetricError> {
     let mut running_maximum = 0.0_f64;
     let mut maximum_return = 0.0_f64;
     for position in values_in_window(motion, release_time_s, hold_start_s, |point| {
         point.position_m
     }) {
         let displacement = (position - release_position) * direction;
+        validate_metric_results(&[("release.displacement_m", displacement)])?;
         running_maximum = running_maximum.max(displacement);
-        maximum_return = maximum_return.max(running_maximum - displacement);
+        let return_distance = running_maximum - displacement;
+        validate_metric_results(&[("release.return_distance_m", return_distance)])?;
+        maximum_return = maximum_return.max(return_distance);
     }
-    maximum_return
+    Ok(maximum_return)
 }
 
 fn opposite_velocity_peak(

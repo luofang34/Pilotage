@@ -258,3 +258,115 @@ fn a_non_finite_hold_error_is_a_typed_error() {
         })
     );
 }
+
+#[test]
+fn signed_zero_release_and_hold_times_select_the_first_sample() {
+    let motion = [
+        MotionPoint {
+            time_s: 0.0,
+            position_m: 0.0,
+            velocity_mps: 1.0,
+        },
+        MotionPoint {
+            time_s: 1.0,
+            position_m: 0.5,
+            velocity_mps: 0.0,
+        },
+        MotionPoint {
+            time_s: 2.0,
+            position_m: 0.5,
+            velocity_mps: 0.0,
+        },
+    ];
+    let release = measure_release(&motion, -0.0, 1.5)
+        .expect("signed zero identifies the first release sample");
+    assert!(release.release_to_stop_s.is_some());
+
+    let position = [
+        TimedValue {
+            time_s: 0.0,
+            value: 0.2,
+        },
+        TimedValue {
+            time_s: 1.0,
+            value: 0.0,
+        },
+    ];
+    let hold =
+        measure_hold(&position, -0.0, 0.0).expect("signed zero identifies the first hold sample");
+    assert_eq!(hold.zero_crossings, 0);
+}
+
+#[test]
+fn non_finite_stop_velocity_delta_has_typed_context() {
+    let motion = [
+        MotionPoint {
+            time_s: 0.0,
+            position_m: 0.0,
+            velocity_mps: f64::MAX,
+        },
+        MotionPoint {
+            time_s: 1.0,
+            position_m: 0.0,
+            velocity_mps: -f64::MAX,
+        },
+    ];
+
+    assert_eq!(
+        measure_release(&motion, 0.0, 1.0),
+        Err(MetricError::NonFiniteResult {
+            field: "release.stop_velocity_delta_mps",
+        })
+    );
+}
+
+#[test]
+fn non_finite_release_displacement_has_typed_context() {
+    let motion = [
+        MotionPoint {
+            time_s: 0.0,
+            position_m: -f64::MAX,
+            velocity_mps: 1.0,
+        },
+        MotionPoint {
+            time_s: 1.0,
+            position_m: f64::MAX,
+            velocity_mps: 1.0,
+        },
+    ];
+
+    assert_eq!(
+        measure_release(&motion, 0.0, 1.0),
+        Err(MetricError::NonFiniteResult {
+            field: "release.displacement_m",
+        })
+    );
+}
+
+#[test]
+fn non_finite_release_return_distance_has_typed_context() {
+    let motion = [
+        MotionPoint {
+            time_s: 0.0,
+            position_m: 0.0,
+            velocity_mps: 1.0,
+        },
+        MotionPoint {
+            time_s: 1.0,
+            position_m: f64::MAX,
+            velocity_mps: 1.0,
+        },
+        MotionPoint {
+            time_s: 2.0,
+            position_m: -f64::MAX,
+            velocity_mps: 1.0,
+        },
+    ];
+
+    assert_eq!(
+        measure_release(&motion, 0.0, 2.0),
+        Err(MetricError::NonFiniteResult {
+            field: "release.return_distance_m",
+        })
+    );
+}

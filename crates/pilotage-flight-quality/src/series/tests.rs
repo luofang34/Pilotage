@@ -1,6 +1,8 @@
 use crate::{MetricError, TimedValue};
 
-use super::{integral_abs_linear, validate_timed_values, weighted_abs_percentile_linear};
+use super::{
+    integral_abs_linear, linear_value_at, validate_timed_values, weighted_abs_percentile_linear,
+};
 
 #[test]
 fn non_monotonic_time_has_typed_context() {
@@ -59,4 +61,23 @@ fn absolute_percentile_preserves_a_zero_duration_atom() {
     ];
 
     assert_eq!(weighted_abs_percentile_linear(&samples, 0.95), 0.0);
+}
+
+#[test]
+fn linear_lookup_treats_signed_zero_as_one_series_endpoint() {
+    let samples = [
+        TimedValue {
+            time_s: -1.0,
+            value: 1.0,
+        },
+        TimedValue {
+            time_s: -0.0,
+            value: 2.0,
+        },
+    ];
+
+    assert_eq!(
+        linear_value_at(&samples, 0.0, |sample| sample.time_s, |sample| sample.value,),
+        2.0
+    );
 }
