@@ -16,7 +16,8 @@ use crate::{
 pub use backend::{BackendCapabilities, BackendCapability};
 pub use phase::{Comparison, Phase, PhaseAction, PhaseCondition, StartHeading, StartState};
 pub use selector::{
-    ControlChannel, ControlValueField, QuaternionComponent, SignalSelector, VectorComponent,
+    ControlChannel, ControlValueField, QuaternionComponent, SignalSelectionError, SignalSelector,
+    VectorComponent,
 };
 pub use waveform::{SineComponent, Waveform};
 

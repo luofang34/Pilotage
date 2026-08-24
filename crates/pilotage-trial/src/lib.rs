@@ -40,6 +40,6 @@ pub use sample::{
 };
 pub use scenario::{
     BackendCapabilities, BackendCapability, Comparison, ControlChannel, ControlValueField, Phase,
-    PhaseAction, PhaseCondition, QuaternionComponent, Scenario, SignalSelector, SineComponent,
-    StartHeading, StartState, VectorComponent, Waveform,
+    PhaseAction, PhaseCondition, QuaternionComponent, Scenario, SignalSelectionError,
+    SignalSelector, SineComponent, StartHeading, StartState, VectorComponent, Waveform,
 };

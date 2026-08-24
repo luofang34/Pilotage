@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 
 use super::*;
-use crate::MAX_ACTUATOR_VALUES;
+use crate::{ControlValue, MAX_ACTUATOR_VALUES, ReferenceFrame, Vector3};
 
 fn start_scenario(target: StartState) -> Scenario {
     Scenario {
@@ -56,10 +56,12 @@ fn condition_scenario(condition: PhaseCondition) -> Scenario {
 }
 
 #[test]
-fn a_control_selector_names_the_tagged_value_field() {
+fn a_control_selector_names_the_tagged_value_field_and_frame() {
     let scenario = condition_scenario(PhaseCondition::Signal {
         selector: SignalSelector::TypedIntent {
-            field: ControlValueField::VelocityYawRate,
+            field: ControlValueField::VelocityYawRate {
+                expected_frame: ReferenceFrame::BodyFrd,
+            },
         },
         comparison: Comparison::LessOrEqual,
         value: 0.2,
@@ -68,6 +70,82 @@ fn a_control_selector_names_the_tagged_value_field() {
     let json = scenario.to_canonical_json().expect("scenario JSON");
     let decoded = Scenario::from_json(&json).expect("scenario parse");
     assert_eq!(decoded, scenario);
+
+    let mut document: serde_json::Value = serde_json::from_slice(&json).expect("JSON value");
+    let field = &mut document["phases"][0]["exit_conditions"][0]["selector"]["field"];
+    assert_eq!(field["expected_frame"], "body_frd");
+    field
+        .as_object_mut()
+        .expect("control value field")
+        .remove("expected_frame");
+    let missing_frame = serde_json::to_vec(&document).expect("missing-frame JSON");
+    assert!(Scenario::from_json(&missing_frame).is_err());
+}
+
+#[test]
+fn a_control_selector_rejects_a_different_reference_frame() {
+    let selector = ControlValueField::VelocityX {
+        expected_frame: ReferenceFrame::BodyFrd,
+    };
+    let body_value = velocity_value(ReferenceFrame::BodyFrd);
+    let local_value = velocity_value(ReferenceFrame::LocalNed);
+
+    assert_eq!(selector.select(&body_value), Ok(1.0));
+    assert!(matches!(
+        selector.select(&local_value),
+        Err(SignalSelectionError::ReferenceFrameMismatch {
+            expected: "body_frd",
+            actual: "local_ned",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_control_selector_rejects_a_different_value_variant() {
+    let selector = ControlValueField::AttitudeThrust {
+        expected_frame: ReferenceFrame::BodyFrd,
+    };
+    let value = ControlValue::BodyRateThrust {
+        body_rates_rad_s: Vector3 {
+            x: 0.1,
+            y: 0.2,
+            z: 0.3,
+        },
+        thrust: 0.4,
+    };
+
+    assert!(matches!(
+        selector.select(&value),
+        Err(SignalSelectionError::ControlValueVariantMismatch {
+            expected: "attitude_thrust",
+            actual: "body_rate_thrust",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_control_selector_rejects_an_unavailable_scalar_channel() {
+    let selector = ControlValueField::ScalarChannel { index: 1 };
+    let value = ControlValue::ScalarChannels { values: vec![0.2] };
+
+    assert_eq!(
+        selector.select(&value),
+        Err(SignalSelectionError::ScalarChannelUnavailable { index: 1, count: 1 })
+    );
+}
+
+fn velocity_value(frame: ReferenceFrame) -> ControlValue {
+    ControlValue::Velocity {
+        frame,
+        linear_mps: Vector3 {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        },
+        yaw_rate_rad_s: 0.4,
+    }
 }
 
 #[test]
