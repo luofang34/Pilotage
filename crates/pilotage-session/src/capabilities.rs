@@ -25,6 +25,30 @@ pub(crate) fn host_capabilities(
         host_version: host_version.to_owned(),
         vehicles: caps.vehicles.iter().map(vehicle_descriptor).collect(),
         supported_modes: execution_modes(caps),
+        control_feel: caps.control_feel.as_ref().map(control_feel_identity),
+    }
+}
+
+fn control_feel_identity(
+    identity: &pilotage_adapter_api::ControlFeelDescriptor,
+) -> wire::ControlFeelIdentity {
+    wire::ControlFeelIdentity {
+        profile_id: identity.profile_id.clone(),
+        mode: control_feel_mode(identity.mode) as i32,
+        schema_version: u32::from(identity.schema_version),
+        profile_sha256: identity.profile_sha256.to_vec(),
+        device_profile_sha256: identity.device_profile_sha256.to_vec(),
+        flight_controller_sha256: identity.flight_controller_sha256.to_vec(),
+    }
+}
+
+fn control_feel_mode(mode: pilotage_adapter_api::ControlFeelMode) -> wire::ControlFeelMode {
+    use pilotage_adapter_api::ControlFeelMode as Domain;
+    match mode {
+        Domain::Precision => wire::ControlFeelMode::Precision,
+        Domain::Balanced => wire::ControlFeelMode::Balanced,
+        Domain::Agile => wire::ControlFeelMode::Agile,
+        Domain::LegacyCompatibility => wire::ControlFeelMode::LegacyCompatibility,
     }
 }
 

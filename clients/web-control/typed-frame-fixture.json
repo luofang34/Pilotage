@@ -1,6 +1,6 @@
 {
   "comment": "Shared typed-control wire fixture. envelopeHex is a SETPOINT frame (intent only) produced by the REAL browser chain (keyboard w through the compiled wasm runtime, scaled by the advertised 3.0/1.5/0.9 velocity envelope, encoded by wire.js); actionCommandHex is the RELIABLE-stream ControlActionCommand (Arm, nonzero id, full authority binding) for the same session \u2014 discrete actions never ride datagrams (CTRL-01). clients/web/typed-command.test.mjs proves the browser produces exactly these bytes; crates/pilotage-session/tests/typed_wire_e2e.rs decodes the SAME bytes and drives them through the session engine to the adapter boundary.",
-  "envelopeHex": "080112380a020807120208011a100a0e76656869636c652e6d6f74696f6e220208042a02082a320508959aef3a38034a090a070801250000c0bf5801",
+  "envelopeHex": "080112380a020807120208011a100a0e76656869636c652e6d6f74696f6e220208042a02082a320508959aef3a38044a090a070801250000c0bf5801",
   "expected": {
     "sessionId": 7,
     "vehicleId": 1,
@@ -8,7 +8,7 @@
     "generation": 4,
     "sequence": 42,
     "sampledAtNanos": 123456789,
-    "profileRevision": 3,
+    "profileRevision": 4,
     "activationRevision": 1,
     "velocity": {
       "frame": 1,

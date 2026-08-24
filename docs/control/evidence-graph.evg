@@ -340,12 +340,12 @@ attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr config-digest 00c701b8b932793eb242eb1a8325944187b2e622
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:1d7b646167cd010a3dd5014aebef2ab5847e7832
+attr source-digest git-blob:b4852a299a3401f2aeb830bddccbe547f7604d64
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:ee5bb8609c86397c7b0917b211f7cb1a3b88752569774f6188cb133837c612d4
-attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr output-digest sha256:e0325e2afbed1baa91b1b39ad9d586ddec8990c34a0c61dfda811f6b49cdf0cc
+attr run-id local:00c701b8b932793eb242eb1a8325944187b2e622
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
@@ -380,23 +380,23 @@ attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr config-digest 00c701b8b932793eb242eb1a8325944187b2e622
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:42287a2da1941328e08374ffc8a033f25b19cde8
+attr source-digest git-blob:4735eb8a0dabc4dd935920c085ec4ee3edd936cc
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:d33d173559d31ba5fa821381a39277955697ed2ee1399541a371aea246f5f892
-attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr output-digest sha256:ff35a22c954495285bb09c185106101d958bd91fbf976f0ae397f5425db4767b
+attr run-id local:00c701b8b932793eb242eb1a8325944187b2e622
 attr outcome pass
 
 node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
 title aviate direct-flight and lifecycle-profile suite — recorded pass
 attr command cargo test -p pilotage-adapter-aviate --lib adapter::tests::direct_flight
-attr config-digest 967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr config-digest 00c701b8b932793eb242eb1a8325944187b2e622
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:0f17f792fd6c02af64c4b79b3be91dc65aaa83f7
+attr source-digest git-blob:e246c0ad7ecd38c930cc6ec63ac341a3034d3bc0
 attr artifact docs/control/evidence-artifacts/ctrl01/lifecycle-profile.run.txt
-attr output-digest sha256:876f9ad081ff41aba750603d63facaf2e08f7e1d78f7a88d77f406913753ebc3
-attr run-id local:967ed8a16d39148eeb7ea6dda426664e9404c9be
+attr output-digest sha256:bb1cb2862355ea452ed923e2cabb6ade5ecbe44636f37e545d4e4b8149f9d136
+attr run-id local:00c701b8b932793eb242eb1a8325944187b2e622
 attr outcome pass
 
 node RESULT-CTRL-INGRESS verification-result
@@ -428,6 +428,12 @@ title committed code baseline the recorded results were produced against (engine
 attr scm git
 attr commit 967ed8a16d39148eeb7ea6dda426664e9404c9be
 attr tree a5d55f59813d313df367c12e3d3fdedeffe18f4d
+
+node CFG-CTRL-FEEL configuration-item
+title committed control-feel integration verification baseline
+attr scm git
+attr commit 00c701b8b932793eb242eb1a8325944187b2e622
+attr tree 8a89376eb3ad1dcaf764336dde5ce54a783fa1fd
 
 node CFG-CTRL-VIDEO-V3 configuration-item
 title committed code baseline for session negotiation and transport results
@@ -582,7 +588,7 @@ edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-EXCL
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-GEN
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-LATCH
 edge RESULT-CTRL-GROUP covers CTRL-GROUP-003
-edge RESULT-CTRL-GROUP justified-by CFG-CTRL01
+edge RESULT-CTRL-GROUP justified-by CFG-CTRL-FEEL
 edge RESULT-CTRL-GROUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ID-REUSE
@@ -605,12 +611,12 @@ edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-FRAME
 edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-COMMAND
 edge RESULT-CTRL-FIXTURE covers CTRL-BIND-001
 edge RESULT-CTRL-FIXTURE covers CTRL-CHAN-002
-edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL01
+edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-FEEL
 edge RESULT-CTRL-FIXTURE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-LIFECYCLE-PROFILE result-of CASE-CTRL-LIFE-PHYSICAL
 edge RESULT-CTRL-LIFECYCLE-PROFILE covers CTRL-LIFE-005
-edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by CFG-CTRL01
+edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by CFG-CTRL-FEEL
 edge RESULT-CTRL-LIFECYCLE-PROFILE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-ENGINE-ACTIONS result-of CASE-CTRL-LIFE-ABSENT

@@ -214,6 +214,7 @@ fn profile(
             link_loss_actions: actions,
         }],
         adapter_version: "test".to_owned(),
+        control_feel: None,
     }
 }
 

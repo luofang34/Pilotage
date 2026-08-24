@@ -30,3 +30,7 @@ pub use error::AviateAdapterError;
 pub use incarnation::{IncarnationProvider, OsIncarnationProvider};
 pub use pilotage_mavlink::link::{LinkConfig, ResetPolicy};
 pub use uplink::FlightUplink;
+
+/// Canonical control-feel artifact for the default Alia launch.
+pub const ALIA250_DEFAULT_CONTROL_FEEL_JSON: &str =
+    include_str!("../profiles/alia250-legacy-v1.json");

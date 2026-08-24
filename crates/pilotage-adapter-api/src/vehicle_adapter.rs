@@ -2,7 +2,7 @@
 
 use pilotage_protocol::{ScopeId, ScopedControlFrame, VehicleId};
 
-use crate::capability::AdapterCapabilities;
+use crate::capability::{AdapterCapabilities, ControlFeelDescriptor};
 use crate::control::{ApplyOutcome, LinkLossEnactError, LinkLossPolicy};
 use crate::step::{StepBudget, StepOutcome};
 use crate::telemetry::{TelemetryBatch, VideoSource};
@@ -18,6 +18,14 @@ pub trait VehicleAdapter {
     /// Reports the vehicles, scopes, and execution characteristics this
     /// adapter supports.
     fn capabilities(&self) -> AdapterCapabilities;
+
+    /// Takes a control-feel capability that changed during control apply.
+    ///
+    /// The host uses this notification for subsequent admission messages.
+    /// An adapter returns `None` when its active artifact did not change.
+    fn take_control_feel_change(&mut self) -> Option<ControlFeelDescriptor> {
+        None
+    }
 
     /// Applies a single scoped control frame, returning how it was disposed
     /// of and the simulation tick the outcome corresponds to.

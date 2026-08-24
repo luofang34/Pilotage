@@ -239,6 +239,16 @@ impl SessionEngine {
         )
     }
 
+    /// Replaces the active control-feel identity for subsequent welcomes.
+    ///
+    /// This operation does not change vehicle or scope capabilities.
+    pub fn update_control_feel(
+        &mut self,
+        control_feel: pilotage_adapter_api::ControlFeelDescriptor,
+    ) {
+        self.capabilities.control_feel = Some(control_feel);
+    }
+
     /// Broadcasts each authority effect and keeps holder bookkeeping in sync.
     ///
     /// Every effect that installs or clears an effective holder updates the

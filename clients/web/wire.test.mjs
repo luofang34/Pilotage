@@ -10,6 +10,7 @@
 // required fields are emitted even when their ids are zero.
 
 import { readFileSync } from "node:fs";
+import { lengthDelimit } from "./envelope-framing.js";
 import {
   encodeControlFrameEnvelope,
   encodeMediaAttachRequestEnvelope,
@@ -34,6 +35,19 @@ function check(name, cond) {
 check(
   "current clients advertise the multiplexed-video session capability",
   SESSION_PROTOCOL_VERSION === 2,
+);
+
+const mediaAttachEnvelope = encodeMediaAttachRequestEnvelope();
+const framedMediaAttach = lengthDelimit(mediaAttachEnvelope);
+check(
+  "length framing preserves an envelope",
+  framedMediaAttach[0] === mediaAttachEnvelope.length &&
+    framedMediaAttach.subarray(1).every((byte, index) => byte === mediaAttachEnvelope[index]),
+);
+const framedBoundary = lengthDelimit(new Uint8Array(128));
+check(
+  "length framing uses a canonical multi-byte varint",
+  framedBoundary[0] === 0x80 && framedBoundary[1] === 0x01,
 );
 
 // Minimal protobuf field walker: returns a Map of field number -> the raw bytes
@@ -798,6 +812,17 @@ check(
   const message = decoded.message;
   const expected = fixture.expected;
   check("welcome session id decodes", Number(message.sessionId) === expected.sessionId);
+  const hexDigest = (value) => Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const feel = message.controlFeel;
+  check("control-feel identity decodes", feel?.profileId === expected.controlFeel.profileId
+    && feel?.mode === expected.controlFeel.mode
+    && feel?.schemaVersion === expected.controlFeel.schemaVersion);
+  check("control-feel artifact digest decodes", hexDigest(feel?.profileSha256 ?? [])
+    === expected.controlFeel.profileSha256);
+  check("control-feel device binding decodes", hexDigest(feel?.deviceProfileSha256 ?? [])
+    === expected.controlFeel.deviceProfileSha256);
+  check("control-feel FC binding decodes", hexDigest(feel?.flightControllerSha256 ?? [])
+    === expected.controlFeel.flightControllerSha256);
   const scopes = message.advertisedScopes ?? [];
   check("both scopes decode", scopes.length === expected.scopes.length);
   const motion = scopes.find((scope) => scope.scope === "vehicle.motion");

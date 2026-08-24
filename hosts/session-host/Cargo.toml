@@ -16,6 +16,7 @@ pilotage-session = { workspace = true }
 pilotage-protocol = { workspace = true }
 pilotage-authority = { workspace = true }
 pilotage-adapter-api = { workspace = true }
+pilotage-control-feel = { workspace = true }
 pilotage-adapter-reference = { workspace = true, optional = true }
 pilotage-adapter-gazebo = { workspace = true, optional = true }
 pilotage-sim-video = { workspace = true, optional = true }

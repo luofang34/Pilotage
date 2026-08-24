@@ -4,6 +4,7 @@ import {
   encodeProfileActivationEnvelope, SESSION_PROTOCOL_VERSION,
 } from "./wire.js";
 import { createActionTracker } from "./action-tracker.js";
+import { lengthDelimit } from "./envelope-framing.js";
 
 /** Builds the reliable-session bootstrap and activation announcer. */
 export function createSessionBootstrap({
@@ -19,25 +20,6 @@ export function createSessionBootstrap({
   handleActionResult,
   applyLeaseResponse,
 }) {
-  function lengthDelimit(envelopeBytes) {
-    const prefix = [];
-    let v = envelopeBytes.length;
-    for (;;) {
-      let byte = v & 0x7f;
-      v >>>= 7;
-      if (v !== 0) {
-        prefix.push(byte | 0x80);
-      } else {
-        prefix.push(byte);
-        break;
-      }
-    }
-    const out = new Uint8Array(prefix.length + envelopeBytes.length);
-    out.set(prefix, 0);
-    out.set(envelopeBytes, prefix.length);
-    return out;
-  }
-
   async function sendClientHello(writer, token) {
     if (!transportSessions.isActive(token)) return false;
     const hello = encodeClientHelloEnvelope({
@@ -83,6 +65,7 @@ export function createSessionBootstrap({
       state.sessionId = decoded.message.sessionId;
       state.principalId = decoded.message.principalId;
       state.advertisedScopes = decoded.message.advertisedScopes ?? [];
+      state.controlFeel = decoded.message.controlFeel ?? null;
       state.actionTracker = createActionTracker();
       state.announcedActivationRevision = null;
       state.motionScope = motionScope;
@@ -90,6 +73,9 @@ export function createSessionBootstrap({
       state.fpvActive = false;
       state.lifecycle = { pendingPress: false };
       log(`ServerWelcome: session=${decoded.message.sessionId} principal=${decoded.message.principalId}`);
+      if (state.controlFeel) {
+        log(`control feel: ${state.controlFeel.profileId} (${state.controlFeel.mode})`);
+      }
       for (const scope of state.advertisedScopes) {
         const families = scope.intents.map((intent) => intent.family).join(",");
         log(`capability: ${scope.scope} intents=[${families}] actions=${scope.actions.length}`);

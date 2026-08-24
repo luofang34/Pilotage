@@ -10,12 +10,96 @@ use pilotage_protocol::{ButtonEdge, LogicalButtonId, VehicleId};
 
 use pilotage_mavlink::link::KinematicsUpdate;
 
+mod control_feel;
 mod direct_flight;
 mod fixtures;
 mod flight_control;
+mod hid_pipeline;
 // The source-role suite exercises the simulation-truth oracle.
 #[cfg(feature = "sim")]
 mod source_roles;
+
+#[test]
+fn a_profile_that_requires_unavailable_acceleration_fails_closed() {
+    let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+    profile.hold.require_accel = true;
+    let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
+        .expect("valid generic profile");
+
+    let result = super::startup::validate_adapter_control_feel(&profile);
+
+    assert!(matches!(
+        result,
+        Err(crate::AviateAdapterError::UnsupportedControlFeel { .. })
+    ));
+}
+
+#[test]
+fn the_control_feel_profile_owns_the_response_curve() {
+    let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+    profile.mode = pilotage_control_feel::FeelMode::Balanced;
+    profile.horizontal.curve.center_expo = 0.2;
+    profile.horizontal.curve.outer_expo = 0.1;
+    let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
+        .expect("valid generic profile");
+
+    let result = super::startup::validate_adapter_control_feel(&profile);
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn legacy_json_cannot_declare_dynamics_that_the_compatibility_law_bypasses() {
+    for pointer in [
+        "/direct/tilt_rate_rps",
+        "/vertical/dynamics/apply_accel",
+        "/yaw/dynamics/apply_jerk",
+    ] {
+        let mut document: serde_json::Value =
+            serde_json::from_str(crate::ALIA250_DEFAULT_CONTROL_FEEL_JSON)
+                .expect("checked compatibility JSON");
+        *document.pointer_mut(pointer).expect("profile field") = serde_json::json!(0.1);
+        let text = serde_json::to_string(&document).expect("custom compatibility JSON");
+        let profile = pilotage_control_feel::ValidatedFlightFeelProfile::from_json_str(&text)
+            .expect("valid generic profile");
+
+        let result = super::startup::validate_adapter_control_feel(&profile);
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::AviateAdapterError::UnsupportedControlFeel { .. })
+            ),
+            "legacy mode accepted changed field {pointer}"
+        );
+    }
+}
+
+#[test]
+fn telemetry_only_advertisement_keeps_the_control_feel_identity() {
+    let mut profile = pilotage_control_feel::FlightFeelProfile::legacy_compatibility();
+    profile.profile_id = "telemetry-only-feel".to_owned();
+    let profile = pilotage_control_feel::ValidatedFlightFeelProfile::new(profile)
+        .expect("valid control-feel profile");
+    let expected_digest =
+        pilotage_control_feel::FeelDigest::calculate(&profile).expect("control-feel digest");
+    let mut adapter = super::AviateAdapter::from_state(
+        VehicleId::new(1),
+        state_with(Duration::ZERO, Duration::ZERO),
+    );
+    adapter.control_feel_profiles = Some(
+        super::control_feel::ControlFeelProfiles::new(profile).expect("control-feel profiles"),
+    );
+
+    let capabilities = adapter.capabilities();
+
+    assert!(capabilities.vehicles[0].scopes.is_empty());
+    assert_eq!(capabilities.adapter_version, env!("CARGO_PKG_VERSION"));
+    let identity = capabilities.control_feel.expect("control-feel identity");
+    assert_eq!(identity.profile_id, "telemetry-only-feel");
+    assert_eq!(identity.schema_version, 1);
+    assert_eq!(identity.profile_sha256, *expected_digest.as_bytes());
+}
 use fixtures::{flight_frame, state_with, state_with_acquisition_skew};
 
 use super::{AviateAdapter, sampling::measurement_pair_is_coherent};

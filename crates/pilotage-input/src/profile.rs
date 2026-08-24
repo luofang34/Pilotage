@@ -16,7 +16,7 @@ pub use button::ButtonConfig;
 pub use device::{DeviceIdentity, DeviceInfo, DeviceProfile, SCHEMA_VERSION};
 pub use error::{EntryKind, ProfileError};
 pub use key::{KeyAxisBinding, KeyBinding};
-pub use validate::validate_axis_config;
+pub use validate::{validate_axis_config, validate_physical_axis_config};
 
 mod validate;
 
@@ -83,7 +83,7 @@ fn validate_profile(profile: &DeviceProfile) -> Result<(), ProfileError> {
                 name: axis.logical.clone(),
             });
         }
-        validate::validate_axis_config(axis)?;
+        validate::validate_physical_axis_config(axis)?;
     }
     let mut button_sources = HashSet::new();
     let mut button_names = HashSet::new();
@@ -177,6 +177,18 @@ mod tests {
     fn parses_from_bytes() {
         let profile = parse_profile_bytes(GOLDEN.as_bytes()).expect("parse golden bytes");
         assert_eq!(profile.revision, 1);
+    }
+
+    #[test]
+    fn rejects_a_response_curve_in_a_physical_profile() {
+        let json = GOLDEN.replace("\"expo\": 0.0", "\"expo\": 0.2");
+        assert!(matches!(
+            parse_profile_str(&json),
+            Err(ProfileError::PhysicalAxisExpo {
+                source_index: 0,
+                value
+            }) if value == 0.2
+        ));
     }
 
     #[test]

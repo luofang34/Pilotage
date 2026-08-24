@@ -13,6 +13,7 @@ aviate-xil-contract = { workspace = true, optional = true }
 aviate-xil-shm = { workspace = true, optional = true }
 getrandom = { version = "0.3.4", features = ["std"] }
 pilotage-adapter-api = { workspace = true }
+pilotage-control-feel = { workspace = true }
 pilotage-mavlink = { workspace = true }
 pilotage-sim-video = { workspace = true, optional = true }
 pilotage-protocol = { workspace = true }
@@ -22,6 +23,10 @@ tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+pilotage-control-web = { path = "../../clients/web-control" }
+pilotage-input = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }
 
 [features]

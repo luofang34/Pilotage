@@ -78,6 +78,7 @@ fn sample_welcome() -> ServerWelcome {
             host_version: "0.1.0".to_owned(),
             vehicles: vec![],
             supported_modes: vec![],
+            control_feel: None,
         },
         scope_holders: vec![sample_snapshot(Some(9)), sample_snapshot(None)],
     }

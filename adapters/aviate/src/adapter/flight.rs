@@ -16,6 +16,58 @@ use super::{
     AviateAdapter, DIRECT_SCOPE, FLIGHT_SCOPE, StepBudget, StepOutcome, control::rejected_control,
     control::sticks_from_velocity, mavlink_batch, process_flight_actions,
 };
+use crate::uplink::FlightUplink;
+
+fn send_motion_intent(
+    uplink: &mut FlightUplink,
+    frame: &ScopedControlFrame,
+    current_attitude: [f32; 3],
+    current_pos: [f32; 3],
+    current_vel: Option<[f32; 3]>,
+) -> Option<bool> {
+    let envelope = uplink.envelope();
+    match (frame.scope.as_str(), frame.intent) {
+        (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
+            let (sticks, constrained) = sticks_from_velocity(&velocity, envelope);
+            let uplink_constrained = uplink.send_stick_frame(
+                sticks[0],
+                sticks[1],
+                sticks[2],
+                sticks[3],
+                current_attitude[2],
+                current_pos,
+                current_vel,
+                None,
+            );
+            Some(constrained || uplink_constrained)
+        }
+        (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
+            let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);
+            let constrained = uplink.send_attitude_frame_seeded(
+                roll,
+                pitch,
+                yaw,
+                attitude.thrust,
+                current_attitude,
+            );
+            Some(
+                constrained
+                    || roll.abs() > envelope.direct_tilt_rad
+                    || pitch.abs() > envelope.direct_tilt_rad,
+            )
+        }
+        _ => None,
+    }
+}
+
+fn intent_belongs_to_scope(frame: &ScopedControlFrame) -> bool {
+    matches!(
+        (frame.scope.as_str(), frame.intent.as_ref()),
+        (_, None)
+            | (FLIGHT_SCOPE, Some(ControlIntent::Velocity(_)))
+            | (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(_)))
+    )
+}
 
 impl AviateAdapter {
     /// Enacts one flight-scope frame: the gate chain, then the velocity
@@ -28,9 +80,28 @@ impl AviateAdapter {
         if let Some(outcome) = self.gated_flight_outcome(frame, tick) {
             return outcome;
         }
-        let Some((current_yaw, current_pos, current_vel)) = self.current_pose() else {
+        if !intent_belongs_to_scope(frame) {
+            return rejected_control(
+                tick,
+                RejectReason::Other("intent family does not belong to this scope".to_owned()),
+            );
+        }
+        let Some(current) = self.current_pose() else {
             return rejected_control(tick, RejectReason::MeasurementUnavailable);
         };
+        match self.activate_pending_control_feel(frame, current.attitude_rad[2]) {
+            Ok(true) => {
+                return ApplyOutcome {
+                    tick,
+                    disposition: Disposition::Accepted,
+                    action_results: Vec::new(),
+                };
+            }
+            Err(detail) => {
+                return rejected_control(tick, RejectReason::Other(detail.to_owned()));
+            }
+            Ok(false) => {}
+        }
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
@@ -40,47 +111,26 @@ impl AviateAdapter {
             |yaw| {
                 uplink.send_arm(yaw);
             },
-            current_yaw,
+            current.attitude_rad[2],
         );
-
-        // Each scope consumes ITS OWN intent family — the gate already
-        // rejected any other family against the advertisement, so these
-        // rejections are defensive, not reachable paths.
-        let constrained = match (frame.scope.as_str(), frame.intent) {
-            (_, None) => {
-                // An actions-only frame (arm) carries no motion demand; the
-                // setpoint stream continues from the next frame.
-                return ApplyOutcome {
-                    tick,
-                    disposition: Disposition::Accepted,
-                    action_results,
-                };
-            }
-            (FLIGHT_SCOPE, Some(ControlIntent::Velocity(velocity))) => {
-                let (sticks, constrained) = sticks_from_velocity(&velocity);
-                uplink.send_stick_frame(
-                    sticks[0],
-                    sticks[1],
-                    sticks[2],
-                    sticks[3],
-                    current_yaw,
-                    current_pos,
-                    current_vel,
-                );
-                constrained
-            }
-            (DIRECT_SCOPE, Some(ControlIntent::AttitudeThrust(attitude))) => {
-                let (roll, pitch, yaw) = pilotage_adapter_api::attitude_euler(&attitude);
-                let tilt_limit = crate::uplink::FPV_MAX_TILT_RAD;
-                uplink.send_attitude_frame(roll, pitch, yaw, attitude.thrust);
-                roll.abs() > tilt_limit || pitch.abs() > tilt_limit
-            }
-            _ => {
-                return rejected_control(
-                    tick,
-                    RejectReason::Other("intent family does not belong to this scope".to_owned()),
-                );
-            }
+        if frame.intent.is_none() {
+            return ApplyOutcome {
+                tick,
+                disposition: Disposition::Accepted,
+                action_results,
+            };
+        }
+        let Some(constrained) = send_motion_intent(
+            uplink,
+            frame,
+            current.attitude_rad,
+            current.pos_ned_m,
+            current.velocity_ned_mps,
+        ) else {
+            return rejected_control(
+                tick,
+                RejectReason::Other("intent family does not belong to this scope".to_owned()),
+            );
         };
         ApplyOutcome {
             tick,

@@ -134,10 +134,15 @@ async fn spawn_aviate_runtime(
     // only; no uplink, no operational control). Parsing fails closed and
     // Physical gets the conservative link configuration.
     let profile = aviate_profile::profile_from_env(std::env::var("PILOTAGE_AVIATE_PROFILE"))?;
-    let mut adapter = pilotage_adapter_aviate::AviateAdapter::start(
+    let control_feel = aviate_profile::control_feel_from_env_blocking(
+        profile,
+        std::env::var_os("PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE"),
+    )?;
+    let mut adapter = pilotage_adapter_aviate::AviateAdapter::start_with_control_feel(
         HOST_VEHICLE,
         profile,
         aviate_profile::link_config(profile),
+        control_feel,
     )
     .await
     .map_err(HostError::AviateAdapter)?;

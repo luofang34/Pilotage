@@ -71,8 +71,8 @@ fn a_direct_frame_reaches_the_fc_as_an_attitude_setpoint() {
     fc.recv_from(&mut buf).expect("arm frame");
     tick_clock(&mut adapter, 200);
 
-    // Climb collective opens the setpoint stream; tilt and heading pass
-    // through the euler round-trip intact.
+    // Climb collective opens the setpoint stream. The compatibility profile
+    // applies the requested attitude without a new response limiter.
     let outcome = adapter.apply_control(&direct_frame(0.2, -0.1, 1.0, 0.9));
     assert_eq!(outcome.disposition, Disposition::Accepted);
     let (_, _) = fc.recv_from(&mut buf).expect("attitude frame");
@@ -89,7 +89,7 @@ fn a_direct_frame_reaches_the_fc_as_an_attitude_setpoint() {
     let yaw = (2.0 * (qw * qz + qx * qy)).atan2(1.0 - 2.0 * (qy * qy + qz * qz));
     assert!((roll - 0.2).abs() < 1e-3, "roll {roll}");
     assert!((pitch + 0.1).abs() < 1e-3, "pitch {pitch}");
-    assert!((yaw - 1.0).abs() < 1e-3, "yaw {yaw}");
+    assert!((yaw - 1.0).abs() < 1e-3, "compatibility heading is {yaw}");
     // thrust 0.9 → stick 0.8 → hover-anchored collective above hover.
     let thrust = field(&buf, 32);
     assert!(thrust > 0.72 && thrust <= 1.0, "collective {thrust}");

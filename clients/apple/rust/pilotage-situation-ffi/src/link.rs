@@ -20,7 +20,8 @@ mod tests;
 
 pub use observer::LinkObserver;
 pub use records::{
-    LinkCatalog, LinkConfig, LinkEvent, LinkIntentCapability, LinkScope, LinkVehicle,
+    LinkCatalog, LinkConfig, LinkControlFeelIdentity, LinkControlFeelMode, LinkEvent,
+    LinkIntentCapability, LinkScope, LinkVehicle,
 };
 
 use std::sync::Arc;

@@ -10,6 +10,7 @@ import { createSessionBootstrap } from "./session-bootstrap.js";
 import { createControlLoop } from "./control-loop.js";
 import { createCockpitReadout } from "./cockpit-readout.js";
 import { loadCompositionForPage } from "./instrument-startup.js";
+import { resolveViewerElements } from "./viewer-elements.js";
 
 const VEHICLE_ID = 1n;
 const INSTRUMENT_SOURCE_ID = 1n;
@@ -21,18 +22,7 @@ const GIMBAL_SCOPE = "vehicle.gimbal";
 const SIM_LIFECYCLE_SCOPE = "sim.lifecycle";
 const FRAME_REJECTION_UPLINK_IDLE = 18;
 
-const els = {
-  host: document.getElementById("host"),
-  port: document.getElementById("port"),
-  certHash: document.getElementById("certHash"),
-  connectBtn: document.getElementById("connectBtn"),
-  resumeBtn: document.getElementById("resumeBtn"),
-  status: document.getElementById("status"),
-  overlay: document.getElementById("overlay"),
-  telemetry: document.getElementById("telemetry"),
-  gamepad: document.getElementById("gamepad"),
-  flightMode: document.getElementById("flightMode"),
-};
+const els = resolveViewerElements(document);
 
 // The instrument stages come from the screen composition (ADR-0032).
 // layout.js evaluates first and builds their figures from the same
@@ -64,6 +54,7 @@ const state = {
   lastDirectFrameMs: 0,
   lifecycle: { pendingPress: false },
   advertisedScopes: [],
+  controlFeel: null,
   connected: false,
   controlCompletion: null,
   stopControlRun: null,

@@ -188,6 +188,7 @@ fn envelope_roundtrips_for_host_capabilities_arm() {
             supported_modes: vec![wire::ExecutionMode::Realtime as i32],
         }],
         supported_modes: vec![wire::ExecutionMode::Realtime as i32],
+        control_feel: None,
     };
     let envelope = wire::Envelope {
         schema_version: SCHEMA_VERSION,

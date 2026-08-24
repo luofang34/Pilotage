@@ -101,6 +101,15 @@ pub enum ProfileError {
         value: f32,
     },
 
+    /// A physical device axis contains a response curve.
+    #[error("device profile axis {source_index} expo must be zero, got {value}")]
+    PhysicalAxisExpo {
+        /// Source index of the axis.
+        source_index: usize,
+        /// The non-zero expo value.
+        value: f32,
+    },
+
     /// An axis response-curve field (`deadzone` or `expo`) was `NaN` or
     /// infinite, so it could never define a usable curve.
     #[error("device profile axis {source_index} has a non-finite {field}")]

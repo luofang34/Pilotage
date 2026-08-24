@@ -190,6 +190,36 @@ pub struct VehicleDescriptor {
     pub link_loss_actions: Vec<LinkLossPolicy>,
 }
 
+/// One supported control-feel mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlFeelMode {
+    /// The response gives priority to exact small inputs.
+    Precision,
+    /// The response balances small-input control and full-scale response.
+    Balanced,
+    /// The response gives priority to fast full-scale response.
+    Agile,
+    /// The response keeps the established input-to-command behavior.
+    LegacyCompatibility,
+}
+
+/// Identity of the control-feel artifact that the adapter uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlFeelDescriptor {
+    /// Stable profile identity.
+    pub profile_id: String,
+    /// Selected feel mode.
+    pub mode: ControlFeelMode,
+    /// Profile schema version.
+    pub schema_version: u16,
+    /// SHA-256 of the complete profile artifact.
+    pub profile_sha256: [u8; 32],
+    /// SHA-256 of the bound input-device profile.
+    pub device_profile_sha256: [u8; 32],
+    /// SHA-256 of the bound flight-controller artifact.
+    pub flight_controller_sha256: [u8; 32],
+}
+
 /// The full capability description an adapter reports to the session host
 /// (ADR-0008): vehicles present, execution characteristics, and adapter
 /// version for compatibility negotiation.
@@ -201,6 +231,8 @@ pub struct AdapterCapabilities {
     pub vehicles: Vec<VehicleDescriptor>,
     /// Adapter implementation version, for compatibility negotiation.
     pub adapter_version: String,
+    /// Active control-feel identity, when the adapter has one.
+    pub control_feel: Option<ControlFeelDescriptor>,
 }
 
 #[cfg(test)]
@@ -241,6 +273,7 @@ mod tests {
                 link_loss_actions: vec![],
             }],
             adapter_version: "0.1.0".to_owned(),
+            control_feel: None,
         };
         assert_eq!(caps.vehicles.len(), 1);
         assert!(caps.execution.stepped);
