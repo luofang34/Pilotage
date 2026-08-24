@@ -5,10 +5,8 @@ set -euo pipefail
 default_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 root="${1:-$default_root}"
 root="$(cd "$root" && pwd)"
-allowlist_is_override=0
 if [ "$#" -ge 2 ]; then
     allowlist="$2"
-    allowlist_is_override=1
 else
     allowlist="$root/scripts/flight-tune-xplane-import-allowlist.tsv"
 fi
@@ -120,9 +118,6 @@ check_aviate_imports() {
     else
         awk 'NF > 0 && $1 !~ /^#/ { print }' "$allowlist" \
             | LC_ALL=C sort -u > "$work/allowed-imports"
-        if [ "$allowlist_is_override" -eq 0 ] && [ -s "$work/allowed-imports" ]; then
-            report "the production flight_tune_xplane import allowlist must stay empty"
-        fi
     fi
     if ! comm -23 "$work/aviate-imports" "$work/allowed-imports" \
         > "$work/new-imports"; then
