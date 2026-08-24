@@ -48,8 +48,9 @@ collect_production_files() {
         list_id=$((list_id + 1))
         list_path="$work/source-list-$list_id"
         list_status=0
-        rg --files "$directory" -g '*.rs' > "$list_path" || list_status=$?
-        if [ "$list_status" -gt 1 ]; then
+        find "$directory" -type f -name '*.rs' -print > "$list_path" \
+            || list_status=$?
+        if [ "$list_status" -ne 0 ]; then
             report "cannot list Rust source files below $(relative_path "$directory")"
             continue
         fi
@@ -83,7 +84,7 @@ collect_file_imports() {
     fi
 
     match_status=0
-    rg -n 'flight_tune_xplane' "$file" > "$matches" || match_status=$?
+    grep -n 'flight_tune_xplane' "$file" > "$matches" || match_status=$?
     if [ "$match_status" -gt 1 ]; then
         report "$relative cannot be scanned for flight_tune_xplane references"
         return
@@ -139,7 +140,8 @@ check_shared_contracts() {
     fi
 }
 
-require_command rg
+require_command find
+require_command grep
 require_command cargo
 require_command python3
 require_command comm
