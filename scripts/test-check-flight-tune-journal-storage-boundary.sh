@@ -32,8 +32,16 @@ printf '%s\n' 'use std::fs;' > "$journal_root/tests.rs"
 bash "$guard" "$fixture" >/dev/null
 
 mkdir -p "$fixture/bin"
-printf '%s\n' '#!/bin/sh' 'exit 2' > "$fixture/bin/rg"
-chmod +x "$fixture/bin/rg"
+printf '%s\n' '#!/bin/sh' 'exit 2' > "$fixture/bin/find"
+chmod +x "$fixture/bin/find"
+if PATH="$fixture/bin:$PATH" bash "$guard" "$fixture" >/dev/null 2>&1; then
+    echo "the journal storage boundary ignored a source scan failure" >&2
+    exit 1
+fi
+rm "$fixture/bin/find"
+
+printf '%s\n' '#!/bin/sh' 'exit 2' > "$fixture/bin/grep"
+chmod +x "$fixture/bin/grep"
 if PATH="$fixture/bin:$PATH" bash "$guard" "$fixture" >/dev/null 2>&1; then
     echo "the journal storage boundary ignored a scanner failure" >&2
     exit 1

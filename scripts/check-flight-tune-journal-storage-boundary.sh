@@ -12,18 +12,26 @@ if [ ! -f "$journal_file" ] || [ ! -d "$journal_root" ]; then
 fi
 
 sources=("$journal_file")
+if ! source_list="$(
+    find "$journal_root" \
+        -type f \
+        -name '*.rs' \
+        ! -name 'tests.rs' \
+        ! -path '*/tests/*' \
+        -print
+)"; then
+    echo "the flight-tune journal source scan failed" >&2
+    exit 1
+fi
 while IFS= read -r source; do
-    sources+=("$source")
-done < <(
-    rg --files "$journal_root" \
-        -g '*.rs' \
-        -g '!**/tests.rs' \
-        -g '!**/tests/**'
-)
+    if [ -n "$source" ]; then
+        sources+=("$source")
+    fi
+done <<< "$source_list"
 
 forbidden='(^|[^[:alnum:]_])(fs|File|OpenOptions|NamedTempFile|TempDir|rustix|libc|nix|cap_std|camino|tempfile|walkdir|Command|Stdio)([^[:alnum:]_]|$)|std[[:space:]]*::[[:space:]]*process'
 
-if matches="$(rg -n "$forbidden" "${sources[@]}" 2>&1)"; then
+if matches="$(grep -En "$forbidden" "${sources[@]}" 2>&1)"; then
     printf '%s\n' "$matches"
     echo "FORBIDDEN: the core journal bypasses pilotage-durable-storage" >&2
     exit 1
