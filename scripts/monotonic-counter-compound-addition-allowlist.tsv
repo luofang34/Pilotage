@@ -7,6 +7,14 @@ crates/pilotage-camera-calibration/src/calibration/recovery.rs	sum_sq += err * e
 crates/pilotage-control-feel/src/shaper.rs	self.neutral_s += dt_s;
 crates/pilotage-control-feel/src/shaper.rs	self.rate += rate_delta;
 crates/pilotage-control-feel/src/shaper.rs	self.stable_s += dt_s;
+crates/pilotage-flight-quality/src/control.rs	absolute_integral += integral_abs_linear(pair[0].effort, pair[1].effort, dt);
+crates/pilotage-flight-quality/src/control.rs	active_saturation_s += dt;
+crates/pilotage-flight-quality/src/control.rs	saturated_s += dt;
+crates/pilotage-flight-quality/src/control.rs	square_integral += integral_square_linear(pair[0].effort, pair[1].effort, dt);
+crates/pilotage-flight-quality/src/series.rs	cumulative += weight;
+crates/pilotage-flight-quality/src/signal.rs	integrated_abs_jerk += jerk.abs() * dt;
+crates/pilotage-flight-quality/src/signal.rs	jerk_square_integral += jerk * jerk * dt;
+crates/pilotage-flight-quality/src/signal.rs	square_integral += integral_square_linear(pair[0].value, pair[1].value, dt);
 crates/pilotage-geo/src/abi/codec.rs	self.off += b.len();
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Pressed => presses += 1,
 crates/pilotage-input/src/button_tracker.rs	ButtonEdge::Released => releases += 1,

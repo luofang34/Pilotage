@@ -1,0 +1,16 @@
+[package]
+name = "pilotage-flight-quality"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Deterministic offline flight-quality metrics and hard trial gates"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

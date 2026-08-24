@@ -28,6 +28,7 @@ members = [
     "crates/pilotage-presentation",
     "crates/pilotage-trial",
     "crates/pilotage-control-feel",
+    "crates/pilotage-flight-quality",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
@@ -132,6 +133,7 @@ pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
 pilotage-presentation = { path = "crates/pilotage-presentation" }
 pilotage-trial = { path = "crates/pilotage-trial" }
 pilotage-control-feel = { path = "crates/pilotage-control-feel" }
+pilotage-flight-quality = { path = "crates/pilotage-flight-quality" }
 pilotage-terrain-query = { path = "crates/pilotage-terrain-query" }
 
 [workspace.lints.rust]
