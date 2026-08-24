@@ -24,7 +24,7 @@ pub(crate) fn identity(stat: &Stat) -> ObjectIdentity {
 }
 
 pub(crate) fn mode(stat: &Stat) -> u32 {
-    u32::from(stat.st_mode) & 0o7777
+    widen_mode(stat.st_mode) & 0o7777
 }
 
 pub(crate) fn inspect_private(
@@ -49,7 +49,7 @@ pub(crate) fn inspect_private(
             context: context.clone(),
         });
     }
-    let link_count = u64::from(stat.st_nlink);
+    let link_count = widen_link_count(stat.st_nlink);
     if kind == ObjectKind::RegularFile && link_count != 1 {
         return Err(StorageError::LinkedObject {
             actual: link_count,
@@ -86,7 +86,15 @@ pub(crate) fn inspect_temporary(
         identity: identity(stat),
         kind: ObjectKind::RegularFile,
         mode: actual,
-        link_count: u64::from(stat.st_nlink),
+        link_count: widen_link_count(stat.st_nlink),
         size: stat.st_size.max(0) as u64,
     })
+}
+
+fn widen_mode<T: Into<u32>>(value: T) -> u32 {
+    value.into()
+}
+
+fn widen_link_count<T: Into<u64>>(value: T) -> u64 {
+    value.into()
 }
