@@ -2,26 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{BackendCapability, Waveform};
+use super::{BackendCapability, ControlChannel, SignalSelector, Waveform};
 use crate::{
-    ArtifactIdentity, MAX_CAPABILITIES, MAX_CONDITION_VALUES, MAX_PHASE_CONDITIONS, MAX_TEXT_BYTES,
-    ValidationError,
+    ArtifactIdentity, MAX_CAPABILITIES, MAX_PHASE_CONDITIONS, MAX_TEXT_BYTES, ValidationError,
     validation::{count, duration, finite, range, text, unique},
 };
-
-/// A control channel for a stimulus.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ControlChannel {
-    /// The roll channel.
-    Roll,
-    /// The pitch channel.
-    Pitch,
-    /// The vertical channel.
-    Vertical,
-    /// The yaw channel.
-    Yaw,
-}
 
 /// A scalar comparison operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -39,82 +24,6 @@ pub enum Comparison {
     AbsoluteLessOrEqual,
     /// The absolute signal is greater than or equal to the limit.
     AbsoluteGreaterOrEqual,
-}
-
-/// A source of one scalar sample signal.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalSource {
-    /// An axis in the raw input report.
-    RawInputAxis,
-    /// A normalized control axis.
-    NormalizedControl,
-    /// A scalar in the typed intent.
-    TypedIntent,
-    /// A scalar in the adapter demand.
-    AdapterDemand,
-    /// A scalar in the transmitted setpoint.
-    TransmittedSetpoint,
-    /// An estimated position component.
-    EstimatePosition,
-    /// An estimated velocity component.
-    EstimateVelocity,
-    /// An estimated acceleration component.
-    EstimateAcceleration,
-    /// An estimated attitude component.
-    EstimateAttitude,
-    /// An estimated body rate component.
-    EstimateBodyRate,
-    /// A truth position component.
-    TruthPosition,
-    /// A truth velocity component.
-    TruthVelocity,
-    /// A truth acceleration component.
-    TruthAcceleration,
-    /// A truth attitude component.
-    TruthAttitude,
-    /// A truth body rate component.
-    TruthBodyRate,
-    /// An actuator value.
-    Actuator,
-    /// A named environmental condition value.
-    ConditionValue,
-}
-
-impl SignalSource {
-    const fn component_count(self) -> usize {
-        match self {
-            Self::RawInputAxis => crate::MAX_RAW_AXES,
-            Self::NormalizedControl => 4,
-            Self::TypedIntent | Self::AdapterDemand | Self::TransmittedSetpoint => 8,
-            Self::EstimateAttitude | Self::TruthAttitude => 4,
-            Self::Actuator => crate::MAX_ACTUATOR_VALUES,
-            Self::ConditionValue => MAX_CONDITION_VALUES,
-            _ => 3,
-        }
-    }
-
-    const fn required_capability(self) -> Option<BackendCapability> {
-        match self {
-            Self::TruthPosition
-            | Self::TruthVelocity
-            | Self::TruthAcceleration
-            | Self::TruthAttitude
-            | Self::TruthBodyRate => Some(BackendCapability::KinematicTruth),
-            Self::ConditionValue => Some(BackendCapability::ConditionControl),
-            _ => None,
-        }
-    }
-}
-
-/// A selector for one scalar in a trial sample.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SignalSelector {
-    /// The signal source.
-    pub source: SignalSource,
-    /// The zero-based component index.
-    pub component: u16,
 }
 
 /// A condition for phase entry, exit, or abort.
@@ -364,32 +273,22 @@ fn validate_condition_list(
     )?;
     for (index, condition) in conditions.iter().enumerate() {
         if let PhaseCondition::Signal {
-            selector, value, ..
+            selector,
+            comparison,
+            value,
         } = condition
         {
-            validate_selector(field, name, index, selector)?;
-            finite(&format!("{field}.{name}[{index}].value"), *value)?;
+            selector.validate(&format!("{field}.{name}[{index}].selector"))?;
+            let value_field = format!("{field}.{name}[{index}].value");
+            match comparison {
+                Comparison::AbsoluteLessOrEqual | Comparison::AbsoluteGreaterOrEqual => {
+                    range(&value_field, *value, 0.0, f64::MAX)?;
+                }
+                _ => finite(&value_field, *value)?,
+            }
         }
     }
     Ok(())
-}
-
-fn validate_selector(
-    field: &str,
-    name: &str,
-    index: usize,
-    selector: &SignalSelector,
-) -> Result<(), ValidationError> {
-    let limit = selector.source.component_count();
-    if usize::from(selector.component) < limit {
-        return Ok(());
-    }
-    Err(ValidationError::OutOfRange {
-        field: format!("{field}.{name}[{index}].selector.component"),
-        actual: f64::from(selector.component),
-        minimum: 0.0,
-        maximum: (limit.saturating_sub(1)) as f64,
-    })
 }
 
 const fn action_capability(action: &PhaseAction) -> Option<BackendCapability> {
@@ -410,7 +309,7 @@ const fn condition_capability(condition: &PhaseCondition) -> Option<BackendCapab
             Some(BackendCapability::ContactState)
         }
         PhaseCondition::SimulatorTime { .. } => Some(BackendCapability::SimulatorTime),
-        PhaseCondition::Signal { selector, .. } => selector.source.required_capability(),
+        PhaseCondition::Signal { selector, .. } => selector.required_capability(),
         _ => None,
     }
 }

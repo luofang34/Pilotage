@@ -39,7 +39,7 @@ pub use sample::{
     Observed, Quaternion, RawInput, ReferenceFrame, SampleTime, TrialSample, Vector3,
 };
 pub use scenario::{
-    BackendCapabilities, BackendCapability, Comparison, ControlChannel, Phase, PhaseAction,
-    PhaseCondition, Scenario, SignalSelector, SignalSource, SineComponent, StartHeading,
-    StartState, Waveform,
+    BackendCapabilities, BackendCapability, Comparison, ControlChannel, ControlValueField, Phase,
+    PhaseAction, PhaseCondition, QuaternionComponent, Scenario, SignalSelector, SineComponent,
+    StartHeading, StartState, VectorComponent, Waveform,
 };

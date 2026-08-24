@@ -133,7 +133,10 @@ fn validate_multisine(
             component.phase_rad,
         )?;
     }
-    Ok(())
+    let envelope = components.iter().fold(bias.abs(), |total, component| {
+        total + component.amplitude.abs()
+    });
+    range(&format!("{field}.envelope"), envelope, 0.0, 1.0)
 }
 
 fn positive_frequency(field: &str, index: usize, value: f64) -> Result<(), ValidationError> {

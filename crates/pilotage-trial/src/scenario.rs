@@ -2,6 +2,7 @@
 
 mod backend;
 mod phase;
+mod selector;
 mod waveform;
 
 use serde::{Deserialize, Serialize};
@@ -13,9 +14,9 @@ use crate::{
 };
 
 pub use backend::{BackendCapabilities, BackendCapability};
-pub use phase::{
-    Comparison, ControlChannel, Phase, PhaseAction, PhaseCondition, SignalSelector, SignalSource,
-    StartHeading, StartState,
+pub use phase::{Comparison, Phase, PhaseAction, PhaseCondition, StartHeading, StartState};
+pub use selector::{
+    ControlChannel, ControlValueField, QuaternionComponent, SignalSelector, VectorComponent,
 };
 pub use waveform::{SineComponent, Waveform};
 
