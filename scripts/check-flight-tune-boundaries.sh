@@ -39,7 +39,7 @@ is_production_rust_path() {
 }
 
 collect_production_files() {
-    local directory file list_id list_path list_status
+    local directory file link list_id link_path list_path list_status
     list_id=0
     for directory in "$@"; do
         [ -d "$directory" ] || continue
@@ -52,6 +52,18 @@ collect_production_files() {
             report "cannot list Rust source files below $(relative_path "$directory")"
             continue
         fi
+        link_path="$work/source-links-$list_id"
+        list_status=0
+        find "$directory" -type l -print > "$link_path" || list_status=$?
+        if [ "$list_status" -ne 0 ]; then
+            report "cannot list source links below $(relative_path "$directory")"
+            continue
+        fi
+        while IFS= read -r link; do
+            if is_production_rust_path "$link"; then
+                report "production Rust source path $(relative_path "$link") is a symlink"
+            fi
+        done < "$link_path"
         while IFS= read -r file; do
             if is_production_rust_path "$file"; then
                 printf '%s\n' "$file"

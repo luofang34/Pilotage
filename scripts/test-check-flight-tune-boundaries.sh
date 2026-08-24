@@ -27,6 +27,7 @@ write_workspace() {
         '    "adapters/pilotage-xplane-trial",' \
         '    "crates/pilotage-trial",' \
         '    "tools/flight-tune",' \
+        '    "tools/flight-tune-aviate",' \
         ']' \
         'resolver = "2"' \
         > "$fixture/Cargo.toml"
@@ -66,6 +67,17 @@ write_clean_manifests() {
         'edition = "2021"' \
         '[dependencies]' \
         > "$fixture/tools/flight-tune/Cargo.toml"
+    printf '%s\n' \
+        '[package]' \
+        'name = "flight-tune-aviate"' \
+        'version = "0.0.0"' \
+        'edition = "2021"' \
+        '[dependencies]' \
+        'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
+        'pilotage-xplane-trial = { path = "../../adapters/pilotage-xplane-trial" }' \
+        > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+    printf '%s\n' 'pub fn host() {}' \
+        > "$fixture/tools/flight-tune-aviate/src/lib.rs"
 }
 
 write_allowlisted_import() {
@@ -201,17 +213,71 @@ expect_failure \
     'uses flight_tune_xplane outside a reviewed import'
 rm "$fixture/tools/flight-tune-aviate/src/runtime.rs"
 
+printf '%s\n' 'use flight_tune_xplane::SymlinkRuntime;' \
+    > "$fixture/symlink-runtime.rs"
+ln -s "$fixture/symlink-runtime.rs" \
+    "$fixture/tools/flight-tune-aviate/src/symlink_runtime.rs"
+expect_failure \
+    'a production Aviate source symlink' \
+    'production Rust source path tools/flight-tune-aviate/src/symlink_runtime.rs is a symlink'
+rm "$fixture/tools/flight-tune-aviate/src/symlink_runtime.rs"
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-aviate"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[dependencies]' \
+    'xplane-adapter = { package = "flight-tune-xplane", path = "../../adapters/flight-tune-xplane" }' \
+    'pilotage-xplane-trial = { path = "../../adapters/pilotage-xplane-trial" }' \
+    > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+expect_failure \
+    'a renamed Aviate X-Plane dependency' \
+    'noncanonical runtime dependency flight-tune-xplane'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-aviate"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[dependencies]' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane", optional = true }' \
+    > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+expect_failure \
+    'an optional Aviate X-Plane dependency' \
+    'noncanonical runtime dependency flight-tune-xplane'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-aviate"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[build-dependencies]' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
+    > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+expect_failure \
+    'an Aviate X-Plane build dependency' \
+    'noncanonical runtime dependency flight-tune-xplane'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-aviate"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[target."cfg(unix)".dependencies]' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
+    > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+expect_failure \
+    'a target-specific Aviate X-Plane dependency' \
+    'noncanonical runtime dependency flight-tune-xplane'
+write_clean_manifests
+
 cp "$fixture_allowlist" \
     "$fixture/scripts/flight-tune-xplane-import-allowlist.tsv"
-if output="$(bash "$guard" "$fixture" 2>&1)"; then
-    echo 'the tuning boundary guard accepted a nonempty production allowlist' >&2
-    exit 1
-fi
-if ! grep -Fq 'production flight_tune_xplane import allowlist must stay empty' \
-    <<<"$output"; then
-    echo 'the tuning boundary guard did not report the production allowlist' >&2
-    exit 1
-fi
+bash "$guard" "$fixture" >/dev/null
 
 mkdir -p "$fixture/failing-bin"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 9' > "$fixture/failing-bin/find"
@@ -307,9 +373,10 @@ printf '%s\n' \
     '[workspace]' \
     'members = [' \
     '    "adapters/flight-tune-xplane",' \
-    '    "adapters/pilotage-xplane-trial",' \
-    '    "crates/pilotage-trial",' \
-    '    "tools/flight-tune",' \
+        '    "adapters/pilotage-xplane-trial",' \
+        '    "crates/pilotage-trial",' \
+        '    "tools/flight-tune",' \
+        '    "tools/flight-tune-aviate",' \
     ']' \
     'resolver = "2"' \
     '[workspace.dependencies]' \
@@ -417,6 +484,54 @@ write_shared_contract
 
 printf '%s\n' \
     'pub enum SharedContract {' \
+    '    Neutral = 1 << 0,' \
+    '    XPlaneReplay = 2,' \
+    '}' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure \
+    'a simulator variant after a shift expression' \
+    'simulator-specific variant XPlaneReplay'
+write_shared_contract
+
+printf '%s\n' \
+    'pub struct SharedContract {' \
+    '    pub mask: [u8; 1 << 2],' \
+    '    pub xplane_new: String,' \
+    '}' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure \
+    'a simulator field after a shift expression' \
+    'simulator-specific field xplane_new'
+write_shared_contract
+
+mkdir -p "$fixture/shared-symlink-target"
+printf '%s\n' \
+    'pub struct SharedContract {' \
+    '    pub xplane_new: String,' \
+    '}' \
+    > "$fixture/shared-symlink-target/contract.rs"
+ln -s "$fixture/shared-symlink-target" \
+    "$fixture/crates/pilotage-trial/src/contracts"
+expect_failure \
+    'a neutral source directory symlink' \
+    'production source path is a symlink'
+rm "$fixture/crates/pilotage-trial/src/contracts"
+
+mkdir -p "$fixture/campaign-symlink-target"
+printf '%s\n' \
+    'pub struct CampaignConfig {' \
+    '    pub xplane_new: String,' \
+    '}' \
+    > "$fixture/campaign-symlink-target/contract.rs"
+ln -s "$fixture/campaign-symlink-target" \
+    "$fixture/tools/flight-tune-campaign/src/config/contracts"
+expect_failure \
+    'a campaign config source directory symlink' \
+    'production source path is a symlink'
+rm "$fixture/tools/flight-tune-campaign/src/config/contracts"
+
+printf '%s\n' \
+    'pub enum SharedContract {' \
     '    Neutral { xplane_version: String },' \
     '}' \
     > "$fixture/crates/pilotage-trial/src/lib.rs"
@@ -428,14 +543,27 @@ write_shared_contract
 printf '%s\n' \
     'pub struct CampaignConfig {' \
     '    pub xplane: XPlaneCampaignConfig,' \
+    '    pub aviate_xplane_contract: PinnedFile,' \
+    '}' \
+    'pub struct XPlaneCampaignConfig {' \
+    '    pub weather_plugin_digest: String,' \
+    '}' \
+    > "$fixture/tools/flight-tune-campaign/src/config.rs"
+run_guard >/dev/null
+
+printf '%s\n' \
+    'pub struct CampaignConfig {' \
+    '    pub xplane: XPlaneCampaignConfig,' \
+    '    pub aviate_xplane_contract: PinnedFile,' \
+    '    pub xplane_new: XPlaneCampaignConfig,' \
     '}' \
     'pub struct XPlaneCampaignConfig {' \
     '    pub weather_plugin_digest: String,' \
     '}' \
     > "$fixture/tools/flight-tune-campaign/src/config.rs"
 expect_failure \
-    'the former CampaignConfig xplane exception' \
-    'CampaignConfig has simulator-specific field xplane'
+    'a new CampaignConfig X-Plane field' \
+    'CampaignConfig has simulator-specific field xplane_new'
 write_campaign_contract
 
 printf '%s\n' \

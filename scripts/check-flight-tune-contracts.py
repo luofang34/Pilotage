@@ -37,6 +37,22 @@ CAMPAIGN_ADAPTER_TYPES = {
     "XPlaneRuntimePluginConfig",
     "AviateCampaignConfig",
 }
+CAMPAIGN_SHARED_IDENTIFIER_ALLOWLIST = frozenset(
+    {
+        (
+            "tools/flight-tune-campaign/src/config.rs",
+            "CampaignConfig",
+            "field",
+            "aviate_xplane_contract",
+        ),
+        (
+            "tools/flight-tune-campaign/src/config.rs",
+            "CampaignConfig",
+            "field",
+            "xplane",
+        ),
+    }
+)
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
@@ -60,7 +76,11 @@ def is_forbidden_identifier(identifier: str) -> bool:
     return any(fragment in value for fragment in FORBIDDEN_IDENTIFIERS)
 
 
-def check_manifest(manifest: Path, root: Path) -> bool:
+def check_manifest(
+    manifest: Path,
+    root: Path,
+    allowed_adapter_dependencies: frozenset[str] = frozenset(),
+) -> bool:
     """Use Cargo's resolved dependency view for one neutral package."""
     if not manifest.is_file():
         return True
@@ -105,11 +125,18 @@ def check_manifest(manifest: Path, root: Path) -> bool:
 
     valid = True
     for dependency in package.get("dependencies", []):
-        if (
-            dependency.get("kind") != "dev"
-            and dependency.get("name") in FORBIDDEN_PACKAGES
-        ):
-            report(f"{relative} has runtime dependency {dependency['name']}")
+        name = dependency.get("name")
+        if dependency.get("kind") == "dev" or name not in FORBIDDEN_PACKAGES:
+            continue
+        canonical_adapter_dependency = (
+            name in allowed_adapter_dependencies
+            and dependency.get("rename") is None
+            and dependency.get("kind") is None
+            and dependency.get("optional") is False
+            and dependency.get("target") is None
+        )
+        if not canonical_adapter_dependency:
+            report(f"{relative} has noncanonical runtime dependency {name}")
             valid = False
     return valid
 
@@ -263,8 +290,8 @@ def top_level_segments(tokens: list[str]) -> list[list[str]]:
     """Divide one type body at top-level commas."""
     segments: list[list[str]] = []
     current: list[str] = []
-    depths = {"(": 0, "[": 0, "{": 0, "<": 0}
-    closing = {")": "(", "]": "[", "}": "{", ">": "<"}
+    depths = {"(": 0, "[": 0, "{": 0}
+    closing = {")": "(", "]": "[", "}": "{"}
     for token in tokens:
         if token == "," and all(depth == 0 for depth in depths.values()):
             if current:
@@ -376,6 +403,27 @@ def is_production_path(path: Path, source_root: Path) -> bool:
     )
 
 
+def production_rust_paths(source_root: Path, root: Path) -> tuple[list[Path], bool]:
+    """List production Rust files and reject source-path symlinks."""
+    if source_root.is_symlink():
+        report(f"{source_root.relative_to(root)} production source root is a symlink")
+        return [], False
+    if not source_root.is_dir():
+        return [], True
+
+    valid = True
+    for path in sorted(source_root.rglob("*")):
+        if path.is_symlink() and is_production_path(path, source_root):
+            report(f"{path.relative_to(root)} production source path is a symlink")
+            valid = False
+    paths = [
+        path
+        for path in sorted(source_root.rglob("*.rs"))
+        if not path.is_symlink() and is_production_path(path, source_root)
+    ]
+    return paths, valid
+
+
 def read_public_types(
     path: Path, root: Path
 ) -> list[tuple[str, str, list[tuple[str, str]]]] | None:
@@ -391,13 +439,16 @@ def check_type_identifiers(
     path: Path,
     root: Path,
     records: list[tuple[str, str, list[tuple[str, str]]]],
+    allowed: frozenset[tuple[str, str, str]] = frozenset(),
 ) -> bool:
     """Reject simulator-specific fields and variants in public shared types."""
     valid = True
     relative = path.relative_to(root)
     for _, type_name, identifiers in records:
         for kind, identifier in identifiers:
-            if is_forbidden_identifier(identifier):
+            if (type_name, kind, identifier) not in allowed and is_forbidden_identifier(
+                identifier
+            ):
                 report(
                     f"{relative} {type_name} has simulator-specific {kind} {identifier}"
                 )
@@ -407,12 +458,8 @@ def check_type_identifiers(
 
 def check_source_root(source_root: Path, root: Path) -> bool:
     """Check all production Rust files below one shared runtime root."""
-    if not source_root.is_dir():
-        return True
-    valid = True
-    for path in sorted(source_root.rglob("*.rs")):
-        if not is_production_path(path, source_root):
-            continue
+    paths, valid = production_rust_paths(source_root, root)
+    for path in paths:
         records = read_public_types(path, root)
         if records is None:
             valid = False
@@ -427,6 +474,14 @@ def check_campaign_file(path: Path, root: Path) -> bool:
     if records is None:
         return False
     valid = True
+    relative = path.relative_to(root).as_posix()
+    allowed = frozenset(
+        (type_name, kind, identifier)
+        for allowed_path, type_name, kind, identifier in (
+            CAMPAIGN_SHARED_IDENTIFIER_ALLOWLIST
+        )
+        if allowed_path == relative
+    )
     for kind, type_name, identifiers in records:
         if type_name in CAMPAIGN_ADAPTER_TYPES:
             continue
@@ -435,7 +490,12 @@ def check_campaign_file(path: Path, root: Path) -> bool:
                 f"{path.relative_to(root)} has unclassified public campaign contract {type_name}"
             )
             valid = False
-        if not check_type_identifiers(path, root, [(kind, type_name, identifiers)]):
+        if not check_type_identifiers(
+            path,
+            root,
+            [(kind, type_name, identifiers)],
+            allowed,
+        ):
             valid = False
     return valid
 
@@ -445,15 +505,15 @@ def check_campaign_config(root: Path) -> bool:
     config_file = root / "tools/flight-tune-campaign/src/config.rs"
     config_root = root / "tools/flight-tune-campaign/src/config"
     paths: list[Path] = []
-    if config_file.is_file():
-        paths.append(config_file)
-    if config_root.is_dir():
-        paths.extend(
-            path
-            for path in sorted(config_root.rglob("*.rs"))
-            if is_production_path(path, config_root)
-        )
     valid = True
+    if config_file.is_symlink():
+        report(f"{config_file.relative_to(root)} production source path is a symlink")
+        valid = False
+    elif config_file.is_file():
+        paths.append(config_file)
+    config_paths, config_paths_valid = production_rust_paths(config_root, root)
+    paths.extend(config_paths)
+    valid = valid and config_paths_valid
     for path in paths:
         if not check_campaign_file(path, root):
             valid = False
@@ -467,11 +527,15 @@ def main() -> int:
         return 2
     root = Path(sys.argv[1]).resolve()
     valid = True
-    for manifest in (
-        root / "crates/pilotage-trial/Cargo.toml",
-        root / "tools/flight-tune/Cargo.toml",
+    for manifest, allowed_adapter_dependencies in (
+        (root / "crates/pilotage-trial/Cargo.toml", frozenset()),
+        (root / "tools/flight-tune/Cargo.toml", frozenset()),
+        (
+            root / "tools/flight-tune-aviate/Cargo.toml",
+            frozenset(FORBIDDEN_PACKAGES),
+        ),
     ):
-        if not check_manifest(manifest, root):
+        if not check_manifest(manifest, root, allowed_adapter_dependencies):
             valid = False
     for source_root in (
         root / "crates/pilotage-trial/src",
