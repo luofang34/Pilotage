@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Configuration for a single physical button, as declared in a device
 /// profile's `buttons` array.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ButtonConfig {
     /// Index of this button in `RawDeviceSample::buttons` (bit position).
     pub source_index: u8,

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "revision": 7,
+  "device": {
+    "vendor_id": 4660,
+    "product_id": 22136,
+    "product": "Synthetic HID"
+  },
+  "description": "Synthetic HID profile. SIM / NOT FOR FLIGHT.",
+  "axes": [
+    {
+      "source_index": 1,
+      "logical": "roll",
+      "invert": true,
+      "deadzone": 0.05,
+      "expo": 0.0,
+      "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 }
+    },
+    {
+      "source_index": 0,
+      "logical": "pitch",
+      "invert": false,
+      "deadzone": 0.05,
+      "expo": 0.0,
+      "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 }
+    }
+  ],
+  "buttons": [],
+  "keys": []
+}

@@ -21,6 +21,7 @@ pub struct DeviceIdentity {
 
 /// Device identity plus an optional human-readable product name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceInfo {
     /// USB vendor ID.
     pub vendor_id: u16,

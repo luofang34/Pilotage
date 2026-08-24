@@ -721,6 +721,123 @@
       ]
     },
     {
+      "name": "accepted HID candidates normalize identically in native and wasm paths",
+      "steps": [
+        {
+          "addDeviceProfile": {
+            "layer": "user",
+            "profile": {
+              "schema_version": 1,
+              "revision": 8,
+              "device": {
+                "vendor_id": 4660,
+                "product_id": 22136,
+                "product": "Synthetic HID"
+              },
+              "description": "Synthetic browser HID profile. SIM / NOT FOR FLIGHT.",
+              "axes": [
+                {
+                  "source_index": 0,
+                  "logical": "slot0",
+                  "invert": false,
+                  "deadzone": 0.0,
+                  "expo": 0.0,
+                  "calibration": { "min": -1.0, "center": 0.0, "max": 1.0 }
+                },
+                {
+                  "source_index": 1,
+                  "logical": "slot1",
+                  "invert": true,
+                  "deadzone": 0.0,
+                  "expo": 0.0,
+                  "calibration": { "min": -1.0, "center": 0.029000001, "max": 1.0 }
+                }
+              ],
+              "buttons": [],
+              "keys": []
+            }
+          },
+          "expect": {
+            "added": true
+          }
+        },
+        {
+          "selectDevice": "Synthetic HID (Vendor: 1234 Product: 5678)",
+          "expect": {
+            "select": "exact"
+          }
+        },
+        {
+          "pad": { "axes": [0.0, 0.029000001], "pressed": [] },
+          "session": { "mode": "quad-pilot" },
+          "expect": {
+            "motionLive": true,
+            "motionThrottle": 0.0,
+            "motionYaw": 0.0
+          }
+        },
+        {
+          "pad": { "axes": [0.0, 0.029000001], "pressed": [] },
+          "session": { "mode": "quad-pilot", "motionRecovered": false },
+          "expect": {
+            "motionGated": true,
+            "activationRevision": 2,
+            "label": "Synthetic HID"
+          }
+        },
+        {
+          "pad": { "axes": [0.0, 0.029000001], "pressed": [] },
+          "session": { "mode": "quad-pilot", "motionRecovered": false },
+          "expect": { "motionThrottle": 0.0, "motionYaw": 0.0 }
+        },
+        {
+          "pad": { "axes": [0.0, 0.029000001], "pressed": [] },
+          "session": { "mode": "quad-pilot" },
+          "expect": { "motionThrottle": 0.0, "motionYaw": 0.0 }
+        },
+        {"pad":{"axes":[-0.002,0],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.028182702139019966,"motionYaw":-0.0020000000949949026}},
+        {"pad":{"axes":[-0.001,0.006],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.02235179953277111,"motionYaw":-0.0010000000474974513}},
+        {"pad":{"axes":[0,0.006],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.02235179953277111,"motionYaw":0}},
+        {"pad":{"axes":[0.001,0.01],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.018464529886841774,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0.002,0.016],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.012633624486625195,"motionYaw":0.0020000000949949026}},
+        {"pad":{"axes":[0.001,0.022],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.006802721880376339,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0,0.022],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.006802721880376339,"motionYaw":0}},
+        {"pad":{"axes":[-0.001,0.026],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.0029154522344470024,"motionYaw":-0.0010000000474974513}},
+        {"pad":{"axes":[-0.002,0.032],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.003089598845690489,"motionYaw":-0.0020000000949949026}},
+        {"pad":{"axes":[-0.001,0.038],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.00926879234611988,"motionYaw":-0.0010000000474974513}},
+        {"pad":{"axes":[0,0.038],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.00926879234611988,"motionYaw":0}},
+        {"pad":{"axes":[0.001,0.042],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.013388257473707199,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0.002,0.048],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.01956745609641075,"motionYaw":0.0020000000949949026}},
+        {"pad":{"axes":[0.001,0.054],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.025746652856469154,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0,0.054],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.025746652856469154,"motionYaw":0}},
+        {"pad":{"axes":[-0.001,0.058],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.029866114258766174,"motionYaw":-0.0010000000474974513}},
+        {"pad":{"axes":[0,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":0}},
+        {"pad":{"axes":[0.4,0.032],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.003089598845690489,"motionYaw":0.4000000059604645}},
+        {"pad":{"axes":[1,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":1}},
+        {"pad":{"axes":[0.8,0.028],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.0009718174114823341,"motionYaw":0.800000011920929}},
+        {"pad":{"axes":[0.2,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":0.20000000298023224}},
+        {"pad":{"axes":[0,0.032],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.003089598845690489,"motionYaw":0}},
+        {"pad":{"axes":[-0.5,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":-0.5}},
+        {"pad":{"axes":[-1,0.028],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.0009718174114823341,"motionYaw":-1}},
+        {"pad":{"axes":[-0.8,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":-0.800000011920929}},
+        {"pad":{"axes":[-0.2,0.032],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.003089598845690489,"motionYaw":-0.20000000298023224}},
+        {"pad":{"axes":[0,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":0}},
+        {"pad":{"axes":[0,0.028],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.0009718174114823341,"motionYaw":0}},
+        {"pad":{"axes":[0,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":0}},
+        {"pad":{"axes":[0.001,-0.4],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.4169096350669861,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0,-1],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-1,"motionYaw":0}},
+        {"pad":{"axes":[-0.001,-0.8],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.8056365251541138,"motionYaw":-0.0010000000474974513}},
+        {"pad":{"axes":[0,-0.2],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.22254616022109985,"motionYaw":0}},
+        {"pad":{"axes":[0.001,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0,0.6],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.5880535840988159,"motionYaw":0}},
+        {"pad":{"axes":[-0.001,1],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":1,"motionYaw":-0.0010000000474974513}},
+        {"pad":{"axes":[0,0.8],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.794026792049408,"motionYaw":0}},
+        {"pad":{"axes":[0.001,0.2],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.17610710859298706,"motionYaw":0.0010000000474974513}},
+        {"pad":{"axes":[0,0.03],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":0.0010298643028363585,"motionYaw":0}},
+        {"pad":{"axes":[-0.001,0.028],"pressed":[]},"session":{"mode":"quad-pilot"},"expect":{"motionLive":true,"motionThrottle":-0.0009718174114823341,"motionYaw":-0.0010000000474974513}}
+      ]
+    },
+    {
       "name": "a gated arm or disarm press reports suppression, never silence",
       "steps": [
         {

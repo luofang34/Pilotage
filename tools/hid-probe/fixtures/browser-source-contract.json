@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "device": {
+    "vendor_id": 4660,
+    "product_id": 22136,
+    "product": "Synthetic HID"
+  },
+  "axes": [
+    { "source_index": 0, "minimum": -1.0, "maximum": 1.0, "neutral_position": "centered" },
+    { "source_index": 1, "minimum": -1.0, "maximum": 1.0, "neutral_position": "centered" }
+  ]
+}
