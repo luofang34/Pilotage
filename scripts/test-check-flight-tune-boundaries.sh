@@ -214,8 +214,8 @@ if ! grep -Fq 'production flight_tune_xplane import allowlist must stay empty' \
 fi
 
 mkdir -p "$fixture/failing-bin"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 9' > "$fixture/failing-bin/rg"
-chmod +x "$fixture/failing-bin/rg"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 9' > "$fixture/failing-bin/find"
+chmod +x "$fixture/failing-bin/find"
 if output="$(PATH="$fixture/failing-bin:$PATH" run_guard 2>&1)"; then
     echo 'the tuning boundary guard ignored a source-list failure' >&2
     exit 1
@@ -224,7 +224,19 @@ if ! grep -Fq 'cannot list Rust source files below' <<<"$output"; then
     echo 'the tuning boundary guard did not report a source-list failure' >&2
     exit 1
 fi
-rm "$fixture/failing-bin/rg"
+rm "$fixture/failing-bin/find"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 9' > "$fixture/failing-bin/grep"
+chmod +x "$fixture/failing-bin/grep"
+if output="$(PATH="$fixture/failing-bin:$PATH" run_guard 2>&1)"; then
+    echo 'the tuning boundary guard ignored an import-scan failure' >&2
+    exit 1
+fi
+if ! grep -Fq 'cannot be scanned for flight_tune_xplane references' \
+    <<<"$output"; then
+    echo 'the tuning boundary guard did not report an import-scan failure' >&2
+    exit 1
+fi
+rm "$fixture/failing-bin/grep"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 9' > "$fixture/failing-bin/comm"
 chmod +x "$fixture/failing-bin/comm"
 if output="$(PATH="$fixture/failing-bin:$PATH" run_guard 2>&1)"; then
