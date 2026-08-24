@@ -140,6 +140,37 @@
     width: 100%;
     height: auto;
   }
+  /* The situation map draws into a div (MapLibre owns its canvas inside),
+     so the frame's canvas-only sizing does not apply. The stage takes the
+     full main-slot width and the same viewport height budget as the video. */
+  #stage-map .frame {
+    line-height: normal;
+  }
+  #mainSlot #stage-map {
+    width: 100%;
+  }
+  .map-surface {
+    width: 100%;
+    height: calc(100vh - 24rem);
+    min-height: 18rem;
+    background: #02060a;
+  }
+  /* Load / typed-unavailable notice for the map stage. Sized by the
+     positioned frame; inert so it never eats a map gesture. */
+  .map-notice {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    font: 0.85rem monospace;
+    color: #fc9;
+    text-align: center;
+    pointer-events: none;
+  }
+  .map-notice:empty {
+    display: none;
+  }
   .g5-column {
     display: flex;
     flex-direction: column;
@@ -260,6 +291,7 @@
       <option value="stage-video" selected>FPV / onboard camera</option>
       <option value="stage-gimbal">gimbal / payload</option>
       <option value="stage-chase">chase / 3rd person</option>
+      <option value="stage-map">situation / globe</option>
       <!-- layout.js appends one option per composition slot. -->
     </select>
   </label>
@@ -286,6 +318,10 @@
   <figure class="stage" id="stage-chase">
     <figcaption>chase / 3rd person</figcaption>
     <div class="frame"><canvas id="chaseVideo" width="320" height="240"></canvas></div>
+  </figure>
+  <figure class="stage" id="stage-map">
+    <figcaption>situation / globe</figcaption>
+    <div class="frame"><div id="situationMap" class="map-surface"></div></div>
   </figure>
 </div>
 

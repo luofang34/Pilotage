@@ -28,6 +28,7 @@ const ORDER = slots.map((slot) => `stage-${slot.panel}`);
 const HOME = {
   "stage-video": shelf,
   "stage-chase": shelf,
+  "stage-map": shelf,
   ...Object.fromEntries(ORDER.map((id) => [id, g5Column])),
 };
 

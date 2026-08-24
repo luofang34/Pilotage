@@ -11,6 +11,7 @@ import { createControlLoop } from "./control-loop.js";
 import { createCockpitReadout } from "./cockpit-readout.js";
 import { loadCompositionForPage } from "./instrument-startup.js";
 import { resolveViewerElements } from "./viewer-elements.js";
+import { wireSituationMapStage } from "./situation-map.js";
 
 const VEHICLE_ID = 1n;
 const INSTRUMENT_SOURCE_ID = 1n;
@@ -145,6 +146,10 @@ transport = createSessionTransport({
   bootstrap,
   control,
 });
+
+// The situation map stage boots lazily on first selection; wiring it here
+// only registers the selector listener.
+wireSituationMapStage(document, { log: readout.log });
 
 window.addEventListener("pagehide", readout.dispose, { once: true });
 window.addEventListener("keydown", (event) => control.forwardKey(event, true));

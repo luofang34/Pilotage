@@ -190,6 +190,12 @@ jobs:
       - name: Terrain base layer guard
         run: bash scripts/check-terrain-base-layer.sh
 
+      - name: Web situation map guard self-test
+        run: bash scripts/test-check-web-situation-map.sh
+
+      - name: Web situation map guard
+        run: bash scripts/check-web-situation-map.sh
+
       - name: ADR supersession lifecycle tests
         run: bash scripts/test-check-adr-supersession.sh
 
@@ -398,6 +404,19 @@ jobs:
 
       - name: browser wire-range identity bounds (GEO-68)
         run: node clients/web/wire-bounds.test.mjs
+
+      - name: situation style resolution (shared with the Apple client)
+        run: node clients/web/situation-style.test.mjs
+
+      - name: Vendor the MapLibre GL JS renderer (pinned digest)
+        run: bash scripts/vendor-maplibre-web.sh
+
+      - name: situation map browser boot contract
+        # A real browser boots the map stage twice: with exported fixture
+        # assets it must reach the globe through the shared style at the
+        # Apple client's camera; without them it must state a typed reason
+        # instead of an empty map.
+        run: node clients/web/situation-map.browser.test.mjs
 
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
