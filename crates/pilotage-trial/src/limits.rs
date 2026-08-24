@@ -5,7 +5,7 @@ pub const TRIAL_MANIFEST_SCHEMA_VERSION: u16 = 1;
 /// The supported run identity schema version.
 pub const RUN_IDENTITY_SCHEMA_VERSION: u16 = 1;
 /// The supported scenario schema version.
-pub const SCENARIO_SCHEMA_VERSION: u16 = 1;
+pub const SCENARIO_SCHEMA_VERSION: u16 = 2;
 /// The supported backend capabilities schema version.
 pub const BACKEND_CAPABILITIES_SCHEMA_VERSION: u16 = 1;
 /// The supported trial sample schema version.
