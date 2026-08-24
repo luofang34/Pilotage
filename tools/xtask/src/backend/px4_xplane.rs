@@ -17,9 +17,9 @@
 use std::path::Path;
 
 use super::xplane_simulator::{
-    Airframe, ensure_xplane_plugins, launch_xplane, selected_airframe, send_xplane_command,
+    Airframe, ensure_xplane_plugins_blocking, prepare_xplane_runtime_blocking, selected_airframe,
     set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root,
-    xplane_running,
+    xplane_running_blocking,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
@@ -84,7 +84,7 @@ impl SimBackend for Px4XPlane {
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
-        ensure_xplane_plugins(&ctx.repo_root);
+        ensure_xplane_plugins_blocking(&ctx.repo_root, xplane_running_blocking()?)?;
         let Ok(airframe) = selected_airframe() else {
             // plan() re-runs the same resolution and reports the error.
             return Ok(());
@@ -92,22 +92,21 @@ impl SimBackend for Px4XPlane {
         let Ok(root) = xplane_root() else {
             return Ok(());
         };
+        let simulator_running = xplane_running_blocking()?;
         set_active_config_name(&root, airframe);
         // PX4's EKF wants the bridge's ground-stationary contract; the
         // aviate lane turns it off, so this lane must turn it back on.
         set_ground_sensor_contract(&root, true);
-        if xplane_running() {
-            // A running X-Plane never inherits the autoflight
-            // environment; arm the SITL listener directly. The command
-            // is the idempotent px4xplane/connect (a local px4xplane
-            // patch): a no-op when already armed or connected.
-            // Best-effort: the datagram is lost when no flight is
-            // loaded yet.
-            print_line("X-Plane is already running; arming the SITL listener...");
-            send_xplane_command("px4xplane/connect");
+        prepare_xplane_runtime_blocking(
+            &ctx.repo_root,
+            &root,
+            airframe,
+            &ctx.log_dir,
+            simulator_running,
+        )?;
+        if simulator_running {
+            print_line("X-Plane weather is ready and the SITL listener is armed");
             print_line("if PX4 cannot connect: Plugins > PX4 X-Plane > Connect to SITL");
-        } else {
-            launch_xplane(&root, airframe, &ctx.log_dir);
         }
         Ok(())
     }

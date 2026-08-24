@@ -83,6 +83,14 @@ pub enum XtaskError {
         /// The reported exit status.
         status: String,
     },
+    /// A running simulator did not prove a required live capability.
+    #[error("simulator capability {capability} is unavailable: {detail}")]
+    SimulatorCapability {
+        /// The capability that the backend requires before FC start.
+        capability: &'static str,
+        /// The observed refusal or protocol error.
+        detail: String,
+    },
     /// An I/O operation outside process management failed.
     #[error("I/O failure during {context}: {source}")]
     Io {

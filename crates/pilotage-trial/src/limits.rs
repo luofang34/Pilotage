@@ -10,6 +10,8 @@ pub const SCENARIO_SCHEMA_VERSION: u16 = 1;
 pub const BACKEND_CAPABILITIES_SCHEMA_VERSION: u16 = 1;
 /// The supported trial sample schema version.
 pub const TRIAL_SAMPLE_SCHEMA_VERSION: u16 = 1;
+/// The supported environmental condition schema version.
+pub const CONDITION_SET_SCHEMA_VERSION: u16 = 1;
 
 /// The maximum trial manifest JSON size.
 pub const MAX_MANIFEST_BYTES: usize = 256 * 1024;
@@ -41,3 +43,5 @@ pub const MAX_ACTUATOR_VALUES: usize = 64;
 pub const MAX_CONDITION_VALUES: usize = 64;
 /// The permitted difference between a quaternion norm and one.
 pub const QUATERNION_NORM_TOLERANCE: f64 = 1.0e-3;
+/// The maximum number of gust events in one condition set.
+pub const MAX_GUST_EVENTS: usize = 64;

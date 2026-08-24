@@ -136,6 +136,15 @@ jobs:
       - name: cargo build --release
         run: cargo build --release
 
+      - name: X-Plane weather transaction state
+        run: bash scripts/check-xplane-weather-state.sh
+
+      - name: X-Plane weather clear protocol
+        run: python3 scripts/test-xplane-weather-clear.py
+
+      - name: X-Plane reset order
+        run: bash scripts/test-reset-xplane-order.sh
+
       - name: flight build carries no simulation-only code
         run: bash scripts/check-flight-build.sh
 

@@ -85,6 +85,12 @@ pub enum ValidationError {
         /// The field path.
         field: String,
     },
+    /// A nanosecond schedule exceeds the supported integer range.
+    #[error("{field} exceeds the u64 nanosecond range")]
+    TimeOverflow {
+        /// The field path.
+        field: String,
+    },
     /// A relation between identity fields is invalid.
     #[error("identity mismatch for {field}")]
     IdentityMismatch {

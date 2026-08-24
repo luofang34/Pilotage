@@ -14,9 +14,9 @@
 use std::path::{Path, PathBuf};
 
 use super::xplane_simulator::{
-    airframe_for, ensure_xplane_plugins, launch_xplane, send_xplane_command,
+    airframe_for, ensure_xplane_plugins_blocking, prepare_xplane_runtime_blocking,
     set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root,
-    xplane_running,
+    xplane_running_blocking,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
@@ -116,7 +116,7 @@ impl SimBackend for AviateXPlane {
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
-        ensure_xplane_plugins(&ctx.repo_root);
+        ensure_xplane_plugins_blocking(&ctx.repo_root, xplane_running_blocking()?)?;
         // The airframe the flight controller mixes decides which channel
         // map the bridge must load, so this backend PINS it rather than
         // trusting whatever the last session left behind.
@@ -126,16 +126,21 @@ impl SimBackend for AviateXPlane {
         let Ok(root) = xplane_root() else {
             return Ok(());
         };
+        let simulator_running = xplane_running_blocking()?;
         set_active_config_name(&root, airframe);
         // Aviate's estimator consumes REAL sensors from boot to
         // touchdown; the bridge's fabricated ground-stationary contract
         // is a PX4-specific crutch this lane refuses.
         set_ground_sensor_contract(&root, false);
-        if xplane_running() {
-            print_line("X-Plane is already running; arming the SITL listener...");
-            send_xplane_command("px4xplane/connect");
-        } else {
-            launch_xplane(&root, airframe, &ctx.log_dir);
+        prepare_xplane_runtime_blocking(
+            &ctx.repo_root,
+            &root,
+            airframe,
+            &ctx.log_dir,
+            simulator_running,
+        )?;
+        if simulator_running {
+            print_line("X-Plane weather is ready and the SITL listener is armed");
         }
         Ok(())
     }

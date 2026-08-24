@@ -7,8 +7,10 @@
 use std::path::PathBuf;
 
 use super::super::xplane_simulator::{
-    Airframe, airframe_for, command_datagram, set_active_config_name, validate_xplane_install,
-    xplane_root_from,
+    Airframe, airframe_for, classify_xplane_probe_status, command_datagram,
+    plugin_install_required, record_plugin_install_stamp, run_plugin_build_blocking,
+    run_xplane_prepare_sequence, set_active_config_name, validate_xplane_install,
+    verify_weather_plugin_blocking, xplane_root_from, xplane_running_with_program_blocking,
 };
 use super::Px4XPlane;
 use crate::backend::{SessionContext, SimBackend};
@@ -120,12 +122,24 @@ fn install_validation_hints_at_the_build_script() {
         }
         other => panic!("expected a missing-plugin refusal, got {other:?}"),
     }
-    // With every plugin present, the missing aircraft is the next hint.
     for plugin in ["px4xplane", "PilotageAutoFlight", "PilotageCamera"] {
         let dir = root.join(format!("Resources/plugins/{plugin}/64"));
         std::fs::create_dir_all(&dir).expect("plugin dir");
         std::fs::write(dir.join("mac.xpl"), b"stub").expect("plugin stub");
     }
+    let refusal = validate_xplane_install(&root, qtailsitter());
+    match refusal {
+        Err(XtaskError::MissingArtifact { what, hint, .. }) => {
+            assert_eq!(what, "Pilotage X-Plane weather plugin");
+            assert!(hint.contains("build-xplane-plugins"));
+        }
+        other => panic!("expected a missing-weather-plugin refusal, got {other:?}"),
+    }
+    let weather = root.join("Resources/plugins/PilotageWeather/64");
+    std::fs::create_dir_all(&weather).expect("weather plugin dir");
+    std::fs::write(weather.join("mac.xpl"), b"stub").expect("weather plugin stub");
+
+    // With every plugin present, the missing aircraft is the next hint.
     let refusal = validate_xplane_install(&root, qtailsitter());
     match refusal {
         Err(XtaskError::MissingArtifact { what, path, .. }) => {
@@ -157,6 +171,175 @@ fn command_datagram_is_prologue_path_nul() {
         command_datagram("px4xplane/toggleEnable"),
         [b"CMND\0".as_slice(), b"px4xplane/toggleEnable\0".as_slice()].concat()
     );
+}
+
+#[test]
+fn stale_plugins_refuse_each_retry_without_a_restart() {
+    assert!(!plugin_install_required(true, true).expect("current plugins"));
+    assert!(plugin_install_required(false, false).expect("stopped simulator"));
+    for _attempt in 0..2 {
+        assert!(matches!(
+            plugin_install_required(false, true),
+            Err(XtaskError::SimulatorCapability { .. })
+        ));
+    }
+}
+
+#[test]
+fn post_build_refusal_keeps_the_retry_stale() {
+    use crate::session::preflight::stamp;
+
+    let root = scaffold("post-build-refusal");
+    let stamp_path = root.join("xplane-plugins.stamp");
+    let current = "stopped simulator install contract\n";
+    assert!(matches!(
+        record_plugin_install_stamp(&stamp_path, Some(current), true),
+        Err(XtaskError::SimulatorCapability { .. })
+    ));
+    assert!(
+        !stamp_path.exists(),
+        "a refused install must not look fresh"
+    );
+
+    let stored = stamp::read_stamp(&stamp_path);
+    let plugins_current = stamp::artifact_is_fresh(true, stored.as_deref(), Some(current));
+    assert!(!plugins_current);
+    assert!(matches!(
+        plugin_install_required(plugins_current, true),
+        Err(XtaskError::SimulatorCapability { .. })
+    ));
+}
+
+#[test]
+fn xplane_process_probe_fails_closed_on_probe_errors() {
+    let root = scaffold("process-probe");
+    assert!(matches!(
+        xplane_running_with_program_blocking(&root.join("missing-pgrep")),
+        Err(XtaskError::Io { .. })
+    ));
+    assert!(matches!(
+        xplane_running_with_program_blocking(std::path::Path::new("/usr/bin/true")),
+        Ok(true)
+    ));
+    assert!(matches!(
+        xplane_running_with_program_blocking(std::path::Path::new("/usr/bin/false")),
+        Ok(false)
+    ));
+    let unexpected = std::process::Command::new("/bin/sh")
+        .args(["-c", "exit 2"])
+        .status()
+        .expect("status 2");
+    assert!(matches!(
+        classify_xplane_probe_status(unexpected),
+        Err(XtaskError::CommandFailed { .. })
+    ));
+}
+
+#[test]
+fn plugin_build_spawn_and_exit_failures_keep_their_types() {
+    let root = scaffold("plugin-build-failures");
+    let missing = root.join("missing-command");
+    assert!(matches!(
+        run_plugin_build_blocking(&root, &missing),
+        Err(XtaskError::Io { .. })
+    ));
+    assert!(matches!(
+        run_plugin_build_blocking(&root, std::path::Path::new("/usr/bin/false")),
+        Err(XtaskError::CommandFailed { .. })
+    ));
+}
+
+#[test]
+fn weather_clear_proof_controls_controller_start() {
+    let root = scaffold("weather-proof-failure");
+    let scripts = root.join("scripts");
+    std::fs::create_dir_all(&scripts).expect("scripts dir");
+    std::fs::write(
+        scripts.join("xplane_weather_clear.py"),
+        "raise SystemExit(7)\n",
+    )
+    .expect("weather proof");
+    assert!(matches!(
+        verify_weather_plugin_blocking(&root),
+        Err(XtaskError::SimulatorCapability { .. })
+    ));
+    std::fs::write(
+        scripts.join("xplane_weather_clear.py"),
+        "raise SystemExit(0)\n",
+    )
+    .expect("weather proof");
+    assert!(verify_weather_plugin_blocking(&root).is_ok());
+}
+
+#[test]
+fn xplane_prepare_sequence_proves_weather_before_connect_or_fc_start() {
+    use std::cell::RefCell;
+
+    let warm_trace = RefCell::new(Vec::new());
+    run_xplane_prepare_sequence(
+        true,
+        || {
+            warm_trace.borrow_mut().push("proof");
+            Ok(())
+        },
+        || {
+            warm_trace.borrow_mut().push("launch");
+            Ok(())
+        },
+        || {
+            warm_trace.borrow_mut().push("cold-proof");
+            Ok(())
+        },
+        || warm_trace.borrow_mut().push("connect"),
+    )
+    .expect("warm prepare");
+    assert_eq!(warm_trace.into_inner(), ["proof", "connect"]);
+
+    let cold_trace = RefCell::new(Vec::new());
+    run_xplane_prepare_sequence(
+        false,
+        || {
+            cold_trace.borrow_mut().push("warm-proof");
+            Ok(())
+        },
+        || {
+            cold_trace.borrow_mut().push("launch");
+            Ok(())
+        },
+        || {
+            cold_trace.borrow_mut().push("proof");
+            Ok(())
+        },
+        || cold_trace.borrow_mut().push("connect"),
+    )
+    .expect("cold prepare");
+    assert_eq!(cold_trace.into_inner(), ["launch", "proof"]);
+
+    let refusal_trace = RefCell::new(Vec::new());
+    let refusal = run_xplane_prepare_sequence(
+        true,
+        || {
+            refusal_trace.borrow_mut().push("proof");
+            Err(XtaskError::SimulatorCapability {
+                capability: "test weather proof",
+                detail: "refused".to_owned(),
+            })
+        },
+        || {
+            refusal_trace.borrow_mut().push("launch");
+            Ok(())
+        },
+        || {
+            refusal_trace.borrow_mut().push("cold-proof");
+            Ok(())
+        },
+        || refusal_trace.borrow_mut().push("connect"),
+    );
+    assert!(matches!(
+        refusal,
+        Err(XtaskError::SimulatorCapability { .. })
+    ));
+    assert_eq!(refusal_trace.into_inner(), ["proof"]);
 }
 
 #[test]

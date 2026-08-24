@@ -22,3 +22,7 @@ crates/pilotage-svs-build/src/payload/decode.rs	off += 34;
 crates/pilotage-svs-db/src/feature.rs	i += 1;
 crates/pilotage-svs-db/src/merkle.rs	i += 2;
 crates/pilotage-timing/src/latency.rs	self.len += 1;
+crates/pilotage-trial/src/condition.rs	maximum_speed += gust.speed_mps;
+crates/pilotage-trial/src/condition.rs	maximum_speed += self.turbulence.amplitude_mps();
+crates/pilotage-trial/src/condition.rs	self.east += other.east * scale;
+crates/pilotage-trial/src/condition.rs	self.north += other.north * scale;
