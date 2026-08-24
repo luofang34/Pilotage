@@ -31,4 +31,12 @@ printf '%s\n' 'use pilotage_durable_storage::DurableStore;' > "$journal_root/sto
 printf '%s\n' 'use std::fs;' > "$journal_root/tests.rs"
 bash "$guard" "$fixture" >/dev/null
 
+mkdir -p "$fixture/bin"
+printf '%s\n' '#!/bin/sh' 'exit 2' > "$fixture/bin/rg"
+chmod +x "$fixture/bin/rg"
+if PATH="$fixture/bin:$PATH" bash "$guard" "$fixture" >/dev/null 2>&1; then
+    echo "the journal storage boundary ignored a scanner failure" >&2
+    exit 1
+fi
+
 echo "flight-tune journal storage boundary self-test: OK"
