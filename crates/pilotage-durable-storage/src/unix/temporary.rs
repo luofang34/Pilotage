@@ -143,6 +143,46 @@ pub(crate) fn cleanup(
     )
 }
 
+pub(crate) fn cleanup_unlinked(
+    directory: &DurableDirectory,
+    lease: &WriterLease,
+    maximum_objects: usize,
+    maximum_bytes: usize,
+) -> StorageResult<usize> {
+    let before = directory.handle.context(
+        None,
+        StorageOperation::RemoveTemporary,
+        DurabilityStep::BeforeMutation,
+    );
+    lease.validate_for(&directory.handle, &before)?;
+    let temporaries = directory
+        .list()?
+        .into_iter()
+        .filter(is_temporary_name)
+        .collect::<Vec<_>>();
+    if temporaries.len() > maximum_objects {
+        return Err(StorageError::Corruption {
+            reason: "the temporary object count exceeds the recovery limit",
+            context: directory.handle.context(
+                None,
+                StorageOperation::RemoveTemporary,
+                DurabilityStep::Selection,
+            ),
+        });
+    }
+    for name in &temporaries {
+        let temporary = inspect_owned(directory, name, maximum_bytes)?;
+        cleanup(directory, lease, &temporary)?;
+    }
+    let after = directory.handle.context(
+        None,
+        StorageOperation::RemoveTemporary,
+        DurabilityStep::AfterMutation,
+    );
+    lease.validate_for(&directory.handle, &after)?;
+    Ok(temporaries.len())
+}
+
 fn create_unique(
     directory: &DurableDirectory,
     lease: &WriterLease,

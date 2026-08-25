@@ -212,6 +212,57 @@ pub(crate) fn put_immutable(
     Ok(PutOutcome::Published)
 }
 
+pub(crate) fn repair_immutable_publication(
+    directory: &DurableDirectory,
+    lease: &WriterLease,
+    name: &ObjectName,
+    maximum_bytes: usize,
+) -> StorageResult<Option<ExactObject>> {
+    let context = directory.handle.context(
+        Some(name),
+        StorageOperation::PublishImmutable,
+        DurabilityStep::BeforeMutation,
+    );
+    lease.validate_for(&directory.handle, &context)?;
+    let stat = match statat(
+        &directory.handle.fd,
+        name.as_os_str(),
+        AtFlags::SYMLINK_NOFOLLOW,
+    ) {
+        Ok(stat) => stat,
+        Err(rustix::io::Errno::NOENT) => {
+            lease.validate_for(&directory.handle, &context)?;
+            return Ok(None);
+        }
+        Err(source) => {
+            return Err(StorageError::Io {
+                context,
+                source: source.into(),
+            });
+        }
+    };
+    let inspected = inspect_temporary(&stat, &context)?;
+    let object = match inspected.link_count {
+        1 => read_exact(&directory.handle, name, maximum_bytes)?,
+        2 => read_exact_with_links(&directory.handle, name, maximum_bytes, 2)?,
+        actual => return Err(StorageError::LinkedObject { actual, context }),
+    };
+    temporary::reject_reserved_destination(
+        directory,
+        name,
+        &object,
+        StorageOperation::PublishImmutable,
+    )?;
+    if inspected.link_count == 2
+        && !temporary::recover_linked_publication(directory, lease, name, &object)?
+    {
+        return Err(StorageError::ContentMismatch { context });
+    }
+    make_existing_durable(&directory.handle, name, &object)?;
+    lease.validate_for(&directory.handle, &context)?;
+    Ok(Some(object))
+}
+
 pub(crate) fn verify_exact(
     directory: &DirectoryHandle,
     name: &ObjectName,

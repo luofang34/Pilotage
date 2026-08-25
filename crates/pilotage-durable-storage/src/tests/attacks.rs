@@ -6,6 +6,28 @@ use crate::{
 };
 
 #[test]
+fn open_existing_does_not_create_a_missing_root() -> TestResult {
+    let temporary = tempfile::tempdir_in(test_parent()?)?;
+    let root = temporary.path().join("missing-store");
+
+    assert!(DurableStore::open_existing_blocking(&root).is_err());
+    assert!(!root.try_exists()?);
+    Ok(())
+}
+
+#[test]
+fn open_existing_rejects_a_root_symlink() -> TestResult {
+    let temporary = tempfile::tempdir_in(test_parent()?)?;
+    let root = temporary.path().join("store");
+    let link = temporary.path().join("store-link");
+    let _store = DurableStore::open_or_create(&root)?;
+    std::os::unix::fs::symlink(&root, &link)?;
+
+    assert!(DurableStore::open_existing_blocking(&link).is_err());
+    Ok(())
+}
+
+#[test]
 fn root_symlink_and_symlinked_tmp_ancestor_are_rejected() -> TestResult {
     let temporary = tempfile::Builder::new()
         .prefix("pilotage-root-link-")
