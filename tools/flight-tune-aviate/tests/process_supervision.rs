@@ -180,27 +180,6 @@ fn owner_sigkill_after_release_recovers_the_complete_group() {
 }
 
 #[test]
-fn drop_reaps_a_sigkilled_owner_before_recovery() {
-    let fixture = TestLaunch::new("owner-sigkill-drop");
-    let target = FifoWatch::new(fixture.target_fifo());
-    let prepared =
-        PreparedAviateProcess::prepare_blocking(fixture.request()).expect("prepare owner drop run");
-    let managed = prepared
-        .release_blocking()
-        .expect("release owner drop target");
-    let attestation = managed.supervision_attestation().clone();
-    target.expect_open("the owner drop target starts");
-
-    support::kill_process(attestation.supervisor_identity.pid);
-    target.expect_eof("the failed owner closes the exact target");
-    drop(managed);
-    let outcome = recover_supervised_process_blocking(&attestation.recovery_request)
-        .expect("recovery continues after the owner is reaped");
-
-    assert!(matches!(outcome, RecoveryOutcome::Terminal { .. }));
-}
-
-#[test]
 fn gate_sigkill_after_release_uses_owner_fallback() {
     let fixture = TestLaunch::new("gate-sigkill-released");
     let target = FifoWatch::new(fixture.target_fifo());

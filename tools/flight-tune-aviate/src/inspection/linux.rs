@@ -1,37 +1,132 @@
 use std::ffi::OsStr;
+use std::fs::File;
 use std::os::unix::ffi::OsStrExt as _;
+use std::os::unix::fs::MetadataExt as _;
+use std::os::unix::io::AsRawFd as _;
 use std::path::{Path, PathBuf};
 
 use crate::AviateSupervisorError;
 use crate::document::{ProcessIdentity, ProcessStartIdentity};
 use crate::inspection::{
-    LifetimeIdentity, ProcessGroupSnapshot, digest_argument_bytes, digest_file, io_error,
-    process_io,
+    InspectionDeadline, LifetimeIdentity, ProcessGroupSnapshot, digest_argument_bytes,
+    digest_open_file, digest_open_file_before, io_error, process_io,
 };
+
+const STABLE_SNAPSHOT_ATTEMPTS: usize = 3;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ExecutableObservation {
+    path: PathBuf,
+    digest: flight_tune::Digest,
+    device: u64,
+    inode: u64,
+    bytes: u64,
+}
+
+trait ProcessSource {
+    fn check_deadline(&mut self) -> Result<(), AviateSupervisorError>;
+    fn lifetime(&mut self, pid: u32) -> Result<Option<LifetimeIdentity>, AviateSupervisorError>;
+    fn command(&mut self, pid: u32) -> Result<Option<Vec<u8>>, AviateSupervisorError>;
+    fn executable(
+        &mut self,
+        pid: u32,
+    ) -> Result<Option<ExecutableObservation>, AviateSupervisorError>;
+}
+
+struct Procfs {
+    deadline: Option<InspectionDeadline>,
+}
+
+enum StableSnapshot {
+    Missing,
+    Unstable {
+        lifetime: LifetimeIdentity,
+    },
+    Stable {
+        lifetime: LifetimeIdentity,
+        command: Vec<u8>,
+        executable: ExecutableObservation,
+    },
+}
 
 pub(super) fn inspect_process(
     pid: u32,
     launch_argv_digest: flight_tune::Digest,
 ) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
-    let Some(lifetime) = inspect_lifetime(pid)? else {
-        return Ok(None);
-    };
-    let executable_link = PathBuf::from(format!("/proc/{pid}/exe"));
-    let executable = match std::fs::read_link(&executable_link) {
-        Ok(path) => path,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(io_error(
-                "read live executable link",
-                &executable_link,
-                source,
-            ));
+    inspect_process_from(&mut Procfs { deadline: None }, pid, launch_argv_digest)
+}
+
+pub(super) fn inspect_process_before(
+    pid: u32,
+    launch_argv_digest: flight_tune::Digest,
+    deadline: InspectionDeadline,
+) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
+    inspect_process_from(
+        &mut Procfs {
+            deadline: Some(deadline),
+        },
+        pid,
+        launch_argv_digest,
+    )
+}
+
+fn inspect_process_from(
+    source: &mut impl ProcessSource,
+    pid: u32,
+    launch_argv_digest: flight_tune::Digest,
+) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
+    let mut lifetime_anchor = None;
+    for _ in 0..STABLE_SNAPSHOT_ATTEMPTS {
+        source.check_deadline()?;
+        match read_stable_snapshot(source, pid)? {
+            StableSnapshot::Missing => return Ok(None),
+            StableSnapshot::Unstable { lifetime } => {
+                bind_lifetime_anchor(&mut lifetime_anchor, &lifetime)?;
+            }
+            StableSnapshot::Stable {
+                lifetime,
+                command,
+                executable,
+            } => {
+                bind_lifetime_anchor(&mut lifetime_anchor, &lifetime)?;
+                return build_process_identity(
+                    pid,
+                    launch_argv_digest,
+                    lifetime,
+                    command,
+                    executable,
+                );
+            }
         }
-    };
-    let executable_digest = digest_file(&executable_link)?;
-    let command_path = PathBuf::from(format!("/proc/{pid}/cmdline"));
-    let command = std::fs::read(&command_path)
-        .map_err(|source| io_error("read live argument vector", &command_path, source))?;
+    }
+    Err(AviateSupervisorError::identity_mismatch(
+        "the Linux process image did not stabilize during inspection",
+    ))
+}
+
+fn bind_lifetime_anchor(
+    anchor: &mut Option<LifetimeIdentity>,
+    actual: &LifetimeIdentity,
+) -> Result<(), AviateSupervisorError> {
+    match anchor {
+        Some(expected) if expected != actual => Err(AviateSupervisorError::identity_mismatch(
+            "the Linux process lifetime changed between inspection attempts",
+        )),
+        Some(_) => Ok(()),
+        None => {
+            *anchor = Some(actual.clone());
+            Ok(())
+        }
+    }
+}
+
+fn build_process_identity(
+    pid: u32,
+    launch_argv_digest: flight_tune::Digest,
+    lifetime: LifetimeIdentity,
+    command: Vec<u8>,
+    executable: ExecutableObservation,
+) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
     let mut arguments = command.split(|byte| *byte == 0).collect::<Vec<_>>();
     if arguments.last().is_some_and(|argument| argument.is_empty()) {
         arguments.pop();
@@ -42,14 +137,6 @@ pub(super) fn inspect_process(
             "the observed Linux arguments differ from the launch arguments",
         ));
     }
-    let Some(final_lifetime) = inspect_lifetime(pid)? else {
-        return Ok(None);
-    };
-    if final_lifetime != lifetime {
-        return Err(AviateSupervisorError::identity_mismatch(
-            "the Linux process lifetime changed during inspection",
-        ));
-    }
     Ok(Some(ProcessIdentity {
         pid,
         process_group: lifetime.process_group,
@@ -57,11 +144,148 @@ pub(super) fn inspect_process(
         parent_pid: lifetime.parent_pid,
         real_user_id: lifetime.real_user_id,
         start: lifetime.start,
-        executable,
-        executable_digest,
+        executable: executable.path,
+        executable_digest: executable.digest,
         launch_argv_digest,
         observed_argv_digest: Some(argv_digest),
     }))
+}
+
+fn read_stable_snapshot(
+    source: &mut impl ProcessSource,
+    pid: u32,
+) -> Result<StableSnapshot, AviateSupervisorError> {
+    source.check_deadline()?;
+    let Some(before) = source.lifetime(pid)? else {
+        return Ok(StableSnapshot::Missing);
+    };
+    let Some(first_command) = source.command(pid)? else {
+        return classify_missing(source, pid, &before);
+    };
+    let Some(first_executable) = source.executable(pid)? else {
+        return classify_missing(source, pid, &before);
+    };
+    let Some(final_command) = source.command(pid)? else {
+        return classify_missing(source, pid, &before);
+    };
+    let Some(final_executable) = source.executable(pid)? else {
+        return classify_missing(source, pid, &before);
+    };
+    let Some(after) = source.lifetime(pid)? else {
+        return Ok(StableSnapshot::Missing);
+    };
+    source.check_deadline()?;
+    if before != after {
+        return Err(AviateSupervisorError::identity_mismatch(
+            "the Linux process lifetime changed during inspection",
+        ));
+    }
+    if first_command != final_command || first_executable != final_executable {
+        return Ok(StableSnapshot::Unstable { lifetime: after });
+    }
+    Ok(StableSnapshot::Stable {
+        lifetime: after,
+        command: final_command,
+        executable: final_executable,
+    })
+}
+
+fn classify_missing(
+    source: &mut impl ProcessSource,
+    pid: u32,
+    before: &LifetimeIdentity,
+) -> Result<StableSnapshot, AviateSupervisorError> {
+    match source.lifetime(pid)? {
+        Some(after) if after == *before => Ok(StableSnapshot::Unstable { lifetime: after }),
+        Some(_) => Err(AviateSupervisorError::identity_mismatch(
+            "the Linux process lifetime changed during inspection",
+        )),
+        None => Ok(StableSnapshot::Missing),
+    }
+}
+
+impl ProcessSource for Procfs {
+    fn check_deadline(&mut self) -> Result<(), AviateSupervisorError> {
+        self.deadline.map_or(Ok(()), InspectionDeadline::check)
+    }
+
+    fn lifetime(&mut self, pid: u32) -> Result<Option<LifetimeIdentity>, AviateSupervisorError> {
+        self.check_deadline()?;
+        let lifetime = inspect_lifetime(pid)?;
+        self.check_deadline()?;
+        Ok(lifetime)
+    }
+
+    fn command(&mut self, pid: u32) -> Result<Option<Vec<u8>>, AviateSupervisorError> {
+        self.check_deadline()?;
+        let path = PathBuf::from(format!("/proc/{pid}/cmdline"));
+        let command = match std::fs::read(&path) {
+            Ok(command) => Ok(Some(command)),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(io_error("read live argument vector", &path, source)),
+        }?;
+        self.check_deadline()?;
+        Ok(command)
+    }
+
+    fn executable(
+        &mut self,
+        pid: u32,
+    ) -> Result<Option<ExecutableObservation>, AviateSupervisorError> {
+        self.check_deadline()?;
+        let executable = observe_executable(pid, self.deadline)?;
+        self.check_deadline()?;
+        Ok(executable)
+    }
+}
+
+fn observe_executable(
+    pid: u32,
+    deadline: Option<InspectionDeadline>,
+) -> Result<Option<ExecutableObservation>, AviateSupervisorError> {
+    let live_path = PathBuf::from(format!("/proc/{pid}/exe"));
+    if let Some(deadline) = deadline {
+        deadline.check()?;
+    }
+    let file = match File::open(&live_path) {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(io_error("open live executable", &live_path, source)),
+    };
+    observe_open_executable_with_deadline(file, &live_path, deadline).map(Some)
+}
+
+#[cfg(test)]
+fn observe_open_executable(
+    file: File,
+    live_path: &Path,
+) -> Result<ExecutableObservation, AviateSupervisorError> {
+    observe_open_executable_with_deadline(file, live_path, None)
+}
+
+fn observe_open_executable_with_deadline(
+    mut file: File,
+    live_path: &Path,
+    deadline: Option<InspectionDeadline>,
+) -> Result<ExecutableObservation, AviateSupervisorError> {
+    let fd_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+    let path = std::fs::read_link(&fd_path)
+        .map_err(|source| io_error("read held executable link", &fd_path, source))?;
+    let metadata = file
+        .metadata()
+        .map_err(|source| io_error("inspect held executable", live_path, source))?;
+    let digest = match deadline {
+        Some(deadline) => digest_open_file_before(&mut file, live_path, deadline)?,
+        None => digest_open_file(&mut file)
+            .map_err(|source| io_error("hash held executable", live_path, source))?,
+    };
+    Ok(ExecutableObservation {
+        path,
+        digest,
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        bytes: metadata.len(),
+    })
 }
 
 pub(super) fn inspect_lifetime(
@@ -257,19 +481,5 @@ fn parse_real_user_id(status: &str) -> Result<u32, AviateSupervisorError> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
-mod tests {
-    use super::parse_stat;
-
-    #[test]
-    fn stat_parser_uses_the_last_command_boundary() {
-        let mut fields = vec!["S", "42", "43", "44"];
-        fields.extend(std::iter::repeat_n("0", 15));
-        fields.push("99");
-        let stat = format!("77 (name) with ) marks) {}", fields.join(" "));
-
-        let parsed = parse_stat(&stat).expect("valid stat");
-
-        assert_eq!(parsed, ("S", 42, 43, 44, 99));
-    }
-}
+#[path = "linux/tests.rs"]
+mod tests;

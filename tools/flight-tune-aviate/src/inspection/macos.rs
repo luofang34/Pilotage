@@ -9,13 +9,33 @@ use sysctl::Sysctl as _;
 use crate::AviateSupervisorError;
 use crate::document::{ProcessIdentity, ProcessStartIdentity};
 use crate::inspection::{
-    ExitedGroupMember, LifetimeIdentity, ProcessGroupSnapshot, digest_file, process_io,
+    ExitedGroupMember, InspectionDeadline, LifetimeIdentity, ProcessGroupSnapshot, digest_file,
+    digest_file_before, process_io,
 };
 
 pub(super) fn inspect_process(
     pid: u32,
     launch_argv_digest: flight_tune::Digest,
 ) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
+    inspect_process_with_deadline(pid, launch_argv_digest, None)
+}
+
+pub(super) fn inspect_process_before(
+    pid: u32,
+    launch_argv_digest: flight_tune::Digest,
+    deadline: InspectionDeadline,
+) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
+    inspect_process_with_deadline(pid, launch_argv_digest, Some(deadline))
+}
+
+fn inspect_process_with_deadline(
+    pid: u32,
+    launch_argv_digest: flight_tune::Digest,
+    deadline: Option<InspectionDeadline>,
+) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
+    if let Some(deadline) = deadline {
+        deadline.check()?;
+    }
     let Some(lifetime) = inspect_lifetime(pid)? else {
         return Ok(None);
     };
@@ -32,10 +52,16 @@ pub(super) fn inspect_process(
             )));
         }
     };
-    let executable_digest = digest_file(&executable)?;
+    let executable_digest = match deadline {
+        Some(deadline) => digest_file_before(&executable, deadline)?,
+        None => digest_file(&executable)?,
+    };
     let Some(final_lifetime) = inspect_lifetime(pid)? else {
         return Ok(None);
     };
+    if let Some(deadline) = deadline {
+        deadline.check()?;
+    }
     if final_lifetime != lifetime {
         return Err(AviateSupervisorError::identity_mismatch(
             "the Darwin process lifetime changed during inspection",

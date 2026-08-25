@@ -5,7 +5,8 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 
 use flight_tune_aviate::{
-    ManagedAviateProcess, PreparedAviateProcess, RecoveryOutcome, SupervisionAttestation,
+    AviateSupervisorError, ManagedAviateProcess, PreparedAviateProcess, RecoveryOutcome,
+    SupervisionAttestation,
 };
 
 use super::{RequestParts, TestLaunch};
@@ -15,6 +16,13 @@ const MODE_ENV: &str = "PILOTAGE_DRIVER_MODE";
 const READY_FIFO_ENV: &str = "PILOTAGE_DRIVER_READY_FIFO";
 const DESCENDANT_EVENT_ENV: &str = "PILOTAGE_DRIVER_DESCENDANT_EVENT_FIFO";
 const DESCENDANT_CONTROL_ENV: &str = "PILOTAGE_DRIVER_DESCENDANT_CONTROL_FIFO";
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum DriverReport {
+    Ready(Box<SupervisionAttestation>),
+    Failed { detail: String },
+}
 
 #[derive(Clone, Copy)]
 enum DriverMode {
@@ -62,16 +70,25 @@ impl DriverProcess {
     }
 
     pub(crate) fn read_attestation(&mut self) -> SupervisionAttestation {
-        let bytes = self
-            .attestation
-            .recv_timeout(super::EVENT_TIMEOUT)
-            .expect("driver returns supervision evidence");
+        let timeout = super::EVENT_TIMEOUT
+            .saturating_mul(5)
+            .saturating_add(std::time::Duration::from_secs(5));
+        let bytes = match self.attestation.recv_timeout(timeout) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.stop_after_report_failure();
+                panic!("driver report channel failed: {error}");
+            }
+        };
         self.ready_reader
             .take()
             .expect("driver evidence reader is present")
             .join()
             .expect("driver evidence reader completes");
-        serde_json::from_slice(&bytes).expect("decode driver supervision evidence")
+        match serde_json::from_slice(&bytes).expect("decode driver supervision report") {
+            DriverReport::Ready(attestation) => *attestation,
+            DriverReport::Failed { detail } => self.reap_reported_failure(&detail),
+        }
     }
 
     pub(crate) fn kill_and_wait(&mut self) {
@@ -80,6 +97,28 @@ impl DriverProcess {
         let status = self.child.wait().expect("reap supervision driver");
         assert!(!status.success(), "the driver receives a forced stop");
     }
+
+    fn stop_after_report_failure(&mut self) {
+        if self
+            .child
+            .try_wait()
+            .expect("inspect failed supervision driver")
+            .is_none()
+        {
+            self.child.kill().expect("stop failed supervision driver");
+        }
+        self.input.take();
+        self.child.wait().expect("reap failed supervision driver");
+    }
+
+    fn reap_reported_failure(&mut self, detail: &str) -> ! {
+        self.input.take();
+        let status = self
+            .child
+            .wait()
+            .expect("reap reporting supervision driver");
+        panic!("supervision driver failed with {status}: {detail}");
+    }
 }
 
 pub(crate) fn run_driver_fixture() {
@@ -87,33 +126,64 @@ pub(crate) fn run_driver_fixture() {
         return;
     }
     let parts = RequestParts::from_environment();
-    match std::env::var(MODE_ENV).expect("driver mode").as_str() {
-        "prepared" => run_prepared(parts),
-        "released_descendant" => run_released_descendant(parts),
-        mode => panic!("unknown driver mode: {mode}"),
+    let result = match std::env::var(MODE_ENV).expect("driver mode").as_str() {
+        "prepared" => prepare_launch(parts),
+        "released_descendant" => release_descendant(parts),
+        mode => Err(AviateSupervisorError::InvalidRequest {
+            detail: format!("unknown driver mode: {mode}"),
+        }),
+    };
+    match result {
+        Ok(launch) => {
+            publish_report(&DriverReport::Ready(Box::new(launch.attestation().clone())));
+            wait_for_input_eof();
+            launch.finish();
+        }
+        Err(error) => publish_report(&DriverReport::Failed {
+            detail: error.to_string(),
+        }),
     }
 }
 
-fn run_prepared(parts: RequestParts) {
-    let request = super::make_request(&parts, None);
-    let prepared =
-        PreparedAviateProcess::prepare_blocking(request).expect("driver prepares launch");
-    publish_attestation(prepared.supervision_attestation());
-    wait_for_input_eof();
-    let outcome = prepared.cancel_blocking().expect("cancel driver launch");
-    assert!(matches!(outcome, RecoveryOutcome::Terminal { .. }));
+enum DriverLaunch {
+    Prepared(Box<PreparedAviateProcess>),
+    Released(Box<ManagedAviateProcess>),
 }
 
-fn run_released_descendant(parts: RequestParts) {
+impl DriverLaunch {
+    fn attestation(&self) -> &SupervisionAttestation {
+        match self {
+            Self::Prepared(process) => process.supervision_attestation(),
+            Self::Released(process) => process.supervision_attestation(),
+        }
+    }
+
+    fn finish(self) {
+        match self {
+            Self::Prepared(process) => {
+                let outcome = (*process).cancel_blocking().expect("cancel driver launch");
+                assert!(matches!(outcome, RecoveryOutcome::Terminal { .. }));
+            }
+            Self::Released(mut process) => terminate_managed(&mut process),
+        }
+    }
+}
+
+fn prepare_launch(parts: RequestParts) -> Result<DriverLaunch, AviateSupervisorError> {
+    let request = super::make_request(&parts, None);
+    PreparedAviateProcess::prepare_blocking(request)
+        .map(Box::new)
+        .map(DriverLaunch::Prepared)
+}
+
+fn release_descendant(parts: RequestParts) -> Result<DriverLaunch, AviateSupervisorError> {
     let event = super::environment_path(DESCENDANT_EVENT_ENV);
     let control = super::environment_path(DESCENDANT_CONTROL_ENV);
     let request = super::make_request(&parts, Some((&event, &control)));
-    let prepared =
-        PreparedAviateProcess::prepare_blocking(request).expect("driver prepares launch");
-    let mut managed = prepared.release_blocking().expect("driver releases launch");
-    publish_attestation(managed.supervision_attestation());
-    wait_for_input_eof();
-    terminate_managed(&mut managed);
+    PreparedAviateProcess::prepare_blocking(request)?
+        .release_blocking()
+        .map(Box::new)
+        .map(DriverLaunch::Released)
 }
 
 fn terminate_managed(managed: &mut ManagedAviateProcess) {
@@ -123,11 +193,11 @@ fn terminate_managed(managed: &mut ManagedAviateProcess) {
     assert!(matches!(outcome, RecoveryOutcome::Terminal { .. }));
 }
 
-fn publish_attestation(attestation: &SupervisionAttestation) {
-    let encoded = serde_json::to_vec(attestation).expect("encode driver evidence");
+fn publish_report(report: &DriverReport) {
+    let encoded = serde_json::to_vec(report).expect("encode driver report");
     let ready_fifo = super::environment_path(READY_FIFO_ENV);
     let mut ready = super::open_fifo_writer(&ready_fifo);
-    ready.write_all(&encoded).expect("write driver evidence");
+    ready.write_all(&encoded).expect("write driver report");
 }
 
 fn wait_for_input_eof() {

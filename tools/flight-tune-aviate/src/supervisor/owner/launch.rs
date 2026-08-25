@@ -21,6 +21,16 @@ use crate::lease_store::LeaseStore;
 use crate::protocol::{GateEvent, ReleaseMessage, decode, read_line_blocking};
 use crate::runtime_files::PARENT_READY_SOCKET;
 
+#[path = "launch/target.rs"]
+mod target;
+
+pub(super) fn attest_target(
+    owner: &mut PreparedOwner,
+    pid: u32,
+) -> Result<TargetAttestation, AviateSupervisorError> {
+    target::attest(owner, pid)
+}
+
 pub(super) fn prepare() -> Result<PreparedOwner, AviateSupervisorError> {
     let (storage_root, runtime_root) = parse_paths()?;
     let mut input = std::io::stdin();
@@ -78,47 +88,6 @@ fn prepare_owner(
     Ok(owner)
 }
 
-pub(super) fn attest_target(
-    owner: &mut PreparedOwner,
-    pid: u32,
-) -> Result<TargetAttestation, AviateSupervisorError> {
-    let digest = target_argv_digest(&owner.bootstrap)?;
-    let target = wait_for_process(
-        pid,
-        digest,
-        Duration::from_millis(owner.bootstrap.startup_timeout_millis),
-    )?;
-    owner.target_identity = Some(target.clone());
-    if target.parent_pid != owner.process_identity.target_gate.pid
-        || target.process_group != owner.process_identity.target_gate.process_group
-        || target.session_id != owner.process_identity.target_gate.session_id
-        || target.executable != owner.bootstrap.target_executable.path
-        || target.executable_digest != owner.bootstrap.target_executable.digest
-    {
-        return Err(AviateSupervisorError::identity_mismatch(
-            "the live target differs from the authorized launch",
-        ));
-    }
-    Ok(TargetAttestation {
-        schema_version: SCHEMA_VERSION,
-        run_intent_digest: owner.bootstrap.run_intent_digest,
-        target,
-    })
-}
-
-pub(super) fn target_argv_digest(
-    bootstrap: &SupervisorBootstrap,
-) -> Result<flight_tune::Digest, AviateSupervisorError> {
-    let executable =
-        bootstrap.target_executable.path.to_str().ok_or_else(|| {
-            AviateSupervisorError::invalid_request("the target path is not UTF-8")
-        })?;
-    let mut arguments = Vec::with_capacity(bootstrap.target_arguments.len().wrapping_add(1));
-    arguments.push(executable.to_owned());
-    arguments.extend(bootstrap.target_arguments.iter().cloned());
-    Ok(inspection::digest_arguments(&arguments))
-}
-
 fn spawn_intent(
     bootstrap: &SupervisorBootstrap,
     correlation_nonce: flight_tune::Digest,
@@ -132,7 +101,7 @@ fn spawn_intent(
         supervisor_executable: bootstrap.supervisor_executable.clone(),
         target_executable: bootstrap.target_executable.clone(),
         target_arguments: bootstrap.target_arguments.clone(),
-        target_argv_digest: target_argv_digest(bootstrap)?,
+        target_argv_digest: target::argv_digest(bootstrap)?,
         target_environment_digest: digest_environment(&bootstrap.target_environment),
         target_current_directory: bootstrap.target_current_directory.clone(),
         target_stdio: TargetStdio::Null,
@@ -156,7 +125,7 @@ pub(super) fn gate_config(
         target_environment: bootstrap.target_environment.clone(),
         target_environment_digest: digest_environment(&bootstrap.target_environment),
         target_current_directory: bootstrap.target_current_directory.clone(),
-        target_argv_digest: target_argv_digest(bootstrap)?,
+        target_argv_digest: target::argv_digest(bootstrap)?,
         target_process_contract: bootstrap.target_process_contract.clone(),
     })
 }
@@ -234,7 +203,12 @@ fn wait_for_gate_process(
             Err(error) => return Err(error),
         };
         if isolated {
-            match inspection::inspect_process(pid, argv_digest) {
+            match inspection::inspect_process_before(
+                pid,
+                argv_digest,
+                deadline,
+                "inspect isolated launch gate",
+            ) {
                 Ok(Some(identity))
                     if identity.process_group == pid && identity.session_id == pid =>
                 {
@@ -329,25 +303,6 @@ fn inspect_self(bootstrap: &SupervisorBootstrap) -> Result<ProcessIdentity, Avia
         ));
     }
     Ok(identity)
-}
-
-fn wait_for_process(
-    pid: u32,
-    argv_digest: flight_tune::Digest,
-    timeout: Duration,
-) -> Result<ProcessIdentity, AviateSupervisorError> {
-    let deadline = checked_deadline(timeout, "inspect spawned process")?;
-    loop {
-        if let Some(identity) = inspection::inspect_process(pid, argv_digest)? {
-            return Ok(identity);
-        }
-        if Instant::now() >= deadline {
-            return Err(AviateSupervisorError::Timeout {
-                operation: "inspect spawned process",
-            });
-        }
-        std::thread::park_timeout(Duration::from_millis(1));
-    }
 }
 
 fn validate_artifacts(bootstrap: &SupervisorBootstrap) -> Result<(), AviateSupervisorError> {

@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::Read as _;
 use std::path::Path;
+use std::time::Instant;
 
 use sha2::{Digest as _, Sha256};
 
@@ -39,6 +40,31 @@ pub(crate) struct ProcessGroupSnapshot {
     pub(crate) unclassified_pids: Vec<u32>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct InspectionDeadline {
+    deadline: Instant,
+    operation: &'static str,
+}
+
+impl InspectionDeadline {
+    pub(crate) const fn new(deadline: Instant, operation: &'static str) -> Self {
+        Self {
+            deadline,
+            operation,
+        }
+    }
+
+    pub(crate) fn check(self) -> Result<(), AviateSupervisorError> {
+        if Instant::now() >= self.deadline {
+            Err(AviateSupervisorError::Timeout {
+                operation: self.operation,
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl ProcessGroupSnapshot {
     pub(crate) fn is_empty(&self) -> bool {
         self.raw_pids.is_empty()
@@ -62,6 +88,27 @@ pub(crate) fn inspect_process(
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (pid, launch_argv_digest);
+        Err(AviateSupervisorError::UnsupportedPlatform)
+    }
+}
+
+pub(crate) fn inspect_process_before(
+    pid: u32,
+    launch_argv_digest: flight_tune::Digest,
+    deadline: Instant,
+    operation: &'static str,
+) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        platform::inspect_process_before(
+            pid,
+            launch_argv_digest,
+            InspectionDeadline::new(deadline, operation),
+        )
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (pid, launch_argv_digest, deadline, operation);
         Err(AviateSupervisorError::UnsupportedPlatform)
     }
 }
@@ -113,7 +160,7 @@ pub(crate) fn process_group_is_absent(process_group: u32) -> Result<bool, Aviate
 pub(crate) fn digest_file(path: &Path) -> Result<flight_tune::Digest, AviateSupervisorError> {
     let mut file =
         File::open(path).map_err(|source| io_error("open executable for hashing", path, source))?;
-    digest_reader(&mut file).map_err(|source| io_error("hash executable", path, source))
+    digest_open_file(&mut file).map_err(|source| io_error("hash executable", path, source))
 }
 
 pub(crate) fn digest_arguments(arguments: &[String]) -> flight_tune::Digest {
@@ -195,7 +242,7 @@ pub(crate) fn digest_argument_bytes<'a>(
     flight_tune::Digest::from_bytes(hasher.finalize().into())
 }
 
-fn digest_reader(reader: &mut File) -> std::io::Result<flight_tune::Digest> {
+pub(crate) fn digest_open_file(reader: &mut File) -> std::io::Result<flight_tune::Digest> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -206,6 +253,38 @@ fn digest_reader(reader: &mut File) -> std::io::Result<flight_tune::Digest> {
         hasher.update(&buffer[..count]);
     }
     Ok(flight_tune::Digest::from_bytes(hasher.finalize().into()))
+}
+
+pub(crate) fn digest_open_file_before(
+    reader: &mut File,
+    path: &Path,
+    deadline: InspectionDeadline,
+) -> Result<flight_tune::Digest, AviateSupervisorError> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        deadline.check()?;
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|source| io_error("hash executable before deadline", path, source))?;
+        if count == 0 {
+            deadline.check()?;
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(flight_tune::Digest::from_bytes(hasher.finalize().into()))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn digest_file_before(
+    path: &Path,
+    deadline: InspectionDeadline,
+) -> Result<flight_tune::Digest, AviateSupervisorError> {
+    deadline.check()?;
+    let mut file = File::open(path)
+        .map_err(|source| io_error("open executable before deadline", path, source))?;
+    digest_open_file_before(&mut file, path, deadline)
 }
 
 #[cfg(test)]
