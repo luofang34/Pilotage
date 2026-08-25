@@ -11,6 +11,12 @@ mod backend;
 mod cleanup_fault;
 #[path = "test_rig/scoring.rs"]
 mod scoring;
+#[path = "test_rig/terminal.rs"]
+mod terminal;
+#[path = "test_rig/terminal_head_poison.rs"]
+mod terminal_head_poison;
+#[path = "test_rig/terminal_state.rs"]
+mod terminal_state;
 #[path = "test_rig/vehicle.rs"]
 mod vehicle;
 #[path = "test_rig/vehicle_state.rs"]
@@ -23,12 +29,17 @@ pub use scoring::{
     EnvelopeGates, ObservedViews, QuadraticMetric, SequenceStrategy, assert_receipt_error,
     candidate, stage,
 };
+#[allow(unused_imports)]
+pub use terminal_head_poison::TerminalExternalAction;
+#[allow(unused_imports)]
+pub use terminal_state::{FakeTerminalReadbackFault, FakeTerminalSealFault, FakeTerminalState};
 pub use vehicle::{FakeFactory, FakeVehicle};
 pub use vehicle_state::FakeVehicleState;
 
 #[derive(Debug, Default)]
 pub struct FakeState {
     pub vehicle: FakeVehicleState,
+    pub terminal: FakeTerminalState,
     pub open_session_count: usize,
     pub prepare_count: usize,
     pub start_count: usize,
@@ -52,6 +63,7 @@ pub struct FakeState {
     pub next_sequence: u64,
     pub panic_on_prepare: Option<usize>,
     pub panic_on_start: Option<usize>,
+    pub expected_head_event_on_stop: Option<(PathBuf, String)>,
     pub cleanup_fault: FakeCleanupFault,
     pub change_head_on_prepare: Option<PathBuf>,
     pub bad_scenario_readback: bool,

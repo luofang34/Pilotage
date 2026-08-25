@@ -11,6 +11,8 @@ use super::test_rig::{
 
 #[path = "transition_authorization/durable_tree.rs"]
 mod durable_tree;
+#[path = "transition_authorization/intent_receipts.rs"]
+mod intent_receipts;
 
 use durable_tree::DurableTreeSnapshot;
 
@@ -149,21 +151,6 @@ fn one_transition_reference_closes_the_execution_chain() {
         assert_eq!(context.digest().expect("context digest"), run_intent_digest);
     }
     assert_observed_contexts(&state, &durable_contexts);
-}
-
-#[test]
-fn preparation_intent_mismatch_stops_vehicle_and_start_mutation() {
-    assert_intent_mismatch(IntentFault::Preparation);
-}
-
-#[test]
-fn vehicle_intent_mismatch_stops_start_mutation() {
-    assert_intent_mismatch(IntentFault::Vehicle);
-}
-
-#[test]
-fn start_intent_mismatch_stops_sampling() {
-    assert_intent_mismatch(IntentFault::Start);
 }
 
 #[test]
@@ -325,100 +312,11 @@ fn transition_entries(tuner: &super::TestTuner) -> impl Iterator<Item = &Journal
     })
 }
 
-fn challenger_contexts(
-    contexts: &[flight_tune::RunExecutionContext],
-) -> Vec<flight_tune::RunExecutionContext> {
-    contexts
-        .iter()
-        .filter(|context| matches!(context.role(), AttemptRole::TrainingChallenger { .. }))
-        .cloned()
-        .collect()
-}
-
 fn assert_observed_contexts(state: &FakeHandle, durable: &[flight_tune::RunExecutionContext]) {
     let observed = &state.0.borrow().transition;
     assert_eq!(observed.prepared_contexts, durable);
     assert_eq!(observed.vehicle_contexts, durable);
     assert_eq!(observed.started_contexts, durable);
-}
-
-#[derive(Clone, Copy)]
-enum IntentFault {
-    Preparation,
-    Vehicle,
-    Start,
-}
-
-fn assert_intent_mismatch(fault: IntentFault) {
-    let directory = TestDirectory::new("run-intent-mismatch");
-    let state = FakeHandle::new();
-    let mut tuner = open(
-        &directory,
-        state.clone(),
-        FakeFactory::new(state.clone()),
-        SequenceStrategy::new(vec![0.5]),
-    )
-    .expect("open tuner");
-    tuner
-        .run_training_attempts_blocking(0)
-        .expect("run safe baseline");
-    let before = ExternalMutations::capture(&state);
-    {
-        let mut state = state.0.borrow_mut();
-        match fault {
-            IntentFault::Preparation => state.transition.bad_preparation_intent = true,
-            IntentFault::Vehicle => state.transition.bad_vehicle_intent = true,
-            IntentFault::Start => state.transition.bad_start_intent = true,
-        }
-    }
-
-    let error = tuner
-        .run_training_attempts_blocking(1)
-        .expect_err("reject mismatched run intent receipt");
-
-    assert!(matches!(error, TuneError::ReceiptMismatch { .. }));
-    let observed = state.0.borrow();
-    assert_eq!(observed.sample_poll_count, before.sample_poll);
-    assert_eq!(observed.cleanup_count, before.cleanup.wrapping_add(1));
-    let prepared_challengers = challenger_contexts(&observed.transition.prepared_contexts);
-    assert_eq!(prepared_challengers.len(), 1);
-    assert!(prepared_challengers[0].transition_authorization().is_some());
-    match fault {
-        IntentFault::Preparation => {
-            assert!(challenger_contexts(&observed.transition.vehicle_contexts).is_empty());
-            assert!(challenger_contexts(&observed.transition.started_contexts).is_empty());
-            assert_eq!(observed.stop_count, before.stop);
-        }
-        IntentFault::Vehicle => {
-            assert!(challenger_contexts(&observed.transition.started_contexts).is_empty());
-            assert_eq!(observed.stop_count, before.stop);
-        }
-        IntentFault::Start => {
-            assert_eq!(
-                challenger_contexts(&observed.transition.started_contexts).len(),
-                1
-            );
-            assert_eq!(observed.stop_count, before.stop.wrapping_add(1));
-        }
-    }
-    drop(observed);
-    assert_quarantine_before_cleanup(tuner.journal().entries());
-}
-
-fn assert_quarantine_before_cleanup(entries: &[JournalEntry]) {
-    let quarantine = entries
-        .iter()
-        .position(|entry| matches!(entry.event, JournalEvent::AttemptQuarantined { .. }))
-        .expect("quarantine event");
-    let cleanup = entries
-        .iter()
-        .enumerate()
-        .skip(quarantine.wrapping_add(1))
-        .find_map(|(index, entry)| {
-            matches!(entry.event, JournalEvent::CleanupRecorded { .. }).then_some(index)
-        })
-        .expect("cleanup event");
-    assert!(quarantine < cleanup);
 }
 
 fn document_digest(value: &impl Serialize) -> Digest {

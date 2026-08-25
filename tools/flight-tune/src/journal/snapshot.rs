@@ -57,10 +57,12 @@ pub(crate) enum RunTerminalSnapshot {
         binding: RunBindingReceipt,
         report: RunTerminalReport,
         base_class: RunTerminalClass,
+        expected_receipt: Box<RunTerminalReceipt>,
     },
     EvidenceFailureRecorded {
         binding: RunBindingReceipt,
         report: RunTerminalReport,
+        expected_receipt: Box<RunTerminalReceipt>,
         class: RunTerminalClass,
     },
     Committed {
@@ -132,19 +134,23 @@ impl From<&PreparedRunTerminalState> for RunTerminalSnapshot {
                 binding,
                 report,
                 base_class,
+                expected_receipt,
             } => Self::ReportRecorded {
                 binding: binding.clone(),
                 report: report.clone(),
                 base_class: *base_class,
+                expected_receipt: expected_receipt.clone(),
             },
             PreparedRunTerminalState::EvidenceFailureRecorded {
                 binding,
                 report,
+                expected_receipt,
                 class,
                 ..
             } => Self::EvidenceFailureRecorded {
                 binding: binding.clone(),
                 report: report.clone(),
+                expected_receipt: expected_receipt.clone(),
                 class: *class,
             },
             PreparedRunTerminalState::Committed { receipt } => Self::Committed {

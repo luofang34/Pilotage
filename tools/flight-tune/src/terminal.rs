@@ -24,8 +24,8 @@ pub use plan::{
 };
 pub use receipt::{RUN_TERMINAL_RECEIPT_SCHEMA_VERSION, RunTerminalReceipt};
 pub use report::{
-    RUN_TERMINAL_REPORT_SCHEMA_VERSION, RunTerminalOperationOutcome, RunTerminalOperationStatus,
-    RunTerminalRecoveryState, RunTerminalReport,
+    RUN_TERMINAL_REPORT_SCHEMA_VERSION, RunTerminalBindingStatus, RunTerminalOperationOutcome,
+    RunTerminalOperationStatus, RunTerminalRecoveryState, RunTerminalReport,
 };
 
 use crate::TuneError;

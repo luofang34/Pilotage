@@ -69,6 +69,17 @@ pub enum TuneError {
         #[source]
         reconciliation: Box<TuneError>,
     },
+    /// An operation and its required terminal sequence both failed.
+    #[error("{operation} failed: {primary}; terminal sequence also failed: {terminal}")]
+    OperationAndTerminalFailed {
+        /// The operation that failed before the terminal sequence.
+        operation: &'static str,
+        /// The primary operation error.
+        primary: Box<TuneError>,
+        /// The terminal sequence error.
+        #[source]
+        terminal: Box<TuneError>,
+    },
     /// A gate or metric evaluator operation failed.
     #[error("{implementation} failed during {operation}: {source}")]
     Evaluator {

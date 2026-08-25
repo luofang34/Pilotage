@@ -5,8 +5,9 @@ use super::{
     successful_outcomes, terminal_intent, terminal_report,
 };
 use crate::terminal::{
-    RUN_TERMINAL_OPERATION_ORDER, RunTerminalClass, RunTerminalDiagnostic, RunTerminalDisposition,
-    RunTerminalIntent, RunTerminalOperation, RunTerminalOperationOutcome, RunTerminalPlan,
+    RUN_TERMINAL_OPERATION_ORDER, RunTerminalBindingStatus, RunTerminalClass,
+    RunTerminalDiagnostic, RunTerminalDisposition, RunTerminalIntent, RunTerminalOperation,
+    RunTerminalOperationOutcome, RunTerminalOperationStatus, RunTerminalPlan,
     RunTerminalQuarantine, RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope,
     RunTerminalSemanticOutcome,
 };
@@ -19,6 +20,82 @@ fn both_successful_semantics_are_completed() {
         let class = RunTerminalClass::classify(&intent, &report).expect("classify report");
         assert!(class.is_completed());
     }
+}
+
+#[test]
+fn binding_failure_quarantines_without_changing_operation_results() {
+    for case in [SemanticCase::ScenarioComplete, SemanticCase::HardGateAbort] {
+        let plan = active_plan();
+        let intent = terminal_intent(case);
+        let diagnostic = RunTerminalDiagnostic::new("terminal binding failed")
+            .expect("create binding diagnostic");
+        let report = RunTerminalReport::new_with_binding_status(
+            &plan,
+            &intent,
+            RunTerminalRecoveryState::Live,
+            RunTerminalBindingStatus::Failed { diagnostic },
+            successful_outcomes(),
+        )
+        .expect("create binding failure report");
+        let class = RunTerminalClass::classify(&intent, &report).expect("classify report");
+        assert_terminal_failure(class);
+        assert!(report.operations().iter().all(|outcome| matches!(
+            outcome.status(),
+            RunTerminalOperationStatus::Succeeded { .. }
+        )));
+    }
+}
+
+#[test]
+fn changed_valid_binding_diagnostic_fails_the_report_digest() {
+    let plan = active_plan();
+    let intent = terminal_intent(SemanticCase::ScenarioComplete);
+    let diagnostic =
+        RunTerminalDiagnostic::new("terminal binding failed").expect("create binding diagnostic");
+    let report = RunTerminalReport::new_with_binding_status(
+        &plan,
+        &intent,
+        RunTerminalRecoveryState::Live,
+        RunTerminalBindingStatus::Failed { diagnostic },
+        successful_outcomes(),
+    )
+    .expect("create binding failure report");
+    let mut document = serde_json::to_value(report).expect("encode report");
+    document["binding_status"]["diagnostic"] = serde_json::to_value(
+        RunTerminalDiagnostic::new("a different binding failure").expect("changed diagnostic"),
+    )
+    .expect("encode changed diagnostic");
+
+    let changed: RunTerminalReport =
+        serde_json::from_value(document).expect("decode changed report");
+    assert!(changed.validate().is_err());
+}
+
+#[test]
+fn report_schema_missing_binding_and_unknown_fields_fail_closed() {
+    let intent = terminal_intent(SemanticCase::ScenarioComplete);
+    let report = terminal_report(&intent, successful_outcomes());
+    let document = serde_json::to_value(report).expect("encode report");
+
+    let mut old_schema = document.clone();
+    old_schema["schema_version"] = Value::from(1);
+    let old_report: RunTerminalReport =
+        serde_json::from_value(old_schema).expect("decode old report schema");
+    assert!(old_report.validate().is_err());
+
+    let mut missing_binding = document.clone();
+    missing_binding
+        .as_object_mut()
+        .expect("report object")
+        .remove("binding_status");
+    assert!(serde_json::from_value::<RunTerminalReport>(missing_binding).is_err());
+
+    let mut unknown_field = document;
+    unknown_field
+        .as_object_mut()
+        .expect("report object")
+        .insert("unreviewed_field".to_owned(), Value::Bool(true));
+    assert!(serde_json::from_value::<RunTerminalReport>(unknown_field).is_err());
 }
 
 #[test]

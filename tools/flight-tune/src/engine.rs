@@ -19,8 +19,8 @@ use crate::journal::{AttemptRole, CampaignPhase};
 use crate::{
     Candidate, CandidateEvaluation, CandidateTransitionReference, Digest,
     FinalQualificationOutcome, GateEvaluator, Journal, MetricEvaluator, PromotionDecision,
-    ProposalContext, ProposalStrategy, SearchStage, SimulatorBackend, SimulatorCapability,
-    SimulatorVehicleAdapter, TrainingView, TuneError, VehicleBinding,
+    ProposalContext, ProposalStrategy, RunTerminalAdapter, SearchStage, SimulatorBackend,
+    SimulatorCapability, SimulatorVehicleAdapter, TrainingView, TuneError, VehicleBinding,
 };
 
 /// Why one bounded training search call stopped.
@@ -58,7 +58,7 @@ pub struct Tuner<B, V, G, M, P> {
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
     B: SimulatorBackend,
-    V: SimulatorVehicleAdapter,
+    V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
     P: ProposalStrategy,
@@ -329,7 +329,10 @@ where
         }
         let result = evaluate::recover_pending_blocking(
             &mut self.journal,
+            &self.stage,
             &mut self.backend,
+            &mut self.vehicle,
+            &self.capability,
             &mut self.gates,
             &mut self.metric,
         );

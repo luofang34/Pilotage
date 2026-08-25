@@ -281,13 +281,8 @@ impl<A: RunTerminalAdapter> VehicleBinding<A> {
         plan: &RunTerminalPlan,
     ) -> Result<Vec<RunTerminalReceipt>, AdapterError> {
         self.validate_terminal_call(capability, binding, plan)?;
-        let receipts = self
-            .adapter
-            .recover_terminal_receipts_blocking(capability, binding)?;
-        for receipt in &receipts {
-            validate_exact_receipt(receipt, binding)?;
-        }
-        Ok(receipts)
+        self.adapter
+            .recover_terminal_receipts_blocking(capability, binding)
     }
 
     fn validate_terminal_call(

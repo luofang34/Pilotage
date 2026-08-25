@@ -38,6 +38,31 @@ fn run_commit_requires_the_exact_saved_binding() {
 }
 
 #[test]
+fn run_commit_rejects_a_valid_receipt_with_changed_causal_evidence() {
+    let mut fixture = ReplayFixture::new();
+    let artifacts = fixture.prepare_run(0, SemanticCase::ScenarioComplete);
+    let mut events = terminal_events(&artifacts);
+    for event in events.drain(..3) {
+        apply_event(&mut fixture.state, &event, &fixture.session).expect("save base chain");
+    }
+    let changed = RunTerminalReceipt::new(
+        &artifacts.binding,
+        &artifacts.intent,
+        &artifacts.report,
+        artifacts.base_class,
+        fixed_digest(96),
+    )
+    .expect("create changed causal receipt");
+    let event = JournalEvent::RunCommitted {
+        trial_id: 0,
+        run_index: 0,
+        receipt: Box::new(changed),
+    };
+
+    assert!(apply_event(&mut fixture.state, &event, &fixture.session).is_err());
+}
+
+#[test]
 fn evidence_failure_rejects_the_base_completed_receipt() {
     let mut fixture = ReplayFixture::new();
     let artifacts = fixture.prepare_run(0, SemanticCase::ScenarioComplete);

@@ -7,7 +7,9 @@ use flight_tune::{
     SampleEvent, ScenarioRef, ScenarioStartReceipt, SessionChallenge, SimulatorBackend,
     SimulatorCapability, SimulatorSessionReceipt, TelemetrySample,
 };
+use serde::Deserialize;
 
+use super::terminal_head_poison::{TerminalExternalAction, poison_terminal_head};
 use super::{FakeHandle, identity};
 
 pub struct FakeBackend {
@@ -159,9 +161,25 @@ impl SimulatorBackend for FakeBackend {
     }
 
     fn stop_blocking(&mut self) -> Result<(), AdapterError> {
-        let mut state = self.state.0.borrow_mut();
-        state.stop_count = state.stop_count.wrapping_add(1);
-        state.lifecycle.push("stop".to_owned());
+        let (expected, head_poison, fail) = {
+            let mut state = self.state.0.borrow_mut();
+            state.stop_count = state.stop_count.wrapping_add(1);
+            state.lifecycle.push("stop".to_owned());
+            let expected = state.expected_head_event_on_stop.take();
+            let head_poison = state
+                .terminal
+                .take_head_poison(TerminalExternalAction::SimulatorStop);
+            (expected, head_poison, state.terminal.fail_simulator_stop)
+        };
+        if let Some((root, event)) = expected {
+            assert_head_event(&root, &event);
+        }
+        poison_terminal_head(head_poison);
+        if fail {
+            return Err(AdapterError::new(
+                "the reference simulator stop operation failed",
+            ));
+        }
         Ok(())
     }
 
@@ -171,6 +189,27 @@ impl SimulatorBackend for FakeBackend {
         state.lifecycle.push("cleanup".to_owned());
         state.cleanup_fault.finish(state.cleanup_count)
     }
+}
+
+#[derive(Deserialize)]
+struct HeadPointer {
+    digest: Digest,
+}
+
+fn assert_head_event(root: &Path, expected: &str) {
+    let head_bytes = std::fs::read(root.join("HEAD.json")).expect("read journal head");
+    let head: HeadPointer = serde_json::from_slice(&head_bytes).expect("decode journal head");
+    let entry_path = root.join("entries").join(format!("{}.json", head.digest));
+    let entry_bytes = std::fs::read(entry_path).expect("read journal entry");
+    let entry: serde_json::Value =
+        serde_json::from_slice(&entry_bytes).expect("decode journal entry");
+    assert_eq!(
+        entry
+            .get("event")
+            .and_then(|event| event.get("event"))
+            .and_then(serde_json::Value::as_str),
+        Some(expected)
+    );
 }
 
 fn change_head_digest(root: &Path) {

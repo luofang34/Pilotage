@@ -56,7 +56,10 @@ pub trait GateEvaluator {
     /// Completes gate evaluation for a normal scenario run.
     fn finish(&mut self) -> Result<(), EvaluatorError>;
 
-    /// Cancels evaluator state after an incomplete run.
+    /// Idempotently cancels evaluator state after an incomplete run.
+    ///
+    /// A repeated call after an uncertain acknowledgement must keep the
+    /// evaluator idle and must return the same successful state.
     fn cancel(&mut self) -> Result<(), EvaluatorError>;
 }
 
@@ -85,7 +88,10 @@ pub trait MetricEvaluator {
     /// Completes the metric for one normal scenario run.
     fn finish(&mut self) -> Result<MetricValues, EvaluatorError>;
 
-    /// Cancels evaluator state after an incomplete run.
+    /// Idempotently cancels evaluator state after an incomplete run.
+    ///
+    /// A repeated call after an uncertain acknowledgement must keep the
+    /// evaluator idle and must return the same successful state.
     fn cancel(&mut self) -> Result<(), EvaluatorError>;
 }
 

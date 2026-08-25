@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use crate::score::{validate_gate_outcomes, validate_metric};
 use crate::{
-    GateEvaluator, GateOutcome, HardGateFailure, Journal, MetricEvaluator, OperationStatus,
-    SampleEvent, SearchStage, SimulatorBackend, TelemetrySample, TuneError,
+    GateEvaluator, GateOutcome, HardGateFailure, Journal, MetricEvaluator, SampleEvent,
+    SearchStage, SimulatorBackend, TelemetrySample, TuneError,
 };
 
 use super::contract::{RunContext, RunTerminal, adapter_error, evaluator_error, validate_sample};
@@ -25,10 +25,7 @@ where
     let mut position = StreamPosition::default();
     loop {
         if let Err(error) = journal.ensure_usable() {
-            return RunTerminal::Failed {
-                error,
-                started: true,
-            };
+            return RunTerminal::Failed { error };
         }
         match backend.sample_blocking(timeout) {
             Ok(SampleEvent::Sample(sample)) => {
@@ -49,7 +46,6 @@ where
                     journal,
                     context,
                     position.expected_sequence,
-                    backend,
                     gates,
                     metric,
                 );
@@ -68,7 +64,6 @@ where
             Err(source) => {
                 return RunTerminal::Failed {
                     error: adapter_error(backend, "sample", source),
-                    started: true,
                 };
             }
         }
@@ -107,10 +102,7 @@ where
         ));
     }
     if let Err(error) = validate_sample(&sample, position.expected_sequence, position.elapsed_ms) {
-        return Some(RunTerminal::Failed {
-            error,
-            started: true,
-        });
+        return Some(RunTerminal::Failed { error });
     }
     position.elapsed_ms = sample.elapsed_ms;
     position.expected_sequence = position.expected_sequence.wrapping_add(1);
@@ -122,23 +114,18 @@ where
             gate,
         )),
         Ok(None) => None,
-        Err(error) => Some(RunTerminal::Failed {
-            error,
-            started: true,
-        }),
+        Err(error) => Some(RunTerminal::Failed { error }),
     }
 }
 
-fn finish_stream_blocking<B, G, M>(
+fn finish_stream_blocking<G, M>(
     journal: &Journal,
     context: &RunContext<'_>,
     sample_count: u64,
-    backend: &mut B,
     gates: &mut G,
     metric: &mut M,
 ) -> RunTerminal
 where
-    B: SimulatorBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -153,7 +140,7 @@ where
             ),
         );
     }
-    finish_normal_run_blocking(journal, backend, gates, metric)
+    finish_normal_run_blocking(journal, gates, metric)
 }
 
 fn evaluate_sample<G, M>(
@@ -181,66 +168,34 @@ where
     Ok(None)
 }
 
-fn finish_normal_run_blocking<B, G, M>(
-    journal: &Journal,
-    backend: &mut B,
-    gates: &mut G,
-    metric: &mut M,
-) -> RunTerminal
+fn finish_normal_run_blocking<G, M>(journal: &Journal, gates: &mut G, metric: &mut M) -> RunTerminal
 where
-    B: SimulatorBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
     if let Err(error) = journal.ensure_usable() {
-        return RunTerminal::Failed {
-            error,
-            started: true,
-        };
-    }
-    if let Err(source) = backend.stop_blocking() {
-        return RunTerminal::Failed {
-            error: adapter_error(backend, "stop", source),
-            started: true,
-        };
-    }
-    if let Err(error) = journal.ensure_usable() {
-        return RunTerminal::Failed {
-            error,
-            started: false,
-        };
+        return RunTerminal::Failed { error };
     }
     if let Err(source) = gates.finish() {
         return RunTerminal::Failed {
             error: evaluator_error(gates.identity(), "finish hard gates", source),
-            started: false,
         };
     }
     if let Err(error) = journal.ensure_usable() {
-        return RunTerminal::Failed {
-            error,
-            started: false,
-        };
+        return RunTerminal::Failed { error };
     }
     let values = match metric.finish() {
         Ok(values) => values,
         Err(source) => {
             return RunTerminal::Failed {
                 error: evaluator_error(metric.identity(), "finish metric", source),
-                started: false,
             };
         }
     };
     if let Err(error) = validate_metric(&values) {
-        return RunTerminal::Failed {
-            error,
-            started: false,
-        };
+        return RunTerminal::Failed { error };
     }
-    RunTerminal::Passed {
-        values,
-        stop: OperationStatus::Succeeded,
-    }
+    RunTerminal::Passed { values }
 }
 
 fn hard_failure(

@@ -10,9 +10,9 @@ use super::{
 };
 
 /// The supported terminal report schema.
-pub const RUN_TERMINAL_REPORT_SCHEMA_VERSION: u16 = 1;
+pub const RUN_TERMINAL_REPORT_SCHEMA_VERSION: u16 = 2;
 
-const REPORT_DOMAIN: &[u8] = b"pilotage.flight-tune.run-terminal-report.v1\0";
+const REPORT_DOMAIN: &[u8] = b"pilotage.flight-tune.run-terminal-report.v2\0";
 
 /// How the terminal sequence started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +22,34 @@ pub enum RunTerminalRecoveryState {
     Live,
     /// Recovery resumed an interrupted run.
     Resumed,
+}
+
+/// The result of binding the immutable terminal plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RunTerminalBindingStatus {
+    /// The adapter accepted the exact terminal plan binding.
+    Succeeded,
+    /// The adapter reported that the terminal plan binding failed.
+    Failed {
+        /// The bounded identity of the full binding diagnostic.
+        diagnostic: RunTerminalDiagnostic,
+    },
+}
+
+impl RunTerminalBindingStatus {
+    /// Reports whether the adapter accepted the exact binding.
+    #[must_use]
+    pub const fn is_succeeded(&self) -> bool {
+        matches!(self, Self::Succeeded)
+    }
+
+    fn validate(&self) -> Result<(), TuneError> {
+        match self {
+            Self::Succeeded => Ok(()),
+            Self::Failed { diagnostic } => diagnostic.validate(),
+        }
+    }
 }
 
 /// The saved result of one terminal operation.
@@ -122,6 +150,7 @@ pub struct RunTerminalReport {
     intent: RunTerminalIntent,
     scope: RunTerminalScope,
     recovery_state: RunTerminalRecoveryState,
+    binding_status: RunTerminalBindingStatus,
     operations: Vec<RunTerminalOperationOutcome>,
     report_digest: Digest,
 }
@@ -135,6 +164,7 @@ struct ReportDocument<'a> {
     intent: &'a RunTerminalIntent,
     scope: RunTerminalScope,
     recovery_state: RunTerminalRecoveryState,
+    binding_status: &'a RunTerminalBindingStatus,
     operations: &'a [RunTerminalOperationOutcome],
 }
 
@@ -150,6 +180,22 @@ impl RunTerminalReport {
         recovery_state: RunTerminalRecoveryState,
         operations: Vec<RunTerminalOperationOutcome>,
     ) -> Result<Self, TuneError> {
+        Self::new_with_binding_status(
+            plan,
+            intent,
+            recovery_state,
+            RunTerminalBindingStatus::Succeeded,
+            operations,
+        )
+    }
+
+    pub(crate) fn new_with_binding_status(
+        plan: &RunTerminalPlan,
+        intent: &RunTerminalIntent,
+        recovery_state: RunTerminalRecoveryState,
+        binding_status: RunTerminalBindingStatus,
+        operations: Vec<RunTerminalOperationOutcome>,
+    ) -> Result<Self, TuneError> {
         let mut report = Self {
             schema_version: RUN_TERMINAL_REPORT_SCHEMA_VERSION,
             context: intent.context().clone(),
@@ -158,6 +204,7 @@ impl RunTerminalReport {
             intent: intent.clone(),
             scope: plan.scope(),
             recovery_state,
+            binding_status,
             operations,
             report_digest: Digest::from_bytes([0; 32]),
         };
@@ -228,6 +275,12 @@ impl RunTerminalReport {
         self.recovery_state
     }
 
+    /// Returns the immutable terminal plan binding result.
+    #[must_use]
+    pub const fn binding_status(&self) -> &RunTerminalBindingStatus {
+        &self.binding_status
+    }
+
     /// Returns the exact ordered operation results.
     #[must_use]
     pub fn operations(&self) -> &[RunTerminalOperationOutcome] {
@@ -240,20 +293,23 @@ impl RunTerminalReport {
         self.report_digest
     }
 
-    /// Reports whether every required operation succeeded.
+    /// Reports whether binding and every required operation succeeded.
     #[must_use]
     pub fn all_required_succeeded(&self) -> bool {
-        self.plan
-            .requirements()
-            .iter()
-            .zip(&self.operations)
-            .all(|(requirement, outcome)| operation_satisfies_success(*requirement, outcome))
+        self.binding_status.is_succeeded()
+            && self
+                .plan
+                .requirements()
+                .iter()
+                .zip(&self.operations)
+                .all(|(requirement, outcome)| operation_satisfies_success(*requirement, outcome))
     }
 
     fn validate_content(&self) -> Result<(), TuneError> {
         self.context.validate()?;
         self.plan.validate()?;
         self.intent.validate()?;
+        self.binding_status.validate()?;
         if self.schema_version != RUN_TERMINAL_REPORT_SCHEMA_VERSION
             || self.context != *self.intent.context()
             || self.run_intent_digest != self.context.digest()?
@@ -275,6 +331,7 @@ impl RunTerminalReport {
             intent: &self.intent,
             scope: self.scope,
             recovery_state: self.recovery_state,
+            binding_status: &self.binding_status,
             operations: &self.operations,
         }
     }

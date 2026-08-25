@@ -40,7 +40,15 @@ pub(super) fn apply_event(
             run_index,
             report,
             base_class,
-        } => record_report(state, *trial_id, *run_index, report, *base_class),
+            expected_receipt,
+        } => record_report(
+            state,
+            *trial_id,
+            *run_index,
+            report,
+            *base_class,
+            expected_receipt,
+        ),
         JournalEvent::RunTerminalEvidenceFailureRecorded {
             trial_id,
             run_index,
@@ -116,6 +124,7 @@ fn record_report(
     run_index: u64,
     report: &RunTerminalReport,
     base_class: RunTerminalClass,
+    expected_receipt: &RunTerminalReceipt,
 ) -> Result<(), TuneError> {
     report
         .validate()
@@ -131,18 +140,29 @@ fn record_report(
     };
     let expected_class = RunTerminalClass::classify(intent, report)
         .map_err(|_| invalid("a terminal report class cannot be recomputed"))?;
+    expected_receipt
+        .validate()
+        .map_err(|_| invalid("an expected terminal receipt is not valid during replay"))?;
     if report.context() != &run.context
         || report.run_intent_digest() != run.run_intent_digest
         || report.plan() != plan
         || report.intent() != intent
         || base_class != expected_class
+        || expected_receipt.binding() != binding
+        || expected_receipt.context() != &run.context
+        || expected_receipt.intent() != intent
+        || expected_receipt.report() != report
+        || expected_receipt.class() != base_class
     {
-        return Err(invalid("a terminal report changed its exact run chain"));
+        return Err(invalid(
+            "a terminal report authority changed its exact run chain",
+        ));
     }
     run.terminal = PreparedRunTerminalState::ReportRecorded {
         binding: binding.clone(),
         report: report.clone(),
         base_class,
+        expected_receipt: Box::new(expected_receipt.clone()),
     };
     Ok(())
 }
@@ -158,6 +178,7 @@ fn record_evidence_failure(
         binding,
         report,
         base_class,
+        expected_receipt,
     } = &run.terminal
     else {
         return Err(invalid(
@@ -173,6 +194,7 @@ fn record_evidence_failure(
         binding: binding.clone(),
         report: report.clone(),
         base_class: *base_class,
+        expected_receipt: expected_receipt.clone(),
         class,
     };
     Ok(())
@@ -189,14 +211,8 @@ fn commit(
         .validate()
         .map_err(|_| invalid("a terminal receipt is not valid during replay"))?;
     let run = current_run_mut(state, trial_id, run_index)?;
-    let (binding, report, expected_class) = commit_chain(&run.terminal)?;
-    if receipt.binding() != binding
-        || receipt.context() != &run.context
-        || receipt.intent() != report.intent()
-        || receipt.report() != report
-        || receipt.class() != expected_class
-        || receipt.binding().adapter() != &session.runtimes.vehicle
-    {
+    let expected = expected_commit_receipt(&run.terminal)?;
+    if receipt != &expected || receipt.binding().adapter() != &session.runtimes.vehicle {
         return Err(invalid(
             "a terminal receipt changed its exact journal chain",
         ));
@@ -207,21 +223,27 @@ fn commit(
     Ok(())
 }
 
-fn commit_chain(
+fn expected_commit_receipt(
     state: &PreparedRunTerminalState,
-) -> Result<(&RunBindingReceipt, &RunTerminalReport, RunTerminalClass), TuneError> {
+) -> Result<RunTerminalReceipt, TuneError> {
     match state {
         PreparedRunTerminalState::ReportRecorded {
-            binding,
-            report,
-            base_class,
-        } => Ok((binding, report, *base_class)),
+            expected_receipt, ..
+        } => Ok(expected_receipt.as_ref().clone()),
         PreparedRunTerminalState::EvidenceFailureRecorded {
             binding,
             report,
             base_class,
+            expected_receipt,
             class,
-        } if base_class.is_completed() => Ok((binding, report, *class)),
+        } if base_class.is_completed() => RunTerminalReceipt::new(
+            binding,
+            report.intent(),
+            report,
+            *class,
+            expected_receipt.causal_evidence_digest(),
+        )
+        .map_err(|_| invalid("an evidence failure receipt cannot be recomputed")),
         _ => Err(invalid(
             "a terminal receipt has no exact uncommitted report",
         )),

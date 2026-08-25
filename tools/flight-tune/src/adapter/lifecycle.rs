@@ -100,10 +100,16 @@ pub trait SimulatorBackend {
     /// Requests the next telemetry sample with a finite timeout.
     fn sample_blocking(&mut self, timeout: Duration) -> Result<SampleEvent, AdapterError>;
 
-    /// Stops the active scenario.
+    /// Idempotently stops the active scenario.
+    ///
+    /// A repeated call after an uncertain acknowledgement must keep the
+    /// simulator idle and must return the same successful state.
     fn stop_blocking(&mut self) -> Result<(), AdapterError>;
 
-    /// Restores the simulator to a clean idle state.
+    /// Idempotently restores the simulator to a clean idle state.
+    ///
+    /// A repeated call after an uncertain acknowledgement must keep the
+    /// simulator idle and must return the same successful state.
     fn cleanup_blocking(&mut self) -> Result<(), AdapterError>;
 }
 

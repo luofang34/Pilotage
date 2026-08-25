@@ -7,7 +7,7 @@ use super::rig::{
     candidate, stage,
 };
 use super::{EvidenceSnapshot, TestDirectory, TestTuner, assert_poisoned, assert_snapshot};
-use crate::{AttemptRole, JournalEvent, TuneError, Tuner};
+use crate::{AttemptRole, JournalEvent, RunExecutionContext, ScenarioSet, TuneError, Tuner};
 
 #[test]
 fn a_missing_head_entry_before_cas_keeps_the_old_head_and_poisons() {
@@ -75,13 +75,36 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
         .join("candidates")
         .join(format!("{prepared_candidate}.json"));
     let head_before = read_head(&directory);
+    let campaign_stage = stage();
+    let scenario = &campaign_stage.training_scenarios[0];
+    let seed = crate::model::derive_seed(
+        tuner.journal().session().fixed_seed,
+        ScenarioSet::Training,
+        scenario,
+        0,
+    );
+    let context = RunExecutionContext::new(
+        tuner.journal().session_digest().expect("session digest"),
+        trial_id,
+        AttemptRole::TrainingBaseline,
+        prepared_candidate,
+        None,
+        ScenarioSet::Training,
+        scenario,
+        0,
+        seed,
+    )
+    .expect("run context");
+    let run_intent_digest = context.digest().expect("run intent digest");
 
     let error = tuner
         .journal
         .append_event_with_before_authorization_for_test(
-            JournalEvent::AttemptQuarantined {
+            JournalEvent::RunPrepared {
                 trial_id,
-                reason: "test quarantine".to_owned(),
+                run_index: 0,
+                context,
+                run_intent_digest,
             },
             || {
                 assert_eq!(root_temporary_count(&directory), 1);

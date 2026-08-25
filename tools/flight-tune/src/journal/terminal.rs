@@ -42,6 +42,7 @@ impl Journal {
         run_index: u64,
         report: RunTerminalReport,
         base_class: RunTerminalClass,
+        expected_receipt: RunTerminalReceipt,
     ) -> Result<(), TuneError> {
         self.ensure_usable()?;
         self.append(JournalEvent::RunTerminalReportRecorded {
@@ -49,6 +50,7 @@ impl Journal {
             run_index,
             report: Box::new(report),
             base_class,
+            expected_receipt: Box::new(expected_receipt),
         })
     }
 

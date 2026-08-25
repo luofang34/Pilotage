@@ -169,23 +169,18 @@ fn a_zero_child_termination_proof_is_rejected() {
 }
 
 #[test]
-fn recovery_rejects_foreign_and_changed_receipts() {
+fn recovery_returns_raw_receipts_for_core_validation() {
     let mut foreign = fixture(fixed_digest(6));
     let foreign_binding = run_binding(foreign.binding.context(), &foreign.plan, fixed_digest(44));
     foreign
         .recovered
         .borrow_mut()
         .push(terminal_receipt(&foreign_binding, &foreign.plan));
-    assert!(
-        foreign
-            .vehicle
-            .recover_terminal_receipts_blocking(
-                &foreign.capability,
-                &foreign.binding,
-                &foreign.plan,
-            )
-            .is_err()
-    );
+    let foreign_receipts = foreign
+        .vehicle
+        .recover_terminal_receipts_blocking(&foreign.capability, &foreign.binding, &foreign.plan)
+        .expect("return foreign receipt for core validation");
+    assert_ne!(foreign_receipts[0].binding(), &foreign.binding);
     assert_eq!(foreign.calls.get(), 1);
 
     let mut changed = fixture(fixed_digest(6));
@@ -194,16 +189,11 @@ fn recovery_rejects_foreign_and_changed_receipts() {
         .recovered
         .borrow_mut()
         .push(changed_receipt_digest(receipt));
-    assert!(
-        changed
-            .vehicle
-            .recover_terminal_receipts_blocking(
-                &changed.capability,
-                &changed.binding,
-                &changed.plan,
-            )
-            .is_err()
-    );
+    let changed_receipts = changed
+        .vehicle
+        .recover_terminal_receipts_blocking(&changed.capability, &changed.binding, &changed.plan)
+        .expect("return malformed receipt for core validation");
+    assert!(changed_receipts[0].validate().is_err());
     assert_eq!(changed.calls.get(), 1);
 }
 

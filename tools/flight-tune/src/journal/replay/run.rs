@@ -31,11 +31,13 @@ pub(crate) enum PreparedRunTerminalState {
         binding: RunBindingReceipt,
         report: RunTerminalReport,
         base_class: RunTerminalClass,
+        expected_receipt: Box<RunTerminalReceipt>,
     },
     EvidenceFailureRecorded {
         binding: RunBindingReceipt,
         report: RunTerminalReport,
         base_class: RunTerminalClass,
+        expected_receipt: Box<RunTerminalReceipt>,
         class: RunTerminalClass,
     },
     Committed {

@@ -244,6 +244,8 @@ pub enum JournalEvent {
         report: Box<RunTerminalReport>,
         /// The class that the core calculated from the report.
         base_class: RunTerminalClass,
+        /// The exact receipt that evidence publication must produce.
+        expected_receipt: Box<RunTerminalReceipt>,
     },
     /// A definite completed-receipt absence became durable.
     RunTerminalEvidenceFailureRecorded {

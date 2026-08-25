@@ -8,7 +8,7 @@ use flight_tune::{
 use super::{FakeHandle, identity};
 
 pub struct FakeVehicle {
-    state: FakeHandle,
+    pub(super) state: FakeHandle,
 }
 
 impl SimulatorVehicleAdapter for FakeVehicle {

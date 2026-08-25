@@ -185,6 +185,7 @@ fn report_requires_the_recomputed_base_class() {
         run_index: 0,
         report: Box::new(artifacts.report),
         base_class: evidence,
+        expected_receipt: Box::new(artifacts.receipt),
     };
 
     assert!(apply_event(&mut fixture.state, &event, &fixture.session).is_err());
@@ -212,7 +213,7 @@ fn evidence_failure_is_durable_before_its_quarantine_commit() {
         &artifacts.intent,
         &artifacts.report,
         class,
-        fixed_digest(93),
+        artifacts.receipt.causal_evidence_digest(),
     )
     .expect("create quarantine receipt");
     let commit = JournalEvent::RunCommitted {
@@ -287,6 +288,7 @@ pub(super) fn terminal_events(artifacts: &RunArtifacts) -> Vec<JournalEvent> {
             run_index: artifacts.index,
             report: Box::new(artifacts.report.clone()),
             base_class: artifacts.base_class,
+            expected_receipt: Box::new(artifacts.receipt.clone()),
         },
         JournalEvent::RunCommitted {
             trial_id: 0,

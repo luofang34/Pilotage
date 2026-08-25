@@ -143,6 +143,14 @@ pub(super) fn record_evidence_failure_without_commit(
     )
     .expect("create terminal report");
     let base_class = RunTerminalClass::classify(&intent, &report).expect("classify report");
+    let expected_receipt = RunTerminalReceipt::new(
+        &binding,
+        &intent,
+        &report,
+        base_class,
+        Digest::from_bytes([93; 32]),
+    )
+    .expect("create expected terminal receipt");
     let class =
         RunTerminalClass::evidence_failure(&intent, &report).expect("classify evidence failure");
     let receipt = RunTerminalReceipt::new(
@@ -160,7 +168,7 @@ pub(super) fn record_evidence_failure_without_commit(
         .prepare_run_terminal_intent(trial_id, 0, intent)
         .expect("save terminal intent");
     journal
-        .record_run_terminal_report(trial_id, 0, report, base_class)
+        .record_run_terminal_report(trial_id, 0, report, base_class, expected_receipt)
         .expect("save terminal report");
     journal
         .record_run_terminal_evidence_failure(trial_id, 0, class)
@@ -278,7 +286,13 @@ fn commit_run(
         .prepare_run_terminal_intent(context.trial_id(), run_index, intent)
         .expect("save terminal intent");
     journal
-        .record_run_terminal_report(context.trial_id(), run_index, report, class)
+        .record_run_terminal_report(
+            context.trial_id(),
+            run_index,
+            report,
+            class,
+            receipt.clone(),
+        )
         .expect("save terminal report");
     journal
         .commit_run(context.trial_id(), run_index, receipt)
