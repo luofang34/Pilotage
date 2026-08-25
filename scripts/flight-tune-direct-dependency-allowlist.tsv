@@ -1,0 +1,61 @@
+manifest	dependency_key	actual_package	kind	target	optional	source_kind	source_ref	default_features	features	version_req
+crates/pilotage-trial/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+crates/pilotage-trial/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+crates/pilotage-trial/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+crates/pilotage-trial/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
+tools/flight-tune-aviate/Cargo.toml	flight-tune	flight-tune	normal		false	path	tools/flight-tune	true		*
+tools/flight-tune-aviate/Cargo.toml	flight-tune-xplane	flight-tune-xplane	normal		false	path	tools/flight-tune-xplane	true		*
+tools/flight-tune-aviate/Cargo.toml	libm	libm	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.2.16
+tools/flight-tune-aviate/Cargo.toml	pilotage-adapter-api	pilotage-adapter-api	normal		false	path	crates/pilotage-adapter-api	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-adapter-aviate	pilotage-adapter-aviate	normal		false	path	adapters/aviate	false	sim	*
+tools/flight-tune-aviate/Cargo.toml	pilotage-control-feel	pilotage-control-feel	normal		false	path	crates/pilotage-control-feel	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-mavlink	pilotage-mavlink	normal		false	path	crates/pilotage-mavlink	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-protocol	pilotage-protocol	normal		false	path	crates/pilotage-protocol	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-timing	pilotage-timing	normal		false	path	crates/pilotage-timing	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-trial	pilotage-trial	normal		false	path	crates/pilotage-trial	true		*
+tools/flight-tune-aviate/Cargo.toml	pilotage-xplane-trial	pilotage-xplane-trial	normal		false	path	crates/pilotage-xplane-trial	true		*
+tools/flight-tune-aviate/Cargo.toml	serde	serde	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune-aviate/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune-aviate/Cargo.toml	serde_json	serde_json	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+tools/flight-tune-aviate/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+tools/flight-tune-aviate/Cargo.toml	sha2	sha2	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+tools/flight-tune-aviate/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+tools/flight-tune-aviate/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
+tools/flight-tune-aviate/Cargo.toml	tokio	tokio	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	net,rt,time	^1.48.0
+tools/flight-tune-aviate/Cargo.toml	toml	toml	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^1.1.4
+tools/flight-tune-aviate/Cargo.toml	tracing	tracing	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.1.44
+tools/flight-tune-campaign/Cargo.toml	flight-tune	flight-tune	normal		false	path	tools/flight-tune	true		*
+tools/flight-tune-campaign/Cargo.toml	flight-tune-aviate	flight-tune-aviate	normal		false	path	tools/flight-tune-aviate	true		*
+tools/flight-tune-campaign/Cargo.toml	flight-tune-xplane	flight-tune-xplane	normal		false	path	tools/flight-tune-xplane	true		*
+tools/flight-tune-campaign/Cargo.toml	libc	libc	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.2.177
+tools/flight-tune-campaign/Cargo.toml	libproc	libproc	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.14.11
+tools/flight-tune-campaign/Cargo.toml	pilotage-control-feel	pilotage-control-feel	normal		false	path	crates/pilotage-control-feel	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-mavlink	pilotage-mavlink	normal		false	path	crates/pilotage-mavlink	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-protocol	pilotage-protocol	normal		false	path	crates/pilotage-protocol	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-trial	pilotage-trial	normal		false	path	crates/pilotage-trial	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-tuning-feedback	pilotage-tuning-feedback	normal		false	path	crates/pilotage-tuning-feedback	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-tuning-journal-proof	pilotage-tuning-journal-proof	normal		false	path	crates/pilotage-tuning-journal-proof	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-xplane-trial	pilotage-xplane-trial	normal		false	path	crates/pilotage-xplane-trial	true		*
+tools/flight-tune-campaign/Cargo.toml	rustix	rustix	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	fs	^1.1.4
+tools/flight-tune-campaign/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune-campaign/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+tools/flight-tune-campaign/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+tools/flight-tune-campaign/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
+tools/flight-tune-campaign/Cargo.toml	toml	toml	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^1.1.4
+tools/flight-tune-campaign/Cargo.toml	tracing	tracing	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.1.44
+tools/flight-tune-campaign/Cargo.toml	tracing-subscriber	tracing-subscriber	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	fmt	^0.3.23
+tools/flight-tune/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
+tools/flight-tune/Cargo.toml	pilotage-flight-quality	pilotage-flight-quality	normal		false	path	crates/pilotage-flight-quality	true		*
+tools/flight-tune/Cargo.toml	pilotage-trial	pilotage-trial	normal		false	path	crates/pilotage-trial	true		*
+tools/flight-tune/Cargo.toml	pilotage-tuning-feedback	pilotage-tuning-feedback	normal		false	path	crates/pilotage-tuning-feedback	true		*
+tools/flight-tune/Cargo.toml	pilotage-tuning-journal-proof	pilotage-tuning-journal-proof	normal		false	path	crates/pilotage-tuning-journal-proof	true		*
+tools/flight-tune/Cargo.toml	serde	serde	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune/Cargo.toml	serde_json	serde_json	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+tools/flight-tune/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+tools/flight-tune/Cargo.toml	sha2	sha2	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+tools/flight-tune/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+tools/flight-tune/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
+tools/flight-tune/Cargo.toml	tracing	tracing	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.1.44

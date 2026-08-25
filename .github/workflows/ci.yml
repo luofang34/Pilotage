@@ -161,6 +161,12 @@ jobs:
       - name: flight build carries no simulation-only code
         run: bash scripts/check-flight-build.sh
 
+      - name: flight tuning boundary guard self-test
+        run: bash scripts/test-check-flight-tune-boundaries.sh
+
+      - name: flight tuning boundary guard
+        run: bash scripts/check-flight-tune-boundaries.sh
+
       - name: check-structure self-test
         run: bash scripts/test-check-structure.sh
 
