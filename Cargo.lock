@@ -734,6 +734,7 @@ dependencies = [
 name = "flight-tune"
 version = "0.1.0"
 dependencies = [
+ "pilotage-durable-storage",
  "pilotage-flight-quality",
  "pilotage-trial",
  "serde",
@@ -1843,6 +1844,16 @@ dependencies = [
  "serde_json",
  "thiserror",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "pilotage-durable-storage"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

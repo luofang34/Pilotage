@@ -9,6 +9,7 @@ description = "Deterministic host-side flight parameter search and promotion"
 workspace = true
 
 [dependencies]
+pilotage-durable-storage = { workspace = true }
 pilotage-flight-quality = { workspace = true }
 pilotage-trial = { workspace = true }
 serde = { workspace = true }
@@ -18,3 +19,6 @@ thiserror = { workspace = true }
 
 [build-dependencies]
 sha2 = { workspace = true }
+
+[dev-dependencies]
+pilotage-durable-storage = { workspace = true, features = ["fault-injection"] }

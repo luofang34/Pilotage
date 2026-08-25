@@ -1,21 +1,25 @@
 //! Isolated training, promotion, and final qualification.
 
 mod evaluate;
+mod open;
 mod promotion;
 mod qualification;
 mod reconcile;
 mod session;
 
-pub(crate) use qualification::final_outcome;
+#[cfg(test)]
+mod tests;
 
-use std::path::Path;
+#[cfg(test)]
+pub(crate) use open::validate_open_components;
+pub(crate) use qualification::final_outcome;
 
 use crate::journal::{AttemptRole, CampaignPhase};
 use crate::{
     Candidate, CandidateEvaluation, Digest, FinalQualificationOutcome, GateEvaluator, Journal,
     MetricEvaluator, PromotionDecision, ProposalContext, ProposalStrategy, SearchStage,
-    SessionChallenge, SimulatorBackend, SimulatorCapability, SimulatorVehicleAdapter,
-    SimulatorVehicleFactory, TrainingView, TuneError, VehicleBinding,
+    SimulatorBackend, SimulatorCapability, SimulatorVehicleAdapter, TrainingView, TuneError,
+    VehicleBinding,
 };
 
 /// Why one bounded training search call stopped.
@@ -58,80 +62,6 @@ where
     M: MetricEvaluator,
     P: ProposalStrategy,
 {
-    /// Opens a matching campaign or creates a new campaign.
-    ///
-    /// The constructor binds the vehicle adapter to the validated simulator
-    /// session. It also cleans and quarantines an incomplete prepared attempt.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TuneError`] when identity, binding, recovery, or storage fails.
-    #[allow(clippy::too_many_arguments)]
-    pub fn open_or_resume<F>(
-        journal_root: impl AsRef<Path>,
-        stage: SearchStage,
-        fixed_seed: u64,
-        initial_candidate: Candidate,
-        mut backend: B,
-        vehicle_factory: F,
-        mut gates: G,
-        mut metric: M,
-        strategy: P,
-    ) -> Result<Self, TuneError>
-    where
-        F: SimulatorVehicleFactory<Adapter = V>,
-    {
-        session::validate_component_identities(
-            &backend,
-            &vehicle_factory,
-            &gates,
-            &metric,
-            &strategy,
-        )?;
-        let runtimes =
-            session::runtime_identities(&backend, &vehicle_factory, &gates, &metric, &strategy);
-        let vehicle_identity = vehicle_factory.vehicle_identity().clone();
-        let mut journal = Journal::open_or_create(
-            journal_root,
-            &stage,
-            fixed_seed,
-            runtimes,
-            &initial_candidate,
-        )?;
-        let session_digest = journal.session_digest()?;
-        let challenge = SessionChallenge::new(session_digest);
-        let receipt = backend
-            .open_session_blocking(&challenge)
-            .map_err(|source| TuneError::Adapter {
-                adapter: backend.simulator_identity().id.clone(),
-                operation: "open simulator session",
-                source,
-            })?;
-        session::validate_simulator_receipt(&journal, receipt)?;
-        let capability = SimulatorCapability::new(receipt);
-        let vehicle = vehicle_factory
-            .bind_blocking(&capability)
-            .map_err(|source| TuneError::Adapter {
-                adapter: vehicle_identity.id,
-                operation: "bind simulator vehicle",
-                source,
-            })?;
-        session::validate_vehicle_binding(&journal, &vehicle)?;
-        evaluate::recover_pending_blocking(&mut journal, &mut backend, &mut gates, &mut metric)?;
-        let mut tuner = Self {
-            stage,
-            backend,
-            vehicle,
-            capability,
-            gates,
-            metric,
-            strategy,
-            journal,
-        };
-        tuner.reconcile_settled_candidate_blocking()?;
-        Ok(tuner)
-    }
-
     /// Evaluates at most `attempt_limit` adaptive training challengers.
     ///
     /// This method does not run promotion or final qualification scenarios.
@@ -143,6 +73,7 @@ where
         &mut self,
         attempt_limit: u64,
     ) -> Result<TuningSummary, TuneError> {
+        self.journal.ensure_usable()?;
         self.require_phase(CampaignPhase::Searching, "run training")?;
         self.recover_pending_blocking()?;
         self.ensure_training_baseline_blocking()?;
@@ -161,6 +92,7 @@ where
     ///
     /// Returns [`TuneError`] when training is incomplete or already closed.
     pub fn freeze_candidate(&mut self) -> Result<Digest, TuneError> {
+        self.journal.ensure_usable()?;
         self.require_phase(CampaignPhase::Searching, "freeze training candidate")?;
         self.recover_pending_blocking()?;
         self.ensure_safe_baseline()?;
@@ -177,6 +109,7 @@ where
     ///
     /// Returns [`TuneError`] when training is not frozen or execution fails.
     pub fn run_promotion_once_blocking(&mut self) -> Result<PromotionDecision, TuneError> {
+        self.journal.ensure_usable()?;
         if let Some(decision) = self.journal.state().promotion_decision.clone() {
             self.reconcile_settled_candidate_blocking()?;
             return Ok(decision);
@@ -217,6 +150,7 @@ where
     pub fn run_final_qualification_once_blocking(
         &mut self,
     ) -> Result<FinalQualificationOutcome, TuneError> {
+        self.journal.ensure_usable()?;
         if let Some(outcome) = self.journal.state().final_outcome.clone() {
             self.reconcile_settled_candidate_blocking()?;
             return Ok(outcome);
@@ -239,6 +173,7 @@ where
     ///
     /// Returns [`TuneError`] when final qualification did not pass.
     pub fn qualified_candidate(&self) -> Result<Candidate, TuneError> {
+        self.journal.ensure_usable()?;
         if self.journal.state().final_outcome != Some(FinalQualificationOutcome::Qualified) {
             return Err(invalid_state(
                 "read qualified candidate",
@@ -297,13 +232,20 @@ where
                 history: &history,
             },
         };
-        let Some(proposal) =
-            self.strategy
-                .propose(&context)
-                .map_err(|error| TuneError::Proposal {
+        self.journal.ensure_usable()?;
+        let proposal = match self.strategy.propose(&context) {
+            Ok(proposal) => {
+                self.journal.ensure_usable()?;
+                proposal
+            }
+            Err(error) => {
+                self.journal.ensure_usable().ok();
+                return Err(TuneError::Proposal {
                     detail: error.to_string(),
-                })?
-        else {
+                });
+            }
+        };
+        let Some(proposal) = proposal else {
             return Ok(false);
         };
         validate_proposal(&self.stage, &incumbent, &proposal, &history)?;
@@ -352,6 +294,10 @@ where
     }
 
     fn recover_pending_blocking(&mut self) -> Result<(), TuneError> {
+        self.journal.ensure_usable()?;
+        if self.journal.state().pending.is_none() {
+            return Ok(());
+        }
         let result = evaluate::recover_pending_blocking(
             &mut self.journal,
             &mut self.backend,

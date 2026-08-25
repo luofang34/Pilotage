@@ -101,6 +101,7 @@ where
 {
     runs.push(run_record(stage, context, values));
     if runs.len() < expected_runs {
+        journal.ensure_usable()?;
         if let Err(source) = backend.cleanup_blocking() {
             let error = adapter_error(backend, "cleanup", source);
             return quarantine_after_error(

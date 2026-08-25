@@ -9,7 +9,8 @@ pub use event::{
     PromotionDecision,
 };
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -56,9 +57,10 @@ pub struct JournalEntry {
 
 /// A content-addressed journal with one locked writer and one atomic head.
 pub struct Journal {
-    root: PathBuf,
+    storage: storage::JournalStorage,
     stage: SearchStage,
-    _writer_lock: storage::WriterLock,
+    writer: storage::WriterLock,
+    poisoned: AtomicBool,
     entries: Vec<JournalEntry>,
     entry_digests: Vec<Digest>,
     state: JournalState,
@@ -77,6 +79,30 @@ impl Journal {
         runtimes: RuntimeIdentities,
         initial_candidate: &Candidate,
     ) -> Result<Self, TuneError> {
+        Self::validate_open_inputs(stage, &runtimes, initial_candidate)?;
+        let opened = storage::open(root.as_ref())?;
+        Self::open_with_storage(opened, stage, fixed_seed, runtimes, initial_candidate)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_or_create_with_faults(
+        root: impl AsRef<Path>,
+        stage: &SearchStage,
+        fixed_seed: u64,
+        runtimes: RuntimeIdentities,
+        initial_candidate: &Candidate,
+        faults: pilotage_durable_storage::FaultController,
+    ) -> Result<Self, TuneError> {
+        Self::validate_open_inputs(stage, &runtimes, initial_candidate)?;
+        let opened = storage::open_with_faults(root.as_ref(), faults)?;
+        Self::open_with_storage(opened, stage, fixed_seed, runtimes, initial_candidate)
+    }
+
+    fn validate_open_inputs(
+        stage: &SearchStage,
+        runtimes: &RuntimeIdentities,
+        initial_candidate: &Candidate,
+    ) -> Result<(), TuneError> {
         stage.validate()?;
         initial_candidate.validate()?;
         stage.validate_challenger(initial_candidate, initial_candidate)?;
@@ -86,9 +112,17 @@ impl Journal {
                 detail: "the harness build identity does not match this build".to_owned(),
             });
         }
-        let root = root.as_ref().to_path_buf();
-        storage::ensure_layout(&root)?;
-        let writer_lock = storage::acquire_writer_lock(&root)?;
+        Ok(())
+    }
+
+    fn open_with_storage(
+        opened: (storage::JournalStorage, storage::WriterLock),
+        stage: &SearchStage,
+        fixed_seed: u64,
+        runtimes: RuntimeIdentities,
+        initial_candidate: &Candidate,
+    ) -> Result<Self, TuneError> {
+        let (storage, writer) = opened;
         let candidate_digest = storage::document_digest("candidate", initial_candidate)?;
         let session = SessionIdentity {
             stage_digest: storage::document_digest("search stage", stage)?,
@@ -97,10 +131,10 @@ impl Journal {
             fixed_seed,
             runtimes,
         };
-        if storage::head_exists(&root)? {
-            return Self::resume(root, stage.clone(), writer_lock, session);
+        if storage::head_exists(&storage)? {
+            return Self::resume(storage, stage.clone(), writer, session);
         }
-        Self::start(root, stage.clone(), writer_lock, session, initial_candidate)
+        Self::start(storage, stage.clone(), writer, session, initial_candidate)
     }
 
     /// Returns the immutable session identity.
@@ -142,11 +176,66 @@ impl Journal {
     ///
     /// Returns [`TuneError`] when the candidate artifact is not valid.
     pub fn training_incumbent(&self) -> Result<Candidate, TuneError> {
+        self.ensure_usable()?;
         self.read_candidate(self.state.training_incumbent)
     }
 
     pub(crate) fn read_candidate(&self, digest: Digest) -> Result<Candidate, TuneError> {
-        storage::read_candidate(&self.root, digest)
+        self.ensure_usable()?;
+        storage::read_candidate(&self.storage, digest).inspect_err(|_| {
+            self.poisoned.store(true, Ordering::Release);
+        })
+    }
+
+    pub(crate) fn ensure_usable(&self) -> Result<(), TuneError> {
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err(TuneError::JournalPoisoned);
+        }
+        storage::verify_live_snapshot(
+            &self.storage,
+            &self.writer,
+            &self.stage,
+            &self.entries,
+            &self.entry_digests,
+        )
+        .inspect_err(|_| {
+            self.poisoned.store(true, Ordering::Release);
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ensure_usable_with_final_hook_for_test(
+        &self,
+        before_final_writer_validation: impl FnOnce(),
+    ) -> Result<(), TuneError> {
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err(TuneError::JournalPoisoned);
+        }
+        storage::verify_live_snapshot_with_final_hook_for_test(
+            &self.storage,
+            &self.writer,
+            &self.stage,
+            &self.entries,
+            &self.entry_digests,
+            before_final_writer_validation,
+        )
+        .inspect_err(|_| {
+            self.poisoned.store(true, Ordering::Release);
+        })
+    }
+
+    fn record_storage_result<T>(&self, result: Result<T, TuneError>) -> Result<T, TuneError> {
+        result.inspect_err(|error| {
+            if error.poisons_journal() {
+                self.poisoned.store(true, Ordering::Release);
+            }
+        })
+    }
+
+    fn record_append_result<T>(&self, result: Result<T, TuneError>) -> Result<T, TuneError> {
+        result.inspect_err(|_| {
+            self.poisoned.store(true, Ordering::Release);
+        })
     }
 
     pub(crate) fn state(&self) -> &JournalState {
@@ -163,16 +252,54 @@ impl Journal {
         candidate: &Candidate,
         plan_digest: Digest,
     ) -> Result<(u64, Digest), TuneError> {
+        self.prepare_attempt_with_hook(role, candidate, plan_digest, || {})
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_attempt_with_before_authorization_for_test(
+        &mut self,
+        role: AttemptRole,
+        candidate: &Candidate,
+        plan_digest: Digest,
+        before_authorization: impl FnOnce(),
+    ) -> Result<(u64, Digest), TuneError> {
+        self.prepare_attempt_with_hook(role, candidate, plan_digest, before_authorization)
+    }
+
+    fn prepare_attempt_with_hook(
+        &mut self,
+        role: AttemptRole,
+        candidate: &Candidate,
+        plan_digest: Digest,
+        before_authorization: impl FnOnce(),
+    ) -> Result<(u64, Digest), TuneError> {
+        self.ensure_usable()?;
         candidate.validate()?;
-        let candidate_digest = storage::store_candidate(&self.root, candidate)?;
+        let candidate_digest = self.record_storage_result(storage::store_candidate(
+            &self.storage,
+            &self.writer,
+            candidate,
+        ))?;
         let trial_id = self.state.next_trial_id;
-        self.append(JournalEvent::AttemptPrepared {
-            trial_id,
-            role,
-            candidate: candidate_digest,
-            plan_digest,
-        })?;
+        self.append_with_hook(
+            JournalEvent::AttemptPrepared {
+                trial_id,
+                role,
+                candidate: candidate_digest,
+                plan_digest,
+            },
+            before_authorization,
+        )?;
         Ok((trial_id, candidate_digest))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn append_event_with_before_authorization_for_test(
+        &mut self,
+        event: JournalEvent,
+        before_authorization: impl FnOnce(),
+    ) -> Result<(), TuneError> {
+        self.append_with_hook(event, before_authorization)
     }
 
     pub(crate) fn complete_attempt(
@@ -181,6 +308,7 @@ impl Journal {
         evaluation: CandidateEvaluation,
         selected: Option<bool>,
     ) -> Result<(), TuneError> {
+        self.ensure_usable()?;
         let role = self.state.pending_role(trial_id)?;
         evaluation.validate(role.scenario_set())?;
         self.append(JournalEvent::AttemptCompleted {
@@ -195,6 +323,7 @@ impl Journal {
         trial_id: u64,
         reason: impl Into<String>,
     ) -> Result<(), TuneError> {
+        self.ensure_usable()?;
         self.append(JournalEvent::AttemptQuarantined {
             trial_id,
             reason: reason.into(),
@@ -207,6 +336,7 @@ impl Journal {
         stop: OperationStatus,
         cleanup: OperationStatus,
     ) -> Result<(), TuneError> {
+        self.ensure_usable()?;
         self.append(JournalEvent::CleanupRecorded {
             trial_id,
             stop,
@@ -215,6 +345,7 @@ impl Journal {
     }
 
     pub(crate) fn freeze(&mut self) -> Result<Digest, TuneError> {
+        self.ensure_usable()?;
         let candidate = self.state.training_incumbent;
         self.append(JournalEvent::Frozen {
             baseline: self.session().initial_candidate_digest,
@@ -236,17 +367,17 @@ impl Journal {
     }
 
     fn start(
-        root: PathBuf,
+        storage: storage::JournalStorage,
         stage: SearchStage,
-        writer_lock: storage::WriterLock,
+        writer: storage::WriterLock,
         session: SessionIdentity,
         initial_candidate: &Candidate,
     ) -> Result<Self, TuneError> {
-        let stored = storage::store_stage(&root, &stage)?;
+        let stored = storage::store_stage(&storage, &writer, &stage)?;
         if stored != session.stage_digest {
             return Err(TuneError::DigestMismatch { expected: stored });
         }
-        let candidate = storage::store_candidate(&root, initial_candidate)?;
+        let candidate = storage::store_candidate(&storage, &writer, initial_candidate)?;
         let entry = JournalEntry {
             schema_version: JOURNAL_SCHEMA_VERSION,
             sequence: 0,
@@ -254,14 +385,19 @@ impl Journal {
             session,
             event: JournalEvent::Started { candidate },
         };
-        let digest = storage::append_entry(&root, &entry)?;
+        let digest = storage::document_digest("journal entry", &entry)?;
         let entries = vec![entry];
         let entry_digests = vec![digest];
         let state = replay(&entries, &entry_digests, &stage)?;
+        let published = storage::append_entry(&storage, &writer, &stage, &entries, &entry_digests)?;
+        if published != digest {
+            return Err(TuneError::DigestMismatch { expected: digest });
+        }
         Ok(Self {
-            root,
+            storage,
             stage,
-            _writer_lock: writer_lock,
+            writer,
+            poisoned: AtomicBool::new(false),
             entries,
             entry_digests,
             state,
@@ -269,32 +405,42 @@ impl Journal {
     }
 
     fn resume(
-        root: PathBuf,
+        storage: storage::JournalStorage,
         stage: SearchStage,
-        writer_lock: storage::WriterLock,
+        writer: storage::WriterLock,
         session: SessionIdentity,
     ) -> Result<Self, TuneError> {
-        let stored_entries = storage::load_entries(&root)?;
+        let stored_entries = storage::load_entries(&storage)?;
         let (entry_digests, entries): (Vec<_>, Vec<_>) = stored_entries.into_iter().unzip();
         if entries.first().map(|entry| &entry.session) != Some(&session)
-            || storage::read_stage(&root, session.stage_digest)? != stage
+            || storage::read_stage(&storage, session.stage_digest)? != stage
         {
             return Err(TuneError::JournalSessionMismatch);
         }
         let state = replay(&entries, &entry_digests, &stage)?;
         let journal = Self {
-            root,
+            storage,
             stage,
-            _writer_lock: writer_lock,
+            writer,
+            poisoned: AtomicBool::new(false),
             entries,
             entry_digests,
             state,
         };
-        journal.verify_candidates()?;
+        journal.ensure_usable()?;
         Ok(journal)
     }
 
     fn append(&mut self, event: JournalEvent) -> Result<(), TuneError> {
+        self.append_with_hook(event, || {})
+    }
+
+    fn append_with_hook(
+        &mut self,
+        event: JournalEvent,
+        before_authorization: impl FnOnce(),
+    ) -> Result<(), TuneError> {
+        self.ensure_usable()?;
         let previous = self
             .entries
             .last()
@@ -312,7 +458,15 @@ impl Journal {
         let mut digests = self.entry_digests.clone();
         digests.push(entry_digest);
         let state = replay(&entries, &digests, &self.stage)?;
-        if storage::append_entry(&self.root, &entry)? != entry_digest {
+        let published = storage::append_entry_with_hook(
+            &self.storage,
+            &self.writer,
+            &self.stage,
+            &entries,
+            &digests,
+            before_authorization,
+        );
+        if self.record_append_result(published)? != entry_digest {
             return Err(TuneError::DigestMismatch {
                 expected: entry_digest,
             });
@@ -320,17 +474,6 @@ impl Journal {
         self.entries = entries;
         self.entry_digests = digests;
         self.state = state;
-        Ok(())
-    }
-
-    fn verify_candidates(&self) -> Result<(), TuneError> {
-        let initial = self.read_candidate(self.session().initial_candidate_digest)?;
-        for entry in &self.entries {
-            if let JournalEvent::AttemptPrepared { candidate, .. } = entry.event {
-                let stored = self.read_candidate(candidate)?;
-                self.stage.validate_challenger(&initial, &stored)?;
-            }
-        }
         Ok(())
     }
 }

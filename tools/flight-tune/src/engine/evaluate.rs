@@ -1,3 +1,4 @@
+mod cleanup;
 mod contract;
 mod record;
 
@@ -12,6 +13,7 @@ use crate::{
     SampleEvent, SearchStage, SimulatorBackend, SimulatorCapability, SimulatorVehicleAdapter,
     TelemetrySample, TuneError, VehicleBinding,
 };
+use cleanup::{cleanup_status, finish_cleanup, operation_status, quarantine_after_error};
 use contract::*;
 use record::{RunProgress, record_terminal};
 
@@ -33,6 +35,7 @@ pub(super) fn candidate_digest(candidate: &Candidate) -> Result<Digest, TuneErro
 }
 
 pub(super) fn ensure_candidate_blocking<V>(
+    journal: &Journal,
     vehicle: &mut VehicleBinding<V>,
     capability: &SimulatorCapability,
     candidate: &Candidate,
@@ -41,11 +44,13 @@ pub(super) fn ensure_candidate_blocking<V>(
 where
     V: SimulatorVehicleAdapter,
 {
+    journal.ensure_usable()?;
     let receipt =
         vehicle
             .adapter_mut()
             .ensure_candidate_blocking(capability, candidate, candidate_digest);
-    validate_candidate_receipt(receipt, capability, candidate_digest)
+    validate_candidate_receipt(receipt, capability, candidate_digest)?;
+    journal.ensure_usable()
 }
 
 pub(super) fn recover_pending_blocking<B, G, M>(
@@ -59,6 +64,7 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    journal.ensure_usable()?;
     let Some(pending) = journal.state().pending.clone() else {
         return Ok(());
     };
@@ -68,8 +74,9 @@ where
             "process stopped after AttemptPrepared; automatic replay is forbidden",
         )?;
     }
+    journal.ensure_usable()?;
     let stop = operation_status(|| backend.stop_blocking());
-    let cleanup = cleanup_status(backend, gates, metric, true);
+    let cleanup = cleanup_status(journal, backend, gates, metric, true)?;
     journal.record_cleanup(pending.trial_id, stop, cleanup.clone())?;
     if cleanup.succeeded() {
         Ok(())
@@ -101,12 +108,14 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    journal.ensure_usable()?;
     let set = role.scenario_set();
     let scenario_count = scenarios(stage, set).len();
     let expected_runs = scenario_count * stage.repetitions as usize;
     let mut runs = Vec::new();
     for scenario in scenarios(stage, set) {
         for repetition in 0..stage.repetitions {
+            journal.ensure_usable()?;
             let seed = derive_seed(journal.session().fixed_seed, set, scenario, repetition);
             let context = RunContext {
                 set,
@@ -115,6 +124,7 @@ where
                 seed,
             };
             let terminal = run_until_terminal(
+                journal,
                 stage,
                 &context,
                 candidate,
@@ -151,6 +161,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn run_until_terminal<B, V, G, M>(
+    journal: &Journal,
     stage: &SearchStage,
     context: &RunContext<'_>,
     candidate: &Candidate,
@@ -167,20 +178,33 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    if let Err(error) = journal.ensure_usable() {
+        return RunTerminal::Failed {
+            error,
+            started: false,
+        };
+    }
     if let Err(source) = backend.prepare_blocking(capability, context.scenario, context.seed) {
         return RunTerminal::Failed {
             error: adapter_error(backend, "prepare", source),
             started: false,
         };
     }
-    if let Err(error) = ensure_candidate_blocking(vehicle, capability, candidate, candidate_digest)
+    if let Err(error) =
+        ensure_candidate_blocking(journal, vehicle, capability, candidate, candidate_digest)
     {
         return RunTerminal::Failed {
             error,
             started: false,
         };
     }
-    if let Err(error) = begin_evaluators(context.scenario, gates, metric) {
+    if let Err(error) = begin_evaluators(journal, context.scenario, gates, metric) {
+        return RunTerminal::Failed {
+            error,
+            started: false,
+        };
+    }
+    if let Err(error) = journal.ensure_usable() {
         return RunTerminal::Failed {
             error,
             started: false,
@@ -201,10 +225,11 @@ where
             started: true,
         };
     }
-    stream_samples(stage, context, backend, gates, metric)
+    stream_samples(journal, stage, context, backend, gates, metric)
 }
 
 fn stream_samples<B, G, M>(
+    journal: &Journal,
     stage: &SearchStage,
     context: &RunContext<'_>,
     backend: &mut B,
@@ -217,51 +242,43 @@ where
     M: MetricEvaluator,
 {
     let timeout = Duration::from_millis(u64::from(context.scenario.sample_timeout_ms));
-    let mut expected_sequence = 0_u64;
-    let mut elapsed_ms = 0_u64;
+    let mut position = StreamPosition::default();
     loop {
+        if let Err(error) = journal.ensure_usable() {
+            return RunTerminal::Failed {
+                error,
+                started: true,
+            };
+        }
         match backend.sample_blocking(timeout) {
             Ok(SampleEvent::Sample(sample)) => {
-                if expected_sequence >= u64::from(context.scenario.max_samples) {
-                    return hard_failure(
-                        context,
-                        sample.sequence,
-                        sample.elapsed_ms,
-                        GateOutcome::fail(
-                            "core.sample_limit",
-                            "the simulator exceeded the scenario sample limit",
-                        ),
-                    );
-                }
-                if let Err(error) = validate_sample(&sample, expected_sequence, elapsed_ms) {
-                    return RunTerminal::Failed {
-                        error,
-                        started: true,
-                    };
-                }
-                elapsed_ms = sample.elapsed_ms;
-                expected_sequence = expected_sequence.wrapping_add(1);
-                match evaluate_sample(stage, &sample, gates, metric) {
-                    Ok(Some(gate)) => {
-                        return hard_failure(context, sample.sequence, sample.elapsed_ms, gate);
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        return RunTerminal::Failed {
-                            error,
-                            started: true,
-                        };
-                    }
+                if let Some(terminal) = process_sample(
+                    journal,
+                    stage,
+                    context,
+                    sample,
+                    &mut position,
+                    gates,
+                    metric,
+                ) {
+                    return terminal;
                 }
             }
             Ok(SampleEvent::Complete) => {
-                return finish_stream_blocking(context, expected_sequence, backend, gates, metric);
+                return finish_stream_blocking(
+                    journal,
+                    context,
+                    position.expected_sequence,
+                    backend,
+                    gates,
+                    metric,
+                );
             }
             Ok(SampleEvent::TimedOut) => {
                 return hard_failure(
                     context,
-                    expected_sequence,
-                    elapsed_ms,
+                    position.expected_sequence,
+                    position.elapsed_ms,
                     GateOutcome::fail(
                         "core.sample_timeout",
                         "the simulator did not supply a sample before the timeout",
@@ -278,7 +295,62 @@ where
     }
 }
 
+#[derive(Default)]
+struct StreamPosition {
+    expected_sequence: u64,
+    elapsed_ms: u64,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_sample<G, M>(
+    journal: &Journal,
+    stage: &SearchStage,
+    context: &RunContext<'_>,
+    sample: TelemetrySample,
+    position: &mut StreamPosition,
+    gates: &mut G,
+    metric: &mut M,
+) -> Option<RunTerminal>
+where
+    G: GateEvaluator,
+    M: MetricEvaluator,
+{
+    if position.expected_sequence >= u64::from(context.scenario.max_samples) {
+        return Some(hard_failure(
+            context,
+            sample.sequence,
+            sample.elapsed_ms,
+            GateOutcome::fail(
+                "core.sample_limit",
+                "the simulator exceeded the scenario sample limit",
+            ),
+        ));
+    }
+    if let Err(error) = validate_sample(&sample, position.expected_sequence, position.elapsed_ms) {
+        return Some(RunTerminal::Failed {
+            error,
+            started: true,
+        });
+    }
+    position.elapsed_ms = sample.elapsed_ms;
+    position.expected_sequence = position.expected_sequence.wrapping_add(1);
+    match evaluate_sample(journal, stage, &sample, gates, metric) {
+        Ok(Some(gate)) => Some(hard_failure(
+            context,
+            sample.sequence,
+            sample.elapsed_ms,
+            gate,
+        )),
+        Ok(None) => None,
+        Err(error) => Some(RunTerminal::Failed {
+            error,
+            started: true,
+        }),
+    }
+}
+
 fn finish_stream_blocking<B, G, M>(
+    journal: &Journal,
     context: &RunContext<'_>,
     sample_count: u64,
     backend: &mut B,
@@ -301,10 +373,11 @@ where
             ),
         );
     }
-    finish_normal_run_blocking(backend, gates, metric)
+    finish_normal_run_blocking(journal, backend, gates, metric)
 }
 
 fn evaluate_sample<G, M>(
+    journal: &Journal,
     stage: &SearchStage,
     sample: &TelemetrySample,
     gates: &mut G,
@@ -314,12 +387,14 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    journal.ensure_usable()?;
     let outcomes = gates
         .evaluate(sample)
         .map_err(|source| evaluator_error(gates.identity(), "evaluate hard gates", source))?;
     if let Some(failure) = validate_gate_outcomes(&stage.required_hard_gates, &outcomes)? {
         return Ok(Some(failure));
     }
+    journal.ensure_usable()?;
     metric
         .observe(sample)
         .map_err(|source| evaluator_error(metric.identity(), "observe metric", source))?;
@@ -327,6 +402,7 @@ where
 }
 
 fn finish_normal_run_blocking<B, G, M>(
+    journal: &Journal,
     backend: &mut B,
     gates: &mut G,
     metric: &mut M,
@@ -336,15 +412,33 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    if let Err(error) = journal.ensure_usable() {
+        return RunTerminal::Failed {
+            error,
+            started: true,
+        };
+    }
     if let Err(source) = backend.stop_blocking() {
         return RunTerminal::Failed {
             error: adapter_error(backend, "stop", source),
             started: true,
         };
     }
+    if let Err(error) = journal.ensure_usable() {
+        return RunTerminal::Failed {
+            error,
+            started: false,
+        };
+    }
     if let Err(source) = gates.finish() {
         return RunTerminal::Failed {
             error: evaluator_error(gates.identity(), "finish hard gates", source),
+            started: false,
+        };
+    }
+    if let Err(error) = journal.ensure_usable() {
+        return RunTerminal::Failed {
+            error,
             started: false,
         };
     }
@@ -384,104 +478,6 @@ fn hard_failure(
             sample_sequence,
             elapsed_ms,
             gate,
-        },
-    }
-}
-
-fn finish_cleanup<B, G, M>(
-    journal: &mut Journal,
-    trial_id: u64,
-    mut stop: OperationStatus,
-    backend: &mut B,
-    stop_required: Option<()>,
-    gates: &mut G,
-    metric: &mut M,
-) -> Result<(), TuneError>
-where
-    B: SimulatorBackend,
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    if stop_required.is_some() {
-        stop = operation_status(|| backend.stop_blocking());
-    }
-    let cleanup = cleanup_status(backend, gates, metric, stop_required.is_some());
-    let succeeded = stop.succeeded() && cleanup.succeeded();
-    journal.record_cleanup(trial_id, stop, cleanup.clone())?;
-    if succeeded {
-        Ok(())
-    } else {
-        Err(TuneError::InvalidState {
-            operation: "cleanup",
-            detail: "the simulator or evaluator is not clean".to_owned(),
-        })
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn quarantine_after_error<B, G, M>(
-    journal: &mut Journal,
-    trial_id: u64,
-    error: TuneError,
-    mut stop: OperationStatus,
-    backend: &mut B,
-    stop_required: Option<()>,
-    gates: &mut G,
-    metric: &mut M,
-) -> Result<(), TuneError>
-where
-    B: SimulatorBackend,
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    journal.quarantine_attempt(trial_id, error.to_string())?;
-    if stop_required.is_some() {
-        stop = operation_status(|| backend.stop_blocking());
-    }
-    let cleanup = cleanup_status(backend, gates, metric, true);
-    journal.record_cleanup(trial_id, stop, cleanup)?;
-    Err(error)
-}
-
-fn cleanup_status<B, G, M>(
-    backend: &mut B,
-    gates: &mut G,
-    metric: &mut M,
-    cancel_evaluators: bool,
-) -> OperationStatus
-where
-    B: SimulatorBackend,
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    let mut failures = Vec::new();
-    if cancel_evaluators {
-        if let Err(error) = gates.cancel() {
-            failures.push(format!("hard gate cancel: {error}"));
-        }
-        if let Err(error) = metric.cancel() {
-            failures.push(format!("metric cancel: {error}"));
-        }
-    }
-    if let Err(error) = backend.cleanup_blocking() {
-        failures.push(format!("simulator cleanup: {error}"));
-    }
-    if failures.is_empty() {
-        OperationStatus::Succeeded
-    } else {
-        OperationStatus::Failed {
-            detail: failures.join("; "),
-        }
-    }
-}
-
-fn operation_status(
-    operation: impl FnOnce() -> Result<(), crate::AdapterError>,
-) -> OperationStatus {
-    match operation() {
-        Ok(()) => OperationStatus::Succeeded,
-        Err(error) => OperationStatus::Failed {
-            detail: error.to_string(),
         },
     }
 }
