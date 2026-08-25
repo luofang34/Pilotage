@@ -27,10 +27,10 @@ mod terminal;
 pub use adapter::{
     AdapterError, CANDIDATE_TRANSITION_RECEIPT_SCHEMA_VERSION, CandidateReceipt,
     CandidateTransitionReceipt, CandidateTransitionReference, CandidateTransitionRequest,
-    EvaluatorError, RunPreparationReceipt, SampleEvent, ScenarioStartReceipt, SessionChallenge,
-    SimulatorBackend, SimulatorCapability, SimulatorSessionReceipt, SimulatorVehicleAdapter,
-    SimulatorVehicleFactory, TelemetrySample, TransitionBindingReceipt, VehicleBinding,
-    VehicleBindingReceipt,
+    EvaluatorError, RunPreparationReceipt, RunTerminalAdapter, RunTerminalCapabilities,
+    SampleEvent, ScenarioStartReceipt, SessionChallenge, SimulatorBackend, SimulatorCapability,
+    SimulatorSessionReceipt, SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
+    TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
 };
 pub use engine::{StopReason, Tuner, TuningSummary};
 pub use error::TuneError;

@@ -6,12 +6,14 @@ use pilotage_trial::Digest;
 use crate::ArtifactIdentity;
 
 mod lifecycle;
+mod terminal;
 mod transition;
 
 pub use lifecycle::{
     CandidateReceipt, RunPreparationReceipt, SampleEvent, ScenarioStartReceipt, SimulatorBackend,
     SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
 };
+pub use terminal::{RunTerminalAdapter, RunTerminalCapabilities};
 pub(crate) use transition::planning_context_digest;
 pub use transition::{
     CANDIDATE_TRANSITION_RECEIPT_SCHEMA_VERSION, CandidateTransitionReceipt,
