@@ -252,6 +252,11 @@ fn verify_prospective_entry_references(
         }
         JournalEvent::AttemptCompleted { .. }
         | JournalEvent::RunPrepared { .. }
+        | JournalEvent::RunBound { .. }
+        | JournalEvent::RunTerminalIntentPrepared { .. }
+        | JournalEvent::RunTerminalReportRecorded { .. }
+        | JournalEvent::RunTerminalEvidenceFailureRecorded { .. }
+        | JournalEvent::RunCommitted { .. }
         | JournalEvent::AttemptQuarantined { .. }
         | JournalEvent::CleanupRecorded { .. }
         | JournalEvent::PromotionClosed { .. } => Ok(()),

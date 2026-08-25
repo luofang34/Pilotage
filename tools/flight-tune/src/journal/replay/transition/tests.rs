@@ -92,7 +92,7 @@ fn challenger_role_requires_a_passed_baseline_and_incumbent() {
     let fixture = fixture();
     let role = AttemptRole::TrainingChallenger { attempt_index: 0 };
     let mut state = searching_state(fixture.source_digest);
-    assert!(super::super::role_allowed(
+    assert!(super::super::attempt::role_allowed(
         &state,
         role,
         fixture.target_digest,
@@ -100,7 +100,7 @@ fn challenger_role_requires_a_passed_baseline_and_incumbent() {
     ));
 
     state.training_incumbent_evaluation = None;
-    assert!(!super::super::role_allowed(
+    assert!(!super::super::attempt::role_allowed(
         &state,
         role,
         fixture.target_digest,
@@ -111,7 +111,7 @@ fn challenger_role_requires_a_passed_baseline_and_incumbent() {
     state.training_baseline = Some(CandidateEvaluation::Quarantined {
         reason: "unsafe baseline".to_owned(),
     });
-    assert!(!super::super::role_allowed(
+    assert!(!super::super::attempt::role_allowed(
         &state,
         role,
         fixture.target_digest,

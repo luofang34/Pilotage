@@ -10,6 +10,8 @@ mod no_samples;
 mod reconciliation;
 #[path = "tuner/recovery_order.rs"]
 mod recovery_order;
+#[path = "tuner/terminal.rs"]
+mod terminal;
 #[path = "tuner/test_rig.rs"]
 mod test_rig;
 #[path = "tuner/transition_authorization.rs"]

@@ -1,7 +1,7 @@
 use crate::journal::CampaignPhase;
 use crate::{
-    FinalQualificationOutcome, GateEvaluator, MetricEvaluator, ProposalStrategy, SimulatorBackend,
-    SimulatorVehicleAdapter, TuneError,
+    FinalQualificationOutcome, GateEvaluator, MetricEvaluator, ProposalStrategy,
+    RunTerminalAdapter, SimulatorBackend, SimulatorVehicleAdapter, TuneError,
 };
 
 use super::{Tuner, evaluate, invalid_state};
@@ -9,7 +9,7 @@ use super::{Tuner, evaluate, invalid_state};
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
     B: SimulatorBackend,
-    V: SimulatorVehicleAdapter,
+    V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
     P: ProposalStrategy,

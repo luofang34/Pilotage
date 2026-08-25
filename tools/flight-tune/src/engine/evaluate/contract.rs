@@ -1,12 +1,13 @@
 use crate::journal::AttemptRole;
 use crate::{
     CandidateEvaluation, CandidateReceipt, Digest, GateEvaluator, Journal, MetricEvaluator,
-    MetricValues, OperationStatus, RunExecutionContext, RunPreparationReceipt, RunRecord,
-    ScenarioRef, ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorBackend,
-    SimulatorCapability, TelemetrySample, TuneError,
+    MetricValues, RunExecutionContext, RunPreparationReceipt, RunRecord, ScenarioRef, ScenarioSet,
+    ScenarioStartReceipt, SearchStage, SimulatorBackend, SimulatorCapability, TelemetrySample,
+    TuneError,
 };
 
 pub(super) struct RunContext<'a> {
+    pub(super) run_index: u64,
     pub(super) execution: RunExecutionContext,
     pub(super) run_intent_digest: Digest,
     pub(super) set: ScenarioSet,
@@ -16,17 +17,9 @@ pub(super) struct RunContext<'a> {
 }
 
 pub(super) enum RunTerminal {
-    Passed {
-        values: MetricValues,
-        stop: OperationStatus,
-    },
-    HardGate {
-        failure: crate::HardGateFailure,
-    },
-    Failed {
-        error: TuneError,
-        started: bool,
-    },
+    Passed { values: MetricValues },
+    HardGate { failure: crate::HardGateFailure },
+    Failed { error: TuneError },
 }
 
 pub(super) fn validate_sample(

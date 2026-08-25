@@ -1,16 +1,62 @@
-use crate::journal::replay::{JournalState, PendingAttempt, invalid};
+use crate::journal::replay::{JournalState, invalid};
 use crate::journal::{JournalEvent, SessionIdentity};
 use crate::model::derive_seed;
 use crate::{
-    CandidateEvaluation, Digest, RunExecutionContext, ScenarioRef, ScenarioSet, SearchStage,
-    TuneError,
+    Digest, RunBindingReceipt, RunExecutionContext, RunTerminalClass, RunTerminalCompletion,
+    RunTerminalDisposition, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt,
+    RunTerminalReport, ScenarioRef, ScenarioSet, SearchStage, TuneError,
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedRun {
-    pub(super) run_index: u64,
-    pub(super) context: RunExecutionContext,
-    pub(super) run_intent_digest: Digest,
+    pub(crate) run_index: u64,
+    pub(crate) context: RunExecutionContext,
+    pub(crate) run_intent_digest: Digest,
+    pub(crate) terminal: PreparedRunTerminalState,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PreparedRunTerminalState {
+    Prepared,
+    Bound {
+        plan: RunTerminalPlan,
+        binding: RunBindingReceipt,
+    },
+    IntentPrepared {
+        plan: RunTerminalPlan,
+        binding: RunBindingReceipt,
+        intent: RunTerminalIntent,
+    },
+    ReportRecorded {
+        binding: RunBindingReceipt,
+        report: RunTerminalReport,
+        base_class: RunTerminalClass,
+        expected_receipt: Box<RunTerminalReceipt>,
+    },
+    EvidenceFailureRecorded {
+        binding: RunBindingReceipt,
+        report: RunTerminalReport,
+        base_class: RunTerminalClass,
+        expected_receipt: Box<RunTerminalReceipt>,
+        class: RunTerminalClass,
+    },
+    Committed {
+        receipt: Box<RunTerminalReceipt>,
+    },
+}
+
+impl PreparedRunTerminalState {
+    fn permits_next_run(&self) -> bool {
+        let Self::Committed { receipt } = self else {
+            return false;
+        };
+        matches!(
+            receipt.class().disposition(),
+            RunTerminalDisposition::Completed {
+                completion: RunTerminalCompletion::ScenarioComplete
+            }
+        )
+    }
 }
 
 impl JournalState {
@@ -71,6 +117,15 @@ pub(super) fn prepare(
         .ok_or_else(|| invalid("run preparation has no active attempt"))?;
     let expected_index = u64::try_from(pending.prepared_runs.len())
         .map_err(|_| invalid("prepared run index overflow"))?;
+    if pending
+        .prepared_runs
+        .last()
+        .is_some_and(|run| !run.terminal.permits_next_run())
+    {
+        return Err(invalid(
+            "a new run requires one committed completed scenario",
+        ));
+    }
     let session_digest = super::super::storage::document_digest("session identity", session)?;
     let expected_scenario = expected_scenario(stage, pending.role.scenario_set(), run_index)?;
     let expected_seed = derive_seed(
@@ -100,41 +155,9 @@ pub(super) fn prepare(
         run_index,
         context: context.clone(),
         run_intent_digest,
+        terminal: PreparedRunTerminalState::Prepared,
     });
     Ok(())
-}
-
-pub(super) fn validate_outcome(
-    pending: &PendingAttempt,
-    evaluation: &CandidateEvaluation,
-) -> Result<(), TuneError> {
-    let prepared_identity_is_exact =
-        pending
-            .prepared_runs
-            .iter()
-            .enumerate()
-            .all(|(index, run)| {
-                u64::try_from(index) == Ok(run.run_index)
-                    && run
-                        .context
-                        .digest()
-                        .is_ok_and(|digest| digest == run.run_intent_digest)
-            });
-    let prepared_count = pending.prepared_runs.len();
-    let count_matches = match evaluation {
-        CandidateEvaluation::Passed { runs, .. } => prepared_count == runs.len(),
-        CandidateEvaluation::HardGateFailed { completed_runs, .. } => {
-            prepared_count == completed_runs.len().saturating_add(1)
-        }
-        CandidateEvaluation::Quarantined { .. } => true,
-    };
-    if count_matches && prepared_identity_is_exact {
-        Ok(())
-    } else {
-        Err(invalid(
-            "an attempt outcome does not match its prepared run count",
-        ))
-    }
 }
 
 fn expected_scenario(
