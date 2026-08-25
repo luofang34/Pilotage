@@ -6,7 +6,7 @@ use crate::{
     SimulatorVehicleFactory, TuneError,
 };
 
-use super::{Tuner, evaluate, session};
+use super::{Tuner, evaluate, session, transition};
 
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
@@ -132,6 +132,7 @@ where
             })?;
         session::validate_vehicle_binding(&journal, &vehicle)?;
         evaluate::recover_pending_blocking(&mut journal, &mut backend, &mut gates, &mut metric)?;
+        transition::reauthorize_saved(&journal, &stage, &vehicle)?;
         let mut tuner = Self {
             stage,
             backend,

@@ -1,16 +1,26 @@
 use crate::journal::{
     AttemptRole, CampaignPhase, FinalQualificationOutcome, JOURNAL_SCHEMA_VERSION, JournalEntry,
-    JournalEvent, OperationStatus, PromotionDecision,
+    JournalEvent, OperationStatus, PromotionDecision, SessionIdentity,
 };
-use crate::{CandidateEvaluation, Digest, SearchStage, TrainingObservation, TuneError};
+use crate::{
+    CandidateEvaluation, CandidateTransitionReference, Digest, SearchStage, TrainingObservation,
+    TuneError,
+};
 
 mod plan;
+mod run;
+pub(crate) mod transition;
+
+use super::transition::AuthorizedTrainingTransition;
+use run::PreparedRun;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingAttempt {
     pub(crate) trial_id: u64,
     pub(crate) role: AttemptRole,
     pub(crate) candidate: Digest,
+    pub(crate) transition: Option<CandidateTransitionReference>,
+    pub(crate) prepared_runs: Vec<PreparedRun>,
     pub(crate) outcome: Option<PendingOutcome>,
 }
 
@@ -29,6 +39,7 @@ pub(crate) struct JournalState {
     pub(crate) training_attempt_count: u64,
     pub(crate) training_history: Vec<TrainingObservation>,
     pub(crate) next_trial_id: u64,
+    pub(crate) authorized_transition: Option<AuthorizedTrainingTransition>,
     pub(crate) pending: Option<PendingAttempt>,
     pub(crate) frozen_candidate: Option<Digest>,
     pub(crate) promotion_baseline: Option<CandidateEvaluation>,
@@ -39,14 +50,6 @@ pub(crate) struct JournalState {
 }
 
 impl JournalState {
-    pub(crate) fn pending_role(&self, trial_id: u64) -> Result<AttemptRole, TuneError> {
-        self.pending
-            .as_ref()
-            .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
-            .map(|pending| pending.role)
-            .ok_or_else(|| invalid("the trial is not pending or already has an outcome"))
-    }
-
     pub(crate) fn selected_release_candidate(&self, initial: Digest) -> Digest {
         if self
             .promotion_decision
@@ -87,13 +90,7 @@ pub(super) fn replay(
             Some(entry_digests[index - 1]),
             &first.session,
         )?;
-        apply_event(
-            &mut state,
-            &entry.event,
-            stage,
-            candidate,
-            first.session.fixed_seed,
-        )?;
+        apply_event(&mut state, &entry.event, stage, &first.session)?;
     }
     Ok(state)
 }
@@ -107,6 +104,7 @@ fn initial_state(candidate: Digest) -> JournalState {
         training_attempt_count: 0,
         training_history: Vec::new(),
         next_trial_id: 0,
+        authorized_transition: None,
         pending: None,
         frozen_candidate: None,
         promotion_baseline: None,
@@ -140,26 +138,42 @@ fn apply_event(
     state: &mut JournalState,
     event: &JournalEvent,
     stage: &SearchStage,
-    initial: Digest,
-    fixed_seed: u64,
+    session: &SessionIdentity,
 ) -> Result<(), TuneError> {
+    let initial = session.initial_candidate_digest;
+    let fixed_seed = session.fixed_seed;
+    if state.authorized_transition.is_some()
+        && !matches!(event, JournalEvent::AttemptPrepared { .. })
+    {
+        return Err(invalid(
+            "a transition authorization must be followed by its attempt",
+        ));
+    }
     match event {
         JournalEvent::Started { .. } => Err(invalid("the journal has two start events")),
+        event @ JournalEvent::CandidateTransitionAuthorized { .. } => {
+            transition::authorize_event(state, event, stage, session)
+        }
         JournalEvent::AttemptPrepared {
             trial_id,
             role,
             candidate,
             plan_digest,
+            transition,
         } => prepare(
             state,
             *trial_id,
             *role,
             *candidate,
             *plan_digest,
+            transition.as_ref(),
             stage,
             initial,
             fixed_seed,
         ),
+        event @ JournalEvent::RunPrepared { .. } => {
+            run::prepare_event(state, event, stage, session)
+        }
         JournalEvent::AttemptCompleted {
             trial_id,
             evaluation,
@@ -198,6 +212,7 @@ fn prepare(
     role: AttemptRole,
     candidate: Digest,
     plan_digest: Digest,
+    transition_reference: Option<&CandidateTransitionReference>,
     stage: &SearchStage,
     initial: Digest,
     fixed_seed: u64,
@@ -213,12 +228,16 @@ fn prepare(
             "an attempt preparation has invalid state or identity",
         ));
     }
+    transition::validate_attempt(state, role, candidate, transition_reference)?;
     state.pending = Some(PendingAttempt {
         trial_id,
         role,
         candidate,
+        transition: transition_reference.cloned(),
+        prepared_runs: Vec::new(),
         outcome: None,
     });
+    state.authorized_transition = None;
     state.next_trial_id = state.next_trial_id.wrapping_add(1);
     Ok(())
 }
@@ -237,7 +256,7 @@ fn role_allowed(
         }
         AttemptRole::TrainingChallenger { attempt_index } => {
             state.phase == CampaignPhase::Searching
-                && state.training_baseline.is_some()
+                && has_passed_training_baseline_and_incumbent(state)
                 && attempt_index == state.training_attempt_count
         }
         AttemptRole::PromotionBaseline => {
@@ -259,6 +278,16 @@ fn role_allowed(
     }
 }
 
+fn has_passed_training_baseline_and_incumbent(state: &JournalState) -> bool {
+    matches!(
+        &state.training_baseline,
+        Some(CandidateEvaluation::Passed { .. })
+    ) && matches!(
+        &state.training_incumbent_evaluation,
+        Some(CandidateEvaluation::Passed { .. })
+    )
+}
+
 fn complete(
     state: &mut JournalState,
     trial_id: u64,
@@ -274,6 +303,11 @@ fn complete(
         .map(|pending| pending.role)
         .ok_or_else(|| invalid("the attempt is not pending or already has an outcome"))?;
     plan::validate_evaluation(evaluation, role, stage, fixed_seed)?;
+    let pending = state
+        .pending
+        .as_ref()
+        .ok_or_else(|| invalid("the attempt lost its run preparation"))?;
+    run::validate_outcome(pending, evaluation)?;
     validate_training_selection(state, role, evaluation, selected)?;
     let pending = pending_without_outcome(state, trial_id)?;
     pending.outcome = Some(PendingOutcome {

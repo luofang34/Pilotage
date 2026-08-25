@@ -24,7 +24,7 @@ where
         }
         let digest = self.settled_candidate_digest();
         let candidate = self.journal.read_candidate(digest)?;
-        evaluate::ensure_candidate_blocking(
+        evaluate::ensure_settled_candidate_blocking(
             &self.journal,
             &mut self.vehicle,
             &self.capability,

@@ -22,6 +22,7 @@ where
         backend.simulator_identity(),
         backend.airframe_identity(),
         factory.vehicle_identity(),
+        factory.transition_validator_identity(),
         gates.identity(),
         metric.identity(),
         strategy.identity(),
@@ -31,6 +32,11 @@ where
                 detail: "a runtime component identity is incomplete".to_owned(),
             });
         }
+    }
+    if factory.adjacency_policy_digest().is_zero() {
+        return Err(TuneError::InvalidIdentity {
+            detail: "the vehicle adjacency-policy identity is incomplete".to_owned(),
+        });
     }
     Ok(())
 }
@@ -57,6 +63,8 @@ where
         simulator: backend.simulator_identity().clone(),
         airframe: backend.airframe_identity().clone(),
         vehicle: factory.vehicle_identity().clone(),
+        transition_validator: factory.transition_validator_identity().clone(),
+        adjacency_policy_digest: factory.adjacency_policy_digest(),
     }
 }
 
@@ -82,12 +90,22 @@ pub(super) fn validate_vehicle_binding<V>(
     vehicle: &VehicleBinding<V>,
 ) -> Result<(), TuneError> {
     let receipt = vehicle.receipt();
+    let transition = vehicle
+        .transition_receipt()
+        .ok_or_else(|| TuneError::ReceiptMismatch {
+            operation: "bind simulator vehicle",
+            detail: "the vehicle binding has no transition policy".to_owned(),
+        })?;
     if receipt.session_digest != journal.session_digest()?
         || receipt.vehicle_digest != journal.session().runtimes.vehicle.digest
+        || transition.session_digest() != receipt.session_digest
+        || transition.validator() != &journal.session().runtimes.transition_validator
+        || transition.adjacency_policy_digest()
+            != journal.session().runtimes.adjacency_policy_digest
     {
         return Err(TuneError::ReceiptMismatch {
             operation: "bind simulator vehicle",
-            detail: "vehicle session or build digest does not match".to_owned(),
+            detail: "vehicle session, build, or transition policy does not match".to_owned(),
         });
     }
     Ok(())

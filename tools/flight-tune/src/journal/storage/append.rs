@@ -238,6 +238,7 @@ fn verify_prospective_entry_references(
     stage.validate_challenger(&initial, &initial)?;
     match &entry.event {
         JournalEvent::Started { candidate }
+        | JournalEvent::CandidateTransitionAuthorized { candidate, .. }
         | JournalEvent::AttemptPrepared { candidate, .. }
         | JournalEvent::Sealed { candidate, .. } => {
             verify_candidate_reference(storage, &stage, &initial, *candidate)
@@ -250,6 +251,7 @@ fn verify_prospective_entry_references(
             verify_candidate_reference(storage, &stage, &initial, *candidate)
         }
         JournalEvent::AttemptCompleted { .. }
+        | JournalEvent::RunPrepared { .. }
         | JournalEvent::AttemptQuarantined { .. }
         | JournalEvent::CleanupRecorded { .. }
         | JournalEvent::PromotionClosed { .. } => Ok(()),

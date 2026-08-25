@@ -70,7 +70,7 @@ fn action_counts(state: &FakeHandle) -> ActionCounts {
     let state = state.0.borrow();
     ActionCounts {
         prepare: state.prepare_count,
-        ensure: state.ensure_count,
+        ensure: state.vehicle.ensure_count,
         gate_begin: state.gate_begin_count,
         metric_begin: state.metric_begin_count,
         start: state.start_count,

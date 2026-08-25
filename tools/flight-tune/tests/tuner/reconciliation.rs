@@ -20,8 +20,8 @@ fn hard_gate_rejection_restores_the_training_incumbent() {
         .run_training_attempts_blocking(1)
         .expect("evaluate rejected challenger");
 
-    assert_eq!(state.0.borrow().gain, 0.0);
-    assert_eq!(state.0.borrow().apply_count, 3);
+    assert_eq!(state.0.borrow().vehicle.gain, 0.0);
+    assert_eq!(state.0.borrow().vehicle.apply_count, 3);
     assert_eq!(
         tuner
             .journal()
@@ -47,8 +47,8 @@ fn passing_but_worse_challenger_restores_the_later_incumbent() {
         .run_training_attempts_blocking(2)
         .expect("evaluate two challengers");
 
-    assert_eq!(state.0.borrow().gain, 1.0);
-    assert_eq!(state.0.borrow().apply_count, 4);
+    assert_eq!(state.0.borrow().vehicle.gain, 1.0);
+    assert_eq!(state.0.borrow().vehicle.apply_count, 4);
     assert_eq!(
         tuner
             .journal()
@@ -74,8 +74,8 @@ fn selected_challenger_does_not_get_a_second_controller_write() {
         .run_training_attempts_blocking(1)
         .expect("select challenger");
 
-    assert_eq!(state.0.borrow().gain, 0.5);
-    assert_eq!(state.0.borrow().apply_count, 2);
+    assert_eq!(state.0.borrow().vehicle.gain, 0.5);
+    assert_eq!(state.0.borrow().vehicle.apply_count, 2);
 }
 
 #[test]
@@ -98,14 +98,14 @@ fn rejected_promotion_restores_the_initial_release_candidate() {
         tuner.run_promotion_once_blocking().expect("run promotion"),
         PromotionDecision::RejectedNoImprovement { .. }
     ));
-    assert_eq!(state.0.borrow().gain, 0.0);
+    assert_eq!(state.0.borrow().vehicle.gain, 0.0);
 }
 
 #[test]
 fn reconciliation_readback_failure_stops_before_the_next_candidate() {
     let directory = TestDirectory::new("reconciliation-readback-stops-search");
     let state = FakeHandle::new();
-    state.0.borrow_mut().bad_candidate_readback_on_apply = Some(3);
+    state.0.borrow_mut().vehicle.bad_candidate_readback_on_apply = Some(3);
     let mut tuner = open(
         directory.path(),
         state.clone(),
@@ -140,19 +140,19 @@ fn restart_restores_once_after_candidate_activation() {
         tuner.run_training_attempts_blocking(1).ok();
     }));
     assert!(stopped.is_err());
-    assert_eq!(state.0.borrow().gain, 0.5);
-    assert_eq!(state.0.borrow().apply_count, 2);
+    assert_eq!(state.0.borrow().vehicle.gain, 0.5);
+    assert_eq!(state.0.borrow().vehicle.apply_count, 2);
     drop(tuner);
     state.0.borrow_mut().panic_on_start = None;
 
     let resumed =
         open(directory.path(), state.clone(), strategy.clone(), 2.0).expect("resume tuner");
-    assert_eq!(state.0.borrow().gain, 0.0);
-    assert_eq!(state.0.borrow().apply_count, 3);
+    assert_eq!(state.0.borrow().vehicle.gain, 0.0);
+    assert_eq!(state.0.borrow().vehicle.apply_count, 3);
     drop(resumed);
 
     let reopened = open(directory.path(), state.clone(), strategy, 2.0).expect("reopen tuner");
-    assert_eq!(state.0.borrow().gain, 0.0);
-    assert_eq!(state.0.borrow().apply_count, 3);
+    assert_eq!(state.0.borrow().vehicle.gain, 0.0);
+    assert_eq!(state.0.borrow().vehicle.apply_count, 3);
     drop(reopened);
 }

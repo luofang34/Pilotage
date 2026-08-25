@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::identity::digest_bytes;
-use crate::{CandidateEvaluation, Digest, ScenarioRef, ScenarioSet, SearchStage, TuneError};
+use crate::{
+    CandidateEvaluation, CandidateTransitionReceipt, CandidateTransitionReference, Digest,
+    RunExecutionContext, ScenarioRef, ScenarioSet, SearchStage, TuneError,
+};
 
 #[derive(Serialize)]
 struct RunPlan<'a> {
@@ -175,6 +178,17 @@ pub enum JournalEvent {
         /// The initial candidate digest.
         candidate: Digest,
     },
+    /// One vehicle validator authorized an exact training transition.
+    CandidateTransitionAuthorized {
+        /// The zero-based challenger index.
+        attempt_index: u64,
+        /// The stable proposal reason.
+        reason: String,
+        /// The immutable target candidate digest.
+        candidate: Digest,
+        /// The complete vehicle authorization receipt.
+        receipt: CandidateTransitionReceipt,
+    },
     /// One complete evaluation was durable before simulator mutation.
     AttemptPrepared {
         /// The monotonic trial identity.
@@ -185,6 +199,19 @@ pub enum JournalEvent {
         candidate: Digest,
         /// The digest of the complete ordered run plan.
         plan_digest: Digest,
+        /// The exact training transition authorization, if this is a challenger.
+        transition: Option<CandidateTransitionReference>,
+    },
+    /// One exact run identity became durable before external mutation.
+    RunPrepared {
+        /// The campaign trial identity.
+        trial_id: u64,
+        /// The zero-based run index in the attempt plan.
+        run_index: u64,
+        /// The complete simulator-neutral run identity.
+        context: RunExecutionContext,
+        /// The canonical digest of the run identity.
+        run_intent_digest: Digest,
     },
     /// One evaluation produced a score or hard gate result.
     AttemptCompleted {
