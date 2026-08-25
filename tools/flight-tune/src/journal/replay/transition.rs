@@ -45,7 +45,7 @@ pub(super) fn authorize(
     session: &SessionIdentity,
 ) -> Result<(), TuneError> {
     if state.phase != CampaignPhase::Searching
-        || !super::has_passed_training_baseline_and_incumbent(state)
+        || !super::attempt::has_passed_training_baseline_and_incumbent(state)
         || state.pending.is_some()
         || state.authorized_transition.is_some()
         || attempt_index != state.training_attempt_count

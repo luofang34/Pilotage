@@ -1,5 +1,6 @@
 //! Content-addressed tuning journal and campaign state.
 
+mod attempt;
 mod event;
 mod replay;
 mod storage;
@@ -17,8 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::harness_build_identity;
 use crate::{
-    Candidate, CandidateEvaluation, CandidateLineage, CandidateTransitionReference, Digest,
-    RuntimeIdentities, SearchStage, TrainingObservation, TuneError,
+    Candidate, CandidateLineage, Digest, RuntimeIdentities, SearchStage, TrainingObservation,
+    TuneError,
 };
 use replay::{JournalState, replay};
 
@@ -247,63 +248,6 @@ impl Journal {
         self.state.training_history.clone()
     }
 
-    pub(crate) fn prepare_attempt(
-        &mut self,
-        role: AttemptRole,
-        candidate: &Candidate,
-        plan_digest: Digest,
-        transition: Option<CandidateTransitionReference>,
-    ) -> Result<(u64, Digest), TuneError> {
-        self.prepare_attempt_with_hook(role, candidate, plan_digest, transition, || {})
-    }
-
-    #[cfg(test)]
-    pub(crate) fn prepare_attempt_with_before_authorization_for_test(
-        &mut self,
-        role: AttemptRole,
-        candidate: &Candidate,
-        plan_digest: Digest,
-        transition: Option<CandidateTransitionReference>,
-        before_authorization: impl FnOnce(),
-    ) -> Result<(u64, Digest), TuneError> {
-        self.prepare_attempt_with_hook(
-            role,
-            candidate,
-            plan_digest,
-            transition,
-            before_authorization,
-        )
-    }
-
-    fn prepare_attempt_with_hook(
-        &mut self,
-        role: AttemptRole,
-        candidate: &Candidate,
-        plan_digest: Digest,
-        transition: Option<CandidateTransitionReference>,
-        before_authorization: impl FnOnce(),
-    ) -> Result<(u64, Digest), TuneError> {
-        self.ensure_usable()?;
-        candidate.validate()?;
-        let candidate_digest = self.record_storage_result(storage::store_candidate(
-            &self.storage,
-            &self.writer,
-            candidate,
-        ))?;
-        let trial_id = self.state.next_trial_id;
-        self.append_with_hook(
-            JournalEvent::AttemptPrepared {
-                trial_id,
-                role,
-                candidate: candidate_digest,
-                plan_digest,
-                transition,
-            },
-            before_authorization,
-        )?;
-        Ok((trial_id, candidate_digest))
-    }
-
     #[cfg(test)]
     pub(crate) fn append_event_with_before_authorization_for_test(
         &mut self,
@@ -311,48 +255,6 @@ impl Journal {
         before_authorization: impl FnOnce(),
     ) -> Result<(), TuneError> {
         self.append_with_hook(event, before_authorization)
-    }
-
-    pub(crate) fn complete_attempt(
-        &mut self,
-        trial_id: u64,
-        evaluation: CandidateEvaluation,
-        selected: Option<bool>,
-    ) -> Result<(), TuneError> {
-        self.ensure_usable()?;
-        let role = self.state.pending_role(trial_id)?;
-        evaluation.validate(role.scenario_set())?;
-        self.append(JournalEvent::AttemptCompleted {
-            trial_id,
-            evaluation,
-            selected_as_training_incumbent: selected,
-        })
-    }
-
-    pub(crate) fn quarantine_attempt(
-        &mut self,
-        trial_id: u64,
-        reason: impl Into<String>,
-    ) -> Result<(), TuneError> {
-        self.ensure_usable()?;
-        self.append(JournalEvent::AttemptQuarantined {
-            trial_id,
-            reason: reason.into(),
-        })
-    }
-
-    pub(crate) fn record_cleanup(
-        &mut self,
-        trial_id: u64,
-        stop: OperationStatus,
-        cleanup: OperationStatus,
-    ) -> Result<(), TuneError> {
-        self.ensure_usable()?;
-        self.append(JournalEvent::CleanupRecorded {
-            trial_id,
-            stop,
-            cleanup,
-        })
     }
 
     pub(crate) fn freeze(&mut self) -> Result<Digest, TuneError> {
