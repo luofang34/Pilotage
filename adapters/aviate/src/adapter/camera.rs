@@ -87,7 +87,20 @@ async fn attach_by_mode(
                 .and_then(std::path::Path::parent)
                 .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from);
             let bin = workspace_root.join("adapters/gazebo/bridge/build/pilotage-gz-bridge");
-            let config = pilotage_sim_video::BridgeConfig::new("x500", bin);
+            // The sensor's topic is the gz scoped path for the model's own
+            // navsat sensor. The world name is the world the launcher
+            // starts, and the launcher tells the host which one through
+            // the environment rather than either side guessing.
+            let config = match std::env::var("PILOTAGE_GZ_WORLD") {
+                Ok(world) if !world.is_empty() => {
+                    pilotage_sim_video::BridgeConfig::new("x500", bin).with_navsat_topic(format!(
+                        "/world/{world}/model/x500/link/base_link/sensor/navsat_sensor/navsat"
+                    ))
+                }
+                // No world named, no sensor topic, no position: the map
+                // says it has none rather than drawing one from nowhere.
+                _ => pilotage_sim_video::BridgeConfig::new("x500", bin),
+            };
             (
                 pilotage_sim_video::BridgeClient::spawn_and_connect(config).await,
                 MeasurementClock::Simulation,

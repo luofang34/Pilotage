@@ -80,6 +80,15 @@ bool BridgeNode::Start(std::string &error_out) {
     return false;
   }
 
+  // The satellite-navigation sensor is optional: a world that declares no
+  // datum has no fix to report, and the bridge stays silent rather than
+  // reporting a position it cannot place.
+  if (!config_.navsat_topic.empty() &&
+      !node_.Subscribe(config_.navsat_topic, &BridgeNode::OnNavSat, this)) {
+    error_out = "failed to subscribe " + config_.navsat_topic;
+    return false;
+  }
+
   // The gimbal payload camera is optional: a vehicle without a gimbal leaves
   // the topic empty and the bridge subscribes no third camera.
   if (!config_.gimbal_camera_topic.empty() &&
@@ -90,6 +99,20 @@ bool BridgeNode::Start(std::string &error_out) {
   }
 
   return true;
+}
+
+void BridgeNode::OnNavSat(const gz::msgs::NavSat &msg) {
+  pilotage::bridge::v1::BridgeEnvelope envelope;
+  auto *fix = envelope.mutable_navsat();
+  fix->set_latitude_deg(msg.latitude_deg());
+  fix->set_longitude_deg(msg.longitude_deg());
+  fix->set_altitude_m(msg.altitude());
+  const auto &stamp = msg.header().stamp();
+  fix->set_sim_time_ns(static_cast<uint64_t>(stamp.sec()) * 1000000000ULL +
+                       static_cast<uint64_t>(stamp.nsec()));
+  // A fix is a latest value: dropping one under back pressure costs a
+  // sample, never the position.
+  connection_->WriteEnvelope(envelope, /*droppable=*/true);
 }
 
 void BridgeNode::OnOdometry(const gz::msgs::Odometry &msg) {
