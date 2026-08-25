@@ -4,7 +4,7 @@ use crate::{
     TuneError,
 };
 
-use super::{JournalState, PendingAttempt, PendingOutcome, invalid, plan, run, transition};
+use super::{JournalState, PendingAttempt, PendingOutcome, invalid, plan, terminal, transition};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare(
@@ -108,7 +108,7 @@ pub(super) fn complete(
         .pending
         .as_ref()
         .ok_or_else(|| invalid("the attempt lost its run preparation"))?;
-    run::validate_outcome(pending, evaluation)?;
+    terminal::validate_completed_attempt(pending, evaluation)?;
     validate_training_selection(state, role, evaluation, selected)?;
     let pending = pending_without_outcome(state, trial_id)?;
     pending.outcome = Some(PendingOutcome {
@@ -157,9 +157,12 @@ pub(super) fn quarantine(
     trial_id: u64,
     reason: &str,
 ) -> Result<(), TuneError> {
-    if reason.trim().is_empty() || reason.len() > 4_096 {
-        return Err(invalid("a quarantine reason is empty or too long"));
-    }
+    let pending = state
+        .pending
+        .as_ref()
+        .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
+        .ok_or_else(|| invalid("the attempt is not pending or already has an outcome"))?;
+    terminal::validate_quarantined_attempt(pending, reason)?;
     let pending = pending_without_outcome(state, trial_id)?;
     let selected = match pending.role {
         AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. } => Some(false),
@@ -177,10 +180,8 @@ pub(super) fn quarantine(
 pub(super) fn cleanup(
     state: &mut JournalState,
     trial_id: u64,
-    stop: &OperationStatus,
     cleanup: &OperationStatus,
 ) -> Result<(), TuneError> {
-    validate_operation_status(stop)?;
     validate_operation_status(cleanup)?;
     let Some(pending) = state.pending.as_ref() else {
         return Err(invalid("cleanup has no pending attempt"));
@@ -275,10 +276,10 @@ fn pending_without_outcome(
 }
 
 fn validate_operation_status(status: &OperationStatus) -> Result<(), TuneError> {
-    if let OperationStatus::Failed { detail } = status
-        && detail.trim().is_empty()
-    {
-        return Err(invalid("a cleanup failure detail is empty"));
+    match status {
+        OperationStatus::Succeeded => Ok(()),
+        OperationStatus::Failed { detail } if !detail.trim().is_empty() => Ok(()),
+        OperationStatus::Failed { .. } => Err(invalid("a cleanup failure detail is empty")),
+        OperationStatus::NotRequired => Err(invalid("attempt cleanup is always required")),
     }
-    Ok(())
 }

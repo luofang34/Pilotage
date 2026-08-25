@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::identity::digest_bytes;
 use crate::{
     CandidateEvaluation, CandidateTransitionReceipt, CandidateTransitionReference, Digest,
-    RunExecutionContext, ScenarioRef, ScenarioSet, SearchStage, TuneError,
+    RunBindingReceipt, RunExecutionContext, RunTerminalClass, RunTerminalIntent, RunTerminalPlan,
+    RunTerminalReceipt, RunTerminalReport, ScenarioRef, ScenarioSet, SearchStage, TuneError,
 };
 
 #[derive(Serialize)]
@@ -213,6 +214,55 @@ pub enum JournalEvent {
         /// The canonical digest of the run identity.
         run_intent_digest: Digest,
     },
+    /// One exact terminal plan and adapter binding became durable.
+    RunBound {
+        /// The campaign trial identity.
+        trial_id: u64,
+        /// The zero-based run index in the attempt plan.
+        run_index: u64,
+        /// The immutable terminal operation plan.
+        terminal_plan: RunTerminalPlan,
+        /// The exact run and adapter binding.
+        binding: RunBindingReceipt,
+    },
+    /// One semantic run result became durable before terminal operations.
+    RunTerminalIntentPrepared {
+        /// The campaign trial identity.
+        trial_id: u64,
+        /// The zero-based run index in the attempt plan.
+        run_index: u64,
+        /// The exact semantic terminal intent.
+        intent: RunTerminalIntent,
+    },
+    /// One complete terminal operation report became durable.
+    RunTerminalReportRecorded {
+        /// The campaign trial identity.
+        trial_id: u64,
+        /// The zero-based run index in the attempt plan.
+        run_index: u64,
+        /// The complete ordered terminal report.
+        report: Box<RunTerminalReport>,
+        /// The class that the core calculated from the report.
+        base_class: RunTerminalClass,
+    },
+    /// A definite completed-receipt absence became durable.
+    RunTerminalEvidenceFailureRecorded {
+        /// The campaign trial identity.
+        trial_id: u64,
+        /// The zero-based run index in the attempt plan.
+        run_index: u64,
+        /// The evidence-failure class for the saved report.
+        class: RunTerminalClass,
+    },
+    /// One exact terminal receipt closed the run.
+    RunCommitted {
+        /// The campaign trial identity.
+        trial_id: u64,
+        /// The zero-based run index in the attempt plan.
+        run_index: u64,
+        /// The exact completed or quarantine receipt.
+        receipt: Box<RunTerminalReceipt>,
+    },
     /// One evaluation produced a score or hard gate result.
     AttemptCompleted {
         /// The monotonic trial identity.
@@ -229,12 +279,10 @@ pub enum JournalEvent {
         /// The stable quarantine reason.
         reason: String,
     },
-    /// The runner saved stop and cleanup results.
+    /// The runner saved one independent cleanup result.
     CleanupRecorded {
         /// The monotonic trial identity.
         trial_id: u64,
-        /// The stop operation result.
-        stop: OperationStatus,
         /// The cleanup operation result.
         cleanup: OperationStatus,
     },
@@ -257,4 +305,36 @@ pub enum JournalEvent {
         /// The final release result.
         outcome: FinalQualificationOutcome,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{JournalEvent, OperationStatus};
+
+    #[test]
+    fn cleanup_event_has_no_terminal_stop_field() -> Result<(), serde_json::Error> {
+        let event = JournalEvent::CleanupRecorded {
+            trial_id: 7,
+            cleanup: OperationStatus::Succeeded,
+        };
+        let document = serde_json::to_value(event)?;
+
+        assert_eq!(document.get("event"), Some(&json!("cleanup_recorded")));
+        assert!(document.get("stop").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_event_rejects_the_schema_three_stop_field() {
+        let document = json!({
+            "event": "cleanup_recorded",
+            "trial_id": 7,
+            "stop": { "status": "succeeded" },
+            "cleanup": { "status": "succeeded" }
+        });
+
+        assert!(serde_json::from_value::<JournalEvent>(document).is_err());
+    }
 }

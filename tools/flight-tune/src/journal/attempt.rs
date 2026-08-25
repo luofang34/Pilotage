@@ -76,29 +76,24 @@ impl Journal {
         })
     }
 
-    pub(crate) fn quarantine_attempt(
-        &mut self,
-        trial_id: u64,
-        reason: impl Into<String>,
-    ) -> Result<(), TuneError> {
+    pub(crate) fn quarantine_attempt(&mut self, trial_id: u64) -> Result<(), TuneError> {
         self.ensure_usable()?;
-        self.append(JournalEvent::AttemptQuarantined {
-            trial_id,
-            reason: reason.into(),
-        })
+        let reason = self
+            .state
+            .pending
+            .as_ref()
+            .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
+            .ok_or_else(|| super::invalid("the attempt is not pending or already has an outcome"))?
+            .terminal_quarantine_reason()?;
+        self.append(JournalEvent::AttemptQuarantined { trial_id, reason })
     }
 
     pub(crate) fn record_cleanup(
         &mut self,
         trial_id: u64,
-        stop: OperationStatus,
         cleanup: OperationStatus,
     ) -> Result<(), TuneError> {
         self.ensure_usable()?;
-        self.append(JournalEvent::CleanupRecorded {
-            trial_id,
-            stop,
-            cleanup,
-        })
+        self.append(JournalEvent::CleanupRecorded { trial_id, cleanup })
     }
 }

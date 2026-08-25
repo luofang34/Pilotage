@@ -10,10 +10,11 @@ use crate::{
 mod attempt;
 mod plan;
 mod run;
+pub(super) mod terminal;
 pub(crate) mod transition;
 
 use super::transition::AuthorizedTrainingTransition;
-use run::PreparedRun;
+pub(super) use run::{PreparedRun, PreparedRunTerminalState};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingAttempt {
@@ -175,6 +176,11 @@ fn apply_event(
         event @ JournalEvent::RunPrepared { .. } => {
             run::prepare_event(state, event, stage, session)
         }
+        event @ (JournalEvent::RunBound { .. }
+        | JournalEvent::RunTerminalIntentPrepared { .. }
+        | JournalEvent::RunTerminalReportRecorded { .. }
+        | JournalEvent::RunTerminalEvidenceFailureRecorded { .. }
+        | JournalEvent::RunCommitted { .. }) => terminal::apply_event(state, event, session),
         JournalEvent::AttemptCompleted {
             trial_id,
             evaluation,
@@ -190,11 +196,9 @@ fn apply_event(
         JournalEvent::AttemptQuarantined { trial_id, reason } => {
             attempt::quarantine(state, *trial_id, reason)
         }
-        JournalEvent::CleanupRecorded {
-            trial_id,
-            stop,
-            cleanup: cleanup_status,
-        } => attempt::cleanup(state, *trial_id, stop, cleanup_status),
+        JournalEvent::CleanupRecorded { trial_id, cleanup } => {
+            attempt::cleanup(state, *trial_id, cleanup)
+        }
         JournalEvent::Frozen {
             baseline,
             candidate,

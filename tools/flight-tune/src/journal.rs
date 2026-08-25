@@ -3,14 +3,15 @@
 mod attempt;
 mod event;
 mod replay;
+pub(crate) mod snapshot;
 mod storage;
+mod terminal;
 mod transition;
 
 pub use event::{
     AttemptRole, CampaignPhase, FinalQualificationOutcome, JournalEvent, OperationStatus,
     PromotionDecision,
 };
-
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -23,7 +24,7 @@ use crate::{
 };
 use replay::{JournalState, replay};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 3;
+const JOURNAL_SCHEMA_VERSION: u32 = 4;
 
 /// The immutable identity of one tuning session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +206,10 @@ impl Journal {
         })
     }
 
+    pub(crate) fn poison(&self) {
+        self.poisoned.store(true, Ordering::Release);
+    }
+
     #[cfg(test)]
     pub(crate) fn ensure_usable_with_final_hook_for_test(
         &self,
@@ -242,6 +247,10 @@ impl Journal {
 
     pub(crate) fn state(&self) -> &JournalState {
         &self.state
+    }
+
+    pub(crate) fn pending_attempt_snapshot(&self) -> Option<snapshot::PendingAttemptSnapshot> {
+        self.state.pending.as_ref().map(Into::into)
     }
 
     pub(crate) fn training_history(&self) -> Vec<TrainingObservation> {
@@ -395,4 +404,10 @@ fn invalid(detail: impl Into<String>) -> TuneError {
     TuneError::InvalidJournal {
         detail: detail.into(),
     }
+}
+
+pub(crate) fn terminal_quarantine_reason(
+    receipt: &crate::RunTerminalReceipt,
+) -> Result<String, TuneError> {
+    replay::terminal::quarantine_reason(receipt)
 }
