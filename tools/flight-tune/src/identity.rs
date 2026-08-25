@@ -98,6 +98,10 @@ pub struct RuntimeIdentities {
     pub airframe: ArtifactIdentity,
     /// The vehicle controller build and adapter configuration.
     pub vehicle: ArtifactIdentity,
+    /// The candidate-transition validator and its exact configuration.
+    pub transition_validator: ArtifactIdentity,
+    /// The exact vehicle adjacency-policy digest.
+    pub adjacency_policy_digest: Digest,
 }
 
 impl RuntimeIdentities {
@@ -110,8 +114,14 @@ impl RuntimeIdentities {
             &self.simulator,
             &self.airframe,
             &self.vehicle,
+            &self.transition_validator,
         ] {
             identity.validate()?;
+        }
+        if self.adjacency_policy_digest.is_zero() {
+            return Err(TuneError::InvalidIdentity {
+                detail: "the vehicle adjacency-policy digest is zero".to_owned(),
+            });
         }
         Ok(())
     }

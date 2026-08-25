@@ -120,7 +120,11 @@ impl ActionSnapshot {
                 state.stop_count,
                 state.cleanup_count,
             ],
-            vehicle: [state.bind_count, state.ensure_count, state.apply_count],
+            vehicle: [
+                state.vehicle.bind_count,
+                state.vehicle.ensure_count,
+                state.vehicle.apply_count,
+            ],
             gates: [
                 state.gate_begin_count,
                 state.gate_evaluate_count,

@@ -3,6 +3,7 @@
 mod event;
 mod replay;
 mod storage;
+mod transition;
 
 pub use event::{
     AttemptRole, CampaignPhase, FinalQualificationOutcome, JournalEvent, OperationStatus,
@@ -16,12 +17,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::harness_build_identity;
 use crate::{
-    Candidate, CandidateEvaluation, CandidateLineage, Digest, RuntimeIdentities, SearchStage,
-    TrainingObservation, TuneError,
+    Candidate, CandidateEvaluation, CandidateLineage, CandidateTransitionReference, Digest,
+    RuntimeIdentities, SearchStage, TrainingObservation, TuneError,
 };
 use replay::{JournalState, replay};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 2;
+const JOURNAL_SCHEMA_VERSION: u32 = 3;
 
 /// The immutable identity of one tuning session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -251,8 +252,9 @@ impl Journal {
         role: AttemptRole,
         candidate: &Candidate,
         plan_digest: Digest,
+        transition: Option<CandidateTransitionReference>,
     ) -> Result<(u64, Digest), TuneError> {
-        self.prepare_attempt_with_hook(role, candidate, plan_digest, || {})
+        self.prepare_attempt_with_hook(role, candidate, plan_digest, transition, || {})
     }
 
     #[cfg(test)]
@@ -261,9 +263,16 @@ impl Journal {
         role: AttemptRole,
         candidate: &Candidate,
         plan_digest: Digest,
+        transition: Option<CandidateTransitionReference>,
         before_authorization: impl FnOnce(),
     ) -> Result<(u64, Digest), TuneError> {
-        self.prepare_attempt_with_hook(role, candidate, plan_digest, before_authorization)
+        self.prepare_attempt_with_hook(
+            role,
+            candidate,
+            plan_digest,
+            transition,
+            before_authorization,
+        )
     }
 
     fn prepare_attempt_with_hook(
@@ -271,6 +280,7 @@ impl Journal {
         role: AttemptRole,
         candidate: &Candidate,
         plan_digest: Digest,
+        transition: Option<CandidateTransitionReference>,
         before_authorization: impl FnOnce(),
     ) -> Result<(u64, Digest), TuneError> {
         self.ensure_usable()?;
@@ -287,6 +297,7 @@ impl Journal {
                 role,
                 candidate: candidate_digest,
                 plan_digest,
+                transition,
             },
             before_authorization,
         )?;

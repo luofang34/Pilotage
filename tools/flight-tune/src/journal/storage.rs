@@ -210,7 +210,8 @@ fn candidate_digests_to_verify(initial: Digest, entries: &[JournalEntry]) -> Vec
     entries
         .iter()
         .filter_map(|entry| match entry.event {
-            crate::JournalEvent::AttemptPrepared { candidate, .. } => Some(candidate),
+            crate::JournalEvent::CandidateTransitionAuthorized { candidate, .. }
+            | crate::JournalEvent::AttemptPrepared { candidate, .. } => Some(candidate),
             _ => None,
         })
         .filter(|candidate| seen.insert(*candidate))

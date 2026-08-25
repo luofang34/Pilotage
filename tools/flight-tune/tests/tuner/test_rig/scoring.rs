@@ -205,7 +205,7 @@ impl ProposalStrategy for SequenceStrategy {
 pub fn candidate(gain: f64) -> Candidate {
     Candidate::new(
         CandidateLineage {
-            schema: "aviate-candidate-v1".to_owned(),
+            schema: "generic-candidate-v1".to_owned(),
             base_preset_digest: Digest::from_bytes([7; 32]),
             plant_digest: Digest::from_bytes([8; 32]),
         },

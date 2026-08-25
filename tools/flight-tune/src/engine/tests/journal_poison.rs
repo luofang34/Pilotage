@@ -1,5 +1,6 @@
 mod authorization;
 mod catalog;
+mod durable_publication;
 mod evidence;
 mod external_action;
 mod prospective_authorization;
@@ -61,7 +62,7 @@ fn an_ambiguous_preparation_poison_stops_all_external_action() {
 #[test]
 fn an_ambiguous_cleanup_poison_skips_candidate_reconciliation() {
     let directory = TestDirectory::new("cleanup-head-poison");
-    let faults = head_faults(4);
+    let faults = head_faults(6);
     let state = FakeHandle::new();
     let (mut tuner, proposals) = open_with_faults(&directory, state.clone(), faults.clone());
 
@@ -75,15 +76,15 @@ fn an_ambiguous_cleanup_poison_skips_candidate_reconciliation() {
         ActionSnapshot::new(&state, &proposals),
         completed_baseline_actions()
     );
-    assert_eq!(tuner.journal().entries().len(), 3);
+    assert_eq!(tuner.journal().entries().len(), 5);
     let poisoned = EvidenceSnapshot::new(&tuner, &directory, &state, &proposals);
     assert_poisoned_operations(&mut tuner, &directory, &state, &proposals, &poisoned);
     drop(tuner);
 
     let reopened = reopen_journal(&directory, state);
-    assert_eq!(reopened.entries().len(), 4);
+    assert_eq!(reopened.entries().len(), 6);
     assert!(matches!(
-        reopened.entries()[3].event,
+        reopened.entries()[5].event,
         JournalEvent::CleanupRecorded { .. }
     ));
     assert!(reopened.state().pending.is_none());
@@ -93,7 +94,7 @@ fn an_ambiguous_cleanup_poison_skips_candidate_reconciliation() {
 #[test]
 fn an_ambiguous_completion_poison_skips_cleanup_and_reconciliation() {
     let directory = TestDirectory::new("completed-head-poison");
-    let faults = head_faults(3);
+    let faults = head_faults(5);
     let state = FakeHandle::new();
     let (mut tuner, proposals) = open_with_faults(&directory, state.clone(), faults.clone());
 
@@ -107,15 +108,15 @@ fn an_ambiguous_completion_poison_skips_cleanup_and_reconciliation() {
         ActionSnapshot::new(&state, &proposals),
         completed_without_final_cleanup_actions()
     );
-    assert_eq!(tuner.journal().entries().len(), 2);
+    assert_eq!(tuner.journal().entries().len(), 4);
     let poisoned = EvidenceSnapshot::new(&tuner, &directory, &state, &proposals);
     assert_poisoned_operations(&mut tuner, &directory, &state, &proposals, &poisoned);
     drop(tuner);
 
     let reopened = reopen_journal(&directory, state);
-    assert_eq!(reopened.entries().len(), 3);
+    assert_eq!(reopened.entries().len(), 5);
     assert!(matches!(
-        reopened.entries()[2].event,
+        reopened.entries()[4].event,
         JournalEvent::AttemptCompleted { .. }
     ));
     let pending = reopened.state().pending.as_ref().expect("pending attempt");
@@ -125,10 +126,14 @@ fn an_ambiguous_completion_poison_skips_cleanup_and_reconciliation() {
 #[test]
 fn an_ambiguous_quarantine_preserves_the_primary_error() {
     let directory = TestDirectory::new("quarantine-head-poison");
-    let faults = head_faults(3);
+    let faults = head_faults(4);
     let state = FakeHandle::new();
     let (mut tuner, proposals) = open_with_faults(&directory, state.clone(), faults.clone());
-    state.0.borrow_mut().bad_candidate_readback_on_ensure = Some(2);
+    state
+        .0
+        .borrow_mut()
+        .vehicle
+        .bad_candidate_readback_on_ensure = Some(2);
 
     let error = tuner
         .run_training_attempts_blocking(0)
@@ -138,20 +143,20 @@ fn an_ambiguous_quarantine_preserves_the_primary_error() {
     assert!(faults.is_exhausted().expect("read fault state"));
     let actions = state.0.borrow();
     assert_eq!(actions.prepare_count, 1);
-    assert_eq!(actions.ensure_count, 2);
+    assert_eq!(actions.vehicle.ensure_count, 2);
     assert_eq!(actions.start_count, 0);
     assert_eq!(actions.stop_count, 0);
     assert_eq!(actions.cleanup_count, 0);
     drop(actions);
-    assert_eq!(tuner.journal().entries().len(), 2);
+    assert_eq!(tuner.journal().entries().len(), 3);
     let poisoned = EvidenceSnapshot::new(&tuner, &directory, &state, &proposals);
     assert_poisoned_operations(&mut tuner, &directory, &state, &proposals, &poisoned);
     drop(tuner);
 
     let reopened = reopen_journal(&directory, state);
-    assert_eq!(reopened.entries().len(), 3);
+    assert_eq!(reopened.entries().len(), 4);
     assert!(matches!(
-        reopened.entries()[2].event,
+        reopened.entries()[3].event,
         JournalEvent::AttemptQuarantined { .. }
     ));
 }

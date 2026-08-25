@@ -1,11 +1,14 @@
 use crate::journal::AttemptRole;
 use crate::{
     CandidateEvaluation, CandidateReceipt, Digest, GateEvaluator, Journal, MetricEvaluator,
-    MetricValues, OperationStatus, RunRecord, ScenarioRef, ScenarioSet, ScenarioStartReceipt,
-    SearchStage, SimulatorBackend, SimulatorCapability, TelemetrySample, TuneError,
+    MetricValues, OperationStatus, RunExecutionContext, RunPreparationReceipt, RunRecord,
+    ScenarioRef, ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorBackend,
+    SimulatorCapability, TelemetrySample, TuneError,
 };
 
 pub(super) struct RunContext<'a> {
+    pub(super) execution: RunExecutionContext,
+    pub(super) run_intent_digest: Digest,
     pub(super) set: ScenarioSet,
     pub(super) scenario: &'a ScenarioRef,
     pub(super) repetition: u32,
@@ -66,6 +69,7 @@ pub(super) fn validate_candidate_receipt(
     receipt: Result<CandidateReceipt, crate::AdapterError>,
     capability: &SimulatorCapability,
     expected: Digest,
+    expected_run_intent: Option<Digest>,
 ) -> Result<(), TuneError> {
     let receipt = receipt.map_err(|source| TuneError::Adapter {
         adapter: "bound simulator vehicle".to_owned(),
@@ -76,10 +80,27 @@ pub(super) fn validate_candidate_receipt(
         || receipt.requested_digest != expected
         || receipt.applied_digest != expected
         || receipt.readback_digest != expected
+        || receipt.run_intent_digest != expected_run_intent
     {
         return Err(TuneError::ReceiptMismatch {
             operation: "ensure candidate",
-            detail: "applied or readback candidate digest does not match".to_owned(),
+            detail: "candidate or run intent readback does not match".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_run_preparation_receipt(
+    receipt: RunPreparationReceipt,
+    capability: &SimulatorCapability,
+    expected_run_intent: Digest,
+) -> Result<(), TuneError> {
+    if receipt.session_digest != capability.session_digest()
+        || receipt.run_intent_digest != expected_run_intent
+    {
+        return Err(TuneError::ReceiptMismatch {
+            operation: "prepare run intent",
+            detail: "the prepared run intent does not match".to_owned(),
         });
     }
     Ok(())
@@ -93,10 +114,11 @@ pub(super) fn validate_scenario_receipt(
     if receipt.session_digest != capability.session_digest()
         || receipt.applied_scenario_digest != context.scenario.digest
         || receipt.seed != context.seed
+        || receipt.run_intent_digest != context.run_intent_digest
     {
         return Err(TuneError::ReceiptMismatch {
             operation: "start scenario",
-            detail: "applied scenario digest or seed does not match".to_owned(),
+            detail: "scenario, seed, or run intent readback does not match".to_owned(),
         });
     }
     Ok(())

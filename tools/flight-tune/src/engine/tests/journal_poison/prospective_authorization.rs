@@ -36,6 +36,7 @@ fn a_missing_head_entry_before_cas_keeps_the_old_head_and_poisons() {
             AttemptRole::TrainingBaseline,
             &initial,
             plan,
+            None,
             || {
                 assert_eq!(root_temporary_count(&directory), 1);
                 fs::remove_file(&started_path).expect("remove current head entry");
@@ -67,7 +68,7 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
         .expect("create run plan");
     let (trial_id, prepared_candidate) = tuner
         .journal
-        .prepare_attempt(AttemptRole::TrainingBaseline, &initial, plan)
+        .prepare_attempt(AttemptRole::TrainingBaseline, &initial, plan, None)
         .expect("prepare pending attempt");
     let candidate_path = directory
         .path()

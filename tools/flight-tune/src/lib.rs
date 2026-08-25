@@ -19,13 +19,16 @@ mod flight_quality;
 mod identity;
 mod journal;
 mod model;
+mod run_context;
 mod score;
 mod strategy;
 
 pub use adapter::{
-    AdapterError, CandidateReceipt, EvaluatorError, SampleEvent, ScenarioStartReceipt,
-    SessionChallenge, SimulatorBackend, SimulatorCapability, SimulatorSessionReceipt,
-    SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample, VehicleBinding,
+    AdapterError, CANDIDATE_TRANSITION_RECEIPT_SCHEMA_VERSION, CandidateReceipt,
+    CandidateTransitionReceipt, CandidateTransitionReference, CandidateTransitionRequest,
+    EvaluatorError, RunPreparationReceipt, SampleEvent, ScenarioStartReceipt, SessionChallenge,
+    SimulatorBackend, SimulatorCapability, SimulatorSessionReceipt, SimulatorVehicleAdapter,
+    SimulatorVehicleFactory, TelemetrySample, TransitionBindingReceipt, VehicleBinding,
     VehicleBindingReceipt,
 };
 pub use engine::{StopReason, Tuner, TuningSummary};
@@ -45,6 +48,7 @@ pub use model::{
     Candidate, ParameterBounds, PromotionPolicy, QualificationPolicy, ScenarioRef, SearchStage,
 };
 pub use pilotage_trial::Digest;
+pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,
     MetricEvaluator, MetricValues, RunRecord, ScenarioSet, ScoreAggregate,

@@ -1,21 +1,20 @@
 mod cleanup;
 mod contract;
 mod record;
-
-use std::time::Duration;
+mod stream;
 
 use crate::identity::digest_bytes;
-use crate::journal::{AttemptRole, OperationStatus};
+use crate::journal::AttemptRole;
 use crate::model::derive_seed;
-use crate::score::{validate_gate_outcomes, validate_metric};
 use crate::{
-    Candidate, Digest, GateEvaluator, GateOutcome, HardGateFailure, Journal, MetricEvaluator,
-    SampleEvent, SearchStage, SimulatorBackend, SimulatorCapability, SimulatorVehicleAdapter,
-    TelemetrySample, TuneError, VehicleBinding,
+    Candidate, CandidateTransitionReference, Digest, GateEvaluator, Journal, MetricEvaluator,
+    RunExecutionContext, SearchStage, SimulatorBackend, SimulatorCapability,
+    SimulatorVehicleAdapter, TuneError, VehicleBinding,
 };
 use cleanup::{cleanup_status, finish_cleanup, operation_status, quarantine_after_error};
 use contract::*;
 use record::{RunProgress, record_terminal};
+use stream::stream_samples;
 
 pub(super) fn plan_digest(
     stage: &SearchStage,
@@ -34,7 +33,7 @@ pub(super) fn candidate_digest(candidate: &Candidate) -> Result<Digest, TuneErro
     Ok(digest_bytes(&bytes))
 }
 
-pub(super) fn ensure_candidate_blocking<V>(
+pub(super) fn ensure_settled_candidate_blocking<V>(
     journal: &Journal,
     vehicle: &mut VehicleBinding<V>,
     capability: &SimulatorCapability,
@@ -45,11 +44,39 @@ where
     V: SimulatorVehicleAdapter,
 {
     journal.ensure_usable()?;
-    let receipt =
-        vehicle
-            .adapter_mut()
-            .ensure_candidate_blocking(capability, candidate, candidate_digest);
-    validate_candidate_receipt(receipt, capability, candidate_digest)?;
+    let receipt = vehicle.adapter_mut().ensure_settled_candidate_blocking(
+        capability,
+        candidate,
+        candidate_digest,
+    );
+    validate_candidate_receipt(receipt, capability, candidate_digest, None)?;
+    journal.ensure_usable()
+}
+
+fn ensure_candidate_for_run_blocking<V>(
+    journal: &Journal,
+    vehicle: &mut VehicleBinding<V>,
+    capability: &SimulatorCapability,
+    context: &RunContext<'_>,
+    candidate: &Candidate,
+    candidate_digest: Digest,
+) -> Result<(), TuneError>
+where
+    V: SimulatorVehicleAdapter,
+{
+    journal.ensure_usable()?;
+    let receipt = vehicle.adapter_mut().ensure_candidate_for_run_blocking(
+        capability,
+        &context.execution,
+        candidate,
+        candidate_digest,
+    );
+    validate_candidate_receipt(
+        receipt,
+        capability,
+        candidate_digest,
+        Some(context.run_intent_digest),
+    )?;
     journal.ensure_usable()
 }
 
@@ -96,6 +123,7 @@ pub(super) fn run_prepared_blocking<B, V, G, M>(
     role: AttemptRole,
     candidate: &Candidate,
     candidate_digest: Digest,
+    transition: Option<CandidateTransitionReference>,
     backend: &mut B,
     vehicle: &mut VehicleBinding<V>,
     capability: &SimulatorCapability,
@@ -113,16 +141,21 @@ where
     let scenario_count = scenarios(stage, set).len();
     let expected_runs = scenario_count * stage.repetitions as usize;
     let mut runs = Vec::new();
+    let mut run_index = 0_u64;
     for scenario in scenarios(stage, set) {
         for repetition in 0..stage.repetitions {
-            journal.ensure_usable()?;
-            let seed = derive_seed(journal.session().fixed_seed, set, scenario, repetition);
-            let context = RunContext {
+            let context = prepare_run_context(
+                journal,
+                trial_id,
+                role,
+                candidate_digest,
+                transition,
                 set,
                 scenario,
                 repetition,
-                seed,
-            };
+                run_index,
+            )?;
+            run_index = run_index.wrapping_add(1);
             let terminal = run_until_terminal(
                 journal,
                 stage,
@@ -160,6 +193,42 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+fn prepare_run_context<'a>(
+    journal: &mut Journal,
+    trial_id: u64,
+    role: AttemptRole,
+    candidate_digest: Digest,
+    transition: Option<CandidateTransitionReference>,
+    set: crate::ScenarioSet,
+    scenario: &'a crate::ScenarioRef,
+    repetition: u32,
+    run_index: u64,
+) -> Result<RunContext<'a>, TuneError> {
+    journal.ensure_usable()?;
+    let seed = derive_seed(journal.session().fixed_seed, set, scenario, repetition);
+    let execution = RunExecutionContext::new(
+        journal.session_digest()?,
+        trial_id,
+        role,
+        candidate_digest,
+        transition,
+        set,
+        scenario,
+        repetition,
+        seed,
+    )?;
+    let run_intent_digest = journal.prepare_run(run_index, &execution)?;
+    Ok(RunContext {
+        execution,
+        run_intent_digest,
+        set,
+        scenario,
+        repetition,
+        seed,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_until_terminal<B, V, G, M>(
     journal: &Journal,
     stage: &SearchStage,
@@ -184,15 +253,20 @@ where
             started: false,
         };
     }
-    if let Err(source) = backend.prepare_blocking(capability, context.scenario, context.seed) {
+    if let Err(error) = prepare_backend_run(backend, capability, context) {
         return RunTerminal::Failed {
-            error: adapter_error(backend, "prepare", source),
+            error,
             started: false,
         };
     }
-    if let Err(error) =
-        ensure_candidate_blocking(journal, vehicle, capability, candidate, candidate_digest)
-    {
+    if let Err(error) = ensure_candidate_for_run_blocking(
+        journal,
+        vehicle,
+        capability,
+        context,
+        candidate,
+        candidate_digest,
+    ) {
         return RunTerminal::Failed {
             error,
             started: false,
@@ -210,7 +284,7 @@ where
             started: false,
         };
     }
-    let receipt = match backend.start_blocking(capability) {
+    let receipt = match backend.start_blocking(capability, &context.execution) {
         Ok(receipt) => receipt,
         Err(source) => {
             return RunTerminal::Failed {
@@ -228,256 +302,16 @@ where
     stream_samples(journal, stage, context, backend, gates, metric)
 }
 
-fn stream_samples<B, G, M>(
-    journal: &Journal,
-    stage: &SearchStage,
-    context: &RunContext<'_>,
+fn prepare_backend_run<B>(
     backend: &mut B,
-    gates: &mut G,
-    metric: &mut M,
-) -> RunTerminal
+    capability: &SimulatorCapability,
+    context: &RunContext<'_>,
+) -> Result<(), TuneError>
 where
     B: SimulatorBackend,
-    G: GateEvaluator,
-    M: MetricEvaluator,
 {
-    let timeout = Duration::from_millis(u64::from(context.scenario.sample_timeout_ms));
-    let mut position = StreamPosition::default();
-    loop {
-        if let Err(error) = journal.ensure_usable() {
-            return RunTerminal::Failed {
-                error,
-                started: true,
-            };
-        }
-        match backend.sample_blocking(timeout) {
-            Ok(SampleEvent::Sample(sample)) => {
-                if let Some(terminal) = process_sample(
-                    journal,
-                    stage,
-                    context,
-                    sample,
-                    &mut position,
-                    gates,
-                    metric,
-                ) {
-                    return terminal;
-                }
-            }
-            Ok(SampleEvent::Complete) => {
-                return finish_stream_blocking(
-                    journal,
-                    context,
-                    position.expected_sequence,
-                    backend,
-                    gates,
-                    metric,
-                );
-            }
-            Ok(SampleEvent::TimedOut) => {
-                return hard_failure(
-                    context,
-                    position.expected_sequence,
-                    position.elapsed_ms,
-                    GateOutcome::fail(
-                        "core.sample_timeout",
-                        "the simulator did not supply a sample before the timeout",
-                    ),
-                );
-            }
-            Err(source) => {
-                return RunTerminal::Failed {
-                    error: adapter_error(backend, "sample", source),
-                    started: true,
-                };
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct StreamPosition {
-    expected_sequence: u64,
-    elapsed_ms: u64,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn process_sample<G, M>(
-    journal: &Journal,
-    stage: &SearchStage,
-    context: &RunContext<'_>,
-    sample: TelemetrySample,
-    position: &mut StreamPosition,
-    gates: &mut G,
-    metric: &mut M,
-) -> Option<RunTerminal>
-where
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    if position.expected_sequence >= u64::from(context.scenario.max_samples) {
-        return Some(hard_failure(
-            context,
-            sample.sequence,
-            sample.elapsed_ms,
-            GateOutcome::fail(
-                "core.sample_limit",
-                "the simulator exceeded the scenario sample limit",
-            ),
-        ));
-    }
-    if let Err(error) = validate_sample(&sample, position.expected_sequence, position.elapsed_ms) {
-        return Some(RunTerminal::Failed {
-            error,
-            started: true,
-        });
-    }
-    position.elapsed_ms = sample.elapsed_ms;
-    position.expected_sequence = position.expected_sequence.wrapping_add(1);
-    match evaluate_sample(journal, stage, &sample, gates, metric) {
-        Ok(Some(gate)) => Some(hard_failure(
-            context,
-            sample.sequence,
-            sample.elapsed_ms,
-            gate,
-        )),
-        Ok(None) => None,
-        Err(error) => Some(RunTerminal::Failed {
-            error,
-            started: true,
-        }),
-    }
-}
-
-fn finish_stream_blocking<B, G, M>(
-    journal: &Journal,
-    context: &RunContext<'_>,
-    sample_count: u64,
-    backend: &mut B,
-    gates: &mut G,
-    metric: &mut M,
-) -> RunTerminal
-where
-    B: SimulatorBackend,
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    if sample_count == 0 {
-        return hard_failure(
-            context,
-            0,
-            0,
-            GateOutcome::fail(
-                "core.no_samples",
-                "the simulator completed without telemetry samples",
-            ),
-        );
-    }
-    finish_normal_run_blocking(journal, backend, gates, metric)
-}
-
-fn evaluate_sample<G, M>(
-    journal: &Journal,
-    stage: &SearchStage,
-    sample: &TelemetrySample,
-    gates: &mut G,
-    metric: &mut M,
-) -> Result<Option<GateOutcome>, TuneError>
-where
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    journal.ensure_usable()?;
-    let outcomes = gates
-        .evaluate(sample)
-        .map_err(|source| evaluator_error(gates.identity(), "evaluate hard gates", source))?;
-    if let Some(failure) = validate_gate_outcomes(&stage.required_hard_gates, &outcomes)? {
-        return Ok(Some(failure));
-    }
-    journal.ensure_usable()?;
-    metric
-        .observe(sample)
-        .map_err(|source| evaluator_error(metric.identity(), "observe metric", source))?;
-    Ok(None)
-}
-
-fn finish_normal_run_blocking<B, G, M>(
-    journal: &Journal,
-    backend: &mut B,
-    gates: &mut G,
-    metric: &mut M,
-) -> RunTerminal
-where
-    B: SimulatorBackend,
-    G: GateEvaluator,
-    M: MetricEvaluator,
-{
-    if let Err(error) = journal.ensure_usable() {
-        return RunTerminal::Failed {
-            error,
-            started: true,
-        };
-    }
-    if let Err(source) = backend.stop_blocking() {
-        return RunTerminal::Failed {
-            error: adapter_error(backend, "stop", source),
-            started: true,
-        };
-    }
-    if let Err(error) = journal.ensure_usable() {
-        return RunTerminal::Failed {
-            error,
-            started: false,
-        };
-    }
-    if let Err(source) = gates.finish() {
-        return RunTerminal::Failed {
-            error: evaluator_error(gates.identity(), "finish hard gates", source),
-            started: false,
-        };
-    }
-    if let Err(error) = journal.ensure_usable() {
-        return RunTerminal::Failed {
-            error,
-            started: false,
-        };
-    }
-    let values = match metric.finish() {
-        Ok(values) => values,
-        Err(source) => {
-            return RunTerminal::Failed {
-                error: evaluator_error(metric.identity(), "finish metric", source),
-                started: false,
-            };
-        }
-    };
-    if let Err(error) = validate_metric(&values) {
-        return RunTerminal::Failed {
-            error,
-            started: false,
-        };
-    }
-    RunTerminal::Passed {
-        values,
-        stop: OperationStatus::Succeeded,
-    }
-}
-
-fn hard_failure(
-    context: &RunContext<'_>,
-    sample_sequence: u64,
-    elapsed_ms: u64,
-    gate: GateOutcome,
-) -> RunTerminal {
-    RunTerminal::HardGate {
-        failure: HardGateFailure {
-            scenario_set: context.set,
-            scenario_id: context.scenario.id.clone(),
-            repetition: context.repetition,
-            seed: context.seed,
-            sample_sequence,
-            elapsed_ms,
-            gate,
-        },
-    }
+    let receipt = backend
+        .prepare_blocking(capability, &context.execution, context.scenario)
+        .map_err(|source| adapter_error(backend, "prepare", source))?;
+    validate_run_preparation_receipt(receipt, capability, context.run_intent_digest)
 }
