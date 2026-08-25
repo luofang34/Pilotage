@@ -21,6 +21,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { INITIAL_CAMERA } from "./situation-map.js";
+
 const webRoot = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(webRoot, "..", "..");
 const TEST_PORT_PARAM = "4433";
@@ -472,12 +474,19 @@ const near = (value, expected, tolerance) =>
     observed.mapState === "ready",
   );
   check(`map ready: the projection is the globe (${observed.projection})`, observed.projection === "globe");
-  check(`map ready: zoom matches the Apple camera (${observed.zoom})`, near(observed.zoom, 6, 0.01));
-  check(`map ready: pitch matches the Apple camera (${observed.pitch})`, near(observed.pitch, 55, 0.01));
+  check(
+    `map ready: zoom matches the Apple camera (${observed.zoom})`,
+    near(observed.zoom, INITIAL_CAMERA.zoomLevel, 0.01),
+  );
+  check(
+    `map ready: pitch matches the Apple camera (${observed.pitch})`,
+    near(observed.pitch, INITIAL_CAMERA.pitchDegrees, 0.01),
+  );
   const [lat, lng] = String(observed.center).split(",").map(Number);
   check(
     `map ready: centre matches the Apple camera (${observed.center})`,
-    near(lat, 40.5, 0.01) && near(lng, -76.5, 0.01),
+    near(lat, INITIAL_CAMERA.centerLatitudeDeg, 0.01) &&
+      near(lng, INITIAL_CAMERA.centerLongitudeDeg, 0.01),
   );
   check(
     `map ready: closest zoom derives from the terrain manifest (${observed.maxZoom})`,

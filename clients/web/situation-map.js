@@ -24,9 +24,9 @@ import {
  *  and holds the two in step); the closest zoom derives from the terrain
  *  manifest. */
 export const INITIAL_CAMERA = Object.freeze({
-  centerLatitudeDeg: 40.5,
-  centerLongitudeDeg: -76.5,
-  zoomLevel: 6,
+  centerLatitudeDeg: 47.4,
+  centerLongitudeDeg: 8.55,
+  zoomLevel: 9,
   pitchDegrees: 55,
   minimumZoomLevel: 0,
 });
