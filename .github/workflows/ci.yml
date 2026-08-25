@@ -408,6 +408,9 @@ jobs:
       - name: situation style resolution (shared with the Apple client)
         run: node clients/web/situation-style.test.mjs
 
+      - name: situation camera controls (shared with the Apple client)
+        run: node clients/web/situation-camera.test.mjs
+
       - name: Vendor the MapLibre GL JS renderer (pinned digest)
         run: bash scripts/vendor-maplibre-web.sh
 

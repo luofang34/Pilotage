@@ -13,6 +13,12 @@ import {
   resolveSituationStyle,
   SituationStyleError,
 } from "./situation-style.js";
+import {
+  CAMERA_MOVE_DURATION_MS,
+  LEVEL_CONTROL_LABEL,
+  headingControlLabel,
+  situationCamera,
+} from "./situation-camera.js";
 
 /** Camera the map opens with. The values match the Apple client's
  *  SituationMap defaults (situation-style.test.mjs reads the Swift source
@@ -52,6 +58,38 @@ async function fetchJson(url) {
   const response = await fetch(url);
   if (!response.ok) return null;
   return response.json();
+}
+
+/** Adds the control that undoes a tilt. The renderer's own compass undoes
+ *  a turn; nothing in it looks straight down again. The control appears
+ *  only while the map is tilted, so a reader never meets a button that
+ *  does nothing (the Apple client applies the same rule to both). */
+function attachLevelControl(doc, map, surface) {
+  const button = doc.createElement("button");
+  button.type = "button";
+  button.className = "map-level-control";
+  button.textContent = "⌖";
+  button.hidden = true;
+  button.addEventListener("click", () => {
+    map.easeTo({ pitch: 0, duration: CAMERA_MOVE_DURATION_MS });
+  });
+  surface.append(button);
+  const update = () => {
+    const camera = situationCamera({
+      bearingDeg: map.getBearing(),
+      pitchDeg: map.getPitch(),
+    });
+    button.hidden = !camera.isTilted;
+    button.title = LEVEL_CONTROL_LABEL;
+    button.setAttribute("aria-label", LEVEL_CONTROL_LABEL);
+    // The compass is the renderer's, so the heading wording it cannot
+    // carry rides the map surface where a reader's tool can still find it.
+    surface.setAttribute("aria-label", headingControlLabel(camera.headingDegrees));
+    surface.dataset.cameraHeading = camera.headingDegrees.toFixed(1);
+    surface.dataset.cameraPitch = camera.pitchDegrees.toFixed(1);
+  };
+  map.on("move", update);
+  update();
 }
 
 function loadStylesheet(doc, href) {
@@ -177,6 +215,13 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
       setUnavailable(MAP_REASON.RENDER_FAILED, String(error));
       return null;
     }
+
+    // A pointer has no two-finger tilt or turn, so the camera needs a
+    // control to reach them: the compass turns the map when dragged and
+    // faces north again when clicked. Touch reaches the same camera
+    // through the renderer's own two-finger handlers.
+    map.addControl(new maplibre.NavigationControl({ visualizePitch: true }), "top-right");
+    attachLevelControl(doc, map, surface);
 
     const loggedErrors = new Set();
     let suppressionAnnounced = false;

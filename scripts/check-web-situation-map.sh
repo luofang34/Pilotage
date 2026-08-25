@@ -11,12 +11,14 @@ root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 web="$root/clients/web"
 map_module="$web/situation-map.js"
 style_module="$web/situation-style.js"
+camera_module="$web/situation-camera.js"
 vendor_script="$root/scripts/vendor-maplibre-web.sh"
 assets_script="$root/scripts/build-web-situation-assets.sh"
 ci="$root/.github/workflows/ci.yml"
 status=0
 
-for path in "$map_module" "$style_module" "$web/situation-style.test.mjs" \
+for path in "$map_module" "$style_module" "$camera_module" \
+    "$web/situation-style.test.mjs" "$web/situation-camera.test.mjs" \
     "$web/situation-map.browser.test.mjs" "$vendor_script" "$assets_script"; do
     if [ ! -f "$path" ]; then
         echo "FORBIDDEN: required web situation file is missing: $path" >&2
@@ -81,9 +83,24 @@ fi
 
 # The web client loads no external resource at run time. The second
 # pattern catches a protocol-relative URL.
-if grep -Eqi 'https?://' "$map_module" "$style_module" \
-    || grep -Eq '["'\'']//' "$map_module" "$style_module"; then
+if grep -Eqi 'https?://' "$map_module" "$style_module" "$camera_module" \
+    || grep -Eq '["'\'']//' "$map_module" "$style_module" "$camera_module"; then
     echo "FORBIDDEN: the situation modules must have no network URL" >&2
+    status=1
+fi
+
+# A reader who turned or tilted the map needs one way back to north and one
+# way back to straight down, and the pointer needs a control to reach a
+# camera that touch reaches with two fingers.
+if ! grep -Fq 'NavigationControl' "$map_module" \
+    || ! grep -Fq 'attachLevelControl' "$map_module"; then
+    echo "FORBIDDEN: the map must carry the compass and the level control" >&2
+    status=1
+fi
+# The thresholds and the wording are the Apple client's; the web client
+# must read them from the shared vocabulary rather than restate them.
+if grep -Eq '[<>]=?[[:space:]]*0\.5|Look straight down|turn back to north' "$map_module"; then
+    echo "FORBIDDEN: camera thresholds and wording belong to situation-camera.js" >&2
     status=1
 fi
 
@@ -106,6 +123,7 @@ done
 # The guardrails only hold while CI runs them. The step must sit on a
 # live run: line; a commented-out step does not count.
 for step in 'clients/web/situation-style.test.mjs' \
+    'clients/web/situation-camera.test.mjs' \
     'clients/web/situation-map.browser.test.mjs' \
     'scripts/vendor-maplibre-web.sh' \
     'scripts/check-web-situation-map.sh' \

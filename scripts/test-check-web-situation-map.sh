@@ -8,7 +8,8 @@ trap 'rm -rf "$fixture"' EXIT
 
 web="$fixture/clients/web"
 mkdir -p "$web" "$fixture/scripts" "$fixture/.github/workflows"
-for file in situation-map.js situation-style.js situation-style.test.mjs \
+for file in situation-map.js situation-style.js situation-camera.js \
+    situation-style.test.mjs situation-camera.test.mjs \
     situation-map.browser.test.mjs index.html main.js layout.js; do
     cp "$repo_root/clients/web/$file" "$web/"
 done
@@ -90,6 +91,14 @@ restore clients/web/situation-map.js
 
 sed -i.bak 's/MAP_ASSETS_MISSING/MAP_ASSETS_ABSENT/g' "$web/situation-map.js"
 reject "a map that lost its typed assets-missing state"
+restore clients/web/situation-map.js
+
+sed -i.bak '/NavigationControl/d' "$web/situation-map.js"
+reject "a map a pointer cannot turn or tilt"
+restore clients/web/situation-map.js
+
+sed -i.bak 's/LEVEL_CONTROL_LABEL/"Look straight down"/' "$web/situation-map.js"
+reject "camera wording restated in the map module"
 restore clients/web/situation-map.js
 
 sed -i.bak 's/^MAPLIBRE_TARBALL_SHA256=.*/MAPLIBRE_TARBALL_SHA256=""/' \
