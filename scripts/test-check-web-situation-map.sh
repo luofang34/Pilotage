@@ -97,7 +97,11 @@ sed -i.bak '/NavigationControl/d' "$web/situation-map.js"
 reject "a map a pointer cannot turn or tilt"
 restore clients/web/situation-map.js
 
-sed -i.bak 's/LEVEL_CONTROL_LABEL/"Look straight down"/' "$web/situation-map.js"
+sed -i.bak 's/visualizePitch: true/visualizePitch: false/' "$web/situation-map.js"
+reject "a compass a pointer cannot tilt with"
+restore clients/web/situation-map.js
+
+sed -i.bak 's/NORTH_UP_LABEL/"Facing north"/' "$web/situation-map.js"
 reject "camera wording restated in the map module"
 restore clients/web/situation-map.js
 

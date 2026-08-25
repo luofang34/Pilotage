@@ -62,19 +62,17 @@ Select "situation / globe" in the main-view control.
 
 Touch reaches the camera with two fingers: two fingers that move together
 tilt the map, and two fingers that turn it rotate the map. A pointer has
-neither gesture, so the map carries controls for both:
+neither gesture, so the map carries a compass. Drag the compass to turn
+and tilt the map. Click it to face north and look straight down again. A
+drag on the map with the control key held turns and tilts it too.
 
-- The compass turns the map when you drag it, and faces the map north
-  again when you click it. A drag on the map with the control key held
-  does the same.
-- The level control looks straight down again. It appears only while the
-  map is tilted.
+The Apple client hides its controls until there is something to undo,
+because touch reaches the camera without them. A pointer reaches the
+camera only through the compass, so the compass is always on the map.
 
-The Apple client applies the same rule: a control appears only when there
-is something to undo. `clients/web/situation-camera.js` holds the
-thresholds and the wording, and `situation-camera.test.mjs` reads the
-Apple sources so a value changed on one client fails until the other
-follows.
+`clients/web/situation-camera.js` holds the thresholds and the wording the
+two clients share, and `situation-camera.test.mjs` reads the Apple sources
+so a value changed on one client fails until the other follows.
 
 ## Availability
 

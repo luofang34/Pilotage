@@ -14,8 +14,7 @@ import {
   SituationStyleError,
 } from "./situation-style.js";
 import {
-  CAMERA_MOVE_DURATION_MS,
-  LEVEL_CONTROL_LABEL,
+  NORTH_UP_LABEL,
   headingControlLabel,
   situationCamera,
 } from "./situation-camera.js";
@@ -60,38 +59,6 @@ async function fetchJson(url) {
   return response.json();
 }
 
-/** Adds the control that undoes a tilt. The renderer's own compass undoes
- *  a turn; nothing in it looks straight down again. The control appears
- *  only while the map is tilted, so a reader never meets a button that
- *  does nothing (the Apple client applies the same rule to both). */
-function attachLevelControl(doc, map, surface) {
-  const button = doc.createElement("button");
-  button.type = "button";
-  button.className = "map-level-control";
-  button.textContent = "⌖";
-  button.hidden = true;
-  button.addEventListener("click", () => {
-    map.easeTo({ pitch: 0, duration: CAMERA_MOVE_DURATION_MS });
-  });
-  surface.append(button);
-  const update = () => {
-    const camera = situationCamera({
-      bearingDeg: map.getBearing(),
-      pitchDeg: map.getPitch(),
-    });
-    button.hidden = !camera.isTilted;
-    button.title = LEVEL_CONTROL_LABEL;
-    button.setAttribute("aria-label", LEVEL_CONTROL_LABEL);
-    // The compass is the renderer's, so the heading wording it cannot
-    // carry rides the map surface where a reader's tool can still find it.
-    surface.setAttribute("aria-label", headingControlLabel(camera.headingDegrees));
-    surface.dataset.cameraHeading = camera.headingDegrees.toFixed(1);
-    surface.dataset.cameraPitch = camera.pitchDegrees.toFixed(1);
-  };
-  map.on("move", update);
-  update();
-}
-
 function loadStylesheet(doc, href) {
   return new Promise((resolve) => {
     const link = doc.createElement("link");
@@ -101,6 +68,32 @@ function loadStylesheet(doc, href) {
     link.addEventListener("error", () => resolve(false), { once: true });
     doc.head.append(link);
   });
+}
+
+/** Reports where the camera points, for a reader's own tool and for the
+ *  tests that hold the two clients to the same rule. The label is written
+ *  only when the heading changes: the move event fires every frame of a
+ *  drag, and an accessible name rewritten at that rate is announced at
+ *  that rate. */
+function watchCamera(map, surface) {
+  let last = null;
+  const update = () => {
+    const camera = situationCamera({
+      bearingDeg: map.getBearing(),
+      pitchDeg: map.getPitch(),
+    });
+    surface.dataset.cameraHeading = camera.headingDegrees.toFixed(1);
+    surface.dataset.cameraPitch = camera.pitchDegrees.toFixed(1);
+    const label = camera.isRotated
+      ? headingControlLabel(camera.headingDegrees)
+      : NORTH_UP_LABEL;
+    if (label !== last) {
+      last = label;
+      surface.setAttribute("aria-label", label);
+    }
+  };
+  map.on("move", update);
+  update();
 }
 
 /**
@@ -217,11 +210,13 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     }
 
     // A pointer has no two-finger tilt or turn, so the camera needs a
-    // control to reach them: the compass turns the map when dragged and
-    // faces north again when clicked. Touch reaches the same camera
-    // through the renderer's own two-finger handlers.
+    // control to reach them: the compass turns and tilts the map when
+    // dragged, and faces north and looks straight down again when
+    // clicked. Touch reaches the same camera through the renderer's own
+    // two-finger handlers, which is why the Apple client can hide its
+    // controls until there is something to undo and this one cannot.
     map.addControl(new maplibre.NavigationControl({ visualizePitch: true }), "top-right");
-    attachLevelControl(doc, map, surface);
+    watchCamera(map, surface);
 
     const loggedErrors = new Set();
     let suppressionAnnounced = false;

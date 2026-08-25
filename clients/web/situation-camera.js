@@ -1,13 +1,17 @@
-// Where the situation map's camera is pointing, and the controls that undo
-// it. The vocabulary mirrors the Apple client's SituationCamera and
-// MapControlsView so a reader meets the same rule on both clients: a
-// control appears only when there is something to undo, because a control
-// that does nothing teaches a reader to ignore the corner it sits in.
+// Where the situation map's camera is pointing. The vocabulary mirrors the
+// Apple client's SituationCamera and MapControlsView, so what a reader is
+// told about the camera is the same sentence on both clients.
+//
+// The rule the two clients do NOT share is when a control appears. Touch
+// reaches the camera with two fingers, so the Apple client can hide a
+// control until there is something to undo. A pointer reaches the camera
+// only through a control, so the web client's compass is always there.
 //
 // The renderers report a bearing differently — MapLibre GL JS normalizes to
-// (-180, 180], MapLibre Native reports 0 to 360 — so the heading is
+// [-180, 180), MapLibre Native reports 0 to 360 — so the heading is
 // normalized here and the shared threshold is applied to the same quantity
-// on both sides.
+// on both sides. The two agree over every bearing either renderer can
+// report; a value outside one full turn is unreachable from both.
 
 /** Turned far enough off north for a reader to notice. A fraction of a
  *  degree is a rounding artefact of a pinch, not a decision. */
@@ -64,8 +68,5 @@ export function headingControlLabel(headingDegrees) {
   return `Facing ${spokenHeading(headingDegrees)}, turn back to north`;
 }
 
-/** What the control that undoes a tilt says. */
-export const LEVEL_CONTROL_LABEL = "Look straight down";
-
-/** How long a control's camera move takes, matching the Apple client. */
-export const CAMERA_MOVE_DURATION_MS = 220;
+/** What the map says about itself when it already faces north. */
+export const NORTH_UP_LABEL = "Facing north";

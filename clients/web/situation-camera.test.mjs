@@ -11,8 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  CAMERA_MOVE_DURATION_MS,
-  LEVEL_CONTROL_LABEL,
+  NORTH_UP_LABEL,
   cardinal,
   headingControlLabel,
   normalizeHeadingDeg,
@@ -31,7 +30,7 @@ const binding = join(
   "PilotageMapLibreBinding",
 );
 const cameraSwift = readFileSync(join(binding, "SituationCamera.swift"), "utf8");
-const mapViewSwift = readFileSync(join(binding, "SituationMapView.swift"), "utf8");
+
 const controlsSwift = readFileSync(
   join(webRoot, "..", "apple", "App", "MapControlsView.swift"),
   "utf8",
@@ -106,20 +105,20 @@ function testCompassWordingMatchesTheAppleControls() {
     controlsSwift.includes('label: "Facing \\(CompassRose.spokenHeading(camera.headingDegrees)), turn back to north"'),
     "the Apple control says the same sentence",
   );
-  assert.ok(
-    controlsSwift.includes(`label: "${LEVEL_CONTROL_LABEL}"`),
-    "the Apple level control says the same words",
-  );
+
 }
 testCompassWordingMatchesTheAppleControls();
 console.log("ok - testCompassWordingMatchesTheAppleControls");
 
-function testCameraMoveDurationMatchesTheAppleBinding() {
-  const duration = mapViewSwift.match(/cameraMoveDuration[^=]*= ([\d.]+)/);
-  assert.ok(duration, "SituationMapView.swift declares the camera move duration");
-  assert.equal(CAMERA_MOVE_DURATION_MS, Math.round(Number(duration[1]) * 1000));
+function testTheMapSaysWhichWayItFaces() {
+  // The heading sentence is the Apple client's. When there is nothing to
+  // undo the map says so plainly rather than inviting a turn back to the
+  // direction it already faces.
+  assert.equal(headingControlLabel(45), "Facing north east, turn back to north");
+  assert.equal(NORTH_UP_LABEL, "Facing north");
+  assert.equal(situationCamera({ bearingDeg: 0, pitchDeg: 0 }).isRotated, false);
 }
-testCameraMoveDurationMatchesTheAppleBinding();
-console.log("ok - testCameraMoveDurationMatchesTheAppleBinding");
+testTheMapSaysWhichWayItFaces();
+console.log("ok - testTheMapSaysWhichWayItFaces");
 
 console.log("\nall situation camera checks passed");

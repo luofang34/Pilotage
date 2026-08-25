@@ -93,13 +93,13 @@ fi
 # way back to straight down, and the pointer needs a control to reach a
 # camera that touch reaches with two fingers.
 if ! grep -Fq 'NavigationControl' "$map_module" \
-    || ! grep -Fq 'attachLevelControl' "$map_module"; then
-    echo "FORBIDDEN: the map must carry the compass and the level control" >&2
+    || ! grep -Fq 'visualizePitch: true' "$map_module"; then
+    echo "FORBIDDEN: a pointer must be able to turn and tilt the map" >&2
     status=1
 fi
 # The thresholds and the wording are the Apple client's; the web client
 # must read them from the shared vocabulary rather than restate them.
-if grep -Eq '[<>]=?[[:space:]]*0\.5|Look straight down|turn back to north' "$map_module"; then
+if grep -Eq '[<>]=?[[:space:]]*0\.5|Facing north|turn back to north' "$map_module"; then
     echo "FORBIDDEN: camera thresholds and wording belong to situation-camera.js" >&2
     status=1
 fi

@@ -231,7 +231,6 @@ if (figure?.dataset.mapState === "ready") {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const container = surface.querySelector(".maplibregl-canvas-container");
   const compass = surface.querySelector(".maplibregl-ctrl-compass");
-  const level = surface.querySelector(".map-level-control");
   const heading = () => Number(surface.dataset.cameraHeading);
   const pitch = () => Number(surface.dataset.cameraPitch);
   const drag = (from, to, init) => {
@@ -257,20 +256,22 @@ if (figure?.dataset.mapState === "ready") {
   };
 
   const start = { heading: heading(), pitch: pitch() };
-  // The map opens tilted, so the level control is the reader's way back.
-  const levelShownAtStart = level && !level.hidden;
-  level?.click();
-  await sleep(700);
-  const afterLevel = { heading: heading(), pitch: pitch() };
-  const levelHiddenWhenFlat = level ? level.hidden : null;
+  const labelAtStart = surface.getAttribute("aria-label") ?? "";
 
-  // Ctrl-drag on the map: the renderer's pointer path to turn and tilt.
+  // The pointer path to turn and tilt.
   drag([600, 400], [740, 300], { ctrlKey: true });
   await sleep(700);
   const afterCtrlDrag = { heading: heading(), pitch: pitch() };
-  const levelShownWhenTilted = level && !level.hidden;
+  const labelWhenTurned = surface.getAttribute("aria-label") ?? "";
 
-  // Two fingers moving together: the touch path to tilt.
+  // The compass: one control back to north and to straight down.
+  compass?.click();
+  await sleep(1600);
+  const afterCompass = { heading: heading(), pitch: pitch() };
+
+  // Two fingers moving together: the touch path to tilt. It runs from the
+  // levelled camera, because a camera already at the pitch ceiling cannot
+  // show that a gesture reached it.
   const beforeTouch = { heading: heading(), pitch: pitch() };
   let touchFailed = null;
   try {
@@ -282,19 +283,11 @@ if (figure?.dataset.mapState === "ready") {
   } catch (error) { touchFailed = String(error); }
   const afterTouch = { heading: heading(), pitch: pitch() };
 
-  // The compass: click to face north again.
-  compass?.click();
-  await sleep(900);
-  const afterCompass = { heading: heading(), pitch: pitch() };
-
   interaction = {
     compassPresent: Boolean(compass),
-    levelPresent: Boolean(level),
-    levelShownAtStart, levelHiddenWhenFlat, levelShownWhenTilted,
-    start, afterLevel, afterCtrlDrag, beforeTouch, afterTouch, afterCompass,
-    touchFailed,
-    surfaceLabel: surface.getAttribute("aria-label") ?? "",
-    levelLabel: level?.getAttribute("aria-label") ?? "",
+    levelControlAbsent: surface.querySelector(".map-level-control") === null,
+    start, afterCtrlDrag, beforeTouch, afterTouch, afterCompass,
+    touchFailed, labelAtStart, labelWhenTurned,
   };
 }
 const attribution = surface?.querySelector(".maplibregl-ctrl-attrib")?.textContent ?? "";
@@ -474,7 +467,10 @@ const near = (value, expected, tolerance) =>
     "map ready: the map surface has real size",
     observed.surfaceSize.width > 200 && observed.surfaceSize.height > 200,
   );
-  check("map ready: the stage reports ready", observed.mapState === "ready");
+  check(
+    `map ready: the stage reports ready (${observed.mapState}${observed.mapReason ? ": " + observed.mapReason : ""}${observed.notice ? " — " + observed.notice : ""})`,
+    observed.mapState === "ready",
+  );
   check(`map ready: the projection is the globe (${observed.projection})`, observed.projection === "globe");
   check(`map ready: zoom matches the Apple camera (${observed.zoom})`, near(observed.zoom, 6, 0.01));
   check(`map ready: pitch matches the Apple camera (${observed.pitch})`, near(observed.pitch, 55, 0.01));
@@ -499,30 +495,17 @@ const near = (value, expected, tolerance) =>
     check("camera: the interaction probe ran", false);
   } else {
     check("camera: the compass control is on the map", camera.compassPresent);
-    check("camera: the level control is on the map", camera.levelPresent);
     check(
-      `camera: the level control shows while the map opens tilted (pitch ${camera.start.pitch})`,
-      camera.levelShownAtStart === true && camera.start.pitch > 0.5,
+      "camera: nothing else claims to level the map",
+      camera.levelControlAbsent,
     );
     check(
-      `camera: the level control looks straight down (pitch ${camera.start.pitch} → ${camera.afterLevel.pitch})`,
-      camera.afterLevel.pitch < 0.5,
+      `camera: a ctrl-drag turns the map (heading ${camera.start.heading} → ${camera.afterCtrlDrag.heading})`,
+      Math.abs(camera.afterCtrlDrag.heading - camera.start.heading) > 1,
     );
     check(
-      "camera: the level control hides once there is no tilt to undo",
-      camera.levelHiddenWhenFlat === true,
-    );
-    check(
-      `camera: a ctrl-drag turns the map (heading ${camera.afterLevel.heading} → ${camera.afterCtrlDrag.heading})`,
-      Math.abs(camera.afterCtrlDrag.heading - camera.afterLevel.heading) > 1,
-    );
-    check(
-      `camera: a ctrl-drag tilts the map (pitch ${camera.afterLevel.pitch} → ${camera.afterCtrlDrag.pitch})`,
-      camera.afterCtrlDrag.pitch - camera.afterLevel.pitch > 1,
-    );
-    check(
-      "camera: the level control returns once the map is tilted again",
-      camera.levelShownWhenTilted === true,
+      `camera: a ctrl-drag tilts the map (pitch ${camera.start.pitch} → ${camera.afterCtrlDrag.pitch})`,
+      Math.abs(camera.afterCtrlDrag.pitch - camera.start.pitch) > 1,
     );
     check(
       `camera: two fingers moving together tilt the map (pitch ${camera.beforeTouch.pitch} → ${camera.afterTouch.pitch})`,
@@ -531,17 +514,21 @@ const near = (value, expected, tolerance) =>
     );
     if (camera.touchFailed) console.error(`  touch path failed: ${camera.touchFailed}`);
     check(
-      `camera: the compass faces north again (heading ${camera.afterTouch.heading} → ${camera.afterCompass.heading})`,
+      `camera: the compass faces north again (heading ${camera.afterCtrlDrag.heading} → ${camera.afterCompass.heading})`,
       camera.afterCompass.heading < 0.5 || camera.afterCompass.heading > 359.5,
     );
     check(
-      "camera: the level control says the same words as the Apple control",
-      camera.levelLabel === "Look straight down",
+      `camera: the compass looks straight down again (pitch ${camera.afterCtrlDrag.pitch} → ${camera.afterCompass.pitch})`,
+      camera.afterCompass.pitch < 0.5,
     );
     check(
-      `camera: the map surface says which way it faces (${camera.surfaceLabel})`,
-      camera.surfaceLabel.startsWith("Facing ") &&
-        camera.surfaceLabel.endsWith("turn back to north"),
+      `camera: the map says it faces north when it does (${camera.labelAtStart})`,
+      camera.labelAtStart === "Facing north",
+    );
+    check(
+      `camera: the map says which way it faces when turned (${camera.labelWhenTurned})`,
+      camera.labelWhenTurned.startsWith("Facing ") &&
+        camera.labelWhenTurned.endsWith("turn back to north"),
     );
   }
 }
