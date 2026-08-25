@@ -18,7 +18,10 @@ mkdir -p \
     "$fixture/tools/flight-tune-aviate/src/bin" \
     "$fixture/tools/flight-tune-aviate/src/support" \
     "$fixture/tools/flight-tune-aviate/src/tests" \
-    "$fixture/tools/flight-tune-campaign/src/config"
+    "$fixture/tools/flight-tune-campaign/src/config" \
+    "$fixture/vendor/errno/src" \
+    "$fixture/vendor/libproc/src" \
+    "$fixture/vendor/sysctl/src"
 
 write_workspace() {
     printf '%s\n' \
@@ -31,6 +34,9 @@ write_workspace() {
         '    "tools/flight-tune",' \
         '    "tools/flight-tune-aviate",' \
         '    "tools/flight-tune-campaign",' \
+        '    "vendor/errno",' \
+        '    "vendor/libproc",' \
+        '    "vendor/sysctl",' \
         ']' \
         'resolver = "2"' \
         > "$fixture/Cargo.toml"
@@ -63,6 +69,59 @@ write_adapter_packages() {
         > "$fixture/injected/Cargo.toml"
     printf '%s\n' 'extern crate proc_macro;' \
         > "$fixture/injected/src/lib.rs"
+    printf '%s\n' \
+        '[package]' \
+        'name = "errno"' \
+        'version = "0.3.14"' \
+        'edition = "2021"' \
+        > "$fixture/vendor/errno/Cargo.toml"
+    printf '%s\n' 'pub fn fixture() {}' \
+        > "$fixture/vendor/errno/src/lib.rs"
+    printf '%s\n' \
+        '[package]' \
+        'name = "libproc"' \
+        'version = "0.14.11"' \
+        'edition = "2021"' \
+        > "$fixture/vendor/libproc/Cargo.toml"
+    printf '%s\n' 'pub fn fixture() {}' \
+        > "$fixture/vendor/libproc/src/lib.rs"
+    printf '%s\n' \
+        '[package]' \
+        'name = "sysctl"' \
+        'version = "0.7.1"' \
+        'edition = "2021"' \
+        > "$fixture/vendor/sysctl/Cargo.toml"
+    printf '%s\n' 'pub fn fixture() {}' \
+        > "$fixture/vendor/sysctl/src/lib.rs"
+}
+
+write_clean_cargo_config() {
+    mkdir -p "$fixture/.cargo"
+    printf '%s\n' \
+        '[env]' \
+        'BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin = "--target=aarch64-apple-darwin"' \
+        > "$fixture/.cargo/config.toml"
+}
+
+write_aviate_manifest() {
+    local errno_version="$1" libproc_version="$2" sysctl_version="$3"
+    local normal_dependency="${4:-}"
+    {
+        printf '%s\n' \
+            '[package]' \
+            'name = "flight-tune-aviate"' \
+            'version = "0.0.0"' \
+            'edition = "2021"' \
+            '[dependencies]'
+        if [ -n "$normal_dependency" ]; then
+            printf '%s\n' "$normal_dependency"
+        fi
+        printf '%s\n' \
+            '[target.'\''cfg(target_os = "macos")'\''.dependencies]' \
+            "errno = { version = \"$errno_version\", path = \"../../vendor/errno\" }" \
+            "libproc = { version = \"$libproc_version\", path = \"../../vendor/libproc\" }" \
+            "sysctl = { version = \"$sysctl_version\", path = \"../../vendor/sysctl\" }"
+    } > "$fixture/tools/flight-tune-aviate/Cargo.toml"
 }
 
 write_clean_manifests() {
@@ -80,15 +139,7 @@ write_clean_manifests() {
         'edition = "2021"' \
         '[dependencies]' \
         > "$fixture/tools/flight-tune/Cargo.toml"
-    printf '%s\n' \
-        '[package]' \
-        'name = "flight-tune-aviate"' \
-        'version = "0.0.0"' \
-        'edition = "2021"' \
-        '[dependencies]' \
-        'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
-        'pilotage-xplane-trial = { path = "../../adapters/pilotage-xplane-trial" }' \
-        > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+    write_aviate_manifest '=0.3.14' '=0.14.11' '=0.7.1'
     printf '%s\n' 'pub fn host() {}' \
         > "$fixture/tools/flight-tune-aviate/src/lib.rs"
     printf '%s\n' \
@@ -103,11 +154,19 @@ write_clean_manifests() {
 }
 
 write_dependency_allowlist() {
-    printf '%s\n' \
-        $'manifest\tdependency_key\tactual_package\tkind\ttarget\toptional\tsource_kind\tsource_ref\tdefault_features\tfeatures\tversion_req' \
-        $'tools/flight-tune-aviate/Cargo.toml\tflight-tune-xplane\tflight-tune-xplane\tnormal\t\tfalse\tpath\tadapters/flight-tune-xplane\ttrue\t\t*' \
-        $'tools/flight-tune-aviate/Cargo.toml\tpilotage-xplane-trial\tpilotage-xplane-trial\tnormal\t\tfalse\tpath\tadapters/pilotage-xplane-trial\ttrue\t\t*' \
-        > "$fixture/scripts/flight-tune-direct-dependency-allowlist.tsv"
+    local include_xplane="${1:-false}"
+    {
+        printf '%s\n' \
+            $'manifest\tdependency_key\tactual_package\tkind\ttarget\toptional\tsource_kind\tsource_ref\tdefault_features\tfeatures\tversion_req' \
+            $'tools/flight-tune-aviate/Cargo.toml\terrno\terrno\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/errno\ttrue\t\t=0.3.14'
+        if [ "$include_xplane" = true ]; then
+            printf '%s\n' \
+                $'tools/flight-tune-aviate/Cargo.toml\tflight-tune-xplane\tflight-tune-xplane\tnormal\t\tfalse\tpath\tadapters/flight-tune-xplane\ttrue\t\t*'
+        fi
+        printf '%s\n' \
+            $'tools/flight-tune-aviate/Cargo.toml\tlibproc\tlibproc\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/libproc\ttrue\t\t=0.14.11' \
+            $'tools/flight-tune-aviate/Cargo.toml\tsysctl\tsysctl\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/sysctl\ttrue\t\t=0.7.1'
+    } > "$fixture/scripts/flight-tune-direct-dependency-allowlist.tsv"
 }
 
 write_allowlisted_import() {
@@ -187,6 +246,7 @@ expect_failure_with_all() {
 
 write_workspace
 write_adapter_packages
+write_clean_cargo_config
 write_clean_manifests
 write_dependency_allowlist
 write_allowlisted_import
@@ -212,7 +272,7 @@ printf '%s\n' 'paths = ["../injected"]' \
 expect_failure \
     'a Cargo configuration path source override' \
     '.cargo/config.toml has an unreviewed dependency source override'
-rm "$fixture/.cargo/config.toml"
+write_clean_cargo_config
 
 printf '%s\n' 'include = ["source-override.toml"]' \
     > "$fixture/.cargo/config.toml"
@@ -223,8 +283,26 @@ printf '%s\n' \
 expect_failure \
     'an included Cargo configuration source override' \
     '.cargo/config.toml has an unreviewed dependency source override'
-rm "$fixture/.cargo/config.toml"
 rm "$fixture/.cargo/source-override.toml"
+write_clean_cargo_config
+
+printf '%s\n' \
+    '[env]' \
+    'BINDGEN_EXTRA_CLANG_ARGS_AARCH64_APPLE_DARWIN = "--target=aarch64-apple-darwin"' \
+    > "$fixture/.cargo/config.toml"
+expect_failure \
+    'a changed macOS bindgen environment key' \
+    '.cargo/config.toml must set BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin'
+write_clean_cargo_config
+
+printf '%s\n' \
+    '[env]' \
+    'BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin = "--target=x86_64-apple-darwin"' \
+    > "$fixture/.cargo/config.toml"
+expect_failure \
+    'a changed macOS bindgen environment value' \
+    '.cargo/config.toml must set BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin'
+write_clean_cargo_config
 
 printf '%s\n' \
     'version = 4' \
@@ -239,6 +317,51 @@ expect_failure \
     'an unreviewed Cargo lockfile registry identity' \
     'Cargo.lock has an unreviewed registry identity for serde'
 rm "$fixture/Cargo.lock"
+
+printf '%s\n' \
+    $'manifest\tdependency_key\tactual_package\tkind\ttarget\toptional\tsource_kind\tsource_ref\tdefault_features\tfeatures\tversion_req' \
+    $'tools/flight-tune-aviate/Cargo.toml\tsysctl\tsysctl\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/sysctl\ttrue\t\t=0.7.1' \
+    $'tools/flight-tune-aviate/Cargo.toml\terrno\terrno\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/errno\ttrue\t\t=0.3.14' \
+    $'tools/flight-tune-aviate/Cargo.toml\tlibproc\tlibproc\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/libproc\ttrue\t\t=0.14.11' \
+    > "$fixture/scripts/flight-tune-direct-dependency-allowlist.tsv"
+expect_failure \
+    'an unsorted direct dependency allowlist' \
+    'direct dependency allowlist is not sorted or has a duplicate'
+write_dependency_allowlist
+
+printf '%s\n' \
+    $'tools/flight-tune-aviate/Cargo.toml\terrno\terrno\tnormal\tcfg(target_os = "macos")\tfalse\tpath\tvendor/errno\ttrue\t\t=0.3.14' \
+    >> "$fixture/scripts/flight-tune-direct-dependency-allowlist.tsv"
+expect_failure \
+    'a duplicate direct dependency allowlist record' \
+    'direct dependency allowlist is not sorted or has a duplicate'
+write_dependency_allowlist
+
+write_aviate_manifest '^0.3.14' '=0.14.11' '=0.7.1'
+expect_failure \
+    'a non-exact macOS errno pin' \
+    'has unreviewed direct production dependency errno'
+write_aviate_manifest '=0.3.14' '^0.14.11' '=0.7.1'
+expect_failure \
+    'a non-exact macOS libproc pin' \
+    'has unreviewed direct production dependency libproc'
+write_aviate_manifest '=0.3.14' '=0.14.11' '^0.7.1'
+expect_failure \
+    'a non-exact macOS sysctl pin' \
+    'has unreviewed direct production dependency sysctl'
+write_aviate_manifest '=0.3.14' '=0.14.11' '=0.7.1'
+
+write_aviate_manifest \
+    '=0.3.14' \
+    '=0.14.11' \
+    '=0.7.1' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }'
+write_dependency_allowlist true
+expect_failure \
+    'a reviewed Aviate flight-tune-xplane runtime dependency' \
+    'noncanonical runtime dependency flight-tune-xplane'
+write_clean_manifests
+write_dependency_allowlist
 
 printf '%s\n' 'pub fn marker() {}' \
     > "$fixture/tools/flight-tune-aviate/src/driver.rs"
@@ -507,6 +630,9 @@ printf '%s\n' \
         '    "tools/flight-tune",' \
         '    "tools/flight-tune-aviate",' \
         '    "tools/flight-tune-campaign",' \
+        '    "vendor/errno",' \
+        '    "vendor/libproc",' \
+        '    "vendor/sysctl",' \
     ']' \
     'resolver = "2"' \
     '[workspace.dependencies]' \
