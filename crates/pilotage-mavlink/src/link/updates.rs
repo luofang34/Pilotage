@@ -57,6 +57,13 @@ pub struct SimTruthUpdate {
     pub pos_ned_m: [f32; 3],
     /// True NED velocity, m/s.
     pub vel_ned_mps: [f32; 3],
+    /// The report's own geodetic position, as the simulator stated it:
+    /// latitude and longitude in degrees·1e7 and altitude in millimeters.
+    /// The NED group above is this position projected against the latched
+    /// origin, so the two are one observation; this is what it was before
+    /// the projection, kept because a projection cannot be undone without
+    /// the origin and the reader of a map needs the position itself.
+    pub lat_lon_alt: [i32; 3],
     /// Microseconds on the simulation clock.
     pub time_usec: u64,
     /// Wrapping publication sequence for the truth stream.

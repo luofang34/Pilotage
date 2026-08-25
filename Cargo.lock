@@ -1711,6 +1711,7 @@ dependencies = [
  "pilotage-adapter-api",
  "pilotage-control-feel",
  "pilotage-control-web",
+ "pilotage-geo",
  "pilotage-input",
  "pilotage-mavlink",
  "pilotage-protocol",

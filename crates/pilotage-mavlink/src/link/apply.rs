@@ -144,6 +144,13 @@ fn apply_sim_truth(
     now: Instant,
 ) {
     const METRES_PER_DEGREE: f64 = 111_111.0;
+    // The origin is latched once and holds for the life of the link, so a
+    // report that states no position must not become it: every later
+    // position would be measured from Null Island and the frame could
+    // never recover.
+    if lat_lon_alt == [0, 0, 0] && latest.truth_origin.is_none() {
+        return;
+    }
     let origin = *latest
         .truth_origin
         .get_or_insert_with(|| crate::link::TruthOrigin {
@@ -162,6 +169,7 @@ fn apply_sim_truth(
         quat_wxyz,
         pos_ned_m: [north as f32, east as f32, down as f32],
         vel_ned_mps,
+        lat_lon_alt,
         time_usec,
         sequence,
         received_at: now,
