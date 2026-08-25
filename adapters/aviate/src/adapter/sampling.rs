@@ -143,6 +143,7 @@ fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruth
         .sim_truth
         .filter(|truth| truth.received_at.elapsed() <= WITHHOLD_AFTER)
         .map(|truth| pilotage_adapter_api::SimTruthSample {
+            geodetic: None,
             quat_wxyz: truth.quat_wxyz,
             pos_ned_m: truth.pos_ned_m,
             vel_ned_mps: truth.vel_ned_mps,
@@ -186,6 +187,8 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
     );
     let (valid_flags, quality) = effective_authorization(attitude, kinematics, has_authorization);
     let avionics = Some(AvionicsSample {
+        // The estimate stream carries no geodetic report.
+        geodetic: None,
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
             rates_rps: att.rates_rps,

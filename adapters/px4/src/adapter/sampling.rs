@@ -116,6 +116,9 @@ pub(super) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
     };
     let avionics = Some(AvionicsSample {
         baro: None,
+        // This lane reads LOCAL_POSITION_NED only; the estimator's
+        // GNSS-fused position is not decoded, so there is no fix.
+        geodetic: None,
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
             rates_rps: att.rates_rps,

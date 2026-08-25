@@ -209,6 +209,12 @@ jobs:
       - name: Terrain base layer guard
         run: bash scripts/check-terrain-base-layer.sh
 
+      - name: Geodetic datum code guard self-test
+        run: bash scripts/test-check-geodetic-datum-codes.sh
+
+      - name: Geodetic datum code bijection
+        run: bash scripts/check-geodetic-datum-codes.sh
+
       - name: ADR supersession lifecycle tests
         run: bash scripts/test-check-adr-supersession.sh
 
@@ -417,6 +423,9 @@ jobs:
 
       - name: browser wire-range identity bounds (GEO-68)
         run: node clients/web/wire-bounds.test.mjs
+
+      - name: geodetic fix decoding (ADR-0022)
+        run: node clients/web/geodetic-fix.test.mjs
 
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''

@@ -148,6 +148,19 @@ impl GeoidModelId {
     }
 }
 
+/// The separation a simulator declares for the heights it reports as MSL.
+///
+/// A simulator states an MSL height without naming the geoid it separated from,
+/// and an MSL height with no model is uninterpretable, so a simulated fix would
+/// otherwise have no legal vertical datum. This constant is that missing
+/// declaration: it names the simulator's own flat separation, so a simulated
+/// height stays traceable to a simulator and is never read as a surveyed one.
+/// It identifies no geoid, and no operational height may carry it.
+///
+/// The value is the top of the range so that a geoid registry, which would
+/// number its first real model from the bottom, cannot grow into it.
+pub const SIMULATOR_GEOID_MODEL_ID: GeoidModelId = GeoidModelId(u16::MAX);
+
 /// Identity of the terrain/ground reference an AGL height is measured above (a
 /// specific terrain database or ground-plane reference). `UNDECLARED` (0) means
 /// the ground is unidentified and an AGL height is refused.

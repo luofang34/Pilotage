@@ -1,9 +1,10 @@
 //! Lossless adapter-to-wire telemetry mapping.
 
 use pilotage_adapter_api::{
-    AvionicsSample, FcStateSample, GimbalAttitudeSample, MeasurementClock, MeasurementStamp,
-    SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
+    AvionicsSample, FcStateSample, GeodeticFixSample, GimbalAttitudeSample, MeasurementClock,
+    MeasurementStamp, SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
 };
+use pilotage_geo::SIMULATOR_GEOID_MODEL_ID;
 use pilotage_protocol::wire;
 use pilotage_timing::MonoTimestamp;
 
@@ -134,7 +135,49 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         baro_stamp: sample
             .baro
             .map(|group| measurement_stamp_to_wire(group.stamp)),
+        geodetic: sample.geodetic.and_then(geodetic_to_wire),
+        // The stamp travels only with a fix that survived the contract:
+        // a stamp beside no position would claim an observation the wire
+        // does not carry.
+        geodetic_stamp: sample
+            .geodetic
+            .filter(|fix| geodetic_to_wire(*fix).is_some())
+            .map(|fix| measurement_stamp_to_wire(fix.stamp)),
     }
+}
+
+/// Maps a fix onto the wire. There is deliberately no `map_or` fallback
+/// here: an absent fix leaves the whole message absent, because 0,0 is a
+/// real place and a receiver that read it would draw a plausible vehicle
+/// in the Gulf of Guinea.
+fn geodetic_to_wire(fix: GeodeticFixSample) -> Option<wire::GeodeticFix> {
+    let position = fix.position;
+    let vertical = position.vertical;
+    // The typed value has public fields, so a producer can assemble one
+    // without the constructor that refuses a datum. Re-run the contract
+    // here: this is the last place before the wire, and a receiver cannot
+    // tell an assembled value from a constructed one.
+    position.validate().ok()?;
+    // The simulator's declared separation names no geoid. A height that
+    // carries it under an operational role would read as a surveyed height
+    // measured from a model nothing can name.
+    if vertical.geoid == SIMULATOR_GEOID_MODEL_ID && fix.stamp.role != SourceRole::SimulationTruth {
+        return None;
+    }
+    Some(wire::GeodeticFix {
+        latitude_deg: position.latitude_deg,
+        longitude_deg: position.longitude_deg,
+        horizontal_datum: u32::from(position.horizontal_datum.to_u8()),
+        realization: u32::from(position.realization.0),
+        height_m: vertical.height_m,
+        vertical_datum: u32::from(vertical.datum.to_u8()),
+        geoid_model: u32::from(vertical.geoid.0),
+        terrain_ref: vertical.terrain_ref.0,
+        baro_setting: vertical.baro_setting.0,
+        local_origin: vertical.origin.0,
+        horizontal_accuracy_mm: fix.quality.horizontal_mm,
+        vertical_accuracy_mm: fix.quality.vertical_mm,
+    })
 }
 
 fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
@@ -150,6 +193,7 @@ fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
         vel_e_mps: sample.vel_ned_mps[1],
         vel_d_mps: sample.vel_ned_mps[2],
         valid_flags: sample.valid_flags,
+        geodetic: sample.geodetic.and_then(geodetic_to_wire),
         stamp: Some(measurement_stamp_to_wire(sample.stamp)),
     }
 }

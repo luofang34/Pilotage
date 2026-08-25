@@ -627,6 +627,107 @@ function decodeFloat32(view) {
   return new DataView(view.buffer, view.byteOffset, 4).getFloat32(0, true);
 }
 
+function decodeFloat64(view) {
+  if (!view || view.length < 8) return null;
+  return new DataView(view.buffer, view.byteOffset, 8).getFloat64(0, true);
+}
+
+// telemetry.proto GeodeticFix: latitude_deg=1, longitude_deg=2 (double),
+// horizontal_datum=3, realization=4, height_m=5 (double),
+// vertical_datum=6, geoid_model=7, terrain_ref=8, baro_setting=9,
+// local_origin=10, horizontal/vertical_accuracy_mm=11..12.
+//
+// Absence is no fix (null). A datum the reader cannot interpret is also no
+// fix: an unknown horizontal datum, or a height whose datum needs an
+// identity that was not declared, is refused rather than displayed. A
+// substituted zero would be Null Island, a real place in the Gulf of
+// Guinea, drawn as a plausible vehicle (ADR-0022).
+function decodeGeodeticFix(bytes) {
+  if (!bytes) return null;
+  const f = parseFields(bytes);
+  const latitudeDeg = decodeFloat64(firstBytes(f, 1));
+  const longitudeDeg = decodeFloat64(firstBytes(f, 2));
+  const heightM = decodeFloat64(firstBytes(f, 5));
+  // A field carried under the wrong wire type decodes to NaN, which passes
+  // an ordinary range test because every comparison against it is false.
+  // Each identity is therefore required to be a whole number in the range
+  // its Rust type can hold: the producer's ids are u16 or u32, and a value
+  // past that truncates on the way back rather than failing.
+  const identity = (field, limit) => {
+    const value = firstVarint(f, field) ?? 0;
+    return Number.isInteger(value) && value >= 0 && value <= limit ? value : null;
+  };
+  const U16 = 0xffff;
+  const U32 = 0xffff_ffff;
+  const horizontalDatum = identity(3, U16);
+  const realization = identity(4, U16);
+  const verticalDatum = identity(6, U16);
+  const geoidModel = identity(7, U16);
+  const terrainRef = identity(8, U32);
+  const baroSetting = identity(9, U32);
+  // The origin is a u64. Read as a Number it would collapse past 2^53, and
+  // two different origins would decode equal — which is the one thing the
+  // origin identity exists to make visible.
+  const localOrigin = firstBigVarint(f, 10) ?? 0n;
+  if (latitudeDeg === null || longitudeDeg === null || heightM === null) return null;
+  if (
+    horizontalDatum === null ||
+    realization === null ||
+    verticalDatum === null ||
+    geoidModel === null ||
+    terrainRef === null ||
+    baroSetting === null ||
+    typeof localOrigin !== "bigint"
+  ) {
+    return null;
+  }
+  if (!Number.isFinite(latitudeDeg) || latitudeDeg < -90 || latitudeDeg > 90) return null;
+  if (!Number.isFinite(longitudeDeg) || longitudeDeg < -180 || longitudeDeg >= 180) return null;
+  if (!Number.isFinite(heightM)) return null;
+  // pilotage_geo::HorizontalDatum: 0 is Unknown, and 4 upward is a datum
+  // this build does not know.
+  if (horizontalDatum === 0 || horizontalDatum > 3) return null;
+  // A realization-bearing datum without one is uninterpretable.
+  if ((horizontalDatum === 2 || horizontalDatum === 3) && realization === 0) return null;
+  // pilotage_geo::VerticalDatum and the identity each one requires.
+  const REQUIRED_VERTICAL_IDENTITY = {
+    2: geoidModel,
+    3: terrainRef,
+    4: baroSetting,
+    6: localOrigin,
+  };
+  if (verticalDatum === 0 || verticalDatum > 6) return null;
+  // The origin is a BigInt and the rest are Numbers, so the undeclared
+  // test compares against each type's own zero.
+  const declared = REQUIRED_VERTICAL_IDENTITY[verticalDatum];
+  if (Object.hasOwn(REQUIRED_VERTICAL_IDENTITY, verticalDatum) && declared == 0) {
+    return null;
+  }
+  // An accuracy is a length, and no measurement is accurate to zero
+  // millimetres. Proto3 omits a zero, so a producer that states nothing and
+  // a producer that claims perfection are the same bytes: both read as
+  // UNSTATED. A reader that derived health from a number would otherwise
+  // rate silence as the best possible fix.
+  const accuracy = (field) => {
+    const value = firstVarint(f, field) ?? 0;
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
+  return {
+    latitudeDeg,
+    longitudeDeg,
+    horizontalDatum,
+    realization,
+    heightM,
+    verticalDatum,
+    geoidModel,
+    terrainRef,
+    baroSetting,
+    localOrigin,
+    horizontalAccuracyMm: accuracy(11),
+    verticalAccuracyMm: accuracy(12),
+  };
+}
+
 /**
  * Decodes exactly one length-delimited `Envelope` frame from the front of
  * `bytes` (varint byte-length prefix + that many bytes), returning
@@ -993,6 +1094,9 @@ function decodeSimTruthState(bytes) {
       decodeFloat32(firstBytes(f, 10)),
     ],
     validFlags: firstVarint(f, 12) ?? 0,
+    // The oracle's position on the Earth, from the same observation as the
+    // NED group above, so it rides this sample's stamp.
+    geodetic: decodeGeodeticFix(firstBytes(f, 13)),
     stamp,
   };
 }
@@ -1108,7 +1212,7 @@ function decodeVelocity2d(bytes) {
 // rate_p/q/r_rad_s=5..7, pos_n/e/d_m=8..10, vel_n/e/d_mps=11..13 (float),
 // valid_flags=14, quality=15, arm_state=16 (varint), attitude and kinematics
 // stamps=17/18, estimator authorization stamp=19, baro_alt_m=20 (float)
-// with baro_stamp=21.
+// with baro_stamp=21, and geodetic=22 with geodetic_stamp=23.
 // Raw estimate; display derivation
 // happens in the instrument runtime (ADR-0017).
 function decodeAvionicsState(bytes) {
@@ -1118,6 +1222,7 @@ function decodeAvionicsState(bytes) {
   const kinematicsStamp = decodeMeasurementStamp(firstBytes(f, 18));
   const estimatorStatusStamp = decodeMeasurementStamp(firstBytes(f, 19));
   const baroStamp = decodeMeasurementStamp(firstBytes(f, 21));
+  const geodeticStamp = decodeMeasurementStamp(firstBytes(f, 23));
   const attitude = attitudeStamp === null ? null : {
     quat: {
       w: decodeFloat32(firstBytes(f, 1)),
@@ -1161,6 +1266,16 @@ function decodeAvionicsState(bytes) {
     // because an absent measurement must never read as zero altitude.
     baroAltM: baroStamp === null ? null : decodeFloat32(firstBytes(f, 20)),
     baroStamp,
+    // The estimator's own fix advances independently of the kinematics
+    // group, so it is unconsumable without its own stamp. Exact-role gate:
+    // a fix stamped with any other role is in the wrong lane, and a
+    // simulator oracle's position read as the estimator's own solution is
+    // exactly the substitution the roles exist to stop.
+    geodetic:
+      geodeticStamp === null || geodeticStamp.role !== 1
+        ? null
+        : decodeGeodeticFix(firstBytes(f, 22)),
+    geodeticStamp,
   };
 }
 
