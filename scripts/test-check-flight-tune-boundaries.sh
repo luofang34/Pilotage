@@ -12,6 +12,7 @@ mkdir -p \
     "$fixture/adapters/flight-tune-xplane/src" \
     "$fixture/adapters/pilotage-xplane-trial/src" \
     "$fixture/crates/pilotage-trial/src" \
+    "$fixture/injected/src" \
     "$fixture/scripts" \
     "$fixture/tools/flight-tune/src" \
     "$fixture/tools/flight-tune-aviate/src/bin" \
@@ -26,8 +27,10 @@ write_workspace() {
         '    "adapters/flight-tune-xplane",' \
         '    "adapters/pilotage-xplane-trial",' \
         '    "crates/pilotage-trial",' \
+        '    "injected",' \
         '    "tools/flight-tune",' \
         '    "tools/flight-tune-aviate",' \
+        '    "tools/flight-tune-campaign",' \
         ']' \
         'resolver = "2"' \
         > "$fixture/Cargo.toml"
@@ -50,6 +53,16 @@ write_adapter_packages() {
         > "$fixture/adapters/pilotage-xplane-trial/Cargo.toml"
     printf '%s\n' 'pub fn adapter() {}' \
         > "$fixture/adapters/pilotage-xplane-trial/src/lib.rs"
+    printf '%s\n' \
+        '[package]' \
+        'name = "injected"' \
+        'version = "0.0.0"' \
+        'edition = "2021"' \
+        '[lib]' \
+        'proc-macro = true' \
+        > "$fixture/injected/Cargo.toml"
+    printf '%s\n' 'extern crate proc_macro;' \
+        > "$fixture/injected/src/lib.rs"
 }
 
 write_clean_manifests() {
@@ -78,6 +91,23 @@ write_clean_manifests() {
         > "$fixture/tools/flight-tune-aviate/Cargo.toml"
     printf '%s\n' 'pub fn host() {}' \
         > "$fixture/tools/flight-tune-aviate/src/lib.rs"
+    printf '%s\n' \
+        '[package]' \
+        'name = "flight-tune-campaign"' \
+        'version = "0.0.0"' \
+        'edition = "2021"' \
+        '[dependencies]' \
+        > "$fixture/tools/flight-tune-campaign/Cargo.toml"
+    printf '%s\n' 'pub mod config;' \
+        > "$fixture/tools/flight-tune-campaign/src/lib.rs"
+}
+
+write_dependency_allowlist() {
+    printf '%s\n' \
+        $'manifest\tdependency_key\tactual_package\tkind\ttarget\toptional\tsource_kind\tsource_ref\tdefault_features\tfeatures\tversion_req' \
+        $'tools/flight-tune-aviate/Cargo.toml\tflight-tune-xplane\tflight-tune-xplane\tnormal\t\tfalse\tpath\tadapters/flight-tune-xplane\ttrue\t\t*' \
+        $'tools/flight-tune-aviate/Cargo.toml\tpilotage-xplane-trial\tpilotage-xplane-trial\tnormal\t\tfalse\tpath\tadapters/pilotage-xplane-trial\ttrue\t\t*' \
+        > "$fixture/scripts/flight-tune-direct-dependency-allowlist.tsv"
 }
 
 write_allowlisted_import() {
@@ -158,6 +188,7 @@ expect_failure_with_all() {
 write_workspace
 write_adapter_packages
 write_clean_manifests
+write_dependency_allowlist
 write_allowlisted_import
 write_shared_contract
 write_campaign_contract
@@ -166,6 +197,48 @@ printf '%s\t%s\n' \
     'useflight_tune_xplane::CausalJoinConfig;' \
     > "$fixture_allowlist"
 run_guard >/dev/null
+
+printf '%s\n' '' '[patch.crates-io]' \
+    'serde = { path = "crates/pilotage-trial" }' \
+    >> "$fixture/Cargo.toml"
+expect_failure \
+    'a workspace Cargo patch source override' \
+    'Cargo.toml has an unreviewed dependency source override'
+write_workspace
+
+mkdir -p "$fixture/.cargo"
+printf '%s\n' 'paths = ["../injected"]' \
+    > "$fixture/.cargo/config.toml"
+expect_failure \
+    'a Cargo configuration path source override' \
+    '.cargo/config.toml has an unreviewed dependency source override'
+rm "$fixture/.cargo/config.toml"
+
+printf '%s\n' 'include = ["source-override.toml"]' \
+    > "$fixture/.cargo/config.toml"
+printf '%s\n' \
+    '[source.crates-io]' \
+    'replace-with = "local-registry"' \
+    > "$fixture/.cargo/source-override.toml"
+expect_failure \
+    'an included Cargo configuration source override' \
+    '.cargo/config.toml has an unreviewed dependency source override'
+rm "$fixture/.cargo/config.toml"
+rm "$fixture/.cargo/source-override.toml"
+
+printf '%s\n' \
+    'version = 4' \
+    '' \
+    '[[package]]' \
+    'name = "serde"' \
+    'version = "999.0.0"' \
+    'source = "registry+https://github.com/rust-lang/crates.io-index"' \
+    'checksum = "0000000000000000000000000000000000000000000000000000000000000000"' \
+    > "$fixture/Cargo.lock"
+expect_failure \
+    'an unreviewed Cargo lockfile registry identity' \
+    'Cargo.lock has an unreviewed registry identity for serde'
+rm "$fixture/Cargo.lock"
 
 printf '%s\n' 'pub fn marker() {}' \
     > "$fixture/tools/flight-tune-aviate/src/driver.rs"
@@ -205,6 +278,61 @@ printf '%s\n' 'use flight_tune_xplane::TestOnlyType;' \
 printf '%s\n' 'use flight_tune_xplane::TestSupportType;' \
     > "$fixture/tools/flight-tune-aviate/src/test_support.rs"
 run_guard >/dev/null
+
+printf '%s\n' \
+    '#[cfg(test)]' \
+    '#[path = "tests/runtime.rs"]' \
+    'mod runtime_fixture;' \
+    > "$fixture/tools/flight-tune-aviate/src/lib.rs"
+run_guard >/dev/null
+
+printf '%s\n' \
+    '#[path = "tests/runtime.rs"]' \
+    'mod runtime_fixture;' \
+    > "$fixture/tools/flight-tune-aviate/src/lib.rs"
+expect_failure \
+    'an unguarded test-path module' \
+    'path attribute imports test-only source without cfg(test)'
+
+printf '%s\n' 'mod test_support;' \
+    > "$fixture/tools/flight-tune-aviate/src/lib.rs"
+expect_failure \
+    'an unguarded test-support module' \
+    'module test_support is not restricted to cfg(test)'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-aviate"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[lib]' \
+    'path = "src/tests/runtime.rs"' \
+    '[dependencies]' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
+    'pilotage-xplane-trial = { path = "../../adapters/pilotage-xplane-trial" }' \
+    > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+expect_failure \
+    'a production Cargo target in a test-only path' \
+    'has a production target outside its scanned source root'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-aviate"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[lib]' \
+    'path = "src/tests/runtime.rs"' \
+    'crate-type = ["cdylib"]' \
+    '[dependencies]' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
+    'pilotage-xplane-trial = { path = "../../adapters/pilotage-xplane-trial" }' \
+    > "$fixture/tools/flight-tune-aviate/Cargo.toml"
+expect_failure \
+    'a production cdylib target in a test-only path' \
+    'has a production target outside its scanned source root'
+write_clean_manifests
 
 printf '%s\n' 'pub fn runtime() { flight_tune_xplane::run(); }' \
     > "$fixture/tools/flight-tune-aviate/src/runtime.rs"
@@ -375,8 +503,10 @@ printf '%s\n' \
     '    "adapters/flight-tune-xplane",' \
         '    "adapters/pilotage-xplane-trial",' \
         '    "crates/pilotage-trial",' \
+        '    "injected",' \
         '    "tools/flight-tune",' \
         '    "tools/flight-tune-aviate",' \
+        '    "tools/flight-tune-campaign",' \
     ']' \
     'resolver = "2"' \
     '[workspace.dependencies]' \
@@ -419,6 +549,19 @@ printf '%s\n' \
     'pilotage-xplane-trial = { path = "../../adapters/pilotage-xplane-trial" }' \
     > "$fixture/tools/flight-tune/Cargo.toml"
 run_guard >/dev/null
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[dependencies]' \
+    'injected = { path = "../../injected" }' \
+    > "$fixture/tools/flight-tune/Cargo.toml"
+expect_failure \
+    'a new direct production dependency' \
+    'has unreviewed direct production dependency injected'
 write_clean_manifests
 
 printf '%s\n' \
@@ -504,6 +647,250 @@ expect_failure \
     'simulator-specific field xplane_new'
 write_shared_contract
 
+printf '%s\n' \
+    'macro_rules! define_contract {' \
+    "    (\$field:ident) => {" \
+    "        pub struct SharedContract { pub \$field: String }" \
+    '    };' \
+    '}' \
+    'define_contract!(xplane_version);' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure \
+    'a macro-generated simulator field' \
+    'has a new simulator-specific token xplane'
+write_shared_contract
+
+printf '%s\n' \
+    'pub struct SharedContract {' \
+    '    #[serde(rename = "x\u{70}lane_new")]' \
+    '    pub id: String,' \
+    '}' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure_with_all \
+    'an escaped simulator-specific serialized field name' \
+    'has a new simulator-specific token xplane' \
+    'has a simulator-specific Serde name xplane'
+write_shared_contract
+
+printf '%s\n' \
+    'pub struct SharedContract { pub id: String }' \
+    'impl serde::Serialize for SharedContract {' \
+    '    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>' \
+    '    where S: serde::Serializer {' \
+    '        let key = concat!("x", "plane");' \
+    '        serializer.serialize_str(key)' \
+    '    }' \
+    '}' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure \
+    'a hand-written shared serializer' \
+    'has an unreviewed manual Serde impl'
+write_shared_contract
+
+printf '%s\n' \
+    'use serde::Serialize as WireFormat;' \
+    'pub struct SharedContract { pub id: String }' \
+    'impl WireFormat for SharedContract {' \
+    '    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>' \
+    '    where S: serde::Serializer {' \
+    '        serializer.serialize_str("neutral")' \
+    '    }' \
+    '}' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure_with_all \
+    'an aliased hand-written shared serializer' \
+    'aliases a protected derive import' \
+    'has an unreviewed manual Serde impl'
+write_shared_contract
+
+printf '%s\n' \
+    'use injected::Serialize;' \
+    '#[derive(Serialize)]' \
+    'pub struct SharedContract { pub id: String }' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure \
+    'a noncanonical protected derive import' \
+    'imports protected derive Serialize from a noncanonical crate'
+write_shared_contract
+
+printf '%s\n' \
+    '#[path = "../../../outside-contract.rs"]' \
+    'mod outside_contract;' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+printf '%s\n' \
+    'pub struct SharedContract { pub xplane_version: String }' \
+    > "$fixture/outside-contract.rs"
+expect_failure \
+    'a production path outside the shared source root' \
+    'path attribute leaves its source root'
+rm "$fixture/outside-contract.rs"
+write_shared_contract
+
+printf '%s\n' \
+    '#[cfg_attr(not(test), path = "../../../outside-contract.rs")]' \
+    'mod outside_contract;' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+expect_failure \
+    'a conditional production module path' \
+    'has a conditional module path'
+write_shared_contract
+
+printf '%s\n' \
+    '#[path = "hidden.txt"]' \
+    'mod hidden;' \
+    > "$fixture/crates/pilotage-trial/src/lib.rs"
+printf '%s\n' \
+    'pub struct SharedContract { pub xplane_version: String }' \
+    > "$fixture/crates/pilotage-trial/src/hidden.txt"
+expect_failure \
+    'a production module with a non-Rust extension' \
+    'has a non-Rust module path'
+rm "$fixture/crates/pilotage-trial/src/hidden.txt"
+write_shared_contract
+
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/unreviewed.rs"));' \
+    > "$fixture/tools/flight-tune/src/lib.rs"
+expect_failure \
+    'an unreviewed generated source include' \
+    'has an unreviewed generated Rust include'
+write_shared_contract
+
+printf '%s\n' \
+    'include!{concat!(env!("OUT_DIR"), "/unreviewed.rs")};' \
+    > "$fixture/tools/flight-tune/src/lib.rs"
+expect_failure \
+    'an unreviewed brace-delimited generated source include' \
+    'has an unreviewed generated Rust include'
+write_shared_contract
+
+printf '%s\n' \
+    'include![concat!(env!("OUT_DIR"), "/unreviewed.rs")];' \
+    > "$fixture/tools/flight-tune/src/lib.rs"
+expect_failure \
+    'an unreviewed bracket-delimited generated source include' \
+    'has an unreviewed generated Rust include'
+write_shared_contract
+
+mkdir -p \
+    "$fixture/tools/flight-tune/src/flight_quality" \
+    "$fixture/tools/flight-tune/build_support"
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+printf '%s\n' \
+    '#[path = "build_support/evaluator_source_identity.rs"]' \
+    'mod evaluator_source_identity;' \
+    'fn main() {}' \
+    > "$fixture/tools/flight-tune/build.rs"
+printf '%s\n' 'pub fn generate() {}' \
+    > "$fixture/tools/flight-tune/build_support/evaluator_source_identity.rs"
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    'build = "malicious_build.rs"' \
+    '[dependencies]' \
+    > "$fixture/tools/flight-tune/Cargo.toml"
+printf '%s\n' 'fn main() {}' \
+    > "$fixture/tools/flight-tune/malicious_build.rs"
+expect_failure \
+    'an alternate generated-source build target' \
+    'has an unreviewed custom build target'
+rm "$fixture/tools/flight-tune/malicious_build.rs"
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "pilotage-trial"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    'build = "build.rs"' \
+    '[dependencies]' \
+    > "$fixture/crates/pilotage-trial/Cargo.toml"
+printf '%s\n' 'fn main() {}' \
+    > "$fixture/crates/pilotage-trial/build.rs"
+expect_failure \
+    'a custom build target in a shared contract package' \
+    'has an unreviewed custom build target'
+rm "$fixture/crates/pilotage-trial/build.rs"
+write_clean_manifests
+
+printf '%s\n' \
+    '#![cfg(any())]' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+expect_failure \
+    'a file-disabled allowlisted include' \
+    'has an attributed generated source file'
+
+printf '%s\n' \
+    '#[cfg(any())]' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+expect_failure \
+    'a conditionally disabled allowlisted include' \
+    'has an unreviewed item macro include'
+
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+expect_failure \
+    'an unfrozen allowlisted include generator' \
+    'generated source input has an unreviewed digest'
+
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+expect_failure \
+    'a repeated allowlisted generated include' \
+    'repeats its reviewed generated Rust include'
+
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+
+printf '%s\n' 'pub const IDENTITY: &str = "manual";' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+expect_failure \
+    'an allowlisted identity file without its generated include' \
+    'omits its reviewed generated Rust include'
+
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+
+printf '%s\n' \
+    'fn hidden_identity() {' \
+    '    include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    '}' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+expect_failure \
+    'an allowlisted generated include inside a function block' \
+    'has an unreviewed generated Rust include'
+
+printf '%s\n' \
+    'include!(concat!(env!("OUT_DIR"), "/evaluator_source_identity.rs"));' \
+    > "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+
+printf '%s\n' \
+    'mod payload;' \
+    'fn main() {}' \
+    > "$fixture/tools/flight-tune/build.rs"
+printf '%s\n' \
+    'const GENERATED: &str = "pub struct Shared { pub xplane_version: String }";' \
+    > "$fixture/tools/flight-tune/payload.rs"
+expect_failure \
+    'an allowlisted generator with an unfrozen payload route' \
+    'generated source input has an unreviewed digest'
+rm "$fixture/tools/flight-tune/payload.rs"
+rm "$fixture/tools/flight-tune/src/flight_quality/identity.rs"
+rm "$fixture/tools/flight-tune/build_support/evaluator_source_identity.rs"
+rm "$fixture/tools/flight-tune/build.rs"
+
 mkdir -p "$fixture/shared-symlink-target"
 printf '%s\n' \
     'pub struct SharedContract {' \
@@ -553,6 +940,96 @@ run_guard >/dev/null
 
 printf '%s\n' \
     'pub struct CampaignConfig {' \
+    '    #[serde(flatten)]' \
+    '    pub xplane: XPlaneCampaignConfig,' \
+    '    pub aviate_xplane_contract: PinnedFile,' \
+    '}' \
+    'pub struct XPlaneCampaignConfig {' \
+    '    pub weather_plugin_digest: String,' \
+    '}' \
+    > "$fixture/tools/flight-tune-campaign/src/config.rs"
+expect_failure \
+    'a flattened campaign adapter field' \
+    'has an unreviewed Serde option flatten'
+
+printf '%s\n' \
+    '#[derive(Serialize)]' \
+    '#[serde(transparent)]' \
+    'pub struct CampaignWrapper(pub XPlaneCampaignConfig);' \
+    > "$fixture/tools/flight-tune-campaign/src/config/wrapper_escape.rs"
+expect_failure \
+    'a transparent campaign adapter wrapper' \
+    'has an unreviewed Serde option transparent'
+rm "$fixture/tools/flight-tune-campaign/src/config/wrapper_escape.rs"
+
+printf '%s\n' \
+    'pub struct SearchGroupConfig {' \
+    '    pub backend: XPlaneCampaignConfig,' \
+    '}' \
+    > "$fixture/tools/flight-tune-campaign/src/config/field_type_escape.rs"
+expect_failure \
+    'a neutral campaign field with an adapter type' \
+    'SearchGroupConfig has simulator-specific field_type:backend XPlaneCampaignConfig'
+rm "$fixture/tools/flight-tune-campaign/src/config/field_type_escape.rs"
+
+printf '%s\n' \
+    'pub struct SearchGroupConfig(pub XPlaneCampaignConfig);' \
+    > "$fixture/tools/flight-tune-campaign/src/config/newtype_escape.rs"
+expect_failure \
+    'a campaign newtype with an adapter type' \
+    'SearchGroupConfig has simulator-specific tuple_field_type:0 XPlaneCampaignConfig'
+rm "$fixture/tools/flight-tune-campaign/src/config/newtype_escape.rs"
+
+printf '%s\n' \
+    'use serde::{Deserialize, Serialize};' \
+    '#[derive(Serialize, Deserialize)]' \
+    'pub struct SharedCampaignContract(pub XPlaneCampaignConfig);' \
+    > "$fixture/tools/flight-tune-campaign/src/newtype_escape.rs"
+expect_failure \
+    'a serialized campaign newtype outside config' \
+    'SharedCampaignContract has simulator-specific tuple_field_type:0 XPlaneCampaignConfig'
+rm "$fixture/tools/flight-tune-campaign/src/newtype_escape.rs"
+
+printf '%s\n' \
+    'pub struct SearchGroupConfig<Backend = XPlaneCampaignConfig> {' \
+    '    pub backend: Backend,' \
+    '}' \
+    > "$fixture/tools/flight-tune-campaign/src/config/header_escape.rs"
+expect_failure \
+    'a campaign generic default with an adapter type' \
+    'SearchGroupConfig has simulator-specific header_type XPlaneCampaignConfig'
+rm "$fixture/tools/flight-tune-campaign/src/config/header_escape.rs"
+
+printf '%s\n' \
+    'pub struct SearchGroupConfig<Backend>(pub Backend)' \
+    'where' \
+    '    Backend: XPlaneBackend;' \
+    > "$fixture/tools/flight-tune-campaign/src/config/tuple_tail_escape.rs"
+expect_failure \
+    'a campaign tuple tail with an adapter bound' \
+    'SearchGroupConfig has simulator-specific header_type XPlaneBackend'
+rm "$fixture/tools/flight-tune-campaign/src/config/tuple_tail_escape.rs"
+
+printf '%s\n' \
+    'type BackendConfig = XPlaneCampaignConfig;' \
+    'pub struct SearchGroupConfig { pub backend: BackendConfig }' \
+    > "$fixture/tools/flight-tune-campaign/src/config/alias_escape.rs"
+expect_failure \
+    'a campaign adapter type alias' \
+    'has unreviewed simulator type alias BackendConfig for XPlaneCampaignConfig'
+rm "$fixture/tools/flight-tune-campaign/src/config/alias_escape.rs"
+
+printf '%s\n' \
+    'use crate::XPlaneCampaignConfig as BackendConfig;' \
+    'pub struct SearchGroupConfig { pub backend: BackendConfig }' \
+    > "$fixture/tools/flight-tune-campaign/src/config/import_alias_escape.rs"
+expect_failure \
+    'a campaign adapter import alias' \
+    'has a simulator-specific import alias'
+rm "$fixture/tools/flight-tune-campaign/src/config/import_alias_escape.rs"
+
+printf '%s\n' \
+    'pub struct CampaignConfig {' \
     '    pub xplane: XPlaneCampaignConfig,' \
     '    pub aviate_xplane_contract: PinnedFile,' \
     '    pub xplane_new: XPlaneCampaignConfig,' \
@@ -565,6 +1042,62 @@ expect_failure \
     'a new CampaignConfig X-Plane field' \
     'CampaignConfig has simulator-specific field xplane_new'
 write_campaign_contract
+
+printf '%s\n' \
+    '#[path = "escape.rs"]' \
+    'mod escape;' \
+    > "$fixture/tools/flight-tune-campaign/src/config.rs"
+printf '%s\n' \
+    'pub struct CampaignConfig { pub xplane_new: String }' \
+    > "$fixture/tools/flight-tune-campaign/src/escape.rs"
+expect_failure \
+    'a campaign sibling shared field' \
+    'CampaignConfig has simulator-specific field xplane_new'
+rm "$fixture/tools/flight-tune-campaign/src/escape.rs"
+write_campaign_contract
+
+printf '%s\n' \
+    'macro_rules! define_contract {' \
+    "    (\$field:ident) => {" \
+    "        pub struct CampaignConfig { pub \$field: String }" \
+    '    };' \
+    '}' \
+    'define_contract!(xplane_new);' \
+    > "$fixture/tools/flight-tune-campaign/src/config/macro_escape.rs"
+expect_failure_with_all \
+    'a macro-generated campaign field' \
+    'has a production macro definition' \
+    'has an unreviewed item macro define_contract'
+rm "$fixture/tools/flight-tune-campaign/src/config/macro_escape.rs"
+
+printf '%s\n' \
+    '#[inject_contract]' \
+    'pub struct CampaignConfig { pub id: String }' \
+    > "$fixture/tools/flight-tune-campaign/src/config/attribute_escape.rs"
+expect_failure \
+    'a campaign procedural attribute contract' \
+    'has an unreviewed contract attribute inject_contract'
+rm "$fixture/tools/flight-tune-campaign/src/config/attribute_escape.rs"
+
+printf '%s\n' \
+    '#[derive(InjectContract)]' \
+    'pub struct CampaignConfig { pub id: String }' \
+    > "$fixture/tools/flight-tune-campaign/src/config/derive_escape.rs"
+expect_failure \
+    'a campaign procedural derive contract' \
+    'has an unreviewed derive macro InjectContract'
+rm "$fixture/tools/flight-tune-campaign/src/config/derive_escape.rs"
+
+printf '%s\n' \
+    'pub struct XPlaneCampaignConfig {' \
+    '    pub xplane_new: String,' \
+    '}' \
+    > "$fixture/tools/flight-tune-campaign/src/config/adapter_escape.rs"
+expect_failure_with_all \
+    'an adapter type name outside its exact file' \
+    'unclassified public campaign contract XPlaneCampaignConfig' \
+    'XPlaneCampaignConfig has simulator-specific field xplane_new'
+rm "$fixture/tools/flight-tune-campaign/src/config/adapter_escape.rs"
 
 printf '%s\n' \
     '#[derive(Serialize)]' \
@@ -593,6 +1126,30 @@ expect_failure_with_all \
     'simulator-specific field xplane_version'
 rm "$fixture/tools/flight-tune-campaign/src/config/shared.rs"
 write_campaign_contract
+
+printf '%s\n' \
+    'pub use crate::config::XPlaneCampaignConfig;' \
+    > "$fixture/tools/flight-tune-campaign/src/reexport_escape.rs"
+expect_failure \
+    'a simulator-specific public use re-export' \
+    'has a simulator-specific public re-export'
+rm "$fixture/tools/flight-tune-campaign/src/reexport_escape.rs"
+
+printf '%s\n' \
+    'pub extern crate flight_tune_xplane as neutral_adapter;' \
+    > "$fixture/tools/flight-tune-campaign/src/reexport_escape.rs"
+expect_failure \
+    'a simulator-specific public extern crate re-export' \
+    'has a simulator-specific public re-export'
+rm "$fixture/tools/flight-tune-campaign/src/reexport_escape.rs"
+
+printf '%s\n' \
+    'extern crate flight_tune_xplane as neutral_adapter;' \
+    > "$fixture/tools/flight-tune-campaign/src/reexport_escape.rs"
+expect_failure \
+    'a simulator-specific private extern crate alias' \
+    'has a simulator-specific extern crate'
+rm "$fixture/tools/flight-tune-campaign/src/reexport_escape.rs"
 
 run_guard >/dev/null
 echo "flight tuning boundary guard self-test: OK"

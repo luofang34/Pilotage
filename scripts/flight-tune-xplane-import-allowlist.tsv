@@ -1,5 +1,6 @@
 tools/flight-tune-aviate/src/driver.rs	useflight_tune_xplane::CausalJoinConfig;
 tools/flight-tune-aviate/src/evidence/readback.rs	useflight_tune_xplane::PlantExecutionEvidence;
+tools/flight-tune-aviate/src/evidence/record.rs	useflight_tune_xplane::TruthObservation;
 tools/flight-tune-aviate/src/evidence/record/selection.rs	useflight_tune_xplane::{PlantExecutionEvidence,TruthObservation};
 tools/flight-tune-aviate/src/runtime.rs	useflight_tune_xplane::{ScenarioObservation,ScenarioRuntime,ScenarioRuntimeError,ScenarioStopContext,TruthObservation,};
 tools/flight-tune-aviate/src/runtime/conditions.rs	useflight_tune_xplane::TruthObservation;
