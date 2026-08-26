@@ -6,11 +6,24 @@
 //! run flew against. Pilotage is the verifier that document names, so this is
 //! where it is produced.
 //!
-//! Nothing here is asserted. The trial plugin loaded inside X-Plane dials this
-//! listener and states its own identity; the artifacts on disk are digested
-//! here; and the document is written only once the two agree. A digest typed
-//! in by hand would forge exactly the binding the mechanism exists to make,
-//! and every trial recorded afterwards would carry a fabricated identity.
+//! What the document records comes from three different places, and they are
+//! not equally strong. The trial plugin loaded inside X-Plane dials this
+//! listener and answers from the simulator's own live state: which aircraft is
+//! loaded, which build of itself is running, which bridge build it was
+//! compiled against. The artifact digests are taken here, by hashing this
+//! account's own disk. Everything else — simulator, aircraft id, protocol,
+//! motor count, sample rate, lane order — is DECLARED by Aviate's preset and
+//! validated for sense, never checked against the running simulator.
+//!
+//! Every one of those inputs is readable and writable by the account that runs
+//! this launcher, and that account can equally start the flight controller by
+//! hand against a document typed into a text editor. There is no trust
+//! boundary here, and nothing below is a security control.
+//!
+//! What it catches is DRIFT: an aircraft swapped without anyone noticing, a
+//! trial plugin rebuilt without restarting X-Plane, a plugin compiled against
+//! a bridge other than the one installed. Those are the mistakes that actually
+//! happen, and each would otherwise poison a trial record in silence.
 //!
 //! The file is single-use and private by contract: the flight controller
 //! claims it by deleting it, and refuses one that any other account could have
@@ -131,16 +144,11 @@ pub(crate) fn produce_blocking(
         bridge_plugin: ExpectedArtifact::new(&bridge_plugin, bridge_digest),
         bridge_config: ExpectedArtifact::new(&bridge_config, config_digest),
         trial_source_build_id: manifest.trial_source_build_id,
-        // The model contract this run is bound to. Nothing upstream states one,
-        // so it is derived from the artifacts that decide what the vehicle
-        // actually is: this aircraft file, under this bridge configuration,
-        // for this airframe. A constant here would bind every run to the same
-        // declared model however the aircraft or its configuration changed.
-        simulator_model_digest: model_contract_digest(
-            aircraft_digest,
-            config_digest,
-            &model.aircraft_id,
-        ),
+        // The model contract this run is bound to. Nothing upstream states
+        // one, so it is derived from the model the preset declares, under the
+        // bridge configuration that shapes it. A constant here would bind
+        // every run to the same declared model however the preset changed.
+        simulator_model_digest: model_contract_digest(&model, config_digest),
     };
 
     let listener = XPlaneTrialListener::bind_blocking(LISTEN)
@@ -224,14 +232,45 @@ fn aircraft_path(xplane_root: &Path) -> Result<PathBuf, XtaskError> {
     })
 }
 
-/// What decides which vehicle this run flew: the aircraft, the bridge
-/// configuration that shapes it, and the airframe it is flown as.
-fn model_contract_digest(aircraft: Digest, bridge_config: Digest, aircraft_id: &str) -> Digest {
+/// What decides which vehicle this run flew: the whole declared model, plus
+/// the bridge configuration that shapes it.
+///
+/// Every preset field, not the three that happen to name the aircraft. Two of
+/// those three are already bound independently — the aircraft file by its own
+/// digest, the aircraft id by the reader's check — so a digest over them alone
+/// restated what the document already said. Over the whole model it says
+/// something new: that `lane_order`, `motor_count` and `sample_rate_hz` are
+/// the same ones the last run flew. Validation refuses a senseless preset
+/// WITHIN a run; only this notices an edited one BETWEEN runs, which is what a
+/// campaign comparing results across days actually needs.
+///
+/// Each variable-length field is length-prefixed. Concatenating strings is
+/// injective only while at most one of them can vary in length, and this hashes
+/// four.
+///
+/// NOT the same value as Aviate's `XPlaneSimulatorModel::canonical_digest`,
+/// which covers fields this document does not carry and which the plant
+/// artifact is checked against. The two travel under the same name in
+/// different records and mean different things: this one binds what the
+/// LAUNCHER knew when it issued the handshake, that one binds the model a
+/// tuning result was fitted to. Anything that ever needs them to agree has to
+/// consume Aviate's, not recompute it here.
+fn model_contract_digest(model: &SimulatorModel, bridge_config: Digest) -> Digest {
     let mut hasher = Sha256::new();
-    hasher.update(b"pilotage.xplane.model-contract.v1\0");
-    hasher.update(aircraft.as_bytes());
+    hasher.update(b"pilotage.xplane.model-contract.v2\0");
+    for text in [
+        model.simulator_id.as_str(),
+        model.aircraft_id.as_str(),
+        model.aircraft_file_digest.as_str(),
+        model.bridge_protocol.as_str(),
+    ] {
+        hasher.update(u64::try_from(text.len()).unwrap_or(u64::MAX).to_be_bytes());
+        hasher.update(text.as_bytes());
+    }
+    hasher.update(model.motor_count.to_be_bytes());
+    hasher.update(model.sample_rate_hz.to_be_bytes());
+    hasher.update(model.lane_order);
     hasher.update(bridge_config.as_bytes());
-    hasher.update(aircraft_id.as_bytes());
     Digest::from_bytes(hasher.finalize().into())
 }
 

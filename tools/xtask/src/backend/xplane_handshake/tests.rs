@@ -89,26 +89,108 @@ fn a_second_launch_does_not_inherit_the_first_ones_document() {
 }
 
 #[test]
-fn the_model_contract_follows_the_artifacts_that_decide_the_vehicle() {
-    // Binding every run to one declared model however the aircraft or its
-    // configuration changed would make the field decoration.
-    let aircraft = Digest::from_bytes([7; 32]);
+fn the_model_contract_follows_every_field_that_decides_the_vehicle() {
+    // Binding every run to one declared model however the preset changed would
+    // make the field decoration. The two fields that name the aircraft are
+    // already bound elsewhere, so what earns this digest its place is the
+    // rest: a `lane_order` or a rate edited between runs is a different
+    // vehicle, and nothing else in the document would say so.
     let config = Digest::from_bytes([8; 32]);
-    let base = model_contract_digest(aircraft, config, "alia250");
+    let base = model_contract_digest(&model("aa".repeat(32)), config);
+
+    let changed: [(&str, SimulatorModel); 7] = [
+        (
+            "another simulator",
+            SimulatorModel {
+                simulator_id: "xplane-11".to_owned(),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "another aircraft id",
+            SimulatorModel {
+                aircraft_id: "xplane12-laminar-cessna172".to_owned(),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "another aircraft file",
+            SimulatorModel {
+                aircraft_file_digest: "bb".repeat(32),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "another bridge protocol",
+            SimulatorModel {
+                bridge_protocol: "mavlink-hil-tcp-v2".to_owned(),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "another motor count",
+            SimulatorModel {
+                motor_count: 6,
+                lane_order: [0, 2, 1, 3],
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "another sample rate",
+            SimulatorModel {
+                sample_rate_hz: 92,
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "another lane order",
+            SimulatorModel {
+                lane_order: [0, 1, 2, 3],
+                ..model("aa".repeat(32))
+            },
+        ),
+    ];
+    for (name, edited) in changed {
+        assert_ne!(
+            base,
+            model_contract_digest(&edited, config),
+            "{name} produced the same contract"
+        );
+    }
 
     assert_ne!(
         base,
-        model_contract_digest(Digest::from_bytes([9; 32]), config, "alia250")
+        model_contract_digest(&model("aa".repeat(32)), Digest::from_bytes([9; 32])),
+        "another bridge configuration produced the same contract"
     );
-    assert_ne!(
+    assert_eq!(
         base,
-        model_contract_digest(aircraft, Digest::from_bytes([9; 32]), "alia250")
+        model_contract_digest(&model("aa".repeat(32)), config),
+        "the same model produced a different contract"
     );
-    assert_ne!(base, model_contract_digest(aircraft, config, "cessna172"));
-    assert_eq!(base, model_contract_digest(aircraft, config, "alia250"));
     // Zero is refused by the verifier, so a derivation that could produce it
     // would fail the run rather than bind it.
     assert!(!base.is_zero());
+}
+
+#[test]
+fn fields_that_run_together_cannot_be_traded_between_each_other() {
+    // Concatenating strings is injective only while at most one can vary in
+    // length. Four do here, so moving a character from one to the next must
+    // still change the contract.
+    let config = Digest::from_bytes([8; 32]);
+    let mut left = model("aa".repeat(32));
+    left.simulator_id = "xplane".to_owned();
+    left.aircraft_id = "-12-alia".to_owned();
+    let mut right = model("aa".repeat(32));
+    right.simulator_id = "xplane-12".to_owned();
+    right.aircraft_id = "-alia".to_owned();
+
+    assert_ne!(
+        model_contract_digest(&left, config),
+        model_contract_digest(&right, config),
+        "a character moved across a field boundary went unnoticed"
+    );
 }
 
 /// The Alia's own model, as its preset declares it.
