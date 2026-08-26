@@ -64,6 +64,7 @@ impl super::AviateAdapter {
                 .as_mut()
                 .and_then(|source| source.truth_sample())?;
             sample.geodetic = self.paired_fix(sample.stamp);
+            self.report_join(sample.geodetic.is_some());
             Some(sample)
         }
         #[cfg(not(feature = "sim"))]
@@ -71,6 +72,40 @@ impl super::AviateAdapter {
             self.truth
                 .as_ref()
                 .map(|never| -> pilotage_adapter_api::SimTruthSample { match **never {} })
+        }
+    }
+
+    /// Reports a run of truth samples published with no fix joined to them.
+    ///
+    /// A sensor that never speaks, a topic nobody publishes, and two clocks
+    /// that do not share an origin are the same from here: no position,
+    /// for the rest of the session, in silence. One report at the start of
+    /// a run says which session is affected without a line per sample; the
+    /// count says how long the run has lasted when it ends.
+    #[cfg(feature = "sim")]
+    fn report_join(&mut self, joined: bool) {
+        /// Enough samples that a single late fix does not raise a report,
+        /// and few enough that an operator learns inside a second at
+        /// 30 Hz.
+        const RUN_BEFORE_REPORT: u64 = 30;
+
+        if joined {
+            if self.navsat_join_failures >= RUN_BEFORE_REPORT {
+                tracing::info!(
+                    samples = self.navsat_join_failures,
+                    "simulator position joined again after a run with none",
+                );
+            }
+            self.navsat_join_failures = 0;
+            return;
+        }
+        self.navsat_join_failures = self.navsat_join_failures.wrapping_add(1);
+        if self.navsat_join_failures == RUN_BEFORE_REPORT {
+            tracing::warn!(
+                samples = RUN_BEFORE_REPORT,
+                sensor_bound = self.camera_bridge.is_some(),
+                "no simulator position joined to the truth samples; the map states none",
+            );
         }
     }
 
@@ -125,10 +160,14 @@ fn fix_for_moment(
     if stamp.acquired_at_ns.abs_diff(fix.sim_time_ns) > SAME_MOMENT_NS {
         return None;
     }
-    // A report whose whole triple is zero states no position: 0,0 is a real
-    // place off the coast of Africa, so the typed contract accepts it and
-    // only this side knows it is a sensor that has not spoken.
-    if fix.latitude_deg == 0.0 && fix.longitude_deg == 0.0 && fix.altitude_m == 0.0 {
+    // Zero latitude AND zero longitude is a world that declared no datum,
+    // not a vehicle at Null Island. A world with no `spherical_coordinates`
+    // block leaves the sensor's origin at 0,0, and a vehicle standing on
+    // the ground there reports a small non-zero altitude — so the altitude
+    // says nothing about whether a datum exists, and requiring it to be
+    // zero too let the whole case through. Exact zero on both angles is
+    // not a place a simulator flies to; it is the default nobody set.
+    if fix.latitude_deg == 0.0 && fix.longitude_deg == 0.0 {
         return None;
     }
     // The sensor states an altitude above mean sea level and names no geoid,

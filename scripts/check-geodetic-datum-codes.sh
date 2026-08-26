@@ -160,6 +160,39 @@ if ! grep -Fq 'firstBigVarint(f, 10)' "$decoder"; then
     status=1
 fi
 
+# The Gazebo lane joins a sensor fix to the truth sample it belongs with.
+# Deleting the join leaves every unit test green — they exercise the join
+# function directly — while the map states no position for the rest of the
+# session, with no error anywhere to say the feature was removed.
+attachments="$root/adapters/aviate/src/adapter/sim_attachments.rs"
+if [ -f "$attachments" ]; then
+    if ! grep -Fq 'sample.geodetic = self.paired_fix(sample.stamp)' "$attachments"; then
+        echo "FORBIDDEN: the truth sample must carry the fix the sensor paired with it" >&2
+        status=1
+    fi
+    if ! grep -Fq 'latest_cached().navsat' "$attachments"; then
+        echo "FORBIDDEN: the paired fix must come from the sensor cache" >&2
+        status=1
+    fi
+fi
+
+# The sensor topic is scoped by the world the launcher started. gz-transport
+# accepts a subscription to a topic nobody publishes, so a name that does
+# not match produces no error, no fix, and no diagnostic.
+camera="$root/adapters/aviate/src/adapter/camera.rs"
+launcher="$root/tools/xtask/src/backend/aviate_gz.rs"
+if [ -f "$camera" ] && [ -f "$launcher" ]; then
+    if ! grep -Fq 'sensor/navsat_sensor/navsat' "$camera"; then
+        echo "FORBIDDEN: the sensor topic must name the model's navsat sensor" >&2
+        status=1
+    fi
+    if ! grep -Fq 'PILOTAGE_GZ_WORLD' "$camera" \
+        || ! grep -Fq 'PILOTAGE_GZ_WORLD' "$launcher"; then
+        echo "FORBIDDEN: the launcher and the reader must agree on the world name" >&2
+        status=1
+    fi
+fi
+
 # The guardrails only hold while CI runs them.
 ci="$root/.github/workflows/ci.yml"
 for step in 'clients/web/geodetic-fix.test.mjs' 'scripts/check-geodetic-datum-codes.sh'; do

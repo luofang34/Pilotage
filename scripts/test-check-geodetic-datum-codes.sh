@@ -12,6 +12,8 @@ mkdir -p \
     "$fixture/schemas/pilotage/v1" \
     "$fixture/clients/web" \
     "$fixture/clients/web-instruments/src/decode_envelope" \
+    "$fixture/adapters/aviate/src/adapter" \
+    "$fixture/tools/xtask/src/backend" \
     "$fixture/hosts/session-host/src/runtime/engine_actor" \
     "$fixture/scripts" \
     "$fixture/.github/workflows"
@@ -21,6 +23,9 @@ proto="$fixture/schemas/pilotage/v1/telemetry.proto"
 decoder="$fixture/clients/web/wire.js"
 mapper="$fixture/hosts/session-host/src/runtime/engine_actor/telemetry.rs"
 wasm_decoder="$fixture/clients/web-instruments/src/decode_envelope/groups.rs"
+attachments="$fixture/adapters/aviate/src/adapter/sim_attachments.rs"
+camera="$fixture/adapters/aviate/src/adapter/camera.rs"
+launcher="$fixture/tools/xtask/src/backend/aviate_gz.rs"
 ci="$fixture/.github/workflows/ci.yml"
 
 cp "$root/crates/pilotage-geo/src/datum.rs" "$datum"
@@ -28,6 +33,9 @@ cp "$root/schemas/pilotage/v1/telemetry.proto" "$proto"
 cp "$root/clients/web/wire.js" "$decoder"
 cp "$root/hosts/session-host/src/runtime/engine_actor/telemetry.rs" "$mapper"
 cp "$root/clients/web-instruments/src/decode_envelope/groups.rs" "$wasm_decoder"
+cp "$root/adapters/aviate/src/adapter/sim_attachments.rs" "$attachments"
+cp "$root/adapters/aviate/src/adapter/camera.rs" "$camera"
+cp "$root/tools/xtask/src/backend/aviate_gz.rs" "$launcher"
 cp "$root/.github/workflows/ci.yml" "$ci"
 cp "$root/scripts/check-geodetic-datum-codes.sh" "$fixture/scripts/"
 
@@ -49,6 +57,8 @@ restore() {
         mapper) cp "$root/hosts/session-host/src/runtime/engine_actor/telemetry.rs" "$mapper" ;;
         ci) cp "$root/.github/workflows/ci.yml" "$ci" ;;
         wasm) cp "$root/clients/web-instruments/src/decode_envelope/groups.rs" "$wasm_decoder" ;;
+        attachments) cp "$root/adapters/aviate/src/adapter/sim_attachments.rs" "$attachments" ;;
+        camera) cp "$root/adapters/aviate/src/adapter/camera.rs" "$camera" ;;
     esac
 }
 
@@ -166,10 +176,10 @@ path = sys.argv[1]
 source = open(path, encoding="utf-8").read()
 before = source
 source = source.replace('fix.stamp.role == SourceRole::SimulationTruth', "true", 1)
-assert source != before, "the truth-lane gate is not written the way this case edits it"
+assert source != before, 'the truth-lane gate is not written the way this case edits it'
 open(path, "w", encoding="utf-8").write(source)
 PY
-reject "a producer that does not gate the truth lane on the truth role"
+reject 'a producer that does not gate the truth lane on the truth role'
 restore mapper
 
 # A lane that stops calling the mapping stops re-running the contract, and
@@ -180,11 +190,40 @@ path = sys.argv[1]
 source = open(path, encoding="utf-8").read()
 before = source
 source = source.replace('.and_then(geodetic_to_wire);', ";", 1)
-assert source != before, "the mapping call is not written the way this case edits it"
+assert source != before, 'the mapping call is not written the way this case edits it'
 open(path, "w", encoding="utf-8").write(source)
 PY
-reject "a lane that reaches the wire without the mapping"
+reject 'a lane that reaches the wire without the mapping'
 restore mapper
+
+# Deleting the join leaves every unit test green — they exercise the join
+# function directly — while the map states no position for the rest of the
+# session, with nothing anywhere to say the feature was removed.
+python3 - "$attachments" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('sample.geodetic = self.paired_fix(sample.stamp);', "", 1)
+assert source != before, 'the join is not written the way this case edits it'
+open(path, "w", encoding="utf-8").write(source)
+PY
+reject 'a truth sample that drops the fix the sensor paired with it'
+restore attachments
+
+# gz-transport accepts a subscription to a topic nobody publishes, so a
+# name that does not match produces no error, no fix, and no diagnostic.
+python3 - "$camera" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('sensor/navsat_sensor/navsat', "sensor/typo/navsat", 1)
+assert source != before, 'the sensor topic is not written the way this case edits it'
+open(path, "w", encoding="utf-8").write(source)
+PY
+reject 'a sensor topic that names no sensor the model publishes'
+restore camera
 
 bash "$gate" "$fixture" >/dev/null
 echo "geodetic datum guards reject each loss"

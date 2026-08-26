@@ -149,6 +149,7 @@ impl AviateAdapter {
             control_feel_profiles: Some(control_feel_profiles),
             control_feel_changed: false,
             frames,
+            navsat_join_failures: 0,
             // A flight vehicle's gimbal is a real device on its own link,
             // not a rendered view, so the pointing attachment exists only
             // in a simulation build — and only for the producer that

@@ -28,8 +28,10 @@ struct BridgeConfig {
   // no gimbal, in which case the bridge subscribes no third camera.
   std::string gimbal_camera_topic;
   // Full gz topic of the vehicle's satellite-navigation sensor. Empty when
-  // the world declares no datum, and the bridge then reports no position:
-  // a fix with no datum behind it is not a place.
+  // the launcher named no world, and the bridge then subscribes to nothing.
+  // A world that declares no datum still publishes on this topic, with its
+  // origin left at zero; the adapter is what refuses that fix, because the
+  // sensor message carries no way to say the datum was never set.
   std::string navsat_topic;
 };
 

@@ -107,12 +107,14 @@ void BridgeNode::OnNavSat(const gz::msgs::NavSat &msg) {
   fix->set_latitude_deg(msg.latitude_deg());
   fix->set_longitude_deg(msg.longitude_deg());
   fix->set_altitude_m(msg.altitude());
-  const auto &stamp = msg.header().stamp();
-  fix->set_sim_time_ns(static_cast<uint64_t>(stamp.sec()) * 1000000000ULL +
-                       static_cast<uint64_t>(stamp.nsec()));
-  // A fix is a latest value: dropping one under back pressure costs a
-  // sample, never the position.
-  connection_->WriteEnvelope(envelope, /*droppable=*/true);
+  fix->set_sim_time_ns(StampToNanos(msg.header()));
+  // A fix is not droppable. The droppable queue holds two payloads and the
+  // cameras fill both, so a droppable fix is discarded whenever the reader
+  // stalls, and the map stops knowing where the vehicle is while the video
+  // recovers frame by frame. A fix is tens of bytes beside a frame's
+  // hundreds of kilobytes, and the odometry beside it already rides
+  // non-droppable at eight times the rate.
+  connection_->WriteEnvelope(envelope, /*droppable=*/false);
 }
 
 void BridgeNode::OnOdometry(const gz::msgs::Odometry &msg) {

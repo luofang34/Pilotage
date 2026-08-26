@@ -100,3 +100,22 @@ fn a_position_the_contract_refuses_is_no_position() {
     };
     assert!(fix_for_moment(past_the_pole, stamp).is_none());
 }
+
+/// A world that declares no datum leaves the sensor's origin at zero, and a
+/// vehicle standing on the ground there reports a small non-zero altitude.
+/// Requiring the altitude to be zero as well let that whole case through,
+/// and the map drew a vehicle off the coast of Africa.
+#[test]
+fn a_world_with_no_datum_states_no_position() {
+    let fix = pilotage_sim_video::BridgeNavSat {
+        latitude_deg: 0.0,
+        longitude_deg: 0.0,
+        // Standing on the ground in a world whose origin nobody set.
+        altitude_m: 0.193,
+        sim_time_ns: 1_000_000,
+    };
+    assert!(
+        super::fix_for_moment(fix, stamp_at(1_000_000)).is_none(),
+        "zero on both angles is the default nobody set, not a place"
+    );
+}
