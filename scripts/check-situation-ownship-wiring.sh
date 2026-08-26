@@ -59,11 +59,11 @@ fi
 
 require_pattern 'compass\.start\(\)' "$app/OwnshipPosition.swift" \
     "the compass must be started, or a heading up map has nothing to turn to"
-require_pattern 'locationManagerShouldDisplayHeadingCalibration' "$app/OwnshipPosition.swift" \
+require_pattern 'locationManagerShouldDisplayHeadingCalibration' "$app/DeviceSensors.swift" \
     "a compass that cannot trust its reading must be allowed to ask the reader to swing the tablet"
-require_pattern 'trueHeading >= 0' "$app/OwnshipPosition.swift" \
+require_pattern 'trueHeading >= 0' "$app/DeviceSensors.swift" \
     "a true heading is absent until the platform has variation, and the magnetic reading must answer instead"
-require_pattern 'case \.landscapeLeft: \.landscapeRight' "$app/OwnshipPosition.swift" \
+require_pattern 'case \.landscapeLeft: \.landscapeRight' "$app/DeviceSensors.swift" \
     "the interface and device orientations name landscape from opposite ends and must be swapped"
 require_pattern '@Published var follow' "$app/OwnshipPosition.swift" \
     "the follow mode must live in the model, because a closure that reads it outlives the view value"

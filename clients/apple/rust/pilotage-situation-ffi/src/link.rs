@@ -15,9 +15,9 @@ mod events;
 mod observer;
 mod pad;
 mod records;
-mod vehicle_fix;
 #[cfg(test)]
 mod tests;
+mod vehicle_fix;
 
 pub use observer::LinkObserver;
 pub use records::{

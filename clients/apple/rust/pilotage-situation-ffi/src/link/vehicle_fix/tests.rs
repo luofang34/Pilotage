@@ -59,11 +59,7 @@ fn truth_without_its_stamp_is_unconsumable() {
     // A position that cannot be shown to be this vehicle's, this boot's and
     // this moment's is not drawn, however plausible its numbers.
     let mut sample = truth(3.0, 0.0);
-    sample
-        .sim_truth
-        .as_mut()
-        .expect("truth lane")
-        .stamp = None;
+    sample.sim_truth.as_mut().expect("truth lane").stamp = None;
     assert!(from_sample(&sample).is_none());
 }
 
@@ -99,11 +95,7 @@ fn an_unstated_attitude_withholds_the_heading() {
     // The mask is the authorization. Reading the quaternion anyway would turn
     // the mark by a number nobody claimed.
     let mut sample = truth(3.0, 0.0);
-    sample
-        .sim_truth
-        .as_mut()
-        .expect("truth lane")
-        .valid_flags = 0b1000;
+    sample.sim_truth.as_mut().expect("truth lane").valid_flags = 0b1000;
     let read = from_sample(&sample).expect("a fix");
     assert_eq!(read.heading_deg, None);
     assert!(read.course_deg.is_some(), "velocity is still stated");
@@ -136,7 +128,10 @@ fn the_estimate_lane_needs_its_status_observation() {
     };
     let read = from_sample(&sample).expect("a fix");
     assert!(!read.from_simulator);
-    assert_eq!(read.heading_deg, None, "no status observation authorizes it");
+    assert_eq!(
+        read.heading_deg, None,
+        "no status observation authorizes it"
+    );
     assert_eq!(read.course_deg, None);
 
     // With the observation present the same sample states both.

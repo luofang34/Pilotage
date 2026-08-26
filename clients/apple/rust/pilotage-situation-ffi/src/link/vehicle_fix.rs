@@ -50,16 +50,10 @@ pub(super) fn from_sample(sample: &wire::TelemetrySample) -> Option<VehicleFix> 
                 [truth.quat_w, truth.quat_x, truth.quat_y, truth.quat_z],
                 truth.valid_flags,
             ),
-            course_deg: track_from(
-                [truth.vel_n_mps, truth.vel_e_mps],
-                truth.valid_flags,
-            )
-            .map(|(bearing, _)| bearing),
-            ground_speed_mps: track_from(
-                [truth.vel_n_mps, truth.vel_e_mps],
-                truth.valid_flags,
-            )
-            .map(|(_, speed)| speed),
+            course_deg: track_from([truth.vel_n_mps, truth.vel_e_mps], truth.valid_flags)
+                .map(|(bearing, _)| bearing),
+            ground_speed_mps: track_from([truth.vel_n_mps, truth.vel_e_mps], truth.valid_flags)
+                .map(|(_, speed)| speed),
             from_simulator: true,
         });
     }
