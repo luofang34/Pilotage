@@ -151,6 +151,23 @@ impl MarkMemory {
         Some((self.advanced_at_ms[slot], false))
     }
 
+    /// The course to draw, and the band's state updated to match.
+    ///
+    /// Both lanes ask this so neither can update `course_drawn` differently
+    /// from the other, which is what decides the band a later sample is
+    /// judged against.
+    fn course(
+        &mut self,
+        track_current: bool,
+        vel_ne: [f32; 2],
+        valid_flags: u32,
+    ) -> Option<(f64, f64)> {
+        let velocity = track_from(vel_ne, valid_flags, self.course_drawn);
+        let course = track_current.then_some(velocity).flatten();
+        self.course_drawn = course.is_some();
+        course
+    }
+
     /// Whether this group has stated a measurement recently enough to draw.
     ///
     /// A group that states no stamp at all cannot be shown to be current, and
@@ -183,53 +200,69 @@ pub(super) fn from_sample(
     now_ms: u64,
 ) -> Option<VehicleFix> {
     if let Some(truth) = sample.sim_truth.as_ref()
-        && let Some(geodetic) = truth.geodetic.as_ref()
-        // A position that cannot be shown to be this vehicle's, this boot's
-        // and this moment's is not drawn.
-        //
-        // Nor one stamped with another lane's role. Role travels in
-        // provenance precisely so a group cannot be read as something it is
-        // not, and an oracle's position read as the estimator's own solution
-        // is the substitution the roles exist to stop.
-        && stamp_states_role(truth.stamp.as_ref(), ROLE_SIMULATION_TRUTH)
-        && let Some(position) = position_of(geodetic)
+        && let Some(fix) = from_truth(memory, truth, now_ms)
     {
-        // The truth lane states one observation and every group rides it, so
-        // all three are tracked against the same stamp. They are still tracked
-        // separately: the lane can hand over to the estimate lane, which
-        // stamps its groups apart.
-        let stamp = truth.stamp.as_ref();
-        let heading_current = memory.is_current(Group::Heading, stamp, now_ms);
-        let track_current = memory.is_current(Group::Track, stamp, now_ms);
-        let fix_advanced = memory
-            .advanced(Group::Fix, stamp, now_ms)
-            .is_some_and(|(_, now)| now);
-        let velocity = track_from(
-            [truth.vel_n_mps, truth.vel_e_mps],
-            truth.valid_flags,
-            memory.course_drawn,
-        );
-        let course = track_current.then_some(velocity).flatten();
-        memory.course_drawn = course.is_some();
-        return Some(VehicleFix {
-            latitude_deg: position.0,
-            longitude_deg: position.1,
-            heading_deg: heading_current
-                .then(|| {
-                    heading_from(
-                        [truth.quat_w, truth.quat_x, truth.quat_y, truth.quat_z],
-                        truth.valid_flags,
-                    )
-                })
-                .flatten(),
-            course_deg: course.map(|(bearing, _)| bearing),
-            ground_speed_mps: course.map(|(_, speed)| speed),
-            from_simulator: true,
-            fix_advanced,
-        });
+        return Some(fix);
     }
+    from_estimate(memory, sample.avionics.as_ref()?, now_ms)
+}
 
-    let avionics = sample.avionics.as_ref()?;
+/// The oracle's own answer, or nothing when it cannot be read as one.
+///
+/// A position that cannot be shown to be this vehicle's, this boot's and this
+/// moment's is not drawn — nor one stamped with another lane's role. Role
+/// travels in provenance precisely so a group cannot be read as something it
+/// is not, and an oracle's position read as the estimator's own solution is
+/// the substitution the roles exist to stop.
+fn from_truth(
+    memory: &mut MarkMemory,
+    truth: &wire::SimTruthState,
+    now_ms: u64,
+) -> Option<VehicleFix> {
+    let geodetic = truth.geodetic.as_ref()?;
+    if !stamp_states_role(truth.stamp.as_ref(), ROLE_SIMULATION_TRUTH) {
+        return None;
+    }
+    let (latitude_deg, longitude_deg) = position_of(geodetic)?;
+    // This lane states one observation and every group rides it, so all three
+    // are tracked against the same stamp. They are still tracked separately:
+    // the lane can hand over to the estimate lane, which stamps its groups
+    // apart.
+    let stamp = truth.stamp.as_ref();
+    let heading_current = memory.is_current(Group::Heading, stamp, now_ms);
+    let track_current = memory.is_current(Group::Track, stamp, now_ms);
+    let fix_advanced = memory
+        .advanced(Group::Fix, stamp, now_ms)
+        .is_some_and(|(_, now)| now);
+    let course = memory.course(
+        track_current,
+        [truth.vel_n_mps, truth.vel_e_mps],
+        truth.valid_flags,
+    );
+    Some(VehicleFix {
+        latitude_deg,
+        longitude_deg,
+        heading_deg: heading_current
+            .then(|| {
+                heading_from(
+                    [truth.quat_w, truth.quat_x, truth.quat_y, truth.quat_z],
+                    truth.valid_flags,
+                )
+            })
+            .flatten(),
+        course_deg: course.map(|(bearing, _)| bearing),
+        ground_speed_mps: course.map(|(_, speed)| speed),
+        from_simulator: true,
+        fix_advanced,
+    })
+}
+
+/// The estimator's own solution, or nothing when this lane states no position.
+fn from_estimate(
+    memory: &mut MarkMemory,
+    avionics: &wire::AvionicsState,
+    now_ms: u64,
+) -> Option<VehicleFix> {
     let geodetic = avionics.geodetic.as_ref()?;
     // The fix carries its own stamp and its own role, and is refused on both:
     // a truth-stamped position in this slot would be drawn as the estimator's
@@ -237,13 +270,12 @@ pub(super) fn from_sample(
     if !stamp_states_role(avionics.geodetic_stamp.as_ref(), ROLE_OPERATIONAL_ESTIMATE) {
         return None;
     }
-    let position = position_of(geodetic)?;
-    // On the estimate lane the mask is a latched authorization from the
-    // estimator, and it means nothing without the status observation behind
-    // it — nor when that observation says the solution is unusable. An
-    // estimator calling its own answer unusable is the clearest refusal there
-    // is, and reading its directions anyway would turn the mark by a number
-    // its author disowned.
+    let (latitude_deg, longitude_deg) = position_of(geodetic)?;
+    // On this lane the mask is a latched authorization from the estimator, and
+    // it means nothing without the status observation behind it — nor when
+    // that observation says the solution is unusable. An estimator calling its
+    // own answer unusable is the clearest refusal there is, and reading its
+    // directions anyway would turn the mark by a number its author disowned.
     let authorized =
         avionics.estimator_status_stamp.is_some() && avionics.quality != QUALITY_UNUSABLE;
     let flags = if authorized { avionics.valid_flags } else { 0 };
@@ -254,16 +286,14 @@ pub(super) fn from_sample(
     let fix_advanced = memory
         .advanced(Group::Fix, avionics.geodetic_stamp.as_ref(), now_ms)
         .is_some_and(|(_, now)| now);
-    let velocity = track_from(
+    let course = memory.course(
+        track_current,
         [avionics.vel_n_mps, avionics.vel_e_mps],
         flags,
-        memory.course_drawn,
     );
-    let course = track_current.then_some(velocity).flatten();
-    memory.course_drawn = course.is_some();
     Some(VehicleFix {
-        latitude_deg: position.0,
-        longitude_deg: position.1,
+        latitude_deg,
+        longitude_deg,
         heading_deg: heading_current
             .then(|| {
                 heading_from(
