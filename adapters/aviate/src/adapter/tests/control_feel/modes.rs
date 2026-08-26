@@ -4,7 +4,9 @@
 use std::time::Duration;
 
 use pilotage_adapter_api::{Disposition, VehicleAdapter};
-use pilotage_control_feel::{FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
+use pilotage_control_feel::{
+    AirframeLimits, FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile,
+};
 use pilotage_protocol::LogicalAxisId;
 
 use super::super::super::PITCH_AXIS;
@@ -233,20 +235,44 @@ fn the_vehicle_advertises_the_modes_it_can_serve() {
 }
 
 /// The shipped profile artifacts, so a launcher can name one on disk.
-const SHAPED_PROFILES: [(FeelMode, &str, &str); 3] = [
+///
+/// Both airframes, because both are shipped: the same shaped family fitted to
+/// what each one's velocity loop can deliver.
+const SHAPED_PROFILES: [(FeelMode, AirframeLimits, &str, &str); 6] = [
     (
         FeelMode::Precision,
-        "precision",
+        AirframeLimits::X500,
+        "x500 precision",
+        include_str!("../../../../profiles/x500-shaped-precision-v1.json"),
+    ),
+    (
+        FeelMode::Balanced,
+        AirframeLimits::X500,
+        "x500 balanced",
+        include_str!("../../../../profiles/x500-shaped-balanced-v1.json"),
+    ),
+    (
+        FeelMode::Agile,
+        AirframeLimits::X500,
+        "x500 agile",
+        include_str!("../../../../profiles/x500-shaped-agile-v1.json"),
+    ),
+    (
+        FeelMode::Precision,
+        AirframeLimits::ALIA250,
+        "alia250 precision",
         include_str!("../../../../profiles/alia250-shaped-precision-v1.json"),
     ),
     (
         FeelMode::Balanced,
-        "balanced",
+        AirframeLimits::ALIA250,
+        "alia250 balanced",
         include_str!("../../../../profiles/alia250-shaped-balanced-v1.json"),
     ),
     (
         FeelMode::Agile,
-        "agile",
+        AirframeLimits::ALIA250,
+        "alia250 agile",
         include_str!("../../../../profiles/alia250-shaped-agile-v1.json"),
     ),
 ];
@@ -257,10 +283,10 @@ fn each_shipped_profile_is_the_law_the_code_shapes() {
     // that had drifted from the code would fly a law nobody reviewed, and
     // nothing at runtime would notice: it parses, it validates, and it is
     // simply not the law the mode is documented to be.
-    for (mode, name, json) in SHAPED_PROFILES {
+    for (mode, limits, name, json) in SHAPED_PROFILES {
         let shipped = ValidatedFlightFeelProfile::from_json_str(json)
             .unwrap_or_else(|error| panic!("{name} must parse and validate: {error}"));
-        let shaped = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(mode))
+        let shaped = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped_for(limits, mode))
             .expect("the code's shaped mode is valid");
         assert_eq!(
             FeelDigest::calculate(&shipped)
@@ -283,7 +309,7 @@ fn a_shipped_profile_installs_on_the_vehicle() {
     fc.set_read_timeout(Some(Duration::from_secs(1)))
         .expect("read timeout");
     let mut adapter = airborne_adapter_with_fc(&fc);
-    for (_, name, json) in SHAPED_PROFILES {
+    for (_, _, name, json) in SHAPED_PROFILES {
         let shipped =
             ValidatedFlightFeelProfile::from_json_str(json).expect("the shipped profile parses");
         adapter

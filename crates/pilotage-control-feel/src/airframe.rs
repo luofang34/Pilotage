@@ -61,5 +61,66 @@ impl AirframeLimits {
     }
 }
 
+/// How much of the airframe's authority the most aggressive mode may ask for.
+///
+/// Not all of it. The velocity loop has to track the demand AND hold against
+/// wind and estimator error at the same time; a demand sitting exactly at the
+/// tilt limit leaves nothing to do the second job with, and the first thing a
+/// gust costs is the ability to follow the stick.
+const MOST_AGGRESSIVE_SHARE: f32 = 0.9;
+
+impl crate::FlightFeelProfile {
+    /// The shaped law for one mode, fitted to what this airframe can deliver.
+    ///
+    /// The modes keep their proportions — the felt distance between Precision
+    /// and Agile is the same on any vehicle — and the whole family is scaled so
+    /// the most aggressive of them sits just inside the airframe's ceiling.
+    /// Scaling the family rather than clipping each mode is what keeps them
+    /// distinct: clipping would push Balanced and Agile onto the same value the
+    /// moment both exceeded the limit, which is a control offering two names
+    /// for one law.
+    #[must_use]
+    pub fn shaped_for(limits: AirframeLimits, mode: crate::FeelMode) -> Self {
+        let mut profile = Self::shaped(mode);
+        if mode == crate::FeelMode::LegacyCompatibility {
+            return profile;
+        }
+        let most_aggressive = Self::shaped(crate::FeelMode::Agile)
+            .horizontal
+            .dynamics
+            .apply_accel;
+        let allowed = limits.horizontal_accel_ceiling_mps2() * MOST_AGGRESSIVE_SHARE;
+        let scale = allowed / most_aggressive;
+        // A vehicle with room to spare keeps the law as written: the scale is a
+        // ceiling, not a target, and stretching a gentle mode to fill an
+        // airframe would make Precision mean something different per vehicle.
+        if scale >= 1.0 {
+            return profile;
+        }
+        for axis in [
+            &mut profile.horizontal,
+            &mut profile.vertical,
+            &mut profile.yaw,
+        ] {
+            axis.dynamics.apply_accel *= scale;
+            axis.dynamics.apply_jerk *= scale;
+            axis.dynamics.release_accel *= scale;
+            axis.dynamics.release_jerk *= scale;
+            axis.dynamics.reversal_accel *= scale;
+            axis.dynamics.reversal_jerk *= scale;
+        }
+        profile.profile_id = format!(
+            "{}-shaped-{}-v1",
+            limits.id,
+            profile
+                .profile_id
+                .rsplit_once("-v1")
+                .and_then(|(head, _)| head.rsplit_once('-'))
+                .map_or("unknown", |(_, slug)| slug)
+        );
+        profile
+    }
+}
+
 #[cfg(test)]
 mod tests;

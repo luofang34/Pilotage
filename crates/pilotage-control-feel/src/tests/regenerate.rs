@@ -15,11 +15,18 @@ fn regenerate_shipped_profiles() {
         (crate::FeelMode::Balanced, "balanced"),
         (crate::FeelMode::Agile, "agile"),
     ] {
-        let profile = FlightFeelProfile::shaped(mode);
-        let json = serde_json::to_string(&profile).expect("encode the shaped profile");
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../adapters/aviate/profiles")
-            .join(format!("alia250-shaped-{name}-v1.json"));
-        std::fs::write(path, json + "\n").expect("write the shipped profile");
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../adapters/aviate/profiles");
+        // The Alia keeps the law as written; the x500 gets the same law fitted
+        // to the tilt its velocity loop may command.
+        for limits in [
+            crate::airframe::AirframeLimits::ALIA250,
+            crate::airframe::AirframeLimits::X500,
+        ] {
+            let profile = FlightFeelProfile::shaped_for(limits, mode);
+            let json = serde_json::to_string(&profile).expect("encode the shaped profile");
+            let path = dir.join(format!("{}-shaped-{name}-v1.json", limits.id));
+            std::fs::write(path, json + "\n").expect("write the shipped profile");
+        }
     }
 }
