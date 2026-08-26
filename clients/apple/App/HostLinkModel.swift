@@ -522,27 +522,8 @@ final class HostLinkModel: ObservableObject {
             if action == 1, accepted, LaunchRequest.autoClimb {
                 climbUntil = Date().addingTimeInterval(15)
             }
-        case .vehicleFix(
-            let latitudeDeg,
-            let longitudeDeg,
-            let headingDeg,
-            let courseDeg,
-            let groundSpeedMps,
-            let fromSimulator
-        ):
-            // The map's own session carries surveillance, weather and terrain.
-            // A vehicle this operator is flying is in none of those, so its
-            // position reaches the mark through here or not at all.
-            onVehicleFix?(
-                VehicleFix(
-                    latitudeDegrees: latitudeDeg,
-                    longitudeDegrees: longitudeDeg,
-                    headingDegrees: headingDeg,
-                    courseDegrees: courseDeg,
-                    groundSpeedMetresPerSecond: groundSpeedMps,
-                    fromSimulator: fromSimulator
-                )
-            )
+        case .vehicleFix:
+            VehicleFix(event).map { onVehicleFix?($0) }
         case .stats(
             let telemetry,
             let stateFrames,
