@@ -558,3 +558,53 @@ fn every_shaped_operator_mode_installs_after_its_neutral_dwell() {
         );
     }
 }
+
+#[test]
+fn an_operator_asks_for_a_mode_by_name_and_gets_the_qualified_one() {
+    // The choice an operator makes is between three named laws, not between
+    // arbitrary profiles. A caller that could supply any profile could supply
+    // one nobody qualified; a mode a vehicle advertises is one somebody stood
+    // behind.
+    for mode in [FeelMode::Precision, FeelMode::Balanced, FeelMode::Agile] {
+        let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+        fc.set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("read timeout");
+        let mut adapter = airborne_adapter_with_fc(&fc);
+
+        let staged = adapter
+            .request_feel_mode(mode)
+            .unwrap_or_else(|error| panic!("{mode:?} must be requestable: {error}"));
+        let named = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(mode))
+            .expect("the named mode is a valid profile");
+        let expected = FeelDigest::calculate(&named).expect("digest the named mode");
+        assert_eq!(
+            staged.as_bytes(),
+            expected.as_bytes(),
+            "{mode:?} staged a different law than the one it names"
+        );
+
+        // It arrives at the same neutral boundary a rollback uses, so asking
+        // for a mode does not change the law under a deflected stick.
+        let deflected = flight_frame(vec![(LogicalAxisId::new(PITCH_AXIS), 0.5)], vec![]);
+        assert_eq!(
+            adapter.apply_control(&deflected).disposition,
+            Disposition::Accepted
+        );
+        receive_frame(&fc, "deflected response frame");
+        assert_ne!(
+            active_digest(&adapter),
+            *expected.as_bytes(),
+            "{mode:?} activated under a deflected stick"
+        );
+    }
+}
+
+#[test]
+fn a_physical_vehicle_refuses_a_mode_request() {
+    // These laws are shaped for a simulator and qualified there. A physical
+    // gateway takes its command law from the aircraft it is bound to, and a
+    // request to change it from the ground is refused rather than negotiated.
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    let mut adapter = airborne_adapter_with_fc(&fc).with_profile(crate::AviateProfile::Physical);
+    assert!(adapter.request_feel_mode(FeelMode::Agile).is_err());
+}

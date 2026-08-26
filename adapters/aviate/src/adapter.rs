@@ -11,7 +11,7 @@ use pilotage_adapter_api::{
     RejectReason, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
     VideoSource,
 };
-use pilotage_control_feel::{FeelDigest, ValidatedFlightFeelProfile};
+use pilotage_control_feel::{FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
 use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 
 #[cfg(test)]
@@ -163,6 +163,35 @@ impl AviateAdapter {
     ///
     /// Returns an error if the artifact does not match this adapter.
     pub fn stage_control_feel(
+        &mut self,
+        candidate: ValidatedFlightFeelProfile,
+    ) -> Result<FeelDigest, AviateAdapterError> {
+        self.stage_validated_control_feel(candidate)
+    }
+
+    /// Stages one named operator feel mode.
+    ///
+    /// An operator chooses between Precision, Balanced and Agile — three laws
+    /// that differ in degree and never in kind. This is that choice, by name,
+    /// rather than an arbitrary profile: a caller that could supply any
+    /// profile could supply one nobody qualified, and a mode a vehicle
+    /// advertises is a mode somebody stood behind.
+    ///
+    /// The mode arrives at the same neutral boundary a rollback uses, so the
+    /// law does not change under a deflected stick.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AviateAdapterError`] when the vehicle is physical, when the
+    /// profile is not one this vehicle accepts, or when no control-feel
+    /// artifact is active.
+    pub fn request_feel_mode(&mut self, mode: FeelMode) -> Result<FeelDigest, AviateAdapterError> {
+        let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(mode))
+            .map_err(|source| AviateAdapterError::InvalidControlFeel { source })?;
+        self.stage_control_feel(profile)
+    }
+
+    fn stage_validated_control_feel(
         &mut self,
         candidate: ValidatedFlightFeelProfile,
     ) -> Result<FeelDigest, AviateAdapterError> {
