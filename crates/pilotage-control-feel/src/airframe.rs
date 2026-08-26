@@ -72,42 +72,74 @@ const MOST_AGGRESSIVE_SHARE: f32 = 0.9;
 impl crate::FlightFeelProfile {
     /// The shaped law for one mode, fitted to what this airframe can deliver.
     ///
-    /// The modes keep their proportions — the felt distance between Precision
-    /// and Agile is the same on any vehicle — and the whole family is scaled so
-    /// the most aggressive of them sits just inside the airframe's ceiling.
-    /// Scaling the family rather than clipping each mode is what keeps them
-    /// distinct: clipping would push Balanced and Agile onto the same value the
-    /// moment both exceeded the limit, which is a control offering two names
-    /// for one law.
+    /// Modes that already sit inside the ceiling are returned as they are. A
+    /// mode above it is brought down to the ceiling, and its siblings are left
+    /// alone: a law that has been flown is evidence, and moving it to make room
+    /// for a mode that was never flyable spends that evidence for nothing.
+    ///
+    /// The exception is an airframe tight enough that clipping lands two modes
+    /// on the same number — a control offering two names for one law. There the
+    /// whole family scales instead, which costs every mode some authority but
+    /// keeps the felt distance between them.
+    ///
+    /// Which branch an airframe takes is a fact about that airframe, not a
+    /// preference: see the shipped-law tests for what each one does and why.
     #[must_use]
     pub fn shaped_for(limits: AirframeLimits, mode: crate::FeelMode) -> Self {
-        let mut profile = Self::shaped(mode);
+        // The compatibility law is exempt, and must be: the adapter refuses a
+        // legacy profile that is not byte-identical to the one it compiles in,
+        // so shaping it would make the file unloadable rather than flyable.
+        //
+        // It is also the only law a physical vehicle is allowed to fly, and it
+        // sits outside BOTH airframes. Nothing here fixes that; see
+        // `the_law_a_physical_vehicle_flies_is_outside_both_airframes`.
         if mode == crate::FeelMode::LegacyCompatibility {
-            return profile;
+            return Self::shaped(mode);
         }
-        let most_aggressive = Self::shaped(crate::FeelMode::Agile)
-            .horizontal
-            .dynamics
-            .apply_accel;
         let allowed = limits.horizontal_accel_ceiling_mps2() * MOST_AGGRESSIVE_SHARE;
-        let scale = allowed / most_aggressive;
-        // A vehicle with room to spare keeps the law as written: the scale is a
-        // ceiling, not a target, and stretching a gentle mode to fill an
-        // airframe would make Precision mean something different per vehicle.
-        if scale >= 1.0 {
-            return profile;
-        }
-        for axis in [
-            &mut profile.horizontal,
-            &mut profile.vertical,
-            &mut profile.yaw,
-        ] {
-            axis.dynamics.apply_accel *= scale;
-            axis.dynamics.apply_jerk *= scale;
-            axis.dynamics.release_accel *= scale;
-            axis.dynamics.release_jerk *= scale;
-            axis.dynamics.reversal_accel *= scale;
-            axis.dynamics.reversal_jerk *= scale;
+        let asks = |mode| Self::shaped(mode).horizontal.dynamics.apply_accel;
+        let (precision, balanced, agile) = (
+            asks(crate::FeelMode::Precision),
+            asks(crate::FeelMode::Balanced),
+            asks(crate::FeelMode::Agile),
+        );
+
+        // Clip first, and keep the modes a reader has already flown wherever
+        // clipping leaves them distinct. Scaling the whole family costs every
+        // mode authority to bring ONE of them inside the ceiling, which is a
+        // change to laws that were not the problem.
+        let clipped = [
+            precision.min(allowed),
+            balanced.min(allowed),
+            agile.min(allowed),
+        ];
+        // Unless clipping collapses two modes onto one number. Then the control
+        // offers two names for one law, which is the defect this exists to
+        // prevent, and scaling the family is the lesser cost.
+        let collapses = clipped[0] >= clipped[1] || clipped[1] >= clipped[2];
+        let scale = if collapses { allowed / agile } else { 1.0 };
+
+        let mut profile = Self::shaped(mode);
+        let ask = profile.horizontal.dynamics.apply_accel;
+        // How much this mode's numbers move: the clip, or the family scale.
+        let factor = if collapses {
+            scale
+        } else {
+            ask.min(allowed) / ask
+        };
+        if factor < 1.0 {
+            for axis in [
+                &mut profile.horizontal,
+                &mut profile.vertical,
+                &mut profile.yaw,
+            ] {
+                axis.dynamics.apply_accel *= factor;
+                axis.dynamics.apply_jerk *= factor;
+                axis.dynamics.release_accel *= factor;
+                axis.dynamics.release_jerk *= factor;
+                axis.dynamics.reversal_accel *= factor;
+                axis.dynamics.reversal_jerk *= factor;
+            }
         }
         profile.profile_id = format!(
             "{}-shaped-{}-v1",
