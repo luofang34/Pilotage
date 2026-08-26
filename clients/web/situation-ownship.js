@@ -68,9 +68,17 @@ export const OWNSHIP_STALE_AFTER_MS = 3_000;
  *
  *  There is no band under this bound, as there is under the speed floor.
  *  The floor's input is a noisy continuous quantity that sits either side
- *  of a threshold; this one's input is whether a publication arrived, and a
- *  group publishing slower than roughly three times a second would blink
- *  rather than hover. No group in the wire contract is that slow. */
+ *  of a threshold, where a band is the only thing that stops it flickering;
+ *  this one's input is whether a publication arrived, which does not
+ *  hover — a group either keeps up with this bound or it does not.
+ *
+ *  What a band WOULD buy is tolerance for a group publishing slower than
+ *  about three times a second, which would blink instead. Both groups this
+ *  gate covers are stamped by the flight controller's own estimator on the
+ *  estimate lane and by the oracle on the truth lane, so neither runs at a
+ *  receiver's rate today. A velocity group ever sourced from the receiver
+ *  would need this reconsidered, which is why the fix is exempted from this
+ *  bound rather than the bound being relaxed for everything. */
 export const GROUP_COHERENCE_MS = 300;
 
 /**
@@ -103,7 +111,14 @@ export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
     ? [truth, OWNSHIP_SOURCE.TRUTH]
     : [avionics, OWNSHIP_SOURCE.ESTIMATE];
   const fix = lane?.geodetic;
-  if (!fix) {
+  const fixStamp = lane?.geodeticStamp ?? lane?.stamp ?? null;
+  // A position without provenance is discarded rather than drawn: it cannot
+  // be shown to be this vehicle's, this boot's, or this moment's, which is
+  // the same refusal every other group here makes. The decoder already
+  // withholds a fix whose stamp is missing or wrongly stamped, so this is
+  // the module's own policy stated where a reader can see it rather than a
+  // second gate on a reachable case.
+  if (!fix || !fixStamp) {
     return { position: null, source: null, reason: OWNSHIP_REASON.NO_FIX };
   }
   const validFlags = authorizedFlags(lane, source);
@@ -122,7 +137,7 @@ export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
     // the truth lane states one observation and both ride it.
     headingStamp: lane.attitudeStamp ?? lane.stamp ?? null,
     trackStamp: lane.kinematicsStamp ?? lane.stamp ?? null,
-    fixStamp: lane.geodeticStamp ?? lane.stamp ?? null,
+    fixStamp,
     source,
     reason: null,
   };
@@ -205,10 +220,16 @@ export function attachOwnship(maplibre, map, surface) {
   let pendingLeader = null;
   let courseDrawn = false;
 
-  // When each direction's group last carried a measurement this page had
-  // not already seen. A group repeated unchanged is a group the producer
-  // is republishing, not measuring, and presence alone cannot tell the two
+  // When each group last carried a measurement this page had not already
+  // seen. A group repeated unchanged is a group the producer is
+  // republishing, not measuring, and presence alone cannot tell the two
   // apart.
+  //
+  // This rests on a guarantee the stamp makes and this file cannot check:
+  // the wire defines the sequence as advancing only for a new measurement,
+  // and the acquisition time as when the measurement was taken rather than
+  // when it was sent. Were either to count publications instead, every test
+  // below would still pass and the whole mechanism would be inert.
   const lastStampIdentity = new Map();
   const lastStampAdvance = new Map();
   /** When this group last carried a measurement the page had not already
@@ -348,7 +369,7 @@ export function attachOwnship(maplibre, map, surface) {
     // course — both correctly current — around a position the vehicle had
     // left, and that live motion would assert the whole symbol was current.
     // A frozen mark at least looks frozen.
-    lastFixAt = advancedAt("fix", sample.fixStamp, nowMs) ?? nowMs;
+    lastFixAt = advancedAt("fix", sample.fixStamp, nowMs);
     if (nowMs - lastFixAt > OWNSHIP_STALE_AFTER_MS) {
       withdraw(OWNSHIP_REASON.STOPPED);
       return;

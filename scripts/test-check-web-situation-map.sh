@@ -449,7 +449,7 @@ reject "a leader endpoint wrapped away from its start"
 restore clients/web/situation-motion.js
 
 # A sample carrying a position is not a sample carrying a new one.
-sed -i.bak 's|advancedAt("fix", sample.fixStamp, nowMs) ?? nowMs|nowMs|' \
+sed -i.bak 's|lastFixAt = advancedAt("fix", sample.fixStamp, nowMs);|lastFixAt = nowMs;|' \
     "$web/situation-ownship.js"
 reject "a mark aged on the sample rather than on the fix"
 restore clients/web/situation-ownship.js

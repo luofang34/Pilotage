@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 
 import {
+  GROUP_COHERENCE_MS,
   OWNSHIP_REASON,
   OWNSHIP_SOURCE,
   OWNSHIP_STALE_AFTER_MS,
@@ -844,5 +845,46 @@ function testASpokenBearingRunsFromOneTo360() {
 }
 testASpokenBearingRunsFromOneTo360();
 console.log("ok - testASpokenBearingRunsFromOneTo360");
+
+function testAFixWithNoProvenanceIsNotAPosition() {
+  // Every other group here refuses what it cannot show to be current. A fix
+  // aged on arrival instead would be the one fail-open default in the
+  // module, and the wire says a sample without its stamp is unconsumable.
+  const truthless = ownshipFromTelemetry({
+    simTruth: { geodetic: FIX, quat: yawQuat(90), validFlags: VALID_ATTITUDE },
+  });
+  assert.equal(truthless.position, null, "truth without provenance is discarded");
+  assert.equal(truthless.reason, OWNSHIP_REASON.NO_FIX);
+
+  const estimateless = ownshipFromTelemetry(estimate(FIX, { geodeticStamp: null }));
+  assert.equal(estimateless.position, null, "and so is an estimate's fix");
+  assert.equal(estimateless.reason, OWNSHIP_REASON.NO_FIX);
+}
+testAFixWithNoProvenanceIsNotAPosition();
+console.log("ok - testAFixWithNoProvenanceIsNotAPosition");
+
+function testAGroupIsStillCurrentAtTheBoundItself() {
+  // The bound is inclusive. A later tidy of the comparison would move the
+  // edge by one tick with nothing to say so.
+  const { observe, surface } = harness();
+  const held = estimate();
+  observe(held, 1_000);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "270.0");
+
+  const republished = (nowMs) =>
+    observe({ avionics: { ...held.avionics, geodeticStamp: freshStamp(1) } }, nowMs);
+
+  republished(1_000 + GROUP_COHERENCE_MS);
+  assert.equal(
+    surface.dataset.ownshipHeadingDeg,
+    "270.0",
+    "exactly at the bound the group is still current",
+  );
+
+  republished(1_000 + GROUP_COHERENCE_MS + 1);
+  assert.equal(surface.dataset.ownshipHeadingDeg, undefined, "one tick past it, it is not");
+}
+testAGroupIsStillCurrentAtTheBoundItself();
+console.log("ok - testAGroupIsStillCurrentAtTheBoundItself");
 
 console.log("\nall situation ownship checks passed");
