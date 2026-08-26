@@ -231,3 +231,63 @@ fn the_vehicle_advertises_the_modes_it_can_serve() {
         "a feel request carries no flight-mode target"
     );
 }
+
+/// The shipped profile artifacts, so a launcher can name one on disk.
+const SHAPED_PROFILES: [(FeelMode, &str, &str); 3] = [
+    (
+        FeelMode::Precision,
+        "precision",
+        include_str!("../../../../profiles/alia250-shaped-precision-v1.json"),
+    ),
+    (
+        FeelMode::Balanced,
+        "balanced",
+        include_str!("../../../../profiles/alia250-shaped-balanced-v1.json"),
+    ),
+    (
+        FeelMode::Agile,
+        "agile",
+        include_str!("../../../../profiles/alia250-shaped-agile-v1.json"),
+    ),
+];
+
+#[test]
+fn each_shipped_profile_is_the_law_the_code_shapes() {
+    // The host installs a law from a file named in the environment. A file
+    // that had drifted from the code would fly a law nobody reviewed, and
+    // nothing at runtime would notice: it parses, it validates, and it is
+    // simply not the law the mode is documented to be.
+    for (mode, name, json) in SHAPED_PROFILES {
+        let shipped = ValidatedFlightFeelProfile::from_json_str(json)
+            .unwrap_or_else(|error| panic!("{name} must parse and validate: {error}"));
+        let shaped = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(mode))
+            .expect("the code's shaped mode is valid");
+        assert_eq!(
+            FeelDigest::calculate(&shipped)
+                .expect("digest the shipped profile")
+                .as_bytes(),
+            FeelDigest::calculate(&shaped)
+                .expect("digest the shaped mode")
+                .as_bytes(),
+            "{name} on disk is not the law the code shapes"
+        );
+        assert_eq!(shipped.profile().mode, mode);
+    }
+}
+
+#[test]
+fn a_shipped_profile_installs_on_the_vehicle() {
+    // A file the adapter refuses is a file a launcher cannot use, however
+    // well it parses.
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read timeout");
+    let mut adapter = airborne_adapter_with_fc(&fc);
+    for (_, name, json) in SHAPED_PROFILES {
+        let shipped =
+            ValidatedFlightFeelProfile::from_json_str(json).expect("the shipped profile parses");
+        adapter
+            .stage_control_feel(shipped)
+            .unwrap_or_else(|error| panic!("{name} must be installable: {error}"));
+    }
+}
