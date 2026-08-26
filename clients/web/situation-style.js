@@ -3,7 +3,7 @@
 // One style file drives the Apple renderer and the web renderer
 // (clients/apple/Resources/SituationStyle.json, exported verbatim by
 // scripts/build-web-situation-assets.sh). This module substitutes the
-// style's three __PILOTAGE_*__ URL tokens for the exported asset URLs,
+// style's __PILOTAGE_*__ URL tokens for the exported asset URLs,
 // mirroring the Apple client's SituationStyleResource: an invalid template
 // is a typed error, a missing font set costs the labels and never the map,
 // and the closest zoom derives from the terrain manifest rather than a

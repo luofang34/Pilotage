@@ -24,7 +24,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#02060a"
+        "background-color": "#dfe3e6"
       }
     },
     {
@@ -43,7 +43,7 @@
       "source": "pilotage-coastline",
       "source-layer": "land",
       "paint": {
-        "fill-color": "#526044",
+        "fill-color": "#dfe7c4",
         "fill-opacity": 1
       }
     },
@@ -62,7 +62,7 @@
       "type": "color-relief",
       "source": "pilotage-terrain",
       "paint": {
-        "color-relief-opacity": 0.6,
+        "color-relief-opacity": 0.9,
         "color-relief-color": [
           "interpolate",
           [
@@ -72,41 +72,49 @@
             "elevation"
           ],
           -11000,
-          "#01040a",
-          -4000,
-          "#02070e",
-          -1000,
-          "#030b14",
-          -200,
-          "#394537",
-          -20,
-          "#4a563c",
+          "#7fb2c8",
+          -400,
+          "#a8cfe0",
+          -80,
+          "#cfdeae",
+          -2,
+          "#cfdeae",
           -1,
-          "#4f5f3e",
+          "#dfe7c4",
           0,
-          "#4f5f3e",
-          60,
-          "#6a7649",
-          200,
-          "#828a58",
-          500,
-          "#9a9668",
-          900,
-          "#ab9b73",
-          1400,
-          "#ac8b63",
-          2000,
-          "#98724c",
-          2800,
-          "#7f5836",
-          3600,
-          "#6a4830",
-          4500,
-          "#7d6a5c",
-          5200,
-          "#a99c92",
-          6000,
-          "#e8e8e8",
+          "#dfe7c4",
+          304.6,
+          "#dfe7c4",
+          304.8,
+          "#cfdeae",
+          609.4,
+          "#cfdeae",
+          609.6,
+          "#fff4db",
+          914.2,
+          "#fff4db",
+          914.4,
+          "#f7e8b8",
+          1523.8,
+          "#f7e8b8",
+          1524.0,
+          "#f2d58b",
+          2133.4,
+          "#f2d58b",
+          2133.6,
+          "#e4bf9b",
+          2743.0,
+          "#e4bf9b",
+          2743.2,
+          "#eeb47f",
+          3657.4,
+          "#eeb47f",
+          3657.6,
+          "#b48e3f",
+          5983.9,
+          "#b48e3f",
+          5984.1,
+          "#ffffff",
           8850,
           "#ffffff"
         ]
@@ -117,12 +125,166 @@
       "type": "hillshade",
       "source": "pilotage-terrain",
       "paint": {
-        "hillshade-exaggeration": 0.35,
+        "hillshade-exaggeration": 0.5,
         "hillshade-shadow-color": "#241f16",
         "hillshade-highlight-color": "#cfc9b4",
         "hillshade-accent-color": "#3a3226",
         "hillshade-illumination-direction": 315,
-        "hillshade-illumination-anchor": "map"
+        "hillshade-illumination-anchor": "map",
+        "hillshade-method": "igor"
+      }
+    },
+    {
+      "id": "pilotage-ocean-water",
+      "type": "fill",
+      "source": "pilotage-coastline",
+      "source-layer": "ocean",
+      "paint": {
+        "fill-color": "#e1eef5",
+        "fill-opacity": 1
+      }
+    },
+    {
+      "id": "pilotage-lake-water",
+      "type": "fill",
+      "source": "pilotage-coastline",
+      "source-layer": "lakes",
+      "paint": {
+        "fill-color": "#93cde5",
+        "fill-opacity": 1
+      }
+    },
+    {
+      "id": "pilotage-river",
+      "type": "line",
+      "source": "pilotage-coastline",
+      "source-layer": "rivers",
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#93cde5",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          2,
+          [
+            "case",
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              3
+            ],
+            0.4,
+            0
+          ],
+          5,
+          [
+            "case",
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              5
+            ],
+            0.6,
+            0
+          ],
+          8,
+          [
+            "case",
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              8
+            ],
+            1.0,
+            0
+          ],
+          9,
+          [
+            "case",
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              4
+            ],
+            1.6,
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              9
+            ],
+            1.2,
+            0
+          ],
+          11,
+          [
+            "case",
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              4
+            ],
+            2.6,
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              9
+            ],
+            1.8,
+            1.1
+          ],
+          14,
+          [
+            "case",
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              4
+            ],
+            5.0,
+            [
+              "<=",
+              [
+                "get",
+                "scalerank"
+              ],
+              9
+            ],
+            3.4,
+            2.0
+          ]
+        ]
       }
     }
   ]

@@ -118,6 +118,15 @@ RESYNC
 }
 
 reject_style() {
+    # A mutation that changed nothing leaves the guard reading the committed
+    # style, which it accepts correctly. The case would then report a hole
+    # that is not there, so an edit that stops finding what it edits fails
+    # here instead.
+    if cmp -s "$root/clients/apple/Resources/SituationStyle.json" \
+        "$fixture/clients/apple/Resources/SituationStyle.json"; then
+        echo "the mutation for $1 changed nothing in the style" >&2
+        exit 1
+    fi
     if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
         bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
         echo "the terrain guard accepted $1" >&2
@@ -361,6 +370,71 @@ fi
 cp "$root/crates/pilotage-terrain-build/Cargo.toml" \
     "$fixture/crates/pilotage-terrain-build/"
 
+# Water reads as water only while it draws over the relief, from the source
+# whose shape is exact where it draws, in its own tone.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'WATER_UNDER'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+order = [layer["id"] for layer in style["layers"]]
+water = order.index("pilotage-ocean-water")
+relief = order.index("pilotage-terrain-relief")
+style["layers"].insert(relief, style["layers"].pop(water))
+json.dump(style, open(path, "w"))
+WATER_UNDER
+reject_style "water drawn under the terrain relief"
+
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'WATER_TONE'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-ocean-water":
+        layer["paint"]["fill-color"] = "#ff00ff"
+json.dump(style, open(path, "w"))
+WATER_TONE
+reject_style "an open-water tone no guard pins"
+
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'WATER_SAME'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+ids = [layer["id"] for layer in style["layers"]]
+ocean = style["layers"][ids.index("pilotage-ocean-water")]["paint"]["fill-color"]
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-lake-water":
+        layer["paint"]["fill-color"] = ocean
+json.dump(style, open(path, "w"))
+WATER_SAME
+reject_style "inland water that reads as open water"
+
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'WATER_LAND'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-ocean-water":
+        layer["source-layer"] = "land"
+json.dump(style, open(path, "w"))
+WATER_LAND
+reject_style "open water drawn from the land polygons"
+
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'RIVER_FLAT'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-river":
+        layer["paint"]["line-width"] = 1.0
+json.dump(style, open(path, "w"))
+RIVER_FLAT
+reject_style "a drainage that never thins"
+
 # The archive checks only run where an archive exists, and the archive is a
 # build artifact no gate builds. Without this case the headline invariant of
 # the coverage change has only ever executed on a machine that happened to
@@ -384,7 +458,7 @@ db.execute(
 )
 db.execute(
     "INSERT INTO metadata VALUES ('json', ?);",
-    ('{"vector_layers":[{"id":"ocean"},{"id":"land"},{"id":"lakes"}]}',),
+    ('{"vector_layers":[{"id":"ocean"},{"id":"land"},{"id":"lakes"},{"id":"rivers"}]}',),
 )
 db.executemany(
     "INSERT INTO tiles VALUES (7, ?, 0, x'00');",
@@ -427,6 +501,54 @@ SYNC
     rm -f "$archive"
     cp "$root/clients/apple/Resources/SituationCoastline.manifest.json" "$manifest"
 }
+
+# GDAL writes appended features into whatever fields the layer was created
+# with and says nothing. A river source that names fewer fields than the one
+# before it deletes the rank from every feature in the layer, and the ladder
+# that reads the rank then falls back to the renderer's default width of 1
+# for the whole world's drainage at every zoom.
+python3 - "$fixture/clients/apple/Resources/SituationCoastline.plan.json" <<'FIELD_DRIFT'
+import json
+import sys
+path = sys.argv[1]
+plan = json.load(open(path))
+for source in plan["sources"]:
+    if source.get("layer") == "rivers" and source["name"] != "rivers":
+        source["select"] = "featurecla"
+        break
+else:
+    raise SystemExit("no regional river source to edit")
+json.dump(plan, open(path, "w"))
+FIELD_DRIFT
+reject_plan "sources feeding one layer must agree on fields and geometry"
+
+# The land polygon is what a reader sees through the relief, which draws at
+# part opacity. Its tone classifies ground as ground; the relief's ramp
+# alone cannot, because an elevation is not a land-or-water statement.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'LAND_TONE'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-land-fill":
+        layer["paint"]["fill-color"] = "#ff00ff"
+json.dump(style, open(path, "w"))
+LAND_TONE
+reject_style "a land tone no guard pins"
+
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'RELIEF_OPAQUE'
+import json
+import sys
+path = sys.argv[1]
+style = json.load(open(path))
+for layer in style["layers"]:
+    if layer["id"] == "pilotage-terrain-relief":
+        layer["paint"]["color-relief-opacity"] = 1
+json.dump(style, open(path, "w"))
+RELIEF_OPAQUE
+reject_style "a relief that hides the polygon beneath it"
+
 
 # Half of 4^7 is 8192. One tile short of it is a plan the build did not keep.
 archive_case 8191 reject

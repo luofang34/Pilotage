@@ -7,8 +7,9 @@ declares the globe projection. The web renderer draws the globe by default.
 
 ## One style, two renderers
 
-The style document carries three `__PILOTAGE_*__` URL tokens. Each client
-substitutes the tokens at run time:
+The style document carries a `__PILOTAGE_*__` URL token for each archive
+it reads and for its fonts. Each client substitutes the tokens at run
+time:
 
 - The Apple client points the tokens at the bundled MBTiles archives and the
   bundled fonts (`SituationStyleResource.swift`).
@@ -24,6 +25,54 @@ longitude −76.5, zoom 6, pitch 55°, minimum zoom 0. The closest zoom derives
 from `SituationTerrain.manifest.json`: the deepest band plus two overzoom
 steps. `clients/web/situation-style.test.mjs` reads the Apple sources and
 fails when one side changes a value without the other.
+
+## Palette
+
+The base map reads as an aeronautical chart. The elevation tints follow
+the FAA VFR sectional ladder, from the sectional's sea-level green through
+cream and tan to brown. The band edges are the sectional's own: 1000,
+2000, 3000, 5000, 7000, 9000, and 12 000 ft, converted to metres. The two
+water tones are the sectional's "Open Water" and "Inland Water".
+
+We read these values from the legend of the FAA Aeronautical Chart User's
+Guide, because the FAA publishes no colour table. Two editions of the
+guide agree to within a few steps of 255. The ramp continues above the
+sectional's highest band and below sea level, where the sectional's legend
+stops; those parts are ours, not the FAA's. Below sea level the ramp
+reuses the tint of the 1000 to 2000 ft band, as the sectional does, so a
+tint alone does not say which of the two a reader is looking at.
+
+Water draws over the terrain relief and over the hillshade. An elevation
+ramp cannot distinguish a lake at 500 m from ground at 500 m, so the
+polygon that carries that information keeps its own colour instead of
+taking the tint of the height below it.
+
+The hillshade uses the Igor method, which darkens a slope without a stain
+on the tint below it. It lights the terrain from the north west, as a
+chart does.
+
+## Drainage
+
+The rivers are centre lines, and they stay centre lines at every zoom.
+Natural Earth publishes no river areas, so a river has a width only where
+a lake polygon gives it one. A sectional chart draws its rivers the same
+way, and thins them by rank; the style follows that, and widens a line
+with the zoom rather than pretending to a shape the data does not carry.
+
+Three files feed the river layer: the global 1:10m network, and the
+regional files for Europe and North America. The lakes layer takes the two
+regional files as well.
+
+The rank is a drawing scale, not a name for which file a feature came from.
+The global file holds mostly rank 0 to 9 and a few dozen features above it;
+the regional files hold rank 10 to 12 only. The ladder therefore reads the
+rank and not the file: it draws nothing above rank 9 below zoom 9, and
+fades those features in between zoom 9 and zoom 11.
+
+The shape of the coast is generalized at 1:10,000,000. It disagrees with
+the terrain relief by some hundred metres. The disagreement is visible when
+a reader zooms in far, and it is the same everywhere, because one source
+draws the whole world.
 
 ## Build steps
 
@@ -62,9 +111,10 @@ that reason complete over the world at every zoom it holds. Above its
 deepest zoom the renderer stretches the tiles that it has, so the picture
 changes with the zoom and never with the position of the reader.
 
-The cost of that completeness sets the depth. Zoom 7 over the world is
-21845 tiles and about 13 MB. Each deeper zoom multiplies both by four, and
-the 1:10m source data does not carry more shape than zoom 7 shows.
+The cost of that completeness sets the depth. The archive stops at zoom 7:
+each deeper zoom multiplies the tile count and the size by four, and the
+1:10m source data does not carry more shape than zoom 7 shows. The
+manifest records what the build produced.
 
 Serve the repository root statically and open the viewer:
 

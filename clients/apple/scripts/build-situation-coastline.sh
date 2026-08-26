@@ -60,34 +60,53 @@ jq -r '.sources[].name' "$plan" |
     while read -r source_name; do
         shapefile=$(jq -r --arg name "$source_name" \
             '.sources[] | select(.name == $name) | .shapefile' "$plan")
-        jq -r '.bands[] | [.name, .min_zoom, .max_zoom, .min_lat_deg, .max_lat_deg, .min_lon_deg, .max_lon_deg] | @tsv' "$plan" |
-            while IFS="$(printf '\t')" read -r band_name _min_zoom _max_zoom min_lat max_lat min_lon max_lon; do
-                layer_name="${source_name}_${band_name}"
-                if [ -f "$geopackage" ]; then
-                    ogr2ogr -update -nln "$layer_name" \
-                        -clipsrc "$min_lon" "$min_lat" "$max_lon" "$max_lat" \
-                        -select featurecla -nlt MULTIPOLYGON -dim XY -makevalid \
-                        "$geopackage" "$work/$source_name/$shapefile"
-                else
-                    ogr2ogr -f GPKG -nln "$layer_name" \
-                        -clipsrc "$min_lon" "$min_lat" "$max_lon" "$max_lat" \
-                        -select featurecla -nlt MULTIPOLYGON -dim XY -makevalid \
-                        "$geopackage" "$work/$source_name/$shapefile"
-                fi
-            done
+        # Several sources can feed one layer: a global file gives the world
+        # its shape, and a regional file gives the flown area the density a
+        # chart is read at. The layer is what the style names.
+        layer_name=$(jq -r --arg name "$source_name" \
+            '.sources[] | select(.name == $name) | .layer // .name' "$plan")
+        # Each source states the geometry it carries and the attributes it
+        # keeps. GDAL writes a line source into a polygon layer anyway, with
+        # only a warning, and that layer then draws nothing.
+        geometry_type=$(jq -r --arg name "$source_name" \
+            '.sources[] | select(.name == $name) | .geometry_type // "MULTIPOLYGON"' "$plan")
+        select_fields=$(jq -r --arg name "$source_name" \
+            '.sources[] | select(.name == $name) | .select // "featurecla"' "$plan")
+        # Repair of a ring is an operation on a polygon. It discards a line.
+        makevalid=""
+        if [ "$geometry_type" = "MULTIPOLYGON" ]; then
+            makevalid="-makevalid"
+        fi
+        # The fields are chosen with a query rather than with -select,
+        # because GDAL refuses -select on an append and the first source of
+        # a layer must choose the same fields as the ones that follow it.
+        query="SELECT $select_fields FROM ${shapefile%.shp}"
+        if [ -f "$geopackage" ]; then
+            # shellcheck disable=SC2086
+            ogr2ogr -update -append -nln "$layer_name" \
+                -sql "$query" -nlt "$geometry_type" -dim XY $makevalid \
+                "$geopackage" "$work/$source_name/$shapefile"
+        else
+            # shellcheck disable=SC2086
+            ogr2ogr -f GPKG -nln "$layer_name" \
+                -sql "$query" -nlt "$geometry_type" -dim XY $makevalid \
+                "$geopackage" "$work/$source_name/$shapefile"
+        fi
     done
 
 jq '
     [
-        .sources[] as $source |
-        .bands[] as $band |
+        (.sources | group_by(.layer // .name) | .[]) as $group |
+        ($group[0].layer // $group[0].name) as $layer |
         {
-            key: ($source.name + "_" + $band.name),
+            key: $layer,
             value: {
-                target_name: $source.name,
-                description: ($source.name + " polygons"),
-                minzoom: $band.min_zoom,
-                maxzoom: $band.max_zoom
+                target_name: $layer,
+                description: ($layer + " " +
+                    (if ($group[0].geometry_type // "MULTIPOLYGON") == "MULTIPOLYGON"
+                     then "polygons" else "lines" end)),
+                minzoom: ([.bands[].min_zoom] | min),
+                maxzoom: ([.bands[].max_zoom] | max)
             }
         }
     ] | from_entries

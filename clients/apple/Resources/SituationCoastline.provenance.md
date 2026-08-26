@@ -1,7 +1,7 @@
 # Situation coastline archive
 
-This archive holds coastline data for the situation map. Coastline data means the ocean,
-land, and lake polygons that classify the map surface.
+This archive holds the surface data for the situation map: the ocean, land, and lake
+polygons that classify the map surface, and the river lines that draw its drainage.
 
 ## Source
 
@@ -39,3 +39,18 @@ verified source archive under `clients/apple/.build/coastline-sources`.
 
 The script writes `SituationCoastline.manifest.json`. The manifest records the plan
 checksum, the archive checksum, the tile count, and the source data.
+
+Each source in the plan declares the geometry it carries and the attributes it keeps. The
+river sources carry lines; the others carry polygons. GDAL writes a line source into a
+polygon layer with only a warning, and that layer then draws nothing.
+
+More than one source can feed one layer. The global 1:10m files give the world its shape.
+The regional files for Europe and North America give the flown areas the drainage density
+of a chart. The rank of a feature is a drawing scale, and not a name for the file that
+holds it: the global file holds mostly rank 0 to 9 and some dozens of features above it,
+and the regional files hold rank 10 to 12 only. The style reads the rank.
+
+Sources that feed one layer must select the same fields and the same geometry. GDAL writes
+appended features into the fields the layer was made with, and gives no message. A source
+that selects fewer fields than the source before it thus deletes a field from each feature
+in the layer.

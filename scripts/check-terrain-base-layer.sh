@@ -148,12 +148,17 @@ if [ -f "$coastline_archive" ]; then
     fi
 fi
 
+# The land polygon is what a reader sees through the relief, which is drawn
+# at part opacity: it is what classifies ground as ground. The water
+# polygons under the relief are covered by the water polygons above it and
+# are there for the shoreline they give the fills beneath, so their tone is
+# pinned but not their visibility.
 if ! jq -e '
     ([.layers[] | select(.id == "pilotage-ocean-fill") |
         select(.paint["fill-color"] == "#061927" and .paint["fill-opacity"] == 1)] |
         length == 1) and
     ([.layers[] | select(.id == "pilotage-land-fill") |
-        select(.paint["fill-color"] == "#526044" and .paint["fill-opacity"] == 1)] |
+        select(.paint["fill-color"] == "#dfe7c4" and .paint["fill-opacity"] == 1)] |
         length == 1) and
     ([.layers[] | select(.id == "pilotage-lake-fill") |
         select(.paint["fill-color"] == "#061927" and .paint["fill-opacity"] == 1)] |
@@ -162,7 +167,51 @@ if ! jq -e '
         select(.paint["color-relief-opacity"] > 0 and
             .paint["color-relief-opacity"] < 1)] | length == 1)
 ' "$style" >/dev/null; then
-    echo "FORBIDDEN: coastline polygons must remain visible below terrain relief" >&2
+    echo "FORBIDDEN: the land polygon must remain visible below terrain relief" >&2
+    status=1
+fi
+
+# Water reads as water. An elevation ramp cannot distinguish a lake at
+# 500 m from ground at 500 m, so the polygon that carries that information
+# draws OVER the relief and the hillshade and keeps its own colour. Below
+# either, water takes the tint of the height below it and a reader meets
+# green where the chart says open water.
+#
+# The two tones are pinned exactly and they differ, which is what makes
+# open water and inland water read apart. A separate inequality assertion
+# would be a rule nothing can break on its own.
+if ! jq -e '
+    ([.layers[] | select(
+        .id == "pilotage-ocean-water" and .type == "fill" and
+        .source == "pilotage-coastline" and .["source-layer"] == "ocean" and
+        .paint["fill-color"] == "#e1eef5" and .paint["fill-opacity"] == 1
+    )] | length == 1) and
+    ([.layers[] | select(
+        .id == "pilotage-lake-water" and .type == "fill" and
+        .source == "pilotage-coastline" and .["source-layer"] == "lakes" and
+        .paint["fill-color"] == "#93cde5" and .paint["fill-opacity"] == 1
+    )] | length == 1) and
+    ([.layers[] | select(
+        .id == "pilotage-river" and .type == "line" and
+        .source == "pilotage-coastline" and .["source-layer"] == "rivers" and
+        .paint["line-color"] == "#93cde5"
+    )] | length == 1) and
+    (.layers | map(.id)) as $order |
+    (["pilotage-ocean-water", "pilotage-lake-water", "pilotage-river"] | all(. as $id |
+        ($order | index($id)) != null and
+        ($order | index($id)) > ($order | index("pilotage-terrain-hillshade"))))
+' "$style" >/dev/null; then
+    echo "FORBIDDEN: hydrography must draw over the relief" >&2
+    status=1
+fi
+
+# Drainage thins with zoom. Without the rank the whole world's drainage
+# draws as a web of hairlines at the zooms the world band covers.
+if ! jq -e '
+    [.layers[] | select(.id == "pilotage-river") | .paint["line-width"] |
+        .. | select(type == "string" and . == "scalerank")] | length > 0
+' "$style" >/dev/null; then
+    echo "FORBIDDEN: river width must thin by the rank the data carries" >&2
     status=1
 fi
 
@@ -276,7 +325,7 @@ fi
 if ! jq -e '
     .dataset_scale == "1:10m" and
     .closest_zoom == ([.bands[].max_zoom] | max) and
-    ([.sources[].name] | sort) == ["lakes", "land", "ocean"] and
+    ([.sources[] | .layer // .name] | unique) == ["lakes", "land", "ocean", "rivers"] and
     all(.sources[];
         (.url | startswith("https://naturalearth.s3.amazonaws.com/")) and
         (.sha256 | test("^[0-9a-f]{64}$")) and
@@ -289,6 +338,25 @@ if ! jq -e '
     (.attribution | length > 0)
 ' "$coastline_plan" >/dev/null; then
     echo "FORBIDDEN: the coastline plan must define verified data for each map zoom" >&2
+    status=1
+fi
+
+# Several sources can feed one layer. GDAL writes the appended features
+# into whatever fields the layer was created with, silently, so a source
+# that names fewer fields than the one before it deletes the missing field
+# from every feature in the layer. The rank the river ladder reads is such
+# a field: without it the ladder's own fallback is never reached, the width
+# property falls back to the renderer's default of 1, and the whole world's
+# drainage draws as hairlines at every zoom.
+if ! jq -e '
+    [.sources[] | {layer: (.layer // .name),
+                   select: (.select // "featurecla"),
+                   geometry: (.geometry_type // "MULTIPOLYGON")}]
+    | group_by(.layer)
+    | all(.[0] as $first | all(.[]; .select == $first.select and
+                                     .geometry == $first.geometry))
+' "$coastline_plan" >/dev/null; then
+    echo "FORBIDDEN: sources feeding one layer must agree on fields and geometry" >&2
     status=1
 fi
 
@@ -367,9 +435,9 @@ if [ -f "$coastline_archive" ]; then
     fi
     if ! sqlite3 "$coastline_archive" \
         "SELECT value FROM metadata WHERE name = 'json';" | jq -e '
-            [.vector_layers[].id] | sort == ["lakes", "land", "ocean"]
+            [.vector_layers[].id] | sort == ["lakes", "land", "ocean", "rivers"]
         ' >/dev/null; then
-        echo "FORBIDDEN: the coastline archive must contain ocean, land, and lakes" >&2
+        echo "FORBIDDEN: the coastline archive must contain ocean, land, lakes, and rivers" >&2
         status=1
     fi
 fi
