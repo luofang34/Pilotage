@@ -1930,6 +1930,7 @@ dependencies = [
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
+ "pilotage-geo",
  "pilotage-instruments-web-shell",
  "pilotage-protocol",
  "prost",
