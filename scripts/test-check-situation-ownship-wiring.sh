@@ -72,13 +72,13 @@ reject "a position request that leaves the compass stopped"
 restore OwnshipPosition.swift
 
 sed -i.bak 's/case .landscapeLeft: .landscapeRight/case .landscapeLeft: .landscapeLeft/' \
-    "$app/OwnshipPosition.swift"
+    "$app/DeviceSensors.swift"
 reject "an interface orientation passed straight through as a device orientation"
-restore OwnshipPosition.swift
+restore DeviceSensors.swift
 
-sed -i.bak 's/trueHeading >= 0/trueHeading > -999/' "$app/OwnshipPosition.swift"
+sed -i.bak 's/trueHeading >= 0/trueHeading > -999/' "$app/DeviceSensors.swift"
 reject "a true heading trusted before the platform has variation"
-restore OwnshipPosition.swift
+restore DeviceSensors.swift
 
 sed -i.bak 's/@Published var follow/var follow/' "$app/OwnshipPosition.swift"
 reject "a follow mode a closure would read as it was rather than as it is"
