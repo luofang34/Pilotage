@@ -334,27 +334,28 @@ pub fn parse_gamepad_identity(id: &str) -> DeviceIdentity {
 /// nothing the key can match and every pad would fall to the wildcard — the
 /// generic mapping, whichever pad the reader is actually holding.
 ///
-/// These are the published USB identities of the pads this repo carries a
-/// profile for, so the same pad in the same hand is packed the same way
-/// wherever it is plugged in. A pad that is not listed still falls to the
-/// wildcard, which is the honest answer for a device nobody wrote a profile
-/// for.
-const NAMED_IDENTITIES: [(&str, DeviceIdentity); 2] = [
-    (
-        "dualsense",
-        DeviceIdentity {
-            vendor_id: 0x054c,
-            product_id: 0x0ce6,
-        },
-    ),
-    (
-        "radiomaster pocket",
-        DeviceIdentity {
-            vendor_id: 0x1209,
-            product_id: 0x4f54,
-        },
-    ),
-];
+/// Only pads whose profile routes each source axis straight through may be
+/// listed, and that is a constraint about the caller rather than the pads.
+///
+/// A profile's `source_index` numbers the axes AS THE BROWSER DELIVERS THEM.
+/// The client that has no USB pair to offer is Apple's, and it does not
+/// deliver browser axes: it reads `leftThumbstick`/`rightThumbstick`, which
+/// name the sticks semantically, so what arrives is already in canonical slot
+/// order whatever the pad reports underneath. Handing those to a profile that
+/// reroutes applies a correction to input that never needed it — the sticks
+/// come out on the wrong controls and the inverted ones come out backwards.
+///
+/// So a rerouting pad is deliberately absent here and falls to the wildcard,
+/// whose straight-through packing is the correct reading of a canonical
+/// stick. Recognising it by name would name it right and fly it wrong.
+/// `named_pads_route_straight_through` holds this.
+const NAMED_IDENTITIES: [(&str, DeviceIdentity); 1] = [(
+    "dualsense",
+    DeviceIdentity {
+        vendor_id: 0x054c,
+        product_id: 0x0ce6,
+    },
+)];
 
 /// Matches a product name against the pads named above.
 ///
@@ -427,17 +428,21 @@ mod apple_identity_tests {
             },
             "the same pad under another of its names"
         );
-        assert_eq!(
-            parse_gamepad_identity("RadioMaster Pocket"),
-            DeviceIdentity {
-                vendor_id: 0x1209,
-                product_id: 0x4f54
-            },
-        );
 
         // A pad nobody wrote a profile for still falls to the wildcard, which
         // is the honest answer rather than a guess at its packing.
-        for unknown in ["Xbox Wireless Controller", "gamepad", ""] {
+        //
+        // The RadioMaster is in that list on purpose. This repo does carry a
+        // profile for it, but that profile reroutes browser axis order, and
+        // the only caller that reaches this path sends canonical stick order
+        // already. Its name is withheld so it gets the straight-through
+        // packing that reading is entitled to.
+        for unknown in [
+            "Xbox Wireless Controller",
+            "RadioMaster Pocket",
+            "gamepad",
+            "",
+        ] {
             assert_eq!(
                 parse_gamepad_identity(unknown),
                 DeviceIdentity::WILDCARD,
