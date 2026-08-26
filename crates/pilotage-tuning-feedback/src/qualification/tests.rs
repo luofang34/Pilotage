@@ -22,6 +22,18 @@ fn verify(evidence: &CampaignEvidence) -> Result<VerifiedCampaignEvidence, crate
 }
 
 #[test]
+fn the_sealed_journal_chain_is_dense_and_linked() {
+    // The tamper cases mutate this chain and require the verifier to refuse
+    // it. A fixture whose chain was already broken would make every one of
+    // them pass without the defence they name ever running, so the
+    // unmutated chain is asserted here first: dense from zero, each entry
+    // hash-linked to the one before, every entry digest recomputing, and the
+    // head the last record.
+    let evidence = fixture();
+    fixture::assert_journal_chain_linked(&evidence);
+}
+
+#[test]
 fn sealed_golden_evidence_qualifies() {
     let evidence = fixture();
     let verified = verify(&evidence).expect("verify golden evidence");
@@ -89,7 +101,7 @@ fn canonical_source_digest_is_fixed() {
         .expect("verify evidence");
     assert_eq!(
         verified.source_digest().to_string(),
-        "beb2e8e51c0e51827221666fee6139e0736b700925a1d932298fed1259246632"
+        "fd8f60cca54d07428cf39b5b7f4784beaec6d2016c429314f2c28e2480f8f303"
     );
 }
 

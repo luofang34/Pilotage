@@ -67,7 +67,10 @@ fn campaign_authority(
             objective: 0.20,
         },
     );
-    let challenger = proof(
+    // The authorization is built first: a challenger's run identity is not
+    // valid without it, so the proof cannot be assembled before it exists.
+    let transition = transition_reference(session, session_digest, frozen_candidate);
+    let challenger = super::proof_with_objectives(
         stage,
         session,
         session_digest,
@@ -79,8 +82,9 @@ fn campaign_authority(
             effort: 0.30,
             objective: 0.20,
         },
+        None,
+        Some(transition.1),
     );
-    let transition = transition_reference(session, session_digest, frozen_candidate);
     let mut chain = JournalChain::new(session.clone());
     chain.push(JournalEvent::Started {
         candidate: session.initial_candidate_digest,

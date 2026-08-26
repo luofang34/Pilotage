@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
 use flight_tune::{
-    ArtifactIdentity, RUN_TERMINAL_OPERATION_ORDER, RunBindingReceipt, RunExecutionContext,
-    RunRecord, RunTerminalClass, RunTerminalDiagnostic, RunTerminalIntent, RunTerminalOperation,
-    RunTerminalOperationOutcome, RunTerminalPlan, RunTerminalReceipt, RunTerminalRecoveryState,
-    RunTerminalReport, RunTerminalScope, RunTerminalSemanticOutcome,
+    ArtifactIdentity, CandidateTransitionReference, RUN_TERMINAL_OPERATION_ORDER,
+    RunBindingReceipt, RunExecutionContext, RunRecord, RunTerminalClass, RunTerminalDiagnostic,
+    RunTerminalIntent, RunTerminalOperation, RunTerminalOperationOutcome, RunTerminalPlan,
+    RunTerminalReceipt, RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope,
+    RunTerminalSemanticOutcome,
 };
 
 use crate::digest;
@@ -37,8 +38,9 @@ pub(super) fn receipt(
     expected: &plan::ExpectedRun<'_>,
     run: RunRecord,
     vehicle: &ArtifactIdentity,
+    transition: Option<CandidateTransitionReference>,
 ) -> RunTerminalReceipt {
-    terminal_receipt(expected, run, vehicle, successful_outcomes())
+    terminal_receipt(expected, run, vehicle, successful_outcomes(), transition)
 }
 
 pub(super) fn quarantine_receipt(
@@ -52,7 +54,7 @@ pub(super) fn quarantine_receipt(
     outcomes[1] =
         RunTerminalOperationOutcome::failed(RunTerminalOperation::ControlStop, diagnostic)
             .expect("create terminal failure");
-    terminal_receipt(expected, run, vehicle, outcomes)
+    terminal_receipt(expected, run, vehicle, outcomes, None)
 }
 
 fn terminal_receipt(
@@ -60,13 +62,17 @@ fn terminal_receipt(
     run: RunRecord,
     vehicle: &ArtifactIdentity,
     outcomes: Vec<RunTerminalOperationOutcome>,
+    transition: Option<CandidateTransitionReference>,
 ) -> RunTerminalReceipt {
     let context = RunExecutionContext::new(
         expected.session_digest,
         expected.trial_id,
         expected.role,
         expected.candidate,
-        None,
+        // A challenger run is the one role whose identity is incomplete
+        // without the authorization that moved the vehicle onto it, and the
+        // context refuses to be built without one.
+        transition,
         expected.scenario_set,
         expected.scenario,
         expected.repetition,

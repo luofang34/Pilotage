@@ -203,3 +203,34 @@ fn install_worse_frozen(evidence: &mut crate::CampaignEvidence) {
 fn assert_promotion_recompute_error(evidence: &crate::CampaignEvidence) {
     assert!(verify(evidence).is_err());
 }
+
+#[test]
+fn a_qualification_policy_that_names_no_objective_limit_is_refused() {
+    // Checked against the stage verifier directly rather than through a
+    // published document: clearing the map in sealed evidence breaks a digest,
+    // so the whole document is refused for a reason that has nothing to do
+    // with the policy, and the case would pass whether or not the policy is
+    // checked at all.
+    //
+    // Without this check a campaign published under an empty final
+    // qualification bar verifies: every digest reconciles, nothing is found
+    // over limit, and the evidence reads as qualified. That is a valid chain
+    // attesting a bar nobody set.
+    let sealed = fixture::fixture();
+    let mut stage = sealed.journal.stage.clone();
+    assert!(
+        super::super::stage::verify(&stage).is_ok(),
+        "the fixture's own stage is valid to begin with"
+    );
+
+    stage.qualification.objective_maxima.clear();
+    assert!(
+        super::super::stage::verify(&stage).is_err(),
+        "an empty qualification bar is not a bar"
+    );
+
+    // The promotion half already refused this; the two are now symmetric.
+    let mut promotion = sealed.journal.stage.clone();
+    promotion.promotion.objective_regression_upper_95.clear();
+    assert!(super::super::stage::verify(&promotion).is_err());
+}

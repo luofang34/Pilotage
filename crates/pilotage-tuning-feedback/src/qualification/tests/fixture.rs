@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use flight_tune::{
     ArtifactIdentity, AttemptRole, AuthenticatedEvaluationProof, Candidate, CandidateEvaluation,
-    CandidateLineage, Digest, JournalEvent, ParameterBounds, PromotionPolicy, PromotionSeedPolicy,
-    QualificationPolicy, RunTerminalDisposition, RunTerminalQuarantine, RuntimeIdentities,
-    ScenarioRef, SearchStage, SessionIdentity,
+    CandidateLineage, CandidateTransitionReference, Digest, JournalEvent, ParameterBounds,
+    PromotionPolicy, PromotionSeedPolicy, QualificationPolicy, RunTerminalDisposition,
+    RunTerminalQuarantine, RuntimeIdentities, ScenarioRef, SearchStage, SessionIdentity,
 };
 
 use crate::CampaignEvidence;
@@ -163,6 +163,7 @@ fn proof(
         candidate,
         point,
         None,
+        None,
     )
 }
 
@@ -176,6 +177,7 @@ fn proof_with_objectives(
     candidate: Digest,
     point: Point,
     missing_objective_at: Option<usize>,
+    transition: Option<CandidateTransitionReference>,
 ) -> AuthenticatedEvaluationProof {
     let expected = plan::expected_runs(
         stage,
@@ -193,7 +195,9 @@ fn proof_with_objectives(
     let receipts = expected
         .iter()
         .zip(&runs)
-        .map(|(expected, run)| receipt(expected, run.clone(), &session.runtimes.vehicle))
+        .map(|(expected, run)| {
+            receipt(expected, run.clone(), &session.runtimes.vehicle, transition)
+        })
         .collect::<Vec<_>>();
     let evaluation = CandidateEvaluation::Passed {
         aggregate: statistics::aggregate(&runs).expect("aggregate proof runs"),
@@ -236,6 +240,7 @@ pub(super) fn proof_with_missing_objective(
             objective: 0.20,
         },
         Some(1),
+        None,
     )
 }
 
@@ -273,7 +278,12 @@ pub(super) fn proof_with_hard_gates(
         panic!("fixture evaluation must pass");
     };
     runs[0].passed_hard_gates = hard_gates.iter().map(|gate| (*gate).to_owned()).collect();
-    proof.terminal_receipts[0] = receipt(&expected[0], runs[0].clone(), &session.runtimes.vehicle);
+    proof.terminal_receipts[0] = receipt(
+        &expected[0],
+        runs[0].clone(),
+        &session.runtimes.vehicle,
+        None,
+    );
     refresh_proof(&mut proof);
     proof
 }

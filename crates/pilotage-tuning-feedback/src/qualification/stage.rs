@@ -7,7 +7,10 @@ use crate::{FeedbackError, error::invalid};
 const MAX_NAME_BYTES: usize = 128;
 const MAX_PARAMETERS: usize = 128;
 const MAX_SCENARIOS_PER_SET: usize = 64;
-const MAX_PROMOTION_OBJECTIVES: usize = 64;
+/// The most objective limits either policy may name. A policy is a bar a
+/// campaign has to clear; both halves of it are bounded the same way because
+/// they bound the same set of measured objectives.
+const MAX_POLICY_OBJECTIVES: usize = 64;
 const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 1;
 
 pub(super) fn verify(stage: &SearchStage) -> Result<(), FeedbackError> {
@@ -117,7 +120,7 @@ fn verify_promotion(stage: &SearchStage) -> Result<(), FeedbackError> {
         || !policy.maximum_control_effort_increase.is_finite()
         || !(0.0..=1.0).contains(&policy.maximum_control_effort_increase)
         || policy.objective_regression_upper_95.is_empty()
-        || policy.objective_regression_upper_95.len() > MAX_PROMOTION_OBJECTIVES
+        || policy.objective_regression_upper_95.len() > MAX_POLICY_OBJECTIVES
     {
         return Err(invalid("the promotion policy is not valid"));
     }
@@ -135,7 +138,15 @@ fn verify_promotion(stage: &SearchStage) -> Result<(), FeedbackError> {
 
 fn verify_qualification(stage: &SearchStage) -> Result<(), FeedbackError> {
     let policy = &stage.qualification;
-    if !nonnegative(policy.maximum_loss_confidence_upper)
+    // A final qualification that names no objective limit is not a bar. Every
+    // per-objective absolute maximum would be absent, `outcome_for` would find
+    // nothing over limit, and any candidate whose scalar losses sat under two
+    // operator-chosen numbers would qualify — with a chain that reconciles
+    // exactly. Promotion already refuses an empty objective map; this is the
+    // half that decides what ships.
+    if policy.objective_maxima.is_empty()
+        || policy.objective_maxima.len() > MAX_POLICY_OBJECTIVES
+        || !nonnegative(policy.maximum_loss_confidence_upper)
         || !nonnegative(policy.maximum_p95_loss)
         || !policy.maximum_mean_control_effort.is_finite()
         || !(0.0..=1.0).contains(&policy.maximum_mean_control_effort)
