@@ -131,6 +131,20 @@ for reason in OWNSHIP_NO_TELEMETRY OWNSHIP_NO_FIX; do
         status=1
     fi
 done
+# Two lanes can carry a position, and a reader has to be told which one is
+# under the mark: an oracle is exact by construction and an estimate is a
+# solution with an accuracy of its own.
+for source in simulation-truth operational-estimate; do
+    if ! grep -Fq "$source" "$ownship_module"; then
+        echo "FORBIDDEN: the ownship module must name the $source lane" >&2
+        status=1
+    fi
+done
+if ! grep -Fq 'ownshipSource' "$ownship_module"; then
+    echo "FORBIDDEN: the mark must say which measurement is under it" >&2
+    status=1
+fi
+
 if ! grep -Fq 'OWNSHIP_STALE_AFTER_MS' "$ownship_module" \
     || ! grep -Fq 'age,' "$ownship_module"; then
     echo "FORBIDDEN: the vehicle mark must be withdrawn when its fix stops arriving" >&2

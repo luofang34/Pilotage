@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   OWNSHIP_REASON,
+  OWNSHIP_SOURCE,
   OWNSHIP_STALE_AFTER_MS,
   attachOwnship,
   ownshipFromTelemetry,
@@ -19,9 +20,12 @@ const truth = (overrides = {}) => ({
   simTruth: { stamp: { role: 2 }, geodetic: FIX, ...overrides },
 });
 
+const estimate = (fix = FIX) => ({ avionics: { geodetic: fix } });
+
 function testAFixDrawsTheVehicleWhereItSays() {
-  const { position, reason } = ownshipFromTelemetry(truth());
+  const { position, source, reason } = ownshipFromTelemetry(truth());
   assert.equal(reason, null);
+  assert.equal(source, OWNSHIP_SOURCE.TRUTH);
   assert.equal(position.latitudeDeg, FIX.latitudeDeg);
   assert.equal(position.longitudeDeg, FIX.longitudeDeg);
   assert.equal(position.heightM, FIX.heightM);
@@ -54,6 +58,29 @@ function testTheMarkNeverFallsBackToAnotherPosition() {
 }
 testTheMarkNeverFallsBackToAnotherPosition();
 console.log("ok - testTheMarkNeverFallsBackToAnotherPosition");
+
+function testEitherLaneCanCarryThePositionAndTheMarkSaysWhich() {
+  // A session with no truth oracle is the normal case, not a failure: it
+  // is the only case a physical vehicle has, and an X-Plane session
+  // flying a PX4 controller has it too.
+  const fromEstimate = ownshipFromTelemetry(estimate());
+  assert.equal(fromEstimate.position.latitudeDeg, FIX.latitudeDeg);
+  assert.equal(fromEstimate.source, OWNSHIP_SOURCE.ESTIMATE);
+
+  // Where a session has an oracle it is being judged against it, so the
+  // oracle is what the mark shows.
+  const both = { ...truth(), ...estimate({ ...FIX, latitudeDeg: 10 }) };
+  const preferred = ownshipFromTelemetry(both);
+  assert.equal(preferred.source, OWNSHIP_SOURCE.TRUTH);
+  assert.equal(preferred.position.latitudeDeg, FIX.latitudeDeg);
+
+  // An estimate lane with no fix is no fix, not a fallback to the frame.
+  const neither = ownshipFromTelemetry({ avionics: { geodetic: null } });
+  assert.equal(neither.position, null);
+  assert.equal(neither.reason, OWNSHIP_REASON.NO_FIX);
+}
+testEitherLaneCanCarryThePositionAndTheMarkSaysWhich();
+console.log("ok - testEitherLaneCanCarryThePositionAndTheMarkSaysWhich");
 
 function testTheReasonsAreTheStringsAReaderMeets() {
   // These go on the surface and into the operator's own tooling, so they
@@ -120,6 +147,7 @@ function testAFixPutsTheMarkOnTheMap() {
   assert.equal(surface.dataset.ownship, "shown");
   assert.equal(surface.dataset.ownshipPosition, "47.397742,8.545594");
   assert.equal(surface.dataset.ownshipReason, undefined, "a shown mark states no reason");
+  assert.equal(surface.dataset.ownshipSource, OWNSHIP_SOURCE.TRUTH, "and says which lane");
 }
 testAFixPutsTheMarkOnTheMap();
 console.log("ok - testAFixPutsTheMarkOnTheMap");
@@ -146,6 +174,7 @@ function testAFixThatStopsArrivingWithdrawsTheMark() {
     undefined,
     "a position beside an absent mark is a position a reader can still read",
   );
+  assert.equal(surface.dataset.ownshipSource, undefined);
 }
 testAFixThatStopsArrivingWithdrawsTheMark();
 console.log("ok - testAFixThatStopsArrivingWithdrawsTheMark");

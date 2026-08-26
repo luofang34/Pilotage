@@ -12,6 +12,15 @@ export const OWNSHIP_REASON = Object.freeze({
   NO_FIX: "OWNSHIP_NO_FIX",
 });
 
+/** Which measurement the drawn position came from. The two are different
+ *  measurements of the same thing and a reader has to be told which one is
+ *  under the mark: an oracle is exact by construction and an estimate is a
+ *  solution with an accuracy of its own. */
+export const OWNSHIP_SOURCE = Object.freeze({
+  TRUTH: "simulation-truth",
+  ESTIMATE: "operational-estimate",
+});
+
 /** How long a fix may go unrefreshed before the mark is withdrawn. A
  *  position that stopped arriving is a position the vehicle has left. */
 export const OWNSHIP_STALE_AFTER_MS = 3_000;
@@ -20,24 +29,36 @@ export const OWNSHIP_STALE_AFTER_MS = 3_000;
  * The vehicle position a telemetry sample states, or a typed reason it
  * states none.
  *
- * The fix comes from the simulation-truth lane. Which lane a group belongs
- * to is settled in the decoder, which refuses a truth group stamped with
- * another role outright, so a mislabelled group arrives here as no group at
- * all. This side does not repeat that gate: it would name a reason the
- * decoder makes unreachable, and a reason the client cannot produce is a
- * reason that lies when a reader meets it.
+ * Two lanes can carry a position. The simulator's oracle states where the
+ * vehicle IS; the flight controller's receiver states where it SOLVED that
+ * it is. The oracle wins where a session has one, because a session that
+ * has one is being judged against it — but a session without one is the
+ * normal case, not a failure, and it is the only case a physical vehicle
+ * has. The mark says which measurement is under it either way.
+ *
+ * Which lane a group belongs to is settled in the decoder, which refuses a
+ * group stamped with another role outright, so a mislabelled group arrives
+ * here as no group at all. This side does not repeat that gate: it would
+ * name a reason the decoder makes unreachable, and a reason the client
+ * cannot produce is a reason that lies when a reader meets it.
  */
 export function ownshipFromTelemetry(telemetry) {
   const truth = telemetry?.simTruth;
-  if (!truth) return { position: null, reason: OWNSHIP_REASON.NO_SAMPLE };
-  const fix = truth.geodetic;
-  if (!fix) return { position: null, reason: OWNSHIP_REASON.NO_FIX };
+  const avionics = telemetry?.avionics;
+  if (!truth && !avionics) {
+    return { position: null, source: null, reason: OWNSHIP_REASON.NO_SAMPLE };
+  }
+  const [fix, source] = truth?.geodetic
+    ? [truth.geodetic, OWNSHIP_SOURCE.TRUTH]
+    : [avionics?.geodetic, OWNSHIP_SOURCE.ESTIMATE];
+  if (!fix) return { position: null, source: null, reason: OWNSHIP_REASON.NO_FIX };
   return {
     position: {
       latitudeDeg: fix.latitudeDeg,
       longitudeDeg: fix.longitudeDeg,
       heightM: fix.heightM,
     },
+    source,
     reason: null,
   };
 }
@@ -70,9 +91,10 @@ export function attachOwnship(maplibre, map, surface) {
     lastFixAt = null;
     surface.dataset.ownship = "absent";
     surface.dataset.ownshipReason = reason;
-    // A position beside an absent mark is a position a reader can still
-    // read off the surface.
+    // A position or a source beside an absent mark is something a reader
+    // can still read off the surface.
     delete surface.dataset.ownshipPosition;
+    delete surface.dataset.ownshipSource;
   };
 
   const age = (nowMs) => {
@@ -82,7 +104,7 @@ export function attachOwnship(maplibre, map, surface) {
   };
 
   const observe = (telemetry, nowMs) => {
-    const { position, reason } = ownshipFromTelemetry(telemetry);
+    const { position, source, reason } = ownshipFromTelemetry(telemetry);
     if (position === null) {
       // One sample without a fix does not blink the mark; the age rule is
       // what removes it, and it applies whether or not samples keep coming.
@@ -99,7 +121,9 @@ export function attachOwnship(maplibre, map, surface) {
       marker.addTo(map);
       shown = true;
     }
-    const next = `Vehicle at ${position.latitudeDeg.toFixed(5)}, ${position.longitudeDeg.toFixed(5)}`;
+    const next =
+      `Vehicle at ${position.latitudeDeg.toFixed(5)}, ${position.longitudeDeg.toFixed(5)}` +
+      ` from the ${source === OWNSHIP_SOURCE.TRUTH ? "simulator" : "flight controller"}`;
     // An accessible name rewritten at the telemetry rate is announced at
     // the telemetry rate.
     if (next !== label) {
@@ -107,6 +131,7 @@ export function attachOwnship(maplibre, map, surface) {
       label = next;
     }
     surface.dataset.ownship = "shown";
+    surface.dataset.ownshipSource = source;
     surface.dataset.ownshipPosition =
       `${position.latitudeDeg.toFixed(6)},${position.longitudeDeg.toFixed(6)}`;
     delete surface.dataset.ownshipReason;

@@ -48,7 +48,7 @@ const SIZE_CAPS = {
   "session-transport.js": 285,
   "situation-camera.js": 75,
   "situation-map.js": 295,
-  "situation-ownship.js": 117,
+  "situation-ownship.js": 142,
   "situation-style.js": 165,
   "snapshot-association.js": 266,
   "telemetry-display.js": 89,
