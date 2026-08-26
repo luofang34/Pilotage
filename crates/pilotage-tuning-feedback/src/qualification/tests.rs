@@ -16,6 +16,17 @@ use producer_rig::{
     TestDirectory, candidate, stage,
 };
 
+/// The bar a campaign's own stage states. The cases below are about the
+/// chain rather than the bar, so they pin the bar the producer used; the
+/// cases about the bar itself pin a different one on purpose.
+fn stated_policy(evidence: &CampaignEvidence) -> crate::RequiredPolicy {
+    crate::RequiredPolicy::new(
+        &evidence.journal.stage.promotion,
+        &evidence.journal.stage.qualification,
+    )
+    .expect("bind the stated policy")
+}
+
 fn verify(evidence: &CampaignEvidence) -> Result<VerifiedCampaignEvidence, crate::FeedbackError> {
     let bytes = digest::encode("campaign evidence", evidence)?;
     VerifiedCampaignEvidence::from_bytes(&bytes, digest::hash(&bytes))
@@ -45,7 +56,7 @@ fn sealed_golden_evidence_qualifies() {
     assert_eq!(
         verified
             .clone()
-            .verify_qualified()
+            .verify_qualified(&stated_policy(&evidence))
             .expect("verify qualified evidence")
             .selected_candidate(),
         selected
@@ -86,9 +97,10 @@ fn journal_producer_snapshot_qualifies_independently() {
         .verified_evidence_snapshot()
         .expect("read producer evidence snapshot");
     let evidence = CampaignEvidence::new(snapshot).expect("verify producer snapshot");
+    let required = stated_policy(&evidence);
     assert!(
         verify(&evidence)
-            .and_then(VerifiedCampaignEvidence::verify_qualified)
+            .and_then(|verified| verified.verify_qualified(&required))
             .is_ok()
     );
 }
@@ -250,4 +262,42 @@ fn content_addressed_store_has_exact_readback() {
     let loaded = VerifiedCampaignEvidence::load_content_addressed_blocking(&receipt.object_path)
         .expect("load evidence");
     assert_eq!(loaded.source_digest(), receipt.digest);
+}
+
+#[test]
+fn a_campaign_run_against_another_bar_does_not_qualify() {
+    // The evidence states the policy its own operator chose, so a verifier
+    // that reads the bar out of the document it is checking can only attest
+    // self-consistency. A campaign run against limits nobody set reconciles
+    // exactly as well as one run against the real limits.
+    let evidence = fixture();
+    let verified = verify(&evidence).expect("verify evidence");
+
+    // The bar the producer actually used qualifies it.
+    assert!(
+        verified
+            .clone()
+            .verify_qualified(&stated_policy(&evidence))
+            .is_ok()
+    );
+
+    // A stricter final qualification bar is a different bar, and this
+    // campaign was not run against it.
+    let mut stricter = evidence.journal.stage.qualification.clone();
+    for maximum in stricter.objective_maxima.values_mut() {
+        *maximum /= 2.0;
+    }
+    let required = crate::RequiredPolicy::new(&evidence.journal.stage.promotion, &stricter)
+        .expect("bind a stricter policy");
+    assert!(
+        verified.clone().verify_qualified(&required).is_err(),
+        "a campaign must not qualify against a bar it never ran against"
+    );
+
+    // So is a different promotion bar.
+    let mut looser = evidence.journal.stage.promotion.clone();
+    looser.minimum_relative_loss_improvement = 0.0;
+    let required = crate::RequiredPolicy::new(&looser, &evidence.journal.stage.qualification)
+        .expect("bind a different promotion policy");
+    assert!(verified.verify_qualified(&required).is_err());
 }

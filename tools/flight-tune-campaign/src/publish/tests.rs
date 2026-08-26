@@ -5,7 +5,7 @@
 mod producer_rig;
 
 use flight_tune::{FinalQualificationOutcome, Tuner};
-use pilotage_tuning_feedback::VerifiedCampaignEvidence;
+use pilotage_tuning_feedback::{RequiredPolicy, VerifiedCampaignEvidence};
 
 use super::publish_journal_evidence_blocking;
 use crate::CampaignError;
@@ -72,8 +72,14 @@ fn a_qualified_journal_publishes_verified_readback() {
 
     let receipt = publish_journal_evidence_blocking(tuner.journal(), evidence_root)
         .expect("publish qualified evidence");
+    // The bar is named by the consumer, not read out of the document being
+    // checked. This campaign runs the rig's own stage, so the rig's stage is
+    // the bar it must be held to.
+    let rig_stage = stage();
+    let required = RequiredPolicy::new(&rig_stage.promotion, &rig_stage.qualification)
+        .expect("bind the rig's policy");
     let qualified = VerifiedCampaignEvidence::load_content_addressed_blocking(&receipt.object_path)
-        .and_then(VerifiedCampaignEvidence::verify_qualified)
+        .and_then(|verified| verified.verify_qualified(&required))
         .expect("verify published readback");
 
     assert_eq!(qualified.campaign().source_digest(), receipt.digest);

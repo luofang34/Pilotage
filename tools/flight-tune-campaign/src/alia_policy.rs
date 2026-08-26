@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use flight_tune::{
     PROMOTION_POLICY_SCHEMA_VERSION, PromotionPolicy, PromotionSeedPolicy, QualificationPolicy,
 };
+use pilotage_tuning_feedback::{FeedbackError, RequiredPolicy};
 
 const ALIA250_OBJECTIVE_LIMITS: [(&str, f64, f64); 22] = [
     ("control.effort_rms", 0.075, 0.75),
@@ -62,3 +63,17 @@ pub fn alia250_qualification_policy() -> QualificationPolicy {
 #[cfg(test)]
 #[path = "alia_policy/tests.rs"]
 mod tests;
+
+/// Returns the bar an Alia 250 campaign must have run against.
+///
+/// A verifier reads the policy out of the evidence it is checking, so it can
+/// only attest that a campaign is self-consistent under whatever bar its
+/// operator wrote. This is the bar itself, stated separately, so a consumer
+/// deciding whether a calibration may ship names which one it requires.
+///
+/// # Errors
+///
+/// Returns [`FeedbackError`] when a policy cannot be encoded.
+pub fn alia250_required_policy() -> Result<RequiredPolicy, FeedbackError> {
+    RequiredPolicy::new(&alia250_promotion_policy(), &alia250_qualification_policy())
+}

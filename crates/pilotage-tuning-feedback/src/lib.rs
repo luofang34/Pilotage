@@ -10,6 +10,7 @@
 mod digest;
 mod error;
 mod evidence;
+mod policy;
 mod qualification;
 mod storage;
 
@@ -18,3 +19,4 @@ pub use evidence::{
     CAMPAIGN_EVIDENCE_SCHEMA_VERSION, CampaignEvidence, EvidenceReceipt, VerifiedCampaignEvidence,
     VerifiedQualifiedEvidence,
 };
+pub use policy::RequiredPolicy;

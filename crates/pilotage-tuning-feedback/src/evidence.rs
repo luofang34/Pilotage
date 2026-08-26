@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use flight_tune::{Digest, FinalQualificationOutcome, JournalEvidenceSnapshot};
 use serde::{Deserialize, Serialize};
 
-use crate::{FeedbackError, digest, qualification, storage};
+use crate::{FeedbackError, RequiredPolicy, digest, qualification, storage};
 
 /// The supported campaign evidence schema.
 pub const CAMPAIGN_EVIDENCE_SCHEMA_VERSION: u16 = 1;
@@ -135,12 +135,24 @@ impl VerifiedCampaignEvidence {
         self.evidence.journal.final_outcome.as_ref()
     }
 
-    /// Requires an independently reproduced qualified final result.
+    /// Requires an independently reproduced qualified final result, against
+    /// a stated bar.
+    ///
+    /// The bar is an argument rather than a field of the evidence because the
+    /// evidence states the policy its own operator chose. A campaign run
+    /// against limits nobody set reconciles exactly as well as one run
+    /// against the real limits, so a verifier that reads the bar out of the
+    /// document it is checking attests only self-consistency.
     ///
     /// # Errors
     ///
-    /// Returns [`FeedbackError`] unless a selected candidate passed final qualification.
-    pub fn verify_qualified(self) -> Result<VerifiedQualifiedEvidence, FeedbackError> {
+    /// Returns [`FeedbackError`] unless a selected candidate passed final
+    /// qualification against exactly `required`.
+    pub fn verify_qualified(
+        self,
+        required: &RequiredPolicy,
+    ) -> Result<VerifiedQualifiedEvidence, FeedbackError> {
+        required.verify(&self.evidence.journal.stage)?;
         let selected_candidate = qualification::verify_qualified(&self.evidence)?;
         Ok(VerifiedQualifiedEvidence {
             campaign: self,
