@@ -579,18 +579,26 @@ async fn cancellation_while_re_establishing_a_restart_stops_the_session() {
         cancel_tx.send(true).ok();
     });
 
-    let outcome = supervise(
-        &mut children,
-        &stages,
-        &backend,
-        &test_context(),
-        &mut cancel,
+    // Bounded, because without the race this DEADLOCKS rather than failing:
+    // the work waits for a sender the test cannot drop while it is blocked
+    // here. An unbounded hang burns a CI job's whole timeout and reports
+    // "cancelled" with no message; this reports the assertion.
+    let outcome = tokio::time::timeout(
+        EVENT_TIMEOUT,
+        supervise(
+            &mut children,
+            &stages,
+            &backend,
+            &test_context(),
+            &mut cancel,
+        ),
     )
-    .await;
+    .await
+    .expect("a stop requested while the restart work waited was never honoured");
 
     assert!(
         outcome.is_ok(),
-        "a stop requested while the restart work waited was not honoured"
+        "a stop requested while the restart work waited did not end cleanly"
     );
     trigger.join().expect("the restart work was reached");
     drop(release_tx);

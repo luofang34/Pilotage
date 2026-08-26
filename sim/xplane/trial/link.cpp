@@ -23,7 +23,29 @@ constexpr std::size_t kMaximumReplyBytes = 64 * 1024;
 // Roughly ten seconds of samples at the rate a trial runs. Enough to ride out
 // a consumer pausing for a scoring step or a large write; short of pretending
 // a consumer that has stopped draining is merely behind.
+// How long a consumer may stop draining before the link gives up on it.
+//
+// Time rather than bytes or samples, because neither of those is fixed. A
+// sample line runs about 120 bytes sitting still and about 480 manoeuvring —
+// most fields print as a single `0` on the ground and seventeen significant
+// digits in flight — and the flight loop runs every frame, so the rate is the
+// frame rate. A byte bound would mean anywhere from five to seventy seconds,
+// and the tolerance would be tightest exactly while the vehicle is doing the
+// thing the trial is measuring.
+constexpr double kMaximumStallS = 10.0;
+
+// A guard against unbounded allocation, not a policy. How long a consumer may
+// stall is the constant above.
 constexpr std::size_t kMaximumQueuedSampleBytes = 256 * 1024;
+
+// How much the kernel may hold on this link's behalf.
+//
+// The stall clock only starts once a send cannot complete, so an unbounded
+// send buffer hides a stopped consumer for as long as the kernel is willing to
+// absorb — auto-tuning on loopback will take a megabyte, which is twenty
+// seconds of samples the detector cannot see. Bounded, backpressure reaches
+// this code promptly. Ample for the rate a trial produces.
+constexpr int kSendBufferBytes = 32 * 1024;
 
 unsigned Port() {
     const char* text = std::getenv("PILOTAGE_XPLANE_TRIAL_PORT");
@@ -104,6 +126,13 @@ void HostLink::SendSample(const std::string& line) {
     // than briefly behind. Giving up the connection then is the honest answer:
     // the host reads a peer that closed and reports exactly that, where a
     // silent hole in the sequence is met later as corruption.
+    const double now = XPLMGetElapsedTime();
+    if (sample_sent_ >= sample_.size()) {
+        last_drained_s_ = now;
+    } else if (now - last_drained_s_ > kMaximumStallS) {
+        Disconnect();
+        return;
+    }
     if (sample_.size() - sample_sent_ + line.size() + 1 > kMaximumQueuedSampleBytes) {
         Disconnect();
         return;
@@ -140,6 +169,9 @@ void HostLink::Connect() {
     int enabled = 1;
     ::setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &enabled,
                  sizeof(enabled));
+    int send_buffer = kSendBufferBytes;
+    ::setsockopt(socket_fd, SOL_SOCKET, SO_SNDBUF, &send_buffer,
+                 sizeof(send_buffer));
 #ifdef SO_NOSIGPIPE
     ::setsockopt(socket_fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled,
                  sizeof(enabled));
@@ -147,6 +179,7 @@ void HostLink::Connect() {
     ::fcntl(socket_fd, F_SETFL,
             ::fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK);
     fd_ = socket_fd;
+    last_drained_s_ = now;
     input_.clear();
     replies_.clear();
     sample_.clear();
@@ -169,6 +202,7 @@ void HostLink::Flush() {
             }
             sample_.clear();
             sample_sent_ = 0;
+            last_drained_s_ = XPLMGetElapsedTime();
             return;
         }
         const ssize_t size = ::send(fd_, active->data() + *sent,
@@ -178,6 +212,16 @@ void HostLink::Flush() {
             continue;
         }
         if (size < 0 && WouldBlock()) {
+            // Release what has already gone out. Without this the buffer only
+            // shrinks on a COMPLETE drain, so a consumer that keeps pace
+            // without ever catching up holds a small backlog — which the cap
+            // above is happy with — while the buffer behind it grows by a
+            // sample every frame, forever. The input side compacts the same
+            // way in `TakeLine`.
+            if (active == &sample_ && sample_sent_ > 0) {
+                sample_.erase(0, sample_sent_);
+                sample_sent_ = 0;
+            }
             return;
         }
         Disconnect();
