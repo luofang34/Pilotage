@@ -951,7 +951,8 @@ function decodeLinkLossCleared(bytes) {
 }
 
 // session.proto ControlActionResult: vehicle=1, scope=2, generation=3,
-// sequence=4, action=5, mode_target=6, accepted=7, detail=8, action_id=9
+// sequence=4, action=5, mode_target=6, accepted=7, detail=8, action_id=9,
+// feel_target=10
 function decodeControlActionResult(bytes) {
   if (!bytes) return {};
   const fields = parseFields(bytes);
@@ -965,6 +966,10 @@ function decodeControlActionResult(bytes) {
     accepted: !!firstVarint(fields, 7),
     detail: firstBytes(fields, 8) ? new TextDecoder().decode(firstBytes(fields, 8)) : "",
     actionId: firstVarint(fields, 9) ?? 0,
+    // The law the vehicle answered for. Without it a client cannot tell
+    // which law a result confirms, and a control bound to the reader's last
+    // press would keep asserting one the vehicle refused.
+    feelTarget: firstVarint(fields, 10),
   };
 }
 

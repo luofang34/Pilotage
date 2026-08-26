@@ -34,19 +34,29 @@ function takeId(tracker) {
  * it twice.
  */
 export function enqueueAction(tracker, scope, action, nowMs, options = {}) {
-  const { modeTarget, cancels = [] } = options;
+  const { modeTarget, feelTarget, cancels = [] } = options;
   for (const [id, entry] of tracker.pending) {
     if (entry.scope !== scope) continue;
     if (cancels.includes(entry.action)) {
       tracker.pending.delete(id);
       continue;
     }
-    if (entry.action === action && entry.modeTarget === modeTarget) {
+    // Both targets are part of what a press MEANS. Keying on the action and
+    // one target alone makes two presses for different laws compare equal, so
+    // the second reuses the first's id — and the host, fingerprinting the
+    // whole action, refuses it as a correlation id reused with different
+    // content. The operator's second choice is then discarded rather than
+    // sent, which is the worst of the three possible outcomes.
+    if (
+      entry.action === action &&
+      entry.modeTarget === modeTarget &&
+      entry.feelTarget === feelTarget
+    ) {
       return id;
     }
   }
   const id = takeId(tracker);
-  tracker.pending.set(id, { scope, action, modeTarget, enqueuedAtMs: nowMs });
+  tracker.pending.set(id, { scope, action, modeTarget, feelTarget, enqueuedAtMs: nowMs });
   return id;
 }
 

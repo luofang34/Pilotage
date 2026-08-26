@@ -311,8 +311,13 @@
       <!-- Offered only once the vehicle advertises a qualified profile for
            each: a control that asks for a law the vehicle has not qualified is
            a control that always fails. -->
+      <!-- Nothing is chosen until the vehicle says which law it is on. The
+           adapter boots on the compatibility law, so an option marked
+           selected here would misstate the active law from first render,
+           before any request was made. -->
+      <option value="" selected disabled>—</option>
       <option value="1">Precision</option>
-      <option value="2" selected>Balanced</option>
+      <option value="2">Balanced</option>
       <option value="3">Agile</option>
     </select>
   </label>

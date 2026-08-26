@@ -8,6 +8,10 @@
 #[path = "intent/targets.rs"]
 mod targets;
 
+#[cfg(test)]
+#[path = "intent/targets_tests.rs"]
+mod targets_tests;
+
 pub(super) use targets::{
     feel_target_from_wire, feel_target_to_wire, mode_target_from_wire, mode_target_to_wire,
 };
@@ -103,6 +107,29 @@ pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::Con
     }
 }
 
+/// The two targets are separate vocabularies, and an action carrying the one
+/// it does not name is a sender and a receiver disagreeing about what was
+/// asked for. Reading past it would act on the half the receiver understood.
+fn refuse_stray_mode_target(request: &wire::ControlActionRequest) -> Result<(), ConvertError> {
+    if request.mode_target == wire::ModeTarget::Unspecified as i32 {
+        return Ok(());
+    }
+    Err(ConvertError::UnknownEnum {
+        enum_name: "pilotage.v1.ControlActionRequest.mode_target",
+        value: request.mode_target,
+    })
+}
+
+fn refuse_stray_feel_target(request: &wire::ControlActionRequest) -> Result<(), ConvertError> {
+    if request.feel_target == wire::FeelTarget::Unspecified as i32 {
+        return Ok(());
+    }
+    Err(ConvertError::UnknownEnum {
+        enum_name: "pilotage.v1.ControlActionRequest.feel_target",
+        value: request.feel_target,
+    })
+}
+
 /// A mode request REQUIRES its typed target; any other action must not
 /// carry one — a populated stray target signals a sender/receiver
 /// disagreement about meaning, which fails closed.
@@ -119,6 +146,7 @@ pub(crate) fn action_from_wire(
         Ok(kind) => kind,
     };
     if kind == wire::ControlAction::ModeRequest {
+        refuse_stray_feel_target(&request)?;
         return Ok((
             ControlAction::ModeRequest {
                 target: mode_target_from_wire(request.mode_target)?,
@@ -127,15 +155,7 @@ pub(crate) fn action_from_wire(
         ));
     }
     if kind == wire::ControlAction::FeelModeRequest {
-        // The two targets are separate vocabularies. A feel request carrying a
-        // flight-mode target is a sender and a receiver disagreeing about what
-        // was asked for, which fails closed rather than being read past.
-        if request.mode_target != wire::ModeTarget::Unspecified as i32 {
-            return Err(ConvertError::UnknownEnum {
-                enum_name: "pilotage.v1.ControlActionRequest.mode_target",
-                value: request.mode_target,
-            });
-        }
+        refuse_stray_mode_target(&request)?;
         return Ok((
             ControlAction::FeelModeRequest {
                 target: feel_target_from_wire(request.feel_target)?,
@@ -143,18 +163,8 @@ pub(crate) fn action_from_wire(
             request.action_id,
         ));
     }
-    if request.mode_target != wire::ModeTarget::Unspecified as i32 {
-        return Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.ControlActionRequest.mode_target",
-            value: request.mode_target,
-        });
-    }
-    if request.feel_target != wire::FeelTarget::Unspecified as i32 {
-        return Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.ControlActionRequest.feel_target",
-            value: request.feel_target,
-        });
-    }
+    refuse_stray_mode_target(&request)?;
+    refuse_stray_feel_target(&request)?;
     match kind {
         wire::ControlAction::Arm => Ok((ControlAction::Arm, request.action_id)),
         wire::ControlAction::Disarm => Ok((ControlAction::Disarm, request.action_id)),

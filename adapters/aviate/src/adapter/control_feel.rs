@@ -131,6 +131,19 @@ impl ControlFeelProfiles {
         active_is_neutral && pending_is_neutral
     }
 
+    /// Drops a staged law that was never installed.
+    ///
+    /// A law staged under a lease that has since been lost is a law the next
+    /// operator did not choose, and it would install itself on their first
+    /// sustained neutral. The same reasoning already discards a hold point
+    /// captured under a lost lease: what was asked for under one authority
+    /// must not act under another.
+    ///
+    /// Returns whether anything was pending.
+    pub(super) fn discard_pending(&mut self) -> bool {
+        self.pending.take().is_some()
+    }
+
     pub(super) fn commit_pending(&mut self) -> Option<ControlFeelEntry> {
         let staged = self.pending.take()?;
         let next = staged.entry;

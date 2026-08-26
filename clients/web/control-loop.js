@@ -718,16 +718,40 @@ export function createControlLoop({
     const scope = state.motionScope;
     let offered = 0;
     for (const option of control.options) {
+      if (option.value === "") continue;
       const target = Number(option.value);
       const advertised = feelModeAdvertised(state.advertisedScopes, vehicleId, scope, target);
       option.disabled = !advertised;
       if (advertised) offered += 1;
     }
     control.disabled = offered === 0;
+    // A disabled option still displays when it is the selected one, so a law
+    // this scope does not offer would keep showing as current. Fall back to
+    // stating none rather than naming one the vehicle will refuse.
+    if (control.selectedOptions[0]?.disabled) {
+      control.value = "";
+      state.activeFeelTarget = null;
+    }
     control.title = control.disabled
       ? "This vehicle advertises no control-feel modes"
       : "How the demand is shaped on its way to the vehicle";
     document.body.dataset.feelModesOffered = String(offered);
+  }
+
+  /// Shows the law the vehicle is on.
+  ///
+  /// `null` means the vehicle did not accept the last request, so the control
+  /// returns to whatever it was showing before rather than keeping a law the
+  /// vehicle refused.
+  function showFeelMode(feelTarget) {
+    const control = els.feelMode;
+    if (!control) return;
+    if (feelTarget === null) {
+      control.value = state.activeFeelTarget ? String(state.activeFeelTarget) : control.value;
+      return;
+    }
+    state.activeFeelTarget = feelTarget;
+    control.value = String(feelTarget);
   }
 
   function requestAction(scope, action, modeTarget, cancels = []) {
@@ -781,6 +805,15 @@ export function createControlLoop({
     if (entry.scope === lifecycleScope) {
       const action = state.controlShell?.planAuthority("lifecycle", false);
       if (action) void executeLeaseAction(transportSessions.currentToken(), action, lifecycleScope);
+    }
+    if (entry.action === CONTROL_ACTION.feelModeRequest) {
+      // The control shows the law the VEHICLE is on, never the reader's last
+      // press. A refused request that left the selector where the reader put
+      // it would have the display assert a law the vehicle declined.
+      showFeelMode(message.accepted ? (message.feelTarget ?? entry.feelTarget) : null);
+      if (!message.accepted) {
+        log(`feel mode refused: ${message.detail}`);
+      }
     }
     if (entry.action === CONTROL_ACTION.modeRequest && message.accepted) {
       state.fpvActive = entry.modeTarget === MODE_TARGET.fpvDirect;
@@ -938,6 +971,7 @@ export function createControlLoop({
     handleFrameRejected,
     motionGroup,
     refreshFeelModeControl,
+    showFeelMode,
     requestFeelMode,
     resumeControlInPlace,
     runSessionStreamReader,

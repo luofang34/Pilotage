@@ -291,3 +291,48 @@ fn a_shipped_profile_installs_on_the_vehicle() {
             .unwrap_or_else(|error| panic!("{name} must be installable: {error}"));
     }
 }
+
+#[test]
+fn a_law_staged_under_a_lost_lease_does_not_install_itself_later() {
+    // The operator who chose it no longer holds authority. Leaving it staged
+    // would install it on the NEXT operator's first sustained neutral — a law
+    // they did not choose, arriving without anything saying so. The hold point
+    // captured under that lease is discarded for the same reason.
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read timeout");
+    let mut adapter = airborne_adapter_with_fc(&fc);
+    let before = active_digest(&adapter);
+
+    adapter
+        .request_feel_mode(FeelMode::Agile)
+        .expect("stage a law");
+
+    adapter
+        .enact_link_loss(
+            pilotage_protocol::VehicleId::new(1),
+            &pilotage_protocol::ScopeId::new(super::super::super::FLIGHT_SCOPE),
+            None,
+        )
+        .expect("enact link loss");
+
+    // Held at centre for long enough that any surviving law would arrive.
+    let step = Duration::from_millis(20);
+    for _ in 0..40 {
+        adapter
+            .uplink_mut()
+            .expect("uplink")
+            .seed_hold_for_test([1.0, 2.0, 3.0]);
+        assert_eq!(
+            adapter.apply_control(&neutral_frame()).disposition,
+            Disposition::Accepted
+        );
+        receive_frame(&fc, "neutral response frame");
+        adapter.uplink_mut().expect("uplink").advance_clock(step);
+    }
+    assert_eq!(
+        active_digest(&adapter),
+        before,
+        "a law staged under the lost lease installed itself"
+    );
+}

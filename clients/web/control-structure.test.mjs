@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 const GENERATED = new Set(["control-runtime.js", "instrument-runtime.js"]);
 
 const SIZE_CAPS = {
-  "action-tracker.js": 90,
+  "action-tracker.js": 100,
   "authority-stream.js": 17,
   "authority-transition.js": 22,
   "bootstrap.js": 88,
@@ -23,7 +23,7 @@ const SIZE_CAPS = {
   "connect-authority.js": 63,
   "control-edges.js": 31,
   "control-gate.js": 39,
-  "control-loop.js": 952,
+  "control-loop.js": 986,
   "control-shell.js": 341,
   "datagram-control.js": 87,
   "envelope-fields.js": 24,
@@ -38,7 +38,7 @@ const SIZE_CAPS = {
   "layout.js": 75,
   "lease-executor.js": 14,
   "lease-release.js": 67,
-  "main.js": 238,
+  "main.js": 239,
   "media-recovery.js": 50,
   "nav-display.js": 63,
   "reconnect.js": 150,
@@ -70,7 +70,7 @@ const SIZE_CAPS = {
   "viewer-elements.js": 16,
   "wire-bounds.js": 120,
   "transfer-handover.js": 84,
-  "wire.js": 1384,
+  "wire.js": 1389,
 };
 
 const dir = new URL("./", import.meta.url);

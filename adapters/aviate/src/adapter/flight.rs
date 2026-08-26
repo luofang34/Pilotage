@@ -281,6 +281,15 @@ impl AviateAdapter {
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.clear_hold_state();
         }
+        // A control law staged under the lost lease is obsolete for the same
+        // reason the hold point is: it was chosen by an operator who no longer
+        // holds authority, and leaving it staged would install it on the next
+        // operator's first sustained neutral.
+        if let Some(profiles) = self.control_feel_profiles.as_mut()
+            && profiles.discard_pending()
+        {
+            tracing::info!("discarded a staged control-feel law on link loss");
+        }
         if policy.is_some() {
             // Engaging any policy sends a zero-velocity setpoint: the FC's
             // velocity mode brakes to a hover, which is the only safe action

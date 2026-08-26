@@ -259,6 +259,16 @@ impl FlightFeelProfile {
             // held to a gentler bound than the horizontal one at every mode.
             vertical: tuning.axis(0.7),
             yaw: tuning.axis(0.85),
+            // Direct flight is a family of its own, and leaving it on the
+            // compatibility law would give an operator three modes that are
+            // the same law: byte-identical, and stepping. The attitude command
+            // is what the stick moves in this family, so it is bounded and
+            // jerk-limited for the same reason the velocity families are.
+            direct: tuning.direct(),
+            // The brake-to-hold transition has to prove the vehicle is
+            // actually stable, which a zero dwell cannot: one sample under the
+            // ceiling is a moment, not a state.
+            hold: tuning.hold(),
             ..legacy
         }
     }
@@ -348,8 +358,12 @@ impl Default for FlightFeelProfile {
 /// The numbers one operator mode chooses, and the shape they are put into.
 ///
 /// The shape is shared so a mode cannot differ in kind from another: every
-/// mode releases more gently than it applies and reverses more gently than it
-/// releases, and every band is hysteretic with a dwell.
+/// mode releases at least as promptly as it applies and reverses no quicker
+/// than it releases, and every band is hysteretic with a dwell.
+///
+/// The release ordering is the safety-relevant one and it reads backwards to
+/// intuition — see [`Self::RELEASE_FACTOR`] for why letting go must never lag
+/// asking.
 #[derive(Debug, Clone, Copy)]
 struct ModeTuning {
     deadzone: f32,
@@ -391,6 +405,35 @@ impl ModeTuning {
         }
     }
 
+    /// The direct attitude and thrust family at this mode's authority.
+    ///
+    /// The rates are in radians and normalized thrust rather than in demand
+    /// units, so they are derived from the mode's acceleration rather than
+    /// shared with it: what carries across is the ordering between modes, not
+    /// the number.
+    fn direct(self) -> DirectDynamics {
+        let scale = f64::from(self.apply_accel) / 4.0;
+        DirectDynamics {
+            tilt_rate_rps: (1.2 * scale) as f32,
+            tilt_accel_rps2: (6.0 * scale) as f32,
+            thrust_rate_per_s: (0.9 * scale) as f32,
+            thrust_accel_per_s2: (4.5 * scale) as f32,
+        }
+    }
+
+    /// The brake-to-hold transition at this mode's patience.
+    ///
+    /// A calmer mode waits longer before it calls the vehicle stopped, which
+    /// is the same judgement its longer neutral dwell makes about the stick.
+    fn hold(self) -> HoldTransition {
+        HoldTransition {
+            max_speed_mps: 0.3,
+            max_accel_mps2: 0.6,
+            require_accel: false,
+            stable_dwell_ms: self.dwell_ms,
+        }
+    }
+
     /// One axis at a fraction of this mode's authority.
     fn axis(self, scale: f32) -> AxisResponse {
         let accel = self.apply_accel * scale;
@@ -400,7 +443,12 @@ impl ModeTuning {
                 deadzone: self.deadzone,
                 center_expo: self.center_expo,
                 outer_expo: self.outer_expo,
-                outer_start: 1.0,
+                // Where the outer curve starts to blend in. At 1.0 it never
+                // does, and a mode's outer exponent is dead configuration
+                // that reads as a difference between modes and is not one.
+                // Blending over the last third gives the finer centre the
+                // exponents are chosen for and still reaches full authority.
+                outer_start: 0.7,
             },
             neutral: NeutralBand {
                 active_enter: self.enter,

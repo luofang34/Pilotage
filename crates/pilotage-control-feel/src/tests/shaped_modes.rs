@@ -147,3 +147,108 @@ fn the_compatibility_law_is_none_of_this() {
         legacy.horizontal.neutral.active_exit
     );
 }
+
+#[test]
+fn the_direct_family_is_shaped_too_and_differs_between_modes() {
+    // The velocity families are not the only ones a stick moves. Direct
+    // flight has its own dynamics, and leaving them on the compatibility law
+    // would give an operator three modes that are the same law — identical,
+    // and stepping — while the control offered a choice between them.
+    let modes = SHAPED.map(FlightFeelProfile::shaped);
+    for (index, mode) in SHAPED.iter().enumerate() {
+        let direct = modes[index].direct;
+        for bound in [
+            direct.tilt_rate_rps,
+            direct.tilt_accel_rps2,
+            direct.thrust_rate_per_s,
+            direct.thrust_accel_per_s2,
+        ] {
+            assert!(
+                bound.is_finite() && bound > 0.0,
+                "{mode:?} direct bound {bound}"
+            );
+            assert!(bound < 1_000.0, "{mode:?} direct bound {bound} is a step");
+        }
+        // The brake-to-hold transition must prove stability, which a zero
+        // dwell cannot: one sample under the ceiling is a moment, not a state.
+        assert!(modes[index].hold.stable_dwell_ms > 0, "{mode:?} hold dwell");
+        assert!(
+            modes[index].hold.max_accel_mps2 < 1_000.0,
+            "{mode:?} hold accel"
+        );
+    }
+
+    // And they are ordered the same way the velocity families are.
+    assert!(modes[0].direct.tilt_rate_rps < modes[1].direct.tilt_rate_rps);
+    assert!(modes[1].direct.tilt_rate_rps < modes[2].direct.tilt_rate_rps);
+    assert!(modes[0].direct.thrust_rate_per_s < modes[1].direct.thrust_rate_per_s);
+    assert!(modes[1].direct.thrust_rate_per_s < modes[2].direct.thrust_rate_per_s);
+    assert!(modes[0].hold.stable_dwell_ms > modes[1].hold.stable_dwell_ms);
+    assert!(modes[1].hold.stable_dwell_ms > modes[2].hold.stable_dwell_ms);
+}
+
+#[test]
+fn no_two_modes_are_the_same_law() {
+    // A control offering three names for one law is a control that lies. This
+    // compares the whole artifact rather than the axes a chosen list happens
+    // to name, which is how the direct family stayed identical across all
+    // three while a test called `no_axis_of_any_mode_steps` passed.
+    let modes = SHAPED.map(FlightFeelProfile::shaped);
+    for left in 0..modes.len() {
+        for right in (left + 1)..modes.len() {
+            assert_ne!(
+                modes[left], modes[right],
+                "{:?} and {:?} are the same law",
+                SHAPED[left], SHAPED[right]
+            );
+        }
+    }
+    // And none of them is the law they replace.
+    let legacy = FlightFeelProfile::legacy_compatibility();
+    for (index, mode) in SHAPED.iter().enumerate() {
+        assert_ne!(
+            modes[index].direct, legacy.direct,
+            "{mode:?} keeps the stepping direct law"
+        );
+        assert_ne!(
+            modes[index].hold, legacy.hold,
+            "{mode:?} keeps the zero-dwell hold"
+        );
+    }
+}
+
+#[test]
+fn every_curve_parameter_a_mode_states_actually_changes_the_curve() {
+    // A parameter that reads as a difference between modes and has no effect
+    // is worse than one that is absent: it documents a choice nobody made.
+    // The outer exponent only applies where the outer curve blends in, so a
+    // blend point of 1.0 makes every mode's outer exponent inert.
+    for mode in SHAPED {
+        let curve = FlightFeelProfile::shaped(mode).horizontal.curve;
+        assert!(
+            curve.outer_start < 1.0,
+            "{mode:?} never blends its outer curve"
+        );
+
+        // Moved to a value no mode uses, so the probe is a real change even
+        // where a mode's two exponents happen to be equal.
+        let mut inert = curve;
+        inert.outer_expo = curve.outer_expo + 0.3;
+        let probe = 0.9_f32;
+        assert_ne!(
+            curve.apply(probe),
+            inert.apply(probe),
+            "{mode:?} outer exponent has no effect on the curve"
+        );
+
+        // And the centre exponent still governs near centre.
+        let mut linear = curve;
+        linear.center_expo = 0.0;
+        let near_centre = curve.deadzone + 0.1;
+        assert_ne!(
+            curve.apply(near_centre),
+            linear.apply(near_centre),
+            "{mode:?} centre exponent has no effect near centre"
+        );
+    }
+}

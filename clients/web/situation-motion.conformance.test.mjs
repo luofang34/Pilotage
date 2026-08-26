@@ -67,4 +67,18 @@ function testTheCorpusAnchorsAreWhatGeometrySays() {
 testTheCorpusAnchorsAreWhatGeometrySays();
 console.log("ok - testTheCorpusAnchorsAreWhatGeometrySays");
 
+function testEveryBearingInTheCorpusWrapsTheWayThisClientDoes() {
+  // The corpus carries these rows for both clients. Checked on only one side
+  // they guard nothing: the two could drift and the suite would still pass.
+  for (const bearing of corpus.bearings) {
+    const wrapped = ((bearing.deg % 360) + 360) % 360;
+    assert.ok(
+      Math.abs(wrapped - bearing.wrapped) < 1e-9,
+      `${bearing.deg} wraps to ${wrapped}, not ${bearing.wrapped}`,
+    );
+  }
+}
+testEveryBearingInTheCorpusWrapsTheWayThisClientDoes();
+console.log("ok - testEveryBearingInTheCorpusWrapsTheWayThisClientDoes");
+
 console.log("\nall situation motion conformance checks passed");

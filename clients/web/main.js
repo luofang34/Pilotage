@@ -233,6 +233,7 @@ window.addEventListener("blur", () => {
 // change the law under a deflected stick.
 els.feelMode?.addEventListener("change", () => {
   const target = Number(els.feelMode.value);
-  if (!Number.isFinite(target)) return;
+  // The placeholder is not a law: selecting it asks for nothing.
+  if (els.feelMode.value === "" || !Number.isFinite(target) || target === 0) return;
   control.requestFeelMode(target);
 });
