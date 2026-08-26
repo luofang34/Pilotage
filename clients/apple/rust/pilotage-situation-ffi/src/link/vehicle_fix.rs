@@ -50,6 +50,12 @@ const VALID_VELOCITY: u32 = 1 << 3;
 /// The estimator's own verdict that its solution cannot be used.
 const QUALITY_UNUSABLE: u32 = 2;
 
+/// `SourceRole::OPERATIONAL_ESTIMATE`: the flight controller's own solution.
+const ROLE_OPERATIONAL_ESTIMATE: i32 = 1;
+
+/// `SourceRole::SIMULATION_TRUTH`: the simulator's oracle.
+const ROLE_SIMULATION_TRUTH: i32 = 2;
+
 /// A vehicle's position and the directions that ride with it.
 pub(super) struct VehicleFix {
     pub(super) latitude_deg: f64,
@@ -165,6 +171,12 @@ impl MarkMemory {
 /// The oracle wins where a session has one, because a session that has one is
 /// being judged against it. A session without one is the normal case, not a
 /// failure, and it is the only case a physical vehicle has.
+///
+/// A truth lane that cannot be read falls through to the estimate lane rather
+/// than taking the mark away. That is not leniency: the browser's decoder
+/// drops an unreadable group before the map is offered the sample, so the map
+/// there sees a session with no oracle and reads the estimate. Refusing the
+/// sample outright here would blank a mark the other client still draws.
 pub(super) fn from_sample(
     memory: &mut MarkMemory,
     sample: &wire::TelemetrySample,
@@ -172,10 +184,15 @@ pub(super) fn from_sample(
 ) -> Option<VehicleFix> {
     if let Some(truth) = sample.sim_truth.as_ref()
         && let Some(geodetic) = truth.geodetic.as_ref()
-        // Truth without provenance is discarded, the same refusal the
-        // decoder makes: a position that cannot be shown to be this
-        // vehicle's, this boot's and this moment's is not drawn.
-        && truth.stamp.is_some()
+        // A position that cannot be shown to be this vehicle's, this boot's
+        // and this moment's is not drawn.
+        //
+        // Nor one stamped with another lane's role. Role travels in
+        // provenance precisely so a group cannot be read as something it is
+        // not, and an oracle's position read as the estimator's own solution
+        // is the substitution the roles exist to stop.
+        && stamp_states_role(truth.stamp.as_ref(), ROLE_SIMULATION_TRUTH)
+        && let Some(position) = position_of(geodetic)
     {
         // The truth lane states one observation and every group rides it, so
         // all three are tracked against the same stamp. They are still tracked
@@ -195,8 +212,8 @@ pub(super) fn from_sample(
         let course = track_current.then_some(velocity).flatten();
         memory.course_drawn = course.is_some();
         return Some(VehicleFix {
-            latitude_deg: geodetic.latitude_deg,
-            longitude_deg: geodetic.longitude_deg,
+            latitude_deg: position.0,
+            longitude_deg: position.1,
             heading_deg: heading_current
                 .then(|| {
                     heading_from(
@@ -214,7 +231,13 @@ pub(super) fn from_sample(
 
     let avionics = sample.avionics.as_ref()?;
     let geodetic = avionics.geodetic.as_ref()?;
-    avionics.geodetic_stamp.as_ref()?;
+    // The fix carries its own stamp and its own role, and is refused on both:
+    // a truth-stamped position in this slot would be drawn as the estimator's
+    // answer, which is the one thing the roles are there to prevent.
+    if !stamp_states_role(avionics.geodetic_stamp.as_ref(), ROLE_OPERATIONAL_ESTIMATE) {
+        return None;
+    }
+    let position = position_of(geodetic)?;
     // On the estimate lane the mask is a latched authorization from the
     // estimator, and it means nothing without the status observation behind
     // it — nor when that observation says the solution is unusable. An
@@ -239,8 +262,8 @@ pub(super) fn from_sample(
     let course = track_current.then_some(velocity).flatten();
     memory.course_drawn = course.is_some();
     Some(VehicleFix {
-        latitude_deg: geodetic.latitude_deg,
-        longitude_deg: geodetic.longitude_deg,
+        latitude_deg: position.0,
+        longitude_deg: position.1,
         heading_deg: heading_current
             .then(|| {
                 heading_from(
@@ -259,6 +282,53 @@ pub(super) fn from_sample(
         from_simulator: false,
         fix_advanced,
     })
+}
+
+/// Whether a stamp states the role its lane requires.
+///
+/// A group is only what its provenance says it is. The browser settles this in
+/// its decoder, which drops a mislabelled group before any consumer sees it.
+/// This client decodes the sample without that step, so the lane that draws
+/// the mark has to make the refusal itself or not make it at all.
+fn stamp_states_role(stamp: Option<&wire::MeasurementStamp>, role: i32) -> bool {
+    stamp.is_some_and(|stamp| stamp.role == role)
+}
+
+/// The latitude and longitude a lane states, or nothing when what it states
+/// cannot be placed on the Earth.
+///
+/// Only the horizontal position is examined, because only it is drawn. The
+/// browser's decoder ALSO refuses a fix whose vertical datum lacks the
+/// identity it requires — a geoid model for MSL, a terrain reference for AGL —
+/// and drops the whole fix with it. A sample malformed only in its height
+/// therefore draws a mark here and none there. The mark that appears is in the
+/// right place; it is the disagreement between the two clients that is the
+/// defect, and closing it means consuming the geo contract rather than
+/// restating a second copy of it here.
+fn position_of(fix: &wire::GeodeticFix) -> Option<(f64, f64)> {
+    if !fix.latitude_deg.is_finite() || !(-90.0..=90.0).contains(&fix.latitude_deg) {
+        return None;
+    }
+    // The wire says the producer sends a normalized longitude, so one needing
+    // a wrap is a producer that did not keep the contract. Wrapping it here
+    // would draw the vehicle a full turn of the Earth from where the other
+    // client draws nothing at all.
+    if !fix.longitude_deg.is_finite() || !(-180.0..180.0).contains(&fix.longitude_deg) {
+        return None;
+    }
+    // `pilotage_geo::HorizontalDatum`: 0 is Unknown, and 4 upward is a datum
+    // this build does not know. The schema states that unknown is refused at
+    // the receiver and never guessed — two datums put the same degrees a
+    // couple of metres apart, and which was meant is not recoverable later.
+    if fix.horizontal_datum == 0 || fix.horizontal_datum > 3 {
+        return None;
+    }
+    // A datum that is a realization of a frame is uninterpretable without
+    // saying which realization.
+    if matches!(fix.horizontal_datum, 2 | 3) && fix.realization == 0 {
+        return None;
+    }
+    Some((fix.latitude_deg, fix.longitude_deg))
 }
 
 /// Where the nose points, from the attitude quaternion.
