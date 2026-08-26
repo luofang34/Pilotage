@@ -190,9 +190,134 @@ fn a_frame_across_the_antimeridian_does_not_overflow_the_projection() {
 
     let latest = state.lock().expect("link state");
     let update = latest.sim_truth.expect("the second report");
+    // The value, not merely its finiteness: an f64 difference of two
+    // i32-range values is always finite, so a finiteness check passes on
+    // the wrapped garbage too. A release build has no overflow check, so
+    // this assertion is the only thing standing between a wrapped
+    // subtraction and a frame measured from nowhere.
+    //
+    // 359.8 degrees, not 0.2: the flat-earth projection subtracts raw
+    // longitudes and does not wrap, so a frame that crosses the
+    // antimeridian measures the long way round. That is a real property of
+    // this projection and not the overflow — pinning the number states
+    // both, where a finiteness check states neither.
+    let expected_east = -359.8 * 111_111.0;
     assert!(
-        update.pos_ned_m[1].is_finite(),
-        "the east offset is a number: {:?}",
+        (f64::from(update.pos_ned_m[1]) - expected_east).abs() < 10.0,
+        "the east offset measures the real separation: {:?}",
         update.pos_ned_m,
+    );
+}
+
+/// A receiver that states no position states no place. Zero on both angles
+/// is a real place off the coast of Africa, so nothing downstream could
+/// tell a receiver that has not solved from a vehicle that is there, and
+/// the map would draw one.
+#[test]
+fn a_receiver_fix_at_zero_is_not_a_position() {
+    let state = state(ResetPolicy::Conservative);
+    let now = Instant::now();
+    let fix = |lat_lon| {
+        (
+            SELECTED,
+            FcMessage::GnssFix {
+                time_usec: 2_000_000,
+                lat_lon,
+                alt_ellipsoid_mm: 536_000,
+                accuracy_mm: [1_250, 2_100],
+            },
+        )
+    };
+    apply_at(&state, &[fix([0, 0])], now);
+    assert!(
+        state.lock().expect("link state").gnss_fix.is_none(),
+        "a receiver that stated no position left no fix",
+    );
+
+    apply_at(&state, &[fix([473_977_419, 85_455_938])], now);
+    let latest = state.lock().expect("link state");
+    let update = latest.gnss_fix.expect("a stated position is a fix");
+    assert_eq!(update.lat_lon, [473_977_419, 85_455_938]);
+}
+
+/// A receiver fix must not reach the shared boot-clock high water mark.
+///
+/// The estimate groups are ordered against one mark in boot milliseconds.
+/// GPS_RAW_INT states a timestamp on a clock of the sender's choosing: a
+/// flight controller with satellite time fills it from UTC, which in
+/// milliseconds is a number decades past any boot clock. Fed into the
+/// shared mark, it makes every later attitude and kinematics report look
+/// like a restart, and the whole estimate stream stops.
+#[test]
+fn a_receiver_fix_does_not_disturb_the_estimate_groups() {
+    // A UTC timestamp in microseconds, as a real receiver reports it.
+    const UTC_USEC: u64 = 1_787_000_000_000_000;
+    let state = state(ResetPolicy::SimulatorHeuristic);
+    let now = Instant::now();
+
+    super::apply_at(&state, &[super::attitude_at(5_000, 0.5)], now);
+    let epoch_before = state.lock().expect("link state").source_epoch;
+
+    apply_at(
+        &state,
+        &[(
+            SELECTED,
+            FcMessage::GnssFix {
+                time_usec: UTC_USEC,
+                lat_lon: [473_977_419, 85_455_938],
+                alt_ellipsoid_mm: 536_000,
+                accuracy_mm: [1_250, 2_100],
+            },
+        )],
+        now,
+    );
+    assert!(
+        state.lock().expect("link state").gnss_fix.is_some(),
+        "the fix is still published",
+    );
+
+    // The estimate stream continues exactly as it would have.
+    super::apply_at(&state, &[super::attitude_at(5_100, 0.6)], now);
+    let latest = state.lock().expect("link state");
+    let attitude = latest
+        .attitude
+        .expect("the next attitude report is accepted");
+    assert_eq!(attitude.time_boot_ms, 5_100);
+    assert_eq!(
+        latest.source_epoch, epoch_before,
+        "no restart was inferred from a clock the receiver chose",
+    );
+    assert_eq!(
+        latest.reordered_measurements, 0,
+        "no group was rejected because of a clock the receiver chose",
+    );
+    drop(latest);
+
+    // A physical deployment admits no inter-group skew at all, and a
+    // receiver reporting at 1 to 5 Hz always lags a 50 Hz attitude stream.
+    // Ordered against the estimate groups its fix would never be accepted,
+    // and a physical vehicle is the deployment this lane exists to serve.
+    let physical = super::state(ResetPolicy::Conservative);
+    physical
+        .lock()
+        .expect("link state")
+        .maximum_inter_group_skew_ms = 0;
+    super::apply_at(&physical, &[super::attitude_at(5_000, 0.5)], now);
+    apply_at(
+        &physical,
+        &[(
+            SELECTED,
+            FcMessage::GnssFix {
+                time_usec: 4_900_000,
+                lat_lon: [473_977_419, 85_455_938],
+                alt_ellipsoid_mm: 536_000,
+                accuracy_mm: [1_250, 2_100],
+            },
+        )],
+        now,
+    );
+    assert!(
+        physical.lock().expect("link state").gnss_fix.is_some(),
+        "a receiver that lags the attitude stream still states a position",
     );
 }

@@ -80,3 +80,67 @@ fn a_truth_report_trimmed_to_its_last_meaning_byte_still_decodes() {
             if lat_lon_alt == [473_977_419, 85_455_938, 500_000]
     ));
 }
+
+/// The estimate lane's position, from the bytes it arrives in.
+///
+/// Every position a real vehicle draws comes from these offsets. The
+/// message carries a sea-level altitude fourteen bytes before the
+/// ellipsoidal one this lane reads, so an offset read early reports a
+/// height measured from a surface nothing named.
+#[test]
+fn a_real_receiver_fix_frame_carries_its_position() {
+    use crate::codec::GNSS_RAW_ID;
+
+    const LAT_LON: [i32; 2] = [473_977_419, 85_455_938];
+    let mut payload = vec![0_u8; 52];
+    payload[0..8].copy_from_slice(&2_000_000_u64.to_le_bytes());
+    payload[8..12].copy_from_slice(&LAT_LON[0].to_le_bytes());
+    payload[12..16].copy_from_slice(&LAT_LON[1].to_le_bytes());
+    // The sea-level height, which this lane must NOT read.
+    payload[16..20].copy_from_slice(&488_227_i32.to_le_bytes());
+    payload[28] = 3;
+    payload[29] = 12;
+    payload[30..34].copy_from_slice(&536_000_i32.to_le_bytes());
+    payload[34..38].copy_from_slice(&1_250_u32.to_le_bytes());
+    payload[38..42].copy_from_slice(&2_100_u32.to_le_bytes());
+
+    let mut out = Vec::new();
+    let stats = parse_datagram(&encode_frame(GNSS_RAW_ID, &payload, true), &mut out);
+    assert_eq!(
+        stats.crc_failures, 0,
+        "the frame verifies under CRC_EXTRA 24"
+    );
+    assert_eq!(out.len(), 1, "the frame decodes: {out:?}");
+    assert!(matches!(
+        out[0].1,
+        FcMessage::GnssFix {
+            lat_lon,
+            alt_ellipsoid_mm,
+            accuracy_mm,
+            ..
+        } if lat_lon == LAT_LON
+            && alt_ellipsoid_mm == 536_000
+            && accuracy_mm == [1_250, 2_100]
+    ));
+
+    // Below a three-dimensional fix the receiver has no height and may
+    // have no position, and it says so here and nowhere else.
+    let mut without_3d = payload.clone();
+    without_3d[28] = 2;
+    let mut out = Vec::new();
+    parse_datagram(&encode_frame(GNSS_RAW_ID, &without_3d, true), &mut out);
+    assert!(
+        out.is_empty(),
+        "a receiver with no 3D fix states no position"
+    );
+
+    // A payload trimmed before the fix type states no fix type, and a
+    // zero-extended one would read as "no fix" rather than as a fix this
+    // lane may not judge.
+    let mut out = Vec::new();
+    parse_datagram(&encode_frame(GNSS_RAW_ID, &payload[..28], false), &mut out);
+    assert!(
+        out.is_empty(),
+        "a frame short of its fix type states no fix"
+    );
+}

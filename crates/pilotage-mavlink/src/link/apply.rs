@@ -129,8 +129,46 @@ fn apply_attitude(
     }
 }
 
-/// Folds one kinematics group into the cache, stamping it with the
-/// authorization current at its source time.
+/// Applies one receiver fix report.
+///
+/// A latitude and longitude both exactly zero is a receiver that stated no
+/// position: 0,0 is a real place off the coast of Africa, so nothing
+/// downstream can tell it from a vehicle that is there.
+fn apply_gnss_fix(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    let FcMessage::GnssFix {
+        lat_lon,
+        alt_ellipsoid_mm,
+        accuracy_mm,
+        ..
+    } = message
+    else {
+        return;
+    };
+    if lat_lon == [0, 0] {
+        return;
+    }
+    // The message's own timestamp is not read. A flight controller with no
+    // satellite time fills it from its boot clock and one with satellite
+    // time fills it from UTC, and nothing on the wire says which — so it
+    // cannot order this lane, and it must never reach the shared boot-clock
+    // high water mark the other groups are ordered against, where a UTC
+    // value would make every later boot timestamp look like a restart.
+    let sequence = latest
+        .gnss_fix
+        .map_or(0, |fix| fix.sequence.wrapping_add(1));
+    let received_since_start_ns =
+        u64::try_from(now.saturating_duration_since(latest.started_at).as_nanos())
+            .unwrap_or(u64::MAX);
+    latest.gnss_fix = Some(crate::link::GnssFixUpdate {
+        lat_lon,
+        alt_ellipsoid_mm,
+        accuracy_mm,
+        sequence,
+        received_since_start_ns,
+        received_at: now,
+    });
+}
+
 /// Applies one simulator ground-truth report: latches the projection
 /// origin on the first fix and projects geodetic truth into local NED.
 /// The flat-earth projection's error over a SITL flight is far below
@@ -205,6 +243,8 @@ fn apply_baro(latest: &mut LinkState, time_boot_ms: u32, press_abs_hpa: f32, now
     }
 }
 
+/// Folds one kinematics group into the cache, stamping it with the
+/// authorization current at its source time.
 fn apply_kinematics(
     latest: &mut LinkState,
     time_boot_ms: u32,
@@ -265,6 +305,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             pos_ned_m,
             vel_ned_mps,
         } => apply_kinematics(latest, time_boot_ms, pos_ned_m, vel_ned_mps, now),
+        FcMessage::GnssFix { .. } => apply_gnss_fix(latest, message, now),
         FcMessage::ScaledPressure {
             time_boot_ms,
             press_abs_hpa,

@@ -287,3 +287,61 @@ fn an_oracle_with_no_paired_sensor_states_no_position() {
     let truth = batch.samples[0].sim_truth.expect("the oracle's sample");
     assert!(truth.geodetic.is_none());
 }
+
+/// The estimate lane's own position, on any backend.
+///
+/// A flight controller reports its receiver's fix whether the vehicle is
+/// real or simulated. That is the lane a physical vehicle will draw from,
+/// and it must reach the published batch under the estimate role and not
+/// the truth role.
+#[test]
+fn the_estimate_lane_publishes_the_position_the_receiver_solved() {
+    // Zurich, so a reader can tell this apart from the estimate fixture's
+    // local pose.
+    const REPORTED: [i32; 3] = [473_977_419, 85_455_938, 488_227];
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.gnss_fix = Some(pilotage_mavlink::link::GnssFixUpdate {
+            lat_lon: [REPORTED[0], REPORTED[1]],
+            alt_ellipsoid_mm: 536_000,
+            accuracy_mm: [1_250, 2_100],
+            sequence: 4,
+            received_since_start_ns: 9_000_000,
+            received_at: std::time::Instant::now(),
+        });
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+
+    let batch = adapter.sample_telemetry();
+    let avionics = batch.samples[0].avionics.expect("the estimate lane");
+    let fix = avionics
+        .geodetic
+        .expect("the position the controller solved");
+
+    assert!((fix.position.latitude_deg - 47.397_741_9).abs() < 1e-7);
+    assert!((fix.position.longitude_deg - 8.545_593_8).abs() < 1e-7);
+    assert!(
+        (fix.position.vertical.height_m - 536.0).abs() < 1e-6,
+        "the height is the ellipsoidal one, not the sea-level one beside it",
+    );
+    assert_eq!(
+        fix.quality.horizontal_mm, 1_250,
+        "the receiver's own accuracy travels with its fix",
+    );
+    assert_eq!(
+        fix.stamp.role,
+        SourceRole::OperationalEstimate,
+        "a receiver's solution is not an oracle",
+    );
+    assert_eq!(
+        fix.stamp.clock,
+        pilotage_adapter_api::MeasurementClock::HostMonotonic,
+        "the message names no clock, so the stamp names the one that received it",
+    );
+    assert_eq!(fix.stamp.acquired_at_ns, 9_000_000);
+    assert!(
+        batch.samples[0].sim_truth.is_none(),
+        "no oracle attached and no truth frame forwarded",
+    );
+}

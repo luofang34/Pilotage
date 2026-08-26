@@ -42,8 +42,22 @@ pub(crate) fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u
         285 => 137,
         29 => 115,
         115 => 4,
+        24 => 24,
         20_000 => 171,
-        other => (other & 0xff) as u8,
+        // The table is kept apart from the decoder's on purpose, so the
+        // two are independent statements of the same wire fact. An id the
+        // decoder knows and this table does not would make a frame the
+        // decoder rejects for its checksum, and the case would read as a
+        // decode failure rather than a missing entry — so a known id must
+        // be recorded above. The fallback serves the cases that build a
+        // frame the decoder is meant NOT to know.
+        other => {
+            assert!(
+                super::crc_extra(other).is_none(),
+                "record the CRC_EXTRA for message {other} above",
+            );
+            (other & 0xff) as u8
+        }
     };
     let crc = super::compute_crc(&frame[1..], extra);
     frame.push((crc & 0xff) as u8);

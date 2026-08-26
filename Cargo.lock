@@ -1744,6 +1744,7 @@ name = "pilotage-adapter-px4"
 version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
+ "pilotage-geo",
  "pilotage-mavlink",
  "pilotage-protocol",
  "pilotage-sim-video",
@@ -1957,6 +1958,7 @@ name = "pilotage-mavlink"
 version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
+ "pilotage-geo",
  "thiserror",
  "tokio",
  "tracing",

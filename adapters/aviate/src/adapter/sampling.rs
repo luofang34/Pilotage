@@ -14,7 +14,9 @@ use pilotage_geo::{
     PositionQuality, SIMULATOR_GEOID_MODEL_ID, TerrainRefId, VerticalDatum, VerticalPosition,
 };
 use pilotage_mavlink::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
-use pilotage_mavlink::link::{AttitudeUpdate, KinematicsUpdate, LinkState, SimTruthUpdate};
+use pilotage_mavlink::link::{
+    AttitudeUpdate, KinematicsUpdate, LinkState, SimTruthUpdate, estimate_geodetic_fix,
+};
 use tracing::warn;
 
 use super::WITHHOLD_AFTER;
@@ -261,8 +263,13 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
     );
     let (valid_flags, quality) = effective_authorization(attitude, kinematics, has_authorization);
     let avionics = Some(AvionicsSample {
-        // The estimate stream carries no geodetic report.
-        geodetic: None,
+        // The estimator's own fix, under its own stamp: it advances
+        // independently of the local frame beside it.
+        geodetic: latest
+            .gnss_fix
+            .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
+            .as_ref()
+            .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
             rates_rps: att.rates_rps,
