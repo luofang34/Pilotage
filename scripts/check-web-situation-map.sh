@@ -220,6 +220,26 @@ if grep -Fq '1 - 2 * (y * y + z * z)' "$motion_module"; then
     echo "FORBIDDEN: the yaw must not assume a unit length the gate does not enforce" >&2
     status=1
 fi
+# A leader is one two-vertex line and the renderer projects each vertex on
+# its own, so an endpoint wrapped back into [-180, 180) puts the two either
+# side of the seam and the segment is drawn across the whole world.
+if grep -Eq '\+ 180\) % 360' "$motion_module"; then
+    echo "FORBIDDEN: a leader endpoint must not be wrapped away from its start" >&2
+    status=1
+fi
+# The producer republishes a cached fix, so a sample carrying a position is
+# not a sample carrying a new one. A mark aged on arrival goes on turning
+# and drawing a course around a position the vehicle left.
+if ! grep -Fq 'advancedAt("fix", sample.fixStamp, nowMs)' "$ownship_module"; then
+    echo "FORBIDDEN: the mark must age on the fix, not on the sample carrying it" >&2
+    status=1
+fi
+# The seam is only visible in a renderer that projects for real.
+if ! grep -Fq 'seamAcrossTheWorld' "$web/situation-map.browser.test.mjs"; then
+    echo "FORBIDDEN: a course at the seam must be proven not to span the world" >&2
+    status=1
+fi
+
 # The mask that authorizes a direction, and the quality beside it, mean
 # nothing without the status observation backing them; absence is a
 # fail-closed case, and the map reads this mask off the raw wire message

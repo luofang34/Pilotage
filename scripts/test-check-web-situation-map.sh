@@ -441,4 +441,20 @@ sed -i.bak 's|run: node clients/web/situation-motion.test.mjs|# &|' \
     "$fixture/.github/workflows/ci.yml"
 reject "a commented-out heading and track step"
 restore .github/workflows/ci.yml
+# An endpoint wrapped back into range puts the two vertices either side of
+# the seam, and the segment between them is drawn across the whole world.
+sed -i.bak 's|return \[(endLonRad \* 180) / Math.PI, (endLatRad \* 180) / Math.PI\];|return [((((((endLonRad * 180) / Math.PI) + 180) % 360) + 360) % 360) - 180, (endLatRad * 180) / Math.PI];|' \
+    "$web/situation-motion.js"
+reject "a leader endpoint wrapped away from its start"
+restore clients/web/situation-motion.js
+
+# A sample carrying a position is not a sample carrying a new one.
+sed -i.bak 's|advancedAt("fix", sample.fixStamp, nowMs) ?? nowMs|nowMs|' \
+    "$web/situation-ownship.js"
+reject "a mark aged on the sample rather than on the fix"
+restore clients/web/situation-ownship.js
+
+sed -i.bak 's/seamAcrossTheWorld/seamIgnored/g' "$web/situation-map.browser.test.mjs"
+reject "a browser suite that never draws a course at the seam"
+restore clients/web/situation-map.browser.test.mjs
 echo "web situation map guards reject each loss"

@@ -45,13 +45,6 @@ const VALID_VELOCITY = 8;
 /** A bearing wrapped into [0, 360). */
 const wrapBearingDeg = (deg) => ((deg % 360) + 360) % 360;
 
-/** A longitude wrapped into [-180, 180). The wire contract carries a
- *  normalized longitude and this repo's own decoder refuses one outside
- *  that band rather than wrap it, so a step that crossed the antimeridian
- *  must come back into range instead of naming a place a decoder would
- *  reject. */
-const wrapLongitudeDeg = (deg) => ((((deg + 180) % 360) + 360) % 360) - 180;
-
 /**
  * The heading a sample states, in degrees clockwise from north, or `null`
  * when it states none.
@@ -113,6 +106,15 @@ export function trackFrom(velNed, validFlags, drawn = false) {
  * thousands of degrees and latitudes past 90 — places that are not on the
  * Earth. This form is defined everywhere, including across the pole and
  * across the antimeridian.
+ *
+ * The longitude returned is deliberately NOT wrapped into [-180, 180). The
+ * leader is one two-vertex line and the renderer projects each vertex on
+ * its own, so a pair either side of the antimeridian is drawn the long way
+ * — westward across the whole world — in place of a line a few kilometres
+ * long. What a renderer needs of the second vertex is that it lie within
+ * 180 degrees of the first, which is what `atan2` returns. The wire's rule
+ * that a longitude arrive normalized governs a position a producer states,
+ * not an endpoint computed beside a start already known good.
  */
 export function leaderEndpoint(position, track, seconds = LEADER_SECONDS) {
   const angular = (track.speedMps * seconds) / EARTH_RADIUS_M;
@@ -131,5 +133,5 @@ export function leaderEndpoint(position, track, seconds = LEADER_SECONDS) {
       Math.sin(bearingRad) * Math.sin(angular) * Math.cos(latRad),
       Math.cos(angular) - Math.sin(latRad) * sinLat,
     );
-  return [wrapLongitudeDeg((endLonRad * 180) / Math.PI), (endLatRad * 180) / Math.PI];
+  return [(endLonRad * 180) / Math.PI, (endLatRad * 180) / Math.PI];
 }

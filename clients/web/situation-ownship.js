@@ -14,7 +14,10 @@
 //
 // "States" means states now. Each direction has a group of its own that
 // advances on its own, so a direction is drawn only while its group keeps
-// producing measurements this page has not already seen.
+// producing measurements this page has not already seen. That test runs on
+// each sample, so a link that stops delivering altogether is caught by the
+// staleness rule below rather than by this one, and the whole mark goes
+// together.
 
 import { headingDegFrom, leaderEndpoint, trackFrom } from "./situation-motion.js";
 
@@ -58,9 +61,16 @@ export const OWNSHIP_STALE_AFTER_MS = 3_000;
  *  separately, and the producer withholds a group only after three seconds.
  *  At a routine yaw rate three seconds is most of a turn, so a nose drawn
  *  from a group that stopped advancing points somewhere the vehicle left.
- *  The instruments beside the map hold their groups to the same limit, and
- *  a heading they would already call incoherent has no business on the map
- *  as a measurement. */
+ *  The value is the one the instruments beside the map bound their
+ *  inter-group skew by — a different quantity measured over the same span,
+ *  chosen so the map does not go on drawing a direction for longer than the
+ *  panels beside it would call the same groups coherent.
+ *
+ *  There is no band under this bound, as there is under the speed floor.
+ *  The floor's input is a noisy continuous quantity that sits either side
+ *  of a threshold; this one's input is whether a publication arrived, and a
+ *  group publishing slower than roughly three times a second would blink
+ *  rather than hover. No group in the wire contract is that slow. */
 export const GROUP_COHERENCE_MS = 300;
 
 /**
@@ -112,6 +122,7 @@ export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
     // the truth lane states one observation and both ride it.
     headingStamp: lane.attitudeStamp ?? lane.stamp ?? null,
     trackStamp: lane.kinematicsStamp ?? lane.stamp ?? null,
+    fixStamp: lane.geodeticStamp ?? lane.stamp ?? null,
     source,
     reason: null,
   };
@@ -178,10 +189,12 @@ export function attachOwnship(maplibre, map, surface) {
   // apart.
   const lastStampIdentity = new Map();
   const lastStampAdvance = new Map();
-  const groupIsCurrent = (kind, stamp, nowMs) => {
-    // A direction whose group states no stamp cannot be shown to be
-    // current, and a direction that cannot be shown current is not drawn.
-    if (!stamp) return false;
+  /** When this group last carried a measurement the page had not already
+   *  seen, or `null` when it states no stamp to tell with. */
+  const advancedAt = (kind, stamp, nowMs) => {
+    // A group that states no stamp cannot be shown to be current, and what
+    // cannot be shown current is not drawn.
+    if (!stamp) return null;
     // The role is in the identity with the rest, so a handover between
     // lanes reads as the new measurement it is without needing the lane
     // remembered separately.
@@ -196,10 +209,18 @@ export function attachOwnship(maplibre, map, surface) {
     if (lastStampIdentity.get(kind) !== identity) {
       lastStampIdentity.set(kind, identity);
       lastStampAdvance.set(kind, nowMs);
-      return true;
+      return nowMs;
     }
-    const advancedAt = lastStampAdvance.get(kind);
-    return advancedAt !== undefined && nowMs - advancedAt <= GROUP_COHERENCE_MS;
+    return lastStampAdvance.get(kind) ?? null;
+  };
+
+  // A direction is held to the tighter bound because it is measured many
+  // times a second and a stale one turns the mark. The fix keeps the
+  // staleness bound the mark has always had, because a receiver reporting
+  // once a second would otherwise withdraw the mark between its own fixes.
+  const groupIsCurrent = (kind, stamp, nowMs) => {
+    const when = advancedAt(kind, stamp, nowMs);
+    return when !== null && nowMs - when <= GROUP_COHERENCE_MS;
   };
 
   const emptyLeader = { type: "FeatureCollection", features: [] };
@@ -299,7 +320,17 @@ export function attachOwnship(maplibre, map, surface) {
       withdraw(reason);
       return;
     }
-    lastFixAt = nowMs;
+    // The producer republishes a cached fix for as long as it will stand
+    // behind it, so a sample carrying a position is not a sample carrying a
+    // NEW one. Aged on arrival, the mark would go on turning and drawing a
+    // course — both correctly current — around a position the vehicle had
+    // left, and that live motion would assert the whole symbol was current.
+    // A frozen mark at least looks frozen.
+    lastFixAt = advancedAt("fix", sample.fixStamp, nowMs) ?? nowMs;
+    if (nowMs - lastFixAt > OWNSHIP_STALE_AFTER_MS) {
+      withdraw(OWNSHIP_REASON.STOPPED);
+      return;
+    }
     // Telemetry stopping is the absence that follows a fix, until a sample
     // says otherwise.
     lastAbsence = OWNSHIP_REASON.STOPPED;

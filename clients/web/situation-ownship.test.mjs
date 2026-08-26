@@ -553,12 +553,16 @@ function testADirectionWhoseGroupStoppedAdvancingIsNotDrawn() {
 
   // The same groups again, with the fix moving on beneath them.
   const moved = {
-    avionics: { ...stale.avionics, geodetic: { ...FIX, latitudeDeg: FIX.latitudeDeg + 0.001 } },
+    avionics: {
+      ...stale.avionics,
+      geodetic: { ...FIX, latitudeDeg: FIX.latitudeDeg + 0.001 },
+      geodeticStamp: freshStamp(1),
+    },
   };
   observe(moved, 1_000 + 200);
   assert.equal(surface.dataset.ownshipHeadingDeg, "270.0", "inside the limit it still counts");
 
-  observe(moved, 1_000 + 400);
+  observe({ avionics: { ...moved.avionics, geodeticStamp: freshStamp(1) } }, 1_000 + 400);
   assert.equal(surface.dataset.ownship, "shown", "the fix is still drawn");
   assert.equal(surface.dataset.ownshipHeadingDeg, undefined, "the nose is not");
   assert.equal(surface.dataset.ownshipTrackDeg, undefined);
@@ -567,7 +571,12 @@ function testADirectionWhoseGroupStoppedAdvancingIsNotDrawn() {
 
   // A group that advances again is drawn again.
   const fresh = {
-    avionics: { ...moved.avionics, attitudeStamp: freshStamp(1), kinematicsStamp: freshStamp(1) },
+    avionics: {
+      ...moved.avionics,
+      attitudeStamp: freshStamp(1),
+      kinematicsStamp: freshStamp(1),
+      geodeticStamp: freshStamp(1),
+    },
   };
   observe(fresh, 1_000 + 500);
   assert.equal(surface.dataset.ownshipHeadingDeg, "270.0", "a new measurement restores it");
@@ -650,8 +659,8 @@ function testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal() {
   age(1_001 + OWNSHIP_STALE_AFTER_MS);
   assert.equal(surface.dataset.ownship, "absent");
 
-  // The same groups, beside a fix that started arriving again.
-  observe(frozen, 20_000);
+  // The same attitude, beside a fix that started advancing again.
+  observe({ avionics: { ...frozen.avionics, geodeticStamp: freshStamp(1) } }, 20_000);
   assert.equal(surface.dataset.ownship, "shown", "the fix is drawn again");
   assert.equal(
     surface.dataset.ownshipHeadingDeg,
@@ -732,5 +741,81 @@ function testADirectionThatGoesAwayIsTakenOffTheSurface() {
 }
 testADirectionThatGoesAwayIsTakenOffTheSurface();
 console.log("ok - testADirectionThatGoesAwayIsTakenOffTheSurface");
+
+function testAMarkDoesNotOutliveTheFixItStandsOn() {
+  // The producer republishes a cached fix for as long as it will stand
+  // behind it, so a sample carrying a position is not a sample carrying a
+  // new one. A mark aged on arrival would go on turning and drawing a
+  // course — both correctly current — around a position the vehicle left,
+  // and the live motion beside it would assert the whole symbol was
+  // current. That is worse than a frozen mark, which at least looks frozen.
+  const { observe, surface, leader } = harness();
+  const sample = estimate();
+  observe(sample, 1_000);
+  assert.equal(surface.dataset.ownship, "shown");
+
+  // The directions keep advancing while the receiver's fix does not.
+  const turning = (nowMs) =>
+    observe(
+      {
+        avionics: {
+          ...sample.avionics,
+          attitudeStamp: freshStamp(1),
+          kinematicsStamp: freshStamp(1),
+        },
+      },
+      nowMs,
+    );
+
+  turning(1_000 + 2_000);
+  assert.equal(surface.dataset.ownship, "shown", "inside the bound the mark stands");
+  assert.equal(surface.dataset.ownshipHeadingDeg, "270.0", "and still turns");
+
+  turning(1_000 + OWNSHIP_STALE_AFTER_MS + 1);
+  assert.equal(surface.dataset.ownship, "absent", "past it the mark goes");
+  assert.equal(surface.dataset.ownshipReason, OWNSHIP_REASON.STOPPED);
+  assert.equal(surface.dataset.ownshipHeadingDeg, undefined, "and takes its directions with it");
+  assert.equal(leader.data.features.length, 0);
+}
+testAMarkDoesNotOutliveTheFixItStandsOn();
+console.log("ok - testAMarkDoesNotOutliveTheFixItStandsOn");
+
+function testAReceiverReportingOnceASecondKeepsItsMark() {
+  // A fix is not a direction: the receiver reports at a rate of its own,
+  // and holding the mark to the tighter bound the directions are held to
+  // would withdraw it between one fix and the next.
+  const { observe, surface } = harness();
+  const sample = estimate();
+  observe(sample, 1_000);
+  assert.equal(surface.dataset.ownship, "shown");
+
+  // Telemetry arrives many times a second and the receiver reports once, so
+  // most samples carry the fix the last one carried. Those samples must not
+  // be read as a fix that has gone stale.
+  let fixStamp = sample.avionics.geodeticStamp;
+  for (let step = 1; step <= 20; step += 1) {
+    const nowMs = 1_000 + step * 250;
+    // A new fix on the whole second; the same one in between.
+    if (step % 4 === 0) fixStamp = freshStamp(1);
+    observe(
+      {
+        avionics: {
+          ...sample.avionics,
+          attitudeStamp: freshStamp(1),
+          kinematicsStamp: freshStamp(1),
+          geodeticStamp: fixStamp,
+        },
+      },
+      nowMs,
+    );
+    assert.equal(
+      surface.dataset.ownship,
+      "shown",
+      `at ${nowMs} ms the mark stands, though a direction this old would not`,
+    );
+  }
+}
+testAReceiverReportingOnceASecondKeepsItsMark();
+console.log("ok - testAReceiverReportingOnceASecondKeepsItsMark");
 
 console.log("\nall situation ownship checks passed");

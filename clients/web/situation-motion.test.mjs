@@ -173,9 +173,28 @@ function testEveryLeaderEndsSomewhereOnTheEarth() {
     const [lon, lat] = leaderEndpoint(position, track);
     assert.ok(Number.isFinite(lon) && Number.isFinite(lat), `${name}: the endpoint is a place`);
     assert.ok(lat >= -90 && lat <= 90, `${name}: latitude ${lat} is on the Earth`);
-    // The wire contract carries a normalized longitude and this repo's own
-    // decoder refuses one outside the band rather than wrap it.
-    assert.ok(lon >= -180 && lon < 180, `${name}: longitude ${lon} is in range`);
+    // The invariant a two-vertex line needs is not that the endpoint is in
+    // range but that it is within half a turn of the vertex before it. A
+    // longitude wrapped back into [-180, 180) puts the two vertices either
+    // side of the seam, and a renderer that projects each on its own draws
+    // the segment the long way, across the whole world.
+    assert.ok(
+      Math.abs(lon - position.longitudeDeg) <= 180,
+      `${name}: the segment spans ${lon - position.longitudeDeg} degrees`,
+    );
+  }
+
+  // The seam cases specifically: a leader a few kilometres long must stay a
+  // few kilometres long, whichever side of 180 it starts on.
+  for (const [name, position, track] of [
+    ["eastbound at the seam", { latitudeDeg: 51.9, longitudeDeg: 179.98 }, { bearingDeg: 90, speedMps: 250 }],
+    ["westbound at the seam", { latitudeDeg: 51.9, longitudeDeg: -179.98 }, { bearingDeg: 270, speedMps: 250 }],
+  ]) {
+    const [lon] = leaderEndpoint(position, track);
+    assert.ok(
+      Math.abs(lon - position.longitudeDeg) < 1,
+      `${name}: the segment spans ${lon - position.longitudeDeg} degrees, not a turn of the Earth`,
+    );
   }
 
   // Crossing the pole comes down the opposite meridian, which a step in
@@ -184,7 +203,11 @@ function testEveryLeaderEndsSomewhereOnTheEarth() {
     { latitudeDeg: 89.999, longitudeDeg: 10 },
     { bearingDeg: 0, speedMps: 100 },
   );
-  assert.ok(Math.abs(overLon - -170) < 1e-6, `over the pole the meridian flips: ${overLon}`);
+  // Half a turn of longitude: the opposite meridian, reached by going over
+  // the top. Mercator has no honest picture of a line through the pole, and
+  // this one is drawn along the top edge either way; what matters is that
+  // the endpoint is a real place rather than a latitude past 90.
+  assert.ok(Math.abs(overLon - 190) < 1e-6, `over the pole the meridian flips: ${overLon}`);
   assert.ok(overLat < 90 && overLat > 89.9, `and comes back down: ${overLat}`);
 }
 testEveryLeaderEndsSomewhereOnTheEarth();

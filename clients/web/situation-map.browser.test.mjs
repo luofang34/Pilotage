@@ -348,13 +348,46 @@ if (figure?.dataset.mapState === "ready") {
     // assigned the whole class list would take it away, and nothing in the
     // renderer puts it back.
     const rendererClassKept = mark.marker.getElement().classList.contains("maplibregl-marker");
+    const surfaced = {
+      headingDeg: readout.dataset.ownshipHeadingDeg ?? null,
+      trackDeg: readout.dataset.ownshipTrackDeg ?? null,
+      groundSpeedMps: readout.dataset.ownshipGroundSpeedMps ?? null,
+    };
     // Turn the map. A mark aligned to the map keeps pointing east while the
     // compass moves under it; a mark aligned to the screen does not.
     probeMap.setBearing(30);
     await new Promise((resolve) => setTimeout(resolve, 300));
     const transformWhenTurned = mark.marker.getElement().style.transform;
 
+    // The seam. A leader is one two-vertex line and the renderer projects
+    // each vertex on its own, so an endpoint wrapped back into [-180, 180)
+    // puts the two either side of 180 and the segment is drawn the long way
+    // — westward across the whole world — in place of a line a few
+    // kilometres long. Put the map over longitude 0, half a world from the
+    // vehicle, and ask whether the course is on screen there.
+    probeMap.setBearing(0);
+    probeMap.jumpTo({ center: [0, 0], zoom: 1 });
+    mark.observe({
+      simTruth: {
+        stamp: { role: 2, sourceId: 9, sequence: 7, acquiredAtNanos: 7 },
+        geodetic: { latitudeDeg: 0, longitudeDeg: 179.99, heightM: 0 },
+        quat: { w: half, x: 0, y: 0, z: half },
+        velNed: [0, 250, 0],
+        validFlags: 9,
+      },
+    }, Date.now());
+    await new Promise((resolve) => probeMap.once("idle", resolve));
+    const centre = probeMap.project([0, 0]);
+    const box = [
+      [centre.x - 20, centre.y - 20],
+      [centre.x + 20, centre.y + 20],
+    ];
+    const seamAcrossTheWorld = probeMap.queryRenderedFeatures(box, {
+      layers: ["pilotage-ownship-leader"],
+    }).length;
+
     leaderRender = {
+      seamAcrossTheWorld,
       sourceLoaded: Boolean(source),
       layerLoaded: Boolean(probeMap.getLayer("pilotage-ownship-leader")),
       coordinates:
@@ -362,9 +395,7 @@ if (figure?.dataset.mapState === "ready") {
           ? drawn.features[0].geometry.coordinates
           : null,
       rendered,
-      headingDeg: readout.dataset.ownshipHeadingDeg ?? null,
-      trackDeg: readout.dataset.ownshipTrackDeg ?? null,
-      groundSpeedMps: readout.dataset.ownshipGroundSpeedMps ?? null,
+      ...surfaced,
       transformAtNorth,
       transformWhenTurned,
       rendererClassKept,
@@ -661,6 +692,11 @@ const near = (value, expected, tolerance) =>
       render.groundSpeedMps === "20.00",
     );
     check("leader: the mark keeps the renderer's own class", render.rendererClassKept);
+    // Half a world from the vehicle there must be nothing to see.
+    check(
+      `leader: a course at the seam is not drawn across the world (${render.seamAcrossTheWorld} feature(s) at longitude 0)`,
+      render.seamAcrossTheWorld === 0,
+    );
     // Aligned to the map, the mark's own rotation is reduced by the map
     // bearing, so it keeps pointing east as the compass turns under it. A
     // mark left aligned to the viewport would read 90 in both.
