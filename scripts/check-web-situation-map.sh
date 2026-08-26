@@ -12,13 +12,15 @@ web="$root/clients/web"
 map_module="$web/situation-map.js"
 style_module="$web/situation-style.js"
 camera_module="$web/situation-camera.js"
+ownship_module="$web/situation-ownship.js"
 vendor_script="$root/scripts/vendor-maplibre-web.sh"
 assets_script="$root/scripts/build-web-situation-assets.sh"
 ci="$root/.github/workflows/ci.yml"
 status=0
 
-for path in "$map_module" "$style_module" "$camera_module" \
+for path in "$map_module" "$style_module" "$camera_module" "$ownship_module" \
     "$web/situation-style.test.mjs" "$web/situation-camera.test.mjs" \
+    "$web/situation-ownship.test.mjs" \
     "$web/situation-map.browser.test.mjs" "$vendor_script" "$assets_script"; do
     if [ ! -f "$path" ]; then
         echo "FORBIDDEN: required web situation file is missing: $path" >&2
@@ -120,10 +122,30 @@ for reason in MAP_LIBRARY_MISSING MAP_ASSETS_MISSING MAP_STYLE_INVALID \
     fi
 done
 
+# The vehicle mark states a typed reason for its absence too, and a mark
+# that stops being refreshed is withdrawn on a clock of its own: a link
+# that goes silent delivers no sample to notice the silence with.
+for reason in OWNSHIP_NO_TELEMETRY OWNSHIP_NO_FIX; do
+    if ! grep -Fq "$reason" "$ownship_module"; then
+        echo "FORBIDDEN: the ownship module must report the $reason state" >&2
+        status=1
+    fi
+done
+if ! grep -Fq 'OWNSHIP_STALE_AFTER_MS' "$ownship_module" \
+    || ! grep -Fq 'age,' "$ownship_module"; then
+    echo "FORBIDDEN: the vehicle mark must be withdrawn when its fix stops arriving" >&2
+    status=1
+fi
+if ! grep -Fq 'ageOwnship' "$map_module" || ! grep -Fq 'ageOwnship' "$web/main.js"; then
+    echo "FORBIDDEN: something must drive the mark's own clock" >&2
+    status=1
+fi
+
 # The guardrails only hold while CI runs them. The step must sit on a
 # live run: line; a commented-out step does not count.
 for step in 'clients/web/situation-style.test.mjs' \
     'clients/web/situation-camera.test.mjs' \
+    'clients/web/situation-ownship.test.mjs' \
     'clients/web/situation-map.browser.test.mjs' \
     'scripts/vendor-maplibre-web.sh' \
     'scripts/check-web-situation-map.sh' \

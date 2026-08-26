@@ -436,6 +436,9 @@ jobs:
       - name: situation camera controls (shared with the Apple client)
         run: node clients/web/situation-camera.test.mjs
 
+      - name: situation ownship placement
+        run: node clients/web/situation-ownship.test.mjs
+
       - name: Vendor the MapLibre GL JS renderer (pinned digest)
         run: bash scripts/vendor-maplibre-web.sh
 

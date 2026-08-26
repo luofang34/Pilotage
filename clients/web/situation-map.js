@@ -13,6 +13,7 @@ import {
   resolveSituationStyle,
   SituationStyleError,
 } from "./situation-style.js";
+import { attachOwnship } from "./situation-ownship.js";
 import {
   NORTH_UP_LABEL,
   headingControlLabel,
@@ -121,6 +122,10 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     log(`situation map unavailable: ${reason} — ${detail}`);
   };
 
+  // The vehicle mark, once the renderer exists. Until then a sample has
+  // nowhere to draw and is dropped rather than queued: a position is only
+  // worth showing while it is current.
+  let ownship = null;
   let bootPromise = null;
   const activate = () => {
     bootPromise ??= boot();
@@ -218,6 +223,7 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     // controls until there is something to undo and this one cannot.
     map.addControl(new maplibre.NavigationControl({ visualizePitch: true }), "top-right");
     watchCamera(map, surface);
+    ownship = attachOwnship(maplibre, map, surface);
 
     const loggedErrors = new Set();
     let suppressionAnnounced = false;
@@ -241,6 +247,10 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     return new Promise((resolve) => {
       const deadline = setTimeout(() => {
         map.remove();
+        // The mark belongs to a map that no longer exists. Left bound, the
+        // next sample would report the vehicle shown on a stage that
+        // reports itself unavailable.
+        ownship = null;
         setUnavailable(
           MAP_REASON.RENDER_FAILED,
           `the renderer did not reach load within ${LOAD_DEADLINE_MS / 1000} s`,
@@ -272,5 +282,14 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
   // or a change fired before this module finished loading).
   if (mainView.value === figure.id) activate();
 
-  return { activate, booted: () => bootPromise };
+  return {
+    activate,
+    booted: () => bootPromise,
+    /** Takes one telemetry sample for the vehicle mark. */
+    observeTelemetry: (telemetry, nowMs) => ownship?.observe(telemetry, nowMs),
+    /** Withdraws a mark whose fix stopped arriving. A link that goes
+     *  silent delivers no sample to notice the silence with, so the mark
+     *  has to be aged on a clock of its own. */
+    ageOwnship: (nowMs) => ownship?.age(nowMs),
+  };
 }

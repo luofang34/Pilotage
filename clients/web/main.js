@@ -148,8 +148,19 @@ transport = createSessionTransport({
 });
 
 // The situation map stage boots lazily on first selection; wiring it here
-// only registers the selector listener.
-wireSituationMapStage(document, { log: readout.log });
+// only registers the selector listener. The readout hands it each accepted
+// sample so the vehicle mark follows the position the vehicle states.
+state.situationMap = wireSituationMapStage(document, { log: readout.log });
+// A link that goes silent delivers no sample to notice the silence with, so
+// the mark is aged on a clock of its own. Without this the vehicle stays on
+// the map at its last position for as long as the page is open, which is
+// the one thing the mark must never do.
+const OWNSHIP_AGE_INTERVAL_MS = 500;
+const ownshipAging = setInterval(
+  () => state.situationMap?.ageOwnship(performance.now()),
+  OWNSHIP_AGE_INTERVAL_MS,
+);
+window.addEventListener("pagehide", () => clearInterval(ownshipAging), { once: true });
 
 window.addEventListener("pagehide", readout.dispose, { once: true });
 window.addEventListener("keydown", (event) => control.forwardKey(event, true));

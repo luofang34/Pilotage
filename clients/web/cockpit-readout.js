@@ -569,6 +569,9 @@ export function createCockpitReadout({
           state.lastFcView = fcView;
           logFcCommandVerdict(fcView);
           els.telemetry.textContent = formatTelemetrySummary(telemetry, fcView);
+          // The map draws the vehicle from the position the sample states,
+          // and draws none when it states none.
+          state.situationMap?.observeTelemetry(telemetry, performance.now());
         } else if (decoded.kind === "FrameRejected") {
           handleFrameRejected(decoded.message);
         }

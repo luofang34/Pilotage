@@ -155,6 +155,17 @@
     min-height: 18rem;
     background: #02060a;
   }
+  /* The vehicle's own position. A triangle rather than a dot: a reader
+     reads a heading from a shape, and a dot would invite one to be
+     inferred where none is drawn yet. */
+  .map-ownship {
+    width: 0;
+    height: 0;
+    border-left: 0.45rem solid transparent;
+    border-right: 0.45rem solid transparent;
+    border-bottom: 0.9rem solid #d5006d;
+    filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9));
+  }
   /* Load / typed-unavailable notice for the map stage. Sized by the
      positioned frame; inert so it never eats a map gesture. */
   .map-notice {

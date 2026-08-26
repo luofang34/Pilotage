@@ -9,6 +9,7 @@ trap 'rm -rf "$fixture"' EXIT
 web="$fixture/clients/web"
 mkdir -p "$web" "$fixture/scripts" "$fixture/.github/workflows"
 for file in situation-map.js situation-style.js situation-camera.js \
+    situation-ownship.js situation-ownship.test.mjs \
     situation-style.test.mjs situation-camera.test.mjs \
     situation-map.browser.test.mjs index.html main.js layout.js; do
     cp "$repo_root/clients/web/$file" "$web/"
@@ -125,4 +126,50 @@ reject "an index.html that references the vendor directory"
 restore clients/web/index.html
 
 bash "$gate" "$fixture" >/dev/null
+# The mark's own clock is the one thing that removes it when the link goes
+# silent. Nothing else in the client would notice.
+python3 - "$fixture/clients/web/situation-ownship.js" <<'AGE_GONE'
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace("OWNSHIP_STALE_AFTER_MS", "OWNSHIP_HOLD_FOREVER_MS")
+assert source != before, "the stale window is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+AGE_GONE
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark that is never withdrawn" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+python3 - "$fixture/clients/web/main.js" <<'DRIVER_GONE'
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace("ageOwnship", "noSuchDriver")
+assert source != before, "the driver is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+DRIVER_GONE
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark clock nothing drives" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/main.js" "$web/"
+
+python3 - "$fixture/clients/web/situation-ownship.js" <<'REASON_GONE'
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace("OWNSHIP_NO_FIX", "OWNSHIP_SOMETHING")
+assert source != before, "the reason is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+REASON_GONE
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark with no typed reason" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
 echo "web situation map guards reject each loss"
