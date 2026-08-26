@@ -461,38 +461,6 @@ fn gimbal_rate_setpoint_locks_the_wire_layout() {
     assert_eq!(super::compute_crc(&frame[1..45], 123), wire_crc);
 }
 
-#[test]
-fn decodes_scaled_pressure_and_sim_truth() {
-    // SCALED_PRESSURE: time u32, press_abs f32 (hPa), press_diff f32,
-    // temperature i16 — standard-datum sea level, 25.00 °C.
-    let mut pressure = Vec::new();
-    pressure.extend_from_slice(&1000_u32.to_le_bytes());
-    pressure.extend_from_slice(&1013.25_f32.to_le_bytes());
-    pressure.extend_from_slice(&0.0_f32.to_le_bytes());
-    pressure.extend_from_slice(&2500_i16.to_le_bytes());
-    let mut datagram = encode_frame(super::SCALED_PRESSURE_ID, &pressure, true);
-
-    // HIL_STATE_QUATERNION with identity attitude, 1 m/s north, and a
-    // fix at 47.0°/8.0°/500 m.
-    let mut truth = vec![0_u8; 64];
-    truth[0..8].copy_from_slice(&2_000_000_u64.to_le_bytes());
-    truth[8..12].copy_from_slice(&1.0_f32.to_le_bytes());
-    truth[36..40].copy_from_slice(&470_000_000_i32.to_le_bytes());
-    truth[40..44].copy_from_slice(&80_000_000_i32.to_le_bytes());
-    truth[44..48].copy_from_slice(&500_000_i32.to_le_bytes());
-    truth[48..50].copy_from_slice(&100_i16.to_le_bytes());
-    datagram.extend_from_slice(&encode_frame(super::HIL_STATE_QUATERNION_ID, &truth, true));
-
-    let mut out = Vec::new();
-    let stats = parse_datagram(&datagram, &mut out);
-    assert_eq!(stats.crc_failures, 0, "both new ids must verify");
-    assert_eq!(stats.decoded, 2, "both frames decode: {out:?}");
-    assert!(matches!(
-        out[0].1,
-        super::FcMessage::ScaledPressure { press_abs_hpa, .. } if (press_abs_hpa - 1013.25).abs() < 0.01
-    ));
-    assert!(matches!(
-        out[1].1,
-        super::FcMessage::SimTruth { vel_ned_mps, .. } if (vel_ned_mps[0] - 1.0).abs() < 0.01
-    ));
-}
+/// The truth lane: the payload a simulator's ground-truth report arrives
+/// in, and what a report short of that payload decodes to.
+mod sim_truth;

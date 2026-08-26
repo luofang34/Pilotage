@@ -9,13 +9,15 @@ use pilotage_adapter_api::{
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
-use super::WITHHOLD_AFTER;
 use pilotage_geo::{
     BaroSettingId, DatumRealizationId, GeodeticPosition, HorizontalDatum, LocalOriginId,
     PositionQuality, SIMULATOR_GEOID_MODEL_ID, TerrainRefId, VerticalDatum, VerticalPosition,
 };
 use pilotage_mavlink::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
 use pilotage_mavlink::link::{AttitudeUpdate, KinematicsUpdate, LinkState, SimTruthUpdate};
+use tracing::warn;
+
+use super::WITHHOLD_AFTER;
 
 /// Yaw extracted from the body→NED quaternion (heading, radians
 /// clockwise from north).
@@ -143,21 +145,23 @@ fn effective_authorization(
 /// The simulator's stated position as a typed fix.
 ///
 /// The report gives latitude and longitude in degrees·1e7 and an altitude
-/// in millimetres it documents as MSL, and it names no geoid. An MSL height
-/// with no separation is uninterpretable, so the height declares the
-/// simulator's own separation: it stays traceable to a simulator and can
-/// never be read as a surveyed height. A report the contract refuses is no
-/// fix at all — the sample keeps its local frame and declares no position.
+/// in millimetres. The message definition names no reference surface for
+/// that altitude at all; the senders this lane reads feed it from their
+/// own above-mean-sea-level solution, which is why it is labelled MSL here
+/// and not in the decoder. An MSL height with no separation is
+/// uninterpretable, so the height declares the simulator's own separation:
+/// it stays traceable to a simulator and can never be read as a surveyed
+/// height. A report the contract refuses is no fix at all — the sample
+/// keeps its local frame and declares no position.
 fn truth_geodetic_fix(
     truth: &SimTruthUpdate,
     stamp: pilotage_adapter_api::MeasurementStamp,
 ) -> Option<GeodeticFixSample> {
     // A report whose whole geodetic triple is zero is a simulator that has
-    // not stated a position, not a vehicle at Null Island. The value is
-    // legal — 0,0 is a real place off the coast of Africa — so the typed
-    // contract cannot refuse it and this is the only place that can. A
-    // frame short of its geodetic bytes decodes to the same zeros, so a
-    // truncated report is refused here too.
+    // not stated a position, not a vehicle at Null Island. The link refuses
+    // such a report outright, because the local frame is that position
+    // projected; this stays as the contract's own statement at the place
+    // that builds the typed value.
     if truth.lat_lon_alt == [0, 0, 0] {
         return None;
     }
@@ -169,6 +173,9 @@ fn truth_geodetic_fix(
         BaroSettingId::UNDECLARED,
         LocalOriginId::UNDECLARED,
     )
+    .inspect_err(|error| {
+        warn!(%error, "simulator height refused by the contract; no position published");
+    })
     .ok()?;
     let position = GeodeticPosition::new(
         f64::from(truth.lat_lon_alt[0]) * 1e-7,
@@ -177,13 +184,19 @@ fn truth_geodetic_fix(
         DatumRealizationId::UNDECLARED,
         vertical,
     )
+    .inspect_err(|error| {
+        warn!(%error, "simulator position refused by the contract; no position published");
+    })
     .ok()?;
     Some(GeodeticFixSample {
         position,
         // The simulator states no accuracy. Zero is the honest reading of a
         // value taken from the model rather than measured: it is the
         // oracle, and a reader derives health from the datum identities
-        // above rather than from a number the producer invented.
+        // above rather than from a number the producer invented. A grader
+        // that read zero as a metre count would read it as perfect, so
+        // this value is safe only while the simulator separation keeps it
+        // inside the truth role.
         quality: PositionQuality {
             horizontal_mm: 0,
             vertical_mm: 0,

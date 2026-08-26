@@ -144,11 +144,16 @@ fn apply_sim_truth(
     now: Instant,
 ) {
     const METRES_PER_DEGREE: f64 = 111_111.0;
-    // The origin is latched once and holds for the life of the link, so a
-    // report that states no position must not become it: every later
-    // position would be measured from Null Island and the frame could
-    // never recover.
-    if lat_lon_alt == [0, 0, 0] && latest.truth_origin.is_none() {
+    // A report whose whole geodetic triple is zero states no position. The
+    // value is legal — 0,0 is a real place off the coast of Africa — so
+    // nothing downstream can tell it from a vehicle that is there, and a
+    // frame short of its geodetic bytes decodes to the same zeros. The
+    // whole report is refused, not only its geodetic half: the local frame
+    // is that position projected, so a projection of no position is a
+    // position too. Projected against a latched origin it reads thousands
+    // of kilometres from the vehicle, under a flag that says the position
+    // is valid.
+    if lat_lon_alt == [0, 0, 0] {
         return;
     }
     let origin = *latest
@@ -159,9 +164,12 @@ fn apply_sim_truth(
             alt_mm: lat_lon_alt[2],
             lon_scale: METRES_PER_DEGREE * (f64::from(lat_lon_alt[0]) * 1e-7).to_radians().cos(),
         });
-    let north = f64::from(lat_lon_alt[0] - origin.lat_1e7) * 1e-7 * METRES_PER_DEGREE;
-    let east = f64::from(lat_lon_alt[1] - origin.lon_1e7) * 1e-7 * origin.lon_scale;
-    let down = f64::from(origin.alt_mm - lat_lon_alt[2]) * 1e-3;
+    // The wire carries these as i32 and a difference of two of them does
+    // not fit one. The subtraction is done in f64, where the whole i32
+    // range is exact.
+    let north = (f64::from(lat_lon_alt[0]) - f64::from(origin.lat_1e7)) * 1e-7 * METRES_PER_DEGREE;
+    let east = (f64::from(lat_lon_alt[1]) - f64::from(origin.lon_1e7)) * 1e-7 * origin.lon_scale;
+    let down = (f64::from(origin.alt_mm) - f64::from(lat_lon_alt[2])) * 1e-3;
     let sequence = latest
         .sim_truth
         .map_or(0, |update| update.sequence.wrapping_add(1));
