@@ -30,6 +30,11 @@ impl DurableStore {
         Err(StorageError::unsupported_at(path))
     }
 
+    /// Refuse a weaker existing-storage implementation.
+    pub fn open_existing_blocking(path: &Path) -> StorageResult<Self> {
+        Err(StorageError::unsupported_at(path))
+    }
+
     /// Refuse a fault-enabled weaker storage implementation.
     #[cfg(any(test, feature = "fault-injection"))]
     pub fn open_or_create_with_faults(
@@ -107,6 +112,26 @@ impl DurableDirectory {
         _name: &ObjectName,
         _object: &ExactObject,
     ) -> StorageResult<PutOutcome> {
+        Err(StorageError::unsupported())
+    }
+
+    /// Refuse immutable-publication repair on an unsupported platform.
+    pub fn repair_immutable_publication_blocking(
+        &self,
+        _lease: &WriterLease,
+        _name: &ObjectName,
+        _maximum_bytes: usize,
+    ) -> StorageResult<Option<ExactObject>> {
+        Err(StorageError::unsupported())
+    }
+
+    /// Refuse temporary recovery on an unsupported platform.
+    pub fn cleanup_unlinked_temporaries_blocking(
+        &self,
+        _lease: &WriterLease,
+        _maximum_objects: usize,
+        _maximum_bytes: usize,
+    ) -> StorageResult<usize> {
         Err(StorageError::unsupported())
     }
 

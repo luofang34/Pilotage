@@ -468,8 +468,16 @@ GENERATED_BUILD_TARGETS = {
 TEST_ONLY_MODULE_NAMES = {"tests", "test_support"}
 NON_PRODUCTION_TARGET_KINDS = {"bench", "custom-build", "example", "test"}
 CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
+BINDGEN_TARGET_ENV_KEY = "BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin"
+BINDGEN_TARGET_ENV_VALUE = "--target=aarch64-apple-darwin"
 CARGO_LOCK_PACKAGE_ALLOWLIST = frozenset(
     {
+        (
+            "errno",
+            "0.3.14",
+            CRATES_IO_SOURCE,
+            "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb",
+        ),
         (
             "libc",
             "0.2.186",
@@ -525,6 +533,12 @@ CARGO_LOCK_PACKAGE_ALLOWLIST = frozenset(
             "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4",
         ),
         (
+            "sysctl",
+            "0.7.1",
+            CRATES_IO_SOURCE,
+            "cca424247104946a59dacd27eaad296223b7feec3d168a6dd04585183091eb0b",
+        ),
+        (
             "thiserror",
             "2.0.18",
             CRATES_IO_SOURCE,
@@ -566,6 +580,7 @@ CARGO_LOCK_TRACKED_PACKAGES = frozenset(
     record[0] for record in CARGO_LOCK_PACKAGE_ALLOWLIST
 )
 CARGO_LOCK_REQUIRED_VERSIONS = {
+    "errno": "0.3.14",
     "libc": "0.2.186",
     "libm": "0.2.16",
     "libproc": "0.14.11",
@@ -574,6 +589,7 @@ CARGO_LOCK_REQUIRED_VERSIONS = {
     "serde_derive": "1.0.228",
     "serde_json": "1.0.150",
     "sha2": "0.10.9",
+    "sysctl": "0.7.1",
     "thiserror": "2.0.18",
     "thiserror-impl": "2.0.18",
     "tokio": "1.52.3",
@@ -704,8 +720,9 @@ def read_direct_dependency_allowlist(
 
 
 def check_cargo_source_overrides(root: Path) -> bool:
-    """Reject project-controlled Cargo source substitution routes."""
+    """Check Cargo source controls and the macOS bindgen target."""
     valid = True
+    bindgen_target_is_exact = False
     manifest = root / "Cargo.toml"
     try:
         workspace_document = tomllib.loads(manifest.read_text(encoding="utf-8"))
@@ -735,6 +752,19 @@ def check_cargo_source_overrides(root: Path) -> bool:
         ):
             report(f"{relative} has an unreviewed dependency source override")
             valid = False
+        if relative == ".cargo/config.toml":
+            environment = document.get("env")
+            bindgen_target_is_exact = (
+                isinstance(environment, dict)
+                and environment.get(BINDGEN_TARGET_ENV_KEY)
+                == BINDGEN_TARGET_ENV_VALUE
+            )
+    if not bindgen_target_is_exact:
+        report(
+            f".cargo/config.toml must set {BINDGEN_TARGET_ENV_KEY} "
+            f'to "{BINDGEN_TARGET_ENV_VALUE}"'
+        )
+        valid = False
     return valid
 
 
@@ -2313,7 +2343,7 @@ def main() -> int:
         (root / "tools/flight-tune/Cargo.toml", frozenset()),
         (
             root / "tools/flight-tune-aviate/Cargo.toml",
-            frozenset(FORBIDDEN_PACKAGES),
+            frozenset(),
         ),
         (
             root / "tools/flight-tune-campaign/Cargo.toml",

@@ -19,14 +19,18 @@ mod flight_quality;
 mod identity;
 mod journal;
 mod model;
+mod run_context;
 mod score;
 mod strategy;
+mod terminal;
 
 pub use adapter::{
-    AdapterError, CandidateReceipt, EvaluatorError, SampleEvent, ScenarioStartReceipt,
-    SessionChallenge, SimulatorBackend, SimulatorCapability, SimulatorSessionReceipt,
-    SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample, VehicleBinding,
-    VehicleBindingReceipt,
+    AdapterError, CANDIDATE_TRANSITION_RECEIPT_SCHEMA_VERSION, CandidateReceipt,
+    CandidateTransitionReceipt, CandidateTransitionReference, CandidateTransitionRequest,
+    EvaluatorError, RunPreparationReceipt, RunTerminalAdapter, RunTerminalCapabilities,
+    SampleEvent, ScenarioStartReceipt, SessionChallenge, SimulatorBackend, SimulatorCapability,
+    SimulatorSessionReceipt, SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
+    TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
 };
 pub use engine::{StopReason, Tuner, TuningSummary};
 pub use error::TuneError;
@@ -45,6 +49,7 @@ pub use model::{
     Candidate, ParameterBounds, PromotionPolicy, QualificationPolicy, ScenarioRef, SearchStage,
 };
 pub use pilotage_trial::Digest;
+pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,
     MetricEvaluator, MetricValues, RunRecord, ScenarioSet, ScoreAggregate,
@@ -52,4 +57,15 @@ pub use score::{
 pub use strategy::{
     BoundedCoordinateSearch, Proposal, ProposalContext, ProposalError, ProposalStrategy,
     TrainingObservation, TrainingView,
+};
+pub use terminal::{
+    MAX_TERMINAL_DIAGNOSTIC_PROJECTION_BYTES, RUN_BINDING_RECEIPT_SCHEMA_VERSION,
+    RUN_TERMINAL_CLASS_SCHEMA_VERSION, RUN_TERMINAL_INTENT_SCHEMA_VERSION,
+    RUN_TERMINAL_OPERATION_ORDER, RUN_TERMINAL_PLAN_SCHEMA_VERSION,
+    RUN_TERMINAL_RECEIPT_SCHEMA_VERSION, RUN_TERMINAL_REPORT_SCHEMA_VERSION, RunBindingReceipt,
+    RunTerminalBindingStatus, RunTerminalClass, RunTerminalCompletion, RunTerminalDiagnostic,
+    RunTerminalDisposition, RunTerminalIntent, RunTerminalOperation, RunTerminalOperationOutcome,
+    RunTerminalOperationStatus, RunTerminalPlan, RunTerminalQuarantine, RunTerminalReceipt,
+    RunTerminalRecoveryState, RunTerminalReport, RunTerminalRequirement, RunTerminalScope,
+    RunTerminalSemanticOutcome, run_terminal_policy_digest,
 };

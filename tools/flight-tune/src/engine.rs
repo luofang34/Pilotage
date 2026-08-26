@@ -6,6 +6,7 @@ mod promotion;
 mod qualification;
 mod reconcile;
 mod session;
+mod transition;
 
 #[cfg(test)]
 mod tests;
@@ -16,10 +17,10 @@ pub(crate) use qualification::final_outcome;
 
 use crate::journal::{AttemptRole, CampaignPhase};
 use crate::{
-    Candidate, CandidateEvaluation, Digest, FinalQualificationOutcome, GateEvaluator, Journal,
-    MetricEvaluator, PromotionDecision, ProposalContext, ProposalStrategy, SearchStage,
-    SimulatorBackend, SimulatorCapability, SimulatorVehicleAdapter, TrainingView, TuneError,
-    VehicleBinding,
+    Candidate, CandidateEvaluation, CandidateTransitionReference, Digest,
+    FinalQualificationOutcome, GateEvaluator, Journal, MetricEvaluator, PromotionDecision,
+    ProposalContext, ProposalStrategy, RunTerminalAdapter, SearchStage, SimulatorBackend,
+    SimulatorCapability, SimulatorVehicleAdapter, TrainingView, TuneError, VehicleBinding,
 };
 
 /// Why one bounded training search call stopped.
@@ -57,7 +58,7 @@ pub struct Tuner<B, V, G, M, P> {
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
     B: SimulatorBackend,
-    V: SimulatorVehicleAdapter,
+    V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
     P: ProposalStrategy,
@@ -218,6 +219,14 @@ where
     }
 
     fn run_one_training_challenger_blocking(&mut self) -> Result<bool, TuneError> {
+        if let Some(authorized) = self.journal.authorized_training_transition().cloned() {
+            let candidate = self.journal.read_candidate(authorized.candidate)?;
+            let role = AttemptRole::TrainingChallenger {
+                attempt_index: authorized.attempt_index,
+            };
+            self.run_attempt_blocking(role, &candidate, Some(authorized.reference))?;
+            return Ok(true);
+        }
         let incumbent = self.journal.training_incumbent()?;
         let history = self.journal.training_history();
         let context = ProposalContext {
@@ -249,10 +258,18 @@ where
             return Ok(false);
         };
         validate_proposal(&self.stage, &incumbent, &proposal, &history)?;
-        let role = AttemptRole::TrainingChallenger {
-            attempt_index: self.journal.training_attempt_count(),
-        };
-        self.run_new_attempt_blocking(role, &proposal.candidate)?;
+        let attempt_index = self.journal.training_attempt_count();
+        let role = AttemptRole::TrainingChallenger { attempt_index };
+        let transition = transition::authorize_new(
+            &mut self.journal,
+            &self.stage,
+            &self.vehicle,
+            &incumbent,
+            &proposal.candidate,
+            attempt_index,
+            &proposal.reason,
+        )?;
+        self.run_attempt_blocking(role, &proposal.candidate, Some(transition))?;
         Ok(true)
     }
 
@@ -270,10 +287,21 @@ where
         role: AttemptRole,
         candidate: &Candidate,
     ) -> Result<(), TuneError> {
+        self.run_attempt_blocking(role, candidate, None)
+    }
+
+    fn run_attempt_blocking(
+        &mut self,
+        role: AttemptRole,
+        candidate: &Candidate,
+        transition: Option<CandidateTransitionReference>,
+    ) -> Result<(), TuneError> {
         let digest = evaluate::candidate_digest(candidate)?;
         let plan =
             evaluate::plan_digest(&self.stage, role, digest, self.journal.session().fixed_seed)?;
-        let (trial_id, stored_digest) = self.journal.prepare_attempt(role, candidate, plan)?;
+        let (trial_id, stored_digest) = self
+            .journal
+            .prepare_attempt(role, candidate, plan, transition)?;
         if stored_digest != digest {
             return Err(TuneError::DigestMismatch { expected: digest });
         }
@@ -284,6 +312,7 @@ where
             role,
             candidate,
             digest,
+            transition,
             &mut self.backend,
             &mut self.vehicle,
             &self.capability,
@@ -300,7 +329,10 @@ where
         }
         let result = evaluate::recover_pending_blocking(
             &mut self.journal,
+            &self.stage,
             &mut self.backend,
+            &mut self.vehicle,
+            &self.capability,
             &mut self.gates,
             &mut self.metric,
         );

@@ -172,6 +172,26 @@ impl DurableDirectory {
         objects::put_immutable(self, lease, name, object)
     }
 
+    /// Repair and read one committed immutable publication.
+    pub fn repair_immutable_publication_blocking(
+        &self,
+        lease: &WriterLease,
+        name: &ObjectName,
+        maximum_bytes: usize,
+    ) -> StorageResult<Option<ExactObject>> {
+        objects::repair_immutable_publication(self, lease, name, maximum_bytes)
+    }
+
+    /// Remove bounded uncommitted temporary objects.
+    pub fn cleanup_unlinked_temporaries_blocking(
+        &self,
+        lease: &WriterLease,
+        maximum_objects: usize,
+        maximum_bytes: usize,
+    ) -> StorageResult<usize> {
+        temporary::cleanup_unlinked(self, lease, maximum_objects, maximum_bytes)
+    }
+
     /// Inspect a private temporary object created by this store.
     pub fn inspect_owned_temporary(
         &self,

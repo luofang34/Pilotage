@@ -1,0 +1,29 @@
+[package]
+name = "flight-tune-aviate"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Crash-contained Aviate process supervision for simulator tuning"
+
+[lints]
+workspace = true
+
+[dependencies]
+flight-tune = { path = "../flight-tune" }
+pilotage-durable-storage = { workspace = true }
+rustix = { workspace = true, features = ["process"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+errno = "=0.3.14"
+libc = { workspace = true }
+libproc = "=0.14.11"
+sysctl = "=0.7.1"
+
+[dev-dependencies]
+pilotage-durable-storage = { workspace = true, features = ["fault-injection"] }
+tempfile = "3.23.0"

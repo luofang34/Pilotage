@@ -1,12 +1,13 @@
-use crate::journal::{AttemptRole, OperationStatus};
+use crate::journal::AttemptRole;
 use crate::score::aggregate_runs;
 use crate::{
-    CandidateEvaluation, GateEvaluator, Journal, MetricEvaluator, RunRecord, SearchStage,
+    CandidateEvaluation, GateEvaluator, HardGateFailure, Journal, MetricEvaluator, RunRecord,
+    RunTerminalCompletion, RunTerminalDisposition, RunTerminalReceipt, RunTerminalSemanticOutcome,
     SimulatorBackend, TuneError,
 };
 
-use super::contract::{RunContext, RunTerminal, adapter_error, run_record, training_selection};
-use super::{finish_cleanup, quarantine_after_error};
+use super::cleanup::{cleanup_status, finish_cleanup};
+use super::contract::training_selection;
 
 pub(super) enum RunProgress {
     Continue,
@@ -14,15 +15,14 @@ pub(super) enum RunProgress {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn record_terminal<B, G, M>(
+pub(super) fn record_committed_terminal<B, G, M>(
     journal: &mut Journal,
     trial_id: u64,
     role: AttemptRole,
-    stage: &SearchStage,
-    context: &RunContext<'_>,
     expected_runs: usize,
     runs: &mut Vec<RunRecord>,
-    terminal: RunTerminal,
+    receipt: &RunTerminalReceipt,
+    primary_error: Option<TuneError>,
     backend: &mut B,
     gates: &mut G,
     metric: &mut M,
@@ -32,64 +32,73 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
-    match terminal {
-        RunTerminal::Passed { values, stop } => record_passed_run(
+    receipt.validate()?;
+    match (receipt.class().disposition(), receipt.intent().outcome()) {
+        (
+            RunTerminalDisposition::Completed {
+                completion: RunTerminalCompletion::ScenarioComplete,
+            },
+            RunTerminalSemanticOutcome::ScenarioComplete { run, .. },
+        ) => record_completed_run(
             journal,
             trial_id,
             role,
-            stage,
-            context,
             expected_runs,
             runs,
-            values,
-            stop,
+            run.clone(),
             backend,
             gates,
             metric,
         ),
-        RunTerminal::HardGate { failure } => {
-            let evaluation = CandidateEvaluation::HardGateFailed {
-                failure,
-                completed_runs: std::mem::take(runs),
-            };
-            let selected = training_selection(journal, role, &evaluation);
-            journal.complete_attempt(trial_id, evaluation, selected)?;
-            finish_cleanup(
-                journal,
-                trial_id,
-                OperationStatus::NotRequired,
-                backend,
-                Some(()),
-                gates,
-                metric,
-            )?;
-            Ok(RunProgress::Complete)
-        }
-        RunTerminal::Failed { error, started } => quarantine_after_error(
+        (
+            RunTerminalDisposition::Completed {
+                completion: RunTerminalCompletion::HardGateAbort,
+            },
+            RunTerminalSemanticOutcome::HardGateAbort { failure, .. },
+        ) => record_hard_gate(
             journal,
             trial_id,
-            error,
-            OperationStatus::NotRequired,
+            role,
+            runs,
+            failure.clone(),
             backend,
-            started.then_some(()),
             gates,
             metric,
-        )
-        .map(|()| RunProgress::Complete),
+        ),
+        (RunTerminalDisposition::Quarantine { .. }, _) => {
+            quarantine_terminal(journal, trial_id, primary_error, backend, gates, metric)
+        }
+        _ => Err(TuneError::InvalidState {
+            operation: "record committed run",
+            detail: "the receipt class and semantic result do not match".to_owned(),
+        }),
+    }
+}
+
+pub(super) fn completed_scenario_run(receipt: &RunTerminalReceipt) -> Result<RunRecord, TuneError> {
+    receipt.validate()?;
+    match (receipt.class().disposition(), receipt.intent().outcome()) {
+        (
+            RunTerminalDisposition::Completed {
+                completion: RunTerminalCompletion::ScenarioComplete,
+            },
+            RunTerminalSemanticOutcome::ScenarioComplete { run, .. },
+        ) => Ok(run.clone()),
+        _ => Err(TuneError::InvalidState {
+            operation: "resume committed run",
+            detail: "a committed prefix contains a terminal attempt result".to_owned(),
+        }),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_passed_run<B, G, M>(
+fn record_completed_run<B, G, M>(
     journal: &mut Journal,
     trial_id: u64,
     role: AttemptRole,
-    stage: &SearchStage,
-    context: &RunContext<'_>,
     expected_runs: usize,
     runs: &mut Vec<RunRecord>,
-    values: crate::MetricValues,
-    stop: OperationStatus,
+    run: RunRecord,
     backend: &mut B,
     gates: &mut G,
     metric: &mut M,
@@ -99,33 +108,95 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
-    runs.push(run_record(stage, context, values));
+    runs.push(run);
     if runs.len() < expected_runs {
-        journal.ensure_usable()?;
-        if let Err(source) = backend.cleanup_blocking() {
-            let error = adapter_error(backend, "cleanup", source);
-            return quarantine_after_error(
-                journal, trial_id, error, stop, backend, None, gates, metric,
-            )
-            .map(|()| RunProgress::Complete);
+        let cleanup = cleanup_status(journal, backend, gates, metric, false)?;
+        if cleanup.succeeded() {
+            return Ok(RunProgress::Continue);
         }
-        return Ok(RunProgress::Continue);
+        return Err(TuneError::InvalidState {
+            operation: "prepare next run",
+            detail: "the simulator cleanup failed after a committed run".to_owned(),
+        });
     }
-    let aggregate = match aggregate_runs(runs, context.set) {
-        Ok(aggregate) => aggregate,
-        Err(error) => {
-            return quarantine_after_error(
-                journal, trial_id, error, stop, backend, None, gates, metric,
-            )
-            .map(|()| RunProgress::Complete);
-        }
-    };
+    let aggregate = aggregate_runs(runs, role.scenario_set())?;
     let evaluation = CandidateEvaluation::Passed {
         aggregate,
         runs: std::mem::take(runs),
     };
+    complete_and_clean(
+        journal, trial_id, role, evaluation, backend, gates, metric, false,
+    )?;
+    Ok(RunProgress::Complete)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_hard_gate<B, G, M>(
+    journal: &mut Journal,
+    trial_id: u64,
+    role: AttemptRole,
+    runs: &mut Vec<RunRecord>,
+    failure: HardGateFailure,
+    backend: &mut B,
+    gates: &mut G,
+    metric: &mut M,
+) -> Result<RunProgress, TuneError>
+where
+    B: SimulatorBackend,
+    G: GateEvaluator,
+    M: MetricEvaluator,
+{
+    let evaluation = CandidateEvaluation::HardGateFailed {
+        failure,
+        completed_runs: std::mem::take(runs),
+    };
+    complete_and_clean(
+        journal, trial_id, role, evaluation, backend, gates, metric, true,
+    )?;
+    Ok(RunProgress::Complete)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_and_clean<B, G, M>(
+    journal: &mut Journal,
+    trial_id: u64,
+    role: AttemptRole,
+    evaluation: CandidateEvaluation,
+    backend: &mut B,
+    gates: &mut G,
+    metric: &mut M,
+    cancel_evaluators: bool,
+) -> Result<(), TuneError>
+where
+    B: SimulatorBackend,
+    G: GateEvaluator,
+    M: MetricEvaluator,
+{
     let selected = training_selection(journal, role, &evaluation);
     journal.complete_attempt(trial_id, evaluation, selected)?;
-    finish_cleanup(journal, trial_id, stop, backend, None, gates, metric)?;
+    finish_cleanup(journal, trial_id, backend, gates, metric, cancel_evaluators)
+}
+
+fn quarantine_terminal<B, G, M>(
+    journal: &mut Journal,
+    trial_id: u64,
+    primary_error: Option<TuneError>,
+    backend: &mut B,
+    gates: &mut G,
+    metric: &mut M,
+) -> Result<RunProgress, TuneError>
+where
+    B: SimulatorBackend,
+    G: GateEvaluator,
+    M: MetricEvaluator,
+{
+    if let Err(error) = journal.quarantine_attempt(trial_id) {
+        return Err(primary_error.unwrap_or(error));
+    }
+    let cleanup = finish_cleanup(journal, trial_id, backend, gates, metric, true);
+    if let Some(error) = primary_error {
+        return Err(error);
+    }
+    cleanup?;
     Ok(RunProgress::Complete)
 }

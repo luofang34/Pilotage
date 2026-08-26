@@ -4,6 +4,7 @@ mod attacks;
 mod cas;
 mod faults;
 mod lease;
+mod publication_recovery;
 mod removal_recovery;
 
 use std::error::Error;

@@ -35,6 +35,7 @@ members = [
     "adapters/px4",
     "tools/hid-probe",
     "tools/flight-tune",
+    "tools/flight-tune-aviate",
     "tools/loopback-probe",
     "tools/xtask",
     "hosts/session-host",

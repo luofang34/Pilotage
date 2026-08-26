@@ -167,6 +167,12 @@ jobs:
       - name: flight tuning boundary guard
         run: bash scripts/check-flight-tune-boundaries.sh
 
+      - name: Aviate supervision boundary guard self-test
+        run: bash scripts/test-check-aviate-supervision-boundary.sh
+
+      - name: Aviate supervision boundary guard
+        run: bash scripts/check-aviate-supervision-boundary.sh
+
       - name: check-structure self-test
         run: bash scripts/test-check-structure.sh
 

@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use crate::{
-    Candidate, GateEvaluator, Journal, MetricEvaluator, ProposalStrategy, RuntimeIdentities,
-    SearchStage, SessionChallenge, SimulatorBackend, SimulatorCapability, SimulatorVehicleAdapter,
-    SimulatorVehicleFactory, TuneError,
+    Candidate, GateEvaluator, Journal, MetricEvaluator, ProposalStrategy, RunTerminalAdapter,
+    RuntimeIdentities, SearchStage, SessionChallenge, SimulatorBackend, SimulatorCapability,
+    SimulatorVehicleAdapter, SimulatorVehicleFactory, TuneError,
 };
 
 use super::{Tuner, evaluate, session};
@@ -11,7 +11,7 @@ use super::{Tuner, evaluate, session};
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
     B: SimulatorBackend,
-    V: SimulatorVehicleAdapter,
+    V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
     P: ProposalStrategy,
@@ -123,7 +123,7 @@ where
         session::validate_simulator_receipt(&journal, receipt)?;
         let capability = SimulatorCapability::new(receipt);
         journal.ensure_usable()?;
-        let vehicle = vehicle_factory
+        let mut vehicle = vehicle_factory
             .bind_blocking(&capability)
             .map_err(|source| TuneError::Adapter {
                 adapter: vehicle_identity.id,
@@ -131,7 +131,15 @@ where
                 source,
             })?;
         session::validate_vehicle_binding(&journal, &vehicle)?;
-        evaluate::recover_pending_blocking(&mut journal, &mut backend, &mut gates, &mut metric)?;
+        evaluate::recover_pending_for_open_blocking(
+            &mut journal,
+            &stage,
+            &mut backend,
+            &mut vehicle,
+            &capability,
+            &mut gates,
+            &mut metric,
+        )?;
         let mut tuner = Self {
             stage,
             backend,

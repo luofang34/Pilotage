@@ -22,12 +22,12 @@ fn a_changed_head_stops_pending_outcome_recovery_before_external_action() {
     let directory = TestDirectory::new("pending-outcome-head-change");
     let state = FakeHandle::new();
     let (mut tuner, proposals) = open_tuner(&directory, state.clone(), Vec::new());
-    state.0.borrow_mut().panic_on_cleanup = Some(2);
+    state.0.borrow_mut().cleanup_fault.panic_on(2);
     let stopped = catch_unwind(AssertUnwindSafe(|| {
         tuner.run_training_attempts_blocking(0).ok();
     }));
     assert!(stopped.is_err());
-    state.0.borrow_mut().panic_on_cleanup = None;
+    state.0.borrow_mut().cleanup_fault.clear();
     let pending = tuner
         .journal()
         .state()

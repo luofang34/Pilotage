@@ -4,15 +4,26 @@ use std::fs;
 use pilotage_durable_storage::{ContentDigest, StorageError};
 
 use super::super::{
-    append_entry_with_hook, candidate_digests_to_verify, document_digest, store_candidate,
-    store_stage,
+    append_entry, append_entry_with_hook, candidate_digests_to_verify, document_digest,
+    store_candidate, store_stage,
 };
-use super::TestDirectory;
+use super::{TestDirectory, catalog};
 use crate::identity::harness_build_identity;
+use crate::journal::snapshot::RunTerminalSnapshot;
 use crate::journal::{JOURNAL_SCHEMA_VERSION, JournalEntry, JournalEvent, SessionIdentity};
 use crate::{
-    ArtifactIdentity, AttemptRole, Candidate, CandidateLineage, Digest, ParameterBounds,
-    PromotionPolicy, QualificationPolicy, RuntimeIdentities, ScenarioRef, SearchStage, TuneError,
+    ArtifactIdentity, AttemptRole, Candidate, CandidateLineage, CandidateTransitionReceipt,
+    CandidateTransitionRequest, Digest, Journal, ParameterBounds, PromotionPolicy,
+    QualificationPolicy, RuntimeIdentities, ScenarioRef, SearchStage, TuneError,
+};
+
+#[path = "prospective/campaign_fixture.rs"]
+mod campaign_fixture;
+
+use campaign_fixture::{
+    assert_no_transition_authorization, record_evidence_failure_without_commit,
+    record_hard_gate_failed_baseline, record_passing_baseline, record_quarantined_baseline,
+    reject_challenger_authorization,
 };
 
 #[test]
@@ -61,6 +72,191 @@ fn a_changed_prospective_candidate_cannot_publish_a_head() {
 }
 
 #[test]
+fn schema_three_active_campaign_is_rejected_without_a_catalog_change() {
+    let directory = TestDirectory::new("schema-three-active-campaign");
+    let (storage, writer) = super::super::open(directory.path()).expect("open journal storage");
+    let stage = test_stage();
+    let initial = test_candidate();
+    let stage_digest = store_stage(&storage, &writer, &stage).expect("store stage");
+    let candidate_digest =
+        store_candidate(&storage, &writer, &initial).expect("store initial candidate");
+    let mut entry = started_entry(stage_digest, candidate_digest, &initial);
+    entry.schema_version = 3;
+    let digest = document_digest("journal entry", &entry).expect("digest old entry");
+    append_entry(
+        &storage,
+        &writer,
+        &stage,
+        std::slice::from_ref(&entry),
+        std::slice::from_ref(&digest),
+    )
+    .expect("publish old active campaign");
+    drop(writer);
+    drop(storage);
+    let before = catalog(directory.path());
+
+    let error = Journal::open_or_create(directory.path(), &stage, 91, test_runtimes(), &initial)
+        .err()
+        .expect("reject schema three campaign");
+
+    assert!(matches!(error, TuneError::InvalidJournal { .. }));
+    assert_eq!(catalog(directory.path()), before);
+}
+
+#[test]
+fn resume_reads_an_authorized_target_before_attempt_preparation() {
+    let directory = TestDirectory::new("authorized-target-resume");
+    let stage = test_stage();
+    let initial = test_candidate();
+    let target = initial
+        .with_parameter("gain", 0.5)
+        .expect("transition target");
+    let runtimes = test_runtimes();
+    let mut journal =
+        Journal::open_or_create(directory.path(), &stage, 91, runtimes.clone(), &initial)
+            .expect("start journal");
+    record_passing_baseline(&mut journal, &stage, &initial);
+    let initial_digest = document_digest("candidate", &initial).expect("initial digest");
+    let target_digest = document_digest("candidate", &target).expect("target digest");
+    let role = AttemptRole::TrainingChallenger { attempt_index: 0 };
+    let plan = role
+        .plan_digest(&stage, target_digest, 91)
+        .expect("challenger plan");
+    let planning = crate::adapter::planning_context_digest(journal.session().stage_digest, plan)
+        .expect("planning context");
+    let request = CandidateTransitionRequest::new(
+        journal.session_digest().expect("session digest"),
+        &initial,
+        initial_digest,
+        &target,
+        target_digest,
+        runtimes.transition_validator.clone(),
+        runtimes.adjacency_policy_digest,
+        planning,
+    )
+    .expect("transition request");
+    let receipt = CandidateTransitionReceipt::authorized(&request).expect("transition receipt");
+    journal
+        .authorize_training_transition(0, "increase gain", &target, receipt)
+        .expect("save transition authorization");
+    drop(journal);
+    change_bytes(
+        &directory
+            .path()
+            .join("candidates")
+            .join(format!("{target_digest}.json")),
+    );
+
+    let error = Journal::open_or_create(directory.path(), &stage, 91, runtimes, &initial)
+        .err()
+        .expect("reject changed authorized target");
+
+    assert!(matches!(error, TuneError::Storage { .. }));
+}
+
+#[test]
+fn a_hard_gate_failed_baseline_cannot_authorize_a_challenger() {
+    let directory = TestDirectory::new("hard-gate-baseline-authorization");
+    let stage = test_stage();
+    let initial = test_candidate();
+    let target = initial
+        .with_parameter("gain", 0.5)
+        .expect("transition target");
+    let runtimes = test_runtimes();
+    let mut journal =
+        Journal::open_or_create(directory.path(), &stage, 91, runtimes.clone(), &initial)
+            .expect("start journal");
+    record_hard_gate_failed_baseline(&mut journal, &stage, &initial);
+
+    reject_challenger_authorization(&mut journal, &stage, &initial, &target);
+    drop(journal);
+
+    let resumed = Journal::open_or_create(directory.path(), &stage, 91, runtimes, &initial)
+        .expect("resume failed baseline");
+    assert_no_transition_authorization(&resumed);
+}
+
+#[test]
+fn a_quarantined_baseline_cannot_authorize_a_challenger() {
+    let directory = TestDirectory::new("quarantined-baseline-authorization");
+    let stage = test_stage();
+    let initial = test_candidate();
+    let target = initial
+        .with_parameter("gain", 0.5)
+        .expect("transition target");
+    let runtimes = test_runtimes();
+    let mut journal =
+        Journal::open_or_create(directory.path(), &stage, 91, runtimes.clone(), &initial)
+            .expect("start journal");
+    record_quarantined_baseline(&mut journal, &stage, &initial);
+
+    reject_challenger_authorization(&mut journal, &stage, &initial, &target);
+    drop(journal);
+
+    let resumed = Journal::open_or_create(directory.path(), &stage, 91, runtimes, &initial)
+        .expect("resume quarantined baseline");
+    assert_no_transition_authorization(&resumed);
+}
+
+#[test]
+fn evidence_failure_state_survives_reopen_before_commit() {
+    let directory = TestDirectory::new("evidence-failure-reopen");
+    let stage = test_stage();
+    let initial = test_candidate();
+    let runtimes = test_runtimes();
+    let mut journal =
+        Journal::open_or_create(directory.path(), &stage, 91, runtimes.clone(), &initial)
+            .expect("start journal");
+    let saved = record_evidence_failure_without_commit(&mut journal, &stage, &initial);
+    drop(journal);
+
+    let mut resumed = Journal::open_or_create(directory.path(), &stage, 91, runtimes, &initial)
+        .expect("resume evidence failure");
+    let snapshot = resumed
+        .pending_attempt_snapshot()
+        .expect("read pending snapshot");
+    assert!(matches!(
+        snapshot.current_run().map(|run| &run.terminal),
+        Some(RunTerminalSnapshot::EvidenceFailureRecorded { class, .. })
+            if *class == saved.receipt.class()
+    ));
+    resumed
+        .commit_run(saved.trial_id, 0, saved.receipt)
+        .expect("commit evidence failure receipt");
+    resumed
+        .quarantine_attempt(saved.trial_id)
+        .expect("close quarantined attempt");
+}
+
+#[test]
+fn explicit_poison_blocks_append_authorization() {
+    let directory = TestDirectory::new("explicit-poison");
+    let stage = test_stage();
+    let initial = test_candidate();
+    let mut journal =
+        Journal::open_or_create(directory.path(), &stage, 91, test_runtimes(), &initial)
+            .expect("start journal");
+    let entry_count = journal.entries().len();
+    let authorization_ran = std::cell::Cell::new(false);
+    let candidate = journal.session().initial_candidate_digest;
+    journal.poison();
+
+    let error = journal
+        .append_event_with_before_authorization_for_test(
+            JournalEvent::Frozen {
+                baseline: candidate,
+                candidate,
+            },
+            || authorization_ran.set(true),
+        )
+        .expect_err("reject append after poison");
+
+    assert!(matches!(error, TuneError::JournalPoisoned));
+    assert!(!authorization_ran.get());
+    assert_eq!(journal.entries().len(), entry_count);
+}
+
+#[test]
 fn candidate_audit_reads_each_digest_once_in_entry_order() {
     let initial = Digest::from_bytes([21; 32]);
     let first = Digest::from_bytes([22; 32]);
@@ -80,6 +276,7 @@ fn candidate_audit_reads_each_digest_once_in_entry_order() {
                 role: AttemptRole::TrainingBaseline,
                 candidate,
                 plan_digest: Digest::from_bytes([24; 32]),
+                transition: None,
             },
         })
         .collect::<Vec<_>>();
@@ -172,6 +369,8 @@ fn test_runtimes() -> RuntimeIdentities {
         simulator: identity("simulator", 14),
         airframe: identity("airframe", 15),
         vehicle: identity("vehicle", 16),
+        transition_validator: identity("transition-validator", 17),
+        adjacency_policy_digest: Digest::from_bytes([18; 32]),
     }
 }
 

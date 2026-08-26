@@ -29,6 +29,24 @@ impl DurableStore {
         Self::open_with_controller(path, FaultController::default())
     }
 
+    /// Open one exact private Unix storage root without creating it.
+    pub fn open_existing_blocking(path: &Path) -> StorageResult<Self> {
+        let context = StorageContext::root_open_at(path);
+        let (parent, leaf) = open_parent(path, &context)?;
+        let mut selected = context.clone();
+        selected.component = Some(leaf.clone());
+        let root_fd = open_existing_root(&parent, &leaf, &selected)?;
+        Self::bind_open_root(
+            path,
+            parent,
+            leaf,
+            root_fd,
+            FaultController::default(),
+            context,
+            false,
+        )
+    }
+
     /// Open or create a store with deterministic storage faults.
     #[cfg(any(test, feature = "fault-injection"))]
     pub fn open_or_create_with_faults(path: &Path, faults: FaultController) -> StorageResult<Self> {
@@ -56,6 +74,18 @@ impl DurableStore {
         let context = StorageContext::root_open_at(path);
         let (parent, leaf) = open_parent(path, &context)?;
         let root_fd = open_or_create_root(&parent, &leaf, &faults, &context)?;
+        Self::bind_open_root(path, parent, leaf, root_fd, faults, context, true)
+    }
+
+    fn bind_open_root(
+        path: &Path,
+        parent: OwnedFd,
+        leaf: ObjectName,
+        root_fd: OwnedFd,
+        faults: FaultController,
+        context: StorageContext,
+        sync_open: bool,
+    ) -> StorageResult<Self> {
         let mut selected = context.clone();
         selected.component = Some(leaf.clone());
         let stat = fstat(&root_fd).map_err(|source| StorageError::Io {
@@ -78,16 +108,18 @@ impl DurableStore {
                 context: bound,
             });
         }
-        let root_barrier = StorageContext {
-            step: DurabilityStep::ObjectData,
-            ..bound.clone()
-        };
-        sync_directory(&root_fd, &faults, &root_barrier)?;
-        let parent_barrier = StorageContext {
-            step: DurabilityStep::ParentDirectory,
-            ..bound
-        };
-        sync_directory(&parent, &faults, &parent_barrier)?;
+        if sync_open {
+            let root_barrier = StorageContext {
+                step: DurabilityStep::ObjectData,
+                ..bound.clone()
+            };
+            sync_directory(&root_fd, &faults, &root_barrier)?;
+            let parent_barrier = StorageContext {
+                step: DurabilityStep::ParentDirectory,
+                ..bound.clone()
+            };
+            sync_directory(&parent, &faults, &parent_barrier)?;
+        }
         let anchor = Arc::new(Anchor {
             root_parent: parent,
             root_leaf: leaf,
