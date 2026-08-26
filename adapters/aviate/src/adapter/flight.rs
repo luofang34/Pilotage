@@ -102,21 +102,9 @@ impl AviateAdapter {
             }
             Ok(false) => {}
         }
-        // A feel request is answered before the flight actions, because it is
-        // the one action that changes the law the rest of this frame is shaped
-        // by. It is staged, not applied: the new law arrives at the next
-        // neutral boundary, so asking for it under a deflected stick does not
-        // change what the stick is doing.
-        let mut feel_results = Vec::new();
-        for action in &frame.actions {
-            let ControlAction::FeelModeRequest { target } = *action else {
-                continue;
-            };
-            feel_results.push(match self.request_feel_mode(feel_mode(target)) {
-                Ok(_) => ActionResult::accepted(*action),
-                Err(error) => ActionResult::rejected(*action, error.to_string()),
-            });
-        }
+        // Answered before the flight actions, because it is the one action that
+        // changes the law the rest of this frame is shaped by.
+        let feel_results = self.answer_feel_requests(&frame.actions);
 
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
@@ -337,6 +325,27 @@ impl AviateAdapter {
             advanced: 0,
             now: SimTick::new(tick),
         }
+    }
+}
+
+impl AviateAdapter {
+    /// Answers every control-feel request on one frame.
+    ///
+    /// The law is staged, not applied: it arrives at the next neutral
+    /// boundary, so asking for a mode with the stick deflected does not change
+    /// what the stick is doing.
+    fn answer_feel_requests(&mut self, actions: &[ControlAction]) -> Vec<ActionResult> {
+        let mut answered = Vec::new();
+        for action in actions {
+            let ControlAction::FeelModeRequest { target } = *action else {
+                continue;
+            };
+            answered.push(match self.request_feel_mode(feel_mode(target)) {
+                Ok(_) => ActionResult::accepted(*action),
+                Err(error) => ActionResult::rejected(*action, error.to_string()),
+            });
+        }
+        answered
     }
 }
 

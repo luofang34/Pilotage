@@ -5,10 +5,17 @@
 //! non-finite intent component — a velocity or rate off the network must never
 //! reach an adapter as `NaN`.
 
+#[path = "intent/targets.rs"]
+mod targets;
+
+pub(super) use targets::{
+    feel_target_from_wire, feel_target_to_wire, mode_target_from_wire, mode_target_to_wire,
+};
+
 use super::ConvertError;
 use crate::intent::{
-    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, FeelTarget,
-    GimbalRateIntent, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, GimbalRateIntent,
+    PositionHoldIntent, ReferenceFrame, VelocityIntent,
 };
 use crate::wire;
 
@@ -53,51 +60,6 @@ fn frame_from_wire(value: i32) -> Result<ReferenceFrame, ConvertError> {
         Ok(wire::ReferenceFrame::Gimbal) => Ok(ReferenceFrame::Gimbal),
         Ok(wire::ReferenceFrame::Unspecified) | Err(_) => Err(ConvertError::UnknownEnum {
             enum_name: "pilotage.v1.ReferenceFrame",
-            value,
-        }),
-    }
-}
-
-pub(super) fn feel_target_to_wire(target: FeelTarget) -> wire::FeelTarget {
-    match target {
-        FeelTarget::Precision => wire::FeelTarget::Precision,
-        FeelTarget::Balanced => wire::FeelTarget::Balanced,
-        FeelTarget::Agile => wire::FeelTarget::Agile,
-    }
-}
-
-pub(super) fn feel_target_from_wire(value: i32) -> Result<FeelTarget, ConvertError> {
-    match wire::FeelTarget::try_from(value) {
-        Ok(wire::FeelTarget::Precision) => Ok(FeelTarget::Precision),
-        Ok(wire::FeelTarget::Balanced) => Ok(FeelTarget::Balanced),
-        Ok(wire::FeelTarget::Agile) => Ok(FeelTarget::Agile),
-        // A feel request with no target is a request the receiver would have
-        // to guess at, and guessing which law to install is exactly what the
-        // typed vocabulary exists to prevent.
-        Ok(wire::FeelTarget::Unspecified) | Err(_) => Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.FeelTarget",
-            value,
-        }),
-    }
-}
-
-pub(super) fn mode_target_to_wire(target: ModeTarget) -> wire::ModeTarget {
-    match target {
-        ModeTarget::CameraVelocity => wire::ModeTarget::CameraVelocity,
-        ModeTarget::FpvDirect => wire::ModeTarget::FpvDirect,
-        ModeTarget::Hold => wire::ModeTarget::Hold,
-        ModeTarget::Return => wire::ModeTarget::Return,
-    }
-}
-
-pub(super) fn mode_target_from_wire(value: i32) -> Result<ModeTarget, ConvertError> {
-    match wire::ModeTarget::try_from(value) {
-        Ok(wire::ModeTarget::CameraVelocity) => Ok(ModeTarget::CameraVelocity),
-        Ok(wire::ModeTarget::FpvDirect) => Ok(ModeTarget::FpvDirect),
-        Ok(wire::ModeTarget::Hold) => Ok(ModeTarget::Hold),
-        Ok(wire::ModeTarget::Return) => Ok(ModeTarget::Return),
-        Ok(wire::ModeTarget::Unspecified) | Err(_) => Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.ModeTarget",
             value,
         }),
     }
@@ -406,7 +368,7 @@ mod tests {
             ControlAction::Arm,
             ControlAction::Disarm,
             ControlAction::ModeRequest {
-                target: super::ModeTarget::Hold,
+                target: crate::intent::ModeTarget::Hold,
             },
             ControlAction::GimbalRecenter,
         ] {
