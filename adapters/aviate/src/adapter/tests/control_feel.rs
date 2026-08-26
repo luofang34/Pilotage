@@ -482,3 +482,79 @@ fn activation_with_an_unavailable_pose_preserves_the_pending_candidate() {
     assert_eq!(active_digest(&adapter), original);
     assert_no_frame(&fc);
 }
+
+#[test]
+fn every_shaped_operator_mode_installs_after_its_neutral_dwell() {
+    // The shaped modes are the answer to a command law that steps, and a
+    // profile the adapter will not take is no answer at all. Each one is
+    // staged on a flying vehicle and has to reach the active artifact.
+    //
+    // The law this replaces had no dwell, so activation was instant: one frame
+    // at centre and the law changed. A shaped mode holds a quiet band for a
+    // stated time before it calls an input neutral, which is what keeps a
+    // resting hand from commanding — and the same rule governs the boundary
+    // the new law arrives at, so a stick crossing centre in passing does not
+    // change the law underneath it.
+    //
+    // The dwell accumulates across frames rather than from one long gap: a
+    // control loop reports continuously, and a single sample after a silence
+    // says nothing about where the stick was during it.
+    for mode in [FeelMode::Precision, FeelMode::Balanced, FeelMode::Agile] {
+        let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+        fc.set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("read timeout");
+        let mut adapter = adapter_with_fc(&fc);
+        let before = active_digest(&adapter);
+
+        // A shaped profile keeps the artifact bindings and the demand envelope
+        // of the law it replaces, so it is installable on the vehicle the
+        // adapter was started with rather than describing a different one.
+        let profile = FlightFeelProfile::shaped(mode);
+        let dwell = Duration::from_millis(u64::from(profile.horizontal.neutral.dwell_ms));
+        assert!(dwell > Duration::ZERO, "{mode:?} must state a dwell");
+        let shaped = ValidatedFlightFeelProfile::new(profile)
+            .unwrap_or_else(|error| panic!("{mode:?} must be a valid profile: {error}"));
+        let expected = *FeelDigest::calculate(&shaped).expect("digest").as_bytes();
+        adapter
+            .stage_control_feel(shaped)
+            .unwrap_or_else(|error| panic!("{mode:?} must be stageable: {error}"));
+
+        // A deflected stick does not activate it.
+        let deflected = flight_frame(vec![(LogicalAxisId::new(PITCH_AXIS), 0.5)], vec![]);
+        assert_eq!(
+            adapter.apply_control(&deflected).disposition,
+            Disposition::Accepted
+        );
+        assert_eq!(
+            active_digest(&adapter),
+            before,
+            "{mode:?} activated deflected"
+        );
+
+        // Held at centre, it arrives — and not before the dwell it states. The
+        // clock is advanced rather than waited on, so the boundary is driven
+        // deterministically at a rate a control loop actually reports at.
+        let step = Duration::from_millis(20);
+        let mut held = Duration::ZERO;
+        let mut activated_after = None;
+        for _ in 0..40 {
+            assert_eq!(
+                adapter.apply_control(&neutral_frame()).disposition,
+                Disposition::Accepted
+            );
+            if active_digest(&adapter) == expected {
+                activated_after = Some(held);
+                break;
+            }
+            adapter.uplink_mut().expect("uplink").advance_clock(step);
+            held += step;
+        }
+
+        let elapsed = activated_after
+            .unwrap_or_else(|| panic!("{mode:?} never activated while held at centre"));
+        assert!(
+            elapsed >= dwell,
+            "{mode:?} activated after {elapsed:?}, before its {dwell:?} dwell"
+        );
+    }
+}
