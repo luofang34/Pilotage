@@ -9,12 +9,12 @@
 
 use pilotage_protocol::wire;
 
-use super::{GroupAdvance, VehicleFix, from_sample};
+use super::{MarkMemory, VehicleFix, from_sample};
 
 /// Reads a sample the way a client that has just connected reads its first
 /// one: nothing seen before, so every group states a new measurement.
 fn first_sample(sample: &wire::TelemetrySample) -> Option<VehicleFix> {
-    from_sample(&mut GroupAdvance::default(), sample, 0)
+    from_sample(&mut MarkMemory::default(), sample, 0)
 }
 
 /// Bits 0 and 3: attitude and velocity stated.
@@ -268,7 +268,7 @@ fn a_direction_stops_being_drawn_when_its_group_goes_quiet() {
     // The position keeps advancing while the attitude repeats one
     // measurement, which is what a lane looks like when its attitude source
     // stops: samples keep arriving and one group inside them stands still.
-    let mut advance = GroupAdvance::default();
+    let mut advance = MarkMemory::default();
     let read = from_sample(&mut advance, &estimate(1, 1, 1), 0).expect("a fix");
     assert_eq!(read.heading_deg, Some(0.0));
 
@@ -301,7 +301,7 @@ fn a_position_that_never_advances_is_not_reported_as_new() {
     // host relaying a frozen block delivers samples forever, and if each one
     // refreshed that clock the mark would never go stale however long the
     // vehicle had stopped reporting.
-    let mut advance = GroupAdvance::default();
+    let mut advance = MarkMemory::default();
     assert!(
         from_sample(&mut advance, &estimate(1, 1, 1), 0)
             .expect("a fix")
@@ -326,7 +326,7 @@ fn the_truth_lane_is_held_to_the_same_bound() {
     // The oracle is not exempt. A simulator that stops stepping states one
     // measurement forever, and a mark that keeps its heading through that is
     // as wrong as one on the estimate lane.
-    let mut advance = GroupAdvance::default();
+    let mut advance = MarkMemory::default();
     assert_eq!(
         from_sample(&mut advance, &truth(3.0, 0.0), 0)
             .expect("a fix")
@@ -340,4 +340,47 @@ fn the_truth_lane_is_held_to_the_same_bound() {
     );
     assert_eq!(stale.course_deg, None);
     assert!(!stale.fix_advanced);
+}
+
+/// An estimate lane moving north at `speed`, every group freshly stamped.
+fn moving_at(speed: f32, sequence: u32) -> wire::TelemetrySample {
+    let mut sample = estimate(sequence, sequence, sequence);
+    sample.avionics.as_mut().expect("estimate lane").vel_n_mps = speed;
+    sample
+}
+
+#[test]
+fn a_course_already_drawn_is_held_through_the_band() {
+    // A vehicle holding station reports a metre or two per second of drift.
+    // Judged against one threshold, it crosses back and forth and the leader
+    // flickers on and off at the telemetry rate, which reads as a vehicle
+    // darting about rather than one sitting still.
+    let course = |memory: &mut MarkMemory, speed: f32, sequence: u32, now_ms: u64| {
+        from_sample(memory, &moving_at(speed, sequence), now_ms)
+            .expect("a fix")
+            .course_deg
+            .is_some()
+    };
+    let mut memory = MarkMemory::default();
+
+    assert!(
+        course(&mut memory, 3.0, 1, 0),
+        "a moving vehicle states a course"
+    );
+    assert!(
+        course(&mut memory, 0.4, 2, 10),
+        "a course already drawn was dropped inside the band"
+    );
+    assert!(
+        !course(&mut memory, 0.3, 3, 20),
+        "a course survived below the speed that releases it"
+    );
+    assert!(
+        !course(&mut memory, 0.4, 4, 30),
+        "a course came back without passing the floor again"
+    );
+    assert!(
+        course(&mut memory, 0.6, 5, 40),
+        "a speed above the floor was refused a course"
+    );
 }

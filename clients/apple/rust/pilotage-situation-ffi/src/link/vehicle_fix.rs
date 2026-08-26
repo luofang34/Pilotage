@@ -22,6 +22,12 @@ use pilotage_protocol::wire;
 /// is noise around a stationary vehicle rather than a course.
 const TRACK_FLOOR_MPS: f64 = 0.5;
 
+/// The speed a course already drawn must fall below before it is taken away.
+///
+/// Without a band between the two, a vehicle drifting either side of the floor
+/// flickers its course on and off at the telemetry rate.
+const TRACK_RELEASE_MPS: f64 = 0.35;
+
 /// How long a direction may go without a new measurement and still be drawn.
 ///
 /// A direction is measured many times a second, and a stale one does not fade
@@ -98,19 +104,25 @@ impl StampIdentity {
     }
 }
 
-/// When each group last stated something this reader had not already seen.
+/// What this reader carries between samples.
+///
+/// When each group last stated something it had not already seen, and whether
+/// a course is currently on screen.
 ///
 /// Kept across samples because that is the only place the answer lives: one
 /// sample cannot say whether its stamp is the same one the last sample
 /// carried, and a lane that keeps repeating a measurement is exactly the case
 /// this exists to notice.
 #[derive(Default)]
-pub(super) struct GroupAdvance {
+pub(super) struct MarkMemory {
     identity: [Option<StampIdentity>; 3],
     advanced_at_ms: [u64; 3],
+    /// Whether a course is on screen now, which decides which side of the
+    /// track band this sample is judged against.
+    course_drawn: bool,
 }
 
-impl GroupAdvance {
+impl MarkMemory {
     /// When this group last advanced, and whether it advanced just now.
     ///
     /// Advance is identity INEQUALITY rather than a sequence comparison. A
@@ -154,7 +166,7 @@ impl GroupAdvance {
 /// being judged against it. A session without one is the normal case, not a
 /// failure, and it is the only case a physical vehicle has.
 pub(super) fn from_sample(
-    advance: &mut GroupAdvance,
+    memory: &mut MarkMemory,
     sample: &wire::TelemetrySample,
     now_ms: u64,
 ) -> Option<VehicleFix> {
@@ -170,12 +182,18 @@ pub(super) fn from_sample(
         // separately: the lane can hand over to the estimate lane, which
         // stamps its groups apart.
         let stamp = truth.stamp.as_ref();
-        let heading_current = advance.is_current(Group::Heading, stamp, now_ms);
-        let track_current = advance.is_current(Group::Track, stamp, now_ms);
-        let fix_advanced = advance
+        let heading_current = memory.is_current(Group::Heading, stamp, now_ms);
+        let track_current = memory.is_current(Group::Track, stamp, now_ms);
+        let fix_advanced = memory
             .advanced(Group::Fix, stamp, now_ms)
             .is_some_and(|(_, now)| now);
-        let velocity = track_from([truth.vel_n_mps, truth.vel_e_mps], truth.valid_flags);
+        let velocity = track_from(
+            [truth.vel_n_mps, truth.vel_e_mps],
+            truth.valid_flags,
+            memory.course_drawn,
+        );
+        let course = track_current.then_some(velocity).flatten();
+        memory.course_drawn = course.is_some();
         return Some(VehicleFix {
             latitude_deg: geodetic.latitude_deg,
             longitude_deg: geodetic.longitude_deg,
@@ -187,8 +205,8 @@ pub(super) fn from_sample(
                     )
                 })
                 .flatten(),
-            course_deg: track_current.then_some(velocity).flatten().map(|(b, _)| b),
-            ground_speed_mps: track_current.then_some(velocity).flatten().map(|(_, s)| s),
+            course_deg: course.map(|(bearing, _)| bearing),
+            ground_speed_mps: course.map(|(_, speed)| speed),
             from_simulator: true,
             fix_advanced,
         });
@@ -208,13 +226,18 @@ pub(super) fn from_sample(
     let flags = if authorized { avionics.valid_flags } else { 0 };
     // This lane stamps its groups apart, so each is asked about its own.
     let heading_current =
-        advance.is_current(Group::Heading, avionics.attitude_stamp.as_ref(), now_ms);
-    let track_current =
-        advance.is_current(Group::Track, avionics.kinematics_stamp.as_ref(), now_ms);
-    let fix_advanced = advance
+        memory.is_current(Group::Heading, avionics.attitude_stamp.as_ref(), now_ms);
+    let track_current = memory.is_current(Group::Track, avionics.kinematics_stamp.as_ref(), now_ms);
+    let fix_advanced = memory
         .advanced(Group::Fix, avionics.geodetic_stamp.as_ref(), now_ms)
         .is_some_and(|(_, now)| now);
-    let velocity = track_from([avionics.vel_n_mps, avionics.vel_e_mps], flags);
+    let velocity = track_from(
+        [avionics.vel_n_mps, avionics.vel_e_mps],
+        flags,
+        memory.course_drawn,
+    );
+    let course = track_current.then_some(velocity).flatten();
+    memory.course_drawn = course.is_some();
     Some(VehicleFix {
         latitude_deg: geodetic.latitude_deg,
         longitude_deg: geodetic.longitude_deg,
@@ -231,8 +254,8 @@ pub(super) fn from_sample(
                 )
             })
             .flatten(),
-        course_deg: track_current.then_some(velocity).flatten().map(|(b, _)| b),
-        ground_speed_mps: track_current.then_some(velocity).flatten().map(|(_, s)| s),
+        course_deg: course.map(|(bearing, _)| bearing),
+        ground_speed_mps: course.map(|(_, speed)| speed),
         from_simulator: false,
         fix_advanced,
     })
@@ -262,7 +285,11 @@ fn heading_from(quat: [f32; 4], valid_flags: u32) -> Option<f64> {
 }
 
 /// Track over the ground and the speed along it.
-fn track_from(vel_ne: [f32; 2], valid_flags: u32) -> Option<(f64, f64)> {
+///
+/// `drawn` says whether a course is on screen now. A course already drawn is
+/// held to the lower bound, so a vehicle hovering either side of the floor
+/// keeps the one it has instead of flickering at the telemetry rate.
+fn track_from(vel_ne: [f32; 2], valid_flags: u32, drawn: bool) -> Option<(f64, f64)> {
     if valid_flags & VALID_VELOCITY == 0 {
         return None;
     }
@@ -271,7 +298,13 @@ fn track_from(vel_ne: [f32; 2], valid_flags: u32) -> Option<(f64, f64)> {
         return None;
     }
     let speed = north.hypot(east);
-    if speed < TRACK_FLOOR_MPS {
+    if speed
+        < if drawn {
+            TRACK_RELEASE_MPS
+        } else {
+            TRACK_FLOOR_MPS
+        }
+    {
         return None;
     }
     Some((wrap_bearing(f64::atan2(east, north).to_degrees()), speed))
