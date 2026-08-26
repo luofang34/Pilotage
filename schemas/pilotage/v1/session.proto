@@ -297,4 +297,8 @@ message ControlActionResult {
   // resolve exactly the press this result answers. Zero when the request
   // carried none.
   uint32 action_id = 9;
+  // Echoed target for a FEEL_MODE_REQUEST; unspecified otherwise. A result
+  // that did not echo it could not be decoded back into the action it
+  // answers, because a feel request without a target is refused.
+  FeelTarget feel_target = 10;
 }

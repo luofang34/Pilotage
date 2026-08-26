@@ -1,5 +1,7 @@
 //! Values that a display binding consumes.
 
+use surveillance_core::HeadingReference;
+
 /// An sRGB color with straight alpha.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Color {
@@ -226,6 +228,23 @@ pub struct OwnshipFeature {
     pub coordinate: Coordinate,
     /// Direction of travel over the ground, in degrees from true north, when reported.
     pub course_deg: Option<f64>,
+    /// Speed over the ground in knots, when reported.
+    ///
+    /// A course without a speed says which way the aircraft is going and not how
+    /// far it gets, so a display can draw the direction and not the vector.
+    pub ground_speed_kt: Option<f64>,
+    /// Direction the nose points, in degrees, when reported.
+    ///
+    /// Not the same as the course: in wind the two differ by the crab angle, and
+    /// that difference is what tells a reader the aircraft is crabbing rather
+    /// than turning.
+    pub heading_deg: Option<f64>,
+    /// Which north the heading is measured from.
+    ///
+    /// A heading is a number and a reference. Drawn against the wrong north it is
+    /// wrong by the local variation, which is tens of degrees in places, so a
+    /// heading whose reference is unstated is not drawn as a true heading.
+    pub heading_reference: Option<HeadingReference>,
     /// Selected display altitude in feet.
     pub altitude_ft: Option<i32>,
     /// Producer instance identity.

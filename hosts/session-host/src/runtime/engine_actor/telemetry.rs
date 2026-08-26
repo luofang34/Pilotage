@@ -1,11 +1,13 @@
 //! Lossless adapter-to-wire telemetry mapping.
 
 use pilotage_adapter_api::{
-    AvionicsSample, FcStateSample, GimbalAttitudeSample, MeasurementClock, MeasurementStamp,
-    SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
+    AvionicsSample, FcStateSample, GeodeticFixSample, GimbalAttitudeSample, MeasurementClock,
+    MeasurementStamp, SimTruthSample, SourceIntegrity, SourceRole, TelemetrySample,
 };
+use pilotage_geo::SIMULATOR_GEOID_MODEL_ID;
 use pilotage_protocol::wire;
 use pilotage_timing::MonoTimestamp;
+use tracing::warn;
 
 const ESTIMATOR_VALID_FLAGS_MASK: u32 = 0x0f;
 const ESTIMATOR_QUALITY_UNUSABLE: u32 = 2;
@@ -107,6 +109,16 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
     } else {
         (0, ESTIMATOR_QUALITY_UNUSABLE)
     };
+    // The estimate lane carries the estimator's OWN solution. A fix under
+    // any other role is in the wrong lane, and a simulator oracle's
+    // position read as the estimator's solution is exactly the
+    // substitution the roles exist to stop. The reader gates on this too;
+    // refusing here as well keeps a producer bug visible on the side that
+    // can name it.
+    let geodetic = sample
+        .geodetic
+        .filter(|fix| fix.stamp.role == SourceRole::OperationalEstimate)
+        .and_then(geodetic_to_wire);
     wire::AvionicsState {
         quat_w: attitude.map_or(0.0, |group| group.quat_wxyz[0]),
         quat_x: attitude.map_or(0.0, |group| group.quat_wxyz[1]),
@@ -134,10 +146,78 @@ fn avionics_to_wire(sample: AvionicsSample) -> wire::AvionicsState {
         baro_stamp: sample
             .baro
             .map(|group| measurement_stamp_to_wire(group.stamp)),
+        // The contract runs once. The stamp travels only with a fix that
+        // survived it: a stamp beside no position would claim an
+        // observation the wire does not carry.
+        geodetic_stamp: geodetic
+            .as_ref()
+            .and(sample.geodetic.as_ref())
+            .map(|fix| measurement_stamp_to_wire(fix.stamp)),
+        geodetic,
     }
 }
 
+/// Maps a fix onto the wire. There is deliberately no `map_or` fallback
+/// here: an absent fix leaves the whole message absent, because 0,0 is a
+/// real place and a receiver that read it would draw a plausible vehicle
+/// in the Gulf of Guinea.
+fn geodetic_to_wire(fix: GeodeticFixSample) -> Option<wire::GeodeticFix> {
+    // The typed value has public fields, so a producer can assemble one
+    // without the constructor that refuses a datum. Re-run the contract
+    // here: this is the last place before the wire, and a receiver cannot
+    // tell an assembled value from a constructed one.
+    // The value the constructor would have produced, not the one the
+    // producer assembled: the constructor wraps longitude, and a caller
+    // that re-checked and then published its own copy would put the
+    // unwrapped number on the wire for readers that disagree about it.
+    let position = match fix.position.normalized() {
+        Ok(position) => position,
+        Err(error) => {
+            warn!(
+                source_id = fix.stamp.source_id,
+                role = ?fix.stamp.role,
+                %error,
+                "geodetic fix refused by the contract; no position published",
+            );
+            return None;
+        }
+    };
+    // The simulator's declared separation names no geoid. A height that
+    // carries it under an operational role would read as a surveyed height
+    // measured from a model nothing can name.
+    let vertical = position.vertical;
+    if vertical.geoid == SIMULATOR_GEOID_MODEL_ID && fix.stamp.role != SourceRole::SimulationTruth {
+        warn!(
+            source_id = fix.stamp.source_id,
+            role = ?fix.stamp.role,
+            "simulator geoid under a non-truth role; no position published",
+        );
+        return None;
+    }
+    Some(wire::GeodeticFix {
+        latitude_deg: position.latitude_deg,
+        longitude_deg: position.longitude_deg,
+        horizontal_datum: u32::from(position.horizontal_datum.to_u8()),
+        realization: u32::from(position.realization.0),
+        height_m: vertical.height_m,
+        vertical_datum: u32::from(vertical.datum.to_u8()),
+        geoid_model: u32::from(vertical.geoid.0),
+        terrain_ref: vertical.terrain_ref.0,
+        baro_setting: vertical.baro_setting.0,
+        local_origin: vertical.origin.0,
+        horizontal_accuracy_mm: fix.quality.horizontal_mm,
+        vertical_accuracy_mm: fix.quality.vertical_mm,
+    })
+}
+
 fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
+    // The truth lane carries the oracle's own position. A fix under any
+    // other role is in the wrong lane, exactly as on the estimate side,
+    // and the reader gates on this too.
+    let geodetic = sample
+        .geodetic
+        .filter(|fix| fix.stamp.role == SourceRole::SimulationTruth)
+        .and_then(geodetic_to_wire);
     wire::SimTruthState {
         quat_w: sample.quat_wxyz[0],
         quat_x: sample.quat_wxyz[1],
@@ -150,6 +230,7 @@ fn sim_truth_to_wire(sample: SimTruthSample) -> wire::SimTruthState {
         vel_e_mps: sample.vel_ned_mps[1],
         vel_d_mps: sample.vel_ned_mps[2],
         valid_flags: sample.valid_flags,
+        geodetic,
         stamp: Some(measurement_stamp_to_wire(sample.stamp)),
     }
 }

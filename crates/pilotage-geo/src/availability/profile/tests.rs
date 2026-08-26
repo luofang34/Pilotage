@@ -65,3 +65,43 @@ fn profile_new_rejects_zero_and_non_monotonic_limits() {
     assert_eq!(ok.fresh_age_ns(), 1);
     assert_eq!(ok.usable_att_mrad(), 2);
 }
+
+/// Zero is a producer that supplied no accuracy, not a producer claiming a
+/// perfect one. Graded on its face it would rank the least-known position
+/// best of all: a wire field the sender left out, or a lane with nothing to
+/// copy, would outrank a receiver that honestly stated a metre.
+#[test]
+fn an_unstated_position_accuracy_does_not_grade_best() {
+    let sim = AvailabilityProfile::simulator();
+    assert_eq!(
+        sim.position_mm_health(0),
+        InputHealth::Failed,
+        "an unstated accuracy leaves a reader unable to say how well the position is known",
+    );
+    assert_eq!(
+        sim.position_mm_health(1),
+        InputHealth::Ok,
+        "a stated accuracy, however small, is still a statement",
+    );
+}
+
+/// The absence is something the type hands a reader, rather than something
+/// each reader has to remember.
+#[test]
+fn the_quality_type_states_which_of_its_numbers_were_supplied() {
+    use crate::PositionQuality;
+
+    let unstated = PositionQuality {
+        horizontal_mm: 0,
+        vertical_mm: 0,
+    };
+    assert_eq!(unstated.stated_horizontal_mm(), None);
+    assert_eq!(unstated.stated_vertical_mm(), None);
+
+    let stated = PositionQuality {
+        horizontal_mm: 1_250,
+        vertical_mm: 2_100,
+    };
+    assert_eq!(stated.stated_horizontal_mm(), Some(1_250));
+    assert_eq!(stated.stated_vertical_mm(), Some(2_100));
+}

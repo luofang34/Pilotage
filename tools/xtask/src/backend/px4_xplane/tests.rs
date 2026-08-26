@@ -356,3 +356,49 @@ fn config_rewrite_targets_only_the_config_name_line() {
         "; comment\nconfig_name = QuadTailsitter\nother = 1\n"
     );
 }
+
+/// The bridge answers a flight controller's connection and then drops it
+/// when its configuration names an aircraft other than the one X-Plane has
+/// loaded. Neither side says why: the controller retries until its
+/// readiness deadline and the session fails with nothing pointing at the
+/// aircraft. A launcher that starts X-Plane chooses both and they agree; a
+/// launcher that finds it running chooses only the configuration.
+#[test]
+fn a_running_simulator_with_another_aircraft_is_refused_by_name() {
+    use crate::backend::xplane_simulator::{airframe_for, loaded_aircraft, verify_loaded_aircraft};
+
+    let airframe = airframe_for(Some("alia250")).expect("a known airframe");
+    let other = airframe_for(Some("qtailsitter")).expect("a known airframe");
+
+    let log = format!(
+        "0:00:00.000 I/WIN: Showing subscreen Main Menu\n\
+         0:00:25.977 I/ACF: Loading airplane number 0 with {}\n",
+        airframe.acf_path,
+    );
+    assert_eq!(loaded_aircraft(&log).as_deref(), Some(airframe.acf_path));
+
+    let root = std::env::temp_dir().join(format!("plt_xplane_acf_{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("fixture root");
+    std::fs::write(root.join("Log.txt"), &log).expect("fixture log");
+
+    verify_loaded_aircraft(&root, airframe).expect("the loaded aircraft is the selected one");
+
+    let refusal = verify_loaded_aircraft(&root, other);
+    let message = refusal
+        .expect_err("another aircraft is refused")
+        .to_string();
+    assert!(
+        message.contains(other.acf_path) && message.contains(airframe.acf_path),
+        "the refusal names both aircraft: {message}",
+    );
+    assert!(
+        message.contains("PILOTAGE_XPLANE_AIRFRAME"),
+        "the refusal says how to resolve it: {message}",
+    );
+
+    // No log to read is not a mismatch: this check turns a silent failure
+    // into a named one and never invents one.
+    std::fs::remove_file(root.join("Log.txt")).expect("remove fixture log");
+    verify_loaded_aircraft(&root, other).expect("an unreadable log states no aircraft");
+    std::fs::remove_dir_all(&root).ok();
+}

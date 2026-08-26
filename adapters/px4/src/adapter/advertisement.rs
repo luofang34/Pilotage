@@ -75,10 +75,12 @@ fn flight_scope_descriptor() -> ScopeDescriptor {
             ActionCapability {
                 action: ActionKind::Arm,
                 mode_targets: vec![],
+                feel_targets: vec![],
             },
             ActionCapability {
                 action: ActionKind::Disarm,
                 mode_targets: vec![],
+                feel_targets: vec![],
             },
         ],
         legacy: Some(LegacyCommandMap::Velocity {
@@ -121,6 +123,7 @@ fn gimbal_scope_descriptor() -> ScopeDescriptor {
         actions: vec![ActionCapability {
             action: ActionKind::GimbalRecenter,
             mode_targets: vec![],
+            feel_targets: vec![],
         }],
         legacy: Some(LegacyCommandMap::GimbalRate {
             pitch: Some(LegacyAxisRoute {

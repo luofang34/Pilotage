@@ -340,12 +340,12 @@ attr outcome pass
 node RESULT-CTRL-GROUP verification-result
 title exclusive authority-group suite — recorded pass
 attr command cargo test -p pilotage-session --lib tests::authority_group
-attr config-digest 00c701b8b932793eb242eb1a8325944187b2e622
+attr config-digest 57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:b4852a299a3401f2aeb830bddccbe547f7604d64
+attr source-digest git-blob:46c81982ac7f8bce831d849af92a0f7e40c6637c
 attr artifact docs/control/evidence-artifacts/ctrl01/authority-group.run.txt
-attr output-digest sha256:e0325e2afbed1baa91b1b39ad9d586ddec8990c34a0c61dfda811f6b49cdf0cc
-attr run-id local:00c701b8b932793eb242eb1a8325944187b2e622
+attr output-digest sha256:39cc20345a6e10a409289de358298e2b9d7e723ea021f56f8013fae1aa72a0f6
+attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr outcome pass
 node RESULT-CTRL-DEDUP verification-result
 title actor exactly-once dedup suite — recorded pass
@@ -360,12 +360,12 @@ attr outcome pass
 node RESULT-CTRL-WIRE verification-result
 title reliable action chain over the real transport — recorded pass
 attr command cargo test -p pilotage-session-host --test reliable_actions_wire
-attr config-digest afad387c195b9c8dff728d5fd9f91d853b9b3a99
+attr config-digest 57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:563e07a09e23e918a8147ab6f6fee7af8725d984
+attr source-digest git-blob:ea41d4527e07c4b1f93dd09028d049fcaa4adc91
 attr artifact docs/control/evidence-artifacts/ctrl01/wire-chain.run.txt
-attr output-digest sha256:1fcfa43c72bff51b2e32c13376b4bdffaefa514189d9426ff9f180b2776e6599
-attr run-id local:afad387c195b9c8dff728d5fd9f91d853b9b3a99
+attr output-digest sha256:d1c0c706e7ac0a057f618f801343cf08848338a6147d8723c17c49185393373a
+attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr outcome pass
 node RESULT-CTRL-SOURCE verification-result
 title input-source coordinator suite — recorded pass
@@ -380,12 +380,12 @@ attr outcome pass
 node RESULT-CTRL-FIXTURE verification-result
 title browser-encoded wire fixture suite — recorded pass
 attr command cargo test -p pilotage-session --test typed_wire_e2e
-attr config-digest 00c701b8b932793eb242eb1a8325944187b2e622
+attr config-digest 57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr tool-version rustc 1.95.0 (59807616e 2026-04-14)
-attr source-digest git-blob:4735eb8a0dabc4dd935920c085ec4ee3edd936cc
+attr source-digest git-blob:a09db38f372d4bffea39a2882cd1db0f045c59cf
 attr artifact docs/control/evidence-artifacts/ctrl01/browser-fixture.run.txt
-attr output-digest sha256:ff35a22c954495285bb09c185106101d958bd91fbf976f0ae397f5425db4767b
-attr run-id local:00c701b8b932793eb242eb1a8325944187b2e622
+attr output-digest sha256:1f55401585b1454208a9df4a2846873a826d98c84cf816e3364d2bbeb179639f
+attr run-id local:57887c15ba4a2c87bf696adf4aa8dc6123795214
 attr outcome pass
 
 node RESULT-CTRL-LIFECYCLE-PROFILE verification-result
@@ -434,6 +434,12 @@ title committed control-feel integration verification baseline
 attr scm git
 attr commit 00c701b8b932793eb242eb1a8325944187b2e622
 attr tree 8a89376eb3ad1dcaf764336dde5ce54a783fa1fd
+
+node CFG-CTRL-FEEL-MODE configuration-item
+title committed baseline for the results re-run when the operator feel-mode path changed their test sources
+attr scm git
+attr commit 57887c15ba4a2c87bf696adf4aa8dc6123795214
+attr tree 020c82d6fee6426286784865bde0aa5c2af3f2b9
 
 node CFG-CTRL-VIDEO-V3 configuration-item
 title committed code baseline for session negotiation and transport results
@@ -588,7 +594,7 @@ edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-EXCL
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-GEN
 edge RESULT-CTRL-GROUP result-of CASE-CTRL-GROUP-LATCH
 edge RESULT-CTRL-GROUP covers CTRL-GROUP-003
-edge RESULT-CTRL-GROUP justified-by CFG-CTRL-FEEL
+edge RESULT-CTRL-GROUP justified-by CFG-CTRL-FEEL-MODE
 edge RESULT-CTRL-GROUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-DEDUP result-of CASE-CTRL-ID-REUSE
@@ -598,7 +604,7 @@ edge RESULT-CTRL-DEDUP justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-WIRE result-of CASE-CTRL-WIRE-CHAIN
 edge RESULT-CTRL-WIRE covers CTRL-CHAN-002
-edge RESULT-CTRL-WIRE justified-by CFG-CTRL-VIDEO-V3
+edge RESULT-CTRL-WIRE justified-by CFG-CTRL-FEEL-MODE
 edge RESULT-CTRL-WIRE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-SOURCE result-of CASE-CTRL-SOURCE-BOOT
@@ -611,7 +617,7 @@ edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-FRAME
 edge RESULT-CTRL-FIXTURE result-of CASE-CTRL-BROWSER-COMMAND
 edge RESULT-CTRL-FIXTURE covers CTRL-BIND-001
 edge RESULT-CTRL-FIXTURE covers CTRL-CHAN-002
-edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-FEEL
+edge RESULT-CTRL-FIXTURE justified-by CFG-CTRL-FEEL-MODE
 edge RESULT-CTRL-FIXTURE justified-by TOOL-CTRL-CARGO
 
 edge RESULT-CTRL-LIFECYCLE-PROFILE result-of CASE-CTRL-LIFE-PHYSICAL

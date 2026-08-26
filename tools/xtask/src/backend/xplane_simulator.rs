@@ -319,6 +319,52 @@ pub(super) fn set_ground_sensor_contract(root: &Path, enabled: bool) {
     }
 }
 
+/// The aircraft a running X-Plane most recently loaded, from its own log,
+/// or `None` when the log says nothing this reader understands.
+///
+/// A launcher that STARTS X-Plane also chooses the aircraft, so the two
+/// agree by construction. A launcher that finds X-Plane already running
+/// chooses only the bridge configuration, and the operator chose the
+/// aircraft — possibly a session ago, for another airframe.
+#[must_use]
+pub(super) fn loaded_aircraft(log: &str) -> Option<String> {
+    const MARKER: &str = "Loading airplane number 0 with ";
+    log.lines().rev().find_map(|line| {
+        line.split_once(MARKER)
+            .map(|(_, acf)| acf.trim().to_owned())
+    })
+}
+
+/// Refuses a bridge configuration that names a different aircraft than the
+/// one X-Plane has loaded.
+///
+/// The bridge answers the flight controller's connection and then drops it,
+/// and neither side says why: the flight controller retries until its
+/// readiness deadline and the session fails with nothing pointing at the
+/// aircraft. The mismatch is knowable before anything starts.
+pub(super) fn verify_loaded_aircraft(root: &Path, airframe: &Airframe) -> Result<(), XtaskError> {
+    let Ok(log) = std::fs::read_to_string(root.join("Log.txt")) else {
+        // No log to read is not a mismatch. This check only ever turns a
+        // silent failure into a named one; it never invents one.
+        return Ok(());
+    };
+    let Some(loaded) = loaded_aircraft(&log) else {
+        return Ok(());
+    };
+    if loaded == airframe.acf_path {
+        return Ok(());
+    }
+    Err(XtaskError::SimulatorCapability {
+        capability: "X-Plane aircraft matching the selected airframe",
+        detail: format!(
+            "X-Plane has {loaded} loaded and this session needs {} for airframe {}. \
+             Load that aircraft in X-Plane, or select the airframe that matches what \
+             is loaded with PILOTAGE_XPLANE_AIRFRAME.",
+            airframe.acf_path, airframe.key,
+        ),
+    })
+}
+
 pub(super) fn set_active_config_name(root: &Path, airframe: &Airframe) {
     for config in [
         root.join("Resources/plugins/px4xplane/64/config.ini"),

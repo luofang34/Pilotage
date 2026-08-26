@@ -175,6 +175,7 @@ impl VehicleAdapter for ReferenceAdapter {
                     actions: vec![pilotage_adapter_api::ActionCapability {
                         action: pilotage_protocol::ActionKind::Arm,
                         mode_targets: vec![],
+                        feel_targets: vec![],
                     }],
                     legacy: Some(LegacyCommandMap::Velocity {
                         vx: Some(LegacyAxisRoute {

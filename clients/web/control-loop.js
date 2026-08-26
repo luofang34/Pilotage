@@ -1,3 +1,4 @@
+import { feelModeControl } from "./feel-mode-control.js";
 import {
   CONTROL_ACTION,
   MODE_TARGET,
@@ -24,6 +25,7 @@ import {
   INTENT_FAMILY_GIMBAL_RATE,
   intentCapabilityFor as capabilityFor,
   actionAdvertised,
+  feelModeAdvertised,
   buildVelocityIntent,
   buildAttitudeThrustIntent,
   buildGimbalRateIntent,
@@ -669,6 +671,55 @@ export function createControlLoop({
     if (action) void executeLeaseAction(transportSessions.currentToken(), action, lifecycleScope);
   }
 
+  /// Asks the vehicle for one control-feel law.
+  ///
+  /// The control is offered only for laws the vehicle advertises, so a reader
+  /// is never given a mode the vehicle would refuse. The law arrives at the
+  /// vehicle's next neutral boundary rather than on this frame: asking while
+  /// the stick is deflected does not change what the stick is doing.
+  function requestFeelMode(feelTarget) {
+    const scope = state.motionScope;
+    if (!feelModeAdvertised(state.advertisedScopes, vehicleId, scope, feelTarget)) {
+      log(`feel mode ${feelTarget} not advertised for ${scope}; not sent`);
+      return false;
+    }
+    const writer = state.sessionWriter;
+    if (!writer) {
+      log("feel mode: no session stream; not sent");
+      return false;
+    }
+    const action = CONTROL_ACTION.feelModeRequest;
+    const actionId = enqueueAction(state.actionTracker, scope, action, performance.now(), {
+      feelTarget,
+    });
+    const command = encodeControlActionCommandEnvelope({
+      sessionId: state.sessionId,
+      vehicleId,
+      scope,
+      generation: generationForScope(scope),
+      activationRevision: state.controlShell.activationRevision(),
+      action,
+      feelTarget,
+      actionId,
+    });
+    writer.write(lengthDelimit(command)).catch(() => {
+      log(`feel mode (id ${actionId}): session stream write failed`);
+    });
+    return true;
+  }
+
+  const feelControl = feelModeControl(els.feelMode, () => ({
+    scopes: state.advertisedScopes,
+    vehicleId,
+    scope: state.motionScope,
+  }));
+
+  function refreshFeelModeControl() {
+    document.body.dataset.feelModesOffered = String(feelControl.refresh());
+  }
+
+  const showFeelMode = (feelTarget) => feelControl.show(feelTarget);
+
   function requestAction(scope, action, modeTarget, cancels = []) {
     if (!actionAdvertised(state.advertisedScopes, vehicleId, scope, action, modeTarget)) {
       log(`action ${action} not advertised for ${scope}; not sent`);
@@ -720,6 +771,15 @@ export function createControlLoop({
     if (entry.scope === lifecycleScope) {
       const action = state.controlShell?.planAuthority("lifecycle", false);
       if (action) void executeLeaseAction(transportSessions.currentToken(), action, lifecycleScope);
+    }
+    if (entry.action === CONTROL_ACTION.feelModeRequest) {
+      // The control shows the law the VEHICLE is on, never the reader's last
+      // press. A refused request that left the selector where the reader put
+      // it would have the display assert a law the vehicle declined.
+      showFeelMode(message.accepted ? (message.feelTarget ?? entry.feelTarget) : null);
+      if (!message.accepted) {
+        log(`feel mode refused: ${message.detail}`);
+      }
     }
     if (entry.action === CONTROL_ACTION.modeRequest && message.accepted) {
       state.fpvActive = entry.modeTarget === MODE_TARGET.fpvDirect;
@@ -876,6 +936,9 @@ export function createControlLoop({
     handleActionResult,
     handleFrameRejected,
     motionGroup,
+    refreshFeelModeControl,
+    showFeelMode,
+    requestFeelMode,
     resumeControlInPlace,
     runSessionStreamReader,
     sendLeaseRelease,

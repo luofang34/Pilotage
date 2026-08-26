@@ -57,6 +57,13 @@ pub struct SimTruthUpdate {
     pub pos_ned_m: [f32; 3],
     /// True NED velocity, m/s.
     pub vel_ned_mps: [f32; 3],
+    /// The report's own geodetic position, as the simulator stated it:
+    /// latitude and longitude in degrees·1e7 and altitude in millimeters.
+    /// The NED group above is this position projected against the latched
+    /// origin, so the two are one observation; this is what it was before
+    /// the projection, kept because a projection cannot be undone without
+    /// the origin and the reader of a map needs the position itself.
+    pub lat_lon_alt: [i32; 3],
     /// Microseconds on the simulation clock.
     pub time_usec: u64,
     /// Wrapping publication sequence for the truth stream.
@@ -95,6 +102,34 @@ pub struct KinematicsUpdate {
     pub valid_flags: u32,
     /// Canonical quality retained for this numeric acquisition.
     pub quality: u32,
+    /// When this update was received.
+    pub received_at: Instant,
+}
+
+/// The receiver's own fix, cached OUTSIDE the estimate measurement
+/// discipline.
+///
+/// The message states a timestamp on a clock of the sender's choosing:
+/// a flight controller with no satellite time fills it from its own boot
+/// clock, and one with satellite time fills it from UTC. The two differ by
+/// decades. The other groups are ordered against a shared boot-clock high
+/// water mark, and a UTC value fed into that mark makes every later boot
+/// timestamp look like a restart — so this lane is ordered by a sequence
+/// of its own and its freshness is measured on the clock that received it.
+#[derive(Debug, Clone, Copy)]
+pub struct GnssFixUpdate {
+    /// Latitude and longitude in degrees·1e7, exactly as the wire carries
+    /// them.
+    pub lat_lon: [i32; 2],
+    /// Height above the WGS-84 ellipsoid, millimetres.
+    pub alt_ellipsoid_mm: i32,
+    /// 1-sigma horizontal and vertical accuracy, millimetres.
+    pub accuracy_mm: [u32; 2],
+    /// Wrapping publication sequence for this lane.
+    pub sequence: u32,
+    /// Nanoseconds from the link's start to when this report arrived: the
+    /// one clock the receiver can name for it.
+    pub received_since_start_ns: u64,
     /// When this update was received.
     pub received_at: Instant,
 }

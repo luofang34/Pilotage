@@ -59,6 +59,11 @@ pub(super) struct Avionics {
     /// its stamp — an absent measurement is never a zero reading.
     baro_alt_m: Option<f32>,
     baro_stamp: Option<Stamp>,
+    /// The estimator's own fix on the Earth. It advances independently of
+    /// the kinematics group, so it carries its own stamp and is
+    /// unconsumable without one.
+    geodetic: Option<GeodeticFix>,
+    geodetic_stamp: Option<Stamp>,
 }
 
 /// Simulation-truth oracle sample in the browser's shape: the simulator's
@@ -71,7 +76,85 @@ pub(super) struct SimTruth {
     pos_ned: [f32; 3],
     vel_ned: [f32; 3],
     valid_flags: u32,
+    geodetic: Option<GeodeticFix>,
     stamp: Stamp,
+}
+
+/// Where a vehicle is on the Earth, with the datum the position is measured
+/// against fully declared (ADR-0022).
+///
+/// The browser receives this only when the geodetic contract accepts it, so
+/// a datum this build cannot interpret reaches a reader as no position at
+/// all rather than as a place drawn on a map.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GeodeticFix {
+    latitude_deg: f64,
+    longitude_deg: f64,
+    height_m: f64,
+    horizontal_datum: u32,
+    realization: u32,
+    vertical_datum: u32,
+    geoid_model: u32,
+    terrain_ref: u32,
+    baro_setting: u32,
+    local_origin: u64,
+    /// 1-sigma accuracy in millimetres, or `None` when the producer stated
+    /// none. Zero on the wire is UNSTATED, never perfect: proto3 omits a
+    /// zero, so silence and a perfection claim are the same bytes.
+    horizontal_accuracy_mm: Option<u32>,
+    vertical_accuracy_mm: Option<u32>,
+}
+
+/// Reads a fix through the geodetic contract, so the refusals are the
+/// contract's own: an unknown datum, a missing realization, an MSL height
+/// that names no geoid, or a latitude past the pole is no fix.
+fn geodetic_message(fix: wire::GeodeticFix) -> Option<GeodeticFix> {
+    use pilotage_geo::{
+        BaroSettingId, DatumRealizationId, GeodeticPosition, GeoidModelId, HorizontalDatum,
+        LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition,
+    };
+
+    let vertical = VerticalPosition::new(
+        fix.height_m,
+        VerticalDatum::from_u8(u8::try_from(fix.vertical_datum).ok()?)?,
+        GeoidModelId(u16::try_from(fix.geoid_model).ok()?),
+        TerrainRefId(fix.terrain_ref),
+        BaroSettingId(fix.baro_setting),
+        LocalOriginId(fix.local_origin),
+    )
+    .ok()?;
+    // The constructor wraps a longitude outside [-180, 180) rather than
+    // refusing it. The wire contract says the producer sends a normalized
+    // value, so a longitude that needs wrapping is a producer that did not
+    // keep the contract. Wrapping it here would draw a vehicle a full turn
+    // of the Earth from where the other decoder draws nothing.
+    if !(fix.longitude_deg >= -180.0 && fix.longitude_deg < 180.0) {
+        return None;
+    }
+    let position = GeodeticPosition::new(
+        fix.latitude_deg,
+        fix.longitude_deg,
+        HorizontalDatum::from_u8(u8::try_from(fix.horizontal_datum).ok()?)?,
+        DatumRealizationId(u16::try_from(fix.realization).ok()?),
+        vertical,
+    )
+    .ok()?;
+    let accuracy = |mm: u32| (mm > 0).then_some(mm);
+    Some(GeodeticFix {
+        latitude_deg: position.latitude_deg,
+        longitude_deg: position.longitude_deg,
+        height_m: position.vertical.height_m,
+        horizontal_datum: u32::from(position.horizontal_datum.to_u8()),
+        realization: u32::from(position.realization.0),
+        vertical_datum: u32::from(position.vertical.datum.to_u8()),
+        geoid_model: u32::from(position.vertical.geoid.0),
+        terrain_ref: position.vertical.terrain_ref.0,
+        baro_setting: position.vertical.baro_setting.0,
+        local_origin: position.vertical.origin.0,
+        horizontal_accuracy_mm: accuracy(fix.horizontal_accuracy_mm),
+        vertical_accuracy_mm: accuracy(fix.vertical_accuracy_mm),
+    })
 }
 
 /// FC-owned arm/mode state under its own provenance stamp.
@@ -135,6 +218,9 @@ pub(super) fn sim_truth_message(state: wire::SimTruthState) -> Option<SimTruth> 
         pos_ned: [state.pos_n_m, state.pos_e_m, state.pos_d_m],
         vel_ned: [state.vel_n_mps, state.vel_e_mps, state.vel_d_mps],
         valid_flags: state.valid_flags,
+        // The oracle's position on the Earth, from the same observation as
+        // the frame above, so it rides this sample's stamp.
+        geodetic: state.geodetic.and_then(geodetic_message),
         stamp: stamp_message(stamp),
     })
 }
@@ -222,7 +308,21 @@ pub(super) fn avionics_message(state: wire::AvionicsState) -> Avionics {
         pos_ned: [state.pos_n_m, state.pos_e_m, state.pos_d_m],
         vel_ned: [state.vel_n_mps, state.vel_e_mps, state.vel_d_mps],
     });
+    // Exact-role gate: a fix stamped with any other role is in the wrong
+    // lane, and a simulator oracle's position read as the estimator's own
+    // solution is exactly the substitution the roles exist to stop.
+    let estimate_role = state
+        .geodetic_stamp
+        .as_ref()
+        .is_some_and(|stamp| stamp.role == wire::SourceRole::OperationalEstimate as i32);
+    let geodetic_stamp = state.geodetic_stamp.map(stamp_message);
+    let geodetic = state
+        .geodetic
+        .filter(|_| estimate_role)
+        .and_then(geodetic_message);
     Avionics {
+        geodetic,
+        geodetic_stamp,
         quat: attitude.map(|attitude| attitude.quat),
         rates: attitude.map(|attitude| attitude.rates),
         pos_ned: kinematics.map(|kinematics| kinematics.pos_ned),

@@ -2,8 +2,8 @@
 
 use super::{
     ATTITUDE_QUATERNION_ID, AVIATE_ESTIMATOR_STATUS_ID, COMMAND_ACK_ID, ESTIMATOR_STATUS_ID,
-    FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, HEARTBEAT_ID, HIL_STATE_QUATERNION_ID,
-    LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
+    FcMessage, GIMBAL_DEVICE_ATTITUDE_STATUS_ID, GNSS_RAW_ID, HEARTBEAT_ID,
+    HIL_STATE_QUATERNION_ID, LOCAL_POSITION_NED_ID, SCALED_PRESSURE_ID,
 };
 
 fn f32_at(payload: &[u8], off: usize) -> f32 {
@@ -88,6 +88,34 @@ fn decode_gimbal_status(payload: &[u8]) -> FcMessage {
     }
 }
 
+/// GPS_RAW_INT wire order: time_usec u64 @0, lat/lon in degrees*1e7 @8/@12,
+/// sea-level altitude @16, accuracy and course fields, then fix_type u8 @28
+/// and satellite count @29, and the version-2 extension fields this lane
+/// reads: alt_ellipsoid i32 @30 and the 1-sigma horizontal and vertical
+/// accuracies @34 and @38.
+///
+/// The length gate reaches the fix type and no further. MAVLink 2 trims
+/// trailing zero BYTES, which can cut into the middle of a value whose high
+/// bytes are zero, so no offset past the first zero byte can be required to
+/// be present. What a sender means by a zero is settled per field instead:
+/// an accuracy of zero is unstated rather than perfect, and a position of
+/// zero is refused where the fix is built.
+fn decode_gnss_fix(payload: &[u8]) -> Option<FcMessage> {
+    /// Below a three-dimensional fix the receiver has no height and may
+    /// have no position. It says so here and nowhere else.
+    const FIX_TYPE_3D: u8 = 3;
+
+    if payload.len() <= 28 || payload[28] < FIX_TYPE_3D {
+        return None;
+    }
+    Some(FcMessage::GnssFix {
+        time_usec: u64_at(payload, 0),
+        lat_lon: [u32_at(payload, 8) as i32, u32_at(payload, 12) as i32],
+        alt_ellipsoid_mm: u32_at(payload, 30) as i32,
+        accuracy_mm: [u32_at(payload, 34), u32_at(payload, 38)],
+    })
+}
+
 pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
     match msg_id {
         HEARTBEAT_ID => Some(FcMessage::Heartbeat {
@@ -124,6 +152,7 @@ pub(super) fn decode_known(msg_id: u32, payload: &[u8]) -> Option<FcMessage> {
             temperature_cdeg: u16_at(payload, 12) as i16,
         }),
         HIL_STATE_QUATERNION_ID => Some(decode_sim_truth(payload)),
+        GNSS_RAW_ID => decode_gnss_fix(payload),
         LOCAL_POSITION_NED_ID => Some(FcMessage::LocalPositionNed {
             time_boot_ms: u32_at(payload, 0),
             pos_ned_m: [f32_at(payload, 4), f32_at(payload, 8), f32_at(payload, 12)],

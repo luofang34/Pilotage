@@ -23,12 +23,13 @@ mod updates;
 use apply::apply_messages;
 pub use apply::apply_messages_at;
 pub use error::LinkError;
+pub use estimate_fix::estimate_geodetic_fix;
 use estimator::EstimatorStatusUpdate;
 pub use outbound::{GimbalRateDemand, OutboundCommand};
 use outbound::{send_gimbal_rate, send_outbound_command};
 pub use updates::{
-    AttitudeUpdate, BaroUpdate, CommandAckReport, GimbalDeviceAttitude, KinematicsUpdate,
-    SimTruthUpdate, TruthOrigin,
+    AttitudeUpdate, BaroUpdate, CommandAckReport, GimbalDeviceAttitude, GnssFixUpdate,
+    KinematicsUpdate, SimTruthUpdate, TruthOrigin,
 };
 
 /// Which message carries the estimator authorization for cached numeric
@@ -185,6 +186,11 @@ pub struct LinkState {
     /// Latest simulator ground-truth report (SITL only). Cached outside
     /// the estimate measurement discipline like the gimbal report.
     pub sim_truth: Option<SimTruthUpdate>,
+    /// The receiver's own fix, when the flight controller reports one.
+    pub gnss_fix: Option<GnssFixUpdate>,
+    /// When this link began: the clock a report is stamped against when
+    /// its own timestamp names a clock nothing identifies.
+    pub started_at: Instant,
     /// Origin the truth stream projects against, latched on its first fix.
     pub truth_origin: Option<TruthOrigin>,
     /// Latest gimbal-device orientation report. Cached outside the
@@ -231,45 +237,8 @@ pub struct LinkState {
     pub wrong_sources: u64,
 }
 
-impl Default for LinkState {
-    fn default() -> Self {
-        Self {
-            system_id: 1,
-            component_id: 1,
-            source_id: 1,
-            source_incarnation: SourceIncarnation::new([0; 16]),
-            reset_policy: ResetPolicy::Conservative,
-            authorization_source: AuthorizationSource::AviatePrivate,
-            standard_status_max_lag_ms: estimator::DEFAULT_STANDARD_STATUS_MAX_LAG_MS,
-            reset_candidate_max_ms: measurement::DEFAULT_RESET_CANDIDATE_MAX_MS,
-            maximum_inter_group_skew_ms: 0,
-            attitude: None,
-            kinematics: None,
-            estimator_status: None,
-            baro: None,
-            sim_truth: None,
-            truth_origin: None,
-            gimbal_device: None,
-            last_command_ack: None,
-            gimbal_configure_ack: None,
-            last_heartbeat: None,
-            heartbeat_armed: None,
-            decoded: 0,
-            crc_failures: 0,
-            unknown_ids: 0,
-            source_epoch: 1,
-            last_source_time_ms: None,
-            last_accepted_at: None,
-            pending_reset: None,
-            duplicate_measurements: 0,
-            reordered_measurements: 0,
-            invalid_estimator_statuses: 0,
-            source_resets: 0,
-            suspected_resets: 0,
-            wrong_sources: 0,
-        }
-    }
-}
+mod defaults;
+mod estimate_fix;
 
 impl LinkState {
     fn for_source(config: LinkConfig, source_incarnation: SourceIncarnation) -> Self {

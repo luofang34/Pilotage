@@ -1,9 +1,9 @@
 {
-  "plan_sha256": "ae33522ca56b9931b3ee3ce7b6a2fb35a11a08c42512c52134283c7df1a4f2f6",
-  "archive_sha256": "2ec00e12fb93c3e7799932000cc9a91dd109e456d751143d039e50fbeb504551",
-  "tiles_requested": 3233,
-  "tiles_written": 3233,
-  "archive_bytes": 253530112,
+  "plan_sha256": "24971b639e2d9ce79077aac9cf26d69f5cfbea848dbccff9d1db7037b4aa86c8",
+  "archive_sha256": "952f8d4ca4dda98568aea09cc837820c02fc5a8d9c7ef5e3aa8df49c0602bd8a",
+  "tiles_requested": 2763,
+  "tiles_written": 2763,
+  "archive_bytes": 251187200,
   "source": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
   "source_name": "AWS Terrain Tiles",
   "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP.",
@@ -21,19 +21,19 @@
       "name": "region",
       "min_zoom": 6,
       "max_zoom": 10,
-      "min_lat_deg": 37.5,
-      "max_lat_deg": 43.5,
-      "min_lon_deg": -81.0,
-      "max_lon_deg": -72.0
+      "min_lat_deg": 45.7,
+      "max_lat_deg": 48.1,
+      "min_lon_deg": 5.8,
+      "max_lon_deg": 10.6
     },
     {
       "name": "local",
       "min_zoom": 11,
       "max_zoom": 13,
-      "min_lat_deg": 40.1,
-      "max_lat_deg": 41.1,
-      "min_lon_deg": -75.25,
-      "max_lon_deg": -74.25
+      "min_lat_deg": 47.0,
+      "max_lat_deg": 47.9,
+      "min_lon_deg": 8.0,
+      "max_lon_deg": 9.2
     }
   ]
 }

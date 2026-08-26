@@ -140,6 +140,57 @@
     width: 100%;
     height: auto;
   }
+  /* The situation map draws into a div (MapLibre owns its canvas inside),
+     so the frame's canvas-only sizing does not apply. The stage takes the
+     full main-slot width and the same viewport height budget as the video. */
+  #stage-map .frame {
+    line-height: normal;
+  }
+  #mainSlot #stage-map {
+    width: 100%;
+  }
+  .map-surface {
+    width: 100%;
+    height: calc(100vh - 24rem);
+    min-height: 18rem;
+    background: #02060a;
+  }
+  /* The vehicle mark. The point is the nose, and the marker is rotated to
+     the heading the vehicle states — so the shape may only have a point in
+     it while a heading is stated. */
+  .map-ownship {
+    width: 0;
+    height: 0;
+    border-left: 0.45rem solid transparent;
+    border-right: 0.45rem solid transparent;
+    border-bottom: 0.9rem solid #d5006d;
+    filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9));
+  }
+  /* No heading was stated. A reader reads a direction off a point, so the
+     mark loses its point rather than pointing somewhere arbitrary. */
+  .map-ownship-unknown-heading {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 0.15rem solid #d5006d;
+    border-radius: 50%;
+    background: transparent;
+  }
+  /* Load / typed-unavailable notice for the map stage. Sized by the
+     positioned frame; inert so it never eats a map gesture. */
+  .map-notice {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    font: 0.85rem monospace;
+    color: #fc9;
+    text-align: center;
+    pointer-events: none;
+  }
+  .map-notice:empty {
+    display: none;
+  }
   .g5-column {
     display: flex;
     flex-direction: column;
@@ -255,11 +306,27 @@
       <option value="rover">Rover (throttle/yaw)</option>
     </select>
   </label>
+  <label>feel
+    <select id="feelMode" disabled title="Waiting for the vehicle to advertise its control-feel modes">
+      <!-- Offered only once the vehicle advertises a qualified profile for
+           each: a control that asks for a law the vehicle has not qualified is
+           a control that always fails. -->
+      <!-- Nothing is chosen until the vehicle says which law it is on. The
+           adapter boots on the compatibility law, so an option marked
+           selected here would misstate the active law from first render,
+           before any request was made. -->
+      <option value="" selected disabled>—</option>
+      <option value="1">Precision</option>
+      <option value="2">Balanced</option>
+      <option value="3">Agile</option>
+    </select>
+  </label>
   <label>main view
     <select id="mainView">
       <option value="stage-video" selected>FPV / onboard camera</option>
       <option value="stage-gimbal">gimbal / payload</option>
       <option value="stage-chase">chase / 3rd person</option>
+      <option value="stage-map">situation / globe</option>
       <!-- layout.js appends one option per composition slot. -->
     </select>
   </label>
@@ -286,6 +353,10 @@
   <figure class="stage" id="stage-chase">
     <figcaption>chase / 3rd person</figcaption>
     <div class="frame"><canvas id="chaseVideo" width="320" height="240"></canvas></div>
+  </figure>
+  <figure class="stage" id="stage-map">
+    <figcaption>situation / globe</figcaption>
+    <div class="frame"><div id="situationMap" class="map-surface"></div></div>
   </figure>
 </div>
 

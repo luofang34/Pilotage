@@ -117,10 +117,26 @@ fn flight_actions() -> Vec<ActionCapability> {
         ActionCapability {
             action: ActionKind::Arm,
             mode_targets: vec![],
+            feel_targets: vec![],
         },
         ActionCapability {
             action: ActionKind::Disarm,
             mode_targets: vec![],
+            feel_targets: vec![],
+        },
+        // The three qualified laws, advertised so a client offers only what
+        // this vehicle has a profile for. A physical gateway refuses the
+        // request itself; advertising it here would offer an operator a
+        // control that always fails.
+        #[cfg(feature = "sim")]
+        ActionCapability {
+            action: ActionKind::FeelModeRequest,
+            mode_targets: vec![],
+            feel_targets: vec![
+                pilotage_protocol::FeelTarget::Precision,
+                pilotage_protocol::FeelTarget::Balanced,
+                pilotage_protocol::FeelTarget::Agile,
+            ],
         },
     ]
 }
@@ -220,6 +236,7 @@ fn gimbal_scope_descriptor() -> ScopeDescriptor {
             ActionCapability {
                 action: ActionKind::GimbalRecenter,
                 mode_targets: vec![],
+                feel_targets: vec![],
             },
             // Zoom is DETENTED: each step selects a distinct camera model
             // whose calibration the frames carry (ADR-0021). A continuous
@@ -227,10 +244,12 @@ fn gimbal_scope_descriptor() -> ScopeDescriptor {
             ActionCapability {
                 action: ActionKind::CameraZoomIn,
                 mode_targets: vec![],
+                feel_targets: vec![],
             },
             ActionCapability {
                 action: ActionKind::CameraZoomOut,
                 mode_targets: vec![],
+                feel_targets: vec![],
             },
         ],
         legacy: Some(LegacyCommandMap::GimbalRate {

@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use super::xplane_simulator::{
     airframe_for, ensure_xplane_plugins_blocking, prepare_xplane_runtime_blocking,
-    set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root,
-    xplane_running_blocking,
+    set_active_config_name, set_ground_sensor_contract, validate_xplane_install,
+    verify_loaded_aircraft, xplane_root, xplane_running_blocking,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
@@ -127,6 +127,14 @@ impl SimBackend for AviateXPlane {
             return Ok(());
         };
         let simulator_running = xplane_running_blocking()?;
+        // A launcher that starts X-Plane also chooses the aircraft. One
+        // that finds it already running chooses only the bridge
+        // configuration, and a configuration that names another aircraft
+        // is answered and then dropped, with nothing on either side
+        // saying why.
+        if simulator_running {
+            verify_loaded_aircraft(&root, airframe)?;
+        }
         set_active_config_name(&root, airframe);
         // Aviate's estimator consumes REAL sensors from boot to
         // touchdown; the bridge's fabricated ground-stationary contract

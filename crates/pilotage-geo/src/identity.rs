@@ -82,12 +82,45 @@ impl IntegrityLevel {
 /// A 1-sigma accuracy estimate for a position, in millimeters — a length. It is
 /// a distinct type from [`AttitudeQuality`] so a position's accuracy can never
 /// be read as an attitude's.
+///
+/// **Zero is UNSTATED, never perfect.** No real receiver knows a position to
+/// the millimetre, so a zero is a producer that supplied no estimate: a wire
+/// field the sender left out, a simulator that measures rather than solves, or
+/// an adapter with nothing to copy. A reader that took it at face value would
+/// rank the least-known position best of all, which is the opposite of what the
+/// producer said. Use [`Self::stated_horizontal_mm`] and
+/// [`Self::stated_vertical_mm`] rather than the fields, so the absence is
+/// something the type system hands you rather than something you remember.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PositionQuality {
-    /// Horizontal 1-sigma estimate, millimeters.
+    /// Horizontal 1-sigma estimate, millimeters. Zero is unstated.
     pub horizontal_mm: u32,
-    /// Vertical 1-sigma estimate, millimeters.
+    /// Vertical 1-sigma estimate, millimeters. Zero is unstated.
     pub vertical_mm: u32,
+}
+
+impl PositionQuality {
+    /// The horizontal 1-sigma the producer stated, or `None` when it stated
+    /// none.
+    #[must_use]
+    pub const fn stated_horizontal_mm(&self) -> Option<u32> {
+        if self.horizontal_mm == 0 {
+            None
+        } else {
+            Some(self.horizontal_mm)
+        }
+    }
+
+    /// The vertical 1-sigma the producer stated, or `None` when it stated
+    /// none.
+    #[must_use]
+    pub const fn stated_vertical_mm(&self) -> Option<u32> {
+        if self.vertical_mm == 0 {
+            None
+        } else {
+            Some(self.vertical_mm)
+        }
+    }
 }
 
 /// A 1-sigma accuracy estimate for an attitude, in milliradians — an angle. It

@@ -148,6 +148,19 @@ impl GeoidModelId {
     }
 }
 
+/// The separation a simulator declares for the heights it reports as MSL.
+///
+/// A simulator states an MSL height without naming the geoid it separated from,
+/// and an MSL height with no model is uninterpretable, so a simulated fix would
+/// otherwise have no legal vertical datum. This constant is that missing
+/// declaration: it names the simulator's own flat separation, so a simulated
+/// height stays traceable to a simulator and is never read as a surveyed one.
+/// It identifies no geoid, and no operational height may carry it.
+///
+/// The value is the top of the range so that a geoid registry, which would
+/// number its first real model from the bottom, cannot grow into it.
+pub const SIMULATOR_GEOID_MODEL_ID: GeoidModelId = GeoidModelId(u16::MAX);
+
 /// Identity of the terrain/ground reference an AGL height is measured above (a
 /// specific terrain database or ground-plane reference). `UNDECLARED` (0) means
 /// the ground is unidentified and an AGL height is refused.
@@ -375,14 +388,31 @@ impl GeodeticPosition {
     ///
     /// The same [`GeoError`] variants [`Self::new`] raises.
     pub fn validate(&self) -> Result<(), GeoError> {
-        Self::new(
+        self.normalized().map(|_| ())
+    }
+
+    /// The same re-check as [`Self::validate`], and the value the constructor
+    /// would have produced.
+    ///
+    /// A value assembled by setting fields keeps whatever longitude it was
+    /// given; the constructor wraps longitude into `[-180, 180)`. A caller
+    /// that re-checks such a value and then reads its own copy publishes the
+    /// unwrapped number, so the normalization the constructor performs is
+    /// returned here rather than discarded.
+    ///
+    /// # Errors
+    ///
+    /// The same [`GeoError`] variants [`Self::new`] raises.
+    pub fn normalized(&self) -> Result<Self, GeoError> {
+        let position = Self::new(
             self.latitude_deg,
             self.longitude_deg,
             self.horizontal_datum,
             self.realization,
             self.vertical,
-        )
-        .and_then(|_| self.vertical.validate())
+        )?;
+        self.vertical.validate()?;
+        Ok(position)
     }
 
     /// Whether this position lies on the anti-meridian (±180°), where longitude

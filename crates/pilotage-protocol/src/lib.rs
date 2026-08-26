@@ -22,7 +22,7 @@ pub use convert::{
 };
 pub use ids::{Generation, PrincipalId, ScopeId, SequenceNum, SessionId, VehicleId};
 pub use intent::{
-    ActionKind, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent,
+    ActionKind, AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, FeelTarget,
     GimbalRateIntent, IntentFamily, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
     actions_conflict,
 };

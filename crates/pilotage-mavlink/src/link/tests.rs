@@ -461,3 +461,5 @@ fn current_epoch_progress_cancels_an_unconfirmed_reset() {
     assert_eq!(latest.attitude.expect("current").time_boot_ms, 60_010);
     assert!(latest.pending_reset.is_none());
 }
+
+mod truth_origin;

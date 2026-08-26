@@ -149,6 +149,56 @@ message AvionicsState {
   // label which they show. Meaningful only when baro_stamp is present.
   float baro_alt_m = 20;
   MeasurementStamp baro_stamp = 21;
+  // The estimator's own geodetic fix. It advances independently of the
+  // kinematics group above, so it carries its own stamp; both are
+  // meaningful only when that stamp is present. Absence means the
+  // estimator supplied no fix, never that the vehicle is at 0,0.
+  GeodeticFix geodetic = 22;
+  MeasurementStamp geodetic_stamp = 23;
+}
+
+// One geodetic fix: where a vehicle is on the Earth, with the datum the
+// position is measured against fully declared (ADR-0022).
+//
+// Absence of this message means NO FIX. A receiver must not substitute a
+// zero, a last-known value, or a position derived from a declared origin:
+// 0,0 is a real place in the Gulf of Guinea and would draw as a plausible
+// vehicle. A receiver builds the value through the geodetic contract, so a
+// datum it cannot interpret is refused rather than displayed.
+//
+// The message carries no availability and no health. Both are DERIVED at
+// the receiver from the datum identities and the accuracy below, so no
+// producer can claim a position is usable (ADR-0022).
+message GeodeticFix {
+  // Latitude in degrees, in [-90, 90].
+  double latitude_deg = 1;
+  // Longitude in degrees, normalized by the producer to [-180, 180).
+  double longitude_deg = 2;
+  // pilotage_geo::HorizontalDatum: 0 unknown, 1 WGS-84, 2 NAD83,
+  // 3 ITRF2014. Unknown is refused at the receiver, never guessed.
+  uint32 horizontal_datum = 3;
+  // Realization or reference epoch of the horizontal datum. 0 is
+  // UNDECLARED, which a datum that needs one is refused for.
+  uint32 realization = 4;
+  // Height against the vertical datum below.
+  double height_m = 5;
+  // pilotage_geo::VerticalDatum: 0 unknown, 1 ellipsoid, 2 MSL, 3 AGL,
+  // 4 baro-indicated, 5 pressure, 6 local-relative.
+  uint32 vertical_datum = 6;
+  // The identity the vertical datum requires. 0 is UNDECLARED and makes a
+  // height that needs it uninterpretable: MSL needs a geoid model, AGL a
+  // terrain reference, baro-indicated an applied setting, and
+  // local-relative an origin.
+  uint32 geoid_model = 7;
+  uint32 terrain_ref = 8;
+  uint32 baro_setting = 9;
+  uint64 local_origin = 10;
+  // 1-sigma accuracy, millimeters. A length, never a score. Zero means
+  // UNSTATED, not perfect: proto3 omits a zero field, so a producer that
+  // states nothing and a producer that claims perfection would otherwise
+  // be the same bytes, and silence would rate as the best possible fix.
+  uint32 horizontal_accuracy_mm = 11;
+  uint32 vertical_accuracy_mm = 12;
 }
 
 // One coherent simulator ground-truth sample: the simulation oracle for
@@ -176,6 +226,10 @@ message SimTruthState {
   // positions: bit0 attitude, bit1 rates, bit2 position, bit3 velocity.
   // Availability only — truth has no estimator authorization to claim.
   uint32 valid_flags = 12;
+  // The oracle's geodetic position. It comes from the same observation as
+  // the NED group above and rides this sample's stamp, so it claims no
+  // advance of its own. Absence means the simulator declared no position.
+  GeodeticFix geodetic = 13;
 }
 
 // FC-owned vehicle state (arm today; mode/failsafe belong here as they

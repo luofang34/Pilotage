@@ -381,6 +381,7 @@ async fn arm_and_expect_accepted(driver: &mut Driver) {
             action: 1,
             mode_target: 0,
             action_id: 0,
+            feel_target: 0,
         },
     );
     driver.execute(actions).await;

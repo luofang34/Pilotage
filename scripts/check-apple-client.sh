@@ -321,6 +321,45 @@ require_pattern 'discardedUatBytes' "$client/App/RadioStatusView.swift" \
 require_pattern 'drainLimitExhaustions' "$client/App/RadioStatusView.swift" \
     "the application must show bounded-drain exhaustion"
 
+ownship_mark="$root/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOwnshipMark.swift"
+ownship_motion="$root/clients/apple/Packages/PilotageCore/Sources/PilotageCore/OwnshipMotion.swift"
+motion_corpus="$root/clients/situation-ownship-motion.corpus.json"
+
+for required in "$ownship_mark" "$ownship_motion" "$motion_corpus"; do
+    if [ ! -f "$required" ]; then
+        echo "FORBIDDEN: ${required#"$root"/} is missing" >&2
+        status=1
+    fi
+done
+
+# The mark is aligned to the map, not the screen. The map can be turned and
+# opens pitched, and a mark aligned to the screen points somewhere the aircraft
+# is not for as long as either holds.
+require_fixed 'symbol.textRotationAlignment = NSExpression(forConstantValue: "map")' \
+    "$ownship_mark" \
+    "the ownship mark must be aligned to the map rather than the viewport"
+require_fixed 'symbol.textPitchAlignment = NSExpression(forConstantValue: "map")' \
+    "$ownship_mark" \
+    "the ownship mark's pitch must follow the map rather than the screen"
+
+# A reader reads a direction off a point, so a mark whose heading nobody
+# reported must not have one.
+require_fixed 'heading == nil ? Self.pointlessGlyph : Self.pointedGlyph' \
+    "$ownship_mark" \
+    "a mark with no reported heading must have no point in it"
+
+# The map draws in true north. A magnetic heading drawn as a true one is wrong
+# by the local variation, which is tens of degrees in places.
+require_fixed 'reference == .trueNorth' \
+    "$ownship_motion" \
+    "only a heading stated against true north may turn the mark"
+
+# The two clients derive these directions in two languages and neither would
+# notice the other drifting.
+require_fixed 'trackFloorMetresPerSecond' \
+    "$ownship_motion" \
+    "the course floor must be the shared physical speed, not a round number in knots"
+
 if [ "$status" -ne 0 ]; then
     echo "Apple client: FAILED" >&2
     exit 1

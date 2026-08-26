@@ -10,6 +10,7 @@
 #include <string>
 
 #include <gz/msgs/image.pb.h>
+#include <gz/msgs/navsat.pb.h>
 #include <gz/msgs/odometry.pb.h>
 #include <gz/msgs/twist.pb.h>
 #include <gz/transport/Node.hh>
@@ -26,6 +27,12 @@ struct BridgeConfig {
   // The gimbal payload camera (camera_id = 2). Empty when the vehicle carries
   // no gimbal, in which case the bridge subscribes no third camera.
   std::string gimbal_camera_topic;
+  // Full gz topic of the vehicle's satellite-navigation sensor. Empty when
+  // the launcher named no world, and the bridge then subscribes to nothing.
+  // A world that declares no datum still publishes on this topic, with its
+  // origin left at zero; the adapter is what refuses that fix, because the
+  // sensor message carries no way to say the datum was never set.
+  std::string navsat_topic;
 };
 
 // Wires gz-transport subscriptions/publisher to a BridgeConnection. The node
@@ -45,6 +52,7 @@ class BridgeNode {
  private:
   // gz-transport member-function callbacks (run on gz reader threads).
   void OnOdometry(const gz::msgs::Odometry &msg);
+  void OnNavSat(const gz::msgs::NavSat &msg);
   // Per-topic thunks (gz-transport::Subscribe needs a fixed-arity callback)
   // that each forward to the shared OnImage body with their camera_id.
   void OnFpvImage(const gz::msgs::Image &msg);
