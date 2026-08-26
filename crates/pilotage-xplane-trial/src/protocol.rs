@@ -238,7 +238,10 @@ fn digest(value: &str, field: &str) -> Result<Digest, XPlaneTrialError> {
         return invalid(format!("{field} has an invalid length"));
     }
     let mut bytes = [0_u8; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    // Fixed-size chunks: the pair is an array rather than a slice, so the two
+    // indexes below cannot be out of bounds and no bounds check is emitted.
+    let (pairs, _) = value.as_bytes().as_chunks::<2>();
+    for (index, pair) in pairs.iter().enumerate() {
         bytes[index] = (nibble(pair[0], field)? << 4) | nibble(pair[1], field)?;
     }
     Ok(Digest::from_bytes(bytes))
@@ -260,7 +263,8 @@ fn hex_text(value: &str, field: &str) -> Result<String, XPlaneTrialError> {
         return invalid(format!("{field} has an invalid length"));
     }
     let mut bytes = Vec::with_capacity(value.len() / 2);
-    for pair in value.as_bytes().chunks_exact(2) {
+    let (pairs, _) = value.as_bytes().as_chunks::<2>();
+    for pair in pairs {
         bytes.push((nibble(pair[0], field)? << 4) | nibble(pair[1], field)?);
     }
     String::from_utf8(bytes).map_err(|_| invalid_value(format!("{field} is not UTF-8")))

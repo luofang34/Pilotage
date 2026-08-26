@@ -1,5 +1,5 @@
 {
-  "originHash" : "7061a1858116e023d33ee736e771c3ffed7d463611401d244df9776e79738c95",
+  "originHash" : "14cae5a34f99cb5983b70c5b07fb2e1301590872de817b43c96f8dd6d07dfa66",
   "pins" : [
     {
       "identity" : "indicateappledisplay",
@@ -7,15 +7,6 @@
       "location" : "https://github.com/luofang34/IndicateAppleDisplay.git",
       "state" : {
         "revision" : "ca5fe14f22798fbee2d184970b928b04736f4083"
-      }
-    },
-    {
-      "identity" : "maplibre-gl-native-distribution",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/maplibre/maplibre-gl-native-distribution",
-      "state" : {
-        "revision" : "5ee345ca5d65238a6fce29bba87816204be7df20",
-        "version" : "6.28.0"
       }
     }
   ],
