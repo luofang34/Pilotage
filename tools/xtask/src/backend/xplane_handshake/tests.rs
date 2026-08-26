@@ -1,0 +1,146 @@
+//! What the handshake says, and what it refuses to say.
+
+#![allow(clippy::expect_used, clippy::panic)]
+
+use std::os::unix::fs::PermissionsExt as _;
+
+use pilotage_trial::Digest;
+use pilotage_xplane_trial::VerifiedXPlaneIdentity;
+
+use super::{SimulatorModel, VERIFIER_ID, model_contract_digest, write_handshake};
+
+fn verified() -> VerifiedXPlaneIdentity {
+    let mut identity = VerifiedXPlaneIdentity {
+        protocol_version: 2,
+        xplane_version: 12_431,
+        sdk_version: 430,
+        host_application_id: 1,
+        trial_plugin_digest: Digest::from_bytes([1; 32]),
+        bridge_plugin_digest: Digest::from_bytes([2; 32]),
+        bridge_config_digest: Digest::from_bytes([3; 32]),
+        aircraft_digest: Digest::from_bytes([4; 32]),
+        simulator_model_digest: Digest::from_bytes([5; 32]),
+        trial_source_build_id: "1c52f8e7".to_owned(),
+        binding_digest: Digest::from_bytes([0; 32]),
+    };
+    identity.refresh_binding_digest();
+    identity
+}
+
+#[test]
+fn the_document_names_the_verifier_aviate_checks_for() {
+    // Aviate refuses a handshake issued by anyone else, so this string is a
+    // contract with another repository rather than a label.
+    let dir = tempdir();
+    let path = write_handshake(
+        &verified(),
+        &model(verified().aircraft_digest.to_string()),
+        &dir,
+    )
+    .expect("write");
+    let text = std::fs::read_to_string(&path).expect("read back");
+    assert!(
+        text.contains(VERIFIER_ID),
+        "the document does not name its verifier: {text}"
+    );
+    assert!(text.contains("xplane12-laminar-alia250"));
+    assert!(text.contains("lane_order"));
+    assert!(text.contains("sample_rate_hz = 100"));
+}
+
+#[test]
+fn the_document_is_readable_only_by_this_account() {
+    // The flight controller refuses a handshake any other account could have
+    // read or substituted, and it is right to: the document is what says the
+    // run flew the simulator it claims.
+    let dir = tempdir();
+    let path = write_handshake(
+        &verified(),
+        &model(verified().aircraft_digest.to_string()),
+        &dir,
+    )
+    .expect("write");
+    let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+    assert_eq!(mode & 0o077, 0, "group or other can reach it: {mode:o}");
+}
+
+#[test]
+fn a_second_launch_does_not_inherit_the_first_ones_document() {
+    // A stale file would be claimed instead of the fresh one, binding the run
+    // to a simulator that has since stopped.
+    let dir = tempdir();
+    let first = write_handshake(
+        &verified(),
+        &model(verified().aircraft_digest.to_string()),
+        &dir,
+    )
+    .expect("first");
+    std::fs::write(&first, "stale").expect("overwrite with a stale document");
+    let second = write_handshake(
+        &verified(),
+        &model(verified().aircraft_digest.to_string()),
+        &dir,
+    )
+    .expect("second");
+    assert_eq!(first, second);
+    let text = std::fs::read_to_string(&second).expect("read back");
+    assert!(!text.contains("stale"), "the stale document survived");
+}
+
+#[test]
+fn the_model_contract_follows_the_artifacts_that_decide_the_vehicle() {
+    // Binding every run to one declared model however the aircraft or its
+    // configuration changed would make the field decoration.
+    let aircraft = Digest::from_bytes([7; 32]);
+    let config = Digest::from_bytes([8; 32]);
+    let base = model_contract_digest(aircraft, config, "alia250");
+
+    assert_ne!(
+        base,
+        model_contract_digest(Digest::from_bytes([9; 32]), config, "alia250")
+    );
+    assert_ne!(
+        base,
+        model_contract_digest(aircraft, Digest::from_bytes([9; 32]), "alia250")
+    );
+    assert_ne!(base, model_contract_digest(aircraft, config, "cessna172"));
+    assert_eq!(base, model_contract_digest(aircraft, config, "alia250"));
+    // Zero is refused by the verifier, so a derivation that could produce it
+    // would fail the run rather than bind it.
+    assert!(!base.is_zero());
+}
+
+/// The Alia's own model, as its preset declares it.
+fn model(aircraft_file_digest: String) -> SimulatorModel {
+    SimulatorModel {
+        simulator_id: "xplane-12".to_owned(),
+        aircraft_id: "xplane12-laminar-alia250".to_owned(),
+        aircraft_file_digest,
+        bridge_protocol: "mavlink-hil-tcp-v1".to_owned(),
+        motor_count: 4,
+        sample_rate_hz: 100,
+        lane_order: [0, 2, 1, 3],
+    }
+}
+
+#[test]
+fn an_aircraft_the_model_was_not_written_for_is_refused() {
+    // The reader verified which aircraft is loaded; the model states which one
+    // it describes. If they differ the run is not the run the model describes,
+    // and writing the document anyway would say it was.
+    let dir = tempdir();
+    let wrong = model(Digest::from_bytes([9; 32]).to_string());
+    let refused = write_handshake(&verified(), &wrong, &dir);
+    assert!(refused.is_err(), "a mismatched aircraft was accepted");
+}
+
+fn tempdir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "pilotage-handshake-test-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("scratch directory");
+    dir
+}

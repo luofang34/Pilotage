@@ -3895,8 +3895,13 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "pilotage-trial",
+ "pilotage-xplane-trial",
+ "serde",
+ "sha2 0.10.9",
  "thiserror",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

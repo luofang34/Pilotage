@@ -14,6 +14,7 @@ pub(crate) mod aviate_gz;
 mod aviate_xplane;
 pub(crate) mod px4_gz;
 mod px4_xplane;
+mod xplane_handshake;
 mod xplane_simulator;
 
 /// Everything a backend may need to plan its stages.

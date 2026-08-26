@@ -95,11 +95,24 @@ impl SimBackend for AviateXPlane {
                        in the Aviate checkout",
             });
         }
+        // Aviate binds every Alia run to a verified runtime and will not start
+        // without the document that names it. Producing it blocks until the
+        // trial plugin inside X-Plane states its own identity, which is the
+        // point: the run is bound to the simulator that is actually running,
+        // not to one a launcher claimed was.
+        let handshake = super::xplane_handshake::produce_blocking(
+            &root,
+            &aviate.join("presets/alia250-xplane.toml"),
+            &ctx.log_dir,
+        )?;
         Ok(vec![Stage {
             spec: ProcessSpec {
                 name: "flight-controller",
                 program: binary.display().to_string(),
-                args: vec![],
+                args: vec![
+                    "--runtime-handshake".to_owned(),
+                    handshake.display().to_string(),
+                ],
                 cwd: Some(aviate),
                 env: vec![("RUST_LOG".to_owned(), "info".to_owned())],
                 remove_env: vec![],
