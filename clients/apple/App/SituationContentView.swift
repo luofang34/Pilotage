@@ -30,6 +30,23 @@ struct SituationContentView: View {
     @State private var selectedMapModeID = MapMode.available.first?.id ?? "terrain"
     @Namespace private var mapControlNamespace
     @StateObject private var ownship = OwnshipModel()
+    /// Ground speed from the same lane as the fix, for the mark's vector.
+    @State private var vehicleGroundSpeed: Double?
+
+    /// The batch the map draws, with the mark the reader should actually see.
+    ///
+    /// The session's own ownship is a surveillance return — the aircraft's shadow
+    /// coming back off a receiver. A vehicle under this operator's control reports
+    /// itself directly and outranks it, and failing both this device's own receiver
+    /// answers, so the reader is never left with an empty map when something knows
+    /// where they are.
+    private var mapDisplayWithOwnship: DisplayBatch? {
+        guard var batch = model.mapDisplay else { return nil }
+        if let drawn = ownship.drawable(groundSpeedMetresPerSecond: vehicleGroundSpeed) {
+            batch.ownship = drawn
+        }
+        return batch
+    }
     @StateObject private var missionPlan = MissionPlanModel()
 
     var body: some View {
@@ -150,7 +167,7 @@ struct SituationContentView: View {
             // leaves a black band above and below that reads as a broken screen rather
             // than as a margin. The controls above it keep the inset.
             SituationMap(
-                batch: model.mapDisplay,
+                batch: mapDisplayWithOwnship,
                 onFeatureTapped: model.selectTraffic,
                 onCameraChanged: { camera = $0 },
                 onReady: { mapCommands = $0 },
@@ -225,6 +242,13 @@ struct SituationContentView: View {
             }
             model.onOwnship = { [ownship] reported in
                 ownship.observeAircraft(reported.map(OwnshipFix.init))
+            }
+            // The vehicle's own position comes over the control link, not the
+            // situation session: that session carries surveillance, weather and
+            // terrain, and an aircraft this operator is flying is in none of them.
+            hostLink.onVehicleFix = { [ownship] vehicle in
+                ownship.observeVehicle(vehicle)
+                vehicleGroundSpeed = vehicle.groundSpeedMetresPerSecond
             }
             ownship.startIfPermitted()
             model.refreshEvidence()

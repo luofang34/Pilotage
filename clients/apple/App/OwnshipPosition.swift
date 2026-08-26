@@ -40,6 +40,23 @@ struct OwnshipFix: Equatable, Sendable {
     }
 }
 
+/// Where the vehicle says it is, as the link resolved it.
+///
+/// Metres per second here, knots at the display edge: the wire states SI and
+/// the conversion belongs where the reader is, not spread through the middle.
+struct VehicleFix: Equatable, Sendable {
+    let latitudeDegrees: Double
+    let longitudeDegrees: Double
+    /// Where the nose points, true, when the lane states an attitude.
+    let headingDegrees: Double?
+    /// Track over the ground, when the vehicle is moving fast enough for one.
+    let courseDegrees: Double?
+    /// Speed over the ground alongside `courseDegrees`.
+    let groundSpeedMetresPerSecond: Double?
+    /// Whether a simulator's oracle supplied it rather than the estimator.
+    let fromSimulator: Bool
+}
+
 /// Whether the client may ask this device for a position, and what it answered.
 enum DeviceLocationAuthorisation: Equatable, Sendable {
     /// The reader has not been asked.
@@ -202,6 +219,11 @@ final class OwnshipModel: ObservableObject {
     private let compass = DeviceHeadingProvider()
     private var deviceFix: OwnshipFix?
     private var aircraftFix: OwnshipFix?
+    /// The vehicle's own telemetry. Ranked above the surveillance shadow: a
+    /// vehicle under this operator's control reports itself directly, and the
+    /// shadow is a second-hand return of the same aircraft.
+    private var vehicleFix: OwnshipFix?
+    private var vehicleHeading: HeadingFix?
     private var deviceHeading: HeadingFix?
     private var aircraftHeading: HeadingFix?
 
@@ -222,10 +244,36 @@ final class OwnshipModel: ObservableObject {
         }
     }
 
+    /// Take the vehicle's own report of where it is and which way it points.
+    ///
+    /// Position and heading arrive together because they come from one lane. Splitting
+    /// them across two calls would let a position from the simulator's oracle sit under a
+    /// heading from the estimator, and nothing on the mark could say so.
+    func observeVehicle(_ vehicle: VehicleFix?) {
+        guard let vehicle else {
+            vehicleFix = nil
+            vehicleHeading = nil
+            resolve()
+            return
+        }
+        vehicleFix = OwnshipFix(
+            latitudeDegrees: vehicle.latitudeDegrees,
+            longitudeDegrees: vehicle.longitudeDegrees,
+            courseDegrees: vehicle.courseDegrees,
+            source: .aircraft
+        )
+        // A heading the lane did not state is not replaced by the course: they are
+        // different quantities, and a crabbing aircraft would be drawn pointing the way
+        // it travels rather than the way it faces.
+        vehicleHeading = vehicle.headingDegrees.map {
+            HeadingFix(trueDegrees: $0, source: .aircraft)
+        }
+        resolve()
+    }
+
     /// Take a heading reported by a panel or receiver in the aircraft.
     ///
-    /// Nothing calls this yet. A GDL 90 source carries one, and it beats a tablet that may
-    /// be lying on a seat.
+    /// A GDL 90 source carries one, and it beats a tablet that may be lying on a seat.
     func observeAircraftHeading(_ heading: HeadingFix?) {
         aircraftHeading = heading
         resolveHeading()
@@ -237,9 +285,40 @@ final class OwnshipModel: ObservableObject {
         let course = fix?.courseDegrees.map {
             HeadingFix(trueDegrees: $0, source: .courseOverGround)
         }
-        let next = aircraftHeading ?? deviceHeading ?? course
+        let next = vehicleHeading ?? aircraftHeading ?? deviceHeading ?? course
         guard next != heading else { return }
         heading = next
+    }
+
+    /// The resolved fix as the map draws it, or nothing when no source has one.
+    ///
+    /// Ground speed rides with the course and is converted at this edge, because the
+    /// display states knots and every lane below states metres per second.
+    ///
+    /// The heading is passed only when it is TRUE. A tablet's magnetometer reading is a
+    /// magnetic one, and a mark turned by it would point somewhere the vehicle is not;
+    /// the drawing side refuses a non-true reference, so this states the reference
+    /// rather than deciding for it.
+    func drawable(groundSpeedMetresPerSecond: Double?) -> DisplayOwnship? {
+        guard let fix else { return nil }
+        return DisplayOwnship(
+            coordinate: DisplayCoordinate(
+                latitudeDeg: fix.latitudeDegrees,
+                longitudeDeg: fix.longitudeDegrees
+            ),
+            courseDeg: fix.courseDegrees,
+            groundSpeedKt: groundSpeedMetresPerSecond.map { $0 * 1.943_844_49 },
+            headingDeg: heading.map(\.trueDegrees),
+            headingReference: heading.map {
+                switch $0.source {
+                case .deviceMagnetic: DisplayHeadingReference.magneticNorth
+                default: DisplayHeadingReference.trueNorth
+                }
+            },
+            altitudeFt: nil,
+            producerInstanceId: 0,
+            snapshotRevision: 0
+        )
     }
 
     /// Begin asking this device for a position.
@@ -285,7 +364,9 @@ final class OwnshipModel: ObservableObject {
     }
 
     private func resolve() {
-        let next = aircraftFix ?? deviceFix
+        // The vehicle's own report, then its surveillance shadow, then this
+        // tablet. A reader without any of the three still gets a map.
+        let next = vehicleFix ?? aircraftFix ?? deviceFix
         guard next != fix else { return }
         fix = next
         resolveHeading()

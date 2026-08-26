@@ -123,6 +123,13 @@ final class HostLinkModel: ObservableObject {
     let panels: [PanelChoice]
 
     private var link: LinkSession?
+    /// Where the vehicle says it is, for whatever draws it.
+    ///
+    /// The link decodes nothing and derives nothing; this hands on what the
+    /// session already resolved, so the rule for which lane wins and when a
+    /// direction may be drawn lives in one place rather than two.
+    var onVehicleFix: ((VehicleFix) -> Void)?
+
     private var composition: PilotageInstrumentComposition?
     private var displays: [UInt32: PanelDisplay] = [:]
     private var verified: VerifiedInstrumentRuntime?
@@ -515,6 +522,27 @@ final class HostLinkModel: ObservableObject {
             if action == 1, accepted, LaunchRequest.autoClimb {
                 climbUntil = Date().addingTimeInterval(15)
             }
+        case .vehicleFix(
+            let latitudeDeg,
+            let longitudeDeg,
+            let headingDeg,
+            let courseDeg,
+            let groundSpeedMps,
+            let fromSimulator
+        ):
+            // The map's own session carries surveillance, weather and terrain.
+            // A vehicle this operator is flying is in none of those, so its
+            // position reaches the mark through here or not at all.
+            onVehicleFix?(
+                VehicleFix(
+                    latitudeDegrees: latitudeDeg,
+                    longitudeDegrees: longitudeDeg,
+                    headingDegrees: headingDeg,
+                    courseDegrees: courseDeg,
+                    groundSpeedMetresPerSecond: groundSpeedMps,
+                    fromSimulator: fromSimulator
+                )
+            )
         case .stats(
             let telemetry,
             let stateFrames,

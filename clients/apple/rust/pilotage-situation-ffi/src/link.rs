@@ -15,6 +15,7 @@ mod events;
 mod observer;
 mod pad;
 mod records;
+mod vehicle_fix;
 #[cfg(test)]
 mod tests;
 
