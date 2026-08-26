@@ -320,7 +320,53 @@ pub fn parse_gamepad_identity(id: &str) -> DeviceIdentity {
     if let Some(identity) = parse_firefox_identity(id) {
         return identity;
     }
+    if let Some(identity) = parse_named_identity(id) {
+        return identity;
+    }
     DeviceIdentity::WILDCARD
+}
+
+/// Controllers a client can only name.
+///
+/// The browser hands over a string carrying the USB identity, which is what
+/// this registry is keyed on. Apple's GameController framework exposes a
+/// product NAME and no vendor/product pair at all, so a client built on it has
+/// nothing the key can match and every pad would fall to the wildcard — the
+/// generic mapping, whichever pad the reader is actually holding.
+///
+/// These are the published USB identities of the pads this repo carries a
+/// profile for, so the same pad in the same hand is packed the same way
+/// wherever it is plugged in. A pad that is not listed still falls to the
+/// wildcard, which is the honest answer for a device nobody wrote a profile
+/// for.
+const NAMED_IDENTITIES: [(&str, DeviceIdentity); 2] = [
+    (
+        "dualsense",
+        DeviceIdentity {
+            vendor_id: 0x054c,
+            product_id: 0x0ce6,
+        },
+    ),
+    (
+        "radiomaster pocket",
+        DeviceIdentity {
+            vendor_id: 0x1209,
+            product_id: 0x4f54,
+        },
+    ),
+];
+
+/// Matches a product name against the pads named above.
+///
+/// Substring rather than equality: the same pad is reported as "DualSense",
+/// "DualSense Wireless Controller" and "Sony DualSense" by different layers,
+/// and all three name one device.
+fn parse_named_identity(id: &str) -> Option<DeviceIdentity> {
+    let lowered = id.to_ascii_lowercase();
+    NAMED_IDENTITIES
+        .iter()
+        .find(|(name, _)| lowered.contains(name))
+        .map(|(_, identity)| *identity)
 }
 
 fn parse_chromium_identity(id: &str) -> Option<DeviceIdentity> {
@@ -357,21 +403,45 @@ mod apple_identity_tests {
     use super::{DeviceIdentity, parse_gamepad_identity};
 
     #[test]
-    fn a_pad_named_without_its_usb_identity_resolves_to_no_device() {
+    fn a_pad_can_be_recognised_by_name_when_no_usb_identity_is_offered() {
         // The browser hands over a string carrying the USB identity, and the
         // registry keys on that. The Apple client has no such string to give:
-        // GameController reports a vendor NAME and no vendor/product pair, so
-        // whatever it sends falls through both parsers to the wildcard and the
-        // reader gets the generic mapping rather than their pad's own.
-        for named in [
-            "DualSense Wireless Controller",
-            "Xbox Wireless Controller",
-            "gamepad",
-        ] {
+        // GameController reports a product NAME and no vendor/product pair.
+        // Without a name lookup every pad on an iPad falls to the wildcard and
+        // the reader gets the generic packing whichever pad they hold.
+        // A pad this repo carries a profile for is now recognised by name, so
+        // the reader gets the law written for their pad rather than the
+        // generic packing.
+        assert_eq!(
+            parse_gamepad_identity("DualSense Wireless Controller"),
+            DeviceIdentity {
+                vendor_id: 0x054c,
+                product_id: 0x0ce6
+            },
+        );
+        assert_eq!(
+            parse_gamepad_identity("Sony DualSense"),
+            DeviceIdentity {
+                vendor_id: 0x054c,
+                product_id: 0x0ce6
+            },
+            "the same pad under another of its names"
+        );
+        assert_eq!(
+            parse_gamepad_identity("RadioMaster Pocket"),
+            DeviceIdentity {
+                vendor_id: 0x1209,
+                product_id: 0x4f54
+            },
+        );
+
+        // A pad nobody wrote a profile for still falls to the wildcard, which
+        // is the honest answer rather than a guess at its packing.
+        for unknown in ["Xbox Wireless Controller", "gamepad", ""] {
             assert_eq!(
-                parse_gamepad_identity(named),
+                parse_gamepad_identity(unknown),
                 DeviceIdentity::WILDCARD,
-                "{named} resolved to a device identity after all"
+                "{unknown} resolved to an identity nobody declared"
             );
         }
 

@@ -621,14 +621,14 @@ final class HostLinkModel: ObservableObject {
     private func watchControllers() {
         controllerAttached = GCController.controllers().contains { $0.extendedGamepad != nil }
         if let pad = GCController.controllers().first(where: { $0.extendedGamepad != nil }) {
-            selectPad(vendorName: pad.vendorName)
+            selectPad(vendorName: padIdentity(pad))
         }
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect, object: nil, queue: .main
         ) { [weak self] note in
             // Only the name crosses the isolation hop; the controller
             // object itself stays on the posting side.
-            let vendorName = (note.object as? GCController)?.vendorName
+            let vendorName = (note.object as? GCController).map(padIdentity)
             Task { @MainActor in
                 self?.controllerAttached = true
                 self?.selectPad(vendorName: vendorName)
