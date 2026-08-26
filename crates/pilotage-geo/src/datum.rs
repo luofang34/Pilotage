@@ -388,14 +388,31 @@ impl GeodeticPosition {
     ///
     /// The same [`GeoError`] variants [`Self::new`] raises.
     pub fn validate(&self) -> Result<(), GeoError> {
-        Self::new(
+        self.normalized().map(|_| ())
+    }
+
+    /// The same re-check as [`Self::validate`], and the value the constructor
+    /// would have produced.
+    ///
+    /// A value assembled by setting fields keeps whatever longitude it was
+    /// given; the constructor wraps longitude into `[-180, 180)`. A caller
+    /// that re-checks such a value and then reads its own copy publishes the
+    /// unwrapped number, so the normalization the constructor performs is
+    /// returned here rather than discarded.
+    ///
+    /// # Errors
+    ///
+    /// The same [`GeoError`] variants [`Self::new`] raises.
+    pub fn normalized(&self) -> Result<Self, GeoError> {
+        let position = Self::new(
             self.latitude_deg,
             self.longitude_deg,
             self.horizontal_datum,
             self.realization,
             self.vertical,
-        )
-        .and_then(|_| self.vertical.validate())
+        )?;
+        self.vertical.validate()?;
+        Ok(position)
     }
 
     /// Whether this position lies on the anti-meridian (±180°), where longitude

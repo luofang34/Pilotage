@@ -240,3 +240,165 @@ fn the_simulator_separation_cannot_ride_an_operational_role() {
         "the oracle's own separation rides the oracle's own role"
     );
 }
+
+/// The typed value has public fields, so a producer can assemble one that
+/// the constructor would have normalized. Re-checking such a value and then
+/// publishing the producer's own copy puts an unwrapped longitude on the
+/// wire, and the readers disagree about it: one wraps 200 to -160 and draws
+/// a vehicle, the other refuses the whole fix and draws none. The mapping
+/// sends what the constructor would have produced.
+#[test]
+fn an_assembled_position_reaches_the_wire_normalized() {
+    let vertical = pilotage_geo::VerticalPosition::new(
+        400.0,
+        pilotage_geo::VerticalDatum::Ellipsoid,
+        pilotage_geo::GeoidModelId::UNDECLARED,
+        pilotage_geo::TerrainRefId::UNDECLARED,
+        pilotage_geo::BaroSettingId::UNDECLARED,
+        pilotage_geo::LocalOriginId::UNDECLARED,
+    )
+    .expect("an ellipsoidal height names no geoid");
+    // Assembled, not constructed: 200 degrees east is 160 degrees west.
+    let position = pilotage_geo::GeodeticPosition {
+        latitude_deg: 47.0,
+        longitude_deg: 200.0,
+        horizontal_datum: pilotage_geo::HorizontalDatum::Wgs84,
+        realization: pilotage_geo::DatumRealizationId::UNDECLARED,
+        vertical,
+    };
+    let truth = super::super::sim_truth_to_wire(SimTruthSample {
+        geodetic: Some(pilotage_adapter_api::GeodeticFixSample {
+            position,
+            quality: pilotage_geo::PositionQuality {
+                horizontal_mm: 0,
+                vertical_mm: 0,
+            },
+            stamp: truth_stamp(),
+        }),
+        quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+        pos_ned_m: [0.0; 3],
+        vel_ned_mps: [0.0; 3],
+        valid_flags: 0,
+        stamp: truth_stamp(),
+    });
+    let fix = truth
+        .geodetic
+        .expect("a normalizable position is publishable");
+    assert!(
+        (fix.longitude_deg - (-160.0)).abs() < 1e-9,
+        "the wire carries the wrapped longitude, not the assembled one: {}",
+        fix.longitude_deg
+    );
+}
+
+/// The estimate lane carries the estimator's own solution. A fix stamped
+/// with another role is in the wrong lane, and a reader that gates on the
+/// role would show nothing while the producer believed it had published a
+/// position. The producer refuses it too, on the side that can name it.
+#[test]
+fn the_estimate_lane_refuses_a_fix_from_another_role() {
+    let vertical = pilotage_geo::VerticalPosition::new(
+        400.0,
+        pilotage_geo::VerticalDatum::Ellipsoid,
+        pilotage_geo::GeoidModelId::UNDECLARED,
+        pilotage_geo::TerrainRefId::UNDECLARED,
+        pilotage_geo::BaroSettingId::UNDECLARED,
+        pilotage_geo::LocalOriginId::UNDECLARED,
+    )
+    .expect("an ellipsoidal height names no geoid");
+    let position = pilotage_geo::GeodeticPosition::new(
+        47.0,
+        8.0,
+        pilotage_geo::HorizontalDatum::Wgs84,
+        pilotage_geo::DatumRealizationId::UNDECLARED,
+        vertical,
+    )
+    .expect("WGS-84 needs no realization");
+    let sample = |role| AvionicsSample {
+        geodetic: Some(pilotage_adapter_api::GeodeticFixSample {
+            position,
+            quality: pilotage_geo::PositionQuality {
+                horizontal_mm: 0,
+                vertical_mm: 0,
+            },
+            stamp: MeasurementStamp {
+                role,
+                ..truth_stamp()
+            },
+        }),
+        attitude: None,
+        kinematics: None,
+        baro: None,
+        estimator_status_stamp: None,
+        valid_flags: 0,
+        quality: 0,
+    };
+
+    let wrong = super::super::avionics_to_wire(sample(SourceRole::SimulationTruth));
+    assert!(
+        wrong.geodetic.is_none(),
+        "a truth-stamped fix is not the estimator's own solution"
+    );
+    assert!(wrong.geodetic_stamp.is_none());
+
+    let right = super::super::avionics_to_wire(sample(SourceRole::OperationalEstimate));
+    assert!(
+        right.geodetic.is_some(),
+        "the estimator's own fix rides the estimate lane"
+    );
+    assert!(right.geodetic_stamp.is_some());
+}
+
+/// The truth lane carries the oracle's own position. A fix under any other
+/// role is in the wrong lane, and a reader that gates on the role shows
+/// nothing while the producer believes it published a position.
+#[test]
+fn the_truth_lane_refuses_a_fix_from_another_role() {
+    let vertical = pilotage_geo::VerticalPosition::new(
+        400.0,
+        pilotage_geo::VerticalDatum::Ellipsoid,
+        pilotage_geo::GeoidModelId::UNDECLARED,
+        pilotage_geo::TerrainRefId::UNDECLARED,
+        pilotage_geo::BaroSettingId::UNDECLARED,
+        pilotage_geo::LocalOriginId::UNDECLARED,
+    )
+    .expect("an ellipsoidal height names no geoid");
+    let position = pilotage_geo::GeodeticPosition::new(
+        47.0,
+        8.0,
+        pilotage_geo::HorizontalDatum::Wgs84,
+        pilotage_geo::DatumRealizationId::UNDECLARED,
+        vertical,
+    )
+    .expect("WGS-84 needs no realization");
+    let sample = |role| SimTruthSample {
+        geodetic: Some(pilotage_adapter_api::GeodeticFixSample {
+            position,
+            quality: pilotage_geo::PositionQuality {
+                horizontal_mm: 0,
+                vertical_mm: 0,
+            },
+            stamp: MeasurementStamp {
+                role,
+                ..truth_stamp()
+            },
+        }),
+        quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+        pos_ned_m: [0.0; 3],
+        vel_ned_mps: [0.0; 3],
+        valid_flags: 0,
+        stamp: truth_stamp(),
+    };
+
+    let wrong = super::super::sim_truth_to_wire(sample(SourceRole::OperationalEstimate));
+    assert!(
+        wrong.geodetic.is_none(),
+        "an estimate-stamped fix is not the oracle's own position"
+    );
+
+    let right = super::super::sim_truth_to_wire(sample(SourceRole::SimulationTruth));
+    assert!(
+        right.geodetic.is_some(),
+        "the oracle's own fix rides the truth lane"
+    );
+}

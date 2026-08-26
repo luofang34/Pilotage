@@ -12,6 +12,10 @@ root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 datum="$root/crates/pilotage-geo/src/datum.rs"
 proto="$root/schemas/pilotage/v1/telemetry.proto"
 decoder="$root/clients/web/wire.js"
+# The browser reads telemetry through the wasm decoder, not through
+# wire.js. A field only the JavaScript decoder knows is a field the
+# client never sees, and no decode error says so.
+wasm_decoder="$root/clients/web-instruments/src/decode_envelope/groups.rs"
 mapper="$root/hosts/session-host/src/runtime/engine_actor/telemetry.rs"
 status=0
 
@@ -85,16 +89,25 @@ if grep -Fq 'GeodeticFix::default' "$mapper"; then
     echo "FORBIDDEN: an absent geodetic fix must not take a default" >&2
     status=1
 fi
-if ! grep -Fq 'sample.geodetic.and_then(geodetic_to_wire)' "$mapper"; then
-    echo "FORBIDDEN: a fix must reach the wire only through the mapping" >&2
+# Both lanes reach the wire through the one mapping that re-runs the
+# contract, and each gates on its own role first. Two call sites, so the
+# count is what is checked: a lane that stopped calling it would still
+# match a bare name.
+if [ "$(grep -c 'and_then(geodetic_to_wire)' "$mapper")" != "2" ]; then
+    echo "FORBIDDEN: each lane must reach the wire through the mapping, and only through it" >&2
     status=1
 fi
 
 # The mapping is the last place before the wire, and the typed value has
 # public fields, so a producer can assemble one the constructor would have
 # refused. The mapping re-runs the contract.
-if ! grep -Fq 'position.validate()' "$mapper"; then
-    echo "FORBIDDEN: the wire mapping must validate the position it sends" >&2
+# `validate` discards the value the constructor would have produced, and
+# the constructor is what wraps a longitude into range. The mapping has to
+# send that value, or the readers disagree about the same bytes: one wraps
+# 200 degrees east to 160 west and draws a vehicle, the other refuses the
+# fix and draws none.
+if ! grep -Fq 'position.normalized()' "$mapper"; then
+    echo "FORBIDDEN: the wire mapping must send the normalized position" >&2
     status=1
 fi
 
@@ -107,9 +120,35 @@ if ! grep -Fq 'SIMULATOR_GEOID_MODEL_ID' "$mapper" \
 fi
 
 # Each lane gates its fix on its own role: a position is where a
-# mislabelled lane actually draws.
+# mislabelled lane actually draws. Both decoders gate, and the producer
+# gates too, on the side that can name the offending source.
 if ! grep -Fq 'geodeticStamp.role !== 1' "$decoder"; then
     echo "FORBIDDEN: the estimate lane must gate its fix on the estimate role" >&2
+    status=1
+fi
+if ! grep -Fq 'SourceRole::OperationalEstimate' "$wasm_decoder"; then
+    echo "FORBIDDEN: the decoder the client runs must gate the estimate lane" >&2
+    status=1
+fi
+if ! grep -Fq 'fix.stamp.role == SourceRole::OperationalEstimate' "$mapper"; then
+    echo "FORBIDDEN: the estimate lane must refuse another role at the producer" >&2
+    status=1
+fi
+if ! grep -Fq 'fix.stamp.role == SourceRole::SimulationTruth' "$mapper"; then
+    echo "FORBIDDEN: the truth lane must refuse another role at the producer" >&2
+    status=1
+fi
+
+# Every lane the wire carries a fix on must be surfaced by the decoder the
+# client runs. A lane only wire.js knows reaches no reader.
+for lane in geodetic geodetic_stamp; do
+    if ! grep -Fq "$lane," "$wasm_decoder"; then
+        echo "FORBIDDEN: the decoder the client runs must surface $lane" >&2
+        status=1
+    fi
+done
+if ! grep -Fq 'fix.longitude_deg < 180.0' "$wasm_decoder"; then
+    echo "FORBIDDEN: the decoder the client runs must refuse an unnormalized longitude" >&2
     status=1
 fi
 

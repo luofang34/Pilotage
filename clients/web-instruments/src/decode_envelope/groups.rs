@@ -59,6 +59,11 @@ pub(super) struct Avionics {
     /// its stamp — an absent measurement is never a zero reading.
     baro_alt_m: Option<f32>,
     baro_stamp: Option<Stamp>,
+    /// The estimator's own fix on the Earth. It advances independently of
+    /// the kinematics group, so it carries its own stamp and is
+    /// unconsumable without one.
+    geodetic: Option<GeodeticFix>,
+    geodetic_stamp: Option<Stamp>,
 }
 
 /// Simulation-truth oracle sample in the browser's shape: the simulator's
@@ -119,6 +124,14 @@ fn geodetic_message(fix: wire::GeodeticFix) -> Option<GeodeticFix> {
         LocalOriginId(fix.local_origin),
     )
     .ok()?;
+    // The constructor wraps a longitude outside [-180, 180) rather than
+    // refusing it. The wire contract says the producer sends a normalized
+    // value, so a longitude that needs wrapping is a producer that did not
+    // keep the contract. Wrapping it here would draw a vehicle a full turn
+    // of the Earth from where the other decoder draws nothing.
+    if !(fix.longitude_deg >= -180.0 && fix.longitude_deg < 180.0) {
+        return None;
+    }
     let position = GeodeticPosition::new(
         fix.latitude_deg,
         fix.longitude_deg,
@@ -295,7 +308,21 @@ pub(super) fn avionics_message(state: wire::AvionicsState) -> Avionics {
         pos_ned: [state.pos_n_m, state.pos_e_m, state.pos_d_m],
         vel_ned: [state.vel_n_mps, state.vel_e_mps, state.vel_d_mps],
     });
+    // Exact-role gate: a fix stamped with any other role is in the wrong
+    // lane, and a simulator oracle's position read as the estimator's own
+    // solution is exactly the substitution the roles exist to stop.
+    let estimate_role = state
+        .geodetic_stamp
+        .as_ref()
+        .is_some_and(|stamp| stamp.role == wire::SourceRole::OperationalEstimate as i32);
+    let geodetic_stamp = state.geodetic_stamp.map(stamp_message);
+    let geodetic = state
+        .geodetic
+        .filter(|_| estimate_role)
+        .and_then(geodetic_message);
     Avionics {
+        geodetic,
+        geodetic_stamp,
         quat: attitude.map(|attitude| attitude.quat),
         rates: attitude.map(|attitude| attitude.rates),
         pos_ned: kinematics.map(|kinematics| kinematics.pos_ned),
