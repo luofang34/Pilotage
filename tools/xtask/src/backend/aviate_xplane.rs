@@ -132,9 +132,9 @@ impl SimBackend for AviateXPlane {
         &self,
         ctx: &SessionContext,
         stage_name: &str,
-    ) -> Result<(), XtaskError> {
+    ) -> Option<Box<dyn FnOnce() -> Result<(), XtaskError> + Send>> {
         if stage_name != "flight-controller" {
-            return Ok(());
+            return None;
         }
         // The flight controller CLAIMS its handshake by deleting it, so the
         // document the plan wrote is gone by the time a reset restarts it. A
@@ -142,13 +142,16 @@ impl SimBackend for AviateXPlane {
         // Re-verifying rather than re-writing is the point: the restarted
         // controller is bound to the simulator that is running NOW, which may
         // not be the one the first start verified.
-        let root = xplane_root()?;
-        super::xplane_handshake::produce_blocking(
-            &root,
-            &aviate_dir(&ctx.repo_root).join("presets/alia250-xplane.toml"),
-            &ctx.log_dir,
-        )?;
-        Ok(())
+        //
+        // The paths are taken now and owned by the returned work, so it can
+        // wait for the simulator without holding the runtime thread.
+        let preset = aviate_dir(&ctx.repo_root).join("presets/alia250-xplane.toml");
+        let log_dir = ctx.log_dir.clone();
+        Some(Box::new(move || {
+            let root = xplane_root()?;
+            super::xplane_handshake::produce_blocking(&root, &preset, &log_dir)?;
+            Ok(())
+        }))
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {

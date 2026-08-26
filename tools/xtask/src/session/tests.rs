@@ -495,3 +495,103 @@ fn the_web_runtime_stamp_covers_the_transitive_dependency_closure() {
         );
     }
 }
+
+/// A backend whose restart work WAITS, the way re-issuing a handshake waits
+/// for a simulator to answer.
+struct WaitingRestartWork {
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl crate::backend::SimBackend for WaitingRestartWork {
+    fn name(&self) -> &'static str {
+        "test"
+    }
+    fn host_adapter(&self) -> &'static str {
+        "reference"
+    }
+    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    fn plan(&self, _ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
+        Ok(Vec::new())
+    }
+    fn stale_process_patterns(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+    fn reset(&self, _repo_root: &Path) -> Result<(), XtaskError> {
+        Ok(())
+    }
+    fn before_stage_restart(
+        &self,
+        _ctx: &SessionContext,
+        stage_name: &str,
+    ) -> Option<Box<dyn FnOnce() -> Result<(), XtaskError> + Send>> {
+        if stage_name != "flight-controller" {
+            return None;
+        }
+        let entered = self.entered.clone();
+        let release = self.release.lock().ok()?.take()?;
+        Some(Box::new(move || {
+            entered.send(()).ok();
+            // Returns when the test drops its sender, so nothing here outlives
+            // the test or depends on a duration.
+            release.recv().ok();
+            Ok(())
+        }))
+    }
+}
+
+#[tokio::test]
+async fn cancellation_while_re_establishing_a_restart_stops_the_session() {
+    // The work a restart puts back can WAIT: re-issuing a handshake waits for
+    // a simulator the operator may have just closed, which is the ordinary way
+    // a session ends. Performed on the runtime thread it stops the runtime
+    // polling, and the task watching for ctrl-c stops with it — so the
+    // operator presses it, nothing happens at all, and the reasonable next
+    // move is `kill -9`, which orphans the host and the viewer.
+    //
+    // Without the race this test does not fail, it HANGS.
+    let fifo = make_fifo("canw");
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let backend = WaitingRestartWork {
+        entered: entered_tx,
+        release: std::sync::Mutex::new(Some(release_rx)),
+    };
+    let dying = ProcessSpec {
+        name: "flight-controller",
+        program: "sh".to_owned(),
+        args: vec!["-c".to_owned(), "exit 7".to_owned()],
+        cwd: None,
+        env: Vec::new(),
+        remove_env: Vec::new(),
+        log_path: fifo.with_extension("dying.log"),
+    };
+    let child = ManagedChild::spawn(&dying).expect("dying stage spawns");
+    let mut children = vec![child];
+    let stages = vec![fifo_stage("flight-controller", &fifo, never(30))];
+    let (cancel_tx, mut cancel) = tokio::sync::watch::channel(false);
+    let trigger = std::thread::spawn(move || {
+        entered_rx
+            .recv_timeout(EVENT_TIMEOUT)
+            .expect("the restart work is reached");
+        cancel_tx.send(true).ok();
+    });
+
+    let outcome = supervise(
+        &mut children,
+        &stages,
+        &backend,
+        &test_context(),
+        &mut cancel,
+    )
+    .await;
+
+    assert!(
+        outcome.is_ok(),
+        "a stop requested while the restart work waited was not honoured"
+    );
+    trigger.join().expect("the restart work was reached");
+    drop(release_tx);
+}

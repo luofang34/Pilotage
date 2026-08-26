@@ -420,7 +420,31 @@ async fn supervise(
                     // The replacement inherits the plan's argv, so anything
                     // the dead process CONSUMED has to be put back before it
                     // starts or the restart hands it a path to nothing.
-                    backend.before_stage_restart(ctx, stage.spec.name)?;
+                    // Raced against cancellation: this can wait on a
+                    // simulator the operator has just closed, and a ctrl-c
+                    // that reaches nothing sends them to `kill -9`, which
+                    // orphans the host and the viewer.
+                    if let Some(work) = backend.before_stage_restart(ctx, stage.spec.name) {
+                        let mut task = tokio::task::spawn_blocking(work);
+                        tokio::select! {
+                            done = &mut task => match done {
+                                Ok(result) => result?,
+                                Err(error) => {
+                                    return Err(XtaskError::SimulatorCapability {
+                                        capability: "re-establishing what the restarted stage consumes",
+                                        detail: format!(
+                                            "the work did not finish: {error}. The replacement was not started."
+                                        ),
+                                    });
+                                }
+                            },
+                            _ = cancel.changed() => {
+                                print_line("");
+                                print_line("stopping the session...");
+                                return Ok(());
+                            }
+                        }
+                    }
                     // A replacement that spawns but never reports ready
                     // must not outlive the error return: it is not in
                     // `children`, so the caller's teardown would miss it.

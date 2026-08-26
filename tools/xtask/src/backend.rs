@@ -79,12 +79,21 @@ pub trait SimBackend {
     /// argv correct.
     ///
     /// Called before the replacement is spawned, never before the first start.
+    ///
+    /// The work is RETURNED rather than performed, because the caller drives a
+    /// current-thread runtime. Blocking here stops that runtime polling, and
+    /// the task watching for ctrl-c stops with it — so an operator pressing it
+    /// during a long wait gets nothing at all, tokio having already taken the
+    /// signal's default disposition away. Handed back as an owned unit, it can
+    /// run off the runtime thread and be raced against cancellation.
+    ///
+    /// `None` when this backend has nothing to re-establish for this stage.
     fn before_stage_restart(
         &self,
         _ctx: &SessionContext,
         _stage_name: &str,
-    ) -> Result<(), XtaskError> {
-        Ok(())
+    ) -> Option<Box<dyn FnOnce() -> Result<(), XtaskError> + Send>> {
+        None
     }
 
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
