@@ -14,6 +14,45 @@ use super::{
     claim_supervisor, resolve_manifest, start_stages, supervise, verify_listening_port,
     viewer_stage,
 };
+
+/// A backend that plans nothing and restores nothing.
+///
+/// `supervise` only needs one to ask whether a restarted stage has anything to
+/// put back; these tests are about the restart loop itself, so the honest
+/// stand-in is a backend for which the answer is no.
+struct NoRestartWork;
+
+impl crate::backend::SimBackend for NoRestartWork {
+    fn name(&self) -> &'static str {
+        "test"
+    }
+    fn host_adapter(&self) -> &'static str {
+        "reference"
+    }
+    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    fn plan(&self, _ctx: &SessionContext) -> Result<Vec<Stage>, crate::error::XtaskError> {
+        Ok(Vec::new())
+    }
+    fn stale_process_patterns(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+    fn reset(&self, _repo_root: &Path) -> Result<(), crate::error::XtaskError> {
+        Ok(())
+    }
+}
+
+fn test_context() -> SessionContext {
+    SessionContext {
+        repo_root: std::env::temp_dir(),
+        host_port: 0,
+        viewer_port: 0,
+        profile: crate::cli::Profile::Simulation,
+        log_dir: std::env::temp_dir(),
+        lan: false,
+    }
+}
 use crate::backend::{SessionContext, Stage};
 use crate::cli::Profile;
 use crate::error::XtaskError;
@@ -151,7 +190,14 @@ async fn failed_restart_kills_the_unready_replacement() {
     let stages = vec![fc];
     let (_keep, mut cancel) = tokio::sync::watch::channel(false);
 
-    let outcome = supervise(&mut children, &stages, &mut cancel).await;
+    let outcome = supervise(
+        &mut children,
+        &stages,
+        &NoRestartWork,
+        &test_context(),
+        &mut cancel,
+    )
+    .await;
 
     assert!(outcome.is_err(), "the replacement can never become ready");
     expect_event(&watch, "open", "replacement starts");
@@ -231,7 +277,14 @@ async fn cancellation_during_restart_kills_the_replacement() {
         assert_eq!(event, "eof");
     });
 
-    let outcome = supervise(&mut children, &stages, &mut cancel).await;
+    let outcome = supervise(
+        &mut children,
+        &stages,
+        &NoRestartWork,
+        &test_context(),
+        &mut cancel,
+    )
+    .await;
 
     assert!(outcome.is_ok(), "a requested stop during restart is clean");
     trigger.join().expect("replacement started, then died");

@@ -157,13 +157,57 @@ pub(crate) fn produce_blocking(
 
 /// Reads the simulator model the flight controller will check this against.
 fn read_model(path: &Path) -> Result<SimulatorModel, XtaskError> {
-    let text = std::fs::read_to_string(path).map_err(|source| XtaskError::MissingArtifact {
-        what: "the Alia X-Plane simulator model preset",
-        path: path.to_path_buf(),
-        hint: leaked(&source),
+    let text = std::fs::read_to_string(path).map_err(|source| XtaskError::Io {
+        context: "read the Alia X-Plane simulator model preset",
+        source,
     })?;
-    toml::from_str(&text)
-        .map_err(|source| verification_failed(format!("simulator model preset: {source}")))
+    let model: SimulatorModel = toml::from_str(&text)
+        .map_err(|source| verification_failed(format!("simulator model preset: {source}")))?;
+    model.validate()?;
+    Ok(model)
+}
+
+impl SimulatorModel {
+    /// Refuses a model that cannot describe a vehicle.
+    ///
+    /// These fields configure motor mixing on the far side of the handshake,
+    /// so a preset that states nothing useful must fail the launch rather than
+    /// be copied into a document the flight controller then trusts. The
+    /// build manifest beside this one is already validated this way; a file
+    /// that decides which motor is which deserves at least as much.
+    fn validate(&self) -> Result<(), XtaskError> {
+        let refuse = |detail: String| Err(verification_failed(detail));
+        if self.simulator_id.is_empty() || self.aircraft_id.is_empty() {
+            return refuse("the model names no simulator or no aircraft".to_owned());
+        }
+        if self.bridge_protocol.is_empty() {
+            return refuse("the model names no bridge protocol".to_owned());
+        }
+        if self.motor_count == 0 {
+            return refuse("the model states no motors".to_owned());
+        }
+        if self.sample_rate_hz == 0 {
+            return refuse("the model states no sample rate".to_owned());
+        }
+        // A permutation, not just four numbers: a repeated lane silently sends
+        // two motors the same command and leaves another unaddressed.
+        let mut lanes = self.lane_order;
+        lanes.sort_unstable();
+        if lanes != [0, 1, 2, 3] {
+            return refuse(format!(
+                "the model's lane order {:?} is not a permutation of the four lanes",
+                self.lane_order
+            ));
+        }
+        if usize::from(self.motor_count) != self.lane_order.len() {
+            return refuse(format!(
+                "the model states {} motors but orders {} lanes",
+                self.motor_count,
+                self.lane_order.len()
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// The aircraft the Alia backend flies, inside this X-Plane.
@@ -202,7 +246,11 @@ fn write_handshake(
 ) -> Result<PathBuf, XtaskError> {
     // The aircraft the reader verified must be the aircraft the model was
     // written for. Same file, or the run is not the run the model describes.
-    if verified.aircraft_digest.to_string() != model.aircraft_file_digest {
+    if !verified
+        .aircraft_digest
+        .to_string()
+        .eq_ignore_ascii_case(model.aircraft_file_digest.trim())
+    {
         return Err(verification_failed(format!(
             "the loaded aircraft is not the one the simulator model declares \
              (running {}, model {})",
@@ -227,10 +275,9 @@ fn write_handshake(
     let text = toml::to_string(&document)
         .map_err(|source| verification_failed(format!("cannot encode the handshake: {source}")))?;
 
-    std::fs::create_dir_all(out_dir).map_err(|source| XtaskError::MissingArtifact {
-        what: "the runtime handshake directory",
-        path: out_dir.to_path_buf(),
-        hint: leaked(&source),
+    std::fs::create_dir_all(out_dir).map_err(|source| XtaskError::Io {
+        context: "create the runtime handshake directory",
+        source,
     })?;
     let path = out_dir.join("runtime-handshake.toml");
     // A stale document from a previous launch would be claimed instead of
@@ -241,44 +288,33 @@ fn write_handshake(
         .create_new(true)
         .mode(0o600)
         .open(&path)
-        .map_err(|source| XtaskError::MissingArtifact {
-            what: "the runtime handshake",
-            path: path.clone(),
-            hint: leaked(&source),
+        .map_err(|source| XtaskError::Io {
+            context: "write the runtime handshake",
+            source,
         })?;
     file.write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
-        .map_err(|source| XtaskError::MissingArtifact {
-            what: "the runtime handshake",
-            path: path.clone(),
-            hint: leaked(&source),
+        .map_err(|source| XtaskError::Io {
+            context: "write the runtime handshake",
+            source,
         })?;
     Ok(path)
 }
 
 fn file_digest(path: &Path) -> Result<Digest, XtaskError> {
-    let bytes = std::fs::read(path).map_err(|source| XtaskError::MissingArtifact {
-        what: "an X-Plane runtime artifact",
-        path: path.to_path_buf(),
-        hint: leaked(&source),
+    let bytes = std::fs::read(path).map_err(|source| XtaskError::Io {
+        context: "read an X-Plane runtime artifact to digest it",
+        source,
     })?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(Digest::from_bytes(hasher.finalize().into()))
 }
 
-/// `MissingArtifact::hint` is a `&'static str`, and an I/O reason is not.
-/// Leaking one keeps the reason rather than discarding it for the type.
-fn leaked(source: &std::io::Error) -> &'static str {
-    Box::leak(source.to_string().into_boxed_str())
-}
-
 fn verification_failed(detail: String) -> XtaskError {
-    XtaskError::Usage {
-        message: format!(
-            "the running X-Plane could not be verified, so no runtime handshake was issued: \
-             {detail}"
-        ),
+    XtaskError::SimulatorCapability {
+        capability: "a verified X-Plane runtime identity",
+        detail,
     }
 }
 

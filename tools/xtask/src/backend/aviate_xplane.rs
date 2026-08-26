@@ -128,6 +128,29 @@ impl SimBackend for AviateXPlane {
         }])
     }
 
+    fn before_stage_restart(
+        &self,
+        ctx: &SessionContext,
+        stage_name: &str,
+    ) -> Result<(), XtaskError> {
+        if stage_name != "flight-controller" {
+            return Ok(());
+        }
+        // The flight controller CLAIMS its handshake by deleting it, so the
+        // document the plan wrote is gone by the time a reset restarts it. A
+        // replacement handed that path would find nothing and never come up.
+        // Re-verifying rather than re-writing is the point: the restarted
+        // controller is bound to the simulator that is running NOW, which may
+        // not be the one the first start verified.
+        let root = xplane_root()?;
+        super::xplane_handshake::produce_blocking(
+            &root,
+            &aviate_dir(&ctx.repo_root).join("presets/alia250-xplane.toml"),
+            &ctx.log_dir,
+        )?;
+        Ok(())
+    }
+
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         ensure_xplane_plugins_blocking(&ctx.repo_root, xplane_running_blocking()?)?;
         // The airframe the flight controller mixes decides which channel

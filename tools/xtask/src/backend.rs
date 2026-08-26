@@ -70,6 +70,23 @@ pub trait SimBackend {
     ///
     /// Returns a typed [`XtaskError`] only for a failure that must abort the
     /// session; recoverable/optional build failures are logged, not returned.
+    /// Re-establish whatever a restarted stage consumes on start.
+    ///
+    /// A stage's argv is planned once and reused for every restart, so
+    /// anything it CONSUMES rather than reads — a single-use credential, a
+    /// claimed file — is gone by the time the replacement runs. This is where
+    /// it comes back. Producing it at the same path the plan named keeps the
+    /// argv correct.
+    ///
+    /// Called before the replacement is spawned, never before the first start.
+    fn before_stage_restart(
+        &self,
+        _ctx: &SessionContext,
+        _stage_name: &str,
+    ) -> Result<(), XtaskError> {
+        Ok(())
+    }
+
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         let _ = ctx;
         Ok(())

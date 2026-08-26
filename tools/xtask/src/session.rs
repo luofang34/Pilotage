@@ -99,7 +99,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     // here) unregisters the `pilotage.local` alias with the session.
     let _mdns_alias = announce::publish_connect_facts(args, &ctx, actual_port, &certificate);
 
-    let outcome = supervise(&mut children, &stages, &mut cancel).await;
+    let outcome = supervise(&mut children, &stages, backend.as_ref(), &ctx, &mut cancel).await;
     std::fs::remove_file(&pid_file).ok();
     // The manifest describes a session that no longer exists past this
     // point; leaving it behind would let a later failed connect clobber
@@ -389,6 +389,8 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
 async fn supervise(
     children: &mut [ManagedChild],
     stages: &[Stage],
+    backend: &dyn crate::backend::SimBackend,
+    ctx: &SessionContext,
     cancel: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), XtaskError> {
     let mut fc_restarts: u32 = 0;
@@ -415,6 +417,10 @@ async fn supervise(
                     print_line(&format!(
                         "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
                     ));
+                    // The replacement inherits the plan's argv, so anything
+                    // the dead process CONSUMED has to be put back before it
+                    // starts or the restart hands it a path to nothing.
+                    backend.before_stage_restart(ctx, stage.spec.name)?;
                     // A replacement that spawns but never reports ready
                     // must not outlive the error return: it is not in
                     // `children`, so the caller's teardown would miss it.

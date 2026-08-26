@@ -8,6 +8,7 @@ use pilotage_trial::Digest;
 use pilotage_xplane_trial::VerifiedXPlaneIdentity;
 
 use super::{SimulatorModel, VERIFIER_ID, model_contract_digest, write_handshake};
+use std::io::Write as _;
 
 fn verified() -> VerifiedXPlaneIdentity {
     let mut identity = VerifiedXPlaneIdentity {
@@ -143,4 +144,111 @@ fn tempdir() -> std::path::PathBuf {
     std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).expect("scratch directory");
     dir
+}
+
+#[test]
+fn a_model_that_cannot_describe_a_vehicle_is_refused() {
+    // These fields configure motor mixing on the far side of the handshake, so
+    // a preset stating nothing useful has to fail the launch rather than be
+    // copied into a document the flight controller trusts.
+    let base = model("aa".repeat(32));
+    let cases: Vec<(&str, SimulatorModel)> = vec![
+        (
+            "no simulator",
+            SimulatorModel {
+                simulator_id: String::new(),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "no aircraft",
+            SimulatorModel {
+                aircraft_id: String::new(),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "no protocol",
+            SimulatorModel {
+                bridge_protocol: String::new(),
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "no motors",
+            SimulatorModel {
+                motor_count: 0,
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "no rate",
+            SimulatorModel {
+                sample_rate_hz: 0,
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "repeated lane",
+            SimulatorModel {
+                lane_order: [0, 0, 1, 3],
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "lane out of range",
+            SimulatorModel {
+                lane_order: [0, 1, 2, 7],
+                ..model("aa".repeat(32))
+            },
+        ),
+        (
+            "motors disagree with lanes",
+            SimulatorModel {
+                motor_count: 6,
+                ..model("aa".repeat(32))
+            },
+        ),
+    ];
+    for (name, broken) in cases {
+        assert!(broken.validate().is_err(), "{name} was accepted");
+    }
+    assert!(base.validate().is_ok(), "a sound model was refused");
+}
+
+#[test]
+fn a_document_left_by_anyone_else_is_never_written_through() {
+    // What this pins is that the previous file's CONTENT cannot survive into
+    // the one the flight controller claims.
+    //
+    // It does not pin the exclusive create. `write_handshake` removes before
+    // it creates, so `create_new` only decides what happens to a racer who
+    // wins the gap between the two, and that is not reachable from a unit
+    // test. Its failure mode is an aborted launch rather than a forged
+    // document — `O_CREAT|O_EXCL` refuses rather than following a planted
+    // symlink — and the directory is owner-writable only, so only a
+    // same-user process can reach it at all.
+    let dir = tempdir();
+    let path = dir.join("runtime-handshake.toml");
+    let mut planted = std::fs::File::create(&path).expect("plant a file");
+    planted
+        .write_all(b"someone else's document")
+        .expect("write");
+    drop(planted);
+
+    let written = write_handshake(
+        &verified(),
+        &model(verified().aircraft_digest.to_string()),
+        &dir,
+    )
+    .expect("write");
+    let text = std::fs::read_to_string(&written).expect("read back");
+    assert!(
+        !text.contains("someone else"),
+        "the planted content survived"
+    );
+    assert!(
+        text.contains(VERIFIER_ID),
+        "the document is not the one written"
+    );
 }

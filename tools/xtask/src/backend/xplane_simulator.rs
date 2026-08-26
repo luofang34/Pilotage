@@ -171,9 +171,10 @@ pub(super) fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Resul
 const XPLANE_PLUGINS_STAMP: &str = "target/xtask-stamps/xplane-plugins-stopped-simulator.stamp";
 
 /// The working-tree inputs whose content decides plugin staleness.
-const XPLANE_PLUGINS_SOURCES: [&str; 4] = [
+const XPLANE_PLUGINS_SOURCES: [&str; 5] = [
     "sim/xplane/autoflight",
     "sim/xplane/camera",
+    "sim/xplane/trial",
     "sim/xplane/weather",
     "scripts/build-xplane-plugins.sh",
 ];
@@ -217,6 +218,11 @@ pub(super) fn ensure_xplane_plugins_blocking(
                 "Resources/plugins/px4xplane/64/mac.xpl",
                 "Resources/plugins/PilotageAutoFlight/64/mac.xpl",
                 "Resources/plugins/PilotageCamera/64/mac.xpl",
+                // The manifest as well as the plugin: the trial plugin states
+                // which bridge build it was built against, and a verifier that
+                // cannot read that has nothing to check the bridge against.
+                "Resources/plugins/PilotageTrial/64/mac.xpl",
+                "Resources/plugins/PilotageTrial/build-manifest.json",
                 "Resources/plugins/PilotageWeather/64/mac.xpl",
             ]
             .iter()
