@@ -343,6 +343,11 @@ if (figure?.dataset.mapState === "ready") {
       layers: ["pilotage-ownship-leader"],
     }).length;
     const transformAtNorth = mark.marker.getElement().style.transform;
+    // MapLibre adds its own class to the element it is given, and the
+    // marker's placement is that class's rules. A shape change that
+    // assigned the whole class list would take it away, and nothing in the
+    // renderer puts it back.
+    const rendererClassKept = mark.marker.getElement().classList.contains("maplibregl-marker");
     // Turn the map. A mark aligned to the map keeps pointing east while the
     // compass moves under it; a mark aligned to the screen does not.
     probeMap.setBearing(30);
@@ -359,8 +364,10 @@ if (figure?.dataset.mapState === "ready") {
       rendered,
       headingDeg: readout.dataset.ownshipHeadingDeg ?? null,
       trackDeg: readout.dataset.ownshipTrackDeg ?? null,
+      groundSpeedMps: readout.dataset.ownshipGroundSpeedMps ?? null,
       transformAtNorth,
       transformWhenTurned,
+      rendererClassKept,
       styleErrors,
     };
     probeMap.remove();
@@ -644,11 +651,16 @@ const near = (value, expected, tolerance) =>
     if (start && end) {
       check(
         `leader: the course runs east, along the track (${end[0] - start[0]}, ${end[1] - start[1]})`,
-        end[0] > start[0] && Math.abs(end[1] - start[1]) < 1e-9,
+        end[0] > start[0] && Math.abs(end[1] - start[1]) < 1e-5,
       );
     }
     check(`leader: the heading reaches the surface (${render.headingDeg})`, render.headingDeg === "90.0");
     check(`leader: the track reaches the surface (${render.trackDeg})`, render.trackDeg === "90.0");
+    check(
+      `leader: the ground speed reaches the surface (${render.groundSpeedMps})`,
+      render.groundSpeedMps === "20.00",
+    );
+    check("leader: the mark keeps the renderer's own class", render.rendererClassKept);
     // Aligned to the map, the mark's own rotation is reduced by the map
     // bearing, so it keeps pointing east as the compass turns under it. A
     // mark left aligned to the viewport would read 90 in both.

@@ -11,6 +11,10 @@
 // states; where it states neither, it is a shape with no direction in it
 // and no line beside it. A pointed mark that never turned would assert a
 // heading of screen-up on a map the reader can rotate.
+//
+// "States" means states now. Each direction has a group of its own that
+// advances on its own, so a direction is drawn only while its group keeps
+// producing measurements this page has not already seen.
 
 import { headingDegFrom, leaderEndpoint, trackFrom } from "./situation-motion.js";
 
@@ -41,6 +45,19 @@ export const OWNSHIP_SOURCE = Object.freeze({
  *  position that stopped arriving is a position the vehicle has left. */
 export const OWNSHIP_STALE_AFTER_MS = 3_000;
 
+/** How long a direction's own group may go without a new measurement
+ *  before the mark stops drawing it.
+ *
+ *  A group can be present in every sample and still be old: the estimate
+ *  lane stamps attitude, velocity and the fix separately and advances them
+ *  separately, and the producer withholds a group only after three seconds.
+ *  At a routine yaw rate three seconds is most of a turn, so a nose drawn
+ *  from a group that stopped advancing points somewhere the vehicle left.
+ *  The instruments beside the map hold their groups to the same limit, and
+ *  a heading they would already call incoherent has no business on the map
+ *  as a measurement. */
+export const GROUP_COHERENCE_MS = 300;
+
 /**
  * The vehicle position a telemetry sample states, or a typed reason it
  * states none.
@@ -58,7 +75,7 @@ export const OWNSHIP_STALE_AFTER_MS = 3_000;
  * name a reason the decoder makes unreachable, and a reason the client
  * cannot produce is a reason that lies when a reader meets it.
  */
-export function ownshipFromTelemetry(telemetry) {
+export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
   const truth = telemetry?.simTruth;
   const avionics = telemetry?.avionics;
   if (!truth && !avionics) {
@@ -84,7 +101,12 @@ export function ownshipFromTelemetry(telemetry) {
     // The attitude group carries the quaternion on the estimate lane; the
     // truth lane carries it flat beside its own frame.
     headingDeg: headingDegFrom(lane.attitude?.quat ?? lane.quat, validFlags),
-    track: trackFrom(lane.kinematics?.velNed ?? lane.velNed, validFlags),
+    track: trackFrom(lane.kinematics?.velNed ?? lane.velNed, validFlags, courseDrawn),
+    // The stamp that governs each direction, so a caller can ask when its
+    // group last advanced. The estimate lane stamps the two groups apart;
+    // the truth lane states one observation and both ride it.
+    headingStamp: lane.attitudeStamp ?? lane.stamp ?? null,
+    trackStamp: lane.kinematicsStamp ?? lane.stamp ?? null,
     source,
     reason: null,
   };
@@ -118,6 +140,37 @@ export function attachOwnship(maplibre, map, surface) {
   let label = null;
   let leaderReady = false;
   let pendingLeader = null;
+  let courseDrawn = false;
+
+  // When each direction's group last carried a measurement this page had
+  // not already seen. A group repeated unchanged is a group the producer
+  // is republishing, not measuring, and presence alone cannot tell the two
+  // apart.
+  const lastStampIdentity = new Map();
+  const lastStampAdvance = new Map();
+  const groupIsCurrent = (kind, stamp, nowMs) => {
+    // A direction whose group states no stamp cannot be shown to be
+    // current, and a direction that cannot be shown current is not drawn.
+    if (!stamp) return false;
+    // The role is in the identity with the rest, so a handover between
+    // lanes reads as the new measurement it is without needing the lane
+    // remembered separately.
+    const identity = [
+      stamp.role,
+      stamp.sourceId,
+      stamp.sourceIncarnation,
+      stamp.sourceEpoch,
+      stamp.sequence,
+      stamp.acquiredAtNanos,
+    ].join("/");
+    if (lastStampIdentity.get(kind) !== identity) {
+      lastStampIdentity.set(kind, identity);
+      lastStampAdvance.set(kind, nowMs);
+      return true;
+    }
+    const advancedAt = lastStampAdvance.get(kind);
+    return advancedAt !== undefined && nowMs - advancedAt <= GROUP_COHERENCE_MS;
+  };
 
   const emptyLeader = { type: "FeatureCollection", features: [] };
 
@@ -132,7 +185,15 @@ export function attachOwnship(maplibre, map, surface) {
   };
 
   const addLeaderLayer = () => {
-    if (leaderReady || map.getSource(LEADER_SOURCE)) return;
+    if (leaderReady) return;
+    // A source already on the style is one to draw into, not one to add
+    // again. Leaving `leaderReady` false here would queue every line into
+    // `pendingLeader` for the life of the page while the mark went on
+    // turning, and no course would ever be drawn.
+    if (map.getSource(LEADER_SOURCE)) {
+      leaderReady = true;
+      return;
+    }
     map.addSource(LEADER_SOURCE, { type: "geojson", data: emptyLeader });
     map.addLayer({
       id: LEADER_LAYER,
@@ -165,10 +226,17 @@ export function attachOwnship(maplibre, map, surface) {
     delete surface.dataset.ownshipSource;
     delete surface.dataset.ownshipHeadingDeg;
     delete surface.dataset.ownshipTrackDeg;
-    delete surface.dataset.ownshipSpeedMps;
+    delete surface.dataset.ownshipGroundSpeedMps;
     marker.setRotation(0);
-    element.className = "map-ownship map-ownship-unknown-heading";
+    // Assigning the whole class list would take MapLibre's own
+    // `maplibregl-marker` class with it, and the marker's placement is
+    // that class's rules.
+    element.classList.toggle("map-ownship-unknown-heading", true);
     drawLeader(emptyLeader);
+    courseDrawn = false;
+    // The stamps are deliberately NOT forgotten. A group that had stopped
+    // advancing is still stopped when the mark comes back, and clearing
+    // the record here would let it return as though it were new.
   };
 
   // Why the last sample carried no position, so a withdrawal can say which
@@ -184,7 +252,12 @@ export function attachOwnship(maplibre, map, surface) {
   };
 
   const observe = (telemetry, nowMs) => {
-    const { position, headingDeg, track, source, reason } = ownshipFromTelemetry(telemetry);
+    const sample = ownshipFromTelemetry(telemetry, { courseDrawn });
+    const { position, source, reason } = sample;
+    const headingDeg = groupIsCurrent("heading", sample.headingStamp, nowMs)
+      ? sample.headingDeg
+      : null;
+    const track = groupIsCurrent("track", sample.trackStamp, nowMs) ? sample.track : null;
     if (position === null) {
       lastAbsence = reason;
       // One sample without a fix does not blink the mark; the age rule is
@@ -204,12 +277,12 @@ export function attachOwnship(maplibre, map, surface) {
     // A shape with a point in it states a direction whether or not one was
     // measured, so the shape itself changes when the heading goes away.
     marker.setRotation(headingDeg ?? 0);
-    element.className =
-      headingDeg === null ? "map-ownship map-ownship-unknown-heading" : "map-ownship";
+    element.classList.toggle("map-ownship-unknown-heading", headingDeg === null);
     if (!shown) {
       marker.addTo(map);
       shown = true;
     }
+    courseDrawn = track !== null;
     drawLeader(
       track === null
         ? emptyLeader
@@ -235,10 +308,15 @@ export function attachOwnship(maplibre, map, surface) {
       ` from the ${source === OWNSHIP_SOURCE.TRUTH ? "simulator" : "flight controller"}` +
       // Whole degrees and whole metres per second: the name is announced
       // when it changes, and a fractional bearing changes every sample.
-      (headingDeg === null ? ", heading unknown" : `, heading ${Math.round(headingDeg)}`) +
+      // Rounded first and wrapped after: 359.6 rounds to 360, and a mark
+      // announced as "heading 360" states a bearing no compass carries.
+      (headingDeg === null
+        ? ", heading unknown"
+        : `, heading ${Math.round(headingDeg) % 360}`) +
       (track === null
         ? ", not tracking"
-        : `, tracking ${Math.round(track.bearingDeg)} at ${Math.round(track.speedMps)} metres per second`);
+        : `, tracking ${Math.round(track.bearingDeg) % 360}` +
+          ` at ${Math.round(track.speedMps)} metres per second over the ground`);
     // An accessible name rewritten at the telemetry rate is announced at
     // the telemetry rate.
     if (next !== label) {
@@ -253,10 +331,13 @@ export function attachOwnship(maplibre, map, surface) {
     else surface.dataset.ownshipHeadingDeg = headingDeg.toFixed(1);
     if (track === null) {
       delete surface.dataset.ownshipTrackDeg;
-      delete surface.dataset.ownshipSpeedMps;
+      delete surface.dataset.ownshipGroundSpeedMps;
     } else {
       surface.dataset.ownshipTrackDeg = track.bearingDeg.toFixed(1);
-      surface.dataset.ownshipSpeedMps = track.speedMps.toFixed(2);
+      // Ground speed: the vertical component is deliberately not in it, and
+      // the name has to say so or a reader takes it for speed through the
+      // air or along the flight path.
+      surface.dataset.ownshipGroundSpeedMps = track.speedMps.toFixed(2);
     }
     delete surface.dataset.ownshipReason;
   };

@@ -314,4 +314,80 @@ if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1
     exit 1
 fi
 cp "$repo_root/clients/web/situation-map.browser.test.mjs" "$web/"
+# A gate that names a band either side of unit length, beside a yaw that is
+# the rotation's only AT unit length, reads a heading wrong by degrees and
+# draws the mark pointed while it does.
+python3 - "$web/situation-motion.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace(
+    "w * w + x * x - y * y - z * z", "1 - 2 * (y * y + z * z)", 1
+)
+assert source != before, "the yaw is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a yaw that assumes an unenforced length" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-motion.js" "$web/"
+
+# A quaternion that is not near unit length is not a rotation, and a
+# truncated frame decodes to zeros that read as a confident due north.
+python3 - "$web/situation-motion.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace("normSquared < 0.9 || normSquared > 1.1", "false", 1)
+assert source != before, "the length gate is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a heading read off a degenerate quaternion" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-motion.js" "$web/"
+
+# The estimate lane advances attitude, velocity and the fix apart, and the
+# producer withholds a group only after three seconds. A direction drawn
+# from a group that stopped advancing points where the vehicle no longer is.
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace("groupIsCurrent", "groupIsIgnored")
+assert source != before, "the freshness gate is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a direction that outlives its group" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+# Assigning the whole class list takes the renderer's own marker class with
+# it, and the marker's placement is that class's rules.
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace(
+    'element.classList.toggle("map-ownship-unknown-heading", headingDeg === null);',
+    'element.className = headingDeg === null'
+    ' ? "map-ownship map-ownship-unknown-heading" : "map-ownship";',
+    1,
+)
+assert source != before, "the shape change is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a shape change that wipes the marker class" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
 echo "web situation map guards reject each loss"

@@ -15,6 +15,11 @@
  *  claiming a course the vehicle is not on. */
 export const TRACK_FLOOR_MPS = 0.5;
 
+/** The speed a leader already drawn must fall below before it is taken
+ *  away. Without a band between the two, a vehicle drifting either side of
+ *  the floor flickers its course on and off at the telemetry rate. */
+export const TRACK_RELEASE_MPS = 0.35;
+
 /** How far ahead the velocity leader reaches, in seconds. The line is the
  *  place the vehicle arrives at if it holds this velocity, so the duration
  *  is what makes its length mean anything; a leader with no stated
@@ -27,68 +32,104 @@ export const LEADER_SECONDS = 60;
  *  local frame do not disagree about the size of the Earth. */
 const METRES_PER_DEGREE = 111_111;
 
+/** The radius that constant implies, so the step below measures the same
+ *  Earth the link projects against. */
+const EARTH_RADIUS_M = (METRES_PER_DEGREE * 180) / Math.PI;
+
 /** The validity bits a sample carries: bit 0 attitude, bit 3 velocity.
  *  A group whose bit is clear is a group the vehicle did not authorize,
  *  whatever numbers sit beside it. */
 const VALID_ATTITUDE = 1;
 const VALID_VELOCITY = 8;
 
+/** A bearing wrapped into [0, 360). */
+const wrapBearingDeg = (deg) => ((deg % 360) + 360) % 360;
+
+/** A longitude wrapped into [-180, 180). The wire contract carries a
+ *  normalized longitude and this repo's own decoder refuses one outside
+ *  that band rather than wrap it, so a step that crossed the antimeridian
+ *  must come back into range instead of naming a place a decoder would
+ *  reject. */
+const wrapLongitudeDeg = (deg) => ((((deg + 180) % 360) + 360) % 360) - 180;
+
 /**
- * The heading a sample states, in degrees clockwise from true north, or
- * `null` when it states none.
+ * The heading a sample states, in degrees clockwise from north, or `null`
+ * when it states none.
  *
  * The quaternion rotates body FRD into world NED, so its yaw is the
- * heading. A quaternion that is not near unit length is not a rotation: a
- * truncated frame decodes to all zeros, which reads as `atan2(0, 1)` — a
- * confident heading of due north for a vehicle whose attitude nobody sent.
+ * heading. The north it is measured from is the world frame's; the
+ * simulator worlds in use declare no heading offset, which makes it
+ * geodetic north, and the wire states no heading reference for a consumer
+ * to check that against.
+ *
+ * A quaternion that is not near unit length is not a rotation: a truncated
+ * frame decodes to all zeros, which read as a rotation would give a
+ * confident due north for a vehicle whose attitude nobody sent.
+ *
+ * The yaw's denominator is `w² + x² − y² − z²` rather than the `1 − 2(y² +
+ * z²)` that assumes unit length. The two agree only at exactly unit
+ * length, and the gate below passes a band either side of it — a
+ * quaternion inside that band would otherwise decode to a heading wrong by
+ * degrees, with the mark drawn pointed and its heading stated to a decimal
+ * place. The form used here is exact at any scale.
  */
 export function headingDegFrom(quat, validFlags) {
   if (!(validFlags & VALID_ATTITUDE)) return null;
   if (!quat) return null;
   const { w, x, y, z } = quat;
   if (![w, x, y, z].every(Number.isFinite)) return null;
-  const norm = w * w + x * x + y * y + z * z;
-  if (norm < 0.9 || norm > 1.1) return null;
-  const yawRad = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
-  const deg = (yawRad * 180) / Math.PI;
-  return ((deg % 360) + 360) % 360;
+  const normSquared = w * w + x * x + y * y + z * z;
+  if (normSquared < 0.9 || normSquared > 1.1) return null;
+  const yawRad = Math.atan2(2 * (w * z + x * y), w * w + x * x - y * y - z * z);
+  return wrapBearingDeg((yawRad * 180) / Math.PI);
 }
 
 /**
  * The ground track a sample states — its bearing in degrees clockwise from
- * true north and its speed in metres per second — or `null` when it states
+ * north and its speed in metres per second — or `null` when it states
  * none.
+ *
+ * `drawn` is whether a course is on the map already, which selects which
+ * end of the hysteresis band applies.
  */
-export function trackFrom(velNed, validFlags) {
+export function trackFrom(velNed, validFlags, drawn = false) {
   if (!(validFlags & VALID_VELOCITY)) return null;
   if (!Array.isArray(velNed) || velNed.length < 2) return null;
   const [north, east] = velNed;
   if (!Number.isFinite(north) || !Number.isFinite(east)) return null;
   const speedMps = Math.hypot(north, east);
-  if (speedMps < TRACK_FLOOR_MPS) return null;
+  if (speedMps < (drawn ? TRACK_RELEASE_MPS : TRACK_FLOOR_MPS)) return null;
   const deg = (Math.atan2(east, north) * 180) / Math.PI;
-  return { bearingDeg: ((deg % 360) + 360) % 360, speedMps };
+  return { bearingDeg: wrapBearingDeg(deg), speedMps };
 }
 
 /**
  * The place the vehicle reaches by holding this velocity for
  * [`LEADER_SECONDS`], as `[longitude, latitude]`.
  *
- * The step is taken on a flat Earth. Over the minute this line covers, the
- * error against a great circle is far below the width of the line itself.
+ * The step is along a great circle. A flat step in degrees is accurate
+ * enough over a minute in the middle latitudes, but it divides by the
+ * cosine of the latitude, so near the pole it produces longitudes of
+ * thousands of degrees and latitudes past 90 — places that are not on the
+ * Earth. This form is defined everywhere, including across the pole and
+ * across the antimeridian.
  */
 export function leaderEndpoint(position, track, seconds = LEADER_SECONDS) {
-  const metres = track.speedMps * seconds;
+  const angular = (track.speedMps * seconds) / EARTH_RADIUS_M;
   const bearingRad = (track.bearingDeg * Math.PI) / 180;
-  const latitudeDeg =
-    position.latitudeDeg + (metres * Math.cos(bearingRad)) / METRES_PER_DEGREE;
-  const scale = Math.cos((position.latitudeDeg * Math.PI) / 180);
-  // At the pole a degree of longitude is no distance at all, and the step
-  // would divide by zero. A vehicle there has no meaningful longitude to
-  // step along, so the leader points along the meridian alone.
-  const longitudeDeg =
-    Math.abs(scale) < 1e-6
-      ? position.longitudeDeg
-      : position.longitudeDeg + (metres * Math.sin(bearingRad)) / (METRES_PER_DEGREE * scale);
-  return [longitudeDeg, latitudeDeg];
+  const latRad = (position.latitudeDeg * Math.PI) / 180;
+  const lonRad = (position.longitudeDeg * Math.PI) / 180;
+  const sinLat =
+    Math.sin(latRad) * Math.cos(angular) +
+    Math.cos(latRad) * Math.sin(angular) * Math.cos(bearingRad);
+  // asin of a value a rounding error past 1 is NaN, and a NaN coordinate
+  // takes the whole line off the map.
+  const endLatRad = Math.asin(Math.min(1, Math.max(-1, sinLat)));
+  const endLonRad =
+    lonRad +
+    Math.atan2(
+      Math.sin(bearingRad) * Math.sin(angular) * Math.cos(latRad),
+      Math.cos(angular) - Math.sin(latRad) * sinLat,
+    );
+  return [wrapLongitudeDeg((endLonRad * 180) / Math.PI), (endLatRad * 180) / Math.PI];
 }

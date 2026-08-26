@@ -26,9 +26,20 @@ const VALID_ATTITUDE = 1;
 const VALID_VELOCITY = 8;
 
 const FIX = { latitudeDeg: 47.3977419, longitudeDeg: 8.5455938, heightM: 488.227 };
+let tick = 0;
+/** A stamp that differs from the last one, as a fresh measurement's does. */
+const freshStamp = (role) => ({
+  sourceId: 1,
+  sourceIncarnation: "a",
+  sourceEpoch: 1,
+  sequence: (tick += 1),
+  acquiredAtNanos: BigInt(tick) * 1_000_000n,
+  role,
+});
+
 const truth = (overrides = {}) => ({
   simTruth: {
-    stamp: { role: 2 },
+    stamp: freshStamp(2),
     geodetic: FIX,
     quat: yawQuat(90),
     velNed: [0, 10, 0],
@@ -43,6 +54,9 @@ const estimate = (fix = FIX, overrides = {}) => ({
     attitude: { quat: yawQuat(270) },
     kinematics: { velNed: [-10, 0, 0] },
     validFlags: VALID_ATTITUDE | VALID_VELOCITY,
+    attitudeStamp: freshStamp(1),
+    kinematicsStamp: freshStamp(1),
+    geodeticStamp: freshStamp(1),
     ...overrides,
   },
 });
@@ -124,8 +138,24 @@ console.log("ok - testTheReasonsAreTheStringsAReaderMeets");
 /** The smallest map and marker the module actually uses. */
 function harness({ styleLoaded = true } = {}) {
   const events = [];
+  const classes = new Set();
   const element = {
-    className: "",
+    classList: {
+      toggle(name, force) {
+        const on = force === undefined ? !classes.has(name) : Boolean(force);
+        if (on) classes.add(name);
+        else classes.delete(name);
+        return on;
+      },
+      contains: (name) => classes.has(name),
+    },
+    get className() {
+      return [...classes].join(" ");
+    },
+    set className(value) {
+      classes.clear();
+      for (const name of value.split(/\s+/).filter(Boolean)) classes.add(name);
+    },
     attributes: {},
     setAttribute(name, value) {
       this.attributes[name] = value;
@@ -187,6 +217,7 @@ function harness({ styleLoaded = true } = {}) {
   const maplibre = {
     Marker: function Marker(options) {
       markerOptions = options;
+      options.element.classList.toggle("maplibregl-marker", true);
       return marker;
     },
   };
@@ -349,7 +380,10 @@ function testTheMarkIsSomethingAReaderCanSee() {
   // role is what the accessible name attaches to.
   const { observe, element } = harness();
   observe(truth(), 1_000);
-  assert.equal(element.className, "map-ownship", "the mark has the shape the style draws");
+  assert.ok(
+    element.classList.contains("map-ownship"),
+    "the mark has the shape the style draws",
+  );
   assert.equal(element.attributes.role, "img", "the name has something to attach to");
 }
 testTheMarkIsSomethingAReaderCanSee();
@@ -382,7 +416,10 @@ function testAMarkWithNoStatedHeadingHasNoPointInIt() {
   assert.match(element.className, /map-ownship-unknown-heading/);
 
   observe(truth(), 1_100);
-  assert.equal(element.className, "map-ownship", "a stated heading restores the point");
+  assert.ok(
+    !element.classList.contains("map-ownship-unknown-heading"),
+    "a stated heading restores the point",
+  );
 }
 testAMarkWithNoStatedHeadingHasNoPointInIt();
 console.log("ok - testAMarkWithNoStatedHeadingHasNoPointInIt");
@@ -396,7 +433,11 @@ function testTheLeaderReachesWhereTheVehicleArrives() {
 
   const [start, end] = leader.data.features[0].geometry.coordinates;
   assert.deepEqual(start, [FIX.longitudeDeg, FIX.latitudeDeg]);
-  assert.ok(Math.abs(end[1] - FIX.latitudeDeg) < 1e-9, "due east changes no latitude");
+  // The step is along a great circle, and a great circle leaving due east
+  // is at its northernmost point, so the latitude falls away either side.
+  // Over this minute that is under a metre.
+  assert.ok(end[1] < FIX.latitudeDeg, "a great circle leaving east turns back down");
+  assert.ok(Math.abs(end[1] - FIX.latitudeDeg) < 1e-5, `east endpoint latitude ${end[1]}`);
   const metres = 10 * LEADER_SECONDS;
   const expectedLon =
     FIX.longitudeDeg + metres / (111_111 * Math.cos((FIX.latitudeDeg * Math.PI) / 180));
@@ -416,7 +457,7 @@ function testTheLeaderFollowsTheTrackAndNotTheNose() {
   assert.equal(surface.dataset.ownshipTrackDeg, "90.0", "the track is where it goes");
   const [, end] = leader.data.features[0].geometry.coordinates;
   assert.ok(end[0] > FIX.longitudeDeg, "the leader runs east, along the track");
-  assert.ok(Math.abs(end[1] - FIX.latitudeDeg) < 1e-9, "and not north, along the nose");
+  assert.ok(end[1] < FIX.latitudeDeg, "and not north, along the nose");
 }
 testTheLeaderFollowsTheTrackAndNotTheNose();
 console.log("ok - testTheLeaderFollowsTheTrackAndNotTheNose");
@@ -427,7 +468,7 @@ function testAVehicleHoldingStationDrawsNoCourse() {
 
   assert.equal(leader.data.features.length, 0, "no line is drawn");
   assert.equal(surface.dataset.ownshipTrackDeg, undefined);
-  assert.equal(surface.dataset.ownshipSpeedMps, undefined);
+  assert.equal(surface.dataset.ownshipGroundSpeedMps, undefined);
   assert.equal(surface.dataset.ownship, "shown", "the position is still drawn");
 }
 testAVehicleHoldingStationDrawsNoCourse();
@@ -445,7 +486,7 @@ function testWithdrawingTheMarkTakesItsCourseWithIt() {
   assert.match(element.className, /map-ownship-unknown-heading/);
   assert.equal(surface.dataset.ownshipHeadingDeg, undefined);
   assert.equal(surface.dataset.ownshipTrackDeg, undefined);
-  assert.equal(surface.dataset.ownshipSpeedMps, undefined);
+  assert.equal(surface.dataset.ownshipGroundSpeedMps, undefined);
 }
 testWithdrawingTheMarkTakesItsCourseWithIt();
 console.log("ok - testWithdrawingTheMarkTakesItsCourseWithIt");
@@ -481,5 +522,142 @@ function testTheLeaderWaitsForAStyleThatHasNotLoaded() {
 }
 testTheLeaderWaitsForAStyleThatHasNotLoaded();
 console.log("ok - testTheLeaderWaitsForAStyleThatHasNotLoaded");
+
+function testAMarkKeepsTheRendererIsOwnClass() {
+  // The marker's placement is MapLibre's own class. Assigning the whole
+  // class list to change the shape would take it away, and nothing puts it
+  // back.
+  const { observe, age, element } = harness();
+  assert.ok(element.classList.contains("maplibregl-marker"), "the renderer claimed it");
+
+  observe(truth(), 1_000);
+  assert.ok(element.classList.contains("maplibregl-marker"), "and still has it when shown");
+  age(1_001 + OWNSHIP_STALE_AFTER_MS);
+  assert.ok(element.classList.contains("maplibregl-marker"), "and when withdrawn");
+}
+testAMarkKeepsTheRendererIsOwnClass();
+console.log("ok - testAMarkKeepsTheRendererIsOwnClass");
+
+function testADirectionWhoseGroupStoppedAdvancingIsNotDrawn() {
+  // The estimate lane advances attitude, velocity and the fix apart, and
+  // the producer withholds a group only after three seconds. A group that
+  // is present in every sample and never advances is being republished,
+  // not measured.
+  const { observe, surface, leader, element } = harness();
+  const stale = estimate();
+  observe(stale, 1_000);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "270.0");
+  assert.equal(surface.dataset.ownshipTrackDeg, "180.0");
+
+  // The same groups again, with the fix moving on beneath them.
+  const moved = {
+    avionics: { ...stale.avionics, geodetic: { ...FIX, latitudeDeg: FIX.latitudeDeg + 0.001 } },
+  };
+  observe(moved, 1_000 + 200);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "270.0", "inside the limit it still counts");
+
+  observe(moved, 1_000 + 400);
+  assert.equal(surface.dataset.ownship, "shown", "the fix is still drawn");
+  assert.equal(surface.dataset.ownshipHeadingDeg, undefined, "the nose is not");
+  assert.equal(surface.dataset.ownshipTrackDeg, undefined);
+  assert.equal(leader.data.features.length, 0, "and no course is left on the map");
+  assert.ok(element.classList.contains("map-ownship-unknown-heading"));
+
+  // A group that advances again is drawn again.
+  const fresh = {
+    avionics: { ...moved.avionics, attitudeStamp: freshStamp(1), kinematicsStamp: freshStamp(1) },
+  };
+  observe(fresh, 1_000 + 500);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "270.0", "a new measurement restores it");
+}
+testADirectionWhoseGroupStoppedAdvancingIsNotDrawn();
+console.log("ok - testADirectionWhoseGroupStoppedAdvancingIsNotDrawn");
+
+function testAHandoverBetweenLanesDoesNotInheritTheOtherLaneIsGroups() {
+  // The lane is part of a stamp's identity, so the estimate lane's first
+  // sample is a measurement this page has not seen however long the truth
+  // lane had been repeating itself.
+  const { observe, surface } = harness();
+  observe(truth(), 1_000);
+  assert.equal(surface.dataset.ownshipSource, OWNSHIP_SOURCE.TRUTH);
+
+  const handover = estimate();
+  observe(handover, 1_000 + 2_000);
+  assert.equal(surface.dataset.ownshipSource, OWNSHIP_SOURCE.ESTIMATE);
+  assert.equal(
+    surface.dataset.ownshipHeadingDeg,
+    "270.0",
+    "the new lane's first measurement is current by definition",
+  );
+}
+testAHandoverBetweenLanesDoesNotInheritTheOtherLaneIsGroups();
+console.log("ok - testAHandoverBetweenLanesDoesNotInheritTheOtherLaneIsGroups");
+
+function testACourseAlreadyDrawnIsHeldThroughTheFloor() {
+  // Without a band between engaging and releasing, a vehicle drifting
+  // either side of the floor flickers its course at the telemetry rate.
+  const { observe, leader } = harness();
+  observe(truth({ velNed: [0.45, 0, 0], stamp: freshStamp(2) }), 1_000);
+  assert.equal(leader.data.features.length, 0, "below the floor no course starts");
+
+  observe(truth({ velNed: [0.6, 0, 0], stamp: freshStamp(2) }), 1_100);
+  assert.equal(leader.data.features.length, 1, "above the floor it does");
+
+  observe(truth({ velNed: [0.45, 0, 0], stamp: freshStamp(2) }), 1_200);
+  assert.equal(leader.data.features.length, 1, "and it is held back through the band");
+
+  observe(truth({ velNed: [0.3, 0, 0], stamp: freshStamp(2) }), 1_300);
+  assert.equal(leader.data.features.length, 0, "below the release speed it goes");
+}
+testACourseAlreadyDrawnIsHeldThroughTheFloor();
+console.log("ok - testACourseAlreadyDrawnIsHeldThroughTheFloor");
+
+function testTheCourseIsDrawnWhenTheSourceIsAlreadyOnTheStyle() {
+  // A style that already carries the source is one to draw into. Treating
+  // it as "not ready" would queue every line for the life of the page while
+  // the mark went on turning.
+  const { observe, leader, map } = harness({ styleLoaded: false });
+  map.addSource("pilotage-ownship-leader", { type: "geojson", data: null });
+  map.fireLoad();
+  observe(truth(), 1_000);
+  assert.equal(leader.data.features.length, 1, "the course reaches the source that was there");
+}
+testTheCourseIsDrawnWhenTheSourceIsAlreadyOnTheStyle();
+console.log("ok - testTheCourseIsDrawnWhenTheSourceIsAlreadyOnTheStyle");
+
+function testTheAccessibleNameNamesGroundSpeedAndNoBearingOf360() {
+  const { observe, element } = harness();
+  // 359.6 rounds to 360, which is a bearing no compass carries.
+  observe(truth({ quat: yawQuat(359.6), velNed: [0, 10, 0], stamp: freshStamp(2) }), 1_000);
+  const name = element.attributes["aria-label"];
+  assert.match(name, /heading 0,/, `announced as ${name}`);
+  assert.match(name, /metres per second over the ground$/, `announced as ${name}`);
+}
+testTheAccessibleNameNamesGroundSpeedAndNoBearingOf360();
+console.log("ok - testTheAccessibleNameNamesGroundSpeedAndNoBearingOf360");
+
+function testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal() {
+  // The record of what each group last carried outlives the mark. A group
+  // that had stopped advancing is still stopped when a fix returns, and
+  // forgetting it here would draw the stale direction as a new one.
+  const { observe, age, surface } = harness();
+  const frozen = estimate();
+  observe(frozen, 1_000);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "270.0");
+
+  age(1_001 + OWNSHIP_STALE_AFTER_MS);
+  assert.equal(surface.dataset.ownship, "absent");
+
+  // The same groups, beside a fix that started arriving again.
+  observe(frozen, 20_000);
+  assert.equal(surface.dataset.ownship, "shown", "the fix is drawn again");
+  assert.equal(
+    surface.dataset.ownshipHeadingDeg,
+    undefined,
+    "the group that froze is still frozen",
+  );
+}
+testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal();
+console.log("ok - testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal");
 
 console.log("\nall situation ownship checks passed");

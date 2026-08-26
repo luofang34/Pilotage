@@ -208,8 +208,31 @@ fi
 # vehicle holding station is on no course. Both refusals are what keeps the
 # mark from stating a direction nobody measured.
 if ! grep -Fq 'TRACK_FLOOR_MPS' "$motion_module" \
-    || ! grep -Fq 'norm < 0.9 || norm > 1.1' "$motion_module"; then
+    || ! grep -Fq 'normSquared < 0.9 || normSquared > 1.1' "$motion_module"; then
     echo "FORBIDDEN: an unmeasured direction must not be drawn as one" >&2
+    status=1
+fi
+# The gate passes a band either side of unit length, so the yaw must come
+# out of a form that is exact at any scale. The `1 - 2(...)` form is the
+# rotation's only at exactly unit length, and inside the band it reads a
+# heading wrong by degrees with the mark drawn pointed.
+if grep -Fq '1 - 2 * (y * y + z * z)' "$motion_module"; then
+    echo "FORBIDDEN: the yaw must not assume a unit length the gate does not enforce" >&2
+    status=1
+fi
+# A direction is drawn only while its own group keeps producing
+# measurements. The estimate lane stamps attitude, velocity and the fix
+# apart and advances them apart.
+if ! grep -Fq 'GROUP_COHERENCE_MS' "$ownship_module" \
+    || ! grep -Fq 'groupIsCurrent' "$ownship_module"; then
+    echo "FORBIDDEN: a direction must not outlive the group that measured it" >&2
+    status=1
+fi
+# Assigning the whole class list takes the renderer's own marker class with
+# it, and the marker's placement is that class's rules.
+if grep -Eq 'element\.className *=' "$ownship_module" \
+    && [ "$(grep -Ec 'element\.className *=' "$ownship_module")" -gt 1 ]; then
+    echo "FORBIDDEN: the mark's shape must change by class, not by class list" >&2
     status=1
 fi
 

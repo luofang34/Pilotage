@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   LEADER_SECONDS,
   TRACK_FLOOR_MPS,
+  TRACK_RELEASE_MPS,
   headingDegFrom,
   leaderEndpoint,
   trackFrom,
@@ -21,6 +22,31 @@ const yawQuat = (deg) => {
   const half = (deg * Math.PI) / 360;
   return { w: Math.cos(half), x: 0, y: 0, z: Math.sin(half) };
 };
+
+const rad = (deg) => (deg * Math.PI) / 180;
+
+/** A body-FRD-to-NED rotation with roll and pitch in it as well as yaw, so
+ *  the yaw extraction is exercised on a quaternion whose x and y are not
+ *  zero — the case where a denominator that assumes unit length goes
+ *  wrong. */
+const attitudeQuat = (rollDeg, pitchDeg, yawDeg) => {
+  const [cr, sr] = [Math.cos(rad(rollDeg) / 2), Math.sin(rad(rollDeg) / 2)];
+  const [cp, sp] = [Math.cos(rad(pitchDeg) / 2), Math.sin(rad(pitchDeg) / 2)];
+  const [cy, sy] = [Math.cos(rad(yawDeg) / 2), Math.sin(rad(yawDeg) / 2)];
+  return {
+    w: cr * cp * cy + sr * sp * sy,
+    x: sr * cp * cy - cr * sp * sy,
+    y: cr * sp * cy + sr * cp * sy,
+    z: cr * cp * sy - sr * sp * cy,
+  };
+};
+
+const scaled = (quat, factor) => ({
+  w: quat.w * factor,
+  x: quat.x * factor,
+  y: quat.y * factor,
+  z: quat.z * factor,
+});
 
 function testHeadingReadsTheYawTheVehicleStates() {
   for (const deg of [0, 45, 90, 179, 270, 359]) {
@@ -108,7 +134,12 @@ function testTheLeaderReachesWhereTheVehicleArrives() {
   // Due east at the same speed covers the same ground distance, which is
   // more degrees of longitude because they are shorter this far north.
   const east = leaderEndpoint(position, { bearingDeg: 90, speedMps: 20 });
-  assert.ok(Math.abs(east[1] - position.latitudeDeg) < 1e-9, "due east changes no latitude");
+  // A great circle leaving due east is at its northernmost point, so the
+  // latitude falls away either side of it. Over a minute that is under a
+  // metre, which is why a flat step is accurate enough in these latitudes
+  // and is not what this function does.
+  assert.ok(east[1] < position.latitudeDeg, "a great circle turns back down");
+  assert.ok(Math.abs(east[1] - position.latitudeDeg) < 1e-5, `east latitude ${east[1]}`);
   const expectedLon =
     position.longitudeDeg + 1200 / (111_111 * Math.cos((position.latitudeDeg * Math.PI) / 180));
   assert.ok(Math.abs(east[0] - expectedLon) < 1e-9);
@@ -126,15 +157,73 @@ function testTheLeaderReachesWhereTheVehicleArrives() {
 testTheLeaderReachesWhereTheVehicleArrives();
 console.log("ok - testTheLeaderReachesWhereTheVehicleArrives");
 
-function testAtThePoleTheLeaderRunsAlongTheMeridian() {
-  // A degree of longitude is no distance at the pole, and the step would
-  // divide by zero.
-  const pole = { latitudeDeg: 90, longitudeDeg: 0, heightM: 0 };
-  const [lon, lat] = leaderEndpoint(pole, { bearingDeg: 90, speedMps: 20 });
-  assert.ok(Number.isFinite(lon) && Number.isFinite(lat), "the endpoint is a place");
-  assert.equal(lon, pole.longitudeDeg);
+function testEveryLeaderEndsSomewhereOnTheEarth() {
+  // A step taken in degrees divides by the cosine of the latitude, so near
+  // the pole it names longitudes in the thousands and latitudes past 90 —
+  // places that are not on the Earth. Every row here is one such case.
+  const cases = [
+    ["at the pole", { latitudeDeg: 90, longitudeDeg: 0 }, { bearingDeg: 90, speedMps: 20 }],
+    ["beside the pole", { latitudeDeg: 89.9999, longitudeDeg: 10 }, { bearingDeg: 90, speedMps: 30 }],
+    ["over the pole", { latitudeDeg: 89.999, longitudeDeg: 10 }, { bearingDeg: 0, speedMps: 100 }],
+    ["at the south pole", { latitudeDeg: -90, longitudeDeg: 0 }, { bearingDeg: 0, speedMps: 20 }],
+    ["across the antimeridian", { latitudeDeg: 51.9, longitudeDeg: 179.98 }, { bearingDeg: 90, speedMps: 250 }],
+    ["the other way across it", { latitudeDeg: 51.9, longitudeDeg: -179.98 }, { bearingDeg: 270, speedMps: 250 }],
+  ];
+  for (const [name, position, track] of cases) {
+    const [lon, lat] = leaderEndpoint(position, track);
+    assert.ok(Number.isFinite(lon) && Number.isFinite(lat), `${name}: the endpoint is a place`);
+    assert.ok(lat >= -90 && lat <= 90, `${name}: latitude ${lat} is on the Earth`);
+    // The wire contract carries a normalized longitude and this repo's own
+    // decoder refuses one outside the band rather than wrap it.
+    assert.ok(lon >= -180 && lon < 180, `${name}: longitude ${lon} is in range`);
+  }
+
+  // Crossing the pole comes down the opposite meridian, which a step in
+  // degrees cannot do at all: it walks off the top of the map instead.
+  const [overLon, overLat] = leaderEndpoint(
+    { latitudeDeg: 89.999, longitudeDeg: 10 },
+    { bearingDeg: 0, speedMps: 100 },
+  );
+  assert.ok(Math.abs(overLon - -170) < 1e-6, `over the pole the meridian flips: ${overLon}`);
+  assert.ok(overLat < 90 && overLat > 89.9, `and comes back down: ${overLat}`);
 }
-testAtThePoleTheLeaderRunsAlongTheMeridian();
-console.log("ok - testAtThePoleTheLeaderRunsAlongTheMeridian");
+testEveryLeaderEndsSomewhereOnTheEarth();
+console.log("ok - testEveryLeaderEndsSomewhereOnTheEarth");
+
+function testAQuaternionInsideTheGateReadsTheYawItCarries() {
+  // The gate passes a band either side of unit length. A denominator of
+  // `1 - 2(y² + z²)` is only the rotation's at exactly unit length, so a
+  // quaternion inside that band would decode to a heading wrong by
+  // degrees, drawn pointed and stated to a decimal place.
+  const quat = attitudeQuat(30, 70, 110);
+  for (const normSquared of [0.9, 0.95, 1, 1.05, 1.1]) {
+    const read = headingDegFrom(scaled(quat, Math.sqrt(normSquared)), VALID_ATTITUDE);
+    assert.ok(
+      Math.abs(read - 110) < 1e-6,
+      `at squared norm ${normSquared} the yaw reads ${read}, not 110`,
+    );
+  }
+  // Outside the band nothing is claimed at all.
+  assert.equal(headingDegFrom(scaled(quat, Math.sqrt(0.85)), VALID_ATTITUDE), null);
+  assert.equal(headingDegFrom(scaled(quat, Math.sqrt(1.15)), VALID_ATTITUDE), null);
+}
+testAQuaternionInsideTheGateReadsTheYawItCarries();
+console.log("ok - testAQuaternionInsideTheGateReadsTheYawItCarries");
+
+function testACourseAlreadyDrawnReleasesLowerThanItEngages() {
+  // Without a band, a vehicle drifting either side of the floor flickers
+  // its course on and off at the telemetry rate.
+  assert.ok(TRACK_RELEASE_MPS < TRACK_FLOOR_MPS, "the band has width");
+  const between = (TRACK_FLOOR_MPS + TRACK_RELEASE_MPS) / 2;
+  assert.equal(trackFrom([between, 0, 0], VALID_VELOCITY, false), null, "it does not engage");
+  assert.ok(trackFrom([between, 0, 0], VALID_VELOCITY, true) !== null, "and does not release");
+  assert.equal(
+    trackFrom([TRACK_RELEASE_MPS - 0.01, 0, 0], VALID_VELOCITY, true),
+    null,
+    "below the release speed a drawn course goes",
+  );
+}
+testACourseAlreadyDrawnReleasesLowerThanItEngages();
+console.log("ok - testACourseAlreadyDrawnReleasesLowerThanItEngages");
 
 console.log("\nall situation motion checks passed");
