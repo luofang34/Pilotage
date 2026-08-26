@@ -120,6 +120,7 @@ fn admitted_link() -> Link {
     let mut control = ControlCoordinator::new();
     control.activate_scheme(pilotage_control_web::DEFAULT_PROFILE_BYTES);
     Link {
+        vehicle_advance: crate::link::vehicle_fix::GroupAdvance::default(),
         engine,
         control,
         feed: None,

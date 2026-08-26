@@ -218,6 +218,12 @@ pub enum LinkEvent {
         /// Whether the simulator's oracle supplied this, rather than the
         /// vehicle's own estimator.
         from_simulator: bool,
+        /// Whether the position is a NEW measurement rather than a repeat.
+        ///
+        /// A mark goes stale on the age of the last position MEASURED, not
+        /// the last one delivered: a host relaying a frozen block delivers
+        /// forever, and a mark timed from delivery would never go stale.
+        fix_advanced: bool,
     },
     /// One second of link accounting. What blinks on screen shows up
     /// here as a number: telemetry that arrives in bursts, frames the

@@ -16,14 +16,20 @@ struct VehicleFix: Equatable, Sendable {
     let groundSpeedMetresPerSecond: Double?
     /// Whether a simulator's oracle supplied it rather than the estimator.
     let fromSimulator: Bool
+    /// Whether the position is a new measurement rather than a repeat.
+    ///
+    /// Staleness is timed from the last position MEASURED, not the last one
+    /// delivered: a host relaying a frozen block delivers forever, and a mark
+    /// timed from delivery would never go stale.
+    let fixAdvanced: Bool
 }
 
 extension VehicleFix {
     /// Reads one link event, or nothing when it is not a vehicle fix.
     ///
-    /// The event states six loose values; naming them is this type's job, not
-    /// the link's, so the link's switch stays a list of what arrived rather
-    /// than a place where meaning is assigned.
+    /// The event states loose values; naming them is this type's job, not the
+    /// link's, so the link's switch stays a list of what arrived rather than a
+    /// place where meaning is assigned.
     init?(_ event: LinkEvent) {
         guard case let .vehicleFix(
             latitudeDeg,
@@ -31,7 +37,8 @@ extension VehicleFix {
             headingDeg,
             courseDeg,
             groundSpeedMps,
-            fromSimulator
+            fromSimulator,
+            fixAdvanced
         ) = event else { return nil }
         self.init(
             latitudeDegrees: latitudeDeg,
@@ -39,7 +46,8 @@ extension VehicleFix {
             headingDegrees: headingDeg,
             courseDegrees: courseDeg,
             groundSpeedMetresPerSecond: groundSpeedMps,
-            fromSimulator: fromSimulator
+            fromSimulator: fromSimulator,
+            fixAdvanced: fixAdvanced
         )
     }
 }

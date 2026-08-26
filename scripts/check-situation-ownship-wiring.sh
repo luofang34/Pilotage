@@ -113,4 +113,22 @@ fi
 require_pattern 'positionIsExtrapolated' "$app/SituationEvidence.swift" \
     "the evidence must count the marks the engine advanced, or a projection that never fires looks the same as one that does"
 
+# The staleness clock must be timed from when a position was MEASURED, not from
+# when one arrived.
+#
+# A host relaying a block whose avionics have stopped keeps delivering samples
+# indefinitely. A mark whose clock is refreshed on arrival therefore never goes
+# stale however long the vehicle has been silent — which is the single case the
+# staleness bound exists to cover. The link states whether the position
+# advanced; the clock has to be conditioned on it.
+require_pattern 'if vehicle\.fixAdvanced' "$app/OwnshipPosition.swift" \
+    "the vehicle staleness clock must be conditioned on fixAdvanced, or a frozen feed keeps the mark alive forever"
+
+# And in one place only. A second, unconditional write refreshes the clock on
+# arrival again while the conditional above it still reads correct.
+if [ "$(grep -c 'vehicleFixAt = Date()' "$app/OwnshipPosition.swift")" -ne 1 ]; then
+    echo "FORBIDDEN: the vehicle staleness clock is set in more than one place, so one of them is not waiting for a new measurement" >&2
+    status=1
+fi
+
 exit "$status"

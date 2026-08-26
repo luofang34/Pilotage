@@ -141,7 +141,15 @@ final class OwnshipModel: ObservableObject {
             resolve()
             return
         }
-        vehicleFixAt = Date()
+        // Timed from when the position was MEASURED, not when it arrived. A
+        // host relaying a block whose avionics have stopped keeps delivering
+        // samples, and a mark refreshed on arrival would never go stale
+        // however long the vehicle had been silent. The first fix starts the
+        // clock regardless, so a lane that somehow never reports an advance
+        // still expires rather than standing forever.
+        if vehicle.fixAdvanced || vehicleFixAt == nil {
+            vehicleFixAt = Date()
+        }
         vehicleFix = OwnshipFix(
             latitudeDegrees: vehicle.latitudeDegrees,
             longitudeDegrees: vehicle.longitudeDegrees,

@@ -32,6 +32,15 @@ sed -i.bak '/model.currentOwnship = /,+9d' "$app/SituationContentView.swift"
 reject "a model whose ownship reader is never set"
 restore SituationContentView.swift
 
+sed -i.bak 's/if vehicle.fixAdvanced || vehicleFixAt == nil {/if true {/' "$app/OwnshipPosition.swift"
+reject "a staleness clock refreshed on arrival rather than on a new measurement"
+restore OwnshipPosition.swift
+
+sed -i.bak 's/^        }$/        }\
+        vehicleFixAt = Date()/' "$app/OwnshipPosition.swift"
+reject "a second, unconditional write to the staleness clock"
+restore OwnshipPosition.swift
+
 sed -i.bak '/model.refreshEvidence()/d' "$app/SituationContentView.swift"
 reject "an evidence write nothing asks for"
 restore SituationContentView.swift

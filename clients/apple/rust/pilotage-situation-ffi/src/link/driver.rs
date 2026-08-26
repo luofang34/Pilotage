@@ -41,6 +41,10 @@ pub(super) struct Link {
     pub(super) retry_at_ms: Option<u64>,
     pub(super) stopped: bool,
     pub(super) stats: LinkStats,
+    /// When each telemetry group last stated a measurement this reader had
+    /// not already seen. A direction whose group has gone quiet stops being
+    /// drawn rather than going on pointing where the vehicle last was.
+    pub(super) vehicle_advance: super::vehicle_fix::GroupAdvance,
     /// Whether the gimbal quasimode captured the stick last tick.
     pub(super) capture_active: bool,
     /// The device label last announced to the shell; the resolved map
@@ -175,6 +179,7 @@ pub(crate) async fn run(
         digest: control.profile_digest(),
     });
     let mut link = Link {
+        vehicle_advance: super::vehicle_fix::GroupAdvance::default(),
         engine,
         control,
         feed: None,

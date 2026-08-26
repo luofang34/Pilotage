@@ -144,7 +144,7 @@ impl Link {
             #[allow(clippy::cast_precision_loss)]
             feed.ingest(sample, now_ms as f64);
         }
-        self.emit_vehicle_fix(sample);
+        self.emit_vehicle_fix(sample, now_ms);
     }
 
     /// Where the vehicle says it is, on its way to the map.
@@ -152,8 +152,9 @@ impl Link {
     /// The situation session ingests surveillance, weather and terrain, and a
     /// vehicle under this operator's own control is on none of them. Without
     /// this the map has a mark it can draw and nothing to draw it from.
-    fn emit_vehicle_fix(&mut self, sample: &wire::TelemetrySample) {
-        let Some(fix) = super::vehicle_fix::from_sample(sample) else {
+    fn emit_vehicle_fix(&mut self, sample: &wire::TelemetrySample, now_ms: u64) {
+        let Some(fix) = super::vehicle_fix::from_sample(&mut self.vehicle_advance, sample, now_ms)
+        else {
             return;
         };
         self.delivery.event(LinkEvent::VehicleFix {
@@ -163,6 +164,7 @@ impl Link {
             course_deg: fix.course_deg,
             ground_speed_mps: fix.ground_speed_mps,
             from_simulator: fix.from_simulator,
+            fix_advanced: fix.fix_advanced,
         });
     }
 

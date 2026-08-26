@@ -4,16 +4,37 @@
 //! under this operator's own control appears in none of them, so its position
 //! reaches the map through this and nothing else.
 //!
-//! The rules here are the browser's rules, deliberately. Both clients draw the
-//! same mark from the same measurements, and a rule stated twice is a rule
-//! that drifts — so the thresholds and the lane choice are the ones the shared
-//! corpus pins, and any change to them has to move the corpus first.
+//! The rules here are the browser's rules, deliberately: both clients draw the
+//! same mark from the same measurements, and a mark that means one thing on a
+//! tablet and another in a browser is worse than either rule alone.
+//!
+//! Nothing shared enforces that. There is no corpus these two agree through —
+//! the values are copied from `clients/web/situation-ownship.js`, carry the
+//! same names, and are held on this side by the tests below and on that side
+//! by its own. A change to either is a change to one client's behaviour until
+//! somebody moves the other, so the tests state the numbers outright rather
+//! than deriving them, and a reader comparing the two files can see in one
+//! pass whether they still agree.
 
 use pilotage_protocol::wire;
 
 /// Below this speed a velocity states no direction worth drawing: the track
 /// is noise around a stationary vehicle rather than a course.
 const TRACK_FLOOR_MPS: f64 = 0.5;
+
+/// How long a direction may go without a new measurement and still be drawn.
+///
+/// A direction is measured many times a second, and a stale one does not fade
+/// — it turns the mark, and keeps pointing confidently at a heading the
+/// vehicle left. So a group that has not produced a measurement this recently
+/// stops contributing, and the mark is drawn without that direction rather
+/// than with a wrong one.
+///
+/// The position itself is deliberately NOT held to this bound. It is reported
+/// far less often, and withdrawing the mark every time a receiver paused would
+/// blink it constantly; it keeps the longer staleness bound instead, which the
+/// client applies.
+const GROUP_COHERENCE_MS: u64 = 300;
 
 /// Bit 0 of the validity mask: the lane states an attitude.
 const VALID_ATTITUDE: u32 = 1 << 0;
@@ -31,6 +52,100 @@ pub(super) struct VehicleFix {
     pub(super) course_deg: Option<f64>,
     pub(super) ground_speed_mps: Option<f64>,
     pub(super) from_simulator: bool,
+    /// Whether the position in this fix is a NEW measurement.
+    ///
+    /// The client withdraws a mark whose position has gone stale, and it can
+    /// only time that from when the position was last measured. Arrival will
+    /// not do: a host relaying a frozen block delivers samples forever, and a
+    /// mark timed from arrival would never go stale no matter how long the
+    /// vehicle had stopped reporting.
+    pub(super) fix_advanced: bool,
+}
+
+/// Which measurement one tracked group belongs to.
+#[derive(Clone, Copy)]
+enum Group {
+    Heading,
+    Track,
+    Fix,
+}
+
+/// What distinguishes one measurement from the one before it.
+///
+/// The role rides in here with the rest, so a handover from the estimate lane
+/// to the truth lane reads as the new measurement it is without the lane
+/// having to be remembered separately.
+#[derive(PartialEq)]
+struct StampIdentity {
+    role: i32,
+    source_id: u64,
+    source_incarnation: Vec<u8>,
+    source_epoch: u32,
+    sequence: u32,
+    acquired_at_ns: u64,
+}
+
+impl StampIdentity {
+    fn of(stamp: &wire::MeasurementStamp) -> Self {
+        Self {
+            role: stamp.role,
+            source_id: stamp.source_id,
+            source_incarnation: stamp.source_incarnation.clone(),
+            source_epoch: stamp.source_epoch,
+            sequence: stamp.sequence,
+            acquired_at_ns: stamp.acquired_at_ns,
+        }
+    }
+}
+
+/// When each group last stated something this reader had not already seen.
+///
+/// Kept across samples because that is the only place the answer lives: one
+/// sample cannot say whether its stamp is the same one the last sample
+/// carried, and a lane that keeps repeating a measurement is exactly the case
+/// this exists to notice.
+#[derive(Default)]
+pub(super) struct GroupAdvance {
+    identity: [Option<StampIdentity>; 3],
+    advanced_at_ms: [u64; 3],
+}
+
+impl GroupAdvance {
+    /// When this group last advanced, and whether it advanced just now.
+    ///
+    /// Advance is identity INEQUALITY rather than a sequence comparison. A
+    /// sequence that wrapped, or one a source restarted, still states a new
+    /// measurement, and ordering it against the last would read the newest
+    /// measurement there is as the oldest.
+    fn advanced(
+        &mut self,
+        group: Group,
+        stamp: Option<&wire::MeasurementStamp>,
+        now_ms: u64,
+    ) -> Option<(u64, bool)> {
+        let identity = StampIdentity::of(stamp?);
+        let slot = group as usize;
+        if self.identity[slot].as_ref() != Some(&identity) {
+            self.identity[slot] = Some(identity);
+            self.advanced_at_ms[slot] = now_ms;
+            return Some((now_ms, true));
+        }
+        Some((self.advanced_at_ms[slot], false))
+    }
+
+    /// Whether this group has stated a measurement recently enough to draw.
+    ///
+    /// A group that states no stamp at all cannot be shown to be current, and
+    /// what cannot be shown current is not drawn.
+    fn is_current(
+        &mut self,
+        group: Group,
+        stamp: Option<&wire::MeasurementStamp>,
+        now_ms: u64,
+    ) -> bool {
+        self.advanced(group, stamp, now_ms)
+            .is_some_and(|(when, _)| now_ms.saturating_sub(when) <= GROUP_COHERENCE_MS)
+    }
 }
 
 /// Reads one sample into a fix, or nothing when no lane states a position.
@@ -38,7 +153,11 @@ pub(super) struct VehicleFix {
 /// The oracle wins where a session has one, because a session that has one is
 /// being judged against it. A session without one is the normal case, not a
 /// failure, and it is the only case a physical vehicle has.
-pub(super) fn from_sample(sample: &wire::TelemetrySample) -> Option<VehicleFix> {
+pub(super) fn from_sample(
+    advance: &mut GroupAdvance,
+    sample: &wire::TelemetrySample,
+    now_ms: u64,
+) -> Option<VehicleFix> {
     if let Some(truth) = sample.sim_truth.as_ref()
         && let Some(geodetic) = truth.geodetic.as_ref()
         // Truth without provenance is discarded, the same refusal the
@@ -46,18 +165,32 @@ pub(super) fn from_sample(sample: &wire::TelemetrySample) -> Option<VehicleFix> 
         // vehicle's, this boot's and this moment's is not drawn.
         && truth.stamp.is_some()
     {
+        // The truth lane states one observation and every group rides it, so
+        // all three are tracked against the same stamp. They are still tracked
+        // separately: the lane can hand over to the estimate lane, which
+        // stamps its groups apart.
+        let stamp = truth.stamp.as_ref();
+        let heading_current = advance.is_current(Group::Heading, stamp, now_ms);
+        let track_current = advance.is_current(Group::Track, stamp, now_ms);
+        let fix_advanced = advance
+            .advanced(Group::Fix, stamp, now_ms)
+            .is_some_and(|(_, now)| now);
+        let velocity = track_from([truth.vel_n_mps, truth.vel_e_mps], truth.valid_flags);
         return Some(VehicleFix {
             latitude_deg: geodetic.latitude_deg,
             longitude_deg: geodetic.longitude_deg,
-            heading_deg: heading_from(
-                [truth.quat_w, truth.quat_x, truth.quat_y, truth.quat_z],
-                truth.valid_flags,
-            ),
-            course_deg: track_from([truth.vel_n_mps, truth.vel_e_mps], truth.valid_flags)
-                .map(|(bearing, _)| bearing),
-            ground_speed_mps: track_from([truth.vel_n_mps, truth.vel_e_mps], truth.valid_flags)
-                .map(|(_, speed)| speed),
+            heading_deg: heading_current
+                .then(|| {
+                    heading_from(
+                        [truth.quat_w, truth.quat_x, truth.quat_y, truth.quat_z],
+                        truth.valid_flags,
+                    )
+                })
+                .flatten(),
+            course_deg: track_current.then_some(velocity).flatten().map(|(b, _)| b),
+            ground_speed_mps: track_current.then_some(velocity).flatten().map(|(_, s)| s),
             from_simulator: true,
+            fix_advanced,
         });
     }
 
@@ -65,33 +198,43 @@ pub(super) fn from_sample(sample: &wire::TelemetrySample) -> Option<VehicleFix> 
     let geodetic = avionics.geodetic.as_ref()?;
     avionics.geodetic_stamp.as_ref()?;
     // On the estimate lane the mask is a latched authorization from the
-    // estimator, and it means nothing without the status observation backing
-    // it. Absence is no authorization, and a consumer of it fails closed.
-    // The mask is a latched authorization from the estimator, and it means
-    // nothing without the status observation behind it — nor when that
-    // observation says the solution is unusable. An estimator calling its own
-    // answer unusable is the clearest refusal there is, and reading its
-    // directions anyway would turn the mark by a number its author disowned.
+    // estimator, and it means nothing without the status observation behind
+    // it — nor when that observation says the solution is unusable. An
+    // estimator calling its own answer unusable is the clearest refusal there
+    // is, and reading its directions anyway would turn the mark by a number
+    // its author disowned.
     let authorized =
         avionics.estimator_status_stamp.is_some() && avionics.quality != QUALITY_UNUSABLE;
     let flags = if authorized { avionics.valid_flags } else { 0 };
+    // This lane stamps its groups apart, so each is asked about its own.
+    let heading_current =
+        advance.is_current(Group::Heading, avionics.attitude_stamp.as_ref(), now_ms);
+    let track_current =
+        advance.is_current(Group::Track, avionics.kinematics_stamp.as_ref(), now_ms);
+    let fix_advanced = advance
+        .advanced(Group::Fix, avionics.geodetic_stamp.as_ref(), now_ms)
+        .is_some_and(|(_, now)| now);
+    let velocity = track_from([avionics.vel_n_mps, avionics.vel_e_mps], flags);
     Some(VehicleFix {
         latitude_deg: geodetic.latitude_deg,
         longitude_deg: geodetic.longitude_deg,
-        heading_deg: heading_from(
-            [
-                avionics.quat_w,
-                avionics.quat_x,
-                avionics.quat_y,
-                avionics.quat_z,
-            ],
-            flags,
-        ),
-        course_deg: track_from([avionics.vel_n_mps, avionics.vel_e_mps], flags)
-            .map(|(bearing, _)| bearing),
-        ground_speed_mps: track_from([avionics.vel_n_mps, avionics.vel_e_mps], flags)
-            .map(|(_, speed)| speed),
+        heading_deg: heading_current
+            .then(|| {
+                heading_from(
+                    [
+                        avionics.quat_w,
+                        avionics.quat_x,
+                        avionics.quat_y,
+                        avionics.quat_z,
+                    ],
+                    flags,
+                )
+            })
+            .flatten(),
+        course_deg: track_current.then_some(velocity).flatten().map(|(b, _)| b),
+        ground_speed_mps: track_current.then_some(velocity).flatten().map(|(_, s)| s),
         from_simulator: false,
+        fix_advanced,
     })
 }
 
