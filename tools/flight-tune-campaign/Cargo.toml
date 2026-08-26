@@ -14,5 +14,6 @@ pilotage-tuning-feedback = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+pilotage-flight-quality = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

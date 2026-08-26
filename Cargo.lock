@@ -823,6 +823,7 @@ name = "flight-tune-campaign"
 version = "0.1.0"
 dependencies = [
  "flight-tune",
+ "pilotage-flight-quality",
  "pilotage-tuning-feedback",
  "serde",
  "serde_json",

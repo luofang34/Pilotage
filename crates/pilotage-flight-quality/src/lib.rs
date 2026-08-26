@@ -26,6 +26,7 @@ mod response;
 mod sample;
 mod series;
 mod signal;
+mod vocabulary;
 
 pub use control::{ControlMetrics, measure_control};
 pub use error::MetricError;
@@ -40,6 +41,10 @@ pub use response::{
 };
 pub use sample::{ControlPoint, MotionPoint, TimedValue};
 pub use signal::{JerkMetrics, SignalStats, measure_jerk, measure_signal};
+pub use vocabulary::{
+    CONTROL_METRICS, HOLD_METRICS, JERK_METRICS, RELEASE_METRICS, RESPONSE_METRICS, SIGNAL_METRICS,
+    is_producible, producible_metrics,
+};
 
 #[cfg(test)]
 mod test_trace;
