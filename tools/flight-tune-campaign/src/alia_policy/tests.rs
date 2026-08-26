@@ -16,8 +16,7 @@ use super::{alia250_promotion_policy, alia250_qualification_policy};
 ///
 /// The test below fails the moment one becomes measurable, which is the prompt
 /// to put it in both vehicles' bars rather than to widen this list.
-const OBJECTIVES_OWED_A_MEASUREMENT: [&str; 4] = [
-    "hold.zero_crossings",
+const OBJECTIVES_OWED_A_MEASUREMENT: [&str; 3] = [
     "wind.position_peak_m",
     "wind.position_p95_m",
     "wind.position_rms_m",

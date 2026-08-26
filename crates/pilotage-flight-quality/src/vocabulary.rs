@@ -36,7 +36,7 @@ pub const RELEASE_METRICS: [&str; 5] = [
 ];
 
 /// Metric names produced by [`crate::measure_hold`].
-pub const HOLD_METRICS: [&str; 2] = ["hold.position_error_m", "hold.rebound_distance_m"];
+pub const HOLD_METRICS: [&str; 2] = ["hold.rebound_distance_m", "hold.zero_crossings"];
 
 /// Metric names produced by [`crate::measure_step_response`].
 pub const RESPONSE_METRICS: [&str; 8] = [
@@ -77,60 +77,13 @@ pub fn producible_metrics() -> impl Iterator<Item = &'static str> {
 mod tests {
     use super::*;
 
-    /// The modules that name metrics, read at compile time so the list above
-    /// is checked against the code rather than against a memory of it.
-    ///
-    /// The check runs one way only. A name in this vocabulary that the code
-    /// does not know is fiction, and a policy built on it fails every campaign
-    /// on the name. A name in the code that this vocabulary omits is merely
-    /// unavailable to a policy, which is a smaller thing and sometimes
-    /// deliberate: several of these strings label a validation rather than
-    /// name an objective.
-    const SOURCES: [&str; 5] = [
-        include_str!("control.rs"),
-        include_str!("signal.rs"),
-        include_str!("release.rs"),
-        include_str!("response.rs"),
-        include_str!("series.rs"),
-    ];
-
-    /// Every `"family.name"` literal in one source.
-    fn emitted_names(source: &str) -> Vec<&str> {
-        source
-            .match_indices('"')
-            .zip(source.match_indices('"').skip(1))
-            .step_by(2)
-            .filter_map(|((open, _), (close, _))| source.get(open + 1..close))
-            .filter(|value| {
-                value.split_once('.').is_some_and(|(family, rest)| {
-                    !family.is_empty()
-                        && !rest.is_empty()
-                        && family.chars().all(|c| c.is_ascii_lowercase())
-                        && rest
-                            .chars()
-                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                })
-            })
-            .collect()
-    }
-
-    #[test]
-    fn every_name_in_the_vocabulary_is_one_the_measurements_know() {
-        // Final qualification requires every objective a policy names to be
-        // present in every run, so a vocabulary entry the measurements do not
-        // know fails the campaign on the name rather than on the vehicle.
-        let emitted: std::collections::BTreeSet<&str> =
-            SOURCES.into_iter().flat_map(emitted_names).collect();
-        for name in producible_metrics() {
-            assert!(
-                emitted.contains(name),
-                "{name} is in the vocabulary but nothing emits it"
-            );
-        }
-    }
-
     #[test]
     fn the_vocabulary_is_a_set_of_family_qualified_names() {
+        // What the vocabulary states is checked where it is consumed: the
+        // evaluator that produces these values maps each name to a field of a
+        // measurement result, so a name no measurement returns does not
+        // compile. Textual checks here would compare against validation
+        // labels, which are the same strings used for a different purpose.
         let mut seen = std::collections::BTreeSet::new();
         for name in producible_metrics() {
             assert!(seen.insert(name), "{name} is listed twice");
@@ -141,6 +94,7 @@ mod tests {
             );
         }
         assert!(is_producible("control.effort_rms"));
+        assert!(is_producible("hold.zero_crossings"));
         assert!(!is_producible("wind.position_rms_m"));
     }
 }

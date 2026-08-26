@@ -28,6 +28,7 @@ tools/flight-tune-campaign/Cargo.toml	libc	libc	normal		false	source	registry+ht
 tools/flight-tune-campaign/Cargo.toml	libproc	libproc	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.14.11
 tools/flight-tune-campaign/Cargo.toml	pilotage-control-feel	pilotage-control-feel	normal		false	path	crates/pilotage-control-feel	true		*
 tools/flight-tune-campaign/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
+tools/flight-tune-campaign/Cargo.toml	pilotage-flight-quality	pilotage-flight-quality	normal		false	path	crates/pilotage-flight-quality	true		*
 tools/flight-tune-campaign/Cargo.toml	pilotage-mavlink	pilotage-mavlink	normal		false	path	crates/pilotage-mavlink	true		*
 tools/flight-tune-campaign/Cargo.toml	pilotage-protocol	pilotage-protocol	normal		false	path	crates/pilotage-protocol	true		*
 tools/flight-tune-campaign/Cargo.toml	pilotage-trial	pilotage-trial	normal		false	path	crates/pilotage-trial	true		*

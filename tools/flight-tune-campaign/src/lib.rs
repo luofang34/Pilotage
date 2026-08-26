@@ -7,6 +7,7 @@
 mod alia_policy;
 mod error;
 mod publish;
+mod scoring;
 
 pub use alia_policy::{
     alia250_promotion_policy, alia250_qualification_policy, alia250_required_policy,
@@ -14,3 +15,4 @@ pub use alia_policy::{
 };
 pub use error::CampaignError;
 pub use publish::publish_journal_evidence_blocking;
+pub use scoring::{FlightQualityEvaluator, channel};
