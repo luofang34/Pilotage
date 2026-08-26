@@ -71,15 +71,31 @@ enum SituationStyleResource {
         guard var style = object as? [String: Any],
               var sources = style["sources"] as? [String: Any],
               var coastline = sources["pilotage-coastline"] as? [String: Any],
-              coastline["url"] as? String == coastlineArchiveToken,
-              var terrain = sources["pilotage-terrain"] as? [String: Any],
-              terrain["url"] as? String == terrainArchiveToken else {
+              coastline["url"] as? String == coastlineArchiveToken else {
             throw SituationStyleResourceError.invalidTemplate
         }
         coastline["url"] = try archiveURL(for: coastlineArchiveFileURL).absoluteString
-        terrain["url"] = try archiveURL(for: terrainArchiveFileURL).absoluteString
         sources["pilotage-coastline"] = coastline
-        sources["pilotage-terrain"] = terrain
+
+        // Every source reading the terrain archive is substituted, rather than
+        // one source named here. The archive is read more than once — once for
+        // the band that covers the whole Earth, once for the deeper bands that
+        // cover part of it — and a source left holding the token is a style
+        // that fails to load, not a layer that quietly goes missing.
+        let terrainNames = sources.compactMap { name, value -> String? in
+            guard let source = value as? [String: Any],
+                  source["url"] as? String == terrainArchiveToken else { return nil }
+            return name
+        }
+        guard !terrainNames.isEmpty else {
+            throw SituationStyleResourceError.invalidTemplate
+        }
+        let terrainURL = try archiveURL(for: terrainArchiveFileURL).absoluteString
+        for name in terrainNames {
+            guard var source = sources[name] as? [String: Any] else { continue }
+            source["url"] = terrainURL
+            sources[name] = source
+        }
         style["sources"] = sources
         // Without a glyph source the renderer draws no text at all, whatever a layer
         // asks for. The fonts ship in the bundle because the map is read where there is

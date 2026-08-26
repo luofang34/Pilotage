@@ -16,7 +16,17 @@
       "url": "__PILOTAGE_TERRAIN_MBTILES_URL__",
       "tileSize": 256,
       "encoding": "terrarium",
-      "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP."
+      "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP.",
+      "maxzoom": 5
+    },
+    "pilotage-terrain-detail": {
+      "type": "raster-dem",
+      "url": "__PILOTAGE_TERRAIN_MBTILES_URL__",
+      "tileSize": 256,
+      "encoding": "terrarium",
+      "attribution": "Elevation from AWS Terrain Tiles. Sources include SRTM, ASTER GDEM, NRCan CDEM, and USGS 3DEP.",
+      "maxzoom": 13,
+      "minzoom": 6
     }
   },
   "layers": [
@@ -133,6 +143,85 @@
         "hillshade-illumination-anchor": "map",
         "hillshade-method": "igor"
       }
+    },
+    {
+      "id": "pilotage-terrain-relief-detail",
+      "type": "color-relief",
+      "source": "pilotage-terrain-detail",
+      "paint": {
+        "color-relief-opacity": 0.9,
+        "color-relief-color": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "elevation"
+          ],
+          -11000,
+          "#7fb2c8",
+          -400,
+          "#a8cfe0",
+          -80,
+          "#cfdeae",
+          -2,
+          "#cfdeae",
+          -1,
+          "#dfe7c4",
+          0,
+          "#dfe7c4",
+          304.6,
+          "#dfe7c4",
+          304.8,
+          "#cfdeae",
+          609.4,
+          "#cfdeae",
+          609.6,
+          "#fff4db",
+          914.2,
+          "#fff4db",
+          914.4,
+          "#f7e8b8",
+          1523.8,
+          "#f7e8b8",
+          1524.0,
+          "#f2d58b",
+          2133.4,
+          "#f2d58b",
+          2133.6,
+          "#e4bf9b",
+          2743.0,
+          "#e4bf9b",
+          2743.2,
+          "#eeb47f",
+          3657.4,
+          "#eeb47f",
+          3657.6,
+          "#b48e3f",
+          5983.9,
+          "#b48e3f",
+          5984.1,
+          "#ffffff",
+          8850,
+          "#ffffff"
+        ]
+      },
+      "minzoom": 6
+    },
+    {
+      "id": "pilotage-terrain-hillshade-detail",
+      "type": "hillshade",
+      "source": "pilotage-terrain-detail",
+      "paint": {
+        "hillshade-exaggeration": 0.5,
+        "hillshade-shadow-color": "#241f16",
+        "hillshade-highlight-color": "#cfc9b4",
+        "hillshade-accent-color": "#3a3226",
+        "hillshade-illumination-direction": 315,
+        "hillshade-illumination-anchor": "map",
+        "hillshade-method": "igor"
+      },
+      "minzoom": 6
     },
     {
       "id": "pilotage-ocean-water",

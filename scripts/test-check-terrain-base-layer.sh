@@ -550,6 +550,45 @@ RELIEF_OPAQUE
 reject_style "a relief that hides the polygon beneath it"
 
 
+# The band that covers the whole Earth is the ceiling for the source that has
+# to draw everywhere. Uncapped, the renderer asks every location for tiles the
+# archive holds over one country, and paints nothing in all the others — which
+# is a map with terrain in a rectangle and blank ground around it.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'UNCAPPED'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["sources"]["pilotage-terrain"]["maxzoom"]
+json.dump(style, open(path, "w"))
+UNCAPPED
+reject_style "a terrain source uncapped past the zoom the archive covers the world to"
+
+# And the deeper bands have to be reached by something, or the archive carries
+# detail nothing ever draws.
+python3 - "$fixture/clients/apple/Resources/SituationStyle.json" <<'NO_DETAIL'
+import json, sys
+path = sys.argv[1]
+style = json.load(open(path))
+del style["sources"]["pilotage-terrain-detail"]
+style["layers"] = [l for l in style["layers"] if not l["id"].endswith("-detail")]
+json.dump(style, open(path, "w"))
+NO_DETAIL
+reject_style "a style that reaches none of the archive's deeper bands"
+
+# The resolver has to substitute every source reading the archive. Naming one
+# leaves the others holding the placeholder, which fails the whole style.
+cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$fixture/clients/apple/App/SituationStyleResource.swift.orig"
+mutate "$fixture/clients/apple/App/SituationStyleResource.swift" \
+    's/let terrainNames = sources.compactMap/let _ = sources["pilotage-terrain"]; let terrainNames = sources.compactMap/'
+if PILOTAGE_TERRAIN_SKIP_REBUILD=1 \
+    bash "$fixture/scripts/check-terrain-base-layer.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the terrain guard accepted a resolver naming one terrain source" >&2
+    exit 1
+fi
+cp "$root/clients/apple/App/SituationStyleResource.swift" \
+    "$fixture/clients/apple/App/"
+
 # Half of 4^7 is 8192. One tile short of it is a plan the build did not keep.
 archive_case 8191 reject
 archive_case 8192 accept

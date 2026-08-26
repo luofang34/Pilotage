@@ -453,6 +453,41 @@ for builder in build-situation-terrain.sh build-situation-coastline.sh; do
     fi
 done
 
+# Terrain must be drawn everywhere the map can be panned, not only where the
+# deepest band reaches.
+#
+# The archive's bands narrow as they deepen: one covers the whole Earth, the
+# next a country, the last a valley. A source declaring the deepest band's zoom
+# as its own ceiling makes the renderer ask, at every location, for tiles that
+# exist in one of them — and paint nothing in all the rest. So the source that
+# has to draw everywhere is capped at the deepest band that covers everywhere,
+# and stretches past it; a second source carries the deeper bands where they
+# exist.
+global_zoom="$(jq -r '[.bands[] | select(.min_lon_deg <= -180 and .max_lon_deg >= 180) | .max_zoom] | max' "$plan")"
+base_zoom="$(jq -r '.sources["pilotage-terrain"].maxzoom // "unset"' "$style")"
+if [ "$base_zoom" != "$global_zoom" ]; then
+    echo "FORBIDDEN: the terrain source drawn at every location stops at zoom $base_zoom, but the archive covers the whole Earth only to zoom $global_zoom" >&2
+    status=1
+fi
+
+if ! jq -e --argjson ceiling "$global_zoom" '
+    [.sources | to_entries[]
+     | select(.value.url == "__PILOTAGE_TERRAIN_MBTILES_URL__")
+     | .value.minzoom // 0]
+    | any(. > $ceiling)
+' "$style" >/dev/null; then
+    echo "FORBIDDEN: no terrain source carries the bands deeper than zoom $global_zoom, so the detail the archive holds is never drawn" >&2
+    status=1
+fi
+
+# The resolver has to substitute every source that reads the archive. Naming
+# one leaves any other holding the placeholder, which fails the whole style
+# rather than dropping the one layer.
+if grep -q 'sources\["pilotage-terrain"\]' "$resolver"; then
+    echo "FORBIDDEN: the style resolver substitutes one named terrain source, and the archive is read by more than one" >&2
+    status=1
+fi
+
 if [ "$status" -ne 0 ]; then
     echo "Terrain base layer: FAILED" >&2
     exit 1
