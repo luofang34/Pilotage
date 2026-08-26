@@ -112,6 +112,7 @@ fi
 
 mv "$work/archive.mbtiles" "$archive"
 archive_digest=$(shasum -a 256 "$archive" | awk '{print $1}')
+
 jq -n \
     --arg plan_sha256 "$plan_digest" \
     --arg archive_sha256 "$archive_digest" \

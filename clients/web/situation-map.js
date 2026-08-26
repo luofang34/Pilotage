@@ -164,14 +164,16 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     }
     await loadStylesheet(doc, VENDOR_STYLESHEET.href);
 
-    const [template, coastlineTileJson, terrainTileJson, terrainManifest] =
-      await Promise.all([
-        fetchJson(ASSETS_BASE + manifest.style),
-        fetchJson(ASSETS_BASE + manifest.sources?.["pilotage-coastline"]),
-        fetchJson(ASSETS_BASE + manifest.sources?.["pilotage-terrain"]),
-        fetchJson(ASSETS_BASE + manifest.terrain_manifest),
-      ]);
-    if (template === null || coastlineTileJson === null || terrainTileJson === null) {
+    const sourceNames = Object.keys(manifest.sources ?? {});
+    const [template, terrainManifest, ...tileJsonDocuments] = await Promise.all([
+      fetchJson(ASSETS_BASE + manifest.style),
+      fetchJson(ASSETS_BASE + manifest.terrain_manifest),
+      ...sourceNames.map((name) => fetchJson(ASSETS_BASE + manifest.sources[name])),
+    ]);
+    const tileJsonBySource = Object.fromEntries(
+      sourceNames.map((name, index) => [name, tileJsonDocuments[index]]),
+    );
+    if (template === null || tileJsonDocuments.some((document) => document === null)) {
       setUnavailable(MAP_REASON.STYLE_INVALID, "the asset export is incomplete");
       return null;
     }
@@ -181,8 +183,7 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
       style = resolveSituationStyle({
         template,
         assetsBase: ASSETS_BASE,
-        coastlineTileJson,
-        terrainTileJson,
+        tileJsonBySource,
         glyphsPath: typeof manifest.glyphs === "string" ? manifest.glyphs : null,
       });
     } catch (error) {

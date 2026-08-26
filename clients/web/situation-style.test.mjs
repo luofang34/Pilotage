@@ -41,25 +41,20 @@ const styleResolverSwift = readFileSync(
 const mapDefaultsSwift = readFileSync(join(appleApp, "PilotageApp.swift"), "utf8");
 
 const ASSETS_BASE = "http://client.test/situation-assets/";
-const coastlineTileJson = {
-  tilejson: "3.0.0",
-  tiles: ["coastline/{z}/{x}/{y}.pbf"],
-  minzoom: 0,
-  maxzoom: 15,
-};
-const terrainTileJson = {
-  tilejson: "3.0.0",
-  tiles: ["terrain/{z}/{x}/{y}.png"],
-  minzoom: 0,
-  maxzoom: 13,
+const tileJsonBySource = {
+  "pilotage-coastline": {
+    tilejson: "3.0.0", tiles: ["coastline/{z}/{x}/{y}.pbf"], minzoom: 0, maxzoom: 7,
+  },
+  "pilotage-terrain": {
+    tilejson: "3.0.0", tiles: ["terrain/{z}/{x}/{y}.png"], minzoom: 0, maxzoom: 13,
+  },
 };
 
 function resolved(overrides = {}) {
   return resolveSituationStyle({
     template: sharedStyle,
     assetsBase: ASSETS_BASE,
-    coastlineTileJson,
-    terrainTileJson,
+    tileJsonBySource,
     glyphsPath: "fonts",
     ...overrides,
   });
@@ -71,7 +66,7 @@ function testTokensResolveToInlineTileSources() {
   assert.equal(coastline.url, undefined, "the archive token is consumed");
   assert.deepEqual(coastline.tiles, [`${ASSETS_BASE}coastline/{z}/{x}/{y}.pbf`]);
   assert.equal(coastline.minzoom, 0);
-  assert.equal(coastline.maxzoom, 15);
+  assert.equal(coastline.maxzoom, 7, "overzoom past the deepest tile is the renderer's");
   const terrain = style.sources["pilotage-terrain"];
   assert.deepEqual(terrain.tiles, [`${ASSETS_BASE}terrain/{z}/{x}/{y}.png`]);
   assert.equal(terrain.maxzoom, 13, "overzoom past the deepest tile is the renderer's");
@@ -79,6 +74,46 @@ function testTokensResolveToInlineTileSources() {
 }
 testTokensResolveToInlineTileSources();
 console.log("ok - testTokensResolveToInlineTileSources");
+
+function testTheCoastlineSourceStopsWhereTheArchiveIsStillGlobal() {
+  // A vector tile the archive does not hold draws nothing, and no
+  // shallower tile stands in for it the way a raster tile's parent does.
+  // Past the deepest zoom a source declares, the renderer stretches the
+  // tile it has instead of asking for one that does not exist. So the
+  // depth the source declares has to be a depth the archive holds
+  // EVERYWHERE, and the plan is what states that.
+  const plan = JSON.parse(
+    readFileSync(new URL("../apple/Resources/SituationCoastline.plan.json", import.meta.url)),
+  );
+  for (const band of plan.bands) {
+    assert.ok(
+      band.min_lon_deg <= -180 && band.max_lon_deg >= 180 &&
+        band.min_lat_deg <= -85 && band.max_lat_deg >= 85,
+      `band ${band.name} covers the world`,
+    );
+  }
+  for (let zoom = 0; zoom <= plan.closest_zoom; zoom += 1) {
+    const covering = plan.bands.filter(
+      (band) => band.min_zoom <= zoom && band.max_zoom >= zoom,
+    );
+    assert.equal(covering.length, 1, `exactly one band covers zoom ${zoom}`);
+  }
+  assert.equal(
+    plan.closest_zoom,
+    Math.max(...plan.bands.map((band) => band.max_zoom)),
+    "the closest zoom is the deepest band",
+  );
+  // The export writes the source's ceiling from the tiles the archive
+  // holds, so the fixture above states what the plan promises. Reading
+  // the export itself would make this suite need a build artifact.
+  assert.equal(
+    tileJsonBySource["pilotage-coastline"].maxzoom,
+    plan.closest_zoom,
+    "the fixture stops where the plan says the archive stops",
+  );
+}
+testTheCoastlineSourceStopsWhereTheArchiveIsStillGlobal();
+console.log("ok - testTheCoastlineSourceStopsWhereTheArchiveIsStillGlobal");
 
 function testResolutionPreservesTheSharedContract() {
   const style = resolved();
@@ -123,12 +158,20 @@ console.log("ok - testInvalidTemplateIsATypedRefusal");
 function testUnusableTileJsonIsATypedRefusal() {
   for (const broken of [null, {}, { tiles: [] }, { tiles: ["a"], minzoom: 0 }]) {
     assert.throws(
-      () => resolved({ coastlineTileJson: broken }),
+      () =>
+        resolved({
+          tileJsonBySource: { ...tileJsonBySource, "pilotage-coastline": broken },
+        }),
       (error) =>
         error instanceof SituationStyleError &&
         error.reason === STYLE_REASON.INVALID_TILEJSON,
     );
   }
+  // A source the export does not describe is refused, never left empty.
+  assert.throws(
+    () => resolved({ tileJsonBySource: { "pilotage-coastline": tileJsonBySource["pilotage-coastline"] } }),
+    (error) => error instanceof SituationStyleError,
+  );
 }
 testUnusableTileJsonIsATypedRefusal();
 console.log("ok - testUnusableTileJsonIsATypedRefusal");

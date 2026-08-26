@@ -46,10 +46,25 @@ from the south and the web tile URL scheme counts from the north. The export
 also decompresses each vector tile, because a static file server sends no
 `Content-Encoding` header.
 
-The archives hold zoom bands: a world band plus deeper regional bands. A
-view outside a deep band shows no coastline fill at that zoom, and the
-terrain stretches its deepest world tile. Both renderers show a banded
-archive the same way.
+The two archives hold their zoom bands differently, because the renderer
+treats a missing tile differently in each.
+
+A raster tile that the terrain archive does not hold is drawn from the
+tile above it, stretched. The terrain archive can therefore hold a world
+band plus deeper bands over the area that is flown: the relief outside
+those bands is coarse, and it is always drawn.
+
+A vector tile that the coastline archive does not hold draws nothing at
+all, and no shallower tile stands in for it. A band that stops at a
+longitude therefore stops the land and the sea at a straight line, and the
+reader sees a rectangle of bare background. The coastline archive is for
+that reason complete over the world at every zoom it holds. Above its
+deepest zoom the renderer stretches the tiles that it has, so the picture
+changes with the zoom and never with the position of the reader.
+
+The cost of that completeness sets the depth. Zoom 7 over the world is
+21845 tiles and about 13 MB. Each deeper zoom multiplies both by four, and
+the 1:10m source data does not carry more shape than zoom 7 shows.
 
 Serve the repository root statically and open the viewer:
 

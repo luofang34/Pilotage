@@ -105,6 +105,49 @@ if ! jq -e '
     status=1
 fi
 
+# A vector tile the archive does not hold draws nothing, and no shallower
+# tile stands in for it the way a raster tile's parent does. So every zoom a
+# vector source declares must be covered EVERYWHERE: a band that stops at a
+# longitude stops the map's land and sea at a straight line, and a reader
+# meets a rectangle of bare background or of flat water with no shore. Above
+# the deepest declared zoom the renderer stretches every tile alike, so the
+# picture changes with zoom and never with where a reader is looking.
+if ! jq -e '
+    (.bands | length) >= 1 and
+    all(.bands[];
+        .min_lon_deg <= -180 and .max_lon_deg >= 180 and
+        .min_lat_deg <= -85 and .max_lat_deg >= 85) and
+    (.closest_zoom == ([.bands[].max_zoom] | max)) and
+    ([range(0; .closest_zoom + 1) as $zoom |
+        ([.bands[] | select(.min_zoom <= $zoom and .max_zoom >= $zoom)] | length)] |
+        all(. == 1))
+' "$coastline_plan" >/dev/null; then
+    echo "FORBIDDEN: every zoom the coastline declares must cover the world" >&2
+    status=1
+fi
+
+# The archive must hold what the plan promises: a zoom that declares global
+# coverage and ships a handful of tiles is a plan the build did not keep.
+if [ -f "$coastline_archive" ]; then
+    deepest="$(jq -r '.closest_zoom' "$coastline_plan")"
+    tiles_at_deepest="$(sqlite3 "$coastline_archive" \
+        "SELECT COUNT(*) FROM tiles WHERE zoom_level = $deepest;")"
+    expected="$(python3 -c "print(4 ** $deepest)")"
+    # An unreadable archive answers with nothing, and an empty string in an
+    # arithmetic comparison is an error that the enclosing `if` would read
+    # as "not less than" — a silent pass on the one input that proves least.
+    if ! printf '%s' "$tiles_at_deepest" | grep -Eq '^[0-9]+$'; then
+        echo "FORBIDDEN: the coastline archive did not answer for its deepest zoom" >&2
+        status=1
+    # A band that covers the world holds a large fraction of its zoom's
+    # tiles. Half is far below what a real build produces and far above
+    # what a regional band could reach.
+    elif [ "$tiles_at_deepest" -lt "$((expected / 2))" ]; then
+        echo "FORBIDDEN: the coastline archive does not cover the world at its deepest zoom" >&2
+        status=1
+    fi
+fi
+
 if ! jq -e '
     ([.layers[] | select(.id == "pilotage-ocean-fill") |
         select(.paint["fill-color"] == "#061927" and .paint["fill-opacity"] == 1)] |
@@ -214,6 +257,7 @@ else
     status=1
 fi
 
+
 # A world band keeps a zoomed-out map from showing empty ocean, and a regional band gives
 # the zoom a pilot reads. An archive with only one of them looks correct at one zoom and
 # blank at the other.
@@ -245,13 +289,6 @@ if ! jq -e '
     (.attribution | length > 0)
 ' "$coastline_plan" >/dev/null; then
     echo "FORBIDDEN: the coastline plan must define verified data for each map zoom" >&2
-    status=1
-fi
-
-terrain_deepest_zoom="$(jq -r '[.bands[].max_zoom] | max' "$manifest")"
-coastline_closest_zoom="$(jq -r '.closest_zoom' "$coastline_plan")"
-if [ "$coastline_closest_zoom" -ne "$((terrain_deepest_zoom + 2))" ]; then
-    echo "FORBIDDEN: the coastline plan must reach the closest map zoom" >&2
     status=1
 fi
 

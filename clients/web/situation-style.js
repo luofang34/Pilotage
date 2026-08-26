@@ -13,6 +13,14 @@ export const GLYPHS_TOKEN = "__PILOTAGE_GLYPHS_URL__";
 export const COASTLINE_TOKEN = "__PILOTAGE_COASTLINE_MBTILES_URL__";
 export const TERRAIN_TOKEN = "__PILOTAGE_TERRAIN_MBTILES_URL__";
 
+/** Which archive token each style source carries. A source is resolved
+ *  against the export named here, so a source added to the style without
+ *  an export is a typed refusal rather than a silent empty layer. */
+const SOURCE_TOKENS = Object.freeze({
+  "pilotage-coastline": COASTLINE_TOKEN,
+  "pilotage-terrain": TERRAIN_TOKEN,
+});
+
 /** Zoom levels the camera may go past the deepest terrain tile. A
  *  raster-dem source draws past its deepest tile by stretching the one it
  *  has, and far past it the picture is invention. The value matches the
@@ -96,9 +104,9 @@ function inlineTileSource(source, tileJson, assetsBase) {
  *
  * `template` is the parsed SituationStyle.json document. `assetsBase` is the
  * URL prefix the exported asset tree is served under, ending in "/".
- * `coastlineTileJson` and `terrainTileJson` are the parsed exported TileJSON
- * documents. `glyphsPath` is the fonts directory relative to `assetsBase`,
- * or null when the export carries no fonts.
+ * `tileJsonBySource` maps each style source name to its parsed exported
+ * TileJSON document. `glyphsPath` is the fonts directory relative to
+ * `assetsBase`, or null when the export carries no fonts.
  *
  * Returns a new style object; the template is not modified. Throws
  * SituationStyleError when the template does not carry the expected tokens.
@@ -106,30 +114,25 @@ function inlineTileSource(source, tileJson, assetsBase) {
 export function resolveSituationStyle({
   template,
   assetsBase,
-  coastlineTileJson,
-  terrainTileJson,
+  tileJsonBySource,
   glyphsPath,
 }) {
   const style = structuredClone(template);
   const sources = style?.sources;
-  const coastline = sources?.["pilotage-coastline"];
-  const terrain = sources?.["pilotage-terrain"];
-  if (coastline?.url !== COASTLINE_TOKEN || terrain?.url !== TERRAIN_TOKEN) {
-    throw new SituationStyleError(
-      STYLE_REASON.INVALID_TEMPLATE,
-      "the style template does not carry the archive URL tokens",
+  for (const [name, token] of Object.entries(SOURCE_TOKENS)) {
+    const source = sources?.[name];
+    if (source?.url !== token) {
+      throw new SituationStyleError(
+        STYLE_REASON.INVALID_TEMPLATE,
+        `the style template does not carry the archive URL token for ${name}`,
+      );
+    }
+    delete source.url;
+    Object.assign(
+      source,
+      inlineTileSource(name, tileJsonBySource?.[name], assetsBase),
     );
   }
-  delete coastline.url;
-  Object.assign(
-    coastline,
-    inlineTileSource("pilotage-coastline", coastlineTileJson, assetsBase),
-  );
-  delete terrain.url;
-  Object.assign(
-    terrain,
-    inlineTileSource("pilotage-terrain", terrainTileJson, assetsBase),
-  );
   // Without a glyph source the renderer draws no text at all. A missing font
   // set costs the labels, not the map: the glyphs key is dropped rather than
   // the style refused.

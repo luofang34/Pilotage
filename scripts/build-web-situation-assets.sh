@@ -78,8 +78,8 @@ staging="$out.new"
 rm -rf "$staging"
 trap 'rm -rf "$staging"' EXIT
 
-python3 - "$style" "$terrain_manifest" "$coastline_archive" "$terrain_archive" \
-    "$fonts" "$staging" <<'EOF'
+python3 - "$style" "$terrain_manifest" "$coastline_archive" \
+    "$terrain_archive" "$fonts" "$staging" <<'EOF'
 import gzip
 import json
 import shutil
@@ -112,12 +112,12 @@ with open(style_path, encoding="utf-8") as handle:
 sources = style.get("sources")
 if not isinstance(sources, dict):
     fail("the style has no sources object")
-coastline_source = sources.get("pilotage-coastline", {})
-terrain_source = sources.get("pilotage-terrain", {})
-if coastline_source.get("url") != COASTLINE_TOKEN:
-    fail("the style coastline source does not carry the archive token")
-if terrain_source.get("url") != TERRAIN_TOKEN:
-    fail("the style terrain source does not carry the archive token")
+for name, token in (
+    ("pilotage-coastline", COASTLINE_TOKEN),
+    ("pilotage-terrain", TERRAIN_TOKEN),
+):
+    if sources.get(name, {}).get("url") != token:
+        fail(f"the style source {name} does not carry its archive token")
 if style.get("glyphs") != f"{GLYPHS_TOKEN}/{{fontstack}}/{{range}}.pbf":
     fail("the style does not carry the glyphs token")
 

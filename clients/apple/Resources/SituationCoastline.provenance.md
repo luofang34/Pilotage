@@ -18,8 +18,12 @@ Natural Earth data is in the public domain. The map carries this attribution:
 The source scale is 1:10m. This scale gives a stable coastline at the closest zoom in the
 plan. It does not give survey accuracy in a harbor.
 
-The plan uses three zoom bands. The world band supports a full-globe view. The region band
-supports the normal flight area. The local band supports the closest zoom.
+The plan uses one zoom band, and that band covers the world. A vector tile that the
+archive does not hold draws nothing, and no shallower tile takes its place. A band that
+stops at a longitude therefore stops the land and the sea at a straight line, and the
+reader sees a rectangle of bare background. Above the deepest zoom in the plan, the
+renderer stretches the tiles that it has. The picture then changes with the zoom, and
+never with the position of the reader.
 
 ## Build
 
