@@ -59,6 +59,31 @@ public enum OwnshipMotion {
     /// One metre per second in knots.
     private static let knotsPerMetrePerSecond: Double = 1.943_844_49
 
+    /// Which north a reported heading is measured from.
+    public enum HeadingReference: Equatable, Sendable {
+        /// Measured from true north.
+        case trueNorth
+        /// Measured from magnetic north.
+        case magneticNorth
+        /// The source stated a reference this display does not know.
+        case other
+    }
+
+    /// The heading a map drawing in true north may turn a mark to, or nothing.
+    ///
+    /// A heading is a number and a reference. Magnetic and true differ by the local
+    /// variation, which is tens of degrees in places, and a display with no variation
+    /// model cannot convert one into the other. A heading not stated against true north
+    /// is therefore withheld rather than drawn as though it were one — the mark loses
+    /// its point instead of pointing somewhere the aircraft is not.
+    public static func drawableHeading(
+        degrees: Double?,
+        reference: HeadingReference?
+    ) -> Double? {
+        guard let degrees, degrees.isFinite, reference == .trueNorth else { return nil }
+        return wrappedBearing(degrees)
+    }
+
     /// A geographic point, as longitude and latitude in degrees.
     public struct Point: Equatable, Sendable {
         /// Degrees east of the prime meridian.

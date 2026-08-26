@@ -138,6 +138,22 @@ final class OwnshipMotionConformanceTests: XCTestCase {
             OwnshipMotion.courseIsDrawable(groundSpeedKnots: .nan, alreadyDrawn: false))
     }
 
+    func testAHeadingNotStatedAgainstTrueNorthIsNotDrawn() {
+        // The map draws in true north and this display carries no variation model, so a
+        // magnetic heading cannot be converted into one it may draw. Drawing it anyway
+        // would turn the mark by the local variation, which is tens of degrees in places
+        // and looks entirely plausible on screen.
+        XCTAssertEqual(OwnshipMotion.drawableHeading(degrees: 90, reference: .trueNorth), 90)
+        XCTAssertNil(OwnshipMotion.drawableHeading(degrees: 90, reference: .magneticNorth))
+        XCTAssertNil(OwnshipMotion.drawableHeading(degrees: 90, reference: .other))
+        XCTAssertNil(OwnshipMotion.drawableHeading(degrees: 90, reference: nil))
+        XCTAssertNil(OwnshipMotion.drawableHeading(degrees: nil, reference: .trueNorth))
+        XCTAssertNil(OwnshipMotion.drawableHeading(degrees: .nan, reference: .trueNorth))
+
+        // A heading outside the range is still a heading; it is wrapped, not refused.
+        XCTAssertEqual(OwnshipMotion.drawableHeading(degrees: -90, reference: .trueNorth), 270)
+    }
+
     func testASpokenBearingRunsFromOneTo360() {
         // Spoken bearings run 001 to 360 and north is 360; zero is the one value the
         // convention does not use. The web client announces the same way.

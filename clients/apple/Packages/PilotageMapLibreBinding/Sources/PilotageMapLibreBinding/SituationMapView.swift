@@ -27,6 +27,7 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
 
     private let mapView: MLNMapView
     private let overlay = SituationOverlay()
+    private let ownshipMark = SituationOwnshipMark()
     private var pendingBatch: DisplayBatch?
     private var hasAppliedInitialCamera = false
 
@@ -256,6 +257,9 @@ public final class SituationMapView: UIView, @preconcurrency MLNMapViewDelegate 
         do {
             applyBaseLayerVisibility(batch.layers, to: style)
             try overlay.apply(batch, to: style)
+            // The aircraft's own mark is drawn after the traffic it flies among, so it
+            // is never hidden underneath one of them.
+            ownshipMark.apply(batch.ownship, to: style)
         } catch {
             onOverlayError?(error)
         }
