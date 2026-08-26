@@ -2263,6 +2263,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-xplane-trial"
+version = "0.1.0"
+dependencies = [
+ "pilotage-trial",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

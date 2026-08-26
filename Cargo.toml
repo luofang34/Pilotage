@@ -27,6 +27,7 @@ members = [
     "crates/pilotage-instrument-feed",
     "crates/pilotage-presentation",
     "crates/pilotage-trial",
+    "crates/pilotage-xplane-trial",
     "crates/pilotage-control-feel",
     "crates/pilotage-flight-quality",
     "crates/pilotage-durable-storage",
@@ -136,6 +137,7 @@ pilotage-mission = { path = "crates/pilotage-mission" }
 pilotage-instrument-runtime = { path = "crates/pilotage-instrument-runtime" }
 pilotage-presentation = { path = "crates/pilotage-presentation" }
 pilotage-trial = { path = "crates/pilotage-trial" }
+pilotage-xplane-trial = { path = "crates/pilotage-xplane-trial" }
 pilotage-control-feel = { path = "crates/pilotage-control-feel" }
 pilotage-flight-quality = { path = "crates/pilotage-flight-quality" }
 pilotage-durable-storage = { path = "crates/pilotage-durable-storage" }
