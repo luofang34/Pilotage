@@ -351,3 +351,40 @@ fn hex_after(haystack: &str, marker: &str) -> Option<u16> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod apple_identity_tests {
+    use super::{DeviceIdentity, parse_gamepad_identity};
+
+    #[test]
+    fn a_pad_named_without_its_usb_identity_resolves_to_no_device() {
+        // The browser hands over a string carrying the USB identity, and the
+        // registry keys on that. The Apple client has no such string to give:
+        // GameController reports a vendor NAME and no vendor/product pair, so
+        // whatever it sends falls through both parsers to the wildcard and the
+        // reader gets the generic mapping rather than their pad's own.
+        for named in [
+            "DualSense Wireless Controller",
+            "Xbox Wireless Controller",
+            "gamepad",
+        ] {
+            assert_eq!(
+                parse_gamepad_identity(named),
+                DeviceIdentity::WILDCARD,
+                "{named} resolved to a device identity after all"
+            );
+        }
+
+        // The same pad, as the browser names it, does carry one.
+        let chromium =
+            "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)";
+        assert_eq!(
+            parse_gamepad_identity(chromium),
+            DeviceIdentity {
+                vendor_id: 0x054c,
+                product_id: 0x0ce6
+            },
+            "the browser's form carries the identity the registry needs"
+        );
+    }
+}
