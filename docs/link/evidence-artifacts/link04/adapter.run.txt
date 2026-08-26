@@ -2,9 +2,9 @@ Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
 scope: LINK-04
 suite: adapter source-role acceptance
 command: cargo test -p pilotage-adapter-aviate source_roles
-config-digest: 6bedcd00d78727155bf1eadded13d60b432fdb6c
+config-digest: 449ace6df9fa40e63075fa3c475bf461babcc43e
 tool-version: rustc 1.95.0 (59807616e 2026-04-14)
-run-id: local:6bedcd00d78727155bf1eadded13d60b432fdb6c
+run-id: local:449ace6df9fa40e63075fa3c475bf461babcc43e
 outcome: pass
 summary:
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 113 filtered out; finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 118 filtered out; finished in 0.00s
