@@ -140,6 +140,22 @@ export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
  *
  * The truth lane states availability, not authorization — an oracle has no
  * estimator to authorize it — so its mask stands on its own.
+ *
+ * The gate here is the stamp's PRESENCE. The ingress the instrument panels
+ * read through goes further and validates the stamp's identity fields and
+ * its role, clock and integrity codings, which needs the wasm bindings this
+ * path does not have; a status stamp carrying a malformed identity still
+ * authorizes this mask. The narrower gate is the one available here, and it
+ * is the one the schema names.
+ *
+ * The fix is not gated on any of this. It carries its own stamp, role-gated
+ * in the decoder, and advances independently of the status observation; the
+ * mask's position bit is the local NED group rather than the geodetic fix,
+ * so gating the fix on it would authorize one measurement with another
+ * measurement's authorization — the very substitution this gate exists to
+ * stop. A fix withheld on a quality verdict would also take the mark away
+ * entirely, where withholding the directions leaves a mark that still says
+ * where the vehicle is and which lane says so.
  */
 function authorizedFlags(lane, source) {
   if (source === OWNSHIP_SOURCE.TRUTH) return lane.validFlags ?? 0;
@@ -148,10 +164,16 @@ function authorizedFlags(lane, source) {
   return lane.validFlags ?? 0;
 }
 
-/** A bearing with one decimal, never "360.0". The value is in [0, 360) and
- *  rounding 359.97 up would name a bearing no compass carries. */
+/** A bearing with one decimal, in [0, 360). Machine-readable, so it takes
+ *  the half-open range a consumer can do arithmetic on: rounding 359.97 to
+ *  "360.0" would put a value outside the range the readers document. */
 const bearingText = (deg) =>
   ((((Math.round(deg * 10) % 3600) + 3600) % 3600) / 10).toFixed(1);
+
+/** A bearing as it is spoken, which is not the range it is stored in.
+ *  Headings are given in whole degrees from 001 to 360, and north is 360;
+ *  zero is the one value the convention does not use. */
+const spokenBearing = (deg) => ((Math.round(deg) + 359) % 360) + 1;
 
 /**
  * Wires the mark to a map. Returns `observe` for each telemetry sample and
@@ -369,17 +391,17 @@ export function attachOwnship(maplibre, map, surface) {
       ` from the ${source === OWNSHIP_SOURCE.TRUTH ? "simulator" : "flight controller"}` +
       // Whole degrees and whole metres per second: the name is announced
       // when it changes, and a fractional bearing changes every sample.
-      // Rounded first and wrapped after: 359.6 rounds to 360, and a mark
-      // announced as "heading 360" states a bearing no compass carries.
       (headingDeg === null
         ? ", heading unknown"
-        : `, heading ${Math.round(headingDeg) % 360}`) +
+        : `, heading ${spokenBearing(headingDeg)}`) +
       (track === null
         ? ", not tracking"
-        : `, tracking ${Math.round(track.bearingDeg) % 360}` +
+        : `, tracking ${spokenBearing(track.bearingDeg)}` +
           ` at ${Math.round(track.speedMps)} metres per second over the ground`);
-    // An accessible name rewritten at the telemetry rate is announced at
-    // the telemetry rate.
+    // The mark is not in a live region, so a renamed label is read when a
+    // reader navigates to the mark and not before; this compares rather
+    // than assigns to keep the write off the hot path, which is all it can
+    // claim to do.
     if (next !== label) {
       element.setAttribute("aria-label", next);
       label = next;

@@ -641,7 +641,9 @@ function testTheAccessibleNameNamesGroundSpeedAndNoBearingOf360() {
   // 359.6 rounds to 360, which is a bearing no compass carries.
   observe(truth({ quat: yawQuat(359.6), velNed: [0, 10, 0], stamp: freshStamp(2) }), 1_000);
   const name = element.attributes["aria-label"];
-  assert.match(name, /heading 0,/, `announced as ${name}`);
+  // Spoken bearings run 001 to 360 and north is 360; zero is the one value
+  // the convention does not use. The dataset keeps [0, 360) for arithmetic.
+  assert.match(name, /heading 360,/, `announced as ${name}`);
   assert.match(name, /metres per second over the ground$/, `announced as ${name}`);
 }
 testTheAccessibleNameNamesGroundSpeedAndNoBearingOf360();
@@ -691,6 +693,13 @@ function testTheEstimateLaneDrawsNoDirectionItWasNotAuthorizedToDraw() {
   // Degraded is not unusable.
   const degraded = ownshipFromTelemetry(estimate(FIX, { quality: 1 }));
   assert.ok(Math.abs(degraded.headingDeg - 270) < 1e-6, "degraded is still a solution");
+
+  // A quality the lane does not state is not a good one. The decoder
+  // always supplies a number, so this is the same defence the unstated mask
+  // has: the gate does not depend on a producer having filled the field.
+  const noQuality = ownshipFromTelemetry(estimate(FIX, { quality: undefined }));
+  assert.equal(noQuality.headingDeg, null, "an unstated quality is not a good one");
+  assert.equal(noQuality.track, null);
 
   // A mask absent altogether authorizes nothing.
   const noMask = ownshipFromTelemetry(estimate(FIX, { validFlags: undefined }));
@@ -817,5 +826,23 @@ function testAReceiverReportingOnceASecondKeepsItsMark() {
 }
 testAReceiverReportingOnceASecondKeepsItsMark();
 console.log("ok - testAReceiverReportingOnceASecondKeepsItsMark");
+
+function testASpokenBearingRunsFromOneTo360() {
+  const { observe, surface, element } = harness();
+  for (const [yaw, spoken, stored] of [
+    [0, 360, "0.0"],
+    [359.97, 360, "0.0"],
+    [1, 1, "1.0"],
+    [90, 90, "90.0"],
+    [359.4, 359, "359.4"],
+  ]) {
+    observe(truth({ quat: yawQuat(yaw), stamp: freshStamp(2) }), 1_000 + yaw);
+    const name = element.attributes["aria-label"];
+    assert.match(name, new RegExp(`heading ${spoken}[,$]`), `${yaw} announced as ${name}`);
+    assert.equal(surface.dataset.ownshipHeadingDeg, stored, `${yaw} stored`);
+  }
+}
+testASpokenBearingRunsFromOneTo360();
+console.log("ok - testASpokenBearingRunsFromOneTo360");
 
 console.log("\nall situation ownship checks passed");
