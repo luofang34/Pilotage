@@ -42,6 +42,7 @@ final class OwnshipMotionConformanceTests: XCTestCase {
         // The corpus sits beside the two clients rather than inside either, so neither
         // owns it and neither can quietly edit its own copy.
         let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // the file's own directory
             .deletingLastPathComponent()  // PilotageCoreTests
             .deletingLastPathComponent()  // Tests
             .deletingLastPathComponent()  // PilotageCore
