@@ -258,10 +258,17 @@ fn aircraft_path(xplane_root: &Path) -> Result<PathBuf, XtaskError> {
 fn model_contract_digest(model: &SimulatorModel, bridge_config: Digest) -> Digest {
     let mut hasher = Sha256::new();
     hasher.update(b"pilotage.xplane.model-contract.v2\0");
+    // The aircraft digest is NORMALIZED before it is hashed, because it is
+    // normalized before it is compared: the aircraft check accepts a preset
+    // whose digest differs only in case or surrounding space as the same
+    // aircraft. Hashing the raw text instead would let a cosmetic reformat of
+    // the preset change this contract while the vehicle did not, which reads
+    // as exactly the model drift the field exists to report.
+    let aircraft_file_digest = model.aircraft_file_digest.trim().to_ascii_lowercase();
     for text in [
         model.simulator_id.as_str(),
         model.aircraft_id.as_str(),
-        model.aircraft_file_digest.as_str(),
+        aircraft_file_digest.as_str(),
         model.bridge_protocol.as_str(),
     ] {
         hasher.update(u64::try_from(text.len()).unwrap_or(u64::MAX).to_be_bytes());

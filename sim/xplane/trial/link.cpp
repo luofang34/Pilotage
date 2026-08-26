@@ -34,9 +34,25 @@ constexpr std::size_t kMaximumReplyBytes = 64 * 1024;
 // thing the trial is measuring.
 constexpr double kMaximumStallS = 10.0;
 
-// A guard against unbounded allocation, not a policy. How long a consumer may
-// stall is the constant above.
-constexpr std::size_t kMaximumQueuedSampleBytes = 256 * 1024;
+// The largest a sample line gets: nearly every field printing seventeen
+// significant digits, which is what manoeuvring looks like. Sitting still most
+// of them print as a single `0` and the line is a quarter of this.
+constexpr std::size_t kWorstCaseSampleBytes = 640;
+
+// The fastest the flight loop runs, and so the fastest samples are produced.
+// The callback asks for every frame, so this is a frame rate.
+constexpr double kFastestSampleRateHz = 120.0;
+
+// A guard against unbounded allocation, and DERIVED so it can never become the
+// policy. Sized at a flat 256 KB it held about five seconds of a manoeuvring
+// vehicle at 100 Hz, so it — not the stall clock — decided when to give up,
+// and it decided soonest exactly while the vehicle was doing the thing the
+// trial measures. That is the asymmetry `kMaximumStallS` exists to remove,
+// reappearing one layer down. Tied to the same constant, a change to either
+// forces a look at the other.
+constexpr std::size_t kMaximumQueuedSampleBytes =
+    static_cast<std::size_t>(kMaximumStallS * kFastestSampleRateHz) *
+    kWorstCaseSampleBytes;
 
 // How much the kernel may hold on this link's behalf.
 //

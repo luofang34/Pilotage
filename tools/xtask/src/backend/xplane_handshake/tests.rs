@@ -334,3 +334,23 @@ fn a_document_left_by_anyone_else_is_never_written_through() {
         "the document is not the one written"
     );
 }
+
+#[test]
+fn a_preset_reformatted_but_unchanged_keeps_its_contract() {
+    // The aircraft check accepts a digest that differs only in case or in the
+    // space around it, so two presets describing one vehicle must produce one
+    // contract. Hashing the raw text made a lowercase-and-trim of the preset
+    // look like the vehicle had changed — a false report of the only thing
+    // this field is for.
+    let config = Digest::from_bytes([8; 32]);
+    let settled = model("AA".repeat(32));
+    let reformatted = SimulatorModel {
+        aircraft_file_digest: format!("  {}  ", "aa".repeat(32)),
+        ..model("AA".repeat(32))
+    };
+    assert_eq!(
+        model_contract_digest(&settled, config),
+        model_contract_digest(&reformatted, config),
+        "reformatting the preset reported the vehicle as changed"
+    );
+}

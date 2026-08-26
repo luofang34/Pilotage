@@ -160,6 +160,18 @@ void AConsumerThatStopsDrainingCostsTheConnection() {
     assert(link.connected());
     assert(link.buffered_sample_bytes() > 0);
 
+    // With the clock held still, the backlog may grow well past what a flat
+    // 256 KB guard would have allowed and the link must stay up: how long a
+    // consumer may stall is the clock's decision, and a byte bound reached
+    // first would silently halve the tolerance this states.
+    std::size_t produced = 0;
+    while (produced < 400 * 1024) {
+        link.SendSample(sample);
+        produced += sample.size() + 1;
+        assert(link.connected());
+    }
+    assert(link.unsent_sample_bytes() > 256 * 1024);
+
     // Still behind a moment later, which is not yet a stall.
     g_now_s = 9.0F;
     link.SendSample(sample);
@@ -192,13 +204,18 @@ void ASlowConsumerDoesNotGrowTheBufferForever() {
     // Drain less than is produced, so the socket fills, sends start going out
     // in part, and the link comes to rest holding a partly-sent buffer. That
     // is the regime where a sent prefix would accumulate.
+    // The clock is held still and the loop kept short on purpose: this is
+    // about the buffer, and a run that drifted into either the stall bound or
+    // the allocation guard would be testing those instead — and would start
+    // failing on a machine whose socket buffers differ. At a deficit of about
+    // 225 bytes an iteration this ends around 225 KB, comfortably inside a
+    // guard that holds ten seconds at the fastest rate a sample can be made.
     const std::string sample(480, 'y');
     std::size_t partial_rests = 0;
     char sink[256];
-    for (int index = 0; index < 2000 && link.connected(); ++index) {
+    for (int index = 0; index < 1000 && link.connected(); ++index) {
         link.SendSample(sample);
         ::recv(peer, sink, sizeof(sink), 0);
-        g_now_s += 0.01F;
         // At rest the buffer holds exactly what has not been sent. Anything
         // more is a prefix already on the wire that nothing released, and it
         // grows by a sample per frame for as long as the trial runs.
