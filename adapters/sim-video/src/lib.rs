@@ -21,3 +21,4 @@ pub mod wire;
 pub use bridge_client::{BRIDGE_BIN_ENV, BridgeClient, BridgeConfig, LatestBridgeState};
 pub use error::SimVideoError;
 pub use framing::read_envelope;
+pub use wire::{BridgeNavSat, BridgeOdometry};

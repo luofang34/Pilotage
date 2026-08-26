@@ -52,6 +52,15 @@ fn begin_source_epoch(latest: &mut LinkState, time_boot_ms: u32) {
     latest.attitude = None;
     latest.kinematics = None;
     latest.estimator_status = None;
+    // A simulator that restarted may have restarted into another world.
+    // The origin is latched once and holds for the life of the link, so an
+    // origin carried across a restart measures the new world's positions
+    // from the old world's datum: the geodetic fix then reports where the
+    // vehicle is while the local frame reports where it is not, in the
+    // same sample, with nothing to choose between them.
+    latest.truth_origin = None;
+    latest.sim_truth = None;
+    latest.gnss_fix = None;
     latest.source_resets = latest.source_resets.wrapping_add(1);
     warn!(
         source_epoch = latest.source_epoch,

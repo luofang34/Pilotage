@@ -734,6 +734,7 @@ dependencies = [
 name = "flight-tune"
 version = "0.1.0"
 dependencies = [
+ "pilotage-durable-storage",
  "pilotage-flight-quality",
  "pilotage-trial",
  "serde",
@@ -1692,6 +1693,7 @@ dependencies = [
  "indicate-frames",
  "pilotage-calibration-id",
  "pilotage-camera-calibration",
+ "pilotage-geo",
  "pilotage-ingress",
  "pilotage-protocol",
  "pilotage-timing",
@@ -1709,6 +1711,7 @@ dependencies = [
  "pilotage-adapter-api",
  "pilotage-control-feel",
  "pilotage-control-web",
+ "pilotage-geo",
  "pilotage-input",
  "pilotage-mavlink",
  "pilotage-protocol",
@@ -1741,6 +1744,7 @@ name = "pilotage-adapter-px4"
 version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
+ "pilotage-geo",
  "pilotage-mavlink",
  "pilotage-protocol",
  "pilotage-sim-video",
@@ -1846,6 +1850,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-durable-storage"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-flight-quality"
 version = "0.1.0"
 dependencies = [
@@ -1918,6 +1932,7 @@ dependencies = [
 name = "pilotage-instruments-web"
 version = "0.1.0"
 dependencies = [
+ "pilotage-geo",
  "pilotage-instruments-web-shell",
  "pilotage-protocol",
  "prost",
@@ -1943,6 +1958,7 @@ name = "pilotage-mavlink"
 version = "0.1.0"
 dependencies = [
  "pilotage-adapter-api",
+ "pilotage-geo",
  "thiserror",
  "tokio",
  "tracing",
@@ -2043,6 +2059,7 @@ dependencies = [
  "pilotage-authority",
  "pilotage-client-session",
  "pilotage-control-feel",
+ "pilotage-geo",
  "pilotage-mission",
  "pilotage-protocol",
  "pilotage-session",

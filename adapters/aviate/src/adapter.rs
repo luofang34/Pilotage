@@ -113,6 +113,13 @@ pub struct AviateAdapter {
     // scope enacts through it: pointing and zoom are commands to the
     // producer that renders the payload view.
     camera_bridge: Option<CameraBridge>,
+    // How many consecutive truth samples have been published with no fix
+    // joined to them. A sensor that never speaks, a topic nobody
+    // publishes, and two clocks that do not share an origin all look the
+    // same from here: no position, forever, in silence. The count is what
+    // turns that silence into one report.
+    #[cfg_attr(not(feature = "sim"), allow(dead_code))]
+    navsat_join_failures: u64,
     // The commanded pointing of the payload view, integrated from the
     // scope's rate demands. `None` when no producer accepts commands,
     // and structurally uninhabited in a flight build.
@@ -238,6 +245,7 @@ impl AviateAdapter {
             control_feel_changed: false,
             frames: None,
             camera_bridge: None,
+            navsat_join_failures: 0,
             pointing: None,
             _frame_forwarder: None,
             arm: None,

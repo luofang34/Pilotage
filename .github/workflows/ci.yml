@@ -107,8 +107,21 @@ jobs:
       - name: Aviate control-feel boundary guard
         run: bash scripts/check-aviate-control-feel-boundary.sh
 
+      - name: flight-tune journal storage boundary self-test
+        run: bash scripts/test-check-flight-tune-journal-storage-boundary.sh
+
+      - name: flight-tune journal storage boundary
+        run: bash scripts/check-flight-tune-journal-storage-boundary.sh
+
       - name: cargo test
         run: cargo test --all-targets
+
+      - name: durable storage non-Unix contract and consumer
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: |
+          cargo check -p pilotage-durable-storage --tests --target wasm32-unknown-unknown
+          cargo check -p flight-tune --target wasm32-unknown-unknown
 
       - name: SituationView conformance corpus
         run: cargo test -p pilotage-situation-view --test corpus
@@ -147,6 +160,12 @@ jobs:
 
       - name: flight build carries no simulation-only code
         run: bash scripts/check-flight-build.sh
+
+      - name: flight tuning boundary guard self-test
+        run: bash scripts/test-check-flight-tune-boundaries.sh
+
+      - name: flight tuning boundary guard
+        run: bash scripts/check-flight-tune-boundaries.sh
 
       - name: check-structure self-test
         run: bash scripts/test-check-structure.sh
@@ -195,6 +214,12 @@ jobs:
 
       - name: Web situation map guard
         run: bash scripts/check-web-situation-map.sh
+
+      - name: Geodetic datum code guard self-test
+        run: bash scripts/test-check-geodetic-datum-codes.sh
+
+      - name: Geodetic datum code bijection
+        run: bash scripts/check-geodetic-datum-codes.sh
 
       - name: ADR supersession lifecycle tests
         run: bash scripts/test-check-adr-supersession.sh
@@ -420,6 +445,9 @@ jobs:
         # Apple client's camera; without them it must state a typed reason
         # instead of an empty map.
         run: node clients/web/situation-map.browser.test.mjs
+
+      - name: geodetic fix decoding (ADR-0022)
+        run: node clients/web/geodetic-fix.test.mjs
 
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''

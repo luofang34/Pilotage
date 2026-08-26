@@ -68,7 +68,7 @@ const SIZE_CAPS = {
   "viewer-elements.js": 15,
   "wire-bounds.js": 120,
   "transfer-handover.js": 84,
-  "wire.js": 1247,
+  "wire.js": 1360,
 };
 
 const dir = new URL("./", import.meta.url);

@@ -1,12 +1,18 @@
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use pilotage_durable_storage::{
+    ContentDigest, DurableDirectory, DurableStore, ExactObject, ExpectedValue, ObjectName,
+    PutOutcome, StorageError, WriterLease,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::identity::digest_bytes;
+mod append;
+mod layout;
+
+pub(super) use append::append_entry;
+pub(super) use append::append_entry_with_hook;
+
 use crate::journal::JournalEntry;
 use crate::{Candidate, Digest, SearchStage, TuneError};
 
@@ -14,9 +20,8 @@ use crate::{Candidate, Digest, SearchStage, TuneError};
 #[path = "storage/tests.rs"]
 mod tests;
 
-const MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CHAIN_ENTRIES: usize = 100_000;
-const TEMPORARY_ATTEMPTS: u32 = 1_024;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -24,92 +29,269 @@ struct HeadPointer {
     digest: Digest,
 }
 
-pub(super) struct WriterLock {
-    _file: File,
+pub(super) struct JournalStorage {
+    _store: DurableStore,
+    root: DurableDirectory,
+    marker: DurableDirectory,
+    candidates: DurableDirectory,
+    stages: DurableDirectory,
+    entries: DurableDirectory,
 }
 
-pub(super) fn ensure_layout(root: &Path) -> Result<(), TuneError> {
-    create_directory(root)?;
-    create_directory(&candidate_directory(root))?;
-    create_directory(&stage_directory(root))?;
-    create_directory(&entry_directory(root))
+pub(super) type WriterLock = WriterLease;
+
+pub(super) fn open(root: &Path) -> Result<(JournalStorage, WriterLock), TuneError> {
+    let store = DurableStore::open_or_create(root).map_err(storage_error)?;
+    finish_open(root, store)
 }
 
-pub(super) fn acquire_writer_lock(root: &Path) -> Result<WriterLock, TuneError> {
-    let path = root.join("WRITER.lock");
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&path)
-        .map_err(|source| io_error("open writer lock", &path, source))?;
-    match file.try_lock() {
-        Ok(()) => Ok(WriterLock { _file: file }),
-        Err(TryLockError::WouldBlock) => Err(TuneError::JournalLocked {
-            path: root.to_path_buf(),
-        }),
-        Err(TryLockError::Error(source)) => Err(io_error("lock journal writer", &path, source)),
+#[cfg(test)]
+pub(super) fn open_with_faults(
+    root: &Path,
+    faults: pilotage_durable_storage::FaultController,
+) -> Result<(JournalStorage, WriterLock), TuneError> {
+    let store = DurableStore::open_or_create_with_faults(root, faults).map_err(storage_error)?;
+    finish_open(root, store)
+}
+
+fn finish_open(
+    root_path: &Path,
+    store: DurableStore,
+) -> Result<(JournalStorage, WriterLock), TuneError> {
+    let opened = layout::open(root_path, &store)?;
+    Ok((
+        JournalStorage {
+            _store: store,
+            root: opened.root,
+            marker: opened.marker,
+            candidates: opened.candidates,
+            stages: opened.stages,
+            entries: opened.entries,
+        },
+        opened.writer,
+    ))
+}
+
+pub(super) fn head_exists(storage: &JournalStorage) -> Result<bool, TuneError> {
+    storage
+        .root
+        .exists(&object_name("HEAD.json")?)
+        .map_err(storage_error)
+}
+
+pub(super) fn verify_head_exact(
+    storage: &JournalStorage,
+    expected: Digest,
+) -> Result<(), TuneError> {
+    let name = object_name("HEAD.json")?;
+    let expected_head = exact_head(expected)?;
+    let actual = storage
+        .root
+        .read_digest(&name, expected_head.digest(), MAX_DOCUMENT_BYTES)
+        .map_err(storage_error)?;
+    if actual != expected_head {
+        return Err(invalid_journal(
+            "the journal head does not match the live authorization",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn verify_live_snapshot(
+    storage: &JournalStorage,
+    writer: &WriterLock,
+    stage: &SearchStage,
+    entries: &[JournalEntry],
+    entry_digests: &[Digest],
+) -> Result<(), TuneError> {
+    verify_live_snapshot_with_hook(storage, writer, stage, entries, entry_digests, || {})
+}
+
+#[cfg(test)]
+pub(super) fn verify_live_snapshot_with_final_hook_for_test(
+    storage: &JournalStorage,
+    writer: &WriterLock,
+    stage: &SearchStage,
+    entries: &[JournalEntry],
+    entry_digests: &[Digest],
+    before_final_writer_validation: impl FnOnce(),
+) -> Result<(), TuneError> {
+    verify_live_snapshot_with_hook(
+        storage,
+        writer,
+        stage,
+        entries,
+        entry_digests,
+        before_final_writer_validation,
+    )
+}
+
+fn verify_live_snapshot_with_hook(
+    storage: &JournalStorage,
+    writer: &WriterLock,
+    stage: &SearchStage,
+    entries: &[JournalEntry],
+    entry_digests: &[Digest],
+    before_final_writer_validation: impl FnOnce(),
+) -> Result<(), TuneError> {
+    layout::verify_authorized(&storage.root)?;
+    layout::verify_handles(
+        &storage.marker,
+        &storage.candidates,
+        &storage.stages,
+        &storage.entries,
+    )?;
+    writer.validate(&storage.root).map_err(storage_error)?;
+    let expected_head = entry_digests
+        .last()
+        .copied()
+        .ok_or_else(|| invalid_journal("the live journal has no head"))?;
+    verify_head_exact(storage, expected_head)?;
+    verify_entry_chain(storage, entries, entry_digests)?;
+    verify_stage_and_candidates(storage, stage, entries)?;
+    verify_head_exact(storage, expected_head)?;
+    layout::verify_authorized(&storage.root)?;
+    layout::verify_handles(
+        &storage.marker,
+        &storage.candidates,
+        &storage.stages,
+        &storage.entries,
+    )?;
+    before_final_writer_validation();
+    writer.validate(&storage.root).map_err(storage_error)
+}
+
+fn verify_entry_chain(
+    storage: &JournalStorage,
+    entries: &[JournalEntry],
+    entry_digests: &[Digest],
+) -> Result<(), TuneError> {
+    let stored = load_entries(storage)?;
+    let matches = entries.len() == entry_digests.len()
+        && stored.len() == entries.len()
+        && stored.iter().zip(entry_digests.iter().zip(entries)).all(
+            |((stored_digest, stored_entry), (live_digest, live_entry))| {
+                stored_digest == live_digest && stored_entry == live_entry
+            },
+        );
+    if matches {
+        Ok(())
+    } else {
+        Err(invalid_journal(
+            "the durable journal chain does not match the live journal",
+        ))
     }
 }
 
-pub(super) fn head_exists(root: &Path) -> Result<bool, TuneError> {
-    let path = head_path(root);
-    path.try_exists()
-        .map_err(|source| io_error("inspect journal head", &path, source))
+fn verify_stage_and_candidates(
+    storage: &JournalStorage,
+    stage: &SearchStage,
+    entries: &[JournalEntry],
+) -> Result<(), TuneError> {
+    let session = entries
+        .first()
+        .map(|entry| &entry.session)
+        .ok_or_else(|| invalid_journal("the live journal has no session"))?;
+    if read_stage(storage, session.stage_digest)? != *stage {
+        return Err(invalid_journal(
+            "the durable search stage does not match the live stage",
+        ));
+    }
+    let initial = read_candidate(storage, session.initial_candidate_digest)?;
+    for candidate in candidate_digests_to_verify(session.initial_candidate_digest, entries) {
+        let stored = read_candidate(storage, candidate)?;
+        stage.validate_challenger(&initial, &stored)?;
+    }
+    Ok(())
+}
+
+fn candidate_digests_to_verify(initial: Digest, entries: &[JournalEntry]) -> Vec<Digest> {
+    let mut seen = HashSet::from([initial]);
+    entries
+        .iter()
+        .filter_map(|entry| match entry.event {
+            crate::JournalEvent::AttemptPrepared { candidate, .. } => Some(candidate),
+            _ => None,
+        })
+        .filter(|candidate| seen.insert(*candidate))
+        .collect()
 }
 
 pub(super) fn document_digest<T: Serialize>(
     document: &'static str,
     value: &T,
 ) -> Result<Digest, TuneError> {
-    let bytes = encode(document, value)?;
-    Ok(digest_bytes(&bytes))
+    Ok(exact_document(document, value)?.0)
 }
 
-pub(super) fn store_candidate(root: &Path, candidate: &Candidate) -> Result<Digest, TuneError> {
-    let bytes = encode("candidate", candidate)?;
-    let digest = digest_bytes(&bytes);
-    write_immutable(&candidate_path(root, digest), &bytes, digest)?;
+pub(super) fn store_candidate(
+    storage: &JournalStorage,
+    writer: &WriterLock,
+    candidate: &Candidate,
+) -> Result<Digest, TuneError> {
+    let (digest, object) = exact_document("candidate", candidate)?;
+    write_immutable(
+        &storage.candidates,
+        writer,
+        &object_name(format!("{digest}.json"))?,
+        &object,
+        digest,
+    )?;
     Ok(digest)
 }
 
-pub(super) fn read_candidate(root: &Path, digest: Digest) -> Result<Candidate, TuneError> {
-    let path = candidate_path(root, digest);
-    let bytes = read_verified(&path, digest)?;
-    let candidate: Candidate = decode("candidate", &path, &bytes)?;
+pub(super) fn read_candidate(
+    storage: &JournalStorage,
+    digest: Digest,
+) -> Result<Candidate, TuneError> {
+    let name = object_name(format!("{digest}.json"))?;
+    let bytes = read_verified(&storage.candidates, &name, digest)?;
+    let candidate: Candidate = decode("candidate", &name, &bytes)?;
     candidate.validate()?;
     Ok(candidate)
 }
 
-pub(super) fn store_stage(root: &Path, stage: &SearchStage) -> Result<Digest, TuneError> {
-    let bytes = encode("search stage", stage)?;
-    let digest = digest_bytes(&bytes);
-    write_immutable(&stage_path(root, digest), &bytes, digest)?;
+pub(super) fn store_stage(
+    storage: &JournalStorage,
+    writer: &WriterLock,
+    stage: &SearchStage,
+) -> Result<Digest, TuneError> {
+    let (digest, object) = exact_document("search stage", stage)?;
+    write_immutable(
+        &storage.stages,
+        writer,
+        &object_name(format!("{digest}.json"))?,
+        &object,
+        digest,
+    )?;
     Ok(digest)
 }
 
-pub(super) fn read_stage(root: &Path, digest: Digest) -> Result<SearchStage, TuneError> {
-    let path = stage_path(root, digest);
-    let bytes = read_verified(&path, digest)?;
-    let stage: SearchStage = decode("search stage", &path, &bytes)?;
+pub(super) fn read_stage(
+    storage: &JournalStorage,
+    digest: Digest,
+) -> Result<SearchStage, TuneError> {
+    let name = object_name(format!("{digest}.json"))?;
+    let bytes = read_verified(&storage.stages, &name, digest)?;
+    let stage: SearchStage = decode("search stage", &name, &bytes)?;
     stage.validate()?;
     Ok(stage)
 }
 
-pub(super) fn append_entry(root: &Path, entry: &JournalEntry) -> Result<Digest, TuneError> {
-    let bytes = encode("journal entry", entry)?;
-    let digest = digest_bytes(&bytes);
-    write_immutable(&entry_path(root, digest), &bytes, digest)?;
-    let head = encode("journal head", &HeadPointer { digest })?;
-    atomic_replace(&head_path(root), &head)?;
-    Ok(digest)
-}
-
-pub(super) fn load_entries(root: &Path) -> Result<Vec<(Digest, JournalEntry)>, TuneError> {
-    let head_file = head_path(root);
-    let head_bytes = read_limited(&head_file)?;
-    let head: HeadPointer = decode("journal head", &head_file, &head_bytes)?;
+pub(super) fn load_entries(
+    storage: &JournalStorage,
+) -> Result<Vec<(Digest, JournalEntry)>, TuneError> {
+    let head_name = object_name("HEAD.json")?;
+    let head_object = storage
+        .root
+        .read_exact(&head_name, MAX_DOCUMENT_BYTES)
+        .map_err(storage_error)?;
+    let head: HeadPointer = decode("journal head", &head_name, head_object.bytes())?;
+    if head_object.bytes() != exact_head(head.digest)?.bytes() {
+        return Err(invalid_journal(
+            "the journal head does not use canonical bytes",
+        ));
+    }
     let mut entries = Vec::new();
     let mut seen = HashSet::new();
     let mut next = Some(head.digest);
@@ -119,9 +301,9 @@ pub(super) fn load_entries(root: &Path) -> Result<Vec<(Digest, JournalEntry)>, T
                 "the journal chain is too long or has a cycle",
             ));
         }
-        let path = entry_path(root, digest);
-        let bytes = read_verified(&path, digest)?;
-        let entry: JournalEntry = decode("journal entry", &path, &bytes)?;
+        let name = object_name(format!("{digest}.json"))?;
+        let bytes = read_verified(&storage.entries, &name, digest)?;
+        let entry: JournalEntry = decode("journal entry", &name, &bytes)?;
         next = entry.previous;
         entries.push((digest, entry));
     }
@@ -129,87 +311,58 @@ pub(super) fn load_entries(root: &Path) -> Result<Vec<(Digest, JournalEntry)>, T
     Ok(entries)
 }
 
-fn create_directory(path: &Path) -> Result<(), TuneError> {
-    fs::create_dir_all(path).map_err(|source| io_error("create directory", path, source))
+fn expected_head(previous: Option<Digest>) -> Result<ExpectedValue, TuneError> {
+    previous
+        .map(exact_head)
+        .transpose()
+        .map(|head| head.map_or(ExpectedValue::Absent, ExpectedValue::Exact))
 }
 
-fn write_immutable(path: &Path, bytes: &[u8], digest: Digest) -> Result<(), TuneError> {
-    if path
-        .try_exists()
-        .map_err(|source| io_error("inspect immutable object", path, source))?
-    {
-        let existing = read_limited(path)?;
-        if existing == bytes {
-            return Ok(());
-        }
+fn exact_head(digest: Digest) -> Result<ExactObject, TuneError> {
+    let bytes = encode("journal head", &HeadPointer { digest })?;
+    Ok(ExactObject::from_bytes(bytes))
+}
+
+fn exact_document<T: Serialize>(
+    document: &'static str,
+    value: &T,
+) -> Result<(Digest, ExactObject), TuneError> {
+    let object = ExactObject::from_bytes(encode(document, value)?);
+    let digest = digest_from_storage(object.digest());
+    Ok((digest, object))
+}
+
+fn write_immutable(
+    directory: &DurableDirectory,
+    writer: &WriterLock,
+    name: &ObjectName,
+    object: &ExactObject,
+    digest: Digest,
+) -> Result<(), TuneError> {
+    if digest_from_storage(object.digest()) != digest {
         return Err(TuneError::DigestMismatch { expected: digest });
     }
-    atomic_replace(path, bytes)
-}
-
-fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<(), TuneError> {
-    check_size(path.display().to_string(), bytes.len())?;
-    let (mut file, temporary) = create_unique_temporary(path)?;
-    file.write_all(bytes)
-        .map_err(|source| io_error("write temporary file", &temporary, source))?;
-    file.sync_all()
-        .map_err(|source| io_error("synchronize temporary file", &temporary, source))?;
-    fs::rename(&temporary, path).map_err(|source| io_error("replace file", path, source))?;
-    synchronize_parent(path)
-}
-
-fn create_unique_temporary(path: &Path) -> Result<(File, PathBuf), TuneError> {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|source| TuneError::InvalidJournal {
-            detail: format!("system time is before the Unix epoch: {source}"),
-        })?
-        .as_nanos();
-    let mut attempt = 0_u32;
-    while attempt < TEMPORARY_ATTEMPTS {
-        let temporary = temporary_path(path, timestamp, attempt);
-        match OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-        {
-            Ok(file) => return Ok((file, temporary)),
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                attempt = attempt.wrapping_add(1);
-            }
-            Err(source) => return Err(io_error("create temporary file", &temporary, source)),
-        }
+    let outcome = directory
+        .put_immutable_no_replace(writer, name, object)
+        .map_err(storage_error)?;
+    match outcome {
+        PutOutcome::Published | PutOutcome::AlreadyExact => Ok(()),
     }
-    Err(invalid_journal("cannot allocate a unique temporary file"))
 }
 
-fn synchronize_parent(path: &Path) -> Result<(), TuneError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid_journal("an atomic file has no parent directory"))?;
-    let directory =
-        File::open(parent).map_err(|source| io_error("open parent directory", parent, source))?;
-    directory
-        .sync_all()
-        .map_err(|source| io_error("synchronize parent directory", parent, source))
-}
-
-fn read_verified(path: &Path, expected: Digest) -> Result<Vec<u8>, TuneError> {
-    let bytes = read_limited(path)?;
-    if digest_bytes(&bytes) != expected {
+fn read_verified(
+    directory: &DurableDirectory,
+    name: &ObjectName,
+    expected: Digest,
+) -> Result<Vec<u8>, TuneError> {
+    let expected_storage = ContentDigest(*expected.as_bytes());
+    let object = directory
+        .read_digest(name, expected_storage, MAX_DOCUMENT_BYTES)
+        .map_err(storage_error)?;
+    if digest_from_storage(object.digest()) != expected {
         return Err(TuneError::DigestMismatch { expected });
     }
-    Ok(bytes)
-}
-
-fn read_limited(path: &Path) -> Result<Vec<u8>, TuneError> {
-    let metadata = fs::metadata(path).map_err(|source| io_error("inspect file", path, source))?;
-    check_size(path.display().to_string(), metadata.len() as usize)?;
-    let mut file = File::open(path).map_err(|source| io_error("open file", path, source))?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.read_to_end(&mut bytes)
-        .map_err(|source| io_error("read file", path, source))?;
-    Ok(bytes)
+    Ok(object.bytes().to_vec())
 }
 
 fn encode<T: Serialize>(document: &'static str, value: &T) -> Result<Vec<u8>, TuneError> {
@@ -221,72 +374,49 @@ fn encode<T: Serialize>(document: &'static str, value: &T) -> Result<Vec<u8>, Tu
 
 fn decode<T: DeserializeOwned>(
     document: &'static str,
-    path: &Path,
+    name: &ObjectName,
     bytes: &[u8],
 ) -> Result<T, TuneError> {
     serde_json::from_slice(bytes).map_err(|source| TuneError::Decode {
         document,
-        path: path.to_path_buf(),
+        path: PathBuf::from(name.as_os_str()),
         source,
     })
 }
 
 fn check_size(document: String, size: usize) -> Result<(), TuneError> {
-    let size = u64::try_from(size).unwrap_or(u64::MAX);
     if size > MAX_DOCUMENT_BYTES {
         return Err(TuneError::DocumentTooLarge {
             document,
-            size,
-            limit: MAX_DOCUMENT_BYTES,
+            size: u64::try_from(size).unwrap_or(u64::MAX),
+            limit: u64::try_from(MAX_DOCUMENT_BYTES).unwrap_or(u64::MAX),
         });
     }
     Ok(())
 }
 
-fn candidate_directory(root: &Path) -> PathBuf {
-    root.join("candidates")
+fn object_name(name: impl AsRef<std::ffi::OsStr>) -> Result<ObjectName, TuneError> {
+    ObjectName::new(name).map_err(storage_error)
 }
 
-fn entry_directory(root: &Path) -> PathBuf {
-    root.join("entries")
+fn digest_from_storage(digest: ContentDigest) -> Digest {
+    Digest::from_bytes(digest.0)
 }
 
-fn stage_directory(root: &Path) -> PathBuf {
-    root.join("stages")
+fn writer_error(path: &Path, source: StorageError) -> TuneError {
+    if source.is_writer_locked() {
+        TuneError::JournalLocked {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        }
+    } else {
+        storage_error(source)
+    }
 }
 
-fn candidate_path(root: &Path, digest: Digest) -> PathBuf {
-    candidate_directory(root).join(format!("{digest}.json"))
-}
-
-fn entry_path(root: &Path, digest: Digest) -> PathBuf {
-    entry_directory(root).join(format!("{digest}.json"))
-}
-
-fn stage_path(root: &Path, digest: Digest) -> PathBuf {
-    stage_directory(root).join(format!("{digest}.json"))
-}
-
-fn head_path(root: &Path) -> PathBuf {
-    root.join("HEAD.json")
-}
-
-fn temporary_path(path: &Path, timestamp: u128, attempt: u32) -> PathBuf {
-    let mut name = path.as_os_str().to_owned();
-    name.push(format!(
-        ".next.{}.{}.{}",
-        std::process::id(),
-        timestamp,
-        attempt
-    ));
-    PathBuf::from(name)
-}
-
-fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> TuneError {
-    TuneError::Io {
-        operation,
-        path: path.to_path_buf(),
-        source,
+fn storage_error(source: StorageError) -> TuneError {
+    TuneError::Storage {
+        source: Box::new(source),
     }
 }
 

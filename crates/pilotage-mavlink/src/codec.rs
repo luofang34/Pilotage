@@ -32,6 +32,18 @@ pub const SCALED_PRESSURE_ID: u32 = 29;
 /// HIL_STATE_QUATERNION: simulator ground truth, forwarded by a SITL
 /// flight controller beside its estimates. Never sent by a real vehicle.
 pub const HIL_STATE_QUATERNION_ID: u32 = 115;
+/// GPS_RAW_INT: the receiver's own fix. A flight controller sends it
+/// whether the vehicle is real or simulated, so it is the estimate lane's
+/// position on every backend alike.
+///
+/// This message rather than GLOBAL_POSITION_INT because it carries an
+/// ELLIPSOIDAL height and stated accuracies. The fused message states a
+/// height above mean sea level and names no model for the sea level it
+/// means, and an above-sea-level height with no separation is
+/// uninterpretable: the geodetic contract refuses it, correctly, and there
+/// is no honest way to supply the missing declaration on a receiver's
+/// behalf.
+pub const GNSS_RAW_ID: u32 = 24;
 /// COMMAND_ACK message id (arm/disarm feedback).
 pub const COMMAND_ACK_ID: u32 = 77;
 /// Standard ESTIMATOR_STATUS message id.
@@ -102,6 +114,21 @@ pub enum FcMessage {
         pos_ned_m: [f32; 3],
         /// Velocity (north, east, down) in meters/second.
         vel_ned_mps: [f32; 3],
+    },
+    /// The receiver's own fix, as the flight controller reports it.
+    /// Unlike the truth report beside it, this is a solution and not an
+    /// oracle: a real vehicle sends it too.
+    GnssFix {
+        /// The sender's clock for this fix, microseconds.
+        time_usec: u64,
+        /// Latitude and longitude in degrees·1e7, exactly as the wire
+        /// carries them.
+        lat_lon: [i32; 2],
+        /// Height above the WGS-84 ellipsoid, millimetres. Interpretable
+        /// with no geoid model, unlike the sea-level height beside it.
+        alt_ellipsoid_mm: i32,
+        /// 1-sigma horizontal and vertical accuracy, millimetres.
+        accuracy_mm: [u32; 2],
     },
     /// Standard estimator health projection. This message is diagnostic and
     /// never authorizes Pilotage consumers to use an estimate.
@@ -189,6 +216,7 @@ fn crc_extra(msg_id: u32) -> Option<u8> {
         HEARTBEAT_ID => Some(50),
         ATTITUDE_QUATERNION_ID => Some(246),
         LOCAL_POSITION_NED_ID => Some(185),
+        GNSS_RAW_ID => Some(24),
         SCALED_PRESSURE_ID => Some(115),
         HIL_STATE_QUATERNION_ID => Some(4),
         COMMAND_ACK_ID => Some(143),
@@ -319,4 +347,4 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, FcMessage)>) -> 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

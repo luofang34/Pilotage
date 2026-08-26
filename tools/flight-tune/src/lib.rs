@@ -9,6 +9,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+extern crate self as flight_tune;
+
 mod adapter;
 mod engine;
 mod error;

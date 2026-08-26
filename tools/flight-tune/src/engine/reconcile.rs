@@ -15,6 +15,7 @@ where
     P: ProposalStrategy,
 {
     pub(super) fn reconcile_settled_candidate_blocking(&mut self) -> Result<(), TuneError> {
+        self.journal.ensure_usable()?;
         if self.journal.state().pending.is_some() {
             return Err(invalid_state(
                 "reconcile active candidate",
@@ -23,7 +24,13 @@ where
         }
         let digest = self.settled_candidate_digest();
         let candidate = self.journal.read_candidate(digest)?;
-        evaluate::ensure_candidate_blocking(&mut self.vehicle, &self.capability, &candidate, digest)
+        evaluate::ensure_candidate_blocking(
+            &self.journal,
+            &mut self.vehicle,
+            &self.capability,
+            &candidate,
+            digest,
+        )
     }
 
     pub(super) fn finish_with_candidate_reconciliation_blocking(
@@ -31,6 +38,12 @@ where
         operation: &'static str,
         primary: Result<(), TuneError>,
     ) -> Result<(), TuneError> {
+        if let Err(poisoned) = self.journal.ensure_usable() {
+            return match primary {
+                Ok(()) => Err(poisoned),
+                Err(primary) => Err(primary),
+            };
+        }
         if self.journal.state().pending.is_some() {
             return primary.and_then(|()| {
                 Err(invalid_state(

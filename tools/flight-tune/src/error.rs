@@ -99,6 +99,30 @@ pub enum TuneError {
     JournalLocked {
         /// The journal root.
         path: PathBuf,
+        /// The structured writer-lease conflict.
+        #[source]
+        source: Box<pilotage_durable_storage::StorageError>,
+    },
+    /// The live journal has an unresolved durable publication result.
+    #[error("the live tuning journal is poisoned")]
+    JournalPoisoned,
+    /// The private durable store rejected a journal operation.
+    #[error("durable journal storage failed: {source}")]
+    Storage {
+        /// The structured durable-storage failure.
+        #[source]
+        source: Box<pilotage_durable_storage::StorageError>,
+    },
+    /// Journal authorization and its temporary cleanup both failed.
+    #[error(
+        "journal authorization failed: {authorization}; temporary cleanup also failed: {cleanup}"
+    )]
+    AuthorizationAndCleanupFailed {
+        /// The authorization failure.
+        authorization: Box<TuneError>,
+        /// The durable-storage cleanup failure.
+        #[source]
+        cleanup: Box<pilotage_durable_storage::StorageError>,
     },
     /// A journal belongs to a different tuning session.
     #[error("journal session does not match the requested session")]
@@ -156,4 +180,18 @@ pub enum TuneError {
         #[source]
         source: serde_json::Error,
     },
+}
+
+impl TuneError {
+    pub(crate) fn poisons_journal(&self) -> bool {
+        match self {
+            Self::JournalPoisoned
+            | Self::DigestMismatch { .. }
+            | Self::AuthorizationAndCleanupFailed { .. } => true,
+            Self::Storage { source } | Self::JournalLocked { source, .. } => {
+                source.poisons_authorization()
+            }
+            _ => false,
+        }
+    }
 }

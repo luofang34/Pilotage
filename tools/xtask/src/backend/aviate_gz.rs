@@ -28,8 +28,14 @@ impl SimBackend for AviateGz {
     }
 
     fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
-        // The camera sidecar discovers gz topics through this.
-        vec![("GZ_IP".to_owned(), "127.0.0.1".to_owned())]
+        vec![
+            // The camera sidecar discovers gz topics through this.
+            ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+            // A sensor's topic is scoped by the world it is in. The
+            // launcher is what chooses the world, so it is what says which
+            // one rather than the host guessing a name.
+            ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
+        ]
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
@@ -315,5 +321,29 @@ mod tests {
         );
         assert_eq!(env(1, "GZ_IP"), "127.0.0.1");
         std::fs::remove_dir_all(repo.parent().expect("base")).ok();
+    }
+
+    /// A sensor's topic is scoped by the world it is in. The launcher
+    /// chooses the world and the host builds the topic, so they agree
+    /// through this name and nothing else. A typo in either place
+    /// subscribes successfully to a topic nobody publishes: gz-transport
+    /// reports no error, the bridge reports no fix, and the map states no
+    /// position with nothing anywhere to say why.
+    #[test]
+    fn the_launcher_names_the_world_the_sensor_topic_is_scoped_by() {
+        use crate::backend::SimBackend;
+
+        let ctx = context(PathBuf::from("unused-for-host-environment"));
+        let env = super::AviateGz.host_env(&ctx);
+        let world = env
+            .iter()
+            .find(|(key, _)| key == "PILOTAGE_GZ_WORLD")
+            .map(|(_, value)| value.clone())
+            .expect("the launcher tells the host which world it started");
+        assert_eq!(world, super::WORLD_NAME);
+        assert!(
+            !world.is_empty(),
+            "an empty world name builds no topic and the host reads no position"
+        );
     }
 }

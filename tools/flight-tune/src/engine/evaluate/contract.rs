@@ -43,6 +43,7 @@ pub(super) fn validate_sample(
 }
 
 pub(super) fn begin_evaluators<G, M>(
+    journal: &Journal,
     scenario: &ScenarioRef,
     gates: &mut G,
     metric: &mut M,
@@ -51,9 +52,11 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    journal.ensure_usable()?;
     gates
         .begin(scenario)
         .map_err(|source| evaluator_error(gates.identity(), "begin hard gates", source))?;
+    journal.ensure_usable()?;
     metric
         .begin(scenario)
         .map_err(|source| evaluator_error(metric.identity(), "begin metric", source))

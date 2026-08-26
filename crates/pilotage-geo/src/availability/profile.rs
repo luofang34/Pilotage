@@ -172,9 +172,16 @@ impl AvailabilityProfile {
     }
 
     /// The health a position accuracy (mm) contributes under this profile.
+    ///
+    /// Zero is unstated, not perfect: no receiver knows a position to the
+    /// millimetre, so a zero is a producer that supplied no estimate. Graded
+    /// on its face it would rank the least-known position best of all, so it
+    /// grades as unusable instead — the same verdict an accuracy too coarse
+    /// to use earns, because both leave a reader unable to say how well the
+    /// position is known.
     #[must_use]
     pub(super) const fn position_mm_health(&self, mm: u32) -> InputHealth {
-        if mm > self.usable_pos_mm {
+        if mm == 0 || mm > self.usable_pos_mm {
             InputHealth::Failed
         } else if mm > self.fresh_pos_mm {
             InputHealth::Degraded
