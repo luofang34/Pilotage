@@ -94,6 +94,16 @@ XPLMDataRef Find(const char* name) {
 
 void BindDatarefs() {
     refs.sim_time = Find("sim/time/total_flight_time_sec");
+    if (refs.sim_time == nullptr) {
+        // Everything this plugin observes is gated on a finite simulator
+        // clock, so without this one dataref it connects, says hello, and then
+        // goes mute forever — sending no samples and noticing no aircraft
+        // change. It fails safe, but silently: the host reaches its timeout
+        // with nothing saying why. Say why.
+        XPLMDebugString(
+            "PilotageTrial: sim/time/total_flight_time_sec did not bind; "
+            "no samples will be sent\n");
+    }
     refs.local_x = Find("sim/flightmodel/position/local_x");
     refs.local_y = Find("sim/flightmodel/position/local_y");
     refs.local_z = Find("sim/flightmodel/position/local_z");

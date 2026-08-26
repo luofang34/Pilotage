@@ -148,6 +148,16 @@ clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
   -o "${TRIAL_BUILD}/protocol_tests"
 "${TRIAL_BUILD}/protocol_tests"
 
+# The link needs one simulator symbol, which the test binary stubs, so its
+# queueing and give-up behaviour is reachable without X-Plane.
+clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
+  -DAPL=1 -DIBM=0 -DLIN=0 -DXPLM200 -DXPLM210 -DXPLM300 -DXPLM301 -DXPLM303 \
+  -I "${PX4XPLANE_DIR}/lib/SDK/CHeaders/XPLM" -I "${TRIAL_SRC}" \
+  "${TRIAL_SRC}/link_tests.cpp" \
+  "${TRIAL_SRC}/link.cpp" \
+  -o "${TRIAL_BUILD}/link_tests"
+"${TRIAL_BUILD}/link_tests"
+
 # --- Install -------------------------------------------------------------
 echo "installing plugins and aircraft..."
 PLUGINS="${XPLANE_ROOT}/Resources/plugins"

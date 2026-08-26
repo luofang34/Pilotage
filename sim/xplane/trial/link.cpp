@@ -20,6 +20,10 @@ constexpr unsigned kDefaultPort = 45991;
 constexpr double kRetryIntervalS = 1.0;
 constexpr std::size_t kMaximumInputBytes = 64 * 1024;
 constexpr std::size_t kMaximumReplyBytes = 64 * 1024;
+// Roughly ten seconds of samples at the rate a trial runs. Enough to ride out
+// a consumer pausing for a scoring step or a large write; short of pretending
+// a consumer that has stopped draining is merely behind.
+constexpr std::size_t kMaximumQueuedSampleBytes = 256 * 1024;
 
 unsigned Port() {
     const char* text = std::getenv("PILOTAGE_XPLANE_TRIAL_PORT");
@@ -89,10 +93,22 @@ void HostLink::SendReply(const std::string& line) {
 }
 
 void HostLink::SendSample(const std::string& line) {
-    if (sample_sent_ != 0) {
+    // Queued, not latest-wins. The host requires the sample sequence to be
+    // contiguous and fails the stream on any gap, so a sample dropped here
+    // does not thin the record — it fails the whole trial afterwards, with a
+    // message that points at the wire instead of at the consumer that stalled.
+    // The sequence number advances for every sample, so dropping one would
+    // also make the plugin's own count disagree with what it sent.
+    //
+    // A backlog this size means the consumer is not draining at all rather
+    // than briefly behind. Giving up the connection then is the honest answer:
+    // the host reads a peer that closed and reports exactly that, where a
+    // silent hole in the sequence is met later as corruption.
+    if (sample_.size() - sample_sent_ + line.size() + 1 > kMaximumQueuedSampleBytes) {
+        Disconnect();
         return;
     }
-    sample_ = line;
+    sample_.append(line);
     sample_.push_back('\n');
     Flush();
 }
