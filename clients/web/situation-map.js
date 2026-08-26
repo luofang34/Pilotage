@@ -102,7 +102,12 @@ function watchCamera(map, surface) {
  * the map on the first selection. Returns the wiring handle with the boot
  * promise for observation; the handle is not needed for operation.
  */
+/** How often the mark's own clock ticks. Short enough that a reader never
+ *  meets a mark much past its 3 s window, long enough to be free. */
+const OWNSHIP_AGE_INTERVAL_MS = 500;
+
 export function wireSituationMapStage(doc, { log = () => {} } = {}) {
+  const win = doc.defaultView ?? globalThis;
   const figure = doc.getElementById("stage-map");
   const surface = doc.getElementById("situationMap");
   const mainView = doc.getElementById("mainView");
@@ -140,6 +145,10 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
       return await bootStage();
     } catch (error) {
       setUnavailable(MAP_REASON.RENDER_FAILED, String(error));
+      // A throw after the mark was bound leaves it live and updating on a
+      // stage that reports itself unavailable.
+      ownship?.age(Number.POSITIVE_INFINITY);
+      ownship = null;
       return null;
     }
   };
@@ -247,9 +256,12 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
     return new Promise((resolve) => {
       const deadline = setTimeout(() => {
         map.remove();
-        // The mark belongs to a map that no longer exists. Left bound, the
-        // next sample would report the vehicle shown on a stage that
-        // reports itself unavailable.
+        // The mark belongs to a map that no longer exists. Withdrawing it
+        // first clears what it already wrote: a stage that reports itself
+        // unavailable beside a surface that reports a vehicle shown, at a
+        // position, is two answers to one question. Releasing the handle
+        // after that stops the next sample from writing them again.
+        ownship?.age(Number.POSITIVE_INFINITY);
         ownship = null;
         setUnavailable(
           MAP_REASON.RENDER_FAILED,
@@ -282,14 +294,38 @@ export function wireSituationMapStage(doc, { log = () => {} } = {}) {
   // or a change fired before this module finished loading).
   if (mainView.value === figure.id) activate();
 
+  // A link that goes silent delivers no sample to notice the silence with,
+  // so the mark is aged on a clock of its own. Without this the vehicle
+  // stays on the map at its last position for as long as the page is open,
+  // which is the one thing the mark must never do. The stage owns the
+  // clock because the stage owns the mark.
+  const ageOwnship = () => ownship?.age(performance.now());
+  let ownshipAging = setInterval(ageOwnship, OWNSHIP_AGE_INTERVAL_MS);
+  // `pagehide` fires for the back/forward cache as well as for a real
+  // unload, and a page restored from that cache resumes its telemetry. A
+  // clock stopped without re-arming would leave the mark updating and
+  // never ageing for the rest of the page's life.
+  win.addEventListener("pagehide", () => {
+    clearInterval(ownshipAging);
+    ownshipAging = null;
+  });
+  win.addEventListener("pageshow", () => {
+    if (ownshipAging === null) ownshipAging = setInterval(ageOwnship, OWNSHIP_AGE_INTERVAL_MS);
+    ageOwnship();
+  });
+  // A hidden tab clamps its timers, so the mark may be a minute stale by
+  // the time a reader looks at it again. Age it before they do.
+  doc.addEventListener("visibilitychange", () => {
+    if (doc.visibilityState === "visible") ageOwnship();
+  });
+
   return {
     activate,
     booted: () => bootPromise,
     /** Takes one telemetry sample for the vehicle mark. */
     observeTelemetry: (telemetry, nowMs) => ownship?.observe(telemetry, nowMs),
-    /** Withdraws a mark whose fix stopped arriving. A link that goes
-     *  silent delivers no sample to notice the silence with, so the mark
-     *  has to be aged on a clock of its own. */
-    ageOwnship: (nowMs) => ownship?.age(nowMs),
+    /** Withdraws a mark whose fix stopped arriving, on the stage's own
+     *  clock. Exposed so a test can drive it deterministically. */
+    ageOwnship: (nowMs) => ownship?.age(nowMs ?? performance.now()),
   };
 }

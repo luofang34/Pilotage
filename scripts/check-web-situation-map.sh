@@ -146,12 +146,24 @@ if ! grep -Fq 'ownshipSource' "$ownship_module"; then
 fi
 
 if ! grep -Fq 'OWNSHIP_STALE_AFTER_MS' "$ownship_module" \
-    || ! grep -Fq 'age,' "$ownship_module"; then
+    || ! grep -Eq 'return \{ observe, age, marker \}' "$ownship_module"; then
     echo "FORBIDDEN: the vehicle mark must be withdrawn when its fix stops arriving" >&2
     status=1
 fi
-if ! grep -Fq 'ageOwnship' "$map_module" || ! grep -Fq 'ageOwnship' "$web/main.js"; then
+# A clock nothing turns is a rule nothing enforces, so the check is on the
+# call that turns it and not on the name being mentioned somewhere.
+# The clock is armed at wiring time and re-armed when a restored page
+# resumes, so both calls are required: one of them alone leaves either a
+# mark that never ages or a mark that stops ageing after a navigation.
+if [ "$(grep -c 'setInterval(ageOwnship, OWNSHIP_AGE_INTERVAL_MS)' "$map_module")" != "2" ]; then
     echo "FORBIDDEN: something must drive the mark's own clock" >&2
+    status=1
+fi
+# The back/forward cache stops a page and later resumes it with its
+# telemetry intact. A clock stopped without re-arming leaves the mark
+# updating and never ageing for the rest of the page's life.
+if ! grep -Fq 'pageshow' "$map_module" || ! grep -Fq 'visibilitychange' "$map_module"; then
+    echo "FORBIDDEN: the mark's clock must survive a restored page and a hidden tab" >&2
     status=1
 fi
 

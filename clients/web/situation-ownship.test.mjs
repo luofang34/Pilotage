@@ -88,6 +88,7 @@ function testTheReasonsAreTheStringsAReaderMeets() {
   assert.deepEqual(OWNSHIP_REASON, {
     NO_SAMPLE: "OWNSHIP_NO_TELEMETRY",
     NO_FIX: "OWNSHIP_NO_FIX",
+    STOPPED: "OWNSHIP_FIX_STOPPED",
   });
 }
 testTheReasonsAreTheStringsAReaderMeets();
@@ -168,7 +169,11 @@ function testAFixThatStopsArrivingWithdrawsTheMark() {
   age(1_001 + OWNSHIP_STALE_AFTER_MS);
   assert.equal(marker.on, false, "past the window the mark is withdrawn");
   assert.equal(surface.dataset.ownship, "absent");
-  assert.equal(surface.dataset.ownshipReason, OWNSHIP_REASON.NO_FIX);
+  assert.equal(
+    surface.dataset.ownshipReason,
+    OWNSHIP_REASON.STOPPED,
+    "telemetry that stopped is not telemetry that carried no fix",
+  );
   assert.equal(
     surface.dataset.ownshipPosition,
     undefined,
@@ -189,6 +194,11 @@ function testOneSampleWithoutAFixDoesNotBlinkTheMark() {
   observe(truth({ geodetic: null }), 1_001 + OWNSHIP_STALE_AFTER_MS);
   assert.equal(marker.on, false, "a gap past the window does");
   assert.equal(surface.dataset.ownship, "absent");
+  assert.equal(
+    surface.dataset.ownshipReason,
+    OWNSHIP_REASON.NO_FIX,
+    "telemetry that kept arriving without a fix says so",
+  );
 }
 testOneSampleWithoutAFixDoesNotBlinkTheMark();
 console.log("ok - testOneSampleWithoutAFixDoesNotBlinkTheMark");
@@ -231,5 +241,60 @@ function testAWithdrawnMarkIsNotWithdrawnTwice() {
 }
 testAWithdrawnMarkIsNotWithdrawnTwice();
 console.log("ok - testAWithdrawnMarkIsNotWithdrawnTwice");
+
+function testTheEstimateLaneReachesTheMap() {
+  // The pure decision function is tested above; this is the half that
+  // talks to a map. A session with no truth oracle is the only case a
+  // physical vehicle has, and until this ran, refusing the estimate lane
+  // outright inside `observe` left every gate green.
+  const { observe, surface, marker } = harness();
+  observe(estimate(), 1_000);
+
+  assert.equal(marker.on, true, "a receiver's fix puts the mark on the map");
+  assert.deepEqual(marker.lngLat, [FIX.longitudeDeg, FIX.latitudeDeg]);
+  assert.equal(surface.dataset.ownship, "shown");
+  assert.equal(surface.dataset.ownshipSource, OWNSHIP_SOURCE.ESTIMATE);
+}
+testTheEstimateLaneReachesTheMap();
+console.log("ok - testTheEstimateLaneReachesTheMap");
+
+function testTheMarkSaysWhenTheLaneUnderItChanges() {
+  // The two lanes are different measurements of the same thing, and the
+  // mark can move several kilometres when it switches between them. The
+  // surface has to say so on every sample, not only on the first.
+  const { observe, surface, element } = harness();
+  observe(truth(), 1_000);
+  assert.equal(surface.dataset.ownshipSource, OWNSHIP_SOURCE.TRUTH);
+  assert.match(element.attributes["aria-label"], /from the simulator$/);
+
+  observe(estimate({ ...FIX, latitudeDeg: 47.5 }), 1_100);
+  assert.equal(
+    surface.dataset.ownshipSource,
+    OWNSHIP_SOURCE.ESTIMATE,
+    "the oracle went away and the mark says which measurement replaced it",
+  );
+  assert.match(element.attributes["aria-label"], /from the flight controller$/);
+
+  observe(truth(), 1_200);
+  assert.equal(
+    surface.dataset.ownshipSource,
+    OWNSHIP_SOURCE.TRUTH,
+    "and says so again when the oracle returns",
+  );
+}
+testTheMarkSaysWhenTheLaneUnderItChanges();
+console.log("ok - testTheMarkSaysWhenTheLaneUnderItChanges");
+
+function testTheMarkIsSomethingAReaderCanSee() {
+  // The element is 0x0 and takes its whole shape from the class, so a mark
+  // without it is "shown" on the surface and invisible on the screen. The
+  // role is what the accessible name attaches to.
+  const { observe, element } = harness();
+  observe(truth(), 1_000);
+  assert.equal(element.className, "map-ownship", "the mark has the shape the style draws");
+  assert.equal(element.attributes.role, "img", "the name has something to attach to");
+}
+testTheMarkIsSomethingAReaderCanSee();
+console.log("ok - testTheMarkIsSomethingAReaderCanSee");
 
 console.log("\nall situation ownship checks passed");

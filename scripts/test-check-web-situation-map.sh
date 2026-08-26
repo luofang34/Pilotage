@@ -143,12 +143,20 @@ if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1
 fi
 cp "$repo_root/clients/web/situation-ownship.js" "$web/"
 
-python3 - "$fixture/clients/web/main.js" <<'DRIVER_GONE'
+# A clock nothing turns is a rule nothing enforces. The mutation removes
+# the call that turns it and leaves the name in place, which is exactly the
+# shape a refactor would leave behind.
+python3 - "$fixture/clients/web/situation-map.js" <<'DRIVER_GONE'
 import sys
 path = sys.argv[1]
 source = open(path, encoding="utf-8").read()
 before = source
-source = source.replace("ageOwnship", "noSuchDriver")
+source = source.replace(
+    "setInterval(ageOwnship, OWNSHIP_AGE_INTERVAL_MS)", "null /* ageOwnship */", 1
+)
+assert source.count("setInterval(ageOwnship, OWNSHIP_AGE_INTERVAL_MS)") == 1, (
+    "one call is the case: the other is the restore path, covered separately"
+)
 assert source != before, "the driver is not written the way this case edits it"
 open(path, "w", encoding="utf-8").write(source)
 DRIVER_GONE
@@ -156,7 +164,7 @@ if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1
     echo "the web situation guard accepted a mark clock nothing drives" >&2
     exit 1
 fi
-cp "$repo_root/clients/web/main.js" "$web/"
+cp "$repo_root/clients/web/situation-map.js" "$web/"
 
 python3 - "$fixture/clients/web/situation-ownship.js" <<'REASON_GONE'
 import sys
@@ -172,4 +180,54 @@ if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1
     exit 1
 fi
 cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+# Two lanes can carry the position and a reader has to be told which one is
+# under the mark: an oracle is exact by construction, an estimate is a
+# solution with an accuracy of its own.
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('simulation-truth', "some-lane")
+assert source != before, "the lane name is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark that names no lane" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('ownshipSource', "ownshipWhence")
+assert source != before, "the source attribute is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark that hides which measurement is under it" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+# A page restored from the back/forward cache resumes its telemetry. A
+# clock stopped without re-arming leaves the mark updating and never
+# ageing for the rest of the page's life.
+python3 - "$web/situation-map.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('pageshow', "unload")
+assert source != before, "the restore path is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark clock that a restored page never re-arms" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-map.js" "$web/"
 echo "web situation map guards reject each loss"

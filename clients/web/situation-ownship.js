@@ -10,6 +10,7 @@
 export const OWNSHIP_REASON = Object.freeze({
   NO_SAMPLE: "OWNSHIP_NO_TELEMETRY",
   NO_FIX: "OWNSHIP_NO_FIX",
+  STOPPED: "OWNSHIP_FIX_STOPPED",
 });
 
 /** Which measurement the drawn position came from. The two are different
@@ -97,15 +98,22 @@ export function attachOwnship(maplibre, map, surface) {
     delete surface.dataset.ownshipSource;
   };
 
+  // Why the last sample carried no position, so a withdrawal can say which
+  // silence it is: telemetry that stopped, or telemetry that kept arriving
+  // and stopped carrying a fix. Reported as one reason they are the same to
+  // a reader, and they are not the same thing at all.
+  let lastAbsence = OWNSHIP_REASON.STOPPED;
+
   const age = (nowMs) => {
     if (lastFixAt === null) return;
     if (nowMs - lastFixAt <= OWNSHIP_STALE_AFTER_MS) return;
-    withdraw(OWNSHIP_REASON.NO_FIX);
+    withdraw(lastAbsence);
   };
 
   const observe = (telemetry, nowMs) => {
     const { position, source, reason } = ownshipFromTelemetry(telemetry);
     if (position === null) {
+      lastAbsence = reason;
       // One sample without a fix does not blink the mark; the age rule is
       // what removes it, and it applies whether or not samples keep coming.
       if (lastFixAt !== null) {
@@ -116,6 +124,9 @@ export function attachOwnship(maplibre, map, surface) {
       return;
     }
     lastFixAt = nowMs;
+    // Telemetry stopping is the absence that follows a fix, until a sample
+    // says otherwise.
+    lastAbsence = OWNSHIP_REASON.STOPPED;
     marker.setLngLat([position.longitudeDeg, position.latitudeDeg]);
     if (!shown) {
       marker.addTo(map);
