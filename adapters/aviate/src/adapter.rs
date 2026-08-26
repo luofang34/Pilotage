@@ -381,6 +381,16 @@ fn process_flight_actions(
                     "no mode requests: direct flight is the vehicle.motion.direct scope",
                 ));
             }
+            // Handled by the adapter before this point, which is where the
+            // control-feel artifact lives. Reaching here means it was not, and
+            // a request that quietly did nothing would leave an operator
+            // believing the law had changed.
+            ControlAction::FeelModeRequest { .. } => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "the control-feel artifact was not reachable for this request",
+                ));
+            }
             ControlAction::SimReset
             | ControlAction::Disarm
             | ControlAction::GimbalRecenter

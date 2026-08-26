@@ -17,6 +17,7 @@ export function createSessionBootstrap({
   authorityFor,
   executeLeaseAction,
   velocityCapabilityFor,
+  refreshFeelModeControl,
   handleActionResult,
   applyLeaseResponse,
 }) {
@@ -83,6 +84,10 @@ export function createSessionBootstrap({
       if (!velocityCapabilityFor(motionScope)) {
         log("vehicle advertises no velocity intent for vehicle.motion; motion control disabled");
       }
+      // The feel control follows the advertisement rather than the page: a
+      // vehicle that qualifies no law offers no choice, and one that qualifies
+      // three offers exactly those three.
+      refreshFeelModeControl();
     } else if (decoded.kind === "ControlActionResult") {
       handleActionResult(decoded.message);
     } else if (decoded.kind === "LeaseResponse") {

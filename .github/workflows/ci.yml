@@ -451,6 +451,11 @@ jobs:
         # held to one corpus of cases whose anchors come from geometry.
         run: node clients/web/situation-motion.conformance.test.mjs
 
+      - name: operator control-feel mode selection
+        # A control that asks for a law the vehicle has not qualified is a
+        # control that always fails, so the offer follows the advertisement.
+        run: node clients/web/feel-mode.test.mjs
+
       - name: Vendor the MapLibre GL JS renderer (pinned digest)
         run: bash scripts/vendor-maplibre-web.sh
 

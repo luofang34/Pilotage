@@ -7,8 +7,8 @@
 
 use super::ConvertError;
 use crate::intent::{
-    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, GimbalRateIntent,
-    ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, FeelTarget,
+    GimbalRateIntent, ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
 };
 use crate::wire;
 
@@ -58,6 +58,29 @@ fn frame_from_wire(value: i32) -> Result<ReferenceFrame, ConvertError> {
     }
 }
 
+pub(super) fn feel_target_to_wire(target: FeelTarget) -> wire::FeelTarget {
+    match target {
+        FeelTarget::Precision => wire::FeelTarget::Precision,
+        FeelTarget::Balanced => wire::FeelTarget::Balanced,
+        FeelTarget::Agile => wire::FeelTarget::Agile,
+    }
+}
+
+pub(super) fn feel_target_from_wire(value: i32) -> Result<FeelTarget, ConvertError> {
+    match wire::FeelTarget::try_from(value) {
+        Ok(wire::FeelTarget::Precision) => Ok(FeelTarget::Precision),
+        Ok(wire::FeelTarget::Balanced) => Ok(FeelTarget::Balanced),
+        Ok(wire::FeelTarget::Agile) => Ok(FeelTarget::Agile),
+        // A feel request with no target is a request the receiver would have
+        // to guess at, and guessing which law to install is exactly what the
+        // typed vocabulary exists to prevent.
+        Ok(wire::FeelTarget::Unspecified) | Err(_) => Err(ConvertError::UnknownEnum {
+            enum_name: "pilotage.v1.FeelTarget",
+            value,
+        }),
+    }
+}
+
 pub(super) fn mode_target_to_wire(target: ModeTarget) -> wire::ModeTarget {
     match target {
         ModeTarget::CameraVelocity => wire::ModeTarget::CameraVelocity,
@@ -81,6 +104,7 @@ pub(super) fn mode_target_from_wire(value: i32) -> Result<ModeTarget, ConvertErr
 }
 
 pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::ControlActionRequest {
+    let mut feel_target = wire::FeelTarget::Unspecified;
     let (kind, target) = match action {
         ControlAction::Arm => (wire::ControlAction::Arm, wire::ModeTarget::Unspecified),
         ControlAction::Disarm => (wire::ControlAction::Disarm, wire::ModeTarget::Unspecified),
@@ -101,11 +125,19 @@ pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::Con
             wire::ModeTarget::Unspecified,
         ),
         ControlAction::SimReset => (wire::ControlAction::SimReset, wire::ModeTarget::Unspecified),
+        ControlAction::FeelModeRequest { target } => {
+            feel_target = feel_target_to_wire(target);
+            (
+                wire::ControlAction::FeelModeRequest,
+                wire::ModeTarget::Unspecified,
+            )
+        }
     };
     wire::ControlActionRequest {
         action: kind as i32,
         mode_target: target as i32,
         action_id,
+        feel_target: feel_target as i32,
     }
 }
 
@@ -132,10 +164,33 @@ pub(crate) fn action_from_wire(
             request.action_id,
         ));
     }
+    if kind == wire::ControlAction::FeelModeRequest {
+        // The two targets are separate vocabularies. A feel request carrying a
+        // flight-mode target is a sender and a receiver disagreeing about what
+        // was asked for, which fails closed rather than being read past.
+        if request.mode_target != wire::ModeTarget::Unspecified as i32 {
+            return Err(ConvertError::UnknownEnum {
+                enum_name: "pilotage.v1.ControlActionRequest.mode_target",
+                value: request.mode_target,
+            });
+        }
+        return Ok((
+            ControlAction::FeelModeRequest {
+                target: feel_target_from_wire(request.feel_target)?,
+            },
+            request.action_id,
+        ));
+    }
     if request.mode_target != wire::ModeTarget::Unspecified as i32 {
         return Err(ConvertError::UnknownEnum {
             enum_name: "pilotage.v1.ControlActionRequest.mode_target",
             value: request.mode_target,
+        });
+    }
+    if request.feel_target != wire::FeelTarget::Unspecified as i32 {
+        return Err(ConvertError::UnknownEnum {
+            enum_name: "pilotage.v1.ControlActionRequest.feel_target",
+            value: request.feel_target,
         });
     }
     match kind {
@@ -147,6 +202,11 @@ pub(crate) fn action_from_wire(
         wire::ControlAction::CameraZoomIn => Ok((ControlAction::CameraZoomIn, request.action_id)),
         wire::ControlAction::CameraZoomOut => Ok((ControlAction::CameraZoomOut, request.action_id)),
         wire::ControlAction::SimReset => Ok((ControlAction::SimReset, request.action_id)),
+        // FeelModeRequest returned above with its own target.
+        wire::ControlAction::FeelModeRequest => Err(ConvertError::UnknownEnum {
+            enum_name: "pilotage.v1.ControlAction",
+            value: request.action,
+        }),
         // ModeRequest returned above; Unspecified/unknown rejected above. A
         // total match keeps this panic-free if the wire enum ever grows.
         wire::ControlAction::ModeRequest | wire::ControlAction::Unspecified => {
@@ -360,6 +420,7 @@ mod tests {
                 action: wire::ControlAction::Unspecified as i32,
                 mode_target: 0,
                 action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ControlAction",
@@ -375,6 +436,7 @@ mod tests {
                 action: wire::ControlAction::ModeRequest as i32,
                 mode_target: wire::ModeTarget::Unspecified as i32,
                 action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ModeTarget",
@@ -390,6 +452,7 @@ mod tests {
                 action: wire::ControlAction::Arm as i32,
                 mode_target: wire::ModeTarget::Hold as i32,
                 action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ControlActionRequest.mode_target",

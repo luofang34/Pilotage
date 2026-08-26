@@ -306,6 +306,16 @@
       <option value="rover">Rover (throttle/yaw)</option>
     </select>
   </label>
+  <label>feel
+    <select id="feelMode" disabled title="Waiting for the vehicle to advertise its control-feel modes">
+      <!-- Offered only once the vehicle advertises a qualified profile for
+           each: a control that asks for a law the vehicle has not qualified is
+           a control that always fails. -->
+      <option value="1">Precision</option>
+      <option value="2" selected>Balanced</option>
+      <option value="3">Agile</option>
+    </select>
+  </label>
   <label>main view
     <select id="mainView">
       <option value="stage-video" selected>FPV / onboard camera</option>

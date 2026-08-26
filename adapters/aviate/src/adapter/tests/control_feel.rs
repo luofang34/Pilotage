@@ -608,3 +608,96 @@ fn a_physical_vehicle_refuses_a_mode_request() {
     let mut adapter = airborne_adapter_with_fc(&fc).with_profile(crate::AviateProfile::Physical);
     assert!(adapter.request_feel_mode(FeelMode::Agile).is_err());
 }
+
+#[test]
+fn a_feel_request_on_a_control_frame_stages_the_named_law() {
+    // The operator's path end to end at the vehicle: a typed action arrives on
+    // a control frame, is accepted, and the named law is staged — waiting for
+    // a neutral boundary rather than changing under the stick that carried it.
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read timeout");
+    let mut adapter = airborne_adapter_with_fc(&fc);
+    let before = active_digest(&adapter);
+
+    // The request rides a frame whose stick is deflected, which is the case
+    // that matters: an operator changes mode while flying.
+    let mut frame = flight_frame(vec![(LogicalAxisId::new(PITCH_AXIS), 0.5)], vec![]);
+    frame.actions = vec![pilotage_protocol::ControlAction::FeelModeRequest {
+        target: pilotage_protocol::FeelTarget::Agile,
+    }];
+    let outcome = adapter.apply_control(&frame);
+    assert_eq!(outcome.disposition, Disposition::Accepted);
+    receive_frame(&fc, "feel request response frame");
+
+    let answered = outcome
+        .action_results
+        .iter()
+        .find(|result| {
+            matches!(
+                result.action,
+                pilotage_protocol::ControlAction::FeelModeRequest { .. }
+            )
+        })
+        .expect("the request was answered");
+    assert!(answered.accepted, "refused: {}", answered.detail);
+    assert_eq!(
+        active_digest(&adapter),
+        before,
+        "the law changed under the stick"
+    );
+
+    // Held at centre, the requested law arrives.
+    let named = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(FeelMode::Agile))
+        .expect("the named mode is a valid profile");
+    let expected = *FeelDigest::calculate(&named)
+        .expect("digest the named mode")
+        .as_bytes();
+    let step = Duration::from_millis(20);
+    let mut arrived = false;
+    for _ in 0..40 {
+        adapter
+            .uplink_mut()
+            .expect("uplink")
+            .seed_hold_for_test([1.0, 2.0, 3.0]);
+        assert_eq!(
+            adapter.apply_control(&neutral_frame()).disposition,
+            Disposition::Accepted
+        );
+        receive_frame(&fc, "neutral response frame");
+        if active_digest(&adapter) == expected {
+            arrived = true;
+            break;
+        }
+        adapter.uplink_mut().expect("uplink").advance_clock(step);
+    }
+    assert!(arrived, "the requested law never arrived");
+}
+
+#[test]
+fn the_vehicle_advertises_the_modes_it_can_serve() {
+    // A client offers only what the vehicle advertises, so a control never
+    // asks for a law the vehicle has no qualified profile for.
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    let adapter = airborne_adapter_with_fc(&fc);
+    let advertised = adapter
+        .advertised_capabilities()
+        .vehicles
+        .into_iter()
+        .flat_map(|vehicle| vehicle.scopes)
+        .flat_map(|scope| scope.actions)
+        .find(|action| action.action == pilotage_protocol::ActionKind::FeelModeRequest)
+        .expect("the vehicle advertises a feel-mode request");
+    assert_eq!(
+        advertised.feel_targets,
+        vec![
+            pilotage_protocol::FeelTarget::Precision,
+            pilotage_protocol::FeelTarget::Balanced,
+            pilotage_protocol::FeelTarget::Agile,
+        ]
+    );
+    assert!(
+        advertised.mode_targets.is_empty(),
+        "a feel request carries no flight-mode target"
+    );
+}

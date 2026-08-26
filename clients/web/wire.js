@@ -360,6 +360,15 @@ export const CONTROL_ACTION = {
   cameraZoomIn: 6,
   cameraZoomOut: 7,
   simReset: 5,
+  feelModeRequest: 8,
+};
+/** The control-feel laws an operator can ask for. Not flight modes: a flight
+ *  mode changes what the vehicle does with a demand, a feel mode changes how
+ *  the demand is shaped on its way there. */
+export const FEEL_TARGET = {
+  precision: 1,
+  balanced: 2,
+  agile: 3,
 };
 export const MODE_TARGET = {
   cameraVelocity: 1,
@@ -412,11 +421,16 @@ function encodeControlIntent({ velocity, attitudeThrust, gimbalRate }) {
 // the reliable-delivery correlation: the sender repeats the action on
 // successive frames until a ControlActionResult echoes the id, and the host
 // deduplicates repeats. Zero (omitted) means "no correlation".
-function encodeControlActionRequest({ action, modeTarget, actionId }) {
+function encodeControlActionRequest({ action, modeTarget, feelTarget, actionId }) {
   const bytes = [];
   fieldVarint(bytes, 1, action);
   if (modeTarget) fieldVarint(bytes, 2, modeTarget);
   if (actionId) fieldVarint(bytes, 3, actionId);
+  // A feel target and a flight-mode target are separate vocabularies: a
+  // request carrying the wrong one is a sender and a receiver disagreeing
+  // about what was asked for, and the host refuses it rather than reading
+  // past it.
+  if (feelTarget) fieldVarint(bytes, 4, feelTarget);
   return bytes;
 }
 
@@ -485,6 +499,7 @@ export function encodeControlActionCommandEnvelope({
   activationRevision,
   action,
   modeTarget,
+  feelTarget,
   actionId,
 }) {
   const bytes = [];
@@ -493,7 +508,11 @@ export function encodeControlActionCommandEnvelope({
   fieldMessage(bytes, 3, encodeScopeId(scope));
   fieldMessage(bytes, 4, encodeGeneration(generation));
   if (activationRevision) fieldVarint(bytes, 5, activationRevision);
-  fieldMessage(bytes, 6, encodeControlActionRequest({ action, modeTarget, actionId }));
+  fieldMessage(
+    bytes,
+    6,
+    encodeControlActionRequest({ action, modeTarget, feelTarget, actionId }),
+  );
   return new Uint8Array(encodeEnvelope(ENVELOPE_FIELD.controlActionCommand, bytes));
 }
 
@@ -805,7 +824,12 @@ export function decodeControlFrame(bytes) {
   }
   const actions = (f.get(10) ?? []).map((actionBytes) => {
     const a = parseFields(actionBytes);
-    return { action: firstVarint(a, 1), modeTarget: firstVarint(a, 2), actionId: firstVarint(a, 3) };
+    return {
+      action: firstVarint(a, 1),
+      modeTarget: firstVarint(a, 2),
+      actionId: firstVarint(a, 3),
+      feelTarget: firstVarint(a, 4),
+    };
   });
   return {
     scope: decodeStringMessage(firstBytes(f, 3)),
@@ -985,6 +1009,9 @@ function decodeActionCapability(bytes) {
   return {
     action: firstVarint(fields, 1),
     modeTargets: repeatedVarints(fields, 2),
+    // The laws this vehicle has a qualified profile for. A control offers
+    // only these, so a reader is never given a mode the vehicle would refuse.
+    feelTargets: repeatedVarints(fields, 3),
   };
 }
 

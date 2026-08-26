@@ -79,6 +79,7 @@ impl From<&ControlActionResult> for wire::ControlActionResult {
             accepted: result.accepted,
             detail: result.detail.clone(),
             action_id: result.action_id,
+            feel_target: request.feel_target,
         }
     }
 }
@@ -100,6 +101,7 @@ impl TryFrom<wire::ControlActionResult> for ControlActionResult {
                 action: result.action,
                 mode_target: result.mode_target,
                 action_id: result.action_id,
+                feel_target: result.feel_target,
             })?;
         Ok(ControlActionResult {
             vehicle: VehicleId::new(vehicle.value),

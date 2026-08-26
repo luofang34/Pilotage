@@ -130,6 +130,7 @@ bootstrap = createSessionBootstrap({
   authorityFor: control.authorityFor,
   executeLeaseAction: control.executeLeaseAction,
   velocityCapabilityFor: control.velocityCapabilityFor,
+  refreshFeelModeControl: control.refreshFeelModeControl,
   handleActionResult: control.handleActionResult,
   applyLeaseResponse: control.applyLeaseResponse,
 });
@@ -225,4 +226,13 @@ window.addEventListener("blur", () => {
   if (token) control.suspendControlForInputLoss(token);
   state.controlShell?.clearKeys();
   control.showResumeAffordance();
+});
+
+// The operator's choice of control-feel law. The vehicle stages it and
+// installs it at its next neutral boundary, so choosing while flying does not
+// change the law under a deflected stick.
+els.feelMode?.addEventListener("change", () => {
+  const target = Number(els.feelMode.value);
+  if (!Number.isFinite(target)) return;
+  control.requestFeelMode(target);
 });

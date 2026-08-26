@@ -24,6 +24,7 @@ import {
   INTENT_FAMILY_GIMBAL_RATE,
   intentCapabilityFor as capabilityFor,
   actionAdvertised,
+  feelModeAdvertised,
   buildVelocityIntent,
   buildAttitudeThrustIntent,
   buildGimbalRateIntent,
@@ -669,6 +670,66 @@ export function createControlLoop({
     if (action) void executeLeaseAction(transportSessions.currentToken(), action, lifecycleScope);
   }
 
+  /// Asks the vehicle for one control-feel law.
+  ///
+  /// The control is offered only for laws the vehicle advertises, so a reader
+  /// is never given a mode the vehicle would refuse. The law arrives at the
+  /// vehicle's next neutral boundary rather than on this frame: asking while
+  /// the stick is deflected does not change what the stick is doing.
+  function requestFeelMode(feelTarget) {
+    const scope = state.motionScope;
+    if (!feelModeAdvertised(state.advertisedScopes, vehicleId, scope, feelTarget)) {
+      log(`feel mode ${feelTarget} not advertised for ${scope}; not sent`);
+      return false;
+    }
+    const writer = state.sessionWriter;
+    if (!writer) {
+      log("feel mode: no session stream; not sent");
+      return false;
+    }
+    const action = CONTROL_ACTION.feelModeRequest;
+    const actionId = enqueueAction(state.actionTracker, scope, action, performance.now(), {
+      feelTarget,
+    });
+    const command = encodeControlActionCommandEnvelope({
+      sessionId: state.sessionId,
+      vehicleId,
+      scope,
+      generation: generationForScope(scope),
+      activationRevision: state.controlShell.activationRevision(),
+      action,
+      feelTarget,
+      actionId,
+    });
+    writer.write(lengthDelimit(command)).catch(() => {
+      log(`feel mode (id ${actionId}): session stream write failed`);
+    });
+    return true;
+  }
+
+  /// Offers only the laws this vehicle advertises.
+  ///
+  /// A control that asks for a law the vehicle has not qualified is a control
+  /// that always fails, so each option is enabled by the advertisement rather
+  /// than by hope, and the whole control stays disabled until one arrives.
+  function refreshFeelModeControl() {
+    const control = els.feelMode;
+    if (!control) return;
+    const scope = state.motionScope;
+    let offered = 0;
+    for (const option of control.options) {
+      const target = Number(option.value);
+      const advertised = feelModeAdvertised(state.advertisedScopes, vehicleId, scope, target);
+      option.disabled = !advertised;
+      if (advertised) offered += 1;
+    }
+    control.disabled = offered === 0;
+    control.title = control.disabled
+      ? "This vehicle advertises no control-feel modes"
+      : "How the demand is shaped on its way to the vehicle";
+    document.body.dataset.feelModesOffered = String(offered);
+  }
+
   function requestAction(scope, action, modeTarget, cancels = []) {
     if (!actionAdvertised(state.advertisedScopes, vehicleId, scope, action, modeTarget)) {
       log(`action ${action} not advertised for ${scope}; not sent`);
@@ -876,6 +937,8 @@ export function createControlLoop({
     handleActionResult,
     handleFrameRejected,
     motionGroup,
+    refreshFeelModeControl,
+    requestFeelMode,
     resumeControlInPlace,
     runSessionStreamReader,
     sendLeaseRelease,

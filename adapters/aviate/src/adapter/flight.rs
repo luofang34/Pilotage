@@ -3,10 +3,10 @@
 //! than inside it so each file stays readable on its own.
 
 use pilotage_adapter_api::{
-    ApplyOutcome, Disposition, LinkLossPolicy, RejectReason, TelemetryBatch, TelemetrySample,
-    VideoSource,
+    ActionResult, ApplyOutcome, Disposition, LinkLossPolicy, RejectReason, TelemetryBatch,
+    TelemetrySample, VideoSource,
 };
-use pilotage_protocol::{ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{ControlAction, ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
 
 #[cfg(feature = "sim")]
@@ -102,17 +102,38 @@ impl AviateAdapter {
             }
             Ok(false) => {}
         }
+        // A feel request is answered before the flight actions, because it is
+        // the one action that changes the law the rest of this frame is shaped
+        // by. It is staged, not applied: the new law arrives at the next
+        // neutral boundary, so asking for it under a deflected stick does not
+        // change what the stick is doing.
+        let mut feel_results = Vec::new();
+        for action in &frame.actions {
+            let ControlAction::FeelModeRequest { target } = *action else {
+                continue;
+            };
+            feel_results.push(match self.request_feel_mode(feel_mode(target)) {
+                Ok(_) => ActionResult::accepted(*action),
+                Err(error) => ActionResult::rejected(*action, error.to_string()),
+            });
+        }
+
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        let action_results = process_flight_actions(
+        let mut action_results = process_flight_actions(
             &frame.actions,
             |yaw| {
                 uplink.send_arm(yaw);
             },
             current.attitude_rad[2],
         );
+        // The free dispatch above rejects a feel request it cannot serve, so
+        // the answered ones replace those rejections rather than joining them.
+        action_results
+            .retain(|result| !matches!(result.action, ControlAction::FeelModeRequest { .. }));
+        action_results.extend(feel_results);
         if frame.intent.is_none() {
             return ApplyOutcome {
                 tick,
@@ -316,5 +337,14 @@ impl AviateAdapter {
             advanced: 0,
             now: SimTick::new(tick),
         }
+    }
+}
+
+/// Reads a wire feel target as the control-feel mode it names.
+const fn feel_mode(target: pilotage_protocol::FeelTarget) -> pilotage_control_feel::FeelMode {
+    match target {
+        pilotage_protocol::FeelTarget::Precision => pilotage_control_feel::FeelMode::Precision,
+        pilotage_protocol::FeelTarget::Balanced => pilotage_control_feel::FeelMode::Balanced,
+        pilotage_protocol::FeelTarget::Agile => pilotage_control_feel::FeelMode::Agile,
     }
 }
