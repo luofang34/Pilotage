@@ -390,4 +390,55 @@ if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1
     exit 1
 fi
 cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+# An unstamped authorization is a fail-closed case, and the map is the
+# first consumer of this mask off the raw wire message.
+sed -i.bak 's/authorizedFlags(lane, source)/lane.validFlags ?? 0/' \
+    "$web/situation-ownship.js"
+reject "a direction drawn on an authorization nobody stamped"
+restore clients/web/situation-ownship.js
+
+# A reader reads a direction off a point, so the shape a mark takes when
+# no heading is stated has to exist in the stylesheet as well as the module.
+sed -i.bak 's/map-ownship-unknown-heading/map-ownship-no-point/g' "$web/index.html"
+reject "a stylesheet with no shape for an unstated heading"
+restore clients/web/index.html
+
+# The map opens pitched and the reader can turn it. A mark aligned to the
+# screen points somewhere the vehicle is not for as long as either holds.
+sed -i.bak 's/rotationAlignment: "map"/rotationAlignment: "viewport"/' \
+    "$web/situation-ownship.js"
+reject "a mark aligned to the viewport rather than the map"
+restore clients/web/situation-ownship.js
+
+sed -i.bak 's/pitchAlignment: "map"/pitchAlignment: "viewport"/' \
+    "$web/situation-ownship.js"
+reject "a mark whose pitch follows the screen rather than the map"
+restore clients/web/situation-ownship.js
+
+# The leader is a distance over the ground, so it is drawn in geographic
+# coordinates; a fixed pixel length states a different distance at every
+# zoom.
+sed -i.bak 's/type: "geojson"/type: "image"/' "$web/situation-ownship.js"
+reject "a leader that is not drawn in geographic coordinates"
+restore clients/web/situation-ownship.js
+
+# A stub map takes any layer spec. Only a real style can refuse one, and
+# only a real map can turn under a mark.
+sed -i.bak 's/attachOwnship/attachSomethingElse/g' "$web/situation-map.browser.test.mjs"
+reject "a browser suite that never drives the mark through real MapLibre"
+restore clients/web/situation-map.browser.test.mjs
+
+sed -i.bak 's/transformWhenTurned/transformIgnored/g' "$web/situation-map.browser.test.mjs"
+reject "a browser suite that never turns the map under the mark"
+restore clients/web/situation-map.browser.test.mjs
+
+# The guardrails only hold while CI runs them.
+sed -i.bak '/situation-motion.test.mjs/d' "$fixture/.github/workflows/ci.yml"
+reject "a CI workflow that no longer checks the heading and the track"
+restore .github/workflows/ci.yml
+
+sed -i.bak 's|run: node clients/web/situation-motion.test.mjs|# &|' \
+    "$fixture/.github/workflows/ci.yml"
+reject "a commented-out heading and track step"
+restore .github/workflows/ci.yml
 echo "web situation map guards reject each loss"

@@ -4,7 +4,7 @@
 // fix is absence of the mark, with the reason on the stage: a map that drew
 // a vehicle at a default, at a last-known position, or at a place derived
 // from a local origin would be telling a reader where the vehicle is when
-// it does not know (ADR-0022, ADR-0037).
+// it does not know (ADR-0022).
 //
 // The same rule governs the two directions beside it. The mark turns to the
 // heading the vehicle states and carries a leader along the track it
@@ -40,6 +40,11 @@ export const OWNSHIP_SOURCE = Object.freeze({
   TRUTH: "simulation-truth",
   ESTIMATE: "operational-estimate",
 });
+
+/** The estimator quality the wire carries: 0 good, 1 degraded, 2
+ *  unusable. A solution its own estimator calls unusable is not a
+ *  measurement to turn a mark by. */
+const QUALITY_UNUSABLE = 2;
 
 /** How long a fix may go unrefreshed before the mark is withdrawn. A
  *  position that stopped arriving is a position the vehicle has left. */
@@ -91,7 +96,7 @@ export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
   if (!fix) {
     return { position: null, source: null, reason: OWNSHIP_REASON.NO_FIX };
   }
-  const validFlags = lane.validFlags ?? 0;
+  const validFlags = authorizedFlags(lane, source);
   return {
     position: {
       latitudeDeg: fix.latitudeDeg,
@@ -111,6 +116,31 @@ export function ownshipFromTelemetry(telemetry, { courseDrawn = false } = {}) {
     reason: null,
   };
 }
+
+/**
+ * The validity mask a lane's directions may be read against.
+ *
+ * On the estimate lane the mask and the quality beside it are a latched
+ * authorization from the estimator, and both are meaningful only while the
+ * status observation backing them is present. Absence means no explicit
+ * authorization was supplied, and a consumer of it fails closed; the map is
+ * the first consumer of this mask off the raw wire message, so the gate has
+ * to be here.
+ *
+ * The truth lane states availability, not authorization — an oracle has no
+ * estimator to authorize it — so its mask stands on its own.
+ */
+function authorizedFlags(lane, source) {
+  if (source === OWNSHIP_SOURCE.TRUTH) return lane.validFlags ?? 0;
+  if (!lane.estimatorStatusStamp) return 0;
+  if ((lane.quality ?? QUALITY_UNUSABLE) === QUALITY_UNUSABLE) return 0;
+  return lane.validFlags ?? 0;
+}
+
+/** A bearing with one decimal, never "360.0". The value is in [0, 360) and
+ *  rounding 359.97 up would name a bearing no compass carries. */
+const bearingText = (deg) =>
+  ((((Math.round(deg * 10) % 3600) + 3600) % 3600) / 10).toFixed(1);
 
 /**
  * Wires the mark to a map. Returns `observe` for each telemetry sample and
@@ -328,12 +358,12 @@ export function attachOwnship(maplibre, map, surface) {
     surface.dataset.ownshipPosition =
       `${position.latitudeDeg.toFixed(6)},${position.longitudeDeg.toFixed(6)}`;
     if (headingDeg === null) delete surface.dataset.ownshipHeadingDeg;
-    else surface.dataset.ownshipHeadingDeg = headingDeg.toFixed(1);
+    else surface.dataset.ownshipHeadingDeg = bearingText(headingDeg);
     if (track === null) {
       delete surface.dataset.ownshipTrackDeg;
       delete surface.dataset.ownshipGroundSpeedMps;
     } else {
-      surface.dataset.ownshipTrackDeg = track.bearingDeg.toFixed(1);
+      surface.dataset.ownshipTrackDeg = bearingText(track.bearingDeg);
       // Ground speed: the vertical component is deliberately not in it, and
       // the name has to say so or a reader takes it for speed through the
       // air or along the flight path.

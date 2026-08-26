@@ -220,6 +220,17 @@ if grep -Fq '1 - 2 * (y * y + z * z)' "$motion_module"; then
     echo "FORBIDDEN: the yaw must not assume a unit length the gate does not enforce" >&2
     status=1
 fi
+# The mask that authorizes a direction, and the quality beside it, mean
+# nothing without the status observation backing them; absence is a
+# fail-closed case, and the map reads this mask off the raw wire message
+# rather than through the ingress that applies the gate for the panels.
+if ! grep -Fq 'authorizedFlags(lane, source)' "$ownship_module" \
+    || ! grep -Fq 'estimatorStatusStamp' "$ownship_module" \
+    || ! grep -Fq 'QUALITY_UNUSABLE' "$ownship_module"; then
+    echo "FORBIDDEN: a direction must not be drawn on an authorization nobody stamped" >&2
+    status=1
+fi
+
 # A direction is drawn only while its own group keeps producing
 # measurements. The estimate lane stamps attitude, velocity and the fix
 # apart and advances them apart.

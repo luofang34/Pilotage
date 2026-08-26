@@ -6,7 +6,7 @@
 // travelling, from the velocity it states. In wind they differ by the crab
 // angle, and that difference is information a reader is entitled to. A
 // display that drew one and called it the other would be inventing an
-// attitude nobody measured (ADR-0037).
+// attitude nobody measured.
 
 /** Below this ground speed a track direction is noise, not a bearing: a
  *  vehicle holding station reports a metre or two per second of drift whose

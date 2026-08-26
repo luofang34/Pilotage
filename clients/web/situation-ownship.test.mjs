@@ -57,6 +57,8 @@ const estimate = (fix = FIX, overrides = {}) => ({
     attitudeStamp: freshStamp(1),
     kinematicsStamp: freshStamp(1),
     geodeticStamp: freshStamp(1),
+    estimatorStatusStamp: freshStamp(1),
+    quality: 0,
     ...overrides,
   },
 });
@@ -659,5 +661,76 @@ function testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal() {
 }
 testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal();
 console.log("ok - testAGroupThatFrozeDoesNotComeBackFreshAfterAWithdrawal");
+
+function testTheEstimateLaneDrawsNoDirectionItWasNotAuthorizedToDraw() {
+  // The mask and the quality beside it are a latched authorization from the
+  // estimator, and both mean nothing without the status observation that
+  // backs them. The map is the first consumer of this mask off the raw wire
+  // message: the ingress the instruments read through applies the gate, and
+  // the map is not handed its output.
+  const unauthorized = ownshipFromTelemetry(estimate(FIX, { estimatorStatusStamp: null }));
+  assert.ok(unauthorized.position, "the fix is a group of its own and still stands");
+  assert.equal(unauthorized.headingDeg, null, "no authorization, no heading");
+  assert.equal(unauthorized.track, null, "no authorization, no course");
+
+  // An estimator that calls its own solution unusable has not authorized a
+  // direction to be drawn from it either.
+  const unusable = ownshipFromTelemetry(estimate(FIX, { quality: 2 }));
+  assert.equal(unusable.headingDeg, null, "quality 2 is unusable");
+  assert.equal(unusable.track, null);
+
+  // Degraded is not unusable.
+  const degraded = ownshipFromTelemetry(estimate(FIX, { quality: 1 }));
+  assert.ok(Math.abs(degraded.headingDeg - 270) < 1e-6, "degraded is still a solution");
+
+  // A mask absent altogether authorizes nothing.
+  const noMask = ownshipFromTelemetry(estimate(FIX, { validFlags: undefined }));
+  assert.equal(noMask.headingDeg, null, "an absent mask is not a full one");
+  assert.equal(noMask.track, null);
+
+  // The oracle has no estimator to authorize it, so its own mask stands.
+  const oracle = ownshipFromTelemetry(truth());
+  assert.ok(Math.abs(oracle.headingDeg - 90) < 1e-6, "truth needs no authorization");
+
+  // A mask the oracle did not state is not a mask with every bit set. It
+  // states which fields the sample carries, so absence is absence.
+  const oracleNoMask = ownshipFromTelemetry(truth({ validFlags: undefined }));
+  assert.ok(oracleNoMask.position, "the oracle's fix still stands");
+  assert.equal(oracleNoMask.headingDeg, null, "an unstated mask states no availability");
+  assert.equal(oracleNoMask.track, null);
+}
+testTheEstimateLaneDrawsNoDirectionItWasNotAuthorizedToDraw();
+console.log("ok - testTheEstimateLaneDrawsNoDirectionItWasNotAuthorizedToDraw");
+
+function testNoBearingIsEverStatedAs360() {
+  // The two readers return a bearing in [0, 360). Formatting one decimal
+  // place rounds 359.97 up, and a surface that reads "360.0" states a
+  // bearing no compass carries.
+  const { observe, surface } = harness();
+  observe(truth({ quat: yawQuat(359.97), velNed: [10, -0.002, 0], stamp: freshStamp(2) }), 1_000);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "0.0", "the heading wraps, not rounds up");
+  assert.equal(surface.dataset.ownshipTrackDeg, "0.0", "and so does the track");
+}
+testNoBearingIsEverStatedAs360();
+console.log("ok - testNoBearingIsEverStatedAs360");
+
+function testADirectionThatGoesAwayIsTakenOffTheSurface() {
+  // A lane that loses its attitude bit in flight is the live case, and the
+  // mark stays: only the direction goes. Nothing else clears the surface.
+  const { observe, surface, leader, element } = harness();
+  observe(truth(), 1_000);
+  assert.equal(surface.dataset.ownshipHeadingDeg, "90.0");
+  assert.equal(surface.dataset.ownshipTrackDeg, "90.0");
+
+  observe(truth({ validFlags: 0, stamp: freshStamp(2) }), 1_100);
+  assert.equal(surface.dataset.ownship, "shown", "the position is still stated");
+  assert.equal(surface.dataset.ownshipHeadingDeg, undefined, "the heading is not");
+  assert.equal(surface.dataset.ownshipTrackDeg, undefined);
+  assert.equal(surface.dataset.ownshipGroundSpeedMps, undefined);
+  assert.equal(leader.data.features.length, 0);
+  assert.ok(element.classList.contains("map-ownship-unknown-heading"));
+}
+testADirectionThatGoesAwayIsTakenOffTheSurface();
+console.log("ok - testADirectionThatGoesAwayIsTakenOffTheSurface");
 
 console.log("\nall situation ownship checks passed");

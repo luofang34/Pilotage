@@ -226,4 +226,21 @@ function testACourseAlreadyDrawnReleasesLowerThanItEngages() {
 testACourseAlreadyDrawnReleasesLowerThanItEngages();
 console.log("ok - testACourseAlreadyDrawnReleasesLowerThanItEngages");
 
+function testTheFloorSitsWhereAHoverEndsAndAWalkBegins() {
+  // Asserting against TRACK_FLOOR_MPS itself is true of any floor. These
+  // are absolute: a vehicle translating at a metre per second is on a
+  // course, and hover drift of a fifth of that is not.
+  assert.ok(trackFrom([0, 1, 0], VALID_VELOCITY) !== null, "1 m/s is a course");
+  assert.equal(trackFrom([0, 0.2, 0], VALID_VELOCITY), null, "0.2 m/s is drift");
+  // And the band under it is a band, not a second floor somewhere else.
+  assert.ok(trackFrom([0, 1, 0], VALID_VELOCITY, true) !== null, "a drawn course holds at 1 m/s");
+  assert.equal(
+    trackFrom([0, 0.2, 0], VALID_VELOCITY, true),
+    null,
+    "and is released by the time drift is all that is left",
+  );
+}
+testTheFloorSitsWhereAHoverEndsAndAWalkBegins();
+console.log("ok - testTheFloorSitsWhereAHoverEndsAndAWalkBegins");
+
 console.log("\nall situation motion checks passed");
