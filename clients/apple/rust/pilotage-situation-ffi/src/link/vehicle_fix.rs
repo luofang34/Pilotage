@@ -297,14 +297,23 @@ fn stamp_states_role(stamp: Option<&wire::MeasurementStamp>, role: i32) -> bool 
 /// The latitude and longitude a lane states, or nothing when what it states
 /// cannot be placed on the Earth.
 ///
-/// Only the horizontal position is examined, because only it is drawn. The
-/// browser's decoder ALSO refuses a fix whose vertical datum lacks the
-/// identity it requires — a geoid model for MSL, a terrain reference for AGL —
-/// and drops the whole fix with it. A sample malformed only in its height
-/// therefore draws a mark here and none there. The mark that appears is in the
-/// right place; it is the disagreement between the two clients that is the
-/// defect, and closing it means consuming the geo contract rather than
-/// restating a second copy of it here.
+/// Only what places the mark is examined, and the browser's decoder refuses
+/// more than this does. It drops the whole fix when the VERTICAL datum lacks
+/// the identity it requires — a geoid model for MSL, a terrain reference for
+/// AGL, a setting for baro-indicated, an origin for local-relative — or when
+/// no vertical datum is named at all, which is what proto3 gives a field
+/// nobody set. It also refuses a realization too large to be one, whatever the
+/// horizontal datum, so the divergence is not confined to height.
+///
+/// A sample malformed in any of those ways draws a mark here and none there.
+/// The mark that appears is in the right place; the defect is that the two
+/// clients disagree about whether to draw it, and closing that means consuming
+/// the geo contract rather than keeping a second copy of its rules here.
+///
+/// None of it is reachable from a conforming host, which re-normalizes a
+/// position before it reaches the wire. That is worth stating and worth
+/// distrusting: "the producer would not send that" is the argument this lane
+/// already declined to accept for role and for datum.
 fn position_of(fix: &wire::GeodeticFix) -> Option<(f64, f64)> {
     if !fix.latitude_deg.is_finite() || !(-90.0..=90.0).contains(&fix.latitude_deg) {
         return None;

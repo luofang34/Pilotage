@@ -182,3 +182,37 @@ fn a_course_already_drawn_is_held_through_the_band() {
         "a speed above the floor was refused a course"
     );
 }
+
+#[test]
+fn the_estimate_lanes_course_stops_when_its_velocity_group_goes_quiet() {
+    // The one gate of the four with nothing behind it — and the estimate lane
+    // is the only lane a physical vehicle flies. Its three siblings each fail
+    // a test when removed; replacing this one with the raw velocity passed the
+    // whole suite.
+    //
+    // Attitude and position keep advancing here so that only the velocity
+    // group is quiet: a test where everything stopped would pass on the fix
+    // gate alone and prove nothing about this one.
+    let mut memory = MarkMemory::default();
+    let read = from_sample(&mut memory, &estimate(1, 1, 1), 0).expect("a fix");
+    assert_eq!(read.course_deg, Some(0.0));
+
+    let read = from_sample(&mut memory, &estimate(2, 1, 2), 300).expect("a fix");
+    assert_eq!(
+        read.course_deg,
+        Some(0.0),
+        "the bound is inclusive: at it, the group is still current"
+    );
+
+    let read = from_sample(&mut memory, &estimate(3, 1, 3), 301).expect("a fix");
+    assert_eq!(
+        read.course_deg, None,
+        "a velocity group that had gone quiet went on drawing a course"
+    );
+    assert_eq!(read.ground_speed_mps, None);
+    assert_eq!(
+        read.heading_deg,
+        Some(0.0),
+        "the attitude group was dropped along with it"
+    );
+}

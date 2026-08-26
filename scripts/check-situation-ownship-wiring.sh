@@ -132,6 +132,14 @@ require_pattern 'replayingFlight == nil' "$app/SituationContentView.swift" \
 require_pattern 'if vehicle\.fixAdvanced' "$app/OwnshipPosition.swift" \
     "the vehicle staleness clock must be conditioned on fixAdvanced, or a frozen feed keeps the mark alive forever"
 
+# A mark withdrawn for staleness must not be reinstalled by a repeat of the
+# measurement that went stale. Without the refusal below, the expiry nils the
+# clock and the very next unadvanced sample starts it again on ARRIVAL — the
+# mark blinks out for one inter-sample gap every few seconds and otherwise
+# stands where the vehicle is not.
+require_pattern 'else if vehicleFixAt == nil' "$app/OwnshipPosition.swift" \
+    "an unadvanced position must be refused once the mark has been withdrawn, or a stale mark returns as though it were new"
+
 # And in one place only. A second, unconditional write refreshes the clock on
 # arrival again while the conditional above it still reads correct.
 if [ "$(grep -c 'vehicleFixAt = Date()' "$app/OwnshipPosition.swift")" -ne 1 ]; then

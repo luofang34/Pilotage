@@ -32,11 +32,15 @@ sed -i.bak '/model.currentOwnship = /,+9d' "$app/SituationContentView.swift"
 reject "a model whose ownship reader is never set"
 restore SituationContentView.swift
 
+sed -i.bak 's/} else if vehicleFixAt == nil {/} else if false {/' "$app/OwnshipPosition.swift"
+reject "a withdrawn mark reinstalled by a repeat of the measurement that went stale"
+restore OwnshipPosition.swift
+
 sed -i.bak '/guard model.replayingFlight == nil else {/,+4d' "$app/SituationContentView.swift"
 reject "a replay overdrawn with the vehicle's live position"
 restore SituationContentView.swift
 
-sed -i.bak 's/if vehicle.fixAdvanced || vehicleFixAt == nil {/if true {/' "$app/OwnshipPosition.swift"
+sed -i.bak 's/if vehicle.fixAdvanced {/if true {/' "$app/OwnshipPosition.swift"
 reject "a staleness clock refreshed on arrival rather than on a new measurement"
 restore OwnshipPosition.swift
 

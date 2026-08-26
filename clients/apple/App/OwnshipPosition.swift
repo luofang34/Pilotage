@@ -144,11 +144,17 @@ final class OwnshipModel: ObservableObject {
         // Timed from when the position was MEASURED, not when it arrived. A
         // host relaying a block whose avionics have stopped keeps delivering
         // samples, and a mark refreshed on arrival would never go stale
-        // however long the vehicle had been silent. The first fix starts the
-        // clock regardless, so a lane that somehow never reports an advance
-        // still expires rather than standing forever.
-        if vehicle.fixAdvanced || vehicleFixAt == nil {
+        // however long the vehicle had been silent.
+        if vehicle.fixAdvanced {
             vehicleFixAt = Date()
+        } else if vehicleFixAt == nil {
+            // No advance, and no clock — so this position either never had one
+            // or has already been withdrawn for going stale. A repeat of the
+            // measurement that went stale does not make it current again, and
+            // installing it would put the mark back where the vehicle no
+            // longer is, then take it away and put it back every few seconds
+            // for as long as the samples kept coming.
+            return
         }
         vehicleFix = OwnshipFix(
             latitudeDegrees: vehicle.latitudeDegrees,
