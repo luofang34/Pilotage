@@ -7,7 +7,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { LEADER_SECONDS, TRACK_FLOOR_MPS, TRACK_RELEASE_MPS, leaderEndpoint } from "./situation-motion.js";
+import {
+  LEADER_SECONDS,
+  TRACK_FLOOR_MPS,
+  TRACK_RELEASE_MPS,
+  leaderEndpoint,
+  wrapBearingDeg,
+} from "./situation-motion.js";
 
 const corpus = JSON.parse(
   readFileSync(new URL("../situation-ownship-motion.corpus.json", import.meta.url), "utf-8"),
@@ -70,8 +76,12 @@ console.log("ok - testTheCorpusAnchorsAreWhatGeometrySays");
 function testEveryBearingInTheCorpusWrapsTheWayThisClientDoes() {
   // The corpus carries these rows for both clients. Checked on only one side
   // they guard nothing: the two could drift and the suite would still pass.
+  //
+  // This calls the client's OWN wrap rather than restating the arithmetic:
+  // a copy here would keep agreeing with the corpus after the client stopped
+  // agreeing with either.
   for (const bearing of corpus.bearings) {
-    const wrapped = ((bearing.deg % 360) + 360) % 360;
+    const wrapped = wrapBearingDeg(bearing.deg);
     assert.ok(
       Math.abs(wrapped - bearing.wrapped) < 1e-9,
       `${bearing.deg} wraps to ${wrapped}, not ${bearing.wrapped}`,

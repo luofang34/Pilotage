@@ -425,10 +425,20 @@ impl ModeTuning {
     ///
     /// A calmer mode waits longer before it calls the vehicle stopped, which
     /// is the same judgement its longer neutral dwell makes about the stick.
+    ///
+    /// The acceleration bound stays wide on purpose. Nothing supplies an
+    /// acceleration with provenance — the validator refuses `require_accel`
+    /// for exactly that reason — so a tight bound here would be a number with
+    /// no measurement behind it, inert until someone wires a source and then
+    /// live in the dangerous direction: gusts and estimator noise on a
+    /// hovering multirotor exceed a tight bound routinely, every exceedance
+    /// restarts the stability dwell, and a hold that never captures leaves the
+    /// vehicle braked to zero velocity and drifting instead of holding
+    /// position. Tighten it when there is something to measure against.
     fn hold(self) -> HoldTransition {
         HoldTransition {
             max_speed_mps: 0.3,
-            max_accel_mps2: 0.6,
+            max_accel_mps2: 10_000.0,
             require_accel: false,
             stable_dwell_ms: self.dwell_ms,
         }

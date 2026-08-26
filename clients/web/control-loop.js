@@ -1,3 +1,4 @@
+import { feelModeControl } from "./feel-mode-control.js";
 import {
   CONTROL_ACTION,
   MODE_TARGET,
@@ -707,52 +708,17 @@ export function createControlLoop({
     return true;
   }
 
-  /// Offers only the laws this vehicle advertises.
-  ///
-  /// A control that asks for a law the vehicle has not qualified is a control
-  /// that always fails, so each option is enabled by the advertisement rather
-  /// than by hope, and the whole control stays disabled until one arrives.
+  const feelControl = feelModeControl(els.feelMode, () => ({
+    scopes: state.advertisedScopes,
+    vehicleId,
+    scope: state.motionScope,
+  }));
+
   function refreshFeelModeControl() {
-    const control = els.feelMode;
-    if (!control) return;
-    const scope = state.motionScope;
-    let offered = 0;
-    for (const option of control.options) {
-      if (option.value === "") continue;
-      const target = Number(option.value);
-      const advertised = feelModeAdvertised(state.advertisedScopes, vehicleId, scope, target);
-      option.disabled = !advertised;
-      if (advertised) offered += 1;
-    }
-    control.disabled = offered === 0;
-    // A disabled option still displays when it is the selected one, so a law
-    // this scope does not offer would keep showing as current. Fall back to
-    // stating none rather than naming one the vehicle will refuse.
-    if (control.selectedOptions[0]?.disabled) {
-      control.value = "";
-      state.activeFeelTarget = null;
-    }
-    control.title = control.disabled
-      ? "This vehicle advertises no control-feel modes"
-      : "How the demand is shaped on its way to the vehicle";
-    document.body.dataset.feelModesOffered = String(offered);
+    document.body.dataset.feelModesOffered = String(feelControl.refresh());
   }
 
-  /// Shows the law the vehicle is on.
-  ///
-  /// `null` means the vehicle did not accept the last request, so the control
-  /// returns to whatever it was showing before rather than keeping a law the
-  /// vehicle refused.
-  function showFeelMode(feelTarget) {
-    const control = els.feelMode;
-    if (!control) return;
-    if (feelTarget === null) {
-      control.value = state.activeFeelTarget ? String(state.activeFeelTarget) : control.value;
-      return;
-    }
-    state.activeFeelTarget = feelTarget;
-    control.value = String(feelTarget);
-  }
+  const showFeelMode = (feelTarget) => feelControl.show(feelTarget);
 
   function requestAction(scope, action, modeTarget, cancels = []) {
     if (!actionAdvertised(state.advertisedScopes, vehicleId, scope, action, modeTarget)) {

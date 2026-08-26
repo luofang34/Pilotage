@@ -293,6 +293,57 @@ fn a_shipped_profile_installs_on_the_vehicle() {
 }
 
 #[test]
+fn a_law_staged_before_a_handover_does_not_install_on_the_new_holder() {
+    // Losing a lease is not the only way authority moves. A scope handed
+    // straight to another operator advances the fencing generation and never
+    // engages link loss, so the discard that rides on link loss never runs.
+    // The outgoing holder's staged law would then arrive on the INCOMING
+    // holder's first sustained neutral — a law they did not choose, on a
+    // vehicle they are flying.
+    let fc = std::net::UdpSocket::bind("127.0.0.1:0").expect("fake FC");
+    fc.set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("read timeout");
+    let mut adapter = airborne_adapter_with_fc(&fc);
+    let before = active_digest(&adapter);
+
+    // The outgoing holder chooses a law while flying, at the generation in
+    // effect for them.
+    let mut staged = flight_frame(vec![(LogicalAxisId::new(PITCH_AXIS), 0.5)], vec![]);
+    let handed_over_from = staged.generation;
+    staged.actions = vec![pilotage_protocol::ControlAction::FeelModeRequest {
+        target: pilotage_protocol::FeelTarget::Agile,
+    }];
+    assert_eq!(
+        adapter.apply_control(&staged).disposition,
+        Disposition::Accepted
+    );
+    receive_frame(&fc, "feel request response frame");
+
+    // The handover commits: the generation advances, and the new holder flies.
+    let next = pilotage_protocol::Generation::new(handed_over_from.as_u64().wrapping_add(1));
+    let step = Duration::from_millis(20);
+    for _ in 0..40 {
+        let mut frame = neutral_frame();
+        frame.generation = next;
+        adapter
+            .uplink_mut()
+            .expect("uplink")
+            .seed_hold_for_test([1.0, 2.0, 3.0]);
+        assert_eq!(
+            adapter.apply_control(&frame).disposition,
+            Disposition::Accepted
+        );
+        receive_frame(&fc, "neutral response frame");
+        adapter.uplink_mut().expect("uplink").advance_clock(step);
+    }
+    assert_eq!(
+        active_digest(&adapter),
+        before,
+        "the previous holder's law installed itself on the new holder"
+    );
+}
+
+#[test]
 fn a_law_staged_under_a_lost_lease_does_not_install_itself_later() {
     // The operator who chose it no longer holds authority. Leaving it staged
     // would install it on the NEXT operator's first sustained neutral — a law

@@ -43,7 +43,7 @@ const VALID_ATTITUDE = 1;
 const VALID_VELOCITY = 8;
 
 /** A bearing wrapped into [0, 360). */
-const wrapBearingDeg = (deg) => ((deg % 360) + 360) % 360;
+export const wrapBearingDeg = (deg) => ((deg % 360) + 360) % 360;
 
 /**
  * The heading a sample states, in degrees clockwise from north, or `null`

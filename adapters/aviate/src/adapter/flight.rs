@@ -104,7 +104,7 @@ impl AviateAdapter {
         }
         // Answered before the flight actions, because it is the one action that
         // changes the law the rest of this frame is shaped by.
-        let feel_results = self.answer_feel_requests(&frame.actions);
+        let feel_results = self.answer_feel_requests(&frame.actions, frame.generation);
 
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
@@ -343,16 +343,22 @@ impl AviateAdapter {
     /// The law is staged, not applied: it arrives at the next neutral
     /// boundary, so asking for a mode with the stick deflected does not change
     /// what the stick is doing.
-    fn answer_feel_requests(&mut self, actions: &[ControlAction]) -> Vec<ActionResult> {
+    fn answer_feel_requests(
+        &mut self,
+        actions: &[ControlAction],
+        generation: pilotage_protocol::Generation,
+    ) -> Vec<ActionResult> {
         let mut answered = Vec::new();
         for action in actions {
             let ControlAction::FeelModeRequest { target } = *action else {
                 continue;
             };
-            answered.push(match self.request_feel_mode(feel_mode(target)) {
-                Ok(_) => ActionResult::accepted(*action),
-                Err(error) => ActionResult::rejected(*action, error.to_string()),
-            });
+            answered.push(
+                match self.request_feel_mode_under(feel_mode(target), Some(generation)) {
+                    Ok(_) => ActionResult::accepted(*action),
+                    Err(error) => ActionResult::rejected(*action, error.to_string()),
+                },
+            );
         }
         answered
     }

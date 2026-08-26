@@ -166,7 +166,7 @@ impl AviateAdapter {
         &mut self,
         candidate: ValidatedFlightFeelProfile,
     ) -> Result<FeelDigest, AviateAdapterError> {
-        self.stage_validated_control_feel(candidate)
+        self.stage_validated_control_feel(candidate, None)
     }
 
     /// Stages one named operator feel mode.
@@ -186,14 +186,28 @@ impl AviateAdapter {
     /// profile is not one this vehicle accepts, or when no control-feel
     /// artifact is active.
     pub fn request_feel_mode(&mut self, mode: FeelMode) -> Result<FeelDigest, AviateAdapterError> {
+        self.request_feel_mode_under(mode, None)
+    }
+
+    /// Stages a named mode on behalf of the operator holding `staged_under`.
+    ///
+    /// Binding the choice to the generation is what lets a handover void it:
+    /// the law belongs to the authority that asked for it, not to whoever
+    /// holds the scope when the sticks next reach neutral.
+    pub(super) fn request_feel_mode_under(
+        &mut self,
+        mode: FeelMode,
+        staged_under: Option<pilotage_protocol::Generation>,
+    ) -> Result<FeelDigest, AviateAdapterError> {
         let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(mode))
             .map_err(|source| AviateAdapterError::InvalidControlFeel { source })?;
-        self.stage_control_feel(profile)
+        self.stage_validated_control_feel(profile, staged_under)
     }
 
     fn stage_validated_control_feel(
         &mut self,
         candidate: ValidatedFlightFeelProfile,
+        staged_under: Option<pilotage_protocol::Generation>,
     ) -> Result<FeelDigest, AviateAdapterError> {
         if self.profile == AviateProfile::Physical {
             return Err(AviateAdapterError::PhysicalControlFeelOverride {
@@ -206,7 +220,7 @@ impl AviateAdapter {
             .ok_or_else(|| AviateAdapterError::UnsupportedControlFeel {
                 detail: "the adapter has no active control-feel artifact".to_owned(),
             })?
-            .stage(candidate)
+            .stage(candidate, staged_under)
     }
 
     /// Stages the complete prior artifact for rollback.
@@ -231,6 +245,13 @@ impl AviateAdapter {
         else {
             return Ok(false);
         };
+        if profiles.discard_stale(frame.generation) {
+            tracing::info!(
+                generation = ?frame.generation,
+                "discarded a staged control-feel law whose authority moved on"
+            );
+            return Ok(false);
+        }
         if !profiles.pending_is_neutral(frame, uplink.monotonic_now()) {
             return Ok(false);
         }

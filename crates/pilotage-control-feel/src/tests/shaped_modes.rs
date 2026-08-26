@@ -171,10 +171,13 @@ fn the_direct_family_is_shaped_too_and_differs_between_modes() {
         }
         // The brake-to-hold transition must prove stability, which a zero
         // dwell cannot: one sample under the ceiling is a moment, not a state.
+        // The dwell is the whole of that proof here — no acceleration reaches
+        // the detector with provenance, so the acceleration bound is left wide
+        // rather than asserting a stillness nothing measures.
         assert!(modes[index].hold.stable_dwell_ms > 0, "{mode:?} hold dwell");
         assert!(
-            modes[index].hold.max_accel_mps2 < 1_000.0,
-            "{mode:?} hold accel"
+            !modes[index].hold.require_accel,
+            "{mode:?} requires an acceleration no source supplies"
         );
     }
 
@@ -193,17 +196,32 @@ fn no_two_modes_are_the_same_law() {
     // compares the whole artifact rather than the axes a chosen list happens
     // to name, which is how the direct family stayed identical across all
     // three while a test called `no_axis_of_any_mode_steps` passed.
+    //
+    // The name and the mode are what the modes are TOLD apart by, so they are
+    // normalized away before the comparison. Comparing them too would make
+    // every assertion below pass on the names alone: three modes with one
+    // identical set of numbers would still differ, and this test would report
+    // a safety it never checked.
     let modes = SHAPED.map(FlightFeelProfile::shaped);
+    let law_of = |profile: &FlightFeelProfile, named_as: &FlightFeelProfile| {
+        let mut law = profile.clone();
+        law.profile_id.clone_from(&named_as.profile_id);
+        law.mode = named_as.mode;
+        law
+    };
     for left in 0..modes.len() {
         for right in (left + 1)..modes.len() {
             assert_ne!(
-                modes[left], modes[right],
-                "{:?} and {:?} are the same law",
-                SHAPED[left], SHAPED[right]
+                modes[left],
+                law_of(&modes[right], &modes[left]),
+                "{:?} and {:?} are the same law under different names",
+                SHAPED[left],
+                SHAPED[right]
             );
         }
     }
-    // And none of them is the law they replace.
+    // And none of them is the law they replace — again on the numbers, not
+    // on the name that differs by construction.
     let legacy = FlightFeelProfile::legacy_compatibility();
     for (index, mode) in SHAPED.iter().enumerate() {
         assert_ne!(
