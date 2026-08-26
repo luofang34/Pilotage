@@ -98,6 +98,10 @@ final class OwnshipModel: ObservableObject {
     /// shadow is a second-hand return of the same aircraft.
     private var vehicleFix: OwnshipFix?
     private var vehicleHeading: HeadingFix?
+    /// When the vehicle last reported. A fix is only the vehicle's CURRENT
+    /// position for as long as reports keep arriving.
+    private var vehicleFixAt: Date?
+    private var staleness: Timer?
     private var deviceHeading: HeadingFix?
     private var aircraftHeading: HeadingFix?
 
@@ -116,6 +120,12 @@ final class OwnshipModel: ObservableObject {
             self?.deviceHeading = heading
             self?.resolveHeading()
         }
+        // Elapsed time is the only thing that can retire a report from a link
+        // that has gone quiet, so it has to be driven by a clock rather than
+        // by the next sample — there is no next sample.
+        staleness = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.expireStaleVehicleFix() }
+        }
     }
 
     /// Take the vehicle's own report of where it is and which way it points.
@@ -127,9 +137,11 @@ final class OwnshipModel: ObservableObject {
         guard let vehicle else {
             vehicleFix = nil
             vehicleHeading = nil
+            vehicleFixAt = nil
             resolve()
             return
         }
+        vehicleFixAt = Date()
         vehicleFix = OwnshipFix(
             latitudeDegrees: vehicle.latitudeDegrees,
             longitudeDegrees: vehicle.longitudeDegrees,
@@ -204,6 +216,23 @@ final class OwnshipModel: ObservableObject {
     func observeAircraft(_ fix: OwnshipFix?) {
         aircraftFix = fix
         resolve()
+    }
+
+    /// How long a vehicle report stands before the mark stops believing it.
+    ///
+    /// The same three seconds the browser withholds after, and for the same
+    /// reason: a link that goes silent delivers no sample to decide it with,
+    /// so nothing but elapsed time can retire the last one. Without this the
+    /// vehicle's last position outranks this tablet's live receiver forever,
+    /// and a reader who has walked away from a disconnected vehicle is drawn
+    /// standing on it.
+    static let vehicleFixStaleAfter: TimeInterval = 3.0
+
+    /// Retires a vehicle report that has stopped arriving.
+    private func expireStaleVehicleFix() {
+        guard let reportedAt = vehicleFixAt else { return }
+        guard Date().timeIntervalSince(reportedAt) > Self.vehicleFixStaleAfter else { return }
+        observeVehicle(nil)
     }
 
     private func resolve() {

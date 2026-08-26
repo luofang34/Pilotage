@@ -20,6 +20,9 @@ const VALID_ATTITUDE: u32 = 1 << 0;
 /// Bit 3: the lane states a velocity.
 const VALID_VELOCITY: u32 = 1 << 3;
 
+/// The estimator's own verdict that its solution cannot be used.
+const QUALITY_UNUSABLE: u32 = 2;
+
 /// A vehicle's position and the directions that ride with it.
 pub(super) struct VehicleFix {
     pub(super) latitude_deg: f64,
@@ -64,11 +67,14 @@ pub(super) fn from_sample(sample: &wire::TelemetrySample) -> Option<VehicleFix> 
     // On the estimate lane the mask is a latched authorization from the
     // estimator, and it means nothing without the status observation backing
     // it. Absence is no authorization, and a consumer of it fails closed.
-    let flags = if avionics.estimator_status_stamp.is_some() {
-        avionics.valid_flags
-    } else {
-        0
-    };
+    // The mask is a latched authorization from the estimator, and it means
+    // nothing without the status observation behind it — nor when that
+    // observation says the solution is unusable. An estimator calling its own
+    // answer unusable is the clearest refusal there is, and reading its
+    // directions anyway would turn the mark by a number its author disowned.
+    let authorized =
+        avionics.estimator_status_stamp.is_some() && avionics.quality != QUALITY_UNUSABLE;
+    let flags = if authorized { avionics.valid_flags } else { 0 };
     Some(VehicleFix {
         latitude_deg: geodetic.latitude_deg,
         longitude_deg: geodetic.longitude_deg,

@@ -161,3 +161,41 @@ fn the_fix_is_withheld_when_the_estimate_states_no_position() {
     };
     assert!(from_sample(&sample).is_none());
 }
+
+#[test]
+fn an_estimator_that_calls_its_own_solution_unusable_is_believed() {
+    // The clearest refusal there is. Reading the directions anyway would turn
+    // the mark by a number the estimator itself disowned — and the browser
+    // withholds them, so drawing them here would put the two clients on
+    // different answers from one sample.
+    let sample = wire::TelemetrySample {
+        avionics: Some(wire::AvionicsState {
+            quat_w: 1.0,
+            vel_n_mps: 3.0,
+            valid_flags: ATTITUDE_AND_VELOCITY,
+            estimator_status_stamp: Some(stamp()),
+            quality: 2,
+            geodetic: Some(fix()),
+            geodetic_stamp: Some(stamp()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let read = from_sample(&sample).expect("the position still stands");
+    assert_eq!(
+        read.heading_deg, None,
+        "an unusable solution turned the mark"
+    );
+    assert_eq!(read.course_deg, None, "an unusable solution drew a course");
+    assert_eq!(read.ground_speed_mps, None);
+
+    // Degraded is not unusable: the estimator is still standing behind it.
+    let mut degraded = sample;
+    degraded.avionics.as_mut().expect("estimate lane").quality = 1;
+    let read = from_sample(&degraded).expect("a fix");
+    assert_eq!(
+        read.heading_deg,
+        Some(0.0),
+        "a degraded solution was refused"
+    );
+}

@@ -50,12 +50,25 @@ extension OwnshipModel {
     /// Ground speed rides with the course and is converted at this edge, because the
     /// display states knots and every lane below states metres per second.
     ///
-    /// The heading is passed only when it is TRUE. A tablet's magnetometer reading is a
-    /// magnetic one, and a mark turned by it would point somewhere the vehicle is not;
-    /// the drawing side refuses a non-true reference, so this states the reference
-    /// rather than deciding for it.
+    /// The mark is turned only by a heading from the SAME source as its
+    /// position, and only by an actual heading.
+    ///
+    /// `heading` is the map's answer — what to rotate the chart by — and it
+    /// falls back through the tablet's compass to course over the ground so
+    /// that a north-up map can still turn. Neither belongs on the mark. A
+    /// device compass reading turns a mark that is sitting at the VEHICLE,
+    /// pointing it wherever the reader happens to be holding the tablet; and
+    /// course over the ground is where the vehicle is going, not where it is
+    /// facing, so a crabbing aircraft would be drawn pointing along its track.
+    /// Both are the substitution the one-lane rule exists to stop: a position
+    /// from one measurement turned by another, with nothing on the mark to
+    /// say so.
+    ///
+    /// A heading that is withheld leaves the mark pointless, which is the
+    /// honest shape for "here, facing unstated".
     func drawable(groundSpeedMetresPerSecond: Double?) -> DisplayOwnship? {
         guard let fix else { return nil }
+        let markHeading = headingForMark(of: fix)
         return DisplayOwnship(
             coordinate: DisplayCoordinate(
                 latitudeDeg: fix.latitudeDegrees,
@@ -63,8 +76,8 @@ extension OwnshipModel {
             ),
             courseDeg: fix.courseDegrees,
             groundSpeedKt: groundSpeedMetresPerSecond.map { $0 * 1.943_844_49 },
-            headingDeg: heading.map(\.trueDegrees),
-            headingReference: heading.map {
+            headingDeg: markHeading.map(\.trueDegrees),
+            headingReference: markHeading.map {
                 switch $0.source {
                 case .deviceMagnetic: DisplayHeadingReference.magneticNorth
                 default: DisplayHeadingReference.trueNorth
@@ -74,5 +87,22 @@ extension OwnshipModel {
             producerInstanceId: 0,
             snapshotRevision: 0
         )
+    }
+}
+
+extension OwnshipModel {
+    /// The heading that belongs to this fix, or nothing.
+    ///
+    /// An aircraft position may be turned only by an aircraft heading; this
+    /// device's position may be turned only by this device's compass. Course
+    /// over the ground turns nothing: it is a direction of travel, not an
+    /// attitude, and the source enum says so.
+    fileprivate func headingForMark(of fix: OwnshipFix) -> HeadingFix? {
+        guard let heading else { return nil }
+        switch (fix.source, heading.source) {
+        case (.aircraft, .aircraft): return heading
+        case (.device, .deviceTrue), (.device, .deviceMagnetic): return heading
+        default: return nil
+        }
     }
 }
