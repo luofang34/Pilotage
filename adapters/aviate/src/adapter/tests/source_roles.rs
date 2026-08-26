@@ -220,3 +220,43 @@ fn mislabeled_estimate_roles_cannot_seed_a_control_setpoint() {
         Disposition::Rejected(RejectReason::MeasurementUnavailable)
     );
 }
+
+/// The X-Plane lane's only truth path.
+///
+/// X-Plane publishes no shared-memory block, so no oracle attaches and the
+/// simulator's ground truth reaches the adapter the one way it can: the
+/// flight controller forwards the truth frame over the estimate link. The
+/// position the simulator stated has to survive that path, or an X-Plane
+/// session draws no vehicle on the map while a Gazebo session does.
+#[test]
+fn the_x_plane_lane_publishes_the_position_the_flight_controller_forwarded() {
+    // Zurich, so a reader can tell this apart from a projection of the
+    // estimate fixture's local pose.
+    const REPORTED: [i32; 3] = [473_977_419, 85_455_938, 488_227];
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.sim_truth = Some(pilotage_mavlink::link::SimTruthUpdate {
+            quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+            pos_ned_m: [0.0; 3],
+            vel_ned_mps: [0.0; 3],
+            lat_lon_alt: REPORTED,
+            time_usec: 1_000,
+            sequence: 3,
+            received_at: std::time::Instant::now(),
+        });
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    // No oracle is attached: that IS the X-Plane shape.
+    assert!(adapter.truth.is_none());
+
+    let batch = adapter.sample_telemetry();
+    let truth = batch.samples[0]
+        .sim_truth
+        .expect("the forwarded truth frame");
+    let fix = truth.geodetic.expect("the position the simulator stated");
+
+    assert!((fix.position.latitude_deg - 47.397_741_9).abs() < 1e-7);
+    assert!((fix.position.longitude_deg - 8.545_593_8).abs() < 1e-7);
+    assert_eq!(fix.stamp.role, SourceRole::SimulationTruth);
+}
