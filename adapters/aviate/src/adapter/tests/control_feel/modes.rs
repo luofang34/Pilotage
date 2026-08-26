@@ -413,3 +413,50 @@ fn a_law_staged_under_a_lost_lease_does_not_install_itself_later() {
         "a law staged under the lost lease installed itself"
     );
 }
+
+#[test]
+fn every_shipped_profile_artifact_is_covered() {
+    // The list above is written by hand, so a profile added to the directory
+    // and not to it ships unchecked: it parses at runtime, it validates, and
+    // it flies whatever law its file happens to contain. Read the directory
+    // and make the two agree, in both directions — an entry naming a file
+    // that no longer exists is the same gap seen from the other side.
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
+    let mut on_disk: Vec<String> = std::fs::read_dir(&directory)
+        .expect("the shipped profiles directory")
+        .map(|entry| {
+            entry
+                .expect("a directory entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.ends_with(".json"))
+        .collect();
+    on_disk.sort();
+
+    // Named from the code's own naming rather than repeated as strings, so a
+    // file cannot be covered by a name the code would never produce.
+    let mut covered: Vec<String> = SHAPED_PROFILES
+        .iter()
+        .map(|(mode, limits, _, _)| {
+            format!(
+                "{}.json",
+                FlightFeelProfile::shaped_for(*limits, *mode).profile_id
+            )
+        })
+        .collect();
+    // The compatibility law is shipped and checked elsewhere: the adapter
+    // refuses it unless it is byte-identical to the one it compiles in, which
+    // is a stronger gate than this one.
+    covered.push(format!(
+        "{}.json",
+        FlightFeelProfile::legacy_compatibility().profile_id
+    ));
+    covered.sort();
+
+    assert_eq!(
+        on_disk, covered,
+        "a shipped profile is checked by neither this test nor the adapter's fixed response"
+    );
+}

@@ -246,7 +246,18 @@ struct SituationContentView: View {
             // The vehicle's own position comes over the control link, not the
             // situation session: that session carries surveillance, weather and
             // terrain, and an aircraft this operator is flying is in none of them.
-            hostLink.onVehicleFix = { [ownship] vehicle in
+            hostLink.onVehicleFix = { [ownship, model] vehicle in
+                // A replay is a map of a flight that already happened. The
+                // vehicle's live position is not part of it, and drawing it
+                // would put the aircraft where it is now on a map of where it
+                // was — the two marks look alike and only one is the flight
+                // the reader asked for. The other live sources are already
+                // held off for the same reason.
+                guard model.replayingFlight == nil else {
+                    ownship.observeVehicle(nil)
+                    vehicleGroundSpeed = nil
+                    return
+                }
                 ownship.observeVehicle(vehicle)
                 vehicleGroundSpeed = vehicle.groundSpeedMetresPerSecond
             }

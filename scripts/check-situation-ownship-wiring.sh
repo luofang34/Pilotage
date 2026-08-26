@@ -112,6 +112,14 @@ fi
 # the projection fires at all.
 require_pattern 'positionIsExtrapolated' "$app/SituationEvidence.swift" \
     "the evidence must count the marks the engine advanced, or a projection that never fires looks the same as one that does"
+# A replay must not be overdrawn with the vehicle's live position.
+#
+# A replay is a map of a flight that already happened. The live mark and the
+# replayed one look alike, so a reader cannot tell that the aircraft they are
+# watching is not the one in the recording. Every other live source is already
+# held off while a replay runs.
+require_pattern 'replayingFlight == nil' "$app/SituationContentView.swift" \
+    "the live vehicle fix must be held off while a replay runs, or it draws the aircraft where it is now on a map of where it was"
 
 # The staleness clock must be timed from when a position was MEASURED, not from
 # when one arrived.
