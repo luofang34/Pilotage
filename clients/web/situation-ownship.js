@@ -1,10 +1,25 @@
-// The vehicle's own position on the situation map.
+// The vehicle's own position, heading and track on the situation map.
 //
 // The mark is drawn from a geodetic fix and from nothing else. Absence of a
 // fix is absence of the mark, with the reason on the stage: a map that drew
 // a vehicle at a default, at a last-known position, or at a place derived
 // from a local origin would be telling a reader where the vehicle is when
 // it does not know (ADR-0022, ADR-0037).
+//
+// The same rule governs the two directions beside it. The mark turns to the
+// heading the vehicle states and carries a leader along the track it
+// states; where it states neither, it is a shape with no direction in it
+// and no line beside it. A pointed mark that never turned would assert a
+// heading of screen-up on a map the reader can rotate.
+
+import { headingDegFrom, leaderEndpoint, trackFrom } from "./situation-motion.js";
+
+/** The map source and layer the velocity leader is drawn from. It is drawn
+ *  in geographic coordinates, not in pixels: the line means "where the
+ *  vehicle arrives in a minute", which is a distance over the ground, and a
+ *  fixed pixel length would state a different distance at every zoom. */
+const LEADER_SOURCE = "pilotage-ownship-leader";
+const LEADER_LAYER = "pilotage-ownship-leader";
 
 /** Why the map is drawing no vehicle. */
 export const OWNSHIP_REASON = Object.freeze({
@@ -49,16 +64,27 @@ export function ownshipFromTelemetry(telemetry) {
   if (!truth && !avionics) {
     return { position: null, source: null, reason: OWNSHIP_REASON.NO_SAMPLE };
   }
-  const [fix, source] = truth?.geodetic
-    ? [truth.geodetic, OWNSHIP_SOURCE.TRUTH]
-    : [avionics?.geodetic, OWNSHIP_SOURCE.ESTIMATE];
-  if (!fix) return { position: null, source: null, reason: OWNSHIP_REASON.NO_FIX };
+  // One lane supplies all three. Position from the oracle beside a heading
+  // from the estimate would draw one measurement turned by another, and
+  // nothing on the mark could say so.
+  const [lane, source] = truth?.geodetic
+    ? [truth, OWNSHIP_SOURCE.TRUTH]
+    : [avionics, OWNSHIP_SOURCE.ESTIMATE];
+  const fix = lane?.geodetic;
+  if (!fix) {
+    return { position: null, source: null, reason: OWNSHIP_REASON.NO_FIX };
+  }
+  const validFlags = lane.validFlags ?? 0;
   return {
     position: {
       latitudeDeg: fix.latitudeDeg,
       longitudeDeg: fix.longitudeDeg,
       heightM: fix.heightM,
     },
+    // The attitude group carries the quaternion on the estimate lane; the
+    // truth lane carries it flat beside its own frame.
+    headingDeg: headingDegFrom(lane.attitude?.quat ?? lane.quat, validFlags),
+    track: trackFrom(lane.kinematics?.velNed ?? lane.velNed, validFlags),
     source,
     reason: null,
   };
@@ -79,10 +105,51 @@ export function attachOwnship(maplibre, map, surface) {
   const element = surface.ownerDocument.createElement("div");
   element.className = "map-ownship";
   element.setAttribute("role", "img");
-  const marker = new maplibre.Marker({ element });
+  // Both alignments are to the MAP, not the viewport. The map opens
+  // pitched and the reader can turn it, and a mark aligned to the screen
+  // would point somewhere the vehicle is not for as long as either holds.
+  const marker = new maplibre.Marker({
+    element,
+    rotationAlignment: "map",
+    pitchAlignment: "map",
+  });
   let shown = false;
   let lastFixAt = null;
   let label = null;
+  let leaderReady = false;
+  let pendingLeader = null;
+
+  const emptyLeader = { type: "FeatureCollection", features: [] };
+
+  const drawLeader = (data) => {
+    if (!leaderReady) {
+      // A style that has not loaded has no source to add one to. The last
+      // line drawn before then is the one drawn when it does.
+      pendingLeader = data;
+      return;
+    }
+    map.getSource(LEADER_SOURCE)?.setData(data);
+  };
+
+  const addLeaderLayer = () => {
+    if (leaderReady || map.getSource(LEADER_SOURCE)) return;
+    map.addSource(LEADER_SOURCE, { type: "geojson", data: emptyLeader });
+    map.addLayer({
+      id: LEADER_LAYER,
+      type: "line",
+      source: LEADER_SOURCE,
+      layout: { "line-cap": "round" },
+      paint: { "line-color": "#d5006d", "line-width": 2 },
+    });
+    leaderReady = true;
+    if (pendingLeader !== null) {
+      map.getSource(LEADER_SOURCE)?.setData(pendingLeader);
+      pendingLeader = null;
+    }
+  };
+
+  if (map.isStyleLoaded?.()) addLeaderLayer();
+  else map.once("load", addLeaderLayer);
 
   const withdraw = (reason) => {
     if (shown) {
@@ -92,10 +159,16 @@ export function attachOwnship(maplibre, map, surface) {
     lastFixAt = null;
     surface.dataset.ownship = "absent";
     surface.dataset.ownshipReason = reason;
-    // A position or a source beside an absent mark is something a reader
-    // can still read off the surface.
+    // Anything beside an absent mark is something a reader can still read
+    // off the surface, and a leader left drawn is a course still claimed.
     delete surface.dataset.ownshipPosition;
     delete surface.dataset.ownshipSource;
+    delete surface.dataset.ownshipHeadingDeg;
+    delete surface.dataset.ownshipTrackDeg;
+    delete surface.dataset.ownshipSpeedMps;
+    marker.setRotation(0);
+    element.className = "map-ownship map-ownship-unknown-heading";
+    drawLeader(emptyLeader);
   };
 
   // Why the last sample carried no position, so a withdrawal can say which
@@ -111,7 +184,7 @@ export function attachOwnship(maplibre, map, surface) {
   };
 
   const observe = (telemetry, nowMs) => {
-    const { position, source, reason } = ownshipFromTelemetry(telemetry);
+    const { position, headingDeg, track, source, reason } = ownshipFromTelemetry(telemetry);
     if (position === null) {
       lastAbsence = reason;
       // One sample without a fix does not blink the mark; the age rule is
@@ -128,13 +201,44 @@ export function attachOwnship(maplibre, map, surface) {
     // says otherwise.
     lastAbsence = OWNSHIP_REASON.STOPPED;
     marker.setLngLat([position.longitudeDeg, position.latitudeDeg]);
+    // A shape with a point in it states a direction whether or not one was
+    // measured, so the shape itself changes when the heading goes away.
+    marker.setRotation(headingDeg ?? 0);
+    element.className =
+      headingDeg === null ? "map-ownship map-ownship-unknown-heading" : "map-ownship";
     if (!shown) {
       marker.addTo(map);
       shown = true;
     }
+    drawLeader(
+      track === null
+        ? emptyLeader
+        : {
+            type: "FeatureCollection",
+            features: [
+              {
+                type: "Feature",
+                properties: {},
+                geometry: {
+                  type: "LineString",
+                  coordinates: [
+                    [position.longitudeDeg, position.latitudeDeg],
+                    leaderEndpoint(position, track),
+                  ],
+                },
+              },
+            ],
+          },
+    );
     const next =
       `Vehicle at ${position.latitudeDeg.toFixed(5)}, ${position.longitudeDeg.toFixed(5)}` +
-      ` from the ${source === OWNSHIP_SOURCE.TRUTH ? "simulator" : "flight controller"}`;
+      ` from the ${source === OWNSHIP_SOURCE.TRUTH ? "simulator" : "flight controller"}` +
+      // Whole degrees and whole metres per second: the name is announced
+      // when it changes, and a fractional bearing changes every sample.
+      (headingDeg === null ? ", heading unknown" : `, heading ${Math.round(headingDeg)}`) +
+      (track === null
+        ? ", not tracking"
+        : `, tracking ${Math.round(track.bearingDeg)} at ${Math.round(track.speedMps)} metres per second`);
     // An accessible name rewritten at the telemetry rate is announced at
     // the telemetry rate.
     if (next !== label) {
@@ -145,6 +249,15 @@ export function attachOwnship(maplibre, map, surface) {
     surface.dataset.ownshipSource = source;
     surface.dataset.ownshipPosition =
       `${position.latitudeDeg.toFixed(6)},${position.longitudeDeg.toFixed(6)}`;
+    if (headingDeg === null) delete surface.dataset.ownshipHeadingDeg;
+    else surface.dataset.ownshipHeadingDeg = headingDeg.toFixed(1);
+    if (track === null) {
+      delete surface.dataset.ownshipTrackDeg;
+      delete surface.dataset.ownshipSpeedMps;
+    } else {
+      surface.dataset.ownshipTrackDeg = track.bearingDeg.toFixed(1);
+      surface.dataset.ownshipSpeedMps = track.speedMps.toFixed(2);
+    }
     delete surface.dataset.ownshipReason;
   };
 

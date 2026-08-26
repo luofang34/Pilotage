@@ -439,6 +439,12 @@ jobs:
       - name: situation ownship placement
         run: node clients/web/situation-ownship.test.mjs
 
+      - name: situation ownship heading and track
+        # Heading is where the nose points and track is where the vehicle
+        # goes; a display that drew one and called it the other would
+        # invent an attitude nobody measured.
+        run: node clients/web/situation-motion.test.mjs
+
       - name: Vendor the MapLibre GL JS renderer (pinned digest)
         run: bash scripts/vendor-maplibre-web.sh
 

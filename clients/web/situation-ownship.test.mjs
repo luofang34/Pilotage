@@ -14,13 +14,38 @@ import {
   attachOwnship,
   ownshipFromTelemetry,
 } from "./situation-ownship.js";
+import { LEADER_SECONDS } from "./situation-motion.js";
+
+/** A body-FRD-to-NED rotation about the down axis: yaw alone. */
+const yawQuat = (deg) => {
+  const half = (deg * Math.PI) / 360;
+  return { w: Math.cos(half), x: 0, y: 0, z: Math.sin(half) };
+};
+
+const VALID_ATTITUDE = 1;
+const VALID_VELOCITY = 8;
 
 const FIX = { latitudeDeg: 47.3977419, longitudeDeg: 8.5455938, heightM: 488.227 };
 const truth = (overrides = {}) => ({
-  simTruth: { stamp: { role: 2 }, geodetic: FIX, ...overrides },
+  simTruth: {
+    stamp: { role: 2 },
+    geodetic: FIX,
+    quat: yawQuat(90),
+    velNed: [0, 10, 0],
+    validFlags: VALID_ATTITUDE | VALID_VELOCITY,
+    ...overrides,
+  },
 });
 
-const estimate = (fix = FIX) => ({ avionics: { geodetic: fix } });
+const estimate = (fix = FIX, overrides = {}) => ({
+  avionics: {
+    geodetic: fix,
+    attitude: { quat: yawQuat(270) },
+    kinematics: { velNed: [-10, 0, 0] },
+    validFlags: VALID_ATTITUDE | VALID_VELOCITY,
+    ...overrides,
+  },
+});
 
 function testAFixDrawsTheVehicleWhereItSays() {
   const { position, source, reason } = ownshipFromTelemetry(truth());
@@ -97,7 +122,7 @@ console.log("ok - testTheReasonsAreTheStringsAReaderMeets");
 // ---- the half that talks to a map ------------------------------------------
 
 /** The smallest map and marker the module actually uses. */
-function harness() {
+function harness({ styleLoaded = true } = {}) {
   const events = [];
   const element = {
     className: "",
@@ -111,10 +136,37 @@ function harness() {
     dataset: {},
     ownerDocument: { createElement: () => element },
   };
-  const map = { id: "map" };
+  const leader = { data: null };
+  const map = {
+    id: "map",
+    sources: new Map(),
+    layers: [],
+    isStyleLoaded: () => styleLoaded,
+    pendingLoad: null,
+    once(event, handler) {
+      if (event === "load") this.pendingLoad = handler;
+    },
+    fireLoad() {
+      this.pendingLoad?.();
+    },
+    addSource(name, spec) {
+      this.sources.set(name, { ...spec, setData: (data) => (leader.data = data) });
+    },
+    getSource(name) {
+      return this.sources.get(name);
+    },
+    addLayer(spec) {
+      this.layers.push(spec);
+    },
+  };
   const marker = {
     lngLat: null,
     on: false,
+    rotation: null,
+    setRotation(value) {
+      this.rotation = value;
+      return this;
+    },
     setLngLat(value) {
       this.lngLat = value;
       return this;
@@ -131,9 +183,15 @@ function harness() {
       return this;
     },
   };
-  const maplibre = { Marker: function Marker() { return marker; } };
+  let markerOptions = null;
+  const maplibre = {
+    Marker: function Marker(options) {
+      markerOptions = options;
+      return marker;
+    },
+  };
   const attached = attachOwnship(maplibre, map, surface);
-  return { ...attached, surface, marker, element, events };
+  return { ...attached, surface, marker, element, events, leader, map, markerOptions };
 }
 
 function testAFixPutsTheMarkOnTheMap() {
@@ -265,7 +323,7 @@ function testTheMarkSaysWhenTheLaneUnderItChanges() {
   const { observe, surface, element } = harness();
   observe(truth(), 1_000);
   assert.equal(surface.dataset.ownshipSource, OWNSHIP_SOURCE.TRUTH);
-  assert.match(element.attributes["aria-label"], /from the simulator$/);
+  assert.match(element.attributes["aria-label"], /from the simulator,/);
 
   observe(estimate({ ...FIX, latitudeDeg: 47.5 }), 1_100);
   assert.equal(
@@ -273,7 +331,7 @@ function testTheMarkSaysWhenTheLaneUnderItChanges() {
     OWNSHIP_SOURCE.ESTIMATE,
     "the oracle went away and the mark says which measurement replaced it",
   );
-  assert.match(element.attributes["aria-label"], /from the flight controller$/);
+  assert.match(element.attributes["aria-label"], /from the flight controller,/);
 
   observe(truth(), 1_200);
   assert.equal(
@@ -296,5 +354,132 @@ function testTheMarkIsSomethingAReaderCanSee() {
 }
 testTheMarkIsSomethingAReaderCanSee();
 console.log("ok - testTheMarkIsSomethingAReaderCanSee");
+
+function testTheMarkTurnsToTheHeadingTheVehicleStates() {
+  const { observe, surface, marker, markerOptions } = harness();
+  observe(truth(), 1_000);
+
+  assert.equal(marker.rotation, 90, "the mark turns to the stated yaw");
+  assert.equal(surface.dataset.ownshipHeadingDeg, "90.0");
+  // Both alignments are to the map: the map opens pitched and the reader
+  // can turn it, and a mark aligned to the screen points somewhere the
+  // vehicle is not for as long as either holds.
+  assert.equal(markerOptions.rotationAlignment, "map");
+  assert.equal(markerOptions.pitchAlignment, "map");
+}
+testTheMarkTurnsToTheHeadingTheVehicleStates();
+console.log("ok - testTheMarkTurnsToTheHeadingTheVehicleStates");
+
+function testAMarkWithNoStatedHeadingHasNoPointInIt() {
+  // A reader reads a direction off a point. Rotating an unrotatable shape
+  // to zero would state due north for a vehicle whose attitude nobody sent.
+  const { observe, surface, marker, element } = harness();
+  observe(truth({ validFlags: VALID_VELOCITY }), 1_000);
+
+  assert.equal(surface.dataset.ownship, "shown", "the position is still known");
+  assert.equal(surface.dataset.ownshipHeadingDeg, undefined, "and the heading is not");
+  assert.equal(marker.rotation, 0);
+  assert.match(element.className, /map-ownship-unknown-heading/);
+
+  observe(truth(), 1_100);
+  assert.equal(element.className, "map-ownship", "a stated heading restores the point");
+}
+testAMarkWithNoStatedHeadingHasNoPointInIt();
+console.log("ok - testAMarkWithNoStatedHeadingHasNoPointInIt");
+
+function testTheLeaderReachesWhereTheVehicleArrives() {
+  // The line is drawn in geographic coordinates, so its length is a
+  // distance over the ground rather than a number of pixels: at 10 m/s the
+  // minute ahead is 600 m due east of the fix.
+  const { observe, leader } = harness();
+  observe(truth(), 1_000);
+
+  const [start, end] = leader.data.features[0].geometry.coordinates;
+  assert.deepEqual(start, [FIX.longitudeDeg, FIX.latitudeDeg]);
+  assert.ok(Math.abs(end[1] - FIX.latitudeDeg) < 1e-9, "due east changes no latitude");
+  const metres = 10 * LEADER_SECONDS;
+  const expectedLon =
+    FIX.longitudeDeg + metres / (111_111 * Math.cos((FIX.latitudeDeg * Math.PI) / 180));
+  assert.ok(Math.abs(end[0] - expectedLon) < 1e-9, `east endpoint ${end[0]}`);
+}
+testTheLeaderReachesWhereTheVehicleArrives();
+console.log("ok - testTheLeaderReachesWhereTheVehicleArrives");
+
+function testTheLeaderFollowsTheTrackAndNotTheNose() {
+  // In wind the two differ, and the difference is what a reader is
+  // entitled to see: a leader drawn along the heading would hide it.
+  const { observe, surface, marker, leader } = harness();
+  // Nose due north, travelling due east.
+  observe(truth({ quat: yawQuat(0), velNed: [0, 10, 0] }), 1_000);
+
+  assert.equal(marker.rotation, 0, "the mark points where the nose does");
+  assert.equal(surface.dataset.ownshipTrackDeg, "90.0", "the track is where it goes");
+  const [, end] = leader.data.features[0].geometry.coordinates;
+  assert.ok(end[0] > FIX.longitudeDeg, "the leader runs east, along the track");
+  assert.ok(Math.abs(end[1] - FIX.latitudeDeg) < 1e-9, "and not north, along the nose");
+}
+testTheLeaderFollowsTheTrackAndNotTheNose();
+console.log("ok - testTheLeaderFollowsTheTrackAndNotTheNose");
+
+function testAVehicleHoldingStationDrawsNoCourse() {
+  const { observe, surface, leader } = harness();
+  observe(truth({ velNed: [0, 0, 0] }), 1_000);
+
+  assert.equal(leader.data.features.length, 0, "no line is drawn");
+  assert.equal(surface.dataset.ownshipTrackDeg, undefined);
+  assert.equal(surface.dataset.ownshipSpeedMps, undefined);
+  assert.equal(surface.dataset.ownship, "shown", "the position is still drawn");
+}
+testAVehicleHoldingStationDrawsNoCourse();
+console.log("ok - testAVehicleHoldingStationDrawsNoCourse");
+
+function testWithdrawingTheMarkTakesItsCourseWithIt() {
+  const { observe, age, surface, leader, marker, element } = harness();
+  observe(truth(), 1_000);
+  assert.equal(leader.data.features.length, 1);
+
+  age(1_001 + OWNSHIP_STALE_AFTER_MS);
+
+  assert.equal(leader.data.features.length, 0, "a leader left drawn is a course still claimed");
+  assert.equal(marker.rotation, 0);
+  assert.match(element.className, /map-ownship-unknown-heading/);
+  assert.equal(surface.dataset.ownshipHeadingDeg, undefined);
+  assert.equal(surface.dataset.ownshipTrackDeg, undefined);
+  assert.equal(surface.dataset.ownshipSpeedMps, undefined);
+}
+testWithdrawingTheMarkTakesItsCourseWithIt();
+console.log("ok - testWithdrawingTheMarkTakesItsCourseWithIt");
+
+function testTheHeadingAndTheTrackComeFromTheLaneUnderTheMark() {
+  // Position from the oracle turned by a heading from the estimate would
+  // draw one measurement rotated by another, and nothing on the mark could
+  // say so.
+  const both = { ...truth(), ...estimate() };
+  const chosen = ownshipFromTelemetry(both);
+  assert.equal(chosen.source, OWNSHIP_SOURCE.TRUTH);
+  assert.ok(Math.abs(chosen.headingDeg - 90) < 1e-6, "the truth lane's own yaw");
+  assert.ok(Math.abs(chosen.track.bearingDeg - 90) < 1e-6, "the truth lane's own velocity");
+
+  const estimateOnly = ownshipFromTelemetry(estimate());
+  assert.equal(estimateOnly.source, OWNSHIP_SOURCE.ESTIMATE);
+  assert.ok(Math.abs(estimateOnly.headingDeg - 270) < 1e-6, "the estimate lane's own yaw");
+  assert.ok(Math.abs(estimateOnly.track.bearingDeg - 180) < 1e-6);
+}
+testTheHeadingAndTheTrackComeFromTheLaneUnderTheMark();
+console.log("ok - testTheHeadingAndTheTrackComeFromTheLaneUnderTheMark");
+
+function testTheLeaderWaitsForAStyleThatHasNotLoaded() {
+  // `addSource` on a style that has not loaded throws, and the mark is
+  // wired before the map reports load. The first line drawn before then is
+  // the one drawn when it loads.
+  const { observe, leader, map } = harness({ styleLoaded: false });
+  observe(truth(), 1_000);
+  assert.equal(leader.data, null, "nothing was drawn into a style with no source");
+
+  map.fireLoad();
+  assert.equal(leader.data.features.length, 1, "the held line is drawn once it can be");
+}
+testTheLeaderWaitsForAStyleThatHasNotLoaded();
+console.log("ok - testTheLeaderWaitsForAStyleThatHasNotLoaded");
 
 console.log("\nall situation ownship checks passed");

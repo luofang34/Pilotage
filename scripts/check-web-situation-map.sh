@@ -13,6 +13,7 @@ map_module="$web/situation-map.js"
 style_module="$web/situation-style.js"
 camera_module="$web/situation-camera.js"
 ownship_module="$web/situation-ownship.js"
+motion_module="$web/situation-motion.js"
 vendor_script="$root/scripts/vendor-maplibre-web.sh"
 assets_script="$root/scripts/build-web-situation-assets.sh"
 ci="$root/.github/workflows/ci.yml"
@@ -20,7 +21,8 @@ status=0
 
 for path in "$map_module" "$style_module" "$camera_module" "$ownship_module" \
     "$web/situation-style.test.mjs" "$web/situation-camera.test.mjs" \
-    "$web/situation-ownship.test.mjs" \
+    "$web/situation-ownship.test.mjs" "$motion_module" \
+    "$web/situation-motion.test.mjs" \
     "$web/situation-map.browser.test.mjs" "$vendor_script" "$assets_script"; do
     if [ ! -f "$path" ]; then
         echo "FORBIDDEN: required web situation file is missing: $path" >&2
@@ -167,11 +169,68 @@ if ! grep -Fq 'pageshow' "$map_module" || ! grep -Fq 'visibilitychange' "$map_mo
     status=1
 fi
 
+# The mark turns to a heading the vehicle STATED. A pointed shape that
+# never turned would assert screen-up on a map the reader can rotate, and a
+# shape rotated from an unstated attitude asserts due north.
+if ! grep -Fq 'marker.setRotation(headingDeg ?? 0)' "$ownship_module"; then
+    echo "FORBIDDEN: the mark must turn to the heading the vehicle states" >&2
+    status=1
+fi
+if ! grep -Fq 'map-ownship-unknown-heading' "$ownship_module" \
+    || ! grep -Fq 'map-ownship-unknown-heading' "$web/index.html"; then
+    echo "FORBIDDEN: a mark with no stated heading must have no point in it" >&2
+    status=1
+fi
+# Both alignments are to the map. The map opens pitched and turns under the
+# reader, and a mark aligned to the screen points where the vehicle is not.
+for alignment in rotationAlignment pitchAlignment; do
+    if ! grep -Eq "$alignment: \"map\"" "$ownship_module"; then
+        echo "FORBIDDEN: the mark must be aligned to the map, not the viewport" >&2
+        status=1
+    fi
+done
+
+# Heading is where the nose points and track is where the vehicle goes.
+# They differ in wind, and a leader drawn along the heading hides that.
+if ! grep -Fq 'leaderEndpoint(position, track)' "$ownship_module"; then
+    echo "FORBIDDEN: the leader must follow the track and not the nose" >&2
+    status=1
+fi
+# The leader is a distance over the ground, so it is drawn in geographic
+# coordinates: a fixed pixel length states a different distance at every
+# zoom, and the line means "where the vehicle arrives in a minute".
+if ! grep -Fq '"type": "geojson"' "$ownship_module" \
+    && ! grep -Fq 'type: "geojson"' "$ownship_module"; then
+    echo "FORBIDDEN: the leader must be drawn in geographic coordinates" >&2
+    status=1
+fi
+# A quaternion that is not near unit length is not a rotation, and a
+# vehicle holding station is on no course. Both refusals are what keeps the
+# mark from stating a direction nobody measured.
+if ! grep -Fq 'TRACK_FLOOR_MPS' "$motion_module" \
+    || ! grep -Fq 'norm < 0.9 || norm > 1.1' "$motion_module"; then
+    echo "FORBIDDEN: an unmeasured direction must not be drawn as one" >&2
+    status=1
+fi
+
+# The unit suite drives the mark against a stub map, which takes any source
+# and layer it is handed. Only a real style can refuse one, and only a real
+# map can turn under a mark, so the browser suite must attach the mark to a
+# real map and read back both the line on screen and the turned mark.
+browser_test="$web/situation-map.browser.test.mjs"
+if ! grep -Fq 'attachOwnship' "$browser_test" \
+    || ! grep -Fq 'queryRenderedFeatures' "$browser_test" \
+    || ! grep -Fq 'transformWhenTurned' "$browser_test"; then
+    echo "FORBIDDEN: the course and the turned mark must be proven in real MapLibre" >&2
+    status=1
+fi
+
 # The guardrails only hold while CI runs them. The step must sit on a
 # live run: line; a commented-out step does not count.
 for step in 'clients/web/situation-style.test.mjs' \
     'clients/web/situation-camera.test.mjs' \
     'clients/web/situation-ownship.test.mjs' \
+    'clients/web/situation-motion.test.mjs' \
     'clients/web/situation-map.browser.test.mjs' \
     'scripts/vendor-maplibre-web.sh' \
     'scripts/check-web-situation-map.sh' \

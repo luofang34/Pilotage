@@ -10,6 +10,7 @@ web="$fixture/clients/web"
 mkdir -p "$web" "$fixture/scripts" "$fixture/.github/workflows"
 for file in situation-map.js situation-style.js situation-camera.js \
     situation-ownship.js situation-ownship.test.mjs \
+    situation-motion.js situation-motion.test.mjs \
     situation-style.test.mjs situation-camera.test.mjs \
     situation-map.browser.test.mjs index.html main.js layout.js; do
     cp "$repo_root/clients/web/$file" "$web/"
@@ -230,4 +231,87 @@ if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1
     exit 1
 fi
 cp "$repo_root/clients/web/situation-map.js" "$web/"
+# A pointed mark that never turns asserts screen-up on a map the reader
+# can rotate.
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('marker.setRotation(headingDeg ?? 0)', "marker.setLngLat(marker.lngLat)", 1)
+assert source != before, "the rotation is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a mark that never turns" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+# A shape with a point in it states a direction whether or not one was
+# measured.
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('map-ownship-unknown-heading', "map-ownship")
+assert source != before, "the pointless shape is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a point where no heading was stated" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+# In wind the nose and the course differ, and a leader along the nose hides
+# the difference a reader is entitled to.
+python3 - "$web/situation-ownship.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('leaderEndpoint(position, track)', "leaderEndpoint(position, nose)", 1)
+assert source != before, "the leader is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a leader drawn along the nose" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-ownship.js" "$web/"
+
+# A vehicle holding station reports drift whose direction wanders through
+# the whole compass; drawn as a course it is a course it is not on.
+python3 - "$web/situation-motion.js" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace('TRACK_FLOOR_MPS', "TRACK_FLOOR_NEVER")
+assert source != before, "the floor is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted station-keeping drift as a course" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-motion.js" "$web/"
+# A stub map takes any layer spec, so a suite that never drives the mark
+# through real MapLibre cannot tell a drawn course from a rejected one.
+python3 - "$web/situation-map.browser.test.mjs" <<PY
+import sys
+path = sys.argv[1]
+source = open(path, encoding="utf-8").read()
+before = source
+source = source.replace("queryRenderedFeatures", "countRenderedFeatures")
+assert source != before, "the render readback is not written the way this case edits it"
+open(path, "w", encoding="utf-8").write(source)
+PY
+if bash "$fixture/scripts/check-web-situation-map.sh" "$fixture" >/dev/null 2>&1; then
+    echo "the web situation guard accepted a course never drawn in real MapLibre" >&2
+    exit 1
+fi
+cp "$repo_root/clients/web/situation-map.browser.test.mjs" "$web/"
 echo "web situation map guards reject each loss"

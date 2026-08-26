@@ -292,6 +292,83 @@ if (figure?.dataset.mapState === "ready") {
     touchFailed, labelAtStart, labelWhenTurned,
   };
 }
+// The unit suite drives the mark against a stub map, which accepts any
+// source and layer it is handed. Only real MapLibre can say whether the
+// leader's spec is one a style will draw, and whether a mark aligned to the
+// map turns with the map. Both are answered here, against a second real map
+// with an empty style, so the check needs no tiles.
+let leaderRender = { skipped: "the map never became ready" };
+if (figure?.dataset.mapState === "ready") {
+  try {
+    const maplibre = await import("./vendor/maplibre-gl/maplibre-gl.mjs");
+    const { attachOwnship } = await import("./situation-ownship.js");
+    const host = document.createElement("div");
+    host.style.cssText = "position:absolute;left:-9999px;top:0;width:400px;height:300px";
+    document.body.appendChild(host);
+    const styleErrors = [];
+    const probeMap = new maplibre.Map({
+      container: host,
+      style: { version: 8, sources: {}, layers: [] },
+      center: [8.5456, 47.3977],
+      zoom: 12,
+      attributionControl: false,
+    });
+    probeMap.on("error", (event) => styleErrors.push(String(event && event.error ? event.error : event)));
+    await new Promise((resolve) => probeMap.on("load", resolve));
+    const readout = document.createElement("div");
+    host.appendChild(readout);
+    const mark = attachOwnship(maplibre, probeMap, readout);
+    // Nose due east, travelling due east at 20 m/s.
+    const half = Math.SQRT1_2;
+    mark.observe({
+      simTruth: {
+        stamp: { role: 2 },
+        geodetic: { latitudeDeg: 47.3977, longitudeDeg: 8.5456, heightM: 500 },
+        quat: { w: half, x: 0, y: 0, z: half },
+        velNed: [0, 20, 0],
+        validFlags: 9,
+      },
+    }, Date.now());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const source = probeMap.getSource("pilotage-ownship-leader");
+    // The serialized style is where the source's data can be read without
+    // depending on a private field of the vendored bundle.
+    const styleSource = probeMap.getStyle().sources["pilotage-ownship-leader"];
+    const drawn = styleSource ? styleSource.data : null;
+    // A layer can hold a line and still draw nothing. Waiting for the map
+    // to go idle and asking what is on screen is the only answer to that.
+    await new Promise((resolve) => probeMap.once("idle", resolve));
+    const rendered = probeMap.queryRenderedFeatures({
+      layers: ["pilotage-ownship-leader"],
+    }).length;
+    const transformAtNorth = mark.marker.getElement().style.transform;
+    // Turn the map. A mark aligned to the map keeps pointing east while the
+    // compass moves under it; a mark aligned to the screen does not.
+    probeMap.setBearing(30);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const transformWhenTurned = mark.marker.getElement().style.transform;
+
+    leaderRender = {
+      sourceLoaded: Boolean(source),
+      layerLoaded: Boolean(probeMap.getLayer("pilotage-ownship-leader")),
+      coordinates:
+        drawn && drawn.features && drawn.features[0]
+          ? drawn.features[0].geometry.coordinates
+          : null,
+      rendered,
+      headingDeg: readout.dataset.ownshipHeadingDeg ?? null,
+      trackDeg: readout.dataset.ownshipTrackDeg ?? null,
+      transformAtNorth,
+      transformWhenTurned,
+      styleErrors,
+    };
+    probeMap.remove();
+    host.remove();
+  } catch (error) {
+    leaderRender = { failed: String(error) };
+  }
+}
 const attribution = surface?.querySelector(".maplibregl-ctrl-attrib")?.textContent ?? "";
 const notice = figure?.querySelector(".map-notice")?.textContent ?? "";
 const inMainSlot = Boolean(figure?.closest("#mainSlot"));
@@ -312,6 +389,7 @@ await fetch("/map-result", {
     center: figure?.dataset.mapCenter ?? null,
     maxZoom: figure?.dataset.mapMaxZoom ?? null,
     attribution,
+    leaderRender,
     notice,
     videoCanvasUsable: Boolean(document.getElementById("video")?.getContext("2d")),
   }),
@@ -538,6 +616,53 @@ const near = (value, expected, tolerance) =>
       `camera: the map says which way it faces when turned (${camera.labelWhenTurned})`,
       camera.labelWhenTurned.startsWith("Facing ") &&
         camera.labelWhenTurned.endsWith("turn back to north"),
+    );
+  }
+
+  // The course and the mark's rotation in real MapLibre. The unit suite
+  // drives them against a stub map that takes any source and layer it is
+  // handed, so a spec a real style rejects passes there and draws nothing
+  // here.
+  const render = observed.leaderRender ?? {};
+  if (render.failed || render.skipped) {
+    check(`leader: the render probe ran (${render.failed ?? render.skipped})`, false);
+  } else {
+    check("leader: real MapLibre took the course's source", render.sourceLoaded);
+    check("leader: real MapLibre took the course's layer", render.layerLoaded);
+    // MapLibre reports a spec it will not draw on the error event rather
+    // than by throwing, so a layer can be added and still render nothing.
+    check(
+      `leader: the style raised no error over the course (${render.styleErrors.join("; ")})`,
+      render.styleErrors.length === 0,
+    );
+    const [start, end] = render.coordinates ?? [];
+    check("leader: a course was drawn", Boolean(start && end));
+    check(
+      `leader: the course reaches the screen (${render.rendered} feature(s) rendered)`,
+      render.rendered > 0,
+    );
+    if (start && end) {
+      check(
+        `leader: the course runs east, along the track (${end[0] - start[0]}, ${end[1] - start[1]})`,
+        end[0] > start[0] && Math.abs(end[1] - start[1]) < 1e-9,
+      );
+    }
+    check(`leader: the heading reaches the surface (${render.headingDeg})`, render.headingDeg === "90.0");
+    check(`leader: the track reaches the surface (${render.trackDeg})`, render.trackDeg === "90.0");
+    // Aligned to the map, the mark's own rotation is reduced by the map
+    // bearing, so it keeps pointing east as the compass turns under it. A
+    // mark left aligned to the viewport would read 90 in both.
+    const angle = (transform) => {
+      const match = /rotateZ\((-?[0-9.]+)deg\)/.exec(transform ?? "");
+      return match ? Number(match[1]) : null;
+    };
+    check(
+      `leader: the mark points east on a north-up map (${angle(render.transformAtNorth)})`,
+      near(angle(render.transformAtNorth), 90, 0.01),
+    );
+    check(
+      `leader: the mark still points east once the map turns 30 degrees (${angle(render.transformWhenTurned)})`,
+      near(angle(render.transformWhenTurned), 60, 0.01),
     );
   }
 }

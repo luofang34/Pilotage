@@ -158,6 +158,9 @@
   /* The vehicle's own position. A triangle rather than a dot: a reader
      reads a heading from a shape, and a dot would invite one to be
      inferred where none is drawn yet. */
+  /* The vehicle mark. The point is the nose, and the marker is rotated to
+     the heading the vehicle states — so the shape may only have a point in
+     it while a heading is stated. */
   .map-ownship {
     width: 0;
     height: 0;
@@ -165,6 +168,15 @@
     border-right: 0.45rem solid transparent;
     border-bottom: 0.9rem solid #d5006d;
     filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9));
+  }
+  /* No heading was stated. A reader reads a direction off a point, so the
+     mark loses its point rather than pointing somewhere arbitrary. */
+  .map-ownship-unknown-heading {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 0.15rem solid #d5006d;
+    border-radius: 50%;
+    background: transparent;
   }
   /* Load / typed-unavailable notice for the map stage. Sized by the
      positioned frame; inert so it never eats a map gesture. */
