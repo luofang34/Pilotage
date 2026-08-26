@@ -357,6 +357,18 @@ const NAMED_IDENTITIES: [(&str, DeviceIdentity); 1] = [(
     },
 )];
 
+/// Products whose name CONTAINS a declared one but which are a different pad.
+///
+/// The match below is a substring so one pad's several names all reach it.
+/// That also lets a sibling product with a longer name reach it and be handed
+/// a USB identity that is not its own — which is then what the device label
+/// and every evidence record built from it state.
+///
+/// A pad listed here falls to the wildcard instead. Its packing does not
+/// change by it: a named pad routes straight through, and so does the
+/// wildcard. What changes is that the record stops naming the wrong device.
+const SHARES_A_NAME_NOT_A_DEVICE: [&str; 1] = ["dualsense edge"];
+
 /// Matches a product name against the pads named above.
 ///
 /// Substring rather than equality: the same pad is reported as "DualSense",
@@ -364,6 +376,12 @@ const NAMED_IDENTITIES: [(&str, DeviceIdentity); 1] = [(
 /// and all three name one device.
 fn parse_named_identity(id: &str) -> Option<DeviceIdentity> {
     let lowered = id.to_ascii_lowercase();
+    if SHARES_A_NAME_NOT_A_DEVICE
+        .iter()
+        .any(|name| lowered.contains(name))
+    {
+        return None;
+    }
     NAMED_IDENTITIES
         .iter()
         .find(|(name, _)| lowered.contains(name))
@@ -440,6 +458,11 @@ mod apple_identity_tests {
         for unknown in [
             "Xbox Wireless Controller",
             "RadioMaster Pocket",
+            // A different product that carries a declared pad's name inside
+            // its own. Handing it that pad's USB identity would make every
+            // record built from it name a device the reader is not holding.
+            "DualSense Edge",
+            "DualSense Edge Wireless Controller",
             "gamepad",
             "",
         ] {

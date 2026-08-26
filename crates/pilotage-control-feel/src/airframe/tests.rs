@@ -51,9 +51,11 @@ fn the_alia_law_asks_the_x500_for_more_than_it_has() {
 fn even_the_alia_cannot_fly_its_own_agile_law() {
     // Agile asks 6.5 m/s^2 of an airframe that can produce 4.74. The mode is
     // not wrong to be the most aggressive of the three; the number is wrong to
-    // be one the vehicle cannot reach. Recorded here rather than quietly
-    // corrected: changing a law that has been flown is a tuning decision, and
-    // it belongs to a run that measures the result.
+    // be one the vehicle cannot reach.
+    //
+    // This is the UNSHAPED family, which names no airframe and so cannot know
+    // what any of them can deliver. `shaped_for` is where the number meets a
+    // vehicle, and it is the only thing entitled to move it.
     let agile = FlightFeelProfile::shaped(FeelMode::Agile)
         .horizontal
         .dynamics
