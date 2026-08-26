@@ -260,3 +260,30 @@ fn the_x_plane_lane_publishes_the_position_the_flight_controller_forwarded() {
     assert!((fix.position.longitude_deg - 8.545_593_8).abs() < 1e-7);
     assert_eq!(fix.stamp.role, SourceRole::SimulationTruth);
 }
+
+/// A Gazebo session whose sidecar is not built has no satellite sensor to
+/// read, so the oracle that outranks the forwarded frame publishes no
+/// position rather than pairing one from another clock.
+#[test]
+fn an_oracle_with_no_paired_sensor_states_no_position() {
+    let (name, _writer) = truth_writer("nav");
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.sim_truth = Some(pilotage_mavlink::link::SimTruthUpdate {
+            quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+            pos_ned_m: [0.0; 3],
+            vel_ned_mps: [0.0; 3],
+            lat_lon_alt: [473_977_419, 85_455_938, 488_227],
+            time_usec: 1_000,
+            sequence: 3,
+            received_at: std::time::Instant::now(),
+        });
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    attach_truth(&mut adapter, &name);
+
+    let batch = adapter.sample_telemetry();
+    let truth = batch.samples[0].sim_truth.expect("the oracle's sample");
+    assert!(truth.geodetic.is_none());
+}
