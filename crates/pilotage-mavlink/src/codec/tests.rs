@@ -14,7 +14,7 @@ const SOURCE: FrameSource = FrameSource {
 /// Test-side serializer: builds a MAVLink 2.0 frame the way Aviate's
 /// `aviate-link` does, optionally truncating trailing zero payload bytes
 /// (the v2 wire optimization the parser must zero-extend back).
-fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u8> {
+pub(crate) fn encode_frame(msg_id: u32, payload: &[u8], truncate: bool) -> Vec<u8> {
     let mut p = payload.to_vec();
     if truncate {
         while p.len() > 1 && p.last() == Some(&0) {

@@ -319,4 +319,4 @@ pub fn parse_datagram(bytes: &[u8], out: &mut Vec<(FrameSource, FcMessage)>) -> 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
