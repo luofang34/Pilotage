@@ -171,11 +171,11 @@ impl SimBackend for AviateXPlane {
         if simulator_running {
             verify_loaded_aircraft(&root, airframe)?;
         }
-        set_active_config_name(&root, airframe);
+        set_active_config_name(&root, airframe, simulator_running)?;
         // Aviate's estimator consumes REAL sensors from boot to
         // touchdown; the bridge's fabricated ground-stationary contract
         // is a PX4-specific crutch this lane refuses.
-        set_ground_sensor_contract(&root, false);
+        set_ground_sensor_contract(&root, false, simulator_running)?;
         prepare_xplane_runtime_blocking(
             &ctx.repo_root,
             &root,
