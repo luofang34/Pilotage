@@ -205,6 +205,32 @@ pub struct DisplayShape {
     pub snapshot_revision: u64,
 }
 
+/// Which north a reported heading is measured from.
+///
+/// A heading is a number and a reference. The map draws in true north, so a
+/// magnetic heading drawn as a true one is wrong by the local variation, which
+/// is tens of degrees in places. An unstated reference is its own case rather
+/// than an assumption of true.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
+pub enum DisplayHeadingReference {
+    /// Measured from true north.
+    TrueNorth,
+    /// Measured from magnetic north.
+    MagneticNorth,
+    /// The source stated a reference this display does not know.
+    Other,
+}
+
+impl From<surveillance_core::HeadingReference> for DisplayHeadingReference {
+    fn from(value: surveillance_core::HeadingReference) -> Self {
+        match value {
+            surveillance_core::HeadingReference::TrueNorth => Self::TrueNorth,
+            surveillance_core::HeadingReference::MagneticNorth => Self::MagneticNorth,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Where the aircraft carrying this display is.
 #[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
 pub struct DisplayOwnship {
@@ -212,6 +238,15 @@ pub struct DisplayOwnship {
     pub coordinate: DisplayCoordinate,
     /// Direction of travel over the ground in degrees from true north, when reported.
     pub course_deg: Option<f64>,
+    /// Speed over the ground in knots, when reported.
+    ///
+    /// A course says which way the aircraft is going; the speed beside it is what
+    /// makes a vector out of the direction.
+    pub ground_speed_kt: Option<f64>,
+    /// Direction the nose points in degrees, when reported.
+    pub heading_deg: Option<f64>,
+    /// Which north that heading is measured from.
+    pub heading_reference: Option<DisplayHeadingReference>,
     /// Selected display altitude in feet.
     pub altitude_ft: Option<i32>,
     /// Producer instance identity.
@@ -225,6 +260,9 @@ impl From<pilotage_presentation::OwnshipFeature> for DisplayOwnship {
         Self {
             coordinate: value.coordinate.into(),
             course_deg: value.course_deg,
+            ground_speed_kt: value.ground_speed_kt,
+            heading_deg: value.heading_deg,
+            heading_reference: value.heading_reference.map(Into::into),
             altitude_ft: value.altitude_ft,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,

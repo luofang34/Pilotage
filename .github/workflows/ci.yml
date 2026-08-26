@@ -445,6 +445,12 @@ jobs:
         # invent an attitude nobody measured.
         run: node clients/web/situation-motion.test.mjs
 
+      - name: situation ownship motion agrees across clients
+        # The iPad and the web client each derive the two directions in their
+        # own language. Neither would notice the other drifting, so both are
+        # held to one corpus of cases whose anchors come from geometry.
+        run: node clients/web/situation-motion.conformance.test.mjs
+
       - name: Vendor the MapLibre GL JS renderer (pinned digest)
         run: bash scripts/vendor-maplibre-web.sh
 
