@@ -88,17 +88,12 @@ fn a_second_launch_does_not_inherit_the_first_ones_document() {
     assert!(!text.contains("stale"), "the stale document survived");
 }
 
-#[test]
-fn the_model_contract_follows_every_field_that_decides_the_vehicle() {
-    // Binding every run to one declared model however the preset changed would
-    // make the field decoration. The two fields that name the aircraft are
-    // already bound elsewhere, so what earns this digest its place is the
-    // rest: a `lane_order` or a rate edited between runs is a different
-    // vehicle, and nothing else in the document would say so.
-    let config = Digest::from_bytes([8; 32]);
-    let base = model_contract_digest(&model("aa".repeat(32)), config);
-
-    let changed: [(&str, SimulatorModel); 7] = [
+/// One edit each to every field the contract is supposed to cover.
+///
+/// Kept beside the test rather than inside it: it is a table of cases, and a
+/// test body that is mostly data stops reading as a statement about behaviour.
+fn each_field_edited_once() -> [(&'static str, SimulatorModel); 7] {
+    [
         (
             "another simulator",
             SimulatorModel {
@@ -149,8 +144,20 @@ fn the_model_contract_follows_every_field_that_decides_the_vehicle() {
                 ..model("aa".repeat(32))
             },
         ),
-    ];
-    for (name, edited) in changed {
+    ]
+}
+
+#[test]
+fn the_model_contract_follows_every_field_that_decides_the_vehicle() {
+    // Binding every run to one declared model however the preset changed would
+    // make the field decoration. The two fields that name the aircraft are
+    // already bound elsewhere, so what earns this digest its place is the
+    // rest: a `lane_order` or a rate edited between runs is a different
+    // vehicle, and nothing else in the document would say so.
+    let config = Digest::from_bytes([8; 32]);
+    let base = model_contract_digest(&model("aa".repeat(32)), config);
+
+    for (name, edited) in each_field_edited_once() {
         assert_ne!(
             base,
             model_contract_digest(&edited, config),
