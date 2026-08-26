@@ -3,6 +3,12 @@ crates/pilotage-trial/Cargo.toml	serde	serde	normal		false	source	registry+https
 crates/pilotage-trial/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
 crates/pilotage-trial/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
 crates/pilotage-trial/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
+crates/pilotage-tuning-feedback/Cargo.toml	flight-tune	flight-tune	normal		false	path	tools/flight-tune	true		*
+crates/pilotage-tuning-feedback/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
+crates/pilotage-tuning-feedback/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+crates/pilotage-tuning-feedback/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+crates/pilotage-tuning-feedback/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
+crates/pilotage-tuning-feedback/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18
 tools/flight-tune-aviate/Cargo.toml	errno	errno	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		=0.3.14
 tools/flight-tune-aviate/Cargo.toml	flight-tune	flight-tune	normal		false	path	tools/flight-tune	true		*
 tools/flight-tune-aviate/Cargo.toml	libc	libc	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.2.177
@@ -29,7 +35,9 @@ tools/flight-tune-campaign/Cargo.toml	pilotage-tuning-feedback	pilotage-tuning-f
 tools/flight-tune-campaign/Cargo.toml	pilotage-tuning-journal-proof	pilotage-tuning-journal-proof	normal		false	path	crates/pilotage-tuning-journal-proof	true		*
 tools/flight-tune-campaign/Cargo.toml	pilotage-xplane-trial	pilotage-xplane-trial	normal		false	path	crates/pilotage-xplane-trial	true		*
 tools/flight-tune-campaign/Cargo.toml	rustix	rustix	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	fs	^1.1.4
+tools/flight-tune-campaign/Cargo.toml	serde	serde	dev		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
 tools/flight-tune-campaign/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune-campaign/Cargo.toml	serde_json	serde_json	dev		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
 tools/flight-tune-campaign/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
 tools/flight-tune-campaign/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
 tools/flight-tune-campaign/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18

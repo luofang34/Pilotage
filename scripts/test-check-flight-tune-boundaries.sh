@@ -12,6 +12,8 @@ mkdir -p \
     "$fixture/adapters/flight-tune-xplane/src" \
     "$fixture/adapters/pilotage-xplane-trial/src" \
     "$fixture/crates/pilotage-trial/src" \
+    "$fixture/crates/pilotage-tuning-feedback/src" \
+    "$fixture/crates/pilotage-tuning-feedback/src/qualification" \
     "$fixture/injected/src" \
     "$fixture/scripts" \
     "$fixture/tools/flight-tune/src" \
@@ -30,6 +32,7 @@ write_workspace() {
         '    "adapters/flight-tune-xplane",' \
         '    "adapters/pilotage-xplane-trial",' \
         '    "crates/pilotage-trial",' \
+        '    "crates/pilotage-tuning-feedback",' \
         '    "injected",' \
         '    "tools/flight-tune",' \
         '    "tools/flight-tune-aviate",' \
@@ -134,6 +137,15 @@ write_clean_manifests() {
         > "$fixture/crates/pilotage-trial/Cargo.toml"
     printf '%s\n' \
         '[package]' \
+        'name = "pilotage-tuning-feedback"' \
+        'version = "0.0.0"' \
+        'edition = "2021"' \
+        '[dependencies]' \
+        > "$fixture/crates/pilotage-tuning-feedback/Cargo.toml"
+    printf '%s\n' 'pub fn verify() {}' \
+        > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+    printf '%s\n' \
+        '[package]' \
         'name = "flight-tune"' \
         'version = "0.0.0"' \
         'edition = "2021"' \
@@ -151,6 +163,8 @@ write_clean_manifests() {
         > "$fixture/tools/flight-tune-campaign/Cargo.toml"
     printf '%s\n' 'pub mod config;' \
         > "$fixture/tools/flight-tune-campaign/src/lib.rs"
+    printf '%s\n' 'pub fn publish() {}' \
+        > "$fixture/tools/flight-tune-campaign/src/publish.rs"
 }
 
 write_dependency_allowlist() {
@@ -257,6 +271,357 @@ printf '%s\t%s\n' \
     'useflight_tune_xplane::CausalJoinConfig;' \
     > "$fixture_allowlist"
 run_guard >/dev/null
+
+printf '%s\n' \
+    'pub fn verify(receipt: &flight_tune::RunTerminalReceipt) {' \
+    '    let _ = ::flight_tune::RunTerminalReceipt::validate(receipt);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/qualification/evaluation.rs"
+run_guard >/dev/null
+\rm "$fixture/crates/pilotage-tuning-feedback/src/qualification/evaluation.rs"
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(snapshot: &flight_tune::JournalEvidenceSnapshot) {' \
+    '    snapshot.validate().expect("core validation");' \
+    '    let _ = flight_tune::promotion_policy_digest;' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a feedback verifier core validation bypass' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(' \
+    '    proof: &flight_tune::AuthenticatedEvaluationProof,' \
+    '    stage: &flight_tune::SearchStage,' \
+    ') {' \
+    '    proof.validate().expect("core proof validation");' \
+    '    stage.validate().expect("core stage validation");' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'core validation through arbitrary receiver names' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(' \
+    '    proof: &flight_tune::AuthenticatedEvaluationProof,' \
+    '    receipt: &flight_tune::RunTerminalReceipt,' \
+    ') {' \
+    '    proof.validate(); // RunTerminalReceipt::validate(receipt)' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/qualification/evaluation.rs"
+expect_failure \
+    'an evaluation whitelist comment disguise' \
+    'bypasses the independent feedback verifier boundary'
+\rm "$fixture/crates/pilotage-tuning-feedback/src/qualification/evaluation.rs"
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(proof: &flight_tune::AuthenticatedEvaluationProof) {' \
+    '    proof.validate(); // writer.validate(&directory)' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/storage.rs"
+expect_failure \
+    'a storage whitelist comment disguise' \
+    'bypasses the independent feedback verifier boundary'
+\rm "$fixture/crates/pilotage-tuning-feedback/src/storage.rs"
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune::AuthenticatedEvaluationProof as P;' \
+    'pub fn verify(proof: &P) {' \
+    '    let validator = P::validate;' \
+    '    let _ = validator(proof);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core validator function item alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(proof: &flight_tune::AuthenticatedEvaluationProof) {' \
+    '    invoke!(proof, validate);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core validator macro disguise' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'macro_rules! format {' \
+    '    ($root:ident, $kind:ident, $member:ident, $value:expr) => {' \
+    '        $root::$kind::$member($value)' \
+    '    };' \
+    '}' \
+    'pub fn verify(context: flight_tune::RunExecutionContext) {' \
+    '    let _ = format!(flight_tune, RunExecutionContext, new, context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a local macro with an allowed macro name' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(session: &flight_tune::SessionIdentity) {' \
+    '    let _ = session.r#digest();' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a raw core digest identifier' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    '#[cfg_attr(all(), path = "tests/escape.rs")]' \
+    'mod hidden;' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'an indirect test-path production module disguise' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' 'mod r#tests;' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a raw test module identifier' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(receipt: &evil::RunTerminalReceipt) {' \
+    '    evil::RunTerminalReceipt::validate(receipt);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/qualification/evaluation.rs"
+expect_failure \
+    'a foreign type with the allowed receipt suffix' \
+    'bypasses the independent feedback verifier boundary'
+\rm "$fixture/crates/pilotage-tuning-feedback/src/qualification/evaluation.rs"
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(' \
+    '    context: flight_tune::RunExecutionContext,' \
+    ') {' \
+    '    let _ = flight_tune::RunExecutionContext::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core validating constructor' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune::RunExecutionContext as Ctx;' \
+    'pub fn verify(context: Ctx) {' \
+    '    let _ = Ctx::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'an imported core constructor alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'type Ctx = flight_tune::RunExecutionContext;' \
+    'pub fn verify(context: Ctx) {' \
+    '    let _ = Ctx::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core constructor type alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(context: flight_tune::RunExecutionContext) {' \
+    '    use flight_tune::RunExecutionContext as Ctx;' \
+    '    let _ = Ctx::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a function-local core constructor alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune::*;' \
+    'pub fn verify(context: RunExecutionContext) {' \
+    '    let _ = RunExecutionContext::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core constructor through a glob import' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune::{self as ft};' \
+    'pub fn verify(context: ft::RunExecutionContext) {' \
+    '    let _ = ft::RunExecutionContext::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core constructor through a grouped self alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use {flight_tune::RunExecutionContext as Ctx};' \
+    'pub fn verify(context: Ctx) {' \
+    '    let _ = Ctx::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core constructor through a grouped root import' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(context: flight_tune::RunExecutionContext) {' \
+    '    let _ = <flight_tune::RunExecutionContext>::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core constructor through an absolute UFCS path' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune::RunExecutionContext as Ctx;' \
+    'pub fn verify(context: Ctx) {' \
+    '    let _ = <Ctx>::new(context);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core constructor through an imported UFCS alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune as ft;' \
+    'pub fn verify() {' \
+    '    let _ = ft::promotion_policy_digest;' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core helper through a crate alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'use flight_tune::AuthenticatedEvaluationProof as P;' \
+    'pub fn verify(proof: &P) {' \
+    '    let _ = P::validate(proof);' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core validator through a type alias' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(proof: &flight_tune::AuthenticatedEvaluationProof) {' \
+    '    let _ = proof.recompute_evaluation_digest();' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a core digest recomputation helper' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    'pub fn verify(' \
+    '    comparison: &flight_tune::PromotionComparison,' \
+    '    session: &flight_tune::SessionIdentity,' \
+    ') {' \
+    '    let _ = comparison.all_passed();' \
+    '    let _ = session.digest();' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'other core decision and identity methods' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+mkdir -p "$fixture/crates/pilotage-tuning-feedback/src/tests"
+printf '%s\n' \
+    '#[path = "tests/escape.rs"]' \
+    'mod hidden;' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+printf '%s\n' \
+    'pub fn verify(proof: &flight_tune::AuthenticatedEvaluationProof) {' \
+    '    proof.validate().expect("hidden core validation");' \
+    '}' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/tests/escape.rs"
+expect_failure \
+    'a test-path production module disguise' \
+    'bypasses the independent feedback verifier boundary'
+\rm -rf "$fixture/crates/pilotage-tuning-feedback/src/tests"
+write_clean_manifests
+
+printf '%s\n' \
+    '#[path = "../../../tools/flight-tune/tests/tuner/test_rig.rs"]' \
+    'mod producer_rig;' \
+    > "$fixture/crates/pilotage-tuning-feedback/src/lib.rs"
+expect_failure \
+    'a production dependency on the flight-tune test rig' \
+    'bypasses the independent feedback verifier boundary'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "pilotage-tuning-feedback"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[dependencies]' \
+    'flight-tune-xplane = { path = "../../adapters/flight-tune-xplane" }' \
+    > "$fixture/crates/pilotage-tuning-feedback/Cargo.toml"
+expect_failure \
+    'a simulator-specific feedback dependency' \
+    'has a simulator-specific dependency'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "pilotage-tuning-feedback"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[dependencies]' \
+    'injected = { path = "../../injected" }' \
+    > "$fixture/crates/pilotage-tuning-feedback/Cargo.toml"
+expect_failure \
+    'an unreviewed feedback production dependency' \
+    'has unreviewed direct production dependency injected'
+write_clean_manifests
+
+printf '%s\n' \
+    '[package]' \
+    'name = "flight-tune-campaign"' \
+    'version = "0.0.0"' \
+    'edition = "2021"' \
+    '[dependencies]' \
+    'flight-tune-aviate = { path = "../flight-tune-aviate" }' \
+    > "$fixture/tools/flight-tune-campaign/Cargo.toml"
+expect_failure \
+    'a simulator-specific campaign publisher dependency' \
+    'has a simulator-specific publisher dependency'
+write_clean_manifests
+
+printf '%s\n' \
+    '#[path = "../../flight-tune/tests/tuner/test_rig.rs"]' \
+    'mod producer_rig;' \
+    > "$fixture/tools/flight-tune-campaign/src/publish.rs"
+expect_failure \
+    'a production campaign publisher dependency on the test rig' \
+    'crosses the simulator-neutral campaign publisher boundary'
+write_clean_manifests
 
 printf '%s\n' '' '[patch.crates-io]' \
     'serde = { path = "crates/pilotage-trial" }' \

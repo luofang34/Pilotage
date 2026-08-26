@@ -1,6 +1,7 @@
 use crate::journal::{
-    AttemptRole, CampaignPhase, FinalQualificationOutcome, JOURNAL_SCHEMA_VERSION, JournalEntry,
-    JournalEvent, PromotionDecision, SessionIdentity,
+    AttemptRole, AuthenticatedEvaluationProof, CampaignPhase, FinalQualificationOutcome,
+    JOURNAL_SCHEMA_VERSION, JournalEntry, JournalEvent, PromotionClosure, PromotionDecision,
+    SessionIdentity,
 };
 use crate::{
     CandidateEvaluation, CandidateTransitionReference, Digest, SearchStage, TrainingObservation,
@@ -8,7 +9,7 @@ use crate::{
 };
 
 mod attempt;
-mod plan;
+pub(crate) mod plan;
 mod run;
 pub(super) mod terminal;
 pub(crate) mod transition;
@@ -21,6 +22,7 @@ pub(crate) struct PendingAttempt {
     pub(crate) trial_id: u64,
     pub(crate) role: AttemptRole,
     pub(crate) candidate: Digest,
+    pub(crate) plan_digest: Digest,
     pub(crate) transition: Option<CandidateTransitionReference>,
     pub(crate) prepared_runs: Vec<PreparedRun>,
     pub(crate) outcome: Option<PendingOutcome>,
@@ -30,6 +32,7 @@ pub(crate) struct PendingAttempt {
 pub(crate) struct PendingOutcome {
     pub(crate) evaluation: CandidateEvaluation,
     pub(crate) selected: Option<bool>,
+    pub(crate) proof: Option<AuthenticatedEvaluationProof>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,14 +48,18 @@ pub(crate) struct JournalState {
     pub(crate) pending: Option<PendingAttempt>,
     pub(crate) frozen_candidate: Option<Digest>,
     pub(crate) promotion_baseline: Option<CandidateEvaluation>,
+    pub(crate) promotion_baseline_proof: Option<AuthenticatedEvaluationProof>,
     pub(crate) promotion_frozen: Option<CandidateEvaluation>,
+    pub(crate) promotion_frozen_proof: Option<AuthenticatedEvaluationProof>,
     pub(crate) promotion_decision: Option<PromotionDecision>,
+    pub(crate) promotion_closure: Option<PromotionClosure>,
     pub(crate) final_evaluation: Option<CandidateEvaluation>,
+    pub(crate) final_proof: Option<AuthenticatedEvaluationProof>,
     pub(crate) final_outcome: Option<FinalQualificationOutcome>,
 }
 
 impl JournalState {
-    pub(crate) fn selected_release_candidate(&self, initial: Digest) -> Digest {
+    pub(crate) fn settlement_candidate(&self, initial: Digest) -> Digest {
         if self
             .promotion_decision
             .as_ref()
@@ -62,6 +69,53 @@ impl JournalState {
         } else {
             initial
         }
+    }
+
+    pub(crate) fn authorized_final_candidate(&self, initial: Digest) -> Result<Digest, TuneError> {
+        let closure = self
+            .promotion_closure
+            .as_ref()
+            .ok_or_else(|| invalid("final qualification has no promotion closure"))?;
+        match closure.decision {
+            PromotionDecision::Promoted { .. } => closure
+                .selected_candidate
+                .filter(|candidate| Some(*candidate) == self.frozen_candidate)
+                .ok_or_else(|| invalid("promotion did not authorize the frozen candidate")),
+            PromotionDecision::RejectedNoImprovement { .. } => closure
+                .selected_candidate
+                .filter(|candidate| *candidate == initial)
+                .ok_or_else(|| invalid("promotion did not authorize the initial candidate")),
+            PromotionDecision::RejectedHardGate { .. }
+            | PromotionDecision::Indeterminate { .. } => Err(invalid(
+                "the promotion result does not authorize final qualification",
+            )),
+        }
+    }
+
+    pub(crate) fn authenticated_proof(
+        &self,
+        trial_id: u64,
+        evaluation: &CandidateEvaluation,
+    ) -> Result<Option<AuthenticatedEvaluationProof>, TuneError> {
+        let pending = self
+            .pending
+            .as_ref()
+            .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
+            .ok_or_else(|| invalid("the attempt is not pending or already has an outcome"))?;
+        if matches!(
+            pending.role,
+            AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. }
+        ) {
+            return Ok(None);
+        }
+        Ok(Some(AuthenticatedEvaluationProof::new(
+            pending.trial_id,
+            pending.role,
+            pending.candidate,
+            pending.plan_digest,
+            evaluation.clone(),
+            terminal::owned_committed_receipts(pending)?,
+        )?))
     }
 }
 
@@ -110,9 +164,13 @@ fn initial_state(candidate: Digest) -> JournalState {
         pending: None,
         frozen_candidate: None,
         promotion_baseline: None,
+        promotion_baseline_proof: None,
         promotion_frozen: None,
+        promotion_frozen_proof: None,
         promotion_decision: None,
+        promotion_closure: None,
         final_evaluation: None,
+        final_proof: None,
         final_outcome: None,
     }
 }
@@ -181,21 +239,14 @@ fn apply_event(
         | JournalEvent::RunTerminalReportRecorded { .. }
         | JournalEvent::RunTerminalEvidenceFailureRecorded { .. }
         | JournalEvent::RunCommitted { .. }) => terminal::apply_event(state, event, session),
-        JournalEvent::AttemptCompleted {
-            trial_id,
-            evaluation,
-            selected_as_training_incumbent,
-        } => attempt::complete(
-            state,
-            *trial_id,
-            evaluation,
-            *selected_as_training_incumbent,
-            stage,
-            fixed_seed,
-        ),
-        JournalEvent::AttemptQuarantined { trial_id, reason } => {
-            attempt::quarantine(state, *trial_id, reason)
+        event @ JournalEvent::AttemptCompleted { .. } => {
+            apply_attempt_completion(state, event, stage, fixed_seed)
         }
+        JournalEvent::AttemptQuarantined {
+            trial_id,
+            reason,
+            proof,
+        } => attempt::quarantine(state, *trial_id, reason, proof.as_deref()),
         JournalEvent::CleanupRecorded { trial_id, cleanup } => {
             attempt::cleanup(state, *trial_id, cleanup)
         }
@@ -203,11 +254,65 @@ fn apply_event(
             baseline,
             candidate,
         } => close::freeze(state, *baseline, *candidate, initial),
-        JournalEvent::PromotionClosed { decision } => close::promotion(state, decision, stage),
-        JournalEvent::Sealed { candidate, outcome } => {
-            close::seal(state, *candidate, outcome, initial, stage)
+        JournalEvent::PromotionClosed { closure } => {
+            close::promotion(state, closure, stage, session)
         }
+        event @ JournalEvent::Sealed { .. } => apply_seal(state, event, initial, stage),
     }
+}
+
+fn apply_attempt_completion(
+    state: &mut JournalState,
+    event: &JournalEvent,
+    stage: &SearchStage,
+    fixed_seed: u64,
+) -> Result<(), TuneError> {
+    let JournalEvent::AttemptCompleted {
+        trial_id,
+        evaluation,
+        proof,
+        selected_as_training_incumbent,
+    } = event
+    else {
+        return Err(invalid("the event is not an attempt completion"));
+    };
+    attempt::complete(
+        state,
+        *trial_id,
+        evaluation,
+        proof.as_deref(),
+        *selected_as_training_incumbent,
+        stage,
+        fixed_seed,
+    )
+}
+
+fn apply_seal(
+    state: &mut JournalState,
+    event: &JournalEvent,
+    initial: Digest,
+    stage: &SearchStage,
+) -> Result<(), TuneError> {
+    let JournalEvent::Sealed {
+        candidate,
+        outcome,
+        promotion_closure_digest,
+        final_evaluation_digest,
+        final_proof_digest,
+    } = event
+    else {
+        return Err(invalid("the event is not a final seal"));
+    };
+    close::seal(
+        state,
+        *candidate,
+        outcome,
+        *promotion_closure_digest,
+        *final_evaluation_digest,
+        *final_proof_digest,
+        initial,
+        stage,
+    )
 }
 
 fn invalid(detail: impl Into<String>) -> TuneError {
@@ -216,3 +321,5 @@ fn invalid(detail: impl Into<String>) -> TuneError {
     }
 }
 mod close;
+
+pub(crate) use close::{expected_promotion_closure, expected_promotion_closure_from_proofs};

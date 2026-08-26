@@ -1,0 +1,18 @@
+[package]
+name = "flight-tune-campaign"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Publication of verified flight tuning campaign evidence"
+
+[lints]
+workspace = true
+
+[dependencies]
+flight-tune = { workspace = true }
+pilotage-tuning-feedback = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

@@ -424,9 +424,12 @@ fn test_stage() -> SearchStage {
         final_qualification_scenarios: vec![scenario("qualification", 3)],
         repetitions: 2,
         promotion: PromotionPolicy {
+            schema_version: crate::PROMOTION_POLICY_SCHEMA_VERSION,
+            seed_policy: crate::PromotionSeedPolicy::PairedScenarioDigestV1,
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.1,
             maximum_control_effort_increase: 0.2,
+            objective_regression_upper_95: BTreeMap::from([("tracking".to_owned(), 0.2)]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 1.0,
