@@ -38,6 +38,19 @@ fn airframe_key() -> String {
     std::env::var("PILOTAGE_XPLANE_AIRFRAME").unwrap_or_else(|_| AIRFRAME.to_owned())
 }
 
+/// The law the Alia starts on.
+///
+/// The same artifact the host falls back to when nothing names one, but it
+/// reaches the Alia there by being the single compiled-in default rather
+/// than by being this aircraft's — which is the property that lets it
+/// reach every OTHER vehicle too. Named here, each backend answers for
+/// what it launches.
+///
+/// This is the compatibility law, not a fitted one: it belongs to no
+/// airframe, and `alia250-shaped-*` exist beside it. Moving to one of
+/// those changes what the aircraft does and wants a flight behind it.
+const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/alia250-legacy-v1.json";
+
 /// The Aviate + X-Plane SITL backend.
 #[derive(Debug)]
 pub struct AviateXPlane;
@@ -52,7 +65,7 @@ impl SimBackend for AviateXPlane {
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![
+        let mut env = vec![
             (
                 "PILOTAGE_AVIATE_PROFILE".to_owned(),
                 ctx.profile.as_env_value().to_owned(),
@@ -70,7 +83,9 @@ impl SimBackend for AviateXPlane {
                     .display()
                     .to_string(),
             ),
-        ]
+        ];
+        env.extend(super::control_feel_env(ctx, CONTROL_FEEL_PROFILE));
+        env
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {

@@ -113,6 +113,21 @@ mod tests {
                 "alia250-shaped-agile-v1.json",
                 pilotage_control_feel::FeelMode::Agile,
             ),
+            // The X500's, which the launcher names by path for a gazebo
+            // session. This host is what reads that path, so a file it
+            // cannot load is a session that does not start.
+            (
+                "x500-shaped-precision-v1.json",
+                pilotage_control_feel::FeelMode::Precision,
+            ),
+            (
+                "x500-shaped-balanced-v1.json",
+                pilotage_control_feel::FeelMode::Balanced,
+            ),
+            (
+                "x500-shaped-agile-v1.json",
+                pilotage_control_feel::FeelMode::Agile,
+            ),
         ] {
             let path = profiles.join(file);
             let loaded = control_feel_from_env_blocking(

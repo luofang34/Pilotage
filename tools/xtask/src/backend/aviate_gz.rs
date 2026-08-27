@@ -14,6 +14,16 @@ use crate::readiness::{Readiness, stage_log};
 const WORLD: &str = "sim/worlds/x500_flightdeck.sdf";
 const WORLD_NAME: &str = "aviate_sitl";
 
+/// The X500's own control-feel law.
+///
+/// Balanced rather than agile or precision: it is the law an operator who
+/// has asked for nothing should get.
+///
+/// This binds the law the vehicle STARTS on. A runtime feel-mode request
+/// does not reach these files — it shapes one from the mode alone — so
+/// asking for another mode moves the vehicle off its fitted law.
+const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
+
 /// The Aviate + Gazebo SITL backend.
 #[derive(Debug)]
 pub struct AviateGz;
@@ -27,15 +37,17 @@ impl SimBackend for AviateGz {
         "aviate"
     }
 
-    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![
+    fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
+        let mut env = vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             // A sensor's topic is scoped by the world it is in. The
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.
             ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
-        ]
+        ];
+        env.extend(super::control_feel_env(ctx, CONTROL_FEEL_PROFILE));
+        env
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
