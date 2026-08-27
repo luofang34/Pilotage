@@ -51,6 +51,19 @@ pub trait SimBackend {
     fn host_adapter(&self) -> &'static str;
     /// Extra environment the host needs for this backend.
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)>;
+    /// Repository-relative control-feel law for the vehicle this backend
+    /// launches, or `None` for one whose host does not read a law.
+    ///
+    /// DECLARED rather than written into [`Self::host_env`], so that
+    /// naming a law and deciding whether to pass it are separate jobs. The
+    /// decision has two cases that do harm rather than nothing — a
+    /// physical session, and an operator who already named one — and a
+    /// backend that assembled the variable itself would have to remember
+    /// both. Here it cannot: it says which law is its vehicle's, and
+    /// [`control_feel_env`] is the only thing that writes the variable.
+    fn control_feel_profile(&self) -> Option<&'static str> {
+        None
+    }
     /// Validates tools/artifacts and plans the simulator and FC stages,
     /// in launch order.
     ///
@@ -199,15 +212,8 @@ mod tests {
     /// compiled-in default for every vehicle — a law qualified for a
     /// different airframe. The launcher is the only component that knows
     /// which aircraft it started, so this is where the binding is asserted.
-    ///
-    /// Asserts a SINGLE entry, not merely a correct one. Stage environment
-    /// is applied in order and the last write wins, so a correct entry
-    /// followed by a stale one launches the stale law — which a shared
-    /// "common host env" helper appending a default is enough to produce.
     #[test]
     fn each_aviate_backend_names_its_own_vehicles_control_feel() {
-        use super::SessionContext;
-        use crate::cli::Profile;
         use std::path::{Path, PathBuf};
 
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -215,36 +221,20 @@ mod tests {
             .and_then(Path::parent)
             .expect("workspace root is two levels above tools/xtask")
             .to_path_buf();
-        let ctx = SessionContext {
-            repo_root: repo_root.clone(),
-            host_port: 4433,
-            viewer_port: 8080,
-            profile: Profile::Simulation,
-            log_dir: repo_root.join("target/xtask-sim"),
-            lan: false,
-        };
 
-        // Backend name -> the substring its profile's file name must carry.
+        // Backend name -> the substring its law's file name must carry.
         for (backend, vehicle) in [("aviate-gz", "x500"), ("aviate-xplane", "alia250")] {
-            let env = backend_for(backend).expect("known backend").host_env(&ctx);
-            let named: Vec<_> = env
-                .iter()
-                .filter(|(key, _)| key == super::CONTROL_FEEL_ENV)
-                .collect();
-            assert!(
-                !named.is_empty(),
-                "{backend} names no control-feel law, so the host falls back to \
-                 whatever single default it was compiled with"
-            );
-            assert_eq!(
-                named.len(),
-                1,
-                "{backend} names the control-feel law {} times; the last write is the \
-                 one that reaches the host, so a correct entry does not make this safe",
-                named.len()
-            );
+            let declared = backend_for(backend)
+                .expect("known backend")
+                .control_feel_profile()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{backend} names no control-feel law, so the host falls back to \
+                         whatever single default it was compiled with"
+                    )
+                });
 
-            let path = PathBuf::from(named[0].1.clone());
+            let path = repo_root.join(declared);
             let name = path
                 .file_name()
                 .and_then(std::ffi::OsStr::to_str)
@@ -262,13 +252,50 @@ mod tests {
         }
     }
 
+    /// No backend may write the control-feel variable itself.
+    ///
+    /// A backend that assembles it by hand has to remember every case
+    /// where passing a law does harm — a physical session, and an operator
+    /// who already named one — and one that remembers only the first
+    /// silently replaces the operator's law while every other test here
+    /// still passes. Declaring the law and writing the variable are
+    /// therefore separate: backends return a path, and the launcher is the
+    /// only writer.
+    #[test]
+    fn no_backend_writes_the_control_feel_variable_itself() {
+        use super::{CONTROL_FEEL_ENV, SessionContext};
+        use crate::cli::Profile;
+        use std::path::PathBuf;
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for backend in ["aviate-gz", "aviate-xplane", "px4-gz", "px4-xplane"] {
+            for profile in [Profile::Simulation, Profile::Physical, Profile::OracleOnly] {
+                let ctx = SessionContext {
+                    repo_root: repo_root.clone(),
+                    host_port: 4433,
+                    viewer_port: 8080,
+                    profile,
+                    log_dir: repo_root.join("target/xtask-sim"),
+                    lan: false,
+                };
+                let env = backend_for(backend).expect("known backend").host_env(&ctx);
+                assert!(
+                    !env.iter().any(|(key, _)| key == CONTROL_FEEL_ENV),
+                    "{backend} writes {CONTROL_FEEL_ENV} in host_env for {profile:?}; \
+                     it must declare the law through control_feel_profile() and let the \
+                     launcher decide whether passing it is safe"
+                );
+            }
+        }
+    }
+
     /// A physical session must be handed NO control-feel law.
     ///
     /// The host does not ignore one there, it refuses the session
     /// outright, so a launcher that names a law unconditionally turns a
-    /// working `--profile physical` run into a startup failure. Naming
-    /// the law per vehicle is what introduced that risk, and this is the
-    /// test that keeps it from coming back.
+    /// working `--profile physical` run into a startup failure. Naming a
+    /// law per vehicle is what creates that risk, and this test is what
+    /// holds it closed.
     #[test]
     fn a_physical_session_is_handed_no_control_feel_law() {
         use super::SessionContext;
@@ -285,9 +312,12 @@ mod tests {
                 log_dir: repo_root.join("target/xtask-sim"),
                 lan: false,
             };
-            let env = backend_for(backend).expect("known backend").host_env(&ctx);
+            let declared = backend_for(backend)
+                .expect("known backend")
+                .control_feel_profile()
+                .expect("an Aviate backend declares a law");
             assert!(
-                !env.iter().any(|(key, _)| key == super::CONTROL_FEEL_ENV),
+                super::control_feel_env(&ctx, declared).is_empty(),
                 "{backend} names a control-feel law for a physical session, which the \
                  host refuses with AviatePhysicalControlFeelOverride"
             );
@@ -301,7 +331,6 @@ mod tests {
     /// diagnostic on either side: the vehicle flies a law nobody chose and
     /// nothing says so. That is the same failure this whole change exists
     /// to prevent, pointed the other way.
-    ///
     #[test]
     fn an_operators_own_control_feel_law_is_not_replaced() {
         use super::{CONTROL_FEEL_ENV, SessionContext, control_feel_env_given};

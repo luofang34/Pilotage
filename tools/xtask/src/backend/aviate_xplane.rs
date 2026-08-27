@@ -64,8 +64,12 @@ impl SimBackend for AviateXPlane {
         "aviate"
     }
 
+    fn control_feel_profile(&self) -> Option<&'static str> {
+        Some(CONTROL_FEEL_PROFILE)
+    }
+
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        let mut env = vec![
+        vec![
             (
                 "PILOTAGE_AVIATE_PROFILE".to_owned(),
                 ctx.profile.as_env_value().to_owned(),
@@ -83,9 +87,7 @@ impl SimBackend for AviateXPlane {
                     .display()
                     .to_string(),
             ),
-        ];
-        env.extend(super::control_feel_env(ctx, CONTROL_FEEL_PROFILE));
-        env
+        ]
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {

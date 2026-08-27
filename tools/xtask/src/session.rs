@@ -62,11 +62,15 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     backend.prepare(&ctx)?;
 
     let mut stages = backend.plan(&ctx)?;
-    stages.push(host_stage(
-        &ctx,
-        backend.host_adapter(),
-        backend.host_env(&ctx),
-    ));
+    let mut host_env = backend.host_env(&ctx);
+    // Applied here rather than inside a backend: naming a vehicle's law and
+    // deciding whether to pass it are separate jobs, and the deciding one
+    // has two cases where passing it does harm rather than nothing. One
+    // place writes the variable, so no backend has to remember them.
+    if let Some(profile_path) = backend.control_feel_profile() {
+        host_env.extend(crate::backend::control_feel_env(&ctx, profile_path));
+    }
+    stages.push(host_stage(&ctx, backend.host_adapter(), host_env));
     stages.push(viewer_stage(&ctx)?);
 
     // The cancellation source must exist before the first child spawns:
