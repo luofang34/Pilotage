@@ -111,6 +111,29 @@ pub trait SimBackend {
     fn reset(&self, repo_root: &std::path::Path) -> Result<(), XtaskError>;
 }
 
+/// Names the control-feel law a simulated vehicle flies on.
+///
+/// The host cannot choose this for itself: every Aviate backend hands it
+/// `--adapter aviate`, so absent a name it loads one compiled-in default
+/// for all of them. The launcher is the only component that knows which
+/// aircraft it started.
+///
+/// Returns NOTHING for a physical session. There the host refuses a named
+/// law outright — `AviatePhysicalControlFeelOverride` — because a real
+/// aircraft must fly the qualified compiled-in artifact rather than one a
+/// launcher pointed at, so naming one does not merely go unused, it fails
+/// the session. Encoded once here so a backend added later cannot
+/// reintroduce that by writing the variable itself.
+pub(crate) fn control_feel_env(ctx: &SessionContext, profile_path: &str) -> Vec<(String, String)> {
+    if ctx.profile == Profile::Physical {
+        return Vec::new();
+    }
+    vec![(
+        "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE".to_owned(),
+        ctx.repo_root.join(profile_path).display().to_string(),
+    )]
+}
+
 /// Resolves `--fc` to a backend, fail-closed on unknown names.
 ///
 /// # Errors
@@ -193,6 +216,39 @@ mod tests {
                 path.is_file(),
                 "{backend} names a control-feel law at {} that does not exist",
                 path.display()
+            );
+        }
+    }
+
+    /// A physical session must be handed NO control-feel law.
+    ///
+    /// The host does not ignore one there, it refuses the session
+    /// outright, so a launcher that names a law unconditionally turns a
+    /// working `--profile physical` run into a startup failure. Naming
+    /// the law per vehicle is what introduced that risk, and this is the
+    /// test that keeps it from coming back.
+    #[test]
+    fn a_physical_session_is_handed_no_control_feel_law() {
+        use super::SessionContext;
+        use crate::cli::Profile;
+        use std::path::PathBuf;
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for backend in ["aviate-gz", "aviate-xplane"] {
+            let ctx = SessionContext {
+                repo_root: repo_root.clone(),
+                host_port: 4433,
+                viewer_port: 8080,
+                profile: Profile::Physical,
+                log_dir: repo_root.join("target/xtask-sim"),
+                lan: false,
+            };
+            let env = backend_for(backend).expect("known backend").host_env(&ctx);
+            assert!(
+                !env.iter()
+                    .any(|(key, _)| key == "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE"),
+                "{backend} names a control-feel law for a physical session, which the \
+                 host refuses with AviatePhysicalControlFeelOverride"
             );
         }
     }

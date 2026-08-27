@@ -61,7 +61,7 @@ impl SimBackend for AviateXPlane {
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![
+        let mut env = vec![
             (
                 "PILOTAGE_AVIATE_PROFILE".to_owned(),
                 ctx.profile.as_env_value().to_owned(),
@@ -73,20 +73,15 @@ impl SimBackend for AviateXPlane {
                 "xplane-plugin".to_owned(),
             ),
             (
-                "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE".to_owned(),
-                ctx.repo_root
-                    .join(CONTROL_FEEL_PROFILE)
-                    .display()
-                    .to_string(),
-            ),
-            (
                 "PILOTAGE_RESET_CMD".to_owned(),
                 ctx.repo_root
                     .join("scripts/reset-xplane-sim.sh")
                     .display()
                     .to_string(),
             ),
-        ]
+        ];
+        env.extend(super::control_feel_env(ctx, CONTROL_FEEL_PROFILE));
+        env
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {

@@ -21,10 +21,6 @@ const WORLD_NAME: &str = "aviate_sitl";
 /// in the session.
 const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
 
-fn control_feel_profile_path(repo_root: &Path) -> PathBuf {
-    repo_root.join(CONTROL_FEEL_PROFILE)
-}
-
 /// The Aviate + Gazebo SITL backend.
 #[derive(Debug)]
 pub struct AviateGz;
@@ -39,27 +35,16 @@ impl SimBackend for AviateGz {
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        vec![
+        let mut env = vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             // A sensor's topic is scoped by the world it is in. The
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.
             ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
-            // The host cannot tell one Aviate vehicle from another: both
-            // backends hand it `--adapter aviate` and the only other thing
-            // it learns is the session profile. Absent this it falls back
-            // to a single compiled-in default, which is the ALIA's law —
-            // so the X500 flew on another aircraft's control feel. The
-            // launcher is what picks the vehicle, so it is what says which
-            // law that vehicle has.
-            (
-                "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE".to_owned(),
-                control_feel_profile_path(&ctx.repo_root)
-                    .display()
-                    .to_string(),
-            ),
-        ]
+        ];
+        env.extend(super::control_feel_env(ctx, CONTROL_FEEL_PROFILE));
+        env
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
