@@ -38,6 +38,7 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
             Ok(())
         }
         Command::Reset(fc) => session::run_reset(&fc),
+        Command::Handshake(out_dir) => session::run_handshake(&out_dir),
         Command::Sim(sim) => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

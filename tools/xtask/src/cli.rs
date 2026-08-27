@@ -1,4 +1,5 @@
-//! Argument parsing for the xtask entry point: `sim`, `reset`, `help`.
+//! Argument parsing for the xtask entry point: `sim`, `reset`,
+//! `handshake`, `help`.
 
 use crate::error::XtaskError;
 
@@ -63,6 +64,8 @@ pub enum Command {
     Sim(SimArgs),
     /// Reset the running simulation world and FC of the named backend.
     Reset(String),
+    /// Produce the Alia X-Plane runtime handshake into a directory.
+    Handshake(std::path::PathBuf),
     /// Print usage.
     Help,
 }
@@ -81,11 +84,35 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
     match command.as_str() {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "reset" => Ok(Command::Reset(parse_reset(rest)?)),
+        "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
-            message: format!("unknown command {other:?} (expected sim, reset, or help)"),
+            message: format!("unknown command {other:?} (expected sim, reset, handshake, or help)"),
         }),
     }
+}
+
+fn parse_handshake(args: &[String]) -> Result<std::path::PathBuf, XtaskError> {
+    let mut out_dir = std::path::PathBuf::from(crate::session::SESSION_DIR);
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--out-dir" => {
+                out_dir =
+                    std::path::PathBuf::from(iter.next().ok_or_else(|| XtaskError::Usage {
+                        message: "--out-dir requires a value".to_owned(),
+                    })?);
+            }
+            other => {
+                return Err(XtaskError::Usage {
+                    message: format!(
+                        "unknown handshake argument {other:?} (expected --out-dir <dir>)"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(out_dir)
 }
 
 fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
@@ -198,6 +225,15 @@ commands:
 
       --fc <name>          FC backend (default: aviate)
 
+  handshake [options]
+      Produce the Alia X-Plane runtime handshake document and print its
+      path, without launching a session. For harnesses that run the
+      flight controller themselves; X-Plane must be running with the
+      trial plugin loaded.
+
+      --out-dir <dir>      directory to write into (default:
+                           target/xtask-sim)
+
   help
       Print this help text.";
 
@@ -228,16 +264,19 @@ mod tests {
     fn help_groups_each_command_once_and_matches_parser_defaults() {
         let sim_heading = "  sim [options]\n";
         let reset_heading = "  reset [options]\n";
+        let handshake_heading = "  handshake [options]\n";
         let help_heading = "  help\n";
 
-        for heading in [sim_heading, reset_heading, help_heading] {
+        for heading in [sim_heading, reset_heading, handshake_heading, help_heading] {
             assert_eq!(USAGE.matches(heading).count(), 1, "heading {heading:?}");
         }
 
         let sim_start = USAGE.find(sim_heading).expect("sim heading");
         let reset_start = USAGE.find(reset_heading).expect("reset heading");
+        let handshake_start = USAGE.find(handshake_heading).expect("handshake heading");
         let help_start = USAGE.find(help_heading).expect("help heading");
-        assert!(sim_start < reset_start && reset_start < help_start);
+        assert!(sim_start < reset_start && reset_start < handshake_start);
+        assert!(handshake_start < help_start);
 
         let sim_help = &USAGE[sim_start..reset_start];
         assert!(sim_help.contains("aviate-gz (alias aviate, default)"));
@@ -249,10 +288,36 @@ mod tests {
         assert!(sim_help.contains("--no-open"));
         assert!(sim_help.contains("--lan"));
 
-        let reset_help = &USAGE[reset_start..help_start];
+        let reset_help = &USAGE[reset_start..handshake_start];
         assert!(reset_help.contains("--fc <name>"));
         assert!(reset_help.contains("default: aviate"));
         assert!(!reset_help.contains("--profile"));
+
+        let handshake_help = &USAGE[handshake_start..help_start];
+        assert!(handshake_help.contains("--out-dir <dir>"));
+        assert!(handshake_help.contains("target/xtask-sim"));
+    }
+
+    #[test]
+    fn handshake_out_dir_parses_and_malformed_flags_fail_closed() {
+        assert_eq!(
+            parse_args(&args(&["handshake"])).expect("default handshake parses"),
+            Command::Handshake(std::path::PathBuf::from("target/xtask-sim"))
+        );
+        assert_eq!(
+            parse_args(&args(&["handshake", "--out-dir", "/tmp/attempt"]))
+                .expect("explicit out-dir parses"),
+            Command::Handshake(std::path::PathBuf::from("/tmp/attempt"))
+        );
+        for malformed in [
+            args(&["handshake", "--out-dir"]),
+            args(&["handshake", "--dir", "/tmp/attempt"]),
+        ] {
+            assert!(matches!(
+                parse_args(&malformed),
+                Err(XtaskError::Usage { .. })
+            ));
+        }
     }
 
     #[test]
