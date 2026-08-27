@@ -38,6 +38,15 @@ fn airframe_key() -> String {
     std::env::var("PILOTAGE_XPLANE_AIRFRAME").unwrap_or_else(|_| AIRFRAME.to_owned())
 }
 
+/// The Alia's own control-feel law.
+///
+/// This is the same artifact the host falls back to when nothing names
+/// one, but it reaches the Alia there by being the single compiled-in
+/// default rather than by being this aircraft's law — which is how the
+/// X500 came to fly on it too. Named here, each backend answers for its
+/// own vehicle.
+const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/alia250-legacy-v1.json";
+
 /// The Aviate + X-Plane SITL backend.
 #[derive(Debug)]
 pub struct AviateXPlane;
@@ -62,6 +71,13 @@ impl SimBackend for AviateXPlane {
             (
                 "PILOTAGE_AVIATE_CAMERA".to_owned(),
                 "xplane-plugin".to_owned(),
+            ),
+            (
+                "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE".to_owned(),
+                ctx.repo_root
+                    .join(CONTROL_FEEL_PROFILE)
+                    .display()
+                    .to_string(),
             ),
             (
                 "PILOTAGE_RESET_CMD".to_owned(),

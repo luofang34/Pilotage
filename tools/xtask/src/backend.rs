@@ -137,6 +137,66 @@ mod tests {
     use super::backend_for;
     use crate::error::XtaskError;
 
+    /// Every Aviate backend must name a control-feel law belonging to the
+    /// aircraft it actually launches.
+    ///
+    /// The host cannot check this for itself: both backends hand it
+    /// `--adapter aviate`, so absent an explicit profile it loads one
+    /// compiled-in default for every vehicle. That default is the Alia's,
+    /// and the X500 flew on it — a law qualified for another airframe.
+    /// The launcher is the only component that knows which aircraft it
+    /// started, so this is where the binding is asserted.
+    #[test]
+    fn each_aviate_backend_names_its_own_vehicles_control_feel() {
+        use super::SessionContext;
+        use crate::cli::Profile;
+        use std::path::{Path, PathBuf};
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root is two levels above tools/xtask")
+            .to_path_buf();
+        let ctx = SessionContext {
+            repo_root: repo_root.clone(),
+            host_port: 4433,
+            viewer_port: 8080,
+            profile: Profile::Simulation,
+            log_dir: repo_root.join("target/xtask-sim"),
+            lan: false,
+        };
+
+        // Backend name -> the substring its profile's file name must carry.
+        for (backend, vehicle) in [("aviate-gz", "x500"), ("aviate-xplane", "alia250")] {
+            let env = backend_for(backend).expect("known backend").host_env(&ctx);
+            let (_, value) = env
+                .iter()
+                .find(|(key, _)| key == "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{backend} names no control-feel law, so the host falls back to \
+                         whatever single default it was compiled with"
+                    )
+                });
+
+            let path = PathBuf::from(value);
+            let name = path
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default();
+            assert!(
+                name.starts_with(vehicle),
+                "{backend} launches {vehicle} but names the control-feel law {name:?}, \
+                 which is another aircraft's"
+            );
+            assert!(
+                path.is_file(),
+                "{backend} names a control-feel law at {} that does not exist",
+                path.display()
+            );
+        }
+    }
+
     #[test]
     fn backend_selection_fails_closed() {
         assert_eq!(backend_for("aviate").expect("known").name(), "aviate-gz");

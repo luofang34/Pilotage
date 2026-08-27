@@ -14,6 +14,17 @@ use crate::readiness::{Readiness, stage_log};
 const WORLD: &str = "sim/worlds/x500_flightdeck.sdf";
 const WORLD_NAME: &str = "aviate_sitl";
 
+/// The X500's own control-feel law.
+///
+/// Balanced rather than agile or precision: it is the law an operator who
+/// has asked for nothing should get, and the other two remain selectable
+/// in the session.
+const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
+
+fn control_feel_profile_path(repo_root: &Path) -> PathBuf {
+    repo_root.join(CONTROL_FEEL_PROFILE)
+}
+
 /// The Aviate + Gazebo SITL backend.
 #[derive(Debug)]
 pub struct AviateGz;
@@ -27,7 +38,7 @@ impl SimBackend for AviateGz {
         "aviate"
     }
 
-    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
+    fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
         vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
@@ -35,6 +46,19 @@ impl SimBackend for AviateGz {
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.
             ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
+            // The host cannot tell one Aviate vehicle from another: both
+            // backends hand it `--adapter aviate` and the only other thing
+            // it learns is the session profile. Absent this it falls back
+            // to a single compiled-in default, which is the ALIA's law —
+            // so the X500 flew on another aircraft's control feel. The
+            // launcher is what picks the vehicle, so it is what says which
+            // law that vehicle has.
+            (
+                "PILOTAGE_AVIATE_CONTROL_FEEL_PROFILE".to_owned(),
+                control_feel_profile_path(&ctx.repo_root)
+                    .display()
+                    .to_string(),
+            ),
         ]
     }
 
