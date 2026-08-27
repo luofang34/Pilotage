@@ -41,8 +41,7 @@ impl SimBackend for AviateGz {
         Some(CONTROL_FEEL_PROFILE)
     }
 
-    fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        let _ = ctx;
+    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
         vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),

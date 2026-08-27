@@ -178,6 +178,64 @@ fn control_feel_env_given(
     )]
 }
 
+/// The host environment a session actually hands the host stage.
+///
+/// The backend's own entries plus the control-feel law it declares, which
+/// only this composition decides to pass. It exists as a function so the
+/// binding can be asserted against the value the launcher builds rather
+/// than against either half of it: a launcher that assembles this and
+/// then hands the host something else is the whole defect back, and two
+/// separately-correct halves do not rule that out.
+pub(crate) fn host_env_for(
+    backend: &dyn SimBackend,
+    ctx: &SessionContext,
+) -> Vec<(String, String)> {
+    let mut env = backend.host_env(ctx);
+    if let Some(profile_path) = backend.control_feel_profile() {
+        env.extend(control_feel_env(ctx, profile_path));
+    }
+    env
+}
+
+/// Every backend `--fc` resolves to.
+///
+/// A table rather than a match arm per backend, because two things must
+/// agree about what "every backend" means: this resolver, and the tests
+/// that hold every backend to a contract. A backend reachable from one
+/// but absent from the other is a backend nothing checks — and the
+/// direction that fails is the safe one, since a backend missing here
+/// cannot be selected at all.
+const BACKENDS: &[BackendEntry] = &[
+    // Canonical names pair the FC family with the simulator behind it;
+    // the bare FC name stays accepted as the family's default.
+    BackendEntry {
+        name: "aviate-gz",
+        alias: Some("aviate"),
+        make: || Box::new(aviate_gz::AviateGz),
+    },
+    BackendEntry {
+        name: "px4-gz",
+        alias: Some("px4"),
+        make: || Box::new(px4_gz::Px4Gz),
+    },
+    BackendEntry {
+        name: "px4-xplane",
+        alias: None,
+        make: || Box::new(px4_xplane::Px4XPlane),
+    },
+    BackendEntry {
+        name: "aviate-xplane",
+        alias: None,
+        make: || Box::new(aviate_xplane::AviateXPlane),
+    },
+];
+
+struct BackendEntry {
+    name: &'static str,
+    alias: Option<&'static str>,
+    make: fn() -> Box<dyn SimBackend>,
+}
+
 /// Resolves `--fc` to a backend, fail-closed on unknown names.
 ///
 /// # Errors
@@ -185,17 +243,13 @@ fn control_feel_env_given(
 /// Returns [`XtaskError::UnknownBackend`] for any name this launcher
 /// does not implement.
 pub fn backend_for(name: &str) -> Result<Box<dyn SimBackend>, XtaskError> {
-    match name {
-        // Canonical names pair the FC family with the simulator behind
-        // it; the bare FC name stays accepted as the family's default.
-        "aviate-gz" | "aviate" => Ok(Box::new(aviate_gz::AviateGz)),
-        "px4-gz" | "px4" => Ok(Box::new(px4_gz::Px4Gz)),
-        "px4-xplane" => Ok(Box::new(px4_xplane::Px4XPlane)),
-        "aviate-xplane" => Ok(Box::new(aviate_xplane::AviateXPlane)),
-        _ => Err(XtaskError::UnknownBackend {
+    BACKENDS
+        .iter()
+        .find(|entry| entry.name == name || entry.alias == Some(name))
+        .map(|entry| (entry.make)())
+        .ok_or_else(|| XtaskError::UnknownBackend {
             name: name.to_owned(),
-        }),
-    }
+        })
 }
 
 #[cfg(test)]
@@ -252,6 +306,95 @@ mod tests {
         }
     }
 
+    /// The environment the launcher ASSEMBLES carries the vehicle's law.
+    ///
+    /// Asserted against the STAGE the launcher pushes, not against the
+    /// composition function it calls. Both halves being right does not
+    /// make the join right, and a test of the join itself still passes
+    /// while a caller assembles the right environment and hands the host
+    /// a different one. The stage is the last artifact before the process
+    /// is spawned, so there is nothing left between it and the host.
+    ///
+    /// Exactly one entry, not merely a correct one — this composition is
+    /// where a duplicate could appear, and the last write is the one that
+    /// reaches the host.
+    #[test]
+    fn the_assembled_host_environment_carries_the_vehicles_law() {
+        use super::{BACKENDS, CONTROL_FEEL_ENV, SessionContext};
+        use crate::cli::Profile;
+        use crate::session::host_stage;
+        use std::path::{Path, PathBuf};
+
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root is two levels above tools/xtask")
+            .to_path_buf();
+        let ctx_for = |profile| SessionContext {
+            repo_root: repo_root.clone(),
+            host_port: 4433,
+            viewer_port: 8080,
+            profile,
+            log_dir: repo_root.join("target/xtask-sim"),
+            lan: false,
+        };
+
+        for (backend, vehicle) in [("aviate-gz", "x500"), ("aviate-xplane", "alia250")] {
+            let sim = ctx_for(Profile::Simulation);
+            let stage = host_stage(&sim, backend_for(backend).expect("known backend").as_ref());
+            let env = &stage.spec.env;
+            let named: Vec<_> = env
+                .iter()
+                .filter(|(key, _)| key == CONTROL_FEEL_ENV)
+                .collect();
+            assert_eq!(
+                named.len(),
+                1,
+                "the environment {backend} hands the host names the control-feel law \
+                 {} times; the host reads one value and the last write wins",
+                named.len()
+            );
+            let path = PathBuf::from(named[0].1.clone());
+            let name = path
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default();
+            assert!(
+                name.starts_with(vehicle),
+                "{backend} launches {vehicle} but hands the host {name:?}, which is \
+                 another aircraft's law"
+            );
+            assert!(path.is_file(), "{} does not exist", path.display());
+
+            let physical = ctx_for(Profile::Physical);
+            let stage = host_stage(
+                &physical,
+                backend_for(backend).expect("known backend").as_ref(),
+            );
+            let env = &stage.spec.env;
+            assert!(
+                !env.iter().any(|(key, _)| key == CONTROL_FEEL_ENV),
+                "{backend} hands a physical session a control-feel law, which the host \
+                 refuses with AviatePhysicalControlFeelOverride"
+            );
+        }
+
+        // Every registered backend, so a new one cannot opt out of the
+        // composition by being absent from a hand-written list.
+        for entry in BACKENDS {
+            let stage = host_stage(
+                &ctx_for(Profile::Simulation),
+                backend_for(entry.name).expect("registered").as_ref(),
+            );
+            let env = &stage.spec.env;
+            assert!(
+                env.iter().filter(|(k, _)| k == CONTROL_FEEL_ENV).count() <= 1,
+                "{} assembles more than one control-feel law",
+                entry.name
+            );
+        }
+    }
+
     /// No backend may write the control-feel variable itself.
     ///
     /// A backend that assembles it by hand has to remember every case
@@ -268,7 +411,8 @@ mod tests {
         use std::path::PathBuf;
 
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        for backend in ["aviate-gz", "aviate-xplane", "px4-gz", "px4-xplane"] {
+        for entry in super::BACKENDS {
+            let backend = entry.name;
             for profile in [Profile::Simulation, Profile::Physical, Profile::OracleOnly] {
                 let ctx = SessionContext {
                     repo_root: repo_root.clone(),
