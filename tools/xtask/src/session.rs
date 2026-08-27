@@ -14,6 +14,7 @@ use crate::output::print_line;
 use crate::process::{ManagedChild, ProcessSpec};
 use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log};
 use preflight::{build_host, prepare_web_assets};
+use supervise::supervise;
 
 pub(crate) mod preflight;
 
@@ -99,7 +100,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     // here) unregisters the `pilotage.local` alias with the session.
     let _mdns_alias = announce::publish_connect_facts(args, &ctx, actual_port, &certificate);
 
-    let outcome = supervise(&mut children, &stages, &mut cancel).await;
+    let outcome = supervise(&mut children, &stages, backend.as_ref(), &ctx, &mut cancel).await;
     std::fs::remove_file(&pid_file).ok();
     // The manifest describes a session that no longer exists past this
     // point; leaving it behind would let a later failed connect clobber
@@ -386,60 +387,6 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
 /// The restart's readiness wait races the cancellation source, so a
 /// ctrl-c during an FC restart stops the session promptly instead of
 /// waiting out the replacement's readiness deadline.
-async fn supervise(
-    children: &mut [ManagedChild],
-    stages: &[Stage],
-    cancel: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<(), XtaskError> {
-    let mut fc_restarts: u32 = 0;
-    loop {
-        tokio::select! {
-            _ = cancel.changed() => {
-                print_line("");
-                print_line("stopping the session...");
-                return Ok(());
-            }
-            () = tokio::time::sleep(SUPERVISE_INTERVAL) => {
-                for index in 0..children.len() {
-                    let Err(death) = children[index].check_running() else {
-                        continue;
-                    };
-                    let stage = &stages[index];
-                    if stage.spec.name != "flight-controller" {
-                        return Err(death);
-                    }
-                    fc_restarts = fc_restarts.wrapping_add(1);
-                    if fc_restarts > MAX_STAGE_RESTARTS {
-                        return Err(death);
-                    }
-                    print_line(&format!(
-                        "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
-                    ));
-                    // A replacement that spawns but never reports ready
-                    // must not outlive the error return: it is not in
-                    // `children`, so the caller's teardown would miss it.
-                    let mut replacement = ManagedChild::spawn(&stage.spec)?;
-                    let ready = tokio::select! {
-                        ready = await_ready(&mut replacement, &stage.readiness) => ready,
-                        _ = cancel.changed() => {
-                            print_line("");
-                            print_line("stopping the session...");
-                            replacement.terminate_group();
-                            return Ok(());
-                        }
-                    };
-                    if let Err(error) = ready {
-                        replacement.terminate_group();
-                        return Err(error);
-                    }
-                    print_line("flight-controller ready");
-                    children[index] = replacement;
-                }
-            }
-        }
-    }
-}
-
 /// Stops every started stage in reverse launch order.
 fn teardown(children: &mut Vec<ManagedChild>) {
     while let Some(mut child) = children.pop() {
@@ -460,6 +407,7 @@ fn open_in_browser(url: &str) {
 }
 
 mod announce;
+mod supervise;
 
 #[cfg(test)]
 mod tests;

@@ -101,10 +101,10 @@ impl SimBackend for Px4XPlane {
         if simulator_running {
             verify_loaded_aircraft(&root, airframe)?;
         }
-        set_active_config_name(&root, airframe);
+        set_active_config_name(&root, airframe, simulator_running)?;
         // PX4's EKF wants the bridge's ground-stationary contract; the
         // aviate lane turns it off, so this lane must turn it back on.
-        set_ground_sensor_contract(&root, true);
+        set_ground_sensor_contract(&root, true, simulator_running)?;
         prepare_xplane_runtime_blocking(
             &ctx.repo_root,
             &root,

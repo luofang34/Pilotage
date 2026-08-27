@@ -349,7 +349,7 @@ fn config_rewrite_targets_only_the_config_name_line() {
     std::fs::create_dir_all(&config_dir).expect("config dir");
     let config = config_dir.join("config.ini");
     std::fs::write(&config, "; comment\nconfig_name = Alia250\nother = 1\n").expect("seed");
-    set_active_config_name(&root, qtailsitter());
+    set_active_config_name(&root, qtailsitter(), false).expect("a stopped simulator is written");
     let rewritten = std::fs::read_to_string(&config).expect("rewritten");
     assert_eq!(
         rewritten,
@@ -401,4 +401,50 @@ fn a_running_simulator_with_another_aircraft_is_refused_by_name() {
     std::fs::remove_file(root.join("Log.txt")).expect("remove fixture log");
     verify_loaded_aircraft(&root, other).expect("an unreadable log states no aircraft");
     std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_configuration_that_would_change_under_a_running_simulator_is_refused() {
+    // The bridge reads its configuration when it loads. Rewriting the file
+    // under a running simulator reaches nothing the run will use, and the
+    // launcher then digests the file it wrote — putting a claim in the trial
+    // document that the running bridge does not match. It is the same
+    // situation as an aircraft already loaded, so it gets the same discipline:
+    // check, refuse, and say what the operator has to do.
+    let root = scaffold("config-under-running-sim");
+    let config_dir = root.join("Resources/plugins/px4xplane/64");
+    std::fs::create_dir_all(&config_dir).expect("config dir");
+    let config = config_dir.join("config.ini");
+    std::fs::write(&config, "config_name = Alia250\n").expect("seed");
+
+    let refused = set_active_config_name(&root, qtailsitter(), true);
+    assert!(
+        matches!(refused, Err(XtaskError::SimulatorCapability { .. })),
+        "a configuration the running bridge cannot read was written anyway"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&config).expect("read back"),
+        "config_name = Alia250\n",
+        "the file was rewritten under a running simulator"
+    );
+}
+
+#[test]
+fn a_configuration_that_already_matches_is_accepted_under_a_running_simulator() {
+    // Refusing whenever the simulator is up would fail the normal case: it is
+    // already running with the configuration this session needs. The refusal
+    // is about a change that cannot take effect, not about the simulator.
+    let root = scaffold("config-running-already-right");
+    let config_dir = root.join("Resources/plugins/px4xplane/64");
+    std::fs::create_dir_all(&config_dir).expect("config dir");
+    let config = config_dir.join("config.ini");
+    let settled = format!("config_name = {}\n", qtailsitter().config_name);
+    std::fs::write(&config, &settled).expect("seed");
+
+    set_active_config_name(&root, qtailsitter(), true)
+        .expect("a configuration that already matches is not a change");
+    assert_eq!(
+        std::fs::read_to_string(&config).expect("read back"),
+        settled
+    );
 }
