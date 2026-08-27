@@ -1,0 +1,23 @@
+Pilotage evidence — captured verification run (SIM / NOT FOR FLIGHT)
+scope: control-feel / airframe fit
+vehicle: gz X500, aviate-gz backend
+method: full forward stick from the hover, held; ground speed sampled at 2 Hz
+        from the simulation-truth lane. Same airframe, same stick input, same
+        harness; only the installed law differs between runs.
+
+The x500's velocity loop may command 0.35 rad of tilt. Level flight at that
+tilt accelerates at g*tan(0.35) = 3.58 m/s^2, which is the most the vehicle
+can produce.
+
+law                                        peak  settled   hunt
+alia250-shaped-balanced  apply 4.00        2.89     2.70   0.64
+alia250-shaped-balanced  apply 2.62        2.72     2.70   0.04
+x500-shaped-balanced     apply 1.98        2.80     2.75   0.05
+
+hunt: peak-to-trough of the ground speed AFTER the ramp completes.
+
+Reading: the law asking 4.00 -- above the airframe's ceiling -- overshoots and
+then wanders 0.64 m/s for the rest of the run. Both laws asking within their
+airframe's ceiling settle and hold, wandering 0.04-0.05. All three reach the
+same speed, so fitting the law to the vehicle costs nothing in what the
+operator gets; it removes only the hunting.

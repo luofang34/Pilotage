@@ -252,7 +252,7 @@ impl Link {
                 action: Self::ACTION_GIMBAL_RECENTER,
                 mode_target: 0,
                 action_id: 0,
-            feel_target: 0,
+                feel_target: 0,
             },
         )
     }
@@ -332,7 +332,7 @@ impl Link {
                 action: Self::ACTION_SIM_RESET,
                 mode_target: 0,
                 action_id: 0,
-            feel_target: 0,
+                feel_target: 0,
             },
         )
     }
@@ -356,7 +356,7 @@ impl Link {
                 action: code,
                 mode_target: 0,
                 action_id: 0,
-            feel_target: 0,
+                feel_target: 0,
             },
         )
     }
