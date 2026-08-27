@@ -1,0 +1,16 @@
+[package]
+name = "pilotage-xplane-trial"
+description = "Verified X-Plane identity and truth sessions for simulator trials"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pilotage-trial = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

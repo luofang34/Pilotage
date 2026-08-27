@@ -171,9 +171,10 @@ pub(super) fn validate_xplane_install(root: &Path, airframe: &Airframe) -> Resul
 const XPLANE_PLUGINS_STAMP: &str = "target/xtask-stamps/xplane-plugins-stopped-simulator.stamp";
 
 /// The working-tree inputs whose content decides plugin staleness.
-const XPLANE_PLUGINS_SOURCES: [&str; 4] = [
+const XPLANE_PLUGINS_SOURCES: [&str; 5] = [
     "sim/xplane/autoflight",
     "sim/xplane/camera",
+    "sim/xplane/trial",
     "sim/xplane/weather",
     "scripts/build-xplane-plugins.sh",
 ];
@@ -217,6 +218,11 @@ pub(super) fn ensure_xplane_plugins_blocking(
                 "Resources/plugins/px4xplane/64/mac.xpl",
                 "Resources/plugins/PilotageAutoFlight/64/mac.xpl",
                 "Resources/plugins/PilotageCamera/64/mac.xpl",
+                // The manifest as well as the plugin: the trial plugin states
+                // which bridge build it was built against, and a verifier that
+                // cannot read that has nothing to check the bridge against.
+                "Resources/plugins/PilotageTrial/64/mac.xpl",
+                "Resources/plugins/PilotageTrial/build-manifest.json",
                 "Resources/plugins/PilotageWeather/64/mac.xpl",
             ]
             .iter()
@@ -285,7 +291,11 @@ pub(super) fn run_plugin_build_blocking(
 /// the client's to display as missing, never to paper over. Each
 /// backend states its choice at prepare time, so lane switches cannot
 /// inherit the other flight controller's crutch.
-pub(super) fn set_ground_sensor_contract(root: &Path, enabled: bool) {
+pub(super) fn set_ground_sensor_contract(
+    root: &Path,
+    enabled: bool,
+    simulator_running: bool,
+) -> Result<(), XtaskError> {
     let value = if enabled { "true" } else { "false" };
     for config in [
         root.join("Resources/plugins/px4xplane/64/config.ini"),
@@ -313,10 +323,55 @@ pub(super) fn set_ground_sensor_contract(root: &Path, enabled: bool) {
             )
             + "
 ";
-        if rewritten != content && std::fs::write(&config, rewritten).is_err() {
-            print_line("could not update the px4xplane ground-contract keys; check config.ini");
-        }
+        write_config_or_refuse(
+            &config,
+            &content,
+            &rewritten,
+            simulator_running,
+            "the ground-stationary guard setting",
+        )?;
     }
+    Ok(())
+}
+
+/// Writes one bridge configuration file, or refuses when the simulator is
+/// already up and the file would have to change.
+///
+/// The bridge reads its configuration when it loads. Rewriting the file under
+/// a running simulator changes nothing the run will use, and the launcher then
+/// digests the file it wrote — putting a claim in the trial document that the
+/// running bridge does not match. A launcher that finds X-Plane already
+/// running does not get to choose the configuration any more than it gets to
+/// choose the aircraft: it checks, and says what the operator has to do.
+///
+/// A file that already says the right thing is not a change, so the common
+/// case of a simulator already running the right configuration still passes.
+fn write_config_or_refuse(
+    config: &Path,
+    content: &str,
+    rewritten: &str,
+    simulator_running: bool,
+    setting: &'static str,
+) -> Result<(), XtaskError> {
+    if rewritten == content {
+        return Ok(());
+    }
+    if simulator_running {
+        return Err(XtaskError::SimulatorCapability {
+            capability: "px4xplane bridge configuration matching this session",
+            detail: format!(
+                "X-Plane is already running and {setting} in {} does not match what this \
+                 session needs. The bridge reads its configuration when it loads, so \
+                 rewriting it now would not reach the running bridge. Reload the bridge \
+                 configuration in X-Plane, or quit X-Plane and let this launcher start it.",
+                config.display(),
+            ),
+        });
+    }
+    if std::fs::write(config, rewritten).is_err() {
+        print_line("could not update the px4xplane config; check config.ini");
+    }
+    Ok(())
 }
 
 /// The aircraft a running X-Plane most recently loaded, from its own log,
@@ -365,7 +420,11 @@ pub(super) fn verify_loaded_aircraft(root: &Path, airframe: &Airframe) -> Result
     })
 }
 
-pub(super) fn set_active_config_name(root: &Path, airframe: &Airframe) {
+pub(super) fn set_active_config_name(
+    root: &Path,
+    airframe: &Airframe,
+    simulator_running: bool,
+) -> Result<(), XtaskError> {
     for config in [
         root.join("Resources/plugins/px4xplane/64/config.ini"),
         root.join("config.ini"),
@@ -385,10 +444,15 @@ pub(super) fn set_active_config_name(root: &Path, airframe: &Airframe) {
             .collect::<Vec<_>>()
             .join("\n")
             + "\n";
-        if rewritten != content && std::fs::write(&config, rewritten).is_err() {
-            print_line("could not update the px4xplane config_name; check config.ini");
-        }
+        write_config_or_refuse(
+            &config,
+            &content,
+            &rewritten,
+            simulator_running,
+            "config_name",
+        )?;
     }
+    Ok(())
 }
 
 /// Sends one X-Plane `CMND` datagram to the local simulator. Fire and

@@ -14,6 +14,7 @@ pub(crate) mod aviate_gz;
 mod aviate_xplane;
 pub(crate) mod px4_gz;
 mod px4_xplane;
+mod xplane_handshake;
 mod xplane_simulator;
 
 /// Everything a backend may need to plan its stages.
@@ -69,6 +70,32 @@ pub trait SimBackend {
     ///
     /// Returns a typed [`XtaskError`] only for a failure that must abort the
     /// session; recoverable/optional build failures are logged, not returned.
+    /// Re-establish whatever a restarted stage consumes on start.
+    ///
+    /// A stage's argv is planned once and reused for every restart, so
+    /// anything it CONSUMES rather than reads — a single-use credential, a
+    /// claimed file — is gone by the time the replacement runs. This is where
+    /// it comes back. Producing it at the same path the plan named keeps the
+    /// argv correct.
+    ///
+    /// Called before the replacement is spawned, never before the first start.
+    ///
+    /// The work is RETURNED rather than performed, because the caller drives a
+    /// current-thread runtime. Blocking here stops that runtime polling, and
+    /// the task watching for ctrl-c stops with it — so an operator pressing it
+    /// during a long wait gets nothing at all, tokio having already taken the
+    /// signal's default disposition away. Handed back as an owned unit, it can
+    /// run off the runtime thread and be raced against cancellation.
+    ///
+    /// `None` when this backend has nothing to re-establish for this stage.
+    fn before_stage_restart(
+        &self,
+        _ctx: &SessionContext,
+        _stage_name: &str,
+    ) -> Option<Box<dyn FnOnce() -> Result<(), XtaskError> + Send>> {
+        None
+    }
+
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         let _ = ctx;
         Ok(())
