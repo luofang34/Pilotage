@@ -40,8 +40,8 @@ fn owner_and_group_waits_share_one_deadline() {
     let argument_digest = inspection::digest_arguments(&arguments);
     let mut owner = spawn_group_member(&arguments);
     let mut gate = spawn_group_member(&arguments);
-    let owner_identity = inspect_group_member(&owner, argument_digest);
-    let gate_identity = inspect_group_member(&gate, argument_digest);
+    let owner_identity = inspect_group_member(&owner, argument_digest, "owner");
+    let gate_identity = inspect_group_member(&gate, argument_digest, "gate");
     let mut wait = OwnerExitWait::new(&mut owner);
 
     let result = recover_processes_same_boot_blocking(
@@ -52,12 +52,18 @@ fn owner_and_group_waits_share_one_deadline() {
         &mut wait,
     );
 
-    assert!(matches!(
-        result,
-        Err(AviateSupervisorError::Timeout {
-            operation: "wait for recovered process group removal",
-        })
-    ));
+    // Prints the result, because recovery inspects a third time inside this
+    // call and a mismatch originating there would otherwise be discarded —
+    // pid and arguments built, then thrown away by a bare `matches!`.
+    assert!(
+        matches!(
+            result,
+            Err(AviateSupervisorError::Timeout {
+                operation: "wait for recovered process group removal",
+            })
+        ),
+        "unexpected recovery result: {result:?}"
+    );
     assert_eq!(
         wait.park_calls, 1,
         "the group wait cannot restart the deadline"
@@ -105,13 +111,21 @@ fn spawn_group_member(arguments: &[String]) -> ReapedChild {
     ReapedChild::spawn(command)
 }
 
+/// Inspects one member, saying WHICH member when it cannot.
+///
+/// The two are spawned and inspected in a fixed order, and an inspection that
+/// fails names a suspect by where it sat in that order: the owner is inspected
+/// after a whole second spawn has run, the gate immediately after its own. A
+/// failure that only ever names the gate says something a failure naming
+/// either one does not.
 fn inspect_group_member(
     child: &ReapedChild,
     argument_digest: flight_tune::Digest,
+    role: &str,
 ) -> crate::document::ProcessIdentity {
     inspection::inspect_process(child.id(), argument_digest)
-        .expect("inspect group member")
-        .expect("group member is live")
+        .unwrap_or_else(|error| panic!("inspect the {role}: {error}"))
+        .unwrap_or_else(|| panic!("the {role} is live"))
 }
 
 fn change_start_token(start: &mut ProcessStartIdentity) {

@@ -104,6 +104,12 @@ fn inspect_process_from(
     ))
 }
 
+/// Loaded by path because this file is. The parent names it `platform`, and a
+/// `#[path]` module's children are looked for inside a directory named for
+/// that module — `platform/`, which nobody creates.
+#[path = "linux/arguments.rs"]
+mod arguments;
+
 fn bind_lifetime_anchor(
     anchor: &mut Option<LifetimeIdentity>,
     actual: &LifetimeIdentity,
@@ -127,15 +133,18 @@ fn build_process_identity(
     command: Vec<u8>,
     executable: ExecutableObservation,
 ) -> Result<Option<ProcessIdentity>, AviateSupervisorError> {
-    let mut arguments = command.split(|byte| *byte == 0).collect::<Vec<_>>();
-    if arguments.last().is_some_and(|argument| argument.is_empty()) {
-        arguments.pop();
-    }
-    let argv_digest = digest_argument_bytes(arguments);
+    let arguments = arguments::split(&command);
+    let argv_digest = digest_argument_bytes(arguments.iter().copied());
     if argv_digest != launch_argv_digest {
-        return Err(AviateSupervisorError::identity_mismatch(
-            "the observed Linux arguments differ from the launch arguments",
-        ));
+        // Says WHICH arguments, because the reader is usually looking at a
+        // failure they cannot reproduce, and the arguments usually name the
+        // cause outright: a process caught mid-exec reports either its
+        // parent's command line or none at all.
+        return Err(AviateSupervisorError::identity_mismatch(format!(
+            "the observed Linux arguments differ from the launch arguments: \
+             pid {pid} reports {}",
+            arguments::describe(&arguments),
+        )));
     }
     Ok(Some(ProcessIdentity {
         pid,
