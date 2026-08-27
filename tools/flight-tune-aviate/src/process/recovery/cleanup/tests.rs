@@ -52,12 +52,18 @@ fn owner_and_group_waits_share_one_deadline() {
         &mut wait,
     );
 
-    assert!(matches!(
-        result,
-        Err(AviateSupervisorError::Timeout {
-            operation: "wait for recovered process group removal",
-        })
-    ));
+    // Prints the result, because recovery inspects a third time inside this
+    // call and a mismatch originating there would otherwise be discarded —
+    // pid and arguments built, then thrown away by a bare `matches!`.
+    assert!(
+        matches!(
+            result,
+            Err(AviateSupervisorError::Timeout {
+                operation: "wait for recovered process group removal",
+            })
+        ),
+        "unexpected recovery result: {result:?}"
+    );
     assert_eq!(
         wait.park_calls, 1,
         "the group wait cannot restart the deadline"

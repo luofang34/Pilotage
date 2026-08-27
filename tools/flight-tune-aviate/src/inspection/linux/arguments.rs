@@ -18,12 +18,18 @@ pub(super) fn split(command: &[u8]) -> Vec<&[u8]> {
     arguments
 }
 
-/// The observed arguments, readable, and bounded.
+/// The observed arguments: how many, then what they were, bounded.
+///
+/// The count leads because the likeliest answers are the ones the rendering
+/// cannot tell apart on its own. One spurious empty argument reads as a
+/// trailing space; a single argument containing a space reads as two; and no
+/// arguments at all is a finding rather than the absence of one — a process
+/// caught partway through `execve` reports an empty command line.
 ///
 /// Lossy because a command line is bytes, not text, and a diagnostic that
 /// refuses to print anything for an argument it cannot decode is a diagnostic
 /// that goes quiet exactly when something unusual happened. Bounded because
-/// this reaches a log, and an process with a pathological command line should
+/// this reaches a log, and a process with a pathological command line should
 /// not be able to flood it.
 pub(super) fn describe(arguments: &[&[u8]]) -> String {
     const MAX_ARGUMENTS: usize = 8;
@@ -46,9 +52,9 @@ pub(super) fn describe(arguments: &[&[u8]]) -> String {
         described.push_str(" ...");
     }
     if described.is_empty() {
-        "no arguments".to_owned()
+        format!("{} argument(s)", arguments.len())
     } else {
-        described
+        format!("{} argument(s): {described}", arguments.len())
     }
 }
 
@@ -68,6 +74,9 @@ mod tests {
         // An argument that really is empty, in the middle, is kept.
         assert_eq!(split(b"a\x00\x00b\x00"), vec![&b"a"[..], b"", b"b"]);
         assert_eq!(split(b""), Vec::<&[u8]>::new());
+        // The guard matters on its own: an image with no trailing terminator
+        // must keep its last argument, and an unconditional pop would eat it.
+        assert_eq!(split(b"a\x00b"), vec![&b"a"[..], b"b"]);
     }
 
     #[test]
@@ -75,9 +84,19 @@ mod tests {
         // A command line is bytes. A describer that printed nothing for what
         // it could not decode would go quiet exactly when something unusual
         // had happened, which is when it is being read.
-        assert_eq!(describe(&[b"/bin/sleep", b"60"]), "/bin/sleep 60");
+        assert_eq!(
+            describe(&[b"/bin/sleep", b"60"]),
+            "2 argument(s): /bin/sleep 60"
+        );
         assert!(describe(&[b"\xff\xfe"]).contains('\u{fffd}'));
-        assert_eq!(describe(&[]), "no arguments");
+        assert_eq!(describe(&[]), "0 argument(s)");
+        // The four renderings a bare join cannot tell apart. Each is a
+        // plausible reading of a process caught mid-exec, and the count is
+        // what separates them.
+        assert!(describe(&[b"/bin/sleep", b"60", b""]).starts_with("3 "));
+        assert!(describe(&[b"/bin/sleep", b"", b"60"]).starts_with("3 "));
+        assert!(describe(&[b""]).starts_with("1 "));
+        assert!(describe(&[b"/bin/sleep 60"]).starts_with("1 "));
     }
 
     #[test]

@@ -104,8 +104,9 @@ fn inspect_process_from(
     ))
 }
 
-/// Loaded by path because this file is: the parent names it `platform`, so a
-/// bare `mod` here would be looked for beside a directory nobody creates.
+/// Loaded by path because this file is. The parent names it `platform`, and a
+/// `#[path]` module's children are looked for inside a directory named for
+/// that module — `platform/`, which nobody creates.
 #[path = "linux/arguments.rs"]
 mod arguments;
 
@@ -135,13 +136,10 @@ fn build_process_identity(
     let arguments = arguments::split(&command);
     let argv_digest = digest_argument_bytes(arguments.iter().copied());
     if argv_digest != launch_argv_digest {
-        // Says WHICH arguments, because the reader of this message is usually
-        // looking at a failure they cannot reproduce. A bare mismatch leaves
-        // them inferring what the process was; the arguments themselves
-        // usually name the cause outright — a process inspected between fork
-        // and exec still reports its parent's command line, so seeing the
-        // inspecting process here is the difference between a puzzle and an
-        // answer.
+        // Says WHICH arguments, because the reader is usually looking at a
+        // failure they cannot reproduce, and the arguments usually name the
+        // cause outright: a process caught mid-exec reports either its
+        // parent's command line or none at all.
         return Err(AviateSupervisorError::identity_mismatch(format!(
             "the observed Linux arguments differ from the launch arguments: \
              pid {pid} reports {}",
