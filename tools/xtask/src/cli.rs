@@ -1,4 +1,5 @@
-//! Argument parsing for the xtask entry point: `sim`, `reset`, `help`.
+//! Argument parsing for the xtask entry point: `sim`, `reset`,
+//! `handshake`, `help`.
 
 use crate::error::XtaskError;
 
@@ -92,7 +93,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
 }
 
 fn parse_handshake(args: &[String]) -> Result<std::path::PathBuf, XtaskError> {
-    let mut out_dir = std::path::PathBuf::from("target/xtask-sim");
+    let mut out_dir = std::path::PathBuf::from(crate::session::SESSION_DIR);
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {

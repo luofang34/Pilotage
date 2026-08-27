@@ -2,7 +2,7 @@
 //! code — headless gz with the Aviate plugin, then the SITL FC over the
 //! versioned shm block, each gated on its own readiness signal.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{SessionContext, SimBackend, Stage};
 use crate::error::XtaskError;
@@ -53,7 +53,7 @@ impl SimBackend for AviateGz {
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
-        plan_with_aviate_dir(ctx, &aviate_dir(&ctx.repo_root))
+        plan_with_aviate_dir(ctx, &super::aviate_dir(&ctx.repo_root))
     }
 
     fn stale_process_patterns(&self) -> Vec<&'static str> {
@@ -80,15 +80,6 @@ impl SimBackend for AviateGz {
             })
         }
     }
-}
-
-/// Where the sibling Aviate checkout lives: `AVIATE_DIR`, else
-/// `../Aviate` next to this repository. A directory convention, never a
-/// source dependency.
-fn aviate_dir(repo_root: &Path) -> PathBuf {
-    std::env::var_os("AVIATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("../Aviate"))
 }
 
 /// `PATH` for spawned tools, with Homebrew's prefix appended when it

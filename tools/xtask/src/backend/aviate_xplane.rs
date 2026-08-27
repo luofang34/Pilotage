@@ -11,7 +11,7 @@
 //! dials the host. That is what makes the gimbal scope real here: the
 //! adapter aims a rendered view, not a servo.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::xplane_simulator::{
     airframe_for, ensure_xplane_plugins_blocking, prepare_xplane_runtime_blocking,
@@ -102,7 +102,7 @@ impl SimBackend for AviateXPlane {
         let airframe = airframe_for(Some(&airframe_key()))?;
         let root = xplane_root()?;
         validate_xplane_install(&root, airframe)?;
-        let aviate = aviate_dir(&ctx.repo_root);
+        let aviate = super::aviate_dir(&ctx.repo_root);
         let binary = aviate.join(APP_BINARY);
         if !binary.is_file() {
             return Err(XtaskError::MissingArtifact {
@@ -119,7 +119,7 @@ impl SimBackend for AviateXPlane {
         // not to one a launcher claimed was.
         let handshake = super::xplane_handshake::produce_blocking(
             &root,
-            &aviate.join("presets/alia250-xplane.toml"),
+            &super::alia_xplane_preset(&ctx.repo_root),
             &ctx.log_dir,
         )?;
         Ok(vec![Stage {
@@ -162,7 +162,7 @@ impl SimBackend for AviateXPlane {
         //
         // The paths are taken now and owned by the returned work, so it can
         // wait for the simulator without holding the runtime thread.
-        let preset = aviate_dir(&ctx.repo_root).join("presets/alia250-xplane.toml");
+        let preset = super::alia_xplane_preset(&ctx.repo_root);
         let log_dir = ctx.log_dir.clone();
         Some(Box::new(move || {
             let root = xplane_root()?;
@@ -222,7 +222,7 @@ impl SimBackend for AviateXPlane {
             // path; a checkout resolved through AVIATE_DIR would
             // silently escape a hardcoded pattern and the reset latch
             // would never clear.
-            .env("AVIATE_DIR", aviate_dir(repo_root))
+            .env("AVIATE_DIR", super::aviate_dir(repo_root))
             .status()
             .map_err(|source| XtaskError::Io {
                 context: "running the X-Plane reset script",
@@ -237,15 +237,6 @@ impl SimBackend for AviateXPlane {
             })
         }
     }
-}
-
-/// Where the Aviate checkout lives: `AVIATE_DIR`, else `../Aviate` next
-/// to this repository. A directory convention, never a source
-/// dependency.
-fn aviate_dir(repo_root: &Path) -> PathBuf {
-    std::env::var_os("AVIATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("../Aviate"))
 }
 
 #[cfg(test)]
