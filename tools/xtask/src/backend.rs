@@ -517,6 +517,34 @@ mod tests {
         );
     }
 
+    /// The name a backend is registered under is the name it answers to.
+    ///
+    /// `--fc` resolves through the table while everything the operator
+    /// reads — the launching line, a stale-session refusal — comes from
+    /// `name()`. A disagreement makes the launcher report one backend
+    /// while running another, and nothing else compares the two.
+    #[test]
+    fn every_registered_backend_answers_to_the_name_it_is_registered_under() {
+        for entry in super::BACKENDS {
+            let resolved = backend_for(entry.name).expect("registered name resolves");
+            assert_eq!(
+                resolved.name(),
+                entry.name,
+                "the table registers {:?} but the backend it builds calls itself {:?}",
+                entry.name,
+                resolved.name()
+            );
+            if let Some(alias) = entry.alias {
+                assert_eq!(
+                    backend_for(alias).expect("alias resolves").name(),
+                    entry.name,
+                    "alias {alias:?} resolves to a backend that is not {:?}",
+                    entry.name
+                );
+            }
+        }
+    }
+
     #[test]
     fn backend_selection_fails_closed() {
         assert_eq!(backend_for("aviate").expect("known").name(), "aviate-gz");
