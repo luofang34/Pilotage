@@ -38,13 +38,17 @@ fn airframe_key() -> String {
     std::env::var("PILOTAGE_XPLANE_AIRFRAME").unwrap_or_else(|_| AIRFRAME.to_owned())
 }
 
-/// The Alia's own control-feel law.
+/// The law the Alia starts on.
 ///
-/// This is the same artifact the host falls back to when nothing names
-/// one, but it reaches the Alia there by being the single compiled-in
-/// default rather than by being this aircraft's law — which is how the
-/// X500 came to fly on it too. Named here, each backend answers for its
-/// own vehicle.
+/// The same artifact the host falls back to when nothing names one, but it
+/// reaches the Alia there by being the single compiled-in default rather
+/// than by being this aircraft's — which is the property that lets it
+/// reach every OTHER vehicle too. Named here, each backend answers for
+/// what it launches.
+///
+/// This is the compatibility law, not a fitted one: it belongs to no
+/// airframe, and `alia250-shaped-*` exist beside it. Moving to one of
+/// those changes what the aircraft does and wants a flight behind it.
 const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/alia250-legacy-v1.json";
 
 /// The Aviate + X-Plane SITL backend.

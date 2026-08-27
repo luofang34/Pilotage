@@ -17,8 +17,11 @@ const WORLD_NAME: &str = "aviate_sitl";
 /// The X500's own control-feel law.
 ///
 /// Balanced rather than agile or precision: it is the law an operator who
-/// has asked for nothing should get, and the other two remain selectable
-/// in the session.
+/// has asked for nothing should get.
+///
+/// This binds the law the vehicle STARTS on. A runtime feel-mode request
+/// does not reach these files — it shapes one from the mode alone — so
+/// asking for another mode moves the vehicle off its fitted law.
 const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
 
 /// The Aviate + Gazebo SITL backend.
