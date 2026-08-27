@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::backend::{SessionContext, Stage, backend_for};
+use crate::backend::{SessionContext, SimBackend, Stage, backend_for};
 use crate::cli::SimArgs;
 use crate::error::XtaskError;
 use crate::output::print_line;
@@ -62,11 +62,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     backend.prepare(&ctx)?;
 
     let mut stages = backend.plan(&ctx)?;
-    stages.push(host_stage(
-        &ctx,
-        backend.host_adapter(),
-        backend.host_env(&ctx),
-    ));
+    stages.push(host_stage(&ctx, backend.as_ref()));
     stages.push(viewer_stage(&ctx)?);
 
     // The cancellation source must exist before the first child spawns:
@@ -303,7 +299,16 @@ fn refuse_stale_session(mut patterns: Vec<&'static str>) -> Result<(), XtaskErro
     }
 }
 
-fn host_stage(ctx: &SessionContext, adapter: &str, mut env: Vec<(String, String)>) -> Stage {
+/// The host stage, with the environment DERIVED from the backend rather
+/// than handed in.
+///
+/// Taking a ready-made environment is what let a caller assemble the
+/// right one and then pass a different one — two correct halves and a
+/// wrong join, which no test of either half can see. With no such
+/// parameter there is nothing to get wrong at the call site.
+pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stage {
+    let adapter = backend.host_adapter();
+    let mut env = crate::backend::host_env_for(backend, ctx);
     env.push((
         "PILOTAGE_AVIATE_PROFILE".to_owned(),
         ctx.profile.as_env_value().to_owned(),

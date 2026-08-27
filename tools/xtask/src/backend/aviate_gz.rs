@@ -37,17 +37,19 @@ impl SimBackend for AviateGz {
         "aviate"
     }
 
-    fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
-        let mut env = vec![
+    fn control_feel_profile(&self) -> Option<&'static str> {
+        Some(CONTROL_FEEL_PROFILE)
+    }
+
+    fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
+        vec![
             // The camera sidecar discovers gz topics through this.
             ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
             // A sensor's topic is scoped by the world it is in. The
             // launcher is what chooses the world, so it is what says which
             // one rather than the host guessing a name.
             ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
-        ];
-        env.extend(super::control_feel_env(ctx, CONTROL_FEEL_PROFILE));
-        env
+        ]
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
