@@ -233,6 +233,29 @@ fn prepared_log_dir(repo_root: &std::path::Path) -> Result<PathBuf, XtaskError> 
     Ok(log_dir)
 }
 
+/// Produces the Alia X-Plane runtime handshake and prints its path.
+///
+/// # Errors
+///
+/// Returns a typed [`XtaskError`] when X-Plane is unreachable or the
+/// handshake cannot be produced.
+pub fn run_handshake(out_dir: &Path) -> Result<(), XtaskError> {
+    let repo_root = repo_root()?;
+    let out = if out_dir.is_absolute() {
+        out_dir.to_path_buf()
+    } else {
+        repo_root.join(out_dir)
+    };
+    std::fs::create_dir_all(&out).map_err(|source| XtaskError::Io {
+        context: "creating the handshake output directory",
+        source,
+    })?;
+    let path = crate::backend::produce_xplane_handshake_blocking(&repo_root, &out)?;
+    print_line(&path.display().to_string());
+    Ok(())
+}
+
+/// Cargo sets `CARGO_MANIFEST_DIR` in the invoking process's
 /// environment, pointing at the invoking workspace's `tools/xtask` — so a
 /// binary cached from another checkout (a worktree, a moved clone) still
 /// operates on the repository the user is standing in. The compile-time

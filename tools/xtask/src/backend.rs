@@ -236,6 +236,27 @@ struct BackendEntry {
     make: fn() -> Box<dyn SimBackend>,
 }
 
+/// Produces the Alia X-Plane runtime handshake without launching a
+/// session, for harnesses that run the flight controller themselves.
+/// Blocks until the trial plugin inside X-Plane states its own identity,
+/// exactly as a session launch does — the run is bound to the simulator
+/// that is actually running, not to one a caller claimed was.
+///
+/// # Errors
+///
+/// Returns a typed [`XtaskError`] when X-Plane is not reachable, the
+/// plugins do not verify, or the handshake cannot be written.
+pub(crate) fn produce_xplane_handshake_blocking(
+    repo_root: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> Result<PathBuf, XtaskError> {
+    let root = xplane_simulator::xplane_root()?;
+    let aviate = std::env::var_os("AVIATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("../Aviate"));
+    xplane_handshake::produce_blocking(&root, &aviate.join("presets/alia250-xplane.toml"), out_dir)
+}
+
 /// Resolves `--fc` to a backend, fail-closed on unknown names.
 ///
 /// # Errors
