@@ -123,6 +123,13 @@ final class HostLinkModel: ObservableObject {
     let panels: [PanelChoice]
 
     private var link: LinkSession?
+    /// Where the vehicle says it is, for whatever draws it.
+    ///
+    /// The link decodes nothing and derives nothing; this hands on what the
+    /// session already resolved, so the rule for which lane wins and when a
+    /// direction may be drawn lives in one place rather than two.
+    var onVehicleFix: ((VehicleFix) -> Void)?
+
     private var composition: PilotageInstrumentComposition?
     private var displays: [UInt32: PanelDisplay] = [:]
     private var verified: VerifiedInstrumentRuntime?
@@ -515,6 +522,8 @@ final class HostLinkModel: ObservableObject {
             if action == 1, accepted, LaunchRequest.autoClimb {
                 climbUntil = Date().addingTimeInterval(15)
             }
+        case .vehicleFix:
+            VehicleFix(event).map { onVehicleFix?($0) }
         case .stats(
             let telemetry,
             let stateFrames,
@@ -612,14 +621,14 @@ final class HostLinkModel: ObservableObject {
     private func watchControllers() {
         controllerAttached = GCController.controllers().contains { $0.extendedGamepad != nil }
         if let pad = GCController.controllers().first(where: { $0.extendedGamepad != nil }) {
-            selectPad(vendorName: pad.vendorName)
+            selectPad(vendorName: padIdentity(pad))
         }
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect, object: nil, queue: .main
         ) { [weak self] note in
             // Only the name crosses the isolation hop; the controller
             // object itself stays on the posting side.
-            let vendorName = (note.object as? GCController)?.vendorName
+            let vendorName = (note.object as? GCController).map(padIdentity)
             Task { @MainActor in
                 self?.controllerAttached = true
                 self?.selectPad(vendorName: vendorName)

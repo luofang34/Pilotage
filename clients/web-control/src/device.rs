@@ -320,7 +320,72 @@ pub fn parse_gamepad_identity(id: &str) -> DeviceIdentity {
     if let Some(identity) = parse_firefox_identity(id) {
         return identity;
     }
+    if let Some(identity) = parse_named_identity(id) {
+        return identity;
+    }
     DeviceIdentity::WILDCARD
+}
+
+/// Controllers a client can only name.
+///
+/// The browser hands over a string carrying the USB identity, which is what
+/// this registry is keyed on. Apple's GameController framework exposes a
+/// product NAME and no vendor/product pair at all, so a client built on it has
+/// nothing the key can match and every pad would fall to the wildcard — the
+/// generic mapping, whichever pad the reader is actually holding.
+///
+/// Only pads whose profile routes each source axis straight through may be
+/// listed, and that is a constraint about the caller rather than the pads.
+///
+/// A profile's `source_index` numbers the axes AS THE BROWSER DELIVERS THEM.
+/// The client that has no USB pair to offer is Apple's, and it does not
+/// deliver browser axes: it reads `leftThumbstick`/`rightThumbstick`, which
+/// name the sticks semantically, so what arrives is already in canonical slot
+/// order whatever the pad reports underneath. Handing those to a profile that
+/// reroutes applies a correction to input that never needed it — the sticks
+/// come out on the wrong controls and the inverted ones come out backwards.
+///
+/// So a rerouting pad is deliberately absent here and falls to the wildcard,
+/// whose straight-through packing is the correct reading of a canonical
+/// stick. Recognising it by name would name it right and fly it wrong.
+/// `named_pads_route_straight_through` holds this.
+const NAMED_IDENTITIES: [(&str, DeviceIdentity); 1] = [(
+    "dualsense",
+    DeviceIdentity {
+        vendor_id: 0x054c,
+        product_id: 0x0ce6,
+    },
+)];
+
+/// Products whose name CONTAINS a declared one but which are a different pad.
+///
+/// The match below is a substring so one pad's several names all reach it.
+/// That also lets a sibling product with a longer name reach it and be handed
+/// a USB identity that is not its own — which is then what the device label
+/// and every evidence record built from it state.
+///
+/// A pad listed here falls to the wildcard instead. Its packing does not
+/// change by it: a named pad routes straight through, and so does the
+/// wildcard. What changes is that the record stops naming the wrong device.
+const SHARES_A_NAME_NOT_A_DEVICE: [&str; 1] = ["dualsense edge"];
+
+/// Matches a product name against the pads named above.
+///
+/// Substring rather than equality: the same pad is reported as "DualSense",
+/// "DualSense Wireless Controller" and "Sony DualSense" by different layers,
+/// and all three name one device.
+fn parse_named_identity(id: &str) -> Option<DeviceIdentity> {
+    let lowered = id.to_ascii_lowercase();
+    if SHARES_A_NAME_NOT_A_DEVICE
+        .iter()
+        .any(|name| lowered.contains(name))
+    {
+        return None;
+    }
+    NAMED_IDENTITIES
+        .iter()
+        .find(|(name, _)| lowered.contains(name))
+        .map(|(_, identity)| *identity)
 }
 
 fn parse_chromium_identity(id: &str) -> Option<DeviceIdentity> {
@@ -351,3 +416,73 @@ fn hex_after(haystack: &str, marker: &str) -> Option<u16> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod apple_identity_tests {
+    use super::{DeviceIdentity, parse_gamepad_identity};
+
+    #[test]
+    fn a_pad_can_be_recognised_by_name_when_no_usb_identity_is_offered() {
+        // The browser hands over a string carrying the USB identity, and the
+        // registry keys on that. The Apple client has no such string to give:
+        // GameController reports a product NAME and no vendor/product pair.
+        // Without a name lookup every pad on an iPad falls to the wildcard and
+        // the reader gets the generic packing whichever pad they hold.
+        // A pad this repo carries a profile for is now recognised by name, so
+        // the reader gets the law written for their pad rather than the
+        // generic packing.
+        assert_eq!(
+            parse_gamepad_identity("DualSense Wireless Controller"),
+            DeviceIdentity {
+                vendor_id: 0x054c,
+                product_id: 0x0ce6
+            },
+        );
+        assert_eq!(
+            parse_gamepad_identity("Sony DualSense"),
+            DeviceIdentity {
+                vendor_id: 0x054c,
+                product_id: 0x0ce6
+            },
+            "the same pad under another of its names"
+        );
+
+        // A pad nobody wrote a profile for still falls to the wildcard, which
+        // is the honest answer rather than a guess at its packing.
+        //
+        // The RadioMaster is in that list on purpose. This repo does carry a
+        // profile for it, but that profile reroutes browser axis order, and
+        // the only caller that reaches this path sends canonical stick order
+        // already. Its name is withheld so it gets the straight-through
+        // packing that reading is entitled to.
+        for unknown in [
+            "Xbox Wireless Controller",
+            "RadioMaster Pocket",
+            // A different product that carries a declared pad's name inside
+            // its own. Handing it that pad's USB identity would make every
+            // record built from it name a device the reader is not holding.
+            "DualSense Edge",
+            "DualSense Edge Wireless Controller",
+            "gamepad",
+            "",
+        ] {
+            assert_eq!(
+                parse_gamepad_identity(unknown),
+                DeviceIdentity::WILDCARD,
+                "{unknown} resolved to an identity nobody declared"
+            );
+        }
+
+        // The same pad, as the browser names it, does carry one.
+        let chromium =
+            "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)";
+        assert_eq!(
+            parse_gamepad_identity(chromium),
+            DeviceIdentity {
+                vendor_id: 0x054c,
+                product_id: 0x0ce6
+            },
+            "the browser's form carries the identity the registry needs"
+        );
+    }
+}

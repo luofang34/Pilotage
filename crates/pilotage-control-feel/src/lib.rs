@@ -1,11 +1,13 @@
 //! Versioned operator control-feel profiles and pure demand shaping.
 
+pub mod airframe;
 mod binding;
 mod digest;
 mod profile;
 mod shaper;
 mod validation;
 
+pub use airframe::AirframeLimits;
 pub use digest::{FeelDigest, FeelDigestError};
 pub use profile::{
     AxisCurve, AxisDynamics, AxisResponse, DemandEnvelope, DirectDynamics, FeelMode,

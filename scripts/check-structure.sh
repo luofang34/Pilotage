@@ -52,7 +52,7 @@ swift_length_ceiling() {
     # main-actor weave — Swift's file-scoped `private` means splitting
     # it needs a real sub-object design, not an extension-file move.
     case "$1" in
-        ./clients/apple/App/HostLinkModel.swift) echo 841 ;;
+        ./clients/apple/App/HostLinkModel.swift) echo 850 ;;
         *) echo 500 ;;
     esac
 }

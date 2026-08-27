@@ -6,7 +6,7 @@
 use pilotage_input::{DeviceIdentity, parse_profile_bytes};
 
 use super::{
-    CompiledDevice, DUALSENSE_JSON, DeviceStage, GENERIC_PAD_JSON, KEYBOARD_JSON,
+    CompiledDevice, DUALSENSE_JSON, DeviceStage, GENERIC_PAD_JSON, KEYBOARD_JSON, NAMED_IDENTITIES,
     RADIOMASTER_POCKET_JSON, SelectOutcome, parse_gamepad_identity,
 };
 use crate::sample::{ButtonSample, RawSample};
@@ -216,4 +216,41 @@ fn clearing_held_keys_neutralizes_the_synthesized_sample() {
     stage.key_sample(&mut out);
     assert!(out.axes.iter().all(|axis| *axis == 0.0));
     assert!(out.buttons.iter().all(|button| !button.pressed));
+}
+
+#[test]
+fn named_pads_route_straight_through() {
+    // Name matching exists for one caller: the Apple client, which has no USB
+    // pair to offer. That client reads GameController's `leftThumbstick` and
+    // `rightThumbstick`, so the axes it sends are already in canonical slot
+    // order — a profile that reroutes would be correcting input that arrives
+    // correct, putting the sticks on the wrong controls.
+    //
+    // Adding a rerouting pad to the name list is therefore a flight defect and
+    // not a naming preference. This is what stops it.
+    for (name, _) in NAMED_IDENTITIES {
+        let mut stage = DeviceStage::new();
+        assert_eq!(
+            stage.select_pad(name),
+            SelectOutcome::Exact,
+            "{name} is listed but resolves to no profile"
+        );
+        for source in 0..4 {
+            let mut axes = [0.0_f32; 4];
+            axes[source] = 1.0;
+            let mut out = RawSample::default();
+            stage.pad_sample(&axes, &[], &mut out);
+            assert_eq!(
+                out.axes[source], 1.0,
+                "{name} sends source axis {source} somewhere other than slot {source}, \
+                 or inverts it; a canonical stick would arrive on the wrong control"
+            );
+            for (slot, value) in out.axes.iter().enumerate().take(4) {
+                assert!(
+                    slot == source || *value == 0.0,
+                    "{name} leaks source axis {source} into slot {slot}"
+                );
+            }
+        }
+    }
 }
