@@ -231,9 +231,12 @@ pub fn stage() -> SearchStage {
         final_qualification_scenarios: vec![scenario("final-crosswind", 3)],
         repetitions: 2,
         promotion: PromotionPolicy {
+            schema_version: flight_tune::PROMOTION_POLICY_SCHEMA_VERSION,
+            seed_policy: flight_tune::PromotionSeedPolicy::PairedScenarioDigestV1,
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.2,
             maximum_control_effort_increase: 1.0,
+            objective_regression_upper_95: BTreeMap::from([("test.response".to_owned(), 1.0)]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 0.5,

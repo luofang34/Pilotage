@@ -14,6 +14,7 @@ fn passing_attempt_requires_the_exact_ordered_committed_runs() {
         &mut fixture.state,
         0,
         &CandidateEvaluation::Passed { aggregate, runs },
+        None,
         Some(true),
         &fixture.stage,
         fixture.session.fixed_seed,
@@ -41,6 +42,7 @@ fn passing_attempt_rejects_a_different_valid_run_record() {
             &mut fixture.state,
             0,
             &evaluation,
+            None,
             Some(true),
             &fixture.stage,
             fixture.session.fixed_seed,
@@ -67,6 +69,7 @@ fn attempt_cannot_complete_with_an_uncommitted_run() {
             &mut fixture.state,
             0,
             &evaluation,
+            None,
             Some(true),
             &fixture.stage,
             fixture.session.fixed_seed,
@@ -90,6 +93,7 @@ fn hard_gate_attempt_requires_the_exact_final_abort() {
         &mut fixture.state,
         0,
         &exact,
+        None,
         Some(false),
         &fixture.stage,
         fixture.session.fixed_seed,
@@ -110,6 +114,7 @@ fn hard_gate_attempt_requires_the_exact_final_abort() {
             &mut different.state,
             0,
             &evaluation,
+            None,
             Some(false),
             &different.stage,
             different.session.fixed_seed,
@@ -132,6 +137,7 @@ fn attempt_completed_rejects_a_quarantine_receipt() {
             &mut fixture.state,
             0,
             &evaluation,
+            None,
             Some(false),
             &fixture.stage,
             fixture.session.fixed_seed,
@@ -149,8 +155,8 @@ fn attempt_quarantine_requires_the_one_final_receipt_and_reason() {
     fixture.commit(&final_run);
     let reason = terminal::quarantine_reason(&final_run.receipt).expect("derive reason");
 
-    assert!(attempt::quarantine(&mut fixture.state, 0, "different reason").is_err());
-    attempt::quarantine(&mut fixture.state, 0, &reason).expect("quarantine exact attempt");
+    assert!(attempt::quarantine(&mut fixture.state, 0, "different reason", None).is_err());
+    attempt::quarantine(&mut fixture.state, 0, &reason, None).expect("quarantine exact attempt");
 }
 
 #[test]
@@ -161,6 +167,7 @@ fn cleanup_failure_keeps_the_closed_attempt_pending() {
         &mut fixture.state,
         0,
         &CandidateEvaluation::Passed { aggregate, runs },
+        None,
         Some(true),
         &fixture.stage,
         fixture.session.fixed_seed,
