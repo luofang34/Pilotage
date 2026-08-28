@@ -199,6 +199,13 @@ jobs:
       - name: cargo test
         run: cargo test --all-targets
 
+      - name: Campaign certification
+        # Every ignored campaign test — the two full vehicle campaigns
+        # and the calibration probe — split out of `cargo test` so the
+        # cost is visible and can be scoped to the changes that can
+        # reach it.
+        run: cargo test -p flight-tune-campaign -- --ignored --test-threads 2
+
       - name: durable storage non-Unix contract and consumer
         env:
           RUSTFLAGS: "-D warnings"
