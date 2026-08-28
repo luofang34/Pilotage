@@ -18,9 +18,10 @@ env:
 
 jobs:
   # Decides which halves of the matrix a change can actually affect.
-  # The skip list is deliberately narrow: only paths with no route into
-  # the Apple builds — Rust tools, the web client, and documentation —
-  # may skip them, and anything unrecognized runs everything.
+  # `cargo xtask affected` reads the declarations in Cargo metadata and
+  # the build graph itself; any failure, and any change to the
+  # classifier's own inputs, answers "run everything". The shell here
+  # only invokes and forwards — it decides nothing.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -31,6 +32,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: xtask-affected
+
       - name: Decide the affected matrix halves
         id: decide
         run: |
@@ -39,18 +48,13 @@ jobs:
             exit 0
           fi
           base="${{ github.event.pull_request.base.sha }}"
-          apple=false
-          while IFS= read -r file; do
-            case "$file" in
-              # The Apple client's tests read golden fixtures from this
-              # tree, so a fixture change must run the job that
-              # validates it.
-              tools/hid-probe/fixtures/*) apple=true ;;
-              tools/*|clients/web/*|docs/*|*.md) ;;
-              *) apple=true ;;
-            esac
-          done < <(git diff --name-only "$base"...HEAD)
-          echo "apple=$apple" >> "$GITHUB_OUTPUT"
+          if answers=$(cargo run -p xtask --quiet -- affected --base "$base"); then
+            printf '%s\n' "$answers"
+            printf '%s\n' "$answers" | grep -v '^#' >> "$GITHUB_OUTPUT"
+          else
+            echo "the classifier failed; everything runs"
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+          fi
 
   quality-gates:
     runs-on: ubuntu-latest

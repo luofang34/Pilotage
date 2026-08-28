@@ -162,3 +162,24 @@ let_underscore_future = "deny"
 await_holding_lock = "deny"
 disallowed_types = "deny"
 disallowed_macros = "deny"
+
+# CI change classification. The `changes` job asks `cargo xtask affected`
+# which halves of the matrix a diff can reach; these tables are the
+# declarations it reads. Paths declare non-cargo reach; packages declare
+# reach through the build graph, expanded to their dependency closure.
+[workspace.metadata.ci]
+# Paths that reach no build: a change wholly inside them affects nothing.
+inert-paths = ["docs/", "*.md"]
+
+[workspace.metadata.ci.domains.apple]
+paths = [
+    "clients/apple/",
+    "clients/apple-instrument-bridge/",
+    "clients/apple-instrument-consumer/",
+    "scripts/check-apple-client.sh",
+    "scripts/test-check-apple-client.sh",
+    "scripts/check-apple-instrument-consumer.sh",
+]
+depends-on-packages = ["pilotage-instrument-apple-bridge"]
+# The Apple client's tests read golden fixtures from this tree.
+extra-paths = ["tools/hid-probe/fixtures/"]
