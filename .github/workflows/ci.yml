@@ -42,6 +42,10 @@ jobs:
           apple=false
           while IFS= read -r file; do
             case "$file" in
+              # The Apple client's tests read golden fixtures from this
+              # tree, so a fixture change must run the job that
+              # validates it.
+              tools/hid-probe/fixtures/*) apple=true ;;
               tools/*|clients/web/*|docs/*|*.md) ;;
               *) apple=true ;;
             esac
