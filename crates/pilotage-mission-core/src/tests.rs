@@ -8,13 +8,15 @@ use crate::{
 };
 
 const CANONICAL_FIXTURE: &[u8] = concat!(
-    "{\"identity\":{\"revision_id\":\"mission-1\",\"schema_version\":1,",
-    "\"content_digest\":\"058815dfb94ec2a28ba81f67ed6493cffcbdc2ea3de8921e7afeeccea51b22d8\",",
+    "{\"identity\":{\"revision_id\":\"mission-1\",\"schema_version\":2,",
+    "\"content_digest\":\"39948a4de2c0ffe060c45b243e82eb575d9cddb68204f097b36c5f3995c9b996\",",
     "\"navigation_data_identity\":{\"cycle\":\"2608\",\"snapshot_id\":\"nav-1\",",
     "\"snapshot_digest\":\"0101010101010101010101010101010101010101010101010101010101010101\"}},",
-    "\"execution_policy\":{\"target\":\"real_vehicle\"},\"phases\":[{\"id\":\"phase-1\",",
+    "\"execution_policy\":{\"target\":\"real_vehicle\",\"retry_limit\":2,",
+    "\"receipt_timeout_ns\":500000},\"phases\":[{\"id\":\"phase-1\",",
     "\"required_capabilities\":[\"simulator_time\",\"arm_disarm\"],\"entry_conditions\":[],",
     "\"action\":{\"domain\":\"flight\",\"action\":{\"kind\":\"arm\"}},",
+    "\"cleanup_actions\":[],",
     "\"completion_conditions\":[],\"abort_conditions\":[],",
     "\"simulator_time_deadline_ns\":1000000}]}"
 )
@@ -44,6 +46,7 @@ fn phase(id: &str, action: MissionAction) -> MissionPhase {
         required_capabilities,
         entry_conditions: Vec::new(),
         action,
+        cleanup_actions: Vec::new(),
         completion_conditions: Vec::new(),
         abort_conditions: Vec::new(),
         simulator_time_deadline_ns: 1_000_000,
@@ -57,7 +60,11 @@ fn document_for(
     MissionDocument::new(
         "mission-1".to_owned(),
         navigation_data(1),
-        ExecutionPolicy { target },
+        ExecutionPolicy {
+            target,
+            retry_limit: 2,
+            receipt_timeout_ns: 500_000,
+        },
         vec![phase("phase-1", action)],
     )
 }
@@ -135,7 +142,7 @@ fn identity_and_policy_field_groups_change_digest() {
         original
     );
     let mut schema = document.clone();
-    schema.identity.schema_version = 2;
+    schema.identity.schema_version = 3;
     assert_ne!(schema.calculate_content_digest().expect("digest"), original);
     let mut navdata = document.clone();
     navdata.identity.navigation_data_identity.cycle = "2609".to_owned();
@@ -146,6 +153,24 @@ fn identity_and_policy_field_groups_change_digest() {
     let mut policy = document;
     policy.execution_policy.target = ExecutionTarget::Simulator;
     assert_ne!(policy.calculate_content_digest().expect("digest"), original);
+    let mut timeout = valid_document();
+    timeout.execution_policy.receipt_timeout_ns =
+        timeout.execution_policy.receipt_timeout_ns.wrapping_add(1);
+    assert_ne!(
+        timeout.calculate_content_digest().expect("digest"),
+        original
+    );
+}
+
+#[test]
+fn retry_limit_change_changes_content_digest() {
+    let mut document = valid_document();
+    let original = document.calculate_content_digest().expect("digest");
+    document.execution_policy.retry_limit = document.execution_policy.retry_limit.wrapping_add(1);
+    assert_ne!(
+        document.calculate_content_digest().expect("digest"),
+        original
+    );
 }
 
 #[test]
@@ -154,6 +179,14 @@ fn each_phase_field_group_changes_digest() {
     let original = document.calculate_content_digest().expect("digest");
     let mut changed = document.clone();
     changed.phases[0].id.push_str("-changed");
+    assert_ne!(
+        changed.calculate_content_digest().expect("digest"),
+        original
+    );
+    changed = document.clone();
+    changed.phases[0]
+        .cleanup_actions
+        .push(MissionAction::Flight(FlightAction::Disarm {}));
     assert_ne!(
         changed.calculate_content_digest().expect("digest"),
         original
@@ -292,6 +325,12 @@ fn validation_rejects_missing_deadline_and_capability() {
             ..
         })
     ));
+    let mut document = valid_document();
+    document.execution_policy.receipt_timeout_ns = 0;
+    assert!(matches!(
+        document.validate(),
+        Err(ValidationError::ZeroDuration { .. })
+    ));
 }
 
 #[test]
@@ -307,12 +346,29 @@ fn real_vehicle_admission_rejects_each_trial_action() {
 }
 
 #[test]
+fn real_vehicle_admission_rejects_a_trial_cleanup_action() {
+    let mut document = valid_document();
+    document.phases[0]
+        .required_capabilities
+        .push(MissionCapability::Reset);
+    document.phases[0]
+        .cleanup_actions
+        .push(MissionAction::Trial(TrialAction::Reset {}));
+    assert!(matches!(
+        document.validate_for_target(ExecutionTarget::RealVehicle),
+        Err(ValidationError::SimulatorOnlyAction { .. })
+    ));
+}
+
+#[test]
 fn phase_order_is_preserved_by_canonical_serialization() {
     let document = MissionDocument::new(
         "mission-ordered".to_owned(),
         navigation_data(1),
         ExecutionPolicy {
             target: ExecutionTarget::RealVehicle,
+            retry_limit: 2,
+            receipt_timeout_ns: 500_000,
         },
         vec![
             phase("first", MissionAction::Flight(FlightAction::Arm {})),
