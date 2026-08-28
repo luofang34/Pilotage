@@ -32,11 +32,23 @@ pub enum MissionBuildError {
         #[source]
         source: RouteError,
     },
-    /// The route expanded to no geometry (e.g. procedure-only tokens).
+    /// The route expanded to no geometry (e.g. a `DCT`-only route).
     #[error("route {route:?} expanded to no points")]
     EmptyRoute {
         /// The route string as given.
         route: String,
+    },
+    /// The route carries a SID/STAR procedure token. The expander
+    /// recognizes such a token but contributes no geometry for it (no
+    /// procedure engine), so flying the built mission would silently
+    /// omit the procedure.
+    #[error("route {route:?} carries unexecuted procedure(s): {procedures:?}")]
+    UnexecutedProcedure {
+        /// The route string as given.
+        route: String,
+        /// Each procedure token the expansion recognized but could not
+        /// resolve to geometry, e.g. `"TRUKN2"` or `"BLUES2.IIU"`.
+        procedures: Vec<String>,
     },
     /// The mission anchor cannot anchor a local tangent plane.
     #[error("mission anchor rejected by geodesy")]

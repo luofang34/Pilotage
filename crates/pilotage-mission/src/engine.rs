@@ -10,7 +10,7 @@ mod tick;
 use core::mem::Discriminant;
 
 use aerocontext_core::NavDataSnapshot;
-use aerocontext_planning::route::expand_str;
+use aerocontext_planning::route::{RouteToken, expand_str};
 use navigate_contract::{
     AltitudeConstraint, FlightPlan, GeodeticPosition, MonotonicNanos, NavigationSolution,
     ObservationStamp, PlanRole, SensorClass, SourceComposition, SourceEpoch, SourceId,
@@ -83,8 +83,9 @@ impl MissionEngine {
     /// # Errors
     ///
     /// Any [`MissionBuildError`]: expansion failure (with cycle
-    /// context), an empty expansion, an implausible anchor, or a plan
-    /// the sequencer refuses to activate.
+    /// context), a route carrying an unexecuted SID/STAR procedure, an
+    /// empty expansion, an implausible anchor, or a plan the sequencer
+    /// refuses to activate.
     pub fn new(
         snapshot: &NavDataSnapshot,
         provenance: SnapshotProvenance,
@@ -97,6 +98,16 @@ impl MissionEngine {
                 source,
             }
         })?;
+        if !expanded.procedures.is_empty() {
+            return Err(MissionBuildError::UnexecutedProcedure {
+                route: config.route.clone(),
+                procedures: expanded
+                    .procedures
+                    .iter()
+                    .map(procedure_token_name)
+                    .collect(),
+            });
+        }
         if expanded.points.is_empty() {
             return Err(MissionBuildError::EmptyRoute {
                 route: config.route.clone(),
@@ -256,6 +267,18 @@ impl MissionEngine {
     #[must_use]
     pub const fn mission_document(&self) -> &MissionDocument {
         &self.document
+    }
+}
+
+/// Names a recognized-but-unresolved procedure token for the operator,
+/// e.g. `"TRUKN2"` or `"BLUES2.IIU"`.
+fn procedure_token_name(token: &RouteToken) -> String {
+    match token {
+        RouteToken::Procedure { name, transition } => match transition {
+            Some(transition) => format!("{name}.{transition}"),
+            None => name.clone(),
+        },
+        other => format!("{other:?}"),
     }
 }
 
