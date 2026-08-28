@@ -289,10 +289,24 @@ for step in 'clients/web/situation-style.test.mjs' \
     'scripts/vendor-maplibre-web.sh' \
     'scripts/check-web-situation-map.sh' \
     'scripts/test-check-web-situation-map.sh'; do
-    if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
-        echo "FORBIDDEN: CI must run $step" >&2
-        status=1
-    fi
+    case "$step" in
+        # A paired guard reaches CI through the discovering runner; the
+        # obligation is that CI runs the runner, not that it names the
+        # script.
+        scripts/check-*.sh|scripts/test-check-*.sh)
+            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq -- '-- guards' \
+                && ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
+                echo "FORBIDDEN: CI must run $step" >&2
+                status=1
+            fi
+            ;;
+        *)
+            if ! grep -E '^[[:space:]]*run:' "$ci" | grep -Fq "$step"; then
+                echo "FORBIDDEN: CI must run $step" >&2
+                status=1
+            fi
+            ;;
+    esac
 done
 
 if [ "$status" -ne 0 ]; then
