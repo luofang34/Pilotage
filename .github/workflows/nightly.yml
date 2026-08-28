@@ -1,0 +1,120 @@
+name: Nightly certification
+
+# The unscoped, unretried pass. Per-merge CI scopes suites to the
+# changes that can reach them and tolerates a rerun; this run scopes
+# nothing and retries nothing, so it audits the change classifier and
+# MEASURES flake rates instead of masking them. When it goes red, the
+# failure output enumerates every merge since the last green nightly —
+# the bisection candidates, already listed.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  PROTOC_SHA256: a7be2928c0454f132c599e25b79b7ad1b57663f2337d7f7e468a1d59b98ec1b0
+  PROTOC_VERSION: "26.1"
+
+jobs:
+  certification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Authorize the private git dependency (Navigate)
+        env:
+          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
+          chmod 600 ~/.ssh/navigate_ci
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+
+      - name: Authorize the private situation domain dependencies
+        env:
+          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
+          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$AIRMASS_DEPLOY_KEY" ] || [ -z "$SURVEILLANCE_DEPLOY_KEY" ]; then
+            echo "::error::AIRMASS_DEPLOY_KEY and SURVEILLANCE_DEPLOY_KEY must contain private deploy keys." >&2
+            exit 1
+          fi
+          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
+          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
+          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
+          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
+          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
+      - name: Install system dependencies (hidapi on Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        run: |
+          archive="${RUNNER_TEMP}/protoc-${PROTOC_VERSION}.zip"
+          install_dir="${RUNNER_TEMP}/protoc"
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+            --output "${archive}"
+          echo "${PROTOC_SHA256}  ${archive}" | sha256sum --check --strict
+          unzip -q "${archive}" -d "${install_dir}"
+          echo "${install_dir}/bin" >> "${GITHUB_PATH}"
+          "${install_dir}/bin/protoc" --version
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+
+      - name: Full workspace tests, unretried
+        run: cargo test --workspace --all-targets
+
+      - name: Campaign certification, both vehicles
+        run: cargo test -p flight-tune-campaign -- --ignored --test-threads 2
+
+      - name: Flake measurement, three unretried rounds
+        run: |
+          failures=0
+          for round in 1 2 3; do
+            echo "== flake measurement round ${round}"
+            if ! cargo test -p flight-tune-aviate --test process_supervision; then
+              failures=$((failures + 1))
+            fi
+            if ! cargo test -p pilotage-tuning-feedback; then
+              failures=$((failures + 1))
+            fi
+          done
+          echo "flake measurement: ${failures} failing suite run(s) across three rounds"
+          if [ "${failures}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Enumerate merges since the last green nightly
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_green=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha' 2>/dev/null || true)
+          if [ -n "${last_green}" ] && git cat-file -e "${last_green}" 2>/dev/null; then
+            echo "::group::Merges since the last green nightly (${last_green})"
+            git log --oneline "${last_green}..HEAD"
+            echo "::endgroup::"
+          else
+            echo "No previous green nightly found; every commit on this branch is a candidate."
+          fi
