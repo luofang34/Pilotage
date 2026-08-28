@@ -26,9 +26,11 @@ fn discovery_pairs_checks_with_their_self_tests() {
     std::fs::remove_dir_all(&scripts).ok();
 }
 
-/// The real repository's convention holds: the guards CI has always
-/// run are discovered, including the Apple-client static guard that
-/// runs on Linux, and none of them lost its self-test.
+/// Every pair CI relies on is pinned by name. Discovery wires a guard
+/// into CI only while its self-test exists, so deleting a self-test
+/// would silently drop its guard from CI; this floor turns that into
+/// a loud failure. Migrating a guard to Rust deletes its pair and must
+/// remove its name here in the same change.
 #[test]
 fn repository_guards_are_discovered() {
     let scripts = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -38,11 +40,25 @@ fn repository_guards_are_discovered() {
     let pairs = discover_pairs(&scripts).expect("discover");
     let names: Vec<&str> = pairs.iter().map(|pair| pair.name.as_str()).collect();
     for expected in [
-        "structure",
-        "monotonic-counter-arithmetic",
-        "production-rust-lints",
+        "adr-supersession",
+        "airspace-view-contract",
         "apple-client",
+        "aviate-control-feel-boundary",
+        "aviate-supervision-boundary",
+        "flight-build",
         "flight-tune-boundaries",
+        "flight-tune-journal-storage-boundary",
+        "geodetic-datum-codes",
+        "monotonic-counter-arithmetic",
+        "navdata-tile-bundle",
+        "production-rust-lints",
+        "situation-layer-controls",
+        "situation-map-attribution",
+        "situation-ownship-wiring",
+        "situation-presentation-boundary",
+        "structure",
+        "terrain-base-layer",
+        "web-situation-map",
     ] {
         assert!(
             names.contains(&expected),
