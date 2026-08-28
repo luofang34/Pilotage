@@ -22,7 +22,13 @@ pub(super) use evidence_fixtures::{
     add_unlinked_temporary, digest_bytes, replace_file_bytes,
 };
 
-const EVENT_TIMEOUT: Duration = Duration::from_secs(15);
+// A deadline, not a pace: healthy fixtures finish in well under a
+// second, and only a genuinely hung run waits this long. The suite
+// spawns supervisor and target processes from parallel test threads,
+// and on a loaded two-core CI runner a fixture's owner readiness can
+// take tens of seconds of wall time — a tight deadline there reads as
+// a supervision defect when it is only scheduling.
+const EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 const CLOSED_GATE_TIMEOUT: Duration = Duration::from_millis(250);
 const TARGET_FIFO_ENV: &str = "PILOTAGE_TARGET_FIFO";
 pub(super) const TARGET_ESCAPE_GROUP_ENV: &str = "PILOTAGE_TARGET_ESCAPE_GROUP";
