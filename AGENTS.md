@@ -18,3 +18,11 @@ English.
 
 Do not copy noncompliant legacy text into a new document. Record a broad legacy
 rewrite as separate work.
+
+## Shell scripts
+
+Use a shell script only to start programs and to connect their inputs and
+outputs. Do not put a decision in a shell script. Write each decision in Rust
+in the xtask tool, with tests. A new repository guard is a Rust function with
+its own tests. When you change an old guard script, move it to Rust in the
+same change and delete its shell self-test.
