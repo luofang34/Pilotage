@@ -3924,6 +3924,7 @@ dependencies = [
  "pilotage-trial",
  "pilotage-xplane-trial",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror",
  "tokio",
