@@ -173,6 +173,27 @@ fn an_exact_step_reaches_its_target_in_one_simulator_sample() {
 }
 
 #[test]
+fn a_causal_record_survives_the_document_round_trip() {
+    // The production runtime carries this record into durable evidence, so
+    // every field it needs has to survive encoding.
+    let (mut transport, mut sender) = frozen();
+    let prepared = transport
+        .prepare_step(&step_request(ControlChannel::Yaw, -0.5))
+        .expect("prepared step");
+    let record = enacted(
+        transport
+            .enact_blocking(&mut sender, &prepared)
+            .expect("enacted step"),
+    );
+
+    let bytes = serde_json::to_vec(&record).expect("encoded record");
+    let restored: super::super::DirectCommandRecord =
+        serde_json::from_slice(&bytes).expect("decoded record");
+
+    assert_eq!(restored, record);
+}
+
+#[test]
 fn a_release_sends_the_frozen_baseline_as_one_exact_step() {
     let (mut transport, mut sender) = frozen();
     let baseline = transport.baseline().expect("frozen baseline").setpoint();
