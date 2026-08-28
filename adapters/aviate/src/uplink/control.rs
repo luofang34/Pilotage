@@ -258,7 +258,7 @@ impl FlightUplink {
         (dt_s, dt_s)
     }
 
-    fn in_quiet_interval(&mut self, now: Instant) -> bool {
+    pub(super) fn in_quiet_interval(&mut self, now: Instant) -> bool {
         if let Some(quiet) = self.quiet_until {
             if now < quiet {
                 return true;
@@ -333,7 +333,7 @@ impl FlightUplink {
         }
     }
 
-    fn time_boot_ms(&self) -> u32 {
+    pub(super) fn time_boot_ms(&self) -> u32 {
         self.clock
             .now()
             .saturating_duration_since(self.started)

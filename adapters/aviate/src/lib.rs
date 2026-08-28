@@ -29,7 +29,10 @@ pub use adapter::{
 pub use error::AviateAdapterError;
 pub use incarnation::{IncarnationProvider, OsIncarnationProvider};
 pub use pilotage_mavlink::link::{LinkConfig, ResetPolicy};
-pub use uplink::FlightUplink;
+pub use uplink::{
+    ATTITUDE_SETPOINT_FRAME_BYTES, ExactDirectError, ExactDirectSetpoint, FlightUplink,
+    SimulatorDirectAuthority, TransmittedDirectSetpoint,
+};
 
 /// Canonical control-feel artifact for the default Alia launch.
 pub const ALIA250_DEFAULT_CONTROL_FEEL_JSON: &str =

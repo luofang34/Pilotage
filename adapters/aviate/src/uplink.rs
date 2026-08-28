@@ -19,10 +19,16 @@ use pilotage_control_feel::{FeelDigest, FlightFeelProfile, ValidatedFlightFeelPr
 use pilotage_mavlink::codec::{encode_arm_command, encode_velocity_setpoint};
 
 mod control;
+mod direct;
 mod fc_replies;
 mod feel;
 #[cfg(test)]
 mod tests;
+
+pub use direct::{
+    ATTITUDE_SETPOINT_FRAME_BYTES, ExactDirectError, ExactDirectSetpoint, SimulatorDirectAuthority,
+    TransmittedDirectSetpoint,
+};
 
 /// Longest believable gap between control frames when integrating the
 /// yaw-rate stick; anything longer is a stall, not a dt.
@@ -102,13 +108,31 @@ impl FlightUplink {
     /// Returns an error if the profile does not match Alia or the socket
     /// cannot initialize.
     pub(crate) fn new_with_profile(profile: ValidatedFlightFeelProfile) -> std::io::Result<Self> {
+        Self::bind_with_profile(profile, default_command_endpoint())
+    }
+
+    /// Binds an ephemeral socket toward an explicit FC command endpoint.
+    ///
+    /// A tuning trial names the endpoint it commands, because that endpoint
+    /// is part of the direct-transport identity. Reading it from the ambient
+    /// environment would leave the identity unbound.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the default profile or socket cannot initialize.
+    pub fn bind_to(command_endpoint: SocketAddr) -> std::io::Result<Self> {
+        let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::legacy_compatibility())
+            .map_err(std::io::Error::other)?;
+        Self::bind_with_profile(profile, command_endpoint)
+    }
+
+    fn bind_with_profile(
+        profile: ValidatedFlightFeelProfile,
+        target: SocketAddr,
+    ) -> std::io::Result<Self> {
         crate::adapter::validate_aviate_profile_bindings(&profile)
             .map_err(std::io::Error::other)?;
         let feel_digest = FeelDigest::calculate(&profile).map_err(std::io::Error::other)?;
-        let target = std::env::var("PILOTAGE_AVIATE_FC_ADDR")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 20000)));
         let socket = UdpSocket::bind("127.0.0.1:0")?;
         socket.set_nonblocking(true)?;
         info!(
@@ -154,6 +178,11 @@ impl FlightUplink {
 
     pub(crate) fn monotonic_now(&self) -> Instant {
         self.clock.now()
+    }
+
+    /// The FC command endpoint every uplink frame is addressed to.
+    pub const fn command_endpoint(&self) -> SocketAddr {
+        self.target
     }
 
     /// Selects the MAVLink system/component whose replies may affect state.
@@ -318,4 +347,11 @@ impl FlightUplink {
         self.hold_pos_ned = None;
         self.feel.reset();
     }
+}
+
+fn default_command_endpoint() -> SocketAddr {
+    std::env::var("PILOTAGE_AVIATE_FC_ADDR")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 20000)))
 }

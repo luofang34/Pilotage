@@ -12,6 +12,7 @@ use pilotage_mavlink::link::KinematicsUpdate;
 
 mod control_feel;
 mod direct_flight;
+mod exact_direct;
 mod fixtures;
 mod flight_control;
 mod hid_pipeline;

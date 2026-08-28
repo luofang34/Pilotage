@@ -106,6 +106,18 @@ pub struct SimulatorCapability {
 }
 
 impl SimulatorCapability {
+    /// Mints a capability for one simulator session, for a downstream test.
+    ///
+    /// The harness mints the real one only after the simulator answers a
+    /// session challenge. A crate that has to exercise a capability-gated
+    /// path in isolation enables the `test-support` feature; a release
+    /// build does not compile this function at all.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub const fn for_test(receipt: SimulatorSessionReceipt) -> Self {
+        Self::new(receipt)
+    }
+
     pub(crate) const fn new(receipt: SimulatorSessionReceipt) -> Self {
         Self {
             session_digest: receipt.session_digest,

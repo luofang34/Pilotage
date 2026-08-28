@@ -808,6 +808,8 @@ dependencies = [
  "flight-tune",
  "libc",
  "libproc",
+ "pilotage-adapter-aviate",
+ "pilotage-control-feel",
  "pilotage-durable-storage",
  "rustix",
  "serde",

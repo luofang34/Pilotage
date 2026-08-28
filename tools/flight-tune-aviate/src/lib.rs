@@ -1,9 +1,13 @@
-//! Crash-contained Aviate process supervision for simulator tuning.
+//! Aviate process supervision and direct control for simulator tuning.
 //!
 //! The supervisor keeps one target behind a launch gate until it stores and
 //! reads back the exact process identity. A parent-lifetime pipe requests
 //! cleanup after parent failure. Recovery does not send process signals. The
 //! launch gate and its owner contain the exact private process group.
+//!
+//! [`direct_transport`] carries the simulator-only exact direct setpoints
+//! that qualify a direct controller. It is not reachable from the normal
+//! application control interface.
 //!
 //! This crate supports only Linux and macOS.
 //!
@@ -16,6 +20,7 @@
 
 mod action_port;
 mod artifact;
+pub mod direct_transport;
 mod document;
 mod error;
 mod inspection;

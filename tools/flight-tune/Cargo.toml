@@ -8,6 +8,13 @@ description = "Deterministic host-side flight parameter search and promotion"
 [lints]
 workspace = true
 
+[features]
+default = []
+# Lets a downstream test mint the simulator session capability that the
+# harness normally hands to an adapter after it validates the handshake.
+# A release build never enables it, so no shipped code can mint one.
+test-support = []
+
 [dependencies]
 pilotage-durable-storage = { workspace = true }
 pilotage-flight-quality = { workspace = true }

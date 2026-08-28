@@ -3,7 +3,7 @@ name = "flight-tune-aviate"
 version = "0.1.0"
 edition.workspace = true
 publish = false
-description = "Crash-contained Aviate process supervision for simulator tuning"
+description = "Aviate process supervision and exact direct control for simulator tuning"
 
 [lints]
 workspace = true
@@ -25,5 +25,8 @@ libproc = "=0.14.11"
 sysctl = "=0.7.1"
 
 [dev-dependencies]
+flight-tune = { path = "../flight-tune", features = ["test-support"] }
+pilotage-adapter-aviate = { workspace = true }
+pilotage-control-feel = { workspace = true }
 pilotage-durable-storage = { workspace = true, features = ["fault-injection"] }
 tempfile = "3.23.0"
