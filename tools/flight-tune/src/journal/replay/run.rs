@@ -2,9 +2,9 @@ use crate::journal::replay::{JournalState, invalid};
 use crate::journal::{JournalEvent, SessionIdentity};
 use crate::model::derive_seed;
 use crate::{
-    Digest, RunBindingReceipt, RunExecutionContext, RunTerminalClass, RunTerminalCompletion,
-    RunTerminalDisposition, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt,
-    RunTerminalReport, ScenarioRef, ScenarioSet, SearchStage, TuneError,
+    Digest, MissionReference, RunBindingReceipt, RunExecutionContext, RunTerminalClass,
+    RunTerminalCompletion, RunTerminalDisposition, RunTerminalIntent, RunTerminalPlan,
+    RunTerminalReceipt, RunTerminalReport, ScenarioSet, SearchStage, TuneError,
 };
 
 #[derive(Debug, Clone)]
@@ -142,8 +142,8 @@ pub(super) fn prepare(
         || context.candidate_digest() != pending.candidate
         || context.transition_authorization() != pending.transition
         || context.scenario_set() != pending.role.scenario_set()
-        || context.scenario_id() != expected_scenario.0.id
-        || context.scenario_digest() != expected_scenario.0.digest
+        || context.mission_revision_id() != expected_scenario.0.revision_id
+        || context.mission_content_digest() != expected_scenario.0.content_digest
         || context.repetition() != expected_scenario.1
         || context.seed() != expected_seed
         || run_intent_digest.is_zero()
@@ -164,7 +164,7 @@ fn expected_scenario(
     stage: &SearchStage,
     set: ScenarioSet,
     run_index: u64,
-) -> Result<(&ScenarioRef, u32), TuneError> {
+) -> Result<(&MissionReference, u32), TuneError> {
     let repetitions = u64::from(stage.repetitions);
     let scenario_index = usize::try_from(run_index / repetitions)
         .map_err(|_| invalid("prepared run scenario index overflow"))?;

@@ -9,14 +9,9 @@ use pilotage_trial::{
     Scenario,
 };
 
-use crate::ScenarioRef;
-
 /// Creates the declarative observation scenario used by a reference backend.
 #[must_use]
-pub fn reference_observation_scenario(
-    reference: &ScenarioRef,
-    completion_time_ns: Option<u64>,
-) -> Scenario {
+pub fn reference_observation_scenario(id: &str, completion_time_ns: Option<u64>) -> Scenario {
     let exit_conditions = completion_time_ns.map_or_else(
         || vec![PhaseCondition::Always],
         |value_ns| {
@@ -28,7 +23,7 @@ pub fn reference_observation_scenario(
     );
     Scenario {
         schema_version: SCENARIO_SCHEMA_VERSION,
-        id: reference.id.clone(),
+        id: id.to_owned(),
         revision: 1,
         phases: vec![Phase {
             id: "observe".to_owned(),
@@ -45,6 +40,34 @@ pub fn reference_observation_scenario(
 }
 
 use super::ScenarioRuntimeError;
+
+/// Projects one trial scenario into its calibration mission document.
+///
+/// The navigation-data identity names the authored trial scenario, so a
+/// changed scenario changes the mission content digest.
+///
+/// # Errors
+///
+/// Returns an error when the trial scenario or projected mission is invalid.
+pub fn calibration_mission_document(
+    scenario: &Scenario,
+    retry_limit: u16,
+    receipt_timeout_ns: u64,
+) -> Result<MissionDocument, ScenarioRuntimeError> {
+    let source = scenario
+        .canonical_digest()
+        .map_err(|error| projection(error.to_string()))?;
+    mission_document_from_scenario(
+        scenario,
+        NavigationDataIdentity {
+            cycle: "calibration".to_owned(),
+            snapshot_id: "trial-scenario".to_owned(),
+            snapshot_digest: pilotage_mission_core::Digest::from_bytes(*source.as_bytes()),
+        },
+        retry_limit,
+        receipt_timeout_ns,
+    )
+}
 
 /// Projects one declarative trial scenario into the shared mission document.
 ///

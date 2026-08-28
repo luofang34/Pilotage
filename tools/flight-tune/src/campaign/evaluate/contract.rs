@@ -1,8 +1,8 @@
 use crate::journal::AttemptRole;
 use crate::{
     CampaignBackend, CandidateEvaluation, CandidateReceipt, Digest, GateEvaluator, Journal,
-    MetricEvaluator, MetricValues, RunExecutionContext, RunPreparationReceipt, RunRecord,
-    ScenarioRef, ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorCapability,
+    MetricEvaluator, MetricValues, MissionReference, RunExecutionContext, RunPreparationReceipt,
+    RunRecord, ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorCapability,
     TelemetrySample, TuneError,
 };
 
@@ -11,7 +11,7 @@ pub(super) struct RunContext<'a> {
     pub(super) execution: RunExecutionContext,
     pub(super) run_intent_digest: Digest,
     pub(super) set: ScenarioSet,
-    pub(super) scenario: &'a ScenarioRef,
+    pub(super) scenario: &'a MissionReference,
     pub(super) repetition: u32,
     pub(super) seed: u64,
 }
@@ -40,7 +40,7 @@ pub(super) fn validate_sample(
 
 pub(super) fn begin_evaluators<G, M>(
     journal: &Journal,
-    scenario: &ScenarioRef,
+    scenario: &MissionReference,
     gates: &mut G,
     metric: &mut M,
 ) -> Result<(), TuneError>
@@ -105,13 +105,13 @@ pub(super) fn validate_scenario_receipt(
     context: &RunContext<'_>,
 ) -> Result<(), TuneError> {
     if receipt.session_digest != capability.session_digest()
-        || receipt.applied_scenario_digest != context.scenario.digest
+        || receipt.applied_mission_content_digest != context.scenario.content_digest
         || receipt.seed != context.seed
         || receipt.run_intent_digest != context.run_intent_digest
     {
         return Err(TuneError::ReceiptMismatch {
-            operation: "start scenario",
-            detail: "scenario, seed, or run intent readback does not match".to_owned(),
+            operation: "start mission",
+            detail: "mission, seed, or run intent readback does not match".to_owned(),
         });
     }
     Ok(())
@@ -145,7 +145,7 @@ pub(super) fn run_record(
 ) -> RunRecord {
     RunRecord {
         scenario_set: context.set,
-        scenario_id: context.scenario.id.clone(),
+        mission_revision_id: context.scenario.revision_id.clone(),
         repetition: context.repetition,
         seed: context.seed,
         loss: values.loss,
@@ -155,7 +155,7 @@ pub(super) fn run_record(
     }
 }
 
-pub(super) fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[ScenarioRef] {
+pub(super) fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
     match set {
         ScenarioSet::Training => &stage.training_scenarios,
         ScenarioSet::Promotion => &stage.promotion_scenarios,

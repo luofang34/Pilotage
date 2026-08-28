@@ -21,8 +21,8 @@ pub enum RunTerminalSemanticOutcome {
     ScenarioComplete {
         /// The candidate that produced the result.
         candidate_digest: Digest,
-        /// The exact scenario artifact identity.
-        scenario_digest: Digest,
+        /// The executed mission content identity.
+        mission_content_digest: Digest,
         /// The exact passing run record.
         run: RunRecord,
     },
@@ -30,8 +30,8 @@ pub enum RunTerminalSemanticOutcome {
     HardGateAbort {
         /// The candidate that produced the failure.
         candidate_digest: Digest,
-        /// The exact scenario artifact identity.
-        scenario_digest: Digest,
+        /// The executed mission content identity.
+        mission_content_digest: Digest,
         /// The exact first hard gate failure.
         failure: HardGateFailure,
     },
@@ -171,14 +171,14 @@ fn validate_outcome(
     match outcome {
         RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest,
-            scenario_digest,
+            mission_content_digest,
             run,
-        } => validate_run(*candidate_digest, *scenario_digest, run, context),
+        } => validate_run(*candidate_digest, *mission_content_digest, run, context),
         RunTerminalSemanticOutcome::HardGateAbort {
             candidate_digest,
-            scenario_digest,
+            mission_content_digest,
             failure,
-        } => validate_failure(*candidate_digest, *scenario_digest, failure, context),
+        } => validate_failure(*candidate_digest, *mission_content_digest, failure, context),
         RunTerminalSemanticOutcome::ExecutionError { diagnostic } => diagnostic.validate(),
         RunTerminalSemanticOutcome::Recovery => Ok(()),
     }
@@ -186,13 +186,13 @@ fn validate_outcome(
 
 fn validate_run(
     candidate_digest: Digest,
-    scenario_digest: Digest,
+    mission_content_digest: Digest,
     run: &RunRecord,
     context: &RunExecutionContext,
 ) -> Result<(), TuneError> {
-    validate_semantic_identity(candidate_digest, scenario_digest, context)?;
+    validate_semantic_identity(candidate_digest, mission_content_digest, context)?;
     if run.scenario_set != context.scenario_set()
-        || run.scenario_id != context.scenario_id()
+        || run.mission_revision_id != context.mission_revision_id()
         || run.repetition != context.repetition()
         || run.seed != context.seed()
     {
@@ -210,13 +210,13 @@ fn validate_run(
 
 fn validate_failure(
     candidate_digest: Digest,
-    scenario_digest: Digest,
+    mission_content_digest: Digest,
     failure: &HardGateFailure,
     context: &RunExecutionContext,
 ) -> Result<(), TuneError> {
-    validate_semantic_identity(candidate_digest, scenario_digest, context)?;
+    validate_semantic_identity(candidate_digest, mission_content_digest, context)?;
     if failure.scenario_set != context.scenario_set()
-        || failure.scenario_id != context.scenario_id()
+        || failure.mission_revision_id != context.mission_revision_id()
         || failure.repetition != context.repetition()
         || failure.seed != context.seed()
         || failure.gate.passed
@@ -232,11 +232,11 @@ fn validate_failure(
 
 fn validate_semantic_identity(
     candidate_digest: Digest,
-    scenario_digest: Digest,
+    mission_content_digest: Digest,
     context: &RunExecutionContext,
 ) -> Result<(), TuneError> {
     if candidate_digest != context.candidate_digest()
-        || scenario_digest != context.scenario_digest()
+        || mission_content_digest != context.mission_content_digest()
     {
         return Err(invalid_terminal(
             "the semantic result artifact identity does not match its run context",

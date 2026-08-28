@@ -9,7 +9,9 @@ use super::{
     PromotionSeedPolicy, digest_policy_content, expected_promotion_pairs, promotion_policy_digest,
 };
 use crate::identity::digest_bytes;
-use crate::{AttemptRole, Digest, ParameterBounds, QualificationPolicy, ScenarioRef, SearchStage};
+use crate::{
+    AttemptRole, Digest, MissionReference, ParameterBounds, QualificationPolicy, SearchStage,
+};
 
 #[test]
 fn policy_digest_is_domain_separated_and_covers_every_field() {
@@ -93,8 +95,8 @@ fn expected_pairs_bind_role_candidate_scenario_repetition_seed_and_intent() {
             pair.frozen.key.candidate_digest,
             plan.frozen_candidate_digest
         );
-        assert_eq!(pair.baseline.key.scenario_id, "promotion-calm");
-        assert_eq!(pair.baseline.key.scenario_digest, fixed_digest(12));
+        assert_eq!(pair.baseline.key.mission_revision_id, "promotion-calm");
+        assert_eq!(pair.baseline.key.mission_content_digest, fixed_digest(12));
         assert_eq!(pair.baseline.key.repetition, repetition as u32);
         assert_eq!(pair.baseline.key.seed, pair.frozen.key.seed);
         assert_eq!(
@@ -205,12 +207,13 @@ pub(super) fn plan() -> PromotionRunPlan {
     }
 }
 
-fn scenario(id: &str, digest: u8) -> ScenarioRef {
-    ScenarioRef {
-        id: id.to_owned(),
-        digest: fixed_digest(digest),
+fn scenario(id: &str, digest: u8) -> MissionReference {
+    MissionReference {
+        revision_id: id.to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(digest),
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     }
 }
 

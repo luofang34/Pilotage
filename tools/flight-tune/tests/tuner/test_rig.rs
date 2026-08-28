@@ -3,7 +3,57 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use flight_tune::{ArtifactIdentity, RunExecutionContext, ScenarioRef};
+use flight_tune::{
+    ArtifactIdentity, Digest, MissionDocument, MissionReference, RunExecutionContext,
+    calibration_mission_document, reference_observation_scenario,
+};
+
+/// The sample ceiling every fake mission runs under.
+pub const FAKE_MAX_SAMPLES: u32 = 8;
+
+const FAKE_RECEIPT_TIMEOUT_NS: u64 = 100_000_000;
+
+/// The retry limit that separates the two stored variants of one trial.
+///
+/// The variants differ in mission content but not in run behaviour, so a
+/// changed document is an identity change and nothing else.
+const CHANGED_RETRY_LIMIT: u16 = 1;
+
+/// The trial names that the fake backend stores as mission documents.
+pub const FAKE_MISSION_IDS: [&str; 3] = ["training-calm", "promotion-gust", "final-crosswind"];
+
+/// Resolves the stored fake mission that one reference names.
+///
+/// The store is keyed by mission content, so a changed document is a
+/// different stored artifact rather than a replacement of the first.
+pub fn fake_stored_mission(mission: &MissionReference) -> Option<MissionDocument> {
+    FAKE_MISSION_IDS
+        .into_iter()
+        .flat_map(|id| [fake_mission_document(id), changed_fake_mission_document(id)])
+        .find(|document| {
+            Digest::from_bytes(*document.identity.content_digest.as_bytes())
+                == mission.content_digest
+        })
+}
+
+/// Builds the stored mission document that one fake trial name produces.
+pub fn fake_mission_document(id: &str) -> MissionDocument {
+    fake_mission_document_with_retry(id, 0)
+}
+
+/// Builds the second stored mission document for one fake trial name.
+pub fn changed_fake_mission_document(id: &str) -> MissionDocument {
+    fake_mission_document_with_retry(id, CHANGED_RETRY_LIMIT)
+}
+
+fn fake_mission_document_with_retry(id: &str, retry_limit: u16) -> MissionDocument {
+    calibration_mission_document(
+        &reference_observation_scenario(id, None),
+        retry_limit,
+        FAKE_RECEIPT_TIMEOUT_NS,
+    )
+    .expect("fake mission document")
+}
 
 #[path = "test_rig/backend.rs"]
 mod backend;
@@ -27,7 +77,7 @@ pub use cleanup_fault::FakeCleanupFault;
 #[allow(unused_imports)]
 pub use scoring::{
     EnvelopeGates, ObservedViews, QuadraticMetric, SequenceStrategy, assert_receipt_error,
-    candidate, stage,
+    candidate, stage, stage_with_changed_training_mission,
 };
 #[allow(unused_imports)]
 pub use terminal_head_poison::TerminalExternalAction;
@@ -62,7 +112,7 @@ pub struct FakeState {
     pub scenario_runs: Vec<(String, u64, f64)>,
     pub transition: FakeTransitionState,
     pub lifecycle: Vec<String>,
-    pub current_scenario: Option<ScenarioRef>,
+    pub current_scenario: Option<MissionReference>,
     pub current_seed: u64,
     pub next_sequence: u64,
     pub panic_on_prepare: Option<usize>,
@@ -73,7 +123,8 @@ pub struct FakeState {
     pub change_head_on_action_prepare: Option<PathBuf>,
     pub change_head_on_sample: Option<PathBuf>,
     pub bad_scenario_readback: bool,
-    pub bad_scenario_document: bool,
+    pub bad_mission_content: bool,
+    pub bad_mission_revision: bool,
     pub timeout_next_sample: bool,
     pub complete_without_sample: bool,
 }

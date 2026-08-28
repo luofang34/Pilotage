@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use flight_tune::{Digest, MetricEvaluator, ScenarioRef, TelemetrySample};
+use flight_tune::{Digest, MetricEvaluator, MissionReference, TelemetrySample};
 
 use super::{FlightQualityEvaluator, channel};
 
@@ -48,12 +48,13 @@ fn trial() -> Vec<TelemetrySample> {
     samples
 }
 
-fn scenario() -> ScenarioRef {
-    ScenarioRef {
-        id: "step-hold-release".to_owned(),
-        digest: Digest::from_bytes([7; 32]),
+fn scenario() -> MissionReference {
+    MissionReference {
+        revision_id: "step-hold-release".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: Digest::from_bytes([7; 32]),
         max_samples: 1_000,
-        sample_timeout_ms: 200,
+        sample_timeout_ns: 200_000_000,
     }
 }
 

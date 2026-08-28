@@ -59,7 +59,7 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
         .expect("run training");
 
     assert_eq!(views.borrow().len(), 1);
-    assert_eq!(views.borrow()[0].0, vec!["training-calm"]);
+    assert_eq!(views.borrow()[0].0, vec!["training-calm:1"]);
     assert!(views.borrow()[0].1.is_empty());
     assert!(
         state
@@ -67,7 +67,7 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
             .borrow()
             .scenario_runs
             .iter()
-            .all(|(id, _, _)| id == "training-calm")
+            .all(|(id, _, _)| id == "training-calm:1")
     );
 
     tuner.freeze_candidate().expect("freeze candidate");

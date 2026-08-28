@@ -12,8 +12,8 @@ use crate::model::derive_seed;
 use crate::{
     ArtifactIdentity, AttemptRole, Candidate, CandidateEvaluation, CandidateLineage,
     CandidateTransitionReceipt, CandidateTransitionRequest, ConfidenceInterval, Digest,
-    ParameterBounds, PromotionPolicy, QualificationPolicy, RunExecutionContext, RuntimeIdentities,
-    ScenarioRef, ScoreAggregate, SearchStage, SessionIdentity, TuneError,
+    MissionReference, ParameterBounds, PromotionPolicy, QualificationPolicy, RunExecutionContext,
+    RuntimeIdentities, ScoreAggregate, SearchStage, SessionIdentity, TuneError,
 };
 
 #[test]
@@ -275,11 +275,12 @@ fn candidate(lineage: &CandidateLineage, gain: f64) -> Candidate {
 }
 
 fn stage() -> SearchStage {
-    let scenario = ScenarioRef {
-        id: "training".to_owned(),
-        digest: digest(3),
+    let scenario = MissionReference {
+        revision_id: "training".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: digest(3),
         max_samples: 8,
-        sample_timeout_ms: 100,
+        sample_timeout_ns: 100_000_000,
     };
     SearchStage {
         id: "transition-stage".to_owned(),

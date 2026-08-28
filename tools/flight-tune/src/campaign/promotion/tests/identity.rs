@@ -5,8 +5,8 @@ use super::{
     MetricPoint, evidence, expected_pairs, fixed_digest, plan, receipt_for_context, stage,
 };
 use crate::{
-    AttemptRole, RunExecutionContext, RunRecord, RunTerminalClass, RunTerminalReceipt, ScenarioRef,
-    ScenarioSet,
+    AttemptRole, MissionReference, RunExecutionContext, RunRecord, RunTerminalClass,
+    RunTerminalReceipt, ScenarioSet,
 };
 
 #[derive(Clone, Copy)]
@@ -128,7 +128,7 @@ fn every_run_requires_the_exact_ordered_hard_gate_set() {
             context,
             RunRecord {
                 scenario_set: ScenarioSet::Promotion,
-                scenario_id: context.scenario_id().to_owned(),
+                mission_revision_id: context.mission_revision_id().to_owned(),
                 repetition: context.repetition(),
                 seed: context.seed(),
                 loss: MetricPoint::baseline().loss,
@@ -188,20 +188,21 @@ fn changed_context(expected: &RunExecutionContext, change: IdentityChange) -> Ru
     .expect("create changed context")
 }
 
-fn changed_scenario(expected: &RunExecutionContext, change: IdentityChange) -> ScenarioRef {
-    ScenarioRef {
-        id: if matches!(change, IdentityChange::ScenarioId) {
+fn changed_scenario(expected: &RunExecutionContext, change: IdentityChange) -> MissionReference {
+    MissionReference {
+        revision_id: if matches!(change, IdentityChange::ScenarioId) {
             "promotion-foreign".to_owned()
         } else {
-            expected.scenario_id().to_owned()
+            expected.mission_revision_id().to_owned()
         },
-        digest: if matches!(change, IdentityChange::ScenarioDigest) {
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: if matches!(change, IdentityChange::ScenarioDigest) {
             fixed_digest(72)
         } else {
-            expected.scenario_digest()
+            expected.mission_content_digest()
         },
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     }
 }
 
@@ -210,7 +211,7 @@ fn matching_receipt(context: &RunExecutionContext, point: MetricPoint) -> RunTer
         context,
         RunRecord {
             scenario_set: ScenarioSet::Promotion,
-            scenario_id: context.scenario_id().to_owned(),
+            mission_revision_id: context.mission_revision_id().to_owned(),
             repetition: context.repetition(),
             seed: context.seed(),
             loss: point.loss,

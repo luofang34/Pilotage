@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{ScenarioRef, SearchStage, derive_seed};
+use super::{MissionReference, SearchStage, derive_seed};
 use crate::identity::digest_bytes;
 use crate::{AttemptRole, Digest, PromotionDecision, RunExecutionContext, TuneError};
 
@@ -118,10 +118,10 @@ pub struct PromotionRunKey {
     pub role: AttemptRole,
     /// The candidate identity.
     pub candidate_digest: Digest,
-    /// The stable scenario name.
-    pub scenario_id: String,
-    /// The exact scenario artifact identity.
-    pub scenario_digest: Digest,
+    /// The executed mission revision.
+    pub mission_revision_id: String,
+    /// The executed mission content identity.
+    pub mission_content_digest: Digest,
     /// The zero-based repetition.
     pub repetition: u32,
     /// The deterministic run seed.
@@ -184,8 +184,8 @@ impl ExpectedPromotionPair {
         let right = &self.frozen.key;
         if left.role != AttemptRole::PromotionBaseline
             || right.role != AttemptRole::PromotionFrozen
-            || left.scenario_id != right.scenario_id
-            || left.scenario_digest != right.scenario_digest
+            || left.mission_revision_id != right.mission_revision_id
+            || left.mission_content_digest != right.mission_content_digest
             || left.repetition != right.repetition
             || left.seed != right.seed
             || self.baseline.context.tuning_session_digest()
@@ -326,7 +326,7 @@ pub(crate) fn expected_promotion_pairs(
 fn expected_pair(
     policy: &PromotionPolicy,
     plan: PromotionRunPlan,
-    scenario: &ScenarioRef,
+    scenario: &MissionReference,
     repetition: u32,
 ) -> Result<ExpectedPromotionPair, TuneError> {
     let seed = match policy.seed_policy {
@@ -365,7 +365,7 @@ fn expected_run(
     role: AttemptRole,
     trial_id: u64,
     candidate_digest: Digest,
-    scenario: &ScenarioRef,
+    scenario: &MissionReference,
     repetition: u32,
     seed: u64,
 ) -> Result<ExpectedPromotionRun, TuneError> {
@@ -391,20 +391,20 @@ fn key_from_context(context: &RunExecutionContext) -> PromotionRunKey {
     PromotionRunKey {
         role: context.role(),
         candidate_digest: context.candidate_digest(),
-        scenario_id: context.scenario_id().to_owned(),
-        scenario_digest: context.scenario_digest(),
+        mission_revision_id: context.mission_revision_id().to_owned(),
+        mission_content_digest: context.mission_content_digest(),
         repetition: context.repetition(),
         seed: context.seed(),
     }
 }
 
-fn validate_promotion_scenarios(scenarios: &[ScenarioRef]) -> Result<(), TuneError> {
+fn validate_promotion_scenarios(scenarios: &[MissionReference]) -> Result<(), TuneError> {
     let mut ids = BTreeSet::new();
     let mut digests = HashSet::new();
     if scenarios.is_empty()
-        || scenarios
-            .iter()
-            .any(|scenario| !ids.insert(scenario.id.as_str()) || !digests.insert(scenario.digest))
+        || scenarios.iter().any(|scenario| {
+            !ids.insert(scenario.revision_id.as_str()) || !digests.insert(scenario.content_digest)
+        })
     {
         return Err(invalid_policy("promotion scenarios are empty or repeated"));
     }

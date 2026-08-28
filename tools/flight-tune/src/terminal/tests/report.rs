@@ -257,7 +257,7 @@ fn a_semantic_result_must_match_the_run_context() {
 
 #[test]
 fn semantic_candidate_and_scenario_artifacts_must_match_context() {
-    for field in ["candidate_digest", "scenario_digest"] {
+    for field in ["candidate_digest", "mission_content_digest"] {
         let context = run_context();
         let mut outcome =
             serde_json::to_value(terminal_intent(SemanticCase::ScenarioComplete).outcome())
@@ -392,7 +392,7 @@ fn scenario_intent(run: crate::RunRecord) -> Result<RunTerminalIntent, crate::Tu
     let context = run_context();
     let outcome = RunTerminalSemanticOutcome::ScenarioComplete {
         candidate_digest: context.candidate_digest(),
-        scenario_digest: context.scenario_digest(),
+        mission_content_digest: context.mission_content_digest(),
         run,
     };
     new_intent(&context, outcome)
@@ -404,7 +404,7 @@ fn hard_gate_intent(
     let context = run_context();
     let outcome = RunTerminalSemanticOutcome::HardGateAbort {
         candidate_digest: context.candidate_digest(),
-        scenario_digest: context.scenario_digest(),
+        mission_content_digest: context.mission_content_digest(),
         failure,
     };
     new_intent(&context, outcome)

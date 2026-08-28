@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::identity::digest_bytes;
 use crate::{
     AuthenticatedEvaluationProof, CandidateEvaluation, CandidateTransitionReceipt,
-    CandidateTransitionReference, Digest, PromotionClosure, RunBindingReceipt, RunExecutionContext,
-    RunTerminalClass, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt, RunTerminalReport,
-    ScenarioRef, ScenarioSet, SearchStage, TuneError,
+    CandidateTransitionReference, Digest, MissionReference, PromotionClosure, RunBindingReceipt,
+    RunExecutionContext, RunTerminalClass, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt,
+    RunTerminalReport, ScenarioSet, SearchStage, TuneError,
 };
 
 #[derive(Serialize)]
@@ -13,7 +13,7 @@ struct RunPlan<'a> {
     role: AttemptRole,
     candidate: Digest,
     scenario_set: ScenarioSet,
-    scenarios: &'a [ScenarioRef],
+    scenarios: &'a [MissionReference],
     repetitions: u32,
     fixed_seed: u64,
 }

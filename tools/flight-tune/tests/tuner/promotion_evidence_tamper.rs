@@ -1,8 +1,8 @@
 use flight_tune::{
     ArtifactIdentity, AttemptRole, Digest, FinalQualificationOutcome, JournalEvent,
-    JournalEvidenceSnapshot, PromotionDecision, RunBindingReceipt, RunExecutionContext,
-    RunTerminalClass, RunTerminalIntent, RunTerminalReceipt, RunTerminalReport,
-    RunTerminalSemanticOutcome, ScenarioRef, ScenarioSet,
+    JournalEvidenceSnapshot, MissionReference, PromotionDecision, RunBindingReceipt,
+    RunExecutionContext, RunTerminalClass, RunTerminalIntent, RunTerminalReceipt,
+    RunTerminalReport, RunTerminalSemanticOutcome, ScenarioSet,
 };
 use sha2::{Digest as ShaDigest, Sha256};
 
@@ -245,15 +245,16 @@ fn refresh_head(snapshot: &mut JournalEvidenceSnapshot) {
 fn receipt_with_scenario_digest(
     snapshot: &JournalEvidenceSnapshot,
     receipt: &RunTerminalReceipt,
-    scenario_digest: Digest,
+    mission_content_digest: Digest,
 ) -> RunTerminalReceipt {
     let proof = &snapshot.promotion_baseline;
     let original = receipt.context();
-    let scenario = ScenarioRef {
-        id: original.scenario_id().to_owned(),
-        digest: scenario_digest,
+    let scenario = MissionReference {
+        revision_id: original.mission_revision_id().to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: mission_content_digest,
         max_samples: snapshot.stage.promotion_scenarios[0].max_samples,
-        sample_timeout_ms: snapshot.stage.promotion_scenarios[0].sample_timeout_ms,
+        sample_timeout_ns: snapshot.stage.promotion_scenarios[0].sample_timeout_ns,
     };
     let context = RunExecutionContext::new(
         snapshot
@@ -278,7 +279,7 @@ fn receipt_with_scenario_digest(
     };
     let outcome = RunTerminalSemanticOutcome::ScenarioComplete {
         candidate_digest: proof.candidate_digest,
-        scenario_digest,
+        mission_content_digest,
         run: run.clone(),
     };
     rebuild_receipt(receipt, &context, outcome)

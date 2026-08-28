@@ -9,7 +9,7 @@ use super::{
     FlightQualityMetricConfig, FlightQualityMetricEvaluator, FlightQualityScales,
     FlightQualityScenario, FlightQualityWeights, ReleasePlan, StepPlan, WindPlan,
 };
-use crate::{Digest, ScenarioRef, TelemetrySample};
+use crate::{Digest, MissionReference, TelemetrySample};
 
 #[test]
 fn the_first_hard_gate_failure_has_priority() {
@@ -223,14 +223,14 @@ fn observe_trace(evaluator: &mut FlightQualityMetricEvaluator, trace: &[(u64, Tr
 }
 
 fn wind_loss(
-    scenario_id: &str,
+    mission_revision_id: &str,
     plan: FlightQualityScenario,
     weights: FlightQualityWeights,
     error_m: f64,
 ) -> f64 {
-    let mut evaluator = metric_evaluator(scenario_id, plan, weights);
+    let mut evaluator = metric_evaluator(mission_revision_id, plan, weights);
     evaluator
-        .begin(&scenario(scenario_id))
+        .begin(&scenario(mission_revision_id))
         .expect("begin wind metric");
     let trace = [0_u64, 100, 200, 300].map(|elapsed_ms| {
         (
@@ -303,21 +303,21 @@ fn gate_config(required: Vec<FlightQualityGate>) -> FlightQualityGateConfig {
 }
 
 fn metric_evaluator(
-    scenario_id: &str,
+    mission_revision_id: &str,
     plan: FlightQualityScenario,
     weights: FlightQualityWeights,
 ) -> FlightQualityMetricEvaluator {
-    FlightQualityMetricEvaluator::new(metric_config(scenario_id, plan, weights))
+    FlightQualityMetricEvaluator::new(metric_config(mission_revision_id, plan, weights))
         .expect("metric evaluator")
 }
 
 fn metric_config(
-    scenario_id: &str,
+    mission_revision_id: &str,
     plan: FlightQualityScenario,
     weights: FlightQualityWeights,
 ) -> FlightQualityMetricConfig {
     FlightQualityMetricConfig {
-        scenarios: BTreeMap::from([(scenario_id.to_owned(), plan)]),
+        scenarios: BTreeMap::from([(mission_revision_id.to_owned(), plan)]),
         scales: FlightQualityScales {
             time_s: 1.0,
             position_m: 1.0,
@@ -343,11 +343,12 @@ const fn weights(
     }
 }
 
-fn scenario(id: &str) -> ScenarioRef {
-    ScenarioRef {
-        id: id.to_owned(),
-        digest: Digest::from_bytes([42; 32]),
+fn scenario(id: &str) -> MissionReference {
+    MissionReference {
+        revision_id: id.to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: Digest::from_bytes([42; 32]),
         max_samples: 128,
-        sample_timeout_ms: 100,
+        sample_timeout_ns: 100_000_000,
     }
 }

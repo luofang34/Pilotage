@@ -2,9 +2,9 @@ use std::fs;
 
 use flight_tune::{
     ArtifactIdentity, AttemptRole, CampaignPhase, EvaluatorError, FinalQualificationOutcome,
-    GateEvaluator, GateOutcome, JournalEntry, JournalEvent, PromotionDecision,
+    GateEvaluator, GateOutcome, JournalEntry, JournalEvent, MissionReference, PromotionDecision,
     RunTerminalDisposition, RunTerminalOperation, RunTerminalQuarantine, RunTerminalReceipt,
-    ScenarioRef, TelemetrySample, TuneError, Tuner,
+    TelemetrySample, TuneError, Tuner,
 };
 
 use crate::open_stage;
@@ -210,8 +210,8 @@ impl GateEvaluator for PromotionGate {
         &self.identity
     }
 
-    fn begin(&mut self, scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
-        self.fail_current = scenario.id.starts_with("promotion-");
+    fn begin(&mut self, scenario: &MissionReference) -> Result<(), EvaluatorError> {
+        self.fail_current = scenario.revision_id.starts_with("promotion-");
         let mut state = self.state.0.borrow_mut();
         state.gate_begin_count = state.gate_begin_count.wrapping_add(1);
         Ok(())

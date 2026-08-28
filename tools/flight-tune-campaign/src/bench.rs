@@ -30,11 +30,11 @@ use std::time::Duration;
 
 use flight_tune::{
     AdapterError, ArtifactIdentity, CampaignBackend, Candidate, Digest, KinematicTruth,
-    MissionCapability, MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext,
-    RunPreparationReceipt, SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRef,
-    ScenarioRuntime, ScenarioRuntimeError, ScenarioStartReceipt, ScenarioStopContext,
-    SessionChallenge, SimulatorCapability, SimulatorSessionReceipt, TelemetrySample, TrialScenario,
-    reference_observation_scenario, scenario_runtime_identity,
+    MissionCapability, MissionDirective, MissionDocument, MissionReference, ReceiptResult,
+    RunExecutionContext, RunPreparationReceipt, SampleEvent, ScenarioFrame,
+    ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError, ScenarioStartReceipt,
+    ScenarioStopContext, SessionChallenge, SimulatorCapability, SimulatorSessionReceipt,
+    TelemetrySample, scenario_runtime_identity,
 };
 use pilotage_control_feel::{AxisCurve, AxisDemandShaper, AxisDynamics, AxisResponse, NeutralBand};
 
@@ -278,14 +278,11 @@ impl CampaignBackend for BenchBackend {
         }
     }
 
-    fn scenario_document_blocking(
+    fn mission_document_blocking(
         &self,
-        scenario: &ScenarioRef,
-    ) -> Result<TrialScenario, AdapterError> {
-        Ok(reference_observation_scenario(
-            scenario,
-            Some(10_480_000_000),
-        ))
+        mission: &MissionReference,
+    ) -> Result<MissionDocument, AdapterError> {
+        bench_stored_mission(mission)
     }
 
     fn project_scenario_frame(
@@ -310,7 +307,7 @@ impl CampaignBackend for BenchBackend {
         &mut self,
         capability: &SimulatorCapability,
         context: &RunExecutionContext,
-        scenario: &ScenarioRef,
+        scenario: &MissionReference,
     ) -> Result<RunPreparationReceipt, AdapterError> {
         let _ = scenario;
         Ok(RunPreparationReceipt {
@@ -344,7 +341,7 @@ impl CampaignBackend for BenchBackend {
         });
         Ok(ScenarioStartReceipt {
             session_digest: capability.session_digest(),
-            applied_scenario_digest: context.scenario_digest(),
+            applied_mission_content_digest: context.mission_content_digest(),
             seed: context.seed(),
             run_intent_digest: context.digest().map_err(to_adapter)?,
         })
@@ -482,7 +479,8 @@ mod qualifying;
 
 pub use adapter::BenchVehicleAdapter;
 pub use qualifying::{
-    BenchGates, BenchVehicleFactory, bench_scenario, bench_stage, warm_start_parameters,
+    BenchGates, BenchVehicleFactory, bench_scenario, bench_stage, bench_stored_mission,
+    warm_start_parameters,
 };
 
 #[cfg(test)]

@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use crate::model::derive_seed;
 use crate::{
-    Digest, GateOutcome, HardGateFailure, ParameterBounds, PromotionPolicy, QualificationPolicy,
-    ScenarioRef, ScenarioSet, SearchStage,
+    Digest, GateOutcome, HardGateFailure, MissionReference, ParameterBounds, PromotionPolicy,
+    QualificationPolicy, ScenarioSet, SearchStage,
 };
 
 use super::validate_failure;
@@ -54,10 +54,10 @@ fn no_sample_failure_requires_the_exact_empty_stream_position() {
     );
 }
 
-fn failure(scenario: &ScenarioRef, sample_sequence: u64, elapsed_ms: u64) -> HardGateFailure {
+fn failure(scenario: &MissionReference, sample_sequence: u64, elapsed_ms: u64) -> HardGateFailure {
     HardGateFailure {
         scenario_set: ScenarioSet::Training,
-        scenario_id: scenario.id.clone(),
+        mission_revision_id: scenario.revision_id.clone(),
         repetition: 0,
         seed: derive_seed(91, ScenarioSet::Training, scenario, 0),
         sample_sequence,
@@ -70,11 +70,12 @@ fn failure(scenario: &ScenarioRef, sample_sequence: u64, elapsed_ms: u64) -> Har
 }
 
 fn stage() -> SearchStage {
-    let scenario = ScenarioRef {
-        id: "empty-stream".to_owned(),
-        digest: Digest::from_bytes([1; 32]),
+    let scenario = MissionReference {
+        revision_id: "empty-stream".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: Digest::from_bytes([1; 32]),
         max_samples: 8,
-        sample_timeout_ms: 100,
+        sample_timeout_ns: 100_000_000,
     };
     SearchStage {
         id: "empty-stream-stage".to_owned(),

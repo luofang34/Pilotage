@@ -13,8 +13,8 @@ use crate::journal::snapshot::RunTerminalSnapshot;
 use crate::journal::{JOURNAL_SCHEMA_VERSION, JournalEntry, JournalEvent, SessionIdentity};
 use crate::{
     ArtifactIdentity, AttemptRole, Candidate, CandidateLineage, CandidateTransitionReceipt,
-    CandidateTransitionRequest, Digest, Journal, ParameterBounds, PromotionPolicy,
-    QualificationPolicy, RuntimeIdentities, ScenarioRef, SearchStage, TuneError,
+    CandidateTransitionRequest, Digest, Journal, MissionReference, ParameterBounds,
+    PromotionPolicy, QualificationPolicy, RuntimeIdentities, SearchStage, TuneError,
 };
 
 #[path = "prospective/campaign_fixture.rs"]
@@ -354,12 +354,13 @@ fn test_stage() -> SearchStage {
     }
 }
 
-fn scenario(id: &str, digest_byte: u8) -> ScenarioRef {
-    ScenarioRef {
-        id: id.to_owned(),
-        digest: Digest::from_bytes([digest_byte; 32]),
+fn scenario(id: &str, digest_byte: u8) -> MissionReference {
+    MissionReference {
+        revision_id: id.to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: Digest::from_bytes([digest_byte; 32]),
         max_samples: 8,
-        sample_timeout_ms: 100,
+        sample_timeout_ns: 100_000_000,
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::journal::AttemptRole;
 use crate::model::derive_seed;
 use crate::{
-    CandidateEvaluation, HardGateFailure, RunRecord, ScenarioRef, ScenarioSet, SearchStage,
+    CandidateEvaluation, HardGateFailure, MissionReference, RunRecord, ScenarioSet, SearchStage,
     TuneError,
 };
 
@@ -50,14 +50,14 @@ pub(crate) fn validate_evaluation(
 fn validate_run_prefix(
     runs: &[RunRecord],
     set: ScenarioSet,
-    scenarios: &[ScenarioRef],
+    scenarios: &[MissionReference],
     stage: &SearchStage,
     fixed_seed: u64,
 ) -> Result<(), TuneError> {
     for (index, run) in runs.iter().enumerate() {
         let (scenario, repetition) = expected_run(scenarios, stage.repetitions, index)?;
         if run.scenario_set != set
-            || run.scenario_id != scenario.id
+            || run.mission_revision_id != scenario.revision_id
             || run.repetition != repetition
             || run.seed != derive_seed(fixed_seed, set, scenario, repetition)
             || run.passed_hard_gates != stage.required_hard_gates
@@ -72,7 +72,7 @@ fn validate_failure(
     failure: &HardGateFailure,
     run_index: usize,
     set: ScenarioSet,
-    scenarios: &[ScenarioRef],
+    scenarios: &[MissionReference],
     stage: &SearchStage,
     fixed_seed: u64,
 ) -> Result<(), TuneError> {
@@ -84,7 +84,7 @@ fn validate_failure(
     let gate_is_valid = core_gate_is_valid(failure, scenario)
         .unwrap_or(gate_is_required && failure.sample_sequence < u64::from(scenario.max_samples));
     if failure.scenario_set != set
-        || failure.scenario_id != scenario.id
+        || failure.mission_revision_id != scenario.revision_id
         || failure.repetition != repetition
         || failure.seed != derive_seed(fixed_seed, set, scenario, repetition)
         || failure.gate.detail.trim().is_empty()
@@ -97,7 +97,7 @@ fn validate_failure(
     Ok(())
 }
 
-fn core_gate_is_valid(failure: &HardGateFailure, scenario: &ScenarioRef) -> Option<bool> {
+fn core_gate_is_valid(failure: &HardGateFailure, scenario: &MissionReference) -> Option<bool> {
     match failure.gate.id.as_str() {
         "core.no_samples" => Some(failure.sample_sequence == 0 && failure.elapsed_ms == 0),
         "core.sample_limit" => Some(failure.sample_sequence == u64::from(scenario.max_samples)),
@@ -107,10 +107,10 @@ fn core_gate_is_valid(failure: &HardGateFailure, scenario: &ScenarioRef) -> Opti
 }
 
 fn expected_run(
-    scenarios: &[ScenarioRef],
+    scenarios: &[MissionReference],
     repetitions: u32,
     index: usize,
-) -> Result<(&ScenarioRef, u32), TuneError> {
+) -> Result<(&MissionReference, u32), TuneError> {
     let repetition_count = repetitions as usize;
     let scenario = scenarios
         .get(index / repetition_count)
@@ -120,7 +120,7 @@ fn expected_run(
     Ok((scenario, repetition))
 }
 
-fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[ScenarioRef] {
+fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
     match set {
         ScenarioSet::Training => &stage.training_scenarios,
         ScenarioSet::Promotion => &stage.promotion_scenarios,

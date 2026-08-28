@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::digest_bytes;
 use crate::{
-    AttemptRole, CandidateTransitionReference, Digest, ScenarioRef, ScenarioSet, TuneError,
+    AttemptRole, CandidateTransitionReference, Digest, MissionReference, ScenarioSet, TuneError,
 };
 
 /// The supported run execution context schema.
-pub const RUN_EXECUTION_CONTEXT_SCHEMA_VERSION: u16 = 1;
+pub const RUN_EXECUTION_CONTEXT_SCHEMA_VERSION: u16 = 2;
 
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v1\0";
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v2\0";
 
 /// The immutable identity of one simulator run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,8 +21,8 @@ pub struct RunExecutionContext {
     candidate_digest: Digest,
     transition_authorization: Option<CandidateTransitionReference>,
     scenario_set: ScenarioSet,
-    scenario_id: String,
-    scenario_digest: Digest,
+    mission_revision_id: String,
+    mission_content_digest: Digest,
     repetition: u32,
     seed: u64,
 }
@@ -41,7 +41,7 @@ impl RunExecutionContext {
         candidate_digest: Digest,
         transition_authorization: Option<CandidateTransitionReference>,
         scenario_set: ScenarioSet,
-        scenario: &ScenarioRef,
+        mission: &MissionReference,
         repetition: u32,
         seed: u64,
     ) -> Result<Self, TuneError> {
@@ -53,8 +53,8 @@ impl RunExecutionContext {
             candidate_digest,
             transition_authorization,
             scenario_set,
-            scenario_id: scenario.id.clone(),
-            scenario_digest: scenario.digest,
+            mission_revision_id: mission.revision_id.clone(),
+            mission_content_digest: mission.content_digest,
             repetition,
             seed,
         };
@@ -86,9 +86,9 @@ impl RunExecutionContext {
             || self.candidate_digest.is_zero()
             || self.role.scenario_set() != self.scenario_set
             || !transition_matches
-            || self.scenario_id.trim().is_empty()
-            || self.scenario_id.len() > 128
-            || self.scenario_digest.is_zero()
+            || self.mission_revision_id.trim().is_empty()
+            || self.mission_revision_id.len() > 128
+            || self.mission_content_digest.is_zero()
         {
             return Err(TuneError::InvalidIdentity {
                 detail: "the run execution context is incomplete or inconsistent".to_owned(),
@@ -150,16 +150,16 @@ impl RunExecutionContext {
         self.scenario_set
     }
 
-    /// Returns the scenario name.
+    /// Returns the executed mission revision.
     #[must_use]
-    pub fn scenario_id(&self) -> &str {
-        &self.scenario_id
+    pub fn mission_revision_id(&self) -> &str {
+        &self.mission_revision_id
     }
 
-    /// Returns the scenario artifact identity.
+    /// Returns the executed mission content identity.
     #[must_use]
-    pub const fn scenario_digest(&self) -> Digest {
-        self.scenario_digest
+    pub const fn mission_content_digest(&self) -> Digest {
+        self.mission_content_digest
     }
 
     /// Returns the zero-based scenario repetition.

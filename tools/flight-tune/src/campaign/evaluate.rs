@@ -279,7 +279,7 @@ fn prepare_run_context<'a>(
     candidate_digest: Digest,
     transition: Option<CandidateTransitionReference>,
     set: crate::ScenarioSet,
-    scenario: &'a crate::ScenarioRef,
+    scenario: &'a crate::MissionReference,
     repetition: u32,
     run_index: u64,
 ) -> Result<RunContext<'a>, TuneError> {

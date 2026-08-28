@@ -4,11 +4,10 @@ use std::time::Duration;
 
 use flight_tune::{
     AdapterError, ArtifactIdentity, CampaignBackend, Digest, KinematicTruth, MissionCapability,
-    MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext, RunPreparationReceipt,
-    SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRef, ScenarioRuntime,
+    MissionDirective, MissionDocument, MissionReference, ReceiptResult, RunExecutionContext,
+    RunPreparationReceipt, SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRuntime,
     ScenarioRuntimeError, ScenarioStartReceipt, ScenarioStopContext, SessionChallenge,
-    SimulatorCapability, SimulatorSessionReceipt, TelemetrySample, TrialScenario,
-    reference_observation_scenario, scenario_runtime_identity,
+    SimulatorCapability, SimulatorSessionReceipt, TelemetrySample, scenario_runtime_identity,
 };
 use serde::Deserialize;
 
@@ -81,13 +80,22 @@ impl CampaignBackend for FakeBackend {
         }
     }
 
-    fn scenario_document_blocking(
+    fn mission_document_blocking(
         &self,
-        scenario: &ScenarioRef,
-    ) -> Result<TrialScenario, AdapterError> {
-        let mut document = reference_observation_scenario(scenario, None);
-        if self.state.0.borrow().bad_scenario_document {
-            document.revision = document.revision.wrapping_add(1);
+        mission: &MissionReference,
+    ) -> Result<MissionDocument, AdapterError> {
+        let (bad_content, bad_revision) = {
+            let state = self.state.0.borrow();
+            (state.bad_mission_content, state.bad_mission_revision)
+        };
+        if bad_revision {
+            return Ok(super::fake_mission_document(super::FAKE_MISSION_IDS[2]));
+        }
+        let mut document = super::fake_stored_mission(mission)
+            .ok_or_else(|| AdapterError::new("the fake backend stores no such mission"))?;
+        if bad_content {
+            document.execution_policy.retry_limit =
+                document.execution_policy.retry_limit.wrapping_add(1);
         }
         Ok(document)
     }
@@ -118,7 +126,7 @@ impl CampaignBackend for FakeBackend {
         &mut self,
         capability: &SimulatorCapability,
         context: &RunExecutionContext,
-        scenario: &ScenarioRef,
+        scenario: &MissionReference,
     ) -> Result<RunPreparationReceipt, AdapterError> {
         let run_intent_digest = context
             .digest()
@@ -175,11 +183,13 @@ impl CampaignBackend for FakeBackend {
             .ok_or_else(|| AdapterError::new("scenario was not prepared"))?;
         let seed = state.current_seed;
         let gain = state.vehicle.gain;
-        state.scenario_runs.push((scenario.id.clone(), seed, gain));
-        let applied_scenario_digest = if state.bad_scenario_readback {
+        state
+            .scenario_runs
+            .push((scenario.revision_id.clone(), seed, gain));
+        let applied_mission_content_digest = if state.bad_scenario_readback {
             Digest::from_bytes([98; 32])
         } else {
-            scenario.digest
+            scenario.content_digest
         };
         let receipt_intent = if state.transition.bad_start_intent {
             Digest::from_bytes([96; 32])
@@ -188,7 +198,7 @@ impl CampaignBackend for FakeBackend {
         };
         Ok(ScenarioStartReceipt {
             session_digest: capability.session_digest(),
-            applied_scenario_digest,
+            applied_mission_content_digest,
             seed,
             run_intent_digest: receipt_intent,
         })

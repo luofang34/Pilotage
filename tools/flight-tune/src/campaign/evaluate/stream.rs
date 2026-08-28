@@ -24,7 +24,7 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
-    let timeout = Duration::from_millis(u64::from(context.scenario.sample_timeout_ms));
+    let timeout = Duration::from_nanos(context.scenario.sample_timeout_ns);
     let wall_start = Instant::now();
     let mut position = StreamPosition::default();
     let outcome = stream_loop(
@@ -419,7 +419,7 @@ fn hard_failure(
     RunTerminal::HardGate {
         failure: HardGateFailure {
             scenario_set: context.set,
-            scenario_id: context.scenario.id.clone(),
+            mission_revision_id: context.scenario.revision_id.clone(),
             repetition: context.repetition,
             seed: context.seed,
             sample_sequence,

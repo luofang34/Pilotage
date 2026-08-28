@@ -20,7 +20,7 @@ pub(super) fn run(
 ) -> RunRecord {
     RunRecord {
         scenario_set: expected.scenario_set,
-        scenario_id: expected.scenario.id.clone(),
+        mission_revision_id: expected.scenario.revision_id.clone(),
         repetition: expected.repetition,
         seed: expected.seed,
         loss: point.loss,
@@ -83,13 +83,13 @@ fn terminal_receipt(
         &context,
         digest::domain(
             "run execution context",
-            b"flight-tune:run-execution-context:v1\0",
+            b"flight-tune:run-execution-context:v2\0",
             &context,
         )
         .expect("run intent digest"),
         RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest: expected.candidate,
-            scenario_digest: expected.scenario.digest,
+            mission_content_digest: expected.scenario.content_digest,
             run,
         },
     )

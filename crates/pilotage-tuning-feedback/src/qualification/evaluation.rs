@@ -268,7 +268,7 @@ fn verify_failure(
     };
     if saved != failure
         || failure.scenario_set != expected.scenario_set
-        || failure.scenario_id != expected.scenario.id
+        || failure.mission_revision_id != expected.scenario.revision_id
         || failure.repetition != expected.repetition
         || failure.seed != expected.seed
         || failure.gate.passed

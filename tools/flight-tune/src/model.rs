@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{CandidateLineage, ScenarioSet, TuneError};
 
 mod promotion;
+mod reference;
 
 pub use promotion::{
     ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
@@ -14,6 +15,7 @@ pub use promotion::{
     promotion_policy_digest,
 };
 pub(crate) use promotion::{expected_promotion_pairs, required_improvement};
+pub use reference::MissionReference;
 
 const MAX_PARAMETERS: usize = 128;
 const MAX_SCENARIOS_PER_SET: usize = 64;
@@ -106,20 +108,6 @@ impl Candidate {
     }
 }
 
-/// A content-identified scenario for one simulator adapter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ScenarioRef {
-    /// The stable scenario name.
-    pub id: String,
-    /// The digest of the scenario artifact bytes.
-    pub digest: Digest,
-    /// The largest permitted sample count for one run.
-    pub max_samples: u32,
-    /// The timeout for each requested sample.
-    pub sample_timeout_ms: u32,
-}
-
 /// Absolute release limits for the untouched final partition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -146,13 +134,13 @@ pub struct SearchStage {
     pub fixed_parameters: BTreeMap<String, f64>,
     /// Hard gates in their evaluation priority order.
     pub required_hard_gates: Vec<String>,
-    /// Scenarios that supply adaptive search evidence.
-    pub training_scenarios: Vec<ScenarioRef>,
-    /// Hidden scenarios for the one promotion decision.
-    pub promotion_scenarios: Vec<ScenarioRef>,
-    /// Hidden scenarios for the final release decision.
-    pub final_qualification_scenarios: Vec<ScenarioRef>,
-    /// The run count for each scenario.
+    /// Missions that supply adaptive search evidence.
+    pub training_scenarios: Vec<MissionReference>,
+    /// Hidden missions for the one promotion decision.
+    pub promotion_scenarios: Vec<MissionReference>,
+    /// Hidden missions for the final release decision.
+    pub final_qualification_scenarios: Vec<MissionReference>,
+    /// The run count for each mission.
     pub repetitions: u32,
     /// The limits for the one promotion decision.
     pub promotion: PromotionPolicy,
@@ -326,25 +314,15 @@ impl SearchStage {
 }
 
 fn validate_scenario(
-    scenario: &ScenarioRef,
+    scenario: &MissionReference,
     ids: &mut BTreeSet<String>,
     digests: &mut HashSet<Digest>,
 ) -> Result<(), TuneError> {
-    validate_name(&scenario.id, "scenario").map_err(as_stage_error)?;
-    if !ids.insert(scenario.id.clone()) || !digests.insert(scenario.digest) {
+    scenario.validate()?;
+    if !ids.insert(scenario.revision_id.clone()) || !digests.insert(scenario.content_digest) {
         return Err(invalid_stage(format!(
-            "scenario {} is repeated across stage partitions",
-            scenario.id
-        )));
-    }
-    if scenario.digest.is_zero()
-        || scenario.max_samples == 0
-        || scenario.sample_timeout_ms == 0
-        || scenario.sample_timeout_ms > 60_000
-    {
-        return Err(invalid_stage(format!(
-            "scenario {} limits or digest are not valid",
-            scenario.id
+            "mission {} is repeated across stage partitions",
+            scenario.revision_id
         )));
     }
     Ok(())
@@ -353,7 +331,7 @@ fn validate_scenario(
 pub(crate) fn derive_seed(
     fixed_seed: u64,
     set: ScenarioSet,
-    scenario: &ScenarioRef,
+    scenario: &MissionReference,
     repetition: u32,
 ) -> u64 {
     let partition = match set {
@@ -361,7 +339,7 @@ pub(crate) fn derive_seed(
         ScenarioSet::Promotion => 0x1319_8a2e_0370_7344,
         ScenarioSet::FinalQualification => 0xa409_3822_299f_31d0,
     };
-    let bytes = scenario.digest.as_bytes();
+    let bytes = scenario.content_digest.as_bytes();
     let key = digest_word(bytes, 0)
         ^ digest_word(bytes, 8).rotate_left(13)
         ^ digest_word(bytes, 16).rotate_left(29)
