@@ -66,6 +66,8 @@ pub enum Command {
     Reset(String),
     /// Produce the Alia X-Plane runtime handshake into a directory.
     Handshake(std::path::PathBuf),
+    /// Run every guard pair the repository declares.
+    Guards,
     /// Classify which CI matrix halves a diff against a base can reach.
     Affected {
         /// The base git reference the diff is taken against.
@@ -90,13 +92,21 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "reset" => Ok(Command::Reset(parse_reset(rest)?)),
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
+        "guards" => {
+            if let Some(extra) = rest.first() {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown guards argument {extra:?}"),
+                });
+            }
+            Ok(Command::Guards)
+        }
         "affected" => Ok(Command::Affected {
             base: parse_affected(rest)?,
         }),
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
             message: format!(
-                "unknown command {other:?} (expected sim, reset, handshake, affected, or help)"
+                "unknown command {other:?} (expected sim, reset, handshake, affected, guards, or help)"
             ),
         }),
     }
@@ -274,6 +284,11 @@ commands:
       Classify which CI matrix halves the diff base...HEAD can reach,
       printing one key=value line per answer with reason lines above.
       Fails open: an unclassifiable change answers everything=true.
+
+  guards
+      Discover every scripts/check-<name>.sh with its
+      scripts/test-check-<name>.sh self-test, run each pair, and name
+      every failing guard.
 
   help
       Print this help text.";
