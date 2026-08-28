@@ -34,6 +34,23 @@ pub enum ModeTarget {
     Return,
 }
 
+/// The explicit target of a control-feel request. A feel mode changes how a
+/// demand is SHAPED on its way to the vehicle; a flight mode changes what the
+/// vehicle does with it. They are separate vocabularies so neither can be
+/// mistaken for the other.
+///
+/// The three differ in degree and never in kind, so an operator who has
+/// learned one knows what the others will do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FeelTarget {
+    /// Lowest centre gain and lowest command jerk.
+    Precision,
+    /// The default balance of response and smoothness.
+    Balanced,
+    /// Fastest response within the same vehicle safety envelope.
+    Agile,
+}
+
 /// A typed discrete control action. An adapter reads `Arm`, never "button 9",
 /// so a rebound control cannot change what a press means at the vehicle
 /// boundary. A mode request carries its explicit typed target.
@@ -61,6 +78,11 @@ pub enum ControlAction {
     /// advertised only by simulation adapters, never by a physical-vehicle
     /// gateway.
     SimReset,
+    /// Request a control-feel change to an explicit typed target.
+    FeelModeRequest {
+        /// The feel mode being requested.
+        target: FeelTarget,
+    },
 }
 
 /// The action kinds a scope can advertise (the capability-side view of
@@ -81,6 +103,8 @@ pub enum ActionKind {
     CameraZoomOut,
     /// Reset the simulation.
     SimReset,
+    /// Request a control-feel change.
+    FeelModeRequest,
 }
 
 impl ControlAction {
@@ -95,6 +119,7 @@ impl ControlAction {
             Self::CameraZoomIn => ActionKind::CameraZoomIn,
             Self::CameraZoomOut => ActionKind::CameraZoomOut,
             Self::SimReset => ActionKind::SimReset,
+            Self::FeelModeRequest { .. } => ActionKind::FeelModeRequest,
         }
     }
 }

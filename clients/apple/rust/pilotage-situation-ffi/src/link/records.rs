@@ -194,6 +194,37 @@ pub enum LinkEvent {
         /// Adapter-supplied reason when not accepted; empty on acceptance.
         detail: String,
     },
+    /// Where the vehicle says it is, from the telemetry lane.
+    ///
+    /// The situation session ingests surveillance, weather and terrain; a
+    /// vehicle under this operator's own control is on none of those, so its
+    /// position reaches the map through here or not at all.
+    ///
+    /// One lane supplies the whole of it. A position from the simulator's
+    /// oracle beside a heading from the estimator would draw one measurement
+    /// turned by another, and nothing on the mark could say so.
+    VehicleFix {
+        /// Latitude in degrees.
+        latitude_deg: f64,
+        /// Longitude in degrees.
+        longitude_deg: f64,
+        /// Where the nose points, true, when the lane states an attitude.
+        heading_deg: Option<f64>,
+        /// Track over the ground, when the lane states a velocity above the
+        /// floor below which a direction is noise rather than a course.
+        course_deg: Option<f64>,
+        /// Speed over the ground, m/s, alongside `course_deg`.
+        ground_speed_mps: Option<f64>,
+        /// Whether the simulator's oracle supplied this, rather than the
+        /// vehicle's own estimator.
+        from_simulator: bool,
+        /// Whether the position is a NEW measurement rather than a repeat.
+        ///
+        /// A mark goes stale on the age of the last position MEASURED, not
+        /// the last one delivered: a host relaying a frozen block delivers
+        /// forever, and a mark timed from delivery would never go stale.
+        fix_advanced: bool,
+    },
     /// One second of link accounting. What blinks on screen shows up
     /// here as a number: telemetry that arrives in bursts, frames the
     /// host rejected, actions that never got a result.

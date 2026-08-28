@@ -90,6 +90,76 @@ mod tests {
     use super::{control_feel_from_env_blocking, link_config, profile_from_env};
     use crate::error::HostError;
 
+    /// Every shipped shaped profile is one this host will actually launch with.
+    ///
+    /// The launcher names a file in the environment and the vehicle comes up
+    /// flying whatever it holds. A file the host refuses is a launch that dies
+    /// at startup; a file it accepts but reads as a different mode is worse,
+    /// because the vehicle flies a law nobody chose and nothing says so.
+    #[test]
+    fn every_shipped_shaped_profile_loads_as_the_mode_it_names() {
+        let profiles =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../adapters/aviate/profiles");
+        for (file, mode) in [
+            (
+                "alia250-shaped-precision-v1.json",
+                pilotage_control_feel::FeelMode::Precision,
+            ),
+            (
+                "alia250-shaped-balanced-v1.json",
+                pilotage_control_feel::FeelMode::Balanced,
+            ),
+            (
+                "alia250-shaped-agile-v1.json",
+                pilotage_control_feel::FeelMode::Agile,
+            ),
+            // The X500's, which the launcher names by path for a gazebo
+            // session. This host is what reads that path, so a file it
+            // cannot load is a session that does not start.
+            (
+                "x500-shaped-precision-v1.json",
+                pilotage_control_feel::FeelMode::Precision,
+            ),
+            (
+                "x500-shaped-balanced-v1.json",
+                pilotage_control_feel::FeelMode::Balanced,
+            ),
+            (
+                "x500-shaped-agile-v1.json",
+                pilotage_control_feel::FeelMode::Agile,
+            ),
+        ] {
+            let path = profiles.join(file);
+            let loaded = control_feel_from_env_blocking(
+                AviateProfile::Simulation,
+                Some(OsString::from(path.as_os_str())),
+            )
+            .unwrap_or_else(|error| panic!("{file} must load: {error}"));
+            assert_eq!(loaded.profile().mode, mode, "{file} loaded as another mode");
+            // And it is a shaped law rather than the one that steps.
+            assert!(
+                loaded.profile().horizontal.neutral.dwell_ms > 0,
+                "{file} has no dwell"
+            );
+            assert!(
+                loaded.profile().horizontal.dynamics.release_accel < 1_000.0,
+                "{file} still steps on release"
+            );
+        }
+    }
+
+    /// A physical vehicle refuses a named profile outright.
+    #[test]
+    fn a_physical_vehicle_refuses_a_named_profile() {
+        let path = OsString::from("/nonexistent/profile.json");
+        let refused = control_feel_from_env_blocking(AviateProfile::Physical, Some(path))
+            .expect_err("refused");
+        assert!(matches!(
+            refused,
+            HostError::AviatePhysicalControlFeelOverride { .. }
+        ));
+    }
+
     #[test]
     fn absent_variable_selects_the_default_simulation_profile() {
         let profile = profile_from_env(Err(VarError::NotPresent)).expect("default");

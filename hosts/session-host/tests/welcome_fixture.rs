@@ -52,6 +52,7 @@ fn capabilities() -> AdapterCapabilities {
                         ActionCapability {
                             action: ActionKind::Arm,
                             mode_targets: vec![],
+                            feel_targets: vec![],
                         },
                         ActionCapability {
                             action: ActionKind::ModeRequest,
@@ -60,6 +61,7 @@ fn capabilities() -> AdapterCapabilities {
                                 ModeTarget::FpvDirect,
                                 ModeTarget::Hold,
                             ],
+                            feel_targets: vec![],
                         },
                     ],
                     legacy: Some(LegacyCommandMap::Velocity {
@@ -86,6 +88,7 @@ fn capabilities() -> AdapterCapabilities {
                     actions: vec![ActionCapability {
                         action: ActionKind::Arm,
                         mode_targets: vec![],
+                        feel_targets: vec![],
                     }],
                     legacy: None,
                 },

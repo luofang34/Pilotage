@@ -32,6 +32,23 @@ sed -i.bak '/model.currentOwnship = /,+9d' "$app/SituationContentView.swift"
 reject "a model whose ownship reader is never set"
 restore SituationContentView.swift
 
+sed -i.bak 's/} else if vehicleFixAt == nil {/} else if false {/' "$app/OwnshipPosition.swift"
+reject "a withdrawn mark reinstalled by a repeat of the measurement that went stale"
+restore OwnshipPosition.swift
+
+sed -i.bak '/guard model.replayingFlight == nil else {/,+4d' "$app/SituationContentView.swift"
+reject "a replay overdrawn with the vehicle's live position"
+restore SituationContentView.swift
+
+sed -i.bak 's/if vehicle.fixAdvanced {/if true {/' "$app/OwnshipPosition.swift"
+reject "a staleness clock refreshed on arrival rather than on a new measurement"
+restore OwnshipPosition.swift
+
+sed -i.bak 's/^        }$/        }\
+        vehicleFixAt = Date()/' "$app/OwnshipPosition.swift"
+reject "a second, unconditional write to the staleness clock"
+restore OwnshipPosition.swift
+
 sed -i.bak '/model.refreshEvidence()/d' "$app/SituationContentView.swift"
 reject "an evidence write nothing asks for"
 restore SituationContentView.swift
@@ -72,13 +89,13 @@ reject "a position request that leaves the compass stopped"
 restore OwnshipPosition.swift
 
 sed -i.bak 's/case .landscapeLeft: .landscapeRight/case .landscapeLeft: .landscapeLeft/' \
-    "$app/OwnshipPosition.swift"
+    "$app/DeviceSensors.swift"
 reject "an interface orientation passed straight through as a device orientation"
-restore OwnshipPosition.swift
+restore DeviceSensors.swift
 
-sed -i.bak 's/trueHeading >= 0/trueHeading > -999/' "$app/OwnshipPosition.swift"
+sed -i.bak 's/trueHeading >= 0/trueHeading > -999/' "$app/DeviceSensors.swift"
 reject "a true heading trusted before the platform has variation"
-restore OwnshipPosition.swift
+restore DeviceSensors.swift
 
 sed -i.bak 's/@Published var follow/var follow/' "$app/OwnshipPosition.swift"
 reject "a follow mode a closure would read as it was rather than as it is"

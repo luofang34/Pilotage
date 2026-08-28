@@ -14,6 +14,7 @@ aviate-xil-shm = { workspace = true, optional = true }
 getrandom = { version = "0.3.4", features = ["std"] }
 pilotage-adapter-api = { workspace = true }
 pilotage-control-feel = { workspace = true }
+pilotage-geo = { workspace = true }
 pilotage-mavlink = { workspace = true }
 pilotage-sim-video = { workspace = true, optional = true }
 pilotage-protocol = { workspace = true }

@@ -72,6 +72,32 @@ enum ControlAction {
   CONTROL_ACTION_CAMERA_ZOOM_IN = 6;
   // Step the camera one detent toward a wider field of view.
   CONTROL_ACTION_CAMERA_ZOOM_OUT = 7;
+  // A request to change the operator's control-feel mode. The concrete target
+  // is the `ControlActionRequest.feel_target` carried alongside — a feel
+  // request with an unspecified target is rejected, never guessed.
+  //
+  // This is not a flight mode. A flight mode changes what the vehicle does
+  // with a demand; a feel mode changes how a demand is shaped on its way
+  // there, and the two are advertised and requested separately so neither can
+  // be mistaken for the other.
+  CONTROL_ACTION_FEEL_MODE_REQUEST = 8;
+}
+
+// The explicit target of a FEEL_MODE_REQUEST action. Targets are typed
+// operator meanings, not scheme-local numbers; a vehicle advertises the ones
+// it accepts via `ActionCapability.feel_targets`.
+//
+// The three differ in degree and never in kind: the same curve family, the
+// same ordering of limits, the same structure of neutral band. An operator
+// who has learned one knows what the others will do.
+enum FeelTarget {
+  FEEL_TARGET_UNSPECIFIED = 0;
+  // Lowest centre gain and lowest command jerk.
+  FEEL_TARGET_PRECISION = 1;
+  // The default balance of response and smoothness.
+  FEEL_TARGET_BALANCED = 2;
+  // Fastest response within the same vehicle safety envelope.
+  FEEL_TARGET_AGILE = 3;
 }
 
 // The explicit target of a MODE_REQUEST action (CTRL-01). Targets are typed
@@ -101,6 +127,10 @@ message ControlActionRequest {
   // id, and the host deduplicates repeats so the vehicle executes the press
   // exactly once. Zero means "no correlation" (legacy translation).
   uint32 action_id = 3;
+  // The control-feel mode being requested. Meaningful only for
+  // `CONTROL_ACTION_FEEL_MODE_REQUEST` (required there, rejected as
+  // unspecified otherwise-populated).
+  FeelTarget feel_target = 4;
 }
 
 // Linear velocity plus yaw rate, the family the browser scheme produces today.

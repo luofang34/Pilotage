@@ -5,6 +5,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CandidateLineage, ScenarioSet, TuneError};
 
+mod promotion;
+
+pub use promotion::{
+    ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
+    PromotionCalculation, PromotionComparison, PromotionObjectiveResult, PromotionPairedStatistics,
+    PromotionPolicy, PromotionRunKey, PromotionRunPlan, PromotionSeedPolicy, PromotionSelection,
+    promotion_policy_digest,
+};
+pub(crate) use promotion::{expected_promotion_pairs, required_improvement};
+
 const MAX_PARAMETERS: usize = 128;
 const MAX_SCENARIOS_PER_SET: usize = 64;
 const MAX_REPETITIONS: u32 = 32;
@@ -108,18 +118,6 @@ pub struct ScenarioRef {
     pub max_samples: u32,
     /// The timeout for each requested sample.
     pub sample_timeout_ms: u32,
-}
-
-/// The limits for the one promotion decision.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromotionPolicy {
-    /// The required reduction in paired mean loss.
-    pub minimum_loss_improvement: f64,
-    /// The required reduction as a fraction of baseline mean loss.
-    pub minimum_relative_loss_improvement: f64,
-    /// The largest permitted paired increase in mean control effort.
-    pub maximum_control_effort_increase: f64,
 }
 
 /// Absolute release limits for the untouched final partition.
@@ -268,17 +266,7 @@ impl SearchStage {
     }
 
     fn validate_promotion(&self) -> Result<(), TuneError> {
-        let policy = self.promotion;
-        if !policy.minimum_loss_improvement.is_finite()
-            || policy.minimum_loss_improvement < 0.0
-            || !policy.minimum_relative_loss_improvement.is_finite()
-            || !(0.0..=1.0).contains(&policy.minimum_relative_loss_improvement)
-            || !policy.maximum_control_effort_increase.is_finite()
-            || policy.maximum_control_effort_increase < 0.0
-        {
-            return Err(invalid_stage("the promotion policy is not valid"));
-        }
-        Ok(())
+        self.promotion.validate().map_err(as_stage_error)
     }
 
     fn validate_qualification(&self) -> Result<(), TuneError> {

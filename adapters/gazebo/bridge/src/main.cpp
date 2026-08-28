@@ -44,6 +44,9 @@ struct Args {
   std::string chase_camera_topic = "/chase_camera";
   // Empty by default: only a gimbal-bearing vehicle sets a payload-camera topic.
   std::string gimbal_camera_topic;
+  // Full gz topic of the satellite-navigation sensor; empty means the
+  // world declares no datum and the bridge reports no position.
+  std::string navsat_topic;
 };
 
 // Parses --port/--vehicle/--camera-topic/--chase-camera-topic. Returns
@@ -66,6 +69,8 @@ std::optional<Args> ParseArgs(int argc, char **argv) {
       have_port = true;
     } else if (flag == "--vehicle" && has_value) {
       args.vehicle = argv[++i];
+    } else if (flag == "--navsat-topic" && has_value) {
+      args.navsat_topic = argv[++i];
     } else if (flag == "--camera-topic" && has_value) {
       args.camera_topic = argv[++i];
     } else if (flag == "--chase-camera-topic" && has_value) {
@@ -119,9 +124,9 @@ int main(int argc, char **argv) {
   }
   g_connection.store(&(*connection), std::memory_order_relaxed);
 
-  pilotage::bridge::BridgeConfig config{args.vehicle, args.camera_topic,
-                                        args.chase_camera_topic,
-                                        args.gimbal_camera_topic};
+  pilotage::bridge::BridgeConfig config{
+      args.vehicle, args.camera_topic, args.chase_camera_topic,
+      args.gimbal_camera_topic, args.navsat_topic};
   pilotage::bridge::BridgeNode bridge(config, &(*connection));
   if (!bridge.Start(error)) {
     std::cerr << "pilotage-gz-bridge: " << error << "\n";
@@ -135,6 +140,8 @@ int main(int argc, char **argv) {
             << ", gimbal_camera="
             << (args.gimbal_camera_topic.empty() ? "(none)"
                                                  : args.gimbal_camera_topic)
+            << ", navsat="
+            << (args.navsat_topic.empty() ? "(none)" : args.navsat_topic)
             << "\n";
 
   // Inbound control loop: block on the socket, publish each BridgeControl as a

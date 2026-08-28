@@ -226,6 +226,9 @@ fn truth_from_sample(
     incarnation: SourceIncarnation,
 ) -> SimTruthSample {
     SimTruthSample {
+        // The shared-memory oracle reports the model's local frame
+        // only; it declares no position on the Earth.
+        geodetic: None,
         quat_wxyz: sample.quat_wxyz,
         pos_ned_m: sample.pos_ned_m,
         vel_ned_mps: sample.vel_ned_mps,

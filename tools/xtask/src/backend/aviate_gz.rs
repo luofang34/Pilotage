@@ -2,7 +2,7 @@
 //! code — headless gz with the Aviate plugin, then the SITL FC over the
 //! versioned shm block, each gated on its own readiness signal.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{SessionContext, SimBackend, Stage};
 use crate::error::XtaskError;
@@ -13,6 +13,16 @@ use crate::readiness::{Readiness, stage_log};
 /// (also what the reset script targets).
 const WORLD: &str = "sim/worlds/x500_flightdeck.sdf";
 const WORLD_NAME: &str = "aviate_sitl";
+
+/// The X500's own control-feel law.
+///
+/// Balanced rather than agile or precision: it is the law an operator who
+/// has asked for nothing should get.
+///
+/// This binds the law the vehicle STARTS on. A runtime feel-mode request
+/// does not reach these files — it shapes one from the mode alone — so
+/// asking for another mode moves the vehicle off its fitted law.
+const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/x500-shaped-balanced-v1.json";
 
 /// The Aviate + Gazebo SITL backend.
 #[derive(Debug)]
@@ -27,13 +37,23 @@ impl SimBackend for AviateGz {
         "aviate"
     }
 
+    fn control_feel_profile(&self) -> Option<&'static str> {
+        Some(CONTROL_FEEL_PROFILE)
+    }
+
     fn host_env(&self, _ctx: &SessionContext) -> Vec<(String, String)> {
-        // The camera sidecar discovers gz topics through this.
-        vec![("GZ_IP".to_owned(), "127.0.0.1".to_owned())]
+        vec![
+            // The camera sidecar discovers gz topics through this.
+            ("GZ_IP".to_owned(), "127.0.0.1".to_owned()),
+            // A sensor's topic is scoped by the world it is in. The
+            // launcher is what chooses the world, so it is what says which
+            // one rather than the host guessing a name.
+            ("PILOTAGE_GZ_WORLD".to_owned(), WORLD_NAME.to_owned()),
+        ]
     }
 
     fn plan(&self, ctx: &SessionContext) -> Result<Vec<Stage>, XtaskError> {
-        plan_with_aviate_dir(ctx, &aviate_dir(&ctx.repo_root))
+        plan_with_aviate_dir(ctx, &super::aviate_dir(&ctx.repo_root))
     }
 
     fn stale_process_patterns(&self) -> Vec<&'static str> {
@@ -60,15 +80,6 @@ impl SimBackend for AviateGz {
             })
         }
     }
-}
-
-/// Where the sibling Aviate checkout lives: `AVIATE_DIR`, else
-/// `../Aviate` next to this repository. A directory convention, never a
-/// source dependency.
-fn aviate_dir(repo_root: &Path) -> PathBuf {
-    std::env::var_os("AVIATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("../Aviate"))
 }
 
 /// `PATH` for spawned tools, with Homebrew's prefix appended when it
@@ -315,5 +326,29 @@ mod tests {
         );
         assert_eq!(env(1, "GZ_IP"), "127.0.0.1");
         std::fs::remove_dir_all(repo.parent().expect("base")).ok();
+    }
+
+    /// A sensor's topic is scoped by the world it is in. The launcher
+    /// chooses the world and the host builds the topic, so they agree
+    /// through this name and nothing else. A typo in either place
+    /// subscribes successfully to a topic nobody publishes: gz-transport
+    /// reports no error, the bridge reports no fix, and the map states no
+    /// position with nothing anywhere to say why.
+    #[test]
+    fn the_launcher_names_the_world_the_sensor_topic_is_scoped_by() {
+        use crate::backend::SimBackend;
+
+        let ctx = context(PathBuf::from("unused-for-host-environment"));
+        let env = super::AviateGz.host_env(&ctx);
+        let world = env
+            .iter()
+            .find(|(key, _)| key == "PILOTAGE_GZ_WORLD")
+            .map(|(_, value)| value.clone())
+            .expect("the launcher tells the host which world it started");
+        assert_eq!(world, super::WORLD_NAME);
+        assert!(
+            !world.is_empty(),
+            "an empty world name builds no topic and the host reads no position"
+        );
     }
 }

@@ -174,7 +174,14 @@ fn sigma_att(sample: &KinematicSample) -> f64 {
 }
 
 fn sigma_pos(sample: &KinematicSample) -> f64 {
-    f64::from(sample.position.quality.horizontal_mm) * 1e-3
+    // Zero is unstated, not perfect. Read as a sigma it would pass any
+    // budget, so an unstated accuracy is infinite here: a budget cannot be
+    // met by a number nobody supplied.
+    sample
+        .position
+        .quality
+        .stated_horizontal_mm()
+        .map_or(f64::INFINITY, |mm| f64::from(mm) * 1e-3)
 }
 
 fn sigma_vel(sample: &KinematicSample) -> f64 {

@@ -59,11 +59,11 @@ fi
 
 require_pattern 'compass\.start\(\)' "$app/OwnshipPosition.swift" \
     "the compass must be started, or a heading up map has nothing to turn to"
-require_pattern 'locationManagerShouldDisplayHeadingCalibration' "$app/OwnshipPosition.swift" \
+require_pattern 'locationManagerShouldDisplayHeadingCalibration' "$app/DeviceSensors.swift" \
     "a compass that cannot trust its reading must be allowed to ask the reader to swing the tablet"
-require_pattern 'trueHeading >= 0' "$app/OwnshipPosition.swift" \
+require_pattern 'trueHeading >= 0' "$app/DeviceSensors.swift" \
     "a true heading is absent until the platform has variation, and the magnetic reading must answer instead"
-require_pattern 'case \.landscapeLeft: \.landscapeRight' "$app/OwnshipPosition.swift" \
+require_pattern 'case \.landscapeLeft: \.landscapeRight' "$app/DeviceSensors.swift" \
     "the interface and device orientations name landscape from opposite ends and must be swapped"
 require_pattern '@Published var follow' "$app/OwnshipPosition.swift" \
     "the follow mode must live in the model, because a closure that reads it outlives the view value"
@@ -112,5 +112,39 @@ fi
 # the projection fires at all.
 require_pattern 'positionIsExtrapolated' "$app/SituationEvidence.swift" \
     "the evidence must count the marks the engine advanced, or a projection that never fires looks the same as one that does"
+# A replay must not be overdrawn with the vehicle's live position.
+#
+# A replay is a map of a flight that already happened. The live mark and the
+# replayed one look alike, so a reader cannot tell that the aircraft they are
+# watching is not the one in the recording. Every other live source is already
+# held off while a replay runs.
+require_pattern 'replayingFlight == nil' "$app/SituationContentView.swift" \
+    "the live vehicle fix must be held off while a replay runs, or it draws the aircraft where it is now on a map of where it was"
+
+# The staleness clock must be timed from when a position was MEASURED, not from
+# when one arrived.
+#
+# A host relaying a block whose avionics have stopped keeps delivering samples
+# indefinitely. A mark whose clock is refreshed on arrival therefore never goes
+# stale however long the vehicle has been silent — which is the single case the
+# staleness bound exists to cover. The link states whether the position
+# advanced; the clock has to be conditioned on it.
+require_pattern 'if vehicle\.fixAdvanced' "$app/OwnshipPosition.swift" \
+    "the vehicle staleness clock must be conditioned on fixAdvanced, or a frozen feed keeps the mark alive forever"
+
+# A mark withdrawn for staleness must not be reinstalled by a repeat of the
+# measurement that went stale. Without the refusal below, the expiry nils the
+# clock and the very next unadvanced sample starts it again on ARRIVAL — the
+# mark blinks out for one inter-sample gap every few seconds and otherwise
+# stands where the vehicle is not.
+require_pattern 'else if vehicleFixAt == nil' "$app/OwnshipPosition.swift" \
+    "an unadvanced position must be refused once the mark has been withdrawn, or a stale mark returns as though it were new"
+
+# And in one place only. A second, unconditional write refreshes the clock on
+# arrival again while the conditional above it still reads correct.
+if [ "$(grep -c 'vehicleFixAt = Date()' "$app/OwnshipPosition.swift")" -ne 1 ]; then
+    echo "FORBIDDEN: the vehicle staleness clock is set in more than one place, so one of them is not waiting for a new measurement" >&2
+    status=1
+fi
 
 exit "$status"

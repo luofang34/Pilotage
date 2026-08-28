@@ -5,10 +5,21 @@
 //! non-finite intent component — a velocity or rate off the network must never
 //! reach an adapter as `NaN`.
 
+#[path = "intent/targets.rs"]
+mod targets;
+
+#[cfg(test)]
+#[path = "intent/targets_tests.rs"]
+mod targets_tests;
+
+pub(super) use targets::{
+    feel_target_from_wire, feel_target_to_wire, mode_target_from_wire, mode_target_to_wire,
+};
+
 use super::ConvertError;
 use crate::intent::{
     AttitudeThrustIntent, BodyRateIntent, ControlAction, ControlIntent, GimbalRateIntent,
-    ModeTarget, PositionHoldIntent, ReferenceFrame, VelocityIntent,
+    PositionHoldIntent, ReferenceFrame, VelocityIntent,
 };
 use crate::wire;
 
@@ -58,29 +69,8 @@ fn frame_from_wire(value: i32) -> Result<ReferenceFrame, ConvertError> {
     }
 }
 
-pub(super) fn mode_target_to_wire(target: ModeTarget) -> wire::ModeTarget {
-    match target {
-        ModeTarget::CameraVelocity => wire::ModeTarget::CameraVelocity,
-        ModeTarget::FpvDirect => wire::ModeTarget::FpvDirect,
-        ModeTarget::Hold => wire::ModeTarget::Hold,
-        ModeTarget::Return => wire::ModeTarget::Return,
-    }
-}
-
-pub(super) fn mode_target_from_wire(value: i32) -> Result<ModeTarget, ConvertError> {
-    match wire::ModeTarget::try_from(value) {
-        Ok(wire::ModeTarget::CameraVelocity) => Ok(ModeTarget::CameraVelocity),
-        Ok(wire::ModeTarget::FpvDirect) => Ok(ModeTarget::FpvDirect),
-        Ok(wire::ModeTarget::Hold) => Ok(ModeTarget::Hold),
-        Ok(wire::ModeTarget::Return) => Ok(ModeTarget::Return),
-        Ok(wire::ModeTarget::Unspecified) | Err(_) => Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.ModeTarget",
-            value,
-        }),
-    }
-}
-
 pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::ControlActionRequest {
+    let mut feel_target = wire::FeelTarget::Unspecified;
     let (kind, target) = match action {
         ControlAction::Arm => (wire::ControlAction::Arm, wire::ModeTarget::Unspecified),
         ControlAction::Disarm => (wire::ControlAction::Disarm, wire::ModeTarget::Unspecified),
@@ -101,12 +91,43 @@ pub(crate) fn action_to_wire(action: ControlAction, action_id: u32) -> wire::Con
             wire::ModeTarget::Unspecified,
         ),
         ControlAction::SimReset => (wire::ControlAction::SimReset, wire::ModeTarget::Unspecified),
+        ControlAction::FeelModeRequest { target } => {
+            feel_target = feel_target_to_wire(target);
+            (
+                wire::ControlAction::FeelModeRequest,
+                wire::ModeTarget::Unspecified,
+            )
+        }
     };
     wire::ControlActionRequest {
         action: kind as i32,
         mode_target: target as i32,
         action_id,
+        feel_target: feel_target as i32,
     }
+}
+
+/// The two targets are separate vocabularies, and an action carrying the one
+/// it does not name is a sender and a receiver disagreeing about what was
+/// asked for. Reading past it would act on the half the receiver understood.
+fn refuse_stray_mode_target(request: &wire::ControlActionRequest) -> Result<(), ConvertError> {
+    if request.mode_target == wire::ModeTarget::Unspecified as i32 {
+        return Ok(());
+    }
+    Err(ConvertError::UnknownEnum {
+        enum_name: "pilotage.v1.ControlActionRequest.mode_target",
+        value: request.mode_target,
+    })
+}
+
+fn refuse_stray_feel_target(request: &wire::ControlActionRequest) -> Result<(), ConvertError> {
+    if request.feel_target == wire::FeelTarget::Unspecified as i32 {
+        return Ok(());
+    }
+    Err(ConvertError::UnknownEnum {
+        enum_name: "pilotage.v1.ControlActionRequest.feel_target",
+        value: request.feel_target,
+    })
 }
 
 /// A mode request REQUIRES its typed target; any other action must not
@@ -125,6 +146,7 @@ pub(crate) fn action_from_wire(
         Ok(kind) => kind,
     };
     if kind == wire::ControlAction::ModeRequest {
+        refuse_stray_feel_target(&request)?;
         return Ok((
             ControlAction::ModeRequest {
                 target: mode_target_from_wire(request.mode_target)?,
@@ -132,12 +154,17 @@ pub(crate) fn action_from_wire(
             request.action_id,
         ));
     }
-    if request.mode_target != wire::ModeTarget::Unspecified as i32 {
-        return Err(ConvertError::UnknownEnum {
-            enum_name: "pilotage.v1.ControlActionRequest.mode_target",
-            value: request.mode_target,
-        });
+    if kind == wire::ControlAction::FeelModeRequest {
+        refuse_stray_mode_target(&request)?;
+        return Ok((
+            ControlAction::FeelModeRequest {
+                target: feel_target_from_wire(request.feel_target)?,
+            },
+            request.action_id,
+        ));
     }
+    refuse_stray_mode_target(&request)?;
+    refuse_stray_feel_target(&request)?;
     match kind {
         wire::ControlAction::Arm => Ok((ControlAction::Arm, request.action_id)),
         wire::ControlAction::Disarm => Ok((ControlAction::Disarm, request.action_id)),
@@ -147,6 +174,11 @@ pub(crate) fn action_from_wire(
         wire::ControlAction::CameraZoomIn => Ok((ControlAction::CameraZoomIn, request.action_id)),
         wire::ControlAction::CameraZoomOut => Ok((ControlAction::CameraZoomOut, request.action_id)),
         wire::ControlAction::SimReset => Ok((ControlAction::SimReset, request.action_id)),
+        // FeelModeRequest returned above with its own target.
+        wire::ControlAction::FeelModeRequest => Err(ConvertError::UnknownEnum {
+            enum_name: "pilotage.v1.ControlAction",
+            value: request.action,
+        }),
         // ModeRequest returned above; Unspecified/unknown rejected above. A
         // total match keeps this panic-free if the wire enum ever grows.
         wire::ControlAction::ModeRequest | wire::ControlAction::Unspecified => {
@@ -346,7 +378,7 @@ mod tests {
             ControlAction::Arm,
             ControlAction::Disarm,
             ControlAction::ModeRequest {
-                target: super::ModeTarget::Hold,
+                target: crate::intent::ModeTarget::Hold,
             },
             ControlAction::GimbalRecenter,
         ] {
@@ -360,6 +392,7 @@ mod tests {
                 action: wire::ControlAction::Unspecified as i32,
                 mode_target: 0,
                 action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ControlAction",
@@ -375,6 +408,7 @@ mod tests {
                 action: wire::ControlAction::ModeRequest as i32,
                 mode_target: wire::ModeTarget::Unspecified as i32,
                 action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ModeTarget",
@@ -390,6 +424,7 @@ mod tests {
                 action: wire::ControlAction::Arm as i32,
                 mode_target: wire::ModeTarget::Hold as i32,
                 action_id: 0,
+                feel_target: wire::FeelTarget::Unspecified as i32,
             }),
             Err(ConvertError::UnknownEnum {
                 enum_name: "pilotage.v1.ControlActionRequest.mode_target",

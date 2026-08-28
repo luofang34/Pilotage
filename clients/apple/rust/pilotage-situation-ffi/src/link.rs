@@ -17,6 +17,7 @@ mod pad;
 mod records;
 #[cfg(test)]
 mod tests;
+mod vehicle_fix;
 
 pub use observer::LinkObserver;
 pub use records::{

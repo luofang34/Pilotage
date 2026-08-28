@@ -376,5 +376,145 @@ function sampleWithGroups({ truthRole, fcRole, gimbalRole, navRole }) {
   check("pong: wasm kind is Pong", wasm.kind === "Pong");
 }
 
+
+// ---- geodetic parity --------------------------------------------------------
+// A group both decoders surface can still disagree INSIDE it. The client
+// reads telemetry through the wasm decoder, so a field only the JavaScript
+// decoder knows is a field the client never sees, with no decode error to
+// notice it by — which is how a position reached the wire and no map drew
+// it. This pins the fix itself, not merely the group that carries it.
+
+function doubleField(field, value) {
+  const buffer = new ArrayBuffer(8);
+  new DataView(buffer).setFloat64(0, value, true);
+  return [...tag(field, 1), ...new Uint8Array(buffer)];
+}
+
+/** A well-formed fix: WGS-84, an MSL height that names its separation. */
+function geodeticBytes({ geoidModel = 65_535, verticalDatum = 2 } = {}) {
+  return [
+    ...doubleField(1, 47.3977419),
+    ...doubleField(2, 8.5455938),
+    ...varintField(3, 1),
+    ...doubleField(5, 488.227),
+    ...varintField(6, verticalDatum),
+    ...varintField(7, geoidModel),
+  ];
+}
+
+function truthSampleWithFix(fixBytes) {
+  return new Uint8Array([
+    ...varintField(1, 1),
+    ...lenField(4, [
+      ...lenField(1, varintField(1, 1)),
+      ...lenField(
+        7,
+        groupBytes(ROLE.simulationTruth, 2, 11, [
+          ...floatField(1, 1.0),
+          ...floatField(5, 12.0),
+          ...varintField(12, 0b1101),
+          ...(fixBytes === null ? [] : lenField(13, fixBytes)),
+        ]),
+      ),
+    ]),
+  ]);
+}
+
+{
+  const withFix = truthSampleWithFix(geodeticBytes());
+  const js = decodeBareEnvelope(withFix).message;
+  const wasm = decodeDatagramEnvelope(withFix).message;
+  check(
+    "geodetic: both decoders surface a well-formed fix",
+    present(js.simTruth?.geodetic) && present(wasm.simTruth?.geodetic),
+  );
+  check(
+    "geodetic: both decoders read the same position",
+    Math.abs((js.simTruth?.geodetic?.latitudeDeg ?? 0) - 47.3977419) < 1e-9 &&
+      Math.abs((wasm.simTruth?.geodetic?.latitudeDeg ?? 0) - 47.3977419) < 1e-9,
+  );
+
+  const withoutFix = truthSampleWithFix(null);
+  const jsAbsent = decodeBareEnvelope(withoutFix).message;
+  const wasmAbsent = decodeDatagramEnvelope(withoutFix).message;
+  check(
+    "geodetic: both decoders report an absent fix as absent",
+    !present(jsAbsent.simTruth?.geodetic) && !present(wasmAbsent.simTruth?.geodetic),
+  );
+
+  // An MSL height that names no separation is uninterpretable, and both
+  // decoders must refuse it rather than one drawing it.
+  const uninterpretable = truthSampleWithFix(geodeticBytes({ geoidModel: 0 }));
+  const jsRefused = decodeBareEnvelope(uninterpretable).message;
+  const wasmRefused = decodeDatagramEnvelope(uninterpretable).message;
+  check(
+    "geodetic: both decoders refuse an MSL height with no geoid",
+    !present(jsRefused.simTruth?.geodetic) && !present(wasmRefused.simTruth?.geodetic),
+  );
+
+  // A longitude the producer did not normalize is a producer that did not
+  // keep the contract. One decoder wrapping it while the other refuses it
+  // puts the vehicle a full turn of the Earth apart between two readers of
+  // the same bytes.
+  const unwrapped = truthSampleWithFix([
+    ...doubleField(1, 47.3977419),
+    ...doubleField(2, 200.0),
+    ...varintField(3, 1),
+    ...doubleField(5, 488.227),
+    ...varintField(6, 2),
+    ...varintField(7, 65_535),
+  ]);
+  const jsUnwrapped = decodeBareEnvelope(unwrapped).message;
+  const wasmUnwrapped = decodeDatagramEnvelope(unwrapped).message;
+  check(
+    "geodetic: both decoders refuse a longitude the producer did not normalize",
+    !present(jsUnwrapped.simTruth?.geodetic) && !present(wasmUnwrapped.simTruth?.geodetic),
+  );
+
+  // The ESTIMATE lane carries its own fix under its own stamp. A field only
+  // the JavaScript decoder knows is a field the client never sees.
+  const estimateSample = (role, fixBytes) =>
+    new Uint8Array([
+      ...varintField(1, 1),
+      ...lenField(4, [
+        ...lenField(1, varintField(1, 1)),
+        ...lenField(6, [
+          ...floatField(1, 1.0),
+          ...(fixBytes === null ? [] : lenField(22, fixBytes)),
+          ...(role === null ? [] : lenField(23, stampBytes(laneStamp(role, 1)))),
+        ]),
+      ]),
+    ]);
+
+  const estimateFix = estimateSample(ROLE.estimate, geodeticBytes({ geoidModel: 0, verticalDatum: 1 }));
+  const jsEstimate = decodeBareEnvelope(estimateFix).message;
+  const wasmEstimate = decodeDatagramEnvelope(estimateFix).message;
+  check(
+    "geodetic: both decoders surface the estimator's own fix",
+    present(jsEstimate.avionics?.geodetic) && present(wasmEstimate.avionics?.geodetic),
+  );
+  check(
+    "geodetic: both decoders read the same estimator position",
+    Math.abs((jsEstimate.avionics?.geodetic?.latitudeDeg ?? 0) - 47.3977419) < 1e-9 &&
+      Math.abs((wasmEstimate.avionics?.geodetic?.latitudeDeg ?? 0) - 47.3977419) < 1e-9,
+  );
+
+  const wrongLane = estimateSample(ROLE.simulationTruth, geodeticBytes({ geoidModel: 0, verticalDatum: 1 }));
+  const jsWrong = decodeBareEnvelope(wrongLane).message;
+  const wasmWrong = decodeDatagramEnvelope(wrongLane).message;
+  check(
+    "geodetic: both decoders refuse an estimate-lane fix stamped another role",
+    !present(jsWrong.avionics?.geodetic) && !present(wasmWrong.avionics?.geodetic),
+  );
+
+  const noStamp = estimateSample(null, geodeticBytes({ geoidModel: 0, verticalDatum: 1 }));
+  const jsNoStamp = decodeBareEnvelope(noStamp).message;
+  const wasmNoStamp = decodeDatagramEnvelope(noStamp).message;
+  check(
+    "geodetic: both decoders refuse an estimator fix with no stamp of its own",
+    !present(jsNoStamp.avionics?.geodetic) && !present(wasmNoStamp.avionics?.geodetic),
+  );
+}
+
 console.log(failures === 0 ? "\nall wasm wire-decode conformance checks passed" : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

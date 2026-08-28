@@ -19,7 +19,9 @@
 name: Evidence trace gate
 
 on:
+  # Pushes gate on main only; a pull request already gates its own head.
   push:
+    branches: [main]
   pull_request:
 
 env:

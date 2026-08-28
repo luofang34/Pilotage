@@ -130,6 +130,8 @@ fn envelope_roundtrips_for_telemetry_sample_arm() {
             angular_rad_s: 0.3,
         }),
         avionics: Some(wire::AvionicsState {
+            geodetic: None,
+            geodetic_stamp: None,
             baro_alt_m: 0.0,
             baro_stamp: None,
             quat_w: 1.0,

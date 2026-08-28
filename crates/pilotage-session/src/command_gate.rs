@@ -138,6 +138,15 @@ pub(crate) fn validate_action(
     {
         return Err(FrameRejectionReason::UnsupportedAction);
     }
+    // A control law is chosen the same way a flight mode is, and admitting a
+    // target the vehicle never advertised would let any client install a law
+    // nobody qualified for it. The browser checks this too; the browser is not
+    // the only thing that can send a frame.
+    if let ControlAction::FeelModeRequest { target } = action
+        && !capability.feel_targets.contains(&target)
+    {
+        return Err(FrameRejectionReason::UnsupportedAction);
+    }
     Ok(())
 }
 

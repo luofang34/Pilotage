@@ -383,6 +383,12 @@ fn committed_receipts(pending: &PendingAttempt) -> Result<Vec<&RunTerminalReceip
         .collect()
 }
 
+pub(super) fn owned_committed_receipts(
+    pending: &PendingAttempt,
+) -> Result<Vec<RunTerminalReceipt>, TuneError> {
+    committed_receipts(pending).map(|receipts| receipts.into_iter().cloned().collect())
+}
+
 fn completed_run(receipt: &RunTerminalReceipt) -> Option<&RunRecord> {
     if !matches!(
         receipt.class().disposition(),

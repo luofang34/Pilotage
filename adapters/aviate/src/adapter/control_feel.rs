@@ -5,7 +5,7 @@ use std::time::Instant;
 use pilotage_control_feel::{
     AxisResponse, FeelDigest, FeelMode, NeutralBand, NeutralLatch, ValidatedFlightFeelProfile,
 };
-use pilotage_protocol::{ControlIntent, ScopedControlFrame};
+use pilotage_protocol::{ControlIntent, Generation, ScopedControlFrame};
 
 use crate::error::AviateAdapterError;
 
@@ -28,6 +28,11 @@ pub(super) struct ControlFeelEntry {
 struct StagedControlFeel {
     entry: ControlFeelEntry,
     neutral: NeutralBoundary,
+    /// The fencing generation in effect when an OPERATOR chose this law, so a
+    /// law outlives its chooser's authority no longer than the authority
+    /// itself. `None` for a law installed out of band by the host, which no
+    /// operator chose and no handover invalidates.
+    staged_under: Option<Generation>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -93,12 +98,14 @@ impl ControlFeelProfiles {
     pub(super) fn stage(
         &mut self,
         profile: ValidatedFlightFeelProfile,
+        staged_under: Option<Generation>,
     ) -> Result<FeelDigest, AviateAdapterError> {
         let entry = ControlFeelEntry::new(profile)?;
         let digest = entry.identity.digest;
         self.pending = Some(StagedControlFeel {
             entry,
             neutral: NeutralBoundary::default(),
+            staged_under,
         });
         Ok(digest)
     }
@@ -110,6 +117,7 @@ impl ControlFeelProfiles {
         self.pending = Some(StagedControlFeel {
             entry: previous,
             neutral: NeutralBoundary::default(),
+            staged_under: None,
         });
         true
     }
@@ -129,6 +137,39 @@ impl ControlFeelProfiles {
             .neutral
             .update(frame, &pending.entry.profile, observed_at);
         active_is_neutral && pending_is_neutral
+    }
+
+    /// Drops a staged law that was never installed.
+    ///
+    /// A law staged under a lease that has since been lost is a law the next
+    /// operator did not choose, and it would install itself on their first
+    /// sustained neutral. The same reasoning already discards a hold point
+    /// captured under a lost lease: what was asked for under one authority
+    /// must not act under another.
+    ///
+    /// Returns whether anything was pending.
+    pub(super) fn discard_pending(&mut self) -> bool {
+        self.pending.take().is_some()
+    }
+
+    /// Drops a staged law whose chooser no longer holds the scope.
+    ///
+    /// Losing a lease is not the only way authority moves: a scope handed
+    /// straight to another operator advances the generation without ever
+    /// engaging link loss, so the discard that rides on link loss never runs
+    /// and the law the previous holder staged would install itself on the new
+    /// holder's first sustained neutral. The generation is the one signal
+    /// every authority change shares, so this is gated on it rather than on
+    /// any single transition.
+    ///
+    /// Returns whether a staged law was dropped.
+    pub(super) fn discard_stale(&mut self, current: Generation) -> bool {
+        let stale = self
+            .pending
+            .as_ref()
+            .and_then(|staged| staged.staged_under)
+            .is_some_and(|staged_under| staged_under != current);
+        stale && self.pending.take().is_some()
     }
 
     pub(super) fn commit_pending(&mut self) -> Option<ControlFeelEntry> {

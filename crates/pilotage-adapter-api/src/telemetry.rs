@@ -1,5 +1,6 @@
 //! Telemetry sampling vocabulary (ADR-0008).
 
+use pilotage_geo::{GeodeticPosition, PositionQuality};
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
@@ -33,6 +34,29 @@ pub struct AvionicsAttitudeSample {
     pub stamp: MeasurementStamp,
 }
 
+/// One geodetic fix: where the vehicle is on the Earth, with the datum the
+/// position is measured against fully declared (ADR-0022).
+///
+/// Absence of the whole sample means no fix. A producer with no fix leaves
+/// it out; it never reports a zero, a last-known value, or a position
+/// derived from a declared origin — an origin-derived position is a
+/// different thing and is not interchangeable with a measured one.
+///
+/// The position is a [`GeodeticPosition`], so a datum a reader cannot
+/// interpret cannot be built: an MSL height needs a declared geoid, an AGL
+/// height a declared terrain reference, and an unknown datum is refused
+/// rather than guessed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeodeticFixSample {
+    /// Where the vehicle is, and what the position is measured against.
+    pub position: GeodeticPosition,
+    /// How well the position is known. A reader derives health from this;
+    /// the producer states no availability of its own.
+    pub quality: PositionQuality,
+    /// Identity and acquisition time of this fix.
+    pub stamp: MeasurementStamp,
+}
+
 /// One independently published position/velocity measurement group.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AvionicsKinematicsSample {
@@ -57,6 +81,11 @@ pub struct AvionicsSample {
     pub kinematics: Option<AvionicsKinematicsSample>,
     /// Barometric group, or `None` when it was not supplied.
     pub baro: Option<AvionicsBaroSample>,
+    /// The estimator's own geodetic fix, or `None` when the estimator
+    /// supplied none. It advances independently of the kinematics group
+    /// and carries its own stamp. A simulator's truth oracle publishes a
+    /// fix on [`SimTruthSample`] instead; the two are never merged.
+    pub geodetic: Option<GeodeticFixSample>,
     /// Identity and acquisition time of the estimator status observation
     /// backing the effective authorization, or `None` when no explicit
     /// authorization was supplied.
@@ -105,6 +134,11 @@ pub struct SimTruthSample {
     /// bit2 position, bit3 velocity. Availability only — truth has no
     /// estimator authorization to claim.
     pub valid_flags: u32,
+    /// The oracle's geodetic position, or `None` when the simulator
+    /// declared none. It comes from the same observation as the NED group
+    /// above and rides this sample's `stamp`, so it never claims an
+    /// advance of its own.
+    pub geodetic: Option<GeodeticFixSample>,
     /// Identity, acquisition time, and integrity of this truth
     /// observation.
     pub stamp: MeasurementStamp,

@@ -13,6 +13,7 @@ use pilotage_adapter_api::{
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
+use pilotage_mavlink::link::estimate_geodetic_fix;
 use pilotage_mavlink::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
 use pilotage_mavlink::{AttitudeUpdate, KinematicsUpdate, LinkState};
 
@@ -116,6 +117,13 @@ pub(super) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
     };
     let avionics = Some(AvionicsSample {
         baro: None,
+        // The estimator's own fix, under its own stamp: it advances
+        // independently of the local frame beside it.
+        geodetic: latest
+            .gnss_fix
+            .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
+            .as_ref()
+            .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
             rates_rps: att.rates_rps,

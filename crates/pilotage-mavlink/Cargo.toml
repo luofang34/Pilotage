@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 pilotage-adapter-api = { workspace = true }
+pilotage-geo = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
 tracing = { workspace = true }

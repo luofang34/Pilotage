@@ -1,17 +1,27 @@
 //! Content-addressed tuning journal and campaign state.
 
 mod attempt;
+mod closure;
 mod event;
+mod evidence;
+mod proof;
 mod replay;
 pub(crate) mod snapshot;
 mod storage;
 mod terminal;
 mod transition;
 
+pub use closure::{PROMOTION_CLOSURE_SCHEMA_VERSION, PromotionClosure};
 pub use event::{
     AttemptRole, CampaignPhase, FinalQualificationOutcome, JournalEvent, OperationStatus,
     PromotionDecision,
 };
+pub use evidence::{
+    AuthenticatedJournalHead, AuthenticatedJournalRecord,
+    CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION, CampaignEvidenceAuthority,
+    JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION, JournalEvidenceSnapshot,
+};
+pub use proof::{AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION, AuthenticatedEvaluationProof};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -24,7 +34,7 @@ use crate::{
 };
 use replay::{JournalState, replay};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 4;
+const JOURNAL_SCHEMA_VERSION: u32 = 5;
 
 /// The immutable identity of one tuning session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +50,17 @@ pub struct SessionIdentity {
     pub fixed_seed: u64,
     /// All executable and plant identities.
     pub runtimes: RuntimeIdentities,
+}
+
+impl SessionIdentity {
+    /// Returns the canonical identity of this complete tuning session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when JSON encoding fails.
+    pub fn digest(&self) -> Result<Digest, TuneError> {
+        storage::document_digest("session identity", self)
+    }
 }
 
 /// One content-addressed record in the tuning journal.
@@ -152,7 +173,7 @@ impl Journal {
     ///
     /// Returns [`TuneError`] when JSON encoding fails.
     pub fn session_digest(&self) -> Result<Digest, TuneError> {
-        storage::document_digest("session identity", self.session())
+        self.session().digest()
     }
 
     /// Returns all journal entries in sequence order.
@@ -276,8 +297,12 @@ impl Journal {
         Ok(candidate)
     }
 
-    pub(crate) fn close_promotion(&mut self, decision: PromotionDecision) -> Result<(), TuneError> {
-        self.append(JournalEvent::PromotionClosed { decision })
+    pub(crate) fn close_promotion(&mut self) -> Result<PromotionDecision, TuneError> {
+        self.ensure_usable()?;
+        let closure = replay::expected_promotion_closure(&self.state, &self.stage, self.session())?;
+        let decision = closure.decision.clone();
+        self.append(JournalEvent::PromotionClosed { closure })?;
+        Ok(decision)
     }
 
     pub(crate) fn seal(
@@ -285,7 +310,23 @@ impl Journal {
         candidate: Digest,
         outcome: FinalQualificationOutcome,
     ) -> Result<(), TuneError> {
-        self.append(JournalEvent::Sealed { candidate, outcome })
+        let closure = self
+            .state
+            .promotion_closure
+            .as_ref()
+            .ok_or_else(|| invalid("a final seal has no promotion closure"))?;
+        let proof = self
+            .state
+            .final_proof
+            .as_ref()
+            .ok_or_else(|| invalid("a final seal has no authenticated evaluation proof"))?;
+        self.append(JournalEvent::Sealed {
+            candidate,
+            outcome,
+            promotion_closure_digest: closure.closure_digest,
+            final_evaluation_digest: proof.evaluation_digest,
+            final_proof_digest: proof.proof_digest,
+        })
     }
 
     fn start(

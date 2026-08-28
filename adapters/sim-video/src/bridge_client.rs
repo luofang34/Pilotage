@@ -23,7 +23,7 @@ use tracing::warn;
 
 use crate::error::SimVideoError;
 use crate::pump::{reader_loop, writer_loop};
-use crate::wire::{BridgeCameraCommand, BridgeControl, BridgeFrame, BridgeOdometry};
+use crate::wire::{BridgeCameraCommand, BridgeControl, BridgeFrame, BridgeNavSat, BridgeOdometry};
 
 /// Environment variable overriding the sidecar bridge binary path.
 pub const BRIDGE_BIN_ENV: &str = "PILOTAGE_GZ_BRIDGE_BIN";
@@ -47,6 +47,10 @@ pub struct BridgeConfig {
     /// Gimbal payload (`camera_id = 2`) gz image topic. `None` when the vehicle
     /// carries no gimbal, so the bridge subscribes no third camera.
     pub gimbal_camera_topic: Option<String>,
+    /// Full gz topic of the vehicle's satellite-navigation sensor. `None`
+    /// when the world declares no datum, and the bridge then reports no
+    /// position rather than a place it cannot name.
+    pub navsat_topic: Option<String>,
     /// Bounded depth of the raw-frame channel.
     pub frame_channel_depth: usize,
 }
@@ -62,6 +66,7 @@ impl BridgeConfig {
             vehicle_name: vehicle_name.into(),
             camera_topic: None,
             gimbal_camera_topic: None,
+            navsat_topic: None,
             frame_channel_depth: DEFAULT_FRAME_CHANNEL_DEPTH,
         }
     }
@@ -83,6 +88,14 @@ impl BridgeConfig {
         self.gimbal_camera_topic = Some(topic.into());
         self
     }
+
+    /// Names the vehicle's satellite-navigation sensor (the bridge's
+    /// `--navsat-topic`). Without it the bridge reports no position.
+    #[must_use]
+    pub fn with_navsat_topic(mut self, topic: impl Into<String>) -> Self {
+        self.navsat_topic = Some(topic.into());
+        self
+    }
 }
 
 /// Latest cached odometry read from the sidecar bridge, shared between the
@@ -95,6 +108,10 @@ impl BridgeConfig {
 pub struct LatestBridgeState {
     /// Most recent odometry sample, if any has arrived yet.
     pub odometry: Option<BridgeOdometry>,
+    /// Most recent satellite-navigation fix, if the world declares a datum
+    /// and any fix has arrived yet. Absent means the simulator states no
+    /// position, never that the vehicle is at a default one.
+    pub navsat: Option<BridgeNavSat>,
 }
 
 /// Liveness of the background reader task that feeds odometry and frames.
@@ -239,6 +256,9 @@ impl BridgeClient {
             command
                 .arg("--gimbal-camera-topic")
                 .arg(gimbal_camera_topic);
+        }
+        if let Some(navsat_topic) = &config.navsat_topic {
+            command.arg("--navsat-topic").arg(navsat_topic);
         }
         command
     }

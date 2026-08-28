@@ -117,10 +117,11 @@ struct SituationMap: UIViewRepresentable {
             ?? SituationStyleResource.fallbackJSON
         let view = SituationMapView(styleJSON: styleJSON)
         view.initialPitchDegrees = 55
-        // Open over the ground the terrain archive covers rather than on the Atlantic, and
-        // let the map be pinched out until the whole world is on screen.
-        view.initialCenter = CLLocationCoordinate2D(latitude: 40.5, longitude: -76.5)
-        view.initialZoomLevel = 6
+        // Open over the ground the terrain archive covers, which is the ground the
+        // simulator flies over, and let the map be pinched out until the whole world is
+        // on screen.
+        view.initialCenter = CLLocationCoordinate2D(latitude: 47.4, longitude: 8.55)
+        view.initialZoomLevel = 9
         view.minimumZoomLevel = 0
         view.maximumZoomLevel = SituationStyleResource.maximumZoomLevel
         view.baseLayerIdentifiers = ["terrain-base": "pilotage-terrain-hillshade"]

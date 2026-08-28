@@ -1,12 +1,12 @@
 {
-  "plan_sha256": "1ea2b7719ae2fce191ce3160d5c6424c5aef0abcf65777275481406dabd5a095",
-  "archive_sha256": "d54e07e7be017d822470ddf0f2587361047b77d2ced1ed54e6c4e520a5fda89e",
-  "tiles_written": 17171,
-  "archive_bytes": 7995392,
+  "plan_sha256": "b550edbe89de100b4f296dc17e054aa19510ac038394a972b66916a5b3490170",
+  "archive_sha256": "0f0b52d3bf0109052b0fca9b8690853b9c66c88e6ead9fd027596678dd42eaec",
+  "tiles_written": 21845,
+  "archive_bytes": 20758528,
   "source_name": "Natural Earth",
   "dataset_scale": "1:10m",
   "attribution": "Made with Natural Earth. Free vector and raster map data at naturalearthdata.com.",
-  "closest_zoom": 15,
+  "closest_zoom": 7,
   "sources": [
     {
       "name": "ocean",
@@ -28,35 +28,62 @@
       "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_lakes.zip",
       "sha256": "0803a06f9c3cb4671d89b68c48b142aad9366ba40f665245e12a913fbc61722a",
       "shapefile": "ne_10m_lakes.shp"
+    },
+    {
+      "name": "lakes_europe",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_lakes_europe.zip",
+      "sha256": "c0b1f0da4dce6af3b27c49b3ed11a664d801ff3d140ca5b9814e7e85a35c1de1",
+      "shapefile": "ne_10m_lakes_europe.shp",
+      "layer": "lakes"
+    },
+    {
+      "name": "lakes_north_america",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_lakes_north_america.zip",
+      "sha256": "96c824a2f2646ea8b16fe6711f7906ba690788a547f51e391654c8e94271ffba",
+      "shapefile": "ne_10m_lakes_north_america.shp",
+      "layer": "lakes"
+    },
+    {
+      "name": "rivers",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_rivers_lake_centerlines_scale_rank.zip",
+      "sha256": "a6fc02f8d663a0cb451b2564fbc361174410cd65d14c59d11ffb870ebb8c8566",
+      "shapefile": "ne_10m_rivers_lake_centerlines_scale_rank.shp",
+      "geometry_type": "MULTILINESTRING",
+      "select": "featurecla,scalerank"
+    },
+    {
+      "name": "rivers_europe",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_rivers_europe.zip",
+      "sha256": "c730ccb4cbe21c1f03d006de4032a0dc69ade342de941d10aa1facab59019dbf",
+      "shapefile": "ne_10m_rivers_europe.shp",
+      "layer": "rivers",
+      "geometry_type": "MULTILINESTRING",
+      "select": "featurecla,scalerank"
+    },
+    {
+      "name": "rivers_north_america",
+      "version": "5.1.1",
+      "url": "https://naturalearth.s3.amazonaws.com/5.1.1/10m_physical/ne_10m_rivers_north_america.zip",
+      "sha256": "7fbe85a2acbf1f3ef4361a16bb39677ad1ea86f888be1689f7a4caeafc7529e8",
+      "shapefile": "ne_10m_rivers_north_america.shp",
+      "layer": "rivers",
+      "geometry_type": "MULTILINESTRING",
+      "select": "featurecla,scalerank"
     }
   ],
   "bands": [
     {
       "name": "world",
       "min_zoom": 0,
-      "max_zoom": 5,
+      "max_zoom": 7,
       "min_lat_deg": -85.0511287798066,
       "max_lat_deg": 85.0511287798066,
       "min_lon_deg": -180.0,
       "max_lon_deg": 180.0
-    },
-    {
-      "name": "region",
-      "min_zoom": 6,
-      "max_zoom": 10,
-      "min_lat_deg": 37.5,
-      "max_lat_deg": 43.5,
-      "min_lon_deg": -81.0,
-      "max_lon_deg": -72.0
-    },
-    {
-      "name": "local",
-      "min_zoom": 11,
-      "max_zoom": 15,
-      "min_lat_deg": 40.1,
-      "max_lat_deg": 41.1,
-      "min_lon_deg": -75.25,
-      "max_lon_deg": -74.25
     }
   ]
 }

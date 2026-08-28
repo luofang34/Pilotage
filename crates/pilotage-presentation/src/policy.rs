@@ -381,12 +381,13 @@ fn ownship_feature(handle: &surveillance_core::TrackSnapshotHandle) -> Option<Ow
     let position = snapshot.position.as_ref()?;
     let coordinate =
         Coordinate::checked(position.value.latitude_deg, position.value.longitude_deg)?;
+    let velocity = snapshot.velocity.as_ref().map(|field| &field.value);
     Some(OwnshipFeature {
         coordinate,
-        course_deg: snapshot
-            .velocity
-            .as_ref()
-            .and_then(|value| value.value.track_angle_deg_true),
+        course_deg: velocity.and_then(|value| value.track_angle_deg_true),
+        ground_speed_kt: velocity.and_then(|value| value.ground_speed_kt),
+        heading_deg: velocity.and_then(|value| value.heading_deg),
+        heading_reference: velocity.and_then(|value| value.heading_reference),
         altitude_ft: snapshot
             .pressure_altitude_ft
             .as_ref()

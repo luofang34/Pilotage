@@ -64,7 +64,8 @@ pub use conformal::{
 };
 pub use datum::{
     BaroSettingId, DatumRealizationId, GeoTile, GeodeticPosition, GeoidModelId, HorizontalDatum,
-    LocalOriginId, TerrainRefId, VerticalDatum, VerticalPosition, wrap_longitude_deg,
+    LocalOriginId, SIMULATOR_GEOID_MODEL_ID, TerrainRefId, VerticalDatum, VerticalPosition,
+    wrap_longitude_deg,
 };
 pub use error::{AbiError, AgeError, GeoError};
 pub use identity::{
