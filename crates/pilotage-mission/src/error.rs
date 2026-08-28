@@ -6,6 +6,7 @@ use aerocontext_planning::route::RouteError;
 use chrono::NaiveDate;
 use navigate_fpl::PlanActivationError;
 use navigate_geodesy::GeodesyError;
+use pilotage_mission_core::CodecError;
 
 /// Why a mission could not be built. Every variant carries the context
 /// an operator needs to act on the refusal.
@@ -46,4 +47,15 @@ pub enum MissionBuildError {
     /// under the floor, a leg no longer than the capture radius).
     #[error("mission plan cannot be activated: {0}")]
     PlanActivation(#[from] PlanActivationError),
+    /// The operational mission document did not validate or encode.
+    #[error("mission document rejected")]
+    MissionDocument(#[from] CodecError),
+    /// A Navigate plan value has no canonical identity encoding.
+    #[error("flight-plan identity cannot encode {field} value {value}")]
+    PlanIdentity {
+        /// The unsupported flight-plan field.
+        field: &'static str,
+        /// The unsupported value.
+        value: String,
+    },
 }

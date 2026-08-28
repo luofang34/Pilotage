@@ -2,6 +2,7 @@
 //! actions out. All time is caller-supplied; nothing here reads a clock
 //! or performs I/O.
 
+mod document;
 mod nav_guidance;
 mod output;
 mod tick;
@@ -19,6 +20,11 @@ use navigate_fpl::{ExecutionConfig, PlanExecution};
 use navigate_fusion::{FusionConfig, NavigationFilter, Observation, ObservationValue};
 use navigate_geodesy::{LocalTangentPlane, NedOffset};
 use navigate_guidance::{GuidanceRefusal, VelocityGuidanceConfig};
+use pilotage_mission_core::{
+    ActionId, DirectiveReceipt, EngineState as CoreEngineState, FlightAction as CoreFlightAction,
+    FlightPlanReference, MissionDocument, MissionEngine as CoreMissionEngine,
+    MissionTerminal as CoreMissionTerminal, PhaseStage, ReceiptResult,
+};
 
 pub use nav_guidance::{NavGuidance, NavQuality};
 pub use output::{MissionAction, MissionCounters, MissionEvent, MissionOutput, MissionState};
@@ -32,13 +38,13 @@ use crate::provenance::{MissionPlanRecord, SnapshotProvenance};
 /// observations with.
 const OWNSHIP_SOURCE: SourceId = SourceId::new(1);
 
-/// A deterministic mission executor over the Navigate stack.
+/// A Navigate-backed operational handler around the shared mission core.
 ///
 /// The host owns the boundary: it converts telemetry into
-/// [`OwnshipSample`]s, frames the emitted intents/actions onto the
-/// session wire, and supplies every `now` on the configured clock
-/// domain. The engine owns the judgment: admission, sequencing,
-/// guidance, and the phase machine.
+/// [`OwnshipSample`]s, frames the emitted intents and actions onto the
+/// session wire, and supplies each `now` on the configured clock domain.
+/// The shared core owns phase transitions. This handler owns Navigate
+/// observations, guidance, and directive interpretation.
 #[derive(Debug)]
 pub struct MissionEngine {
     config: MissionConfig,
@@ -46,20 +52,23 @@ pub struct MissionEngine {
     filter: NavigationFilter,
     execution: PlanExecution,
     guidance: VelocityGuidanceConfig,
-    state: MissionState,
+    document: MissionDocument,
+    plan_reference: FlightPlanReference,
+    core: Option<CoreMissionEngine>,
+    core_failed: bool,
+    active_action: Option<CoreFlightAction>,
+    pending_receipt: Option<DirectiveReceipt>,
+    outstanding_arm: Option<ActionId>,
+    plan_complete: bool,
     counters: MissionCounters,
     /// The solution the last tick published, backing the display-facing
     /// guidance view. A tick whose filter published nothing clears it, so
     /// [`MissionEngine::nav_guidance`] cannot serve stale geometry.
     last_solution: Option<NavigationSolution>,
-    pending_events: Vec<MissionEvent>,
     /// The latest known heading. `None` until a sample carries an
     /// attitude group: intents need the NED→body rotation, and guessing
     /// zero would silently rotate every command to due north.
     last_yaw_rad: Option<f64>,
-    next_action_id: u64,
-    outstanding_arm: Option<u64>,
-    arm_needs_send: bool,
     last_refusal: Option<Discriminant<GuidanceRefusal>>,
 }
 
@@ -95,18 +104,24 @@ impl MissionEngine {
         }
         let waypoints = build_waypoints(&expanded.points, &config);
         let expanded_idents: Vec<String> = waypoints.iter().map(|wp| wp.ident.clone()).collect();
-        let record = MissionPlanRecord {
-            provenance,
-            route_input: config.route.clone(),
-            waypoint_count: waypoints.len(),
-            expanded_idents,
-        };
         let plan = FlightPlan::new(
             format!("mission:{}", config.route),
             PlanRole::Mission,
             waypoints,
         );
         let execution = PlanExecution::new(plan, ExecutionConfig::default())?;
+        let (document, plan_reference) = document::build_document(
+            execution.plan(),
+            &config,
+            provenance.navigation_data_identity.clone(),
+        )?;
+        let record = MissionPlanRecord {
+            provenance,
+            route_input: config.route.clone(),
+            waypoint_count: expanded_idents.len(),
+            expanded_idents,
+            mission_identity: document.identity.clone(),
+        };
         let plane = LocalTangentPlane::new(config.anchor)?;
         let filter = NavigationFilter::new(FusionConfig::default(), config.clock);
         let guidance = guidance_config(&config);
@@ -116,14 +131,17 @@ impl MissionEngine {
             filter,
             execution,
             guidance,
-            state: MissionState::AwaitSolution,
+            document,
+            plan_reference,
+            core: None,
+            core_failed: false,
+            active_action: None,
+            pending_receipt: None,
+            outstanding_arm: None,
+            plan_complete: false,
             counters: MissionCounters::default(),
             last_solution: None,
-            pending_events: Vec::new(),
             last_yaw_rad: None,
-            next_action_id: 0,
-            outstanding_arm: None,
-            arm_needs_send: false,
             last_refusal: None,
         };
         Ok((engine, record))
@@ -168,30 +186,29 @@ impl MissionEngine {
     }
 
     /// Reports the correlated result of a previously emitted action.
-    /// Acceptance advances the phase machine; rejection schedules a
-    /// re-send with a fresh id on the next tick. Results for unknown
-    /// ids, or outside the arming phase, are inert.
+    /// Acceptance completes the correlated core directive. Rejection is
+    /// a retryable receipt, so the core emits a fresh identifier on the
+    /// next tick. Results for unknown identifiers are inert.
     pub fn on_action_result(&mut self, action_id: u64, accepted: bool) {
-        if self.state != MissionState::Arming || self.outstanding_arm != Some(action_id) {
+        let Some(outstanding) = self.outstanding_arm else {
+            return;
+        };
+        if u64::from(outstanding.get()) != action_id {
             return;
         }
         self.outstanding_arm = None;
-        if accepted {
-            self.pending_events
-                .push(MissionEvent::ArmAccepted { action_id });
-            if self.config.cruise_height_m > 0.0 {
-                self.state = MissionState::Climb;
-                self.pending_events.push(MissionEvent::ClimbStarted);
-            } else {
-                self.state = MissionState::Enroute;
-                self.pending_events.push(MissionEvent::EnrouteStarted);
-            }
+        let result = if accepted {
+            ReceiptResult::Succeeded {}
         } else {
             self.counters.arm_rejected = self.counters.arm_rejected.wrapping_add(1);
-            self.arm_needs_send = true;
-            self.pending_events
-                .push(MissionEvent::ArmRejected { action_id });
-        }
+            ReceiptResult::Retryable {
+                detail: "the vehicle rejected the arm action".to_owned(),
+            }
+        };
+        self.pending_receipt = Some(DirectiveReceipt {
+            action_id: outstanding,
+            result,
+        });
     }
 
     /// The named refusal/rejection counters.
@@ -202,8 +219,43 @@ impl MissionEngine {
 
     /// The current mission phase.
     #[must_use]
-    pub const fn state(&self) -> MissionState {
-        self.state
+    pub fn state(&self) -> MissionState {
+        if self.core_failed {
+            return MissionState::Failed;
+        }
+        let Some(core) = self.core.as_ref() else {
+            return MissionState::AwaitSolution;
+        };
+        match core.state() {
+            CoreEngineState::Running {
+                phase_id, stage, ..
+            } if phase_id == document::ARM_PHASE_ID => match stage {
+                PhaseStage::WaitingForEntry {} => MissionState::AwaitSolution,
+                PhaseStage::WaitingForReceipt { .. } | PhaseStage::WaitingForCompletion {} => {
+                    MissionState::Arming
+                }
+            },
+            CoreEngineState::Running { phase_id, .. } if phase_id == document::CLIMB_PHASE_ID => {
+                MissionState::Climb
+            }
+            CoreEngineState::Running { phase_id, .. }
+                if phase_id == document::FOLLOW_PLAN_PHASE_ID =>
+            {
+                MissionState::Enroute
+            }
+            CoreEngineState::Terminal {
+                result: CoreMissionTerminal::Complete { .. },
+            } => MissionState::Complete,
+            CoreEngineState::CleaningUp { .. }
+            | CoreEngineState::Running { .. }
+            | CoreEngineState::Terminal { .. } => MissionState::Failed,
+        }
+    }
+
+    /// Gets the validated mission document that owns phase transitions.
+    #[must_use]
+    pub const fn mission_document(&self) -> &MissionDocument {
+        &self.document
     }
 }
 

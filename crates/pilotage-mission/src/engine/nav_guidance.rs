@@ -87,8 +87,11 @@ impl MissionEngine {
     #[must_use]
     pub fn nav_guidance(&self) -> Option<NavGuidance> {
         let solution = self.last_solution.as_ref()?;
-        match self.state {
-            MissionState::AwaitSolution | MissionState::Arming | MissionState::Complete => None,
+        match self.state() {
+            MissionState::AwaitSolution
+            | MissionState::Arming
+            | MissionState::Complete
+            | MissionState::Failed => None,
             MissionState::Climb | MissionState::Enroute => {
                 let leg = self.execution.active_leg()?;
                 Some(leg_guidance(

@@ -4,6 +4,7 @@
 use aerocontext_core::NavDataSnapshot;
 use aerocontext_navdata::blob;
 use chrono::NaiveDate;
+use pilotage_mission_core::{Digest, MissionIdentity, NavigationDataIdentity};
 
 use crate::error::MissionBuildError;
 
@@ -22,6 +23,8 @@ pub struct SnapshotProvenance {
     pub next_effective_on: NaiveDate,
     /// Verified SHA-256 of the blob payload, lowercase hex.
     pub sha256_hex: String,
+    /// Identity of the immutable navigation-data snapshot.
+    pub navigation_data_identity: NavigationDataIdentity,
     /// Whether the snapshot is a generated fixture rather than published
     /// data; a fixture-built plan must never be mistaken for one packed
     /// from an authority's cycle.
@@ -41,11 +44,20 @@ pub fn decode_snapshot(
     fixture: bool,
 ) -> Result<(NavDataSnapshot, SnapshotProvenance), MissionBuildError> {
     let info = blob::inspect(bytes)?;
+    let authority = info.snapshot.cycle.authority.slug().to_owned();
+    let effective_on = info.snapshot.cycle.effective_on;
+    let sha256_hex = info.sha256_hex();
+    let cycle = format!("{authority}:{effective_on}");
     let provenance = SnapshotProvenance {
-        authority: info.snapshot.cycle.authority.slug().to_owned(),
-        effective_on: info.snapshot.cycle.effective_on,
+        authority,
+        effective_on,
         next_effective_on: info.snapshot.cycle.next_effective_on,
-        sha256_hex: info.sha256_hex(),
+        sha256_hex: sha256_hex.clone(),
+        navigation_data_identity: NavigationDataIdentity {
+            cycle: cycle.clone(),
+            snapshot_id: format!("{cycle}:sha256:{sha256_hex}"),
+            snapshot_digest: Digest::from_bytes(info.sha256),
+        },
         fixture,
     };
     Ok((info.snapshot, provenance))
@@ -65,4 +77,6 @@ pub struct MissionPlanRecord {
     pub expanded_idents: Vec<String>,
     /// Number of waypoints in the built plan.
     pub waypoint_count: usize,
+    /// Identity of the mission document that owns the plan execution.
+    pub mission_identity: MissionIdentity,
 }
