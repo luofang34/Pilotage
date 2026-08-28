@@ -20,6 +20,9 @@ env:
 jobs:
   certification:
     runs-on: ubuntu-latest
+    # Far above the healthy ~1 h, far below the 6 h default: a hang in
+    # an unattended run burns a bounded amount, not a night.
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -61,6 +64,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: thumbv7em-none-eabihf, wasm32-unknown-unknown
 
       - name: Install protoc
         run: |
@@ -109,7 +115,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           last_green=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly.yml/runs?status=success&per_page=1" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly.yml/runs?status=success&branch=main&per_page=1" \
             --jq '.workflow_runs[0].head_sha' 2>/dev/null || true)
           if [ -n "${last_green}" ] && git cat-file -e "${last_green}" 2>/dev/null; then
             echo "::group::Merges since the last green nightly (${last_green})"
