@@ -1,14 +1,14 @@
 use flight_tune::{
     AttemptRole, AuthenticatedEvaluationProof, AuthenticatedJournalHead,
     AuthenticatedJournalRecord, CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
-    CampaignEvidenceAuthority, CandidateTransitionReference, CandidateTransitionRequest, Digest,
-    FinalQualificationOutcome, JournalEntry, JournalEvent, JournalEvidenceSnapshot,
-    OperationStatus, PromotionClosure, RunTerminalReceipt, SearchStage, SessionIdentity,
+    CampaignEvidenceAuthority, CandidateTransitionReference, Digest, FinalQualificationOutcome,
+    JournalEntry, JournalEvent, JournalEvidenceSnapshot, OperationStatus, PromotionClosure,
+    RunTerminalReceipt, SearchStage, SessionIdentity,
 };
 
 use crate::{CampaignEvidence, digest};
 
-use super::{Point, fixed_digest, proof, tuning_candidate};
+use super::attempts::training_attempts;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sealed_campaign(
@@ -54,37 +54,8 @@ fn campaign_authority(
     frozen_candidate: Digest,
 ) -> (CampaignEvidenceAuthority, AuthenticatedJournalHead) {
     let session_digest = digest::document("session identity", session).expect("session digest");
-    let training = proof(
-        stage,
-        session,
-        session_digest,
-        0,
-        AttemptRole::TrainingBaseline,
-        session.initial_candidate_digest,
-        Point {
-            loss: 1.25,
-            effort: 0.25,
-            objective: 0.20,
-        },
-    );
-    // The authorization is built first: a challenger's run identity is not
-    // valid without it, so the proof cannot be assembled before it exists.
-    let transition = transition_reference(session, session_digest, frozen_candidate);
-    let challenger = super::proof_with_objectives(
-        stage,
-        session,
-        session_digest,
-        1,
-        AttemptRole::TrainingChallenger { attempt_index: 0 },
-        frozen_candidate,
-        Point {
-            loss: 0.90,
-            effort: 0.30,
-            objective: 0.20,
-        },
-        None,
-        Some(transition.1),
-    );
+    let (training, transition, challenger) =
+        training_attempts(stage, session, session_digest, frozen_candidate);
     let mut chain = JournalChain::new(session.clone());
     chain.push(JournalEvent::Started {
         candidate: session.initial_candidate_digest,
@@ -132,33 +103,6 @@ fn campaign_authority(
         },
         head,
     )
-}
-
-fn transition_reference(
-    session: &SessionIdentity,
-    session_digest: Digest,
-    frozen_candidate: Digest,
-) -> (
-    flight_tune::CandidateTransitionReceipt,
-    CandidateTransitionReference,
-) {
-    let source = tuning_candidate(0.0);
-    let target = tuning_candidate(0.5);
-    let request = CandidateTransitionRequest::new(
-        session_digest,
-        &source,
-        session.initial_candidate_digest,
-        &target,
-        frozen_candidate,
-        session.runtimes.transition_validator.clone(),
-        session.runtimes.adjacency_policy_digest,
-        fixed_digest(61),
-    )
-    .expect("create fixture transition request");
-    let receipt = flight_tune::CandidateTransitionReceipt::authorized(&request)
-        .expect("authorize fixture transition");
-    let reference = receipt.reference();
-    (receipt, reference)
 }
 
 struct JournalChain {

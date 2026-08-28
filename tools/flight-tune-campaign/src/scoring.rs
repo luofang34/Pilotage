@@ -224,74 +224,7 @@ impl MetricEvaluator for FlightQualityEvaluator {
         let hold_position = value_at(&trace.position, settled_at, false);
         let hold = measure_hold(&trace.position, settled_at, hold_position).map_err(fail)?;
 
-        let objectives = BTreeMap::from([
-            ("control.effort_rms".to_owned(), control.effort_rms),
-            (
-                "control.longest_saturation_s".to_owned(),
-                control.longest_saturation_s,
-            ),
-            (
-                "control.saturation_fraction".to_owned(),
-                control.saturation_fraction,
-            ),
-            (
-                "hold.zero_crossings".to_owned(),
-                f64::from(hold.zero_crossings),
-            ),
-            (
-                "hold.rebound_distance_m".to_owned(),
-                hold.rebound_distance_m.abs(),
-            ),
-            (
-                "jerk.peak_acceleration_mps2".to_owned(),
-                jerk.peak_acceleration_mps2,
-            ),
-            ("jerk.peak_jerk_mps3".to_owned(), jerk.peak_jerk_mps3),
-            ("jerk.jerk_p95_mps3".to_owned(), jerk.jerk_p95_mps3),
-            ("jerk.jerk_rms_mps3".to_owned(), jerk.jerk_rms_mps3),
-            (
-                "release.brake_distance_m".to_owned(),
-                required(release.brake_distance_m, "release.brake_distance_m")?.abs(),
-            ),
-            (
-                "release.opposite_velocity_peak_mps".to_owned(),
-                release.opposite_velocity_peak_mps.abs(),
-            ),
-            (
-                "release.return_toward_release_m".to_owned(),
-                release.return_toward_release_m.abs(),
-            ),
-            (
-                "release.release_to_stop_s".to_owned(),
-                required(release.release_to_stop_s, "release.release_to_stop_s")?,
-            ),
-            (
-                "response.input_to_command_delay_s".to_owned(),
-                required(
-                    response.input_to_command_delay_s,
-                    "response.input_to_command_delay_s",
-                )?,
-            ),
-            (
-                "response.input_to_response_delay_s".to_owned(),
-                required(
-                    response.input_to_response_delay_s,
-                    "response.input_to_response_delay_s",
-                )?,
-            ),
-            (
-                "response.overshoot_fraction".to_owned(),
-                response.overshoot_fraction.abs(),
-            ),
-            (
-                "response.rise_time_s".to_owned(),
-                required(response.rise_time_s, "response.rise_time_s")?,
-            ),
-            (
-                "response.settling_time_s".to_owned(),
-                required(response.settling_time_s, "response.settling_time_s")?,
-            ),
-        ]);
+        let objectives = objectives_from(&control, &jerk, &hold, &release, &response)?;
 
         // The scalar the search minimises is the mean absolute tracking error
         // over the trial. It is chosen rather than a weighted sum of the
@@ -331,6 +264,86 @@ impl MetricEvaluator for FlightQualityEvaluator {
 /// holding when the step arrived" from "the demand it stepped to". The sample
 /// at the transition already carries the new demand — the phase and the value
 /// change together — so including it would make every step zero amplitude.
+/// One named objective per measured limit the bar states.
+fn objectives_from(
+    control: &pilotage_flight_quality::ControlMetrics,
+    jerk: &pilotage_flight_quality::JerkMetrics,
+    hold: &pilotage_flight_quality::HoldMetrics,
+    release: &pilotage_flight_quality::ReleaseMetrics,
+    response: &pilotage_flight_quality::ResponseMetrics,
+) -> Result<BTreeMap<String, f64>, EvaluatorError> {
+    let objectives = BTreeMap::from([
+        ("control.effort_rms".to_owned(), control.effort_rms),
+        (
+            "control.longest_saturation_s".to_owned(),
+            control.longest_saturation_s,
+        ),
+        (
+            "control.saturation_fraction".to_owned(),
+            control.saturation_fraction,
+        ),
+        (
+            "hold.zero_crossings".to_owned(),
+            f64::from(hold.zero_crossings),
+        ),
+        (
+            "hold.rebound_distance_m".to_owned(),
+            hold.rebound_distance_m.abs(),
+        ),
+        (
+            "jerk.peak_acceleration_mps2".to_owned(),
+            jerk.peak_acceleration_mps2,
+        ),
+        ("jerk.peak_jerk_mps3".to_owned(), jerk.peak_jerk_mps3),
+        ("jerk.jerk_p95_mps3".to_owned(), jerk.jerk_p95_mps3),
+        ("jerk.jerk_rms_mps3".to_owned(), jerk.jerk_rms_mps3),
+        (
+            "release.brake_distance_m".to_owned(),
+            required(release.brake_distance_m, "release.brake_distance_m")?.abs(),
+        ),
+        (
+            "release.opposite_velocity_peak_mps".to_owned(),
+            release.opposite_velocity_peak_mps.abs(),
+        ),
+        (
+            "release.return_toward_release_m".to_owned(),
+            release.return_toward_release_m.abs(),
+        ),
+        (
+            "release.release_to_stop_s".to_owned(),
+            required(release.release_to_stop_s, "release.release_to_stop_s")?,
+        ),
+        (
+            "response.input_to_command_delay_s".to_owned(),
+            required(
+                response.input_to_command_delay_s,
+                "response.input_to_command_delay_s",
+            )?,
+        ),
+        (
+            "response.input_to_response_delay_s".to_owned(),
+            required(
+                response.input_to_response_delay_s,
+                "response.input_to_response_delay_s",
+            )?,
+        ),
+        (
+            "response.overshoot_fraction".to_owned(),
+            response.overshoot_fraction.abs(),
+        ),
+        (
+            "response.rise_time_s".to_owned(),
+            required(response.rise_time_s, "response.rise_time_s")?,
+        ),
+        (
+            "response.settling_time_s".to_owned(),
+            required(response.settling_time_s, "response.settling_time_s")?,
+        ),
+    ]);
+
+    Ok(objectives)
+}
+
 fn value_at(series: &[TimedValue], time_s: f64, before: bool) -> f64 {
     if before {
         series

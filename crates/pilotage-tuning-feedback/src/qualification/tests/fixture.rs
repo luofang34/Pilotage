@@ -14,6 +14,7 @@ use crate::digest;
 
 use super::super::{plan, statistics};
 
+mod attempts;
 mod authority;
 mod sealing;
 mod terminal;
