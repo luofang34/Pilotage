@@ -2340,6 +2340,7 @@ def main() -> int:
     registry_names: set[str] = set()
     for manifest, allowed_adapter_dependencies in (
         (root / "crates/pilotage-trial/Cargo.toml", frozenset()),
+        (root / "crates/pilotage-tuning-feedback/Cargo.toml", frozenset()),
         (root / "tools/flight-tune/Cargo.toml", frozenset()),
         (
             root / "tools/flight-tune-aviate/Cargo.toml",

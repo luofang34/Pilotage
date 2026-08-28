@@ -3,6 +3,7 @@ mod catalog;
 mod durable_publication;
 mod evidence;
 mod external_action;
+mod promotion_closure_fault;
 mod prospective_authorization;
 #[allow(dead_code)]
 #[path = "../../../tests/tuner/test_rig.rs"]

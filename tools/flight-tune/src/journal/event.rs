@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::digest_bytes;
 use crate::{
-    CandidateEvaluation, CandidateTransitionReceipt, CandidateTransitionReference, Digest,
-    RunBindingReceipt, RunExecutionContext, RunTerminalClass, RunTerminalIntent, RunTerminalPlan,
-    RunTerminalReceipt, RunTerminalReport, ScenarioRef, ScenarioSet, SearchStage, TuneError,
+    AuthenticatedEvaluationProof, CandidateEvaluation, CandidateTransitionReceipt,
+    CandidateTransitionReference, Digest, PromotionClosure, RunBindingReceipt, RunExecutionContext,
+    RunTerminalClass, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt, RunTerminalReport,
+    ScenarioRef, ScenarioSet, SearchStage, TuneError,
 };
 
 #[derive(Serialize)]
@@ -99,26 +100,14 @@ impl OperationStatus {
 #[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PromotionDecision {
     /// The frozen candidate became the release candidate.
-    Promoted {
-        /// The paired mean challenger-minus-baseline loss.
-        mean_loss_delta: f64,
-        /// The upper 95 percent confidence limit for paired loss.
-        loss_delta_upper_95: f64,
-        /// The paired mean challenger-minus-baseline effort.
-        mean_effort_delta: f64,
-    },
+    Promoted {},
     /// A hidden run failed a hard gate.
     RejectedHardGate {
         /// The first failed hard gate identity.
         gate_id: String,
     },
     /// The paired result did not meet promotion limits.
-    RejectedNoImprovement {
-        /// The upper 95 percent confidence limit for paired loss.
-        loss_delta_upper_95: f64,
-        /// The paired mean challenger-minus-baseline effort.
-        mean_effort_delta: f64,
-    },
+    RejectedNoImprovement {},
     /// Recovery or an execution failure made the decision incomplete.
     Indeterminate {
         /// The stable reason.
@@ -271,6 +260,8 @@ pub enum JournalEvent {
         trial_id: u64,
         /// The complete partition result.
         evaluation: CandidateEvaluation,
+        /// The authenticated hidden evaluation proof, when this role requires one.
+        proof: Option<Box<AuthenticatedEvaluationProof>>,
         /// The training incumbent decision, if this is a training role.
         selected_as_training_incumbent: Option<bool>,
     },
@@ -280,6 +271,8 @@ pub enum JournalEvent {
         trial_id: u64,
         /// The stable quarantine reason.
         reason: String,
+        /// The authenticated hidden evaluation proof, when this role requires one.
+        proof: Option<Box<AuthenticatedEvaluationProof>>,
     },
     /// The runner saved one independent cleanup result.
     CleanupRecorded {
@@ -297,8 +290,8 @@ pub enum JournalEvent {
     },
     /// The one hidden promotion decision closed.
     PromotionClosed {
-        /// The complete promotion result.
-        decision: PromotionDecision,
+        /// The replay-computed promotion closure.
+        closure: PromotionClosure,
     },
     /// Final qualification completed and sealed the journal.
     Sealed {
@@ -306,6 +299,12 @@ pub enum JournalEvent {
         candidate: Digest,
         /// The final release result.
         outcome: FinalQualificationOutcome,
+        /// The exact promotion closure identity.
+        promotion_closure_digest: Digest,
+        /// The final evaluation identity.
+        final_evaluation_digest: Digest,
+        /// The final authenticated proof identity.
+        final_proof_digest: Digest,
     },
 }
 
@@ -335,6 +334,16 @@ mod tests {
             "trial_id": 7,
             "stop": { "status": "succeeded" },
             "cleanup": { "status": "succeeded" }
+        });
+
+        assert!(serde_json::from_value::<JournalEvent>(document).is_err());
+    }
+
+    #[test]
+    fn legacy_caller_supplied_promotion_decision_is_rejected() {
+        let document = json!({
+            "event": "promotion_closed",
+            "decision": { "decision": "promoted" }
         });
 
         assert!(serde_json::from_value::<JournalEvent>(document).is_err());

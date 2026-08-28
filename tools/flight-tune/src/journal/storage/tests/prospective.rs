@@ -72,8 +72,8 @@ fn a_changed_prospective_candidate_cannot_publish_a_head() {
 }
 
 #[test]
-fn schema_three_active_campaign_is_rejected_without_a_catalog_change() {
-    let directory = TestDirectory::new("schema-three-active-campaign");
+fn schema_four_active_campaign_is_rejected_without_a_catalog_change() {
+    let directory = TestDirectory::new("schema-four-active-campaign");
     let (storage, writer) = super::super::open(directory.path()).expect("open journal storage");
     let stage = test_stage();
     let initial = test_candidate();
@@ -81,7 +81,7 @@ fn schema_three_active_campaign_is_rejected_without_a_catalog_change() {
     let candidate_digest =
         store_candidate(&storage, &writer, &initial).expect("store initial candidate");
     let mut entry = started_entry(stage_digest, candidate_digest, &initial);
-    entry.schema_version = 3;
+    entry.schema_version = 4;
     let digest = document_digest("journal entry", &entry).expect("digest old entry");
     append_entry(
         &storage,
@@ -97,7 +97,7 @@ fn schema_three_active_campaign_is_rejected_without_a_catalog_change() {
 
     let error = Journal::open_or_create(directory.path(), &stage, 91, test_runtimes(), &initial)
         .err()
-        .expect("reject schema three campaign");
+        .expect("reject schema four campaign");
 
     assert!(matches!(error, TuneError::InvalidJournal { .. }));
     assert_eq!(catalog(directory.path()), before);
@@ -338,9 +338,12 @@ fn test_stage() -> SearchStage {
         final_qualification_scenarios: vec![scenario("qualification", 3)],
         repetitions: 2,
         promotion: PromotionPolicy {
+            schema_version: crate::PROMOTION_POLICY_SCHEMA_VERSION,
+            seed_policy: crate::PromotionSeedPolicy::PairedScenarioDigestV1,
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.2,
             maximum_control_effort_increase: 1.0,
+            objective_regression_upper_95: BTreeMap::from([("tracking".to_owned(), 1.0)]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 0.5,
