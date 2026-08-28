@@ -66,6 +66,11 @@ pub enum Command {
     Reset(String),
     /// Produce the Alia X-Plane runtime handshake into a directory.
     Handshake(std::path::PathBuf),
+    /// Classify which CI matrix halves a diff against a base can reach.
+    Affected {
+        /// The base git reference the diff is taken against.
+        base: String,
+    },
     /// Print usage.
     Help,
 }
@@ -85,9 +90,14 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "reset" => Ok(Command::Reset(parse_reset(rest)?)),
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
+        "affected" => Ok(Command::Affected {
+            base: parse_affected(rest)?,
+        }),
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
-            message: format!("unknown command {other:?} (expected sim, reset, handshake, or help)"),
+            message: format!(
+                "unknown command {other:?} (expected sim, reset, handshake, affected, or help)"
+            ),
         }),
     }
 }
@@ -113,6 +123,32 @@ fn parse_handshake(args: &[String]) -> Result<std::path::PathBuf, XtaskError> {
         }
     }
     Ok(out_dir)
+}
+
+fn parse_affected(args: &[String]) -> Result<String, XtaskError> {
+    let mut base: Option<String> = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--base" => {
+                base = Some(
+                    iter.next()
+                        .ok_or_else(|| XtaskError::Usage {
+                            message: "--base requires a value".to_owned(),
+                        })?
+                        .clone(),
+                );
+            }
+            other => {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown affected argument {other:?} (expected --base <ref>)"),
+                });
+            }
+        }
+    }
+    base.ok_or_else(|| XtaskError::Usage {
+        message: "affected requires --base <ref>".to_owned(),
+    })
 }
 
 fn parse_reset(args: &[String]) -> Result<String, XtaskError> {
@@ -234,6 +270,11 @@ commands:
       --out-dir <dir>      directory to write into (default:
                            target/xtask-sim)
 
+  affected --base <ref>
+      Classify which CI matrix halves the diff base...HEAD can reach,
+      printing one key=value line per answer with reason lines above.
+      Fails open: an unclassifiable change answers everything=true.
+
   help
       Print this help text.";
 
@@ -265,9 +306,16 @@ mod tests {
         let sim_heading = "  sim [options]\n";
         let reset_heading = "  reset [options]\n";
         let handshake_heading = "  handshake [options]\n";
+        let affected_heading = "  affected --base <ref>\n";
         let help_heading = "  help\n";
 
-        for heading in [sim_heading, reset_heading, handshake_heading, help_heading] {
+        for heading in [
+            sim_heading,
+            reset_heading,
+            handshake_heading,
+            affected_heading,
+            help_heading,
+        ] {
             assert_eq!(USAGE.matches(heading).count(), 1, "heading {heading:?}");
         }
 
@@ -275,8 +323,9 @@ mod tests {
         let reset_start = USAGE.find(reset_heading).expect("reset heading");
         let handshake_start = USAGE.find(handshake_heading).expect("handshake heading");
         let help_start = USAGE.find(help_heading).expect("help heading");
+        let affected_start = USAGE.find(affected_heading).expect("affected heading");
         assert!(sim_start < reset_start && reset_start < handshake_start);
-        assert!(handshake_start < help_start);
+        assert!(handshake_start < affected_start && affected_start < help_start);
 
         let sim_help = &USAGE[sim_start..reset_start];
         assert!(sim_help.contains("aviate-gz (alias aviate, default)"));

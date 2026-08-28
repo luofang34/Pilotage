@@ -18,39 +18,73 @@ env:
 
 jobs:
   # Decides which halves of the matrix a change can actually affect.
-  # The skip list is deliberately narrow: only paths with no route into
-  # the Apple builds — Rust tools, the web client, and documentation —
-  # may skip them, and anything unrecognized runs everything.
+  # `cargo xtask affected` reads the declarations in Cargo metadata and
+  # the build graph itself; any failure, and any change to the
+  # classifier's own inputs, answers "run everything". The shell here
+  # only invokes and forwards — it decides nothing.
   changes:
     runs-on: ubuntu-latest
     outputs:
       apple: ${{ steps.decide.outputs.apple }}
+      web: ${{ steps.decide.outputs.web }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      # Building xtask resolves the whole workspace graph, private git
+      # dependencies included, before compiling one package — so this
+      # job carries the same read-only deploy keys the quality gates do.
+      - name: Authorize the private git dependency (Navigate)
+        env:
+          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
+          chmod 600 ~/.ssh/navigate_ci
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+
+      - name: Authorize the private situation domain dependencies
+        env:
+          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
+          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
+          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
+          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
+          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
+          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: xtask-affected
+
       - name: Decide the affected matrix halves
         id: decide
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "apple=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           base="${{ github.event.pull_request.base.sha }}"
-          apple=false
-          while IFS= read -r file; do
-            case "$file" in
-              # The Apple client's tests read golden fixtures from this
-              # tree, so a fixture change must run the job that
-              # validates it.
-              tools/hid-probe/fixtures/*) apple=true ;;
-              tools/*|clients/web/*|docs/*|*.md) ;;
-              *) apple=true ;;
-            esac
-          done < <(git diff --name-only "$base"...HEAD)
-          echo "apple=$apple" >> "$GITHUB_OUTPUT"
+          if answers=$(cargo run -p xtask --quiet -- affected --base "$base"); then
+            printf '%s\n' "$answers"
+            printf '%s\n' "$answers" | grep -v '^#' >> "$GITHUB_OUTPUT"
+          else
+            echo "the classifier failed; everything runs"
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          fi
 
   quality-gates:
     runs-on: ubuntu-latest
