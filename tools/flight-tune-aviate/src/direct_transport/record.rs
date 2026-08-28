@@ -3,8 +3,9 @@
 //! The record carries the whole causal chain of one command: what the
 //! scenario asked for, what the transport calculated, what the sender put
 //! on the link, and what the flight controller reported back, with the
-//! time of each. #469 binds this record to raw samples, the terminal
-//! receipt, the trace digest, and the campaign journal.
+//! time of each. The production scenario runtime binds this record to raw
+//! samples, the terminal receipt, the trace digest, and the campaign
+//! journal; the transport itself owns none of that.
 
 use flight_tune::{ControlChannel, ControlFamily, Digest};
 use serde::{Deserialize, Serialize};

@@ -4,8 +4,9 @@
 //! direct mode through the observation window. Revoke removes the
 //! authority itself: after it, the transport prepares nothing, enacts
 //! nothing, and freezes nothing, and a command prepared before the revoke
-//! can no longer be enacted. #469 calls it from terminal and recovery
-//! paths, where the only safe assumption is that it may already have run.
+//! can no longer be enacted. The production runtime calls it from terminal
+//! and recovery paths, where the only safe assumption is that it may
+//! already have run.
 
 use flight_tune::Digest;
 
