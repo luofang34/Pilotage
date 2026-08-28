@@ -24,11 +24,10 @@ mod tests;
 /// Returns a typed [`XtaskError`] naming every failing guard, or the
 /// discovery failure when the scripts directory cannot be read.
 pub fn run_guards(repo_root: &Path) -> Result<(), XtaskError> {
-    let pairs = discover_pairs(&repo_root.join("scripts"))?;
+    let scripts = repo_root.join("scripts");
+    let pairs = discover_pairs(&scripts)?;
     if pairs.is_empty() {
-        return Err(XtaskError::Usage {
-            message: "no guard pairs were discovered under scripts/".to_owned(),
-        });
+        return Err(XtaskError::NoGuardPairs { scripts });
     }
     let mut failed = Vec::new();
     for pair in &pairs {
@@ -45,9 +44,7 @@ pub fn run_guards(repo_root: &Path) -> Result<(), XtaskError> {
         print_line(&format!("guards: {} pairs ok", pairs.len()));
         Ok(())
     } else {
-        Err(XtaskError::Usage {
-            message: format!("guards failed: {}", failed.join(", ")),
-        })
+        Err(XtaskError::GuardsFailed { names: failed })
     }
 }
 
@@ -105,10 +102,20 @@ fn run_pair(repo_root: &Path, pair: &GuardPair) -> Result<(), &'static str> {
 }
 
 fn bash_passes(repo_root: &Path, script: &Path) -> bool {
-    Command::new("bash")
+    match Command::new("bash")
         .arg(script)
         .current_dir(repo_root)
         .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    {
+        Ok(status) => status.success(),
+        Err(source) => {
+            // A script that never started must not read as a script
+            // that refused: name the spawn failure before failing.
+            print_line(&format!(
+                "guard script {} did not start: {source}",
+                script.display()
+            ));
+            false
+        }
+    }
 }
