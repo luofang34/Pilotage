@@ -121,7 +121,16 @@ fn domain_claims_path(domain: &Domain, file: &str) -> bool {
         .paths
         .iter()
         .chain(domain.extra_paths.iter())
-        .any(|prefix| file.starts_with(prefix.as_str()) || file == prefix.trim_end_matches('/'))
+        .any(|entry| {
+            // A trailing slash declares a directory; anything else is
+            // one exact file, so a stray sibling suffix cannot claim a
+            // domain by prefix.
+            if entry.ends_with('/') {
+                file.starts_with(entry.as_str())
+            } else {
+                file == entry
+            }
+        })
 }
 
 fn changed_files(base: &str) -> Result<Vec<String>, XtaskError> {

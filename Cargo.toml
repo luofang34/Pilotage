@@ -183,3 +183,8 @@ paths = [
 depends-on-packages = ["pilotage-instrument-apple-bridge"]
 # The Apple client's tests read golden fixtures from this tree.
 extra-paths = ["tools/hid-probe/fixtures/"]
+
+[workspace.metadata.ci.domains.web]
+# The web client is not a cargo member; declaring it places its files
+# so a web-only change answers web and nothing else.
+paths = ["clients/web/"]

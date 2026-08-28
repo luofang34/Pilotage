@@ -42,9 +42,9 @@ fn a_domain_path_answers_that_domain() {
     assert_eq!(outcome.domains.get("apple"), Some(&true));
 }
 
-/// The gap independent review found in the path-only classifier: golden
-/// fixtures consumed by another domain's tests. Declared extra paths
-/// must answer the domain that reads them.
+/// Golden fixtures live in one domain's tree and are consumed by
+/// another domain's tests; a declared extra path answers the domain
+/// that reads it.
 #[test]
 fn a_declared_fixture_answers_its_consumer() {
     let outcome = classify(
@@ -125,4 +125,16 @@ fn real_workspace_pins_the_apple_closure() {
     let tuner = classify(&one("tools/flight-tune/src/engine.rs"), &model);
     assert_eq!(tuner.domains.get("apple"), Some(&false));
     assert!(!tuner.everything);
+
+    let web = classify(&one("clients/web/bootstrap.js"), &model);
+    assert_eq!(web.domains.get("web"), Some(&true));
+    assert_eq!(web.domains.get("apple"), Some(&false));
+    assert!(!web.everything);
+
+    // An exact-file declaration claims that file alone; a stray
+    // sibling suffix is unplaced and fails open instead.
+    let exact = classify(&one("scripts/check-apple-client.sh"), &model);
+    assert_eq!(exact.domains.get("apple"), Some(&true));
+    let stray = classify(&one("scripts/check-apple-client.sh.orig"), &model);
+    assert!(stray.everything);
 }
