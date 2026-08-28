@@ -7,7 +7,10 @@ use super::super::{
     EffectiveSetpointReport, ReadbackSelection,
 };
 use super::sender::RecordingSender;
-use super::{SAMPLE_PERIOD_NS, authorize, baseline_request, readback_bound, step_request};
+use super::{
+    SAMPLE_PERIOD_NS, authorize, authorize_without_skew, baseline_request, readback_bound,
+    step_request,
+};
 
 const MICROSECOND_NS: u64 = 1_000;
 
@@ -129,6 +132,60 @@ fn a_valid_delayed_source_with_no_exact_source_sends_nothing_and_records_nothing
     assert!(
         delayed.transmitted().is_empty(),
         "no exact source means no direct demand"
+    );
+}
+
+#[test]
+fn a_raw_source_that_has_not_reached_the_command_time_waits() {
+    let mut sender = RecordingSender::new();
+    let mut transport = authorize(&sender);
+    transport
+        .freeze_baseline_blocking(&mut sender, &baseline_request())
+        .expect("frozen baseline");
+    let prepared = transport
+        .prepare_step(&step_request(ControlChannel::Roll, 1.0))
+        .expect("prepared step");
+    // The only sample the source carries is later than the command time.
+    let mut ahead = RecordingSender::new()
+        .reporting(report_at(4))
+        .holding_sample();
+
+    let outcome = transport
+        .enact_blocking(&mut ahead, &prepared)
+        .expect("waiting is not an error");
+
+    assert_eq!(outcome, DirectEnactment::Pending);
+    assert!(
+        ahead.transmitted().is_empty(),
+        "a future sample waits; it does not command the vehicle"
+    );
+}
+
+#[test]
+fn a_transmitted_command_without_an_exact_readback_quarantines_the_run() {
+    let mut sender = RecordingSender::new();
+    let mut transport = authorize_without_skew(&sender);
+    transport
+        .freeze_baseline_blocking(&mut sender, &baseline_request())
+        .expect("frozen baseline");
+    let prepared = transport
+        .prepare_step(&step_request(ControlChannel::Roll, 1.0))
+        .expect("prepared step");
+    // The source is exact for the pre-send check and then stops advancing,
+    // so the command leaves the process and never gets its readback.
+    sender.hold_sample_from_now();
+    sender.clear_transmitted();
+
+    let result = transport.enact_blocking(&mut sender, &prepared);
+
+    assert!(matches!(
+        result,
+        Err(DirectTransportError::NoEffectiveReadback)
+    ));
+    assert_eq!(
+        sender.transmitted().len(),
+        1,
+        "the command was already on the link when the readback failed"
     );
 }
 

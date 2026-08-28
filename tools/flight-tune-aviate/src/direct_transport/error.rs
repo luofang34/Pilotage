@@ -103,6 +103,12 @@ pub enum DirectTransportError {
         /// The declared numeric tolerance.
         tolerance: f64,
     },
+    /// A transmitted command never got an exact effective readback.
+    ///
+    /// The command is already on the link, so the run cannot continue
+    /// unscored: it quarantines instead.
+    #[error("a transmitted direct command has no exact effective readback")]
+    NoEffectiveReadback,
     /// One supplied value is not a usable number.
     #[error("the direct transport received an unusable {field} value")]
     InvalidValue {

@@ -70,11 +70,34 @@ fn authorize(sender: &RecordingSender) -> DirectTransport {
     .expect("authorized transport")
 }
 
+/// A transport that accepts only a sample at exactly the query time.
+fn authorize_without_skew(sender: &RecordingSender) -> DirectTransport {
+    let bound = CausalReadbackBound::new(SAMPLE_PERIOD_NS, 0).expect("readback bound");
+    authorize_bound(
+        sender,
+        ExecutionTarget::Simulator,
+        &session_receipt(),
+        &vehicle_receipt(),
+        bound,
+    )
+    .expect("authorized transport")
+}
+
 fn authorize_with(
     sender: &RecordingSender,
     target: ExecutionTarget,
     simulator: &SimulatorSessionReceipt,
     vehicle: &VehicleBindingReceipt,
+) -> Result<DirectTransport, DirectTransportError> {
+    authorize_bound(sender, target, simulator, vehicle, readback_bound())
+}
+
+fn authorize_bound(
+    sender: &RecordingSender,
+    target: ExecutionTarget,
+    simulator: &SimulatorSessionReceipt,
+    vehicle: &VehicleBindingReceipt,
+    readback: CausalReadbackBound,
 ) -> Result<DirectTransport, DirectTransportError> {
     let capability = capability();
     let transport = transport_identity();
@@ -85,7 +108,7 @@ fn authorize_with(
             vehicle,
             target,
             transport: &transport,
-            readback: readback_bound(),
+            readback,
             tolerance: TOLERANCE,
         },
         sender,

@@ -258,9 +258,7 @@ impl DirectTransport {
                 ReadbackOutcome::Absent => break,
             }
         }
-        Err(DirectTransportError::EffectiveTargetMismatch {
-            tolerance: self.tolerance,
-        })
+        Err(DirectTransportError::NoEffectiveReadback)
     }
 
     fn source_for<S: DirectCommandSender + ?Sized>(

@@ -91,6 +91,11 @@ impl RecordingSender {
         self.transmitted.clear();
     }
 
+    /// Stops the reported sample from advancing past the one it holds now.
+    pub(super) const fn hold_sample_from_now(&mut self) {
+        self.hold_sample = true;
+    }
+
     /// Runs the clock forward without a command.
     pub(super) fn advance(&mut self, samples: u64) {
         self.now_ns = self
