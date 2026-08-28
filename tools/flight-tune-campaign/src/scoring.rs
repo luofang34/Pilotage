@@ -185,18 +185,7 @@ impl MetricEvaluator for FlightQualityEvaluator {
             EvaluatorError::new(format!("a measurement refused this run: {error}"))
         };
 
-        let step_at = trace
-            .entered(PHASE_STEP)
-            .ok_or_else(|| EvaluatorError::new("the run never left idle"))?;
-        let hold_at = trace
-            .entered(PHASE_HOLD)
-            .ok_or_else(|| EvaluatorError::new("the run never reached its hold"))?;
-        let release_at = trace
-            .entered(PHASE_RELEASE)
-            .ok_or_else(|| EvaluatorError::new("the run never released"))?;
-        let settled_at = trace
-            .entered(PHASE_SETTLED)
-            .ok_or_else(|| EvaluatorError::new("the run never settled after its release"))?;
+        let (step_at, hold_at, release_at, settled_at) = phase_entries(&trace)?;
 
         let control = measure_control(&trace.control).map_err(fail)?;
         let jerk = measure_jerk(&trace.acceleration).map_err(fail)?;
@@ -224,7 +213,18 @@ impl MetricEvaluator for FlightQualityEvaluator {
         let hold_position = value_at(&trace.position, settled_at, false);
         let hold = measure_hold(&trace.position, settled_at, hold_position).map_err(fail)?;
 
-        let objectives = objectives_from(&control, &jerk, &hold, &release, &response)?;
+        // A candidate that never stops or never settles is MEASURED as
+        // one that never did — each absent metric scores as the worst
+        // its own window allows, so a bad law fails its ceilings instead
+        // of aborting the campaign that is judging it.
+        let worst = worst_case(
+            &trace.position,
+            step_at,
+            release_at,
+            settled_at,
+            hold_position,
+        );
+        let objectives = objectives_from(&control, &jerk, &hold, &release, &response, worst);
 
         // The scalar the search minimises is the mean absolute tracking error
         // over the trial. It is chosen rather than a weighted sum of the
@@ -271,8 +271,9 @@ fn objectives_from(
     hold: &pilotage_flight_quality::HoldMetrics,
     release: &pilotage_flight_quality::ReleaseMetrics,
     response: &pilotage_flight_quality::ResponseMetrics,
-) -> Result<BTreeMap<String, f64>, EvaluatorError> {
-    let objectives = BTreeMap::from([
+    worst: WorstCase,
+) -> BTreeMap<String, f64> {
+    BTreeMap::from([
         ("control.effort_rms".to_owned(), control.effort_rms),
         (
             "control.longest_saturation_s".to_owned(),
@@ -299,7 +300,7 @@ fn objectives_from(
         ("jerk.jerk_rms_mps3".to_owned(), jerk.jerk_rms_mps3),
         (
             "release.brake_distance_m".to_owned(),
-            required(release.brake_distance_m, "release.brake_distance_m")?.abs(),
+            release.brake_distance_m.map_or(worst.brake_m, f64::abs),
         ),
         (
             "release.opposite_velocity_peak_mps".to_owned(),
@@ -311,21 +312,15 @@ fn objectives_from(
         ),
         (
             "release.release_to_stop_s".to_owned(),
-            required(release.release_to_stop_s, "release.release_to_stop_s")?,
+            release.release_to_stop_s.unwrap_or(worst.release_s),
         ),
         (
             "response.input_to_command_delay_s".to_owned(),
-            required(
-                response.input_to_command_delay_s,
-                "response.input_to_command_delay_s",
-            )?,
+            response.input_to_command_delay_s.unwrap_or(worst.step_s),
         ),
         (
             "response.input_to_response_delay_s".to_owned(),
-            required(
-                response.input_to_response_delay_s,
-                "response.input_to_response_delay_s",
-            )?,
+            response.input_to_response_delay_s.unwrap_or(worst.step_s),
         ),
         (
             "response.overshoot_fraction".to_owned(),
@@ -333,15 +328,48 @@ fn objectives_from(
         ),
         (
             "response.rise_time_s".to_owned(),
-            required(response.rise_time_s, "response.rise_time_s")?,
+            response.rise_time_s.unwrap_or(worst.step_s),
         ),
         (
             "response.settling_time_s".to_owned(),
-            required(response.settling_time_s, "response.settling_time_s")?,
+            response.settling_time_s.unwrap_or(worst.step_s),
         ),
-    ]);
+    ])
+}
 
-    Ok(objectives)
+/// The four phase boundaries the trial promises. Their absence is a
+/// harness fault — the trial script drives the phases, not the
+/// candidate — so it refuses rather than scores.
+fn phase_entries(trace: &Trace) -> Result<(f64, f64, f64, f64), EvaluatorError> {
+    let entered = |phase: f64, missing: &'static str| {
+        trace
+            .entered(phase)
+            .ok_or_else(|| EvaluatorError::new(missing))
+    };
+    Ok((
+        entered(PHASE_STEP, "the run never left idle")?,
+        entered(PHASE_HOLD, "the run never reached its hold")?,
+        entered(PHASE_RELEASE, "the run never released")?,
+        entered(PHASE_SETTLED, "the run never settled after its release")?,
+    ))
+}
+
+fn worst_case(
+    position: &[TimedValue],
+    step_at: f64,
+    release_at: f64,
+    settled_at: f64,
+    hold_position: f64,
+) -> WorstCase {
+    let brake_m = window(position, release_at, settled_at)
+        .iter()
+        .map(|point| (point.value - hold_position).abs())
+        .fold(0.0_f64, f64::max);
+    WorstCase {
+        release_s: settled_at - release_at,
+        step_s: release_at - step_at,
+        brake_m,
+    }
 }
 
 fn value_at(series: &[TimedValue], time_s: f64, before: bool) -> f64 {
@@ -373,11 +401,17 @@ fn window(series: &[TimedValue], from_s: f64, to_s: f64) -> Vec<TimedValue> {
 ///
 /// These measurements are absent when the run never reached the threshold they
 /// are defined by — a response that never rose to ninety percent has no rise
-/// time. Final qualification requires every named objective in every run, so
-/// an absent one is reported here, where it names what was missing, rather
-/// than left out to fail later on the name alone.
-fn required(value: Option<f64>, name: &'static str) -> Result<f64, EvaluatorError> {
-    value.ok_or_else(|| EvaluatorError::new(format!("the run produced no {name}")))
+/// The value each absent metric scores as: the worst its own window
+/// allows. A run that never stopped is scored as stopping at the
+/// window's end; one that never rose as rising at the step window's
+/// end; a brake distance with no stop as the farthest the vehicle got
+/// from its hold. Ceilings then judge the law; absence never aborts
+/// the campaign.
+#[derive(Clone, Copy)]
+struct WorstCase {
+    release_s: f64,
+    step_s: f64,
+    brake_m: f64,
 }
 
 #[cfg(test)]

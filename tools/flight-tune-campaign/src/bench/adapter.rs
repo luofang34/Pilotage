@@ -33,7 +33,7 @@ impl SimulatorVehicleAdapter for BenchVehicleAdapter {
 
     fn ensure_settled_candidate_blocking(
         &mut self,
-        _capability: &SimulatorCapability,
+        capability: &SimulatorCapability,
         candidate: &Candidate,
         candidate_digest: Digest,
     ) -> Result<CandidateReceipt, AdapterError> {
@@ -45,7 +45,7 @@ impl SimulatorVehicleAdapter for BenchVehicleAdapter {
             settled.digest = Some(candidate_digest);
         }
         Ok(CandidateReceipt {
-            session_digest: _capability.session_digest(),
+            session_digest: capability.session_digest(),
             requested_digest: candidate_digest,
             applied_digest: candidate_digest,
             // The bench applies the law in process, so what it reads back is

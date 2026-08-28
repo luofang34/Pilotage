@@ -15,6 +15,12 @@
 //! Results from this backend describe the command law, not the aircraft. They
 //! are not a qualified calibration for any vehicle.
 //!
+//! The held-out scenarios are held out in NAME only here: the plant is
+//! deterministic and the trial script fixed, so promotion and final runs
+//! replay the training trial under different labels. The stage still
+//! enforces id and digest disjointness — what a simulator-backed backend
+//! makes physically distinct, this bench keeps structurally distinct.
+//!
 //! SIM / NOT FOR FLIGHT.
 
 use std::cell::RefCell;
@@ -134,12 +140,18 @@ fn response_from(candidate: &Candidate) -> Result<AxisResponse, AdapterError> {
     let apply_jerk = read(parameter::APPLY_JERK)?;
     let release_factor = read(parameter::RELEASE_FACTOR)?;
     let enter = read(parameter::NEUTRAL_ENTER)?;
+    let center_expo = read(parameter::CENTER_EXPO)? as f32;
     Ok(AxisResponse {
         curve: AxisCurve {
             deadzone: read(parameter::DEADZONE)? as f32,
-            center_expo: read(parameter::CENTER_EXPO)? as f32,
-            outer_expo: read(parameter::OUTER_EXPO)? as f32,
-            outer_start: 1.0,
+            center_expo,
+            // The profile validator refuses an outer expo above the
+            // center one; folding the search there keeps every sealed
+            // winner a law a real profile will load. The outer blend
+            // begins where the shipped law's does, so the trial's firm
+            // input exercises it.
+            outer_expo: (read(parameter::OUTER_EXPO)? as f32).min(center_expo),
+            outer_start: 0.7,
         },
         neutral: NeutralBand {
             active_enter: enter as f32,
@@ -209,11 +221,20 @@ impl BenchBackend {
     }
 
     /// The phase and raw stick input at one trial time.
+    ///
+    /// The step is a FIRM input, not a full-scale one. At full scale the
+    /// curve maps every legal deadzone and expo to the same output, so
+    /// half the searched parameters cannot move a single sample — and
+    /// tracking a deliberate full-scale hold reads as one long
+    /// saturation stretch no legal candidate can avoid, which turns the
+    /// saturation ceiling into a bar nothing can pass. At this level
+    /// the curve shapes the demand, the neutral latch sees a real
+    /// crossing, and saturation means what the ceiling says it means.
     fn input_at(time_s: f64) -> (f64, f32) {
         match time_s {
             t if t < STEP_AT_S => (0.0, 0.0),
-            t if t < HOLD_AT_S => (1.0, 1.0),
-            t if t < RELEASE_AT_S => (2.0, 1.0),
+            t if t < HOLD_AT_S => (1.0, 0.85),
+            t if t < RELEASE_AT_S => (2.0, 0.85),
             t if t < SETTLE_AT_S => (3.0, 0.0),
             _ => (4.0, 0.0),
         }
@@ -242,21 +263,21 @@ impl SimulatorBackend for BenchBackend {
 
     fn prepare_blocking(
         &mut self,
-        _capability: &SimulatorCapability,
-        _context: &RunExecutionContext,
+        capability: &SimulatorCapability,
+        context: &RunExecutionContext,
         scenario: &ScenarioRef,
     ) -> Result<RunPreparationReceipt, AdapterError> {
         let _ = scenario;
         Ok(RunPreparationReceipt {
-            session_digest: _capability.session_digest(),
-            run_intent_digest: _context.digest().map_err(to_adapter)?,
+            session_digest: capability.session_digest(),
+            run_intent_digest: context.digest().map_err(to_adapter)?,
         })
     }
 
     fn start_blocking(
         &mut self,
-        _capability: &SimulatorCapability,
-        _context: &RunExecutionContext,
+        capability: &SimulatorCapability,
+        context: &RunExecutionContext,
     ) -> Result<ScenarioStartReceipt, AdapterError> {
         let response = self
             .handle
@@ -277,10 +298,10 @@ impl SimulatorBackend for BenchBackend {
             previous_velocity: 0.0,
         });
         Ok(ScenarioStartReceipt {
-            session_digest: _capability.session_digest(),
-            applied_scenario_digest: _context.scenario_digest(),
-            seed: _context.seed(),
-            run_intent_digest: _context.digest().map_err(to_adapter)?,
+            session_digest: capability.session_digest(),
+            applied_scenario_digest: context.scenario_digest(),
+            seed: context.seed(),
+            run_intent_digest: context.digest().map_err(to_adapter)?,
         })
     }
 

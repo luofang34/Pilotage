@@ -124,9 +124,25 @@ impl GateEvaluator for BenchGates {
     }
 
     fn evaluate(&mut self, sample: &TelemetrySample) -> Result<Vec<GateOutcome>, EvaluatorError> {
-        let read = |name: &str| sample.values.get(name).copied().unwrap_or(0.0);
-        let speed = read(channel::VELOCITY_MPS).abs();
-        let acceleration = read(channel::ACCELERATION_MPS2).abs();
+        // A gate is a refusal: a sample that does not carry a channel,
+        // or carries garbage in it, must fail the gate rather than pass
+        // as a zero the vehicle never reported.
+        let read = |name: &str| {
+            sample
+                .values
+                .get(name)
+                .copied()
+                .filter(|value| value.is_finite())
+        };
+        let (Some(speed), Some(acceleration)) = (
+            read(channel::VELOCITY_MPS).map(f64::abs),
+            read(channel::ACCELERATION_MPS2).map(f64::abs),
+        ) else {
+            return Ok(vec![GateOutcome::fail(
+                "envelope.channels",
+                "a gated channel is missing or not finite".to_owned(),
+            )]);
+        };
         let mut outcomes = Vec::new();
         outcomes.push(if speed <= self.maximum_speed_mps {
             GateOutcome::pass("envelope.speed")
@@ -248,8 +264,8 @@ pub fn bench_scenario(id: &str, digest_byte: u8) -> ScenarioRef {
     ScenarioRef {
         id: id.to_owned(),
         digest: Digest::from_bytes([digest_byte; 32]),
-        // The trial is nine seconds at fifty hertz, and the ceiling is the
-        // sample count that covers it with room for the completion event.
+        // The ceiling covers the whole trial at the bench's sample rate
+        // with room for the completion event.
         max_samples: 700,
         sample_timeout_ms: 200,
     }

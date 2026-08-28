@@ -112,13 +112,12 @@ fn a_campaign_runs_end_to_end_for_the_alia250() {
         crate::alia250_promotion_policy(),
         crate::alia250_qualification_policy(),
     );
+    // Qualified, not merely "a verdict": a bar no legal candidate can
+    // reach would seal FailedObjective on every run, and this assertion
+    // is what distinguishes a working bar from a decorative one.
     assert!(
-        matches!(
-            outcome,
-            FinalQualificationOutcome::Qualified
-                | FinalQualificationOutcome::FailedObjective { .. }
-        ),
-        "the campaign reached a verdict rather than an error: {outcome:?}"
+        matches!(outcome, FinalQualificationOutcome::Qualified),
+        "the campaign qualifies its winner: {outcome:?}"
     );
     assert!(root.join("published").exists(), "evidence was published");
     std::fs::remove_dir_all(&root).ok();
@@ -136,12 +135,8 @@ fn a_campaign_runs_end_to_end_for_the_x500() {
         crate::x500_qualification_policy(),
     );
     assert!(
-        matches!(
-            outcome,
-            FinalQualificationOutcome::Qualified
-                | FinalQualificationOutcome::FailedObjective { .. }
-        ),
-        "the campaign reached a verdict rather than an error: {outcome:?}"
+        matches!(outcome, FinalQualificationOutcome::Qualified),
+        "the campaign qualifies its winner: {outcome:?}"
     );
     assert!(root.join("published").exists(), "evidence was published");
     std::fs::remove_dir_all(&root).ok();
@@ -202,5 +197,68 @@ fn the_warm_start_is_the_law_the_vehicle_would_otherwise_ship() {
             bounds.minimum,
             bounds.maximum
         );
+    }
+}
+
+/// Prints the shipped warm start's measured objectives on this bench's
+/// trial, for recalibrating the vehicle bars when the trial or the
+/// models change. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "calibration probe, prints with --nocapture"]
+#[allow(clippy::disallowed_macros)] // an ignored diagnostic exists to print
+fn probe_warm_start_objectives() {
+    use flight_tune::MetricEvaluator as _;
+    for (name, model) in [
+        ("alia250", BenchVehicle::alia250()),
+        ("x500", BenchVehicle::x500()),
+    ] {
+        let candidate = start_candidate();
+        let response = super::response_from(&candidate).expect("response");
+        let mut shaper = pilotage_control_feel::AxisDemandShaper::default();
+        let mut evaluator =
+            FlightQualityEvaluator::new(Digest::from_bytes([9; 32])).expect("evaluator");
+        evaluator.begin(&bench_scenario("probe", 9)).expect("begin");
+        let (mut velocity, mut position, mut previous) = (0.0_f64, 0.0_f64, 0.0_f64);
+        let mut step: u32 = 0;
+        loop {
+            let time_s = f64::from(step) * super::DT_S;
+            if time_s >= super::END_S {
+                break;
+            }
+            let (phase, stick) = super::BenchBackend::input_at(time_s);
+            let shaped = shaper.step(stick, 1.0, super::DT_S as f32, response).value;
+            let demanded = f64::from(shaped) * model.full_scale_mps;
+            velocity += (demanded - velocity) * super::DT_S / model.time_constant_s;
+            position += velocity * super::DT_S;
+            let acceleration = (velocity - previous) / super::DT_S;
+            previous = velocity;
+            let sample = flight_tune::TelemetrySample {
+                sequence: u64::from(step),
+                elapsed_ms: u64::from(step) * 20,
+                values: std::collections::BTreeMap::from([
+                    (channel::COMMAND.to_owned(), f64::from(shaped)),
+                    (
+                        channel::RESPONSE.to_owned(),
+                        velocity / model.full_scale_mps,
+                    ),
+                    (channel::POSITION_M.to_owned(), position),
+                    (channel::VELOCITY_MPS.to_owned(), velocity),
+                    (channel::ACCELERATION_MPS2.to_owned(), acceleration),
+                    (channel::EFFORT.to_owned(), f64::from(shaped.abs())),
+                    (
+                        channel::SATURATED.to_owned(),
+                        f64::from(u8::from(shaped.abs() >= 0.999)),
+                    ),
+                    (channel::PHASE.to_owned(), phase),
+                ]),
+            };
+            evaluator.observe(&sample).expect("observe");
+            step = step.wrapping_add(1);
+        }
+        let values = evaluator.finish().expect("finish");
+        eprintln!("=== {name} loss={} objectives:", values.loss);
+        for (key, value) in &values.objectives {
+            eprintln!("  {key} = {value:.4}");
+        }
     }
 }

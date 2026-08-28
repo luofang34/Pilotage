@@ -14,6 +14,11 @@ use pilotage_tuning_feedback::{FeedbackError, RequiredPolicy};
 /// A candidate can improve against a baseline that was itself poor, which is
 /// what the second column is for.
 ///
+/// The ceilings are CALIBRATED, not aspirational: each admits the shipped
+/// law's measured value on this bench's trial with margin for the search's
+/// neighborhood, and refuses serious degradation. The ignored bench probe
+/// prints the measured values when the trial or the models change.
+///
 /// Every name here is one [`pilotage_flight_quality::is_producible`] knows.
 /// Final qualification requires each named objective to be present in every
 /// run, so a bar naming a metric nothing measures fails the campaign on the
@@ -26,13 +31,13 @@ const ALIA250_OBJECTIVE_LIMITS: [(&str, f64, f64); 18] = [
     ("hold.zero_crossings", 0.5, 4.0),
     ("hold.rebound_distance_m", 0.03, 0.3),
     ("jerk.peak_acceleration_mps2", 0.6, 6.0),
-    ("jerk.peak_jerk_mps3", 2.5, 25.0),
+    ("jerk.peak_jerk_mps3", 3.5, 35.0),
     ("jerk.jerk_p95_mps3", 1.5, 15.0),
     ("jerk.jerk_rms_mps3", 1.0, 10.0),
     ("release.brake_distance_m", 0.25, 2.5),
     ("release.opposite_velocity_peak_mps", 0.05, 0.5),
     ("release.return_toward_release_m", 0.03, 0.3),
-    ("release.release_to_stop_s", 0.15, 1.5),
+    ("release.release_to_stop_s", 0.25, 2.5),
     ("response.input_to_command_delay_s", 0.01, 0.1),
     ("response.input_to_response_delay_s", 0.035, 0.35),
     ("response.overshoot_fraction", 0.03, 0.3),
@@ -57,14 +62,14 @@ const X500_OBJECTIVE_LIMITS: [(&str, f64, f64); 18] = [
     ("control.saturation_fraction", 0.005, 0.05),
     ("hold.zero_crossings", 0.4, 3.0),
     ("hold.rebound_distance_m", 0.02, 0.2),
-    ("jerk.peak_acceleration_mps2", 1.0, 10.0),
-    ("jerk.peak_jerk_mps3", 4.0, 40.0),
-    ("jerk.jerk_p95_mps3", 2.5, 25.0),
+    ("jerk.peak_acceleration_mps2", 1.6, 16.0),
+    ("jerk.peak_jerk_mps3", 12.0, 120.0),
+    ("jerk.jerk_p95_mps3", 5.0, 50.0),
     ("jerk.jerk_rms_mps3", 1.6, 16.0),
     ("release.brake_distance_m", 0.15, 1.5),
     ("release.opposite_velocity_peak_mps", 0.04, 0.4),
     ("release.return_toward_release_m", 0.02, 0.2),
-    ("release.release_to_stop_s", 0.09, 0.9),
+    ("release.release_to_stop_s", 0.12, 1.2),
     ("response.input_to_command_delay_s", 0.01, 0.1),
     ("response.input_to_response_delay_s", 0.025, 0.25),
     ("response.overshoot_fraction", 0.03, 0.3),
