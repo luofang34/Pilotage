@@ -7,11 +7,11 @@ use crate::model::{
     PromotionSeedPolicy, expected_promotion_pairs,
 };
 use crate::{
-    ArtifactIdentity, Digest, ParameterBounds, PromotionPolicy, QualificationPolicy,
-    RUN_TERMINAL_OPERATION_ORDER, RunBindingReceipt, RunRecord, RunTerminalClass,
-    RunTerminalIntent, RunTerminalOperation, RunTerminalOperationOutcome, RunTerminalPlan,
-    RunTerminalReceipt, RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope,
-    RunTerminalSemanticOutcome, ScenarioRef, ScenarioSet, SearchStage,
+    ArtifactIdentity, Digest, MissionReference, ParameterBounds, PromotionPolicy,
+    QualificationPolicy, RUN_TERMINAL_OPERATION_ORDER, RunBindingReceipt, RunRecord,
+    RunTerminalClass, RunTerminalIntent, RunTerminalOperation, RunTerminalOperationOutcome,
+    RunTerminalPlan, RunTerminalReceipt, RunTerminalRecoveryState, RunTerminalReport,
+    RunTerminalScope, RunTerminalSemanticOutcome, ScenarioSet, SearchStage,
 };
 
 #[path = "tests/boundaries.rs"]
@@ -176,7 +176,7 @@ fn receipt_with_gates(
         context,
         RunRecord {
             scenario_set: ScenarioSet::Promotion,
-            scenario_id: context.scenario_id().to_owned(),
+            mission_revision_id: context.mission_revision_id().to_owned(),
             repetition: context.repetition(),
             seed: context.seed(),
             loss: point.loss,
@@ -196,7 +196,7 @@ pub(super) fn receipt_for_context(
         context.digest().expect("digest run context"),
         RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             run,
         },
     )
@@ -229,12 +229,13 @@ fn successful_outcomes() -> Vec<RunTerminalOperationOutcome> {
         .collect()
 }
 
-fn scenario(id: &str, digest: u8) -> ScenarioRef {
-    ScenarioRef {
-        id: id.to_owned(),
-        digest: fixed_digest(digest),
+fn scenario(id: &str, digest: u8) -> MissionReference {
+    MissionReference {
+        revision_id: id.to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(digest),
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     }
 }
 

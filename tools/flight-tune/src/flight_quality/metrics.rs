@@ -10,7 +10,8 @@ use crate::flight_quality::config::{
 };
 use crate::flight_quality::telemetry::CanonicalSample;
 use crate::{
-    ArtifactIdentity, EvaluatorError, MetricEvaluator, MetricValues, ScenarioRef, TelemetrySample,
+    ArtifactIdentity, EvaluatorError, MetricEvaluator, MetricValues, MissionReference,
+    TelemetrySample,
 };
 
 /// Detailed metrics for the last completed scenario run.
@@ -74,16 +75,21 @@ impl MetricEvaluator for FlightQualityMetricEvaluator {
         &self.identity
     }
 
-    fn begin(&mut self, scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+    fn begin(&mut self, scenario: &MissionReference) -> Result<(), EvaluatorError> {
         if self.active.is_some() {
             return Err(invalid("a metric run is already active"));
         }
         let plan = self
             .config
             .scenarios
-            .get(&scenario.id)
+            .get(&scenario.revision_id)
             .cloned()
-            .ok_or_else(|| invalid(format!("scenario {} has no metric plan", scenario.id)))?;
+            .ok_or_else(|| {
+                invalid(format!(
+                    "scenario {} has no metric plan",
+                    scenario.revision_id
+                ))
+            })?;
         self.last_report = None;
         self.active = Some(ActiveRun {
             plan,

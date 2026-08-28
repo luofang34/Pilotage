@@ -1,9 +1,11 @@
-use flight_tune::{AttemptRole, Digest, RunTerminalReceipt, ScenarioRef, ScenarioSet, SearchStage};
+use flight_tune::{
+    AttemptRole, Digest, MissionReference, RunTerminalReceipt, ScenarioSet, SearchStage,
+};
 use serde::Serialize;
 
 use crate::{FeedbackError, digest, error::invalid};
 
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v1\0";
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v2\0";
 
 #[derive(Clone, Copy)]
 pub(super) struct ExpectedRun<'a> {
@@ -11,7 +13,7 @@ pub(super) struct ExpectedRun<'a> {
     pub(super) candidate: Digest,
     pub(super) trial_id: u64,
     pub(super) scenario_set: ScenarioSet,
-    pub(super) scenario: &'a ScenarioRef,
+    pub(super) scenario: &'a MissionReference,
     pub(super) repetition: u32,
     pub(super) seed: u64,
     pub(super) session_digest: Digest,
@@ -22,7 +24,7 @@ struct RunPlanDocument<'a> {
     role: AttemptRole,
     candidate: Digest,
     scenario_set: ScenarioSet,
-    scenarios: &'a [ScenarioRef],
+    scenarios: &'a [MissionReference],
     repetitions: u32,
     fixed_seed: u64,
 }
@@ -89,8 +91,8 @@ pub(super) fn verify_receipt_context(
         || context.candidate_digest() != expected.candidate
         || context.transition_authorization().is_some()
         || context.scenario_set() != expected.scenario_set
-        || context.scenario_id() != expected.scenario.id
-        || context.scenario_digest() != expected.scenario.digest
+        || context.mission_revision_id() != expected.scenario.revision_id
+        || context.mission_content_digest() != expected.scenario.content_digest
         || context.repetition() != expected.repetition
         || context.seed() != expected.seed
         || receipt.intent().run_intent_digest() != intent_digest
@@ -112,7 +114,7 @@ pub(super) const fn scenario_set(role: AttemptRole) -> ScenarioSet {
     }
 }
 
-fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[ScenarioRef] {
+fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
     match set {
         ScenarioSet::Training => &stage.training_scenarios,
         ScenarioSet::Promotion => &stage.promotion_scenarios,
@@ -120,13 +122,18 @@ fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[ScenarioRef] {
     }
 }
 
-fn derive_seed(fixed_seed: u64, set: ScenarioSet, scenario: &ScenarioRef, repetition: u32) -> u64 {
+fn derive_seed(
+    fixed_seed: u64,
+    set: ScenarioSet,
+    scenario: &MissionReference,
+    repetition: u32,
+) -> u64 {
     let partition = match set {
         ScenarioSet::Training => 0x243f_6a88_85a3_08d3,
         ScenarioSet::Promotion => 0x1319_8a2e_0370_7344,
         ScenarioSet::FinalQualification => 0xa409_3822_299f_31d0,
     };
-    let bytes = scenario.digest.as_bytes();
+    let bytes = scenario.content_digest.as_bytes();
     let key = digest_word(bytes, 0)
         ^ digest_word(bytes, 8).rotate_left(13)
         ^ digest_word(bytes, 16).rotate_left(29)
@@ -156,17 +163,18 @@ fn split_mix(mut value: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use flight_tune::{Digest, ScenarioRef, ScenarioSet};
+    use flight_tune::{Digest, MissionReference, ScenarioSet};
 
     use super::derive_seed;
 
     #[test]
     fn promotion_seed_v1_outputs_are_fixed() {
-        let scenario = ScenarioRef {
-            id: "promotion-calm".to_owned(),
-            digest: Digest::from_bytes([12; 32]),
+        let scenario = MissionReference {
+            revision_id: "promotion-calm".to_owned(),
+            schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+            content_digest: Digest::from_bytes([12; 32]),
             max_samples: 100,
-            sample_timeout_ms: 20,
+            sample_timeout_ns: 20_000_000,
         };
         let seeds = (0..3)
             .map(|repetition| derive_seed(23, ScenarioSet::Promotion, &scenario, repetition))

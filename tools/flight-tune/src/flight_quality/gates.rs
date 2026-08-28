@@ -1,7 +1,7 @@
 use crate::flight_quality::config::{FlightQualityGate, FlightQualityGateConfig, gate_identity};
 use crate::flight_quality::telemetry::{CanonicalTelemetryKey, finite_value, flag};
 use crate::{
-    ArtifactIdentity, EvaluatorError, GateEvaluator, GateOutcome, ScenarioRef, TelemetrySample,
+    ArtifactIdentity, EvaluatorError, GateEvaluator, GateOutcome, MissionReference, TelemetrySample,
 };
 
 /// A fail-fast streaming evaluator for canonical flight hard gates.
@@ -127,7 +127,7 @@ impl GateEvaluator for FlightQualityGateEvaluator {
         &self.identity
     }
 
-    fn begin(&mut self, _scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+    fn begin(&mut self, _scenario: &MissionReference) -> Result<(), EvaluatorError> {
         if self.active {
             return Err(EvaluatorError::new("a gate run is already active"));
         }

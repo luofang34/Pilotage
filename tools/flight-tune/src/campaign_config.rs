@@ -65,8 +65,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        Digest, PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds, PromotionPolicy,
-        PromotionSeedPolicy, QualificationPolicy, ScenarioRef,
+        Digest, MissionReference, PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds,
+        PromotionPolicy, PromotionSeedPolicy, QualificationPolicy,
     };
 
     #[test]
@@ -115,12 +115,13 @@ mod tests {
         }
     }
 
-    fn scenario(id: &str, byte: u8) -> ScenarioRef {
-        ScenarioRef {
-            id: id.to_owned(),
-            digest: Digest::from_bytes([byte; 32]),
+    fn scenario(id: &str, byte: u8) -> MissionReference {
+        MissionReference {
+            revision_id: id.to_owned(),
+            schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+            content_digest: Digest::from_bytes([byte; 32]),
             max_samples: 1,
-            sample_timeout_ms: 1,
+            sample_timeout_ns: 1_000_000,
         }
     }
 }

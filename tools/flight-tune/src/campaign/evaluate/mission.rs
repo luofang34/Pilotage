@@ -1,10 +1,8 @@
-use pilotage_mission_core::{
-    Digest as MissionDigest, EngineStart, ExecutionTarget, NavigationDataIdentity, WallDeadline,
-};
+use pilotage_mission_core::{EngineStart, ExecutionTarget, WallDeadline};
 
 use crate::{
-    AdapterError, ArtifactIdentity, CampaignBackend, CampaignMissionRuntime, Digest, Journal,
-    ScenarioRuntime, ScenarioStopReason, TuneError, mission_document_from_scenario,
+    AdapterError, ArtifactIdentity, CampaignBackend, CampaignMissionRuntime, Journal,
+    ScenarioRuntime, ScenarioStopReason, TuneError,
 };
 
 use super::RunContext;
@@ -16,23 +14,13 @@ pub(super) fn admit_campaign_mission<B: CampaignBackend>(
 ) -> Result<CampaignMissionRuntime, TuneError> {
     journal.ensure_usable()?;
     attest_runtime(journal, backend)?;
-    let scenario = backend
-        .scenario_document_blocking(context.scenario)
-        .map_err(|source| runtime_adapter_error(backend, "resolve scenario document", source))?;
-    validate_scenario_artifact(context, &scenario)?;
-    let timeout_ns = u64::from(context.scenario.sample_timeout_ms).saturating_mul(1_000_000);
-    let document = mission_document_from_scenario(
-        &scenario,
-        navigation_identity(context.scenario.digest),
-        0,
-        timeout_ns,
-    )
-    .map_err(|source| mission_error(backend, "admit scenario document", source))?;
+    let document = backend
+        .mission_document_blocking(context.scenario)
+        .map_err(|source| runtime_adapter_error(backend, "resolve mission document", source))?;
+    context.scenario.verify_document(&document)?;
     CampaignMissionRuntime::attest_capabilities(&document, backend.scenario_runtime())
-        .map_err(|source| mission_error(backend, "admit scenario capabilities", source))?;
-    let duration_ns = timeout_ns
-        .saturating_mul(u64::from(context.scenario.max_samples))
-        .max(1);
+        .map_err(|source| mission_error(backend, "admit mission capabilities", source))?;
+    let duration_ns = context.scenario.run_duration_ns();
     CampaignMissionRuntime::admit(document.clone(), engine_start(&document, duration_ns))
         .map_err(|source| mission_error(backend, "start mission engine", source))
 }
@@ -94,33 +82,6 @@ fn attest_runtime<B: CampaignBackend>(journal: &Journal, backend: &B) -> Result<
         .map_err(|source| mission_error(backend, "attest scenario action port", source))
 }
 
-fn validate_scenario_artifact(
-    context: &RunContext<'_>,
-    scenario: &pilotage_trial::Scenario,
-) -> Result<(), TuneError> {
-    if scenario.id != context.scenario.id {
-        return Err(scenario_mismatch(
-            "the resolved scenario id differs from its reference",
-        ));
-    }
-    let digest = scenario.canonical_digest().map_err(|error| {
-        scenario_mismatch(&format!("cannot digest the resolved scenario: {error}"))
-    })?;
-    if digest != context.scenario.digest {
-        return Err(scenario_mismatch(
-            "the resolved scenario content differs from its reference",
-        ));
-    }
-    Ok(())
-}
-
-fn scenario_mismatch(detail: &str) -> TuneError {
-    TuneError::ReceiptMismatch {
-        operation: "resolve scenario document",
-        detail: detail.to_owned(),
-    }
-}
-
 fn engine_start(
     document: &pilotage_mission_core::MissionDocument,
     duration_ns: u64,
@@ -145,14 +106,6 @@ fn expected_scenario_runtime(journal: &Journal) -> Result<&ArtifactIdentity, Tun
         .ok_or_else(|| TuneError::InvalidIdentity {
             detail: "the scenario runtime uses the prior identity domain".to_owned(),
         })
-}
-
-fn navigation_identity(digest: Digest) -> NavigationDataIdentity {
-    NavigationDataIdentity {
-        cycle: "calibration".to_owned(),
-        snapshot_id: "scenario-artifact".to_owned(),
-        snapshot_digest: MissionDigest::from_bytes(*digest.as_bytes()),
-    }
 }
 
 fn mission_error<B: CampaignBackend>(

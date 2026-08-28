@@ -4,12 +4,12 @@ use std::rc::Rc;
 
 use flight_tune::{
     ArtifactIdentity, Candidate, CandidateLineage, Digest, EvaluatorError, GateEvaluator,
-    GateOutcome, MetricEvaluator, MetricValues, ParameterBounds, PromotionPolicy, Proposal,
-    ProposalContext, ProposalError, ProposalStrategy, QualificationPolicy, ScenarioRef,
-    SearchStage, TelemetrySample, TrainingObservation, TuneError, reference_observation_scenario,
+    GateOutcome, MetricEvaluator, MetricValues, MissionReference, ParameterBounds, PromotionPolicy,
+    Proposal, ProposalContext, ProposalError, ProposalStrategy, QualificationPolicy, SearchStage,
+    TelemetrySample, TrainingObservation, TuneError,
 };
 
-use super::{FakeHandle, FakeState, identity};
+use super::{FAKE_MAX_SAMPLES, FakeHandle, FakeState, identity};
 
 pub struct EnvelopeGates {
     identity: ArtifactIdentity,
@@ -47,7 +47,7 @@ impl GateEvaluator for EnvelopeGates {
         &self.identity
     }
 
-    fn begin(&mut self, _scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+    fn begin(&mut self, _scenario: &MissionReference) -> Result<(), EvaluatorError> {
         self.record(|state| {
             state.gate_begin_count = state.gate_begin_count.wrapping_add(1);
         });
@@ -109,7 +109,7 @@ impl MetricEvaluator for QuadraticMetric {
         &self.identity
     }
 
-    fn begin(&mut self, _scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+    fn begin(&mut self, _scenario: &MissionReference) -> Result<(), EvaluatorError> {
         let mut state = self.state.0.borrow_mut();
         state.metric_begin_count = state.metric_begin_count.wrapping_add(1);
         drop(state);
@@ -179,7 +179,7 @@ impl ProposalStrategy for SequenceStrategy {
                 .training
                 .scenarios
                 .iter()
-                .map(|scenario| scenario.id.clone())
+                .map(|scenario| scenario.revision_id.clone())
                 .collect(),
             context.training.history.to_vec(),
         ));
@@ -226,9 +226,9 @@ pub fn stage() -> SearchStage {
         )]),
         fixed_parameters: BTreeMap::from([("mode".to_owned(), 1.0)]),
         required_hard_gates: vec!["envelope".to_owned()],
-        training_scenarios: vec![scenario("training-calm", 1)],
-        promotion_scenarios: vec![scenario("promotion-gust", 2)],
-        final_qualification_scenarios: vec![scenario("final-crosswind", 3)],
+        training_scenarios: vec![scenario(super::FAKE_MISSION_IDS[0])],
+        promotion_scenarios: vec![scenario(super::FAKE_MISSION_IDS[1])],
+        final_qualification_scenarios: vec![scenario(super::FAKE_MISSION_IDS[2])],
         repetitions: 2,
         promotion: PromotionPolicy {
             schema_version: flight_tune::PROMOTION_POLICY_SCHEMA_VERSION,
@@ -247,17 +247,22 @@ pub fn stage() -> SearchStage {
     }
 }
 
-fn scenario(id: &str, digest_byte: u8) -> ScenarioRef {
-    let mut reference = ScenarioRef {
-        id: id.to_owned(),
-        digest: Digest::from_bytes([digest_byte; 32]),
-        max_samples: 8,
-        sample_timeout_ms: 100,
-    };
-    reference.digest = reference_observation_scenario(&reference, None)
-        .canonical_digest()
-        .expect("reference scenario digest");
-    reference
+fn scenario(id: &str) -> MissionReference {
+    MissionReference::from_document(&super::fake_mission_document(id), FAKE_MAX_SAMPLES)
+        .expect("mission reference")
+}
+
+/// The same stage with one changed training mission document.
+pub fn stage_with_changed_training_mission() -> SearchStage {
+    let changed = MissionReference::from_document(
+        &super::changed_fake_mission_document(super::FAKE_MISSION_IDS[0]),
+        FAKE_MAX_SAMPLES,
+    )
+    .expect("changed mission reference");
+    SearchStage {
+        training_scenarios: vec![changed],
+        ..stage()
+    }
 }
 
 pub fn assert_receipt_error(error: TuneError) {

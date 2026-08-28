@@ -15,7 +15,9 @@ use pilotage_trial::{
 };
 
 use super::*;
-use crate::{ArtifactIdentity, AttemptRole, Digest, RunExecutionContext, ScenarioRef, ScenarioSet};
+use crate::{
+    ArtifactIdentity, AttemptRole, Digest, MissionReference, RunExecutionContext, ScenarioSet,
+};
 
 #[path = "../../build_support/scenario_runtime_identity.rs"]
 #[allow(dead_code)]
@@ -402,11 +404,12 @@ fn context() -> RunExecutionContext {
         Digest::from_bytes([2; 32]),
         None,
         ScenarioSet::Training,
-        &ScenarioRef {
-            id: "reference-scenario".to_owned(),
-            digest: Digest::from_bytes([3; 32]),
+        &MissionReference {
+            revision_id: "reference-scenario".to_owned(),
+            schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+            content_digest: Digest::from_bytes([3; 32]),
             max_samples: 2,
-            sample_timeout_ms: 10,
+            sample_timeout_ns: 10_000_000,
         },
         0,
         4,

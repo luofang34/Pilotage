@@ -1,15 +1,15 @@
 use std::fs;
 
 use flight_tune::{
-    AttemptRole, Digest, JournalEntry, JournalEvent, SimulatorVehicleFactory, TuneError, Tuner,
-    scenario_runtime_identity,
+    AttemptRole, Digest, JournalEntry, JournalEvent, SearchStage, SimulatorVehicleFactory,
+    TuneError, Tuner, scenario_runtime_identity,
 };
 use serde::Deserialize;
 
 use super::TestTuner;
 use super::test_rig::{
     EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, QuadraticMetric, SequenceStrategy,
-    TestDirectory, candidate, stage,
+    TestDirectory, candidate, stage, stage_with_changed_training_mission,
 };
 
 #[test]
@@ -83,6 +83,63 @@ fn changed_runtime_orphans_baseline_and_pending_challenger_before_mutation() {
     assert_eq!(new_tuner.journal().training_attempt_count(), 1);
 }
 
+#[test]
+fn changed_mission_document_orphans_baseline_before_mutation() {
+    let directory = TestDirectory::new("orphan-baseline-old-mission");
+    let state = FakeHandle::new();
+    let mut tuner = open_with_stage(
+        &directory,
+        state.clone(),
+        stage(),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("open old mission session");
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run old mission training");
+    drop(tuner);
+
+    let old_head = read_head_entry(&directory);
+    let before = ExternalMutations::capture(&state);
+    let changed = stage_with_changed_training_mission();
+    assert_ne!(
+        changed.training_scenarios[0].content_digest,
+        stage().training_scenarios[0].content_digest
+    );
+
+    let result = open_with_stage(
+        &directory,
+        state.clone(),
+        changed.clone(),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    );
+
+    assert!(matches!(result, Err(TuneError::JournalSessionMismatch)));
+    assert_eq!(ExternalMutations::capture(&state), before);
+    assert_eq!(read_head_entry(&directory), old_head);
+
+    let new_directory = TestDirectory::new("orphan-baseline-new-mission");
+    let runs_before = state.0.borrow().scenario_runs.len();
+    let mut new_tuner = open_with_stage(
+        &new_directory,
+        state.clone(),
+        changed,
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("start changed mission session");
+    new_tuner
+        .run_training_attempts_blocking(1)
+        .expect("run changed mission baseline and challenger");
+    assert!(state.0.borrow().scenario_runs.len() > runs_before);
+    assert_eq!(new_tuner.journal().training_attempt_count(), 1);
+}
+
 fn open_with_factory(
     directory: &TestDirectory,
     state: FakeHandle,
@@ -90,9 +147,20 @@ fn open_with_factory(
     factory: FakeFactory,
     strategy: SequenceStrategy,
 ) -> Result<TestTuner, TuneError> {
+    open_with_stage(directory, state, stage(), backend, factory, strategy)
+}
+
+fn open_with_stage(
+    directory: &TestDirectory,
+    state: FakeHandle,
+    stage: SearchStage,
+    backend: FakeBackend,
+    factory: FakeFactory,
+    strategy: SequenceStrategy,
+) -> Result<TestTuner, TuneError> {
     Tuner::open_or_resume(
         directory.path(),
-        stage(),
+        stage,
         91,
         candidate(0.0),
         backend,

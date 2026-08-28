@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ArtifactIdentity, EvaluatorError, ScenarioRef, TelemetrySample, TuneError};
+use crate::{ArtifactIdentity, EvaluatorError, MissionReference, TelemetrySample, TuneError};
 
 #[cfg(test)]
 #[path = "score/tests.rs"]
@@ -47,8 +47,8 @@ pub trait GateEvaluator {
     /// Returns the exact gate implementation identity.
     fn identity(&self) -> &ArtifactIdentity;
 
-    /// Starts evaluation for one scenario run.
-    fn begin(&mut self, scenario: &ScenarioRef) -> Result<(), EvaluatorError>;
+    /// Starts evaluation for one mission run.
+    fn begin(&mut self, mission: &MissionReference) -> Result<(), EvaluatorError>;
 
     /// Evaluates hard gates in order through the first failure.
     fn evaluate(&mut self, sample: &TelemetrySample) -> Result<Vec<GateOutcome>, EvaluatorError>;
@@ -79,8 +79,8 @@ pub trait MetricEvaluator {
     /// Returns the exact metric implementation identity.
     fn identity(&self) -> &ArtifactIdentity;
 
-    /// Starts metric evaluation for one scenario run.
-    fn begin(&mut self, scenario: &ScenarioRef) -> Result<(), EvaluatorError>;
+    /// Starts metric evaluation for one mission run.
+    fn begin(&mut self, mission: &MissionReference) -> Result<(), EvaluatorError>;
 
     /// Adds one sample after all hard gates pass for that sample.
     fn observe(&mut self, sample: &TelemetrySample) -> Result<(), EvaluatorError>;
@@ -113,8 +113,8 @@ pub enum ScenarioSet {
 pub struct RunRecord {
     /// The isolated scenario partition.
     pub scenario_set: ScenarioSet,
-    /// The stable scenario identity.
-    pub scenario_id: String,
+    /// The executed mission revision.
+    pub mission_revision_id: String,
     /// The repeated-run index.
     pub repetition: u32,
     /// The deterministic run seed.
@@ -135,8 +135,8 @@ pub struct RunRecord {
 pub struct HardGateFailure {
     /// The isolated scenario partition.
     pub scenario_set: ScenarioSet,
-    /// The stable scenario identity.
-    pub scenario_id: String,
+    /// The executed mission revision.
+    pub mission_revision_id: String,
     /// The repeated-run index.
     pub repetition: u32,
     /// The deterministic run seed.

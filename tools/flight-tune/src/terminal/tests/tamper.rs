@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::{
-    AttemptRole, CandidateTransitionReference, RunExecutionContext, ScenarioRef, ScenarioSet,
+    AttemptRole, CandidateTransitionReference, MissionReference, RunExecutionContext, ScenarioSet,
 };
 
 use super::{
@@ -168,11 +168,12 @@ fn challenger_intent() -> RunTerminalIntent {
         "receipt_digest": fixed_digest(7),
     }))
     .expect("decode transition reference");
-    let scenario = ScenarioRef {
-        id: "step-calm".to_owned(),
-        digest: fixed_digest(2),
+    let scenario = MissionReference {
+        revision_id: "step-calm".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(2),
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     };
     let context = RunExecutionContext::new(
         fixed_digest(1),
@@ -191,7 +192,7 @@ fn challenger_intent() -> RunTerminalIntent {
         context.digest().expect("digest challenger context"),
         crate::terminal::RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             run: super::run_record(),
         },
     )

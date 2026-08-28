@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use flight_tune::{
     ArtifactIdentity, AttemptRole, AuthenticatedEvaluationProof, Candidate, CandidateEvaluation,
-    CandidateLineage, CandidateTransitionReference, Digest, JournalEvent, ParameterBounds,
-    PromotionPolicy, PromotionSeedPolicy, QualificationPolicy, RunTerminalDisposition,
-    RunTerminalQuarantine, RuntimeIdentities, ScenarioRef, SearchStage, SessionIdentity,
+    CandidateLineage, CandidateTransitionReference, Digest, JournalEvent, MissionReference,
+    ParameterBounds, PromotionPolicy, PromotionSeedPolicy, QualificationPolicy,
+    RunTerminalDisposition, RunTerminalQuarantine, RuntimeIdentities, SearchStage, SessionIdentity,
 };
 
 use crate::CampaignEvidence;
@@ -440,12 +440,13 @@ fn quarantine_reason(digest: Digest, class: RunTerminalQuarantine) -> String {
     format!("terminal receipt {digest} has quarantine class {name}")
 }
 
-fn scenario(id: &str, value: u8) -> ScenarioRef {
-    ScenarioRef {
-        id: id.to_owned(),
-        digest: fixed_digest(value),
+fn scenario(id: &str, value: u8) -> MissionReference {
+    MissionReference {
+        revision_id: id.to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(value),
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     }
 }
 

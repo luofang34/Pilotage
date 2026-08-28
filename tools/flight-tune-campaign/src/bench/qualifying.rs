@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use flight_tune::{
     AdapterError, ArtifactIdentity, Digest, EvaluatorError, GateEvaluator, GateOutcome,
-    ScenarioRef, SimulatorCapability, SimulatorVehicleFactory, TelemetrySample,
-    TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
+    MissionDocument, MissionReference, SimulatorCapability, SimulatorVehicleFactory,
+    TelemetrySample, TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
 };
 
 use super::parameter;
@@ -130,7 +130,7 @@ impl GateEvaluator for BenchGates {
         &self.identity
     }
 
-    fn begin(&mut self, _scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+    fn begin(&mut self, _scenario: &MissionReference) -> Result<(), EvaluatorError> {
         Ok(())
     }
 
@@ -235,7 +235,7 @@ pub fn warm_start_parameters(mode: FeelMode) -> BTreeMap<String, f64> {
 ///
 /// # Errors
 ///
-/// Returns an error when a scenario identity cannot be calculated.
+/// Returns an error when a mission identity cannot be calculated.
 pub fn bench_stage(
     id: &str,
     promotion: flight_tune::PromotionPolicy,
@@ -263,32 +263,63 @@ pub fn bench_stage(
         // Training, promotion and final qualification fly separate scenarios.
         // The bar that decides what ships is measured on runs the search never
         // saw, so a candidate cannot be fitted to the scenario that judges it.
-        training_scenarios: vec![bench_scenario("training-step", 21)?],
-        promotion_scenarios: vec![bench_scenario("promotion-step", 22)?],
-        final_qualification_scenarios: vec![bench_scenario("final-step", 23)?],
+        training_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[0])?],
+        promotion_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[1])?],
+        final_qualification_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[2])?],
         repetitions: 2,
         promotion,
         qualification,
     })
 }
 
-/// One trial of the bench, as a scenario reference.
+/// The ceiling covers the whole trial at the bench's sample rate with room for
+/// the completion event.
+const BENCH_MAX_SAMPLES: u32 = 700;
+
+const BENCH_RECEIPT_TIMEOUT_NS: u64 = 200_000_000;
+
+const BENCH_COMPLETION_TIME_NS: u64 = 10_480_000_000;
+
+/// The trial names that the bench stores as mission documents.
+const BENCH_TRIAL_IDS: [&str; 3] = ["training-step", "promotion-step", "final-step"];
+
+/// Resolves the stored bench mission that one reference names.
 ///
 /// # Errors
 ///
-/// Returns an error when the canonical scenario identity cannot be calculated.
-pub fn bench_scenario(id: &str, digest_byte: u8) -> Result<ScenarioRef, AdapterError> {
-    let mut reference = ScenarioRef {
-        id: id.to_owned(),
-        digest: Digest::from_bytes([digest_byte; 32]),
-        // The ceiling covers the whole trial at the bench's sample rate
-        // with room for the completion event.
-        max_samples: 700,
-        sample_timeout_ms: 200,
-    };
-    reference.digest =
-        flight_tune::reference_observation_scenario(&reference, Some(10_480_000_000))
-            .canonical_digest()
-            .map_err(|error| AdapterError::new(error.to_string()))?;
-    Ok(reference)
+/// Returns an error when the bench stores no mission with that revision.
+pub fn bench_stored_mission(mission: &MissionReference) -> Result<MissionDocument, AdapterError> {
+    for id in BENCH_TRIAL_IDS {
+        let document = bench_mission(id)?;
+        if document.identity.revision_id == mission.revision_id {
+            return Ok(document);
+        }
+    }
+    Err(AdapterError::new(
+        "the bench stores no mission document with that revision",
+    ))
+}
+
+/// One trial of the bench, as its stored mission document.
+///
+/// The trial scenario becomes a mission document once. The reference names
+/// that document, so the campaign schedule and the executed mission carry one
+/// identity.
+fn bench_mission(id: &str) -> Result<MissionDocument, AdapterError> {
+    flight_tune::calibration_mission_document(
+        &flight_tune::reference_observation_scenario(id, Some(BENCH_COMPLETION_TIME_NS)),
+        0,
+        BENCH_RECEIPT_TIMEOUT_NS,
+    )
+    .map_err(|error| AdapterError::new(error.to_string()))
+}
+
+/// One trial of the bench, as a mission reference.
+///
+/// # Errors
+///
+/// Returns an error when the mission identity cannot be calculated.
+pub fn bench_scenario(id: &str) -> Result<MissionReference, AdapterError> {
+    MissionReference::from_document(&bench_mission(id)?, BENCH_MAX_SAMPLES)
+        .map_err(|error| AdapterError::new(error.to_string()))
 }

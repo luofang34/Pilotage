@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use flight_tune::{
-    ArtifactIdentity, AttemptRole, Digest, RunBindingReceipt, RunExecutionContext, RunRecord,
-    RunTerminalClass, RunTerminalOperation, RunTerminalOperationOutcome, RunTerminalPlan,
-    RunTerminalReceipt, RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope,
-    RunTerminalSemanticOutcome, ScenarioRef, ScenarioSet,
+    ArtifactIdentity, AttemptRole, Digest, MissionReference, RunBindingReceipt,
+    RunExecutionContext, RunRecord, RunTerminalClass, RunTerminalOperation,
+    RunTerminalOperationOutcome, RunTerminalPlan, RunTerminalReceipt, RunTerminalRecoveryState,
+    RunTerminalReport, RunTerminalScope, RunTerminalSemanticOutcome, ScenarioSet,
 };
 
 use super::super::terminal_state::{
@@ -181,11 +181,12 @@ fn run_binding(
 }
 
 fn run_context(session_digest: Digest) -> RunExecutionContext {
-    let scenario = ScenarioRef {
-        id: "terminal-reference".to_owned(),
-        digest: fixed_digest(3),
+    let scenario = MissionReference {
+        revision_id: "terminal-reference".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(3),
         max_samples: 10,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     };
     RunExecutionContext::new(
         session_digest,
@@ -214,7 +215,7 @@ fn completed_receipt(binding: &RunBindingReceipt, plan: &RunTerminalPlan) -> Run
     let context = binding.context();
     let run = RunRecord {
         scenario_set: context.scenario_set(),
-        scenario_id: context.scenario_id().to_owned(),
+        mission_revision_id: context.mission_revision_id().to_owned(),
         repetition: context.repetition(),
         seed: context.seed(),
         loss: 0.2,
@@ -227,7 +228,7 @@ fn completed_receipt(binding: &RunBindingReceipt, plan: &RunTerminalPlan) -> Run
         plan,
         RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             run,
         },
         RunTerminalRecoveryState::Live,

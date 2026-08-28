@@ -159,7 +159,7 @@ fn semantic_outcome(
         RunTerminal::Passed { values } => Ok((
             RunTerminalSemanticOutcome::ScenarioComplete {
                 candidate_digest: context.execution.candidate_digest(),
-                scenario_digest: context.execution.scenario_digest(),
+                mission_content_digest: context.execution.mission_content_digest(),
                 run: run_record(stage, context, values),
             },
             None,
@@ -167,7 +167,7 @@ fn semantic_outcome(
         RunTerminal::HardGate { failure } => Ok((
             RunTerminalSemanticOutcome::HardGateAbort {
                 candidate_digest: context.execution.candidate_digest(),
-                scenario_digest: context.execution.scenario_digest(),
+                mission_content_digest: context.execution.mission_content_digest(),
                 failure,
             },
             None,

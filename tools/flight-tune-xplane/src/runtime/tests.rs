@@ -10,9 +10,9 @@ use pilotage_trial::{
 
 use super::*;
 use flight_tune::{
-    ArtifactIdentity, AttemptRole, CampaignMissionRuntime, Digest, RunExecutionContext,
-    ScenarioObservationReceipt, ScenarioRef, ScenarioRuntime, ScenarioRuntimeError, ScenarioSet,
-    ScenarioStopContext, mission_document_from_scenario,
+    ArtifactIdentity, AttemptRole, CampaignMissionRuntime, Digest, MissionReference,
+    RunExecutionContext, ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError,
+    ScenarioSet, ScenarioStopContext, mission_document_from_scenario,
 };
 
 struct RecordingRuntime {
@@ -269,11 +269,12 @@ fn context() -> RunExecutionContext {
         Digest::from_bytes([2; 32]),
         None,
         ScenarioSet::Training,
-        &ScenarioRef {
-            id: "projection-conformance".to_owned(),
-            digest: Digest::from_bytes([3; 32]),
+        &MissionReference {
+            revision_id: "projection-conformance".to_owned(),
+            schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+            content_digest: Digest::from_bytes([3; 32]),
             max_samples: 2,
-            sample_timeout_ms: 10,
+            sample_timeout_ns: 10_000_000,
         },
         0,
         4,

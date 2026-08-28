@@ -4,7 +4,7 @@ use std::fmt;
 
 use pilotage_trial::Digest;
 
-use crate::{ArtifactIdentity, Candidate, ParameterBounds, ScenarioRef};
+use crate::{ArtifactIdentity, Candidate, MissionReference, ParameterBounds};
 
 /// A prior training result that a proposal strategy can inspect.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,7 +35,7 @@ pub struct TrainingView<'a> {
     /// The only parameters that a proposal can change.
     pub allowlist: &'a BTreeMap<String, ParameterBounds>,
     /// The training scenarios.
-    pub scenarios: &'a [ScenarioRef],
+    pub scenarios: &'a [MissionReference],
     /// The repeated run count for each training scenario.
     pub repetitions: u32,
     /// The current training incumbent.

@@ -8,7 +8,8 @@ use super::{
     SimulatorCapability, SimulatorSessionReceipt, VehicleBinding,
 };
 use crate::{
-    ArtifactIdentity, Candidate, RunExecutionContext, ScenarioFrame, ScenarioRef, ScenarioRuntime,
+    ArtifactIdentity, Candidate, MissionDocument, MissionReference, RunExecutionContext,
+    ScenarioFrame, ScenarioRuntime,
 };
 
 /// The receipt for an applied candidate and its controller readback.
@@ -40,8 +41,8 @@ pub struct RunPreparationReceipt {
 pub struct ScenarioStartReceipt {
     /// The tuning session that owns the run.
     pub session_digest: Digest,
-    /// The digest of the applied scenario artifact.
-    pub applied_scenario_digest: Digest,
+    /// The content digest of the applied mission document.
+    pub applied_mission_content_digest: Digest,
     /// The applied deterministic run seed.
     pub seed: u64,
     /// The exact started run intent digest.
@@ -90,11 +91,11 @@ pub trait CampaignBackend {
     /// Revalidates the live action runtime without external mutation.
     fn attest_scenario_runtime_blocking(&self) -> Result<(), AdapterError>;
 
-    /// Resolves one declarative scenario artifact.
-    fn scenario_document_blocking(
+    /// Resolves the stored mission document that one reference names.
+    fn mission_document_blocking(
         &self,
-        scenario: &ScenarioRef,
-    ) -> Result<pilotage_trial::Scenario, AdapterError>;
+        mission: &MissionReference,
+    ) -> Result<MissionDocument, AdapterError>;
 
     /// Projects one verified telemetry sample into the neutral runtime frame.
     fn project_scenario_frame(
@@ -113,10 +114,10 @@ pub trait CampaignBackend {
         &mut self,
         capability: &SimulatorCapability,
         context: &RunExecutionContext,
-        scenario: &ScenarioRef,
+        mission: &MissionReference,
     ) -> Result<RunPreparationReceipt, AdapterError>;
 
-    /// Starts the prepared scenario and returns the applied artifact receipt.
+    /// Starts the prepared mission and returns the applied artifact receipt.
     fn start_blocking(
         &mut self,
         capability: &SimulatorCapability,

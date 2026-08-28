@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AttemptRole, AuthenticatedEvaluationProof, Digest, FinalQualificationOutcome, JournalEntry,
-    JournalEvent, PromotionClosure, PromotionDecision, RunExecutionContext, ScenarioRef,
+    JournalEvent, MissionReference, PromotionClosure, PromotionDecision, RunExecutionContext,
     ScenarioSet, SearchStage, TuneError,
 };
 
@@ -366,7 +366,7 @@ fn invalid(detail: impl Into<String>) -> TuneError {
     }
 }
 
-fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[ScenarioRef] {
+fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
     match set {
         ScenarioSet::Training => &stage.training_scenarios,
         ScenarioSet::Promotion => &stage.promotion_scenarios,

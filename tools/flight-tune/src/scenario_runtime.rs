@@ -5,7 +5,9 @@ mod frame;
 mod host;
 mod port;
 
-pub use document::{mission_document_from_scenario, reference_observation_scenario};
+pub use document::{
+    calibration_mission_document, mission_document_from_scenario, reference_observation_scenario,
+};
 pub use frame::{KinematicTruth, ScenarioFrame};
 pub use host::CampaignMissionRuntime;
 pub use port::{

@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ArtifactIdentity, AttemptRole, Digest, GateOutcome, HardGateFailure, RunExecutionContext,
-    RunRecord, ScenarioRef, ScenarioSet,
+    ArtifactIdentity, AttemptRole, Digest, GateOutcome, HardGateFailure, MissionReference,
+    RunExecutionContext, RunRecord, ScenarioSet,
 };
 
 use super::{
@@ -28,11 +28,12 @@ pub(super) fn fixed_digest(value: u8) -> Digest {
 }
 
 pub(super) fn run_context() -> RunExecutionContext {
-    let scenario = ScenarioRef {
-        id: "step-calm".to_owned(),
-        digest: fixed_digest(2),
+    let scenario = MissionReference {
+        revision_id: "step-calm".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(2),
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     };
     RunExecutionContext::new(
         fixed_digest(1),
@@ -53,12 +54,12 @@ pub(super) fn terminal_intent(case: SemanticCase) -> RunTerminalIntent {
     let outcome = match case {
         SemanticCase::ScenarioComplete => RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             run: run_record(),
         },
         SemanticCase::HardGateAbort => RunTerminalSemanticOutcome::HardGateAbort {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             failure: hard_gate_failure(),
         },
     };
@@ -116,7 +117,7 @@ pub(super) fn terminal_receipt(case: SemanticCase) -> RunTerminalReceipt {
 pub(super) fn run_record() -> RunRecord {
     RunRecord {
         scenario_set: ScenarioSet::Training,
-        scenario_id: "step-calm".to_owned(),
+        mission_revision_id: "step-calm".to_owned(),
         repetition: 0,
         seed: 41,
         loss: 0.2,
@@ -129,7 +130,7 @@ pub(super) fn run_record() -> RunRecord {
 pub(super) fn hard_gate_failure() -> HardGateFailure {
     HardGateFailure {
         scenario_set: ScenarioSet::Training,
-        scenario_id: "step-calm".to_owned(),
+        mission_revision_id: "step-calm".to_owned(),
         repetition: 0,
         seed: 41,
         sample_sequence: 5,

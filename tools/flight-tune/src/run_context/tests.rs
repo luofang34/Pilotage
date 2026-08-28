@@ -44,11 +44,12 @@ fn context(reference: CandidateTransitionReference) -> RunExecutionContext {
         reference.target_candidate_digest(),
         Some(reference),
         ScenarioSet::Training,
-        &ScenarioRef {
-            id: "calm".to_owned(),
-            digest: digest(9),
+        &MissionReference {
+            revision_id: "calm".to_owned(),
+            schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+            content_digest: digest(9),
             max_samples: 10,
-            sample_timeout_ms: 20,
+            sample_timeout_ns: 20_000_000,
         },
         0,
         22,

@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use flight_tune::{
-    ArtifactIdentity, Digest, EvaluatorError, MetricEvaluator, MetricValues, ScenarioRef,
+    ArtifactIdentity, Digest, EvaluatorError, MetricEvaluator, MetricValues, MissionReference,
     TelemetrySample,
 };
 use pilotage_flight_quality::{
@@ -120,7 +120,7 @@ impl MetricEvaluator for FlightQualityEvaluator {
         &self.identity
     }
 
-    fn begin(&mut self, _scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+    fn begin(&mut self, _scenario: &MissionReference) -> Result<(), EvaluatorError> {
         self.trace = Trace::default();
         self.active = true;
         Ok(())

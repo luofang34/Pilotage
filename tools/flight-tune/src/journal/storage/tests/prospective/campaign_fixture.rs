@@ -34,7 +34,7 @@ pub(super) fn record_passing_baseline(
                 &context,
                 RunTerminalSemanticOutcome::ScenarioComplete {
                     candidate_digest,
-                    scenario_digest: context.scenario_digest(),
+                    mission_content_digest: context.mission_content_digest(),
                     run: run.clone(),
                 },
             );
@@ -61,7 +61,7 @@ pub(super) fn record_hard_gate_failed_baseline(
     let context = prepare_training_run(journal, stage, trial_id, candidate_digest, 0);
     let failure = HardGateFailure {
         scenario_set: ScenarioSet::Training,
-        scenario_id: context.scenario_id().to_owned(),
+        mission_revision_id: context.mission_revision_id().to_owned(),
         repetition: 0,
         seed: context.seed(),
         sample_sequence: 1,
@@ -74,7 +74,7 @@ pub(super) fn record_hard_gate_failed_baseline(
         &context,
         RunTerminalSemanticOutcome::HardGateAbort {
             candidate_digest,
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             failure: failure.clone(),
         },
     );
@@ -122,7 +122,7 @@ pub(super) fn record_evidence_failure_without_commit(
     let run = run_record(stage, &context, 0.5);
     let outcome = RunTerminalSemanticOutcome::ScenarioComplete {
         candidate_digest,
-        scenario_digest: context.scenario_digest(),
+        mission_content_digest: context.mission_content_digest(),
         run,
     };
     let plan = RunTerminalPlan::new(RunTerminalScope::Active).expect("create terminal plan");
@@ -314,7 +314,7 @@ fn successful_outcomes() -> Vec<RunTerminalOperationOutcome> {
 fn run_record(stage: &SearchStage, context: &RunExecutionContext, loss: f64) -> RunRecord {
     RunRecord {
         scenario_set: context.scenario_set(),
-        scenario_id: context.scenario_id().to_owned(),
+        mission_revision_id: context.mission_revision_id().to_owned(),
         repetition: context.repetition(),
         seed: context.seed(),
         loss,

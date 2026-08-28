@@ -9,7 +9,7 @@ use crate::terminal::{
     RunTerminalSemanticOutcome,
 };
 use crate::{
-    ArtifactIdentity, AttemptRole, RunExecutionContext, ScenarioRef, ScenarioSet,
+    ArtifactIdentity, AttemptRole, MissionReference, RunExecutionContext, ScenarioSet,
     SimulatorSessionReceipt, VehicleBindingReceipt,
 };
 
@@ -295,11 +295,12 @@ fn run_binding(
 }
 
 fn run_context(session_digest: Digest) -> RunExecutionContext {
-    let scenario = ScenarioRef {
-        id: "terminal-reference".to_owned(),
-        digest: fixed_digest(3),
+    let scenario = MissionReference {
+        revision_id: "terminal-reference".to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(3),
         max_samples: 10,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     };
     RunExecutionContext::new(
         session_digest,

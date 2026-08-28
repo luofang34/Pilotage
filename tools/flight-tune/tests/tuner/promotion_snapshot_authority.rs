@@ -144,7 +144,7 @@ pub(super) fn assert_promotion_uses_paired_seeds(state: &FakeHandle) {
         .borrow()
         .scenario_runs
         .iter()
-        .filter(|(id, _, _)| id == "promotion-gust")
+        .filter(|(id, _, _)| id == "promotion-gust:1")
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(promotion.len(), 4);

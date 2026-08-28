@@ -8,12 +8,12 @@ use crate::journal::snapshot::{PendingAttemptSnapshot, RunTerminalSnapshot};
 use crate::journal::{AttemptRole, JournalEvent, SessionIdentity};
 use crate::model::derive_seed;
 use crate::{
-    ArtifactIdentity, CandidateLineage, Digest, GateOutcome, HardGateFailure, ParameterBounds,
-    PromotionPolicy, QualificationPolicy, RunBindingReceipt, RunExecutionContext, RunRecord,
-    RunTerminalClass, RunTerminalDiagnostic, RunTerminalIntent, RunTerminalOperation,
+    ArtifactIdentity, CandidateLineage, Digest, GateOutcome, HardGateFailure, MissionReference,
+    ParameterBounds, PromotionPolicy, QualificationPolicy, RunBindingReceipt, RunExecutionContext,
+    RunRecord, RunTerminalClass, RunTerminalDiagnostic, RunTerminalIntent, RunTerminalOperation,
     RunTerminalOperationOutcome, RunTerminalPlan, RunTerminalReceipt, RunTerminalRecoveryState,
     RunTerminalReport, RunTerminalScope, RunTerminalSemanticOutcome, RuntimeIdentities,
-    ScenarioRef, ScenarioSet, SearchStage,
+    ScenarioSet, SearchStage,
 };
 
 use super::{apply_event, quarantine_reason};
@@ -340,12 +340,12 @@ fn semantic_outcome(
     match case {
         SemanticCase::ScenarioComplete => RunTerminalSemanticOutcome::ScenarioComplete {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             run: run_record(context, index),
         },
         SemanticCase::HardGateAbort => RunTerminalSemanticOutcome::HardGateAbort {
             candidate_digest: context.candidate_digest(),
-            scenario_digest: context.scenario_digest(),
+            mission_content_digest: context.mission_content_digest(),
             failure: hard_gate_failure(context),
         },
         SemanticCase::ExecutionError => RunTerminalSemanticOutcome::ExecutionError {
@@ -358,7 +358,7 @@ fn semantic_outcome(
 pub(super) fn run_record(context: &RunExecutionContext, index: u64) -> RunRecord {
     RunRecord {
         scenario_set: context.scenario_set(),
-        scenario_id: context.scenario_id().to_owned(),
+        mission_revision_id: context.mission_revision_id().to_owned(),
         repetition: context.repetition(),
         seed: context.seed(),
         loss: 0.2 + index as f64 / 10.0,
@@ -371,7 +371,7 @@ pub(super) fn run_record(context: &RunExecutionContext, index: u64) -> RunRecord
 pub(super) fn hard_gate_failure(context: &RunExecutionContext) -> HardGateFailure {
     HardGateFailure {
         scenario_set: context.scenario_set(),
-        scenario_id: context.scenario_id().to_owned(),
+        mission_revision_id: context.mission_revision_id().to_owned(),
         repetition: context.repetition(),
         seed: context.seed(),
         sample_sequence: 5,
@@ -440,12 +440,13 @@ fn test_stage() -> SearchStage {
     }
 }
 
-fn scenario(id: &str, byte: u8) -> ScenarioRef {
-    ScenarioRef {
-        id: id.to_owned(),
-        digest: fixed_digest(byte),
+fn scenario(id: &str, byte: u8) -> MissionReference {
+    MissionReference {
+        revision_id: id.to_owned(),
+        schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+        content_digest: fixed_digest(byte),
         max_samples: 100,
-        sample_timeout_ms: 20,
+        sample_timeout_ns: 20_000_000,
     }
 }
 

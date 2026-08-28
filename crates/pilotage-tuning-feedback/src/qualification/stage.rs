@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashSet};
 
-use flight_tune::{ArtifactIdentity, Digest, PromotionSeedPolicy, ScenarioRef, SearchStage};
+use flight_tune::{ArtifactIdentity, Digest, MissionReference, PromotionSeedPolicy, SearchStage};
 
 use crate::{FeedbackError, error::invalid};
 
@@ -12,6 +12,8 @@ const MAX_SCENARIOS_PER_SET: usize = 64;
 /// they bound the same set of measured objectives.
 const MAX_POLICY_OBJECTIVES: usize = 64;
 const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 1;
+const MISSION_SCHEMA_VERSION: u16 = 2;
+const MAX_SAMPLE_TIMEOUT_NS: u64 = 60_000_000_000;
 
 pub(super) fn verify(stage: &SearchStage) -> Result<(), FeedbackError> {
     verify_name(&stage.id, "stage")?;
@@ -90,21 +92,22 @@ fn verify_scenarios(stage: &SearchStage) -> Result<(), FeedbackError> {
 }
 
 fn verify_scenario(
-    scenario: &ScenarioRef,
+    mission: &MissionReference,
     ids: &mut BTreeSet<String>,
     digests: &mut HashSet<Digest>,
 ) -> Result<(), FeedbackError> {
-    verify_name(&scenario.id, "scenario")?;
-    if !ids.insert(scenario.id.clone())
-        || !digests.insert(scenario.digest)
-        || scenario.digest.is_zero()
-        || scenario.max_samples == 0
-        || scenario.sample_timeout_ms == 0
-        || scenario.sample_timeout_ms > 60_000
+    verify_name(&mission.revision_id, "mission")?;
+    if !ids.insert(mission.revision_id.clone())
+        || !digests.insert(mission.content_digest)
+        || mission.schema_version != MISSION_SCHEMA_VERSION
+        || mission.content_digest.is_zero()
+        || mission.max_samples == 0
+        || mission.sample_timeout_ns == 0
+        || mission.sample_timeout_ns > MAX_SAMPLE_TIMEOUT_NS
     {
         return Err(invalid(format!(
-            "scenario {} is repeated or has invalid limits",
-            scenario.id
+            "mission {} is repeated or has invalid limits",
+            mission.revision_id
         )));
     }
     Ok(())

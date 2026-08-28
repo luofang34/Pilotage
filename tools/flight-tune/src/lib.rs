@@ -58,23 +58,23 @@ pub use journal::{
     PromotionClosure, PromotionDecision, SessionIdentity,
 };
 pub use model::{
-    Candidate, ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
-    ParameterBounds, PromotionCalculation, PromotionComparison, PromotionObjectiveResult,
-    PromotionPairedStatistics, PromotionPolicy, PromotionRunKey, PromotionRunPlan,
-    PromotionSeedPolicy, PromotionSelection, QualificationPolicy, ScenarioRef, SearchStage,
+    Candidate, ExpectedPromotionPair, ExpectedPromotionRun, MissionReference,
+    PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds, PromotionCalculation, PromotionComparison,
+    PromotionObjectiveResult, PromotionPairedStatistics, PromotionPolicy, PromotionRunKey,
+    PromotionRunPlan, PromotionSeedPolicy, PromotionSelection, QualificationPolicy, SearchStage,
     promotion_policy_digest,
 };
 pub use pilotage_mission_core::{
     ArtifactIdentity as MissionArtifactIdentity, ControlChannel, DirectiveContext, FlightAction,
-    MissionCapability, MissionDirective, MissionDocument, ObservedSignal, ReceiptResult,
-    StartState, TrialAction, VehicleLifecycleState, Waveform,
+    MISSION_SCHEMA_VERSION, MissionCapability, MissionDirective, MissionDocument, ObservedSignal,
+    ReceiptResult, StartState, TrialAction, VehicleLifecycleState, Waveform,
 };
 pub use pilotage_trial::{Digest, Scenario as TrialScenario};
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use scenario_runtime::{
     CampaignMissionRuntime, KinematicTruth, ScenarioFrame, ScenarioObservationReceipt,
     ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext, ScenarioStopReason,
-    mission_document_from_scenario, reference_observation_scenario,
+    calibration_mission_document, mission_document_from_scenario, reference_observation_scenario,
 };
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,

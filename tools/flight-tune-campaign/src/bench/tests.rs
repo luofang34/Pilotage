@@ -255,7 +255,7 @@ fn probe_warm_start_objectives() {
         let mut evaluator =
             FlightQualityEvaluator::new(Digest::from_bytes([9; 32])).expect("evaluator");
         evaluator
-            .begin(&bench_scenario("probe", 9).expect("build scenario"))
+            .begin(&bench_scenario("probe").expect("build scenario"))
             .expect("begin");
         let (mut velocity, mut position, mut previous) = (0.0_f64, 0.0_f64, 0.0_f64);
         let mut step: u32 = 0;
