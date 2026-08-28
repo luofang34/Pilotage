@@ -1,15 +1,18 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod stimulus;
+
 use crate::{
-    ArtifactIdentity, CodecError, Comparison, ControlChannel, Digest, ExecutionPolicy,
-    ExecutionTarget, FlightAction, FlightPlanReference, MissionAction, MissionCapability,
-    MissionCondition, MissionDocument, MissionPhase, NavigationDataIdentity, SignalCondition,
-    SignalSelector, StartHeading, StartState, TrialAction, ValidationError, Waveform,
+    ArtifactIdentity, CodecError, Comparison, ControlChannel, ControlFamily, Digest,
+    ExecutionPolicy, ExecutionTarget, FlightAction, FlightPlanReference, MissionAction,
+    MissionCapability, MissionCondition, MissionDocument, MissionPhase, NavigationDataIdentity,
+    PhysicalUnit, ReferenceRule, SignalCondition, SignalSelector, StartHeading, StartState,
+    StimulusEnvelope, StimulusMapping, TrialAction, ValidationError, Waveform,
 };
 
 const CANONICAL_FIXTURE: &[u8] = concat!(
-    "{\"identity\":{\"revision_id\":\"mission-1\",\"schema_version\":2,",
-    "\"content_digest\":\"39948a4de2c0ffe060c45b243e82eb575d9cddb68204f097b36c5f3995c9b996\",",
+    "{\"identity\":{\"revision_id\":\"mission-1\",\"schema_version\":3,",
+    "\"content_digest\":\"f1a8b82556d74cebf50216fd1d20cd01504d5e4ba22ec439bcad33f8ff1b08d9\",",
     "\"navigation_data_identity\":{\"cycle\":\"2608\",\"snapshot_id\":\"nav-1\",",
     "\"snapshot_digest\":\"0101010101010101010101010101010101010101010101010101010101010101\"}},",
     "\"execution_policy\":{\"target\":\"real_vehicle\",\"retry_limit\":2,",
@@ -100,7 +103,10 @@ fn trial_actions() -> Vec<TrialAction> {
         },
         TrialAction::Settle {},
         TrialAction::Stimulate {
+            family: ControlFamily::OperatorVelocity,
             channel: ControlChannel::Pitch,
+            mapping: StimulusMapping::CandidateBoundCurve,
+            envelope: operator_envelope(),
             waveform: Waveform::Step { value: 0.2 },
         },
         TrialAction::ReleaseControl {},
@@ -109,6 +115,18 @@ fn trial_actions() -> Vec<TrialAction> {
         TrialAction::Disarm {},
         TrialAction::CollectResults {},
     ]
+}
+
+fn operator_envelope() -> StimulusEnvelope {
+    StimulusEnvelope {
+        id: "bench.operator.pitch".to_owned(),
+        revision: 1,
+        unit: PhysicalUnit::MetersPerSecond,
+        reference: ReferenceRule::Zero,
+        negative_endpoint: -5.0,
+        neutral: 0.0,
+        positive_endpoint: 5.0,
+    }
 }
 
 fn recalculate(document: &mut MissionDocument) {
@@ -142,7 +160,7 @@ fn identity_and_policy_field_groups_change_digest() {
         original
     );
     let mut schema = document.clone();
-    schema.identity.schema_version = 3;
+    schema.identity.schema_version = crate::MISSION_SCHEMA_VERSION.wrapping_add(1);
     assert_ne!(schema.calculate_content_digest().expect("digest"), original);
     let mut navdata = document.clone();
     navdata.identity.navigation_data_identity.cycle = "2609".to_owned();

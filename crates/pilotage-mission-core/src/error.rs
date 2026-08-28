@@ -107,6 +107,15 @@ pub enum ValidationError {
         /// The maximum value.
         maximum: f64,
     },
+    /// A stimulus does not name one valid physical command.
+    #[error("{field} has an invalid stimulus: {source}")]
+    InvalidStimulus {
+        /// The field path.
+        field: String,
+        /// The physical contract failure.
+        #[source]
+        source: crate::StimulusError,
+    },
     /// A flight plan uses different navigation data from the mission.
     #[error("phase {phase_id} flight plan {plan_id} has different navigation-data identity")]
     NavigationDataMismatch {

@@ -4,8 +4,9 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use flight_tune::{
-    ArtifactIdentity, Digest, MissionDocument, MissionReference, RunExecutionContext,
-    calibration_mission_document, reference_observation_scenario,
+    ArtifactIdentity, ControlFamily, Digest, MissionDocument, MissionReference,
+    RunExecutionContext, TrialScenario, calibration_mission_document,
+    reference_observation_scenario,
 };
 
 /// The sample ceiling every fake mission runs under.
@@ -29,7 +30,14 @@ pub const FAKE_MISSION_IDS: [&str; 3] = ["training-calm", "promotion-gust", "fin
 pub fn fake_stored_mission(mission: &MissionReference) -> Option<MissionDocument> {
     FAKE_MISSION_IDS
         .into_iter()
-        .flat_map(|id| [fake_mission_document(id), changed_fake_mission_document(id)])
+        .flat_map(|id| {
+            [
+                fake_mission_document(id),
+                changed_fake_mission_document(id),
+                fake_stimulus_mission_document(id, ControlFamily::OperatorVelocity),
+                fake_stimulus_mission_document(id, ControlFamily::DirectAttitudeThrust),
+            ]
+        })
         .find(|document| {
             Digest::from_bytes(*document.identity.content_digest.as_bytes())
                 == mission.content_digest
@@ -55,6 +63,55 @@ fn fake_mission_document_with_retry(id: &str, retry_limit: u16) -> MissionDocume
     .expect("fake mission document")
 }
 
+/// Builds the stored mission document for one trial name and control family.
+///
+/// The two family variants differ in the physical command that the stimulus
+/// requests, so each variant is a separate stored artifact.
+pub fn fake_stimulus_mission_document(id: &str, family: ControlFamily) -> MissionDocument {
+    calibration_mission_document(
+        &fake_stimulus_scenario(id, family),
+        0,
+        FAKE_RECEIPT_TIMEOUT_NS,
+    )
+    .expect("fake stimulus mission document")
+}
+
+/// Decodes the authored scenario that one stimulus mission projects.
+///
+/// The rig writes the scenario as schema bytes rather than as constructed
+/// values, so the fixture also pins the encoded stimulus shape. Crates that
+/// include this rig reach the scenario codec through `flight-tune`.
+fn fake_stimulus_scenario(id: &str, family: ControlFamily) -> TrialScenario {
+    let (capability, mapping, envelope) = match family {
+        ControlFamily::OperatorVelocity => (
+            "operator_velocity_control",
+            "candidate_bound_curve",
+            r#"{"id":"fake.operator.roll","revision":1,"unit":"meters_per_second",
+                "reference":"zero","negative_endpoint":-3.0,"neutral":0.0,
+                "positive_endpoint":3.0}"#,
+        ),
+        ControlFamily::DirectAttitudeThrust => (
+            "direct_attitude_thrust_control",
+            "affine_exact",
+            r#"{"id":"fake.direct.roll","revision":1,"unit":"radians",
+                "reference":"effective_setpoint_at_entry","negative_endpoint":-0.2,
+                "neutral":0.0,"positive_endpoint":0.2}"#,
+        ),
+    };
+    let document = format!(
+        r#"{{"schema_version":3,"id":"{id}","revision":1,"phases":[
+            {{"id":"stimulus","max_sim_time_ns":2000000000,
+              "required_capabilities":["simulator_time","{capability}"],
+              "entry_conditions":[{{"kind":"always"}}],
+              "action":{{"kind":"stimulus","family":"{family_name}","channel":"roll",
+                        "mapping":"{mapping}","envelope":{envelope},
+                        "waveform":{{"kind":"step","value":0.5}}}},
+              "exit_conditions":[{{"kind":"always"}}],"abort_conditions":[]}}]}}"#,
+        family_name = family.as_str(),
+    );
+    TrialScenario::from_json(document.as_bytes()).expect("fake stimulus scenario")
+}
+
 #[path = "test_rig/backend.rs"]
 mod backend;
 #[path = "test_rig/cleanup_fault.rs"]
@@ -77,7 +134,7 @@ pub use cleanup_fault::FakeCleanupFault;
 #[allow(unused_imports)]
 pub use scoring::{
     EnvelopeGates, ObservedViews, QuadraticMetric, SequenceStrategy, assert_receipt_error,
-    candidate, stage, stage_with_changed_training_mission,
+    candidate, stage, stage_with_changed_training_mission, stage_with_stimulus_family,
 };
 #[allow(unused_imports)]
 pub use terminal_head_poison::TerminalExternalAction;

@@ -5,7 +5,8 @@ use pilotage_mission_core::{
     NavigationDataIdentity, ReceiptResult, WallDeadline,
 };
 use pilotage_trial::{
-    BackendCapability, Phase, PhaseAction, PhaseCondition, SCENARIO_SCHEMA_VERSION, Scenario,
+    BackendCapability, ControlChannel, ControlFamily, Phase, PhaseAction, PhaseCondition,
+    PhysicalUnit, ReferenceRule, SCENARIO_SCHEMA_VERSION, Scenario, StimulusEnvelope, Waveform,
 };
 
 use super::*;
@@ -17,6 +18,23 @@ use flight_tune::{
 
 struct RecordingRuntime {
     identity: ArtifactIdentity,
+    capabilities: Vec<MissionCapability>,
+    prepare_count: u32,
+}
+
+impl RecordingRuntime {
+    fn new(identity: ArtifactIdentity) -> Self {
+        Self {
+            identity,
+            capabilities: vec![MissionCapability::SimulatorTime],
+            prepare_count: 0,
+        }
+    }
+
+    fn with_capability(mut self, capability: MissionCapability) -> Self {
+        self.capabilities.push(capability);
+        self
+    }
 }
 
 #[derive(Default)]
@@ -45,7 +63,7 @@ impl ScenarioRuntime for RecordingRuntime {
     }
 
     fn capabilities(&self) -> &[MissionCapability] {
-        &[MissionCapability::SimulatorTime]
+        &self.capabilities
     }
 
     fn prepare_blocking(
@@ -53,6 +71,7 @@ impl ScenarioRuntime for RecordingRuntime {
         _document: &pilotage_mission_core::MissionDocument,
         _context: &RunExecutionContext,
     ) -> Result<(), ScenarioRuntimeError> {
+        self.prepare_count = self.prepare_count.wrapping_add(1);
         Ok(())
     }
 
@@ -106,9 +125,7 @@ fn reference_and_xplane_frames_produce_the_same_directives() {
         flight_tune::Digest::from_bytes([7; 32]),
     )
     .expect("runtime identity");
-    let mut reference_port = RecordingRuntime {
-        identity: identity.clone(),
-    };
+    let mut reference_port = RecordingRuntime::new(identity.clone());
     let mut reference = CampaignMissionRuntime::start_blocking(
         document.clone(),
         start(&document),
@@ -117,9 +134,7 @@ fn reference_and_xplane_frames_produce_the_same_directives() {
         &context(),
     )
     .expect("reference runtime");
-    let mut xplane_port = RecordingRuntime {
-        identity: identity.clone(),
-    };
+    let mut xplane_port = RecordingRuntime::new(identity.clone());
     let mut xplane = CampaignMissionRuntime::start_blocking(
         document.clone(),
         start(&document),
@@ -150,7 +165,7 @@ fn reference_and_xplane_frames_produce_the_same_directives() {
 fn xplane_dispatches_reset_without_sending_it_to_the_vehicle_port() {
     let identity =
         ArtifactIdentity::new("runtime", Digest::from_bytes([7; 32])).expect("runtime identity");
-    let vehicle = RecordingRuntime { identity };
+    let vehicle = RecordingRuntime::new(identity);
     let mut runtime = XPlaneScenarioRuntime::new(RecordingSimulatorActions::default(), vehicle);
     let directive: MissionDirective = serde_json::from_value(serde_json::json!({
         "lane": "trial",
@@ -174,6 +189,51 @@ fn xplane_dispatches_reset_without_sending_it_to_the_vehicle_port() {
 
     assert_eq!(receipt.action_result, Some(ReceiptResult::Succeeded {}));
     assert_eq!(simulator.actions, vec![XPlaneSimulatorAction::Reset]);
+}
+
+#[test]
+fn a_composed_runtime_admits_only_the_control_family_that_it_declares() {
+    let identity =
+        ArtifactIdentity::new("runtime", Digest::from_bytes([7; 32])).expect("runtime identity");
+    let vehicle = RecordingRuntime::new(identity.clone())
+        .with_capability(MissionCapability::OperatorVelocityControl);
+    let mut runtime = XPlaneScenarioRuntime::new(RecordingSimulatorActions::default(), vehicle);
+    let operator = mission_document_from_scenario(
+        &stimulus_scenario(ControlFamily::OperatorVelocity),
+        navigation(),
+        0,
+        1_000_000_000,
+    )
+    .expect("operator document");
+    let direct = mission_document_from_scenario(
+        &stimulus_scenario(ControlFamily::DirectAttitudeThrust),
+        navigation(),
+        0,
+        1_000_000_000,
+    )
+    .expect("direct document");
+
+    CampaignMissionRuntime::attest_capabilities(&operator, &runtime)
+        .expect("the declared operator family is admitted");
+    let refused = CampaignMissionRuntime::start_blocking(
+        direct.clone(),
+        start(&direct),
+        &identity,
+        &mut runtime,
+        &context(),
+    )
+    .map(|_| ());
+
+    assert!(matches!(
+        refused,
+        Err(ScenarioRuntimeError::MissingCapability {
+            capability: MissionCapability::DirectAttitudeThrustControl,
+            ..
+        })
+    ));
+    let (simulator, vehicle) = runtime.into_inner();
+    assert_eq!(vehicle.prepare_count, 0);
+    assert!(simulator.actions.is_empty());
 }
 
 #[test]
@@ -205,6 +265,49 @@ fn rejected_frame_does_not_latch_the_run_origin() {
         .expect("valid frame");
 
     assert_eq!(accepted.truth.position_ned_m, [0.0; 3]);
+}
+
+fn stimulus_scenario(family: ControlFamily) -> Scenario {
+    let envelope = match family {
+        ControlFamily::OperatorVelocity => StimulusEnvelope {
+            id: "conformance.operator.roll".to_owned(),
+            revision: 1,
+            unit: PhysicalUnit::MetersPerSecond,
+            reference: ReferenceRule::Zero,
+            negative_endpoint: -3.0,
+            neutral: 0.0,
+            positive_endpoint: 3.0,
+        },
+        ControlFamily::DirectAttitudeThrust => StimulusEnvelope {
+            id: "conformance.direct.roll".to_owned(),
+            revision: 1,
+            unit: PhysicalUnit::Radians,
+            reference: ReferenceRule::EffectiveSetpointAtEntry,
+            negative_endpoint: -0.2,
+            neutral: 0.0,
+            positive_endpoint: 0.2,
+        },
+    };
+    Scenario {
+        schema_version: SCENARIO_SCHEMA_VERSION,
+        id: "family-admission".to_owned(),
+        revision: 1,
+        phases: vec![Phase {
+            id: "stimulus".to_owned(),
+            max_sim_time_ns: 2_000_000_000,
+            required_capabilities: vec![BackendCapability::SimulatorTime, family.capability()],
+            entry_conditions: vec![PhaseCondition::Always],
+            action: PhaseAction::Stimulus {
+                family,
+                channel: ControlChannel::Roll,
+                mapping: family.mapping(),
+                envelope,
+                waveform: Waveform::Step { value: 0.4 },
+            },
+            exit_conditions: vec![PhaseCondition::Always],
+            abort_conditions: Vec::new(),
+        }],
+    }
 }
 
 fn sample(sequence: u64) -> XPlaneTruthSample {

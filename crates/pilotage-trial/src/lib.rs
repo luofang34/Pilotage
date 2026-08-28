@@ -29,8 +29,8 @@ pub use limits::{
     BACKEND_CAPABILITIES_SCHEMA_VERSION, CONDITION_SET_SCHEMA_VERSION, MAX_ACTUATOR_VALUES,
     MAX_CAPABILITIES, MAX_CLOCK_MAPPINGS, MAX_CONDITION_VALUES, MAX_GUST_EVENTS,
     MAX_MANIFEST_BYTES, MAX_PHASE_CONDITIONS, MAX_PHASES, MAX_RAW_AXES, MAX_RAW_BUTTONS,
-    MAX_SAMPLE_BYTES, MAX_TEXT_BYTES, MAX_WAVE_COMPONENTS, SCENARIO_SCHEMA_VERSION,
-    TRIAL_MANIFEST_SCHEMA_VERSION, TRIAL_SAMPLE_SCHEMA_VERSION,
+    MAX_SAMPLE_BYTES, MAX_STIMULUS_ENVELOPE_BYTES, MAX_TEXT_BYTES, MAX_WAVE_COMPONENTS,
+    SCENARIO_SCHEMA_VERSION, TRIAL_MANIFEST_SCHEMA_VERSION, TRIAL_SAMPLE_SCHEMA_VERSION,
 };
 pub use manifest::TrialManifest;
 pub use sample::{
@@ -39,7 +39,8 @@ pub use sample::{
     Observed, Quaternion, RawInput, ReferenceFrame, SampleTime, TrialSample, Vector3,
 };
 pub use scenario::{
-    BackendCapabilities, BackendCapability, Comparison, ControlChannel, ControlValueField, Phase,
-    PhaseAction, PhaseCondition, QuaternionComponent, Scenario, SignalSelectionError,
-    SignalSelector, SineComponent, StartHeading, StartState, VectorComponent, Waveform,
+    BackendCapabilities, BackendCapability, Comparison, ControlChannel, ControlFamily,
+    ControlValueField, Phase, PhaseAction, PhaseCondition, PhysicalUnit, QuaternionComponent,
+    ReferenceRule, Scenario, SignalSelectionError, SignalSelector, SineComponent, StartHeading,
+    StartState, StimulusEnvelope, StimulusError, StimulusMapping, VectorComponent, Waveform,
 };

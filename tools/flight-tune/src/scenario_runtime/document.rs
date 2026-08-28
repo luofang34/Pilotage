@@ -107,9 +107,7 @@ fn project_phase(phase: &pilotage_trial::Phase) -> Result<MissionPhase, Scenario
         transcode(&phase.required_capabilities)?;
     if matches!(
         &action,
-        MissionAction::Trial(
-            TrialAction::Stimulate { .. } | TrialAction::ReleaseControl {} | TrialAction::Stop {}
-        )
+        MissionAction::Trial(TrialAction::ReleaseControl {} | TrialAction::Stop {})
     ) && !required_capabilities.contains(&MissionCapability::SimulatorControl)
     {
         required_capabilities.push(MissionCapability::SimulatorControl);
@@ -201,8 +199,17 @@ fn project_action(action: &PhaseAction) -> Result<MissionAction, ScenarioRuntime
             target: transcode(target)?,
         },
         PhaseAction::Settle => TrialAction::Settle {},
-        PhaseAction::Stimulus { channel, waveform } => TrialAction::Stimulate {
+        PhaseAction::Stimulus {
+            family,
+            channel,
+            mapping,
+            envelope,
+            waveform,
+        } => TrialAction::Stimulate {
+            family: transcode(family)?,
             channel: transcode(channel)?,
+            mapping: transcode(mapping)?,
+            envelope: transcode(envelope)?,
             waveform: transcode(waveform)?,
         },
         PhaseAction::ReleaseControl => TrialAction::ReleaseControl {},

@@ -65,9 +65,10 @@ pub use model::{
     promotion_policy_digest,
 };
 pub use pilotage_mission_core::{
-    ArtifactIdentity as MissionArtifactIdentity, ControlChannel, DirectiveContext, FlightAction,
-    MISSION_SCHEMA_VERSION, MissionCapability, MissionDirective, MissionDocument, ObservedSignal,
-    ReceiptResult, StartState, TrialAction, VehicleLifecycleState, Waveform,
+    ArtifactIdentity as MissionArtifactIdentity, ControlChannel, ControlFamily, DirectiveContext,
+    FlightAction, MISSION_SCHEMA_VERSION, MissionCapability, MissionDirective, MissionDocument,
+    ObservedSignal, PhysicalUnit, ReceiptResult, ReferenceRule, StartState, StimulusEnvelope,
+    StimulusError, StimulusMapping, TrialAction, VehicleLifecycleState, Waveform,
 };
 pub use pilotage_trial::{Digest, Scenario as TrialScenario};
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};

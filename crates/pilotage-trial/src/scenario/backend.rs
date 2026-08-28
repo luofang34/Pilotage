@@ -32,6 +32,10 @@ pub enum BackendCapability {
     WindControl,
     /// Apply controlled turbulence.
     TurbulenceControl,
+    /// Command the operator velocity control family.
+    OperatorVelocityControl,
+    /// Command the direct attitude and thrust control family.
+    DirectAttitudeThrustControl,
 }
 
 impl BackendCapability {
@@ -49,6 +53,8 @@ impl BackendCapability {
             Self::ContactState => "contact_state",
             Self::WindControl => "wind_control",
             Self::TurbulenceControl => "turbulence_control",
+            Self::OperatorVelocityControl => "operator_velocity_control",
+            Self::DirectAttitudeThrustControl => "direct_attitude_thrust_control",
         }
     }
 }

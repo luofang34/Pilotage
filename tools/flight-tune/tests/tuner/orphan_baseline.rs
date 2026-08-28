@@ -1,8 +1,8 @@
 use std::fs;
 
 use flight_tune::{
-    AttemptRole, Digest, JournalEntry, JournalEvent, SearchStage, SimulatorVehicleFactory,
-    TuneError, Tuner, scenario_runtime_identity,
+    AttemptRole, ControlFamily, Digest, JournalEntry, JournalEvent, SearchStage,
+    SimulatorVehicleFactory, TuneError, Tuner, scenario_runtime_identity,
 };
 use serde::Deserialize;
 
@@ -10,6 +10,7 @@ use super::TestTuner;
 use super::test_rig::{
     EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, QuadraticMetric, SequenceStrategy,
     TestDirectory, candidate, stage, stage_with_changed_training_mission,
+    stage_with_stimulus_family,
 };
 
 #[test]
@@ -136,6 +137,63 @@ fn changed_mission_document_orphans_baseline_before_mutation() {
     new_tuner
         .run_training_attempts_blocking(1)
         .expect("run changed mission baseline and challenger");
+    assert!(state.0.borrow().scenario_runs.len() > runs_before);
+    assert_eq!(new_tuner.journal().training_attempt_count(), 1);
+}
+
+#[test]
+fn changed_stimulus_control_family_orphans_baseline_before_mutation() {
+    let directory = TestDirectory::new("orphan-baseline-old-family");
+    let state = FakeHandle::new();
+    let operator = stage_with_stimulus_family(ControlFamily::OperatorVelocity);
+    let direct = stage_with_stimulus_family(ControlFamily::DirectAttitudeThrust);
+    assert_ne!(
+        operator.training_scenarios[0].content_digest,
+        direct.training_scenarios[0].content_digest
+    );
+    let mut tuner = open_with_stage(
+        &directory,
+        state.clone(),
+        operator,
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("open operator-family session");
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run operator-family training");
+    drop(tuner);
+
+    let old_head = read_head_entry(&directory);
+    let before = ExternalMutations::capture(&state);
+    let result = open_with_stage(
+        &directory,
+        state.clone(),
+        direct.clone(),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    );
+
+    assert!(matches!(result, Err(TuneError::JournalSessionMismatch)));
+    assert_eq!(ExternalMutations::capture(&state), before);
+    assert_eq!(read_head_entry(&directory), old_head);
+
+    let new_directory = TestDirectory::new("orphan-baseline-new-family");
+    let runs_before = state.0.borrow().scenario_runs.len();
+    let mut new_tuner = open_with_stage(
+        &new_directory,
+        state.clone(),
+        direct,
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("start direct-family session");
+    new_tuner
+        .run_training_attempts_blocking(1)
+        .expect("run direct-family baseline and challenger");
     assert!(state.0.borrow().scenario_runs.len() > runs_before);
     assert_eq!(new_tuner.journal().training_attempt_count(), 1);
 }

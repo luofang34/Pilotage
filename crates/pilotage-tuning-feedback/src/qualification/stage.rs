@@ -12,7 +12,7 @@ const MAX_SCENARIOS_PER_SET: usize = 64;
 /// they bound the same set of measured objectives.
 const MAX_POLICY_OBJECTIVES: usize = 64;
 const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 1;
-const MISSION_SCHEMA_VERSION: u16 = 2;
+const MISSION_SCHEMA_VERSION: u16 = 3;
 const MAX_SAMPLE_TIMEOUT_NS: u64 = 60_000_000_000;
 
 pub(super) fn verify(stage: &SearchStage) -> Result<(), FeedbackError> {

@@ -36,10 +36,13 @@ pub use signal::{
     ControlChannel, ControlValueField, QuaternionComponent, ReferenceFrame, SignalSelector,
     VectorComponent,
 };
-pub use trial::{SineComponent, StartHeading, StartState, Waveform};
+pub use trial::{
+    ControlFamily, PhysicalUnit, ReferenceRule, SineComponent, StartHeading, StartState,
+    StimulusEnvelope, StimulusError, StimulusMapping, Waveform,
+};
 
 /// The mission document schema version supported by this crate.
-pub const MISSION_SCHEMA_VERSION: u16 = 2;
+pub const MISSION_SCHEMA_VERSION: u16 = 3;
 
 /// The maximum encoded mission document size.
 pub const MAX_DOCUMENT_BYTES: usize = 1_048_576;

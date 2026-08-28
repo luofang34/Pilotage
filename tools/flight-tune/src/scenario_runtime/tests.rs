@@ -1,17 +1,15 @@
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use pilotage_mission_core::{
-    Digest as MissionDigest, EngineStart, EngineState, ExecutionTarget, MissionAction,
-    MissionCapability, MissionDirective, NavigationDataIdentity, ReceiptResult, TrialAction,
-    WallDeadline,
+    Digest as MissionDigest, EngineStart, EngineState, ExecutionTarget, MissionCapability,
+    MissionDirective, NavigationDataIdentity, ReceiptResult, WallDeadline,
 };
 use pilotage_trial::{
-    BackendCapability, Comparison, ControlChannel, Phase, PhaseAction, PhaseCondition,
-    SCENARIO_SCHEMA_VERSION, Scenario, Waveform,
+    BackendCapability, Phase, PhaseAction, PhaseCondition, SCENARIO_SCHEMA_VERSION, Scenario,
 };
 
 use super::*;
@@ -26,6 +24,7 @@ mod source_identity;
 #[derive(Default)]
 struct ReferenceRuntime {
     identity: Option<ArtifactIdentity>,
+    capabilities: Vec<MissionCapability>,
     prepared: bool,
     started: bool,
     directives: Vec<MissionDirective>,
@@ -39,16 +38,21 @@ impl ReferenceRuntime {
     fn new(identity: ArtifactIdentity) -> Self {
         Self {
             identity: Some(identity),
+            capabilities: vec![MissionCapability::SimulatorTime],
             ..Self::default()
         }
     }
 
     fn tracked(identity: ArtifactIdentity, mutations: Rc<Cell<u32>>) -> Self {
         Self {
-            identity: Some(identity),
             mutations: Some(mutations),
-            ..Self::default()
+            ..Self::new(identity)
         }
+    }
+
+    fn with_capability(mut self, capability: MissionCapability) -> Self {
+        self.capabilities.push(capability);
+        self
     }
 }
 
@@ -58,7 +62,7 @@ impl ScenarioRuntime for ReferenceRuntime {
     }
 
     fn capabilities(&self) -> &[MissionCapability] {
-        &[MissionCapability::SimulatorTime]
+        &self.capabilities
     }
 
     fn prepare_blocking(
@@ -169,40 +173,7 @@ fn identity_mismatch_precedes_action_port_mutation() {
     assert_eq!(mutations.get(), 0);
 }
 
-#[test]
-fn unsupported_capability_precedes_action_port_mutation() {
-    let mut scenario = one_phase_scenario();
-    scenario.phases[0].action = PhaseAction::Stimulus {
-        channel: ControlChannel::Roll,
-        waveform: Waveform::Pulse {
-            value: 0.25,
-            duration_ns: 1,
-        },
-    };
-    let document = mission_document_from_scenario(&scenario, navigation(), 0, 1_000_000)
-        .expect("project scenario");
-    let identity =
-        ArtifactIdentity::new("runtime", Digest::from_bytes([9; 32])).expect("runtime identity");
-    let mutations = Rc::new(Cell::new(0));
-    let mut action_port = ReferenceRuntime::tracked(identity.clone(), mutations.clone());
-
-    let result = CampaignMissionRuntime::start_blocking(
-        document.clone(),
-        start(&document),
-        &identity,
-        &mut action_port,
-        &context(),
-    );
-
-    assert!(matches!(
-        result,
-        Err(ScenarioRuntimeError::MissingCapability {
-            capability: MissionCapability::SimulatorControl,
-            ..
-        })
-    ));
-    assert_eq!(mutations.get(), 0);
-}
+mod stimulus;
 
 #[test]
 fn uncertain_start_failure_stops_and_cleans_the_action_port() {
@@ -317,46 +288,6 @@ fn production_identity_changes_for_engine_input_and_ignores_test_input() {
             source_identity::digest_named_for_test(&changed).expect("production identity")
         );
     }
-}
-
-#[test]
-fn projection_adds_the_neutral_simulator_control_capability() {
-    let scenario = Scenario {
-        schema_version: SCENARIO_SCHEMA_VERSION,
-        id: "stimulus-scenario".to_owned(),
-        revision: 1,
-        phases: vec![Phase {
-            id: "stimulus".to_owned(),
-            max_sim_time_ns: 2_000_000,
-            required_capabilities: vec![BackendCapability::SimulatorTime],
-            entry_conditions: vec![PhaseCondition::Always],
-            action: PhaseAction::Stimulus {
-                channel: ControlChannel::Roll,
-                waveform: Waveform::Pulse {
-                    value: 0.25,
-                    duration_ns: 1_000_000,
-                },
-            },
-            exit_conditions: vec![PhaseCondition::SimulatorTime {
-                comparison: Comparison::GreaterOrEqual,
-                value_ns: 1_000_000,
-            }],
-            abort_conditions: Vec::new(),
-        }],
-    };
-
-    let document = mission_document_from_scenario(&scenario, navigation(), 0, 1_000_000)
-        .expect("project stimulus");
-
-    assert!(
-        document.phases[0]
-            .required_capabilities
-            .contains(&MissionCapability::SimulatorControl)
-    );
-    assert!(matches!(
-        document.phases[0].action,
-        MissionAction::Trial(TrialAction::Stimulate { .. })
-    ));
 }
 
 fn one_phase_scenario() -> Scenario {

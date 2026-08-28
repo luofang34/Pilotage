@@ -73,12 +73,12 @@ fn route_config_produces_the_three_bounded_action_phases() {
         document.phases[2].simulator_time_deadline_ns,
         FOLLOW_PLAN_PHASE_DEADLINE_NS
     );
-    assert!(
-        document
-            .phases
-            .iter()
-            .all(|phase| { !matches!(phase.action, MissionAction::Flight(FlightAction::Hold {})) })
-    );
+    assert!(document.phases.iter().all(|phase| {
+        !matches!(
+            phase.action,
+            MissionAction::Flight(FlightAction::MaintainTarget {})
+        )
+    }));
 }
 
 #[test]

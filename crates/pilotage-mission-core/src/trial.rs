@@ -1,8 +1,16 @@
 //! Trial action value types.
 
+mod stimulus;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{ArtifactIdentity, ValidationError, validation::range};
+
+pub use stimulus::{
+    ControlFamily, PhysicalUnit, ReferenceRule, StimulusEnvelope, StimulusError, StimulusMapping,
+};
+
+pub(crate) use stimulus::validate as validate_stimulus;
 
 const MAX_WAVE_COMPONENTS: usize = 64;
 

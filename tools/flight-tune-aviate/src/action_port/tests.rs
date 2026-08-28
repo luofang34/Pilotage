@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeMap;
 
@@ -100,6 +100,73 @@ fn port_preserves_the_typed_directive_and_frame_sequence() {
     assert_eq!(projected.len(), 1);
     assert_eq!(projected[0].context, directive.context().clone());
     assert_eq!(projected[0].action, AviateVehicleAction::Observe);
+}
+
+#[test]
+fn the_port_carries_the_typed_control_family_and_envelope_to_the_driver() {
+    let driver_identity = ArtifactIdentity::new("aviate-driver", Digest::from_bytes([7; 32]))
+        .expect("driver identity");
+    let mut port = AviateVehicleActionPort::new(RecordingDriver {
+        identity: driver_identity,
+        directives: Vec::new(),
+    })
+    .expect("action port");
+    let directive: MissionDirective = serde_json::from_value(serde_json::json!({
+        "lane": "trial",
+        "directive": {
+            "context": {
+                "action_id": 4,
+                "phase_index": 0,
+                "phase_id": "stimulus",
+                "attempt": 1,
+                "purpose": { "purpose": "phase_action" }
+            },
+            "action": {
+                "kind": "stimulate",
+                "family": "direct_attitude_thrust",
+                "channel": "vertical",
+                "mapping": "affine_exact",
+                "envelope": {
+                    "id": "alia250.direct.collective",
+                    "revision": 2,
+                    "unit": "normalized_collective_force",
+                    "reference": "identified_hover_trim",
+                    "negative_endpoint": -0.2,
+                    "neutral": 0.05,
+                    "positive_endpoint": 0.4
+                },
+                "waveform": { "kind": "step", "value": 0.5 }
+            }
+        }
+    }))
+    .expect("typed stimulus directive");
+
+    let receipt = ScenarioRuntime::observe_blocking(&mut port, &frame(21), Some(&directive))
+        .expect("observe directive");
+
+    assert_eq!(receipt.action_result, Some(ReceiptResult::Succeeded {}));
+    let projected = port.into_inner().directives;
+    let AviateVehicleAction::Stimulate {
+        family,
+        channel,
+        mapping,
+        envelope,
+        ..
+    } = &projected[0].action
+    else {
+        panic!("the port must carry the stimulus to the driver");
+    };
+    assert_eq!(*family, ControlFamily::DirectAttitudeThrust);
+    assert_eq!(*channel, ControlChannel::Vertical);
+    assert_eq!(*mapping, StimulusMapping::AffineExact);
+    assert!(
+        (mapping
+            .resolve_exact(envelope, 1.0)
+            .expect("resolve the positive endpoint")
+            - 0.4)
+            .abs()
+            < 1.0e-12
+    );
 }
 
 #[test]

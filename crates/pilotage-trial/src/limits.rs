@@ -5,7 +5,7 @@ pub const TRIAL_MANIFEST_SCHEMA_VERSION: u16 = 1;
 /// The supported run identity schema version.
 pub const RUN_IDENTITY_SCHEMA_VERSION: u16 = 1;
 /// The supported scenario schema version.
-pub const SCENARIO_SCHEMA_VERSION: u16 = 2;
+pub const SCENARIO_SCHEMA_VERSION: u16 = 3;
 /// The supported backend capabilities schema version.
 pub const BACKEND_CAPABILITIES_SCHEMA_VERSION: u16 = 1;
 /// The supported trial sample schema version.
@@ -19,6 +19,8 @@ pub const MAX_MANIFEST_BYTES: usize = 256 * 1024;
 pub const MAX_RUN_IDENTITY_BYTES: usize = 64 * 1024;
 /// The maximum trial sample JSON size.
 pub const MAX_SAMPLE_BYTES: usize = 64 * 1024;
+/// The maximum stimulus envelope JSON size.
+pub const MAX_STIMULUS_ENVELOPE_BYTES: usize = 4 * 1024;
 /// The maximum UTF-8 byte count for one text value.
 pub const MAX_TEXT_BYTES: usize = 256;
 /// The maximum number of phases in one scenario.

@@ -15,7 +15,7 @@ fn abort_cleanup_reverses_phases_attempts_all_steps_and_aggregates_failures() {
         .push(crate::MissionCapability::FlightControl);
     let mut second = phase("second");
     second.cleanup_actions = vec![
-        MissionAction::Flight(FlightAction::Hold {}),
+        MissionAction::Flight(FlightAction::MaintainTarget {}),
         MissionAction::Flight(FlightAction::Disarm {}),
     ];
     second.abort_conditions = vec![crash_condition()];
@@ -35,7 +35,7 @@ fn abort_cleanup_reverses_phases_attempts_all_steps_and_aggregates_failures() {
     assert_eq!(second_action.directives[0].context().phase_id, "second");
 
     let first_cleanup = tick(&mut engine, 2, 2, crashed_observation(), Vec::new());
-    assert_cleanup(&first_cleanup, 1, "second", 0, "flight.hold");
+    assert_cleanup(&first_cleanup, 1, "second", 0, "flight.maintain_target");
     let second_cleanup = tick(
         &mut engine,
         3,
@@ -44,7 +44,7 @@ fn abort_cleanup_reverses_phases_attempts_all_steps_and_aggregates_failures() {
         vec![receipt(
             &first_cleanup,
             ReceiptResult::Failed {
-                detail: "hold failed".to_owned(),
+                detail: "maintain target failed".to_owned(),
             },
         )],
     );
@@ -75,7 +75,7 @@ fn abort_cleanup_reverses_phases_attempts_all_steps_and_aggregates_failures() {
             cleanup_failures,
             ..
         } if cleanup_failures.len() == 2
-            && cleanup_failures[0].action == "flight.hold"
+            && cleanup_failures[0].action == "flight.maintain_target"
             && cleanup_failures[1].action == "flight.land"
     ));
 }
