@@ -19,6 +19,8 @@ pub enum MissionState {
     /// The plan is complete; every tick commands zero velocity so the
     /// adapter's brake-then-hold takes over.
     Complete,
+    /// The core refused or stopped the mission before plan completion.
+    Failed,
 }
 
 /// A discrete action the host must send as a `ControlActionCommand` on
@@ -68,6 +70,16 @@ pub enum MissionEvent {
     },
     /// The final waypoint captured; emitted exactly once.
     MissionComplete,
+    /// The sequencing core stopped the mission with a typed result.
+    MissionFailed {
+        /// The typed core terminal result.
+        result: pilotage_mission_core::MissionTerminal,
+    },
+    /// The sequencing core refused one host input.
+    MissionEngineRefused {
+        /// The core error detail for the operational log.
+        detail: String,
+    },
     /// Guidance refused to issue a setpoint this tick; no intent was
     /// emitted (the host's silence watchdog is the backstop). Repeats of
     /// the same refusal kind are counted but not re-surfaced until the

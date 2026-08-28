@@ -46,8 +46,8 @@ pub struct MissionConfig {
     /// (ADR-0030); nothing downstream ever sees degrees.
     pub anchor: GeodeticPosition,
     /// Cruise height above the anchor altitude, meters. Default 15.0.
-    /// `0.0` disables the climb phase: the mission goes straight from
-    /// arming to enroute guidance.
+    /// `0.0` disables climb behavior. The mission starts enroute guidance
+    /// after the arm receipt.
     pub cruise_height_m: f64,
     /// Commanded climb rate during the climb phase, m/s. Default 0.8.
     pub climb_rate_mps: f64,
