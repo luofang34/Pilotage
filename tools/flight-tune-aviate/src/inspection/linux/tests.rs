@@ -2,10 +2,8 @@
 
 use std::collections::VecDeque;
 
-use super::{
-    ExecutableObservation, ProcessSource, STABLE_SNAPSHOT_ATTEMPTS, inspect_process_from,
-    observe_open_executable, parse_stat,
-};
+use super::procfs::{observe_open_executable, parse_stat};
+use super::{ExecutableObservation, ProcessSource, STABLE_SNAPSHOT_ATTEMPTS, inspect_process_from};
 use crate::AviateSupervisorError;
 use crate::document::ProcessStartIdentity;
 use crate::inspection::LifetimeIdentity;
@@ -274,6 +272,75 @@ impl ProcessSource for ScriptedSource {
     ) -> Result<Option<ExecutableObservation>, AviateSupervisorError> {
         Ok(self.executables.pop_front().expect("scripted executable"))
     }
+}
+
+#[test]
+fn inspection_outwaits_a_command_line_in_flight() {
+    // A freshly-spawned process reports an EMPTY command line until its
+    // execve completes; the kernel is saying "in flight", not "someone
+    // else". The inspection must wait it out, not call it a mismatch.
+    let lifetime_value = lifetime();
+    let target_command = command("/target");
+    let target_executable = executable("/target", 3);
+    let mut source = ScriptedSource::new(
+        vec![
+            Some(lifetime_value.clone()),
+            Some(lifetime_value.clone()),
+            Some(lifetime_value.clone()),
+            Some(lifetime_value),
+        ],
+        vec![
+            Vec::new(),
+            Vec::new(),
+            target_command.clone(),
+            target_command.clone(),
+        ],
+        vec![
+            target_executable.clone(),
+            target_executable.clone(),
+            target_executable.clone(),
+            target_executable,
+        ],
+    );
+    let digest = crate::inspection::digest_argument_bytes(
+        target_command
+            .split(|byte| *byte == 0)
+            .filter(|value| !value.is_empty()),
+    );
+
+    let identity = inspect_process_from(&mut source, 77, digest)
+        .expect("outwait the exec window")
+        .expect("the process is present");
+
+    assert_eq!(identity.observed_argv_digest, Some(digest));
+    assert!(source.is_empty(), "inspection consumes both snapshots");
+}
+
+#[test]
+fn a_command_line_that_never_arrives_refuses_as_unstabilized() {
+    // A permanently empty command line (a zombie, a kernel thread) is
+    // indeterminate, and an indeterminate identity must refuse as one —
+    // never as "the arguments differ", which accuses a live process of
+    // being somebody else.
+    let mut lifetimes = Vec::new();
+    let mut commands = Vec::new();
+    let mut executables = Vec::new();
+    for _ in 0..STABLE_SNAPSHOT_ATTEMPTS {
+        lifetimes.extend([Some(lifetime()), Some(lifetime())]);
+        commands.extend([Vec::new(), Vec::new()]);
+        executables.extend([executable("/target", 3), executable("/target", 3)]);
+    }
+    let mut source = ScriptedSource::new(lifetimes, commands, executables);
+    let digest = crate::inspection::digest_argument_bytes([b"/target".as_slice()]);
+
+    let error = inspect_process_from(&mut source, 77, digest)
+        .expect_err("refuse a command line that never arrives");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("stabilize") && !text.contains("differ"),
+        "{text}"
+    );
 }
 
 fn lifetime() -> LifetimeIdentity {
