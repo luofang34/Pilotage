@@ -2,10 +2,8 @@
 
 use std::collections::VecDeque;
 
-use super::{
-    ExecutableObservation, ProcessSource, STABLE_SNAPSHOT_ATTEMPTS, inspect_process_from,
-    observe_open_executable, parse_stat,
-};
+use super::procfs::{observe_open_executable, parse_stat};
+use super::{ExecutableObservation, ProcessSource, STABLE_SNAPSHOT_ATTEMPTS, inspect_process_from};
 use crate::AviateSupervisorError;
 use crate::document::ProcessStartIdentity;
 use crate::inspection::LifetimeIdentity;
