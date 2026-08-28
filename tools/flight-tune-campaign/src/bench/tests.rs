@@ -135,7 +135,7 @@ fn a_campaign_smokes_the_whole_chain() {
 }
 
 #[test]
-#[ignore = "certification: the full campaign for both vehicles, affected-gated in CI and nightly"]
+#[ignore = "certification: the full campaign for one vehicle, run by its own CI step"]
 fn a_campaign_runs_end_to_end_for_the_alia250() {
     // The whole chain: a warm start, a bounded search over the command law,
     // a frozen champion, a paired promotion decision on scenarios the search
@@ -159,7 +159,7 @@ fn a_campaign_runs_end_to_end_for_the_alia250() {
 }
 
 #[test]
-#[ignore = "certification: the full campaign for both vehicles, affected-gated in CI and nightly"]
+#[ignore = "certification: the full campaign for one vehicle, run by its own CI step"]
 fn a_campaign_runs_end_to_end_for_the_x500() {
     // The second vehicle contributes a model and a bar and nothing else. That
     // this runs at all, through the same backend, evaluator and engine, is the
