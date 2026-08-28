@@ -12,7 +12,13 @@ use crate::inspection::{
     digest_open_file, digest_open_file_before, io_error, process_io,
 };
 
-const STABLE_SNAPSHOT_ATTEMPTS: usize = 3;
+const STABLE_SNAPSHOT_ATTEMPTS: usize = 5;
+
+/// Rest between unstable snapshots. Three instantaneous procfs reads
+/// fit inside one execve, so an unpaced retry loop resolves nothing;
+/// paced attempts span the window in which a process's command line is
+/// legitimately in flight.
+const SNAPSHOT_RETRY_PACE: std::time::Duration = std::time::Duration::from_millis(10);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ExecutableObservation {
@@ -82,6 +88,7 @@ fn inspect_process_from(
             StableSnapshot::Missing => return Ok(None),
             StableSnapshot::Unstable { lifetime } => {
                 bind_lifetime_anchor(&mut lifetime_anchor, &lifetime)?;
+                std::thread::sleep(SNAPSHOT_RETRY_PACE);
             }
             StableSnapshot::Stable {
                 lifetime,
@@ -89,6 +96,16 @@ fn inspect_process_from(
                 executable,
             } => {
                 bind_lifetime_anchor(&mut lifetime_anchor, &lifetime)?;
+                // An EMPTY command line is not a different process — it
+                // is the kernel's own statement that the image is in
+                // flight (mid-exec) or gone (zombie), and both resolve
+                // within the paced attempts or refuse as unstabilized.
+                // Only a command line that says something DIFFERENT is a
+                // mismatch.
+                if arguments::split(&command).is_empty() {
+                    std::thread::sleep(SNAPSHOT_RETRY_PACE);
+                    continue;
+                }
                 return build_process_identity(
                     pid,
                     launch_argv_digest,
