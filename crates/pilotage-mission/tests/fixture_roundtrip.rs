@@ -29,6 +29,23 @@ fn demo_blob_round_trips_with_faithful_provenance() {
     );
     assert_eq!(provenance.sha256_hex.len(), 64);
     assert!(provenance.sha256_hex.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_eq!(
+        provenance.navigation_data_identity.cycle,
+        "faa-nasr:2026-01-22"
+    );
+    assert!(
+        provenance
+            .navigation_data_identity
+            .snapshot_id
+            .ends_with(&provenance.sha256_hex)
+    );
+    assert_eq!(
+        provenance
+            .navigation_data_identity
+            .snapshot_digest
+            .to_string(),
+        provenance.sha256_hex
+    );
 }
 
 #[test]

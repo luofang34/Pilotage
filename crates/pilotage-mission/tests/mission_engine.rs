@@ -110,7 +110,7 @@ fn step(
     now: &mut MonotonicNanos,
     arm_requests: &mut u32,
     events: &mut Vec<MissionEvent>,
-) {
+) -> pilotage_mission::MissionOutput {
     *now = MonotonicNanos::from_nanos(now.as_nanos() + STEP_NANOS);
     truth.sequence = truth.sequence.wrapping_add(1);
     engine.on_ownship(&truth.sample(*now), *now);
@@ -120,11 +120,19 @@ fn step(
         *arm_requests += 1;
         engine.on_action_result(action.action_id, true);
     }
-    if let Some(intent) = out.intent {
-        assert_within_limits(&intent);
-        truth.integrate(&intent);
+    if let Some(intent) = out.intent.as_ref() {
+        assert_within_limits(intent);
+        truth.integrate(intent);
     }
-    events.extend(out.events);
+    events.extend(out.events.iter().cloned());
+    out
+}
+
+fn is_zero_velocity(intent: &ControlIntent) -> bool {
+    let ControlIntent::Velocity(velocity) = intent else {
+        return false;
+    };
+    velocity.vx == 0.0 && velocity.vy == 0.0 && velocity.vz == 0.0 && velocity.yaw_rate == 0.0
 }
 
 fn count<F: Fn(&MissionEvent) -> bool>(events: &[MissionEvent], predicate: F) -> usize {
@@ -191,14 +199,24 @@ fn mission_arms_once_climbs_flies_the_route_and_completes() {
     let mut events = Vec::new();
     let mut completed = false;
     for _ in 0..20_000 {
-        step(
+        let output = step(
             &mut engine,
             &mut truth,
             &mut now,
             &mut arm_requests,
             &mut events,
         );
-        if engine.state() == MissionState::Complete {
+        let held_before_terminal = output.state == MissionState::Enroute
+            && output.intent.as_ref().is_some_and(is_zero_velocity);
+        assert!(!held_before_terminal, "no enroute hold tick is permitted");
+        if output.state == MissionState::Complete {
+            assert!(
+                output
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, MissionEvent::MissionComplete)),
+                "the first terminal tick surfaces mission completion"
+            );
             completed = true;
             break;
         }

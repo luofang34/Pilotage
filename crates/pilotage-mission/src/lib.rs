@@ -1,9 +1,9 @@
-//! Sans-IO mission engine: a packed navdata snapshot plus a route
-//! string becomes a validated flight plan, and truth-role ownship
-//! samples become typed velocity intents and discrete actions toward
-//! the Pilotage control boundary.
+//! Operational mission handler: a packed navdata snapshot plus a route
+//! string becomes a validated flight plan and mission document. The shared
+//! mission core sequences the document. Navigate interprets active flight
+//! directives as typed velocity intents and discrete actions.
 //!
-//! Nothing here reads a clock or performs I/O. `now` is always a
+//! The handler does not read a clock or perform input or output. `now` is a
 //! caller-supplied [`navigate_contract::MonotonicNanos`] on the single
 //! clock domain fixed in [`MissionConfig`]; telemetry arrives as
 //! host-converted [`OwnshipSample`]s; outputs are
@@ -16,6 +16,7 @@ pub mod engine;
 pub mod error;
 pub mod fixture;
 pub mod ownship;
+pub mod policy;
 pub mod provenance;
 
 mod body_frame;

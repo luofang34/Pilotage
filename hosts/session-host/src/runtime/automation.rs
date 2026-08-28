@@ -129,6 +129,12 @@ pub(crate) fn prepare(options: &MissionOptions) -> Result<MissionPlan, HostError
         effective_on = %record.provenance.effective_on,
         sha256 = %record.provenance.sha256_hex,
         fixture = record.provenance.fixture,
+        mission_revision = %record.mission_identity.revision_id,
+        mission_schema = record.mission_identity.schema_version,
+        mission_digest = %record.mission_identity.content_digest,
+        navdata_cycle = %record.mission_identity.navigation_data_identity.cycle,
+        navdata_snapshot = %record.mission_identity.navigation_data_identity.snapshot_id,
+        navdata_digest = %record.mission_identity.navigation_data_identity.snapshot_digest,
         "mission packed for flight"
     );
     Ok(plan)
