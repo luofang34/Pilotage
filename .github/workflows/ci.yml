@@ -8,6 +8,16 @@ on:
     branches: [main]
   pull_request:
 
+
+# A push to a pull request supersedes the runs of the push before it.
+# The stale run's answer serves nobody, and it holds runners the
+# repository has few of (five macOS). Group per pull request and cancel
+# the superseded run; a push to main gets a group of its own commit, so
+# main keeps one verdict per commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   # The Navigate crates are private git dependencies; libgit2
