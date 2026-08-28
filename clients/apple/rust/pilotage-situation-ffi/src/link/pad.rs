@@ -323,6 +323,7 @@ impl Link {
                     action: ACTION_GIMBAL_RECENTER,
                     mode_target: 0,
                     action_id: 0,
+                    feel_target: 0,
                 },
             ));
         }

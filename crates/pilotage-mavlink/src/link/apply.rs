@@ -129,8 +129,46 @@ fn apply_attitude(
     }
 }
 
-/// Folds one kinematics group into the cache, stamping it with the
-/// authorization current at its source time.
+/// Applies one receiver fix report.
+///
+/// A latitude and longitude both exactly zero is a receiver that stated no
+/// position: 0,0 is a real place off the coast of Africa, so nothing
+/// downstream can tell it from a vehicle that is there.
+fn apply_gnss_fix(latest: &mut LinkState, message: FcMessage, now: Instant) {
+    let FcMessage::GnssFix {
+        lat_lon,
+        alt_ellipsoid_mm,
+        accuracy_mm,
+        ..
+    } = message
+    else {
+        return;
+    };
+    if lat_lon == [0, 0] {
+        return;
+    }
+    // The message's own timestamp is not read. A flight controller with no
+    // satellite time fills it from its boot clock and one with satellite
+    // time fills it from UTC, and nothing on the wire says which — so it
+    // cannot order this lane, and it must never reach the shared boot-clock
+    // high water mark the other groups are ordered against, where a UTC
+    // value would make every later boot timestamp look like a restart.
+    let sequence = latest
+        .gnss_fix
+        .map_or(0, |fix| fix.sequence.wrapping_add(1));
+    let received_since_start_ns =
+        u64::try_from(now.saturating_duration_since(latest.started_at).as_nanos())
+            .unwrap_or(u64::MAX);
+    latest.gnss_fix = Some(crate::link::GnssFixUpdate {
+        lat_lon,
+        alt_ellipsoid_mm,
+        accuracy_mm,
+        sequence,
+        received_since_start_ns,
+        received_at: now,
+    });
+}
+
 /// Applies one simulator ground-truth report: latches the projection
 /// origin on the first fix and projects geodetic truth into local NED.
 /// The flat-earth projection's error over a SITL flight is far below
@@ -144,6 +182,18 @@ fn apply_sim_truth(
     now: Instant,
 ) {
     const METRES_PER_DEGREE: f64 = 111_111.0;
+    // A report whose whole geodetic triple is zero states no position. The
+    // value is legal — 0,0 is a real place off the coast of Africa — so
+    // nothing downstream can tell it from a vehicle that is there, and a
+    // frame short of its geodetic bytes decodes to the same zeros. The
+    // whole report is refused, not only its geodetic half: the local frame
+    // is that position projected, so a projection of no position is a
+    // position too. Projected against a latched origin it reads thousands
+    // of kilometres from the vehicle, under a flag that says the position
+    // is valid.
+    if lat_lon_alt == [0, 0, 0] {
+        return;
+    }
     let origin = *latest
         .truth_origin
         .get_or_insert_with(|| crate::link::TruthOrigin {
@@ -152,9 +202,12 @@ fn apply_sim_truth(
             alt_mm: lat_lon_alt[2],
             lon_scale: METRES_PER_DEGREE * (f64::from(lat_lon_alt[0]) * 1e-7).to_radians().cos(),
         });
-    let north = f64::from(lat_lon_alt[0] - origin.lat_1e7) * 1e-7 * METRES_PER_DEGREE;
-    let east = f64::from(lat_lon_alt[1] - origin.lon_1e7) * 1e-7 * origin.lon_scale;
-    let down = f64::from(origin.alt_mm - lat_lon_alt[2]) * 1e-3;
+    // The wire carries these as i32 and a difference of two of them does
+    // not fit one. The subtraction is done in f64, where the whole i32
+    // range is exact.
+    let north = (f64::from(lat_lon_alt[0]) - f64::from(origin.lat_1e7)) * 1e-7 * METRES_PER_DEGREE;
+    let east = (f64::from(lat_lon_alt[1]) - f64::from(origin.lon_1e7)) * 1e-7 * origin.lon_scale;
+    let down = (f64::from(origin.alt_mm) - f64::from(lat_lon_alt[2])) * 1e-3;
     let sequence = latest
         .sim_truth
         .map_or(0, |update| update.sequence.wrapping_add(1));
@@ -162,6 +215,7 @@ fn apply_sim_truth(
         quat_wxyz,
         pos_ned_m: [north as f32, east as f32, down as f32],
         vel_ned_mps,
+        lat_lon_alt,
         time_usec,
         sequence,
         received_at: now,
@@ -189,6 +243,8 @@ fn apply_baro(latest: &mut LinkState, time_boot_ms: u32, press_abs_hpa: f32, now
     }
 }
 
+/// Folds one kinematics group into the cache, stamping it with the
+/// authorization current at its source time.
 fn apply_kinematics(
     latest: &mut LinkState,
     time_boot_ms: u32,
@@ -249,6 +305,7 @@ fn apply_message(latest: &mut LinkState, message: FcMessage, now: Instant) {
             pos_ned_m,
             vel_ned_mps,
         } => apply_kinematics(latest, time_boot_ms, pos_ned_m, vel_ned_mps, now),
+        FcMessage::GnssFix { .. } => apply_gnss_fix(latest, message, now),
         FcMessage::ScaledPressure {
             time_boot_ms,
             press_abs_hpa,

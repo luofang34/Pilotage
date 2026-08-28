@@ -26,6 +26,20 @@ message BridgeOdometry {
   uint64 sim_time_ns = 5;
 }
 
+// A single satellite-navigation fix from the sidecar to the host, reduced
+// to the geodetic position the host's telemetry model needs (ADR-0008): no
+// raw gz.msgs.NavSat crosses this boundary. Velocity is not carried — the
+// truth sample the fix joins already reports it.
+message BridgeNavSat {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+  // Altitude as the sensor states it, metres.
+  double altitude_m = 3;
+  // The simulation clock, so the host can tell whether this fix and a
+  // truth sample describe the same moment.
+  uint64 sim_time_ns = 4;
+}
+
 // A single raw camera frame from the sidecar to the host, ahead of the
 // host's own MJPEG encode step (ADR-0005): no raw gz.msgs.Image crosses
 // this boundary.
@@ -73,5 +87,6 @@ message BridgeEnvelope {
     BridgeOdometry odometry = 2;
     BridgeFrame frame = 3;
     BridgeCameraCommand camera_command = 4;
+    BridgeNavSat navsat = 5;
   }
 }

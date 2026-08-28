@@ -9,6 +9,8 @@
 #   3. PilotageCamera  - this repository's vehicle camera export
 #                       (sim/xplane/camera)
 #   4. PilotageWeather - static regional weather control and readback
+#   5. PilotageTrial   - verified identity and trial truth stream
+#                        (sim/xplane/trial)
 #                       (sim/xplane/weather)
 #
 # The install target is the X-Plane root: XPLANE_ROOT, else the first
@@ -58,6 +60,11 @@ git -C "${PX4XPLANE_DIR}" submodule update --init --recursive
 cmake -S "${PX4XPLANE_DIR}" -B "${PX4XPLANE_DIR}/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build "${PX4XPLANE_DIR}/build" -j "$(sysctl -n hw.ncpu)" >/dev/null
 PACKAGE="${PX4XPLANE_DIR}/build/mac/Release/px4xplane"
+
+# The trial plugin embeds this so a verifier can tell whether the bridge it
+# is talking to is the bridge it was built against. Taken from the package this
+# run installs, so a plugin rebuild never leaves the manifest behind.
+BRIDGE_BUILD_DIGEST="$(shasum -a 256 "${PACKAGE}/64/mac.xpl" | awk '{print $1}')"
 [[ -f "${PACKAGE}/64/mac.xpl" ]] || { echo "px4xplane build produced no mac.xpl" >&2; exit 1; }
 
 # --- Build PilotageAutoFlight -------------------------------------------
@@ -109,6 +116,48 @@ clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
   -o "${WEATHER_BUILD}/weather_state_tests"
 "${WEATHER_BUILD}/weather_state_tests"
 
+# --- Build PilotageTrial -------------------------------------------------
+echo "building PilotageTrial..."
+TRIAL_BUILD="${REPO_ROOT}/target/xplane-trial"
+TRIAL_SRC="${REPO_ROOT}/sim/xplane/trial"
+mkdir -p "${TRIAL_BUILD}"
+# The build id is over the sources, so a plugin built from different code
+# cannot claim the identity of one built from this code.
+TRIAL_BUILD_ID="$({
+  shasum -a 256 "${TRIAL_SRC}/PilotageTrial.cpp" | awk '{print $1}'
+  shasum -a 256 "${TRIAL_SRC}/link.cpp" | awk '{print $1}'
+  shasum -a 256 "${TRIAL_SRC}/link.h" | awk '{print $1}'
+  shasum -a 256 "${TRIAL_SRC}/protocol.cpp" | awk '{print $1}'
+  shasum -a 256 "${TRIAL_SRC}/protocol.h" | awk '{print $1}'
+} | shasum -a 256 | awk '{print $1}')"
+clang++ -std=c++17 -O2 -Wall -Wextra -Werror -shared -fPIC \
+  -DAPL=1 -DIBM=0 -DLIN=0 -DXPLM200 -DXPLM210 -DXPLM300 -DXPLM301 -DXPLM303 \
+  -DPILOTAGE_TRIAL_BUILD_ID=\"${TRIAL_BUILD_ID}\" \
+  -DPILOTAGE_BRIDGE_BUILD_DIGEST=\"${BRIDGE_BUILD_DIGEST}\" \
+  -I "${PX4XPLANE_DIR}/lib/SDK/CHeaders/XPLM" -I "${TRIAL_SRC}" \
+  "${TRIAL_SRC}/PilotageTrial.cpp" \
+  "${TRIAL_SRC}/link.cpp" \
+  "${TRIAL_SRC}/protocol.cpp" \
+  -undefined dynamic_lookup \
+  -o "${TRIAL_BUILD}/mac.xpl"
+
+clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
+  -I "${TRIAL_SRC}" \
+  "${TRIAL_SRC}/protocol_tests.cpp" \
+  "${TRIAL_SRC}/protocol.cpp" \
+  -o "${TRIAL_BUILD}/protocol_tests"
+"${TRIAL_BUILD}/protocol_tests"
+
+# The link needs one simulator symbol, which the test binary stubs, so its
+# queueing and give-up behaviour is reachable without X-Plane.
+clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
+  -DAPL=1 -DIBM=0 -DLIN=0 -DXPLM200 -DXPLM210 -DXPLM300 -DXPLM301 -DXPLM303 \
+  -I "${PX4XPLANE_DIR}/lib/SDK/CHeaders/XPLM" -I "${TRIAL_SRC}" \
+  "${TRIAL_SRC}/link_tests.cpp" \
+  "${TRIAL_SRC}/link.cpp" \
+  -o "${TRIAL_BUILD}/link_tests"
+"${TRIAL_BUILD}/link_tests"
+
 # --- Install -------------------------------------------------------------
 echo "installing plugins and aircraft..."
 PLUGINS="${XPLANE_ROOT}/Resources/plugins"
@@ -159,6 +208,14 @@ cp "${CAMERA_BUILD}/mac.xpl" "${PLUGINS}/PilotageCamera/64/mac.xpl"
 
 mkdir -p "${PLUGINS}/PilotageWeather/64"
 cp "${WEATHER_BUILD}/mac.xpl" "${PLUGINS}/PilotageWeather/64/mac.xpl"
+
+mkdir -p "${PLUGINS}/PilotageTrial/64"
+cp "${TRIAL_BUILD}/mac.xpl" "${PLUGINS}/PilotageTrial/64/mac.xpl"
+# Written by the same run that builds both, so the manifest can never pin a
+# bridge digest the installed bridge no longer has.
+printf '{"schema_version":1,"trial_source_build_id":"%s","bridge_plugin_digest":"%s"}\n' \
+  "${TRIAL_BUILD_ID}" "${BRIDGE_BUILD_DIGEST}" \
+  > "${PLUGINS}/PilotageTrial/build-manifest.json"
 
 mkdir -p "${XPLANE_ROOT}/Aircraft/Extra Aircraft"
 rm -rf "${XPLANE_ROOT}/Aircraft/Extra Aircraft/QuadTailsitter"

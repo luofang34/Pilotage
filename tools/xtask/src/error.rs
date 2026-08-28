@@ -11,6 +11,20 @@ pub enum XtaskError {
         /// What was wrong with the arguments.
         message: String,
     },
+    /// At least one guard failed its self-test or its check. Every
+    /// failing guard is named, so one red run reports them all.
+    #[error("guards failed: {}", names.join(", "))]
+    GuardsFailed {
+        /// Every failing guard, in discovery order.
+        names: Vec<String>,
+    },
+    /// Guard discovery found no pairs at all. An empty result means
+    /// the runner is looking at the wrong tree, not at a clean one.
+    #[error("no guard pairs were discovered under {}", scripts.display())]
+    NoGuardPairs {
+        /// The directory discovery searched.
+        scripts: PathBuf,
+    },
     /// `--fc` named a backend this launcher does not know. Unknown
     /// backends fail closed instead of guessing.
     #[error("unknown --fc backend {name:?} (expected: aviate)")]

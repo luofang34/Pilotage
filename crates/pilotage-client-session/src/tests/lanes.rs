@@ -201,6 +201,7 @@ fn actions_across_lanes_share_one_correlation_id_space() {
             action: 1,
             mode_target: 0,
             action_id: 0,
+            feel_target: 0,
         },
     );
     let recenter = engine.control_action(
@@ -210,6 +211,7 @@ fn actions_across_lanes_share_one_correlation_id_space() {
             action: 4,
             mode_target: 0,
             action_id: 0,
+            feel_target: 0,
         },
     );
     // The host correlates per client, not per lane: the same id from a

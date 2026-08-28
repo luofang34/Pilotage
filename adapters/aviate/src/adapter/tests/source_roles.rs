@@ -220,3 +220,128 @@ fn mislabeled_estimate_roles_cannot_seed_a_control_setpoint() {
         Disposition::Rejected(RejectReason::MeasurementUnavailable)
     );
 }
+
+/// The X-Plane lane's only truth path.
+///
+/// X-Plane publishes no shared-memory block, so no oracle attaches and the
+/// simulator's ground truth reaches the adapter the one way it can: the
+/// flight controller forwards the truth frame over the estimate link. The
+/// position the simulator stated has to survive that path, or an X-Plane
+/// session draws no vehicle on the map while a Gazebo session does.
+#[test]
+fn the_x_plane_lane_publishes_the_position_the_flight_controller_forwarded() {
+    // Zurich, so a reader can tell this apart from a projection of the
+    // estimate fixture's local pose.
+    const REPORTED: [i32; 3] = [473_977_419, 85_455_938, 488_227];
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.sim_truth = Some(pilotage_mavlink::link::SimTruthUpdate {
+            quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+            pos_ned_m: [0.0; 3],
+            vel_ned_mps: [0.0; 3],
+            lat_lon_alt: REPORTED,
+            time_usec: 1_000,
+            sequence: 3,
+            received_at: std::time::Instant::now(),
+        });
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    // No oracle is attached: that IS the X-Plane shape.
+    assert!(adapter.truth.is_none());
+
+    let batch = adapter.sample_telemetry();
+    let truth = batch.samples[0]
+        .sim_truth
+        .expect("the forwarded truth frame");
+    let fix = truth.geodetic.expect("the position the simulator stated");
+
+    assert!((fix.position.latitude_deg - 47.397_741_9).abs() < 1e-7);
+    assert!((fix.position.longitude_deg - 8.545_593_8).abs() < 1e-7);
+    assert_eq!(fix.stamp.role, SourceRole::SimulationTruth);
+}
+
+/// A Gazebo session whose sidecar is not built has no satellite sensor to
+/// read, so the oracle that outranks the forwarded frame publishes no
+/// position rather than pairing one from another clock.
+#[test]
+fn an_oracle_with_no_paired_sensor_states_no_position() {
+    let (name, _writer) = truth_writer("nav");
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.sim_truth = Some(pilotage_mavlink::link::SimTruthUpdate {
+            quat_wxyz: [1.0, 0.0, 0.0, 0.0],
+            pos_ned_m: [0.0; 3],
+            vel_ned_mps: [0.0; 3],
+            lat_lon_alt: [473_977_419, 85_455_938, 488_227],
+            time_usec: 1_000,
+            sequence: 3,
+            received_at: std::time::Instant::now(),
+        });
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+    attach_truth(&mut adapter, &name);
+
+    let batch = adapter.sample_telemetry();
+    let truth = batch.samples[0].sim_truth.expect("the oracle's sample");
+    assert!(truth.geodetic.is_none());
+}
+
+/// The estimate lane's own position, on any backend.
+///
+/// A flight controller reports its receiver's fix whether the vehicle is
+/// real or simulated. That is the lane a physical vehicle will draw from,
+/// and it must reach the published batch under the estimate role and not
+/// the truth role.
+#[test]
+fn the_estimate_lane_publishes_the_position_the_receiver_solved() {
+    // Zurich, so a reader can tell this apart from the estimate fixture's
+    // local pose.
+    const REPORTED: [i32; 3] = [473_977_419, 85_455_938, 488_227];
+    let state = state_with(Duration::ZERO, Duration::ZERO);
+    {
+        let mut latest = state.lock().expect("lock");
+        latest.gnss_fix = Some(pilotage_mavlink::link::GnssFixUpdate {
+            lat_lon: [REPORTED[0], REPORTED[1]],
+            alt_ellipsoid_mm: 536_000,
+            accuracy_mm: [1_250, 2_100],
+            sequence: 4,
+            received_since_start_ns: 9_000_000,
+            received_at: std::time::Instant::now(),
+        });
+    }
+    let mut adapter = AviateAdapter::from_state(VehicleId::new(1), state);
+
+    let batch = adapter.sample_telemetry();
+    let avionics = batch.samples[0].avionics.expect("the estimate lane");
+    let fix = avionics
+        .geodetic
+        .expect("the position the controller solved");
+
+    assert!((fix.position.latitude_deg - 47.397_741_9).abs() < 1e-7);
+    assert!((fix.position.longitude_deg - 8.545_593_8).abs() < 1e-7);
+    assert!(
+        (fix.position.vertical.height_m - 536.0).abs() < 1e-6,
+        "the height is the ellipsoidal one, not the sea-level one beside it",
+    );
+    assert_eq!(
+        fix.quality.horizontal_mm, 1_250,
+        "the receiver's own accuracy travels with its fix",
+    );
+    assert_eq!(
+        fix.stamp.role,
+        SourceRole::OperationalEstimate,
+        "a receiver's solution is not an oracle",
+    );
+    assert_eq!(
+        fix.stamp.clock,
+        pilotage_adapter_api::MeasurementClock::HostMonotonic,
+        "the message names no clock, so the stamp names the one that received it",
+    );
+    assert_eq!(fix.stamp.acquired_at_ns, 9_000_000);
+    assert!(
+        batch.samples[0].sim_truth.is_none(),
+        "no oracle attached and no truth frame forwarded",
+    );
+}

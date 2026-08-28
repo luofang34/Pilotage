@@ -10,6 +10,24 @@ use pilotage_timing::{MonoTimestamp, SimTick};
 
 use super::{avionics_to_wire, sample_to_wire};
 
+/// One telemetry sample carrying only the estimate under test.
+fn one_vehicle_sample(avionics: AvionicsSample) -> TelemetrySample {
+    TelemetrySample {
+        vehicle: VehicleId::new(9),
+        tick: SimTick::new(42),
+        pose: Some(Pose2d {
+            x: 1.0,
+            y: 2.0,
+            heading: 0.5,
+        }),
+        speed: Some(3.0),
+        avionics: Some(avionics),
+        sim_truth: None,
+        fc_state: None,
+        gimbal: None,
+    }
+}
+
 #[test]
 fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let attitude = MeasurementStamp {
@@ -30,6 +48,7 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
     let kinematics = with(19, 1_200_000);
     let estimator_status = with(20, 1_234_567);
     let avionics = AvionicsSample {
+        geodetic: None,
         baro: None,
         attitude: Some(AvionicsAttitudeSample {
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
@@ -45,22 +64,10 @@ fn publication_time_and_source_acquisition_stamps_stay_distinct() {
         valid_flags: 0b1111,
         quality: 0,
     };
-    let sample = TelemetrySample {
-        vehicle: VehicleId::new(9),
-        tick: SimTick::new(42),
-        pose: Some(Pose2d {
-            x: 1.0,
-            y: 2.0,
-            heading: 0.5,
-        }),
-        speed: Some(3.0),
-        avionics: Some(avionics),
-        sim_truth: None,
-        fc_state: None,
-        gimbal: None,
-    };
-
-    let wire_sample = sample_to_wire(sample, MonoTimestamp::from_nanos(9_000_000));
+    let wire_sample = sample_to_wire(
+        one_vehicle_sample(avionics),
+        MonoTimestamp::from_nanos(9_000_000),
+    );
     assert_eq!(wire_sample.vehicle.expect("vehicle").value, 9);
     assert_eq!(
         wire_sample.observed_at.expect("publication").nanos,
@@ -108,6 +115,7 @@ fn simulation_stamp(sequence: u32) -> MeasurementStamp {
 #[test]
 fn estimator_authorization_is_normalized_at_wire_boundary() {
     let avionics = avionics_to_wire(AvionicsSample {
+        geodetic: None,
         baro: None,
         attitude: None,
         kinematics: None,
@@ -128,6 +136,7 @@ fn kinematics_only_omits_planar_projection_while_group_flows() {
         pose: None,
         speed: None,
         avionics: Some(AvionicsSample {
+            geodetic: None,
             baro: None,
             attitude: None,
             kinematics: Some(AvionicsKinematicsSample {
@@ -168,6 +177,7 @@ fn attitude_only_omits_planar_projection_while_group_flows() {
         pose: None,
         speed: None,
         avionics: Some(AvionicsSample {
+            geodetic: None,
             baro: None,
             attitude: Some(AvionicsAttitudeSample {
                 quat_wxyz: [0.7, 0.0, 0.0, 0.7],
@@ -224,6 +234,7 @@ fn truth_and_fc_state_survive_the_wire_under_their_own_identities() {
         // No estimate exists: nothing may synthesize one from truth.
         avionics: None,
         sim_truth: Some(SimTruthSample {
+            geodetic: None,
             quat_wxyz: [1.0, 0.0, 0.0, 0.0],
             pos_ned_m: [2.0, 1.0, -3.0],
             vel_ned_mps: [0.0, 0.5, 1.0],
@@ -309,3 +320,5 @@ fn the_fc_command_verdict_crosses_the_wire() {
     assert_eq!(none.last_command_kind, 0);
     assert_eq!(none.last_command_result, 0);
 }
+
+mod geodetic;

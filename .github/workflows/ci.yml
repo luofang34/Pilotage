@@ -1,8 +1,21 @@
 name: CI
 
 on:
+  # Pushes build on main only: a pull request already builds its own
+  # head, and building every branch push alongside its pull request ran
+  # the whole matrix twice for one change.
   push:
+    branches: [main]
   pull_request:
+
+# A push to a pull request supersedes the runs of the push before it.
+# The stale run's answer serves nobody, and it holds runners the
+# repository has few of. Group per pull request and cancel the
+# superseded run; a push to main gets a group of its own commit, so
+# main keeps one verdict per commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,6 +26,75 @@ env:
   PROTOC_VERSION: "26.1"
 
 jobs:
+  # Decides which halves of the matrix a change can actually affect.
+  # `cargo xtask affected` reads the declarations in Cargo metadata and
+  # the build graph itself; any failure, and any change to the
+  # classifier's own inputs, answers "run everything". The shell here
+  # only invokes and forwards — it decides nothing.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      apple: ${{ steps.decide.outputs.apple }}
+      web: ${{ steps.decide.outputs.web }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Building xtask resolves the whole workspace graph, private git
+      # dependencies included, before compiling one package — so this
+      # job carries the same read-only deploy keys the quality gates do.
+      - name: Authorize the private git dependency (Navigate)
+        env:
+          NAVIGATE_DEPLOY_KEY: ${{ secrets.NAVIGATE_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NAVIGATE_DEPLOY_KEY" > ~/.ssh/navigate_ci
+          chmod 600 ~/.ssh/navigate_ci
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          printf 'Host github-navigate\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/navigate_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-navigate/luofang34/Navigate".insteadOf "https://github.com/luofang34/Navigate"
+
+      - name: Authorize the private situation domain dependencies
+        env:
+          AIRMASS_DEPLOY_KEY: ${{ secrets.AIRMASS_DEPLOY_KEY }}
+          SURVEILLANCE_DEPLOY_KEY: ${{ secrets.SURVEILLANCE_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$AIRMASS_DEPLOY_KEY" > ~/.ssh/airmass_ci
+          printf '%s\n' "$SURVEILLANCE_DEPLOY_KEY" > ~/.ssh/surveillance_ci
+          chmod 600 ~/.ssh/airmass_ci ~/.ssh/surveillance_ci
+          printf 'Host github-airmass\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/airmass_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          printf 'Host github-surveillance\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/surveillance_ci\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."ssh://git@github-airmass/luofang34/Airmass".insteadOf "https://github.com/luofang34/Airmass"
+          git config --global url."ssh://git@github-surveillance/luofang34/Surveillance".insteadOf "https://github.com/luofang34/Surveillance"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: xtask-affected
+
+      - name: Decide the affected matrix halves
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if answers=$(cargo run -p xtask --quiet -- affected --base "$base"); then
+            printf '%s\n' "$answers"
+            printf '%s\n' "$answers" | grep -v '^#' >> "$GITHUB_OUTPUT"
+          else
+            echo "the classifier failed; everything runs"
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          fi
+
   quality-gates:
     runs-on: ubuntu-latest
     steps:
@@ -89,32 +171,20 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Production Rust lint guard self-test
-        run: sh scripts/test-check-production-rust-lints.sh
-
-      - name: Production Rust lint guard
-        run: sh scripts/check-production-rust-lints.sh
-
-      - name: Monotonic counter arithmetic guard self-test
-        run: bash scripts/test-check-monotonic-counter-arithmetic.sh
-
-      - name: Monotonic counter arithmetic guard
-        run: bash scripts/check-monotonic-counter-arithmetic.sh
-
-      - name: Aviate control-feel boundary guard self-test
-        run: bash scripts/test-check-aviate-control-feel-boundary.sh
-
-      - name: Aviate control-feel boundary guard
-        run: bash scripts/check-aviate-control-feel-boundary.sh
-
-      - name: flight-tune journal storage boundary self-test
-        run: bash scripts/test-check-flight-tune-journal-storage-boundary.sh
-
-      - name: flight-tune journal storage boundary
-        run: bash scripts/check-flight-tune-journal-storage-boundary.sh
+      - name: Repository guards
+        # Every scripts/check-*.sh with a test-check-*.sh self-test,
+        # discovered and run as pairs; adding a guard never edits CI.
+        run: cargo run -p xtask --quiet -- guards
 
       - name: cargo test
         run: cargo test --all-targets
+
+      - name: Campaign certification
+        # Every ignored campaign test — the two full vehicle campaigns
+        # and the calibration probe — split out of `cargo test` so the
+        # cost is visible and can be scoped to the changes that can
+        # reach it.
+        run: cargo test -p flight-tune-campaign -- --ignored --test-threads 2
 
       - name: durable storage non-Unix contract and consumer
         env:
@@ -128,18 +198,6 @@ jobs:
 
       - name: SituationView dependency boundary
         run: bash scripts/check-situation-view-boundary.sh
-
-      - name: AirspaceView contract self-test
-        run: bash scripts/test-check-airspace-view-contract.sh
-
-      - name: AirspaceView contract
-        run: bash scripts/check-airspace-view-contract.sh
-
-      - name: Navdata tile bundle guard self-test
-        run: bash scripts/test-check-navdata-tile-bundle.sh
-
-      - name: Navdata tile bundle guard
-        run: bash scripts/check-navdata-tile-bundle.sh
 
       - name: cargo doc
         env:
@@ -157,69 +215,6 @@ jobs:
 
       - name: X-Plane reset order
         run: bash scripts/test-reset-xplane-order.sh
-
-      - name: flight build carries no simulation-only code
-        run: bash scripts/check-flight-build.sh
-
-      - name: flight tuning boundary guard self-test
-        run: bash scripts/test-check-flight-tune-boundaries.sh
-
-      - name: flight tuning boundary guard
-        run: bash scripts/check-flight-tune-boundaries.sh
-
-      - name: Aviate supervision boundary guard self-test
-        run: bash scripts/test-check-aviate-supervision-boundary.sh
-
-      - name: Aviate supervision boundary guard
-        run: bash scripts/check-aviate-supervision-boundary.sh
-
-      - name: check-structure self-test
-        run: bash scripts/test-check-structure.sh
-
-      - name: check-structure
-        run: bash scripts/check-structure.sh
-
-      - name: situation presentation boundary self-test
-        run: bash scripts/test-check-situation-presentation-boundary.sh
-
-      - name: situation presentation boundary
-        run: bash scripts/check-situation-presentation-boundary.sh
-
-      - name: situation layer controls self-test
-        run: bash scripts/test-check-situation-layer-controls.sh
-
-      - name: situation layer controls
-        run: bash scripts/check-situation-layer-controls.sh
-
-      - name: situation map attribution self-test
-        run: bash scripts/test-check-situation-map-attribution.sh
-
-      - name: situation map attribution
-        run: bash scripts/check-situation-map-attribution.sh
-
-      - name: situation ownship wiring self-test
-        run: bash scripts/test-check-situation-ownship-wiring.sh
-
-      - name: situation ownship wiring
-        run: bash scripts/check-situation-ownship-wiring.sh
-
-      - name: Apple client guard self-test
-        run: bash scripts/test-check-apple-client.sh
-
-      - name: Apple client guard
-        run: bash scripts/check-apple-client.sh
-
-      - name: Terrain base layer guard self-test
-        run: bash scripts/test-check-terrain-base-layer.sh
-
-      - name: Terrain base layer guard
-        run: bash scripts/check-terrain-base-layer.sh
-
-      - name: ADR supersession lifecycle tests
-        run: bash scripts/test-check-adr-supersession.sh
-
-      - name: ADR supersession lifecycle
-        run: bash scripts/check-adr-supersession.sh
 
       - name: certification-claim guard (AIR-03)
         # Fail on any tracked doc/UI artifact that asserts a certification,
@@ -424,6 +419,45 @@ jobs:
       - name: browser wire-range identity bounds (GEO-68)
         run: node clients/web/wire-bounds.test.mjs
 
+      - name: situation style resolution (shared with the Apple client)
+        run: node clients/web/situation-style.test.mjs
+
+      - name: situation camera controls (shared with the Apple client)
+        run: node clients/web/situation-camera.test.mjs
+
+      - name: situation ownship placement
+        run: node clients/web/situation-ownship.test.mjs
+
+      - name: situation ownship heading and track
+        # Heading is where the nose points and track is where the vehicle
+        # goes; a display that drew one and called it the other would
+        # invent an attitude nobody measured.
+        run: node clients/web/situation-motion.test.mjs
+
+      - name: situation ownship motion agrees across clients
+        # The iPad and the web client each derive the two directions in their
+        # own language. Neither would notice the other drifting, so both are
+        # held to one corpus of cases whose anchors come from geometry.
+        run: node clients/web/situation-motion.conformance.test.mjs
+
+      - name: operator control-feel mode selection
+        # A control that asks for a law the vehicle has not qualified is a
+        # control that always fails, so the offer follows the advertisement.
+        run: node clients/web/feel-mode.test.mjs
+
+      - name: Vendor the MapLibre GL JS renderer (pinned digest)
+        run: bash scripts/vendor-maplibre-web.sh
+
+      - name: situation map browser boot contract
+        # A real browser boots the map stage twice: with exported fixture
+        # assets it must reach the globe through the shared style at the
+        # Apple client's camera; without them it must state a typed reason
+        # instead of an empty map.
+        run: node clients/web/situation-map.browser.test.mjs
+
+      - name: geodetic fix decoding (ADR-0022)
+        run: node clients/web/geodetic-fix.test.mjs
+
       - name: Setup buf
         if: hashFiles('schemas/**/*.proto') != ''
         uses: bufbuild/buf-action@v1
@@ -451,6 +485,8 @@ jobs:
           fi
 
   apple-instrument-consumer:
+    needs: changes
+    if: needs.changes.outputs.apple == 'true'
     runs-on: macos-15
     steps:
       - name: Checkout
@@ -509,6 +545,8 @@ jobs:
         run: bash scripts/check-apple-instrument-consumer.sh
 
   apple-client:
+    needs: changes
+    if: needs.changes.outputs.apple == 'true'
     runs-on: macos-15
     steps:
       - name: Checkout

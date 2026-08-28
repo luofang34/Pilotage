@@ -85,6 +85,11 @@ message IntentCapability {
 message ActionCapability {
   ControlAction action = 1;
   repeated ModeTarget mode_targets = 2;
+  // The control-feel modes this scope accepts, for a
+  // `CONTROL_ACTION_FEEL_MODE_REQUEST` action. A client offers only what the
+  // vehicle advertises, so a control never asks for a law the vehicle has no
+  // qualified profile for.
+  repeated FeelTarget feel_targets = 3;
 }
 
 // A single independently assignable control scope published by a host for

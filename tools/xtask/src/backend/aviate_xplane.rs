@@ -11,12 +11,12 @@
 //! dials the host. That is what makes the gimbal scope real here: the
 //! adapter aims a rendered view, not a servo.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::xplane_simulator::{
     airframe_for, ensure_xplane_plugins_blocking, prepare_xplane_runtime_blocking,
-    set_active_config_name, set_ground_sensor_contract, validate_xplane_install, xplane_root,
-    xplane_running_blocking,
+    set_active_config_name, set_ground_sensor_contract, validate_xplane_install,
+    verify_loaded_aircraft, xplane_root, xplane_running_blocking,
 };
 use super::{SessionContext, SimBackend, Stage};
 use crate::cli::Profile;
@@ -38,6 +38,19 @@ fn airframe_key() -> String {
     std::env::var("PILOTAGE_XPLANE_AIRFRAME").unwrap_or_else(|_| AIRFRAME.to_owned())
 }
 
+/// The law the Alia starts on.
+///
+/// The same artifact the host falls back to when nothing names one, but it
+/// reaches the Alia there by being the single compiled-in default rather
+/// than by being this aircraft's — which is the property that lets it
+/// reach every OTHER vehicle too. Named here, each backend answers for
+/// what it launches.
+///
+/// This is the compatibility law, not a fitted one: it belongs to no
+/// airframe, and `alia250-shaped-*` exist beside it. Moving to one of
+/// those changes what the aircraft does and wants a flight behind it.
+const CONTROL_FEEL_PROFILE: &str = "adapters/aviate/profiles/alia250-legacy-v1.json";
+
 /// The Aviate + X-Plane SITL backend.
 #[derive(Debug)]
 pub struct AviateXPlane;
@@ -49,6 +62,10 @@ impl SimBackend for AviateXPlane {
 
     fn host_adapter(&self) -> &'static str {
         "aviate"
+    }
+
+    fn control_feel_profile(&self) -> Option<&'static str> {
+        Some(CONTROL_FEEL_PROFILE)
     }
 
     fn host_env(&self, ctx: &SessionContext) -> Vec<(String, String)> {
@@ -85,7 +102,7 @@ impl SimBackend for AviateXPlane {
         let airframe = airframe_for(Some(&airframe_key()))?;
         let root = xplane_root()?;
         validate_xplane_install(&root, airframe)?;
-        let aviate = aviate_dir(&ctx.repo_root);
+        let aviate = super::aviate_dir(&ctx.repo_root);
         let binary = aviate.join(APP_BINARY);
         if !binary.is_file() {
             return Err(XtaskError::MissingArtifact {
@@ -95,11 +112,24 @@ impl SimBackend for AviateXPlane {
                        in the Aviate checkout",
             });
         }
+        // Aviate binds every Alia run to a verified runtime and will not start
+        // without the document that names it. Producing it blocks until the
+        // trial plugin inside X-Plane states its own identity, which is the
+        // point: the run is bound to the simulator that is actually running,
+        // not to one a launcher claimed was.
+        let handshake = super::xplane_handshake::produce_blocking(
+            &root,
+            &super::alia_xplane_preset(&ctx.repo_root),
+            &ctx.log_dir,
+        )?;
         Ok(vec![Stage {
             spec: ProcessSpec {
                 name: "flight-controller",
                 program: binary.display().to_string(),
-                args: vec![],
+                args: vec![
+                    "--runtime-handshake".to_owned(),
+                    handshake.display().to_string(),
+                ],
                 cwd: Some(aviate),
                 env: vec![("RUST_LOG".to_owned(), "info".to_owned())],
                 remove_env: vec![],
@@ -115,6 +145,32 @@ impl SimBackend for AviateXPlane {
         }])
     }
 
+    fn before_stage_restart(
+        &self,
+        ctx: &SessionContext,
+        stage_name: &str,
+    ) -> Option<Box<dyn FnOnce() -> Result<(), XtaskError> + Send>> {
+        if stage_name != "flight-controller" {
+            return None;
+        }
+        // The flight controller CLAIMS its handshake by deleting it, so the
+        // document the plan wrote is gone by the time a reset restarts it. A
+        // replacement handed that path would find nothing and never come up.
+        // Re-verifying rather than re-writing is the point: the restarted
+        // controller is bound to the simulator that is running NOW, which may
+        // not be the one the first start verified.
+        //
+        // The paths are taken now and owned by the returned work, so it can
+        // wait for the simulator without holding the runtime thread.
+        let preset = super::alia_xplane_preset(&ctx.repo_root);
+        let log_dir = ctx.log_dir.clone();
+        Some(Box::new(move || {
+            let root = xplane_root()?;
+            super::xplane_handshake::produce_blocking(&root, &preset, &log_dir)?;
+            Ok(())
+        }))
+    }
+
     fn prepare(&self, ctx: &SessionContext) -> Result<(), XtaskError> {
         ensure_xplane_plugins_blocking(&ctx.repo_root, xplane_running_blocking()?)?;
         // The airframe the flight controller mixes decides which channel
@@ -127,11 +183,19 @@ impl SimBackend for AviateXPlane {
             return Ok(());
         };
         let simulator_running = xplane_running_blocking()?;
-        set_active_config_name(&root, airframe);
+        // A launcher that starts X-Plane also chooses the aircraft. One
+        // that finds it already running chooses only the bridge
+        // configuration, and a configuration that names another aircraft
+        // is answered and then dropped, with nothing on either side
+        // saying why.
+        if simulator_running {
+            verify_loaded_aircraft(&root, airframe)?;
+        }
+        set_active_config_name(&root, airframe, simulator_running)?;
         // Aviate's estimator consumes REAL sensors from boot to
         // touchdown; the bridge's fabricated ground-stationary contract
         // is a PX4-specific crutch this lane refuses.
-        set_ground_sensor_contract(&root, false);
+        set_ground_sensor_contract(&root, false, simulator_running)?;
         prepare_xplane_runtime_blocking(
             &ctx.repo_root,
             &root,
@@ -158,7 +222,7 @@ impl SimBackend for AviateXPlane {
             // path; a checkout resolved through AVIATE_DIR would
             // silently escape a hardcoded pattern and the reset latch
             // would never clear.
-            .env("AVIATE_DIR", aviate_dir(repo_root))
+            .env("AVIATE_DIR", super::aviate_dir(repo_root))
             .status()
             .map_err(|source| XtaskError::Io {
                 context: "running the X-Plane reset script",
@@ -173,15 +237,6 @@ impl SimBackend for AviateXPlane {
             })
         }
     }
-}
-
-/// Where the Aviate checkout lives: `AVIATE_DIR`, else `../Aviate` next
-/// to this repository. A directory convention, never a source
-/// dependency.
-fn aviate_dir(repo_root: &Path) -> PathBuf {
-    std::env::var_os("AVIATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("../Aviate"))
 }
 
 #[cfg(test)]

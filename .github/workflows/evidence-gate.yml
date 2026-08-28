@@ -19,8 +19,18 @@
 name: Evidence trace gate
 
 on:
+  # Pushes gate on main only; a pull request already gates its own head.
   push:
+    branches: [main]
   pull_request:
+
+# A push to a pull request supersedes the runs of the push before it;
+# the stale run's answer serves nobody. Group per pull request and
+# cancel the superseded run; a push to main gets a group of its own
+# commit, so main keeps one verdict per commit.
+concurrency:
+  group: evidence-gate-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

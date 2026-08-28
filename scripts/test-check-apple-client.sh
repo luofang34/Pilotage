@@ -13,6 +13,7 @@ mkdir -p \
     "$client_fixture/Packages/PilotageMapLibreBinding" \
     "$client_fixture/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding" \
     "$client_fixture/Packages/PilotageCore" \
+    "$client_fixture/Packages/PilotageCore/Sources/PilotageCore" \
     "$client_fixture/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge" \
     "$client_fixture/Packages/PilotageMapLibreTerrain" \
     "$client_fixture/rust/pilotage-situation-ffi/src/reception" \
@@ -38,6 +39,11 @@ cp "$root/clients/apple/Packages/PilotageMapLibreBinding/Package.swift" \
     "$client_fixture/Packages/PilotageMapLibreBinding/"
 cp "$root/clients/apple/Packages/PilotageCore/Package.swift" \
     "$client_fixture/Packages/PilotageCore/"
+cp "$root/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOwnshipMark.swift" \
+    "$client_fixture/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
+cp "$root/clients/apple/Packages/PilotageCore/Sources/PilotageCore/OwnshipMotion.swift" \
+    "$client_fixture/Packages/PilotageCore/Sources/PilotageCore/"
+cp "$root/clients/situation-ownship-motion.corpus.json" "$fixture/clients/"
 cp "$root/clients/apple/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/SituationOverlay.swift" \
     "$client_fixture/Packages/PilotageMapLibreBinding/Sources/PilotageMapLibreBinding/"
 cp "$root/clients/apple/Packages/PilotageGeoJSONEdge/Sources/PilotageGeoJSONEdge/FeatureCollection.swift" \

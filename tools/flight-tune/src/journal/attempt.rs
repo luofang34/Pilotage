@@ -69,9 +69,11 @@ impl Journal {
         self.ensure_usable()?;
         let role = self.state.pending_role(trial_id)?;
         evaluation.validate(role.scenario_set())?;
+        let proof = self.state.authenticated_proof(trial_id, &evaluation)?;
         self.append(JournalEvent::AttemptCompleted {
             trial_id,
             evaluation,
+            proof: proof.map(Box::new),
             selected_as_training_incumbent: selected,
         })
     }
@@ -85,7 +87,15 @@ impl Journal {
             .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
             .ok_or_else(|| super::invalid("the attempt is not pending or already has an outcome"))?
             .terminal_quarantine_reason()?;
-        self.append(JournalEvent::AttemptQuarantined { trial_id, reason })
+        let evaluation = CandidateEvaluation::Quarantined {
+            reason: reason.clone(),
+        };
+        let proof = self.state.authenticated_proof(trial_id, &evaluation)?;
+        self.append(JournalEvent::AttemptQuarantined {
+            trial_id,
+            reason,
+            proof: proof.map(Box::new),
+        })
     }
 
     pub(crate) fn record_cleanup(

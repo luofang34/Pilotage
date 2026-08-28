@@ -1,10 +1,17 @@
+use std::fs;
+
 use flight_tune::{
-    AttemptRole, CampaignPhase, FinalQualificationOutcome, JournalEvent, PromotionDecision,
+    ArtifactIdentity, AttemptRole, CampaignPhase, EvaluatorError, FinalQualificationOutcome,
+    GateEvaluator, GateOutcome, JournalEntry, JournalEvent, PromotionDecision,
     RunTerminalDisposition, RunTerminalOperation, RunTerminalQuarantine, RunTerminalReceipt,
+    ScenarioRef, TelemetrySample, TuneError, Tuner,
 };
 
 use crate::open_stage;
-use crate::test_rig::{FakeHandle, SequenceStrategy, TestDirectory, stage};
+use crate::test_rig::{
+    FakeBackend, FakeFactory, FakeHandle, FakeVehicle, QuadraticMetric, SequenceStrategy,
+    TestDirectory, candidate, stage,
+};
 
 use super::{TerminalActions, latest_receipt, open_with_gate};
 
@@ -33,6 +40,16 @@ fn quarantined_promotion_receipt_can_only_close_as_indeterminate() {
     assert!(!decision.is_promoted());
     assert_eq!(TerminalActions::capture(&state), actions);
     assert_eq!(tuner.journal().phase(), CampaignPhase::PromotionClosed);
+
+    let expected = MutationSnapshot::capture(tuner.journal().entries(), directory.path(), &state);
+    for _ in 0..2 {
+        assert!(tuner.run_final_qualification_once_blocking().is_err());
+        assert_eq!(
+            MutationSnapshot::capture(tuner.journal().entries(), directory.path(), &state),
+            expected
+        );
+        assert_eq!(tuner.journal().phase(), CampaignPhase::PromotionClosed);
+    }
 }
 
 #[test]
@@ -58,6 +75,7 @@ fn quarantined_final_receipt_cannot_create_a_qualified_result() {
     state.0.borrow_mut().terminal.failed_operations = vec![RunTerminalOperation::ControlStop];
 
     assert!(tuner.run_final_qualification_once_blocking().is_err());
+    assert!(tuner.journal().verified_evidence_snapshot().is_err());
 
     let receipt = latest_receipt(tuner.journal().entries());
     assert_quarantine(receipt, AttemptRole::FinalQualification);
@@ -73,6 +91,52 @@ fn quarantined_final_receipt_cannot_create_a_qualified_result() {
     assert_eq!(TerminalActions::capture(&state), actions);
     assert_eq!(tuner.journal().phase(), CampaignPhase::Sealed);
     assert!(tuner.qualified_candidate().is_err());
+}
+
+#[test]
+fn successful_promotion_hard_gate_rejects_final_without_any_mutation() {
+    let directory = TestDirectory::new("promotion-hard-gate-final-authorization");
+    let state = FakeHandle::new();
+    let mut tuner = open_with_promotion_gate(directory.path(), state.clone())
+        .expect("open hard-gate promotion campaign");
+    tuner
+        .run_training_attempts_blocking(0)
+        .expect("complete training baseline");
+    tuner.freeze_candidate().expect("freeze candidate");
+
+    assert!(matches!(
+        tuner.run_promotion_once_blocking().expect("close promotion"),
+        PromotionDecision::RejectedHardGate { ref gate_id } if gate_id == "envelope"
+    ));
+    let expected = MutationSnapshot::capture(tuner.journal().entries(), directory.path(), &state);
+    for _ in 0..2 {
+        assert!(tuner.run_final_qualification_once_blocking().is_err());
+        assert_eq!(
+            MutationSnapshot::capture(tuner.journal().entries(), directory.path(), &state),
+            expected
+        );
+    }
+}
+
+#[test]
+fn unsuccessful_hard_gate_terminal_report_becomes_indeterminate() {
+    let directory = TestDirectory::new("promotion-hard-gate-terminal-failure");
+    let state = FakeHandle::new();
+    let mut tuner = open_with_promotion_gate(directory.path(), state.clone())
+        .expect("open hard-gate promotion campaign");
+    tuner
+        .run_training_attempts_blocking(0)
+        .expect("complete training baseline");
+    tuner.freeze_candidate().expect("freeze candidate");
+    state.0.borrow_mut().terminal.failed_operations = vec![RunTerminalOperation::ControlStop];
+
+    assert!(tuner.run_promotion_once_blocking().is_err());
+    assert!(matches!(
+        tuner
+            .run_promotion_once_blocking()
+            .expect("close quarantined promotion"),
+        PromotionDecision::Indeterminate { .. }
+    ));
 }
 
 fn assert_quarantine(receipt: &RunTerminalReceipt, expected_role: AttemptRole) {
@@ -102,4 +166,97 @@ fn assert_quarantined_without_completion(entries: &[flight_tune::JournalEntry]) 
         last_closure.map(|entry| &entry.event),
         Some(JournalEvent::AttemptQuarantined { .. })
     ));
+}
+
+type PromotionGateTuner =
+    Tuner<FakeBackend, FakeVehicle, PromotionGate, QuadraticMetric, SequenceStrategy>;
+
+fn open_with_promotion_gate(
+    path: &std::path::Path,
+    state: FakeHandle,
+) -> Result<PromotionGateTuner, TuneError> {
+    Tuner::open_or_resume(
+        path,
+        stage(),
+        91,
+        candidate(0.0),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        PromotionGate::new(state.clone()),
+        QuadraticMetric::new(state),
+        SequenceStrategy::new(Vec::new()),
+    )
+}
+
+struct PromotionGate {
+    identity: ArtifactIdentity,
+    state: FakeHandle,
+    fail_current: bool,
+}
+
+impl PromotionGate {
+    fn new(state: FakeHandle) -> Self {
+        Self {
+            identity: ArtifactIdentity::from_text("gates", "fail-promotion-envelope")
+                .expect("gate identity"),
+            state,
+            fail_current: false,
+        }
+    }
+}
+
+impl GateEvaluator for PromotionGate {
+    fn identity(&self) -> &ArtifactIdentity {
+        &self.identity
+    }
+
+    fn begin(&mut self, scenario: &ScenarioRef) -> Result<(), EvaluatorError> {
+        self.fail_current = scenario.id.starts_with("promotion-");
+        let mut state = self.state.0.borrow_mut();
+        state.gate_begin_count = state.gate_begin_count.wrapping_add(1);
+        Ok(())
+    }
+
+    fn evaluate(&mut self, _sample: &TelemetrySample) -> Result<Vec<GateOutcome>, EvaluatorError> {
+        let mut state = self.state.0.borrow_mut();
+        state.gate_evaluate_count = state.gate_evaluate_count.wrapping_add(1);
+        drop(state);
+        if self.fail_current {
+            Ok(vec![GateOutcome::fail(
+                "envelope",
+                "promotion envelope failed",
+            )])
+        } else {
+            Ok(vec![GateOutcome::pass("envelope")])
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), EvaluatorError> {
+        let mut state = self.state.0.borrow_mut();
+        state.gate_finish_count = state.gate_finish_count.wrapping_add(1);
+        Ok(())
+    }
+
+    fn cancel(&mut self) -> Result<(), EvaluatorError> {
+        let mut state = self.state.0.borrow_mut();
+        state.gate_cancel_count = state.gate_cancel_count.wrapping_add(1);
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct MutationSnapshot {
+    entries: Vec<JournalEntry>,
+    head: Vec<u8>,
+    external_state: String,
+}
+
+impl MutationSnapshot {
+    fn capture(entries: &[JournalEntry], root: &std::path::Path, state: &FakeHandle) -> Self {
+        Self {
+            entries: entries.to_vec(),
+            head: fs::read(root.join("HEAD.json")).expect("read journal head"),
+            external_state: format!("{:?}", *state.0.borrow()),
+        }
+    }
 }

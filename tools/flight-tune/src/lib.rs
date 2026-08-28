@@ -42,11 +42,19 @@ pub use flight_quality::{
 };
 pub use identity::{ArtifactIdentity, CandidateLineage, RuntimeIdentities};
 pub use journal::{
-    AttemptRole, CampaignPhase, FinalQualificationOutcome, Journal, JournalEntry, JournalEvent,
-    OperationStatus, PromotionDecision, SessionIdentity,
+    AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION, AttemptRole, AuthenticatedEvaluationProof,
+    AuthenticatedJournalHead, AuthenticatedJournalRecord,
+    CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION, CampaignEvidenceAuthority, CampaignPhase,
+    FinalQualificationOutcome, JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION, Journal, JournalEntry,
+    JournalEvent, JournalEvidenceSnapshot, OperationStatus, PROMOTION_CLOSURE_SCHEMA_VERSION,
+    PromotionClosure, PromotionDecision, SessionIdentity,
 };
 pub use model::{
-    Candidate, ParameterBounds, PromotionPolicy, QualificationPolicy, ScenarioRef, SearchStage,
+    Candidate, ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
+    ParameterBounds, PromotionCalculation, PromotionComparison, PromotionObjectiveResult,
+    PromotionPairedStatistics, PromotionPolicy, PromotionRunKey, PromotionRunPlan,
+    PromotionSeedPolicy, PromotionSelection, QualificationPolicy, ScenarioRef, SearchStage,
+    promotion_policy_digest,
 };
 pub use pilotage_trial::Digest;
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};

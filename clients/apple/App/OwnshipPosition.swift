@@ -50,115 +50,6 @@ enum DeviceLocationAuthorisation: Equatable, Sendable {
     case denied
 }
 
-/// Reads a position from the device.
-///
-/// Not every iPad has a satellite receiver: the cellular models do and the others do not.
-/// This reports nothing on a tablet that cannot answer, which is the case the aircraft
-/// source exists for, so the control is driven by whether a position exists rather than by
-/// which hardware is present.
-@MainActor
-final class DeviceLocationProvider: NSObject, CLLocationManagerDelegate {
-    /// Receives each position the device reports.
-    var onFix: ((OwnshipFix) -> Void)?
-    /// Receives the reader's answer to the permission request.
-    var onAuthorisation: ((DeviceLocationAuthorisation) -> Void)?
-
-    /// What the platform answers right now, without waiting to be told.
-    ///
-    /// The published copy of this is only filled once the provider has been started, so a
-    /// decision about whether to start cannot be made from it without asking the question
-    /// the answer depends on.
-    var authorisation: DeviceLocationAuthorisation {
-        Self.reading(manager.authorizationStatus)
-    }
-
-    private let manager = CLLocationManager()
-    private var isRunning = false
-
-    /// Whether the device's own location service is switched on.
-    nonisolated static var servicesEnabled: Bool {
-        CLLocationManager.locationServicesEnabled()
-    }
-
-    override init() {
-        super.init()
-        manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        // An aircraft moves far enough that a metre of filtering costs nothing and saves a
-        // wake-up for every jitter of the fix.
-        manager.distanceFilter = 5
-    }
-
-    /// Ask for a position, requesting permission the first time.
-    func start() {
-        guard !isRunning else { return }
-        isRunning = true
-        report(manager.authorizationStatus)
-        switch manager.authorizationStatus {
-        case .notDetermined:
-            manager.requestWhenInUseAuthorization()
-        case .authorizedWhenInUse, .authorizedAlways:
-            manager.startUpdatingLocation()
-        default:
-            break
-        }
-    }
-
-    /// Stop asking. A map nobody is looking at does not need a position.
-    func stop() {
-        isRunning = false
-        manager.stopUpdatingLocation()
-    }
-
-    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status = manager.authorizationStatus
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.report(status)
-            if status == .authorizedWhenInUse || status == .authorizedAlways, self.isRunning {
-                self.manager.startUpdatingLocation()
-            }
-        }
-    }
-
-    nonisolated func locationManager(
-        _ manager: CLLocationManager,
-        didUpdateLocations locations: [CLLocation]
-    ) {
-        guard let location = locations.last else { return }
-        let fix = OwnshipFix(
-            latitudeDegrees: location.coordinate.latitude,
-            longitudeDegrees: location.coordinate.longitude,
-            courseDegrees: location.course >= 0 ? location.course : nil,
-            source: .device
-        )
-        Task { @MainActor [weak self] in
-            self?.onFix?(fix)
-        }
-    }
-
-    nonisolated func locationManager(
-        _ manager: CLLocationManager,
-        didFailWithError error: Error
-    ) {
-        // A failure to fix is not a failure of the client. The aircraft source may still
-        // answer, and the control follows whether a position exists.
-    }
-
-    private func report(_ status: CLAuthorizationStatus) {
-        onAuthorisation?(Self.reading(status))
-    }
-
-    /// Read one platform answer, in one place, so the pushed and the pulled answer agree.
-    private static func reading(_ status: CLAuthorizationStatus) -> DeviceLocationAuthorisation {
-        switch status {
-        case .notDetermined: .undetermined
-        case .authorizedWhenInUse, .authorizedAlways: .granted
-        default: .denied
-        }
-    }
-}
-
 /// The position the map may centre on, from whichever source has one.
 ///
 /// The aircraft is preferred when it reports, because that is where the aircraft is; the
@@ -202,6 +93,15 @@ final class OwnshipModel: ObservableObject {
     private let compass = DeviceHeadingProvider()
     private var deviceFix: OwnshipFix?
     private var aircraftFix: OwnshipFix?
+    /// The vehicle's own telemetry. Ranked above the surveillance shadow: a
+    /// vehicle under this operator's control reports itself directly, and the
+    /// shadow is a second-hand return of the same aircraft.
+    private var vehicleFix: OwnshipFix?
+    private var vehicleHeading: HeadingFix?
+    /// When the vehicle last reported. A fix is only the vehicle's CURRENT
+    /// position for as long as reports keep arriving.
+    private var vehicleFixAt: Date?
+    private var staleness: Timer?
     private var deviceHeading: HeadingFix?
     private var aircraftHeading: HeadingFix?
 
@@ -220,12 +120,60 @@ final class OwnshipModel: ObservableObject {
             self?.deviceHeading = heading
             self?.resolveHeading()
         }
+        // Elapsed time is the only thing that can retire a report from a link
+        // that has gone quiet, so it has to be driven by a clock rather than
+        // by the next sample — there is no next sample.
+        staleness = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.expireStaleVehicleFix() }
+        }
+    }
+
+    /// Take the vehicle's own report of where it is and which way it points.
+    ///
+    /// Position and heading arrive together because they come from one lane. Splitting
+    /// them across two calls would let a position from the simulator's oracle sit under a
+    /// heading from the estimator, and nothing on the mark could say so.
+    func observeVehicle(_ vehicle: VehicleFix?) {
+        guard let vehicle else {
+            vehicleFix = nil
+            vehicleHeading = nil
+            vehicleFixAt = nil
+            resolve()
+            return
+        }
+        // Timed from when the position was MEASURED, not when it arrived. A
+        // host relaying a block whose avionics have stopped keeps delivering
+        // samples, and a mark refreshed on arrival would never go stale
+        // however long the vehicle had been silent.
+        if vehicle.fixAdvanced {
+            vehicleFixAt = Date()
+        } else if vehicleFixAt == nil {
+            // No advance, and no clock — so this position either never had one
+            // or has already been withdrawn for going stale. A repeat of the
+            // measurement that went stale does not make it current again, and
+            // installing it would put the mark back where the vehicle no
+            // longer is, then take it away and put it back every few seconds
+            // for as long as the samples kept coming.
+            return
+        }
+        vehicleFix = OwnshipFix(
+            latitudeDegrees: vehicle.latitudeDegrees,
+            longitudeDegrees: vehicle.longitudeDegrees,
+            courseDegrees: vehicle.courseDegrees,
+            source: .aircraft
+        )
+        // A heading the lane did not state is not replaced by the course: they are
+        // different quantities, and a crabbing aircraft would be drawn pointing the way
+        // it travels rather than the way it faces.
+        vehicleHeading = vehicle.headingDegrees.map {
+            HeadingFix(trueDegrees: $0, source: .aircraft)
+        }
+        resolve()
     }
 
     /// Take a heading reported by a panel or receiver in the aircraft.
     ///
-    /// Nothing calls this yet. A GDL 90 source carries one, and it beats a tablet that may
-    /// be lying on a seat.
+    /// A GDL 90 source carries one, and it beats a tablet that may be lying on a seat.
     func observeAircraftHeading(_ heading: HeadingFix?) {
         aircraftHeading = heading
         resolveHeading()
@@ -237,7 +185,7 @@ final class OwnshipModel: ObservableObject {
         let course = fix?.courseDegrees.map {
             HeadingFix(trueDegrees: $0, source: .courseOverGround)
         }
-        let next = aircraftHeading ?? deviceHeading ?? course
+        let next = vehicleHeading ?? aircraftHeading ?? deviceHeading ?? course
         guard next != heading else { return }
         heading = next
     }
@@ -284,8 +232,27 @@ final class OwnshipModel: ObservableObject {
         resolve()
     }
 
+    /// How long a vehicle report stands before the mark stops believing it.
+    ///
+    /// The same three seconds the browser withholds after, and for the same
+    /// reason: a link that goes silent delivers no sample to decide it with,
+    /// so nothing but elapsed time can retire the last one. Without this the
+    /// vehicle's last position outranks this tablet's live receiver forever,
+    /// and a reader who has walked away from a disconnected vehicle is drawn
+    /// standing on it.
+    static let vehicleFixStaleAfter: TimeInterval = 3.0
+
+    /// Retires a vehicle report that has stopped arriving.
+    private func expireStaleVehicleFix() {
+        guard let reportedAt = vehicleFixAt else { return }
+        guard Date().timeIntervalSince(reportedAt) > Self.vehicleFixStaleAfter else { return }
+        observeVehicle(nil)
+    }
+
     private func resolve() {
-        let next = aircraftFix ?? deviceFix
+        // The vehicle's own report, then its surveillance shadow, then this
+        // tablet. A reader without any of the three still gets a map.
+        let next = vehicleFix ?? aircraftFix ?? deviceFix
         guard next != fix else { return }
         fix = next
         resolveHeading()
@@ -378,102 +345,5 @@ struct HeadingFix: Equatable, Sendable {
         case courseOverGround
         /// A panel or receiver in the aircraft.
         case aircraft
-    }
-}
-
-/// Reads which way the device is pointing.
-///
-/// Not every iPad has a magnetometer, so this reports nothing on a tablet that cannot
-/// answer and the map falls back to course over the ground.
-@MainActor
-final class DeviceHeadingProvider: NSObject, CLLocationManagerDelegate {
-    /// Receives each heading the device reports.
-    var onHeading: ((HeadingFix) -> Void)?
-
-    private let manager = CLLocationManager()
-    private var isRunning = false
-
-
-    /// Whether this device can report which way it is pointing.
-    nonisolated static var available: Bool { CLLocationManager.headingAvailable() }
-
-    override init() {
-        super.init()
-        manager.delegate = self
-        // A degree of filtering keeps a map from shivering while the aircraft holds course.
-        manager.headingFilter = 3
-        // A tablet flown in landscape reads ninety degrees off if the platform is told it
-        // is upright, and the reading is plausible enough that nobody notices it is wrong.
-        applyOrientation()
-    }
-
-    /// Take the orientation again, because a tablet is turned while it is being read.
-    func refreshOrientation() {
-        applyOrientation()
-    }
-
-    /// Tell the platform which way the tablet is being held.
-    ///
-    /// The interface orientation rather than the device orientation, because the device
-    /// answers `unknown` until it has been moved, and a tablet started flat on a table in
-    /// landscape would be told it is upright and read ninety degrees off.
-    private func applyOrientation() {
-        // Landscape is named from opposite ends by the two enumerations: turning the
-        // tablet left turns the content right, so the platform's interface orientation and
-        // the location service's device orientation swap the two. Passing one straight
-        // through as the other reads a hundred and eighty degrees off.
-        manager.headingOrientation = switch Self.interfaceOrientation {
-        case .landscapeLeft: .landscapeRight
-        case .landscapeRight: .landscapeLeft
-        case .portraitUpsideDown: .portraitUpsideDown
-        default: .portrait
-        }
-    }
-
-    /// Which way the window is drawn, which is which way the reader holds the tablet.
-    private static var interfaceOrientation: UIInterfaceOrientation {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?
-            .interfaceOrientation ?? .portrait
-    }
-
-    func start() {
-        guard Self.available, !isRunning else { return }
-        isRunning = true
-        applyOrientation()
-        manager.startUpdatingHeading()
-    }
-
-    func stop() {
-        isRunning = false
-        manager.stopUpdatingHeading()
-    }
-
-    /// Let the platform ask the reader to swing the tablet through a figure of eight.
-    ///
-    /// A magnetometer near a keyboard cover or a metal panel reports a negative accuracy,
-    /// which is the platform saying it does not know which way it is pointing. Refusing
-    /// the prompt leaves a compass that is present, started, and permanently silent, with
-    /// nothing on screen to say why.
-    nonisolated func locationManagerShouldDisplayHeadingCalibration(
-        _ manager: CLLocationManager
-    ) -> Bool {
-        true
-    }
-
-    nonisolated func locationManager(
-        _ manager: CLLocationManager,
-        didUpdateHeading newHeading: CLHeading
-    ) {
-        // A negative accuracy means the reading is not trustworthy at all, and a negative
-        // true heading means the platform had no variation to apply.
-        guard newHeading.headingAccuracy >= 0 else { return }
-        let fix: HeadingFix = newHeading.trueHeading >= 0
-            ? HeadingFix(trueDegrees: newHeading.trueHeading, source: .deviceTrue)
-            : HeadingFix(trueDegrees: newHeading.magneticHeading, source: .deviceMagnetic)
-        Task { @MainActor [weak self] in
-            self?.onHeading?(fix)
-        }
     }
 }

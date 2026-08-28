@@ -128,6 +128,11 @@ fn action_capability(action: &pilotage_adapter_api::ActionCapability) -> wire::A
             .iter()
             .map(|target| mode_target(*target) as i32)
             .collect(),
+        feel_targets: action
+            .feel_targets
+            .iter()
+            .map(|target| feel_target(*target) as i32)
+            .collect(),
     }
 }
 
@@ -161,6 +166,16 @@ fn action_kind(kind: pilotage_protocol::ActionKind) -> wire::ControlAction {
         Domain::CameraZoomIn => wire::ControlAction::CameraZoomIn,
         Domain::CameraZoomOut => wire::ControlAction::CameraZoomOut,
         Domain::SimReset => wire::ControlAction::SimReset,
+        Domain::FeelModeRequest => wire::ControlAction::FeelModeRequest,
+    }
+}
+
+fn feel_target(target: pilotage_protocol::FeelTarget) -> wire::FeelTarget {
+    use pilotage_protocol::FeelTarget as Domain;
+    match target {
+        Domain::Precision => wire::FeelTarget::Precision,
+        Domain::Balanced => wire::FeelTarget::Balanced,
+        Domain::Agile => wire::FeelTarget::Agile,
     }
 }
 

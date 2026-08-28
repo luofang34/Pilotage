@@ -1,7 +1,8 @@
 //! Capability model an adapter advertises to the session host (ADR-0008).
 
 use pilotage_protocol::{
-    ActionKind, IntentFamily, LogicalAxisId, ModeTarget, ReferenceFrame, ScopeId, VehicleId,
+    ActionKind, FeelTarget, IntentFamily, LogicalAxisId, ModeTarget, ReferenceFrame, ScopeId,
+    VehicleId,
 };
 
 use crate::control::LinkLossPolicy;
@@ -47,6 +48,7 @@ pub fn sim_lifecycle_descriptor() -> ScopeDescriptor {
         actions: vec![ActionCapability {
             action: pilotage_protocol::ActionKind::SimReset,
             mode_targets: vec![],
+            feel_targets: vec![],
         }],
         legacy: None,
     }
@@ -98,6 +100,11 @@ pub struct ActionCapability {
     pub action: ActionKind,
     /// The mode targets admitted for a `ModeRequest`; empty otherwise.
     pub mode_targets: Vec<ModeTarget>,
+    /// The feel targets admitted for a `FeelModeRequest`; empty otherwise.
+    ///
+    /// A client offers only what a vehicle advertises, so a control never asks
+    /// for a law the vehicle has no qualified profile for.
+    pub feel_targets: Vec<FeelTarget>,
 }
 
 /// One legacy numeric axis routed onto a typed intent component: the axis

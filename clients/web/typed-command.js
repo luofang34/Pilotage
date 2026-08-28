@@ -5,6 +5,8 @@
 // tested off the DOM.
 
 // Wire IntentFamily values (capability.proto).
+import { CONTROL_ACTION } from "./wire.js";
+
 export const INTENT_FAMILY_VELOCITY = 1;
 // Wire ReferenceFrame LOCAL_NED (control.proto).
 export const REFERENCE_FRAME_LOCAL_NED = 2;
@@ -37,12 +39,31 @@ export function intentCapabilityFor(advertisedScopes, vehicleId, scope, family) 
  * request, the specific `modeTarget`. An unadvertised action must not be
  * SENT: the host would reject it anyway, but a client that fires
  * known-unsupported presses is lying to its operator. */
+
 export function actionAdvertised(advertisedScopes, vehicleId, scope, action, modeTarget) {
   const descriptor = scopeDescriptorFor(advertisedScopes, vehicleId, scope);
   for (const capability of descriptor?.actions ?? []) {
     if (capability.action !== action) continue;
     if (modeTarget === undefined) return true;
     return capability.modeTargets.includes(modeTarget);
+  }
+  return false;
+}
+
+/**
+ * Whether this vehicle has a qualified profile for one control-feel law.
+ *
+ * A control offers only what the vehicle advertises, so a reader is never
+ * given a mode the vehicle would refuse. The feel targets are read separately
+ * from the flight-mode targets because they are separate vocabularies: a
+ * vehicle that accepts a flight mode has said nothing about which laws it can
+ * shape a demand with.
+ */
+export function feelModeAdvertised(advertisedScopes, vehicleId, scope, feelTarget) {
+  const descriptor = scopeDescriptorFor(advertisedScopes, vehicleId, scope);
+  for (const capability of descriptor?.actions ?? []) {
+    if (capability.action !== CONTROL_ACTION.feelModeRequest) continue;
+    return (capability.feelTargets ?? []).includes(feelTarget);
   }
   return false;
 }

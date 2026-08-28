@@ -114,6 +114,7 @@ fn action_command(
                 action: wire::ControlAction::Arm as i32,
                 mode_target: 0,
                 action_id,
+                feel_target: 0,
             }),
         },
     ))

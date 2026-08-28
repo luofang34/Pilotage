@@ -490,3 +490,9 @@ fn validation_rejects_weaker_release_dynamics() {
         Err(ValidationError::InvalidOrder { .. })
     ));
 }
+
+#[path = "tests/shaped_modes.rs"]
+mod shaped_modes_file;
+
+#[path = "tests/regenerate.rs"]
+mod regenerate;

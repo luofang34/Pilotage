@@ -482,3 +482,6 @@ fn activation_with_an_unavailable_pose_preserves_the_pending_candidate() {
     assert_eq!(active_digest(&adapter), original);
     assert_no_frame(&fc);
 }
+
+#[path = "control_feel/modes.rs"]
+mod modes;

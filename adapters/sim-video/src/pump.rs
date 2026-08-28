@@ -63,8 +63,17 @@ fn handle_envelope(
             // A closed receiver is impossible here: the client owns the sole
             // `state_rx`, so `send` only fails after the client is dropped,
             // which also aborts this task.
+            let navsat = state_tx.borrow().navsat;
             state_tx.send_replace(LatestBridgeState {
                 odometry: Some(odometry),
+                navsat,
+            });
+        }
+        Some(bridge_envelope::Payload::Navsat(navsat)) => {
+            let odometry = state_tx.borrow().odometry;
+            state_tx.send_replace(LatestBridgeState {
+                odometry,
+                navsat: Some(navsat),
             });
         }
         Some(bridge_envelope::Payload::Frame(frame)) => {

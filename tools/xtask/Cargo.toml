@@ -9,7 +9,13 @@ publish = false
 workspace = true
 
 [dependencies]
+pilotage-trial = { workspace = true }
+pilotage-xplane-trial = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "signal", "sync", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -6,6 +6,14 @@
 mod journal_storage;
 #[path = "tuner/no_samples.rs"]
 mod no_samples;
+#[path = "tuner/promotion_chain_tamper.rs"]
+mod promotion_chain_tamper;
+#[path = "tuner/promotion_evidence_tamper.rs"]
+mod promotion_evidence_tamper;
+#[path = "tuner/promotion_recovery.rs"]
+mod promotion_recovery;
+#[path = "tuner/promotion_snapshot_authority.rs"]
+mod promotion_snapshot_authority;
 #[path = "tuner/reconciliation.rs"]
 mod reconciliation;
 #[path = "tuner/recovery_order.rs"]
@@ -57,8 +65,16 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
     );
 
     tuner.freeze_candidate().expect("freeze candidate");
+    assert!(tuner.journal().verified_evidence_snapshot().is_err());
     let promotion = tuner.run_promotion_once_blocking().expect("run promotion");
     assert!(matches!(promotion, PromotionDecision::Promoted { .. }));
+    let promotion_evidence = tuner
+        .journal()
+        .verified_evidence_snapshot()
+        .expect("verify promotion evidence");
+    assert_eq!(promotion_evidence.promotion_closure.decision, promotion);
+    assert!(promotion_evidence.promotion_frozen.is_some());
+    assert!(promotion_evidence.final_proof.is_none());
     assert_eq!(state.0.borrow().vehicle.gain, 0.5);
     let runs_after_promotion = state.0.borrow().scenario_runs.len();
     assert_eq!(
@@ -66,7 +82,7 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
         promotion
     );
     assert_eq!(state.0.borrow().scenario_runs.len(), runs_after_promotion);
-    assert_promotion_uses_paired_seeds(&state);
+    promotion_snapshot_authority::assert_promotion_uses_paired_seeds(&state);
 
     let final_outcome = tuner
         .run_final_qualification_once_blocking()
@@ -81,6 +97,12 @@ fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {
     );
     assert_eq!(state.0.borrow().scenario_runs.len(), runs_after_final);
     assert_eq!(tuner.journal().phase(), CampaignPhase::Sealed);
+    let sealed_evidence = tuner
+        .journal()
+        .verified_evidence_snapshot()
+        .expect("verify sealed evidence");
+    assert!(sealed_evidence.final_proof.is_some());
+    assert_eq!(sealed_evidence.final_outcome, Some(final_outcome));
     assert_eq!(
         tuner.qualified_candidate().expect("qualified candidate"),
         candidate(0.5)
@@ -436,7 +458,6 @@ fn sample_timeout_is_a_hard_gate_and_still_cleans_the_backend() {
     assert_eq!(state.0.borrow().stop_count, 1);
     assert_eq!(state.0.borrow().cleanup_count, 1);
 }
-
 fn open(
     path: &Path,
     state: FakeHandle,
@@ -464,18 +485,4 @@ fn open_stage(
         QuadraticMetric::new(state),
         strategy,
     )
-}
-
-fn assert_promotion_uses_paired_seeds(state: &FakeHandle) {
-    let promotion = state
-        .0
-        .borrow()
-        .scenario_runs
-        .iter()
-        .filter(|(id, _, _)| id == "promotion-gust")
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(promotion.len(), 4);
-    assert_eq!(promotion[0].1, promotion[2].1);
-    assert_eq!(promotion[1].1, promotion[3].1);
 }

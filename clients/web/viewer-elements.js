@@ -11,5 +11,6 @@ export function resolveViewerElements(document) {
     telemetry: document.getElementById("telemetry"),
     gamepad: document.getElementById("gamepad"),
     flightMode: document.getElementById("flightMode"),
+    feelMode: document.getElementById("feelMode"),
   };
 }

@@ -7,13 +7,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::backend::{SessionContext, Stage, backend_for};
+use crate::backend::{SessionContext, SimBackend, Stage, backend_for};
 use crate::cli::SimArgs;
 use crate::error::XtaskError;
 use crate::output::print_line;
 use crate::process::{ManagedChild, ProcessSpec};
 use crate::readiness::{Readiness, ReadySignal, await_ready, stage_log};
 use preflight::{build_host, prepare_web_assets};
+use supervise::supervise;
 
 pub(crate) mod preflight;
 
@@ -61,11 +62,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     backend.prepare(&ctx)?;
 
     let mut stages = backend.plan(&ctx)?;
-    stages.push(host_stage(
-        &ctx,
-        backend.host_adapter(),
-        backend.host_env(&ctx),
-    ));
+    stages.push(host_stage(&ctx, backend.as_ref()));
     stages.push(viewer_stage(&ctx)?);
 
     // The cancellation source must exist before the first child spawns:
@@ -99,7 +96,7 @@ pub async fn run_sim(args: &SimArgs) -> Result<(), XtaskError> {
     // here) unregisters the `pilotage.local` alias with the session.
     let _mdns_alias = announce::publish_connect_facts(args, &ctx, actual_port, &certificate);
 
-    let outcome = supervise(&mut children, &stages, &mut cancel).await;
+    let outcome = supervise(&mut children, &stages, backend.as_ref(), &ctx, &mut cancel).await;
     std::fs::remove_file(&pid_file).ok();
     // The manifest describes a session that no longer exists past this
     // point; leaving it behind would let a later failed connect clobber
@@ -216,13 +213,14 @@ pub fn run_reset(fc: &str) -> Result<(), XtaskError> {
     backend.reset(&repo_root()?)
 }
 
-/// This repository's root: the checkout `cargo xtask` was INVOKED from.
-///
-/// `cargo run` exports `CARGO_MANIFEST_DIR` into the child's runtime
+/// The session working directory, relative to the repository root.
+/// Stage logs and the standalone handshake default land in one place.
+pub(crate) const SESSION_DIR: &str = "target/xtask-sim";
+
 /// Ensures the stage-log directory exists with the previous run's logs
 /// preserved out of the way, announcing where they went.
 fn prepared_log_dir(repo_root: &std::path::Path) -> Result<PathBuf, XtaskError> {
-    let log_dir = repo_root.join("target/xtask-sim");
+    let log_dir = repo_root.join(SESSION_DIR);
     std::fs::create_dir_all(&log_dir).map_err(|source| XtaskError::Io {
         context: "creating the session log directory",
         source,
@@ -236,11 +234,36 @@ fn prepared_log_dir(repo_root: &std::path::Path) -> Result<PathBuf, XtaskError> 
     Ok(log_dir)
 }
 
+/// Produces the Alia X-Plane runtime handshake and prints its path.
+///
+/// # Errors
+///
+/// Returns a typed [`XtaskError`] when X-Plane is unreachable or the
+/// handshake cannot be produced.
+pub fn run_handshake(out_dir: &Path) -> Result<(), XtaskError> {
+    let repo_root = repo_root()?;
+    let out = if out_dir.is_absolute() {
+        out_dir.to_path_buf()
+    } else {
+        repo_root.join(out_dir)
+    };
+    std::fs::create_dir_all(&out).map_err(|source| XtaskError::Io {
+        context: "creating the handshake output directory",
+        source,
+    })?;
+    let path = crate::backend::produce_xplane_handshake_blocking(&repo_root, &out)?;
+    print_line(&path.display().to_string());
+    Ok(())
+}
+
+/// This repository's root: the checkout `cargo xtask` was INVOKED from.
+///
+/// `cargo run` exports `CARGO_MANIFEST_DIR` into the child's runtime
 /// environment, pointing at the invoking workspace's `tools/xtask` — so a
 /// binary cached from another checkout (a worktree, a moved clone) still
 /// operates on the repository the user is standing in. The compile-time
 /// path is only the fallback for running the binary outside cargo.
-fn repo_root() -> Result<PathBuf, XtaskError> {
+pub(crate) fn repo_root() -> Result<PathBuf, XtaskError> {
     let runtime_manifest = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
     let manifest = resolve_manifest(
         runtime_manifest.as_deref(),
@@ -302,7 +325,16 @@ fn refuse_stale_session(mut patterns: Vec<&'static str>) -> Result<(), XtaskErro
     }
 }
 
-fn host_stage(ctx: &SessionContext, adapter: &str, mut env: Vec<(String, String)>) -> Stage {
+/// The host stage, with the environment DERIVED from the backend rather
+/// than handed in.
+///
+/// Taking a ready-made environment is what let a caller assemble the
+/// right one and then pass a different one — two correct halves and a
+/// wrong join, which no test of either half can see. With no such
+/// parameter there is nothing to get wrong at the call site.
+pub(crate) fn host_stage(ctx: &SessionContext, backend: &dyn SimBackend) -> Stage {
+    let adapter = backend.host_adapter();
+    let mut env = crate::backend::host_env_for(backend, ctx);
     env.push((
         "PILOTAGE_AVIATE_PROFILE".to_owned(),
         ctx.profile.as_env_value().to_owned(),
@@ -386,60 +418,6 @@ fn viewer_stage(ctx: &SessionContext) -> Result<Stage, XtaskError> {
 /// The restart's readiness wait races the cancellation source, so a
 /// ctrl-c during an FC restart stops the session promptly instead of
 /// waiting out the replacement's readiness deadline.
-async fn supervise(
-    children: &mut [ManagedChild],
-    stages: &[Stage],
-    cancel: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<(), XtaskError> {
-    let mut fc_restarts: u32 = 0;
-    loop {
-        tokio::select! {
-            _ = cancel.changed() => {
-                print_line("");
-                print_line("stopping the session...");
-                return Ok(());
-            }
-            () = tokio::time::sleep(SUPERVISE_INTERVAL) => {
-                for index in 0..children.len() {
-                    let Err(death) = children[index].check_running() else {
-                        continue;
-                    };
-                    let stage = &stages[index];
-                    if stage.spec.name != "flight-controller" {
-                        return Err(death);
-                    }
-                    fc_restarts = fc_restarts.wrapping_add(1);
-                    if fc_restarts > MAX_STAGE_RESTARTS {
-                        return Err(death);
-                    }
-                    print_line(&format!(
-                        "flight-controller exited (reset or crash); restarting ({fc_restarts}/{MAX_STAGE_RESTARTS})..."
-                    ));
-                    // A replacement that spawns but never reports ready
-                    // must not outlive the error return: it is not in
-                    // `children`, so the caller's teardown would miss it.
-                    let mut replacement = ManagedChild::spawn(&stage.spec)?;
-                    let ready = tokio::select! {
-                        ready = await_ready(&mut replacement, &stage.readiness) => ready,
-                        _ = cancel.changed() => {
-                            print_line("");
-                            print_line("stopping the session...");
-                            replacement.terminate_group();
-                            return Ok(());
-                        }
-                    };
-                    if let Err(error) = ready {
-                        replacement.terminate_group();
-                        return Err(error);
-                    }
-                    print_line("flight-controller ready");
-                    children[index] = replacement;
-                }
-            }
-        }
-    }
-}
-
 /// Stops every started stage in reverse launch order.
 fn teardown(children: &mut Vec<ManagedChild>) {
     while let Some(mut child) = children.pop() {
@@ -460,6 +438,7 @@ fn open_in_browser(url: &str) {
 }
 
 mod announce;
+mod supervise;
 
 #[cfg(test)]
 mod tests;

@@ -1,5 +1,10 @@
 //! Flat records that cross the Apple FFI boundary.
 
+#[path = "records/heading_reference.rs"]
+mod heading_reference;
+
+pub use heading_reference::DisplayHeadingReference;
+
 mod presentation;
 
 pub use presentation::{
@@ -212,6 +217,15 @@ pub struct DisplayOwnship {
     pub coordinate: DisplayCoordinate,
     /// Direction of travel over the ground in degrees from true north, when reported.
     pub course_deg: Option<f64>,
+    /// Speed over the ground in knots, when reported.
+    ///
+    /// A course says which way the aircraft is going; the speed beside it is what
+    /// makes a vector out of the direction.
+    pub ground_speed_kt: Option<f64>,
+    /// Direction the nose points in degrees, when reported.
+    pub heading_deg: Option<f64>,
+    /// Which north that heading is measured from.
+    pub heading_reference: Option<DisplayHeadingReference>,
     /// Selected display altitude in feet.
     pub altitude_ft: Option<i32>,
     /// Producer instance identity.
@@ -225,6 +239,9 @@ impl From<pilotage_presentation::OwnshipFeature> for DisplayOwnship {
         Self {
             coordinate: value.coordinate.into(),
             course_deg: value.course_deg,
+            ground_speed_kt: value.ground_speed_kt,
+            heading_deg: value.heading_deg,
+            heading_reference: value.heading_reference.map(Into::into),
             altitude_ft: value.altitude_ft,
             producer_instance_id: value.producer_instance_id,
             snapshot_revision: value.snapshot_revision,

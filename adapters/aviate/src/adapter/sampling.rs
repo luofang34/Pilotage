@@ -3,15 +3,23 @@
 use std::sync::{Arc, Mutex};
 
 use pilotage_adapter_api::{
-    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, Pose2d, SourceRole,
-    TelemetryBatch, TelemetrySample,
+    AvionicsAttitudeSample, AvionicsKinematicsSample, AvionicsSample, GeodeticFixSample, Pose2d,
+    SourceRole, TelemetryBatch, TelemetrySample,
 };
 use pilotage_protocol::VehicleId;
 use pilotage_timing::SimTick;
 
-use super::WITHHOLD_AFTER;
+use pilotage_geo::{
+    BaroSettingId, DatumRealizationId, GeodeticPosition, HorizontalDatum, LocalOriginId,
+    PositionQuality, SIMULATOR_GEOID_MODEL_ID, TerrainRefId, VerticalDatum, VerticalPosition,
+};
 use pilotage_mavlink::link::estimator::{QUALITY_DEGRADED, QUALITY_UNUSABLE};
-use pilotage_mavlink::link::{AttitudeUpdate, KinematicsUpdate, LinkState};
+use pilotage_mavlink::link::{
+    AttitudeUpdate, KinematicsUpdate, LinkState, SimTruthUpdate, estimate_geodetic_fix,
+};
+use tracing::warn;
+
+use super::WITHHOLD_AFTER;
 
 /// Yaw extracted from the body→NED quaternion (heading, radians
 /// clockwise from north).
@@ -136,20 +144,77 @@ fn effective_authorization(
     (flags, quality)
 }
 
+/// The simulator's stated position as a typed fix.
+///
+/// The report gives latitude and longitude in degrees·1e7 and an altitude
+/// in millimetres. The message definition names no reference surface for
+/// that altitude at all; the senders this lane reads feed it from their
+/// own above-mean-sea-level solution, which is why it is labelled MSL here
+/// and not in the decoder. An MSL height with no separation is
+/// uninterpretable, so the height declares the simulator's own separation:
+/// it stays traceable to a simulator and can never be read as a surveyed
+/// height. A report the contract refuses is no fix at all — the sample
+/// keeps its local frame and declares no position.
+fn truth_geodetic_fix(
+    truth: &SimTruthUpdate,
+    stamp: pilotage_adapter_api::MeasurementStamp,
+) -> Option<GeodeticFixSample> {
+    // A report whose whole geodetic triple is zero is a simulator that has
+    // not stated a position, not a vehicle at Null Island. The link refuses
+    // such a report outright, because the local frame is that position
+    // projected; this stays as the contract's own statement at the place
+    // that builds the typed value.
+    if truth.lat_lon_alt == [0, 0, 0] {
+        return None;
+    }
+    let vertical = VerticalPosition::new(
+        f64::from(truth.lat_lon_alt[2]) * 1e-3,
+        VerticalDatum::Msl,
+        SIMULATOR_GEOID_MODEL_ID,
+        TerrainRefId::UNDECLARED,
+        BaroSettingId::UNDECLARED,
+        LocalOriginId::UNDECLARED,
+    )
+    .inspect_err(|error| {
+        warn!(%error, "simulator height refused by the contract; no position published");
+    })
+    .ok()?;
+    let position = GeodeticPosition::new(
+        f64::from(truth.lat_lon_alt[0]) * 1e-7,
+        f64::from(truth.lat_lon_alt[1]) * 1e-7,
+        HorizontalDatum::Wgs84,
+        DatumRealizationId::UNDECLARED,
+        vertical,
+    )
+    .inspect_err(|error| {
+        warn!(%error, "simulator position refused by the contract; no position published");
+    })
+    .ok()?;
+    Some(GeodeticFixSample {
+        position,
+        // The simulator states no accuracy. Zero is the honest reading of a
+        // value taken from the model rather than measured: it is the
+        // oracle, and a reader derives health from the datum identities
+        // above rather than from a number the producer invented. A grader
+        // that read zero as a metre count would read it as perfect, so
+        // this value is safe only while the simulator separation keeps it
+        // inside the truth role.
+        quality: PositionQuality {
+            horizontal_mm: 0,
+            vertical_mm: 0,
+        },
+        stamp,
+    })
+}
+
 /// The fresh simulation-truth sample, stamped with its own source role so
 /// a consumer can never mistake it for the FC's operational estimate.
 fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruthSample> {
     latest
         .sim_truth
         .filter(|truth| truth.received_at.elapsed() <= WITHHOLD_AFTER)
-        .map(|truth| pilotage_adapter_api::SimTruthSample {
-            quat_wxyz: truth.quat_wxyz,
-            pos_ned_m: truth.pos_ned_m,
-            vel_ned_mps: truth.vel_ned_mps,
-            // Attitude, position, and velocity are all carried;
-            // the truth stream has no body-rate report.
-            valid_flags: 0b1101,
-            stamp: pilotage_adapter_api::MeasurementStamp {
+        .map(|truth| {
+            let stamp = pilotage_adapter_api::MeasurementStamp {
                 role: pilotage_adapter_api::SourceRole::SimulationTruth,
                 integrity: pilotage_adapter_api::SourceIntegrity::ChecksummedOnly,
                 source_id: latest.source_id,
@@ -158,7 +223,19 @@ fn sim_truth_sample(latest: &LinkState) -> Option<pilotage_adapter_api::SimTruth
                 sequence: truth.sequence,
                 acquired_at_ns: truth.time_usec.wrapping_mul(1_000),
                 clock: pilotage_adapter_api::MeasurementClock::Simulation,
-            },
+            };
+            pilotage_adapter_api::SimTruthSample {
+                // The same observation the NED group was projected from, so
+                // it rides this sample's stamp.
+                geodetic: truth_geodetic_fix(&truth, stamp),
+                quat_wxyz: truth.quat_wxyz,
+                pos_ned_m: truth.pos_ned_m,
+                vel_ned_mps: truth.vel_ned_mps,
+                // Attitude, position, and velocity are all carried;
+                // the truth stream has no body-rate report.
+                valid_flags: 0b1101,
+                stamp,
+            }
         })
 }
 
@@ -186,6 +263,13 @@ pub(crate) fn mavlink_batch(vehicle: VehicleId, state: &Arc<Mutex<LinkState>>) -
     );
     let (valid_flags, quality) = effective_authorization(attitude, kinematics, has_authorization);
     let avionics = Some(AvionicsSample {
+        // The estimator's own fix, under its own stamp: it advances
+        // independently of the local frame beside it.
+        geodetic: latest
+            .gnss_fix
+            .filter(|fix| fix.received_at.elapsed() <= WITHHOLD_AFTER)
+            .as_ref()
+            .and_then(|fix| estimate_geodetic_fix(fix, &latest)),
         attitude: attitude.map(|att| AvionicsAttitudeSample {
             quat_wxyz: att.quat_wxyz,
             rates_rps: att.rates_rps,
@@ -279,3 +363,6 @@ fn validated_velocity(kinematics: KinematicsUpdate) -> Option<[f32; 3]> {
     let finite = kinematics.vel_ned_mps.iter().all(|v| v.is_finite());
     (declared_valid && finite).then_some(kinematics.vel_ned_mps)
 }
+
+#[cfg(test)]
+mod tests;

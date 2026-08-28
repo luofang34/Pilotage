@@ -11,7 +11,7 @@ use pilotage_adapter_api::{
     RejectReason, SourceIncarnation, StepBudget, StepOutcome, TelemetryBatch, VehicleAdapter,
     VideoSource,
 };
-use pilotage_control_feel::{FeelDigest, ValidatedFlightFeelProfile};
+use pilotage_control_feel::{FeelDigest, FeelMode, FlightFeelProfile, ValidatedFlightFeelProfile};
 use pilotage_protocol::{ControlAction, LogicalAxisId, ScopeId, ScopedControlFrame, VehicleId};
 
 #[cfg(test)]
@@ -113,6 +113,13 @@ pub struct AviateAdapter {
     // scope enacts through it: pointing and zoom are commands to the
     // producer that renders the payload view.
     camera_bridge: Option<CameraBridge>,
+    // How many consecutive truth samples have been published with no fix
+    // joined to them. A sensor that never speaks, a topic nobody
+    // publishes, and two clocks that do not share an origin all look the
+    // same from here: no position, forever, in silence. The count is what
+    // turns that silence into one report.
+    #[cfg_attr(not(feature = "sim"), allow(dead_code))]
+    navsat_join_failures: u64,
     // The commanded pointing of the payload view, integrated from the
     // scope's rate demands. `None` when no producer accepts commands,
     // and structurally uninhabited in a flight build.
@@ -159,6 +166,49 @@ impl AviateAdapter {
         &mut self,
         candidate: ValidatedFlightFeelProfile,
     ) -> Result<FeelDigest, AviateAdapterError> {
+        self.stage_validated_control_feel(candidate, None)
+    }
+
+    /// Stages one named operator feel mode.
+    ///
+    /// An operator chooses between Precision, Balanced and Agile — three laws
+    /// that differ in degree and never in kind. This is that choice, by name,
+    /// rather than an arbitrary profile: a caller that could supply any
+    /// profile could supply one nobody qualified, and a mode a vehicle
+    /// advertises is a mode somebody stood behind.
+    ///
+    /// The mode arrives at the same neutral boundary a rollback uses, so the
+    /// law does not change under a deflected stick.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AviateAdapterError`] when the vehicle is physical, when the
+    /// profile is not one this vehicle accepts, or when no control-feel
+    /// artifact is active.
+    pub fn request_feel_mode(&mut self, mode: FeelMode) -> Result<FeelDigest, AviateAdapterError> {
+        self.request_feel_mode_under(mode, None)
+    }
+
+    /// Stages a named mode on behalf of the operator holding `staged_under`.
+    ///
+    /// Binding the choice to the generation is what lets a handover void it:
+    /// the law belongs to the authority that asked for it, not to whoever
+    /// holds the scope when the sticks next reach neutral.
+    pub(super) fn request_feel_mode_under(
+        &mut self,
+        mode: FeelMode,
+        staged_under: Option<pilotage_protocol::Generation>,
+    ) -> Result<FeelDigest, AviateAdapterError> {
+        let profile = ValidatedFlightFeelProfile::new(FlightFeelProfile::shaped(mode))
+            .map_err(|source| AviateAdapterError::InvalidControlFeel { source })?;
+        self.stage_validated_control_feel(profile, staged_under)
+    }
+
+    fn stage_validated_control_feel(
+        &mut self,
+        candidate: ValidatedFlightFeelProfile,
+        staged_under: Option<pilotage_protocol::Generation>,
+    ) -> Result<FeelDigest, AviateAdapterError> {
         if self.profile == AviateProfile::Physical {
             return Err(AviateAdapterError::PhysicalControlFeelOverride {
                 profile_id: candidate.profile().profile_id.clone(),
@@ -170,7 +220,7 @@ impl AviateAdapter {
             .ok_or_else(|| AviateAdapterError::UnsupportedControlFeel {
                 detail: "the adapter has no active control-feel artifact".to_owned(),
             })?
-            .stage(candidate)
+            .stage(candidate, staged_under)
     }
 
     /// Stages the complete prior artifact for rollback.
@@ -195,6 +245,13 @@ impl AviateAdapter {
         else {
             return Ok(false);
         };
+        if profiles.discard_stale(frame.generation) {
+            tracing::info!(
+                generation = ?frame.generation,
+                "discarded a staged control-feel law whose authority moved on"
+            );
+            return Ok(false);
+        }
         if !profiles.pending_is_neutral(frame, uplink.monotonic_now()) {
             return Ok(false);
         }
@@ -238,6 +295,7 @@ impl AviateAdapter {
             control_feel_changed: false,
             frames: None,
             camera_bridge: None,
+            navsat_join_failures: 0,
             pointing: None,
             _frame_forwarder: None,
             arm: None,
@@ -342,6 +400,16 @@ fn process_flight_actions(
                 action_results.push(ActionResult::rejected(
                     *action,
                     "no mode requests: direct flight is the vehicle.motion.direct scope",
+                ));
+            }
+            // Handled by the adapter before this point, which is where the
+            // control-feel artifact lives. Reaching here means it was not, and
+            // a request that quietly did nothing would leave an operator
+            // believing the law had changed.
+            ControlAction::FeelModeRequest { .. } => {
+                action_results.push(ActionResult::rejected(
+                    *action,
+                    "the control-feel artifact was not reachable for this request",
                 ));
             }
             ControlAction::SimReset

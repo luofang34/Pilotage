@@ -3,10 +3,10 @@
 //! than inside it so each file stays readable on its own.
 
 use pilotage_adapter_api::{
-    ApplyOutcome, Disposition, LinkLossPolicy, RejectReason, TelemetryBatch, TelemetrySample,
-    VideoSource,
+    ActionResult, ApplyOutcome, Disposition, LinkLossPolicy, RejectReason, TelemetryBatch,
+    TelemetrySample, VideoSource,
 };
-use pilotage_protocol::{ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
+use pilotage_protocol::{ControlAction, ControlIntent, ScopeId, ScopedControlFrame, VehicleId};
 use pilotage_timing::SimTick;
 
 #[cfg(feature = "sim")]
@@ -102,17 +102,26 @@ impl AviateAdapter {
             }
             Ok(false) => {}
         }
+        // Answered before the flight actions, because it is the one action that
+        // changes the law the rest of this frame is shaped by.
+        let feel_results = self.answer_feel_requests(&frame.actions, frame.generation);
+
         let Some(uplink) = self.uplink.as_mut() else {
             return rejected_control(tick, RejectReason::UnknownScope);
         };
 
-        let action_results = process_flight_actions(
+        let mut action_results = process_flight_actions(
             &frame.actions,
             |yaw| {
                 uplink.send_arm(yaw);
             },
             current.attitude_rad[2],
         );
+        // The free dispatch above rejects a feel request it cannot serve, so
+        // the answered ones replace those rejections rather than joining them.
+        action_results
+            .retain(|result| !matches!(result.action, ControlAction::FeelModeRequest { .. }));
+        action_results.extend(feel_results);
         if frame.intent.is_none() {
             return ApplyOutcome {
                 tick,
@@ -272,6 +281,15 @@ impl AviateAdapter {
         if let Some(uplink) = self.uplink.as_mut() {
             uplink.clear_hold_state();
         }
+        // A control law staged under the lost lease is obsolete for the same
+        // reason the hold point is: it was chosen by an operator who no longer
+        // holds authority, and leaving it staged would install it on the next
+        // operator's first sustained neutral.
+        if let Some(profiles) = self.control_feel_profiles.as_mut()
+            && profiles.discard_pending()
+        {
+            tracing::info!("discarded a staged control-feel law on link loss");
+        }
         if policy.is_some() {
             // Engaging any policy sends a zero-velocity setpoint: the FC's
             // velocity mode brakes to a hover, which is the only safe action
@@ -316,5 +334,41 @@ impl AviateAdapter {
             advanced: 0,
             now: SimTick::new(tick),
         }
+    }
+}
+
+impl AviateAdapter {
+    /// Answers every control-feel request on one frame.
+    ///
+    /// The law is staged, not applied: it arrives at the next neutral
+    /// boundary, so asking for a mode with the stick deflected does not change
+    /// what the stick is doing.
+    fn answer_feel_requests(
+        &mut self,
+        actions: &[ControlAction],
+        generation: pilotage_protocol::Generation,
+    ) -> Vec<ActionResult> {
+        let mut answered = Vec::new();
+        for action in actions {
+            let ControlAction::FeelModeRequest { target } = *action else {
+                continue;
+            };
+            answered.push(
+                match self.request_feel_mode_under(feel_mode(target), Some(generation)) {
+                    Ok(_) => ActionResult::accepted(*action),
+                    Err(error) => ActionResult::rejected(*action, error.to_string()),
+                },
+            );
+        }
+        answered
+    }
+}
+
+/// Reads a wire feel target as the control-feel mode it names.
+const fn feel_mode(target: pilotage_protocol::FeelTarget) -> pilotage_control_feel::FeelMode {
+    match target {
+        pilotage_protocol::FeelTarget::Precision => pilotage_control_feel::FeelMode::Precision,
+        pilotage_protocol::FeelTarget::Balanced => pilotage_control_feel::FeelMode::Balanced,
+        pilotage_protocol::FeelTarget::Agile => pilotage_control_feel::FeelMode::Agile,
     }
 }

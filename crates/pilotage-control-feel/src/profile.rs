@@ -186,6 +186,93 @@ pub struct FlightFeelProfile {
 }
 
 impl FlightFeelProfile {
+    /// Return the shaped starting profile for one operator mode.
+    ///
+    /// These are starting points, not qualified calibrations. A qualified
+    /// default comes out of a tuning campaign that measures this vehicle;
+    /// what these give it is a safe, principled place to start from, and what
+    /// they give an operator today is a command law that does not step.
+    ///
+    /// Two sets of principles shape them, and both are checked rather than
+    /// described:
+    ///
+    /// An electric vehicle delivers torque progressively. Demand is bounded in
+    /// acceleration and in jerk, so no input produces a step; lifting off is a
+    /// controlled ramp rather than an instant return to zero, which is what
+    /// makes a release predictable instead of a lurch. It is a PROMPT ramp:
+    /// letting go is how an operator stops asking, and a release that lagged
+    /// the apply would take longer to stop commanding than to start. A neutral
+    /// band with a dwell keeps a resting hand from commanding, and the band is
+    /// hysteretic so an input sitting on its edge does not chatter between
+    /// commanding and not.
+    ///
+    /// A control surface has to be predictable and consistent. The three modes
+    /// differ in degree and never in kind: the same curve family, the same
+    /// ordering of limits, the same structure of band. An operator who has
+    /// learned one knows what the others will do. Response begins on the first
+    /// sample rather than after a delay, because a control that does not
+    /// answer immediately reads as broken however smoothly it moves later.
+    ///
+    /// [`FeelMode::LegacyCompatibility`] returns [`Self::legacy_compatibility`],
+    /// which is the unshaped command law and is deliberately none of this.
+    #[must_use]
+    pub fn shaped(mode: FeelMode) -> Self {
+        let tuning = match mode {
+            FeelMode::LegacyCompatibility => return Self::legacy_compatibility(),
+            FeelMode::Precision => ModeTuning {
+                deadzone: 0.08,
+                center_expo: 0.50,
+                outer_expo: 0.35,
+                enter: 0.045,
+                exit: 0.030,
+                dwell_ms: 120,
+                apply_accel: 2.5,
+                apply_jerk: 12.0,
+            },
+            FeelMode::Balanced => ModeTuning {
+                deadzone: 0.06,
+                center_expo: 0.35,
+                outer_expo: 0.30,
+                enter: 0.035,
+                exit: 0.022,
+                dwell_ms: 90,
+                apply_accel: 4.0,
+                apply_jerk: 24.0,
+            },
+            FeelMode::Agile => ModeTuning {
+                deadzone: 0.04,
+                center_expo: 0.20,
+                outer_expo: 0.20,
+                enter: 0.028,
+                exit: 0.018,
+                dwell_ms: 60,
+                apply_accel: 6.5,
+                apply_jerk: 45.0,
+            },
+        };
+        let legacy = Self::legacy_compatibility();
+        Self {
+            profile_id: format!("alia250-shaped-{}-v1", tuning.slug(mode)),
+            mode,
+            horizontal: tuning.axis(1.0),
+            // Altitude is the axis a passenger feels most directly, so it is
+            // held to a gentler bound than the horizontal one at every mode.
+            vertical: tuning.axis(0.7),
+            yaw: tuning.axis(0.85),
+            // Direct flight is a family of its own, and leaving it on the
+            // compatibility law would give an operator three modes that are
+            // the same law: byte-identical, and stepping. The attitude command
+            // is what the stick moves in this family, so it is bounded and
+            // jerk-limited for the same reason the velocity families are.
+            direct: tuning.direct(),
+            // The brake-to-hold transition has to prove the vehicle is
+            // actually stable, which a zero dwell cannot: one sample under the
+            // ceiling is a moment, not a state.
+            hold: tuning.hold(),
+            ..legacy
+        }
+    }
+
     /// Return the fixed compatibility profile.
     #[must_use]
     pub fn legacy_compatibility() -> Self {
@@ -265,5 +352,127 @@ impl FlightFeelProfile {
 impl Default for FlightFeelProfile {
     fn default() -> Self {
         Self::legacy_compatibility()
+    }
+}
+
+/// The numbers one operator mode chooses, and the shape they are put into.
+///
+/// The shape is shared so a mode cannot differ in kind from another: every
+/// mode releases at least as promptly as it applies and reverses no quicker
+/// than it releases, and every band is hysteretic with a dwell.
+///
+/// The release ordering is the safety-relevant one and it reads backwards to
+/// intuition — see [`Self::RELEASE_FACTOR`] for why letting go must never lag
+/// asking.
+#[derive(Debug, Clone, Copy)]
+struct ModeTuning {
+    deadzone: f32,
+    center_expo: f32,
+    outer_expo: f32,
+    enter: f32,
+    exit: f32,
+    dwell_ms: u32,
+    apply_accel: f32,
+    apply_jerk: f32,
+}
+
+impl ModeTuning {
+    /// Releasing is PROMPTER than applying, never gentler.
+    ///
+    /// Comfort would argue the other way — an input returning to centre is a
+    /// deceleration nobody asked to be abrupt — and for a car's torque that is
+    /// the right argument. It is the wrong one here: letting go is how an
+    /// operator stops asking, so a release that lagged the apply would mean
+    /// the vehicle took longer to stop commanding than it took to start. The
+    /// validator refuses that order, and it is right to.
+    ///
+    /// What makes a release comfortable is that it is bounded and jerk-limited
+    /// at all, not that it is slow. The command law this replaces released at
+    /// ten thousand per second with no jerk limit, which is a step.
+    const RELEASE_FACTOR: f32 = 1.25;
+    /// A reversal is a correction, so it is no slower than a fresh command and
+    /// no quicker than a release. It crosses zero under load, which is where an
+    /// unshaped law feels like a jolt, and bounding its jerk is what removes
+    /// the jolt without making the correction sluggish.
+    const REVERSAL_FACTOR: f32 = 1.0;
+
+    fn slug(self, mode: FeelMode) -> &'static str {
+        match mode {
+            FeelMode::Precision => "precision",
+            FeelMode::Balanced => "balanced",
+            FeelMode::Agile => "agile",
+            FeelMode::LegacyCompatibility => "legacy",
+        }
+    }
+
+    /// The direct attitude and thrust family at this mode's authority.
+    ///
+    /// The rates are in radians and normalized thrust rather than in demand
+    /// units, so they are derived from the mode's acceleration rather than
+    /// shared with it: what carries across is the ordering between modes, not
+    /// the number.
+    fn direct(self) -> DirectDynamics {
+        let scale = f64::from(self.apply_accel) / 4.0;
+        DirectDynamics {
+            tilt_rate_rps: (1.2 * scale) as f32,
+            tilt_accel_rps2: (6.0 * scale) as f32,
+            thrust_rate_per_s: (0.9 * scale) as f32,
+            thrust_accel_per_s2: (4.5 * scale) as f32,
+        }
+    }
+
+    /// The brake-to-hold transition at this mode's patience.
+    ///
+    /// A calmer mode waits longer before it calls the vehicle stopped, which
+    /// is the same judgement its longer neutral dwell makes about the stick.
+    ///
+    /// The acceleration bound stays wide on purpose. Nothing supplies an
+    /// acceleration with provenance — the validator refuses `require_accel`
+    /// for exactly that reason — so a tight bound here would be a number with
+    /// no measurement behind it, inert until someone wires a source and then
+    /// live in the dangerous direction: gusts and estimator noise on a
+    /// hovering multirotor exceed a tight bound routinely, every exceedance
+    /// restarts the stability dwell, and a hold that never captures leaves the
+    /// vehicle braked to zero velocity and drifting instead of holding
+    /// position. Tighten it when there is something to measure against.
+    fn hold(self) -> HoldTransition {
+        HoldTransition {
+            max_speed_mps: 0.3,
+            max_accel_mps2: 10_000.0,
+            require_accel: false,
+            stable_dwell_ms: self.dwell_ms,
+        }
+    }
+
+    /// One axis at a fraction of this mode's authority.
+    fn axis(self, scale: f32) -> AxisResponse {
+        let accel = self.apply_accel * scale;
+        let jerk = self.apply_jerk * scale;
+        AxisResponse {
+            curve: AxisCurve {
+                deadzone: self.deadzone,
+                center_expo: self.center_expo,
+                outer_expo: self.outer_expo,
+                // Where the outer curve starts to blend in. At 1.0 it never
+                // does, and a mode's outer exponent is dead configuration
+                // that reads as a difference between modes and is not one.
+                // Blending over the last third gives the finer centre the
+                // exponents are chosen for and still reaches full authority.
+                outer_start: 0.7,
+            },
+            neutral: NeutralBand {
+                active_enter: self.enter,
+                active_exit: self.exit,
+                dwell_ms: self.dwell_ms,
+            },
+            dynamics: AxisDynamics {
+                apply_accel: accel,
+                apply_jerk: jerk,
+                release_accel: accel * Self::RELEASE_FACTOR,
+                release_jerk: jerk * Self::RELEASE_FACTOR,
+                reversal_accel: accel * Self::REVERSAL_FACTOR,
+                reversal_jerk: jerk * Self::REVERSAL_FACTOR,
+            },
+        }
     }
 }

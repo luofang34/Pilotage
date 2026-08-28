@@ -1,0 +1,160 @@
+{
+  "note": "One corpus, two clients. Generated from the web implementation; the anchors are computed from geometry, not from either client.",
+  "leaderSeconds": 60,
+  "trackFloorMps": 0.5,
+  "trackReleaseMps": 0.35,
+  "leaders": [
+    {
+      "name": "due north at the equator",
+      "latitudeDeg": 0,
+      "longitudeDeg": 0,
+      "bearingDeg": 0,
+      "groundSpeedMps": 20,
+      "seconds": 60,
+      "endLongitudeDeg": 0,
+      "endLatitudeDeg": 0.010800010800010801
+    },
+    {
+      "name": "due east at the equator",
+      "latitudeDeg": 0,
+      "longitudeDeg": 0,
+      "bearingDeg": 90,
+      "groundSpeedMps": 20,
+      "seconds": 60,
+      "endLongitudeDeg": 0.010800010800010801,
+      "endLatitudeDeg": 6.613099289333753e-19
+    },
+    {
+      "name": "mid latitude eastbound",
+      "latitudeDeg": 47.4,
+      "longitudeDeg": 8.55,
+      "bearingDeg": 90,
+      "groundSpeedMps": 20,
+      "seconds": 60,
+      "endLongitudeDeg": 8.565955671544675,
+      "endLatitudeDeg": 47.39999889306595
+    },
+    {
+      "name": "mid latitude on a diagonal",
+      "latitudeDeg": 47.4,
+      "longitudeDeg": 8.55,
+      "bearingDeg": 45,
+      "groundSpeedMps": 30,
+      "seconds": 60,
+      "endLongitudeDeg": 8.566927225871325,
+      "endLatitudeDeg": 47.411453895662405
+    },
+    {
+      "name": "southern hemisphere",
+      "latitudeDeg": -35,
+      "longitudeDeg": 138.6,
+      "bearingDeg": 45,
+      "groundSpeedMps": 25,
+      "seconds": 60,
+      "endLongitudeDeg": 138.61165209523585,
+      "endLatitudeDeg": -34.99045349220003
+    },
+    {
+      "name": "beside the north pole",
+      "latitudeDeg": 89.9999,
+      "longitudeDeg": 10,
+      "bearingDeg": 90,
+      "groundSpeedMps": 30,
+      "seconds": 60,
+      "endLongitudeDeg": 99.64632071858914,
+      "endLatitudeDeg": 89.98379967515487
+    },
+    {
+      "name": "across the north pole",
+      "latitudeDeg": 89.999,
+      "longitudeDeg": 10,
+      "bearingDeg": 0,
+      "groundSpeedMps": 100,
+      "seconds": 60,
+      "endLongitudeDeg": 190,
+      "endLatitudeDeg": 89.94699994599995
+    },
+    {
+      "name": "at the south pole",
+      "latitudeDeg": -90,
+      "longitudeDeg": 0,
+      "bearingDeg": 0,
+      "groundSpeedMps": 20,
+      "seconds": 60,
+      "endLongitudeDeg": 0,
+      "endLatitudeDeg": -89.98919998918949
+    },
+    {
+      "name": "eastbound at the seam",
+      "latitudeDeg": 51.9,
+      "longitudeDeg": 179.98,
+      "bearingDeg": 90,
+      "groundSpeedMps": 250,
+      "seconds": 60,
+      "endLongitudeDeg": 180.19878748724096,
+      "endLatitudeDeg": 51.899797164926035
+    },
+    {
+      "name": "westbound at the seam",
+      "latitudeDeg": 51.9,
+      "longitudeDeg": -179.98,
+      "bearingDeg": 270,
+      "groundSpeedMps": 250,
+      "seconds": 60,
+      "endLongitudeDeg": -180.19878748724096,
+      "endLatitudeDeg": 51.899797164926035
+    },
+    {
+      "name": "a slow walk",
+      "latitudeDeg": 12.34,
+      "longitudeDeg": -56.78,
+      "bearingDeg": 200,
+      "groundSpeedMps": 1,
+      "seconds": 60,
+      "endLongitudeDeg": -56.78018905859821,
+      "endLatitudeDeg": 12.33949256541222
+    }
+  ],
+  "bearings": [
+    {
+      "deg": 0,
+      "wrapped": 0
+    },
+    {
+      "deg": 0.4,
+      "wrapped": 0.39999999999997726
+    },
+    {
+      "deg": 1,
+      "wrapped": 1
+    },
+    {
+      "deg": 89.5,
+      "wrapped": 89.5
+    },
+    {
+      "deg": 90,
+      "wrapped": 90
+    },
+    {
+      "deg": 179.6,
+      "wrapped": 179.60000000000002
+    },
+    {
+      "deg": 270,
+      "wrapped": 270
+    },
+    {
+      "deg": 359.4,
+      "wrapped": 359.4
+    },
+    {
+      "deg": 359.97,
+      "wrapped": 359.97
+    },
+    {
+      "deg": 360,
+      "wrapped": 0
+    }
+  ]
+}
