@@ -3,9 +3,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use flight_tune::{
-    AdapterError, ArtifactIdentity, Digest, RunExecutionContext, RunPreparationReceipt,
-    SampleEvent, ScenarioRef, ScenarioStartReceipt, SessionChallenge, SimulatorBackend,
-    SimulatorCapability, SimulatorSessionReceipt, TelemetrySample,
+    AdapterError, ArtifactIdentity, CampaignBackend, Digest, KinematicTruth, MissionCapability,
+    MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext, RunPreparationReceipt,
+    SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRef, ScenarioRuntime,
+    ScenarioRuntimeError, ScenarioStartReceipt, ScenarioStopContext, SessionChallenge,
+    SimulatorCapability, SimulatorSessionReceipt, TelemetrySample, TrialScenario,
+    reference_observation_scenario, scenario_runtime_identity,
 };
 use serde::Deserialize;
 
@@ -16,6 +19,8 @@ pub struct FakeBackend {
     state: FakeHandle,
     simulator: ArtifactIdentity,
     airframe: ArtifactIdentity,
+    action_port_identity: ArtifactIdentity,
+    scenario_runtime_identity: ArtifactIdentity,
 }
 
 impl FakeBackend {
@@ -24,21 +29,74 @@ impl FakeBackend {
     }
 
     pub fn with_simulator_id(state: FakeHandle, id: &str) -> Self {
+        let action_port_identity = identity("vehicle", "fake-controller-v1");
         Self {
             state,
             simulator: identity("simulator", id),
             airframe: identity("airframe", "default-airframe"),
+            scenario_runtime_identity: scenario_runtime_identity(&action_port_identity)
+                .expect("scenario runtime identity"),
+            action_port_identity,
         }
+    }
+
+    pub fn with_action_port_identity(state: FakeHandle, content: &str) -> Self {
+        let mut backend = Self::new(state);
+        backend.action_port_identity = identity("scenario-action-port", content);
+        backend.scenario_runtime_identity =
+            scenario_runtime_identity(&backend.action_port_identity)
+                .expect("scenario runtime identity");
+        backend
     }
 }
 
-impl SimulatorBackend for FakeBackend {
+impl CampaignBackend for FakeBackend {
+    type ScenarioRuntime = Self;
+
     fn simulator_identity(&self) -> &ArtifactIdentity {
         &self.simulator
     }
 
     fn airframe_identity(&self) -> &ArtifactIdentity {
         &self.airframe
+    }
+
+    fn scenario_runtime(&self) -> &Self::ScenarioRuntime {
+        self
+    }
+
+    fn scenario_runtime_mut(&mut self) -> &mut Self::ScenarioRuntime {
+        self
+    }
+
+    fn attest_scenario_runtime_blocking(&self) -> Result<(), AdapterError> {
+        let expected = scenario_runtime_identity(&self.action_port_identity)
+            .map_err(|error| AdapterError::new(error.to_string()))?;
+        if expected == self.scenario_runtime_identity {
+            Ok(())
+        } else {
+            Err(AdapterError::new(
+                "the fake scenario runtime identity changed",
+            ))
+        }
+    }
+
+    fn scenario_document_blocking(
+        &self,
+        scenario: &ScenarioRef,
+    ) -> Result<TrialScenario, AdapterError> {
+        let mut document = reference_observation_scenario(scenario, None);
+        if self.state.0.borrow().bad_scenario_document {
+            document.revision = document.revision.wrapping_add(1);
+        }
+        Ok(document)
+    }
+
+    fn project_scenario_frame(
+        &mut self,
+        sample: &TelemetrySample,
+    ) -> Result<ScenarioFrame, AdapterError> {
+        Ok(fake_scenario_frame(sample))
     }
 
     fn open_session_blocking(
@@ -153,10 +211,16 @@ impl SimulatorBackend for FakeBackend {
         state.next_sequence = state.next_sequence.wrapping_add(1);
         state.sample_count = state.sample_count.wrapping_add(1);
         state.lifecycle.push("sample".to_owned());
+        let values = BTreeMap::from([("gain".to_owned(), state.vehicle.gain)]);
+        let head_change = state.change_head_on_sample.take();
+        drop(state);
+        if let Some(root) = head_change {
+            change_head_digest(&root);
+        }
         Ok(SampleEvent::Sample(TelemetrySample {
             sequence,
             elapsed_ms: 10,
-            values: BTreeMap::from([("gain".to_owned(), state.vehicle.gain)]),
+            values,
         }))
     }
 
@@ -188,6 +252,94 @@ impl SimulatorBackend for FakeBackend {
         state.cleanup_count = state.cleanup_count.wrapping_add(1);
         state.lifecycle.push("cleanup".to_owned());
         state.cleanup_fault.finish(state.cleanup_count)
+    }
+}
+
+impl ScenarioRuntime for FakeBackend {
+    fn identity(&self) -> &ArtifactIdentity {
+        &self.scenario_runtime_identity
+    }
+
+    fn capabilities(&self) -> &[MissionCapability] {
+        &[MissionCapability::SimulatorTime]
+    }
+
+    fn prepare_blocking(
+        &mut self,
+        _document: &MissionDocument,
+        _context: &RunExecutionContext,
+    ) -> Result<(), ScenarioRuntimeError> {
+        let head_change = self
+            .state
+            .0
+            .borrow_mut()
+            .change_head_on_action_prepare
+            .take();
+        if let Some(root) = head_change {
+            change_head_digest(&root);
+        }
+        Ok(())
+    }
+
+    fn start_blocking(&mut self) -> Result<(), ScenarioRuntimeError> {
+        let mut state = self.state.0.borrow_mut();
+        state.scenario_action_start_count = state.scenario_action_start_count.wrapping_add(1);
+        state.lifecycle.push("scenario_action_start".to_owned());
+        Ok(())
+    }
+
+    fn observe_blocking(
+        &mut self,
+        frame: &ScenarioFrame,
+        directive: Option<&MissionDirective>,
+    ) -> Result<ScenarioObservationReceipt, ScenarioRuntimeError> {
+        let mut state = self.state.0.borrow_mut();
+        state.scenario_action_observe_count = state.scenario_action_observe_count.wrapping_add(1);
+        state.lifecycle.push("scenario_action_observe".to_owned());
+        drop(state);
+        Ok(ScenarioObservationReceipt {
+            source_sequence: frame.source_sequence,
+            action_result: directive.map(|_| ReceiptResult::Succeeded {}),
+        })
+    }
+
+    fn stop_blocking(
+        &mut self,
+        _context: &mut ScenarioStopContext,
+    ) -> Result<(), ScenarioRuntimeError> {
+        let mut state = self.state.0.borrow_mut();
+        state.scenario_action_stop_count = state.scenario_action_stop_count.wrapping_add(1);
+        state.lifecycle.push("scenario_action_stop".to_owned());
+        Ok(())
+    }
+
+    fn cleanup_blocking(&mut self) -> Result<(), ScenarioRuntimeError> {
+        let mut state = self.state.0.borrow_mut();
+        state.scenario_action_cleanup_count = state.scenario_action_cleanup_count.wrapping_add(1);
+        state.lifecycle.push("scenario_action_cleanup".to_owned());
+        Ok(())
+    }
+}
+
+fn fake_scenario_frame(sample: &TelemetrySample) -> ScenarioFrame {
+    ScenarioFrame {
+        source_sequence: sample.sequence,
+        simulator_time_ns: sample.elapsed_ms.saturating_mul(1_000_000),
+        trial_time_ns: sample.elapsed_ms.saturating_mul(1_000_000),
+        lifecycle: None,
+        ground_contact: Some(false),
+        crashed: Some(false),
+        link_valid: Some(true),
+        estimator_valid: Some(true),
+        truth: KinematicTruth {
+            position_ned_m: [0.0; 3],
+            velocity_ned_mps: [0.0; 3],
+            acceleration_ned_mps2: [0.0; 3],
+            attitude_wxyz: [1.0, 0.0, 0.0, 0.0],
+            body_rates_rps: [0.0; 3],
+        },
+        applied_conditions: BTreeMap::new(),
+        canonical_signals: Vec::new(),
     }
 }
 

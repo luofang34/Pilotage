@@ -7,7 +7,9 @@ use super::{
     AdapterError, CandidateTransitionReceipt, CandidateTransitionRequest, SessionChallenge,
     SimulatorCapability, SimulatorSessionReceipt, VehicleBinding,
 };
-use crate::{ArtifactIdentity, Candidate, RunExecutionContext, ScenarioRef};
+use crate::{
+    ArtifactIdentity, Candidate, RunExecutionContext, ScenarioFrame, ScenarioRef, ScenarioRuntime,
+};
 
 /// The receipt for an applied candidate and its controller readback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,12 +71,36 @@ pub enum SampleEvent {
 }
 
 /// A simulator backend with an explicit run lifecycle.
-pub trait SimulatorBackend {
+pub trait CampaignBackend {
+    /// The vehicle action runtime that executes mission directives.
+    type ScenarioRuntime: ScenarioRuntime;
+
     /// Returns the exact simulator implementation identity.
     fn simulator_identity(&self) -> &ArtifactIdentity;
 
     /// Returns the exact loaded airframe identity.
     fn airframe_identity(&self) -> &ArtifactIdentity;
+
+    /// Returns the live scenario action runtime without mutation.
+    fn scenario_runtime(&self) -> &Self::ScenarioRuntime;
+
+    /// Returns the live scenario action runtime for one admitted run.
+    fn scenario_runtime_mut(&mut self) -> &mut Self::ScenarioRuntime;
+
+    /// Revalidates the live action runtime without external mutation.
+    fn attest_scenario_runtime_blocking(&self) -> Result<(), AdapterError>;
+
+    /// Resolves one declarative scenario artifact.
+    fn scenario_document_blocking(
+        &self,
+        scenario: &ScenarioRef,
+    ) -> Result<pilotage_trial::Scenario, AdapterError>;
+
+    /// Projects one verified telemetry sample into the neutral runtime frame.
+    fn project_scenario_frame(
+        &mut self,
+        sample: &TelemetrySample,
+    ) -> Result<ScenarioFrame, AdapterError>;
 
     /// Opens and validates one simulator session.
     fn open_session_blocking(
@@ -167,6 +193,11 @@ pub trait SimulatorVehicleFactory {
 
     /// Returns the exact vehicle implementation identity.
     fn vehicle_identity(&self) -> &ArtifactIdentity;
+
+    /// Returns the exact vehicle action-port identity for scenario execution.
+    fn scenario_action_port_identity(&self) -> &ArtifactIdentity {
+        self.vehicle_identity()
+    }
 
     /// Returns the exact candidate-transition validator identity.
     fn transition_validator_identity(&self) -> &ArtifactIdentity;

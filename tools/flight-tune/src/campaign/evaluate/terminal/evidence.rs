@@ -8,13 +8,13 @@ use crate::{
 use super::terminal_error;
 
 #[derive(Clone, Copy)]
-pub(in crate::engine::evaluate) enum EvidenceBindingState {
+pub(in crate::campaign::evaluate) enum EvidenceBindingState {
     Active,
     RestoreIfAbsent,
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::engine::evaluate) fn seal_report_blocking<V>(
+pub(in crate::campaign::evaluate) fn seal_report_blocking<V>(
     journal: &mut Journal,
     trial_id: u64,
     run_index: u64,

@@ -14,14 +14,15 @@ use super::parameter;
 use crate::scoring::channel;
 use pilotage_control_feel::{FeelMode, FlightFeelProfile};
 
-use super::BenchHandle;
 use super::adapter::BenchVehicleAdapter;
+use super::{BenchHandle, bench_action_port_identity};
 
 /// Binds the bench vehicle to a validated simulator session.
 #[derive(Debug)]
 pub struct BenchVehicleFactory {
     handle: BenchHandle,
     identity: ArtifactIdentity,
+    action_port_identity: ArtifactIdentity,
     transition_validator: ArtifactIdentity,
     adjacency_policy_digest: Digest,
 }
@@ -40,6 +41,7 @@ impl BenchVehicleFactory {
         Ok(Self {
             handle,
             identity: text(vehicle_id)?,
+            action_port_identity: bench_action_port_identity()?,
             transition_validator: text("bench-transition-validator")?,
             adjacency_policy_digest: Digest::from_bytes([8; 32]),
         })
@@ -51,6 +53,10 @@ impl SimulatorVehicleFactory for BenchVehicleFactory {
 
     fn vehicle_identity(&self) -> &ArtifactIdentity {
         &self.identity
+    }
+
+    fn scenario_action_port_identity(&self) -> &ArtifactIdentity {
+        &self.action_port_identity
     }
 
     fn transition_validator_identity(&self) -> &ArtifactIdentity {
@@ -75,6 +81,11 @@ impl SimulatorVehicleFactory for BenchVehicleFactory {
             VehicleBindingReceipt {
                 session_digest: capability.session_digest(),
                 vehicle_digest: self.identity.digest,
+                scenario_runtime_digest: flight_tune::scenario_runtime_identity(
+                    &self.action_port_identity,
+                )
+                .map_err(|error| AdapterError::new(error.to_string()))?
+                .digest,
             },
             transition,
         )
@@ -221,15 +232,18 @@ pub fn warm_start_parameters(mode: FeelMode) -> BTreeMap<String, f64> {
 /// starting point rather than around zero: a search that may propose any value
 /// spends its first trials rediscovering that a control has to be stable,
 /// which is what a warm start exists to avoid.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns an error when a scenario identity cannot be calculated.
 pub fn bench_stage(
     id: &str,
     promotion: flight_tune::PromotionPolicy,
     qualification: flight_tune::QualificationPolicy,
-) -> flight_tune::SearchStage {
+) -> Result<flight_tune::SearchStage, AdapterError> {
     use flight_tune::ParameterBounds;
     let bounds = |minimum: f64, maximum: f64| ParameterBounds { minimum, maximum };
-    flight_tune::SearchStage {
+    Ok(flight_tune::SearchStage {
         id: id.to_owned(),
         allowlist: BTreeMap::from([
             (parameter::DEADZONE.to_owned(), bounds(0.02, 0.12)),
@@ -249,24 +263,32 @@ pub fn bench_stage(
         // Training, promotion and final qualification fly separate scenarios.
         // The bar that decides what ships is measured on runs the search never
         // saw, so a candidate cannot be fitted to the scenario that judges it.
-        training_scenarios: vec![bench_scenario("training-step", 21)],
-        promotion_scenarios: vec![bench_scenario("promotion-step", 22)],
-        final_qualification_scenarios: vec![bench_scenario("final-step", 23)],
+        training_scenarios: vec![bench_scenario("training-step", 21)?],
+        promotion_scenarios: vec![bench_scenario("promotion-step", 22)?],
+        final_qualification_scenarios: vec![bench_scenario("final-step", 23)?],
         repetitions: 2,
         promotion,
         qualification,
-    }
+    })
 }
 
 /// One trial of the bench, as a scenario reference.
-#[must_use]
-pub fn bench_scenario(id: &str, digest_byte: u8) -> ScenarioRef {
-    ScenarioRef {
+///
+/// # Errors
+///
+/// Returns an error when the canonical scenario identity cannot be calculated.
+pub fn bench_scenario(id: &str, digest_byte: u8) -> Result<ScenarioRef, AdapterError> {
+    let mut reference = ScenarioRef {
         id: id.to_owned(),
         digest: Digest::from_bytes([digest_byte; 32]),
         // The ceiling covers the whole trial at the bench's sample rate
         // with room for the completion event.
         max_samples: 700,
         sample_timeout_ms: 200,
-    }
+    };
+    reference.digest =
+        flight_tune::reference_observation_scenario(&reference, Some(10_480_000_000))
+            .canonical_digest()
+            .map_err(|error| AdapterError::new(error.to_string()))?;
+    Ok(reference)
 }

@@ -1,7 +1,7 @@
 use flight_tune::{
-    Digest, JournalEvent, RunTerminalCapabilities, RunTerminalDisposition, RunTerminalOperation,
-    RunTerminalOperationStatus, RunTerminalQuarantine, RunTerminalSemanticOutcome,
-    SimulatorBackend,
+    CampaignBackend, Digest, JournalEvent, RunTerminalCapabilities, RunTerminalDisposition,
+    RunTerminalOperation, RunTerminalOperationStatus, RunTerminalQuarantine,
+    RunTerminalSemanticOutcome,
 };
 
 use crate::test_rig::{FakeBackend, FakeHandle, TestDirectory};

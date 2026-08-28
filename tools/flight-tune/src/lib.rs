@@ -13,26 +13,31 @@
 extern crate self as flight_tune;
 
 mod adapter;
-mod engine;
+mod campaign;
+mod campaign_config;
 mod error;
 mod flight_quality;
 mod identity;
 mod journal;
 mod model;
 mod run_context;
+mod scenario_runtime;
 mod score;
 mod strategy;
 mod terminal;
 
 pub use adapter::{
-    AdapterError, CANDIDATE_TRANSITION_RECEIPT_SCHEMA_VERSION, CandidateReceipt,
+    AdapterError, CANDIDATE_TRANSITION_RECEIPT_SCHEMA_VERSION, CampaignBackend, CandidateReceipt,
     CandidateTransitionReceipt, CandidateTransitionReference, CandidateTransitionRequest,
     EvaluatorError, RunPreparationReceipt, RunTerminalAdapter, RunTerminalCapabilities,
-    SampleEvent, ScenarioStartReceipt, SessionChallenge, SimulatorBackend, SimulatorCapability,
+    SampleEvent, ScenarioStartReceipt, SessionChallenge, SimulatorCapability,
     SimulatorSessionReceipt, SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
     TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
 };
-pub use engine::{StopReason, Tuner, TuningSummary};
+pub use campaign::{StopReason, Tuner, TuningSummary};
+pub use campaign_config::{
+    CAMPAIGN_CONFIG_SCHEMA_VERSION, CampaignAdapterDocuments, CampaignConfig,
+};
 pub use error::TuneError;
 pub use flight_quality::{
     CanonicalTelemetryKey, FlightQualityGate, FlightQualityGateConfig, FlightQualityGateEvaluator,
@@ -40,7 +45,10 @@ pub use flight_quality::{
     FlightQualityScales, FlightQualityScenario, FlightQualityWeights, ReleasePlan, StepPlan,
     WindPlan,
 };
-pub use identity::{ArtifactIdentity, CandidateLineage, RuntimeIdentities};
+pub use identity::{
+    ArtifactIdentity, CandidateLineage, RuntimeIdentities, scenario_engine_identity,
+    scenario_runtime_identity,
+};
 pub use journal::{
     AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION, AttemptRole, AuthenticatedEvaluationProof,
     AuthenticatedJournalHead, AuthenticatedJournalRecord,
@@ -56,8 +64,18 @@ pub use model::{
     PromotionSeedPolicy, PromotionSelection, QualificationPolicy, ScenarioRef, SearchStage,
     promotion_policy_digest,
 };
-pub use pilotage_trial::Digest;
+pub use pilotage_mission_core::{
+    ArtifactIdentity as MissionArtifactIdentity, ControlChannel, DirectiveContext, FlightAction,
+    MissionCapability, MissionDirective, MissionDocument, ObservedSignal, ReceiptResult,
+    StartState, TrialAction, VehicleLifecycleState, Waveform,
+};
+pub use pilotage_trial::{Digest, Scenario as TrialScenario};
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
+pub use scenario_runtime::{
+    CampaignMissionRuntime, KinematicTruth, ScenarioFrame, ScenarioObservationReceipt,
+    ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext, ScenarioStopReason,
+    mission_document_from_scenario, reference_observation_scenario,
+};
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,
     MetricEvaluator, MetricValues, RunRecord, ScenarioSet, ScoreAggregate,

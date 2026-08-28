@@ -293,7 +293,7 @@ impl JournalEvidenceSnapshot {
                     .as_ref()
                     .ok_or_else(|| invalid("a sealed head has no final proof"))?;
                 let expected_outcome =
-                    crate::engine::final_outcome(&self.stage, Some(&proof.evaluation));
+                    crate::campaign::final_outcome(&self.stage, Some(&proof.evaluation));
                 if *candidate != proof.candidate_digest
                     || *outcome != expected_outcome
                     || self.final_outcome.as_ref() != Some(&expected_outcome)

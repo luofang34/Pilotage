@@ -11,17 +11,39 @@ use std::process::ExitCode;
 
 use sha2::{Digest as _, Sha256};
 
+#[path = "build_support/scenario_runtime_identity.rs"]
+mod scenario_runtime_identity;
+
 fn main() -> ExitCode {
     match source_identity() {
         Ok(identity) => {
             println!("cargo:rustc-env=FLIGHT_TUNE_BUILD_ID={identity}");
-            ExitCode::SUCCESS
+            match scenario_runtime_identity::calculate(&workspace_root()) {
+                Ok(runtime) => {
+                    println!(
+                        "cargo:rustc-env=FLIGHT_TUNE_SCENARIO_ENGINE_ID={}",
+                        hex(&runtime.digest)
+                    );
+                    for path in runtime.paths {
+                        println!("cargo:rerun-if-changed={}", path.display());
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    println!("cargo:warning=cannot identify scenario runtime sources: {error}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Err(error) => {
             println!("cargo:warning=cannot identify flight-tune sources: {error}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 fn source_identity() -> Result<String, std::io::Error> {

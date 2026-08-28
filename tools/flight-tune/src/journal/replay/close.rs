@@ -139,7 +139,7 @@ fn build_promotion_closure(
         );
     }
     let frozen = frozen.ok_or_else(|| invalid("promotion has no frozen proof"))?;
-    let calculation = crate::engine::calculate_promotion(
+    let calculation = crate::campaign::calculate_promotion(
         stage,
         PromotionRunPlan {
             tuning_session_digest: session.digest()?,
@@ -323,7 +323,7 @@ fn final_shape_matches(
     outcome: &FinalQualificationOutcome,
     stage: &SearchStage,
 ) -> bool {
-    crate::engine::final_outcome(stage, evaluation) == *outcome
+    crate::campaign::final_outcome(stage, evaluation) == *outcome
 }
 
 fn invalid(detail: impl Into<String>) -> TuneError {

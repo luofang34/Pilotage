@@ -136,6 +136,7 @@ fn binding_checks_session_validator_and_policy_before_adapter_call() {
             VehicleBindingReceipt {
                 session_digest: digest(1),
                 vehicle_digest: digest(2),
+                scenario_runtime_digest: digest(7),
             },
             TransitionBindingReceipt::new(digest(1), validator(), digest(3))
                 .expect("transition binding"),
@@ -180,6 +181,7 @@ fn transition_binding_rejects_another_session() {
                 VehicleBindingReceipt {
                     session_digest: digest(1),
                     vehicle_digest: digest(2),
+                    scenario_runtime_digest: digest(7),
                 },
                 TransitionBindingReceipt::new(digest(9), validator(), digest(3))
                     .expect("transition binding"),

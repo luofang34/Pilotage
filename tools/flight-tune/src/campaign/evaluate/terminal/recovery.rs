@@ -1,9 +1,9 @@
 use crate::journal::snapshot::{PreparedRunSnapshot, RunTerminalSnapshot};
 use crate::{
-    Journal, RunBindingReceipt, RunTerminalAdapter, RunTerminalBindingStatus, RunTerminalClass,
-    RunTerminalDiagnostic, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt,
-    RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope, RunTerminalSemanticOutcome,
-    SimulatorBackend, SimulatorCapability, TuneError, VehicleBinding,
+    CampaignBackend, Journal, RunBindingReceipt, RunTerminalAdapter, RunTerminalBindingStatus,
+    RunTerminalClass, RunTerminalDiagnostic, RunTerminalIntent, RunTerminalPlan,
+    RunTerminalReceipt, RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope,
+    RunTerminalSemanticOutcome, SimulatorCapability, TuneError, VehicleBinding,
 };
 
 use super::{
@@ -11,7 +11,7 @@ use super::{
     plan_for_scope, seal_report_blocking,
 };
 
-pub(in crate::engine::evaluate) fn recover_current_run_blocking<B, V>(
+pub(in crate::campaign::evaluate) fn recover_current_run_blocking<B, V>(
     journal: &mut Journal,
     run: &PreparedRunSnapshot,
     backend: &mut B,
@@ -19,7 +19,7 @@ pub(in crate::engine::evaluate) fn recover_current_run_blocking<B, V>(
     capability: &SimulatorCapability,
 ) -> Result<RunTerminalReceipt, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     match &run.terminal {
@@ -77,7 +77,7 @@ fn recover_prepared_blocking<B, V>(
     capability: &SimulatorCapability,
 ) -> Result<RunTerminalReceipt, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let plan = plan_for_scope(journal, vehicle, RunTerminalScope::RuntimeOnly)?;
@@ -140,7 +140,7 @@ fn recover_bound_blocking<B, V>(
     plan: &RunTerminalPlan,
 ) -> Result<RunTerminalReceipt, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let recovered =
@@ -172,7 +172,7 @@ fn contain_without_intent_blocking<B, V>(
     plan: &RunTerminalPlan,
 ) -> Result<ContainedRun, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let intent = RunTerminalIntent::new(
@@ -203,7 +203,7 @@ fn report_and_seal_blocking<B, V>(
     intent: &RunTerminalIntent,
 ) -> Result<RunTerminalReceipt, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let report = execute_recovery_report_blocking(
@@ -265,7 +265,7 @@ fn execute_recovery_report_blocking<B, V>(
     intent: &RunTerminalIntent,
 ) -> Result<RunTerminalReport, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let binding_status =

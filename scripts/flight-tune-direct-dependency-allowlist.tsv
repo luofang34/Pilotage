@@ -47,6 +47,7 @@ tools/flight-tune-campaign/Cargo.toml	tracing	tracing	normal		false	source	regis
 tools/flight-tune-campaign/Cargo.toml	tracing-subscriber	tracing-subscriber	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	fmt	^0.3.23
 tools/flight-tune/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
 tools/flight-tune/Cargo.toml	pilotage-flight-quality	pilotage-flight-quality	normal		false	path	crates/pilotage-flight-quality	true		*
+tools/flight-tune/Cargo.toml	pilotage-mission-core	pilotage-mission-core	normal		false	path	crates/pilotage-mission-core	true		*
 tools/flight-tune/Cargo.toml	pilotage-trial	pilotage-trial	normal		false	path	crates/pilotage-trial	true		*
 tools/flight-tune/Cargo.toml	pilotage-tuning-feedback	pilotage-tuning-feedback	normal		false	path	crates/pilotage-tuning-feedback	true		*
 tools/flight-tune/Cargo.toml	pilotage-tuning-journal-proof	pilotage-tuning-journal-proof	normal		false	path	crates/pilotage-tuning-journal-proof	true		*

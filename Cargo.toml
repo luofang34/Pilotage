@@ -39,6 +39,7 @@ members = [
     "tools/hid-probe",
     "tools/flight-tune",
     "tools/flight-tune-campaign",
+    "tools/flight-tune-xplane",
     "tools/flight-tune-aviate",
     "tools/loopback-probe",
     "tools/xtask",

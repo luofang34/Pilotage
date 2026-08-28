@@ -1,9 +1,9 @@
 use crate::journal::AttemptRole;
 use crate::{
-    CandidateEvaluation, CandidateReceipt, Digest, GateEvaluator, Journal, MetricEvaluator,
-    MetricValues, RunExecutionContext, RunPreparationReceipt, RunRecord, ScenarioRef, ScenarioSet,
-    ScenarioStartReceipt, SearchStage, SimulatorBackend, SimulatorCapability, TelemetrySample,
-    TuneError,
+    CampaignBackend, CandidateEvaluation, CandidateReceipt, Digest, GateEvaluator, Journal,
+    MetricEvaluator, MetricValues, RunExecutionContext, RunPreparationReceipt, RunRecord,
+    ScenarioRef, ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorCapability,
+    TelemetrySample, TuneError,
 };
 
 pub(super) struct RunContext<'a> {
@@ -163,7 +163,7 @@ pub(super) fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[ScenarioRef]
     }
 }
 
-pub(super) fn adapter_error<B: SimulatorBackend>(
+pub(super) fn adapter_error<B: CampaignBackend>(
     backend: &B,
     operation: &'static str,
     source: crate::AdapterError,

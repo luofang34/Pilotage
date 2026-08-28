@@ -239,6 +239,7 @@ fn fixture(child_proof: Digest) -> Fixture {
             VehicleBindingReceipt {
                 session_digest,
                 vehicle_digest,
+                scenario_runtime_digest: Digest::from_bytes([7; 32]),
             },
         )
         .expect("bind vehicle");

@@ -1,9 +1,9 @@
 use crate::journal::AttemptRole;
 use crate::journal::snapshot::RunTerminalSnapshot;
 use crate::{
-    CandidateTransitionReference, Digest, GateEvaluator, Journal, MetricEvaluator,
-    RunTerminalAdapter, SearchStage, SimulatorBackend, SimulatorCapability,
-    SimulatorVehicleAdapter, TuneError, VehicleBinding,
+    CampaignBackend, CandidateTransitionReference, Digest, GateEvaluator, Journal, MetricEvaluator,
+    RunTerminalAdapter, SearchStage, SimulatorCapability, SimulatorVehicleAdapter, TuneError,
+    VehicleBinding,
 };
 
 use super::cleanup::finish_cleanup;
@@ -26,7 +26,7 @@ struct PendingResume {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::engine) fn recover_pending_blocking<B, V, G, M>(
+pub(in crate::campaign) fn recover_pending_blocking<B, V, G, M>(
     journal: &mut Journal,
     stage: &SearchStage,
     backend: &mut B,
@@ -36,7 +36,7 @@ pub(in crate::engine) fn recover_pending_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -50,7 +50,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::engine) fn recover_pending_for_open_blocking<B, V, G, M>(
+pub(in crate::campaign) fn recover_pending_for_open_blocking<B, V, G, M>(
     journal: &mut Journal,
     stage: &SearchStage,
     backend: &mut B,
@@ -60,7 +60,7 @@ pub(in crate::engine) fn recover_pending_for_open_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -85,7 +85,7 @@ fn recover_terminal_prefix_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<Option<PendingResume>, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -115,7 +115,7 @@ fn pending_resume_blocking<B, G, M>(
     metric: &mut M,
 ) -> Result<Option<PendingResume>, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -157,7 +157,7 @@ fn resume_pending_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -197,7 +197,7 @@ pub(super) fn resume_committed_prefix<B, G, M>(
     metric: &mut M,
 ) -> Result<Option<ResumeCursor>, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {

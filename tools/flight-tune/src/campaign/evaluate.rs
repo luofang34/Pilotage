@@ -1,5 +1,6 @@
 mod cleanup;
 mod contract;
+mod mission;
 mod pending;
 mod record;
 mod stream;
@@ -9,8 +10,8 @@ use crate::identity::digest_bytes;
 use crate::journal::AttemptRole;
 use crate::model::derive_seed;
 use crate::{
-    Candidate, CandidateTransitionReference, Digest, GateEvaluator, Journal, MetricEvaluator,
-    RunExecutionContext, RunRecord, RunTerminalAdapter, SearchStage, SimulatorBackend,
+    CampaignBackend, Candidate, CandidateTransitionReference, Digest, GateEvaluator, Journal,
+    MetricEvaluator, RunExecutionContext, RunRecord, RunTerminalAdapter, SearchStage,
     SimulatorCapability, SimulatorVehicleAdapter, TuneError, VehicleBinding,
 };
 use contract::*;
@@ -100,7 +101,7 @@ pub(super) fn run_prepared_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -158,7 +159,7 @@ fn run_from_cursor_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -232,7 +233,7 @@ fn run_one_blocking<B, V, G, M>(
     metric: &mut M,
 ) -> Result<RunProgress, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -321,11 +322,15 @@ fn run_until_terminal<B, V, G, M>(
     metric: &mut M,
 ) -> RunTerminal
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    let mut mission = match mission::admit_campaign_mission(journal, context, backend) {
+        Ok(mission) => mission,
+        Err(error) => return RunTerminal::Failed { error },
+    };
     if let Err(error) = journal.ensure_usable() {
         return RunTerminal::Failed { error };
     }
@@ -359,7 +364,19 @@ where
     if let Err(error) = validate_scenario_receipt(receipt, capability, context) {
         return RunTerminal::Failed { error };
     }
-    stream_samples(journal, stage, context, backend, gates, metric)
+    if let Err(error) = mission::start_campaign_action_port(journal, context, backend, &mut mission)
+    {
+        return RunTerminal::Failed { error };
+    }
+    stream_samples(
+        journal,
+        stage,
+        context,
+        backend,
+        &mut mission,
+        gates,
+        metric,
+    )
 }
 
 fn prepare_backend_run<B>(
@@ -368,7 +385,7 @@ fn prepare_backend_run<B>(
     context: &RunContext<'_>,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
 {
     let receipt = backend
         .prepare_blocking(capability, &context.execution, context.scenario)

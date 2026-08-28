@@ -1,5 +1,5 @@
 use crate::journal::OperationStatus;
-use crate::{GateEvaluator, Journal, MetricEvaluator, SimulatorBackend, TuneError};
+use crate::{CampaignBackend, GateEvaluator, Journal, MetricEvaluator, TuneError};
 
 pub(super) fn finish_cleanup<B, G, M>(
     journal: &mut Journal,
@@ -10,7 +10,7 @@ pub(super) fn finish_cleanup<B, G, M>(
     cancel_evaluators: bool,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -36,7 +36,7 @@ pub(super) fn cleanup_status<B, G, M>(
     cancel_evaluators: bool,
 ) -> Result<OperationStatus, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
