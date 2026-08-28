@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CodecError, Digest, MAX_CAPABILITIES, MAX_PHASE_CONDITIONS, MAX_PHASES, MISSION_SCHEMA_VERSION,
-    MissionAction, MissionCondition, MissionIdentity, NavigationDataIdentity, TransportLane,
-    ValidationError, canonical, validation,
+    CodecError, Digest, MAX_CAPABILITIES, MAX_CLEANUP_ACTIONS, MAX_PHASE_CONDITIONS, MAX_PHASES,
+    MISSION_SCHEMA_VERSION, MissionAction, MissionCondition, MissionIdentity,
+    NavigationDataIdentity, TransportLane, ValidationError, canonical, validation,
 };
 
 /// A mission execution target.
@@ -24,6 +24,10 @@ pub enum ExecutionTarget {
 pub struct ExecutionPolicy {
     /// The target that can execute the document.
     pub target: ExecutionTarget,
+    /// The maximum number of retries after the first directive attempt.
+    pub retry_limit: u16,
+    /// The maximum caller wall-clock wait for one directive receipt.
+    pub receipt_timeout_ns: u64,
 }
 
 /// A capability required by a mission phase.
@@ -72,6 +76,8 @@ pub struct MissionPhase {
     pub entry_conditions: Vec<MissionCondition>,
     /// The one action for the phase.
     pub action: MissionAction,
+    /// The actions to attempt during abort cleanup.
+    pub cleanup_actions: Vec<MissionAction>,
     /// The conditions that complete the phase.
     pub completion_conditions: Vec<MissionCondition>,
     /// The conditions that abort the mission.
@@ -170,6 +176,7 @@ impl MissionDocument {
     /// Returns an error if the host target is not permitted or content is invalid.
     pub fn validate_for_target(&self, target: ExecutionTarget) -> Result<(), ValidationError> {
         self.identity.validate_fields()?;
+        self.execution_policy.validate()?;
         self.validate_phases()?;
         self.validate_admission(target)?;
         if self.execution_policy.target != target {
@@ -183,6 +190,7 @@ impl MissionDocument {
 
     fn validate_content(&self) -> Result<(), ValidationError> {
         self.identity.validate_content_fields()?;
+        self.execution_policy.validate()?;
         self.validate_phases()
     }
 
@@ -208,17 +216,19 @@ impl MissionDocument {
             return Ok(());
         }
         for phase in &self.phases {
-            if phase.action.transport_lane() == TransportLane::SimulatorOnly {
-                return Err(ValidationError::SimulatorOnlyAction {
-                    phase_id: phase.id.clone(),
-                    action: phase.action.name(),
-                });
+            for action in std::iter::once(&phase.action).chain(&phase.cleanup_actions) {
+                if action.transport_lane() == TransportLane::SimulatorOnly {
+                    return Err(ValidationError::SimulatorOnlyAction {
+                        phase_id: phase.id.clone(),
+                        action: action.name(),
+                    });
+                }
             }
         }
         Ok(())
     }
 
-    fn verify_content_digest(&self) -> Result<(), CodecError> {
+    pub(crate) fn verify_content_digest(&self) -> Result<(), CodecError> {
         self.identity.validate_fields()?;
         let calculated = self.calculate_content_digest()?;
         if self.identity.content_digest != calculated {
@@ -249,7 +259,11 @@ impl MissionPhase {
         self.validate_capability_list()?;
         self.validate_conditions(&field)?;
         self.action.validate(&field)?;
-        self.validate_plan_identity(navigation_data)?;
+        self.validate_cleanup_actions(&field)?;
+        self.validate_plan_identity(&self.action, navigation_data)?;
+        for action in &self.cleanup_actions {
+            self.validate_plan_identity(action, navigation_data)?;
+        }
         self.validate_capability_declarations()
     }
 
@@ -278,11 +292,24 @@ impl MissionPhase {
         validate_condition_list(field, "abort_conditions", &self.abort_conditions)
     }
 
+    fn validate_cleanup_actions(&self, field: &str) -> Result<(), ValidationError> {
+        validation::count_with_limit(
+            &format!("{field}.cleanup_actions"),
+            self.cleanup_actions.len(),
+            MAX_CLEANUP_ACTIONS,
+        )?;
+        for (index, action) in self.cleanup_actions.iter().enumerate() {
+            action.validate(&format!("{field}.cleanup_actions[{index}]"))?;
+        }
+        Ok(())
+    }
+
     fn validate_plan_identity(
         &self,
+        action: &MissionAction,
         navigation_data: &NavigationDataIdentity,
     ) -> Result<(), ValidationError> {
-        if let Some(plan) = self.action.flight_plan()
+        if let Some(plan) = action.flight_plan()
             && plan.navigation_data_identity != *navigation_data
         {
             return Err(ValidationError::NavigationDataMismatch {
@@ -297,6 +324,11 @@ impl MissionPhase {
         self.require_declared(MissionCapability::SimulatorTime)?;
         if let Some(capability) = self.action.required_capability() {
             self.require_declared(capability)?;
+        }
+        for action in &self.cleanup_actions {
+            if let Some(capability) = action.required_capability() {
+                self.require_declared(capability)?;
+            }
         }
         for condition in self
             .entry_conditions
@@ -319,6 +351,15 @@ impl MissionPhase {
             phase_id: self.id.clone(),
             capability,
         })
+    }
+}
+
+impl ExecutionPolicy {
+    fn validate(&self) -> Result<(), ValidationError> {
+        validation::nonzero_u64(
+            "mission.execution_policy.receipt_timeout_ns",
+            self.receipt_timeout_ns,
+        )
     }
 }
 

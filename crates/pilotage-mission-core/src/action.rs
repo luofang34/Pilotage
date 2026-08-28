@@ -157,7 +157,7 @@ impl FlightAction {
         }
     }
 
-    const fn name(&self) -> &'static str {
+    pub(crate) const fn name(&self) -> &'static str {
         match self {
             Self::Arm {} => "flight.arm",
             Self::Climb { .. } => "flight.climb",
@@ -197,7 +197,7 @@ impl TrialAction {
         }
     }
 
-    const fn name(&self) -> &'static str {
+    pub(crate) const fn name(&self) -> &'static str {
         match self {
             Self::Reset {} => "trial.reset",
             Self::WaitReady {} => "trial.wait_ready",

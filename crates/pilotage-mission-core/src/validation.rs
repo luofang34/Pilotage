@@ -82,6 +82,15 @@ pub(crate) fn finite(field: &str, value: f64) -> Result<(), ValidationError> {
     Ok(())
 }
 
+pub(crate) fn nonzero_u64(field: &str, value: u64) -> Result<(), ValidationError> {
+    if value == 0 {
+        return Err(ValidationError::ZeroDuration {
+            field: field.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn range(
     field: &str,
     value: f64,
