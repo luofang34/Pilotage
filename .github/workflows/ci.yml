@@ -155,6 +155,11 @@ jobs:
       - name: cargo test
         run: cargo test --all-targets
 
+      - name: Campaign certification
+        # The full two-vehicle campaign pair, split out of `cargo test`
+        # so its cost is visible and can be scoped to the changes that
+        # can reach it once the classifier emits a campaign answer.
+        run: cargo test -p flight-tune-campaign -- --ignored --test-threads 2
       - name: durable storage non-Unix contract and consumer
         env:
           RUSTFLAGS: "-D warnings"

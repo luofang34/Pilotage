@@ -58,6 +58,18 @@ fn campaign(
     promotion: flight_tune::PromotionPolicy,
     qualification: flight_tune::QualificationPolicy,
 ) -> (FinalQualificationOutcome, PathBuf) {
+    campaign_with_attempts(name, model, promotion, qualification, 3)
+}
+
+/// The same chain with a stated training budget, so the smoke can fly
+/// the whole thing at a fraction of the certification's journal cost.
+fn campaign_with_attempts(
+    name: &str,
+    model: BenchVehicle,
+    promotion: flight_tune::PromotionPolicy,
+    qualification: flight_tune::QualificationPolicy,
+    training_attempts: u64,
+) -> (FinalQualificationOutcome, PathBuf) {
     let scratch = Scratch::new(name);
     let root = scratch.0.clone();
     let handle = BenchHandle::default();
@@ -81,7 +93,7 @@ fn campaign(
     .expect("open the campaign");
 
     tuner
-        .run_training_attempts_blocking(3)
+        .run_training_attempts_blocking(training_attempts)
         .expect("run training attempts");
     tuner.freeze_candidate().expect("freeze the champion");
     tuner
@@ -100,7 +112,30 @@ fn campaign(
     (outcome, root)
 }
 
+/// The full chain at smoke cost: one vehicle, one training attempt,
+/// every phase, and the winner still qualifies. This is the per-merge
+/// answer to "did I break the engine or the bench wiring"; the
+/// certification pair below answers the larger question on its own
+/// cadence.
 #[test]
+fn a_campaign_smokes_the_whole_chain() {
+    let (outcome, root) = campaign_with_attempts(
+        "smoke",
+        BenchVehicle::alia250(),
+        crate::alia250_promotion_policy(),
+        crate::alia250_qualification_policy(),
+        1,
+    );
+    assert!(
+        matches!(outcome, FinalQualificationOutcome::Qualified),
+        "the smoke campaign qualifies its winner: {outcome:?}"
+    );
+    assert!(root.join("published").exists(), "evidence was published");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+#[ignore = "certification: the full campaign for both vehicles, affected-gated in CI and nightly"]
 fn a_campaign_runs_end_to_end_for_the_alia250() {
     // The whole chain: a warm start, a bounded search over the command law,
     // a frozen champion, a paired promotion decision on scenarios the search
@@ -124,6 +159,7 @@ fn a_campaign_runs_end_to_end_for_the_alia250() {
 }
 
 #[test]
+#[ignore = "certification: the full campaign for both vehicles, affected-gated in CI and nightly"]
 fn a_campaign_runs_end_to_end_for_the_x500() {
     // The second vehicle contributes a model and a bar and nothing else. That
     // this runs at all, through the same backend, evaluator and engine, is the
