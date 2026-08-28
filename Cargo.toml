@@ -22,6 +22,7 @@ members = [
     "crates/pilotage-terrain-build",
     "crates/pilotage-terrain-query",
     "crates/pilotage-mission",
+    "crates/pilotage-mission-core",
     "crates/pilotage-instrument-runtime",
     "crates/pilotage-client-session",
     "crates/pilotage-instrument-feed",

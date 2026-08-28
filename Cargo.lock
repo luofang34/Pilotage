@@ -2082,6 +2082,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilotage-mission-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "pilotage-navdata-cycle"
 version = "0.1.0"
 dependencies = [
