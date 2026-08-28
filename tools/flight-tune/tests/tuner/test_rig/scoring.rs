@@ -6,7 +6,7 @@ use flight_tune::{
     ArtifactIdentity, Candidate, CandidateLineage, Digest, EvaluatorError, GateEvaluator,
     GateOutcome, MetricEvaluator, MetricValues, ParameterBounds, PromotionPolicy, Proposal,
     ProposalContext, ProposalError, ProposalStrategy, QualificationPolicy, ScenarioRef,
-    SearchStage, TelemetrySample, TrainingObservation, TuneError,
+    SearchStage, TelemetrySample, TrainingObservation, TuneError, reference_observation_scenario,
 };
 
 use super::{FakeHandle, FakeState, identity};
@@ -248,12 +248,16 @@ pub fn stage() -> SearchStage {
 }
 
 fn scenario(id: &str, digest_byte: u8) -> ScenarioRef {
-    ScenarioRef {
+    let mut reference = ScenarioRef {
         id: id.to_owned(),
         digest: Digest::from_bytes([digest_byte; 32]),
         max_samples: 8,
         sample_timeout_ms: 100,
-    }
+    };
+    reference.digest = reference_observation_scenario(&reference, None)
+        .canonical_digest()
+        .expect("reference scenario digest");
+    reference
 }
 
 pub fn assert_receipt_error(error: TuneError) {

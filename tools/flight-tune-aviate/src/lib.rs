@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+mod action_port;
 mod artifact;
 mod document;
 mod error;
@@ -24,6 +25,9 @@ mod protocol;
 mod runtime_files;
 mod supervisor;
 
+pub use action_port::{
+    AviateActionDriver, AviateActionPortError, AviateVehicleActionPort, aviate_action_port_identity,
+};
 pub use document::{
     ProcessIdentity, ProcessStartIdentity, TargetAttestation, TargetProcessContract,
 };

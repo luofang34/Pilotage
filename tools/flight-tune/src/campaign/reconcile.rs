@@ -1,14 +1,14 @@
 use crate::journal::CampaignPhase;
 use crate::{
-    FinalQualificationOutcome, GateEvaluator, MetricEvaluator, ProposalStrategy,
-    RunTerminalAdapter, SimulatorBackend, SimulatorVehicleAdapter, TuneError,
+    CampaignBackend, FinalQualificationOutcome, GateEvaluator, MetricEvaluator, ProposalStrategy,
+    RunTerminalAdapter, SimulatorVehicleAdapter, TuneError,
 };
 
 use super::{Tuner, evaluate, invalid_state};
 
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,

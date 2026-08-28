@@ -122,6 +122,7 @@ fn session(initial: Digest) -> SessionIdentity {
             strategy: identity("strategy", 8),
             metric: identity("metric", 9),
             hard_gates: identity("gates", 10),
+            scenario_runtime: Some(identity("pilotage-scenario-runtime-v2", 16)),
             simulator: identity("simulator", 11),
             airframe: identity("airframe", 12),
             vehicle: identity("vehicle", 13),

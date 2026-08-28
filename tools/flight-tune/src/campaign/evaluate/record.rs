@@ -1,9 +1,9 @@
 use crate::journal::AttemptRole;
 use crate::score::aggregate_runs;
 use crate::{
-    CandidateEvaluation, GateEvaluator, HardGateFailure, Journal, MetricEvaluator, RunRecord,
-    RunTerminalCompletion, RunTerminalDisposition, RunTerminalReceipt, RunTerminalSemanticOutcome,
-    SimulatorBackend, TuneError,
+    CampaignBackend, CandidateEvaluation, GateEvaluator, HardGateFailure, Journal, MetricEvaluator,
+    RunRecord, RunTerminalCompletion, RunTerminalDisposition, RunTerminalReceipt,
+    RunTerminalSemanticOutcome, TuneError,
 };
 
 use super::cleanup::{cleanup_status, finish_cleanup};
@@ -28,7 +28,7 @@ pub(super) fn record_committed_terminal<B, G, M>(
     metric: &mut M,
 ) -> Result<RunProgress, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -104,7 +104,7 @@ fn record_completed_run<B, G, M>(
     metric: &mut M,
 ) -> Result<RunProgress, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -142,7 +142,7 @@ fn record_hard_gate<B, G, M>(
     metric: &mut M,
 ) -> Result<RunProgress, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -168,7 +168,7 @@ fn complete_and_clean<B, G, M>(
     cancel_evaluators: bool,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {
@@ -186,7 +186,7 @@ fn quarantine_terminal<B, G, M>(
     metric: &mut M,
 ) -> Result<RunProgress, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     G: GateEvaluator,
     M: MetricEvaluator,
 {

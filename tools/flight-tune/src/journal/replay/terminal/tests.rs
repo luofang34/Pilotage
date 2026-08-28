@@ -455,6 +455,7 @@ fn test_runtimes() -> RuntimeIdentities {
         strategy: identity("strategy", 11),
         metric: identity("metric", 12),
         hard_gates: identity("hard-gates", 13),
+        scenario_runtime: Some(identity("pilotage-scenario-runtime-v2", 19)),
         simulator: identity("simulator", 14),
         airframe: identity("airframe", 15),
         vehicle: identity("vehicle", 16),

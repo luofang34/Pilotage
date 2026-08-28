@@ -1,0 +1,165 @@
+use std::fs;
+
+use flight_tune::{
+    AttemptRole, Digest, JournalEntry, JournalEvent, SimulatorVehicleFactory, TuneError, Tuner,
+    scenario_runtime_identity,
+};
+use serde::Deserialize;
+
+use super::TestTuner;
+use super::test_rig::{
+    EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, QuadraticMetric, SequenceStrategy,
+    TestDirectory, candidate, stage,
+};
+
+#[test]
+fn changed_runtime_orphans_baseline_and_pending_challenger_before_mutation() {
+    let old_directory = TestDirectory::new("orphan-baseline-old-runtime");
+    let state = FakeHandle::new();
+    state.0.borrow_mut().panic_on_prepare = Some(3);
+    let strategy = SequenceStrategy::new(vec![0.5]);
+    let mut tuner = open_with_factory(
+        &old_directory,
+        state.clone(),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        strategy.clone(),
+    )
+    .expect("open old runtime");
+    let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        tuner.run_training_attempts_blocking(1).ok();
+    }));
+    assert!(stopped.is_err());
+    drop(tuner);
+    state.0.borrow_mut().panic_on_prepare = None;
+
+    let old_head = read_head_entry(&old_directory);
+    assert!(read_entries(&old_directory).iter().any(|entry| matches!(
+        &entry.event,
+        JournalEvent::AttemptPrepared {
+            role: AttemptRole::TrainingChallenger { .. },
+            ..
+        }
+    )));
+    let old_runtime = old_head
+        .session
+        .runtimes
+        .scenario_runtime
+        .clone()
+        .expect("old scenario runtime identity");
+    let before = ExternalMutations::capture(&state);
+    let changed_port =
+        FakeFactory::with_action_port_identity(state.clone(), "aviate-action-port-v2");
+    let changed_runtime = scenario_runtime_identity(changed_port.scenario_action_port_identity())
+        .expect("changed runtime identity");
+    assert_ne!(changed_runtime, old_runtime);
+
+    let result = open_with_factory(
+        &old_directory,
+        state.clone(),
+        FakeBackend::with_action_port_identity(state.clone(), "aviate-action-port-v2"),
+        changed_port,
+        strategy,
+    );
+
+    assert!(matches!(result, Err(TuneError::JournalSessionMismatch)));
+    assert_eq!(ExternalMutations::capture(&state), before);
+    assert_eq!(read_head_entry(&old_directory), old_head);
+
+    let new_directory = TestDirectory::new("orphan-baseline-new-runtime");
+    let runs_before = state.0.borrow().scenario_runs.len();
+    let mut new_tuner = open_with_factory(
+        &new_directory,
+        state.clone(),
+        FakeBackend::with_action_port_identity(state.clone(), "aviate-action-port-v2"),
+        FakeFactory::with_action_port_identity(state.clone(), "aviate-action-port-v2"),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("start exact-runtime session");
+    new_tuner
+        .run_training_attempts_blocking(1)
+        .expect("run exact-runtime baseline and challenger");
+    assert!(state.0.borrow().scenario_runs.len() > runs_before);
+    assert_eq!(new_tuner.journal().training_attempt_count(), 1);
+}
+
+fn open_with_factory(
+    directory: &TestDirectory,
+    state: FakeHandle,
+    backend: FakeBackend,
+    factory: FakeFactory,
+    strategy: SequenceStrategy,
+) -> Result<TestTuner, TuneError> {
+    Tuner::open_or_resume(
+        directory.path(),
+        stage(),
+        91,
+        candidate(0.0),
+        backend,
+        factory,
+        EnvelopeGates::new(2.0),
+        QuadraticMetric::new(state),
+        strategy,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct HeadPointer {
+    digest: Digest,
+}
+
+fn read_head_entry(directory: &TestDirectory) -> JournalEntry {
+    let head_bytes = fs::read(directory.path().join("HEAD.json")).expect("read journal head");
+    let head: HeadPointer = serde_json::from_slice(&head_bytes).expect("decode journal head");
+    let entry_path = directory
+        .path()
+        .join("entries")
+        .join(format!("{}.json", head.digest));
+    let entry_bytes = fs::read(entry_path).expect("read journal entry");
+    serde_json::from_slice(&entry_bytes).expect("decode journal entry")
+}
+
+fn read_entries(directory: &TestDirectory) -> Vec<JournalEntry> {
+    let mut entries = fs::read_dir(directory.path().join("entries"))
+        .expect("read journal entries")
+        .map(|entry| {
+            let path = entry.expect("journal entry path").path();
+            let bytes = fs::read(path).expect("read journal entry");
+            serde_json::from_slice::<JournalEntry>(&bytes).expect("decode journal entry")
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.sequence);
+    entries
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExternalMutations {
+    open_session: usize,
+    prepare: usize,
+    start: usize,
+    stop: usize,
+    cleanup: usize,
+    vehicle_bind: usize,
+    vehicle_ensure: usize,
+    vehicle_apply: usize,
+    transition_authorization: usize,
+    scenario_runs: usize,
+}
+
+impl ExternalMutations {
+    fn capture(handle: &FakeHandle) -> Self {
+        let state = handle.0.borrow();
+        Self {
+            open_session: state.open_session_count,
+            prepare: state.prepare_count,
+            start: state.start_count,
+            stop: state.stop_count,
+            cleanup: state.cleanup_count,
+            vehicle_bind: state.vehicle.bind_count,
+            vehicle_ensure: state.vehicle.ensure_count,
+            vehicle_apply: state.vehicle.apply_count,
+            transition_authorization: state.transition.authorization_count,
+            scenario_runs: state.scenario_runs.len(),
+        }
+    }
+}

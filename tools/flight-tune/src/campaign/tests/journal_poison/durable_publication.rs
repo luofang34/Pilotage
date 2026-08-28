@@ -75,7 +75,7 @@ fn check_candidate_authorization_publication(fault: PublicationFault) {
         state.0.borrow().transition.authorization_count,
         authorizations_before + 1
     );
-    let target = crate::engine::evaluate::candidate_digest(&candidate(0.5))
+    let target = crate::campaign::evaluate::candidate_digest(&candidate(0.5))
         .expect("digest target candidate");
     let publication_after = PublicationSnapshot::new(&directory);
     let orphan = assert_publication_objects(
@@ -84,7 +84,7 @@ fn check_candidate_authorization_publication(fault: PublicationFault) {
         &publication_after,
         Some(target),
     );
-    let source = crate::engine::evaluate::candidate_digest(&candidate(0.0))
+    let source = crate::campaign::evaluate::candidate_digest(&candidate(0.0))
         .expect("digest source candidate");
     assert_authorization_entry(&orphan, source, target);
     assert_eq!(authorization_count(tuner.journal()), 0);
@@ -106,7 +106,7 @@ fn check_run_preparation_publication(fault: PublicationFault) {
     let state = FakeHandle::new();
     let mut tuner = open_tuner(&directory, state.clone(), Vec::new());
     let initial = candidate(0.0);
-    let digest = crate::engine::evaluate::candidate_digest(&initial).expect("digest candidate");
+    let digest = crate::campaign::evaluate::candidate_digest(&initial).expect("digest candidate");
     let plan = AttemptRole::TrainingBaseline
         .plan_digest(&tuner.stage, digest, tuner.journal.session().fixed_seed)
         .expect("create run plan");
@@ -157,7 +157,7 @@ fn run_prepared_baseline(
     initial: &crate::Candidate,
     digest: Digest,
 ) -> Result<(), TuneError> {
-    crate::engine::evaluate::run_prepared_blocking(
+    crate::campaign::evaluate::run_prepared_blocking(
         &mut tuner.journal,
         &tuner.stage,
         trial_id,

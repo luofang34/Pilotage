@@ -10,7 +10,7 @@ mod terminal;
 mod transition;
 
 pub use lifecycle::{
-    CandidateReceipt, RunPreparationReceipt, SampleEvent, ScenarioStartReceipt, SimulatorBackend,
+    CampaignBackend, CandidateReceipt, RunPreparationReceipt, SampleEvent, ScenarioStartReceipt,
     SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
 };
 pub use terminal::{RunTerminalAdapter, RunTerminalCapabilities};
@@ -177,6 +177,8 @@ pub struct VehicleBindingReceipt {
     pub session_digest: Digest,
     /// The bound vehicle implementation digest.
     pub vehicle_digest: Digest,
+    /// The final engine and vehicle action-port digest.
+    pub scenario_runtime_digest: Digest,
 }
 
 /// The transition policy that is fixed to one simulator session binding.

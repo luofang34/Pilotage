@@ -437,11 +437,16 @@ GENERATED_INCLUDE_INPUTS = {
         "tools/flight-tune-aviate/build.rs",
         "tools/flight-tune-aviate/build_support/runtime_source_identity.rs",
     ),
+    "tools/flight-tune/src/scenario_runtime.rs": (
+        "tools/flight-tune/build.rs",
+        "tools/flight-tune/build_support/scenario_runtime_identity.rs",
+    ),
 }
 GENERATED_INPUT_DIGESTS = {
     "tools/flight-tune/build.rs": frozenset(
         {
             "b56dd4918f6443ceb9804f5e4fb04d464268cb29ebeba76b7dc69a5a07a475cd",
+            "e4a5a3ef9d5d36ac52b5dacab7bd6eeebcef2d118490bd0831c9a8b462e1d176",
             "f0424a1bc2c4cc2fe118246db46bd3b912f6c5c5460e487c53285f93629c0aac",
         }
     ),
@@ -453,6 +458,9 @@ GENERATED_INPUT_DIGESTS = {
     ),
     "tools/flight-tune-aviate/build_support/runtime_source_identity.rs": frozenset(
         {"d29a99fcf0c26af600616584f874171cbbc90b723a37d4c92e6b706c91fd7497"}
+    ),
+    "tools/flight-tune/build_support/scenario_runtime_identity.rs": frozenset(
+        {"ea659ffa2a8008ac9b23afd1bc8c493b3406121e1915e5ac2874ddac34707d35"}
     ),
 }
 GENERATED_BUILD_TARGETS = {

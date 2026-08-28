@@ -22,6 +22,8 @@ fn completion_without_samples_is_a_core_hard_gate_failure() {
         Err(TuneError::UnsafeBaseline { .. })
     ));
     assert_eq!(state.0.borrow().metric_observe_count, 0);
+    assert_eq!(state.0.borrow().scenario_action_stop_count, 1);
+    assert_eq!(state.0.borrow().scenario_action_cleanup_count, 1);
     assert!(tuner.journal().entries().iter().any(|entry| {
         matches!(
             &entry.event,

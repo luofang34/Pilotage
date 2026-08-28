@@ -4,6 +4,8 @@ use sha2::{Digest as ShaDigest, Sha256};
 
 use crate::TuneError;
 
+const SCENARIO_RUNTIME_ID_V2: &str = "pilotage-scenario-runtime-v2";
+
 /// The content identity of one runtime artifact or implementation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +94,9 @@ pub struct RuntimeIdentities {
     pub metric: ArtifactIdentity,
     /// The streaming hard gate implementation and its configuration.
     pub hard_gates: ArtifactIdentity,
+    /// The engine and vehicle action-port identity for scenario execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_runtime: Option<ArtifactIdentity>,
     /// The simulator build and adapter configuration.
     pub simulator: ArtifactIdentity,
     /// The selected simulator airframe artifact.
@@ -118,6 +123,18 @@ impl RuntimeIdentities {
         ] {
             identity.validate()?;
         }
+        let scenario_runtime =
+            self.scenario_runtime
+                .as_ref()
+                .ok_or_else(|| TuneError::InvalidIdentity {
+                    detail: "the scenario runtime uses the prior identity domain".to_owned(),
+                })?;
+        scenario_runtime.validate()?;
+        if scenario_runtime.id != SCENARIO_RUNTIME_ID_V2 {
+            return Err(TuneError::InvalidIdentity {
+                detail: "the scenario runtime uses the prior identity domain".to_owned(),
+            });
+        }
         if self.adjacency_policy_digest.is_zero() {
             return Err(TuneError::InvalidIdentity {
                 detail: "the vehicle adjacency-policy digest is zero".to_owned(),
@@ -125,6 +142,37 @@ impl RuntimeIdentities {
         }
         Ok(())
     }
+}
+
+/// Returns the production-source identity of the shared mission engine.
+#[must_use]
+pub fn scenario_engine_identity() -> ArtifactIdentity {
+    ArtifactIdentity {
+        id: "pilotage-scenario-engine-source-v2".to_owned(),
+        digest: digest_bytes(env!("FLIGHT_TUNE_SCENARIO_ENGINE_ID").as_bytes()),
+    }
+}
+
+/// Composes the shared engine and vehicle action-port runtime identity.
+///
+/// # Errors
+///
+/// Returns [`TuneError`] when the vehicle action-port identity is invalid.
+pub fn scenario_runtime_identity(
+    vehicle_action_port: &ArtifactIdentity,
+) -> Result<ArtifactIdentity, TuneError> {
+    vehicle_action_port.validate()?;
+    let engine = scenario_engine_identity();
+    let mut hasher = Sha256::new();
+    hasher.update(b"pilotage-scenario-runtime-v2\0");
+    hasher.update(engine.digest.as_bytes());
+    hasher.update((vehicle_action_port.id.len() as u64).to_le_bytes());
+    hasher.update(vehicle_action_port.id.as_bytes());
+    hasher.update(vehicle_action_port.digest.as_bytes());
+    ArtifactIdentity::new(
+        SCENARIO_RUNTIME_ID_V2,
+        Digest::from_bytes(hasher.finalize().into()),
+    )
 }
 
 pub(crate) fn harness_build_identity() -> ArtifactIdentity {
@@ -138,4 +186,66 @@ pub(crate) fn digest_bytes(bytes: &[u8]) -> Digest {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     Digest::from_bytes(hasher.finalize().into())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+
+    #[test]
+    fn vehicle_action_port_change_resets_final_runtime_identity() {
+        let first = ArtifactIdentity::from_text("aviate-action-port", "first").expect("identity");
+        let second = ArtifactIdentity::from_text("aviate-action-port", "second").expect("identity");
+
+        assert_ne!(
+            scenario_runtime_identity(&first).expect("first runtime"),
+            scenario_runtime_identity(&second).expect("second runtime")
+        );
+    }
+
+    #[test]
+    fn prior_runtime_identity_remains_readable_but_is_not_admitted() {
+        let runtimes = runtimes();
+        let mut value = serde_json::to_value(&runtimes).expect("encode runtimes");
+        value["scenario_runtime"]["id"] =
+            Value::String("flight-tune-aviate-scenario-runtime".to_owned());
+        let prior: RuntimeIdentities =
+            serde_json::from_value(value).expect("read prior runtime evidence");
+
+        assert_eq!(
+            prior
+                .scenario_runtime
+                .as_ref()
+                .map(|identity| identity.id.as_str()),
+            Some("flight-tune-aviate-scenario-runtime")
+        );
+        assert!(prior.validate().is_err());
+        let encoded = serde_json::to_value(prior).expect("encode prior evidence");
+        assert_eq!(
+            encoded["scenario_runtime"]["id"],
+            Value::String("flight-tune-aviate-scenario-runtime".to_owned())
+        );
+    }
+
+    fn runtimes() -> RuntimeIdentities {
+        RuntimeIdentities {
+            harness_build: harness_build_identity(),
+            strategy: identity("strategy", 1),
+            metric: identity("metric", 2),
+            hard_gates: identity("gates", 3),
+            scenario_runtime: Some(identity(SCENARIO_RUNTIME_ID_V2, 4)),
+            simulator: identity("simulator", 5),
+            airframe: identity("airframe", 6),
+            vehicle: identity("vehicle", 7),
+            transition_validator: identity("transition-validator", 8),
+            adjacency_policy_digest: Digest::from_bytes([9; 32]),
+        }
+    }
+
+    fn identity(id: &str, byte: u8) -> ArtifactIdentity {
+        ArtifactIdentity::new(id, Digest::from_bytes([byte; 32])).expect("identity")
+    }
 }

@@ -2,11 +2,11 @@ mod evidence;
 mod recovery;
 
 use crate::{
-    AdapterError, Digest, Journal, RunBindingReceipt, RunExecutionContext, RunTerminalAdapter,
-    RunTerminalBindingStatus, RunTerminalClass, RunTerminalDiagnostic, RunTerminalIntent,
-    RunTerminalOperation, RunTerminalOperationOutcome, RunTerminalPlan, RunTerminalReceipt,
-    RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope, RunTerminalSemanticOutcome,
-    SearchStage, SimulatorBackend, SimulatorCapability, TuneError, VehicleBinding,
+    AdapterError, CampaignBackend, Digest, Journal, RunBindingReceipt, RunExecutionContext,
+    RunTerminalAdapter, RunTerminalBindingStatus, RunTerminalClass, RunTerminalDiagnostic,
+    RunTerminalIntent, RunTerminalOperation, RunTerminalOperationOutcome, RunTerminalPlan,
+    RunTerminalReceipt, RunTerminalRecoveryState, RunTerminalReport, RunTerminalScope,
+    RunTerminalSemanticOutcome, SearchStage, SimulatorCapability, TuneError, VehicleBinding,
 };
 
 pub(super) use evidence::{EvidenceBindingState, seal_report_blocking};
@@ -67,7 +67,7 @@ pub(super) fn finish_live_terminal_blocking<B, V>(
     capability: &SimulatorCapability,
 ) -> Result<CommittedTerminal, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let (outcome, mut primary_error) = semantic_outcome(stage, context, terminal)?;
@@ -101,7 +101,7 @@ fn persist_live_terminal_blocking<B, V>(
     capability: &SimulatorCapability,
 ) -> Result<RunTerminalReceipt, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     let trial_id = context.execution.trial_id();
@@ -237,7 +237,7 @@ pub(super) fn execute_plan_blocking<B, V>(
     binding_status: RunTerminalBindingStatus,
 ) -> Result<RunTerminalReport, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     plan.validate()?;
@@ -304,7 +304,7 @@ fn execute_required_blocking<B, V>(
     operation: RunTerminalOperation,
 ) -> Result<RunTerminalOperationOutcome, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     journal.ensure_usable()?;
@@ -327,7 +327,7 @@ fn run_operation_blocking<B, V>(
     operation: RunTerminalOperation,
 ) -> Result<Option<Digest>, AdapterError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: RunTerminalAdapter,
 {
     match operation {

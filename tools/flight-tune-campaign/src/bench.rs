@@ -29,9 +29,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use flight_tune::{
-    AdapterError, ArtifactIdentity, Candidate, Digest, RunExecutionContext, RunPreparationReceipt,
-    SampleEvent, ScenarioRef, ScenarioStartReceipt, SessionChallenge, SimulatorBackend,
-    SimulatorCapability, SimulatorSessionReceipt, TelemetrySample,
+    AdapterError, ArtifactIdentity, CampaignBackend, Candidate, Digest, KinematicTruth,
+    MissionCapability, MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext,
+    RunPreparationReceipt, SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRef,
+    ScenarioRuntime, ScenarioRuntimeError, ScenarioStartReceipt, ScenarioStopContext,
+    SessionChallenge, SimulatorCapability, SimulatorSessionReceipt, TelemetrySample, TrialScenario,
+    reference_observation_scenario, scenario_runtime_identity,
 };
 use pilotage_control_feel::{AxisCurve, AxisDemandShaper, AxisDynamics, AxisResponse, NeutralBand};
 
@@ -182,6 +185,7 @@ pub struct BenchBackend {
     vehicle_model: BenchVehicle,
     simulator: ArtifactIdentity,
     airframe: ArtifactIdentity,
+    scenario_runtime: ArtifactIdentity,
     run: Option<Run>,
 }
 
@@ -216,6 +220,8 @@ impl BenchBackend {
             vehicle_model,
             simulator: build("pilotage-control-feel-bench", Digest::from_bytes([1; 32]))?,
             airframe: build(airframe_id, airframe_digest)?,
+            scenario_runtime: scenario_runtime_identity(&bench_action_port_identity()?)
+                .map_err(to_adapter)?,
             run: None,
         })
     }
@@ -241,13 +247,52 @@ impl BenchBackend {
     }
 }
 
-impl SimulatorBackend for BenchBackend {
+impl CampaignBackend for BenchBackend {
+    type ScenarioRuntime = Self;
+
     fn simulator_identity(&self) -> &ArtifactIdentity {
         &self.simulator
     }
 
     fn airframe_identity(&self) -> &ArtifactIdentity {
         &self.airframe
+    }
+
+    fn scenario_runtime(&self) -> &Self::ScenarioRuntime {
+        self
+    }
+
+    fn scenario_runtime_mut(&mut self) -> &mut Self::ScenarioRuntime {
+        self
+    }
+
+    fn attest_scenario_runtime_blocking(&self) -> Result<(), AdapterError> {
+        let expected =
+            scenario_runtime_identity(&bench_action_port_identity()?).map_err(to_adapter)?;
+        if expected == self.scenario_runtime {
+            Ok(())
+        } else {
+            Err(AdapterError::new(
+                "the bench scenario runtime identity changed",
+            ))
+        }
+    }
+
+    fn scenario_document_blocking(
+        &self,
+        scenario: &ScenarioRef,
+    ) -> Result<TrialScenario, AdapterError> {
+        Ok(reference_observation_scenario(
+            scenario,
+            Some(10_480_000_000),
+        ))
+    }
+
+    fn project_scenario_frame(
+        &mut self,
+        sample: &TelemetrySample,
+    ) -> Result<ScenarioFrame, AdapterError> {
+        Ok(bench_scenario_frame(sample))
     }
 
     fn open_session_blocking(
@@ -354,6 +399,77 @@ impl SimulatorBackend for BenchBackend {
         self.run = None;
         Ok(())
     }
+}
+
+impl ScenarioRuntime for BenchBackend {
+    fn identity(&self) -> &ArtifactIdentity {
+        &self.scenario_runtime
+    }
+
+    fn capabilities(&self) -> &[MissionCapability] {
+        &[MissionCapability::SimulatorTime]
+    }
+
+    fn prepare_blocking(
+        &mut self,
+        _document: &MissionDocument,
+        _context: &RunExecutionContext,
+    ) -> Result<(), ScenarioRuntimeError> {
+        Ok(())
+    }
+
+    fn start_blocking(&mut self) -> Result<(), ScenarioRuntimeError> {
+        Ok(())
+    }
+
+    fn observe_blocking(
+        &mut self,
+        frame: &ScenarioFrame,
+        directive: Option<&MissionDirective>,
+    ) -> Result<ScenarioObservationReceipt, ScenarioRuntimeError> {
+        Ok(ScenarioObservationReceipt {
+            source_sequence: frame.source_sequence,
+            action_result: directive.map(|_| ReceiptResult::Succeeded {}),
+        })
+    }
+
+    fn stop_blocking(
+        &mut self,
+        _context: &mut ScenarioStopContext,
+    ) -> Result<(), ScenarioRuntimeError> {
+        Ok(())
+    }
+
+    fn cleanup_blocking(&mut self) -> Result<(), ScenarioRuntimeError> {
+        Ok(())
+    }
+}
+
+fn bench_scenario_frame(sample: &TelemetrySample) -> ScenarioFrame {
+    let value = |name: &str| sample.values.get(name).copied().unwrap_or(0.0);
+    ScenarioFrame {
+        source_sequence: sample.sequence,
+        simulator_time_ns: sample.elapsed_ms.saturating_mul(1_000_000),
+        trial_time_ns: sample.elapsed_ms.saturating_mul(1_000_000),
+        lifecycle: None,
+        ground_contact: Some(false),
+        crashed: Some(false),
+        link_valid: Some(true),
+        estimator_valid: Some(true),
+        truth: KinematicTruth {
+            position_ned_m: [value(channel::POSITION_M), 0.0, 0.0],
+            velocity_ned_mps: [value(channel::VELOCITY_MPS), 0.0, 0.0],
+            acceleration_ned_mps2: [value(channel::ACCELERATION_MPS2), 0.0, 0.0],
+            attitude_wxyz: [1.0, 0.0, 0.0, 0.0],
+            body_rates_rps: [0.0; 3],
+        },
+        applied_conditions: BTreeMap::new(),
+        canonical_signals: Vec::new(),
+    }
+}
+
+pub(super) fn bench_action_port_identity() -> Result<ArtifactIdentity, AdapterError> {
+    ArtifactIdentity::from_text("bench-action-port", "bench-action-port-v2").map_err(to_adapter)
 }
 
 /// Reads an engine error as an adapter one.

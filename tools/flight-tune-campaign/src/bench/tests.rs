@@ -75,7 +75,7 @@ fn campaign_with_attempts(
     let handle = BenchHandle::default();
     let mut tuner = Tuner::open_or_resume(
         &root,
-        bench_stage(name, promotion, qualification),
+        bench_stage(name, promotion, qualification).expect("build stage"),
         4_242,
         start_candidate(),
         BenchBackend::new(
@@ -224,7 +224,8 @@ fn the_warm_start_is_the_law_the_vehicle_would_otherwise_ship() {
         "bounds",
         crate::alia250_promotion_policy(),
         crate::alia250_qualification_policy(),
-    );
+    )
+    .expect("build stage");
     for (name, bounds) in &stage.allowlist {
         let value = parameters[name];
         assert!(
@@ -253,7 +254,9 @@ fn probe_warm_start_objectives() {
         let mut shaper = pilotage_control_feel::AxisDemandShaper::default();
         let mut evaluator =
             FlightQualityEvaluator::new(Digest::from_bytes([9; 32])).expect("evaluator");
-        evaluator.begin(&bench_scenario("probe", 9)).expect("begin");
+        evaluator
+            .begin(&bench_scenario("probe", 9).expect("build scenario"))
+            .expect("begin");
         let (mut velocity, mut position, mut previous) = (0.0_f64, 0.0_f64, 0.0_f64);
         let mut step: u32 = 0;
         loop {

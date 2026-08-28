@@ -1,0 +1,19 @@
+[package]
+name = "flight-tune-xplane"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "X-Plane frame projection for simulator-neutral flight tuning"
+
+[lints]
+workspace = true
+
+[dependencies]
+flight-tune = { path = "../flight-tune" }
+pilotage-xplane-trial = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pilotage-mission-core = { path = "../../crates/pilotage-mission-core" }
+pilotage-trial = { workspace = true }
+serde_json = { workspace = true }

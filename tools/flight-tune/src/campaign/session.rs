@@ -1,7 +1,7 @@
-use crate::identity::harness_build_identity;
+use crate::identity::{harness_build_identity, scenario_runtime_identity};
 use crate::{
-    GateEvaluator, Journal, MetricEvaluator, ProposalStrategy, RuntimeIdentities, SimulatorBackend,
-    SimulatorSessionReceipt, SimulatorVehicleFactory, TuneError, VehicleBinding,
+    CampaignBackend, GateEvaluator, Journal, MetricEvaluator, ProposalStrategy, RuntimeIdentities,
+    ScenarioRuntime, SimulatorSessionReceipt, SimulatorVehicleFactory, TuneError, VehicleBinding,
 };
 
 pub(super) fn validate_component_identities<B, F, G, M, P>(
@@ -12,7 +12,7 @@ pub(super) fn validate_component_identities<B, F, G, M, P>(
     strategy: &P,
 ) -> Result<(), TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     F: SimulatorVehicleFactory,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -21,7 +21,9 @@ where
     for identity in [
         backend.simulator_identity(),
         backend.airframe_identity(),
+        backend.scenario_runtime().identity(),
         factory.vehicle_identity(),
+        factory.scenario_action_port_identity(),
         factory.transition_validator_identity(),
         gates.identity(),
         metric.identity(),
@@ -38,6 +40,19 @@ where
             detail: "the vehicle adjacency-policy identity is incomplete".to_owned(),
         });
     }
+    backend
+        .attest_scenario_runtime_blocking()
+        .map_err(|source| TuneError::Adapter {
+            adapter: backend.scenario_runtime().identity().id.clone(),
+            operation: "attest scenario runtime",
+            source,
+        })?;
+    let declared = scenario_runtime_identity(factory.scenario_action_port_identity())?;
+    if backend.scenario_runtime().identity() != &declared {
+        return Err(TuneError::InvalidIdentity {
+            detail: "the backend and vehicle factory scenario runtime identities differ".to_owned(),
+        });
+    }
     Ok(())
 }
 
@@ -47,25 +62,26 @@ pub(super) fn runtime_identities<B, F, G, M, P>(
     gates: &G,
     metric: &M,
     strategy: &P,
-) -> RuntimeIdentities
+) -> Result<RuntimeIdentities, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     F: SimulatorVehicleFactory,
     G: GateEvaluator,
     M: MetricEvaluator,
     P: ProposalStrategy,
 {
-    RuntimeIdentities {
+    Ok(RuntimeIdentities {
         harness_build: harness_build_identity(),
         strategy: strategy.identity().clone(),
         metric: metric.identity().clone(),
         hard_gates: gates.identity().clone(),
+        scenario_runtime: Some(backend.scenario_runtime().identity().clone()),
         simulator: backend.simulator_identity().clone(),
         airframe: backend.airframe_identity().clone(),
         vehicle: factory.vehicle_identity().clone(),
         transition_validator: factory.transition_validator_identity().clone(),
         adjacency_policy_digest: factory.adjacency_policy_digest(),
-    }
+    })
 }
 
 pub(super) fn validate_simulator_receipt(
@@ -98,6 +114,13 @@ pub(super) fn validate_vehicle_binding<V>(
         })?;
     if receipt.session_digest != journal.session_digest()?
         || receipt.vehicle_digest != journal.session().runtimes.vehicle.digest
+        || Some(receipt.scenario_runtime_digest)
+            != journal
+                .session()
+                .runtimes
+                .scenario_runtime
+                .as_ref()
+                .map(|identity| identity.digest)
         || transition.session_digest() != receipt.session_digest
         || transition.validator() != &journal.session().runtimes.transition_validator
         || transition.adjacency_policy_digest()

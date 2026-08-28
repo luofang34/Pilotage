@@ -6,6 +6,8 @@
 mod journal_storage;
 #[path = "tuner/no_samples.rs"]
 mod no_samples;
+#[path = "tuner/orphan_baseline.rs"]
+mod orphan_baseline;
 #[path = "tuner/promotion_chain_tamper.rs"]
 mod promotion_chain_tamper;
 #[path = "tuner/promotion_evidence_tamper.rs"]
@@ -18,6 +20,10 @@ mod promotion_snapshot_authority;
 mod reconciliation;
 #[path = "tuner/recovery_order.rs"]
 mod recovery_order;
+#[path = "tuner/scenario_admission.rs"]
+mod scenario_admission;
+#[path = "tuner/scenario_authority.rs"]
+mod scenario_authority;
 #[path = "tuner/terminal.rs"]
 mod terminal;
 #[path = "tuner/test_rig.rs"]

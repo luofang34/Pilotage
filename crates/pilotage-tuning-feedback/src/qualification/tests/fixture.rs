@@ -137,6 +137,7 @@ fn session(stage: &SearchStage) -> SessionIdentity {
             strategy: artifact("strategy", 32),
             metric: artifact("metric", 33),
             hard_gates: artifact("gates", 34),
+            scenario_runtime: None,
             simulator: artifact("simulator", 35),
             airframe: artifact("airframe", 36),
             vehicle: artifact("vehicle", 37),

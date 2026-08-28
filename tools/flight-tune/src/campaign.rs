@@ -18,10 +18,10 @@ pub(crate) use qualification::final_outcome;
 
 use crate::journal::{AttemptRole, CampaignPhase};
 use crate::{
-    Candidate, CandidateEvaluation, CandidateTransitionReference, Digest,
+    CampaignBackend, Candidate, CandidateEvaluation, CandidateTransitionReference, Digest,
     FinalQualificationOutcome, GateEvaluator, Journal, MetricEvaluator, PromotionDecision,
-    ProposalContext, ProposalStrategy, RunTerminalAdapter, SearchStage, SimulatorBackend,
-    SimulatorCapability, SimulatorVehicleAdapter, TrainingView, TuneError, VehicleBinding,
+    ProposalContext, ProposalStrategy, RunTerminalAdapter, SearchStage, SimulatorCapability,
+    SimulatorVehicleAdapter, TrainingView, TuneError, VehicleBinding,
 };
 
 /// Why one bounded training search call stopped.
@@ -58,7 +58,7 @@ pub struct Tuner<B, V, G, M, P> {
 
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,

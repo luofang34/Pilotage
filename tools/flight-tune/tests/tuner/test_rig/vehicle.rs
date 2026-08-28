@@ -115,6 +115,7 @@ fn activate_candidate(
 pub struct FakeFactory {
     state: FakeHandle,
     identity: ArtifactIdentity,
+    action_port_identity: ArtifactIdentity,
     transition_validator: ArtifactIdentity,
     adjacency_policy_digest: Digest,
     allow_binding: bool,
@@ -122,9 +123,11 @@ pub struct FakeFactory {
 
 impl FakeFactory {
     pub fn new(state: FakeHandle) -> Self {
+        let vehicle_identity = identity("vehicle", "fake-controller-v1");
         Self {
             state,
-            identity: identity("vehicle", "fake-controller-v1"),
+            action_port_identity: identity("vehicle", "fake-controller-v1"),
+            identity: vehicle_identity,
             transition_validator: identity("transition-validator", "fake-validator-v1"),
             adjacency_policy_digest: digest_text("fake-adjacency-policy-v1"),
             allow_binding: true,
@@ -132,9 +135,11 @@ impl FakeFactory {
     }
 
     pub fn hardware_like(state: FakeHandle) -> Self {
+        let vehicle_identity = identity("vehicle", "hardware-like-controller");
         Self {
             state,
-            identity: identity("vehicle", "hardware-like-controller"),
+            action_port_identity: identity("vehicle", "fake-controller-v1"),
+            identity: vehicle_identity,
             transition_validator: identity("transition-validator", "hardware-validator-v1"),
             adjacency_policy_digest: digest_text("hardware-adjacency-policy-v1"),
             allow_binding: false,
@@ -144,6 +149,12 @@ impl FakeFactory {
     pub fn with_transition_validator(state: FakeHandle, content: &str) -> Self {
         let mut factory = Self::new(state);
         factory.transition_validator = identity("transition-validator", content);
+        factory
+    }
+
+    pub fn with_action_port_identity(state: FakeHandle, content: &str) -> Self {
+        let mut factory = Self::new(state);
+        factory.action_port_identity = identity("scenario-action-port", content);
         factory
     }
 
@@ -159,6 +170,10 @@ impl SimulatorVehicleFactory for FakeFactory {
 
     fn vehicle_identity(&self) -> &ArtifactIdentity {
         &self.identity
+    }
+
+    fn scenario_action_port_identity(&self) -> &ArtifactIdentity {
+        &self.action_port_identity
     }
 
     fn transition_validator_identity(&self) -> &ArtifactIdentity {
@@ -191,6 +206,11 @@ impl SimulatorVehicleFactory for FakeFactory {
             VehicleBindingReceipt {
                 session_digest: capability.session_digest(),
                 vehicle_digest: self.identity.digest,
+                scenario_runtime_digest: flight_tune::scenario_runtime_identity(
+                    &self.action_port_identity,
+                )
+                .map_err(|error| AdapterError::new(error.to_string()))?
+                .digest,
             },
             transition,
         )

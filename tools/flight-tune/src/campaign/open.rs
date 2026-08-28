@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::{
-    Candidate, GateEvaluator, Journal, MetricEvaluator, ProposalStrategy, RunTerminalAdapter,
-    RuntimeIdentities, SearchStage, SessionChallenge, SimulatorBackend, SimulatorCapability,
+    CampaignBackend, Candidate, GateEvaluator, Journal, MetricEvaluator, ProposalStrategy,
+    RunTerminalAdapter, RuntimeIdentities, SearchStage, SessionChallenge, SimulatorCapability,
     SimulatorVehicleAdapter, SimulatorVehicleFactory, TuneError,
 };
 
@@ -10,7 +10,7 @@ use super::{Tuner, evaluate, session};
 
 impl<B, V, G, M, P> Tuner<B, V, G, M, P>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     V: SimulatorVehicleAdapter + RunTerminalAdapter,
     G: GateEvaluator,
     M: MetricEvaluator,
@@ -163,18 +163,12 @@ pub(crate) fn validate_open_components<B, F, G, M, P>(
     strategy: &P,
 ) -> Result<RuntimeIdentities, TuneError>
 where
-    B: SimulatorBackend,
+    B: CampaignBackend,
     F: SimulatorVehicleFactory,
     G: GateEvaluator,
     M: MetricEvaluator,
     P: ProposalStrategy,
 {
     session::validate_component_identities(backend, vehicle_factory, gates, metric, strategy)?;
-    Ok(session::runtime_identities(
-        backend,
-        vehicle_factory,
-        gates,
-        metric,
-        strategy,
-    ))
+    session::runtime_identities(backend, vehicle_factory, gates, metric, strategy)
 }

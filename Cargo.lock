@@ -792,6 +792,7 @@ version = "0.1.0"
 dependencies = [
  "pilotage-durable-storage",
  "pilotage-flight-quality",
+ "pilotage-mission-core",
  "pilotage-trial",
  "serde",
  "serde_json",
@@ -827,6 +828,18 @@ dependencies = [
  "pilotage-flight-quality",
  "pilotage-tuning-feedback",
  "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "flight-tune-xplane"
+version = "0.1.0"
+dependencies = [
+ "flight-tune",
+ "pilotage-mission-core",
+ "pilotage-trial",
+ "pilotage-xplane-trial",
  "serde_json",
  "thiserror",
 ]
