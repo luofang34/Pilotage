@@ -128,29 +128,10 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Production Rust lint guard self-test
-        run: sh scripts/test-check-production-rust-lints.sh
-
-      - name: Production Rust lint guard
-        run: sh scripts/check-production-rust-lints.sh
-
-      - name: Monotonic counter arithmetic guard self-test
-        run: bash scripts/test-check-monotonic-counter-arithmetic.sh
-
-      - name: Monotonic counter arithmetic guard
-        run: bash scripts/check-monotonic-counter-arithmetic.sh
-
-      - name: Aviate control-feel boundary guard self-test
-        run: bash scripts/test-check-aviate-control-feel-boundary.sh
-
-      - name: Aviate control-feel boundary guard
-        run: bash scripts/check-aviate-control-feel-boundary.sh
-
-      - name: flight-tune journal storage boundary self-test
-        run: bash scripts/test-check-flight-tune-journal-storage-boundary.sh
-
-      - name: flight-tune journal storage boundary
-        run: bash scripts/check-flight-tune-journal-storage-boundary.sh
+      - name: Repository guards
+        # Every scripts/check-*.sh with a test-check-*.sh self-test,
+        # discovered and run as pairs; adding a guard never edits CI.
+        run: cargo run -p xtask --quiet -- guards
 
       - name: cargo test
         run: cargo test --all-targets
@@ -168,18 +149,6 @@ jobs:
       - name: SituationView dependency boundary
         run: bash scripts/check-situation-view-boundary.sh
 
-      - name: AirspaceView contract self-test
-        run: bash scripts/test-check-airspace-view-contract.sh
-
-      - name: AirspaceView contract
-        run: bash scripts/check-airspace-view-contract.sh
-
-      - name: Navdata tile bundle guard self-test
-        run: bash scripts/test-check-navdata-tile-bundle.sh
-
-      - name: Navdata tile bundle guard
-        run: bash scripts/check-navdata-tile-bundle.sh
-
       - name: cargo doc
         env:
           RUSTDOCFLAGS: "-D missing_docs -D rustdoc::broken_intra_doc_links"
@@ -196,81 +165,6 @@ jobs:
 
       - name: X-Plane reset order
         run: bash scripts/test-reset-xplane-order.sh
-
-      - name: flight build carries no simulation-only code
-        run: bash scripts/check-flight-build.sh
-
-      - name: flight tuning boundary guard self-test
-        run: bash scripts/test-check-flight-tune-boundaries.sh
-
-      - name: flight tuning boundary guard
-        run: bash scripts/check-flight-tune-boundaries.sh
-
-      - name: Aviate supervision boundary guard self-test
-        run: bash scripts/test-check-aviate-supervision-boundary.sh
-
-      - name: Aviate supervision boundary guard
-        run: bash scripts/check-aviate-supervision-boundary.sh
-
-      - name: check-structure self-test
-        run: bash scripts/test-check-structure.sh
-
-      - name: check-structure
-        run: bash scripts/check-structure.sh
-
-      - name: situation presentation boundary self-test
-        run: bash scripts/test-check-situation-presentation-boundary.sh
-
-      - name: situation presentation boundary
-        run: bash scripts/check-situation-presentation-boundary.sh
-
-      - name: situation layer controls self-test
-        run: bash scripts/test-check-situation-layer-controls.sh
-
-      - name: situation layer controls
-        run: bash scripts/check-situation-layer-controls.sh
-
-      - name: situation map attribution self-test
-        run: bash scripts/test-check-situation-map-attribution.sh
-
-      - name: situation map attribution
-        run: bash scripts/check-situation-map-attribution.sh
-
-      - name: situation ownship wiring self-test
-        run: bash scripts/test-check-situation-ownship-wiring.sh
-
-      - name: situation ownship wiring
-        run: bash scripts/check-situation-ownship-wiring.sh
-
-      - name: Apple client guard self-test
-        run: bash scripts/test-check-apple-client.sh
-
-      - name: Apple client guard
-        run: bash scripts/check-apple-client.sh
-
-      - name: Terrain base layer guard self-test
-        run: bash scripts/test-check-terrain-base-layer.sh
-
-      - name: Terrain base layer guard
-        run: bash scripts/check-terrain-base-layer.sh
-
-      - name: Web situation map guard self-test
-        run: bash scripts/test-check-web-situation-map.sh
-
-      - name: Web situation map guard
-        run: bash scripts/check-web-situation-map.sh
-
-      - name: Geodetic datum code guard self-test
-        run: bash scripts/test-check-geodetic-datum-codes.sh
-
-      - name: Geodetic datum code bijection
-        run: bash scripts/check-geodetic-datum-codes.sh
-
-      - name: ADR supersession lifecycle tests
-        run: bash scripts/test-check-adr-supersession.sh
-
-      - name: ADR supersession lifecycle
-        run: bash scripts/check-adr-supersession.sh
 
       - name: certification-claim guard (AIR-03)
         # Fail on any tracked doc/UI artifact that asserts a certification,

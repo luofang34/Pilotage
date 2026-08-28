@@ -7,6 +7,7 @@ use std::process::ExitCode;
 mod backend;
 mod cli;
 mod error;
+mod guards;
 mod log_archive;
 mod output;
 mod process;
@@ -39,6 +40,7 @@ fn run(args: &[String]) -> Result<(), error::XtaskError> {
         }
         Command::Reset(fc) => session::run_reset(&fc),
         Command::Handshake(out_dir) => session::run_handshake(&out_dir),
+        Command::Guards => guards::run_guards(&session::repo_root()?),
         Command::Sim(sim) => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

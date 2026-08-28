@@ -263,7 +263,7 @@ pub fn run_handshake(out_dir: &Path) -> Result<(), XtaskError> {
 /// binary cached from another checkout (a worktree, a moved clone) still
 /// operates on the repository the user is standing in. The compile-time
 /// path is only the fallback for running the binary outside cargo.
-fn repo_root() -> Result<PathBuf, XtaskError> {
+pub(crate) fn repo_root() -> Result<PathBuf, XtaskError> {
     let runtime_manifest = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
     let manifest = resolve_manifest(
         runtime_manifest.as_deref(),

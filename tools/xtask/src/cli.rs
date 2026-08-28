@@ -66,6 +66,8 @@ pub enum Command {
     Reset(String),
     /// Produce the Alia X-Plane runtime handshake into a directory.
     Handshake(std::path::PathBuf),
+    /// Run every guard pair the repository declares.
+    Guards,
     /// Print usage.
     Help,
 }
@@ -85,9 +87,19 @@ pub fn parse_args(args: &[String]) -> Result<Command, XtaskError> {
         "sim" => Ok(Command::Sim(parse_sim(rest)?)),
         "reset" => Ok(Command::Reset(parse_reset(rest)?)),
         "handshake" => Ok(Command::Handshake(parse_handshake(rest)?)),
+        "guards" => {
+            if let Some(extra) = rest.first() {
+                return Err(XtaskError::Usage {
+                    message: format!("unknown guards argument {extra:?}"),
+                });
+            }
+            Ok(Command::Guards)
+        }
         "help" | "--help" | "-h" => Ok(Command::Help),
         other => Err(XtaskError::Usage {
-            message: format!("unknown command {other:?} (expected sim, reset, handshake, or help)"),
+            message: format!(
+                "unknown command {other:?} (expected sim, reset, handshake, guards, or help)"
+            ),
         }),
     }
 }
@@ -233,6 +245,11 @@ commands:
 
       --out-dir <dir>      directory to write into (default:
                            target/xtask-sim)
+
+  guards
+      Discover every scripts/check-<name>.sh with its
+      scripts/test-check-<name>.sh self-test, run each pair, and name
+      every failing guard.
 
   help
       Print this help text.";
