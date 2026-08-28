@@ -31,11 +31,13 @@ members = [
     "crates/pilotage-control-feel",
     "crates/pilotage-flight-quality",
     "crates/pilotage-durable-storage",
+    "crates/pilotage-tuning-feedback",
     "adapters/reference-headless",
     "adapters/aviate",
     "adapters/px4",
     "tools/hid-probe",
     "tools/flight-tune",
+    "tools/flight-tune-campaign",
     "tools/flight-tune-aviate",
     "tools/loopback-probe",
     "tools/xtask",
@@ -142,7 +144,10 @@ pilotage-xplane-trial = { path = "crates/pilotage-xplane-trial" }
 pilotage-control-feel = { path = "crates/pilotage-control-feel" }
 pilotage-flight-quality = { path = "crates/pilotage-flight-quality" }
 pilotage-durable-storage = { path = "crates/pilotage-durable-storage" }
+pilotage-tuning-feedback = { path = "crates/pilotage-tuning-feedback" }
 pilotage-terrain-query = { path = "crates/pilotage-terrain-query" }
+flight-tune = { path = "tools/flight-tune" }
+flight-tune-campaign = { path = "tools/flight-tune-campaign" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

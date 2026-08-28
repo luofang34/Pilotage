@@ -9,7 +9,7 @@ use crate::{
 #[path = "plan/tests.rs"]
 mod tests;
 
-pub(super) fn validate_evaluation(
+pub(crate) fn validate_evaluation(
     evaluation: &CandidateEvaluation,
     role: AttemptRole,
     stage: &SearchStage,

@@ -72,14 +72,12 @@ where
         match self.journal.phase() {
             CampaignPhase::Searching => self.journal.state().training_incumbent,
             CampaignPhase::Frozen => initial,
-            CampaignPhase::PromotionClosed => {
-                self.journal.state().selected_release_candidate(initial)
-            }
+            CampaignPhase::PromotionClosed => self.journal.state().settlement_candidate(initial),
             CampaignPhase::Sealed
                 if self.journal.state().final_outcome
                     == Some(FinalQualificationOutcome::Qualified) =>
             {
-                self.journal.state().selected_release_candidate(initial)
+                self.journal.state().settlement_candidate(initial)
             }
             CampaignPhase::Sealed => initial,
         }

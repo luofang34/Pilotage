@@ -13,6 +13,7 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) use open::validate_open_components;
+pub(crate) use promotion::calculate as calculate_promotion;
 pub(crate) use qualification::final_outcome;
 
 use crate::journal::{AttemptRole, CampaignPhase};
@@ -131,12 +132,7 @@ where
                 .ok_or_else(|| invalid_state("run promotion", "no frozen candidate"))?;
             self.run_partition_attempt_blocking(AttemptRole::PromotionFrozen, digest)?;
         }
-        let decision = promotion::decide(
-            self.stage.promotion,
-            self.journal.state().promotion_baseline.as_ref(),
-            self.journal.state().promotion_frozen.as_ref(),
-        )?;
-        self.journal.close_promotion(decision.clone())?;
+        let decision = self.journal.close_promotion()?;
         self.reconcile_settled_candidate_blocking()?;
         Ok(decision)
     }
@@ -157,8 +153,8 @@ where
             return Ok(outcome);
         }
         self.require_phase(CampaignPhase::PromotionClosed, "run final qualification")?;
+        let candidate = self.authorized_final_candidate()?;
         self.recover_pending_blocking()?;
-        let candidate = self.selected_release_candidate();
         if self.journal.state().final_evaluation.is_none() {
             self.run_partition_attempt_blocking(AttemptRole::FinalQualification, candidate)?;
         }
@@ -182,7 +178,7 @@ where
             ));
         }
         self.journal
-            .read_candidate(self.selected_release_candidate())
+            .read_candidate(self.authorized_final_candidate()?)
     }
 
     /// Returns the audit journal.
@@ -339,10 +335,10 @@ where
         self.finish_with_candidate_reconciliation_blocking("recover pending attempt", result)
     }
 
-    fn selected_release_candidate(&self) -> Digest {
+    fn authorized_final_candidate(&self) -> Result<Digest, TuneError> {
         self.journal
             .state()
-            .selected_release_candidate(self.journal.session().initial_candidate_digest)
+            .authorized_final_candidate(self.journal.session().initial_candidate_digest)
     }
 
     fn require_phase(

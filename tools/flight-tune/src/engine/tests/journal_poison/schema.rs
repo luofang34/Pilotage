@@ -11,23 +11,23 @@ use crate::identity::digest_bytes;
 use crate::{Digest, JournalEntry, TuneError, Tuner};
 
 #[test]
-fn schema_three_active_campaign_stops_before_all_external_action() {
-    let directory = TestDirectory::new("schema-three-no-external-action");
-    create_schema_four_campaign(&directory);
-    rewrite_started_entry_as_schema_three(&directory);
+fn schema_four_active_campaign_stops_before_all_external_action() {
+    let directory = TestDirectory::new("schema-four-no-external-action");
+    create_schema_five_campaign(&directory);
+    rewrite_started_entry_as_schema_four(&directory);
     let state = FakeHandle::new();
 
     let error = open_existing_campaign(&directory, state.clone())
         .err()
-        .expect("reject schema three campaign");
+        .expect("reject schema four campaign");
 
     assert!(matches!(error, TuneError::InvalidJournal { .. }));
     assert_no_external_action(&state);
 }
 
-fn create_schema_four_campaign(directory: &TestDirectory) {
+fn create_schema_five_campaign(directory: &TestDirectory) {
     let state = FakeHandle::new();
-    let tuner = open_existing_campaign(directory, state).expect("create schema four campaign");
+    let tuner = open_existing_campaign(directory, state).expect("create schema five campaign");
     assert_eq!(tuner.journal().entries().len(), 1);
 }
 
@@ -49,7 +49,7 @@ fn open_existing_campaign(
     )
 }
 
-fn rewrite_started_entry_as_schema_three(directory: &TestDirectory) {
+fn rewrite_started_entry_as_schema_four(directory: &TestDirectory) {
     let head_path = directory.path().join("HEAD.json");
     let head: HeadPointer =
         serde_json::from_slice(&fs::read(&head_path).expect("read HEAD")).expect("decode HEAD");
@@ -57,17 +57,17 @@ fn rewrite_started_entry_as_schema_three(directory: &TestDirectory) {
     let mut entry: JournalEntry =
         serde_json::from_slice(&fs::read(&old_path).expect("read started entry"))
             .expect("decode started entry");
-    entry.schema_version = 3;
-    let bytes = serde_json::to_vec(&entry).expect("encode schema three entry");
+    entry.schema_version = 4;
+    let bytes = serde_json::to_vec(&entry).expect("encode schema four entry");
     let digest = digest_bytes(&bytes);
     let new_path = entry_path(directory, digest);
-    fs::rename(old_path, &new_path).expect("rename schema three entry");
-    fs::write(new_path, bytes).expect("write schema three entry");
+    fs::rename(old_path, &new_path).expect("rename schema four entry");
+    fs::write(new_path, bytes).expect("write schema four entry");
     fs::write(
         head_path,
-        serde_json::to_vec(&HeadPointer { digest }).expect("encode schema three HEAD"),
+        serde_json::to_vec(&HeadPointer { digest }).expect("encode schema four HEAD"),
     )
-    .expect("write schema three HEAD");
+    .expect("write schema four HEAD");
 }
 
 fn entry_path(directory: &TestDirectory, digest: Digest) -> std::path::PathBuf {

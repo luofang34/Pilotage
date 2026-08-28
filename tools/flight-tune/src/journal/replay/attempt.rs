@@ -1,4 +1,4 @@
-use crate::journal::{AttemptRole, CampaignPhase, OperationStatus};
+use crate::journal::{AttemptRole, AuthenticatedEvaluationProof, CampaignPhase, OperationStatus};
 use crate::{
     CandidateEvaluation, CandidateTransitionReference, Digest, SearchStage, TrainingObservation,
     TuneError,
@@ -34,6 +34,7 @@ pub(super) fn prepare(
         trial_id,
         role,
         candidate,
+        plan_digest,
         transition: transition_reference.cloned(),
         prepared_runs: Vec::new(),
         outcome: None,
@@ -74,7 +75,9 @@ pub(super) fn role_allowed(
         AttemptRole::FinalQualification => {
             state.phase == CampaignPhase::PromotionClosed
                 && state.final_evaluation.is_none()
-                && candidate == state.selected_release_candidate(initial)
+                && state
+                    .authorized_final_candidate(initial)
+                    .is_ok_and(|authorized| authorized == candidate)
         }
     }
 }
@@ -93,6 +96,7 @@ pub(super) fn complete(
     state: &mut JournalState,
     trial_id: u64,
     evaluation: &CandidateEvaluation,
+    proof: Option<&AuthenticatedEvaluationProof>,
     selected: Option<bool>,
     stage: &SearchStage,
     fixed_seed: u64,
@@ -109,11 +113,13 @@ pub(super) fn complete(
         .as_ref()
         .ok_or_else(|| invalid("the attempt lost its run preparation"))?;
     terminal::validate_completed_attempt(pending, evaluation)?;
+    validate_proof(pending, evaluation, proof)?;
     validate_training_selection(state, role, evaluation, selected)?;
     let pending = pending_without_outcome(state, trial_id)?;
     pending.outcome = Some(PendingOutcome {
         evaluation: evaluation.clone(),
         selected,
+        proof: proof.cloned(),
     });
     Ok(())
 }
@@ -156,6 +162,7 @@ pub(super) fn quarantine(
     state: &mut JournalState,
     trial_id: u64,
     reason: &str,
+    proof: Option<&AuthenticatedEvaluationProof>,
 ) -> Result<(), TuneError> {
     let pending = state
         .pending
@@ -163,16 +170,19 @@ pub(super) fn quarantine(
         .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
         .ok_or_else(|| invalid("the attempt is not pending or already has an outcome"))?;
     terminal::validate_quarantined_attempt(pending, reason)?;
+    let evaluation = CandidateEvaluation::Quarantined {
+        reason: reason.to_owned(),
+    };
+    validate_proof(pending, &evaluation, proof)?;
     let pending = pending_without_outcome(state, trial_id)?;
     let selected = match pending.role {
         AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. } => Some(false),
         _ => None,
     };
     pending.outcome = Some(PendingOutcome {
-        evaluation: CandidateEvaluation::Quarantined {
-            reason: reason.to_owned(),
-        },
+        evaluation,
         selected,
+        proof: proof.cloned(),
     });
     Ok(())
 }
@@ -210,14 +220,17 @@ fn finalize(state: &mut JournalState, pending: PendingAttempt) -> Result<(), Tun
         }
         AttemptRole::PromotionBaseline => {
             state.promotion_baseline = Some(outcome.evaluation);
+            state.promotion_baseline_proof = outcome.proof;
             Ok(())
         }
         AttemptRole::PromotionFrozen => {
             state.promotion_frozen = Some(outcome.evaluation);
+            state.promotion_frozen_proof = outcome.proof;
             Ok(())
         }
         AttemptRole::FinalQualification => {
             state.final_evaluation = Some(outcome.evaluation);
+            state.final_proof = outcome.proof;
             Ok(())
         }
     }
@@ -282,4 +295,39 @@ fn validate_operation_status(status: &OperationStatus) -> Result<(), TuneError> 
         OperationStatus::Failed { .. } => Err(invalid("a cleanup failure detail is empty")),
         OperationStatus::NotRequired => Err(invalid("attempt cleanup is always required")),
     }
+}
+
+fn validate_proof(
+    pending: &PendingAttempt,
+    evaluation: &CandidateEvaluation,
+    proof: Option<&AuthenticatedEvaluationProof>,
+) -> Result<(), TuneError> {
+    let required = matches!(
+        pending.role,
+        AttemptRole::PromotionBaseline
+            | AttemptRole::PromotionFrozen
+            | AttemptRole::FinalQualification
+    );
+    if !required {
+        return if proof.is_none() {
+            Ok(())
+        } else {
+            Err(invalid("a training attempt cannot contain a hidden proof"))
+        };
+    }
+    let proof = proof.ok_or_else(|| invalid("a hidden attempt has no authenticated proof"))?;
+    proof.validate()?;
+    let receipts = terminal::owned_committed_receipts(pending)?;
+    if proof.trial_id != pending.trial_id
+        || proof.role != pending.role
+        || proof.candidate_digest != pending.candidate
+        || proof.plan_digest != pending.plan_digest
+        || &proof.evaluation != evaluation
+        || proof.terminal_receipts != receipts
+    {
+        return Err(invalid(
+            "an authenticated proof changed its pending attempt",
+        ));
+    }
+    Ok(())
 }

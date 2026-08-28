@@ -1,112 +1,248 @@
-use crate::score::paired_stats;
-use crate::{CandidateEvaluation, PromotionDecision, PromotionPolicy, RunRecord, TuneError};
+use std::collections::{BTreeMap, HashSet};
 
-pub(super) fn decide(
-    policy: PromotionPolicy,
-    baseline: Option<&CandidateEvaluation>,
-    frozen: Option<&CandidateEvaluation>,
-) -> Result<PromotionDecision, TuneError> {
-    if let Some(gate_id) = [baseline, frozen]
-        .into_iter()
-        .flatten()
-        .find_map(gate_failure)
-    {
-        return Ok(PromotionDecision::RejectedHardGate { gate_id });
-    }
-    if [baseline, frozen].into_iter().flatten().any(is_quarantined) {
-        return Ok(PromotionDecision::Indeterminate {
-            reason: "promotion quarantined one frozen evaluation".to_owned(),
-        });
-    }
-    let (Some(baseline), Some(frozen)) = (baseline, frozen) else {
-        return Ok(PromotionDecision::Indeterminate {
-            reason: "promotion did not complete both frozen evaluations".to_owned(),
-        });
-    };
-    let (baseline_runs, frozen_runs) = passing_runs(baseline, frozen)?;
-    validate_pairs(baseline_runs, frozen_runs)?;
-    let loss = paired_stats(
-        baseline_runs
-            .iter()
-            .zip(frozen_runs)
-            .map(|(baseline, frozen)| frozen.loss - baseline.loss),
-    )?;
-    let effort = paired_stats(
-        baseline_runs
-            .iter()
-            .zip(frozen_runs)
-            .map(|(baseline, frozen)| frozen.control_effort - baseline.control_effort),
-    )?;
-    let baseline_mean_loss =
-        baseline_runs.iter().map(|run| run.loss).sum::<f64>() / baseline_runs.len() as f64;
-    let required_loss_improvement = policy
-        .minimum_loss_improvement
-        .max(baseline_mean_loss * policy.minimum_relative_loss_improvement);
-    if loss.upper_95 <= -required_loss_improvement
-        && effort.mean <= policy.maximum_control_effort_increase
-    {
-        return Ok(PromotionDecision::Promoted {
-            mean_loss_delta: loss.mean,
-            loss_delta_upper_95: loss.upper_95,
-            mean_effort_delta: effort.mean,
-        });
-    }
-    Ok(PromotionDecision::RejectedNoImprovement {
-        loss_delta_upper_95: loss.upper_95,
-        mean_effort_delta: effort.mean,
+use crate::model::{
+    ExpectedPromotionPair, ExpectedPromotionRun, PromotionCalculation, PromotionComparison,
+    PromotionObjectiveResult, PromotionPairedStatistics, PromotionRunPlan, PromotionSelection,
+    expected_promotion_pairs, required_improvement,
+};
+use crate::score::{PairedStats, paired_stats};
+use crate::{
+    Digest, PromotionDecision, PromotionPolicy, RunRecord, RunTerminalCompletion,
+    RunTerminalDisposition, RunTerminalReceipt, RunTerminalSemanticOutcome, SearchStage, TuneError,
+};
+
+#[cfg(test)]
+#[path = "promotion/tests.rs"]
+mod tests;
+
+pub(crate) fn calculate(
+    stage: &SearchStage,
+    plan: PromotionRunPlan,
+    baseline_receipts: &[RunTerminalReceipt],
+    frozen_receipts: &[RunTerminalReceipt],
+) -> Result<PromotionCalculation, TuneError> {
+    let expected = expected_promotion_pairs(stage, plan)?;
+    validate_receipt_counts(&expected, baseline_receipts, frozen_receipts)?;
+    let baseline = authenticated_runs(&expected, baseline_receipts, |pair| &pair.baseline, stage)?;
+    let frozen = authenticated_runs(&expected, frozen_receipts, |pair| &pair.frozen, stage)?;
+    let comparison = compare_runs(&stage.promotion, &baseline, &frozen)?;
+    let selection = select(
+        &comparison,
+        plan.initial_candidate_digest,
+        plan.frozen_candidate_digest,
+    );
+    Ok(PromotionCalculation {
+        comparison,
+        selection,
     })
 }
 
-fn gate_failure(evaluation: &CandidateEvaluation) -> Option<String> {
-    if let CandidateEvaluation::HardGateFailed { failure, .. } = evaluation {
-        Some(failure.gate.id.clone())
-    } else {
-        None
+fn validate_receipt_counts(
+    expected: &[ExpectedPromotionPair],
+    baseline: &[RunTerminalReceipt],
+    frozen: &[RunTerminalReceipt],
+) -> Result<(), TuneError> {
+    if expected.len() < 2 || baseline.len() != expected.len() || frozen.len() != expected.len() {
+        return Err(pair_error(
+            "promotion receipts do not match the expected run count",
+        ));
     }
-}
-
-fn is_quarantined(evaluation: &CandidateEvaluation) -> bool {
-    matches!(evaluation, CandidateEvaluation::Quarantined { .. })
-}
-
-fn passing_runs<'a>(
-    baseline: &'a CandidateEvaluation,
-    frozen: &'a CandidateEvaluation,
-) -> Result<(&'a [RunRecord], &'a [RunRecord]), TuneError> {
-    match (baseline, frozen) {
-        (
-            CandidateEvaluation::Passed {
-                runs: baseline_runs,
-                ..
-            },
-            CandidateEvaluation::Passed {
-                runs: frozen_runs, ..
-            },
-        ) => Ok((baseline_runs, frozen_runs)),
-        _ => Err(TuneError::InvalidScore {
-            detail: "promotion expected two passing evaluations".to_owned(),
-        }),
-    }
-}
-
-fn validate_pairs(baseline: &[RunRecord], frozen: &[RunRecord]) -> Result<(), TuneError> {
-    if baseline.len() != frozen.len() || baseline.len() < 2 {
-        return Err(pair_error());
-    }
-    for (left, right) in baseline.iter().zip(frozen) {
-        if left.scenario_set != right.scenario_set
-            || left.scenario_id != right.scenario_id
-            || left.repetition != right.repetition
-            || left.seed != right.seed
+    let mut identities = HashSet::new();
+    for pair in expected {
+        pair.validate()?;
+        if !identities.insert(pair.baseline.run_intent_digest)
+            || !identities.insert(pair.frozen.run_intent_digest)
         {
-            return Err(pair_error());
+            return Err(pair_error("an expected promotion run is repeated"));
         }
     }
     Ok(())
 }
 
-fn pair_error() -> TuneError {
+fn authenticated_runs<'a>(
+    expected: &[ExpectedPromotionPair],
+    receipts: &'a [RunTerminalReceipt],
+    side: impl Fn(&ExpectedPromotionPair) -> &ExpectedPromotionRun,
+    stage: &SearchStage,
+) -> Result<Vec<&'a RunRecord>, TuneError> {
+    let mut runs = Vec::with_capacity(receipts.len());
+    let mut receipt_digests = HashSet::new();
+    for (pair, receipt) in expected.iter().zip(receipts) {
+        receipt.validate()?;
+        let expected_run = side(pair);
+        if receipt.context() != &expected_run.context
+            || receipt.intent().run_intent_digest() != expected_run.run_intent_digest
+            || !receipt_digests.insert(receipt.receipt_digest())
+        {
+            return Err(pair_error(
+                "a promotion receipt identity changed or repeated",
+            ));
+        }
+        let run = completed_run(receipt)?;
+        validate_run_result(run, stage)?;
+        runs.push(run);
+    }
+    Ok(runs)
+}
+
+fn validate_run_result(run: &RunRecord, stage: &SearchStage) -> Result<(), TuneError> {
+    if run.passed_hard_gates != stage.required_hard_gates {
+        return Err(pair_error(
+            "one promotion run changed the exact ordered hard-gate set",
+        ));
+    }
+    validate_objective_set(run, &stage.promotion)
+}
+
+fn completed_run(receipt: &RunTerminalReceipt) -> Result<&RunRecord, TuneError> {
+    match (receipt.class().disposition(), receipt.intent().outcome()) {
+        (
+            RunTerminalDisposition::Completed {
+                completion: RunTerminalCompletion::ScenarioComplete,
+            },
+            RunTerminalSemanticOutcome::ScenarioComplete { run, .. },
+        ) => Ok(run),
+        _ => Err(pair_error(
+            "promotion comparison requires completed scenario receipts",
+        )),
+    }
+}
+
+fn validate_objective_set(run: &RunRecord, policy: &PromotionPolicy) -> Result<(), TuneError> {
+    if run
+        .objectives
+        .keys()
+        .ne(policy.objective_regression_upper_95.keys())
+    {
+        return Err(pair_error(
+            "one promotion run changed the exact objective key set",
+        ));
+    }
+    Ok(())
+}
+
+fn compare_runs(
+    policy: &PromotionPolicy,
+    baseline: &[&RunRecord],
+    frozen: &[&RunRecord],
+) -> Result<PromotionComparison, TuneError> {
+    policy.validate()?;
+    if baseline.len() != frozen.len() || baseline.len() < 2 {
+        return Err(pair_error("promotion run keys do not form exact pairs"));
+    }
+    for run in baseline.iter().chain(frozen) {
+        validate_objective_set(run, policy)?;
+    }
+    let baseline_mean_loss = finite_mean(baseline.iter().map(|run| run.loss))?;
+    let loss = paired(
+        baseline
+            .iter()
+            .zip(frozen)
+            .map(|(left, right)| right.loss - left.loss),
+    )?;
+    let control_effort = paired(
+        baseline
+            .iter()
+            .zip(frozen)
+            .map(|(left, right)| right.control_effort - left.control_effort),
+    )?;
+    let required_loss_improvement = required_improvement(policy, baseline_mean_loss)?;
+    let objectives = objective_results(policy, baseline, frozen)?;
+    Ok(PromotionComparison {
+        baseline_mean_loss,
+        required_loss_improvement,
+        loss,
+        loss_passed: loss.upper_95 <= -required_loss_improvement,
+        control_effort,
+        control_effort_passed: control_effort.mean <= policy.maximum_control_effort_increase,
+        objectives,
+    })
+}
+
+fn objective_results(
+    policy: &PromotionPolicy,
+    baseline: &[&RunRecord],
+    frozen: &[&RunRecord],
+) -> Result<BTreeMap<String, PromotionObjectiveResult>, TuneError> {
+    let mut results = BTreeMap::new();
+    for (name, maximum) in &policy.objective_regression_upper_95 {
+        let mut deltas = Vec::with_capacity(baseline.len());
+        for (left, right) in baseline.iter().zip(frozen) {
+            let left = objective(left, name)?;
+            let right = objective(right, name)?;
+            deltas.push(right - left);
+        }
+        let statistics = paired(deltas.into_iter())?;
+        results.insert(
+            name.clone(),
+            PromotionObjectiveResult {
+                statistics,
+                maximum_upper_95: *maximum,
+                passed: statistics.upper_95 <= *maximum,
+            },
+        );
+    }
+    Ok(results)
+}
+
+fn objective(run: &RunRecord, name: &str) -> Result<f64, TuneError> {
+    run.objectives
+        .get(name)
+        .copied()
+        .ok_or_else(|| pair_error(format!("promotion run has no objective {name}")))
+}
+
+fn paired(values: impl Iterator<Item = f64>) -> Result<PromotionPairedStatistics, TuneError> {
+    let PairedStats { mean, upper_95 } = paired_stats(values)?;
+    Ok(PromotionPairedStatistics { mean, upper_95 })
+}
+
+fn finite_mean(values: impl Iterator<Item = f64>) -> Result<f64, TuneError> {
+    let mut count = 0_usize;
+    let mut mean = 0.0;
+    for value in values {
+        if !value.is_finite() {
+            return Err(pair_error("a promotion mean input is not finite"));
+        }
+        count = count.wrapping_add(1);
+        mean += (value - mean) / count as f64;
+        if !mean.is_finite() {
+            return Err(pair_error("promotion mean arithmetic is not finite"));
+        }
+    }
+    if count < 2 {
+        return Err(pair_error("a promotion mean needs two runs"));
+    }
+    Ok(mean)
+}
+
+fn select(
+    comparison: &PromotionComparison,
+    initial_candidate: Digest,
+    frozen_candidate: Digest,
+) -> PromotionSelection {
+    let decision = decision(comparison);
+    let selected_candidate = if comparison.all_passed() {
+        frozen_candidate
+    } else {
+        initial_candidate
+    };
+    PromotionSelection {
+        decision,
+        selected_candidate: Some(selected_candidate),
+    }
+}
+
+fn decision(comparison: &PromotionComparison) -> PromotionDecision {
+    if comparison.all_passed() {
+        PromotionDecision::Promoted {}
+    } else {
+        PromotionDecision::RejectedNoImprovement {}
+    }
+}
+
+fn pair_error(detail: impl Into<String>) -> TuneError {
     TuneError::InvalidScore {
-        detail: "promotion run keys do not form exact pairs".to_owned(),
+        detail: detail.into(),
     }
 }

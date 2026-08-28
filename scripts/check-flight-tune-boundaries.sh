@@ -147,12 +147,89 @@ check_shared_contracts() {
     fi
 }
 
+check_feedback_verifier() {
+    local source_root manifest file relative match_status line_number
+    source_root="$root/crates/pilotage-tuning-feedback/src"
+    manifest="$root/crates/pilotage-tuning-feedback/Cargo.toml"
+    if ! python3 "$default_root/scripts/check-feedback-verifier-boundary.py" "$root"; then
+        status=1
+    fi
+    collect_production_files "$source_root" > "$work/feedback-files"
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        relative="$(relative_path "$file")"
+        if ! awk '
+            /^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?mod[[:space:]]+(tests|test_support)[[:space:]]*;/ {
+                if (previous !~ /^[[:space:]]*#\[cfg\(test\)\][[:space:]]*$/) {
+                    print NR
+                }
+            }
+            $0 !~ /^[[:space:]]*$/ { previous = $0 }
+        ' "$file" > "$work/feedback-unguarded-test-modules"; then
+            report "$relative cannot be scanned for test-only module guards"
+        fi
+        while IFS= read -r line_number; do
+            [ -n "$line_number" ] || continue
+            report "$relative:$line_number exposes a test-only verifier module to production"
+        done < "$work/feedback-unguarded-test-modules"
+    done < "$work/feedback-files"
+    if [ -f "$manifest" ]; then
+        match_status=0
+        grep -nE 'flight-tune-xplane|pilotage-xplane|flight-tune-aviate|aviate-xil' \
+            "$manifest" > "$work/feedback-manifest-matches" || match_status=$?
+        if [ "$match_status" -gt 1 ]; then
+            report "crates/pilotage-tuning-feedback/Cargo.toml cannot be scanned"
+        elif [ "$match_status" -eq 0 ]; then
+            report "crates/pilotage-tuning-feedback/Cargo.toml has a simulator-specific dependency"
+        fi
+    fi
+}
+
+check_campaign_publisher() {
+    local source_root manifest file relative matches match_status
+    source_root="$root/tools/flight-tune-campaign/src"
+    manifest="$root/tools/flight-tune-campaign/Cargo.toml"
+    : > "$work/campaign-publisher-files"
+    if [ -f "$source_root/publish.rs" ]; then
+        printf '%s\n' "$source_root/publish.rs" >> "$work/campaign-publisher-files"
+    fi
+    collect_production_files "$source_root/publish" >> "$work/campaign-publisher-files"
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        relative="$(relative_path "$file")"
+        matches="$work/campaign-publisher-matches"
+        match_status=0
+        grep -nE 'tools/flight-tune/tests|test_rig|flight_tune_xplane|pilotage_xplane|flight_tune_aviate|aviate_xil' \
+            "$file" > "$matches" || match_status=$?
+        if [ "$match_status" -gt 1 ]; then
+            report "$relative cannot be scanned for publisher boundary violations"
+            continue
+        fi
+        while IFS=: read -r line_number source; do
+            [ -n "$line_number" ] || continue
+            report "$relative:$line_number crosses the simulator-neutral campaign publisher boundary"
+        done < "$matches"
+    done < "$work/campaign-publisher-files"
+    if [ -f "$manifest" ]; then
+        match_status=0
+        grep -nE 'flight-tune-xplane|pilotage-xplane|flight-tune-aviate|aviate-xil' \
+            "$manifest" > "$work/campaign-publisher-manifest-matches" || match_status=$?
+        if [ "$match_status" -gt 1 ]; then
+            report "tools/flight-tune-campaign/Cargo.toml cannot be scanned"
+        elif [ "$match_status" -eq 0 ]; then
+            report "tools/flight-tune-campaign/Cargo.toml has a simulator-specific publisher dependency"
+        fi
+    fi
+}
+
 require_command find
 require_command grep
 require_command cargo
 require_command python3
 require_command comm
 check_aviate_imports
+check_feedback_verifier
+check_campaign_publisher
 check_shared_contracts
 
 if [ "$status" -ne 0 ]; then

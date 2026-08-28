@@ -102,7 +102,7 @@ fn a_missing_qualified_candidate_poison_stops_the_read() {
     let selected = tuner
         .journal()
         .state()
-        .selected_release_candidate(tuner.journal().session().initial_candidate_digest);
+        .settlement_candidate(tuner.journal().session().initial_candidate_digest);
     fs::remove_file(
         directory
             .path()
