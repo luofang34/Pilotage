@@ -252,6 +252,19 @@ fn scenario(id: &str) -> MissionReference {
         .expect("mission reference")
 }
 
+/// The same stage with a training mission that commands one control family.
+pub fn stage_with_stimulus_family(family: flight_tune::ControlFamily) -> SearchStage {
+    let training = MissionReference::from_document(
+        &super::fake_stimulus_mission_document(super::FAKE_MISSION_IDS[0], family),
+        FAKE_MAX_SAMPLES,
+    )
+    .expect("stimulus mission reference");
+    SearchStage {
+        training_scenarios: vec![training],
+        ..stage()
+    }
+}
+
 /// The same stage with one changed training mission document.
 pub fn stage_with_changed_training_mission() -> SearchStage {
     let changed = MissionReference::from_document(

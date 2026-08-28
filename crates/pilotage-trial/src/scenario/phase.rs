@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{BackendCapability, ControlChannel, SignalSelector, Waveform};
+use super::{
+    BackendCapability, ControlChannel, ControlFamily, SignalSelector, StimulusEnvelope,
+    StimulusMapping, Waveform, stimulus,
+};
 use crate::{
     ArtifactIdentity, MAX_CAPABILITIES, MAX_PHASE_CONDITIONS, MAX_TEXT_BYTES, ValidationError,
     validation::{count, duration, finite, range, text, unique},
@@ -99,8 +102,14 @@ pub enum PhaseAction {
     Settle,
     /// Apply one control stimulus.
     Stimulus {
+        /// The physical control family that the stimulus commands.
+        family: ControlFamily,
         /// The control channel.
         channel: ControlChannel,
+        /// The rule that resolves a normalized value to a physical command.
+        mapping: StimulusMapping,
+        /// The versioned physical envelope of the normalized range.
+        envelope: StimulusEnvelope,
         /// The stimulus waveform.
         waveform: Waveform,
     },
@@ -167,7 +176,20 @@ impl Phase {
                 condition_set.validate(&format!("{field}.action.condition_set"))
             }
             PhaseAction::ReachStartState { target } => target.validate(field),
-            PhaseAction::Stimulus { waveform, .. } => {
+            PhaseAction::Stimulus {
+                family,
+                channel,
+                mapping,
+                envelope,
+                waveform,
+            } => {
+                stimulus::validate(
+                    &format!("{field}.action"),
+                    *family,
+                    *channel,
+                    *mapping,
+                    envelope,
+                )?;
                 waveform.validate(&format!("{field}.action.waveform"))
             }
             _ => Ok(()),
@@ -298,6 +320,7 @@ const fn action_capability(action: &PhaseAction) -> Option<BackendCapability> {
         PhaseAction::ApplyConditions { .. } => Some(BackendCapability::ConditionControl),
         PhaseAction::Arm | PhaseAction::Disarm => Some(BackendCapability::ArmDisarm),
         PhaseAction::ReachStartState { .. } => Some(BackendCapability::KinematicTruth),
+        PhaseAction::Stimulus { family, .. } => Some(family.capability()),
         _ => None,
     }
 }

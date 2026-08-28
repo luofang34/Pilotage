@@ -3,6 +3,7 @@
 mod backend;
 mod phase;
 mod selector;
+mod stimulus;
 mod waveform;
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,9 @@ pub use phase::{Comparison, Phase, PhaseAction, PhaseCondition, StartHeading, St
 pub use selector::{
     ControlChannel, ControlValueField, QuaternionComponent, SignalSelectionError, SignalSelector,
     VectorComponent,
+};
+pub use stimulus::{
+    ControlFamily, PhysicalUnit, ReferenceRule, StimulusEnvelope, StimulusError, StimulusMapping,
 };
 pub use waveform::{SineComponent, Waveform};
 

@@ -234,10 +234,24 @@ fn a_multisine_rejects_an_excessive_composed_envelope() {
         phases: vec![Phase {
             id: "stimulus".to_owned(),
             max_sim_time_ns: 1_000_000_000,
-            required_capabilities: vec![BackendCapability::SimulatorTime],
+            required_capabilities: vec![
+                BackendCapability::SimulatorTime,
+                BackendCapability::OperatorVelocityControl,
+            ],
             entry_conditions: vec![PhaseCondition::Always],
             action: PhaseAction::Stimulus {
+                family: ControlFamily::OperatorVelocity,
                 channel: ControlChannel::Roll,
+                mapping: StimulusMapping::CandidateBoundCurve,
+                envelope: StimulusEnvelope {
+                    id: "bounded-multisine.roll".to_owned(),
+                    revision: 1,
+                    unit: PhysicalUnit::MetersPerSecond,
+                    reference: ReferenceRule::Zero,
+                    negative_endpoint: -4.0,
+                    neutral: 0.0,
+                    positive_endpoint: 4.0,
+                },
                 waveform,
             },
             exit_conditions: vec![PhaseCondition::Always],

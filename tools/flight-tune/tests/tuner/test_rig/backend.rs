@@ -271,7 +271,11 @@ impl ScenarioRuntime for FakeBackend {
     }
 
     fn capabilities(&self) -> &[MissionCapability] {
-        &[MissionCapability::SimulatorTime]
+        &[
+            MissionCapability::SimulatorTime,
+            MissionCapability::OperatorVelocityControl,
+            MissionCapability::DirectAttitudeThrustControl,
+        ]
     }
 
     fn prepare_blocking(

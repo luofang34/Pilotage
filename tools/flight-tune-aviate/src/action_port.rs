@@ -1,8 +1,9 @@
 use flight_tune::{
-    ArtifactIdentity, ControlChannel, Digest, DirectiveContext, FlightAction, MissionCapability,
-    MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext, ScenarioFrame,
-    ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext,
-    StartState, TrialAction, TuneError, Waveform, scenario_runtime_identity,
+    ArtifactIdentity, ControlChannel, ControlFamily, Digest, DirectiveContext, FlightAction,
+    MissionCapability, MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext,
+    ScenarioFrame, ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError,
+    ScenarioStopContext, StartState, StimulusEnvelope, StimulusMapping, TrialAction, TuneError,
+    Waveform, scenario_runtime_identity,
 };
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
@@ -31,8 +32,14 @@ pub enum AviateVehicleAction {
     Settle,
     /// Apply one typed control stimulus.
     Stimulate {
+        /// The physical control family that the stimulus commands.
+        family: ControlFamily,
         /// The control channel.
         channel: ControlChannel,
+        /// The rule that resolves a normalized value to a physical command.
+        mapping: StimulusMapping,
+        /// The versioned physical envelope of the normalized range.
+        envelope: StimulusEnvelope,
         /// The stimulus waveform.
         waveform: Waveform,
     },
@@ -249,7 +256,7 @@ fn project_vehicle_directive(
                 FlightAction::Disarm {} => AviateVehicleAction::Disarm,
                 FlightAction::Climb { .. }
                 | FlightAction::FollowPlan { .. }
-                | FlightAction::Hold {}
+                | FlightAction::MaintainTarget {}
                 | FlightAction::Land {} => return Err(refused("unsupported operational action")),
             };
             (directive.context.clone(), action)
@@ -264,8 +271,17 @@ fn project_vehicle_directive(
                     AviateVehicleAction::ReachStartState { target: *target }
                 }
                 TrialAction::Settle {} => AviateVehicleAction::Settle,
-                TrialAction::Stimulate { channel, waveform } => AviateVehicleAction::Stimulate {
+                TrialAction::Stimulate {
+                    family,
+                    channel,
+                    mapping,
+                    envelope,
+                    waveform,
+                } => AviateVehicleAction::Stimulate {
+                    family: *family,
                     channel: *channel,
+                    mapping: *mapping,
+                    envelope: envelope.clone(),
                     waveform: waveform.clone(),
                 },
                 TrialAction::ReleaseControl {} => AviateVehicleAction::ReleaseControl,

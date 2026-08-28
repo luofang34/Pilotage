@@ -189,6 +189,15 @@ pub enum ValidationError {
         /// The permitted difference from one.
         tolerance: f64,
     },
+    /// A stimulus does not name one valid physical command.
+    #[error("{field} has an invalid stimulus: {source}")]
+    InvalidStimulus {
+        /// The field path.
+        field: String,
+        /// The physical contract failure.
+        #[source]
+        source: crate::StimulusError,
+    },
     /// A phase needs a capability that the backend does not supply.
     #[error("phase {phase} needs unsupported capability {capability}")]
     UnsupportedCapability {

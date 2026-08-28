@@ -62,6 +62,10 @@ pub enum MissionCapability {
     NavigationState,
     /// Apply simulator-only trial control.
     SimulatorControl,
+    /// Command the operator velocity control family.
+    OperatorVelocityControl,
+    /// Command the direct attitude and thrust control family.
+    DirectAttitudeThrustControl,
 }
 
 /// One bounded phase in a mission document.

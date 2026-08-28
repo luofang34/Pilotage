@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ArtifactIdentity, ControlChannel};
 use crate::{
-    FlightPlanReference, MissionCapability, ValidationError,
+    ControlFamily, FlightPlanReference, MissionCapability, StimulusEnvelope, StimulusMapping,
+    ValidationError,
     trial::{StartState, Waveform},
 };
 
@@ -50,7 +51,7 @@ pub enum FlightAction {
         plan: FlightPlanReference,
     },
     /// Hold the current flight target.
-    Hold {},
+    MaintainTarget {},
     /// Land the vehicle.
     Land {},
     /// Disarm the vehicle.
@@ -79,8 +80,14 @@ pub enum TrialAction {
     Settle {},
     /// Apply one control stimulus.
     Stimulate {
+        /// The physical control family that the stimulus commands.
+        family: ControlFamily,
         /// The control channel.
         channel: ControlChannel,
+        /// The rule that resolves a normalized value to a physical command.
+        mapping: StimulusMapping,
+        /// The versioned physical envelope of the normalized range.
+        envelope: StimulusEnvelope,
         /// The stimulus waveform.
         waveform: Waveform,
     },
@@ -150,7 +157,7 @@ impl FlightAction {
     const fn required_capability(&self) -> Option<MissionCapability> {
         match self {
             Self::Arm {} | Self::Disarm {} => Some(MissionCapability::ArmDisarm),
-            Self::Climb { .. } | Self::Hold {} | Self::Land {} => {
+            Self::Climb { .. } | Self::MaintainTarget {} | Self::Land {} => {
                 Some(MissionCapability::FlightControl)
             }
             Self::FollowPlan { .. } => Some(MissionCapability::FlightPlan),
@@ -162,7 +169,7 @@ impl FlightAction {
             Self::Arm {} => "flight.arm",
             Self::Climb { .. } => "flight.climb",
             Self::FollowPlan { .. } => "flight.follow_plan",
-            Self::Hold {} => "flight.hold",
+            Self::MaintainTarget {} => "flight.maintain_target",
             Self::Land {} => "flight.land",
             Self::Disarm {} => "flight.disarm",
         }
@@ -176,7 +183,20 @@ impl TrialAction {
                 condition_set.validate(&format!("{field}.action.condition_set"))
             }
             Self::ReachStartState { target } => target.validate(field),
-            Self::Stimulate { waveform, .. } => {
+            Self::Stimulate {
+                family,
+                channel,
+                mapping,
+                envelope,
+                waveform,
+            } => {
+                crate::trial::validate_stimulus(
+                    &format!("{field}.action"),
+                    *family,
+                    *channel,
+                    *mapping,
+                    envelope,
+                )?;
                 waveform.validate(&format!("{field}.action.waveform"))
             }
             _ => Ok(()),
@@ -189,9 +209,8 @@ impl TrialAction {
             Self::WaitReady {} => Some(MissionCapability::LifecycleState),
             Self::ApplyConditions { .. } => Some(MissionCapability::ConditionControl),
             Self::ReachStartState { .. } => Some(MissionCapability::KinematicTruth),
-            Self::Stimulate { .. } | Self::ReleaseControl {} | Self::Stop {} => {
-                Some(MissionCapability::SimulatorControl)
-            }
+            Self::Stimulate { family, .. } => Some(family.capability()),
+            Self::ReleaseControl {} | Self::Stop {} => Some(MissionCapability::SimulatorControl),
             Self::Disarm {} => Some(MissionCapability::ArmDisarm),
             Self::Settle {} | Self::Observe {} | Self::CollectResults {} => None,
         }
