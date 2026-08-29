@@ -13,10 +13,14 @@ tools/flight-tune-aviate/Cargo.toml	errno	errno	normal	cfg(target_os = "macos")	
 tools/flight-tune-aviate/Cargo.toml	flight-tune	flight-tune	normal		false	path	tools/flight-tune	true		*
 tools/flight-tune-aviate/Cargo.toml	libc	libc	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.2.177
 tools/flight-tune-aviate/Cargo.toml	libproc	libproc	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		=0.14.11
+tools/flight-tune-aviate/Cargo.toml	pilotage-control-feel	pilotage-control-feel	normal		false	path	crates/pilotage-control-feel	true		*
 tools/flight-tune-aviate/Cargo.toml	pilotage-durable-storage	pilotage-durable-storage	normal		false	path	crates/pilotage-durable-storage	true		*
 tools/flight-tune-aviate/Cargo.toml	rustix	rustix	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	fs,process	=1.1.4
+tools/flight-tune-aviate/Cargo.toml	serde	serde	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
 tools/flight-tune-aviate/Cargo.toml	serde	serde	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	derive	^1.0.228
+tools/flight-tune-aviate/Cargo.toml	serde_json	serde_json	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
 tools/flight-tune-aviate/Cargo.toml	serde_json	serde_json	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true	float_roundtrip	^1.0.150
+tools/flight-tune-aviate/Cargo.toml	sha2	sha2	build		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
 tools/flight-tune-aviate/Cargo.toml	sha2	sha2	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	true		^0.10.9
 tools/flight-tune-aviate/Cargo.toml	sysctl	sysctl	normal	cfg(target_os = "macos")	false	source	registry+https://github.com/rust-lang/crates.io-index	true		=0.7.1
 tools/flight-tune-aviate/Cargo.toml	thiserror	thiserror	normal		false	source	registry+https://github.com/rust-lang/crates.io-index	false		^2.0.18

@@ -27,11 +27,15 @@ mod inspection;
 mod lease_store;
 mod process;
 mod protocol;
+pub mod runtime;
 mod runtime_files;
 mod supervisor;
+mod transition_authorization;
+mod vehicle;
 
 pub use action_port::{
-    AviateActionDriver, AviateActionPortError, AviateVehicleActionPort, aviate_action_port_identity,
+    AviateActionDriver, AviateActionPortError, AviateVehicleAction, AviateVehicleActionPort,
+    AviateVehicleDirective, aviate_action_port_identity,
 };
 pub use document::{
     ProcessIdentity, ProcessStartIdentity, TargetAttestation, TargetProcessContract,
@@ -41,6 +45,19 @@ pub use process::{
     ManagedAviateProcess, PreparedAviateProcess, RECOVERY_REQUEST_SCHEMA_VERSION, RecoveryOutcome,
     RecoveryRequest, SUPERVISION_ATTESTATION_SCHEMA_VERSION, SupervisedProcessRequest,
     SupervisionAttestation, recover_supervised_process_blocking,
+};
+pub use runtime::identity::{
+    AviateRuntimeIdentity, RUNTIME_IMPLEMENTATION_ID, RUNTIME_IMPLEMENTATION_SCHEMA_VERSION,
+    RuntimeIdentityInputs, RuntimeImplementationDocument, RuntimeSourceEntry,
+};
+pub use runtime::{AviateRuntimeError, AviateScenarioDriver};
+pub use transition_authorization::{
+    ADJACENCY_POLICY_SCHEMA_VERSION, AdjacencyPolicy, ParameterStepLimit, TRANSITION_VALIDATOR_ID,
+    TransitionValidator, validator_identity,
+};
+pub use vehicle::{
+    AviateFeelController, AviateVehicleAdapter, AviateVehicleFactory, CandidateFeelMapping,
+    VEHICLE_ID, bind_run_intent, require_run_intent, vehicle_identity,
 };
 
 /// Runs the process-supervisor helper protocol.

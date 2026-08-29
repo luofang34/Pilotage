@@ -108,6 +108,12 @@ impl PreparedDirectCommand {
         self.run_intent_digest
     }
 
+    /// The direct transport that prepared this command.
+    #[must_use]
+    pub const fn transport_identity_digest(&self) -> Digest {
+        self.transport_identity_digest
+    }
+
     /// Replaces the physical target, for a tamper test.
     ///
     /// The transport re-derives every prepared target before it enacts it,
