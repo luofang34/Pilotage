@@ -13,7 +13,7 @@ use super::{authority::AttemptAuthority, plan, statistics};
 
 const EVALUATION_DOMAIN: &[u8] = b"pilotage.flight-tune.authenticated-evaluation.v1\0";
 const PROOF_DOMAIN: &[u8] = b"pilotage.flight-tune.authenticated-evaluation-proof.v1\0";
-const PROOF_SCHEMA_VERSION: u16 = 1;
+const PROOF_SCHEMA_VERSION: u16 = 2;
 
 pub(super) struct VerifiedProof<'a> {
     pub(super) proof: &'a AuthenticatedEvaluationProof,
@@ -26,6 +26,7 @@ struct EvaluationDocument<'a> {
     role: AttemptRole,
     candidate_digest: Digest,
     plan_digest: Digest,
+    retry_index: u32,
     evaluation: &'a CandidateEvaluation,
 }
 
@@ -51,6 +52,7 @@ pub(super) fn verify<'a>(
         attempt.trial_id,
         session.fixed_seed,
         session_digest,
+        attempt.retry_index,
     );
     verify_receipt_headers(proof, session, session_digest, attempt)?;
     match &proof.evaluation {
@@ -90,6 +92,7 @@ fn verify_header(
         || attempt.candidate.is_zero()
         || proof.plan_digest != attempt.plan_digest
         || proof.plan_digest.is_zero()
+        || proof.retry_index != attempt.retry_index
         || proof.terminal_receipts.is_empty()
         || !is_hidden(attempt.role)
     {
@@ -113,6 +116,7 @@ fn verify_receipt_headers(
             || context.trial_id() != attempt.trial_id
             || context.role() != attempt.role
             || context.candidate_digest() != attempt.candidate
+            || context.retry_index() != attempt.retry_index
             || receipt.binding().adapter() != &session.runtimes.vehicle
             || !identities.insert(receipt.receipt_digest())
         {
@@ -231,13 +235,34 @@ fn verify_run(
         || !(0.0..=1.0).contains(&run.control_effort)
         || run.passed_hard_gates != stage.required_hard_gates
         || !objective_keys_match(stage, role, run)
-        || run
-            .objectives
-            .values()
-            .any(|value| !value.is_finite() || *value < 0.0)
     {
         return Err(invalid(
             "an evaluation run changed its metrics, gates, or objectives",
+        ));
+    }
+    verify_objectives(&run.objectives)
+}
+
+/// Requires the objective names and values the core would have accepted.
+///
+/// A name that carries whitespace can present as another name once a report
+/// renders it, so the core refuses one and this verifier refuses the same.
+///
+/// # Errors
+///
+/// Returns [`FeedbackError`] when a name is blank, carries whitespace, or a
+/// value is not finite and nonnegative.
+pub(super) fn verify_objectives(
+    objectives: &std::collections::BTreeMap<String, f64>,
+) -> Result<(), FeedbackError> {
+    if objectives.iter().any(|(name, value)| {
+        name.trim().is_empty()
+            || name.chars().any(char::is_whitespace)
+            || !value.is_finite()
+            || *value < 0.0
+    }) {
+        return Err(invalid(
+            "a named objective is empty, carries whitespace, or is out of range",
         ));
     }
     Ok(())
@@ -290,6 +315,7 @@ fn verify_digests(proof: &AuthenticatedEvaluationProof) -> Result<(), FeedbackEr
             role: proof.role,
             candidate_digest: proof.candidate_digest,
             plan_digest: proof.plan_digest,
+            retry_index: proof.retry_index,
             evaluation: &proof.evaluation,
         },
     )?;

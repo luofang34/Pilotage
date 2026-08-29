@@ -146,6 +146,7 @@ pub(super) fn prepare(
         || context.mission_content_digest() != expected_scenario.0.content_digest
         || context.repetition() != expected_scenario.1
         || context.seed() != expected_seed
+        || context.retry_index() != pending.retry_index
         || run_intent_digest.is_zero()
         || context_digest != run_intent_digest
     {

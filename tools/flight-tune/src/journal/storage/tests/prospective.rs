@@ -323,6 +323,7 @@ fn test_candidate() -> Candidate {
 
 fn test_stage() -> SearchStage {
     SearchStage {
+        execution_retry: crate::ExecutionRetryPolicy::none(),
         id: "test-stage".to_owned(),
         allowlist: BTreeMap::from([(
             "gain".to_owned(),

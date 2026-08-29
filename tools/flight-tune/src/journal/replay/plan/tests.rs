@@ -78,6 +78,7 @@ fn stage() -> SearchStage {
         sample_timeout_ns: 100_000_000,
     };
     SearchStage {
+        execution_retry: crate::ExecutionRetryPolicy::none(),
         id: "empty-stream-stage".to_owned(),
         allowlist: BTreeMap::from([(
             "gain".to_owned(),

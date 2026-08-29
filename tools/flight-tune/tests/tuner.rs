@@ -2,6 +2,8 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+#[path = "tuner/execution_retry.rs"]
+mod execution_retry;
 #[path = "tuner/journal_storage.rs"]
 mod journal_storage;
 #[path = "tuner/no_samples.rs"]
@@ -473,7 +475,7 @@ fn open(
     open_stage(path, state, strategy, gate_limit, stage())
 }
 
-fn open_stage(
+pub(crate) fn open_stage(
     path: &Path,
     state: FakeHandle,
     strategy: SequenceStrategy,

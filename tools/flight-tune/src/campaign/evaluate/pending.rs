@@ -95,6 +95,12 @@ where
         return Ok(None);
     };
     if snapshot.outcome.is_some() {
+        // A session that stopped between a quarantine and its decision left
+        // the decision owed. Cleanup cannot close the attempt until the
+        // declared limit has answered it.
+        if let Some(trial_id) = journal.awaits_retry_decision() {
+            journal.record_retry_decision(trial_id)?;
+        }
         finish_cleanup(journal, snapshot.trial_id, backend, gates, metric, true)?;
         return Ok(None);
     }

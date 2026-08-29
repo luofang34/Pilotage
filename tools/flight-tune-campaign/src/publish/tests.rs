@@ -76,8 +76,12 @@ fn a_qualified_journal_publishes_verified_readback() {
     // checked. This campaign runs the rig's own stage, so the rig's stage is
     // the bar it must be held to.
     let rig_stage = stage();
-    let required = RequiredPolicy::new(&rig_stage.promotion, &rig_stage.qualification)
-        .expect("bind the rig's policy");
+    let required = RequiredPolicy::new(
+        &rig_stage.promotion,
+        &rig_stage.qualification,
+        &rig_stage.execution_retry,
+    )
+    .expect("bind the rig's policy");
     let qualified = VerifiedCampaignEvidence::load_content_addressed_blocking(&receipt.object_path)
         .and_then(|verified| verified.verify_qualified(&required))
         .expect("verify published readback");

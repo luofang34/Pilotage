@@ -23,6 +23,7 @@ fn stated_policy(evidence: &CampaignEvidence) -> crate::RequiredPolicy {
     crate::RequiredPolicy::new(
         &evidence.journal.stage.promotion,
         &evidence.journal.stage.qualification,
+        &evidence.journal.stage.execution_retry,
     )
     .expect("bind the stated policy")
 }
@@ -105,6 +106,12 @@ fn journal_producer_snapshot_qualifies_independently() {
     );
 }
 
+/// The pinned identity is re-recorded whenever the evidence schema changes.
+///
+/// It moved when the run execution context gained a retry index and the
+/// campaign evidence authority gained its attempt projection: every run
+/// intent, every receipt, and the whole chain take new identities, which is
+/// the point of the schema change rather than a side effect of it.
 #[test]
 fn canonical_source_digest_is_fixed() {
     let evidence = fixture();
@@ -113,7 +120,7 @@ fn canonical_source_digest_is_fixed() {
         .expect("verify evidence");
     assert_eq!(
         verified.source_digest().to_string(),
-        "e043cdad5f47a68208c6f6191833379bf97a73e51a10efe8affeb0df4bb529e7"
+        "45b235f3516250cafd2fc30c1874a449999165fe1b15ce2268728e8c74c5e59b"
     );
 }
 
@@ -287,8 +294,12 @@ fn a_campaign_run_against_another_bar_does_not_qualify() {
     for maximum in stricter.objective_maxima.values_mut() {
         *maximum /= 2.0;
     }
-    let required = crate::RequiredPolicy::new(&evidence.journal.stage.promotion, &stricter)
-        .expect("bind a stricter policy");
+    let required = crate::RequiredPolicy::new(
+        &evidence.journal.stage.promotion,
+        &stricter,
+        &evidence.journal.stage.execution_retry,
+    )
+    .expect("bind a stricter policy");
     assert!(
         verified.clone().verify_qualified(&required).is_err(),
         "a campaign must not qualify against a bar it never ran against"
@@ -297,7 +308,24 @@ fn a_campaign_run_against_another_bar_does_not_qualify() {
     // So is a different promotion bar.
     let mut looser = evidence.journal.stage.promotion.clone();
     looser.minimum_relative_loss_improvement = 0.0;
-    let required = crate::RequiredPolicy::new(&looser, &evidence.journal.stage.qualification)
-        .expect("bind a different promotion policy");
-    assert!(verified.verify_qualified(&required).is_err());
+    let required = crate::RequiredPolicy::new(
+        &looser,
+        &evidence.journal.stage.qualification,
+        &evidence.journal.stage.execution_retry,
+    )
+    .expect("bind a different promotion policy");
+    assert!(verified.clone().verify_qualified(&required).is_err());
+
+    // So is a bar that would have let the campaign discard failed executions.
+    let permissive = flight_tune::ExecutionRetryPolicy::with_limit(1).expect("a supported limit");
+    let required = crate::RequiredPolicy::new(
+        &evidence.journal.stage.promotion,
+        &evidence.journal.stage.qualification,
+        &permissive,
+    )
+    .expect("bind a different execution retry policy");
+    assert!(
+        verified.verify_qualified(&required).is_err(),
+        "a no-retry campaign must not clear a bar that authorized replacements"
+    );
 }

@@ -169,6 +169,7 @@ pub(super) fn policy() -> PromotionPolicy {
 
 pub(super) fn stage() -> SearchStage {
     SearchStage {
+        execution_retry: crate::ExecutionRetryPolicy::none(),
         id: "stage-one".to_owned(),
         allowlist: BTreeMap::from([(
             "rate".to_owned(),
@@ -198,6 +199,8 @@ pub(super) fn stage() -> SearchStage {
 
 pub(super) fn plan() -> PromotionRunPlan {
     PromotionRunPlan {
+        baseline_retry_index: 0,
+        frozen_retry_index: 0,
         tuning_session_digest: fixed_digest(20),
         baseline_trial_id: 40,
         frozen_trial_id: 41,

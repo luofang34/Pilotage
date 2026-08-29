@@ -1,11 +1,13 @@
 use flight_tune::{
-    AttemptRole, AuthenticatedJournalRecord, CandidateEvaluation, Digest, JournalEvent,
-    OperationStatus, PromotionClosure, PromotionDecision, SearchStage, SessionIdentity,
+    AttemptRole, AuthenticatedJournalRecord, CandidateEvaluation, CandidateTransitionReference,
+    Digest, JournalEvent, OperationStatus, PromotionClosure, PromotionDecision, SearchStage,
+    SessionIdentity,
 };
 
 use crate::{FeedbackError, error::invalid};
 
-use super::super::plan;
+use super::super::evaluation as evaluation_rules;
+use super::super::{plan, statistics};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -19,7 +21,24 @@ struct PendingAttempt {
     trial_id: u64,
     role: AttemptRole,
     candidate: Digest,
+    plan_digest: Digest,
+    transition: Option<CandidateTransitionReference>,
+    retry_index: u32,
     outcome: Option<PendingOutcome>,
+    quarantined: bool,
+    decided: bool,
+    replacement: Option<AuthorizedRetry>,
+}
+
+/// The replacement one quarantined attempt is owed.
+#[derive(Clone, Copy)]
+struct AuthorizedRetry {
+    replacement_trial_id: u64,
+    retry_index: u32,
+    role: AttemptRole,
+    candidate: Digest,
+    plan_digest: Digest,
+    transition: Option<CandidateTransitionReference>,
 }
 
 #[derive(Clone, Copy)]
@@ -39,6 +58,7 @@ struct ReplayState<'a> {
     training_incumbent: Digest,
     training_incumbent_loss: Option<f64>,
     training_attempt_count: u64,
+    authorized_retry: Option<AuthorizedRetry>,
     frozen_candidate: Option<Digest>,
     promotion_baseline_passed: Option<bool>,
     promotion_frozen_done: bool,
@@ -90,6 +110,7 @@ impl<'a> ReplayState<'a> {
             training_incumbent: session.initial_candidate_digest,
             training_incumbent_loss: None,
             training_attempt_count: 0,
+            authorized_retry: None,
             frozen_candidate: None,
             promotion_baseline_passed: None,
             promotion_frozen_done: false,
@@ -99,6 +120,12 @@ impl<'a> ReplayState<'a> {
     }
 
     fn apply(&mut self, event: &JournalEvent) -> Result<(), FeedbackError> {
+        if self.authorized_retry.is_some() && !matches!(event, JournalEvent::AttemptPrepared { .. })
+        {
+            return Err(invalid(
+                "an authorized retry must be followed by its replacement attempt",
+            ));
+        }
         match event {
             JournalEvent::Started { .. } => Err(invalid("the campaign authority has two starts")),
             JournalEvent::CandidateTransitionAuthorized { .. } => {
@@ -137,6 +164,17 @@ impl<'a> ReplayState<'a> {
             JournalEvent::AttemptQuarantined {
                 trial_id, proof, ..
             } => self.quarantine(*trial_id, proof.is_some()),
+            JournalEvent::RetryAuthorized {
+                source_trial_id,
+                replacement_trial_id,
+                retry_index,
+                ..
+            } => self.retry_authorized(*source_trial_id, *replacement_trial_id, *retry_index),
+            JournalEvent::RetryExhausted {
+                source_trial_id,
+                retry_index,
+                ..
+            } => self.retry_exhausted(*source_trial_id, *retry_index),
             JournalEvent::CleanupRecorded { trial_id, cleanup } => self.cleanup(*trial_id, cleanup),
             JournalEvent::Frozen {
                 baseline,
@@ -163,14 +201,108 @@ impl<'a> ReplayState<'a> {
         {
             return Err(invalid("an authority attempt preparation changed"));
         }
+        let retry_index = self.derived_retry_index(trial_id, role, candidate, plan_digest)?;
         self.pending = Some(PendingAttempt {
             trial_id,
             role,
             candidate,
+            plan_digest,
+            transition: None,
+            retry_index,
             outcome: None,
+            quarantined: false,
+            decided: false,
+            replacement: None,
         });
+        self.authorized_retry = None;
         self.next_trial_id = self.next_trial_id.wrapping_add(1);
         Ok(())
+    }
+
+    /// Derives how many replacements separate this preparation from its first
+    /// execution.
+    ///
+    /// A first execution derives zero. A replacement derives its index from
+    /// the authorization the quarantined source produced, so no preparation
+    /// can state its own place in a retry chain.
+    fn derived_retry_index(
+        &self,
+        trial_id: u64,
+        role: AttemptRole,
+        candidate: Digest,
+        plan_digest: Digest,
+    ) -> Result<u32, FeedbackError> {
+        let Some(retry) = self.authorized_retry else {
+            return Ok(0);
+        };
+        if retry.replacement_trial_id != trial_id
+            || retry.role != role
+            || retry.candidate != candidate
+            || retry.plan_digest != plan_digest
+            || retry.transition.is_some()
+        {
+            return Err(invalid(
+                "a replacement attempt changed its authorized execution context",
+            ));
+        }
+        Ok(retry.retry_index)
+    }
+
+    fn retry_authorized(
+        &mut self,
+        source_trial_id: u64,
+        replacement_trial_id: u64,
+        retry_index: u32,
+    ) -> Result<(), FeedbackError> {
+        let expected_replacement = self.next_trial_id;
+        let limit = self.stage.execution_retry.execution_retry_limit;
+        let pending = self.quarantined_without_decision(source_trial_id)?;
+        if pending.retry_index >= limit
+            || replacement_trial_id != expected_replacement
+            || retry_index != pending.retry_index.wrapping_add(1)
+        {
+            return Err(invalid(
+                "an authorized retry does not match its quarantined attempt",
+            ));
+        }
+        pending.replacement = Some(AuthorizedRetry {
+            replacement_trial_id,
+            retry_index,
+            role: pending.role,
+            candidate: pending.candidate,
+            plan_digest: pending.plan_digest,
+            transition: pending.transition,
+        });
+        pending.decided = true;
+        Ok(())
+    }
+
+    fn retry_exhausted(
+        &mut self,
+        source_trial_id: u64,
+        retry_index: u32,
+    ) -> Result<(), FeedbackError> {
+        let limit = self.stage.execution_retry.execution_retry_limit;
+        let pending = self.quarantined_without_decision(source_trial_id)?;
+        if pending.retry_index < limit || retry_index != pending.retry_index {
+            return Err(invalid(
+                "an exhausted retry stopped before the declared limit",
+            ));
+        }
+        pending.decided = true;
+        Ok(())
+    }
+
+    fn quarantined_without_decision(
+        &mut self,
+        trial_id: u64,
+    ) -> Result<&mut PendingAttempt, FeedbackError> {
+        self.pending
+            .as_mut()
+            .filter(|pending| {
+                pending.trial_id == trial_id && pending.quarantined && !pending.decided
+            })
+            .ok_or_else(|| invalid("no quarantined attempt awaits a retry decision"))
     }
 
     fn role_allowed(&self, role: AttemptRole, candidate: Digest, transition: bool) -> bool {
@@ -226,7 +358,7 @@ impl<'a> ReplayState<'a> {
             .filter(|pending| pending.trial_id == trial_id && pending.outcome.is_none())
             .map(|pending| pending.role)
             .ok_or_else(|| invalid("an authority event has the wrong active attempt"))?;
-        let mean_loss = evaluation.aggregate().map(|value| value.mean_loss);
+        let mean_loss = derived_mean_loss(evaluation)?;
         let expected_selected = match role {
             AttemptRole::TrainingBaseline => Some(mean_loss.is_some()),
             AttemptRole::TrainingChallenger { .. } => Some(mean_loss.is_some_and(|loss| {
@@ -267,6 +399,7 @@ impl<'a> ReplayState<'a> {
             selected: false,
             mean_loss: None,
         });
+        pending.quarantined = true;
         Ok(())
     }
 
@@ -277,6 +410,13 @@ impl<'a> ReplayState<'a> {
             .is_none_or(|pending| pending.trial_id != trial_id || pending.outcome.is_none())
         {
             return Err(invalid("an authority cleanup changed its attempt"));
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.quarantined && !pending.decided)
+        {
+            return Err(invalid("a quarantined attempt has no retry decision"));
         }
         if matches!(cleanup, OperationStatus::Succeeded) {
             let pending = self
@@ -289,6 +429,13 @@ impl<'a> ReplayState<'a> {
     }
 
     fn finalize(&mut self, pending: PendingAttempt) -> Result<(), FeedbackError> {
+        // A replaced execution states no result. Recording one would let a
+        // quarantine both close its partition slot and receive a replacement,
+        // which is two outcomes for one experimental condition.
+        if let Some(retry) = pending.replacement {
+            self.authorized_retry = Some(retry);
+            return Ok(());
+        }
         let outcome = pending
             .outcome
             .ok_or_else(|| invalid("an authority cleanup lost its outcome"))?;
@@ -396,6 +543,37 @@ impl<'a> ReplayState<'a> {
             return Err(invalid("the campaign authority phase changed"));
         }
         Ok(())
+    }
+}
+
+/// Derives the mean loss one completed evaluation states.
+///
+/// The training incumbent decision turns on this value, so reading it back
+/// out of the document would make the document its own authority. It is
+/// calculated again from the run records the same evaluation carries, with
+/// the core algorithm, and the stored aggregate must equal it field for
+/// field.
+fn derived_mean_loss(evaluation: &CandidateEvaluation) -> Result<Option<f64>, FeedbackError> {
+    match evaluation {
+        CandidateEvaluation::Passed { aggregate, runs } => {
+            for run in runs {
+                evaluation_rules::verify_objectives(&run.objectives)?;
+            }
+            let derived = statistics::aggregate(runs)?;
+            if aggregate != &derived {
+                return Err(invalid(
+                    "a completed evaluation aggregate changed from its run records",
+                ));
+            }
+            Ok(Some(derived.mean_loss))
+        }
+        CandidateEvaluation::HardGateFailed { completed_runs, .. } => {
+            for run in completed_runs {
+                evaluation_rules::verify_objectives(&run.objectives)?;
+            }
+            Ok(None)
+        }
+        CandidateEvaluation::Quarantined { .. } => Ok(None),
     }
 }
 

@@ -77,13 +77,14 @@ fn terminal_receipt(
         expected.scenario,
         expected.repetition,
         expected.seed,
+        expected.retry_index,
     )
     .expect("create run context");
     let intent = RunTerminalIntent::new(
         &context,
         digest::domain(
             "run execution context",
-            b"flight-tune:run-execution-context:v2\0",
+            b"flight-tune:run-execution-context:v3\0",
             &context,
         )
         .expect("run intent digest"),

@@ -93,6 +93,7 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
         scenario,
         0,
         seed,
+        0,
     )
     .expect("run context");
     let run_intent_digest = context.digest().expect("run intent digest");

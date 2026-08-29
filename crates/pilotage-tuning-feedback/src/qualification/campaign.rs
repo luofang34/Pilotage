@@ -5,7 +5,9 @@ use crate::{FeedbackError, digest, error::invalid};
 use super::stage;
 use super::{authority, authority::VerifiedAuthority};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 5;
+pub(super) mod retry;
+
+const JOURNAL_SCHEMA_VERSION: u32 = 6;
 const SNAPSHOT_SCHEMA_VERSION: u16 = 3;
 
 pub(super) struct CampaignIdentity {

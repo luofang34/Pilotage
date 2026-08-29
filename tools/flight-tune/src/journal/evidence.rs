@@ -11,8 +11,9 @@ use super::{JOURNAL_SCHEMA_VERSION, Journal, storage};
 mod authority;
 
 pub use authority::{
-    AuthenticatedJournalRecord, CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
-    CampaignEvidenceAuthority,
+    ATTEMPT_PROJECTION_SCHEMA_VERSION, AttemptProjection, AttemptProjectionOutcome,
+    AttemptProjectionRecord, AttemptRetryOutcome, AuthenticatedJournalRecord,
+    CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION, CampaignEvidenceAuthority,
 };
 
 /// The supported journal evidence snapshot schema.
@@ -172,6 +173,7 @@ impl JournalEvidenceSnapshot {
                 scenario,
                 repetition,
                 crate::model::derive_seed(session.fixed_seed, set, scenario, repetition),
+                proof.retry_index,
             )?;
             if receipt.context() != &expected
                 || receipt.intent().run_intent_digest() != expected.digest()?

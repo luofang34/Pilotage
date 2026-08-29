@@ -82,6 +82,7 @@ fn prospective_replay_rejects_final_attempts_without_promotion_authority() {
 
 fn stage() -> SearchStage {
     SearchStage {
+        execution_retry: crate::ExecutionRetryPolicy::none(),
         id: String::new(),
         allowlist: BTreeMap::new(),
         fixed_parameters: BTreeMap::new(),

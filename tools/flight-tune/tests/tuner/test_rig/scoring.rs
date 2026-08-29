@@ -216,6 +216,7 @@ pub fn candidate(gain: f64) -> Candidate {
 
 pub fn stage() -> SearchStage {
     SearchStage {
+        execution_retry: flight_tune::ExecutionRetryPolicy::none(),
         id: "inner-loop".to_owned(),
         allowlist: BTreeMap::from([(
             "gain".to_owned(),
@@ -250,6 +251,15 @@ pub fn stage() -> SearchStage {
 fn scenario(id: &str) -> MissionReference {
     MissionReference::from_document(&super::fake_mission_document(id), FAKE_MAX_SAMPLES)
         .expect("mission reference")
+}
+
+/// The same stage, with the stated number of replacement executions allowed.
+pub fn stage_with_execution_retry_limit(limit: u32) -> SearchStage {
+    SearchStage {
+        execution_retry: flight_tune::ExecutionRetryPolicy::with_limit(limit)
+            .expect("a supported execution retry limit"),
+        ..stage()
+    }
 }
 
 /// The same stage with a training mission that commands one control family.

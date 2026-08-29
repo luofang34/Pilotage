@@ -265,7 +265,7 @@ pub enum JournalEvent {
         /// The training incumbent decision, if this is a training role.
         selected_as_training_incumbent: Option<bool>,
     },
-    /// An incomplete or failed attempt cannot run again in this session.
+    /// An incomplete or failed attempt cannot run again under this trial identity.
     AttemptQuarantined {
         /// The monotonic trial identity.
         trial_id: u64,
@@ -273,6 +273,26 @@ pub enum JournalEvent {
         reason: String,
         /// The authenticated hidden evaluation proof, when this role requires one.
         proof: Option<Box<AuthenticatedEvaluationProof>>,
+    },
+    /// One quarantined attempt received its one authorized replacement.
+    RetryAuthorized {
+        /// The quarantined attempt this replacement answers.
+        source_trial_id: u64,
+        /// The trial identity the replacement attempt must take.
+        replacement_trial_id: u64,
+        /// The retry index the replacement attempt must carry.
+        retry_index: u32,
+        /// The identity of the exact quarantine reason bytes.
+        quarantine_reason_digest: Digest,
+    },
+    /// One quarantined attempt reached the declared execution retry limit.
+    RetryExhausted {
+        /// The quarantined attempt that cannot run again.
+        source_trial_id: u64,
+        /// The retry index the quarantined attempt carried.
+        retry_index: u32,
+        /// The identity of the exact quarantine reason bytes.
+        quarantine_reason_digest: Digest,
     },
     /// The runner saved one independent cleanup result.
     CleanupRecorded {

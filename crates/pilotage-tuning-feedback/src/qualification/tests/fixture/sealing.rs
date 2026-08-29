@@ -26,6 +26,7 @@ struct EvaluationDocument<'a> {
     role: AttemptRole,
     candidate_digest: Digest,
     plan_digest: Digest,
+    retry_index: u32,
     evaluation: &'a CandidateEvaluation,
 }
 
@@ -170,6 +171,7 @@ pub(super) fn refresh_proof(proof: &mut AuthenticatedEvaluationProof) {
             role: proof.role,
             candidate_digest: proof.candidate_digest,
             plan_digest: proof.plan_digest,
+            retry_index: proof.retry_index,
             evaluation: &proof.evaluation,
         },
     )

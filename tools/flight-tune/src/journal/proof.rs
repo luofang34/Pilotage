@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// The supported authenticated evaluation proof schema.
-pub const AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION: u16 = 1;
+pub const AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION: u16 = 2;
 
 const EVALUATION_DOMAIN: &[u8] = b"pilotage.flight-tune.authenticated-evaluation.v1\0";
 const PROOF_DOMAIN: &[u8] = b"pilotage.flight-tune.authenticated-evaluation-proof.v1\0";
@@ -28,6 +28,8 @@ pub struct AuthenticatedEvaluationProof {
     pub candidate_digest: Digest,
     /// The complete ordered run-plan identity.
     pub plan_digest: Digest,
+    /// How many replacements separate this attempt from its first execution.
+    pub retry_index: u32,
     /// The semantic evaluation.
     pub evaluation: CandidateEvaluation,
     /// The exact ordered terminal receipts.
@@ -45,6 +47,7 @@ struct EvaluationDocument<'a> {
     role: AttemptRole,
     candidate_digest: Digest,
     plan_digest: Digest,
+    retry_index: u32,
     evaluation: &'a CandidateEvaluation,
 }
 
@@ -61,6 +64,7 @@ impl AuthenticatedEvaluationProof {
         role: AttemptRole,
         candidate_digest: Digest,
         plan_digest: Digest,
+        retry_index: u32,
         evaluation: CandidateEvaluation,
         terminal_receipts: Vec<RunTerminalReceipt>,
     ) -> Result<Self, TuneError> {
@@ -70,6 +74,7 @@ impl AuthenticatedEvaluationProof {
             role,
             candidate_digest,
             plan_digest,
+            retry_index,
             evaluation,
             terminal_receipts,
             evaluation_digest: Digest::from_bytes([0; 32]),
@@ -124,6 +129,7 @@ impl AuthenticatedEvaluationProof {
                 role: self.role,
                 candidate_digest: self.candidate_digest,
                 plan_digest: self.plan_digest,
+                retry_index: self.retry_index,
                 evaluation: &self.evaluation,
             },
             "authenticated evaluation",
@@ -160,6 +166,7 @@ impl AuthenticatedEvaluationProof {
             if context.trial_id() != self.trial_id
                 || context.role() != self.role
                 || context.candidate_digest() != self.candidate_digest
+                || context.retry_index() != self.retry_index
                 || !digests.insert(receipt.receipt_digest())
             {
                 return Err(invalid(

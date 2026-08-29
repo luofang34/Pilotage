@@ -184,6 +184,7 @@ fn changed_context(expected: &RunExecutionContext, change: IdentityChange) -> Ru
         &scenario,
         repetition,
         seed,
+        0,
     )
     .expect("create changed context")
 }

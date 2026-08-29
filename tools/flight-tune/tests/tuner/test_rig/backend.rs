@@ -177,6 +177,11 @@ impl CampaignBackend for FakeBackend {
         if state.panic_on_start == Some(state.start_count) {
             panic!("simulated process stop after candidate activation");
         }
+        if state.start_count <= state.fail_starts_through {
+            return Err(AdapterError::new(
+                "simulated execution failure after candidate activation",
+            ));
+        }
         let scenario = state
             .current_scenario
             .clone()

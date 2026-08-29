@@ -286,7 +286,42 @@ where
         self.run_attempt_blocking(role, candidate, None)
     }
 
+    /// Runs one attempt and every replacement the declared limit authorizes.
+    ///
+    /// A quarantine that received a replacement is not a campaign failure.
+    /// The declared limit already answered it, and the execution the campaign
+    /// records for that condition is the replacement.
     fn run_attempt_blocking(
+        &mut self,
+        role: AttemptRole,
+        candidate: &Candidate,
+        transition: Option<CandidateTransitionReference>,
+    ) -> Result<(), TuneError> {
+        let result = self.run_one_attempt_blocking(role, candidate, transition);
+        self.settle_authorized_retries_blocking(result)
+    }
+
+    fn settle_authorized_retries_blocking(
+        &mut self,
+        first: Result<(), TuneError>,
+    ) -> Result<(), TuneError> {
+        let mut result = first;
+        let mut remaining = self.stage.execution_retry.execution_retry_limit;
+        while let Some(retry) = self.journal.authorized_retry() {
+            if remaining == 0 {
+                return Err(invalid_state(
+                    "run an authorized replacement",
+                    "the execution retry limit was exceeded",
+                ));
+            }
+            remaining = remaining.wrapping_sub(1);
+            let candidate = self.journal.read_candidate(retry.candidate)?;
+            result = self.run_one_attempt_blocking(retry.role, &candidate, retry.transition);
+        }
+        result
+    }
+
+    fn run_one_attempt_blocking(
         &mut self,
         role: AttemptRole,
         candidate: &Candidate,
@@ -320,19 +355,24 @@ where
 
     fn recover_pending_blocking(&mut self) -> Result<(), TuneError> {
         self.journal.ensure_usable()?;
-        if self.journal.state().pending.is_none() {
+        if self.journal.state().pending.is_none() && self.journal.authorized_retry().is_none() {
             return Ok(());
         }
-        let result = evaluate::recover_pending_blocking(
-            &mut self.journal,
-            &self.stage,
-            &mut self.backend,
-            &mut self.vehicle,
-            &self.capability,
-            &mut self.gates,
-            &mut self.metric,
-        );
-        self.finish_with_candidate_reconciliation_blocking("recover pending attempt", result)
+        let result = if self.journal.state().pending.is_some() {
+            let recovered = evaluate::recover_pending_blocking(
+                &mut self.journal,
+                &self.stage,
+                &mut self.backend,
+                &mut self.vehicle,
+                &self.capability,
+                &mut self.gates,
+                &mut self.metric,
+            );
+            self.finish_with_candidate_reconciliation_blocking("recover pending attempt", recovered)
+        } else {
+            Ok(())
+        };
+        self.settle_authorized_retries_blocking(result)
     }
 
     fn authorized_final_candidate(&self) -> Result<Digest, TuneError> {

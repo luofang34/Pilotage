@@ -84,6 +84,10 @@ pub struct PromotionRunPlan {
     pub baseline_trial_id: u64,
     /// The frozen attempt identity.
     pub frozen_trial_id: u64,
+    /// The retry index the baseline attempt carried.
+    pub baseline_retry_index: u32,
+    /// The retry index the frozen attempt carried.
+    pub frozen_retry_index: u32,
     /// The initial candidate identity.
     pub initial_candidate_digest: Digest,
     /// The frozen candidate identity.
@@ -346,6 +350,7 @@ fn expected_pair(
             scenario,
             repetition,
             seed,
+            plan.baseline_retry_index,
         )?,
         frozen: expected_run(
             plan,
@@ -355,6 +360,7 @@ fn expected_pair(
             scenario,
             repetition,
             seed,
+            plan.frozen_retry_index,
         )?,
     })
 }
@@ -368,6 +374,7 @@ fn expected_run(
     scenario: &MissionReference,
     repetition: u32,
     seed: u64,
+    retry_index: u32,
 ) -> Result<ExpectedPromotionRun, TuneError> {
     let context = RunExecutionContext::new(
         plan.tuning_session_digest,
@@ -379,6 +386,7 @@ fn expected_run(
         scenario,
         repetition,
         seed,
+        retry_index,
     )?;
     Ok(ExpectedPromotionRun {
         key: key_from_context(&context),

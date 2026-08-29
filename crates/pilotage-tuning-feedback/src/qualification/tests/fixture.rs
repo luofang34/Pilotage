@@ -88,6 +88,7 @@ pub(super) fn fixture() -> CampaignEvidence {
 
 fn stage() -> SearchStage {
     SearchStage {
+        execution_retry: flight_tune::ExecutionRetryPolicy::none(),
         id: "golden-stage".to_owned(),
         allowlist: BTreeMap::from([(
             "rate".to_owned(),
@@ -188,6 +189,7 @@ fn proof_with_objectives(
         trial_id,
         session.fixed_seed,
         session_digest,
+        0,
     );
     let runs = expected
         .iter()
@@ -206,6 +208,7 @@ fn proof_with_objectives(
         runs,
     };
     let mut proof = AuthenticatedEvaluationProof {
+        retry_index: 0,
         schema_version: flight_tune::AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION,
         trial_id,
         role,
@@ -275,6 +278,7 @@ pub(super) fn proof_with_hard_gates(
         trial_id,
         session.fixed_seed,
         session_digest,
+        0,
     );
     let CandidateEvaluation::Passed { runs, .. } = &mut proof.evaluation else {
         panic!("fixture evaluation must pass");
@@ -399,6 +403,7 @@ pub(super) fn quarantined_proof(
         trial_id,
         session.fixed_seed,
         session_digest,
+        0,
     );
     let run = run(
         &expected[0],
@@ -415,6 +420,7 @@ pub(super) fn quarantined_proof(
     };
     let reason = quarantine_reason(terminal.receipt_digest(), quarantine);
     let mut proof = AuthenticatedEvaluationProof {
+        retry_index: 0,
         schema_version: flight_tune::AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION,
         trial_id,
         role,

@@ -5,12 +5,13 @@ use flight_tune::{
 
 use crate::{FeedbackError, error::invalid};
 
+use super::campaign::retry::{self, VerifiedAttempts};
 use super::plan;
 
 mod ancestry;
 mod journal_replay;
 
-const AUTHORITY_SCHEMA_VERSION: u16 = 2;
+const AUTHORITY_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Clone, Copy)]
 pub(super) struct AttemptAuthority {
@@ -18,6 +19,7 @@ pub(super) struct AttemptAuthority {
     pub(super) role: AttemptRole,
     pub(super) candidate: Digest,
     pub(super) plan_digest: Digest,
+    pub(super) retry_index: u32,
 }
 
 pub(super) struct VerifiedAuthority {
@@ -37,6 +39,13 @@ pub(super) fn verify(
         return Err(invalid("the campaign evidence authority schema changed"));
     }
     let records = ancestry::verify(snapshot)?;
+    // The relation is recomputed from chain bytes before any stored index is
+    // read, so every retry index below is derived rather than trusted.
+    let attempts = retry::verify(
+        &snapshot.authority.journal_chain,
+        &snapshot.authority.attempts,
+        snapshot.stage.execution_retry.execution_retry_limit,
+    )?;
     let replayed = journal_replay::verify(
         &snapshot.authority.journal_chain,
         &snapshot.stage,
@@ -54,18 +63,21 @@ pub(super) fn verify(
         AttemptRole::PromotionBaseline,
         saved.baseline_candidate,
         &snapshot.stage,
+        &attempts,
     )?;
     let frozen = optional_attempt(
         records.promotion_frozen,
         AttemptRole::PromotionFrozen,
         frozen_candidate,
         &snapshot.stage,
+        &attempts,
     )?;
     let final_attempt = optional_attempt(
         records.final_qualification,
         AttemptRole::FinalQualification,
         saved.final_candidate.unwrap_or(saved.baseline_candidate),
         &snapshot.stage,
+        &attempts,
     )?;
     Ok(VerifiedAuthority {
         baseline_candidate: saved.baseline_candidate,
@@ -136,6 +148,7 @@ fn attempt(
     expected_role: AttemptRole,
     expected_candidate: Digest,
     stage: &SearchStage,
+    attempts: &VerifiedAttempts,
 ) -> Result<AttemptAuthority, FeedbackError> {
     let JournalEvent::AttemptPrepared {
         trial_id,
@@ -165,6 +178,7 @@ fn attempt(
         role: *role,
         candidate: *candidate,
         plan_digest: *plan_digest,
+        retry_index: attempts.retry_index(*trial_id)?,
     })
 }
 
@@ -173,8 +187,9 @@ fn optional_attempt(
     role: AttemptRole,
     candidate: Digest,
     stage: &SearchStage,
+    attempts: &VerifiedAttempts,
 ) -> Result<Option<AttemptAuthority>, FeedbackError> {
     record
-        .map(|record| attempt(record, role, candidate, stage))
+        .map(|record| attempt(record, role, candidate, stage, attempts))
         .transpose()
 }

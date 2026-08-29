@@ -8,9 +8,15 @@ use crate::{
 use super::{AuthenticatedJournalHead, JOURNAL_SCHEMA_VERSION, Journal, invalid, storage};
 
 mod ancestry;
+mod projection;
+
+pub use projection::{
+    ATTEMPT_PROJECTION_SCHEMA_VERSION, AttemptProjection, AttemptProjectionOutcome,
+    AttemptProjectionRecord, AttemptRetryOutcome,
+};
 
 /// The supported campaign evidence authority schema.
-pub const CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION: u16 = 2;
+pub const CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION: u16 = 3;
 
 /// One historical journal record with its canonical identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -45,6 +51,8 @@ pub struct CampaignEvidenceAuthority {
     pub schema_version: u16,
     /// The complete authenticated journal chain from session start through the evidence head.
     pub journal_chain: Vec<AuthenticatedJournalRecord>,
+    /// The complete ordered attempt, quarantine, and retry relation.
+    pub attempts: AttemptProjection,
     /// The initial baseline candidate identity.
     pub baseline_candidate: Digest,
     /// The candidate fixed by the freeze event.
@@ -75,6 +83,10 @@ impl CampaignEvidenceAuthority {
             return Err(invalid("the campaign evidence authority schema changed"));
         }
         ancestry::validate_chain(self, stage, head, baseline, frozen, closure, final_proof)?;
+        self.attempts.validate(
+            &self.journal_chain,
+            stage.execution_retry.execution_retry_limit,
+        )?;
         self.validate_records(head)?;
         self.validate_candidates(head, closure)?;
         self.validate_attempts(stage, head, baseline, frozen, final_proof)
@@ -196,17 +208,23 @@ pub(super) fn from_journal(journal: &Journal) -> Result<CampaignEvidenceAuthorit
             PromotionDecision::RejectedHardGate { .. }
             | PromotionDecision::Indeterminate { .. } => None,
         };
+    let journal_chain = journal
+        .entries
+        .iter()
+        .zip(&journal.entry_digests)
+        .map(|(entry, digest)| AuthenticatedJournalRecord {
+            entry: entry.clone(),
+            entry_digest: *digest,
+        })
+        .collect::<Vec<_>>();
+    let attempts = projection::from_chain(
+        &journal_chain,
+        journal.stage.execution_retry.execution_retry_limit,
+    )?;
     Ok(CampaignEvidenceAuthority {
         schema_version: CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
-        journal_chain: journal
-            .entries
-            .iter()
-            .zip(&journal.entry_digests)
-            .map(|(entry, digest)| AuthenticatedJournalRecord {
-                entry: entry.clone(),
-                entry_digest: *digest,
-            })
-            .collect(),
+        journal_chain,
+        attempts,
         baseline_candidate: journal
             .entries
             .first()
@@ -221,10 +239,10 @@ pub(super) fn from_journal(journal: &Journal) -> Result<CampaignEvidenceAuthorit
         frozen: required_record(journal, |event| {
             matches!(event, JournalEvent::Frozen { .. })
         })?,
-        promotion_baseline: attempt_record(journal, AttemptRole::PromotionBaseline)?
+        promotion_baseline: attempt_record(journal, AttemptRole::PromotionBaseline)
             .ok_or_else(|| invalid("promotion has no baseline attempt authority"))?,
-        promotion_frozen: attempt_record(journal, AttemptRole::PromotionFrozen)?,
-        final_qualification: attempt_record(journal, AttemptRole::FinalQualification)?,
+        promotion_frozen: attempt_record(journal, AttemptRole::PromotionFrozen),
+        final_qualification: attempt_record(journal, AttemptRole::FinalQualification),
     })
 }
 
@@ -296,16 +314,29 @@ fn validate_optional_order(
     Ok(())
 }
 
+/// Returns the preparation that settled one hidden role.
+///
+/// A replaced execution prepares the same role again, so the settling
+/// preparation is the last one the chain carries rather than the only one.
 fn attempt_record(
     journal: &Journal,
     expected_role: AttemptRole,
-) -> Result<Option<AuthenticatedJournalRecord>, TuneError> {
-    optional_record(journal, |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
-        )
-    })
+) -> Option<AuthenticatedJournalRecord> {
+    journal
+        .entries
+        .iter()
+        .zip(&journal.entry_digests)
+        .filter(|(entry, _)| {
+            matches!(
+                &entry.event,
+                JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
+            )
+        })
+        .next_back()
+        .map(|(entry, digest)| AuthenticatedJournalRecord {
+            entry: entry.clone(),
+            entry_digest: *digest,
+        })
 }
 
 fn required_record(

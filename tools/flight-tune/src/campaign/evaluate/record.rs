@@ -193,6 +193,12 @@ where
     if let Err(error) = journal.quarantine_attempt(trial_id) {
         return Err(primary_error.unwrap_or(error));
     }
+    // The decision is durable before cleanup, so a session that stops in the
+    // cleanup window cannot leave a quarantine a later session is free to
+    // answer either way.
+    if let Err(error) = journal.record_retry_decision(trial_id) {
+        return Err(primary_error.unwrap_or(error));
+    }
     let cleanup = finish_cleanup(journal, trial_id, backend, gates, metric, true);
     if let Some(error) = primary_error {
         return Err(error);

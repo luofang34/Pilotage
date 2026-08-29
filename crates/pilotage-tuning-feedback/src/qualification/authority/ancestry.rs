@@ -5,7 +5,7 @@ use flight_tune::{
 
 use crate::{FeedbackError, digest, error::invalid};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 5;
+const JOURNAL_SCHEMA_VERSION: u32 = 6;
 const MAX_AUTHORITY_CHAIN_ENTRIES: usize = 100_000;
 
 pub(super) struct DerivedRecords<'a> {
@@ -88,33 +88,10 @@ fn derive_records(
     chain: &[AuthenticatedJournalRecord],
 ) -> Result<DerivedRecords<'_>, FeedbackError> {
     let frozen = required_record(chain, |event| matches!(event, JournalEvent::Frozen { .. }))?;
-    let promotion_baseline = required_record(chain, |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared {
-                role: AttemptRole::PromotionBaseline,
-                ..
-            }
-        )
-    })?;
-    let promotion_frozen = unique_record(chain, |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared {
-                role: AttemptRole::PromotionFrozen,
-                ..
-            }
-        )
-    })?;
-    let final_qualification = unique_record(chain, |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared {
-                role: AttemptRole::FinalQualification,
-                ..
-            }
-        )
-    })?;
+    let promotion_baseline = last_attempt_record(chain, AttemptRole::PromotionBaseline)
+        .ok_or_else(|| invalid("the campaign authority has no required journal event"))?;
+    let promotion_frozen = last_attempt_record(chain, AttemptRole::PromotionFrozen);
+    let final_qualification = last_attempt_record(chain, AttemptRole::FinalQualification);
     Ok(DerivedRecords {
         frozen,
         promotion_baseline,
@@ -154,6 +131,26 @@ fn verify_promotion_closure(
         return Err(invalid("the campaign authority closure changed"));
     }
     Ok(())
+}
+
+/// Returns the preparation that settled one hidden role.
+///
+/// A replaced execution prepares the same role again, so the chain may carry
+/// several preparations for one role. Only the last one produced the result
+/// the evidence rests on.
+fn last_attempt_record(
+    chain: &[AuthenticatedJournalRecord],
+    expected_role: AttemptRole,
+) -> Option<&AuthenticatedJournalRecord> {
+    chain
+        .iter()
+        .filter(|record| {
+            matches!(
+                &record.entry.event,
+                JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
+            )
+        })
+        .next_back()
 }
 
 fn required_record(

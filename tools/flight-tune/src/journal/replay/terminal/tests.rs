@@ -109,6 +109,7 @@ impl ReplayFixture {
             scenario,
             repetition,
             seed,
+            0,
         )
         .expect("create run context")
     }
@@ -409,6 +410,7 @@ fn test_session(stage: &SearchStage, candidate: Digest) -> SessionIdentity {
 
 fn test_stage() -> SearchStage {
     SearchStage {
+        execution_retry: crate::ExecutionRetryPolicy::none(),
         id: "terminal-replay".to_owned(),
         allowlist: BTreeMap::from([(
             "gain".to_owned(),

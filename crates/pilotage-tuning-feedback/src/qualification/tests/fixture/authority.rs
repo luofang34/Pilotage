@@ -1,5 +1,5 @@
 use flight_tune::{
-    AttemptRole, AuthenticatedEvaluationProof, AuthenticatedJournalHead,
+    AttemptProjection, AttemptRole, AuthenticatedEvaluationProof, AuthenticatedJournalHead,
     AuthenticatedJournalRecord, CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
     CampaignEvidenceAuthority, CandidateTransitionReference, Digest, FinalQualificationOutcome,
     JournalEntry, JournalEvent, JournalEvidenceSnapshot, OperationStatus, PromotionClosure,
@@ -92,6 +92,11 @@ fn campaign_authority(
     (
         CampaignEvidenceAuthority {
             schema_version: CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
+            attempts: AttemptProjection::from_journal_chain(
+                &chain.records,
+                stage.execution_retry.execution_retry_limit,
+            )
+            .expect("derive the fixture attempt projection"),
             journal_chain: chain.records,
             baseline_candidate: session.initial_candidate_digest,
             frozen_candidate,
@@ -184,7 +189,7 @@ impl JournalChain {
     fn push(&mut self, event: JournalEvent) -> AuthenticatedJournalRecord {
         let sequence = u64::try_from(self.records.len()).expect("journal sequence");
         let entry = JournalEntry {
-            schema_version: 5,
+            schema_version: 6,
             sequence,
             previous: self.records.last().map(|record| record.entry_digest),
             session: self.session.clone(),
@@ -303,7 +308,7 @@ fn terminal_events(
 
 fn unlinked_record(session: &SessionIdentity, event: JournalEvent) -> AuthenticatedJournalRecord {
     let entry = JournalEntry {
-        schema_version: 5,
+        schema_version: 6,
         sequence: 0,
         previous: None,
         session: session.clone(),
@@ -362,6 +367,7 @@ pub(super) fn rechain_journal_authority(evidence: &mut CampaignEvidence) {
         previous = Some(record.entry_digest);
     }
     sync_named_records(evidence);
+    sync_attempt_projection(evidence);
     let head = evidence
         .journal
         .authority
@@ -384,6 +390,19 @@ fn sync_named_records(evidence: &mut CampaignEvidence) {
         Some(find_attempt(chain, AttemptRole::PromotionFrozen));
     evidence.journal.authority.final_qualification =
         Some(find_attempt(chain, AttemptRole::FinalQualification));
+}
+
+/// Re-derives the projection after a test rewrites the chain.
+///
+/// A tamper test that leaves a stale projection behind would be caught by the
+/// projection check rather than by the relation it means to attack.
+fn sync_attempt_projection(evidence: &mut CampaignEvidence) {
+    let limit = evidence.journal.stage.execution_retry.execution_retry_limit;
+    if let Ok(projection) =
+        AttemptProjection::from_journal_chain(&evidence.journal.authority.journal_chain, limit)
+    {
+        evidence.journal.authority.attempts = projection;
+    }
 }
 
 fn find_attempt(
