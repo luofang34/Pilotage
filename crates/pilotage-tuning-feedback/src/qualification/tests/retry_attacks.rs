@@ -67,7 +67,7 @@ fn assert_qualifies(evidence: &CampaignEvidence) {
 
 /// Requires the evidence to be refused, whichever door it is offered at.
 fn assert_refused(evidence: &CampaignEvidence) {
-    let error = verify(evidence).err().expect("a refusal");
+    let error = verify(evidence).expect_err("a refusal");
     // A refusal that only reports a broken chain link proves the link check,
     // not the relation each case is about.
     assert!(
@@ -129,13 +129,12 @@ fn sync_named_records(evidence: &mut CampaignEvidence) {
     let find = |role: flight_tune::AttemptRole| {
         chain
             .iter()
-            .filter(|record| {
+            .rfind(|record| {
                 matches!(
                     &record.entry.event,
                     JournalEvent::AttemptPrepared { role: saved, .. } if *saved == role
                 )
             })
-            .next_back()
             .cloned()
             .expect("a named attempt record")
     };

@@ -142,15 +142,12 @@ fn last_attempt_record(
     chain: &[AuthenticatedJournalRecord],
     expected_role: AttemptRole,
 ) -> Option<&AuthenticatedJournalRecord> {
-    chain
-        .iter()
-        .filter(|record| {
-            matches!(
-                &record.entry.event,
-                JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
-            )
-        })
-        .next_back()
+    chain.iter().rfind(|record| {
+        matches!(
+            &record.entry.event,
+            JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
+        )
+    })
 }
 
 fn required_record(

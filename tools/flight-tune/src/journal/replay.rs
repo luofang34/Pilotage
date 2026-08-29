@@ -278,6 +278,29 @@ fn apply_event(
             reason,
             proof,
         } => attempt::quarantine(state, *trial_id, reason, proof.as_deref()),
+        event @ (JournalEvent::RetryAuthorized { .. } | JournalEvent::RetryExhausted { .. }) => {
+            apply_retry_decision(state, event, stage)
+        }
+        JournalEvent::CleanupRecorded { trial_id, cleanup } => {
+            attempt::cleanup(state, *trial_id, cleanup)
+        }
+        JournalEvent::Frozen {
+            baseline,
+            candidate,
+        } => close::freeze(state, *baseline, *candidate, initial),
+        JournalEvent::PromotionClosed { closure } => {
+            close::promotion(state, closure, stage, session)
+        }
+        event @ JournalEvent::Sealed { .. } => apply_seal(state, event, initial, stage),
+    }
+}
+
+fn apply_retry_decision(
+    state: &mut JournalState,
+    event: &JournalEvent,
+    stage: &SearchStage,
+) -> Result<(), TuneError> {
+    match event {
         JournalEvent::RetryAuthorized {
             source_trial_id,
             replacement_trial_id,
@@ -302,17 +325,7 @@ fn apply_event(
             *quarantine_reason_digest,
             stage,
         ),
-        JournalEvent::CleanupRecorded { trial_id, cleanup } => {
-            attempt::cleanup(state, *trial_id, cleanup)
-        }
-        JournalEvent::Frozen {
-            baseline,
-            candidate,
-        } => close::freeze(state, *baseline, *candidate, initial),
-        JournalEvent::PromotionClosed { closure } => {
-            close::promotion(state, closure, stage, session)
-        }
-        event @ JournalEvent::Sealed { .. } => apply_seal(state, event, initial, stage),
+        _ => Err(invalid("the event is not a retry decision")),
     }
 }
 

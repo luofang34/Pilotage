@@ -66,6 +66,9 @@ fn assert_refused(evidence: &CampaignEvidence, case: &str) {
     );
 }
 
+/// One named change to a stored evaluation.
+type Case = (&'static str, fn(&mut CandidateEvaluation));
+
 /// Applies one change to the first completed training evaluation in the chain.
 fn change_training_evaluation(
     evidence: &mut CampaignEvidence,
@@ -102,7 +105,7 @@ fn an_untouched_campaign_qualifies() {
 fn every_stored_aggregate_field_is_derived_again() {
     // One case per field, so a verifier that recomputed only the mean would
     // still be caught by the rest.
-    let cases: [(&str, fn(&mut CandidateEvaluation)); 6] = [
+    let cases: [Case; 6] = [
         ("mean", |evaluation| {
             if let CandidateEvaluation::Passed { aggregate, .. } = evaluation {
                 aggregate.mean_loss += 0.25;

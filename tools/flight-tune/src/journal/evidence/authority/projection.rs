@@ -1,9 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AttemptRole, CandidateTransitionReference, Digest, JournalEvent, TuneError};
+use crate::{
+    AttemptRole, CandidateTransitionReference, Digest, JournalEvent, OperationStatus,
+    RunExecutionContext, TuneError,
+};
 
 use super::super::super::retry::quarantine_reason_digest;
 use super::{AuthenticatedJournalRecord, invalid};
+
+mod bijection;
+
+use bijection::{require_committed_runs, require_retry_bijection};
 
 /// The supported attempt projection schema.
 pub const ATTEMPT_PROJECTION_SCHEMA_VERSION: u16 = 1;
@@ -163,109 +170,60 @@ fn apply(
             candidate,
             plan_digest,
             transition,
-        } => {
-            if open.is_some() {
-                return Err(invalid("a projection attempt opened inside another"));
-            }
-            let retry_index = replacement_retry_index(attempts, *trial_id, owed.take())?;
-            *open = Some(attempts.len());
-            attempts.push(AttemptProjectionRecord {
-                trial_id: *trial_id,
-                role: *role,
-                candidate_digest: *candidate,
-                plan_digest: *plan_digest,
-                transition_authorization: *transition,
-                retry_index,
-                run_intent_digests: Vec::new(),
-                terminal_receipt_digests: Vec::new(),
-                outcome: AttemptProjectionOutcome::Completed {
-                    selected_as_training_incumbent: None,
-                },
-            });
-            Ok(())
-        }
+        } => open_attempt(
+            attempts,
+            open,
+            owed,
+            *trial_id,
+            *role,
+            *candidate,
+            *plan_digest,
+            *transition,
+        ),
         JournalEvent::RunPrepared {
             context,
             run_intent_digest,
             ..
-        } => {
-            // The stated identity has to be the identity of the context that
-            // states it, or a changed condition could travel under the
-            // identity of the condition it replaced.
-            if context.digest()? != *run_intent_digest {
-                return Err(invalid(
-                    "a prepared run identity does not cover its execution context",
-                ));
-            }
-            open_record(attempts, *open)?
-                .run_intent_digests
-                .push(*run_intent_digest);
-            Ok(())
-        }
+        } => record_prepared_run(attempts, *open, context, *run_intent_digest),
         JournalEvent::RunCommitted { receipt, .. } => {
-            open_record(attempts, *open)?
-                .terminal_receipt_digests
-                .push(receipt.receipt_digest());
-            Ok(())
+            record_committed_run(attempts, *open, receipt.receipt_digest())
         }
         JournalEvent::AttemptCompleted {
             selected_as_training_incumbent,
             ..
-        } => {
-            open_record(attempts, *open)?.outcome = AttemptProjectionOutcome::Completed {
-                selected_as_training_incumbent: *selected_as_training_incumbent,
-            };
-            Ok(())
-        }
+        } => record_completion(attempts, *open, *selected_as_training_incumbent),
         JournalEvent::AttemptQuarantined { reason, .. } => {
-            let record = open_record(attempts, *open)?;
-            let last = record
-                .terminal_receipt_digests
-                .last()
-                .copied()
-                .ok_or_else(|| invalid("a projection quarantine has no runner receipt"))?;
-            record.outcome = AttemptProjectionOutcome::Quarantined {
-                reason_digest: quarantine_reason_digest(reason),
-                runner_quarantine_receipt_digest: last,
-                // The decision arrives in the next event and replaces this.
-                retry: AttemptRetryOutcome::Exhausted { retry_index: 0 },
-            };
-            Ok(())
+            record_quarantine(attempts, *open, reason)
         }
         JournalEvent::RetryAuthorized {
             source_trial_id,
             replacement_trial_id,
             retry_index,
-            quarantine_reason_digest: reason_digest,
-        } => {
-            set_retry(
-                attempts,
-                *open,
-                *source_trial_id,
-                *reason_digest,
-                AttemptRetryOutcome::Authorized {
-                    replacement_trial_id: *replacement_trial_id,
-                    replacement_retry_index: *retry_index,
-                },
-            )?;
-            *owed = Some(*replacement_trial_id);
-            Ok(())
-        }
+            quarantine_reason_digest,
+        } => record_authorized_retry(
+            attempts,
+            *open,
+            owed,
+            *source_trial_id,
+            *replacement_trial_id,
+            *retry_index,
+            *quarantine_reason_digest,
+        ),
         JournalEvent::RetryExhausted {
             source_trial_id,
             retry_index,
-            quarantine_reason_digest: reason_digest,
+            quarantine_reason_digest,
         } => set_retry(
             attempts,
             *open,
             *source_trial_id,
-            *reason_digest,
+            *quarantine_reason_digest,
             AttemptRetryOutcome::Exhausted {
                 retry_index: *retry_index,
             },
         ),
         JournalEvent::CleanupRecorded { cleanup, .. } => {
-            if cleanup.succeeded() {
+            if matches!(cleanup, OperationStatus::Succeeded) {
                 *open = None;
             }
             Ok(())
@@ -274,12 +232,136 @@ fn apply(
     }
 }
 
+/// Records one committed terminal receipt against its open attempt.
+fn record_committed_run(
+    attempts: &mut [AttemptProjectionRecord],
+    open: Option<usize>,
+    receipt_digest: Digest,
+) -> Result<(), TuneError> {
+    open_record(attempts, open)?
+        .terminal_receipt_digests
+        .push(receipt_digest);
+    Ok(())
+}
+
+/// Records one completed outcome and the training decision it carried.
+fn record_completion(
+    attempts: &mut [AttemptProjectionRecord],
+    open: Option<usize>,
+    selected_as_training_incumbent: Option<bool>,
+) -> Result<(), TuneError> {
+    open_record(attempts, open)?.outcome = AttemptProjectionOutcome::Completed {
+        selected_as_training_incumbent,
+    };
+    Ok(())
+}
+
+/// Records the one replacement a quarantined attempt received.
+#[allow(clippy::too_many_arguments)]
+fn record_authorized_retry(
+    attempts: &mut [AttemptProjectionRecord],
+    open: Option<usize>,
+    owed: &mut Option<u64>,
+    source_trial_id: u64,
+    replacement_trial_id: u64,
+    replacement_retry_index: u32,
+    reason: Digest,
+) -> Result<(), TuneError> {
+    set_retry(
+        attempts,
+        open,
+        source_trial_id,
+        reason,
+        AttemptRetryOutcome::Authorized {
+            replacement_trial_id,
+            replacement_retry_index,
+        },
+    )?;
+    *owed = Some(replacement_trial_id);
+    Ok(())
+}
+
+/// Records one prepared run under the identity that covers its context.
+///
+/// A stated identity that does not cover the context stating it would let a
+/// changed condition travel under the identity of the one it replaced.
+fn record_prepared_run(
+    attempts: &mut [AttemptProjectionRecord],
+    open: Option<usize>,
+    context: &RunExecutionContext,
+    run_intent_digest: Digest,
+) -> Result<(), TuneError> {
+    if context.digest()? != run_intent_digest {
+        return Err(invalid(
+            "a prepared run identity does not cover its execution context",
+        ));
+    }
+    open_record(attempts, open)?
+        .run_intent_digests
+        .push(run_intent_digest);
+    Ok(())
+}
+
+/// Records one quarantine against the last receipt the runner committed.
+fn record_quarantine(
+    attempts: &mut [AttemptProjectionRecord],
+    open: Option<usize>,
+    reason: &str,
+) -> Result<(), TuneError> {
+    let record = open_record(attempts, open)?;
+    let last = record
+        .terminal_receipt_digests
+        .last()
+        .copied()
+        .ok_or_else(|| invalid("a projection quarantine has no runner receipt"))?;
+    record.outcome = AttemptProjectionOutcome::Quarantined {
+        reason_digest: quarantine_reason_digest(reason),
+        runner_quarantine_receipt_digest: last,
+        // The decision arrives in the next event and replaces this.
+        retry: AttemptRetryOutcome::Exhausted { retry_index: 0 },
+    };
+    Ok(())
+}
+
+/// Opens one attempt record with the retry index its authorization derives.
+#[allow(clippy::too_many_arguments)]
+fn open_attempt(
+    attempts: &mut Vec<AttemptProjectionRecord>,
+    open: &mut Option<usize>,
+    owed: &mut Option<u64>,
+    trial_id: u64,
+    role: AttemptRole,
+    candidate_digest: Digest,
+    plan_digest: Digest,
+    transition_authorization: Option<CandidateTransitionReference>,
+) -> Result<(), TuneError> {
+    if open.is_some() {
+        return Err(invalid("a projection attempt opened inside another"));
+    }
+    let retry_index = derived_retry_index(attempts, trial_id, owed.take())?;
+    *open = Some(attempts.len());
+    attempts.push(AttemptProjectionRecord {
+        trial_id,
+        role,
+        candidate_digest,
+        plan_digest,
+        transition_authorization,
+        retry_index,
+        run_intent_digests: Vec::new(),
+        terminal_receipt_digests: Vec::new(),
+        outcome: AttemptProjectionOutcome::Completed {
+            selected_as_training_incumbent: None,
+        },
+    });
+    Ok(())
+}
+
 /// Derives the retry index one preparation must carry.
 ///
 /// A first execution derives zero. A replacement derives one more than the
 /// quarantined source that authorized it, read out of the projection rather
 /// than out of the event being projected.
-fn replacement_retry_index(
+fn derived_retry_index(
     attempts: &[AttemptProjectionRecord],
     trial_id: u64,
     owed: Option<u64>,
@@ -349,102 +431,4 @@ fn open_record(
     attempts
         .get_mut(index)
         .ok_or_else(|| invalid("a projection lost its open attempt"))
-}
-
-/// Requires every prepared run to have committed exactly one receipt.
-///
-/// An attempt cannot close with a prepared run left uncommitted, so a
-/// projection whose two counts differ has lost or gained a receipt.
-fn require_committed_runs(attempts: &[AttemptProjectionRecord]) -> Result<(), TuneError> {
-    if attempts
-        .iter()
-        .any(|record| record.run_intent_digests.len() != record.terminal_receipt_digests.len())
-    {
-        return Err(invalid(
-            "an attempt committed a different receipt count than it prepared",
-        ));
-    }
-    Ok(())
-}
-
-/// Requires one exact answer for every quarantine, and no answer without one.
-fn require_retry_bijection(
-    attempts: &[AttemptProjectionRecord],
-    execution_retry_limit: u32,
-) -> Result<(), TuneError> {
-    let mut claimed: Vec<u64> = Vec::new();
-    for record in attempts {
-        let AttemptProjectionOutcome::Quarantined { retry, .. } = record.outcome else {
-            continue;
-        };
-        match retry {
-            AttemptRetryOutcome::Authorized {
-                replacement_trial_id,
-                replacement_retry_index,
-            } => {
-                if record.retry_index >= execution_retry_limit
-                    || replacement_retry_index != record.retry_index.wrapping_add(1)
-                    || claimed.contains(&replacement_trial_id)
-                {
-                    return Err(invalid(
-                        "an authorized replacement is over limit or claimed twice",
-                    ));
-                }
-                claimed.push(replacement_trial_id);
-                require_same_condition(attempts, record, replacement_trial_id)?;
-            }
-            AttemptRetryOutcome::Exhausted { retry_index } => {
-                if retry_index != record.retry_index || record.retry_index < execution_retry_limit {
-                    return Err(invalid(
-                        "an exhausted retry stopped before the declared limit",
-                    ));
-                }
-            }
-        }
-    }
-    require_every_replacement_claimed(attempts, &claimed)
-}
-
-/// Requires a replacement to keep every field except the two it may change.
-fn require_same_condition(
-    attempts: &[AttemptProjectionRecord],
-    source: &AttemptProjectionRecord,
-    replacement_trial_id: u64,
-) -> Result<(), TuneError> {
-    let replacement = attempts
-        .iter()
-        .find(|record| record.trial_id == replacement_trial_id)
-        .ok_or_else(|| invalid("an authorized replacement never ran"))?;
-    if replacement.role != source.role
-        || replacement.candidate_digest != source.candidate_digest
-        || replacement.plan_digest != source.plan_digest
-        || replacement.transition_authorization != source.transition_authorization
-        || replacement.trial_id == source.trial_id
-    {
-        return Err(invalid("a replacement changed its experimental condition"));
-    }
-    Ok(())
-}
-
-/// Requires every attempt above retry index zero to be a claimed replacement.
-fn require_every_replacement_claimed(
-    attempts: &[AttemptProjectionRecord],
-    claimed: &[u64],
-) -> Result<(), TuneError> {
-    let replacements = attempts
-        .iter()
-        .filter(|record| record.retry_index > 0)
-        .count();
-    if replacements != claimed.len() {
-        return Err(invalid("a replacement attempt has no authorizing source"));
-    }
-    for trial_id in claimed {
-        if !attempts
-            .iter()
-            .any(|record| record.trial_id == *trial_id && record.retry_index > 0)
-        {
-            return Err(invalid("an authorized replacement has no first execution"));
-        }
-    }
-    Ok(())
 }

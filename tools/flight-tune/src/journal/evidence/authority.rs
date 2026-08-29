@@ -326,13 +326,12 @@ fn attempt_record(
         .entries
         .iter()
         .zip(&journal.entry_digests)
-        .filter(|(entry, _)| {
+        .rfind(|(entry, _)| {
             matches!(
                 &entry.event,
                 JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
             )
         })
-        .next_back()
         .map(|(entry, digest)| AuthenticatedJournalRecord {
             entry: entry.clone(),
             entry_digest: *digest,

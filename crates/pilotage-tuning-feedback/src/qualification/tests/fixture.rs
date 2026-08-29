@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use flight_tune::{
     ArtifactIdentity, AttemptRole, AuthenticatedEvaluationProof, Candidate, CandidateEvaluation,
     CandidateLineage, CandidateTransitionReference, Digest, JournalEvent, MissionReference,
-    ParameterBounds, PromotionPolicy, PromotionSeedPolicy, QualificationPolicy,
-    RunTerminalDisposition, RunTerminalQuarantine, RuntimeIdentities, SearchStage, SessionIdentity,
+    ParameterBounds, PromotionPolicy, PromotionSeedPolicy, QualificationPolicy, RuntimeIdentities,
+    SearchStage, SessionIdentity,
 };
 
 use crate::CampaignEvidence;
@@ -16,12 +16,14 @@ use super::super::{plan, statistics};
 
 mod attempts;
 mod authority;
+mod quarantine;
 mod sealing;
 mod terminal;
 
 use authority::sealed_campaign;
+pub(super) use quarantine::quarantined_proof;
 use sealing::promotion_closure;
-use terminal::{quarantine_receipt, receipt, run};
+use terminal::{receipt, run};
 
 #[derive(Clone, Copy)]
 struct Point {
@@ -386,64 +388,6 @@ pub(super) fn passing_proof(
             objective,
         },
     )
-}
-
-pub(super) fn quarantined_proof(
-    stage: &SearchStage,
-    session: &SessionIdentity,
-    trial_id: u64,
-    role: AttemptRole,
-    candidate: Digest,
-) -> AuthenticatedEvaluationProof {
-    let session_digest = digest::document("session identity", session).expect("session digest");
-    let expected = plan::expected_runs(
-        stage,
-        role,
-        candidate,
-        trial_id,
-        session.fixed_seed,
-        session_digest,
-        0,
-    );
-    let run = run(
-        &expected[0],
-        Point {
-            loss: 0.8,
-            effort: 0.35,
-            objective: 0.21,
-        },
-        false,
-    );
-    let terminal = quarantine_receipt(&expected[0], run, &session.runtimes.vehicle);
-    let RunTerminalDisposition::Quarantine { quarantine } = terminal.class().disposition() else {
-        panic!("fixture receipt must quarantine");
-    };
-    let reason = quarantine_reason(terminal.receipt_digest(), quarantine);
-    let mut proof = AuthenticatedEvaluationProof {
-        retry_index: 0,
-        schema_version: flight_tune::AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION,
-        trial_id,
-        role,
-        candidate_digest: candidate,
-        plan_digest: plan::digest_for(stage, role, candidate, session.fixed_seed)
-            .expect("run plan digest"),
-        evaluation: CandidateEvaluation::Quarantined { reason },
-        terminal_receipts: vec![terminal],
-        evaluation_digest: Digest::from_bytes([0; 32]),
-        proof_digest: Digest::from_bytes([0; 32]),
-    };
-    refresh_proof(&mut proof);
-    proof
-}
-
-fn quarantine_reason(digest: Digest, class: RunTerminalQuarantine) -> String {
-    let name = match class {
-        RunTerminalQuarantine::TerminalFailure => "terminal_failure",
-        RunTerminalQuarantine::ExecutionFailure => "execution_failure",
-        RunTerminalQuarantine::Recovery => "recovery",
-        RunTerminalQuarantine::EvidenceFailure => "evidence_failure",
-    };
-    format!("terminal receipt {digest} has quarantine class {name}")
 }
 
 fn scenario(id: &str, value: u8) -> MissionReference {
