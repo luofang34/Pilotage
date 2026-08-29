@@ -269,6 +269,91 @@ fn changed_training_suite_orphans_baseline_before_mutation() {
     assert_eq!(new_tuner.journal().training_attempt_count(), 1);
 }
 
+#[test]
+fn changed_metric_identity_orphans_baseline_before_mutation() {
+    let directory = TestDirectory::new("orphan-baseline-changed-metric");
+    let state = FakeHandle::new();
+    let (old_head, before) = run_one_attempt(&directory, &state, "open the first metric session");
+
+    let result = open_with_evaluators(
+        &directory,
+        state.clone(),
+        EnvelopeGates::new(2.0),
+        QuadraticMetric::with_implementation(state.clone(), "quadratic-target-two"),
+    );
+
+    assert!(matches!(
+        result,
+        Err(TuneError::EvaluatorIdentityChanged { .. })
+    ));
+    assert_eq!(ExternalMutations::capture(&state), before);
+    assert_eq!(read_head_entry(&directory), old_head);
+}
+
+#[test]
+fn changed_hard_gate_identity_orphans_baseline_before_mutation() {
+    let directory = TestDirectory::new("orphan-baseline-changed-gates");
+    let state = FakeHandle::new();
+    let (old_head, before) = run_one_attempt(&directory, &state, "open the first gate session");
+
+    let result = open_with_evaluators(
+        &directory,
+        state.clone(),
+        EnvelopeGates::new(3.0),
+        QuadraticMetric::new(state.clone()),
+    );
+
+    assert!(matches!(
+        result,
+        Err(TuneError::EvaluatorIdentityChanged { .. })
+    ));
+    assert_eq!(ExternalMutations::capture(&state), before);
+    assert_eq!(read_head_entry(&directory), old_head);
+}
+
+/// Seals one training attempt and reports the state a restart cannot move.
+fn run_one_attempt(
+    directory: &TestDirectory,
+    state: &FakeHandle,
+    detail: &str,
+) -> (JournalEntry, ExternalMutations) {
+    let mut tuner = open_with_factory(
+        directory,
+        state.clone(),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect(detail);
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run the baseline and challenger");
+    drop(tuner);
+    (
+        read_head_entry(directory),
+        ExternalMutations::capture(state),
+    )
+}
+
+fn open_with_evaluators(
+    directory: &TestDirectory,
+    state: FakeHandle,
+    gates: EnvelopeGates,
+    metric: QuadraticMetric,
+) -> Result<TestTuner, TuneError> {
+    Tuner::open_or_resume(
+        directory.path(),
+        stage(),
+        91,
+        candidate(0.0),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state),
+        gates,
+        metric,
+        SequenceStrategy::new(vec![0.5]),
+    )
+}
+
 fn open_with_factory(
     directory: &TestDirectory,
     state: FakeHandle,

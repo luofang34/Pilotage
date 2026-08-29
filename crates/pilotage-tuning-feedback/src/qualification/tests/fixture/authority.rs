@@ -31,7 +31,7 @@ pub(super) fn sealed_campaign(
     closure: PromotionClosure,
     final_proof: AuthenticatedEvaluationProof,
     frozen_candidate: Digest,
-) -> CampaignEvidence {
+) -> Result<CampaignEvidence, crate::FeedbackError> {
     let (authority, head) = campaign_authority(
         &stage,
         &session,
@@ -52,7 +52,6 @@ pub(super) fn sealed_campaign(
         final_proof: Some(final_proof),
         final_outcome: Some(FinalQualificationOutcome::Qualified),
     })
-    .expect("create verified campaign fixture")
 }
 
 #[allow(clippy::too_many_arguments)]

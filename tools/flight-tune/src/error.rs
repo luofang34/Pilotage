@@ -25,6 +25,12 @@ pub enum TuneError {
         /// The validation detail.
         detail: String,
     },
+    /// An evaluator identity is not the one the frozen plan states.
+    #[error("evaluator identity rejected: {detail}")]
+    EvaluatorIdentityChanged {
+        /// The rejection detail.
+        detail: String,
+    },
     /// A hard gate, metric, aggregate, or paired comparison is not valid.
     #[error("score validation failed: {detail}")]
     InvalidScore {

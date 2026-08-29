@@ -33,8 +33,25 @@ struct Point {
 }
 
 pub(super) fn fixture() -> CampaignEvidence {
+    try_fixture_with_evaluators(
+        artifact(flight_tune::METRIC_IMPLEMENTATION_ID, 33),
+        artifact(flight_tune::GATE_IMPLEMENTATION_ID, 34),
+    )
+    .expect("create verified campaign fixture")
+}
+
+/// Seals one golden campaign that names the two evaluators it ran.
+///
+/// A case about the evaluator identities has to state them before the chain is
+/// sealed. Changing them afterwards breaks every proof that binds the session,
+/// so the campaign would fail for the chain rather than for the rule the case
+/// names.
+pub(super) fn try_fixture_with_evaluators(
+    metric: ArtifactIdentity,
+    hard_gates: ArtifactIdentity,
+) -> Result<CampaignEvidence, crate::FeedbackError> {
     let stage = stage();
-    let session = session(&stage);
+    let session = session(&stage, metric, hard_gates);
     let session_digest = digest::document("session identity", &session).expect("session digest");
     let baseline = proof(
         &stage,
@@ -148,7 +165,11 @@ fn stage() -> SearchStage {
     }
 }
 
-fn session(stage: &SearchStage) -> SessionIdentity {
+fn session(
+    stage: &SearchStage,
+    metric: ArtifactIdentity,
+    hard_gates: ArtifactIdentity,
+) -> SessionIdentity {
     SessionIdentity {
         stage_digest: digest::document("search stage", stage).expect("stage digest"),
         initial_candidate_digest: candidate_digest(0.0),
@@ -161,8 +182,8 @@ fn session(stage: &SearchStage) -> SessionIdentity {
         runtimes: RuntimeIdentities {
             harness_build: artifact("harness", 31),
             strategy: artifact("strategy", 32),
-            metric: artifact("metric", 33),
-            hard_gates: artifact("gates", 34),
+            metric,
+            hard_gates,
             scenario_runtime: None,
             simulator: artifact("simulator", 35),
             airframe: artifact("airframe", 36),

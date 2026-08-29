@@ -50,6 +50,78 @@ impl ArtifactIdentity {
     }
 }
 
+/// The exact evaluator implementations one session is frozen to.
+///
+/// The metric evaluator and the hard-gate evaluator have separate production
+/// inventories, so the two identities cannot hold the same value. A pair that
+/// does would let one evaluator stand in for the other.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvaluatorIdentities {
+    /// The continuous metric implementation and its configuration.
+    pub metric: ArtifactIdentity,
+    /// The streaming hard gate implementation and its configuration.
+    pub hard_gates: ArtifactIdentity,
+}
+
+impl EvaluatorIdentities {
+    /// Creates one validated evaluator identity pair.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when one evaluator identity is not valid, or when
+    /// the two identities cannot describe separate evaluators.
+    pub fn new(metric: ArtifactIdentity, hard_gates: ArtifactIdentity) -> Result<Self, TuneError> {
+        let identities = Self { metric, hard_gates };
+        identities.validate()?;
+        Ok(identities)
+    }
+
+    /// Rejects a pair that cannot describe two separate evaluators.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when one evaluator identity is not valid, or when
+    /// the two identities share a name or a digest.
+    pub fn validate(&self) -> Result<(), TuneError> {
+        self.metric.validate()?;
+        self.hard_gates.validate()?;
+        if self.metric.id == self.hard_gates.id || self.metric.digest == self.hard_gates.digest {
+            return Err(TuneError::EvaluatorIdentityChanged {
+                detail: "one evaluator identity stands in for the other".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Rejects evaluators that are not the ones the plan froze.
+    ///
+    /// A restart, a retry, a suite comparison, a promotion, and a final
+    /// qualification all read the frozen plan first. This check runs before
+    /// any of them, so a rebuilt evaluator cannot reach a simulator, a
+    /// process, a vehicle, or a journal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when one pair is not valid, or when the two pairs
+    /// differ.
+    pub fn require_frozen(&self, frozen: &Self) -> Result<(), TuneError> {
+        self.validate()?;
+        frozen.validate()?;
+        if self.metric != frozen.metric {
+            return Err(TuneError::EvaluatorIdentityChanged {
+                detail: "the metric evaluator is not the one the plan froze".to_owned(),
+            });
+        }
+        if self.hard_gates != frozen.hard_gates {
+            return Err(TuneError::EvaluatorIdentityChanged {
+                detail: "the hard gate evaluator is not the one the plan froze".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// The immutable source identity for all candidates in one session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,7 +182,17 @@ pub struct RuntimeIdentities {
 }
 
 impl RuntimeIdentities {
+    /// Returns the evaluator identities this session is frozen to.
+    #[must_use]
+    pub fn evaluator_identities(&self) -> EvaluatorIdentities {
+        EvaluatorIdentities {
+            metric: self.metric.clone(),
+            hard_gates: self.hard_gates.clone(),
+        }
+    }
+
     pub(crate) fn validate(&self) -> Result<(), TuneError> {
+        self.evaluator_identities().validate()?;
         for identity in [
             &self.harness_build,
             &self.strategy,

@@ -446,12 +446,16 @@ GENERATED_INPUT_DIGESTS = {
     "tools/flight-tune/build.rs": frozenset(
         {
             "b56dd4918f6443ceb9804f5e4fb04d464268cb29ebeba76b7dc69a5a07a475cd",
+            "850a570ee9246b7961046e0712c7a5590f220a3d8faee54f55a9d511ff706d5c",
             "e4a5a3ef9d5d36ac52b5dacab7bd6eeebcef2d118490bd0831c9a8b462e1d176",
             "f0424a1bc2c4cc2fe118246db46bd3b912f6c5c5460e487c53285f93629c0aac",
         }
     ),
     "tools/flight-tune/build_support/evaluator_source_identity.rs": frozenset(
-        {"ce2adf92e3954858395151639c9bfd38234debd19157d1eaa94e96c47a223915"}
+        {
+            "31e6d4055f827129d0bc99dcede52ea2e6ad31068ea17652187b0d1aef760a05",
+            "ce2adf92e3954858395151639c9bfd38234debd19157d1eaa94e96c47a223915",
+        }
     ),
     "tools/flight-tune-aviate/build.rs": frozenset(
         {"843c7d7845f1342e41b4fc457654da121d2b22120e0ea3ff5cc3a6c1c1dc23f7"}

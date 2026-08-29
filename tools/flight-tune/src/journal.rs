@@ -384,6 +384,12 @@ impl Journal {
     ) -> Result<Self, TuneError> {
         let stored_entries = storage::load_entries(&storage)?;
         let (entry_digests, entries): (Vec<_>, Vec<_>) = stored_entries.into_iter().unzip();
+        if let Some(frozen) = entries.first() {
+            session
+                .runtimes
+                .evaluator_identities()
+                .require_frozen(&frozen.session.runtimes.evaluator_identities())?;
+        }
         if entries.first().map(|entry| &entry.session) != Some(&session)
             || storage::read_stage(&storage, session.stage_digest)? != stage
         {

@@ -65,6 +65,31 @@ fn prepared_contexts(tuner: &TestTuner) -> Vec<&RunExecutionContext> {
 }
 
 #[test]
+fn an_execution_retry_cannot_change_an_evaluator_identity() {
+    let directory = TestDirectory::new("execution-retry-frozen-evaluators");
+    let state = FakeHandle::new();
+    let mut tuner =
+        open_with_failing_start(&directory, &state, 1, 1).expect("open a retrying tuner");
+    let frozen = tuner.journal().session().runtimes.evaluator_identities();
+
+    tuner
+        .run_training_attempts_blocking(0)
+        .expect("the replacement settles the training baseline");
+
+    assert_eq!(quarantine_count(&tuner), 1);
+    let entries = tuner.journal().entries();
+    assert!(entries.len() > 1, "a retry writes more than one entry");
+    for entry in entries {
+        entry
+            .session
+            .runtimes
+            .evaluator_identities()
+            .require_frozen(&frozen)
+            .expect("every retry entry keeps the frozen evaluators");
+    }
+}
+
+#[test]
 fn a_quarantined_execution_receives_one_replacement_that_keeps_its_condition() {
     let directory = TestDirectory::new("execution-retry-one-replacement");
     let state = FakeHandle::new();
