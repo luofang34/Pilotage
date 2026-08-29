@@ -9,9 +9,6 @@ mod budget;
 mod promotion;
 mod reference;
 mod retry;
-#[cfg(test)]
-pub(crate) mod training_suite;
-#[cfg(not(test))]
 mod training_suite;
 
 pub use budget::CampaignRunBound;
@@ -24,6 +21,8 @@ pub use promotion::{
 pub(crate) use promotion::{expected_promotion_pairs, required_improvement};
 pub use reference::MissionReference;
 pub use retry::{EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy};
+#[cfg(test)]
+pub(crate) use training_suite::tests::stage_for_budget;
 pub(crate) use training_suite::{AttemptRunPlan, TrainingSuiteAnchor};
 pub use training_suite::{
     SearchGroup, SearchGroupBinding, SearchGroupKind, TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite,
@@ -216,18 +215,12 @@ impl SearchStage {
         challenger: &Candidate,
     ) -> Result<SearchGroupBinding, TuneError> {
         let changed = training_suite::changed_parameters(incumbent, challenger);
-        if changed.is_empty() {
+        let Some(first) = changed.first() else {
             return Err(invalid_candidate("a proposal changes no parameter"));
-        }
+        };
         let mut owners = BTreeSet::new();
         for name in &changed {
-            let owner = self
-                .search_groups
-                .iter()
-                .find(|group| group.parameters.contains(name))
-                .ok_or_else(|| {
-                    invalid_candidate(format!("parameter {name} has no search group"))
-                })?;
+            let owner = self.owning_group(name)?;
             owners.insert(owner.id.as_str());
         }
         if owners.len() != 1 {
@@ -235,17 +228,17 @@ impl SearchStage {
                 "a proposal changes parameters from two search groups",
             ));
         }
-        self.binding_for(changed.first().map(String::as_str).unwrap_or_default())
+        self.binding_for(self.owning_group(first)?)
     }
 
-    fn binding_for(&self, parameter: &str) -> Result<SearchGroupBinding, TuneError> {
-        let group = self
-            .search_groups
+    fn owning_group(&self, parameter: &str) -> Result<&SearchGroup, TuneError> {
+        self.search_groups
             .iter()
             .find(|group| group.parameters.contains(parameter))
-            .ok_or_else(|| {
-                invalid_candidate(format!("parameter {parameter} has no search group"))
-            })?;
+            .ok_or_else(|| invalid_candidate(format!("parameter {parameter} has no search group")))
+    }
+
+    fn binding_for(&self, group: &SearchGroup) -> Result<SearchGroupBinding, TuneError> {
         let (index, suite) = self
             .training_suites
             .iter()

@@ -220,6 +220,20 @@ fn an_unsupported_suite_schema_is_refused() {
 }
 
 #[test]
+fn an_operator_feel_group_with_an_unguarded_suite_is_refused() {
+    let mut stage = stage();
+    stage.training_suites[1].guard_scenarios.clear();
+    stage.training_suites[1].guard_regression_limits.clear();
+    // The operator mission now has to carry the whole training partition, so
+    // the direct mission needs a suite of its own to stay in use.
+    stage.training_suites[1]
+        .primary_scenarios
+        .push(mission("direct", 1));
+
+    assert!(stage.validate().is_err());
+}
+
+#[test]
 fn a_controller_change_derives_the_controller_suite() {
     let stage = stage();
     let binding = stage

@@ -8,7 +8,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use flight_tune::{
-    Candidate, Digest, MissionReference, RunRecord, SearchGroupBinding, SearchStage, TrainingSuite,
+    Candidate, Digest, MissionReference, RunRecord, SearchGroupBinding, SearchGroupKind,
+    SearchStage, TrainingSuite,
 };
 
 use crate::{FeedbackError, digest, error::invalid};
@@ -195,6 +196,7 @@ pub(super) fn verify_search_space(stage: &SearchStage) -> Result<(), FeedbackErr
         }
     }
     let named = verify_groups(stage, &suite_ids)?;
+    verify_group_families(stage)?;
     for suite in &stage.training_suites {
         if !named.contains(suite.id.as_str()) {
             return Err(invalid("a training suite has no search group"));
@@ -209,6 +211,28 @@ pub(super) fn verify_search_space(stage: &SearchStage) -> Result<(), FeedbackErr
                 .any(|mission| mission == scenario)
         }) {
             return Err(invalid("a training mission belongs to no suite"));
+        }
+    }
+    Ok(())
+}
+
+/// Requires each operator-feel suite to guard a direct response.
+///
+/// A suite that only scores the operator response would accept a command shape
+/// that improves the operator trial and degrades the response a controller
+/// group was tuned for.
+fn verify_group_families(stage: &SearchStage) -> Result<(), FeedbackError> {
+    for group in &stage.search_groups {
+        if group.kind != SearchGroupKind::OperatorFeel {
+            continue;
+        }
+        let guarded = stage
+            .training_suites
+            .iter()
+            .find(|suite| suite.id == group.suite_id)
+            .is_some_and(|suite| !suite.guard_scenarios.is_empty());
+        if !guarded {
+            return Err(invalid("an operator-feel group takes an unguarded suite"));
         }
     }
     Ok(())

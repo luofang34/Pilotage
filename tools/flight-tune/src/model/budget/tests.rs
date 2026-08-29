@@ -2,7 +2,7 @@
 
 use crate::ExecutionRetryPolicy;
 
-use super::super::training_suite::tests::stage_for_budget;
+use super::super::stage_for_budget;
 
 #[test]
 fn a_prepared_campaign_states_a_finite_bound() {

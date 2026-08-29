@@ -4,15 +4,15 @@ use pilotage_trial::Digest;
 
 use crate::AttemptRole;
 
-use super::super::initial_state;
 use super::super::super::retry::AuthorizedRetry;
+use super::super::initial_state;
 use super::prepare;
 
 /// A replacement execution repeats one condition, so it cannot change the
 /// suite that condition ran on.
 #[test]
 fn a_replacement_that_changes_its_suite_is_refused() {
-    let stage = crate::model::training_suite::tests::stage_for_budget();
+    let stage = crate::model::stage_for_budget();
     let candidate = Digest::from_bytes([5; 32]);
     let source = AttemptRole::TrainingBaseline { suite_index: 0 };
     let replacement = AttemptRole::TrainingBaseline { suite_index: 1 };
@@ -52,7 +52,7 @@ fn a_replacement_that_changes_its_suite_is_refused() {
 /// A replacement that keeps its suite and its run plan is authorized.
 #[test]
 fn a_replacement_that_keeps_its_suite_is_prepared() {
-    let stage = crate::model::training_suite::tests::stage_for_budget();
+    let stage = crate::model::stage_for_budget();
     let candidate = Digest::from_bytes([5; 32]);
     let role = AttemptRole::TrainingBaseline { suite_index: 1 };
     let plan_digest = role
@@ -71,7 +71,15 @@ fn a_replacement_that_keeps_its_suite_is_prepared() {
     });
 
     prepare(
-        &mut state, 1, role, candidate, plan_digest, None, &stage, candidate, 91,
+        &mut state,
+        1,
+        role,
+        candidate,
+        plan_digest,
+        None,
+        &stage,
+        candidate,
+        91,
     )
     .expect("prepare the authorized replacement");
 

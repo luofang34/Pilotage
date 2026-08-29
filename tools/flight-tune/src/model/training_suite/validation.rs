@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{MissionReference, ParameterBounds, TuneError};
 
 use super::{
-    MAX_GUARD_LIMITS, MAX_SEARCH_GROUPS, MAX_TRAINING_SUITES, SearchGroup,
+    MAX_GUARD_LIMITS, MAX_SEARCH_GROUPS, MAX_TRAINING_SUITES, SearchGroup, SearchGroupKind,
     TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite, invalid_stage,
 };
 
@@ -33,6 +33,7 @@ pub(crate) fn validate_search_space(
         }
     }
     let named = validate_groups(allowlist, groups, &suite_ids)?;
+    validate_group_families(suites, groups)?;
     for suite in suites {
         if !named.contains(suite.id.as_str()) {
             return Err(invalid_stage(format!(
@@ -42,6 +43,34 @@ pub(crate) fn validate_search_space(
         }
     }
     validate_scenario_coverage(training_scenarios, suites)
+}
+
+/// Requires each operator-feel suite to guard a direct response.
+///
+/// An operator-feel group changes the command shape between the operator and
+/// the controller. A suite that only scores the operator response would accept
+/// a shape that improves the operator trial and degrades the response the
+/// controller group was tuned for.
+fn validate_group_families(
+    suites: &[TrainingSuite],
+    groups: &[SearchGroup],
+) -> Result<(), TuneError> {
+    for group in groups {
+        if group.kind != SearchGroupKind::OperatorFeel {
+            continue;
+        }
+        let guarded = suites
+            .iter()
+            .find(|suite| suite.id == group.suite_id)
+            .is_some_and(|suite| !suite.guard_scenarios.is_empty());
+        if !guarded {
+            return Err(invalid_stage(format!(
+                "operator-feel group {} takes a suite with no guard mission",
+                group.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_groups<'a>(
