@@ -4,7 +4,7 @@ mod error;
 
 use serde::{Deserialize, Serialize};
 
-use super::BackendCapability;
+use crate::BackendCapability;
 use crate::{
     ControlValue, MAX_ACTUATOR_VALUES, MAX_RAW_AXES, MAX_TEXT_BYTES, ReferenceFrame,
     ValidationError, validation::text,

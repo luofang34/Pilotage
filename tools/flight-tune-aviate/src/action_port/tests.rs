@@ -225,3 +225,59 @@ fn frame(source_sequence: u64) -> ScenarioFrame {
         canonical_signals: Vec::new(),
     }
 }
+
+/// One sensor-noise condition, in the form a campaign artifact carries it.
+const SENSOR_NOISE_CONDITION: &str = r#"{
+    "schema_version": 4,
+    "id": "sensor-noise",
+    "revision": 1,
+    "seed": 5,
+    "wind": {
+        "steady": {"speed_mps": 0.0, "direction_deg": 0.0},
+        "gusts": [],
+        "turbulence": {"kind": "none"}
+    },
+    "timing": {"estimate_delay_ns": 0, "update_jitter": {"kind": "none"}},
+    "sensor": {
+        "kind": "bounded_noise",
+        "lanes": [{
+            "sensor": "gyroscope",
+            "axis": "x",
+            "peak_amplitude_rad_s": 0.01,
+            "update_interval_samples": 5
+        }]
+    },
+    "actuator": {
+        "authority_scale_basis_points": 10000,
+        "command_loss": {"kind": "none"}
+    },
+    "controller_initialization": {
+        "hover_thrust_force": {"kind": "scale_baseline", "scale_basis_points": 10000}
+    }
+}"#;
+
+#[test]
+fn the_action_port_declares_no_uncertainty_until_the_runtime_proves_one() {
+    let driver_identity = ArtifactIdentity::new("aviate-driver", Digest::from_bytes([7; 32]))
+        .expect("driver identity");
+    let port = AviateVehicleActionPort::new(RecordingDriver {
+        identity: driver_identity,
+        directives: Vec::new(),
+    })
+    .expect("action port");
+    let condition = flight_tune::ConditionSet::from_json(SENSOR_NOISE_CONDITION.as_bytes())
+        .expect("sensor-noise condition");
+    let admission = flight_tune::ConditionAdmission::new(
+        flight_tune::UncertaintyDeclaration::from_runtime(&port),
+    );
+
+    assert!(port.uncertainty_capabilities().is_empty());
+    assert_eq!(
+        port.hover_estimator_mode(),
+        flight_tune::HoverEstimatorMode::Online
+    );
+    assert!(matches!(
+        admission.prepare(&condition),
+        Err(ScenarioRuntimeError::UnsupportedCondition { .. })
+    ));
+}

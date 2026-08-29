@@ -1,7 +1,8 @@
 use flight_tune::{
-    ArtifactIdentity, MissionArtifactIdentity, MissionCapability, MissionDirective,
-    MissionDocument, ReceiptResult, RunExecutionContext, ScenarioFrame, ScenarioObservationReceipt,
-    ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext, TrialAction,
+    ArtifactIdentity, BackendCapability, HoverEstimatorMode, MissionArtifactIdentity,
+    MissionCapability, MissionDirective, MissionDocument, ReceiptResult, RunExecutionContext,
+    ScenarioFrame, ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError,
+    ScenarioStopContext, TrialAction,
 };
 
 /// One simulator-owned action from the shared mission directive contract.
@@ -21,6 +22,14 @@ pub trait XPlaneSimulatorActionDriver {
     /// Returns the mission capabilities that the simulator driver supplies.
     fn capabilities(&self) -> &[MissionCapability];
 
+    /// Returns the deterministic uncertainty that the simulator executes.
+    ///
+    /// The default reports none, so a driver that has not proved a
+    /// perturbation refuses every non-nominal condition.
+    fn uncertainty_capabilities(&self) -> &[BackendCapability] {
+        &[]
+    }
+
     /// Executes one simulator action for the current neutral frame.
     ///
     /// # Errors
@@ -38,24 +47,35 @@ pub struct XPlaneScenarioRuntime<S, V> {
     simulator: S,
     vehicle: V,
     capabilities: Vec<MissionCapability>,
+    uncertainty_capabilities: Vec<BackendCapability>,
 }
 
 impl<S: XPlaneSimulatorActionDriver, V: ScenarioRuntime> XPlaneScenarioRuntime<S, V> {
     /// Creates one typed simulator and vehicle action dispatcher.
     #[must_use]
     pub fn new(simulator: S, vehicle: V) -> Self {
-        let mut capabilities = vehicle.capabilities().to_vec();
-        for capability in simulator.capabilities() {
-            if !capabilities.contains(capability) {
-                capabilities.push(*capability);
-            }
-        }
+        let capabilities = combined(vehicle.capabilities(), simulator.capabilities());
+        let uncertainty_capabilities = combined(
+            vehicle.uncertainty_capabilities(),
+            simulator.uncertainty_capabilities(),
+        );
         Self {
             simulator,
             vehicle,
             capabilities,
+            uncertainty_capabilities,
         }
     }
+}
+
+fn combined<T: Copy + PartialEq>(vehicle: &[T], simulator: &[T]) -> Vec<T> {
+    let mut combined = vehicle.to_vec();
+    for value in simulator {
+        if !combined.contains(value) {
+            combined.push(*value);
+        }
+    }
+    combined
 }
 
 impl<S, V> XPlaneScenarioRuntime<S, V> {
@@ -77,6 +97,16 @@ where
 
     fn capabilities(&self) -> &[MissionCapability] {
         &self.capabilities
+    }
+
+    fn uncertainty_capabilities(&self) -> &[BackendCapability] {
+        &self.uncertainty_capabilities
+    }
+
+    fn hover_estimator_mode(&self) -> HoverEstimatorMode {
+        // The controller owns the hover estimator, so the vehicle runtime is
+        // the only source of its live mode.
+        self.vehicle.hover_estimator_mode()
     }
 
     fn prepare_blocking(

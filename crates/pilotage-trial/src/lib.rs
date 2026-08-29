@@ -6,6 +6,7 @@ mod causal_api;
 pub use causal_api::*;
 
 mod canonical;
+mod capability;
 mod condition;
 mod digest;
 mod error;
@@ -16,9 +17,12 @@ mod sample;
 mod scenario;
 mod validation;
 
+pub use capability::{BackendCapabilities, BackendCapability, HoverEstimatorMode};
 pub use condition::{
-    AppliedWind, ConditionSet, DelayJitter, GustEvent, HorizontalWind, TimingCondition,
-    TurbulenceModel, WindCondition,
+    ActuatorCondition, AppliedWind, CommandHoldAction, CommandHoldIntervalIdentity,
+    CommandLossPolicy, ConditionSet, ControllerInitializationCondition, DelayJitter, GustEvent,
+    HorizontalWind, HoverThrustForceInitialization, SensorAxis, SensorCondition, SensorNoiseLane,
+    SensorNoiseReference, SensorReferenceLane, TimingCondition, TurbulenceModel, WindCondition,
 };
 pub use digest::Digest;
 pub use error::{CodecError, ValidationError};
@@ -39,8 +43,8 @@ pub use sample::{
     Observed, Quaternion, RawInput, ReferenceFrame, SampleTime, TrialSample, Vector3,
 };
 pub use scenario::{
-    BackendCapabilities, BackendCapability, Comparison, ControlChannel, ControlFamily,
-    ControlValueField, Phase, PhaseAction, PhaseCondition, PhysicalUnit, QuaternionComponent,
-    ReferenceRule, Scenario, SignalSelectionError, SignalSelector, SineComponent, StartHeading,
-    StartState, StimulusEnvelope, StimulusError, StimulusMapping, VectorComponent, Waveform,
+    Comparison, ControlChannel, ControlFamily, ControlValueField, Phase, PhaseAction,
+    PhaseCondition, PhysicalUnit, QuaternionComponent, ReferenceRule, Scenario,
+    SignalSelectionError, SignalSelector, SineComponent, StartHeading, StartState,
+    StimulusEnvelope, StimulusError, StimulusMapping, VectorComponent, Waveform,
 };

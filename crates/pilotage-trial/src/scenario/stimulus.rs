@@ -11,10 +11,10 @@ mod error;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
 
-use super::{BackendCapability, ControlChannel};
+use super::ControlChannel;
 use crate::{
-    CodecError, Digest, MAX_STIMULUS_ENVELOPE_BYTES, MAX_TEXT_BYTES, ValidationError, canonical,
-    validation::text,
+    BackendCapability, CodecError, Digest, MAX_STIMULUS_ENVELOPE_BYTES, MAX_TEXT_BYTES,
+    ValidationError, canonical, validation::text,
 };
 
 pub use error::StimulusError;

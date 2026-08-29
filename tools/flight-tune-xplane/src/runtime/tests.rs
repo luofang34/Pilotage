@@ -11,14 +11,16 @@ use pilotage_trial::{
 
 use super::*;
 use flight_tune::{
-    ArtifactIdentity, AttemptRole, CampaignMissionRuntime, Digest, MissionReference,
-    RunExecutionContext, ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError,
-    ScenarioSet, ScenarioStopContext, mission_document_from_scenario,
+    ArtifactIdentity, AttemptRole, CampaignMissionRuntime, Digest, HoverEstimatorMode,
+    MissionReference, RunExecutionContext, ScenarioObservationReceipt, ScenarioRuntime,
+    ScenarioRuntimeError, ScenarioSet, ScenarioStopContext, mission_document_from_scenario,
 };
 
 struct RecordingRuntime {
     identity: ArtifactIdentity,
     capabilities: Vec<MissionCapability>,
+    uncertainty: Vec<BackendCapability>,
+    hover_estimator_mode: HoverEstimatorMode,
     prepare_count: u32,
 }
 
@@ -27,12 +29,24 @@ impl RecordingRuntime {
         Self {
             identity,
             capabilities: vec![MissionCapability::SimulatorTime],
+            uncertainty: Vec::new(),
+            hover_estimator_mode: HoverEstimatorMode::Online,
             prepare_count: 0,
         }
     }
 
     fn with_capability(mut self, capability: MissionCapability) -> Self {
         self.capabilities.push(capability);
+        self
+    }
+
+    fn with_uncertainty(
+        mut self,
+        capability: BackendCapability,
+        hover_estimator_mode: HoverEstimatorMode,
+    ) -> Self {
+        self.uncertainty.push(capability);
+        self.hover_estimator_mode = hover_estimator_mode;
         self
     }
 }
@@ -45,6 +59,10 @@ struct RecordingSimulatorActions {
 impl XPlaneSimulatorActionDriver for RecordingSimulatorActions {
     fn capabilities(&self) -> &[MissionCapability] {
         &[MissionCapability::Reset]
+    }
+
+    fn uncertainty_capabilities(&self) -> &[BackendCapability] {
+        &[BackendCapability::SensorPerturbation]
     }
 
     fn execute_blocking(
@@ -64,6 +82,14 @@ impl ScenarioRuntime for RecordingRuntime {
 
     fn capabilities(&self) -> &[MissionCapability] {
         &self.capabilities
+    }
+
+    fn uncertainty_capabilities(&self) -> &[BackendCapability] {
+        &self.uncertainty
+    }
+
+    fn hover_estimator_mode(&self) -> HoverEstimatorMode {
+        self.hover_estimator_mode
     }
 
     fn prepare_blocking(
@@ -396,4 +422,35 @@ fn start(document: &pilotage_mission_core::MissionDocument) -> EngineStart {
             expires_at_ns: 10_000_000_000,
         },
     }
+}
+
+#[test]
+fn the_composed_runtime_reads_the_hover_estimator_mode_from_the_vehicle() {
+    let identity =
+        ArtifactIdentity::new("vehicle", Digest::from_bytes([2; 32])).expect("vehicle identity");
+    let online = XPlaneScenarioRuntime::new(
+        RecordingSimulatorActions::default(),
+        RecordingRuntime::new(identity.clone()),
+    );
+    let frozen = XPlaneScenarioRuntime::new(
+        RecordingSimulatorActions::default(),
+        RecordingRuntime::new(identity).with_uncertainty(
+            BackendCapability::HoverTrimUncertainty,
+            HoverEstimatorMode::Frozen,
+        ),
+    );
+
+    assert_eq!(online.hover_estimator_mode(), HoverEstimatorMode::Online);
+    assert_eq!(frozen.hover_estimator_mode(), HoverEstimatorMode::Frozen);
+    assert_eq!(
+        online.uncertainty_capabilities(),
+        [BackendCapability::SensorPerturbation]
+    );
+    assert_eq!(
+        frozen.uncertainty_capabilities(),
+        [
+            BackendCapability::HoverTrimUncertainty,
+            BackendCapability::SensorPerturbation
+        ]
+    );
 }

@@ -13,6 +13,7 @@ extern crate self as flight_tune;
 mod adapter;
 mod campaign;
 mod campaign_config;
+mod contract_api;
 mod error;
 mod flight_quality;
 mod identity;
@@ -36,6 +37,7 @@ pub use campaign::{StopReason, Tuner, TuningSummary};
 pub use campaign_config::{
     CAMPAIGN_CONFIG_SCHEMA_VERSION, CampaignAdapterDocuments, CampaignConfig,
 };
+pub use contract_api::*;
 pub use error::TuneError;
 pub use flight_quality::{
     CanonicalTelemetryKey, FlightQualityGate, FlightQualityGateConfig, FlightQualityGateEvaluator,
@@ -64,20 +66,12 @@ pub use model::{
     PromotionPolicy, PromotionRunKey, PromotionRunPlan, PromotionSeedPolicy, PromotionSelection,
     QualificationPolicy, SearchStage, promotion_policy_digest,
 };
-pub use pilotage_mission_core::{
-    ArtifactIdentity as MissionArtifactIdentity, ControlChannel, ControlFamily, ControlValueField,
-    Digest as MissionDigest, DirectiveContext, ExecutionTarget, FlightAction,
-    MISSION_SCHEMA_VERSION, MissionCapability, MissionDirective, MissionDocument, MissionTerminal,
-    ObservedSignal, PhysicalUnit, ReceiptResult, ReferenceFrame, ReferenceRule, SignalSelector,
-    SineComponent, StartHeading, StartState, StimulusEnvelope, StimulusError, StimulusMapping,
-    TrialAction, VehicleLifecycleState, Waveform,
-};
-pub use pilotage_trial::{Digest, Scenario as TrialScenario};
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use scenario_runtime::{
-    CampaignMissionRuntime, KinematicTruth, ScenarioFrame, ScenarioObservationReceipt,
-    ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext, ScenarioStopReason,
-    calibration_mission_document, mission_document_from_scenario, reference_observation_scenario,
+    CampaignMissionRuntime, ConditionAdmission, KinematicTruth, ScenarioFrame,
+    ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext,
+    ScenarioStopReason, UncertaintyDeclaration, calibration_mission_document,
+    mission_document_from_scenario, reference_observation_scenario,
 };
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,
