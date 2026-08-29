@@ -1,6 +1,5 @@
 //! Versioned scenario and backend contracts.
 
-mod backend;
 mod phase;
 mod selector;
 mod stimulus;
@@ -9,12 +8,11 @@ mod waveform;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CodecError, Digest, MAX_MANIFEST_BYTES, MAX_PHASES, MAX_TEXT_BYTES, SCENARIO_SCHEMA_VERSION,
-    ValidationError, canonical,
+    BackendCapabilities, CodecError, Digest, MAX_MANIFEST_BYTES, MAX_PHASES, MAX_TEXT_BYTES,
+    SCENARIO_SCHEMA_VERSION, ValidationError, canonical,
     validation::{nonempty_count, schema, text},
 };
 
-pub use backend::{BackendCapabilities, BackendCapability};
 pub use phase::{Comparison, Phase, PhaseAction, PhaseCondition, StartHeading, StartState};
 pub use selector::{
     ControlChannel, ControlValueField, QuaternionComponent, SignalSelectionError, SignalSelector,

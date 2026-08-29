@@ -37,6 +37,7 @@ fn backend() -> BackendCapabilities {
             BackendCapability::WindControl,
             BackendCapability::TurbulenceControl,
         ],
+        hover_estimator_mode: crate::HoverEstimatorMode::Online,
     }
 }
 

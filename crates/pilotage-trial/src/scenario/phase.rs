@@ -3,11 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BackendCapability, ControlChannel, ControlFamily, SignalSelector, StimulusEnvelope,
-    StimulusMapping, Waveform, stimulus,
+    ControlChannel, ControlFamily, SignalSelector, StimulusEnvelope, StimulusMapping, Waveform,
+    stimulus,
 };
 use crate::{
-    ArtifactIdentity, MAX_CAPABILITIES, MAX_PHASE_CONDITIONS, MAX_TEXT_BYTES, ValidationError,
+    ArtifactIdentity, BackendCapability, MAX_CAPABILITIES, MAX_PHASE_CONDITIONS, MAX_TEXT_BYTES,
+    ValidationError,
     validation::{count, duration, finite, range, text, unique},
 };
 

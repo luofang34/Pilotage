@@ -1,4 +1,5 @@
 use pilotage_mission_core::{MissionCapability, MissionDirective, MissionTerminal, ReceiptResult};
+use pilotage_trial::{BackendCapability, HoverEstimatorMode};
 use thiserror::Error;
 
 use crate::{ArtifactIdentity, RunExecutionContext, TuneError};
@@ -140,6 +141,29 @@ pub enum ScenarioRuntimeError {
         #[source]
         cleanup: Box<ScenarioRuntimeError>,
     },
+    /// A backend cannot execute one requested uncertainty condition.
+    #[error("condition {condition} is not executable on this backend: {source}")]
+    UnsupportedCondition {
+        /// The condition-set identifier.
+        condition: String,
+        /// The capability contract failure.
+        #[source]
+        source: pilotage_trial::ValidationError,
+    },
+    /// The live hover-estimator mode differs from the prepared mode.
+    #[error("hover estimator was prepared as {prepared} and now reports {live}")]
+    ChangedHoverEstimatorMode {
+        /// The prepared estimator-mode name.
+        prepared: &'static str,
+        /// The live estimator-mode name.
+        live: &'static str,
+    },
+    /// The live uncertainty capabilities differ from the prepared set.
+    #[error("uncertainty capabilities changed after condition {condition} was prepared")]
+    ChangedUncertaintyCapabilities {
+        /// The condition-set identifier.
+        condition: String,
+    },
 }
 
 impl ScenarioRuntimeError {
@@ -160,6 +184,23 @@ pub trait ScenarioRuntime {
 
     /// Returns all mission capabilities that the composed runtime supplies.
     fn capabilities(&self) -> &[MissionCapability];
+
+    /// Returns the deterministic uncertainty that this runtime executes.
+    ///
+    /// The default reports none, so a runtime that has not proved a
+    /// perturbation refuses every non-nominal condition.
+    fn uncertainty_capabilities(&self) -> &[BackendCapability] {
+        &[]
+    }
+
+    /// Returns the live hover-estimator mode.
+    ///
+    /// The default is the fail-safe online mode. An estimator that can write
+    /// over the hover force refuses a hover-force uncertainty request, so a
+    /// runtime must report an inactive estimator to accept one.
+    fn hover_estimator_mode(&self) -> HoverEstimatorMode {
+        HoverEstimatorMode::Online
+    }
 
     /// Prepares one admitted mission without starting external execution.
     fn prepare_blocking(
