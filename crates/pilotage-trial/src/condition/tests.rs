@@ -1,6 +1,13 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::*;
+use crate::{BackendCapability, HoverEstimatorMode};
+
+#[path = "tests/strict_json.rs"]
+mod strict_json;
+
+#[path = "tests/uncertainty.rs"]
+mod uncertainty;
 
 fn condition(seed: u64) -> ConditionSet {
     ConditionSet {
@@ -27,6 +34,9 @@ fn condition(seed: u64) -> ConditionSet {
             },
         },
         timing: TimingCondition::nominal(),
+        sensor: SensorCondition::nominal(),
+        actuator: ActuatorCondition::nominal(),
+        controller_initialization: ControllerInitializationCondition::nominal(),
     }
 }
 
@@ -312,6 +322,9 @@ fn fixed_condition_timeline_matches_the_golden_values_after_reset() {
                 interval_ns: 250_000_000,
             },
         },
+        sensor: SensorCondition::nominal(),
+        actuator: ActuatorCondition::nominal(),
+        controller_initialization: ControllerInitializationCondition::nominal(),
     };
     let expected = [
         (0, 2.0, 4_246_789),
@@ -331,7 +344,7 @@ fn fixed_condition_timeline_matches_the_golden_values_after_reset() {
             .canonical_digest()
             .expect("golden condition")
             .to_string(),
-        "69342e8bb6470366bfa640051ced0612a3cd10ae113f7c4f26c03d6637a3cb6e"
+        "3b7493b39b2075327ebe650e480e1bbe7d76d4fed6839f38af2bdb5268cf4069"
     );
 
     let first: Vec<_> = expected

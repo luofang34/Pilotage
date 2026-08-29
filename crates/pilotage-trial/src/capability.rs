@@ -8,6 +8,9 @@ use crate::{
     validation::{count, schema, unique},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A capability that a trial backend can supply.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +39,14 @@ pub enum BackendCapability {
     OperatorVelocityControl,
     /// Command the direct attitude and thrust control family.
     DirectAttitudeThrustControl,
+    /// Apply deterministic bounded sensor perturbations.
+    SensorPerturbation,
+    /// Scale eligible actuator commands.
+    ActuatorAuthority,
+    /// Apply a deterministic command zero-order hold.
+    CommandHold,
+    /// Scale the controller hover-force initialization.
+    HoverTrimUncertainty,
 }
 
 impl BackendCapability {
@@ -55,6 +66,44 @@ impl BackendCapability {
             Self::TurbulenceControl => "turbulence_control",
             Self::OperatorVelocityControl => "operator_velocity_control",
             Self::DirectAttitudeThrustControl => "direct_attitude_thrust_control",
+            Self::SensorPerturbation => "sensor_perturbation",
+            Self::ActuatorAuthority => "actuator_authority",
+            Self::CommandHold => "command_hold",
+            Self::HoverTrimUncertainty => "hover_trim_uncertainty",
+        }
+    }
+}
+
+/// The online hover-estimator state for one backend.
+///
+/// A hover-force uncertainty request needs a value that the controller keeps.
+/// An online estimator writes over that value, so the request is refused.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HoverEstimatorMode {
+    /// The estimator can update the hover-force value.
+    #[default]
+    Online,
+    /// The estimator is disabled.
+    Disabled,
+    /// The estimator keeps one fixed value.
+    Frozen,
+}
+
+impl HoverEstimatorMode {
+    /// Reports whether hover-force uncertainty can use this mode.
+    #[must_use]
+    pub const fn is_inactive(self) -> bool {
+        matches!(self, Self::Disabled | Self::Frozen)
+    }
+
+    /// Gets the stable estimator-mode name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Online => "online",
+            Self::Disabled => "disabled",
+            Self::Frozen => "frozen",
         }
     }
 }
@@ -69,6 +118,8 @@ pub struct BackendCapabilities {
     pub backend: ArtifactIdentity,
     /// The capabilities that the backend supplies.
     pub capabilities: Vec<BackendCapability>,
+    /// The online hover-estimator state.
+    pub hover_estimator_mode: HoverEstimatorMode,
 }
 
 impl BackendCapabilities {

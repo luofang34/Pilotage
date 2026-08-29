@@ -206,6 +206,26 @@ pub enum ValidationError {
         /// The capability name.
         capability: String,
     },
+    /// A condition needs a capability that the backend does not report.
+    #[error("condition needs unsupported capability {capability}")]
+    UnsupportedConditionCapability {
+        /// The capability name.
+        capability: String,
+    },
+    /// A hover-force request meets an estimator that can overwrite it.
+    #[error("hover-force uncertainty needs an inactive hover estimator; the mode is {mode}")]
+    ActiveHoverEstimator {
+        /// The reported estimator-mode name.
+        mode: String,
+    },
+    /// A relation between two request fields is invalid.
+    #[error("{field} must {relation}")]
+    InvalidRelation {
+        /// The field path.
+        field: String,
+        /// The relation that the field must satisfy.
+        relation: &'static str,
+    },
     /// A sample uses a phase index that is outside the scenario.
     #[error("sample phase index {index} is outside {phase_count} phases")]
     PhaseOutOfRange {

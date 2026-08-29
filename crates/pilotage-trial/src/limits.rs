@@ -7,11 +7,11 @@ pub const RUN_IDENTITY_SCHEMA_VERSION: u16 = 1;
 /// The supported scenario schema version.
 pub const SCENARIO_SCHEMA_VERSION: u16 = 3;
 /// The supported backend capabilities schema version.
-pub const BACKEND_CAPABILITIES_SCHEMA_VERSION: u16 = 1;
+pub const BACKEND_CAPABILITIES_SCHEMA_VERSION: u16 = 2;
 /// The supported trial sample schema version.
 pub const TRIAL_SAMPLE_SCHEMA_VERSION: u16 = 1;
-/// The supported environmental condition schema version.
-pub const CONDITION_SET_SCHEMA_VERSION: u16 = 1;
+/// The supported deterministic condition schema version.
+pub const CONDITION_SET_SCHEMA_VERSION: u16 = 4;
 
 /// The maximum trial manifest JSON size.
 pub const MAX_MANIFEST_BYTES: usize = 256 * 1024;

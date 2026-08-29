@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 
 use super::*;
-use crate::{ControlValue, MAX_ACTUATOR_VALUES, ReferenceFrame, Vector3};
+use crate::{BackendCapability, ControlValue, MAX_ACTUATOR_VALUES, ReferenceFrame, Vector3};
 
 fn start_scenario(target: StartState) -> Scenario {
     Scenario {
