@@ -52,15 +52,43 @@ fn passed_outcome(
             metric: metric.to_owned(),
         };
     }
-    for (metric, maximum) in &policy.objective_maxima {
-        let values = runs
-            .iter()
-            .filter_map(|run| run.objectives.get(metric).copied())
-            .collect::<Vec<_>>();
-        if values.len() != runs.len() || values.iter().any(|value| value > maximum) {
+    scoped_outcome(stage, runs)
+}
+
+/// Every final run against the limit its own scenario states.
+///
+/// A run that names a scenario with no scoped row, or that states no value for
+/// a declared objective, fails the objective rather than passing it. There is
+/// no global maximum to fall back on, and a decision that cannot find its bar
+/// is not a decision that met one.
+fn scoped_outcome(stage: &SearchStage, runs: &[crate::RunRecord]) -> FinalQualificationOutcome {
+    for run in runs {
+        let resolved = run
+            .objectives
+            .get(crate::TARGET_AUTHORITY_OBJECTIVE)
+            .copied();
+        if !stage
+            .response_targets
+            .authority_holds(&run.mission_revision_id, resolved)
+        {
             return FinalQualificationOutcome::FailedObjective {
-                metric: metric.clone(),
+                metric: crate::TARGET_AUTHORITY_OBJECTIVE.to_owned(),
             };
+        }
+    }
+    for metric in &stage.qualification.objectives {
+        for run in runs {
+            let within = stage
+                .response_targets
+                .target(&run.mission_revision_id, metric)
+                .ok()
+                .zip(run.objectives.get(metric).copied())
+                .is_some_and(|(target, value)| target.holds(value));
+            if !within {
+                return FinalQualificationOutcome::FailedObjective {
+                    metric: metric.clone(),
+                };
+            }
         }
     }
     FinalQualificationOutcome::Qualified

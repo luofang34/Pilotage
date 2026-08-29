@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::series::{
-    integral_abs_linear, interpolate, timed_window, validate_event, validate_metric_results,
-    validate_optional_metric_results, validate_timed_values, validate_values,
+    band_settling_time, crossing_delta, first_crossing, integral_abs_linear, timed_window,
+    validate_event, validate_metric_results, validate_optional_metric_results,
+    validate_timed_values, validate_values,
 };
 use crate::{MetricError, TimedValue};
 
@@ -82,7 +83,8 @@ pub fn measure_step_response(
     let response_delay =
         first_crossing(&response_progress, DELAY_FRACTION).map(|time_s| time_s - spec.input_time_s);
     let rise_time = crossing_delta(&response_progress, RISE_LOW_FRACTION, RISE_HIGH_FRACTION);
-    let settling_time = settling_time(&response_progress).map(|time_s| time_s - spec.input_time_s);
+    let settling_time = band_settling_time(&response_progress, SETTLING_FRACTION)
+        .map(|time_s| time_s - spec.input_time_s);
     let (overshoot, undershoot) = excursions(&response_progress, spec);
     let response_error = response_error(response, spec);
     validate_values(&response_error, "response.error", |sample| sample.value)?;
@@ -173,57 +175,6 @@ fn progress_window(samples: &[TimedValue], spec: StepSpec) -> Vec<TimedValue> {
             value: (sample.value - spec.initial_value) * direction / amplitude,
         })
         .collect()
-}
-
-fn first_crossing(progress: &[TimedValue], threshold: f64) -> Option<f64> {
-    if progress[0].value >= threshold {
-        return Some(progress[0].time_s);
-    }
-    progress.windows(2).find_map(|pair| {
-        let before = pair[0];
-        let after = pair[1];
-        if before.value < threshold && after.value >= threshold {
-            Some(interpolate(
-                before.value,
-                before.time_s,
-                after.value,
-                after.time_s,
-                threshold,
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-fn crossing_delta(progress: &[TimedValue], low: f64, high: f64) -> Option<f64> {
-    let low_time = first_crossing(progress, low)?;
-    let high_time = first_crossing(progress, high)?;
-    Some(high_time - low_time)
-}
-
-fn settling_time(progress: &[TimedValue]) -> Option<f64> {
-    let low = 1.0 - SETTLING_FRACTION;
-    let high = 1.0 + SETTLING_FRACTION;
-    if !(low..=high).contains(&progress[progress.len() - 1].value) {
-        return None;
-    }
-    let last_outside = progress
-        .iter()
-        .rposition(|sample| !(low..=high).contains(&sample.value));
-    let Some(index) = last_outside else {
-        return Some(progress[0].time_s);
-    };
-    let before = progress[index];
-    let after = progress[index + 1];
-    let boundary = if before.value < low { low } else { high };
-    Some(interpolate(
-        before.value,
-        before.time_s,
-        after.value,
-        after.time_s,
-        boundary,
-    ))
 }
 
 fn excursions(progress: &[TimedValue], spec: StepSpec) -> (f64, f64) {

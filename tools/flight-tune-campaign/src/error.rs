@@ -24,6 +24,18 @@ pub enum CampaignError {
         #[source]
         source: Box<pilotage_tuning_feedback::FeedbackError>,
     },
+    /// The generated scenario corpus differs from its declaration.
+    #[error("the scenario matrix is not valid: {detail}")]
+    Matrix {
+        /// The exact difference.
+        detail: String,
+    },
+}
+
+pub(crate) fn matrix(detail: impl Into<String>) -> CampaignError {
+    CampaignError::Matrix {
+        detail: detail.into(),
+    }
 }
 
 pub(crate) fn snapshot(source: flight_tune::TuneError) -> CampaignError {

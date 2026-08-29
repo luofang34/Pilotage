@@ -169,7 +169,7 @@ pub(super) fn promotion(
     stage: &SearchStage,
     session: &SessionIdentity,
 ) -> Result<(), TuneError> {
-    closure.validate_for(&stage.promotion)?;
+    closure.validate_for(stage)?;
     let expected = expected_promotion_closure(state, stage, session)?;
     if closure != &expected {
         return Err(invalid(

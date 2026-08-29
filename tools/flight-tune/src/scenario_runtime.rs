@@ -4,6 +4,7 @@ mod document;
 mod frame;
 mod host;
 mod port;
+mod reference;
 mod uncertainty;
 
 pub use document::{
@@ -15,6 +16,7 @@ pub use port::{
     ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext,
     ScenarioStopReason,
 };
+pub use reference::{ReferenceStimulus, reference_stimulus_scenario};
 pub use uncertainty::{ConditionAdmission, UncertaintyDeclaration};
 
 #[cfg(test)]

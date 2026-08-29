@@ -335,18 +335,24 @@ fn verify_digests(proof: &AuthenticatedEvaluationProof) -> Result<(), FeedbackEr
     Ok(())
 }
 
+/// The exact objective names one hidden run has to state.
+///
+/// A scenario that keeps an authority band reports one value beyond its
+/// declared objectives, so the expected key set is derived from the table
+/// rather than read from the policy alone.
 fn objective_keys_match(stage: &SearchStage, role: AttemptRole, run: &RunRecord) -> bool {
-    match role {
-        AttemptRole::PromotionBaseline | AttemptRole::PromotionFrozen => run
-            .objectives
-            .keys()
-            .eq(stage.promotion.objective_regression_upper_95.keys()),
-        AttemptRole::FinalQualification => run
-            .objectives
-            .keys()
-            .eq(stage.qualification.objective_maxima.keys()),
-        AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. } => false,
-    }
+    let declared = match role {
+        AttemptRole::PromotionBaseline | AttemptRole::PromotionFrozen => {
+            &stage.promotion.objectives
+        }
+        AttemptRole::FinalQualification => &stage.qualification.objectives,
+        AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. } => {
+            return false;
+        }
+    };
+    let expected =
+        super::response_target::expected_objective_names(stage, &run.mission_revision_id, declared);
+    run.objectives.keys().eq(expected.iter())
 }
 
 fn completed_run(receipt: &RunTerminalReceipt) -> Option<&RunRecord> {

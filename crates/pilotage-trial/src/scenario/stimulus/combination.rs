@@ -44,7 +44,7 @@ pub(super) fn validate(
 ///
 /// The match is exhaustive over both enums, so a combination that this table
 /// does not name cannot exist.
-const fn required_physics(
+pub(super) const fn required_physics(
     family: ControlFamily,
     channel: ControlChannel,
 ) -> (PhysicalUnit, ReferenceRule) {

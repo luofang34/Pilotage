@@ -86,6 +86,28 @@ pub fn fake_stimulus_mission_document(id: &str, family: ControlFamily) -> Missio
 /// The rig writes the scenario as schema bytes rather than as constructed
 /// values, so the fixture also pins the encoded stimulus shape. Crates that
 /// include this rig reach the scenario codec through `flight-tune`.
+/// The identity of the envelope the operator-velocity fake stimulus carries.
+///
+/// A scoped response target row names the envelope its limits are written
+/// for, so a test stage that scopes a stimulus mission has to name this one.
+pub fn fake_operator_envelope_digest() -> Digest {
+    let document =
+        fake_stimulus_mission_document(FAKE_MISSION_IDS[0], ControlFamily::OperatorVelocity);
+    for phase in &document.phases {
+        if let flight_tune::MissionAction::Trial(flight_tune::TrialAction::Stimulate {
+            envelope,
+            ..
+        }) = &phase.action
+        {
+            let digest = envelope
+                .canonical_digest()
+                .expect("fake stimulus envelope digest");
+            return Digest::from_bytes(*digest.as_bytes());
+        }
+    }
+    panic!("the fake stimulus mission commands no stimulus");
+}
+
 fn fake_stimulus_scenario(id: &str, family: ControlFamily) -> TrialScenario {
     let (capability, mapping, envelope) = match family {
         ControlFamily::OperatorVelocity => (

@@ -12,6 +12,7 @@ workspace = true
 flight-tune = { workspace = true }
 pilotage-control-feel = { workspace = true }
 pilotage-flight-quality = { workspace = true }
+pilotage-trial = { workspace = true }
 pilotage-tuning-feedback = { workspace = true }
 thiserror = { workspace = true }
 

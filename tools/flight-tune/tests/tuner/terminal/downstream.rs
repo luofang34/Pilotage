@@ -221,13 +221,14 @@ impl GateEvaluator for PromotionGate {
         let mut state = self.state.0.borrow_mut();
         state.gate_evaluate_count = state.gate_evaluate_count.wrapping_add(1);
         drop(state);
+        let crash = GateOutcome::pass(flight_tune::MANDATORY_CRASH_GATE_ID);
         if self.fail_current {
-            Ok(vec![GateOutcome::fail(
-                "envelope",
-                "promotion envelope failed",
-            )])
+            Ok(vec![
+                crash,
+                GateOutcome::fail("envelope", "promotion envelope failed"),
+            ])
         } else {
-            Ok(vec![GateOutcome::pass("envelope")])
+            Ok(vec![crash, GateOutcome::pass("envelope")])
         }
     }
 

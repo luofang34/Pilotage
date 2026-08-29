@@ -41,7 +41,10 @@ fn the_first_hard_gate_failure_has_priority() {
 
 #[test]
 fn a_missing_canonical_signal_fails_closed() {
-    let config = gate_config(vec![FlightQualityGate::FiniteSignals]);
+    let config = gate_config(vec![
+        FlightQualityGate::CrashOrUnexpectedContact,
+        FlightQualityGate::FiniteSignals,
+    ]);
     let mut evaluator = FlightQualityGateEvaluator::new(config).expect("gate evaluator");
     evaluator.begin(&scenario("quality")).expect("begin gates");
     let mut sample = healthy_sample(0, 0, TraceValues::default());
@@ -51,9 +54,10 @@ fn a_missing_canonical_signal_fails_closed() {
 
     let outcomes = evaluator.evaluate(&sample).expect("evaluate gates");
 
-    assert_eq!(outcomes.len(), 1);
-    assert!(!outcomes[0].passed);
-    assert!(outcomes[0].detail.contains("has no canonical field"));
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes[0].passed);
+    assert!(!outcomes[1].passed);
+    assert!(outcomes[1].detail.contains("has no canonical field"));
 }
 
 #[test]
@@ -75,7 +79,10 @@ fn the_metric_collector_rejects_a_missing_canonical_signal() {
 
 #[test]
 fn continuous_saturation_fails_at_the_configured_duration() {
-    let config = gate_config(vec![FlightQualityGate::ActuatorSaturationDuration]);
+    let config = gate_config(vec![
+        FlightQualityGate::CrashOrUnexpectedContact,
+        FlightQualityGate::ActuatorSaturationDuration,
+    ]);
     let mut evaluator = FlightQualityGateEvaluator::new(config).expect("gate evaluator");
     evaluator.begin(&scenario("quality")).expect("begin gates");
     for (sequence, elapsed_ms) in [0_u64, 300, 600].into_iter().enumerate() {
@@ -88,10 +95,11 @@ fn continuous_saturation_fails_at_the_configured_duration() {
             },
         );
         let outcomes = evaluator.evaluate(&sample).expect("evaluate gates");
+        assert!(outcomes[0].passed, "the crash gate runs first and passes");
         if elapsed_ms < 600 {
-            assert!(outcomes[0].passed);
+            assert!(outcomes[1].passed);
         } else {
-            assert!(!outcomes[0].passed);
+            assert!(!outcomes[1].passed);
         }
     }
 }
@@ -351,4 +359,53 @@ fn scenario(id: &str) -> MissionReference {
         max_samples: 128,
         sample_timeout_ns: 100_000_000,
     }
+}
+
+/// An absent contact value refuses the execution rather than scoring it.
+///
+/// A sample that carries no crash value is not a sample proving the vehicle
+/// hit nothing. Reading it as a passed gate would let a collision be measured;
+/// reading it as a crash would blame the candidate for the harness. It refuses,
+/// which quarantines the execution instead.
+#[test]
+fn an_absent_contact_signal_refuses_the_execution() {
+    let config = gate_config(vec![FlightQualityGate::CrashOrUnexpectedContact]);
+    let mut evaluator = FlightQualityGateEvaluator::new(config).expect("gate evaluator");
+    evaluator.begin(&scenario("quality")).expect("begin gates");
+    let mut sample = healthy_sample(0, 0, TraceValues::default());
+    sample
+        .values
+        .remove(CanonicalTelemetryKey::CrashDetected.as_str());
+
+    let error = evaluator
+        .evaluate(&sample)
+        .expect_err("an absent contact value is a harness fault");
+    assert!(
+        error.to_string().contains("crash_detected"),
+        "unexpected error: {error}"
+    );
+
+    // A sample that states the value passes, so the refusal is about absence
+    // and not about the gate being unable to pass at all.
+    let healthy = healthy_sample(1, 20, TraceValues::default());
+    let outcomes = evaluator.evaluate(&healthy).expect("evaluate gates");
+    assert!(outcomes[0].passed);
+}
+
+/// A gate order that does not start with the crash gate is refused.
+#[test]
+fn the_crash_gate_is_the_first_gate_a_configuration_may_state() {
+    let config = gate_config(vec![
+        FlightQualityGate::FiniteSignals,
+        FlightQualityGate::CrashOrUnexpectedContact,
+    ]);
+    assert!(
+        FlightQualityGateEvaluator::new(config).is_err(),
+        "a crash gate behind another gate is refused"
+    );
+    let omitted = gate_config(vec![FlightQualityGate::FiniteSignals]);
+    assert!(
+        FlightQualityGateEvaluator::new(omitted).is_err(),
+        "an omitted crash gate is refused"
+    );
 }

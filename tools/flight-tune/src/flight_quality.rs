@@ -7,7 +7,8 @@ mod telemetry;
 
 pub use config::{
     FlightQualityGate, FlightQualityGateConfig, FlightQualityMetricConfig, FlightQualityScales,
-    FlightQualityScenario, FlightQualityWeights, ReleasePlan, StepPlan, WindPlan,
+    FlightQualityScenario, FlightQualityWeights, MANDATORY_CRASH_GATE_ID, ReleasePlan, StepPlan,
+    WindPlan,
 };
 pub use gates::FlightQualityGateEvaluator;
 pub use metrics::{FlightQualityMetricEvaluator, FlightQualityReport};

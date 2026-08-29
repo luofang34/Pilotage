@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::model::{
     ExpectedPromotionPair, ExpectedPromotionRun, PromotionCalculation, PromotionComparison,
-    PromotionObjectiveResult, PromotionPairedStatistics, PromotionRunPlan, PromotionSelection,
-    expected_promotion_pairs, required_improvement,
+    PromotionObjectiveResult, PromotionPairedStatistics, PromotionRunPlan,
+    PromotionScenarioResults, PromotionSelection, expected_promotion_pairs, required_improvement,
 };
 use crate::score::{PairedStats, paired_stats};
 use crate::{
-    Digest, PromotionDecision, PromotionPolicy, RunRecord, RunTerminalCompletion,
-    RunTerminalDisposition, RunTerminalReceipt, RunTerminalSemanticOutcome, SearchStage, TuneError,
+    Digest, PromotionDecision, RunRecord, RunTerminalCompletion, RunTerminalDisposition,
+    RunTerminalReceipt, RunTerminalSemanticOutcome, SearchStage, TuneError,
 };
 
 #[cfg(test)]
@@ -25,7 +25,7 @@ pub(crate) fn calculate(
     validate_receipt_counts(&expected, baseline_receipts, frozen_receipts)?;
     let baseline = authenticated_runs(&expected, baseline_receipts, |pair| &pair.baseline, stage)?;
     let frozen = authenticated_runs(&expected, frozen_receipts, |pair| &pair.frozen, stage)?;
-    let comparison = compare_runs(&stage.promotion, &baseline, &frozen)?;
+    let comparison = compare_runs(stage, &expected, &baseline, &frozen)?;
     let selection = select(
         &comparison,
         plan.initial_candidate_digest,
@@ -91,7 +91,7 @@ fn validate_run_result(run: &RunRecord, stage: &SearchStage) -> Result<(), TuneE
             "one promotion run changed the exact ordered hard-gate set",
         ));
     }
-    validate_objective_set(run, &stage.promotion)
+    validate_objective_set(run, stage)
 }
 
 fn completed_run(receipt: &RunTerminalReceipt) -> Result<&RunRecord, TuneError> {
@@ -108,12 +108,11 @@ fn completed_run(receipt: &RunTerminalReceipt) -> Result<&RunRecord, TuneError> 
     }
 }
 
-fn validate_objective_set(run: &RunRecord, policy: &PromotionPolicy) -> Result<(), TuneError> {
-    if run
-        .objectives
-        .keys()
-        .ne(policy.objective_regression_upper_95.keys())
-    {
+fn validate_objective_set(run: &RunRecord, stage: &SearchStage) -> Result<(), TuneError> {
+    let expected = stage
+        .response_targets
+        .expected_objective_names(&run.mission_revision_id, &stage.promotion.objectives);
+    if run.objectives.keys().ne(expected.iter()) {
         return Err(pair_error(
             "one promotion run changed the exact objective key set",
         ));
@@ -122,16 +121,18 @@ fn validate_objective_set(run: &RunRecord, policy: &PromotionPolicy) -> Result<(
 }
 
 fn compare_runs(
-    policy: &PromotionPolicy,
+    stage: &SearchStage,
+    expected: &[ExpectedPromotionPair],
     baseline: &[&RunRecord],
     frozen: &[&RunRecord],
 ) -> Result<PromotionComparison, TuneError> {
+    let policy = &stage.promotion;
     policy.validate()?;
-    if baseline.len() != frozen.len() || baseline.len() < 2 {
+    if baseline.len() != frozen.len() || baseline.len() < 2 || expected.len() != baseline.len() {
         return Err(pair_error("promotion run keys do not form exact pairs"));
     }
     for run in baseline.iter().chain(frozen) {
-        validate_objective_set(run, policy)?;
+        validate_objective_set(run, stage)?;
     }
     let baseline_mean_loss = finite_mean(baseline.iter().map(|run| run.loss))?;
     let loss = paired(
@@ -147,7 +148,7 @@ fn compare_runs(
             .map(|(left, right)| right.control_effort - left.control_effort),
     )?;
     let required_loss_improvement = required_improvement(policy, baseline_mean_loss)?;
-    let objectives = objective_results(policy, baseline, frozen)?;
+    let scenarios = scenario_results(stage, expected, baseline, frozen)?;
     Ok(PromotionComparison {
         baseline_mean_loss,
         required_loss_improvement,
@@ -155,30 +156,97 @@ fn compare_runs(
         loss_passed: loss.upper_95 <= -required_loss_improvement,
         control_effort,
         control_effort_passed: control_effort.mean <= policy.maximum_control_effort_increase,
-        objectives,
+        scenarios,
+    })
+}
+
+/// One result group for each promotion scenario, over that scenario's own
+/// paired runs and against that scenario's own scoped limits.
+fn scenario_results(
+    stage: &SearchStage,
+    expected: &[ExpectedPromotionPair],
+    baseline: &[&RunRecord],
+    frozen: &[&RunRecord],
+) -> Result<BTreeMap<String, PromotionScenarioResults>, TuneError> {
+    let mut results = BTreeMap::new();
+    for scenario in &stage.promotion_scenarios {
+        let pairs = scenario_pairs(expected, baseline, frozen, &scenario.revision_id);
+        if pairs.len() < 2 {
+            return Err(pair_error(format!(
+                "promotion scenario {} has fewer than two paired runs",
+                scenario.revision_id
+            )));
+        }
+        results.insert(
+            scenario.revision_id.clone(),
+            PromotionScenarioResults {
+                mission_content_digest: scenario.content_digest,
+                authority_band: stage.response_targets.authority_band(&scenario.revision_id),
+                authority_passed: authority_holds(stage, &scenario.revision_id, &pairs),
+                objectives: objective_results(stage, &scenario.revision_id, &pairs)?,
+            },
+        );
+    }
+    Ok(results)
+}
+
+/// The baseline and frozen runs that one scenario produced, in run order.
+fn scenario_pairs<'a>(
+    expected: &[ExpectedPromotionPair],
+    baseline: &[&'a RunRecord],
+    frozen: &[&'a RunRecord],
+    mission_revision_id: &str,
+) -> Vec<(&'a RunRecord, &'a RunRecord)> {
+    expected
+        .iter()
+        .zip(baseline.iter().zip(frozen))
+        .filter(|(pair, _)| pair.baseline.key.mission_revision_id == mission_revision_id)
+        .map(|(_, (left, right))| (*left, *right))
+        .collect()
+}
+
+/// Whether both sides of every pair kept the operator authority.
+///
+/// The challenger is the candidate under decision, but the incumbent is the
+/// evidence it is measured against: a paired improvement over a baseline that
+/// had already given the authority away is not an improvement anyone asked
+/// for.
+fn authority_holds(
+    stage: &SearchStage,
+    mission_revision_id: &str,
+    pairs: &[(&RunRecord, &RunRecord)],
+) -> bool {
+    pairs.iter().all(|(left, right)| {
+        [left, right].into_iter().all(|run| {
+            stage.response_targets.authority_holds(
+                mission_revision_id,
+                run.objectives
+                    .get(crate::TARGET_AUTHORITY_OBJECTIVE)
+                    .copied(),
+            )
+        })
     })
 }
 
 fn objective_results(
-    policy: &PromotionPolicy,
-    baseline: &[&RunRecord],
-    frozen: &[&RunRecord],
+    stage: &SearchStage,
+    mission_revision_id: &str,
+    pairs: &[(&RunRecord, &RunRecord)],
 ) -> Result<BTreeMap<String, PromotionObjectiveResult>, TuneError> {
     let mut results = BTreeMap::new();
-    for (name, maximum) in &policy.objective_regression_upper_95 {
-        let mut deltas = Vec::with_capacity(baseline.len());
-        for (left, right) in baseline.iter().zip(frozen) {
-            let left = objective(left, name)?;
-            let right = objective(right, name)?;
-            deltas.push(right - left);
+    for name in &stage.promotion.objectives {
+        let target = stage.response_targets.target(mission_revision_id, name)?;
+        let mut deltas = Vec::with_capacity(pairs.len());
+        for (left, right) in pairs {
+            deltas.push(objective(right, name)? - objective(left, name)?);
         }
         let statistics = paired(deltas.into_iter())?;
         results.insert(
             name.clone(),
             PromotionObjectiveResult {
                 statistics,
-                maximum_upper_95: *maximum,
-                passed: statistics.upper_95 <= *maximum,
+                maximum_upper_95: target.limit,
+                passed: target.holds(statistics.upper_95),
             },
         );
     }

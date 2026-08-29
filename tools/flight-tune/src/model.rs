@@ -3,24 +3,34 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use pilotage_trial::Digest;
 use serde::{Deserialize, Serialize};
 
-use crate::{CandidateLineage, ScenarioSet, TuneError};
+use crate::flight_quality::MANDATORY_CRASH_GATE_ID;
+use crate::{CandidateLineage, TuneError};
 
 mod budget;
 mod promotion;
 mod reference;
+pub(crate) mod response_target;
 mod retry;
+mod seed;
 mod training_suite;
 
 pub use budget::CampaignRunBound;
 pub use promotion::{
     ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
     PromotionCalculation, PromotionComparison, PromotionObjectiveResult, PromotionPairedStatistics,
-    PromotionPolicy, PromotionRunKey, PromotionRunPlan, PromotionSeedPolicy, PromotionSelection,
-    promotion_policy_digest,
+    PromotionPolicy, PromotionRunKey, PromotionRunPlan, PromotionScenarioResults,
+    PromotionSeedPolicy, PromotionSelection, promotion_policy_digest,
 };
 pub(crate) use promotion::{expected_promotion_pairs, required_improvement};
 pub use reference::MissionReference;
+pub(crate) use response_target::verify_document;
+pub use response_target::{
+    PhysicalTarget, RESPONSE_TARGET_TABLE_SCHEMA_VERSION, ResponseTargetScope, ResponseTargetTable,
+    ScenarioMotion, ScopedResponseTarget, TARGET_AUTHORITY_OBJECTIVE, TargetAuthorityBand,
+    TargetComparison, is_admissible,
+};
 pub use retry::{EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy};
+pub(crate) use seed::derive_seed;
 #[cfg(test)]
 pub(crate) use training_suite::tests::stage_for_budget;
 pub(crate) use training_suite::{AttemptRunPlan, TrainingSuiteAnchor};
@@ -129,8 +139,12 @@ pub struct QualificationPolicy {
     pub maximum_p95_loss: f64,
     /// Largest permitted mean normalized control effort.
     pub maximum_mean_control_effort: f64,
-    /// Maximum value for each required named objective.
-    pub objective_maxima: BTreeMap<String, f64>,
+    /// The objectives that every final qualification run has to state.
+    ///
+    /// The policy declares the names only. Each absolute maximum is one row of
+    /// the stage's scoped response target table, so a limit written for a
+    /// direct attitude scenario can never decide a velocity one.
+    pub objectives: BTreeSet<String>,
 }
 
 /// One bounded search and qualification stage.
@@ -161,6 +175,8 @@ pub struct SearchStage {
     pub promotion: PromotionPolicy,
     /// Absolute limits for the final release decision.
     pub qualification: QualificationPolicy,
+    /// The exact scoped limit for every decision this stage takes.
+    pub response_targets: ResponseTargetTable,
     /// How many replacement executions one quarantined attempt may receive.
     pub execution_retry: ExecutionRetryPolicy,
 }
@@ -185,7 +201,17 @@ impl SearchStage {
         )?;
         self.validate_promotion()?;
         self.execution_retry.validate()?;
-        self.validate_qualification()
+        self.validate_qualification()?;
+        response_target::validate_for_stage(&self.response_targets, self)
+    }
+
+    /// Returns the identity of the complete scoped response target table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when the table cannot encode.
+    pub fn response_target_digest(&self) -> Result<Digest, TuneError> {
+        self.response_targets.digest()
     }
 
     /// Returns the frozen suite at one position in the declared suite order.
@@ -291,6 +317,16 @@ impl SearchStage {
         if self.required_hard_gates.is_empty() || self.required_hard_gates.len() > MAX_GATE_COUNT {
             return Err(invalid_stage("the hard gate count is not valid"));
         }
+        // The crash gate is the floor of every campaign and the first gate
+        // evaluated. A campaign that scored a run after the vehicle hit
+        // something states a measurement of the collision, and a gate that
+        // ran after a bound gate would let that measurement be reported as a
+        // limit failure instead of as the crash it was.
+        if self.required_hard_gates.first().map(String::as_str) != Some(MANDATORY_CRASH_GATE_ID) {
+            return Err(invalid_stage(format!(
+                "{MANDATORY_CRASH_GATE_ID} must be the first required hard gate"
+            )));
+        }
         let mut gates = BTreeSet::new();
         for gate in &self.required_hard_gates {
             validate_name(gate, "hard gate").map_err(as_stage_error)?;
@@ -356,11 +392,11 @@ impl SearchStage {
             || policy.maximum_p95_loss < 0.0
             || !policy.maximum_mean_control_effort.is_finite()
             || !(0.0..=1.0).contains(&policy.maximum_mean_control_effort)
-            || policy.objective_maxima.iter().any(|(name, maximum)| {
-                validate_name(name, "qualification objective").is_err()
-                    || !maximum.is_finite()
-                    || *maximum < 0.0
-            })
+            || policy.objectives.is_empty()
+            || policy
+                .objectives
+                .iter()
+                .any(|name| validate_name(name, "qualification objective").is_err())
         {
             return Err(invalid_stage("the qualification policy is not valid"));
         }
@@ -417,45 +453,6 @@ fn validate_scenario(
         )));
     }
     Ok(())
-}
-
-pub(crate) fn derive_seed(
-    fixed_seed: u64,
-    set: ScenarioSet,
-    scenario: &MissionReference,
-    repetition: u32,
-) -> u64 {
-    let partition = match set {
-        ScenarioSet::Training => 0x243f_6a88_85a3_08d3,
-        ScenarioSet::Promotion => 0x1319_8a2e_0370_7344,
-        ScenarioSet::FinalQualification => 0xa409_3822_299f_31d0,
-    };
-    let bytes = scenario.content_digest.as_bytes();
-    let key = digest_word(bytes, 0)
-        ^ digest_word(bytes, 8).rotate_left(13)
-        ^ digest_word(bytes, 16).rotate_left(29)
-        ^ digest_word(bytes, 24).rotate_left(47);
-    split_mix(fixed_seed ^ partition ^ key ^ u64::from(repetition))
-}
-
-fn digest_word(bytes: &[u8; 32], start: usize) -> u64 {
-    u64::from_le_bytes([
-        bytes[start],
-        bytes[start + 1],
-        bytes[start + 2],
-        bytes[start + 3],
-        bytes[start + 4],
-        bytes[start + 5],
-        bytes[start + 6],
-        bytes[start + 7],
-    ])
-}
-
-fn split_mix(mut value: u64) -> u64 {
-    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
 }
 
 fn validate_name(value: &str, kind: &str) -> Result<(), TuneError> {

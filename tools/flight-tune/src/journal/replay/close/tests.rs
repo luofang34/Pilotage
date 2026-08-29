@@ -111,14 +111,24 @@ fn stage() -> SearchStage {
             minimum_loss_improvement: 0.1,
             minimum_relative_loss_improvement: 0.1,
             maximum_control_effort_increase: 0.1,
-            objective_regression_upper_95: BTreeMap::from([("tracking".to_owned(), 0.1)]),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 1.0,
             maximum_p95_loss: 1.0,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::new(),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
+        response_targets: crate::model::response_target::fixture::covering(&[(
+            &[crate::MissionReference {
+                revision_id: "close-scenario".to_owned(),
+                schema_version: flight_tune::MISSION_SCHEMA_VERSION,
+                content_digest: Digest::from_bytes([5; 32]),
+                max_samples: 8,
+                sample_timeout_ns: 100_000_000,
+            }],
+            &BTreeMap::from([("tracking".to_owned(), 0.1)]),
+        )]),
     }
 }
 

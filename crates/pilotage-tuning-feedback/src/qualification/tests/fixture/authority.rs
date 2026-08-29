@@ -203,7 +203,7 @@ impl JournalChain {
     fn push(&mut self, event: JournalEvent) -> AuthenticatedJournalRecord {
         let sequence = u64::try_from(self.records.len()).expect("journal sequence");
         let entry = JournalEntry {
-            schema_version: 7,
+            schema_version: 8,
             sequence,
             previous: self.records.last().map(|record| record.entry_digest),
             session: self.session.clone(),
@@ -322,7 +322,7 @@ fn terminal_events(
 
 fn unlinked_record(session: &SessionIdentity, event: JournalEvent) -> AuthenticatedJournalRecord {
     let entry = JournalEntry {
-        schema_version: 7,
+        schema_version: 8,
         sequence: 0,
         previous: None,
         session: session.clone(),

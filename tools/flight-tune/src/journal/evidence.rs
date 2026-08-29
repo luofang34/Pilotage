@@ -16,7 +16,11 @@ pub use authority::{
 };
 
 /// The supported journal evidence snapshot schema.
-pub const JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION: u16 = 4;
+///
+/// The snapshot carries the stage and the promotion closure, and both changed
+/// shape when every objective limit moved into the scoped response target
+/// table. An unbumped version would let two different shapes claim one schema.
+pub const JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION: u16 = 5;
 
 /// One authenticated current journal head.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,7 +102,7 @@ impl JournalEvidenceSnapshot {
         if let Some(proof) = &self.final_proof {
             proof.validate()?;
         }
-        self.promotion_closure.validate_for(&self.stage.promotion)?;
+        self.promotion_closure.validate_for(&self.stage)?;
         self.validate_proof_plans()?;
         self.validate_session_bindings()?;
         self.validate_closure_anchors()?;

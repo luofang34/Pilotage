@@ -9,6 +9,7 @@ mod evaluation;
 mod final_qualification;
 mod plan;
 mod promotion;
+mod response_target;
 mod stage;
 mod statistics;
 mod training_suite;

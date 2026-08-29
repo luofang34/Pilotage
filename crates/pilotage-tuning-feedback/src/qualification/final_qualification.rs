@@ -144,14 +144,27 @@ fn outcome_for(
                     metric: metric.to_owned(),
                 });
             }
-            for (metric, maximum) in &stage.qualification.objective_maxima {
+            // The authority band is absolute and per run. A candidate that
+            // improved every normalized metric by resolving less physical
+            // speed for the same operator input did not improve the command
+            // law, and no other measurement here can see that.
+            for run in runs {
+                if !super::response_target::authority_holds(stage, run) {
+                    return Ok(FinalQualificationOutcome::FailedObjective {
+                        metric: flight_tune::TARGET_AUTHORITY_OBJECTIVE.to_owned(),
+                    });
+                }
+            }
+            for metric in &stage.qualification.objectives {
                 let mut failed = false;
                 for run in runs {
+                    let target =
+                        super::response_target::row(stage, &run.mission_revision_id, metric)?;
                     let value =
                         run.objectives.get(metric).copied().ok_or_else(|| {
                             invalid(format!("a final run has no objective {metric}"))
                         })?;
-                    failed |= value > *maximum;
+                    failed |= !super::response_target::holds(target, value);
                 }
                 if failed {
                     return Ok(FinalQualificationOutcome::FailedObjective {

@@ -118,6 +118,16 @@ impl ControlFamily {
             Self::DirectAttitudeThrust => StimulusMapping::AffineExact,
         }
     }
+
+    /// Gets the one unit and reference rule that a family and channel permit.
+    ///
+    /// A consumer that states a physical limit for one family and channel has
+    /// to name the same unit the stimulus envelope carries, so the table is
+    /// stated once here and read by both.
+    #[must_use]
+    pub const fn required_physics(self, channel: ControlChannel) -> (PhysicalUnit, ReferenceRule) {
+        combination::required_physics(self, channel)
+    }
 }
 
 impl StimulusMapping {

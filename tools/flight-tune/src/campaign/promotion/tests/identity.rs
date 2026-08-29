@@ -113,14 +113,15 @@ fn a_rechained_receipt_with_a_different_run_record_still_fails_expected_identity
 
 #[test]
 fn every_run_requires_the_exact_ordered_hard_gate_set() {
+    let crash = crate::MANDATORY_CRASH_GATE_ID.to_owned();
     let cases = [
-        vec!["crash".to_owned()],
-        vec!["crash".to_owned(), "finite".to_owned(), "extra".to_owned()],
-        vec!["finite".to_owned(), "crash".to_owned()],
+        vec![crash.clone()],
+        vec![crash.clone(), "finite".to_owned(), "extra".to_owned()],
+        vec!["finite".to_owned(), crash.clone()],
     ];
     for passed_hard_gates in cases {
         let mut stage = stage();
-        stage.required_hard_gates = vec!["crash".to_owned(), "finite".to_owned()];
+        stage.required_hard_gates = vec![crash.clone(), "finite".to_owned()];
         let pairs = expected_pairs(&stage);
         let mut evidence = evidence(&stage, MetricPoint::baseline(), MetricPoint::passing());
         let context = &pairs[0].baseline.context;

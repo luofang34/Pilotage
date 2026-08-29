@@ -5,6 +5,15 @@ use serde::{Deserialize, Serialize};
 use crate::identity::digest_bytes;
 use crate::{ArtifactIdentity, EvaluatorError};
 
+/// The one hard gate every campaign must evaluate, and evaluate first.
+///
+/// A run that continued after the vehicle hit something measures the
+/// collision. Nothing downstream can tell that measurement apart from a
+/// command law that was merely poor, so the crash gate is a floor rather than
+/// a choice: a stage cannot drop it, rename it, or put another gate in front
+/// of it.
+pub const MANDATORY_CRASH_GATE_ID: &str = "flight_quality.crash_or_unexpected_contact";
+
 /// One canonical streaming hard gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,7 +45,7 @@ impl FlightQualityGate {
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
-            Self::CrashOrUnexpectedContact => "flight_quality.crash_or_unexpected_contact",
+            Self::CrashOrUnexpectedContact => MANDATORY_CRASH_GATE_ID,
             Self::FiniteSignals => "flight_quality.finite_signals",
             Self::PositionBound => "flight_quality.position_bound",
             Self::AttitudeBound => "flight_quality.attitude_bound",
@@ -84,6 +93,11 @@ impl FlightQualityGateConfig {
         let unique = self.required.iter().copied().collect::<BTreeSet<_>>();
         if self.required.is_empty() || unique.len() != self.required.len() {
             return Err(invalid("hard gates must be present and unique"));
+        }
+        if self.required.first() != Some(&FlightQualityGate::CrashOrUnexpectedContact) {
+            return Err(invalid(
+                "the crash or unexpected contact gate is evaluated first",
+            ));
         }
         for value in [
             self.maximum_position_error_m,

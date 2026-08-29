@@ -27,6 +27,7 @@ fn stated_policy(evidence: &CampaignEvidence) -> crate::RequiredPolicy {
         &evidence.journal.stage.promotion,
         &evidence.journal.stage.qualification,
         &evidence.journal.stage.execution_retry,
+        &evidence.journal.stage.response_targets,
     )
     .expect("bind the stated policy")
 }
@@ -111,12 +112,14 @@ fn journal_producer_snapshot_qualifies_independently() {
 
 /// The pinned identity is re-recorded whenever the evidence schema changes.
 ///
-/// It moved when each search group gained its own frozen training suite: the
-/// attempt role names the suite it runs, the run plan covers the suite
-/// declaration, the transition records the derived group, and the authority
-/// carries the candidates a verifier derives that group from. Every run
-/// intent, every receipt, and the whole chain take new identities, which is
-/// the point of the schema change rather than a side effect of it.
+/// It moved when every objective limit left the two policies for the scoped
+/// response target table. The stage carries the table, the policies declare
+/// names instead of numbers, the promotion comparison states one result group
+/// for each scenario, and the crash gate became the first required gate. The
+/// journal entry, the evidence snapshot, and the promotion closure all take
+/// new schema versions with it, because each embeds a shape that changed.
+/// Every run intent, every receipt, and the whole chain take new identities,
+/// which is the point of the change rather than a side effect of it.
 #[test]
 fn canonical_source_digest_is_fixed() {
     let evidence = fixture();
@@ -125,7 +128,7 @@ fn canonical_source_digest_is_fixed() {
         .expect("verify evidence");
     assert_eq!(
         verified.source_digest().to_string(),
-        "d0c083e328cf82e417aa47999e422a3b4f7fdef3fb4ae15cd142b6f92edcda41"
+        "2d8f49e7774c0a2764de95618a5d5b3941a6b1e7130199ce4e97d37ee7d39aaf"
     );
 }
 
@@ -195,10 +198,11 @@ fn one_pair_cannot_omit_an_objective() {
 
 #[test]
 fn every_run_needs_the_exact_ordered_hard_gates() {
+    let crash = flight_tune::MANDATORY_CRASH_GATE_ID;
     for hard_gates in [
-        &["crash"][..],
-        &["crash", "finite", "bounded"][..],
-        &["finite", "crash"][..],
+        vec![crash],
+        vec![crash, "finite", "bounded"],
+        vec!["finite", crash],
     ] {
         let mut evidence = fixture();
         let proof = evidence.journal.promotion_baseline.clone();
@@ -208,7 +212,7 @@ fn every_run_needs_the_exact_ordered_hard_gates() {
             proof.trial_id,
             proof.role,
             proof.candidate_digest,
-            hard_gates,
+            &hard_gates,
         );
         fixture::refresh_promotion_authority(&mut evidence);
         assert!(
@@ -294,15 +298,19 @@ fn a_campaign_run_against_another_bar_does_not_qualify() {
     );
 
     // A stricter final qualification bar is a different bar, and this
-    // campaign was not run against it.
-    let mut stricter = evidence.journal.stage.qualification.clone();
-    for maximum in stricter.objective_maxima.values_mut() {
-        *maximum /= 2.0;
+    // campaign was not run against it. The limits live in the scoped table
+    // now, so halving one row is what states the stricter bar.
+    let mut stricter = evidence.journal.stage.response_targets.targets.clone();
+    for row in &mut stricter {
+        row.limit /= 2.0;
     }
+    let stricter =
+        flight_tune::ResponseTargetTable::new(stricter).expect("a stricter table is valid");
     let required = crate::RequiredPolicy::new(
         &evidence.journal.stage.promotion,
-        &stricter,
+        &evidence.journal.stage.qualification,
         &evidence.journal.stage.execution_retry,
+        &stricter,
     )
     .expect("bind a stricter policy");
     assert!(
@@ -317,6 +325,7 @@ fn a_campaign_run_against_another_bar_does_not_qualify() {
         &looser,
         &evidence.journal.stage.qualification,
         &evidence.journal.stage.execution_retry,
+        &evidence.journal.stage.response_targets,
     )
     .expect("bind a different promotion policy");
     assert!(verified.clone().verify_qualified(&required).is_err());
@@ -327,6 +336,7 @@ fn a_campaign_run_against_another_bar_does_not_qualify() {
         &evidence.journal.stage.promotion,
         &evidence.journal.stage.qualification,
         &permissive,
+        &evidence.journal.stage.response_targets,
     )
     .expect("bind a different execution retry policy");
     assert!(

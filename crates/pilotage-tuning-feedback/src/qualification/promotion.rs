@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use flight_tune::{
     CandidateEvaluation, Digest, JournalEvidenceSnapshot, PromotionClosure, PromotionComparison,
-    PromotionDecision, PromotionObjectiveResult, RunRecord, SearchStage, SessionIdentity,
+    PromotionDecision, PromotionObjectiveResult, PromotionScenarioResults, RunRecord, SearchStage,
+    SessionIdentity,
 };
 use serde::Serialize;
 
@@ -12,12 +13,12 @@ use super::campaign::CampaignIdentity;
 use super::evaluation;
 use super::statistics;
 
-const POLICY_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-policy.v1\0";
+const POLICY_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-policy.v2\0";
 const COMPARISON_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-comparison.v1\0";
 const DECISION_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-decision.v1\0";
 const SELECTION_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-selection.v1\0";
 const CLOSURE_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-closure.v1\0";
-const PROMOTION_CLOSURE_SCHEMA_VERSION: u16 = 1;
+const PROMOTION_CLOSURE_SCHEMA_VERSION: u16 = 2;
 
 pub(super) struct PromotionResult {
     pub(super) selected_candidate: Option<Digest>,
@@ -209,19 +210,72 @@ fn compare(
             control_effort.mean,
             policy.maximum_control_effort_increase,
         ),
-        objectives: objective_results(stage, baseline_runs, frozen_runs)?,
+        scenarios: scenario_results(stage, baseline_runs, frozen_runs)?,
     })
+}
+
+/// One recomputed result group for each promotion scenario.
+///
+/// The runs are grouped by the scenario each one names, and a pair whose two
+/// sides name different scenarios is refused: a comparison across two
+/// scenarios would apply one scoped limit to evidence from another.
+fn scenario_results(
+    stage: &SearchStage,
+    baseline: &[RunRecord],
+    frozen: &[RunRecord],
+) -> Result<BTreeMap<String, PromotionScenarioResults>, FeedbackError> {
+    let mut results = BTreeMap::new();
+    for scenario in &stage.promotion_scenarios {
+        let pairs = scenario_pairs(baseline, frozen, &scenario.revision_id)?;
+        if pairs.len() < 2 {
+            return Err(invalid(format!(
+                "promotion scenario {} has fewer than two paired runs",
+                scenario.revision_id
+            )));
+        }
+        results.insert(
+            scenario.revision_id.clone(),
+            PromotionScenarioResults {
+                mission_content_digest: scenario.content_digest,
+                authority_band: super::response_target::band_for(stage, &scenario.revision_id),
+                authority_passed: pairs.iter().all(|(left, right)| {
+                    super::response_target::authority_holds(stage, left)
+                        && super::response_target::authority_holds(stage, right)
+                }),
+                objectives: objective_results(stage, &scenario.revision_id, &pairs)?,
+            },
+        );
+    }
+    Ok(results)
+}
+
+fn scenario_pairs<'a>(
+    baseline: &'a [RunRecord],
+    frozen: &'a [RunRecord],
+    mission_revision_id: &str,
+) -> Result<Vec<(&'a RunRecord, &'a RunRecord)>, FeedbackError> {
+    let mut pairs = Vec::new();
+    for (left, right) in baseline.iter().zip(frozen) {
+        if left.mission_revision_id != right.mission_revision_id {
+            return Err(invalid("a promotion pair names two scenarios"));
+        }
+        if left.mission_revision_id == mission_revision_id {
+            pairs.push((left, right));
+        }
+    }
+    Ok(pairs)
 }
 
 fn objective_results(
     stage: &SearchStage,
-    baseline: &[RunRecord],
-    frozen: &[RunRecord],
+    mission_revision_id: &str,
+    pairs: &[(&RunRecord, &RunRecord)],
 ) -> Result<BTreeMap<String, PromotionObjectiveResult>, FeedbackError> {
     let mut results = BTreeMap::new();
-    for (name, maximum) in &stage.promotion.objective_regression_upper_95 {
-        let mut deltas = Vec::with_capacity(baseline.len());
-        for (left, right) in baseline.iter().zip(frozen) {
+    for name in &stage.promotion.objectives {
+        let target = super::response_target::row(stage, mission_revision_id, name)?;
+        let mut deltas = Vec::with_capacity(pairs.len());
+        for (left, right) in pairs {
             let left = left
                 .objectives
                 .get(name)
@@ -239,8 +293,8 @@ fn objective_results(
             name.clone(),
             PromotionObjectiveResult {
                 statistics,
-                maximum_upper_95: *maximum,
-                passed: within_upper_limit(statistics.upper_95, *maximum),
+                maximum_upper_95: target.limit,
+                passed: super::response_target::holds(target, statistics.upper_95),
             },
         );
     }
@@ -354,7 +408,9 @@ fn passing_runs<'a>(
 fn comparison_passes(comparison: &PromotionComparison) -> bool {
     comparison.loss_passed
         && comparison.control_effort_passed
-        && comparison.objectives.values().all(|result| result.passed)
+        && comparison.scenarios.values().all(|scenario| {
+            scenario.authority_passed && scenario.objectives.values().all(|result| result.passed)
+        })
 }
 
 const fn within_upper_limit(actual: f64, maximum: f64) -> bool {

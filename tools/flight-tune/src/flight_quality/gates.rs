@@ -36,7 +36,19 @@ impl FlightQualityGateEvaluator {
         })
     }
 
-    fn evaluate_one(&mut self, gate: FlightQualityGate, sample: &TelemetrySample) -> GateOutcome {
+    /// Evaluates one gate, with an absent contact signal as a harness fault.
+    ///
+    /// Every other gate reads a missing or unusable channel as a failure of
+    /// the run. The crash gate cannot: a sample that carries no contact value
+    /// is not a sample that proves the vehicle did not hit anything, and
+    /// scoring it as a passed gate or as a crashed vehicle both state
+    /// something the run never measured. It refuses instead, which quarantines
+    /// the execution rather than judging the candidate.
+    fn evaluate_one(
+        &mut self,
+        gate: FlightQualityGate,
+        sample: &TelemetrySample,
+    ) -> Result<GateOutcome, EvaluatorError> {
         let result = match gate {
             FlightQualityGate::CrashOrUnexpectedContact => crash_or_contact(sample),
             FlightQualityGate::FiniteSignals => finite_signals(sample),
@@ -73,7 +85,10 @@ impl FlightQualityGateEvaluator {
             ),
             FlightQualityGate::RecoveryDeadline => self.recovery(sample),
         };
-        to_outcome(gate, result)
+        if gate == FlightQualityGate::CrashOrUnexpectedContact {
+            return result.map(|detail| to_outcome(gate, Ok(detail)));
+        }
+        Ok(to_outcome(gate, result))
     }
 
     fn saturation(&mut self, sample: &TelemetrySample) -> Result<Option<String>, EvaluatorError> {
@@ -143,7 +158,7 @@ impl GateEvaluator for FlightQualityGateEvaluator {
         let required = self.config.required.clone();
         let mut outcomes = Vec::with_capacity(required.len());
         for gate in required {
-            let outcome = self.evaluate_one(gate, sample);
+            let outcome = self.evaluate_one(gate, sample)?;
             let failed = !outcome.passed;
             outcomes.push(outcome);
             if failed {

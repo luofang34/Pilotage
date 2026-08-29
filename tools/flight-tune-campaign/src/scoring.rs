@@ -40,6 +40,12 @@ pub mod channel {
     pub const EFFORT: &str = "effort";
     /// Nonzero while an actuator limit is active.
     pub const SATURATED: &str = "saturated";
+    /// The physical demand the candidate resolved, in the envelope's unit.
+    pub const PHYSICAL_DEMAND: &str = "physical_demand";
+    /// Nonzero when the simulator detected a crash.
+    pub const CRASHED: &str = "crashed";
+    /// Nonzero when the simulator detected unexpected ground contact.
+    pub const GROUND_CONTACT: &str = "ground_contact";
     /// Which phase the trial is in: 0 idle, 1 step, 2 hold, 3 release,
     /// 4 settled.
     pub const PHASE: &str = "phase";
@@ -71,6 +77,7 @@ struct Trace {
     response: Vec<TimedValue>,
     position: Vec<TimedValue>,
     acceleration: Vec<TimedValue>,
+    demand: Vec<TimedValue>,
     motion: Vec<MotionPoint>,
     control: Vec<ControlPoint>,
     phase: Vec<TimedValue>,
@@ -158,6 +165,10 @@ impl MetricEvaluator for FlightQualityEvaluator {
             time_s,
             value: read(channel::ACCELERATION_MPS2)?,
         });
+        self.trace.demand.push(TimedValue {
+            time_s,
+            value: read(channel::PHYSICAL_DEMAND)?,
+        });
         self.trace.motion.push(MotionPoint {
             time_s,
             position_m,
@@ -189,26 +200,7 @@ impl MetricEvaluator for FlightQualityEvaluator {
 
         let control = measure_control(&trace.control).map_err(fail)?;
         let jerk = measure_jerk(&trace.acceleration).map_err(fail)?;
-        // The step is described by what the run did: the demand before the
-        // input and the demand it settled on after it.
-        let initial_value = value_at(&trace.command, step_at, true);
-        let target_value = value_at(&trace.command, hold_at, false);
-        // The step response is measured over the step, which ends when the
-        // stick is let go. Measured over the whole trial it never settles: the
-        // response leaves the band again at release, and "the final entry into
-        // the band" is then a thing that never happened.
-        let command_window = window(&trace.command, step_at, release_at);
-        let response_window = window(&trace.response, step_at, release_at);
-        let response = measure_step_response(
-            &command_window,
-            &response_window,
-            StepSpec {
-                input_time_s: step_at,
-                initial_value,
-                target_value,
-            },
-        )
-        .map_err(fail)?;
+        let response = step_response(&trace, step_at, hold_at, release_at).map_err(fail)?;
         let release = measure_release(&trace.motion, release_at, settled_at).map_err(fail)?;
         let hold_position = value_at(&trace.position, settled_at, false);
         let hold = measure_hold(&trace.position, settled_at, hold_position).map_err(fail)?;
@@ -224,7 +216,15 @@ impl MetricEvaluator for FlightQualityEvaluator {
             settled_at,
             hold_position,
         );
-        let objectives = objectives_from(&control, &jerk, &hold, &release, &response, worst);
+        let mut objectives = objectives_from(&control, &jerk, &hold, &release, &response, worst);
+        // The physical target the candidate resolved for the held operator
+        // input. It is read at the hold, after the demand rate limits have
+        // settled, so it states what the stick was worth rather than what the
+        // vehicle was passing through on the way there.
+        objectives.insert(
+            flight_tune::TARGET_AUTHORITY_OBJECTIVE.to_owned(),
+            value_at(&trace.demand, hold_at, false).abs(),
+        );
 
         // The scalar the search minimises is the mean absolute tracking error
         // over the trial. It is chosen rather than a weighted sum of the
@@ -255,6 +255,30 @@ impl MetricEvaluator for FlightQualityEvaluator {
         self.active = false;
         Ok(())
     }
+}
+
+/// The step response over the interval the stick was held.
+///
+/// The step is described by what the run did: the demand before the input and
+/// the demand it settled on after it. The window ends when the stick is let
+/// go, because measured over the whole trial the response leaves the settling
+/// band again at release, and "the final entry into the band" is then a thing
+/// that never happened.
+fn step_response(
+    trace: &Trace,
+    step_at: f64,
+    hold_at: f64,
+    release_at: f64,
+) -> Result<pilotage_flight_quality::ResponseMetrics, pilotage_flight_quality::MetricError> {
+    measure_step_response(
+        &window(&trace.command, step_at, release_at),
+        &window(&trace.response, step_at, release_at),
+        StepSpec {
+            input_time_s: step_at,
+            initial_value: value_at(&trace.command, step_at, true),
+            target_value: value_at(&trace.command, hold_at, false),
+        },
+    )
 }
 
 /// The series value at or nearest one time.

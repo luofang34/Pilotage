@@ -42,8 +42,8 @@ pub use error::TuneError;
 pub use flight_quality::{
     CanonicalTelemetryKey, FlightQualityGate, FlightQualityGateConfig, FlightQualityGateEvaluator,
     FlightQualityMetricConfig, FlightQualityMetricEvaluator, FlightQualityReport,
-    FlightQualityScales, FlightQualityScenario, FlightQualityWeights, ReleasePlan, StepPlan,
-    WindPlan,
+    FlightQualityScales, FlightQualityScenario, FlightQualityWeights, MANDATORY_CRASH_GATE_ID,
+    ReleasePlan, StepPlan, WindPlan,
 };
 pub use identity::{
     ArtifactIdentity, CandidateLineage, RuntimeIdentities, scenario_engine_identity,
@@ -62,18 +62,20 @@ pub use journal::{
 pub use model::{
     CampaignRunBound, Candidate, EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy,
     ExpectedPromotionPair, ExpectedPromotionRun, MissionReference, PROMOTION_POLICY_SCHEMA_VERSION,
-    ParameterBounds, PromotionCalculation, PromotionComparison, PromotionObjectiveResult,
-    PromotionPairedStatistics, PromotionPolicy, PromotionRunKey, PromotionRunPlan,
-    PromotionSeedPolicy, PromotionSelection, QualificationPolicy, SearchGroup, SearchGroupBinding,
-    SearchGroupKind, SearchStage, TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite,
-    promotion_policy_digest,
+    ParameterBounds, PhysicalTarget, PromotionCalculation, PromotionComparison,
+    PromotionObjectiveResult, PromotionPairedStatistics, PromotionPolicy, PromotionRunKey,
+    PromotionRunPlan, PromotionScenarioResults, PromotionSeedPolicy, PromotionSelection,
+    QualificationPolicy, RESPONSE_TARGET_TABLE_SCHEMA_VERSION, ResponseTargetScope,
+    ResponseTargetTable, ScenarioMotion, ScopedResponseTarget, SearchGroup, SearchGroupBinding,
+    SearchGroupKind, SearchStage, TARGET_AUTHORITY_OBJECTIVE, TRAINING_SUITE_SCHEMA_VERSION,
+    TargetAuthorityBand, TargetComparison, TrainingSuite, is_admissible, promotion_policy_digest,
 };
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use scenario_runtime::{
-    CampaignMissionRuntime, ConditionAdmission, KinematicTruth, ScenarioFrame,
+    CampaignMissionRuntime, ConditionAdmission, KinematicTruth, ReferenceStimulus, ScenarioFrame,
     ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError, ScenarioStopContext,
     ScenarioStopReason, UncertaintyDeclaration, calibration_mission_document,
-    mission_document_from_scenario, reference_observation_scenario,
+    mission_document_from_scenario, reference_observation_scenario, reference_stimulus_scenario,
 };
 pub use score::{
     CandidateEvaluation, ConfidenceInterval, GateEvaluator, GateOutcome, HardGateFailure,

@@ -18,6 +18,9 @@
 /// The identity of the fixed numerical rules in this crate.
 pub const FLIGHT_QUALITY_SCORER_VERSION: u16 = 1;
 
+mod angular;
+mod angular_release;
+mod collective;
 mod control;
 mod error;
 mod gate;
@@ -28,6 +31,18 @@ mod series;
 mod signal;
 mod vocabulary;
 
+pub use angular::{
+    ANGULAR_DELAY_FRACTION, ANGULAR_RISE_HIGH_FRACTION, ANGULAR_RISE_LOW_FRACTION,
+    ANGULAR_SETTLING_FRACTION, ANGULAR_STEADY_STATE_WINDOW_S, AngularStepMetrics, AngularStepSpec,
+    MINIMUM_ANGULAR_AMPLITUDE_RAD, measure_angular_step, shortest_arc_rad,
+};
+pub use angular_release::{
+    AngularReleaseMetrics, AngularReleaseSpec, FINAL_RATE_WINDOW_S, measure_angular_release,
+};
+pub use collective::{
+    COLLECTIVE_DELAY_FRACTION, COLLECTIVE_STEADY_WINDOW_S, CollectiveMetrics, CollectiveStepSpec,
+    MINIMUM_COLLECTIVE_DELTA, measure_collective_response,
+};
 pub use control::{ControlMetrics, measure_control};
 pub use error::MetricError;
 pub use gate::{GateContext, HardGate, HardGateOutcome, HardGateReport};
@@ -42,8 +57,9 @@ pub use response::{
 pub use sample::{ControlPoint, MotionPoint, TimedValue};
 pub use signal::{JerkMetrics, SignalStats, measure_jerk, measure_signal};
 pub use vocabulary::{
-    CONTROL_METRICS, HOLD_METRICS, JERK_METRICS, RELEASE_METRICS, RESPONSE_METRICS, SIGNAL_METRICS,
-    is_producible, producible_metrics,
+    ANGULAR_METRICS, ANGULAR_RELEASE_METRICS, COLLECTIVE_METRICS, CONTROL_METRICS, HOLD_METRICS,
+    JERK_METRICS, RELEASE_METRICS, RESPONSE_METRICS, SIGNAL_METRICS, is_producible,
+    producible_metrics,
 };
 
 #[cfg(test)]

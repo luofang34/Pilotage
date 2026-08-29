@@ -51,14 +51,72 @@ fn start_candidate() -> Candidate {
     .expect("build the warm start")
 }
 
+/// Scores one candidate on the bench trial, through the shipped shaper and
+/// the shipped evaluator.
+///
+/// The trace is the one the backend produces, so a result here is a result the
+/// campaign would have measured.
+fn score_candidate(model: BenchVehicle, candidate: &Candidate) -> flight_tune::MetricValues {
+    use flight_tune::MetricEvaluator as _;
+    let response = super::response_from(candidate).expect("response");
+    let mut shaper = pilotage_control_feel::AxisDemandShaper::default();
+    let mut evaluator =
+        FlightQualityEvaluator::new(Digest::from_bytes([9; 32])).expect("evaluator");
+    evaluator
+        .begin(&bench_scenario("training-step", model).expect("build scenario"))
+        .expect("begin");
+    let (mut velocity, mut position, mut previous) = (0.0_f64, 0.0_f64, 0.0_f64);
+    let mut step: u32 = 0;
+    loop {
+        let time_s = f64::from(step) * super::DT_S;
+        if time_s >= super::END_S {
+            break;
+        }
+        let (phase, stick) = super::BenchBackend::input_at(time_s);
+        let shaped = shaper.step(stick, 1.0, super::DT_S as f32, response).value;
+        let demanded = f64::from(shaped) * model.full_scale_mps;
+        velocity += (demanded - velocity) * super::DT_S / model.time_constant_s;
+        position += velocity * super::DT_S;
+        let acceleration = (velocity - previous) / super::DT_S;
+        previous = velocity;
+        let sample = flight_tune::TelemetrySample {
+            sequence: u64::from(step),
+            elapsed_ms: u64::from(step) * 20,
+            values: std::collections::BTreeMap::from([
+                (channel::COMMAND.to_owned(), f64::from(shaped)),
+                (
+                    channel::RESPONSE.to_owned(),
+                    velocity / model.full_scale_mps,
+                ),
+                (channel::POSITION_M.to_owned(), position),
+                (channel::VELOCITY_MPS.to_owned(), velocity),
+                (channel::ACCELERATION_MPS2.to_owned(), acceleration),
+                (channel::PHYSICAL_DEMAND.to_owned(), demanded),
+                (channel::EFFORT.to_owned(), f64::from(shaped.abs())),
+                (
+                    channel::SATURATED.to_owned(),
+                    f64::from(u8::from(shaped.abs() >= 0.999)),
+                ),
+                (channel::CRASHED.to_owned(), 0.0),
+                (channel::GROUND_CONTACT.to_owned(), 0.0),
+                (channel::PHASE.to_owned(), phase),
+            ]),
+        };
+        evaluator.observe(&sample).expect("observe");
+        step = step.wrapping_add(1);
+    }
+    evaluator.finish().expect("finish")
+}
+
 /// Runs one complete campaign for one vehicle and returns its final verdict.
 fn campaign(
     name: &str,
     model: BenchVehicle,
     promotion: flight_tune::PromotionPolicy,
     qualification: flight_tune::QualificationPolicy,
+    response_targets: flight_tune::ResponseTargetTable,
 ) -> (FinalQualificationOutcome, PathBuf) {
-    campaign_with_attempts(name, model, promotion, qualification, 3)
+    campaign_with_attempts(name, model, promotion, qualification, response_targets, 3)
 }
 
 /// The same chain with a stated training budget, so the smoke can fly
@@ -68,6 +126,7 @@ fn campaign_with_attempts(
     model: BenchVehicle,
     promotion: flight_tune::PromotionPolicy,
     qualification: flight_tune::QualificationPolicy,
+    response_targets: flight_tune::ResponseTargetTable,
     training_attempts: u64,
 ) -> (FinalQualificationOutcome, PathBuf) {
     let scratch = Scratch::new(name);
@@ -75,7 +134,7 @@ fn campaign_with_attempts(
     let handle = BenchHandle::default();
     let mut tuner = Tuner::open_or_resume(
         &root,
-        bench_stage(name, promotion, qualification).expect("build stage"),
+        bench_stage(name, model, promotion, qualification, response_targets).expect("build stage"),
         4_242,
         start_candidate(),
         BenchBackend::new(
@@ -128,19 +187,24 @@ const BENCH_MAXIMUM_DURATION_NS: u64 = 9_520_000_000_000;
 /// rather than from the wall clock.
 #[test]
 fn each_vehicle_states_a_finite_bound_inside_its_declared_budget() {
-    for (name, promotion, qualification) in [
+    for (name, model, promotion, qualification, response_targets) in [
         (
             "alia250",
+            BenchVehicle::alia250(),
             crate::alia250_promotion_policy(),
             crate::alia250_qualification_policy(),
+            crate::alia250_response_targets().expect("build response targets"),
         ),
         (
             "x500",
+            BenchVehicle::x500(),
             crate::x500_promotion_policy(),
             crate::x500_qualification_policy(),
+            crate::x500_response_targets().expect("build response targets"),
         ),
     ] {
-        let stage = bench_stage(name, promotion, qualification).expect("build stage");
+        let stage = bench_stage(name, model, promotion, qualification, response_targets)
+            .expect("build stage");
         let bound = stage.run_bound(3).expect("state a bounded campaign");
 
         assert_eq!(
@@ -167,6 +231,7 @@ fn a_campaign_smokes_the_whole_chain() {
         BenchVehicle::alia250(),
         crate::alia250_promotion_policy(),
         crate::alia250_qualification_policy(),
+        crate::alia250_response_targets().expect("build response targets"),
         1,
     );
     assert!(
@@ -189,6 +254,7 @@ fn a_campaign_runs_end_to_end_for_the_alia250() {
         BenchVehicle::alia250(),
         crate::alia250_promotion_policy(),
         crate::alia250_qualification_policy(),
+        crate::alia250_response_targets().expect("build response targets"),
     );
     // Qualified, not merely "a verdict": a bar no legal candidate can
     // reach would seal FailedObjective on every run, and this assertion
@@ -212,6 +278,7 @@ fn a_campaign_runs_end_to_end_for_the_x500() {
         BenchVehicle::x500(),
         crate::x500_promotion_policy(),
         crate::x500_qualification_policy(),
+        crate::x500_response_targets().expect("build response targets"),
     );
     assert!(
         matches!(outcome, FinalQualificationOutcome::Qualified),
@@ -265,8 +332,10 @@ fn the_warm_start_is_the_law_the_vehicle_would_otherwise_ship() {
     // proposal would be a correction rather than a step.
     let stage = bench_stage(
         "bounds",
+        BenchVehicle::alia250(),
         crate::alia250_promotion_policy(),
         crate::alia250_qualification_policy(),
+        crate::alia250_response_targets().expect("build response targets"),
     )
     .expect("build stage");
     for (name, bounds) in &stage.allowlist {
@@ -287,60 +356,88 @@ fn the_warm_start_is_the_law_the_vehicle_would_otherwise_ship() {
 #[ignore = "calibration probe, prints with --nocapture"]
 #[allow(clippy::disallowed_macros)] // an ignored diagnostic exists to print
 fn probe_warm_start_objectives() {
-    use flight_tune::MetricEvaluator as _;
     for (name, model) in [
         ("alia250", BenchVehicle::alia250()),
         ("x500", BenchVehicle::x500()),
     ] {
-        let candidate = start_candidate();
-        let response = super::response_from(&candidate).expect("response");
-        let mut shaper = pilotage_control_feel::AxisDemandShaper::default();
-        let mut evaluator =
-            FlightQualityEvaluator::new(Digest::from_bytes([9; 32])).expect("evaluator");
-        evaluator
-            .begin(&bench_scenario("probe").expect("build scenario"))
-            .expect("begin");
-        let (mut velocity, mut position, mut previous) = (0.0_f64, 0.0_f64, 0.0_f64);
-        let mut step: u32 = 0;
-        loop {
-            let time_s = f64::from(step) * super::DT_S;
-            if time_s >= super::END_S {
-                break;
-            }
-            let (phase, stick) = super::BenchBackend::input_at(time_s);
-            let shaped = shaper.step(stick, 1.0, super::DT_S as f32, response).value;
-            let demanded = f64::from(shaped) * model.full_scale_mps;
-            velocity += (demanded - velocity) * super::DT_S / model.time_constant_s;
-            position += velocity * super::DT_S;
-            let acceleration = (velocity - previous) / super::DT_S;
-            previous = velocity;
-            let sample = flight_tune::TelemetrySample {
-                sequence: u64::from(step),
-                elapsed_ms: u64::from(step) * 20,
-                values: std::collections::BTreeMap::from([
-                    (channel::COMMAND.to_owned(), f64::from(shaped)),
-                    (
-                        channel::RESPONSE.to_owned(),
-                        velocity / model.full_scale_mps,
-                    ),
-                    (channel::POSITION_M.to_owned(), position),
-                    (channel::VELOCITY_MPS.to_owned(), velocity),
-                    (channel::ACCELERATION_MPS2.to_owned(), acceleration),
-                    (channel::EFFORT.to_owned(), f64::from(shaped.abs())),
-                    (
-                        channel::SATURATED.to_owned(),
-                        f64::from(u8::from(shaped.abs() >= 0.999)),
-                    ),
-                    (channel::PHASE.to_owned(), phase),
-                ]),
-            };
-            evaluator.observe(&sample).expect("observe");
-            step = step.wrapping_add(1);
-        }
-        let values = evaluator.finish().expect("finish");
+        let values = score_candidate(model, &start_candidate());
+
         eprintln!("=== {name} loss={} objectives:", values.loss);
         for (key, value) in &values.objectives {
             eprintln!("  {key} = {value:.4}");
         }
     }
+}
+
+/// A candidate that gives away operator authority is refused by the band, and
+/// by nothing else.
+///
+/// This is the failure a normalized response metric cannot see. A larger expo
+/// resolves less physical speed for the same stick, so the vehicle reaches its
+/// smaller target sooner and overshoots it less, and every normalized
+/// measurement reads that as a better command law. The three halves are
+/// asserted together on purpose: the metrics improve, the physical target
+/// drops, and the band is the only thing that refuses it.
+#[test]
+fn a_candidate_that_lowers_its_physical_target_fails_the_authority_band() {
+    let model = BenchVehicle::alia250();
+    let shipped = start_candidate();
+    let mut parameters = warm_start_parameters(FeelMode::Balanced);
+    parameters.insert(parameter::CENTER_EXPO.to_owned(), 0.7);
+    parameters.insert(parameter::OUTER_EXPO.to_owned(), 0.7);
+    parameters.insert(parameter::DEADZONE.to_owned(), 0.12);
+    let quiet = Candidate::new(
+        CandidateLineage {
+            schema: "pilotage.bench.candidate.v1".to_owned(),
+            base_preset_digest: Digest::from_bytes([2; 32]),
+            plant_digest: Digest::from_bytes([3; 32]),
+        },
+        parameters,
+    )
+    .expect("build the quieter candidate");
+
+    let shipped_values = score_candidate(model, &shipped);
+    let quiet_values = score_candidate(model, &quiet);
+    let objective = |values: &flight_tune::MetricValues, name: &str| {
+        *values
+            .objectives
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} is measured"))
+    };
+
+    // One: the normalized response metrics do not get worse.
+    let shipped_settling = objective(&shipped_values, "response.settling_time_s");
+    let quiet_settling = objective(&quiet_values, "response.settling_time_s");
+    assert!(
+        quiet_settling <= shipped_settling,
+        "the quieter candidate settles no later: {quiet_settling} against {shipped_settling}"
+    );
+    let shipped_overshoot = objective(&shipped_values, "response.overshoot_fraction");
+    let quiet_overshoot = objective(&quiet_values, "response.overshoot_fraction");
+    assert!(
+        quiet_overshoot <= shipped_overshoot,
+        "the quieter candidate overshoots no more: {quiet_overshoot} against {shipped_overshoot}"
+    );
+
+    // Two: it resolved a smaller physical target for the same operator input.
+    let name = flight_tune::TARGET_AUTHORITY_OBJECTIVE;
+    let shipped_target = objective(&shipped_values, name);
+    let quiet_target = objective(&quiet_values, name);
+    assert!(
+        quiet_target < shipped_target,
+        "the quieter candidate asks for less speed: {quiet_target} against {shipped_target}"
+    );
+
+    // Three: the band is what refuses it, and the shipped law clears it.
+    let table = crate::alia250_response_targets().expect("build response targets");
+    let promotion = crate::bench_mission_revision_id(crate::BENCH_PROMOTION_TRIAL_ID, model)
+        .expect("promotion mission identity");
+    assert!(
+        table.authority_holds(&promotion, Some(shipped_target)),
+        "the shipped law keeps its authority at {shipped_target} m/s"
+    );
+    assert!(
+        !table.authority_holds(&promotion, Some(quiet_target)),
+        "the quieter candidate gave away authority at {quiet_target} m/s"
+    );
 }

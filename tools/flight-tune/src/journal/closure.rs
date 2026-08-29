@@ -2,11 +2,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::digest_bytes;
 use crate::{
-    Digest, PromotionComparison, PromotionDecision, PromotionPolicy, PromotionSelection, TuneError,
+    Digest, PromotionComparison, PromotionDecision, PromotionSelection, SearchStage, TuneError,
 };
 
 /// The supported promotion closure schema.
-pub const PROMOTION_CLOSURE_SCHEMA_VERSION: u16 = 1;
+///
+/// The closure embeds the paired comparison, which now states one result group
+/// for each promotion scenario and the authority each one kept. A closure at
+/// the earlier version held one flat objective map, so the two shapes cannot
+/// share a version number.
+pub const PROMOTION_CLOSURE_SCHEMA_VERSION: u16 = 2;
 
 const COMPARISON_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-comparison.v1\0";
 const DECISION_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-decision.v1\0";
@@ -144,18 +149,19 @@ impl PromotionClosure {
         Ok(())
     }
 
-    /// Validates the paired comparison against its complete policy.
+    /// Validates the paired comparison against its complete stage.
     ///
     /// # Errors
     ///
-    /// Returns [`TuneError`] when the policy or comparison differs.
-    pub fn validate_for(&self, policy: &PromotionPolicy) -> Result<(), TuneError> {
+    /// Returns [`TuneError`] when the policy, scoped limits, or comparison
+    /// differ.
+    pub fn validate_for(&self, stage: &SearchStage) -> Result<(), TuneError> {
         self.validate()?;
-        if self.policy_digest != crate::promotion_policy_digest(policy)? {
+        if self.policy_digest != crate::promotion_policy_digest(&stage.promotion)? {
             return Err(invalid("a promotion closure policy changed"));
         }
         if let Some(comparison) = &self.comparison {
-            comparison.validate_for(policy)?;
+            comparison.validate_for(stage)?;
         }
         Ok(())
     }

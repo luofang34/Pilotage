@@ -30,7 +30,10 @@ pub(super) fn run(
         } else {
             BTreeMap::from([("tracking".to_owned(), point.objective)])
         },
-        passed_hard_gates: vec!["crash".to_owned(), "finite".to_owned()],
+        passed_hard_gates: vec![
+            flight_tune::MANDATORY_CRASH_GATE_ID.to_owned(),
+            "finite".to_owned(),
+        ],
     }
 }
 
