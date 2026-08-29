@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use flight_tune::{
-    PROMOTION_POLICY_SCHEMA_VERSION, PromotionPolicy, PromotionSeedPolicy, QualificationPolicy,
+    ExecutionRetryPolicy, PROMOTION_POLICY_SCHEMA_VERSION, PromotionPolicy, PromotionSeedPolicy,
+    QualificationPolicy,
 };
 use pilotage_tuning_feedback::{FeedbackError, RequiredPolicy};
 
@@ -100,7 +101,11 @@ pub fn alia250_qualification_policy() -> QualificationPolicy {
 ///
 /// Returns [`FeedbackError`] when a policy cannot be encoded.
 pub fn alia250_required_policy() -> Result<RequiredPolicy, FeedbackError> {
-    RequiredPolicy::new(&alia250_promotion_policy(), &alia250_qualification_policy())
+    RequiredPolicy::new(
+        &alia250_promotion_policy(),
+        &alia250_qualification_policy(),
+        &execution_retry_policy(),
+    )
 }
 
 /// Returns the default x500 paired promotion policy.
@@ -121,7 +126,20 @@ pub fn x500_qualification_policy() -> QualificationPolicy {
 ///
 /// Returns [`FeedbackError`] when a policy cannot be encoded.
 pub fn x500_required_policy() -> Result<RequiredPolicy, FeedbackError> {
-    RequiredPolicy::new(&x500_promotion_policy(), &x500_qualification_policy())
+    RequiredPolicy::new(
+        &x500_promotion_policy(),
+        &x500_qualification_policy(),
+        &execution_retry_policy(),
+    )
+}
+
+/// The execution retry limit every shipped vehicle campaign runs against.
+///
+/// A replacement execution is an execution the operator discarded. Neither
+/// vehicle bar admits one, so a campaign that authorized replacements does
+/// not clear the bar this consumer states.
+fn execution_retry_policy() -> ExecutionRetryPolicy {
+    ExecutionRetryPolicy::none()
 }
 
 /// One paired promotion policy over a vehicle's objective limits.

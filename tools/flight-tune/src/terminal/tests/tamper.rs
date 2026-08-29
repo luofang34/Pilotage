@@ -185,6 +185,7 @@ fn challenger_intent() -> RunTerminalIntent {
         &scenario,
         0,
         41,
+        0,
     )
     .expect("create challenger context");
     RunTerminalIntent::new(

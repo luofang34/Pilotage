@@ -312,6 +312,7 @@ fn run_context(session_digest: Digest) -> RunExecutionContext {
         &scenario,
         0,
         41,
+        0,
     )
     .expect("make run context")
 }

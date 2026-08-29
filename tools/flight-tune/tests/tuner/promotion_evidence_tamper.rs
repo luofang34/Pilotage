@@ -271,6 +271,7 @@ fn receipt_with_scenario_digest(
         &scenario,
         original.repetition(),
         original.seed(),
+        0,
     )
     .expect("create foreign scenario context");
     let RunTerminalSemanticOutcome::ScenarioComplete { run, .. } = receipt.intent().outcome()

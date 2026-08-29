@@ -4,7 +4,11 @@ use crate::{
     TuneError,
 };
 
-use super::{JournalState, PendingAttempt, PendingOutcome, invalid, plan, terminal, transition};
+use super::super::retry::{AuthorizedRetry, quarantine_reason_digest};
+use super::{
+    JournalState, PendingAttempt, PendingOutcome, PendingRetryDecision, invalid, plan, terminal,
+    transition,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare(
@@ -29,19 +33,127 @@ pub(super) fn prepare(
             "an attempt preparation has invalid state or identity",
         ));
     }
-    transition::validate_attempt(state, role, candidate, transition_reference)?;
+    let retry_index = prepared_retry_index(
+        state,
+        trial_id,
+        role,
+        candidate,
+        plan_digest,
+        transition_reference,
+    )?;
     state.pending = Some(PendingAttempt {
         trial_id,
         role,
         candidate,
         plan_digest,
         transition: transition_reference.cloned(),
+        retry_index,
         prepared_runs: Vec::new(),
         outcome: None,
+        retry_decision: None,
     });
     state.authorized_transition = None;
+    state.authorized_retry = None;
     state.next_trial_id = state.next_trial_id.wrapping_add(1);
     Ok(())
+}
+
+/// Derives how many replacements separate this preparation from its source.
+///
+/// A first execution derives zero. A replacement derives its index from the
+/// authorization the quarantined source produced, never from the event that
+/// prepares it, so a forged index cannot enter the chain.
+fn prepared_retry_index(
+    state: &JournalState,
+    trial_id: u64,
+    role: AttemptRole,
+    candidate: Digest,
+    plan_digest: Digest,
+    transition_reference: Option<&CandidateTransitionReference>,
+) -> Result<u32, TuneError> {
+    let Some(retry) = state.authorized_retry else {
+        transition::validate_attempt(state, role, candidate, transition_reference)?;
+        return Ok(0);
+    };
+    if retry.replacement_trial_id != trial_id
+        || retry.role != role
+        || retry.candidate != candidate
+        || retry.plan_digest != plan_digest
+        || retry.transition.as_ref() != transition_reference
+    {
+        return Err(invalid(
+            "a replacement attempt changed its authorized execution context",
+        ));
+    }
+    Ok(retry.retry_index)
+}
+
+pub(super) fn retry_authorized(
+    state: &mut JournalState,
+    source_trial_id: u64,
+    replacement_trial_id: u64,
+    retry_index: u32,
+    reason_digest: Digest,
+    stage: &SearchStage,
+) -> Result<(), TuneError> {
+    let expected_replacement = state.next_trial_id;
+    let permitted = stage.execution_retry;
+    let pending = quarantined_without_decision(state, source_trial_id)?;
+    let expected_reason = pending_reason_digest(pending)?;
+    if !permitted.permits_replacement(pending.retry_index)
+        || replacement_trial_id != expected_replacement
+        || retry_index != pending.retry_index.wrapping_add(1)
+        || reason_digest != expected_reason
+    {
+        return Err(invalid(
+            "an authorized retry does not match its quarantined attempt",
+        ));
+    }
+    pending.retry_decision = Some(PendingRetryDecision::Authorized {
+        replacement_trial_id,
+        retry_index,
+    });
+    Ok(())
+}
+
+pub(super) fn retry_exhausted(
+    state: &mut JournalState,
+    source_trial_id: u64,
+    retry_index: u32,
+    reason_digest: Digest,
+    stage: &SearchStage,
+) -> Result<(), TuneError> {
+    let permitted = stage.execution_retry;
+    let pending = quarantined_without_decision(state, source_trial_id)?;
+    let expected_reason = pending_reason_digest(pending)?;
+    if permitted.permits_replacement(pending.retry_index)
+        || retry_index != pending.retry_index
+        || reason_digest != expected_reason
+    {
+        return Err(invalid(
+            "an exhausted retry does not match its quarantined attempt",
+        ));
+    }
+    pending.retry_decision = Some(PendingRetryDecision::Exhausted { retry_index });
+    Ok(())
+}
+
+fn quarantined_without_decision(
+    state: &mut JournalState,
+    trial_id: u64,
+) -> Result<&mut PendingAttempt, TuneError> {
+    state
+        .pending
+        .as_mut()
+        .filter(|pending| pending.trial_id == trial_id && pending.awaits_retry_decision())
+        .ok_or_else(|| invalid("no quarantined attempt awaits a retry decision"))
+}
+
+fn pending_reason_digest(pending: &PendingAttempt) -> Result<Digest, TuneError> {
+    pending
+        .quarantine_reason()
+        .map(quarantine_reason_digest)
+        .ok_or_else(|| invalid("a quarantined attempt has no reason bytes"))
 }
 
 pub(super) fn role_allowed(
@@ -199,6 +311,9 @@ pub(super) fn cleanup(
     if pending.trial_id != trial_id || pending.outcome.is_none() {
         return Err(invalid("cleanup has the wrong trial or no saved outcome"));
     }
+    if pending.awaits_retry_decision() {
+        return Err(invalid("a quarantined attempt has no retry decision"));
+    }
     if cleanup.succeeded() {
         let completed = state
             .pending
@@ -210,6 +325,25 @@ pub(super) fn cleanup(
 }
 
 fn finalize(state: &mut JournalState, pending: PendingAttempt) -> Result<(), TuneError> {
+    if let Some(PendingRetryDecision::Authorized {
+        replacement_trial_id,
+        retry_index,
+    }) = pending.retry_decision
+    {
+        // A replaced execution states no result. Recording one would let a
+        // quarantine both close its partition slot and receive a replacement,
+        // which is two outcomes for one experimental condition.
+        state.authorized_retry = Some(AuthorizedRetry {
+            source_trial_id: pending.trial_id,
+            replacement_trial_id,
+            retry_index,
+            role: pending.role,
+            candidate: pending.candidate,
+            plan_digest: pending.plan_digest,
+            transition: pending.transition,
+        });
+        return Ok(());
+    }
     let outcome = pending
         .outcome
         .ok_or_else(|| invalid("a clean attempt has no outcome"))?;

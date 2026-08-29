@@ -6,6 +6,7 @@ mod event;
 mod evidence;
 mod proof;
 mod replay;
+pub(crate) mod retry;
 pub(crate) mod snapshot;
 mod storage;
 mod terminal;
@@ -17,11 +18,13 @@ pub use event::{
     PromotionDecision,
 };
 pub use evidence::{
-    AuthenticatedJournalHead, AuthenticatedJournalRecord,
-    CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION, CampaignEvidenceAuthority,
-    JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION, JournalEvidenceSnapshot,
+    ATTEMPT_PROJECTION_SCHEMA_VERSION, AttemptProjection, AttemptProjectionOutcome,
+    AttemptProjectionRecord, AttemptRetryOutcome, AuthenticatedJournalHead,
+    AuthenticatedJournalRecord, CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
+    CampaignEvidenceAuthority, JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION, JournalEvidenceSnapshot,
 };
 pub use proof::{AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION, AuthenticatedEvaluationProof};
+pub use retry::quarantine_reason_digest;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,7 +37,7 @@ use crate::{
 };
 use replay::{JournalState, replay};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 5;
+const JOURNAL_SCHEMA_VERSION: u32 = 6;
 
 /// The immutable identity of one tuning session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -314,6 +314,7 @@ pub fn run_context(
         &mission_reference(document),
         0,
         seed,
+        0,
     )
     .expect("a valid run execution context")
 }

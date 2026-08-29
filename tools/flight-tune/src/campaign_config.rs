@@ -84,6 +84,7 @@ mod tests {
 
     fn stage() -> SearchStage {
         SearchStage {
+            execution_retry: crate::ExecutionRetryPolicy::none(),
             id: "neutral-stage".to_owned(),
             allowlist: BTreeMap::from([(
                 "gain".to_owned(),

@@ -6,11 +6,16 @@ use crate::{
 };
 
 /// The supported run execution context schema.
-pub const RUN_EXECUTION_CONTEXT_SCHEMA_VERSION: u16 = 2;
+pub const RUN_EXECUTION_CONTEXT_SCHEMA_VERSION: u16 = 3;
 
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v2\0";
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
 
 /// The immutable identity of one simulator run.
+///
+/// The seed is a pure function of the session, partition, mission, and
+/// repetition, so two executions of one experimental condition differ in
+/// nothing except the retry index. Without that field a replacement execution
+/// would carry the identity of the execution it replaced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunExecutionContext {
@@ -25,6 +30,7 @@ pub struct RunExecutionContext {
     mission_content_digest: Digest,
     repetition: u32,
     seed: u64,
+    retry_index: u32,
 }
 
 impl RunExecutionContext {
@@ -44,6 +50,7 @@ impl RunExecutionContext {
         mission: &MissionReference,
         repetition: u32,
         seed: u64,
+        retry_index: u32,
     ) -> Result<Self, TuneError> {
         let context = Self {
             schema_version: RUN_EXECUTION_CONTEXT_SCHEMA_VERSION,
@@ -57,6 +64,7 @@ impl RunExecutionContext {
             mission_content_digest: mission.content_digest,
             repetition,
             seed,
+            retry_index,
         };
         context.validate()?;
         Ok(context)
@@ -172,6 +180,29 @@ impl RunExecutionContext {
     #[must_use]
     pub const fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// Returns how many replacements separate this run from its first attempt.
+    #[must_use]
+    pub const fn retry_index(&self) -> u32 {
+        self.retry_index
+    }
+
+    /// Reports whether two identities state one experimental condition.
+    ///
+    /// The trial identity and the retry index are the only fields a
+    /// replacement execution may change.
+    #[must_use]
+    pub fn states_same_condition(&self, other: &Self) -> bool {
+        self.tuning_session_digest == other.tuning_session_digest
+            && self.role == other.role
+            && self.candidate_digest == other.candidate_digest
+            && self.transition_authorization == other.transition_authorization
+            && self.scenario_set == other.scenario_set
+            && self.mission_revision_id == other.mission_revision_id
+            && self.mission_content_digest == other.mission_content_digest
+            && self.repetition == other.repetition
+            && self.seed == other.seed
     }
 }
 

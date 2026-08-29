@@ -295,6 +295,7 @@ fn prepare_run_context<'a>(
         scenario,
         repetition,
         seed,
+        journal.pending_retry_index(trial_id)?,
     )?;
     let run_intent_digest = journal.prepare_run(run_index, &execution)?;
     Ok(RunContext {

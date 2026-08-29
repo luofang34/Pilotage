@@ -269,6 +269,11 @@ pub fn bench_stage(
         repetitions: 2,
         promotion,
         qualification,
+        // The bench plant is deterministic and runs in process, so no
+        // execution it starts can fail for a reason a replacement would
+        // answer. Authorizing replacements that can never be needed would
+        // state a weaker bar than the one this campaign actually clears.
+        execution_retry: flight_tune::ExecutionRetryPolicy::none(),
     })
 }
 

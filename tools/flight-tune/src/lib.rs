@@ -1,11 +1,9 @@
 //! Simulator-only flight parameter search and qualification.
 //!
-//! Adaptive search can read training evidence only. One frozen candidate then
-//! receives one hidden promotion comparison. A separate final qualification
-//! seals the campaign. The journal saves a prepared attempt before simulator
-//! mutation and quarantines interrupted work before cleanup.
-//!
-//! SIM / NOT FOR FLIGHT.
+//! Adaptive search reads training evidence only. One frozen candidate receives
+//! one hidden promotion comparison; a separate final qualification seals the
+//! campaign. The journal saves a prepared attempt before simulator mutation and
+//! states one retry decision for every quarantine. SIM / NOT FOR FLIGHT.
 
 #![forbid(unsafe_code)]
 
@@ -52,19 +50,21 @@ pub use identity::{
     scenario_runtime_identity,
 };
 pub use journal::{
-    AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION, AttemptRole, AuthenticatedEvaluationProof,
-    AuthenticatedJournalHead, AuthenticatedJournalRecord,
-    CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION, CampaignEvidenceAuthority, CampaignPhase,
-    FinalQualificationOutcome, JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION, Journal, JournalEntry,
-    JournalEvent, JournalEvidenceSnapshot, OperationStatus, PROMOTION_CLOSURE_SCHEMA_VERSION,
-    PromotionClosure, PromotionDecision, SessionIdentity,
+    ATTEMPT_PROJECTION_SCHEMA_VERSION, AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION,
+    AttemptProjection, AttemptProjectionOutcome, AttemptProjectionRecord, AttemptRetryOutcome,
+    AttemptRole, AuthenticatedEvaluationProof, AuthenticatedJournalHead,
+    AuthenticatedJournalRecord, CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
+    CampaignEvidenceAuthority, CampaignPhase, FinalQualificationOutcome,
+    JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION, Journal, JournalEntry, JournalEvent,
+    JournalEvidenceSnapshot, OperationStatus, PROMOTION_CLOSURE_SCHEMA_VERSION, PromotionClosure,
+    PromotionDecision, SessionIdentity, quarantine_reason_digest,
 };
 pub use model::{
-    Candidate, ExpectedPromotionPair, ExpectedPromotionRun, MissionReference,
-    PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds, PromotionCalculation, PromotionComparison,
-    PromotionObjectiveResult, PromotionPairedStatistics, PromotionPolicy, PromotionRunKey,
-    PromotionRunPlan, PromotionSeedPolicy, PromotionSelection, QualificationPolicy, SearchStage,
-    promotion_policy_digest,
+    Candidate, EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy, ExpectedPromotionPair,
+    ExpectedPromotionRun, MissionReference, PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds,
+    PromotionCalculation, PromotionComparison, PromotionObjectiveResult, PromotionPairedStatistics,
+    PromotionPolicy, PromotionRunKey, PromotionRunPlan, PromotionSeedPolicy, PromotionSelection,
+    QualificationPolicy, SearchStage, promotion_policy_digest,
 };
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use scenario_runtime::{

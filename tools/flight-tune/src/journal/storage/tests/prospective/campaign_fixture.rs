@@ -239,6 +239,7 @@ fn prepare_training_run(
         scenario,
         repetition,
         seed,
+        0,
     )
     .expect("baseline run context");
     journal
@@ -353,6 +354,12 @@ fn transition_receipt(
 }
 
 fn record_successful_cleanup(journal: &mut Journal, trial_id: u64) {
+    // A quarantined attempt owes its one retry decision before it can close.
+    if journal.awaits_retry_decision() == Some(trial_id) {
+        journal
+            .record_retry_decision(trial_id)
+            .expect("record retry decision");
+    }
     journal
         .record_cleanup(trial_id, OperationStatus::Succeeded)
         .expect("record successful cleanup");

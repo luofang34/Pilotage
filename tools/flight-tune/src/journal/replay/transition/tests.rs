@@ -128,6 +128,8 @@ fn replay_rejects_a_coherently_forged_run_transition_reference() {
     let role = AttemptRole::TrainingChallenger { attempt_index: 0 };
     let mut state = searching_state(fixture.source_digest);
     state.pending = Some(PendingAttempt {
+        retry_index: 0,
+        retry_decision: None,
         trial_id: 0,
         role,
         candidate: fixture.target_digest,
@@ -158,6 +160,7 @@ fn replay_rejects_a_coherently_forged_run_transition_reference() {
             scenario,
             0,
         ),
+        0,
     )
     .expect("self-consistent forged run context");
     let forged_digest = context.digest().expect("forged run digest");
@@ -283,6 +286,7 @@ fn stage() -> SearchStage {
         sample_timeout_ns: 100_000_000,
     };
     SearchStage {
+        execution_retry: crate::ExecutionRetryPolicy::none(),
         id: "transition-stage".to_owned(),
         allowlist: BTreeMap::from([(
             "gain".to_owned(),

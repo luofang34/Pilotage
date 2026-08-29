@@ -145,6 +145,8 @@ fn build_promotion_closure(
             tuning_session_digest: session.digest()?,
             baseline_trial_id: baseline.trial_id,
             frozen_trial_id: frozen.trial_id,
+            baseline_retry_index: baseline.retry_index,
+            frozen_retry_index: frozen.retry_index,
             initial_candidate_digest: session.initial_candidate_digest,
             frozen_candidate_digest: frozen.candidate_digest,
             fixed_seed: session.fixed_seed,

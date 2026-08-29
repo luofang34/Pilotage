@@ -134,7 +134,8 @@ pub use cleanup_fault::FakeCleanupFault;
 #[allow(unused_imports)]
 pub use scoring::{
     EnvelopeGates, ObservedViews, QuadraticMetric, SequenceStrategy, assert_receipt_error,
-    candidate, stage, stage_with_changed_training_mission, stage_with_stimulus_family,
+    candidate, stage, stage_with_changed_training_mission, stage_with_execution_retry_limit,
+    stage_with_stimulus_family,
 };
 #[allow(unused_imports)]
 pub use terminal_head_poison::TerminalExternalAction;
@@ -174,6 +175,8 @@ pub struct FakeState {
     pub next_sequence: u64,
     pub panic_on_prepare: Option<usize>,
     pub panic_on_start: Option<usize>,
+    /// Every simulator start at or below this one-based count fails execution.
+    pub fail_starts_through: usize,
     pub expected_head_event_on_stop: Option<(PathBuf, String)>,
     pub cleanup_fault: FakeCleanupFault,
     pub change_head_on_prepare: Option<PathBuf>,

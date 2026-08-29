@@ -7,6 +7,7 @@ use crate::{CandidateLineage, ScenarioSet, TuneError};
 
 mod promotion;
 mod reference;
+mod retry;
 
 pub use promotion::{
     ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
@@ -16,6 +17,7 @@ pub use promotion::{
 };
 pub(crate) use promotion::{expected_promotion_pairs, required_improvement};
 pub use reference::MissionReference;
+pub use retry::{EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy};
 
 const MAX_PARAMETERS: usize = 128;
 const MAX_SCENARIOS_PER_SET: usize = 64;
@@ -146,6 +148,8 @@ pub struct SearchStage {
     pub promotion: PromotionPolicy,
     /// Absolute limits for the final release decision.
     pub qualification: QualificationPolicy,
+    /// How many replacement executions one quarantined attempt may receive.
+    pub execution_retry: ExecutionRetryPolicy,
 }
 
 impl SearchStage {
@@ -161,6 +165,7 @@ impl SearchStage {
         self.validate_parameters()?;
         self.validate_scenarios()?;
         self.validate_promotion()?;
+        self.execution_retry.validate()?;
         self.validate_qualification()
     }
 

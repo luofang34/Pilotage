@@ -14,6 +14,7 @@ mod run;
 pub(super) mod terminal;
 pub(crate) mod transition;
 
+use super::retry::AuthorizedRetry;
 use super::transition::AuthorizedTrainingTransition;
 pub(super) use run::{PreparedRun, PreparedRunTerminalState};
 
@@ -24,8 +25,37 @@ pub(crate) struct PendingAttempt {
     pub(crate) candidate: Digest,
     pub(crate) plan_digest: Digest,
     pub(crate) transition: Option<CandidateTransitionReference>,
+    pub(crate) retry_index: u32,
     pub(crate) prepared_runs: Vec<PreparedRun>,
     pub(crate) outcome: Option<PendingOutcome>,
+    pub(crate) retry_decision: Option<PendingRetryDecision>,
+}
+
+impl PendingAttempt {
+    /// Returns the exact quarantine reason bytes, when this attempt has them.
+    pub(crate) fn quarantine_reason(&self) -> Option<&str> {
+        match self.outcome.as_ref().map(|outcome| &outcome.evaluation) {
+            Some(CandidateEvaluation::Quarantined { reason }) => Some(reason.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Reports whether this attempt is quarantined and owes a retry decision.
+    pub(crate) fn awaits_retry_decision(&self) -> bool {
+        self.quarantine_reason().is_some() && self.retry_decision.is_none()
+    }
+}
+
+/// The one retry decision a quarantined attempt received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingRetryDecision {
+    /// One replacement execution is authorized under the stated identity.
+    Authorized {
+        replacement_trial_id: u64,
+        retry_index: u32,
+    },
+    /// The declared execution retry limit permits no replacement.
+    Exhausted { retry_index: u32 },
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +75,7 @@ pub(crate) struct JournalState {
     pub(crate) training_history: Vec<TrainingObservation>,
     pub(crate) next_trial_id: u64,
     pub(crate) authorized_transition: Option<AuthorizedTrainingTransition>,
+    pub(crate) authorized_retry: Option<AuthorizedRetry>,
     pub(crate) pending: Option<PendingAttempt>,
     pub(crate) frozen_candidate: Option<Digest>,
     pub(crate) promotion_baseline: Option<CandidateEvaluation>,
@@ -113,6 +144,7 @@ impl JournalState {
             pending.role,
             pending.candidate,
             pending.plan_digest,
+            pending.retry_index,
             evaluation.clone(),
             terminal::owned_committed_receipts(pending)?,
         )?))
@@ -161,6 +193,7 @@ fn initial_state(candidate: Digest) -> JournalState {
         training_history: Vec::new(),
         next_trial_id: 0,
         authorized_transition: None,
+        authorized_retry: None,
         pending: None,
         frozen_candidate: None,
         promotion_baseline: None,
@@ -202,12 +235,10 @@ fn apply_event(
 ) -> Result<(), TuneError> {
     let initial = session.initial_candidate_digest;
     let fixed_seed = session.fixed_seed;
-    if state.authorized_transition.is_some()
+    if (state.authorized_transition.is_some() || state.authorized_retry.is_some())
         && !matches!(event, JournalEvent::AttemptPrepared { .. })
     {
-        return Err(invalid(
-            "a transition authorization must be followed by its attempt",
-        ));
+        return Err(invalid("an authorization must be followed by its attempt"));
     }
     match event {
         JournalEvent::Started { .. } => Err(invalid("the journal has two start events")),
@@ -247,6 +278,9 @@ fn apply_event(
             reason,
             proof,
         } => attempt::quarantine(state, *trial_id, reason, proof.as_deref()),
+        event @ (JournalEvent::RetryAuthorized { .. } | JournalEvent::RetryExhausted { .. }) => {
+            apply_retry_decision(state, event, stage)
+        }
         JournalEvent::CleanupRecorded { trial_id, cleanup } => {
             attempt::cleanup(state, *trial_id, cleanup)
         }
@@ -258,6 +292,40 @@ fn apply_event(
             close::promotion(state, closure, stage, session)
         }
         event @ JournalEvent::Sealed { .. } => apply_seal(state, event, initial, stage),
+    }
+}
+
+fn apply_retry_decision(
+    state: &mut JournalState,
+    event: &JournalEvent,
+    stage: &SearchStage,
+) -> Result<(), TuneError> {
+    match event {
+        JournalEvent::RetryAuthorized {
+            source_trial_id,
+            replacement_trial_id,
+            retry_index,
+            quarantine_reason_digest,
+        } => attempt::retry_authorized(
+            state,
+            *source_trial_id,
+            *replacement_trial_id,
+            *retry_index,
+            *quarantine_reason_digest,
+            stage,
+        ),
+        JournalEvent::RetryExhausted {
+            source_trial_id,
+            retry_index,
+            quarantine_reason_digest,
+        } => attempt::retry_exhausted(
+            state,
+            *source_trial_id,
+            *retry_index,
+            *quarantine_reason_digest,
+            stage,
+        ),
+        _ => Err(invalid("the event is not a retry decision")),
     }
 }
 

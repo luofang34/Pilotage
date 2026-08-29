@@ -114,11 +114,20 @@ fn validate_chain_records(
 struct PendingAttempt {
     trial_id: u64,
     outcome_saved: bool,
+    quarantined: bool,
+    decided: bool,
+}
+
+impl PendingAttempt {
+    /// Reports whether this attempt still owes its one retry decision.
+    const fn owes_decision(self) -> bool {
+        self.quarantined && !self.decided
+    }
 }
 
 fn validate_attempt_progression(chain: &[AuthenticatedJournalRecord]) -> Result<(), TuneError> {
     let mut next_trial_id = 0_u64;
-    let mut pending = None;
+    let mut pending: Option<PendingAttempt> = None;
     for record in chain {
         match &record.entry.event {
             JournalEvent::AttemptPrepared { trial_id, .. } => {
@@ -128,22 +137,53 @@ fn validate_attempt_progression(chain: &[AuthenticatedJournalRecord]) -> Result<
                 pending = Some(PendingAttempt {
                     trial_id: *trial_id,
                     outcome_saved: false,
+                    quarantined: false,
+                    decided: false,
                 });
                 next_trial_id = next_trial_id.wrapping_add(1);
             }
             event if run_trial(event).is_some() => {
                 require_active_trial(pending, run_trial(event), false)?;
             }
-            JournalEvent::AttemptCompleted { trial_id, .. }
-            | JournalEvent::AttemptQuarantined { trial_id, .. } => {
+            JournalEvent::AttemptCompleted { trial_id, .. } => {
                 require_active_trial(pending, Some(*trial_id), false)?;
                 pending = pending.map(|value| PendingAttempt {
                     outcome_saved: true,
                     ..value
                 });
             }
+            JournalEvent::AttemptQuarantined { trial_id, .. } => {
+                require_active_trial(pending, Some(*trial_id), false)?;
+                pending = pending.map(|value| PendingAttempt {
+                    outcome_saved: true,
+                    quarantined: true,
+                    ..value
+                });
+            }
+            JournalEvent::RetryAuthorized {
+                source_trial_id, ..
+            }
+            | JournalEvent::RetryExhausted {
+                source_trial_id, ..
+            } => {
+                require_active_trial(pending, Some(*source_trial_id), true)?;
+                if pending.is_none_or(|value| !value.owes_decision()) {
+                    return Err(invalid(
+                        "a campaign authority retry answers no open quarantine",
+                    ));
+                }
+                pending = pending.map(|value| PendingAttempt {
+                    decided: true,
+                    ..value
+                });
+            }
             JournalEvent::CleanupRecorded { trial_id, cleanup } => {
                 require_active_trial(pending, Some(*trial_id), true)?;
+                if pending.is_some_and(PendingAttempt::owes_decision) {
+                    return Err(invalid(
+                        "the campaign authority cleans a quarantine with no retry decision",
+                    ));
+                }
                 if matches!(cleanup, OperationStatus::Succeeded) {
                     pending = None;
                 }
@@ -193,62 +233,61 @@ fn require_active_trial(
 
 fn require_named_records(authority: &CampaignEvidenceAuthority) -> Result<(), TuneError> {
     let chain = &authority.journal_chain;
-    require_record(chain, &authority.frozen, |event| {
-        matches!(event, JournalEvent::Frozen { .. })
-    })?;
-    require_record(chain, &authority.promotion_baseline, |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared {
-                role: AttemptRole::PromotionBaseline,
-                ..
-            }
-        )
-    })?;
-    require_optional_record(chain, authority.promotion_frozen.as_ref(), |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared {
-                role: AttemptRole::PromotionFrozen,
-                ..
-            }
-        )
-    })?;
-    require_optional_record(chain, authority.final_qualification.as_ref(), |event| {
-        matches!(
-            event,
-            JournalEvent::AttemptPrepared {
-                role: AttemptRole::FinalQualification,
-                ..
-            }
-        )
-    })
-}
-
-fn require_record(
-    chain: &[AuthenticatedJournalRecord],
-    saved: &AuthenticatedJournalRecord,
-    predicate: impl Fn(&JournalEvent) -> bool,
-) -> Result<(), TuneError> {
-    match unique_record(chain, predicate)? {
-        Some(record) if record == saved => Ok(()),
-        _ => Err(invalid(
-            "a named authority record is not in the journal chain",
-        )),
+    match unique_record(chain, |event| matches!(event, JournalEvent::Frozen { .. }))? {
+        Some(record) if record == &authority.frozen => {}
+        _ => {
+            return Err(invalid(
+                "a named authority record is not in the journal chain",
+            ));
+        }
     }
+    if last_attempt_record(chain, AttemptRole::PromotionBaseline)
+        != Some(&authority.promotion_baseline)
+    {
+        return Err(invalid(
+            "a named authority record is not in the journal chain",
+        ));
+    }
+    require_settling_attempt(
+        chain,
+        authority.promotion_frozen.as_ref(),
+        AttemptRole::PromotionFrozen,
+    )?;
+    require_settling_attempt(
+        chain,
+        authority.final_qualification.as_ref(),
+        AttemptRole::FinalQualification,
+    )
 }
 
-fn require_optional_record(
+/// Requires the named record to be the preparation that settled its role.
+///
+/// A replaced execution prepares the same role again, so the chain may carry
+/// several preparations for one hidden role. Only the last one produced the
+/// result the evidence rests on.
+fn require_settling_attempt(
     chain: &[AuthenticatedJournalRecord],
     saved: Option<&AuthenticatedJournalRecord>,
-    predicate: impl Fn(&JournalEvent) -> bool,
+    role: AttemptRole,
 ) -> Result<(), TuneError> {
-    if unique_record(chain, predicate)? != saved {
+    if last_attempt_record(chain, role) != saved {
         return Err(invalid(
             "an optional authority record changed in the journal chain",
         ));
     }
     Ok(())
+}
+
+fn last_attempt_record(
+    chain: &[AuthenticatedJournalRecord],
+    expected_role: AttemptRole,
+) -> Option<&AuthenticatedJournalRecord> {
+    chain.iter().rfind(|record| {
+        matches!(
+            &record.entry.event,
+            JournalEvent::AttemptPrepared { role, .. } if *role == expected_role
+        )
+    })
 }
 
 fn require_promotion_closure(

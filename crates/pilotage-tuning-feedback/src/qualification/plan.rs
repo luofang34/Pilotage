@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{FeedbackError, digest, error::invalid};
 
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v2\0";
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
 
 #[derive(Clone, Copy)]
 pub(super) struct ExpectedRun<'a> {
@@ -17,6 +17,7 @@ pub(super) struct ExpectedRun<'a> {
     pub(super) repetition: u32,
     pub(super) seed: u64,
     pub(super) session_digest: Digest,
+    pub(super) retry_index: u32,
 }
 
 #[derive(Serialize)]
@@ -49,6 +50,7 @@ pub(super) fn digest_for(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn expected_runs(
     stage: &SearchStage,
     role: AttemptRole,
@@ -56,6 +58,7 @@ pub(super) fn expected_runs(
     trial_id: u64,
     fixed_seed: u64,
     session_digest: Digest,
+    retry_index: u32,
 ) -> Vec<ExpectedRun<'_>> {
     let scenario_set = scenario_set(role);
     let capacity = scenarios(stage, scenario_set)
@@ -73,6 +76,7 @@ pub(super) fn expected_runs(
                 repetition,
                 seed: derive_seed(fixed_seed, scenario_set, scenario, repetition),
                 session_digest,
+                retry_index,
             });
         }
     }
@@ -95,6 +99,7 @@ pub(super) fn verify_receipt_context(
         || context.mission_content_digest() != expected.scenario.content_digest
         || context.repetition() != expected.repetition
         || context.seed() != expected.seed
+        || context.retry_index() != expected.retry_index
         || receipt.intent().run_intent_digest() != intent_digest
     {
         return Err(invalid(
