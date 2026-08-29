@@ -27,7 +27,10 @@ pub enum AviateVehicleAction {
     /// Wait for valid estimator and command-link states.
     WaitReady,
     /// Move to the declared start state.
-    ReachStartState { target: StartState },
+    ReachStartState {
+        /// The declared reset-relative start state.
+        target: StartState,
+    },
     /// Hold the start state until the vehicle settles.
     Settle,
     /// Apply one typed control stimulus.
@@ -152,6 +155,12 @@ impl<D: AviateActionDriver> AviateVehicleActionPort<D> {
     #[must_use]
     pub fn into_inner(self) -> D {
         self.driver
+    }
+
+    /// Returns the Aviate driver without consuming the port.
+    #[must_use]
+    pub const fn driver(&self) -> &D {
+        &self.driver
     }
 }
 

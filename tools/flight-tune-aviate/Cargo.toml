@@ -8,8 +8,14 @@ description = "Aviate process supervision and exact direct control for simulator
 [lints]
 workspace = true
 
+[build-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
 [dependencies]
 flight-tune = { path = "../flight-tune" }
+pilotage-control-feel = { workspace = true }
 pilotage-durable-storage = { workspace = true }
 rustix = { workspace = true, features = ["process"] }
 serde = { workspace = true }
@@ -27,6 +33,5 @@ sysctl = "=0.7.1"
 [dev-dependencies]
 flight-tune = { path = "../flight-tune", features = ["test-support"] }
 pilotage-adapter-aviate = { workspace = true }
-pilotage-control-feel = { workspace = true }
 pilotage-durable-storage = { workspace = true, features = ["fault-injection"] }
 tempfile = "3.23.0"

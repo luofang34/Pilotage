@@ -92,6 +92,16 @@ const TRANSPORT_SOURCES: [(&str, &[u8]); 10] = [
     ),
 ];
 
+/// The exact production sources that the transport identity binds.
+///
+/// A new production source under `direct_transport` has to enter this
+/// list, or the exact direct step it shapes would not reach the runtime
+/// production-input identity that qualifies it.
+#[must_use]
+pub fn direct_transport_sources() -> Vec<&'static str> {
+    TRANSPORT_SOURCES.iter().map(|(name, _)| *name).collect()
+}
+
 /// The content identity of this direct-transport implementation.
 ///
 /// # Errors
