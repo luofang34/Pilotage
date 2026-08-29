@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::identity::digest_bytes;
+use crate::flight_quality::identity::{EvaluatorClass, evaluator_identity};
 use crate::{ArtifactIdentity, EvaluatorError};
 
 /// The one hard gate every campaign must evaluate, and evaluate first.
@@ -226,56 +226,13 @@ impl FlightQualityMetricConfig {
 pub(super) fn gate_identity(
     config: &FlightQualityGateConfig,
 ) -> Result<ArtifactIdentity, EvaluatorError> {
-    implementation_identity(
-        "pilotage-flight-quality-streaming-gates",
-        config,
-        &[
-            include_str!("config.rs"),
-            include_str!("gates.rs"),
-            include_str!("telemetry.rs"),
-        ],
-    )
+    evaluator_identity(EvaluatorClass::Gate, config)
 }
 
 pub(super) fn metric_identity(
     config: &FlightQualityMetricConfig,
 ) -> Result<ArtifactIdentity, EvaluatorError> {
-    implementation_identity(
-        "pilotage-flight-quality-streaming-metrics",
-        config,
-        &[
-            include_str!("config.rs"),
-            include_str!("metrics.rs"),
-            include_str!("telemetry.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/control.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/release.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/response.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/signal.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/series.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/sample.rs"),
-            include_str!("../../../../crates/pilotage-flight-quality/src/error.rs"),
-        ],
-    )
-}
-
-fn implementation_identity<T: Serialize>(
-    id: &'static str,
-    config: &T,
-    sources: &[&str],
-) -> Result<ArtifactIdentity, EvaluatorError> {
-    let config = serde_json::to_vec(config)
-        .map_err(|error| invalid(format!("cannot encode evaluator configuration: {error}")))?;
-    let mut bytes = Vec::with_capacity(config.len());
-    append_document(&mut bytes, &config);
-    for source in sources {
-        append_document(&mut bytes, source.as_bytes());
-    }
-    ArtifactIdentity::new(id, digest_bytes(&bytes)).map_err(|error| invalid(error.to_string()))
-}
-
-fn append_document(output: &mut Vec<u8>, document: &[u8]) {
-    output.extend_from_slice(&(document.len() as u64).to_le_bytes());
-    output.extend_from_slice(document);
+    evaluator_identity(EvaluatorClass::Metric, config)
 }
 
 fn active_weight(weights: FlightQualityWeights, scenario: &FlightQualityScenario) -> f64 {

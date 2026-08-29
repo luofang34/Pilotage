@@ -106,6 +106,16 @@ impl QuadraticMetric {
             gain: None,
         }
     }
+
+    /// Keeps the quadratic rule and states another implementation identity.
+    #[allow(dead_code)]
+    pub fn with_implementation(state: FakeHandle, implementation: &str) -> Self {
+        Self {
+            identity: identity("metric", implementation),
+            state,
+            gain: None,
+        }
+    }
 }
 
 impl MetricEvaluator for QuadraticMetric {

@@ -40,14 +40,15 @@ pub use campaign_config::{
 pub use contract_api::*;
 pub use error::TuneError;
 pub use flight_quality::{
-    CanonicalTelemetryKey, FlightQualityGate, FlightQualityGateConfig, FlightQualityGateEvaluator,
-    FlightQualityMetricConfig, FlightQualityMetricEvaluator, FlightQualityReport,
-    FlightQualityScales, FlightQualityScenario, FlightQualityWeights, MANDATORY_CRASH_GATE_ID,
-    ReleasePlan, StepPlan, WindPlan,
+    CanonicalTelemetryKey, EVALUATOR_IMPLEMENTATION_SCHEMA_VERSION, FlightQualityGate,
+    FlightQualityGateConfig, FlightQualityGateEvaluator, FlightQualityMetricConfig,
+    FlightQualityMetricEvaluator, FlightQualityReport, FlightQualityScales, FlightQualityScenario,
+    FlightQualityWeights, GATE_IMPLEMENTATION_ID, MANDATORY_CRASH_GATE_ID,
+    METRIC_IMPLEMENTATION_ID, ReleasePlan, StepPlan, WindPlan,
 };
 pub use identity::{
-    ArtifactIdentity, CandidateLineage, RuntimeIdentities, scenario_engine_identity,
-    scenario_runtime_identity,
+    ArtifactIdentity, CandidateLineage, EvaluatorIdentities, RuntimeIdentities,
+    scenario_engine_identity, scenario_runtime_identity,
 };
 pub use journal::{
     ATTEMPT_PROJECTION_SCHEMA_VERSION, AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION,

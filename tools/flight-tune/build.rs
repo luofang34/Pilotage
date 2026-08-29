@@ -5,41 +5,106 @@
 
 #![allow(clippy::disallowed_macros)]
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use sha2::{Digest as _, Sha256};
 
+#[path = "build_support/evaluator_source_identity.rs"]
+mod evaluator_source_identity;
 #[path = "build_support/scenario_runtime_identity.rs"]
 mod scenario_runtime_identity;
 
 fn main() -> ExitCode {
-    match source_identity() {
-        Ok(identity) => {
-            println!("cargo:rustc-env=FLIGHT_TUNE_BUILD_ID={identity}");
-            match scenario_runtime_identity::calculate(&workspace_root()) {
-                Ok(runtime) => {
-                    println!(
-                        "cargo:rustc-env=FLIGHT_TUNE_SCENARIO_ENGINE_ID={}",
-                        hex(&runtime.digest)
-                    );
-                    for path in runtime.paths {
-                        println!("cargo:rerun-if-changed={}", path.display());
-                    }
-                    ExitCode::SUCCESS
-                }
-                Err(error) => {
-                    println!("cargo:warning=cannot identify scenario runtime sources: {error}");
-                    ExitCode::FAILURE
-                }
-            }
-        }
+    match generate_build_inputs() {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            println!("cargo:warning=cannot identify flight-tune sources: {error}");
+            println!("cargo:warning={error}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn generate_build_inputs() -> Result<(), std::io::Error> {
+    let workspace = workspace_root();
+    generate_evaluator_identities(&workspace)
+        .map_err(|error| labelled("cannot identify flight-quality evaluator sources", &error))?;
+    generate_scenario_runtime_identity(&workspace)
+        .map_err(|error| labelled("cannot identify scenario runtime sources", &error))?;
+    let identity = source_identity()
+        .map_err(|error| labelled("cannot identify flight-tune sources", &error))?;
+    println!("cargo:rustc-env=FLIGHT_TUNE_BUILD_ID={identity}");
+    Ok(())
+}
+
+fn labelled(detail: &str, error: &std::io::Error) -> std::io::Error {
+    std::io::Error::other(format!("{detail}: {error}"))
+}
+
+fn generate_scenario_runtime_identity(workspace: &Path) -> Result<(), std::io::Error> {
+    let runtime = scenario_runtime_identity::calculate(workspace)?;
+    println!(
+        "cargo:rustc-env=FLIGHT_TUNE_SCENARIO_ENGINE_ID={}",
+        hex(&runtime.digest)
+    );
+    for path in runtime.paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    Ok(())
+}
+
+/// Writes the closed evaluator inventories the crate reads back at run time.
+///
+/// Both inventories are calculated before either is written. A partial file
+/// would let a build that failed completeness still compile against a stale
+/// constant from an earlier run.
+fn generate_evaluator_identities(workspace: &Path) -> Result<(), std::io::Error> {
+    let metric = evaluator_source_identity::calculate(
+        workspace,
+        evaluator_source_identity::EvaluatorKind::Metric,
+    )?;
+    let gates = evaluator_source_identity::calculate(
+        workspace,
+        evaluator_source_identity::EvaluatorKind::Gate,
+    )?;
+    for root in evaluator_source_identity::source_roots(workspace) {
+        println!("cargo:rerun-if-changed={}", root.display());
+    }
+    for path in metric.paths.iter().chain(&gates.paths) {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    let output = output_directory()?.join("evaluator_source_identity.rs");
+    let mut file = std::fs::File::create(output)?;
+    write_inventory(&mut file, "METRIC", metric)?;
+    write_inventory(&mut file, "GATE", gates)?;
+    file.sync_all()
+}
+
+fn output_directory() -> Result<PathBuf, std::io::Error> {
+    std::env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| std::io::Error::other("Cargo did not supply the build output directory"))
+}
+
+fn write_inventory(
+    file: &mut std::fs::File,
+    name: &str,
+    inventory: evaluator_source_identity::EvaluatorSourceInventory,
+) -> Result<(), std::io::Error> {
+    if inventory.names.len() != inventory.paths.len() {
+        return Err(std::io::Error::other(
+            "an evaluator source inventory is inconsistent",
+        ));
+    }
+    let document = String::from_utf8(inventory.document).map_err(std::io::Error::other)?;
+    writeln!(file, "const {name}_SOURCE_DOCUMENT: &str = {document:?};")?;
+    writeln!(
+        file,
+        "const {name}_SOURCE_DIGEST: [u8; 32] = {:?};",
+        inventory.digest
+    )?;
+    Ok(())
 }
 
 fn workspace_root() -> PathBuf {

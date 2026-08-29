@@ -2,6 +2,7 @@
 
 mod aggregate_attacks;
 mod attacks;
+mod evaluator_attacks;
 mod fixture;
 #[path = "../../../../tools/flight-tune/tests/tuner/test_rig.rs"]
 #[allow(dead_code)]
@@ -112,14 +113,12 @@ fn journal_producer_snapshot_qualifies_independently() {
 
 /// The pinned identity is re-recorded whenever the evidence schema changes.
 ///
-/// It moved when every objective limit left the two policies for the scoped
-/// response target table. The stage carries the table, the policies declare
-/// names instead of numbers, the promotion comparison states one result group
-/// for each scenario, and the crash gate became the first required gate. The
-/// journal entry, the evidence snapshot, and the promotion closure all take
-/// new schema versions with it, because each embeds a shape that changed.
-/// Every run intent, every receipt, and the whole chain take new identities,
-/// which is the point of the change rather than a side effect of it.
+/// It moved when the golden campaign started naming the two evaluators it ran.
+/// The fixture states the exact flight-quality metric and hard-gate
+/// implementation names instead of two placeholder names, so the session
+/// identity changes and the sealed chain changes with it. A campaign that
+/// cannot say which evaluator produced a score cannot be qualified against
+/// one, which is the point of the change rather than a side effect of it.
 #[test]
 fn canonical_source_digest_is_fixed() {
     let evidence = fixture();
@@ -128,7 +127,7 @@ fn canonical_source_digest_is_fixed() {
         .expect("verify evidence");
     assert_eq!(
         verified.source_digest().to_string(),
-        "2d8f49e7774c0a2764de95618a5d5b3941a6b1e7130199ce4e97d37ee7d39aaf"
+        "077f3df8c005b63f27802e10c7ab249ba4004216d4d5f29037336e5a24950c5c"
     );
 }
 

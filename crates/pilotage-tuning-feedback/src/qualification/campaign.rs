@@ -10,6 +10,16 @@ pub(super) mod retry;
 const JOURNAL_SCHEMA_VERSION: u32 = 8;
 const SNAPSHOT_SCHEMA_VERSION: u16 = 5;
 
+/// The name the tuning harness gives one flight-quality metric evaluator.
+///
+/// The value mirrors the harness byte for byte. The verifier keeps its own
+/// copy, so a harness that renamed an evaluator cannot also rename the bar it
+/// is measured against.
+pub(super) const METRIC_IMPLEMENTATION_ID: &str = "pilotage-flight-quality-streaming-metrics-v2";
+
+/// The name the tuning harness gives one flight-quality hard-gate evaluator.
+pub(super) const GATE_IMPLEMENTATION_ID: &str = "pilotage-flight-quality-streaming-gates-v2";
+
 pub(super) struct CampaignIdentity {
     pub(super) session_digest: Digest,
     pub(super) authority: VerifiedAuthority,
@@ -70,6 +80,26 @@ fn verify_runtimes(runtimes: &RuntimeIdentities) -> Result<(), FeedbackError> {
         (&runtimes.transition_validator, "transition validator"),
     ] {
         stage::verify_artifact(artifact, name)?;
+    }
+    verify_evaluators(runtimes)
+}
+
+/// Rejects a session where one evaluator stands in for the other.
+///
+/// The metric evaluator and the hard-gate evaluator hold separate production
+/// inventories, so they cannot share a name or a value. A pair that does, or a
+/// pair that carries the two flight-quality names the wrong way round, states
+/// an evaluator the campaign never ran.
+fn verify_evaluators(runtimes: &RuntimeIdentities) -> Result<(), FeedbackError> {
+    if runtimes.metric.id == runtimes.hard_gates.id
+        || runtimes.metric.digest == runtimes.hard_gates.digest
+    {
+        return Err(invalid("one evaluator identity stands in for the other"));
+    }
+    if runtimes.metric.id == GATE_IMPLEMENTATION_ID
+        || runtimes.hard_gates.id == METRIC_IMPLEMENTATION_ID
+    {
+        return Err(invalid("the evaluator identities are exchanged"));
     }
     Ok(())
 }

@@ -2,6 +2,7 @@
 
 mod config;
 mod gates;
+mod identity;
 mod metrics;
 mod telemetry;
 
@@ -11,6 +12,9 @@ pub use config::{
     WindPlan,
 };
 pub use gates::FlightQualityGateEvaluator;
+pub use identity::{
+    EVALUATOR_IMPLEMENTATION_SCHEMA_VERSION, GATE_IMPLEMENTATION_ID, METRIC_IMPLEMENTATION_ID,
+};
 pub use metrics::{FlightQualityMetricEvaluator, FlightQualityReport};
 pub use telemetry::CanonicalTelemetryKey;
 
