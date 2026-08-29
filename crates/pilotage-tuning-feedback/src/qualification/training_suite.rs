@@ -143,13 +143,12 @@ fn guards_hold(
     }
     let before = guard_means(incumbent);
     let after = guard_means(proposed);
-    suite
-        .guard_regression_limits
-        .iter()
-        .all(|(name, limit)| match (before.get(name), after.get(name)) {
+    suite.guard_regression_limits.iter().all(|(name, limit)| {
+        match (before.get(name), after.get(name)) {
             (Some(baseline), Some(challenger)) => *challenger <= baseline + limit,
             _ => false,
-        })
+        }
+    })
 }
 
 fn guard_means(runs: &[RunRecord]) -> BTreeMap<String, f64> {
@@ -184,7 +183,9 @@ pub(super) fn verify_search_space(stage: &SearchStage) -> Result<(), FeedbackErr
         || stage.search_groups.is_empty()
         || stage.search_groups.len() > MAX_SEARCH_GROUPS
     {
-        return Err(invalid("the training suite or search group count is not valid"));
+        return Err(invalid(
+            "the training suite or search group count is not valid",
+        ));
     }
     let mut suite_ids = BTreeSet::new();
     for suite in &stage.training_suites {

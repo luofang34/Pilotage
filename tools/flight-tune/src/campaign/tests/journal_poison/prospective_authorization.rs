@@ -68,7 +68,12 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
         .expect("create run plan");
     let (trial_id, prepared_candidate) = tuner
         .journal
-        .prepare_attempt(AttemptRole::TrainingBaseline { suite_index: 0 }, &initial, plan, None)
+        .prepare_attempt(
+            AttemptRole::TrainingBaseline { suite_index: 0 },
+            &initial,
+            plan,
+            None,
+        )
         .expect("prepare pending attempt");
     let candidate_path = directory
         .path()

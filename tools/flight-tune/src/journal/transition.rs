@@ -40,7 +40,11 @@ impl Journal {
             candidate,
         ))?;
         let source_candidate = self.read_candidate(self.state.training_incumbent)?;
-        if &self.stage.derive_search_group(&source_candidate, candidate)? != group {
+        if &self
+            .stage
+            .derive_search_group(&source_candidate, candidate)?
+            != group
+        {
             return Err(TuneError::InvalidCandidate {
                 detail: "a transition states a group the candidate difference does not select"
                     .to_owned(),

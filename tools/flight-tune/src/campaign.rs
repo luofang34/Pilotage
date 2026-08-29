@@ -208,8 +208,16 @@ where
     fn ensure_suite_baseline_blocking(&mut self, suite_index: u16) -> Result<(), TuneError> {
         let incumbent = self.journal.training_incumbent()?;
         let digest = evaluate::candidate_digest(&incumbent)?;
-        if self.journal.state().suite_baseline(digest, suite_index).is_none() {
-            self.run_new_attempt_blocking(AttemptRole::TrainingBaseline { suite_index }, &incumbent)?;
+        if self
+            .journal
+            .state()
+            .suite_baseline(digest, suite_index)
+            .is_none()
+        {
+            self.run_new_attempt_blocking(
+                AttemptRole::TrainingBaseline { suite_index },
+                &incumbent,
+            )?;
         }
         match self.journal.state().suite_baseline(digest, suite_index) {
             Some(CandidateEvaluation::Passed { .. }) => Ok(()),

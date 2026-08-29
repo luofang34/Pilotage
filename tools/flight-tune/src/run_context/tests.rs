@@ -40,7 +40,10 @@ fn context(reference: CandidateTransitionReference) -> RunExecutionContext {
     RunExecutionContext::new(
         digest(1),
         4,
-        AttemptRole::TrainingChallenger { attempt_index: 0, suite_index: 0 },
+        AttemptRole::TrainingChallenger {
+            attempt_index: 0,
+            suite_index: 0,
+        },
         reference.target_candidate_digest(),
         Some(reference),
         ScenarioSet::Training,

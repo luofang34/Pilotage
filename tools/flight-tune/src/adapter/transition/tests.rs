@@ -193,8 +193,7 @@ fn transition_binding_rejects_another_session() {
 #[test]
 fn planning_context_is_domain_separated_and_complete() {
     let group = group_binding();
-    let context =
-        planning_context_digest(digest(1), digest(2), &group).expect("planning context");
+    let context = planning_context_digest(digest(1), digest(2), &group).expect("planning context");
     assert!(!context.is_zero());
     assert_ne!(context, digest_bytes(&[1; 32]));
     assert!(planning_context_digest(digest(0), digest(2), &group).is_err());

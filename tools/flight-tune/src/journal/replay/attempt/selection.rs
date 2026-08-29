@@ -55,13 +55,12 @@ fn guards_hold(
     }
     let before = guard_means(incumbent);
     let after = guard_means(proposed);
-    suite
-        .guard_regression_limits
-        .iter()
-        .all(|(name, limit)| match (before.get(name), after.get(name)) {
+    suite.guard_regression_limits.iter().all(|(name, limit)| {
+        match (before.get(name), after.get(name)) {
             (Some(baseline), Some(challenger)) => *challenger <= baseline + limit,
             _ => false,
-        })
+        }
+    })
 }
 
 /// Returns the mean of each named objective across the guard runs.

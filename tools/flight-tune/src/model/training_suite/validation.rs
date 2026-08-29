@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{MissionReference, ParameterBounds, TuneError};
 
 use super::{
-    MAX_GUARD_LIMITS, MAX_SEARCH_GROUPS, MAX_TRAINING_SUITES, SearchGroup, TRAINING_SUITE_SCHEMA_VERSION,
-    TrainingSuite, invalid_stage,
+    MAX_GUARD_LIMITS, MAX_SEARCH_GROUPS, MAX_TRAINING_SUITES, SearchGroup,
+    TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite, invalid_stage,
 };
 
 /// Validates the complete link from every search group to its frozen suite.
@@ -116,14 +116,20 @@ fn validate_suite(
     }
     super::super::validate_name(&suite.id, "training suite").map_err(as_stage_error)?;
     if suite.primary_scenarios.is_empty() {
-        return Err(invalid_stage(format!("suite {} has no primary mission", suite.id)));
+        return Err(invalid_stage(format!(
+            "suite {} has no primary mission",
+            suite.id
+        )));
     }
     let count = suite
         .primary_scenarios
         .len()
         .saturating_add(suite.guard_scenarios.len());
     if count > super::super::MAX_SCENARIOS_PER_SET {
-        return Err(invalid_stage(format!("suite {} has too many missions", suite.id)));
+        return Err(invalid_stage(format!(
+            "suite {} has too many missions",
+            suite.id
+        )));
     }
     if !(2..=super::super::MAX_REPETITIONS).contains(&suite.repetitions) {
         return Err(invalid_stage(format!(

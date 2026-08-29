@@ -285,7 +285,6 @@ fn apply_event(
             plan_digest,
             transition,
         } => attempt::prepare(
-
             state,
             *trial_id,
             *role,

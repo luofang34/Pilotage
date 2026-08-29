@@ -118,12 +118,19 @@ fn resume_reads_an_authorized_target_before_attempt_preparation() {
     record_passing_baseline(&mut journal, &stage, &initial);
     let initial_digest = document_digest("candidate", &initial).expect("initial digest");
     let target_digest = document_digest("candidate", &target).expect("target digest");
-    let role = AttemptRole::TrainingChallenger { attempt_index: 0, suite_index: 0 };
+    let role = AttemptRole::TrainingChallenger {
+        attempt_index: 0,
+        suite_index: 0,
+    };
     let plan = role
         .plan_digest(&stage, target_digest, 91)
         .expect("challenger plan");
-    let planning = crate::adapter::planning_context_digest(journal.session().stage_digest, plan, &group_binding(&stage))
-        .expect("planning context");
+    let planning = crate::adapter::planning_context_digest(
+        journal.session().stage_digest,
+        plan,
+        &group_binding(&stage),
+    )
+    .expect("planning context");
     let request = CandidateTransitionRequest::new(
         journal.session_digest().expect("session digest"),
         &initial,
@@ -410,8 +417,6 @@ fn group_binding(stage: &SearchStage) -> crate::SearchGroupBinding {
         group_id: "test-group".to_owned(),
         suite_id: "test-suite".to_owned(),
         suite_index: 0,
-        suite_digest: stage.training_suites[0]
-            .digest()
-            .expect("the suite digest"),
+        suite_digest: stage.training_suites[0].digest().expect("the suite digest"),
     }
 }

@@ -338,10 +338,14 @@ fn transition_receipt(
         attempt_index,
         suite_index: 0,
     }
-        .plan_digest(stage, target_digest, journal.session().fixed_seed)
-        .expect("challenger plan");
-    let planning = crate::adapter::planning_context_digest(journal.session().stage_digest, plan, &group_binding(stage))
-        .expect("planning context");
+    .plan_digest(stage, target_digest, journal.session().fixed_seed)
+    .expect("challenger plan");
+    let planning = crate::adapter::planning_context_digest(
+        journal.session().stage_digest,
+        plan,
+        &group_binding(stage),
+    )
+    .expect("planning context");
     let request = CandidateTransitionRequest::new(
         journal.session_digest().expect("session digest"),
         source,
@@ -374,8 +378,6 @@ fn group_binding(stage: &SearchStage) -> crate::SearchGroupBinding {
         group_id: "test-group".to_owned(),
         suite_id: "test-suite".to_owned(),
         suite_index: 0,
-        suite_digest: stage.training_suites[0]
-            .digest()
-            .expect("the suite digest"),
+        suite_digest: stage.training_suites[0].digest().expect("the suite digest"),
     }
 }

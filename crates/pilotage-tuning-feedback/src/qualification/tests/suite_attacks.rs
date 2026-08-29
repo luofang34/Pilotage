@@ -10,8 +10,8 @@ use flight_tune::{FinalQualificationOutcome, JournalEvent};
 use crate::CampaignEvidence;
 
 use super::producer_rig::{
-    EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, ParameterSequenceStrategy, QuadraticMetric,
-    TestDirectory, two_group_candidate, two_group_stage,
+    EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, ParameterSequenceStrategy,
+    QuadraticMetric, TestDirectory, two_group_candidate, two_group_stage,
 };
 use super::{stated_policy, verify};
 

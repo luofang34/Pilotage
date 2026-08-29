@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AttemptRole, AuthenticatedEvaluationProof, Digest, FinalQualificationOutcome, JournalEntry,
-    JournalEvent, PromotionClosure, PromotionDecision, RunExecutionContext, SearchStage,
-    TuneError,
+    JournalEvent, PromotionClosure, PromotionDecision, RunExecutionContext, SearchStage, TuneError,
 };
 
 use super::{JOURNAL_SCHEMA_VERSION, Journal, storage};
@@ -358,4 +357,3 @@ fn invalid(detail: impl Into<String>) -> TuneError {
         detail: detail.into(),
     }
 }
-

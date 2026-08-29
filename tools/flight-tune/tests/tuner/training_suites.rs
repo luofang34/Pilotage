@@ -4,8 +4,8 @@ use flight_tune::{AttemptRole, JournalEvent, TuneError, Tuner};
 
 use super::TestTuner;
 use super::test_rig::{
-    EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, ParameterSequenceStrategy, QuadraticMetric,
-    TestDirectory, two_group_candidate, two_group_stage,
+    EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, ParameterSequenceStrategy,
+    QuadraticMetric, TestDirectory, two_group_candidate, two_group_stage,
 };
 
 /// The run counts each declared suite states.
@@ -105,11 +105,23 @@ fn a_changed_incumbent_takes_a_new_baseline_on_the_same_suite() {
         .collect::<Vec<_>>();
     let first_challenger = prepared
         .iter()
-        .find(|(role, _)| matches!(role, AttemptRole::TrainingChallenger { attempt_index: 0, .. }))
+        .find(|(role, _)| {
+            matches!(
+                role,
+                AttemptRole::TrainingChallenger {
+                    attempt_index: 0,
+                    ..
+                }
+            )
+        })
         .map(|(_, candidate)| *candidate)
         .expect("the first challenger");
 
-    assert_eq!(baselines.len(), 2, "a changed incumbent owes a new baseline");
+    assert_eq!(
+        baselines.len(),
+        2,
+        "a changed incumbent owes a new baseline"
+    );
     assert_eq!(
         baselines[1], first_challenger,
         "the second baseline states the exact new incumbent"
@@ -173,22 +185,67 @@ fn a_restart_resumes_the_same_suite_and_run_plan() {
 
     let roles = prepared_roles(&resumed);
     assert!(
-        roles
-            .iter()
-            .all(|role| !matches!(role, AttemptRole::TrainingChallenger { suite_index: 0, .. })
-                || matches!(role, AttemptRole::TrainingChallenger { attempt_index: 0, .. })),
+        roles.iter().all(|role| !matches!(
+            role,
+            AttemptRole::TrainingChallenger { suite_index: 0, .. }
+        ) || matches!(
+            role,
+            AttemptRole::TrainingChallenger {
+                attempt_index: 0,
+                ..
+            }
+        )),
         "a resumed campaign keeps each challenger on the suite it started"
     );
     assert_eq!(
         roles
             .iter()
-            .filter(|role| matches!(
-                role,
-                AttemptRole::TrainingChallenger { suite_index: 1, .. }
-            ))
+            .filter(|role| matches!(role, AttemptRole::TrainingChallenger { suite_index: 1, .. }))
             .count(),
         1,
         "the interrupted challenger resumed instead of proposing again"
+    );
+}
+
+/// A suite narrows the search and nothing else.
+///
+/// Promotion and final qualification decide what ships, so they read their
+/// complete hidden partitions whatever suite the search used.
+#[test]
+fn promotion_and_final_qualification_keep_their_complete_partitions() {
+    let directory = TestDirectory::new("training-suite-hidden-partitions");
+    let state = FakeHandle::new();
+    let stage = two_group_stage();
+    let mut tuner = open(
+        &directory,
+        state.clone(),
+        ParameterSequenceStrategy::new(vec![vec![("gain", 0.5)]]),
+    )
+    .expect("open a two group tuner");
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run one challenger");
+    tuner.freeze_candidate().expect("freeze the champion");
+    tuner
+        .run_promotion_once_blocking()
+        .expect("run the promotion decision");
+    tuner
+        .run_final_qualification_once_blocking()
+        .expect("run final qualification");
+
+    let hidden = prepared_attempts(&tuner)
+        .into_iter()
+        .zip(prepared_run_counts(&tuner))
+        .filter(|((role, _), _)| role.training_suite_index().is_none())
+        .map(|(_, runs)| runs)
+        .collect::<Vec<_>>();
+    let promotion = stage.promotion_scenarios.len() * stage.repetitions as usize;
+    let qualification = stage.final_qualification_scenarios.len() * stage.repetitions as usize;
+
+    assert_eq!(
+        hidden,
+        vec![promotion, promotion, qualification],
+        "each hidden attempt flies its complete partition"
     );
 }
 

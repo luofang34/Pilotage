@@ -9,8 +9,8 @@ use serde::Deserialize;
 use super::TestTuner;
 use super::test_rig::{
     EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, QuadraticMetric, SequenceStrategy,
-    TestDirectory, candidate, stage, stage_with_changed_suite,
-    stage_with_changed_training_mission, stage_with_stimulus_family,
+    TestDirectory, candidate, stage, stage_with_changed_suite, stage_with_changed_training_mission,
+    stage_with_stimulus_family,
 };
 
 #[test]

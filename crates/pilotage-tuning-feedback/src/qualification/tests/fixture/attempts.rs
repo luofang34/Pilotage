@@ -44,7 +44,10 @@ pub(super) fn training_attempts(
         session,
         session_digest,
         1,
-        AttemptRole::TrainingChallenger { attempt_index: 0, suite_index: 0 },
+        AttemptRole::TrainingChallenger {
+            attempt_index: 0,
+            suite_index: 0,
+        },
         frozen_candidate,
         Point {
             loss: 0.90,

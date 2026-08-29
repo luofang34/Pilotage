@@ -206,7 +206,8 @@ fn proof_with_objectives(
         session.fixed_seed,
         session_digest,
         0,
-    ).expect("the expected run plan");
+    )
+    .expect("the expected run plan");
     let runs = expected
         .iter()
         .enumerate()
@@ -295,7 +296,8 @@ pub(super) fn proof_with_hard_gates(
         session.fixed_seed,
         session_digest,
         0,
-    ).expect("the expected run plan");
+    )
+    .expect("the expected run plan");
     let CandidateEvaluation::Passed { runs, .. } = &mut proof.evaluation else {
         panic!("fixture evaluation must pass");
     };

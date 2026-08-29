@@ -47,13 +47,8 @@ fn replay_keeps_the_exact_authorized_target_and_reference() {
     assert_eq!(authorized.attempt_index, 0);
     assert_eq!(authorized.candidate, fixture.target_digest);
     assert_eq!(authorized.reference, reference);
-    validate_attempt(
-        &state,
-        CHALLENGER,
-        fixture.target_digest,
-        Some(&reference),
-    )
-    .expect("bind exact authorization to attempt");
+    validate_attempt(&state, CHALLENGER, fixture.target_digest, Some(&reference))
+        .expect("bind exact authorization to attempt");
 }
 
 #[test]
@@ -83,13 +78,8 @@ fn replay_rejects_a_challenger_without_one_matching_authorization() {
     let fixture = fixture();
     let state = searching_state(fixture.source_digest);
 
-    let error = validate_attempt(
-        &state,
-        CHALLENGER,
-        fixture.target_digest,
-        None,
-    )
-    .expect_err("reject missing authorization");
+    let error = validate_attempt(&state, CHALLENGER, fixture.target_digest, None)
+        .expect_err("reject missing authorization");
 
     assert!(matches!(error, TuneError::InvalidJournal { .. }));
 }
@@ -270,11 +260,13 @@ fn receipt(fixture: &Fixture, policy: Digest, planning: Digest) -> CandidateTran
 fn searching_state(source: Digest) -> crate::journal::replay::JournalState {
     let mut state = initial_state(source);
     let evaluation = passed_evaluation();
-    state.suite_baselines.push(crate::journal::replay::SuiteBaseline {
-        candidate: source,
-        suite_index: 0,
-        evaluation: evaluation.clone(),
-    });
+    state
+        .suite_baselines
+        .push(crate::journal::replay::SuiteBaseline {
+            candidate: source,
+            suite_index: 0,
+            evaluation: evaluation.clone(),
+        });
     state.training_incumbent_evaluation = Some(evaluation);
     state
 }
@@ -285,9 +277,7 @@ fn binding(stage: &SearchStage) -> SearchGroupBinding {
         group_id: "transition-group".to_owned(),
         suite_id: "transition-suite".to_owned(),
         suite_index: 0,
-        suite_digest: stage.training_suites[0]
-            .digest()
-            .expect("the suite digest"),
+        suite_digest: stage.training_suites[0].digest().expect("the suite digest"),
     }
 }
 

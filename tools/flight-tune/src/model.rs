@@ -9,6 +9,9 @@ mod budget;
 mod promotion;
 mod reference;
 mod retry;
+#[cfg(test)]
+pub(crate) mod training_suite;
+#[cfg(not(test))]
 mod training_suite;
 
 pub use budget::CampaignRunBound;
@@ -240,7 +243,9 @@ impl SearchStage {
             .search_groups
             .iter()
             .find(|group| group.parameters.contains(parameter))
-            .ok_or_else(|| invalid_candidate(format!("parameter {parameter} has no search group")))?;
+            .ok_or_else(|| {
+                invalid_candidate(format!("parameter {parameter} has no search group"))
+            })?;
         let (index, suite) = self
             .training_suites
             .iter()

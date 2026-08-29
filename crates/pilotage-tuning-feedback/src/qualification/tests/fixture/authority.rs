@@ -111,10 +111,7 @@ fn campaign_authority(
             )
             .expect("derive the fixture attempt projection"),
             journal_chain: chain.records,
-            candidates: vec![
-                super::tuning_candidate(0.0),
-                super::tuning_candidate(0.5),
-            ],
+            candidates: vec![super::tuning_candidate(0.0), super::tuning_candidate(0.5)],
             baseline_candidate: session.initial_candidate_digest,
             frozen_candidate,
             final_candidate: Some(frozen_candidate),

@@ -47,7 +47,9 @@ pub enum AttemptRole {
 impl AttemptRole {
     pub(crate) const fn scenario_set(self) -> ScenarioSet {
         match self {
-            Self::TrainingBaseline { .. } | Self::TrainingChallenger { .. } => ScenarioSet::Training,
+            Self::TrainingBaseline { .. } | Self::TrainingChallenger { .. } => {
+                ScenarioSet::Training
+            }
             Self::PromotionBaseline | Self::PromotionFrozen => ScenarioSet::Promotion,
             Self::FinalQualification => ScenarioSet::FinalQualification,
         }

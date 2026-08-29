@@ -13,6 +13,10 @@ use super::{
 #[path = "attempt/selection.rs"]
 mod selection;
 
+#[cfg(test)]
+#[path = "attempt/tests.rs"]
+mod tests;
+
 pub(crate) use selection::training_better;
 
 #[allow(clippy::too_many_arguments)]
@@ -344,7 +348,13 @@ fn finalize(state: &mut JournalState, pending: PendingAttempt) -> Result<(), Tun
         AttemptRole::TrainingChallenger {
             attempt_index,
             suite_index,
-        } => finalize_training(state, pending.candidate, attempt_index, suite_index, outcome),
+        } => finalize_training(
+            state,
+            pending.candidate,
+            attempt_index,
+            suite_index,
+            outcome,
+        ),
         AttemptRole::PromotionBaseline => {
             state.promotion_baseline = Some(outcome.evaluation);
             state.promotion_baseline_proof = outcome.proof;

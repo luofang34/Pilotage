@@ -138,11 +138,7 @@ fn verify_passed(
     if runs.len() != expected.len() || proof.terminal_receipts.len() != expected.len() {
         return Err(invalid("a passing evaluation has an incomplete run plan"));
     }
-    for ((expected_run, receipt), run) in expected
-        .iter()
-        .zip(&proof.terminal_receipts)
-        .zip(runs)
-    {
+    for ((expected_run, receipt), run) in expected.iter().zip(&proof.terminal_receipts).zip(runs) {
         verify_completed(stage, role, receipt, run, expected_run)?;
     }
     Ok(())
@@ -161,10 +157,8 @@ fn verify_hard_gate(
     {
         return Err(invalid("a hard-gate evaluation has an invalid run prefix"));
     }
-    for ((expected_run, receipt), run) in expected
-        .iter()
-        .zip(&proof.terminal_receipts)
-        .zip(completed)
+    for ((expected_run, receipt), run) in
+        expected.iter().zip(&proof.terminal_receipts).zip(completed)
     {
         verify_completed(stage, role, receipt, run, expected_run)?;
     }

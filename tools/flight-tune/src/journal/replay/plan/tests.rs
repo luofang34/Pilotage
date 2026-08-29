@@ -17,28 +17,11 @@ fn no_sample_failure_requires_the_exact_empty_stream_position() {
     let plan = training_plan(&stage);
     let scenario = &stage.training_scenarios[0];
     let valid = failure(scenario, 0, 0);
-    validate_failure(
-        &valid,
-        0,
-        ScenarioSet::Training,
-        &plan,
-        &stage,
-        91,
-    )
-    .expect("validate exact empty stream");
+    validate_failure(&valid, 0, ScenarioSet::Training, &plan, &stage, 91)
+        .expect("validate exact empty stream");
 
     for forged in [failure(scenario, 1, 0), failure(scenario, 0, 1)] {
-        assert!(
-            validate_failure(
-                &forged,
-                0,
-                ScenarioSet::Training,
-                &plan,
-                &stage,
-                91,
-            )
-            .is_err()
-        );
+        assert!(validate_failure(&forged, 0, ScenarioSet::Training, &plan, &stage, 91,).is_err());
     }
 
     let mut declared_core_stage = stage.clone();

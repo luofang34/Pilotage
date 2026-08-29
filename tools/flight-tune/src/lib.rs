@@ -61,11 +61,11 @@ pub use journal::{
 };
 pub use model::{
     CampaignRunBound, Candidate, EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy,
-    ExpectedPromotionPair, ExpectedPromotionRun, MissionReference,
-    PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds, PromotionCalculation, PromotionComparison,
-    PromotionObjectiveResult, PromotionPairedStatistics, PromotionPolicy, PromotionRunKey,
-    PromotionRunPlan, PromotionSeedPolicy, PromotionSelection, QualificationPolicy, SearchGroup,
-    SearchGroupBinding, SearchGroupKind, SearchStage, TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite,
+    ExpectedPromotionPair, ExpectedPromotionRun, MissionReference, PROMOTION_POLICY_SCHEMA_VERSION,
+    ParameterBounds, PromotionCalculation, PromotionComparison, PromotionObjectiveResult,
+    PromotionPairedStatistics, PromotionPolicy, PromotionRunKey, PromotionRunPlan,
+    PromotionSeedPolicy, PromotionSelection, QualificationPolicy, SearchGroup, SearchGroupBinding,
+    SearchGroupKind, SearchStage, TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite,
     promotion_policy_digest,
 };
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
