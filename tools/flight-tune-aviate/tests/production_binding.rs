@@ -13,9 +13,8 @@
 mod rig;
 
 use flight_tune::{
-    CandidateReceipt, CandidateTransitionRequest, Digest, MissionCapability, RunPreparationReceipt,
-    ScenarioStartReceipt, SimulatorVehicleAdapter, SimulatorVehicleFactory,
-    scenario_runtime_identity,
+    CandidateTransitionRequest, Digest, MissionCapability, SimulatorVehicleAdapter,
+    SimulatorVehicleFactory, scenario_runtime_identity,
 };
 use flight_tune_aviate::runtime::direct::NoDirectControl;
 use flight_tune_aviate::runtime::phase::transition::StartStateTolerance;
