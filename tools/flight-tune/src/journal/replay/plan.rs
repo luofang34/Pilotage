@@ -1,5 +1,5 @@
 use crate::journal::AttemptRole;
-use crate::model::derive_seed;
+use crate::model::{AttemptRunPlan, derive_seed};
 use crate::{
     CandidateEvaluation, HardGateFailure, MissionReference, RunRecord, ScenarioSet, SearchStage,
     TuneError,
@@ -17,14 +17,14 @@ pub(crate) fn validate_evaluation(
 ) -> Result<(), TuneError> {
     let set = role.scenario_set();
     evaluation.validate(set)?;
-    let scenarios = scenarios(stage, set);
-    let expected_count = scenarios.len() * stage.repetitions as usize;
+    let plan = AttemptRunPlan::new(stage, role)?;
+    let expected_count = plan.run_count();
     match evaluation {
         CandidateEvaluation::Passed { runs, .. } => {
             if runs.len() != expected_count {
                 return Err(invalid("a passing evaluation has an incomplete run plan"));
             }
-            validate_run_prefix(runs, set, scenarios, stage, fixed_seed)
+            validate_run_prefix(runs, set, &plan, stage, fixed_seed)
         }
         CandidateEvaluation::HardGateFailed {
             failure,
@@ -33,15 +33,8 @@ pub(crate) fn validate_evaluation(
             if completed_runs.len() >= expected_count {
                 return Err(invalid("a hard gate failure has no remaining planned run"));
             }
-            validate_run_prefix(completed_runs, set, scenarios, stage, fixed_seed)?;
-            validate_failure(
-                failure,
-                completed_runs.len(),
-                set,
-                scenarios,
-                stage,
-                fixed_seed,
-            )
+            validate_run_prefix(completed_runs, set, &plan, stage, fixed_seed)?;
+            validate_failure(failure, completed_runs.len(), set, &plan, stage, fixed_seed)
         }
         CandidateEvaluation::Quarantined { .. } => Ok(()),
     }
@@ -50,12 +43,12 @@ pub(crate) fn validate_evaluation(
 fn validate_run_prefix(
     runs: &[RunRecord],
     set: ScenarioSet,
-    scenarios: &[MissionReference],
+    plan: &AttemptRunPlan,
     stage: &SearchStage,
     fixed_seed: u64,
 ) -> Result<(), TuneError> {
     for (index, run) in runs.iter().enumerate() {
-        let (scenario, repetition) = expected_run(scenarios, stage.repetitions, index)?;
+        let (scenario, repetition) = plan.run_at(index)?;
         if run.scenario_set != set
             || run.mission_revision_id != scenario.revision_id
             || run.repetition != repetition
@@ -72,11 +65,11 @@ fn validate_failure(
     failure: &HardGateFailure,
     run_index: usize,
     set: ScenarioSet,
-    scenarios: &[MissionReference],
+    plan: &AttemptRunPlan,
     stage: &SearchStage,
     fixed_seed: u64,
 ) -> Result<(), TuneError> {
-    let (scenario, repetition) = expected_run(scenarios, stage.repetitions, run_index)?;
+    let (scenario, repetition) = plan.run_at(run_index)?;
     let gate_is_required = stage
         .required_hard_gates
         .iter()
@@ -103,28 +96,6 @@ fn core_gate_is_valid(failure: &HardGateFailure, scenario: &MissionReference) ->
         "core.sample_limit" => Some(failure.sample_sequence == u64::from(scenario.max_samples)),
         "core.sample_timeout" => Some(failure.sample_sequence <= u64::from(scenario.max_samples)),
         _ => None,
-    }
-}
-
-fn expected_run(
-    scenarios: &[MissionReference],
-    repetitions: u32,
-    index: usize,
-) -> Result<(&MissionReference, u32), TuneError> {
-    let repetition_count = repetitions as usize;
-    let scenario = scenarios
-        .get(index / repetition_count)
-        .ok_or_else(|| invalid("a saved run index exceeds the prepared run plan"))?;
-    let repetition = u32::try_from(index % repetition_count)
-        .map_err(|_| invalid("a saved repetition exceeds u32"))?;
-    Ok((scenario, repetition))
-}
-
-fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
-    match set {
-        ScenarioSet::Training => &stage.training_scenarios,
-        ScenarioSet::Promotion => &stage.promotion_scenarios,
-        ScenarioSet::FinalQualification => &stage.final_qualification_scenarios,
     }
 }
 

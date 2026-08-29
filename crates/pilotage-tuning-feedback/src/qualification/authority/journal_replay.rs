@@ -1,17 +1,21 @@
 use flight_tune::{
     AttemptRole, AuthenticatedJournalRecord, CandidateEvaluation, CandidateTransitionReference,
-    Digest, JournalEvent, OperationStatus, PromotionClosure, PromotionDecision, SearchStage,
-    SessionIdentity,
+    Digest, JournalEvent, OperationStatus, PromotionClosure, PromotionDecision, RunRecord,
+    SearchStage, SessionIdentity,
 };
 
 use crate::{FeedbackError, error::invalid};
 
 use super::super::plan;
+use super::super::training_suite;
+use super::candidates::VerifiedCandidates;
 
 mod retry;
 mod score;
+mod suite;
 
 use score::derived_mean_loss;
+use suite::{SuiteBaseline, passing_runs};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -45,20 +49,22 @@ struct AuthorizedRetry {
     transition: Option<CandidateTransitionReference>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct PendingOutcome {
     passed: bool,
     selected: bool,
     mean_loss: Option<f64>,
+    runs: Option<Vec<RunRecord>>,
 }
 
 struct ReplayState<'a> {
     stage: &'a SearchStage,
     session: &'a SessionIdentity,
+    candidates: &'a VerifiedCandidates<'a>,
     phase: Phase,
     next_trial_id: u64,
     pending: Option<PendingAttempt>,
-    training_baseline_done: bool,
+    suite_baselines: Vec<SuiteBaseline>,
     training_incumbent: Digest,
     training_incumbent_loss: Option<f64>,
     training_attempt_count: u64,
@@ -80,8 +86,9 @@ pub(super) fn verify(
     chain: &[AuthenticatedJournalRecord],
     stage: &SearchStage,
     session: &SessionIdentity,
+    candidates: &VerifiedCandidates<'_>,
 ) -> Result<ReplayedAuthority, FeedbackError> {
-    let mut state = ReplayState::new(stage, session);
+    let mut state = ReplayState::new(stage, session, candidates);
     for record in chain.iter().skip(1) {
         state.apply(&record.entry.event)?;
     }
@@ -103,14 +110,19 @@ pub(super) fn verify(
 }
 
 impl<'a> ReplayState<'a> {
-    fn new(stage: &'a SearchStage, session: &'a SessionIdentity) -> Self {
+    fn new(
+        stage: &'a SearchStage,
+        session: &'a SessionIdentity,
+        candidates: &'a VerifiedCandidates<'a>,
+    ) -> Self {
         Self {
             stage,
             session,
+            candidates,
             phase: Phase::Searching,
             next_trial_id: 0,
             pending: None,
-            training_baseline_done: false,
+            suite_baselines: Vec::new(),
             training_incumbent: session.initial_candidate_digest,
             training_incumbent_loss: None,
             training_attempt_count: 0,
@@ -132,8 +144,14 @@ impl<'a> ReplayState<'a> {
         }
         match event {
             JournalEvent::Started { .. } => Err(invalid("the campaign authority has two starts")),
-            JournalEvent::CandidateTransitionAuthorized { .. } => {
-                self.require_idle(Phase::Searching)
+            JournalEvent::CandidateTransitionAuthorized {
+                candidate,
+                group,
+                receipt,
+                ..
+            } => {
+                self.require_idle(Phase::Searching)?;
+                self.verify_derived_group(*candidate, receipt.source_candidate_digest(), group)
             }
             JournalEvent::AttemptPrepared {
                 trial_id,
@@ -223,46 +241,6 @@ impl<'a> ReplayState<'a> {
         Ok(())
     }
 
-    fn role_allowed(&self, role: AttemptRole, candidate: Digest, transition: bool) -> bool {
-        match role {
-            AttemptRole::TrainingBaseline => {
-                self.phase == Phase::Searching
-                    && !self.training_baseline_done
-                    && candidate == self.session.initial_candidate_digest
-                    && !transition
-            }
-            AttemptRole::TrainingChallenger { attempt_index } => {
-                self.phase == Phase::Searching
-                    && self.training_incumbent_loss.is_some()
-                    && attempt_index == self.training_attempt_count
-                    && transition
-            }
-            AttemptRole::PromotionBaseline => {
-                self.phase == Phase::Frozen
-                    && self.promotion_baseline_passed.is_none()
-                    && candidate == self.session.initial_candidate_digest
-                    && !transition
-            }
-            AttemptRole::PromotionFrozen => {
-                self.phase == Phase::Frozen
-                    && self.promotion_baseline_passed == Some(true)
-                    && !self.promotion_frozen_done
-                    && self.frozen_candidate == Some(candidate)
-                    && !transition
-            }
-            AttemptRole::FinalQualification => {
-                self.phase == Phase::PromotionClosed
-                    && !self.final_done
-                    && self
-                        .promotion_closure
-                        .as_ref()
-                        .and_then(authorized_final_candidate)
-                        == Some(candidate)
-                    && !transition
-            }
-        }
-    }
-
     fn complete(
         &mut self,
         trial_id: u64,
@@ -277,19 +255,24 @@ impl<'a> ReplayState<'a> {
             .map(|pending| pending.role)
             .ok_or_else(|| invalid("an authority event has the wrong active attempt"))?;
         let mean_loss = derived_mean_loss(evaluation)?;
+        let runs = passing_runs(evaluation);
         let expected_selected = match role {
-            AttemptRole::TrainingBaseline => Some(mean_loss.is_some()),
-            AttemptRole::TrainingChallenger { .. } => Some(mean_loss.is_some_and(|loss| {
-                self.training_incumbent_loss
-                    .is_none_or(|incumbent| loss < incumbent)
-            })),
+            AttemptRole::TrainingBaseline { .. } => Some(mean_loss.is_some()),
+            AttemptRole::TrainingChallenger { suite_index, .. } => {
+                Some(training_suite::training_better(
+                    training_suite::suite_at(self.stage, suite_index)?,
+                    self.suite_baseline(self.training_incumbent, suite_index)
+                        .and_then(|baseline| baseline.as_deref()),
+                    runs.as_deref(),
+                ))
+            }
             AttemptRole::PromotionBaseline
             | AttemptRole::PromotionFrozen
             | AttemptRole::FinalQualification => None,
         };
         let hidden = !matches!(
             role,
-            AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. }
+            AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. }
         );
         if selected != expected_selected || has_proof != hidden {
             return Err(invalid("an authority attempt outcome changed"));
@@ -299,6 +282,7 @@ impl<'a> ReplayState<'a> {
             passed: mean_loss.is_some(),
             selected: selected.unwrap_or(false),
             mean_loss,
+            runs,
         });
         Ok(())
     }
@@ -307,7 +291,7 @@ impl<'a> ReplayState<'a> {
         let pending = self.active_pending_mut(trial_id)?;
         let hidden = !matches!(
             pending.role,
-            AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. }
+            AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. }
         );
         if has_proof != hidden {
             return Err(invalid("an authority quarantine proof changed"));
@@ -316,6 +300,7 @@ impl<'a> ReplayState<'a> {
             passed: false,
             selected: false,
             mean_loss: None,
+            runs: None,
         });
         pending.quarantined = true;
         Ok(())
@@ -358,8 +343,8 @@ impl<'a> ReplayState<'a> {
             .outcome
             .ok_or_else(|| invalid("an authority cleanup lost its outcome"))?;
         match pending.role {
-            AttemptRole::TrainingBaseline => {
-                self.training_baseline_done = true;
+            AttemptRole::TrainingBaseline { suite_index } => {
+                self.record_suite_baseline(pending.candidate, suite_index, &outcome);
                 self.update_incumbent(pending.candidate, outcome);
             }
             AttemptRole::TrainingChallenger { .. } => {
@@ -384,8 +369,7 @@ impl<'a> ReplayState<'a> {
 
     fn freeze(&mut self, baseline: Digest, candidate: Digest) -> Result<(), FeedbackError> {
         self.require_idle(Phase::Searching)?;
-        if !self.training_baseline_done
-            || self.training_incumbent_loss.is_none()
+        if self.training_incumbent_loss.is_none()
             || baseline != self.session.initial_candidate_digest
             || candidate != self.training_incumbent
         {

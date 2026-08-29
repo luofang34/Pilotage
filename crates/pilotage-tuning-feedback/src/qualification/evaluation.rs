@@ -53,7 +53,7 @@ pub(super) fn verify<'a>(
         session.fixed_seed,
         session_digest,
         attempt.retry_index,
-    );
+    )?;
     verify_receipt_headers(proof, session, session_digest, attempt)?;
     match &proof.evaluation {
         CandidateEvaluation::Passed { aggregate, runs } => {
@@ -131,19 +131,14 @@ fn verify_receipt_headers(
 fn verify_passed(
     stage: &SearchStage,
     role: AttemptRole,
-    expected: &[plan::ExpectedRun<'_>],
+    expected: &[plan::ExpectedRun],
     proof: &AuthenticatedEvaluationProof,
     runs: &[RunRecord],
 ) -> Result<(), FeedbackError> {
     if runs.len() != expected.len() || proof.terminal_receipts.len() != expected.len() {
         return Err(invalid("a passing evaluation has an incomplete run plan"));
     }
-    for ((expected_run, receipt), run) in expected
-        .iter()
-        .copied()
-        .zip(&proof.terminal_receipts)
-        .zip(runs)
-    {
+    for ((expected_run, receipt), run) in expected.iter().zip(&proof.terminal_receipts).zip(runs) {
         verify_completed(stage, role, receipt, run, expected_run)?;
     }
     Ok(())
@@ -152,7 +147,7 @@ fn verify_passed(
 fn verify_hard_gate(
     stage: &SearchStage,
     role: AttemptRole,
-    expected: &[plan::ExpectedRun<'_>],
+    expected: &[plan::ExpectedRun],
     proof: &AuthenticatedEvaluationProof,
     completed: &[RunRecord],
     failure: &HardGateFailure,
@@ -162,17 +157,14 @@ fn verify_hard_gate(
     {
         return Err(invalid("a hard-gate evaluation has an invalid run prefix"));
     }
-    for ((expected_run, receipt), run) in expected
-        .iter()
-        .copied()
-        .zip(&proof.terminal_receipts)
-        .zip(completed)
+    for ((expected_run, receipt), run) in
+        expected.iter().zip(&proof.terminal_receipts).zip(completed)
     {
         verify_completed(stage, role, receipt, run, expected_run)?;
     }
     let index = completed.len();
     let receipt = &proof.terminal_receipts[index];
-    let expected_run = expected[index];
+    let expected_run = &expected[index];
     plan::verify_receipt_context(receipt, expected_run)?;
     verify_failure(stage, receipt, failure, expected_run)
 }
@@ -180,7 +172,7 @@ fn verify_hard_gate(
 fn verify_quarantine(
     stage: &SearchStage,
     role: AttemptRole,
-    expected: &[plan::ExpectedRun<'_>],
+    expected: &[plan::ExpectedRun],
     proof: &AuthenticatedEvaluationProof,
     reason: &str,
 ) -> Result<(), FeedbackError> {
@@ -193,9 +185,9 @@ fn verify_quarantine(
     for (index, receipt) in prefix.iter().enumerate() {
         let run = completed_run(receipt)
             .ok_or_else(|| invalid("a quarantine prefix contains a non-completed run"))?;
-        verify_completed(stage, role, receipt, run, expected[index])?;
+        verify_completed(stage, role, receipt, run, &expected[index])?;
     }
-    plan::verify_receipt_context(last, expected[prefix.len()])?;
+    plan::verify_receipt_context(last, &expected[prefix.len()])?;
     let RunTerminalDisposition::Quarantine { quarantine } = last.class().disposition() else {
         return Err(invalid("a quarantine evaluation has a completed receipt"));
     };
@@ -210,7 +202,7 @@ fn verify_completed(
     role: AttemptRole,
     receipt: &RunTerminalReceipt,
     run: &RunRecord,
-    expected: plan::ExpectedRun<'_>,
+    expected: &plan::ExpectedRun,
 ) -> Result<(), FeedbackError> {
     plan::verify_receipt_context(receipt, expected)?;
     let saved = completed_run(receipt)
@@ -272,7 +264,7 @@ fn verify_failure(
     stage: &SearchStage,
     receipt: &RunTerminalReceipt,
     failure: &HardGateFailure,
-    expected: plan::ExpectedRun<'_>,
+    expected: &plan::ExpectedRun,
 ) -> Result<(), FeedbackError> {
     let saved = completed_failure(receipt)
         .ok_or_else(|| invalid("a hard-gate result has no completed abort receipt"))?;
@@ -353,7 +345,7 @@ fn objective_keys_match(stage: &SearchStage, role: AttemptRole, run: &RunRecord)
             .objectives
             .keys()
             .eq(stage.qualification.objective_maxima.keys()),
-        AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. } => false,
+        AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. } => false,
     }
 }
 

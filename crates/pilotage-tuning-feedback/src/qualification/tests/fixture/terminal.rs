@@ -14,7 +14,7 @@ use super::super::super::plan;
 use super::{Point, fixed_digest};
 
 pub(super) fn run(
-    expected: &plan::ExpectedRun<'_>,
+    expected: &plan::ExpectedRun,
     point: Point,
     missing_objective: bool,
 ) -> RunRecord {
@@ -35,7 +35,7 @@ pub(super) fn run(
 }
 
 pub(super) fn receipt(
-    expected: &plan::ExpectedRun<'_>,
+    expected: &plan::ExpectedRun,
     run: RunRecord,
     vehicle: &ArtifactIdentity,
     transition: Option<CandidateTransitionReference>,
@@ -44,7 +44,7 @@ pub(super) fn receipt(
 }
 
 pub(super) fn quarantine_receipt(
-    expected: &plan::ExpectedRun<'_>,
+    expected: &plan::ExpectedRun,
     run: RunRecord,
     vehicle: &ArtifactIdentity,
 ) -> RunTerminalReceipt {
@@ -58,7 +58,7 @@ pub(super) fn quarantine_receipt(
 }
 
 fn terminal_receipt(
-    expected: &plan::ExpectedRun<'_>,
+    expected: &plan::ExpectedRun,
     run: RunRecord,
     vehicle: &ArtifactIdentity,
     outcomes: Vec<RunTerminalOperationOutcome>,
@@ -74,7 +74,7 @@ fn terminal_receipt(
         // context refuses to be built without one.
         transition,
         expected.scenario_set,
-        expected.scenario,
+        &expected.scenario,
         expected.repetition,
         expected.seed,
         expected.retry_index,
@@ -84,7 +84,7 @@ fn terminal_receipt(
         &context,
         digest::domain(
             "run execution context",
-            b"flight-tune:run-execution-context:v3\0",
+            b"flight-tune:run-execution-context:v4\0",
             &context,
         )
         .expect("run intent digest"),

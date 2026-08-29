@@ -185,7 +185,7 @@ pub(super) fn reject_challenger_authorization(
     let receipt = transition_receipt(journal, stage, source, target, 0);
     let entry_count = journal.entries().len();
     let error = journal
-        .authorize_training_transition(0, "increase gain", target, receipt)
+        .authorize_training_transition(0, "increase gain", target, &group_binding(stage), receipt)
         .expect_err("reject challenger authorization");
 
     assert!(matches!(error, TuneError::InvalidJournal { .. }));
@@ -206,7 +206,7 @@ fn prepare_baseline(
     candidate: &Candidate,
 ) -> (u64, Digest) {
     let candidate_digest = document_digest("candidate", candidate).expect("candidate digest");
-    let role = AttemptRole::TrainingBaseline;
+    let role = AttemptRole::TrainingBaseline { suite_index: 0 };
     let plan = role
         .plan_digest(stage, candidate_digest, journal.session().fixed_seed)
         .expect("baseline plan");
@@ -232,7 +232,7 @@ fn prepare_training_run(
     let context = RunExecutionContext::new(
         journal.session_digest().expect("session digest"),
         trial_id,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         candidate_digest,
         None,
         ScenarioSet::Training,
@@ -334,11 +334,18 @@ fn transition_receipt(
 ) -> CandidateTransitionReceipt {
     let source_digest = document_digest("candidate", source).expect("source digest");
     let target_digest = document_digest("candidate", target).expect("target digest");
-    let plan = AttemptRole::TrainingChallenger { attempt_index }
-        .plan_digest(stage, target_digest, journal.session().fixed_seed)
-        .expect("challenger plan");
-    let planning = crate::adapter::planning_context_digest(journal.session().stage_digest, plan)
-        .expect("planning context");
+    let plan = AttemptRole::TrainingChallenger {
+        attempt_index,
+        suite_index: 0,
+    }
+    .plan_digest(stage, target_digest, journal.session().fixed_seed)
+    .expect("challenger plan");
+    let planning = crate::adapter::planning_context_digest(
+        journal.session().stage_digest,
+        plan,
+        &group_binding(stage),
+    )
+    .expect("planning context");
     let request = CandidateTransitionRequest::new(
         journal.session_digest().expect("session digest"),
         source,
@@ -363,4 +370,14 @@ fn record_successful_cleanup(journal: &mut Journal, trial_id: u64) {
     journal
         .record_cleanup(trial_id, OperationStatus::Succeeded)
         .expect("record successful cleanup");
+}
+
+/// The binding the test stage's one group and suite state.
+fn group_binding(stage: &SearchStage) -> crate::SearchGroupBinding {
+    crate::SearchGroupBinding {
+        group_id: "test-group".to_owned(),
+        suite_id: "test-suite".to_owned(),
+        suite_index: 0,
+        suite_digest: stage.training_suites[0].digest().expect("the suite digest"),
+    }
 }

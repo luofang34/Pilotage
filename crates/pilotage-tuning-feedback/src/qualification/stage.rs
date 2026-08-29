@@ -20,6 +20,7 @@ pub(super) fn verify(stage: &SearchStage) -> Result<(), FeedbackError> {
     verify_counts(stage)?;
     verify_parameters(stage)?;
     verify_scenarios(stage)?;
+    super::training_suite::verify_search_space(stage)?;
     verify_promotion(stage)?;
     verify_qualification(stage)
 }

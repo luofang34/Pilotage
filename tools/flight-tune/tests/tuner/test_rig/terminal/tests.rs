@@ -191,7 +191,7 @@ fn run_context(session_digest: Digest) -> RunExecutionContext {
     RunExecutionContext::new(
         session_digest,
         1,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         fixed_digest(4),
         None,
         ScenarioSet::Training,

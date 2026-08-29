@@ -118,12 +118,19 @@ fn resume_reads_an_authorized_target_before_attempt_preparation() {
     record_passing_baseline(&mut journal, &stage, &initial);
     let initial_digest = document_digest("candidate", &initial).expect("initial digest");
     let target_digest = document_digest("candidate", &target).expect("target digest");
-    let role = AttemptRole::TrainingChallenger { attempt_index: 0 };
+    let role = AttemptRole::TrainingChallenger {
+        attempt_index: 0,
+        suite_index: 0,
+    };
     let plan = role
         .plan_digest(&stage, target_digest, 91)
         .expect("challenger plan");
-    let planning = crate::adapter::planning_context_digest(journal.session().stage_digest, plan)
-        .expect("planning context");
+    let planning = crate::adapter::planning_context_digest(
+        journal.session().stage_digest,
+        plan,
+        &group_binding(&stage),
+    )
+    .expect("planning context");
     let request = CandidateTransitionRequest::new(
         journal.session_digest().expect("session digest"),
         &initial,
@@ -137,7 +144,7 @@ fn resume_reads_an_authorized_target_before_attempt_preparation() {
     .expect("transition request");
     let receipt = CandidateTransitionReceipt::authorized(&request).expect("transition receipt");
     journal
-        .authorize_training_transition(0, "increase gain", &target, receipt)
+        .authorize_training_transition(0, "increase gain", &target, &group_binding(&stage), receipt)
         .expect("save transition authorization");
     drop(journal);
     change_bytes(
@@ -273,7 +280,7 @@ fn candidate_audit_reads_each_digest_once_in_entry_order() {
             session: session.clone(),
             event: JournalEvent::AttemptPrepared {
                 trial_id: u64::try_from(sequence).expect("small trial identity"),
-                role: AttemptRole::TrainingBaseline,
+                role: AttemptRole::TrainingBaseline { suite_index: 0 },
                 candidate,
                 plan_digest: Digest::from_bytes([24; 32]),
                 transition: None,
@@ -335,6 +342,20 @@ fn test_stage() -> SearchStage {
         fixed_parameters: BTreeMap::from([("mode".to_owned(), 1.0)]),
         required_hard_gates: vec!["envelope".to_owned()],
         training_scenarios: vec![scenario("training", 1)],
+        training_suites: vec![crate::TrainingSuite {
+            schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
+            id: "test-suite".to_owned(),
+            primary_scenarios: vec![scenario("training", 1)],
+            guard_scenarios: Vec::new(),
+            guard_regression_limits: BTreeMap::new(),
+            repetitions: 2,
+        }],
+        search_groups: vec![crate::SearchGroup {
+            id: "test-group".to_owned(),
+            kind: crate::SearchGroupKind::Controller,
+            parameters: std::collections::BTreeSet::from(["gain".to_owned()]),
+            suite_id: "test-suite".to_owned(),
+        }],
         promotion_scenarios: vec![scenario("promotion", 2)],
         final_qualification_scenarios: vec![scenario("qualification", 3)],
         repetitions: 2,
@@ -388,4 +409,14 @@ fn change_bytes(path: &std::path::Path) {
     let mut bytes = fs::read(path).expect("read candidate");
     bytes.push(b' ');
     fs::write(path, bytes).expect("change candidate");
+}
+
+/// The binding the test stage's one group and suite state.
+fn group_binding(stage: &SearchStage) -> crate::SearchGroupBinding {
+    crate::SearchGroupBinding {
+        group_id: "test-group".to_owned(),
+        suite_id: "test-suite".to_owned(),
+        suite_index: 0,
+        suite_digest: stage.training_suites[0].digest().expect("the suite digest"),
+    }
 }

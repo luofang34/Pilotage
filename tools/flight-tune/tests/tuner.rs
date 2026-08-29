@@ -30,6 +30,8 @@ mod scenario_authority;
 mod terminal;
 #[path = "tuner/test_rig.rs"]
 mod test_rig;
+#[path = "tuner/training_suites.rs"]
+mod training_suites;
 #[path = "tuner/transition_authorization.rs"]
 mod transition_authorization;
 #[path = "tuner/transition_chain_tamper.rs"]
@@ -46,7 +48,8 @@ use test_rig::{
     SequenceStrategy, TestDirectory, assert_receipt_error, candidate, stage,
 };
 
-type TestTuner = Tuner<FakeBackend, FakeVehicle, EnvelopeGates, QuadraticMetric, SequenceStrategy>;
+type TestTuner<P = SequenceStrategy> =
+    Tuner<FakeBackend, FakeVehicle, EnvelopeGates, QuadraticMetric, P>;
 
 #[test]
 fn training_cannot_observe_hidden_sets_and_the_campaign_seals_once() {

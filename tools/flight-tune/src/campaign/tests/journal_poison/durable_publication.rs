@@ -107,12 +107,17 @@ fn check_run_preparation_publication(fault: PublicationFault) {
     let mut tuner = open_tuner(&directory, state.clone(), Vec::new());
     let initial = candidate(0.0);
     let digest = crate::campaign::evaluate::candidate_digest(&initial).expect("digest candidate");
-    let plan = AttemptRole::TrainingBaseline
+    let plan = AttemptRole::TrainingBaseline { suite_index: 0 }
         .plan_digest(&tuner.stage, digest, tuner.journal.session().fixed_seed)
         .expect("create run plan");
     let (trial_id, stored) = tuner
         .journal
-        .prepare_attempt(AttemptRole::TrainingBaseline, &initial, plan, None)
+        .prepare_attempt(
+            AttemptRole::TrainingBaseline { suite_index: 0 },
+            &initial,
+            plan,
+            None,
+        )
         .expect("prepare the attempt");
     assert_eq!(stored, digest);
     let actions_before = ActionSnapshot::new(&state, &tuner.strategy.views);
@@ -161,7 +166,7 @@ fn run_prepared_baseline(
         &mut tuner.journal,
         &tuner.stage,
         trial_id,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         initial,
         digest,
         None,
@@ -430,7 +435,10 @@ fn assert_run_prepared_entry(entry: &JournalEntry, trial_id: u64, candidate_dige
     };
     assert_eq!(*saved_trial, trial_id);
     assert_eq!(context.trial_id(), trial_id);
-    assert_eq!(context.role(), AttemptRole::TrainingBaseline);
+    assert_eq!(
+        context.role(),
+        AttemptRole::TrainingBaseline { suite_index: 0 }
+    );
     assert_eq!(context.candidate_digest(), candidate_digest);
     assert_eq!(context.transition_authorization(), None);
     assert_eq!(

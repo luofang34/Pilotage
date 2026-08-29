@@ -1,9 +1,8 @@
-use crate::journal::AttemptRole;
 use crate::{
-    CampaignBackend, CandidateEvaluation, CandidateReceipt, Digest, GateEvaluator, Journal,
-    MetricEvaluator, MetricValues, MissionReference, RunExecutionContext, RunPreparationReceipt,
-    RunRecord, ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorCapability,
-    TelemetrySample, TuneError,
+    CampaignBackend, CandidateReceipt, Digest, GateEvaluator, Journal, MetricEvaluator,
+    MetricValues, MissionReference, RunExecutionContext, RunPreparationReceipt, RunRecord,
+    ScenarioSet, ScenarioStartReceipt, SearchStage, SimulatorCapability, TelemetrySample,
+    TuneError,
 };
 
 pub(super) struct RunContext<'a> {
@@ -117,27 +116,6 @@ pub(super) fn validate_scenario_receipt(
     Ok(())
 }
 
-pub(super) fn training_selection(
-    journal: &Journal,
-    role: AttemptRole,
-    evaluation: &CandidateEvaluation,
-) -> Option<bool> {
-    match role {
-        AttemptRole::TrainingBaseline => Some(evaluation.aggregate().is_some()),
-        AttemptRole::TrainingChallenger { .. } => {
-            Some(evaluation.aggregate().is_some_and(|challenger| {
-                journal
-                    .state()
-                    .training_incumbent_evaluation
-                    .as_ref()
-                    .and_then(CandidateEvaluation::aggregate)
-                    .is_none_or(|incumbent| challenger.mean_loss < incumbent.mean_loss)
-            }))
-        }
-        _ => None,
-    }
-}
-
 pub(super) fn run_record(
     stage: &SearchStage,
     context: &RunContext<'_>,
@@ -152,14 +130,6 @@ pub(super) fn run_record(
         control_effort: values.control_effort,
         objectives: values.objectives,
         passed_hard_gates: stage.required_hard_gates.clone(),
-    }
-}
-
-pub(super) fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
-    match set {
-        ScenarioSet::Training => &stage.training_scenarios,
-        ScenarioSet::Promotion => &stage.promotion_scenarios,
-        ScenarioSet::FinalQualification => &stage.final_qualification_scenarios,
     }
 }
 

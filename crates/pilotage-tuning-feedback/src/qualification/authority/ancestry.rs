@@ -5,7 +5,7 @@ use flight_tune::{
 
 use crate::{FeedbackError, digest, error::invalid};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 6;
+const JOURNAL_SCHEMA_VERSION: u32 = 7;
 const MAX_AUTHORITY_CHAIN_ENTRIES: usize = 100_000;
 
 pub(super) struct DerivedRecords<'a> {

@@ -107,9 +107,7 @@ where
     M: MetricEvaluator,
 {
     journal.ensure_usable()?;
-    let set = role.scenario_set();
-    let scenario_count = scenarios(stage, set).len();
-    let expected_runs = scenario_count * stage.repetitions as usize;
+    let expected_runs = crate::model::AttemptRunPlan::new(stage, role)?.run_count();
     let Some(cursor) = pending::resume_committed_prefix(
         journal,
         trial_id,
@@ -165,9 +163,10 @@ where
     M: MetricEvaluator,
 {
     let set = role.scenario_set();
+    let plan = crate::model::AttemptRunPlan::new(stage, role)?;
     let mut run_index = 0_u64;
-    for scenario in scenarios(stage, set) {
-        for repetition in 0..stage.repetitions {
+    for scenario in &plan.scenarios {
+        for repetition in 0..plan.repetitions {
             if run_index < cursor.next_run_index {
                 run_index = run_index.wrapping_add(1);
                 continue;

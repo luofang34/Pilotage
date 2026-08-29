@@ -16,7 +16,7 @@ fn a_missing_head_entry_before_cas_keeps_the_old_head_and_poisons() {
     let (mut tuner, proposals) = open_tuner(&directory, state.clone());
     let initial = candidate(0.0);
     let initial_digest = tuner.journal().session().initial_candidate_digest;
-    let plan = AttemptRole::TrainingBaseline
+    let plan = AttemptRole::TrainingBaseline { suite_index: 0 }
         .plan_digest(
             &stage(),
             initial_digest,
@@ -33,7 +33,7 @@ fn a_missing_head_entry_before_cas_keeps_the_old_head_and_poisons() {
     let error = tuner
         .journal
         .prepare_attempt_with_before_authorization_for_test(
-            AttemptRole::TrainingBaseline,
+            AttemptRole::TrainingBaseline { suite_index: 0 },
             &initial,
             plan,
             None,
@@ -59,7 +59,7 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
     let (mut tuner, proposals) = open_tuner(&directory, state.clone());
     let initial = candidate(0.0);
     let initial_digest = tuner.journal().session().initial_candidate_digest;
-    let plan = AttemptRole::TrainingBaseline
+    let plan = AttemptRole::TrainingBaseline { suite_index: 0 }
         .plan_digest(
             &stage(),
             initial_digest,
@@ -68,7 +68,12 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
         .expect("create run plan");
     let (trial_id, prepared_candidate) = tuner
         .journal
-        .prepare_attempt(AttemptRole::TrainingBaseline, &initial, plan, None)
+        .prepare_attempt(
+            AttemptRole::TrainingBaseline { suite_index: 0 },
+            &initial,
+            plan,
+            None,
+        )
         .expect("prepare pending attempt");
     let candidate_path = directory
         .path()
@@ -86,7 +91,7 @@ fn a_missing_pending_candidate_before_cas_keeps_the_old_head_and_poisons() {
     let context = RunExecutionContext::new(
         tuner.journal().session_digest().expect("session digest"),
         trial_id,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         prepared_candidate,
         None,
         ScenarioSet::Training,

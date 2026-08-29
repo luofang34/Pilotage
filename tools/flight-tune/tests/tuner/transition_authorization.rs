@@ -40,6 +40,13 @@ fn a_non_aviate_adapter_authorizes_each_training_transition() {
     assert_eq!(transition_entries(&tuner).count(), 2);
 }
 
+/// A refused transition changes nothing, and refusing it twice changes
+/// nothing either.
+///
+/// The first refusal follows the suite baseline that the new incumbent owes,
+/// because a challenger cannot run until its own incumbent has a comparable
+/// result on the selected suite. The second refusal reads that same baseline,
+/// so it states the cost of the refusal alone.
 #[test]
 fn later_incumbent_rejection_has_no_external_side_effect() {
     let directory = TestDirectory::new("later-incumbent-adjacency");
@@ -60,13 +67,16 @@ fn later_incumbent_rejection_has_no_external_side_effect() {
     tuner
         .run_training_attempts_blocking(1)
         .expect("accept adjacent transition");
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect_err("reject nonadjacent transition");
     let before = ExternalMutations::capture(&state);
     let journal_length = tuner.journal().entries().len();
     let durable_before = DurableTreeSnapshot::capture(directory.path());
 
     let error = tuner
         .run_training_attempts_blocking(1)
-        .expect_err("reject nonadjacent transition");
+        .expect_err("reject the same nonadjacent transition again");
 
     assert!(matches!(error, TuneError::Adapter { .. }));
     assert_eq!(ExternalMutations::capture(&state), before);
@@ -74,7 +84,7 @@ fn later_incumbent_rejection_has_no_external_side_effect() {
     durable_before.assert_unchanged(directory.path());
     assert_eq!(
         state.0.borrow().transition.checks,
-        vec![(0.5, 0.7), (0.7, 0.3)]
+        vec![(0.5, 0.7), (0.7, 0.3), (0.7, 0.3)]
     );
 }
 

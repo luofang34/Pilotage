@@ -2,7 +2,7 @@
 //! gates a trial is held to, and the stage and scenarios a campaign
 //! names.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use flight_tune::{
     AdapterError, ArtifactIdentity, Digest, EvaluatorError, GateEvaluator, GateOutcome,
@@ -243,6 +243,8 @@ pub fn bench_stage(
 ) -> Result<flight_tune::SearchStage, AdapterError> {
     use flight_tune::ParameterBounds;
     let bounds = |minimum: f64, maximum: f64| ParameterBounds { minimum, maximum };
+    let direct = bench_scenario(BENCH_TRIAL_IDS[0])?;
+    let operator = bench_scenario(BENCH_TRIAL_IDS[1])?;
     Ok(flight_tune::SearchStage {
         id: id.to_owned(),
         allowlist: BTreeMap::from([
@@ -263,9 +265,14 @@ pub fn bench_stage(
         // Training, promotion and final qualification fly separate scenarios.
         // The bar that decides what ships is measured on runs the search never
         // saw, so a candidate cannot be fitted to the scenario that judges it.
-        training_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[0])?],
-        promotion_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[1])?],
-        final_qualification_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[2])?],
+        training_scenarios: vec![direct.clone(), operator.clone()],
+        training_suites: vec![
+            direct_response_suite(&direct),
+            operator_feel_suite(&operator, &direct, &promotion)?,
+        ],
+        search_groups: search_groups(),
+        promotion_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[2])?],
+        final_qualification_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[3])?],
         repetitions: 2,
         promotion,
         qualification,
@@ -277,16 +284,114 @@ pub fn bench_stage(
     })
 }
 
+/// The objectives a change to the command shape may not degrade.
+///
+/// Both are direct response measurements. A shaping change that improves the
+/// operator trial while it slows the response or spends more actuator is a
+/// change the operator trial alone would accept.
+const GUARD_OBJECTIVES: [&str; 2] = ["response.overshoot_fraction", "control.effort_rms"];
+
+/// The suite that answers a change to the demand dynamics.
+///
+/// The demand rate limits shape the closed-loop response, so the direct step
+/// trial is the evidence that answers them.
+fn direct_response_suite(direct: &MissionReference) -> flight_tune::TrainingSuite {
+    flight_tune::TrainingSuite {
+        schema_version: flight_tune::TRAINING_SUITE_SCHEMA_VERSION,
+        id: "direct-response".to_owned(),
+        primary_scenarios: vec![direct.clone()],
+        guard_scenarios: Vec::new(),
+        guard_regression_limits: BTreeMap::new(),
+        repetitions: 2,
+    }
+}
+
+/// The suite that answers a change to the operator command shape.
+///
+/// The operator trial carries the loss and the direct step trial guards it.
+/// The guard limits are the vehicle's own promotion regression limits, so one
+/// bar answers both the hidden decision and the search.
+fn operator_feel_suite(
+    operator: &MissionReference,
+    direct: &MissionReference,
+    promotion: &flight_tune::PromotionPolicy,
+) -> Result<flight_tune::TrainingSuite, AdapterError> {
+    let mut guard_regression_limits = BTreeMap::new();
+    for name in GUARD_OBJECTIVES {
+        let limit = promotion
+            .objective_regression_upper_95
+            .get(name)
+            .copied()
+            .ok_or_else(|| {
+                AdapterError::new(format!("the promotion policy states no limit for {name}"))
+            })?;
+        guard_regression_limits.insert(name.to_owned(), limit);
+    }
+    Ok(flight_tune::TrainingSuite {
+        schema_version: flight_tune::TRAINING_SUITE_SCHEMA_VERSION,
+        id: "operator-feel".to_owned(),
+        primary_scenarios: vec![operator.clone()],
+        guard_scenarios: vec![direct.clone()],
+        guard_regression_limits,
+        repetitions: 2,
+    })
+}
+
+/// The two parameter groups and the suite each one is answered by.
+///
+/// The demand rate limits and the stick shape are separate response families.
+/// A search that compared one against evidence produced under the other would
+/// compare two different questions.
+fn search_groups() -> Vec<flight_tune::SearchGroup> {
+    vec![
+        flight_tune::SearchGroup {
+            id: "command-dynamics".to_owned(),
+            kind: flight_tune::SearchGroupKind::Controller,
+            parameters: BTreeSet::from([
+                parameter::APPLY_ACCEL.to_owned(),
+                parameter::APPLY_JERK.to_owned(),
+                parameter::RELEASE_FACTOR.to_owned(),
+            ]),
+            suite_id: "direct-response".to_owned(),
+        },
+        flight_tune::SearchGroup {
+            id: "command-shape".to_owned(),
+            kind: flight_tune::SearchGroupKind::OperatorFeel,
+            parameters: BTreeSet::from([
+                parameter::DEADZONE.to_owned(),
+                parameter::CENTER_EXPO.to_owned(),
+                parameter::OUTER_EXPO.to_owned(),
+                parameter::NEUTRAL_ENTER.to_owned(),
+                parameter::NEUTRAL_DWELL_MS.to_owned(),
+            ]),
+            suite_id: "operator-feel".to_owned(),
+        },
+    ]
+}
+
 /// The ceiling covers the whole trial at the bench's sample rate with room for
 /// the completion event.
 const BENCH_MAX_SAMPLES: u32 = 700;
 
-const BENCH_RECEIPT_TIMEOUT_NS: u64 = 200_000_000;
+/// How long one sample of the bench may take to arrive.
+///
+/// The mission wall ceiling is this timeout for every permitted sample, so the
+/// value prices the slowest sample a campaign can produce. The engine verifies
+/// the complete durable journal once for each sample, and a campaign that
+/// searches several suites writes more journal entries than one that searches
+/// a single set, so the last runs of the longest campaign state the slowest
+/// samples the bench has to allow.
+const BENCH_RECEIPT_TIMEOUT_NS: u64 = 400_000_000;
 
 const BENCH_COMPLETION_TIME_NS: u64 = 10_480_000_000;
 
 /// The trial names that the bench stores as mission documents.
-const BENCH_TRIAL_IDS: [&str; 3] = ["training-step", "promotion-step", "final-step"];
+const BENCH_TRIAL_IDS: [&str; 4] = [
+    "training-step",
+    "training-operator",
+    "promotion-step",
+    "final-step",
+];
 
 /// Resolves the stored bench mission that one reference names.
 ///

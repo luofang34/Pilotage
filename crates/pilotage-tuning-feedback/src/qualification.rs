@@ -11,6 +11,7 @@ mod plan;
 mod promotion;
 mod stage;
 mod statistics;
+mod training_suite;
 
 #[cfg(test)]
 mod tests;

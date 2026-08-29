@@ -78,7 +78,7 @@ where
         self.journal.ensure_usable()?;
         self.require_phase(CampaignPhase::Searching, "run training")?;
         self.recover_pending_blocking()?;
-        self.ensure_training_baseline_blocking()?;
+        self.ensure_initial_baseline_blocking()?;
         let starting_attempt = self.journal.training_attempt_count();
         for _ in 0..attempt_limit {
             if !self.run_one_training_challenger_blocking()? {
@@ -187,18 +187,56 @@ where
         &self.journal
     }
 
-    fn ensure_training_baseline_blocking(&mut self) -> Result<(), TuneError> {
-        if self.journal.state().training_baseline.is_none() {
-            let candidate = self
-                .journal
-                .read_candidate(self.journal.session().initial_candidate_digest)?;
-            self.run_new_attempt_blocking(AttemptRole::TrainingBaseline, &candidate)?;
+    /// Evaluates the initial candidate on the first declared suite.
+    ///
+    /// A campaign must show that its own starting point is safe before it
+    /// proposes anything. Every later suite receives its baseline when a
+    /// challenger first needs it.
+    fn ensure_initial_baseline_blocking(&mut self) -> Result<(), TuneError> {
+        if self.journal.state().training_incumbent_evaluation.is_none() {
+            let candidate = self.journal.training_incumbent()?;
+            self.run_new_attempt_blocking(
+                AttemptRole::TrainingBaseline { suite_index: 0 },
+                &candidate,
+            )?;
         }
         self.ensure_safe_baseline()
     }
 
+    /// Evaluates the exact current incumbent on one suite when it has no
+    /// comparable result there.
+    fn ensure_suite_baseline_blocking(&mut self, suite_index: u16) -> Result<(), TuneError> {
+        let incumbent = self.journal.training_incumbent()?;
+        let digest = evaluate::candidate_digest(&incumbent)?;
+        if self
+            .journal
+            .state()
+            .suite_baseline(digest, suite_index)
+            .is_none()
+        {
+            self.run_new_attempt_blocking(
+                AttemptRole::TrainingBaseline { suite_index },
+                &incumbent,
+            )?;
+        }
+        match self.journal.state().suite_baseline(digest, suite_index) {
+            Some(CandidateEvaluation::Passed { .. }) => Ok(()),
+            Some(CandidateEvaluation::HardGateFailed { failure, .. }) => {
+                Err(TuneError::UnsafeBaseline {
+                    detail: format!("hard gate {} failed on the selected suite", failure.gate.id),
+                })
+            }
+            Some(CandidateEvaluation::Quarantined { reason }) => Err(TuneError::UnsafeBaseline {
+                detail: reason.clone(),
+            }),
+            None => Err(TuneError::UnsafeBaseline {
+                detail: "the suite baseline did not complete".to_owned(),
+            }),
+        }
+    }
+
     fn ensure_safe_baseline(&self) -> Result<(), TuneError> {
-        match self.journal.state().training_baseline.as_ref() {
+        match self.journal.state().training_incumbent_evaluation.as_ref() {
             Some(CandidateEvaluation::Passed { .. }) => Ok(()),
             Some(CandidateEvaluation::HardGateFailed { failure, .. }) => {
                 Err(TuneError::UnsafeBaseline {
@@ -219,6 +257,7 @@ where
             let candidate = self.journal.read_candidate(authorized.candidate)?;
             let role = AttemptRole::TrainingChallenger {
                 attempt_index: authorized.attempt_index,
+                suite_index: authorized.group.suite_index,
             };
             self.run_attempt_blocking(role, &candidate, Some(authorized.reference))?;
             return Ok(true);
@@ -231,8 +270,8 @@ where
                 attempt_index: self.journal.training_attempt_count(),
                 stage_id: &self.stage.id,
                 allowlist: &self.stage.allowlist,
-                scenarios: &self.stage.training_scenarios,
-                repetitions: self.stage.repetitions,
+                search_groups: &self.stage.search_groups,
+                training_suites: &self.stage.training_suites,
                 incumbent: &incumbent,
                 history: &history,
             },
@@ -254,8 +293,16 @@ where
             return Ok(false);
         };
         validate_proposal(&self.stage, &incumbent, &proposal, &history)?;
+        let group = self
+            .stage
+            .derive_search_group(&incumbent, &proposal.candidate)?;
+        self.ensure_suite_baseline_blocking(group.suite_index)?;
+        let incumbent = self.journal.training_incumbent()?;
         let attempt_index = self.journal.training_attempt_count();
-        let role = AttemptRole::TrainingChallenger { attempt_index };
+        let role = AttemptRole::TrainingChallenger {
+            attempt_index,
+            suite_index: group.suite_index,
+        };
         let transition = transition::authorize_new(
             &mut self.journal,
             &self.stage,
@@ -264,6 +311,7 @@ where
             &proposal.candidate,
             attempt_index,
             &proposal.reason,
+            &group,
         )?;
         self.run_attempt_blocking(role, &proposal.candidate, Some(transition))?;
         Ok(true)

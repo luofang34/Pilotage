@@ -112,6 +112,49 @@ fn campaign_with_attempts(
     (outcome, root)
 }
 
+/// The declared training budget for one bench campaign.
+///
+/// The run count is exact, so a stage whose suites grow past what the budget
+/// pays for fails here and not halfway through a run. The duration is the
+/// ceiling every run may take at the bench's declared sample timeout, not the
+/// time a campaign takes: an observed campaign finishes far under it.
+const BENCH_MAXIMUM_RUNS: u64 = 34;
+const BENCH_MAXIMUM_DURATION_NS: u64 = 9_520_000_000_000;
+
+/// A prepared campaign states a finite run and duration bound before it runs.
+///
+/// The bound counts every challenger run and every suite baseline a challenger
+/// can require, so an operator can read the cost of the search from the stage
+/// rather than from the wall clock.
+#[test]
+fn each_vehicle_states_a_finite_bound_inside_its_declared_budget() {
+    for (name, promotion, qualification) in [
+        (
+            "alia250",
+            crate::alia250_promotion_policy(),
+            crate::alia250_qualification_policy(),
+        ),
+        (
+            "x500",
+            crate::x500_promotion_policy(),
+            crate::x500_qualification_policy(),
+        ),
+    ] {
+        let stage = bench_stage(name, promotion, qualification).expect("build stage");
+        let bound = stage.run_bound(3).expect("state a bounded campaign");
+
+        assert_eq!(
+            bound.maximum_runs, BENCH_MAXIMUM_RUNS,
+            "the {name} campaign states its declared run bound"
+        );
+        assert!(
+            bound.maximum_duration_ns <= BENCH_MAXIMUM_DURATION_NS,
+            "the {name} campaign fits its declared duration budget: {}",
+            bound.maximum_duration_ns
+        );
+    }
+}
+
 /// The full chain at smoke cost: one vehicle, one training attempt,
 /// every phase, and the winner still qualifies. This is the per-merge
 /// answer to "did I break the engine or the bench wiring"; the

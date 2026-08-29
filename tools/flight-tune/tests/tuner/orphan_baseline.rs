@@ -9,7 +9,7 @@ use serde::Deserialize;
 use super::TestTuner;
 use super::test_rig::{
     EnvelopeGates, FakeBackend, FakeFactory, FakeHandle, QuadraticMetric, SequenceStrategy,
-    TestDirectory, candidate, stage, stage_with_changed_training_mission,
+    TestDirectory, candidate, stage, stage_with_changed_suite, stage_with_changed_training_mission,
     stage_with_stimulus_family,
 };
 
@@ -194,6 +194,77 @@ fn changed_stimulus_control_family_orphans_baseline_before_mutation() {
     new_tuner
         .run_training_attempts_blocking(1)
         .expect("run direct-family baseline and challenger");
+    assert!(state.0.borrow().scenario_runs.len() > runs_before);
+    assert_eq!(new_tuner.journal().training_attempt_count(), 1);
+}
+
+/// A frozen suite that changed orphans every result recorded under it.
+///
+/// The suite states which missions answer a search group and how many times
+/// each one runs. A result produced under one suite cannot answer a decision
+/// stated under another, so the campaign refuses to continue rather than
+/// compare across the change.
+#[test]
+fn changed_training_suite_orphans_baseline_before_mutation() {
+    let directory = TestDirectory::new("orphan-baseline-old-suite");
+    let state = FakeHandle::new();
+    let declared = stage();
+    let changed = stage_with_changed_suite();
+    assert_eq!(
+        declared.training_scenarios, changed.training_scenarios,
+        "only the suite declaration moved"
+    );
+    assert_ne!(
+        declared.training_suites[0]
+            .digest()
+            .expect("the declared suite digest"),
+        changed.training_suites[0]
+            .digest()
+            .expect("the changed suite digest")
+    );
+    let mut tuner = open_with_stage(
+        &directory,
+        state.clone(),
+        declared,
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("open the declared suite session");
+    tuner
+        .run_training_attempts_blocking(1)
+        .expect("run the declared suite training");
+    drop(tuner);
+
+    let old_head = read_head_entry(&directory);
+    let before = ExternalMutations::capture(&state);
+    let result = open_with_stage(
+        &directory,
+        state.clone(),
+        changed.clone(),
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    );
+
+    assert!(matches!(result, Err(TuneError::JournalSessionMismatch)));
+    assert_eq!(ExternalMutations::capture(&state), before);
+    assert_eq!(read_head_entry(&directory), old_head);
+
+    let new_directory = TestDirectory::new("orphan-baseline-new-suite");
+    let runs_before = state.0.borrow().scenario_runs.len();
+    let mut new_tuner = open_with_stage(
+        &new_directory,
+        state.clone(),
+        changed,
+        FakeBackend::new(state.clone()),
+        FakeFactory::new(state.clone()),
+        SequenceStrategy::new(vec![0.5]),
+    )
+    .expect("start the changed suite session");
+    new_tuner
+        .run_training_attempts_blocking(1)
+        .expect("run the changed suite baseline and challenger");
     assert!(state.0.borrow().scenario_runs.len() > runs_before);
     assert_eq!(new_tuner.journal().training_attempt_count(), 1);
 }

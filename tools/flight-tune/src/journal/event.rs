@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::identity::digest_bytes;
+use crate::model::{AttemptRunPlan, TrainingSuiteAnchor};
 use crate::{
     AuthenticatedEvaluationProof, CandidateEvaluation, CandidateTransitionReceipt,
     CandidateTransitionReference, Digest, MissionReference, PromotionClosure, RunBindingReceipt,
     RunExecutionContext, RunTerminalClass, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt,
-    RunTerminalReport, ScenarioSet, SearchStage, TuneError,
+    RunTerminalReport, ScenarioSet, SearchGroupBinding, SearchStage, TuneError,
 };
 
 #[derive(Serialize)]
@@ -16,18 +17,24 @@ struct RunPlan<'a> {
     scenarios: &'a [MissionReference],
     repetitions: u32,
     fixed_seed: u64,
+    training_suite: Option<&'a TrainingSuiteAnchor>,
 }
 
 /// The role of one durably prepared candidate evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AttemptRole {
-    /// The initial candidate on adaptive training scenarios.
-    TrainingBaseline,
-    /// One adaptive training challenger.
+    /// The current training incumbent on one exact training suite.
+    TrainingBaseline {
+        /// The position of the suite in the frozen suite order.
+        suite_index: u16,
+    },
+    /// One adaptive training challenger on one exact training suite.
     TrainingChallenger {
         /// The zero-based challenger index.
         attempt_index: u64,
+        /// The position of the suite in the frozen suite order.
+        suite_index: u16,
     },
     /// The initial candidate on hidden promotion scenarios.
     PromotionBaseline,
@@ -40,9 +47,21 @@ pub enum AttemptRole {
 impl AttemptRole {
     pub(crate) const fn scenario_set(self) -> ScenarioSet {
         match self {
-            Self::TrainingBaseline | Self::TrainingChallenger { .. } => ScenarioSet::Training,
+            Self::TrainingBaseline { .. } | Self::TrainingChallenger { .. } => {
+                ScenarioSet::Training
+            }
             Self::PromotionBaseline | Self::PromotionFrozen => ScenarioSet::Promotion,
             Self::FinalQualification => ScenarioSet::FinalQualification,
+        }
+    }
+
+    /// Returns the frozen training suite this role names.
+    #[must_use]
+    pub const fn training_suite_index(self) -> Option<u16> {
+        match self {
+            Self::TrainingBaseline { suite_index }
+            | Self::TrainingChallenger { suite_index, .. } => Some(suite_index),
+            Self::PromotionBaseline | Self::PromotionFrozen | Self::FinalQualification => None,
         }
     }
 
@@ -52,19 +71,15 @@ impl AttemptRole {
         candidate: Digest,
         fixed_seed: u64,
     ) -> Result<Digest, TuneError> {
-        let scenario_set = self.scenario_set();
-        let scenarios = match scenario_set {
-            ScenarioSet::Training => &stage.training_scenarios,
-            ScenarioSet::Promotion => &stage.promotion_scenarios,
-            ScenarioSet::FinalQualification => &stage.final_qualification_scenarios,
-        };
+        let run_plan = AttemptRunPlan::new(stage, self)?;
         let plan = RunPlan {
             role: self,
             candidate,
-            scenario_set,
-            scenarios,
-            repetitions: stage.repetitions,
+            scenario_set: run_plan.set,
+            scenarios: &run_plan.scenarios,
+            repetitions: run_plan.repetitions,
             fixed_seed,
+            training_suite: run_plan.suite.as_ref(),
         };
         let bytes = serde_json::to_vec(&plan).map_err(|source| TuneError::Encode {
             document: "run plan",
@@ -176,6 +191,8 @@ pub enum JournalEvent {
         reason: String,
         /// The immutable target candidate digest.
         candidate: Digest,
+        /// The group and suite the engine derived from the candidate difference.
+        group: SearchGroupBinding,
         /// The complete vehicle authorization receipt.
         receipt: CandidateTransitionReceipt,
     },

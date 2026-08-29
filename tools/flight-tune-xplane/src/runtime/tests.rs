@@ -394,7 +394,7 @@ fn context() -> RunExecutionContext {
     RunExecutionContext::new(
         Digest::from_bytes([1; 32]),
         1,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         Digest::from_bytes([2; 32]),
         None,
         ScenarioSet::Training,

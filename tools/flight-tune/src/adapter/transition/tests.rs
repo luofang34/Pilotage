@@ -192,10 +192,14 @@ fn transition_binding_rejects_another_session() {
 
 #[test]
 fn planning_context_is_domain_separated_and_complete() {
-    let context = planning_context_digest(digest(1), digest(2)).expect("planning context");
+    let group = group_binding();
+    let context = planning_context_digest(digest(1), digest(2), &group).expect("planning context");
     assert!(!context.is_zero());
     assert_ne!(context, digest_bytes(&[1; 32]));
-    assert!(planning_context_digest(digest(0), digest(2)).is_err());
+    assert!(planning_context_digest(digest(0), digest(2), &group).is_err());
+    let mut empty = group_binding();
+    empty.suite_digest = crate::Digest::from_bytes([0; 32]);
+    assert!(planning_context_digest(digest(1), digest(2), &empty).is_err());
 }
 
 struct AcceptingAdapter<'a> {
@@ -264,4 +268,14 @@ fn validator() -> ArtifactIdentity {
 
 const fn digest(value: u8) -> Digest {
     Digest::from_bytes([value; 32])
+}
+
+/// One binding a planning context can be calculated over.
+fn group_binding() -> crate::SearchGroupBinding {
+    crate::SearchGroupBinding {
+        group_id: "dynamics".to_owned(),
+        suite_id: "direct-response".to_owned(),
+        suite_index: 0,
+        suite_digest: digest(31),
+    }
 }

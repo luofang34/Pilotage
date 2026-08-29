@@ -60,11 +60,13 @@ pub use journal::{
     PromotionDecision, SessionIdentity, quarantine_reason_digest,
 };
 pub use model::{
-    Candidate, EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy, ExpectedPromotionPair,
-    ExpectedPromotionRun, MissionReference, PROMOTION_POLICY_SCHEMA_VERSION, ParameterBounds,
-    PromotionCalculation, PromotionComparison, PromotionObjectiveResult, PromotionPairedStatistics,
-    PromotionPolicy, PromotionRunKey, PromotionRunPlan, PromotionSeedPolicy, PromotionSelection,
-    QualificationPolicy, SearchStage, promotion_policy_digest,
+    CampaignRunBound, Candidate, EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy,
+    ExpectedPromotionPair, ExpectedPromotionRun, MissionReference, PROMOTION_POLICY_SCHEMA_VERSION,
+    ParameterBounds, PromotionCalculation, PromotionComparison, PromotionObjectiveResult,
+    PromotionPairedStatistics, PromotionPolicy, PromotionRunKey, PromotionRunPlan,
+    PromotionSeedPolicy, PromotionSelection, QualificationPolicy, SearchGroup, SearchGroupBinding,
+    SearchGroupKind, SearchStage, TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite,
+    promotion_policy_digest,
 };
 pub use run_context::{RUN_EXECUTION_CONTEXT_SCHEMA_VERSION, RunExecutionContext};
 pub use scenario_runtime::{

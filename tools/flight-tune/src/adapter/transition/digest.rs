@@ -3,11 +3,11 @@ use serde::Serialize;
 use sha2::{Digest as ShaDigest, Sha256};
 
 use crate::identity::digest_bytes;
-use crate::{ArtifactIdentity, Candidate, TuneError};
+use crate::{ArtifactIdentity, Candidate, SearchGroupBinding, TuneError};
 
 const RECEIPT_DOMAIN: &[u8] = b"pilotage.flight-tune.candidate-transition-receipt.v1\0";
 const PLANNING_CONTEXT_DOMAIN: &[u8] =
-    b"pilotage.flight-tune.candidate-transition-planning-context.v1\0";
+    b"pilotage.flight-tune.candidate-transition-planning-context.v2\0";
 
 #[derive(Serialize)]
 pub(super) struct ReceiptDocument<'a> {
@@ -21,10 +21,11 @@ pub(super) struct ReceiptDocument<'a> {
 }
 
 #[derive(Serialize)]
-struct PlanningContextDocument {
+struct PlanningContextDocument<'a> {
     schema_version: u16,
     stage_digest: Digest,
     plan_digest: Digest,
+    group: &'a SearchGroupBinding,
 }
 
 pub(super) fn validate_candidate_digest(
@@ -51,8 +52,14 @@ pub(super) fn receipt_digest(document: &ReceiptDocument<'_>) -> Result<Digest, T
 pub(crate) fn planning_context_digest(
     stage_digest: Digest,
     plan_digest: Digest,
+    group: &SearchGroupBinding,
 ) -> Result<Digest, TuneError> {
-    if stage_digest.is_zero() || plan_digest.is_zero() {
+    if stage_digest.is_zero()
+        || plan_digest.is_zero()
+        || group.suite_digest.is_zero()
+        || group.group_id.trim().is_empty()
+        || group.suite_id.trim().is_empty()
+    {
         return Err(TuneError::InvalidIdentity {
             detail: "the candidate transition planning context is incomplete".to_owned(),
         });
@@ -60,9 +67,10 @@ pub(crate) fn planning_context_digest(
     domain_digest(
         PLANNING_CONTEXT_DOMAIN,
         &PlanningContextDocument {
-            schema_version: 1,
+            schema_version: 2,
             stage_digest,
             plan_digest,
+            group,
         },
         "candidate transition planning context",
     )

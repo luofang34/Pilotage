@@ -5,19 +5,29 @@ use serde::Serialize;
 
 use crate::{FeedbackError, digest, error::invalid};
 
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
+use super::training_suite;
 
-#[derive(Clone, Copy)]
-pub(super) struct ExpectedRun<'a> {
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v4\0";
+
+#[derive(Clone)]
+pub(super) struct ExpectedRun {
     pub(super) role: AttemptRole,
     pub(super) candidate: Digest,
     pub(super) trial_id: u64,
     pub(super) scenario_set: ScenarioSet,
-    pub(super) scenario: &'a MissionReference,
+    pub(super) scenario: MissionReference,
     pub(super) repetition: u32,
     pub(super) seed: u64,
     pub(super) session_digest: Digest,
     pub(super) retry_index: u32,
+}
+
+/// The identity of the suite that one training run plan uses.
+#[derive(Serialize)]
+struct SuiteAnchor {
+    index: u16,
+    id: String,
+    digest: Digest,
 }
 
 #[derive(Serialize)]
@@ -28,6 +38,45 @@ struct RunPlanDocument<'a> {
     scenarios: &'a [MissionReference],
     repetitions: u32,
     fixed_seed: u64,
+    training_suite: Option<&'a SuiteAnchor>,
+}
+
+/// The ordered run plan one role takes from one frozen stage.
+struct AttemptPlan {
+    scenarios: Vec<MissionReference>,
+    repetitions: u32,
+    suite: Option<SuiteAnchor>,
+}
+
+fn attempt_plan(stage: &SearchStage, role: AttemptRole) -> Result<AttemptPlan, FeedbackError> {
+    let set = scenario_set(role);
+    let Some(index) = training_suite_index(role) else {
+        return Ok(AttemptPlan {
+            scenarios: scenarios(stage, set).to_vec(),
+            repetitions: stage.repetitions,
+            suite: None,
+        });
+    };
+    let suite = training_suite::suite_at(stage, index)?;
+    Ok(AttemptPlan {
+        scenarios: training_suite::ordered_scenarios(suite),
+        repetitions: suite.repetitions,
+        suite: Some(SuiteAnchor {
+            index,
+            id: suite.id.clone(),
+            digest: training_suite::suite_digest(suite)?,
+        }),
+    })
+}
+
+const fn training_suite_index(role: AttemptRole) -> Option<u16> {
+    match role {
+        AttemptRole::TrainingBaseline { suite_index }
+        | AttemptRole::TrainingChallenger { suite_index, .. } => Some(suite_index),
+        AttemptRole::PromotionBaseline
+        | AttemptRole::PromotionFrozen
+        | AttemptRole::FinalQualification => None,
+    }
 }
 
 pub(super) fn digest_for(
@@ -36,16 +85,17 @@ pub(super) fn digest_for(
     candidate: Digest,
     fixed_seed: u64,
 ) -> Result<Digest, FeedbackError> {
-    let scenario_set = scenario_set(role);
+    let plan = attempt_plan(stage, role)?;
     digest::document(
         "run plan",
         &RunPlanDocument {
             role,
             candidate,
-            scenario_set,
-            scenarios: scenarios(stage, scenario_set),
-            repetitions: stage.repetitions,
+            scenario_set: scenario_set(role),
+            scenarios: &plan.scenarios,
+            repetitions: plan.repetitions,
             fixed_seed,
+            training_suite: plan.suite.as_ref(),
         },
     )
 }
@@ -59,20 +109,22 @@ pub(super) fn expected_runs(
     fixed_seed: u64,
     session_digest: Digest,
     retry_index: u32,
-) -> Vec<ExpectedRun<'_>> {
+) -> Result<Vec<ExpectedRun>, FeedbackError> {
     let scenario_set = scenario_set(role);
-    let capacity = scenarios(stage, scenario_set)
+    let plan = attempt_plan(stage, role)?;
+    let capacity = plan
+        .scenarios
         .len()
-        .saturating_mul(stage.repetitions as usize);
+        .saturating_mul(plan.repetitions as usize);
     let mut expected = Vec::with_capacity(capacity);
-    for scenario in scenarios(stage, scenario_set) {
-        for repetition in 0..stage.repetitions {
+    for scenario in &plan.scenarios {
+        for repetition in 0..plan.repetitions {
             expected.push(ExpectedRun {
                 role,
                 candidate,
                 trial_id,
                 scenario_set,
-                scenario,
+                scenario: scenario.clone(),
                 repetition,
                 seed: derive_seed(fixed_seed, scenario_set, scenario, repetition),
                 session_digest,
@@ -80,12 +132,12 @@ pub(super) fn expected_runs(
             });
         }
     }
-    expected
+    Ok(expected)
 }
 
 pub(super) fn verify_receipt_context(
     receipt: &RunTerminalReceipt,
-    expected: ExpectedRun<'_>,
+    expected: &ExpectedRun,
 ) -> Result<(), FeedbackError> {
     let context = receipt.context();
     let intent_digest = digest::domain("run execution context", RUN_CONTEXT_DOMAIN, context)?;
@@ -111,7 +163,7 @@ pub(super) fn verify_receipt_context(
 
 pub(super) const fn scenario_set(role: AttemptRole) -> ScenarioSet {
     match role {
-        AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. } => {
+        AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. } => {
             ScenarioSet::Training
         }
         AttemptRole::PromotionBaseline | AttemptRole::PromotionFrozen => ScenarioSet::Promotion,

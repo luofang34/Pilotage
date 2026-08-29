@@ -26,8 +26,10 @@ fn replay_rejects_a_coherent_forged_transition_receipt_chain() {
             attempt_index,
             reason,
             candidate,
+            group,
             receipt,
         } => JournalEvent::CandidateTransitionAuthorized {
+            group: group.clone(),
             attempt_index: *attempt_index,
             reason: reason.clone(),
             candidate: *candidate,

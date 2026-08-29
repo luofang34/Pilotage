@@ -5,10 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CandidateLineage, ScenarioSet, TuneError};
 
+mod budget;
 mod promotion;
 mod reference;
 mod retry;
+mod training_suite;
 
+pub use budget::CampaignRunBound;
 pub use promotion::{
     ExpectedPromotionPair, ExpectedPromotionRun, PROMOTION_POLICY_SCHEMA_VERSION,
     PromotionCalculation, PromotionComparison, PromotionObjectiveResult, PromotionPairedStatistics,
@@ -18,6 +21,12 @@ pub use promotion::{
 pub(crate) use promotion::{expected_promotion_pairs, required_improvement};
 pub use reference::MissionReference;
 pub use retry::{EXECUTION_RETRY_POLICY_SCHEMA_VERSION, ExecutionRetryPolicy};
+#[cfg(test)]
+pub(crate) use training_suite::tests::stage_for_budget;
+pub(crate) use training_suite::{AttemptRunPlan, TrainingSuiteAnchor};
+pub use training_suite::{
+    SearchGroup, SearchGroupBinding, SearchGroupKind, TRAINING_SUITE_SCHEMA_VERSION, TrainingSuite,
+};
 
 const MAX_PARAMETERS: usize = 128;
 const MAX_SCENARIOS_PER_SET: usize = 64;
@@ -138,6 +147,10 @@ pub struct SearchStage {
     pub required_hard_gates: Vec<String>,
     /// Missions that supply adaptive search evidence.
     pub training_scenarios: Vec<MissionReference>,
+    /// The frozen training suites in their declared order.
+    pub training_suites: Vec<TrainingSuite>,
+    /// The search parameter groups in their declared order.
+    pub search_groups: Vec<SearchGroup>,
     /// Hidden missions for the one promotion decision.
     pub promotion_scenarios: Vec<MissionReference>,
     /// Hidden missions for the final release decision.
@@ -164,9 +177,82 @@ impl SearchStage {
         self.validate_counts()?;
         self.validate_parameters()?;
         self.validate_scenarios()?;
+        training_suite::validate_search_space(
+            &self.allowlist,
+            &self.training_scenarios,
+            &self.training_suites,
+            &self.search_groups,
+        )?;
         self.validate_promotion()?;
         self.execution_retry.validate()?;
         self.validate_qualification()
+    }
+
+    /// Returns the frozen suite at one position in the declared suite order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when the stage does not declare that suite.
+    pub fn training_suite(&self, index: u16) -> Result<&TrainingSuite, TuneError> {
+        self.training_suites
+            .get(index as usize)
+            .ok_or_else(|| invalid_stage(format!("the stage does not declare suite {index}")))
+    }
+
+    /// Derives the search group and training suite for one exact proposal.
+    ///
+    /// The derivation reads only the parameters that differ between the two
+    /// candidates. A proposal strategy cannot name its own suite, so a
+    /// controller change cannot take an operator-feel suite.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TuneError`] when the proposal changes no parameter or changes
+    /// parameters from two groups.
+    pub fn derive_search_group(
+        &self,
+        incumbent: &Candidate,
+        challenger: &Candidate,
+    ) -> Result<SearchGroupBinding, TuneError> {
+        let changed = training_suite::changed_parameters(incumbent, challenger);
+        let Some(first) = changed.first() else {
+            return Err(invalid_candidate("a proposal changes no parameter"));
+        };
+        let mut owners = BTreeSet::new();
+        for name in &changed {
+            let owner = self.owning_group(name)?;
+            owners.insert(owner.id.as_str());
+        }
+        if owners.len() != 1 {
+            return Err(invalid_candidate(
+                "a proposal changes parameters from two search groups",
+            ));
+        }
+        self.binding_for(self.owning_group(first)?)
+    }
+
+    fn owning_group(&self, parameter: &str) -> Result<&SearchGroup, TuneError> {
+        self.search_groups
+            .iter()
+            .find(|group| group.parameters.contains(parameter))
+            .ok_or_else(|| invalid_candidate(format!("parameter {parameter} has no search group")))
+    }
+
+    fn binding_for(&self, group: &SearchGroup) -> Result<SearchGroupBinding, TuneError> {
+        let (index, suite) = self
+            .training_suites
+            .iter()
+            .enumerate()
+            .find(|(_, suite)| suite.id == group.suite_id)
+            .ok_or_else(|| invalid_stage(format!("group {} has no suite", group.id)))?;
+        let suite_index =
+            u16::try_from(index).map_err(|_| invalid_stage("a suite index exceeds u16"))?;
+        Ok(SearchGroupBinding {
+            group_id: group.id.clone(),
+            suite_id: suite.id.clone(),
+            suite_index,
+            suite_digest: suite.digest()?,
+        })
     }
 
     /// Validates one candidate against its current training incumbent.

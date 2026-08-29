@@ -4,13 +4,19 @@ use std::fmt;
 
 use pilotage_trial::Digest;
 
-use crate::{ArtifactIdentity, Candidate, MissionReference, ParameterBounds};
+use crate::{ArtifactIdentity, Candidate, ParameterBounds, SearchGroup, TrainingSuite};
 
 /// A prior training result that a proposal strategy can inspect.
+///
+/// The suite position states which evidence produced the loss. Two results
+/// from two suites are not comparable, so a strategy must read the suite
+/// before it reads the loss.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrainingObservation {
     /// The zero-based training challenger index.
     pub attempt_index: u64,
+    /// The position of the training suite that produced this result.
+    pub suite_index: u16,
     /// The challenger candidate digest.
     pub candidate_digest: Digest,
     /// Whether training selected this challenger as the new incumbent.
@@ -34,10 +40,10 @@ pub struct TrainingView<'a> {
     pub stage_id: &'a str,
     /// The only parameters that a proposal can change.
     pub allowlist: &'a BTreeMap<String, ParameterBounds>,
-    /// The training scenarios.
-    pub scenarios: &'a [MissionReference],
-    /// The repeated run count for each training scenario.
-    pub repetitions: u32,
+    /// The frozen search parameter groups in their declared order.
+    pub search_groups: &'a [SearchGroup],
+    /// The frozen training suites in their declared order.
+    pub training_suites: &'a [TrainingSuite],
     /// The current training incumbent.
     pub incumbent: &'a Candidate,
     /// Prior training challenger results in journal order.

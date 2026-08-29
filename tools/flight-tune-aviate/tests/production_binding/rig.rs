@@ -307,7 +307,7 @@ pub fn run_context(
     RunExecutionContext::new(
         Digest::from_bytes([session; 32]),
         7,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         candidate_digest,
         None,
         ScenarioSet::Training,
