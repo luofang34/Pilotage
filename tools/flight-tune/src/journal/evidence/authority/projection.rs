@@ -120,6 +120,7 @@ impl AttemptProjection {
                 "the attempt projection does not match its journal chain",
             ));
         }
+        require_committed_runs(&self.attempts)?;
         require_retry_bijection(&self.attempts, execution_retry_limit)
     }
 }
@@ -184,8 +185,18 @@ fn apply(
             Ok(())
         }
         JournalEvent::RunPrepared {
-            run_intent_digest, ..
+            context,
+            run_intent_digest,
+            ..
         } => {
+            // The stated identity has to be the identity of the context that
+            // states it, or a changed condition could travel under the
+            // identity of the condition it replaced.
+            if context.digest()? != *run_intent_digest {
+                return Err(invalid(
+                    "a prepared run identity does not cover its execution context",
+                ));
+            }
             open_record(attempts, *open)?
                 .run_intent_digests
                 .push(*run_intent_digest);
@@ -338,6 +349,22 @@ fn open_record(
     attempts
         .get_mut(index)
         .ok_or_else(|| invalid("a projection lost its open attempt"))
+}
+
+/// Requires every prepared run to have committed exactly one receipt.
+///
+/// An attempt cannot close with a prepared run left uncommitted, so a
+/// projection whose two counts differ has lost or gained a receipt.
+fn require_committed_runs(attempts: &[AttemptProjectionRecord]) -> Result<(), TuneError> {
+    if attempts
+        .iter()
+        .any(|record| record.run_intent_digests.len() != record.terminal_receipt_digests.len())
+    {
+        return Err(invalid(
+            "an attempt committed a different receipt count than it prepared",
+        ));
+    }
+    Ok(())
 }
 
 /// Requires one exact answer for every quarantine, and no answer without one.

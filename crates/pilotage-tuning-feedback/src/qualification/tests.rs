@@ -1,10 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod aggregate_attacks;
 mod attacks;
 mod fixture;
 #[path = "../../../../tools/flight-tune/tests/tuner/test_rig.rs"]
 #[allow(dead_code)]
 mod producer_rig;
+mod retry_attacks;
 
 use flight_tune::{CandidateEvaluation, FinalQualificationOutcome};
 

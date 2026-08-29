@@ -14,6 +14,9 @@ use crate::{FeedbackError, digest, error::invalid};
 /// The projection schema this verifier reproduces.
 const PROJECTION_SCHEMA_VERSION: u16 = 1;
 
+/// The domain the core binds one run execution context under.
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
+
 /// The domain the core binds one quarantine reason under.
 const QUARANTINE_REASON_DOMAIN: &[u8] = b"pilotage.flight-tune.attempt-quarantine-reason.v1\0";
 
@@ -56,6 +59,7 @@ pub(in crate::qualification) fn verify(
             "the attempt projection does not match its journal chain",
         ));
     }
+    require_committed_runs(&attempts)?;
     require_bijection(&attempts, execution_retry_limit)?;
     Ok(VerifiedAttempts { attempts })
 }
@@ -111,8 +115,19 @@ fn apply(
             Ok(())
         }
         JournalEvent::RunPrepared {
-            run_intent_digest, ..
+            context,
+            run_intent_digest,
+            ..
         } => {
+            // The stated identity has to be the identity of the context that
+            // states it, or a changed condition could travel under the
+            // identity of the condition it replaced.
+            let derived = digest::domain("run execution context", RUN_CONTEXT_DOMAIN, context)?;
+            if derived != *run_intent_digest {
+                return Err(invalid(
+                    "a prepared run identity does not cover its execution context",
+                ));
+            }
             open_record(attempts, *open)?
                 .run_intent_digests
                 .push(*run_intent_digest);
@@ -267,6 +282,22 @@ fn open_record(
     attempts
         .get_mut(index)
         .ok_or_else(|| invalid("a projection lost its open attempt"))
+}
+
+/// Requires every prepared run to have committed exactly one receipt.
+///
+/// An attempt cannot close with a prepared run left uncommitted, so a
+/// projection whose two counts differ has lost or gained a receipt.
+fn require_committed_runs(attempts: &[AttemptProjectionRecord]) -> Result<(), FeedbackError> {
+    if attempts
+        .iter()
+        .any(|record| record.run_intent_digests.len() != record.terminal_receipt_digests.len())
+    {
+        return Err(invalid(
+            "an attempt committed a different receipt count than it prepared",
+        ));
+    }
+    Ok(())
 }
 
 /// Requires one exact answer for every quarantine, and none without one.
