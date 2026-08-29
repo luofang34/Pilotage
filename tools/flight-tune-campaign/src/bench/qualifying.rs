@@ -373,7 +373,15 @@ fn search_groups() -> Vec<flight_tune::SearchGroup> {
 /// the completion event.
 const BENCH_MAX_SAMPLES: u32 = 700;
 
-const BENCH_RECEIPT_TIMEOUT_NS: u64 = 200_000_000;
+/// How long one sample of the bench may take to arrive.
+///
+/// The mission wall ceiling is this timeout for every permitted sample, so the
+/// value prices the slowest sample a campaign can produce. The engine verifies
+/// the complete durable journal once for each sample, and a campaign that
+/// searches several suites writes more journal entries than one that searches
+/// a single set, so the last runs of the longest campaign state the slowest
+/// samples the bench has to allow.
+const BENCH_RECEIPT_TIMEOUT_NS: u64 = 400_000_000;
 
 const BENCH_COMPLETION_TIME_NS: u64 = 10_480_000_000;
 

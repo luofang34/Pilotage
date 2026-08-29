@@ -114,10 +114,12 @@ fn campaign_with_attempts(
 
 /// The declared training budget for one bench campaign.
 ///
-/// The number is the campaign's own bound, so a stage whose suites grow past
-/// what the budget pays for fails here and not halfway through a run.
+/// The run count is exact, so a stage whose suites grow past what the budget
+/// pays for fails here and not halfway through a run. The duration is the
+/// ceiling every run may take at the bench's declared sample timeout, not the
+/// time a campaign takes: an observed campaign finishes far under it.
 const BENCH_MAXIMUM_RUNS: u64 = 34;
-const BENCH_MAXIMUM_DURATION_NS: u64 = 6_440_000_000_000;
+const BENCH_MAXIMUM_DURATION_NS: u64 = 9_520_000_000_000;
 
 /// A prepared campaign states a finite run and duration bound before it runs.
 ///
