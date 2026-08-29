@@ -70,24 +70,6 @@ impl RunExecutionContext {
         Ok(context)
     }
 
-    /// Returns this identity with the retry index one replacement further on.
-    ///
-    /// Every other field is carried through unchanged, so a replacement
-    /// cannot silently change the experimental condition it replaces.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TuneError`] when the source identity is not valid.
-    pub fn replacement(&self) -> Result<Self, TuneError> {
-        self.validate()?;
-        let context = Self {
-            retry_index: self.retry_index.wrapping_add(1),
-            ..self.clone()
-        };
-        context.validate()?;
-        Ok(context)
-    }
-
     /// Validates the structure and internal consistency of this run identity.
     ///
     /// This method does not authorize a candidate transition. Journal replay

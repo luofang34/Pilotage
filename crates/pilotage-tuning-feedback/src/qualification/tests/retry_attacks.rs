@@ -214,19 +214,33 @@ fn a_replacement_that_changes_the_seed_is_refused() {
 }
 
 #[test]
-fn a_replacement_that_changes_its_scenario_or_repetition_is_refused() {
-    for repetition in [7_u32, 9] {
-        let mut evidence = replaced_campaign(&format!("retry-attack-repetition-{repetition}"));
-        for record in &mut evidence.journal.authority.journal_chain {
-            if let JournalEvent::RunPrepared { context, .. } = &mut record.entry.event
-                && context.retry_index() == 1
-            {
-                *context = rebuilt_with_repetition(context, repetition);
-            }
+fn a_replacement_that_changes_its_repetition_is_refused() {
+    let mut evidence = replaced_campaign("retry-attack-repetition");
+    for record in &mut evidence.journal.authority.journal_chain {
+        if let JournalEvent::RunPrepared { context, .. } = &mut record.entry.event
+            && context.retry_index() == 1
+        {
+            *context = rebuilt_with_repetition(context, context.repetition().wrapping_add(7));
         }
-        rechain(&mut evidence);
-        assert_refused(&evidence);
     }
+    rechain(&mut evidence);
+    assert_refused(&evidence);
+}
+
+#[test]
+fn a_replacement_that_changes_its_scenario_digest_is_refused() {
+    let mut evidence = replaced_campaign("retry-attack-scenario");
+    for record in &mut evidence.journal.authority.journal_chain {
+        if let JournalEvent::RunPrepared { context, .. } = &mut record.entry.event
+            && context.retry_index() == 1
+        {
+            // The mission the replacement flew is part of the condition it
+            // must keep, so a different scenario is a different experiment.
+            *context = rebuilt_with_scenario(context, Digest::from_bytes([41; 32]));
+        }
+    }
+    rechain(&mut evidence);
+    assert_refused(&evidence);
 }
 
 #[test]
@@ -392,7 +406,12 @@ fn rebuilt_with_seed(
     context: &flight_tune::RunExecutionContext,
     seed: u64,
 ) -> flight_tune::RunExecutionContext {
-    rebuild(context, context.repetition(), seed)
+    rebuild(
+        context,
+        context.repetition(),
+        seed,
+        context.mission_content_digest(),
+    )
 }
 
 /// Rebuilds one run identity with a different repetition and nothing else.
@@ -400,18 +419,37 @@ fn rebuilt_with_repetition(
     context: &flight_tune::RunExecutionContext,
     repetition: u32,
 ) -> flight_tune::RunExecutionContext {
-    rebuild(context, repetition, context.seed())
+    rebuild(
+        context,
+        repetition,
+        context.seed(),
+        context.mission_content_digest(),
+    )
+}
+
+/// Rebuilds one run identity with a different scenario and nothing else.
+fn rebuilt_with_scenario(
+    context: &flight_tune::RunExecutionContext,
+    content_digest: Digest,
+) -> flight_tune::RunExecutionContext {
+    rebuild(
+        context,
+        context.repetition(),
+        context.seed(),
+        content_digest,
+    )
 }
 
 fn rebuild(
     context: &flight_tune::RunExecutionContext,
     repetition: u32,
     seed: u64,
+    content_digest: Digest,
 ) -> flight_tune::RunExecutionContext {
     let mission = flight_tune::MissionReference {
         revision_id: context.mission_revision_id().to_owned(),
         schema_version: flight_tune::MISSION_SCHEMA_VERSION,
-        content_digest: context.mission_content_digest(),
+        content_digest,
         max_samples: super::producer_rig::FAKE_MAX_SAMPLES,
         sample_timeout_ns: 20_000_000,
     };
