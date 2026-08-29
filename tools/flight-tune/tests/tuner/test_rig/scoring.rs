@@ -63,13 +63,17 @@ impl GateEvaluator for EnvelopeGates {
             .get("gain")
             .copied()
             .ok_or_else(|| EvaluatorError::new("sample has no gain"))?;
+        // The crash gate is the floor of every campaign and is evaluated
+        // first. The rig has no plant that can hit anything, so it passes,
+        // and the envelope gate is what a candidate can actually trip.
+        let crash = GateOutcome::pass(flight_tune::MANDATORY_CRASH_GATE_ID);
         if gain > self.limit {
-            Ok(vec![GateOutcome::fail(
-                "envelope",
-                "gain exceeded the test envelope",
-            )])
+            Ok(vec![
+                crash,
+                GateOutcome::fail("envelope", "gain exceeded the test envelope"),
+            ])
         } else {
-            Ok(vec![GateOutcome::pass("envelope")])
+            Ok(vec![crash, GateOutcome::pass("envelope")])
         }
     }
 
@@ -237,6 +241,26 @@ pub fn single_group() -> flight_tune::SearchGroup {
     }
 }
 
+#[path = "scoring/targets.rs"]
+mod targets;
+
+pub use targets::response_targets;
+
+fn scenario(id: &str) -> MissionReference {
+    MissionReference::from_document(&super::fake_mission_document(id), FAKE_MAX_SAMPLES)
+        .expect("mission reference")
+}
+
+/// One hidden mission of the rig, which commands an operator velocity
+/// stimulus so a scoped response limit has a family to name.
+pub fn hidden_scenario(id: &str) -> MissionReference {
+    MissionReference::from_document(
+        &super::fake_stimulus_mission_document(id, flight_tune::ControlFamily::OperatorVelocity),
+        FAKE_MAX_SAMPLES,
+    )
+    .expect("hidden mission reference")
+}
+
 pub fn stage() -> SearchStage {
     let training = vec![scenario(super::FAKE_MISSION_IDS[0])];
     SearchStage {
@@ -250,12 +274,18 @@ pub fn stage() -> SearchStage {
             },
         )]),
         fixed_parameters: BTreeMap::from([("mode".to_owned(), 1.0)]),
-        required_hard_gates: vec!["envelope".to_owned()],
+        required_hard_gates: vec![
+            flight_tune::MANDATORY_CRASH_GATE_ID.to_owned(),
+            "envelope".to_owned(),
+        ],
         training_suites: vec![single_suite(&training)],
         search_groups: vec![single_group()],
         training_scenarios: training,
-        promotion_scenarios: vec![scenario(super::FAKE_MISSION_IDS[1])],
-        final_qualification_scenarios: vec![scenario(super::FAKE_MISSION_IDS[2])],
+        // The hidden partitions command a stimulus, because a scoped response
+        // limit is written for a control family and a mission that commands
+        // nothing states no family to write one for.
+        promotion_scenarios: vec![hidden_scenario(super::FAKE_MISSION_IDS[1])],
+        final_qualification_scenarios: vec![hidden_scenario(super::FAKE_MISSION_IDS[2])],
         repetitions: 2,
         promotion: PromotionPolicy {
             schema_version: flight_tune::PROMOTION_POLICY_SCHEMA_VERSION,
@@ -263,20 +293,19 @@ pub fn stage() -> SearchStage {
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.2,
             maximum_control_effort_increase: 1.0,
-            objective_regression_upper_95: BTreeMap::from([("test.response".to_owned(), 1.0)]),
+            objectives: BTreeSet::from(["test.response".to_owned()]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 0.5,
             maximum_p95_loss: 0.5,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::from([("test.response".to_owned(), 0.75)]),
+            objectives: BTreeSet::from(["test.response".to_owned()]),
         },
+        response_targets: response_targets(
+            &[hidden_scenario(super::FAKE_MISSION_IDS[1])],
+            &[hidden_scenario(super::FAKE_MISSION_IDS[2])],
+        ),
     }
-}
-
-fn scenario(id: &str) -> MissionReference {
-    MissionReference::from_document(&super::fake_mission_document(id), FAKE_MAX_SAMPLES)
-        .expect("mission reference")
 }
 
 /// The same stage, with the stated number of replacement executions allowed.

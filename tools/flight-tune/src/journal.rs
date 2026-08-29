@@ -38,7 +38,7 @@ use crate::{
 pub(crate) use replay::training_better;
 use replay::{JournalState, replay};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 7;
+const JOURNAL_SCHEMA_VERSION: u32 = 8;
 
 /// The immutable identity of one tuning session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,6 +213,11 @@ impl Journal {
         storage::read_candidate(&self.storage, digest).inspect_err(|_| {
             self.poisoned.store(true, Ordering::Release);
         })
+    }
+
+    /// Returns the frozen stage this journal was opened against.
+    pub(crate) const fn stage(&self) -> &SearchStage {
+        &self.stage
     }
 
     pub(crate) fn ensure_usable(&self) -> Result<(), TuneError> {

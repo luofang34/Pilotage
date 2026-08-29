@@ -170,5 +170,27 @@ where
     P: ProposalStrategy,
 {
     session::validate_component_identities(backend, vehicle_factory, gates, metric, strategy)?;
+    require_contact_state(backend.scenario_runtime())?;
     session::runtime_identities(backend, vehicle_factory, gates, metric, strategy)
+}
+
+/// Refuses a runtime that cannot report ground contact and crash state.
+///
+/// The crash gate is the floor of every campaign, and it reads a contact
+/// signal. A backend that never declares one would give every sample an
+/// absent value, which the gate refuses one execution at a time; refusing it
+/// once at open states the same thing before a simulator is touched.
+fn require_contact_state<R: crate::ScenarioRuntime>(runtime: &R) -> Result<(), TuneError> {
+    if runtime
+        .capabilities()
+        .contains(&crate::MissionCapability::ContactState)
+    {
+        return Ok(());
+    }
+    Err(TuneError::InvalidStage {
+        detail: format!(
+            "the scenario runtime declares no contact state, which {} needs",
+            crate::MANDATORY_CRASH_GATE_ID
+        ),
+    })
 }

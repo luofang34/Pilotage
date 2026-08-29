@@ -60,7 +60,10 @@ fn stage() -> SearchStage {
             ("shape".to_owned(), bounds()),
         ]),
         fixed_parameters: BTreeMap::new(),
-        required_hard_gates: vec!["envelope".to_owned()],
+        required_hard_gates: vec![
+            crate::MANDATORY_CRASH_GATE_ID.to_owned(),
+            "envelope".to_owned(),
+        ],
         training_scenarios: vec![direct.clone(), operator.clone()],
         training_suites: vec![
             suite("direct-response", vec![direct.clone()], Vec::new()),
@@ -89,16 +92,24 @@ fn stage() -> SearchStage {
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.1,
             maximum_control_effort_increase: 1.0,
-            objective_regression_upper_95: BTreeMap::from([("test.response".to_owned(), 1.0)]),
+            objectives: BTreeSet::from(["test.response".to_owned()]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 1.0,
             maximum_p95_loss: 1.0,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::from([("test.response".to_owned(), 1.0)]),
+            objectives: BTreeSet::from(["test.response".to_owned()]),
         },
         execution_retry: ExecutionRetryPolicy::none(),
+        response_targets: crate::model::response_target::fixture::covering(&[
+            (&[mission("promotion", 3)], &limits()),
+            (&[mission("final", 4)], &limits()),
+        ]),
     }
+}
+
+fn limits() -> BTreeMap<String, f64> {
+    BTreeMap::from([("test.response".to_owned(), 1.0)])
 }
 
 const fn bounds() -> ParameterBounds {
@@ -318,4 +329,39 @@ fn a_search_group_set_is_ordered_and_unique() {
     );
 
     assert_eq!(group.parameters, BTreeSet::from(["rate".to_owned()]));
+}
+
+/// The crash gate is the floor of every campaign and the first gate.
+///
+/// A stage that dropped it, renamed it, or let another gate run first would
+/// let a run that hit something be scored, and every measurement of that run
+/// describes the collision rather than the command law.
+#[test]
+fn the_crash_gate_cannot_be_removed_renamed_or_moved() {
+    let valid = stage();
+    valid.validate().expect("the fixture stage is valid");
+
+    let mut removed = stage();
+    removed.required_hard_gates = vec!["envelope".to_owned()];
+    assert!(
+        removed.validate().is_err(),
+        "an omitted crash gate is refused"
+    );
+
+    let mut renamed = stage();
+    renamed.required_hard_gates = vec!["crash".to_owned(), "envelope".to_owned()];
+    assert!(
+        renamed.validate().is_err(),
+        "a renamed crash gate is refused"
+    );
+
+    let mut reordered = stage();
+    reordered.required_hard_gates = vec![
+        "envelope".to_owned(),
+        crate::MANDATORY_CRASH_GATE_ID.to_owned(),
+    ];
+    assert!(
+        reordered.validate().is_err(),
+        "a crash gate behind another gate is refused"
+    );
 }

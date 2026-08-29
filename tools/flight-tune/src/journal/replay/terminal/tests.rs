@@ -365,7 +365,7 @@ pub(super) fn run_record(context: &RunExecutionContext, index: u64) -> RunRecord
         loss: 0.2 + index as f64 / 10.0,
         control_effort: 0.3,
         objectives: BTreeMap::from([("tracking".to_owned(), 0.2)]),
-        passed_hard_gates: vec!["crash".to_owned()],
+        passed_hard_gates: vec![crate::MANDATORY_CRASH_GATE_ID.to_owned()],
     }
 }
 
@@ -377,7 +377,7 @@ pub(super) fn hard_gate_failure(context: &RunExecutionContext) -> HardGateFailur
         seed: context.seed(),
         sample_sequence: 5,
         elapsed_ms: 80,
-        gate: GateOutcome::fail("crash", "attitude limit"),
+        gate: GateOutcome::fail(crate::MANDATORY_CRASH_GATE_ID, "attitude limit"),
     }
 }
 
@@ -420,7 +420,7 @@ fn test_stage() -> SearchStage {
             },
         )]),
         fixed_parameters: BTreeMap::new(),
-        required_hard_gates: vec!["crash".to_owned()],
+        required_hard_gates: vec![crate::MANDATORY_CRASH_GATE_ID.to_owned()],
         training_scenarios: vec![scenario("training", 1)],
         training_suites: vec![crate::TrainingSuite {
             schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
@@ -445,14 +445,24 @@ fn test_stage() -> SearchStage {
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.1,
             maximum_control_effort_increase: 0.2,
-            objective_regression_upper_95: BTreeMap::from([("tracking".to_owned(), 0.2)]),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 1.0,
             maximum_p95_loss: 1.0,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::from([("tracking".to_owned(), 1.0)]),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
+        response_targets: crate::model::response_target::fixture::covering(&[
+            (
+                &[scenario("promotion", 2)],
+                &BTreeMap::from([("tracking".to_owned(), 0.2)]),
+            ),
+            (
+                &[scenario("qualification", 3)],
+                &BTreeMap::from([("tracking".to_owned(), 1.0)]),
+            ),
+        ]),
     }
 }
 

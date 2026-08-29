@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -6,14 +6,21 @@ use super::{MissionReference, SearchStage, derive_seed};
 use crate::identity::digest_bytes;
 use crate::{AttemptRole, Digest, PromotionDecision, RunExecutionContext, TuneError};
 
+mod comparison;
+
 #[cfg(test)]
 #[path = "promotion/tests.rs"]
 mod tests;
 
-/// The supported promotion policy schema.
-pub const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 1;
+pub use comparison::{
+    PromotionComparison, PromotionObjectiveResult, PromotionPairedStatistics,
+    PromotionScenarioResults,
+};
 
-const PROMOTION_POLICY_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-policy.v1\0";
+/// The supported promotion policy schema.
+pub const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 2;
+
+const PROMOTION_POLICY_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-policy.v2\0";
 const MAX_PROMOTION_OBJECTIVES: usize = 64;
 
 /// The versioned seed algorithm for paired promotion runs.
@@ -38,8 +45,12 @@ pub struct PromotionPolicy {
     pub minimum_relative_loss_improvement: f64,
     /// The largest permitted paired increase in mean control effort.
     pub maximum_control_effort_increase: f64,
-    /// The largest permitted paired upper 95 percent increase by objective.
-    pub objective_regression_upper_95: BTreeMap<String, f64>,
+    /// The objectives that every promotion run has to state.
+    ///
+    /// The policy declares the names only. Each limit is one row of the
+    /// stage's scoped response target table, because one number cannot bound
+    /// an operator velocity result and a direct attitude result at once.
+    pub objectives: BTreeSet<String>,
 }
 
 impl PromotionPolicy {
@@ -60,7 +71,7 @@ impl PromotionPolicy {
                 "a scalar promotion policy value is not valid",
             ));
         }
-        validate_objective_limits(&self.objective_regression_upper_95)
+        validate_objective_names(&self.objectives)
     }
 }
 
@@ -203,89 +214,6 @@ impl ExpectedPromotionPair {
     }
 }
 
-/// Paired mean and upper 95 percent confidence statistics.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromotionPairedStatistics {
-    /// The paired frozen-minus-baseline mean.
-    pub mean: f64,
-    /// The upper 95 percent confidence limit for the paired mean.
-    pub upper_95: f64,
-}
-
-impl PromotionPairedStatistics {
-    pub(crate) fn validate(self) -> Result<(), TuneError> {
-        if !self.mean.is_finite() || !self.upper_95.is_finite() {
-            return Err(invalid_policy("promotion paired statistics are not finite"));
-        }
-        Ok(())
-    }
-}
-
-/// One named objective non-regression result.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromotionObjectiveResult {
-    /// The complete paired statistics.
-    pub statistics: PromotionPairedStatistics,
-    /// The permitted paired upper 95 percent increase.
-    pub maximum_upper_95: f64,
-    /// Whether the paired upper limit met the policy.
-    pub passed: bool,
-}
-
-/// The complete paired promotion comparison.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromotionComparison {
-    /// The arithmetic baseline mean loss.
-    pub baseline_mean_loss: f64,
-    /// The larger absolute or relative required loss reduction.
-    pub required_loss_improvement: f64,
-    /// The complete paired loss statistics.
-    pub loss: PromotionPairedStatistics,
-    /// Whether the loss result met both improvement limits.
-    pub loss_passed: bool,
-    /// The complete paired control effort statistics.
-    pub control_effort: PromotionPairedStatistics,
-    /// Whether mean control effort met its limit.
-    pub control_effort_passed: bool,
-    /// One explicit result for each declared named objective.
-    pub objectives: BTreeMap<String, PromotionObjectiveResult>,
-}
-
-impl PromotionComparison {
-    /// Validates all saved statistics and results against one policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TuneError`] when a value, key, threshold, or result differs.
-    pub fn validate_for(&self, policy: &PromotionPolicy) -> Result<(), TuneError> {
-        policy.validate()?;
-        self.loss.validate()?;
-        self.control_effort.validate()?;
-        if !valid_nonnegative(self.baseline_mean_loss)
-            || !valid_nonnegative(self.required_loss_improvement)
-            || self.required_loss_improvement
-                != required_improvement(policy, self.baseline_mean_loss)?
-            || self.loss_passed != (self.loss.upper_95 <= -self.required_loss_improvement)
-            || self.control_effort_passed
-                != (self.control_effort.mean <= policy.maximum_control_effort_increase)
-        {
-            return Err(invalid_policy("the saved promotion comparison changed"));
-        }
-        validate_objective_results(policy, &self.objectives)
-    }
-
-    /// Reports whether every relative promotion gate passed.
-    #[must_use]
-    pub fn all_passed(&self) -> bool {
-        self.loss_passed
-            && self.control_effort_passed
-            && self.objectives.values().all(|result| result.passed)
-    }
-}
-
 /// The promotion decision and its only permitted release candidate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -419,45 +347,14 @@ fn validate_promotion_scenarios(scenarios: &[MissionReference]) -> Result<(), Tu
     Ok(())
 }
 
-fn validate_objective_limits(limits: &BTreeMap<String, f64>) -> Result<(), TuneError> {
-    if limits.is_empty()
-        || limits.len() > MAX_PROMOTION_OBJECTIVES
-        || limits.iter().any(|(name, limit)| {
-            name.is_empty()
-                || name.len() > 128
-                || name.chars().any(char::is_whitespace)
-                || !valid_nonnegative(*limit)
+fn validate_objective_names(names: &BTreeSet<String>) -> Result<(), TuneError> {
+    if names.is_empty()
+        || names.len() > MAX_PROMOTION_OBJECTIVES
+        || names.iter().any(|name| {
+            name.is_empty() || name.len() > 128 || name.chars().any(char::is_whitespace)
         })
     {
-        return Err(invalid_policy("promotion objective limits are not valid"));
-    }
-    Ok(())
-}
-
-fn validate_objective_results(
-    policy: &PromotionPolicy,
-    results: &BTreeMap<String, PromotionObjectiveResult>,
-) -> Result<(), TuneError> {
-    if results
-        .keys()
-        .ne(policy.objective_regression_upper_95.keys())
-    {
-        return Err(invalid_policy("the saved promotion objective set changed"));
-    }
-    for (name, result) in results {
-        result.statistics.validate()?;
-        let maximum = policy
-            .objective_regression_upper_95
-            .get(name)
-            .copied()
-            .ok_or_else(|| invalid_policy("a promotion objective result has no policy limit"))?;
-        if result.maximum_upper_95 != maximum
-            || result.passed != (result.statistics.upper_95 <= maximum)
-        {
-            return Err(invalid_policy(format!(
-                "the saved promotion objective result for {name} changed"
-            )));
-        }
+        return Err(invalid_policy("promotion objective names are not valid"));
     }
     Ok(())
 }

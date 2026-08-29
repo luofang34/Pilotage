@@ -39,14 +39,23 @@ fn trial() -> Vec<TelemetrySample> {
                 (channel::POSITION_M.to_owned(), position),
                 (channel::VELOCITY_MPS.to_owned(), velocity),
                 (channel::ACCELERATION_MPS2.to_owned(), acceleration),
+                (
+                    channel::PHYSICAL_DEMAND.to_owned(),
+                    command * FULL_SCALE_MPS,
+                ),
                 (channel::EFFORT.to_owned(), command.abs()),
                 (channel::SATURATED.to_owned(), 0.0),
+                (channel::CRASHED.to_owned(), 0.0),
+                (channel::GROUND_CONTACT.to_owned(), 0.0),
                 (channel::PHASE.to_owned(), phase),
             ]),
         });
     }
     samples
 }
+
+/// The full-scale speed the fixture trace resolves its demand against.
+const FULL_SCALE_MPS: f64 = 3.0;
 
 fn scenario() -> MissionReference {
     MissionReference {
@@ -79,7 +88,10 @@ fn the_evaluator_produces_exactly_what_both_vehicles_are_scored_on() {
         ("alia250", crate::alia250_qualification_policy()),
         ("x500", crate::x500_qualification_policy()),
     ] {
-        let required: BTreeSet<String> = qualification.objective_maxima.keys().cloned().collect();
+        // The evaluator also produces the resolved physical target, which the
+        // authority band reads and no policy declares.
+        let mut required: BTreeSet<String> = qualification.objectives.iter().cloned().collect();
+        required.insert(flight_tune::TARGET_AUTHORITY_OBJECTIVE.to_owned());
         assert_eq!(
             required, produced,
             "{vehicle} is scored on objectives the evaluator does not produce"
@@ -90,6 +102,12 @@ fn the_evaluator_produces_exactly_what_both_vehicles_are_scored_on() {
 #[test]
 fn every_objective_it_produces_is_one_the_scoring_layer_admits() {
     for name in score().objectives.keys() {
+        // The resolved physical target is an authority measurement rather
+        // than a flight-quality metric, so it has no entry in that crate's
+        // vocabulary and is never a scoped table row.
+        if name == flight_tune::TARGET_AUTHORITY_OBJECTIVE {
+            continue;
+        }
         assert!(
             pilotage_flight_quality::is_producible(name),
             "{name} is produced but not in the scoring vocabulary"

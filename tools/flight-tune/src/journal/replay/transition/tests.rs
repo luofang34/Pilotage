@@ -321,7 +321,10 @@ fn stage() -> SearchStage {
             },
         )]),
         fixed_parameters: BTreeMap::new(),
-        required_hard_gates: vec!["envelope".to_owned()],
+        required_hard_gates: vec![
+            crate::MANDATORY_CRASH_GATE_ID.to_owned(),
+            "envelope".to_owned(),
+        ],
         training_scenarios: vec![scenario.clone()],
         training_suites: vec![crate::TrainingSuite {
             schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
@@ -338,7 +341,7 @@ fn stage() -> SearchStage {
             suite_id: "transition-suite".to_owned(),
         }],
         promotion_scenarios: vec![scenario.clone()],
-        final_qualification_scenarios: vec![scenario],
+        final_qualification_scenarios: vec![scenario.clone()],
         repetitions: 1,
         promotion: PromotionPolicy {
             schema_version: crate::PROMOTION_POLICY_SCHEMA_VERSION,
@@ -346,14 +349,18 @@ fn stage() -> SearchStage {
             minimum_loss_improvement: 0.0,
             minimum_relative_loss_improvement: 0.0,
             maximum_control_effort_increase: 0.0,
-            objective_regression_upper_95: BTreeMap::from([("tracking".to_owned(), 0.0)]),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 1.0,
             maximum_p95_loss: 1.0,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::new(),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
+        response_targets: crate::model::response_target::fixture::covering(&[(
+            &[scenario],
+            &BTreeMap::from([("tracking".to_owned(), 0.0)]),
+        )]),
     }
 }
 

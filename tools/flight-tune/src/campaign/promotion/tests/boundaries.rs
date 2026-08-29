@@ -18,7 +18,12 @@ fn valid_complete_comparison_promotes_the_frozen_candidate() {
         Some(plan().frozen_candidate_digest)
     );
     assert!(calculation.comparison.all_passed());
-    assert_eq!(calculation.comparison.objectives.len(), 3);
+    assert_eq!(
+        calculation.comparison.scenarios["promotion-calm"]
+            .objectives
+            .len(),
+        3
+    );
 }
 
 #[test]
@@ -64,9 +69,10 @@ fn aggregate_loss_cannot_hide_one_named_objective_regression() {
         .expect("calculate objective rejection");
 
     assert!(calculation.comparison.loss_passed);
-    assert!(!calculation.comparison.objectives["tracking"].passed);
-    assert!(calculation.comparison.objectives["settling"].passed);
-    assert!(calculation.comparison.objectives["overshoot"].passed);
+    let results = &calculation.comparison.scenarios["promotion-calm"].objectives;
+    assert!(!results["tracking"].passed);
+    assert!(results["settling"].passed);
+    assert!(results["overshoot"].passed);
     assert_rejected(&calculation.selection.decision);
 }
 
@@ -151,9 +157,16 @@ fn effort_limit_passes_at_equality_and_fails_at_the_next_value() {
 fn each_objective_limit_has_an_inclusive_float_boundary() {
     for objective in ["tracking", "settling", "overshoot"] {
         let mut stage = stage();
-        for maximum in stage.promotion.objective_regression_upper_95.values_mut() {
-            *maximum = 0.125;
-        }
+        stage.response_targets = crate::model::response_target::fixture::covering(&[
+            (
+                &[super::super::tests::scenario("promotion-calm", 12)],
+                &super::super::tests::objective_limits(0.125),
+            ),
+            (
+                &[super::super::tests::scenario("final-calm", 13)],
+                &super::super::tests::objective_limits(1.0),
+            ),
+        ]);
         let baseline = MetricPoint {
             tracking: 0.0,
             settling: 0.0,
@@ -174,7 +187,7 @@ fn each_objective_limit_has_an_inclusive_float_boundary() {
             &equal_evidence.frozen,
         )
         .expect("calculate objective equality");
-        assert!(calculation.comparison.objectives[objective].passed);
+        assert!(calculation.comparison.scenarios["promotion-calm"].objectives[objective].passed);
 
         let mut over = equal;
         match objective {
@@ -191,7 +204,7 @@ fn each_objective_limit_has_an_inclusive_float_boundary() {
             &over_evidence.frozen,
         )
         .expect("calculate objective adjacent failure");
-        assert!(!calculation.comparison.objectives[objective].passed);
+        assert!(!calculation.comparison.scenarios["promotion-calm"].objectives[objective].passed);
     }
 }
 
@@ -204,15 +217,18 @@ fn comparison_validation_rejects_non_finite_or_changed_results() {
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut changed = calculation.comparison.clone();
         changed.loss.mean = value;
-        assert!(changed.validate_for(&stage.promotion).is_err());
+        assert!(changed.validate_for(&stage).is_err());
     }
     let mut changed = calculation.comparison;
     changed
+        .scenarios
+        .get_mut("promotion-calm")
+        .expect("promotion scenario")
         .objectives
         .get_mut("tracking")
         .expect("tracking")
         .passed = false;
-    assert!(changed.validate_for(&stage.promotion).is_err());
+    assert!(changed.validate_for(&stage).is_err());
 }
 
 #[test]

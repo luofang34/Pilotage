@@ -59,20 +59,13 @@ fn policy_rejects_versions_non_finite_values_and_bad_objectives() {
         let mut changed = policy();
         changed.maximum_control_effort_increase = value;
         assert!(changed.validate().is_err());
-        let mut changed = policy();
-        changed
-            .objective_regression_upper_95
-            .insert("tracking".to_owned(), value);
-        assert!(changed.validate().is_err());
     }
 
     let mut changed = policy();
-    changed.objective_regression_upper_95.clear();
+    changed.objectives.clear();
     assert!(changed.validate().is_err());
     let mut changed = policy();
-    changed
-        .objective_regression_upper_95
-        .insert("bad name".to_owned(), 0.1);
+    changed.objectives.insert("bad name".to_owned());
     assert!(changed.validate().is_err());
 }
 
@@ -160,11 +153,19 @@ pub(super) fn policy() -> PromotionPolicy {
         minimum_loss_improvement: 0.1,
         minimum_relative_loss_improvement: 0.2,
         maximum_control_effort_increase: 0.3,
-        objective_regression_upper_95: BTreeMap::from([
-            ("settling".to_owned(), 0.4),
-            ("tracking".to_owned(), 0.2),
+        objectives: std::collections::BTreeSet::from([
+            "settling".to_owned(),
+            "tracking".to_owned(),
         ]),
     }
+}
+
+/// The scoped limit for each declared objective of this fixture.
+fn objective_limits(settling: f64, tracking: f64) -> BTreeMap<String, f64> {
+    BTreeMap::from([
+        ("settling".to_owned(), settling),
+        ("tracking".to_owned(), tracking),
+    ])
 }
 
 pub(super) fn stage() -> SearchStage {
@@ -179,7 +180,7 @@ pub(super) fn stage() -> SearchStage {
             },
         )]),
         fixed_parameters: BTreeMap::new(),
-        required_hard_gates: vec!["crash".to_owned()],
+        required_hard_gates: vec![crate::MANDATORY_CRASH_GATE_ID.to_owned()],
         training_scenarios: vec![scenario("training-calm", 11)],
         training_suites: vec![crate::TrainingSuite {
             schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
@@ -203,11 +204,18 @@ pub(super) fn stage() -> SearchStage {
             maximum_loss_confidence_upper: 1.0,
             maximum_p95_loss: 1.0,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::from([
-                ("settling".to_owned(), 1.0),
-                ("tracking".to_owned(), 1.0),
+            objectives: std::collections::BTreeSet::from([
+                "settling".to_owned(),
+                "tracking".to_owned(),
             ]),
         },
+        response_targets: crate::model::response_target::fixture::covering(&[
+            (
+                &[scenario("promotion-calm", 12)],
+                &objective_limits(0.4, 0.2),
+            ),
+            (&[scenario("final-calm", 13)], &objective_limits(1.0, 1.0)),
+        ]),
     }
 }
 

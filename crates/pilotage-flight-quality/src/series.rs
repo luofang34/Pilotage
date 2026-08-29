@@ -143,6 +143,69 @@ pub(crate) fn timed_window(samples: &[TimedValue], start_s: f64, end_s: f64) -> 
     window
 }
 
+/// The first time a normalized progress series reaches a threshold.
+///
+/// The series starts at the input event, so a series that already sits at or
+/// above the threshold crossed it at the event itself.
+pub(crate) fn first_crossing(progress: &[TimedValue], threshold: f64) -> Option<f64> {
+    if progress[0].value >= threshold {
+        return Some(progress[0].time_s);
+    }
+    progress.windows(2).find_map(|pair| {
+        let before = pair[0];
+        let after = pair[1];
+        if before.value < threshold && after.value >= threshold {
+            Some(crossing_time(before, after, threshold))
+        } else {
+            None
+        }
+    })
+}
+
+/// The time at which a linear segment takes one value.
+///
+/// The interpolation runs from value to time, which is the inverse of the
+/// usual direction: the question is when a threshold was reached, not what the
+/// series held at a time.
+pub(crate) fn crossing_time(before: TimedValue, after: TimedValue, value: f64) -> f64 {
+    interpolate(
+        before.value,
+        before.time_s,
+        after.value,
+        after.time_s,
+        value,
+    )
+}
+
+/// The interval between two rising threshold crossings.
+pub(crate) fn crossing_delta(progress: &[TimedValue], low: f64, high: f64) -> Option<f64> {
+    let low_time = first_crossing(progress, low)?;
+    let high_time = first_crossing(progress, high)?;
+    Some(high_time - low_time)
+}
+
+/// The time of the final entry into a band around unit progress.
+///
+/// A series that ends outside the band never settled, which is a measurement
+/// the series does not carry rather than a value to guess.
+pub(crate) fn band_settling_time(progress: &[TimedValue], half_width: f64) -> Option<f64> {
+    let low = 1.0 - half_width;
+    let high = 1.0 + half_width;
+    if !(low..=high).contains(&progress[progress.len() - 1].value) {
+        return None;
+    }
+    let last_outside = progress
+        .iter()
+        .rposition(|sample| !(low..=high).contains(&sample.value));
+    let Some(index) = last_outside else {
+        return Some(progress[0].time_s);
+    };
+    let before = progress[index];
+    let after = progress[index + 1];
+    let boundary = if before.value < low { low } else { high };
+    Some(crossing_time(before, after, boundary))
+}
+
 pub(crate) fn integral_square_linear(v0: f64, v1: f64, duration_s: f64) -> f64 {
     duration_s * (v0 * v0 + v0 * v1 + v1 * v1) / 3.0
 }

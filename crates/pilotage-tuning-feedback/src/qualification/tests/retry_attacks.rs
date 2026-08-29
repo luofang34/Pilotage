@@ -392,6 +392,7 @@ fn a_campaign_that_replaced_an_execution_fails_a_no_retry_bar() {
         &evidence.journal.stage.promotion,
         &evidence.journal.stage.qualification,
         &flight_tune::ExecutionRetryPolicy::none(),
+        &evidence.journal.stage.response_targets,
     )
     .expect("bind a no-retry bar");
 

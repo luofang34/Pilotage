@@ -4,6 +4,8 @@
 
 #[path = "tuner/execution_retry.rs"]
 mod execution_retry;
+#[path = "tuner/final_objectives.rs"]
+mod final_objectives;
 #[path = "tuner/journal_storage.rs"]
 mod journal_storage;
 #[path = "tuner/no_samples.rs"]
@@ -152,73 +154,6 @@ fn promotion_rejects_an_improvement_below_the_relative_floor() {
             .expect("run final qualification"),
         FinalQualificationOutcome::FailedObjective { .. }
     ));
-}
-
-#[test]
-fn final_qualification_rejects_a_named_objective_limit() {
-    let directory = TestDirectory::new("named-final-objective");
-    let state = FakeHandle::new();
-    let mut tuner = open(
-        directory.path(),
-        state.clone(),
-        SequenceStrategy::new(vec![1.0]),
-        2.0,
-    )
-    .expect("open tuner");
-
-    tuner
-        .run_training_attempts_blocking(1)
-        .expect("run training");
-    tuner.freeze_candidate().expect("freeze candidate");
-    assert!(matches!(
-        tuner.run_promotion_once_blocking().expect("run promotion"),
-        PromotionDecision::Promoted { .. }
-    ));
-    assert_eq!(
-        tuner
-            .run_final_qualification_once_blocking()
-            .expect("run final qualification"),
-        FinalQualificationOutcome::FailedObjective {
-            metric: "test.response".to_owned(),
-        }
-    );
-    assert_eq!(state.0.borrow().vehicle.gain, 0.0);
-}
-
-#[test]
-fn final_qualification_rejects_a_missing_named_objective() {
-    let directory = TestDirectory::new("missing-final-objective");
-    let state = FakeHandle::new();
-    let mut policy = stage();
-    policy
-        .qualification
-        .objective_maxima
-        .insert("required.missing".to_owned(), 1.0);
-    let mut tuner = open_stage(
-        directory.path(),
-        state,
-        SequenceStrategy::new(vec![0.5]),
-        2.0,
-        policy,
-    )
-    .expect("open tuner");
-
-    tuner
-        .run_training_attempts_blocking(1)
-        .expect("run training");
-    tuner.freeze_candidate().expect("freeze candidate");
-    assert!(matches!(
-        tuner.run_promotion_once_blocking().expect("run promotion"),
-        PromotionDecision::Promoted { .. }
-    ));
-    assert_eq!(
-        tuner
-            .run_final_qualification_once_blocking()
-            .expect("run final qualification"),
-        FinalQualificationOutcome::FailedObjective {
-            metric: "required.missing".to_owned(),
-        }
-    );
 }
 
 #[test]
@@ -469,7 +404,7 @@ fn sample_timeout_is_a_hard_gate_and_still_cleans_the_backend() {
     assert_eq!(state.0.borrow().stop_count, 1);
     assert_eq!(state.0.borrow().cleanup_count, 1);
 }
-fn open(
+pub(crate) fn open(
     path: &Path,
     state: FakeHandle,
     strategy: SequenceStrategy,

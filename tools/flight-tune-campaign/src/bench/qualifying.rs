@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use flight_tune::{
     AdapterError, ArtifactIdentity, Digest, EvaluatorError, GateEvaluator, GateOutcome,
-    MissionDocument, MissionReference, SimulatorCapability, SimulatorVehicleFactory,
-    TelemetrySample, TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
+    MissionReference, SimulatorCapability, SimulatorVehicleFactory, TelemetrySample,
+    TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
 };
 
 use super::parameter;
@@ -15,7 +15,15 @@ use crate::scoring::channel;
 use pilotage_control_feel::{FeelMode, FlightFeelProfile};
 
 use super::adapter::BenchVehicleAdapter;
-use super::{BenchHandle, bench_action_port_identity};
+use super::{BenchHandle, BenchVehicle, bench_action_port_identity};
+
+mod trial;
+
+use trial::BENCH_TRIAL_IDS;
+pub use trial::{
+    BENCH_FINAL_TRIAL_ID, BENCH_PROMOTION_TRIAL_ID, bench_mission_revision_id,
+    bench_physical_target, bench_response_targets, bench_scenario, bench_stored_mission,
+};
 
 /// Binds the bench vehicle to a validated simulator session.
 #[derive(Debug)]
@@ -145,22 +153,29 @@ impl GateEvaluator for BenchGates {
                 .copied()
                 .filter(|value| value.is_finite())
         };
+        let mut outcomes = vec![crash_outcome(
+            read(channel::CRASHED),
+            read(channel::GROUND_CONTACT),
+        )?];
+        if !outcomes[0].passed {
+            return Ok(outcomes);
+        }
         let (Some(speed), Some(acceleration)) = (
             read(channel::VELOCITY_MPS).map(f64::abs),
             read(channel::ACCELERATION_MPS2).map(f64::abs),
         ) else {
-            return Ok(vec![GateOutcome::fail(
+            outcomes.push(GateOutcome::fail(
                 "envelope.channels",
                 "a gated channel is missing or not finite".to_owned(),
-            )]);
+            ));
+            return Ok(outcomes);
         };
-        let mut outcomes = Vec::new();
         outcomes.push(if speed <= self.maximum_speed_mps {
             GateOutcome::pass("envelope.speed")
         } else {
             GateOutcome::fail("envelope.speed", format!("{speed:.3} m/s"))
         });
-        if !outcomes[0].passed {
+        if !outcomes[1].passed {
             return Ok(outcomes);
         }
         outcomes.push(if acceleration <= self.maximum_acceleration_mps2 {
@@ -178,6 +193,36 @@ impl GateEvaluator for BenchGates {
     fn cancel(&mut self) -> Result<(), EvaluatorError> {
         Ok(())
     }
+}
+
+/// The crash gate over one sample's contact signals.
+///
+/// An absent contact value refuses the execution rather than scoring it. A
+/// missing signal is not evidence that nothing was hit, and reading it as a
+/// passed gate would let a run whose vehicle hit something be measured, while
+/// reading it as a crash would blame the candidate for the harness.
+fn crash_outcome(
+    crashed: Option<f64>,
+    ground_contact: Option<f64>,
+) -> Result<GateOutcome, EvaluatorError> {
+    let (Some(crashed), Some(ground_contact)) = (crashed, ground_contact) else {
+        return Err(EvaluatorError::new(
+            "a sample states no crash or contact value",
+        ));
+    };
+    if crashed != 0.0 {
+        return Ok(GateOutcome::fail(
+            flight_tune::MANDATORY_CRASH_GATE_ID,
+            "the bench detected a crash".to_owned(),
+        ));
+    }
+    if ground_contact != 0.0 {
+        return Ok(GateOutcome::fail(
+            flight_tune::MANDATORY_CRASH_GATE_ID,
+            "the bench detected unexpected contact".to_owned(),
+        ));
+    }
+    Ok(GateOutcome::pass(flight_tune::MANDATORY_CRASH_GATE_ID))
 }
 
 /// The starting command law a search departs from, as candidate parameters.
@@ -238,13 +283,17 @@ pub fn warm_start_parameters(mode: FeelMode) -> BTreeMap<String, f64> {
 /// Returns an error when a mission identity cannot be calculated.
 pub fn bench_stage(
     id: &str,
+    model: BenchVehicle,
     promotion: flight_tune::PromotionPolicy,
     qualification: flight_tune::QualificationPolicy,
+    response_targets: flight_tune::ResponseTargetTable,
 ) -> Result<flight_tune::SearchStage, AdapterError> {
     use flight_tune::ParameterBounds;
     let bounds = |minimum: f64, maximum: f64| ParameterBounds { minimum, maximum };
-    let direct = bench_scenario(BENCH_TRIAL_IDS[0])?;
-    let operator = bench_scenario(BENCH_TRIAL_IDS[1])?;
+    let direct = bench_scenario(BENCH_TRIAL_IDS[0], model)?;
+    let operator = bench_scenario(BENCH_TRIAL_IDS[1], model)?;
+    let promotion_scenario = bench_scenario(BENCH_PROMOTION_TRIAL_ID, model)?;
+    let final_scenario = bench_scenario(BENCH_FINAL_TRIAL_ID, model)?;
     Ok(flight_tune::SearchStage {
         id: id.to_owned(),
         allowlist: BTreeMap::from([
@@ -258,7 +307,11 @@ pub fn bench_stage(
             (parameter::NEUTRAL_DWELL_MS.to_owned(), bounds(20.0, 200.0)),
         ]),
         fixed_parameters: BTreeMap::new(),
+        // The crash gate is the floor of every campaign and is evaluated
+        // before any limit. A run that hit something has no measurement worth
+        // comparing against an envelope.
         required_hard_gates: vec![
+            flight_tune::MANDATORY_CRASH_GATE_ID.to_owned(),
             "envelope.speed".to_owned(),
             "envelope.acceleration".to_owned(),
         ],
@@ -268,11 +321,16 @@ pub fn bench_stage(
         training_scenarios: vec![direct.clone(), operator.clone()],
         training_suites: vec![
             direct_response_suite(&direct),
-            operator_feel_suite(&operator, &direct, &promotion)?,
+            operator_feel_suite(
+                &operator,
+                &direct,
+                &response_targets,
+                &promotion_scenario.revision_id,
+            )?,
         ],
         search_groups: search_groups(),
-        promotion_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[2])?],
-        final_qualification_scenarios: vec![bench_scenario(BENCH_TRIAL_IDS[3])?],
+        promotion_scenarios: vec![promotion_scenario],
+        final_qualification_scenarios: vec![final_scenario],
         repetitions: 2,
         promotion,
         qualification,
@@ -281,6 +339,7 @@ pub fn bench_stage(
         // answer. Authorizing replacements that can never be needed would
         // state a weaker bar than the one this campaign actually clears.
         execution_retry: flight_tune::ExecutionRetryPolicy::none(),
+        response_targets,
     })
 }
 
@@ -309,22 +368,21 @@ fn direct_response_suite(direct: &MissionReference) -> flight_tune::TrainingSuit
 /// The suite that answers a change to the operator command shape.
 ///
 /// The operator trial carries the loss and the direct step trial guards it.
-/// The guard limits are the vehicle's own promotion regression limits, so one
-/// bar answers both the hidden decision and the search.
+/// The guard limits are the vehicle's own promotion regression limits for the
+/// promotion scenario, so one bar answers both the hidden decision and the
+/// search.
 fn operator_feel_suite(
     operator: &MissionReference,
     direct: &MissionReference,
-    promotion: &flight_tune::PromotionPolicy,
+    response_targets: &flight_tune::ResponseTargetTable,
+    promotion_mission_id: &str,
 ) -> Result<flight_tune::TrainingSuite, AdapterError> {
     let mut guard_regression_limits = BTreeMap::new();
     for name in GUARD_OBJECTIVES {
-        let limit = promotion
-            .objective_regression_upper_95
-            .get(name)
-            .copied()
-            .ok_or_else(|| {
-                AdapterError::new(format!("the promotion policy states no limit for {name}"))
-            })?;
+        let limit = response_targets
+            .target(promotion_mission_id, name)
+            .map_err(|error| AdapterError::new(error.to_string()))?
+            .limit;
         guard_regression_limits.insert(name.to_owned(), limit);
     }
     Ok(flight_tune::TrainingSuite {
@@ -367,69 +425,4 @@ fn search_groups() -> Vec<flight_tune::SearchGroup> {
             suite_id: "operator-feel".to_owned(),
         },
     ]
-}
-
-/// The ceiling covers the whole trial at the bench's sample rate with room for
-/// the completion event.
-const BENCH_MAX_SAMPLES: u32 = 700;
-
-/// How long one sample of the bench may take to arrive.
-///
-/// The mission wall ceiling is this timeout for every permitted sample, so the
-/// value prices the slowest sample a campaign can produce. The engine verifies
-/// the complete durable journal once for each sample, and a campaign that
-/// searches several suites writes more journal entries than one that searches
-/// a single set, so the last runs of the longest campaign state the slowest
-/// samples the bench has to allow.
-const BENCH_RECEIPT_TIMEOUT_NS: u64 = 400_000_000;
-
-const BENCH_COMPLETION_TIME_NS: u64 = 10_480_000_000;
-
-/// The trial names that the bench stores as mission documents.
-const BENCH_TRIAL_IDS: [&str; 4] = [
-    "training-step",
-    "training-operator",
-    "promotion-step",
-    "final-step",
-];
-
-/// Resolves the stored bench mission that one reference names.
-///
-/// # Errors
-///
-/// Returns an error when the bench stores no mission with that revision.
-pub fn bench_stored_mission(mission: &MissionReference) -> Result<MissionDocument, AdapterError> {
-    for id in BENCH_TRIAL_IDS {
-        let document = bench_mission(id)?;
-        if document.identity.revision_id == mission.revision_id {
-            return Ok(document);
-        }
-    }
-    Err(AdapterError::new(
-        "the bench stores no mission document with that revision",
-    ))
-}
-
-/// One trial of the bench, as its stored mission document.
-///
-/// The trial scenario becomes a mission document once. The reference names
-/// that document, so the campaign schedule and the executed mission carry one
-/// identity.
-fn bench_mission(id: &str) -> Result<MissionDocument, AdapterError> {
-    flight_tune::calibration_mission_document(
-        &flight_tune::reference_observation_scenario(id, Some(BENCH_COMPLETION_TIME_NS)),
-        0,
-        BENCH_RECEIPT_TIMEOUT_NS,
-    )
-    .map_err(|error| AdapterError::new(error.to_string()))
-}
-
-/// One trial of the bench, as a mission reference.
-///
-/// # Errors
-///
-/// Returns an error when the mission identity cannot be calculated.
-pub fn bench_scenario(id: &str) -> Result<MissionReference, AdapterError> {
-    MissionReference::from_document(&bench_mission(id)?, BENCH_MAX_SAMPLES)
-        .map_err(|error| AdapterError::new(error.to_string()))
 }

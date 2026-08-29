@@ -53,6 +53,38 @@ pub const RESPONSE_METRICS: [&str; 8] = [
 /// Metric names produced by [`crate::measure_signal`].
 pub const SIGNAL_METRICS: [&str; 3] = ["signal.rms", "signal.peak_abs", "signal.p95_abs"];
 
+/// Metric names produced by [`crate::measure_angular_step`].
+///
+/// These are a separate family from [`RESPONSE_METRICS`] on purpose. A
+/// velocity response and an attitude response answer different questions in
+/// different units, and sharing a name would let a limit written for one be
+/// satisfied by the other.
+pub const ANGULAR_METRICS: [&str; 8] = [
+    "angular.amplitude_rad",
+    "angular.input_to_response_delay_s",
+    "angular.rise_time_s",
+    "angular.settling_time_s",
+    "angular.overshoot_rad",
+    "angular.overshoot_fraction",
+    "angular.undershoot_rad",
+    "angular.steady_state_error_rad",
+];
+
+/// Metric names produced by [`crate::measure_angular_release`].
+pub const ANGULAR_RELEASE_METRICS: [&str; 2] = [
+    "angular_release.opposite_return_peak_rad",
+    "angular_release.final_body_rate_rms_rps",
+];
+
+/// Metric names produced by [`crate::measure_collective_response`].
+pub const COLLECTIVE_METRICS: [&str; 5] = [
+    "collective.commanded_force_delta",
+    "collective.input_to_response_delay_s",
+    "collective.peak_response_mps2",
+    "collective.steady_response_mps2",
+    "collective.direction_error_fraction",
+];
+
 /// Whether this crate can produce a metric of this name.
 ///
 /// A policy that names anything else states a bar no run can be measured
@@ -71,6 +103,9 @@ pub fn producible_metrics() -> impl Iterator<Item = &'static str> {
         .chain(HOLD_METRICS)
         .chain(RESPONSE_METRICS)
         .chain(SIGNAL_METRICS)
+        .chain(ANGULAR_METRICS)
+        .chain(ANGULAR_RELEASE_METRICS)
+        .chain(COLLECTIVE_METRICS)
 }
 
 #[cfg(test)]
@@ -95,6 +130,14 @@ mod tests {
         }
         assert!(is_producible("control.effort_rms"));
         assert!(is_producible("hold.zero_crossings"));
+        assert!(is_producible("angular.settling_time_s"));
+        assert!(is_producible("collective.direction_error_fraction"));
         assert!(!is_producible("wind.position_rms_m"));
+        // A direct attitude family and an operator velocity family never
+        // share a name, so a limit written for one cannot be met by the
+        // other even before a scope decides which run answers it.
+        for name in ANGULAR_METRICS {
+            assert!(!RESPONSE_METRICS.contains(&name), "{name} is shared");
+        }
     }
 }

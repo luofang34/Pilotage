@@ -38,7 +38,7 @@ fn an_objective_owed_a_measurement_is_not_in_any_bar_until_it_has_one() {
             ("x500", super::x500_qualification_policy()),
         ] {
             assert!(
-                !qualification.objective_maxima.contains_key(name),
+                !qualification.objectives.contains(name),
                 "{vehicle} names {name}, which nothing measures"
             );
         }
@@ -53,9 +53,9 @@ fn alia_policy_limits_are_finite_and_nonnegative() {
     promotion.validate().expect("validate promotion policy");
     assert!(
         promotion
-            .objective_regression_upper_95
-            .keys()
-            .eq(qualification.objective_maxima.keys())
+            .objectives
+            .iter()
+            .eq(qualification.objectives.iter())
     );
     assert!(qualification.maximum_loss_confidence_upper.is_finite());
     assert!(qualification.maximum_loss_confidence_upper >= 0.0);
@@ -63,11 +63,12 @@ fn alia_policy_limits_are_finite_and_nonnegative() {
     assert!(qualification.maximum_p95_loss >= 0.0);
     assert!(qualification.maximum_mean_control_effort.is_finite());
     assert!(qualification.maximum_mean_control_effort >= 0.0);
+    let table = super::alia250_response_targets().expect("build response targets");
     assert!(
-        qualification
-            .objective_maxima
-            .values()
-            .all(|limit| limit.is_finite() && *limit >= 0.0)
+        table
+            .targets
+            .iter()
+            .all(|row| row.limit.is_finite() && row.limit >= 0.0)
     );
 }
 
@@ -95,19 +96,13 @@ fn every_vehicle_states_its_bar_over_metrics_the_scoring_layer_produces() {
     ];
     for (vehicle, qualification, promotion) in vehicles {
         assert!(
-            !qualification.objective_maxima.is_empty(),
+            !qualification.objectives.is_empty(),
             "{vehicle} states no final bar"
         );
-        for name in qualification.objective_maxima.keys() {
+        for name in qualification.objectives.iter().chain(&promotion.objectives) {
             assert!(
                 pilotage_flight_quality::is_producible(name),
-                "{vehicle} final bar names {name}, which nothing measures"
-            );
-        }
-        for name in promotion.objective_regression_upper_95.keys() {
-            assert!(
-                pilotage_flight_quality::is_producible(name),
-                "{vehicle} promotion bar names {name}, which nothing measures"
+                "{vehicle} bar names {name}, which nothing measures"
             );
         }
         // The two halves bound the same objectives: a metric held to an
@@ -115,11 +110,8 @@ fn every_vehicle_states_its_bar_over_metrics_the_scoring_layer_produces() {
         // ceiling one promotion at a time without any single step being
         // refused.
         assert_eq!(
-            qualification.objective_maxima.keys().collect::<Vec<_>>(),
-            promotion
-                .objective_regression_upper_95
-                .keys()
-                .collect::<Vec<_>>(),
+            qualification.objectives.iter().collect::<Vec<_>>(),
+            promotion.objectives.iter().collect::<Vec<_>>(),
             "{vehicle} bounds different objectives in its two halves"
         );
     }
@@ -129,23 +121,31 @@ fn every_vehicle_states_its_bar_over_metrics_the_scoring_layer_produces() {
 /// limit, because they measure different things.
 #[test]
 fn each_absolute_ceiling_sits_above_its_regression_limit() {
-    for (vehicle, qualification, promotion) in [
+    for (vehicle, model, table) in [
         (
             "alia250",
-            super::alia250_qualification_policy(),
-            super::alia250_promotion_policy(),
+            crate::BenchVehicle::alia250(),
+            super::alia250_response_targets().expect("build response targets"),
         ),
         (
             "x500",
-            super::x500_qualification_policy(),
-            super::x500_promotion_policy(),
+            crate::BenchVehicle::x500(),
+            super::x500_response_targets().expect("build response targets"),
         ),
     ] {
-        for (name, ceiling) in &qualification.objective_maxima {
-            let regression = promotion
-                .objective_regression_upper_95
-                .get(name)
-                .unwrap_or_else(|| panic!("{vehicle} has no regression limit for {name}"));
+        let promotion_id = crate::bench_mission_revision_id(crate::BENCH_PROMOTION_TRIAL_ID, model)
+            .expect("promotion mission identity");
+        let final_id = crate::bench_mission_revision_id(crate::BENCH_FINAL_TRIAL_ID, model)
+            .expect("final mission identity");
+        for name in alia250_qualification_policy().objectives {
+            let ceiling = table
+                .target(&final_id, &name)
+                .unwrap_or_else(|error| panic!("{vehicle} {name}: {error}"))
+                .limit;
+            let regression = table
+                .target(&promotion_id, &name)
+                .unwrap_or_else(|error| panic!("{vehicle} {name}: {error}"))
+                .limit;
             assert!(
                 ceiling > regression,
                 "{vehicle} {name}: ceiling {ceiling} is not above its regression limit {regression}"

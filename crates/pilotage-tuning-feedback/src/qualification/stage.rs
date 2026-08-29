@@ -11,7 +11,7 @@ const MAX_SCENARIOS_PER_SET: usize = 64;
 /// campaign has to clear; both halves of it are bounded the same way because
 /// they bound the same set of measured objectives.
 const MAX_POLICY_OBJECTIVES: usize = 64;
-const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 1;
+const PROMOTION_POLICY_SCHEMA_VERSION: u16 = 2;
 const MISSION_SCHEMA_VERSION: u16 = 3;
 const MAX_SAMPLE_TIMEOUT_NS: u64 = 60_000_000_000;
 
@@ -22,7 +22,25 @@ pub(super) fn verify(stage: &SearchStage) -> Result<(), FeedbackError> {
     verify_scenarios(stage)?;
     super::training_suite::verify_search_space(stage)?;
     verify_promotion(stage)?;
-    verify_qualification(stage)
+    verify_qualification(stage)?;
+    verify_hard_gate_floor(stage)?;
+    super::response_target::verify(stage)
+}
+
+/// The crash gate is the first gate of every campaign.
+///
+/// A stage that dropped it, renamed it, or let another gate run first would
+/// let a run that hit something be scored, and every measurement of that run
+/// describes the collision rather than the command law.
+fn verify_hard_gate_floor(stage: &SearchStage) -> Result<(), FeedbackError> {
+    if stage.required_hard_gates.first().map(String::as_str)
+        != Some(flight_tune::MANDATORY_CRASH_GATE_ID)
+    {
+        return Err(invalid(
+            "the crash or unexpected contact gate is not the first required hard gate",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn verify_artifact(
@@ -123,18 +141,14 @@ fn verify_promotion(stage: &SearchStage) -> Result<(), FeedbackError> {
         || !(0.0..=1.0).contains(&policy.minimum_relative_loss_improvement)
         || !policy.maximum_control_effort_increase.is_finite()
         || !(0.0..=1.0).contains(&policy.maximum_control_effort_increase)
-        || policy.objective_regression_upper_95.is_empty()
-        || policy.objective_regression_upper_95.len() > MAX_POLICY_OBJECTIVES
+        || policy.objectives.is_empty()
+        || policy.objectives.len() > MAX_POLICY_OBJECTIVES
     {
         return Err(invalid("the promotion policy is not valid"));
     }
-    for (name, maximum) in &policy.objective_regression_upper_95 {
-        if name.is_empty()
-            || name.len() > MAX_NAME_BYTES
-            || name.chars().any(char::is_whitespace)
-            || !nonnegative(*maximum)
-        {
-            return Err(invalid("a promotion objective limit is not valid"));
+    for name in &policy.objectives {
+        if name.is_empty() || name.len() > MAX_NAME_BYTES || name.chars().any(char::is_whitespace) {
+            return Err(invalid("a promotion objective name is not valid"));
         }
     }
     Ok(())
@@ -148,8 +162,8 @@ fn verify_qualification(stage: &SearchStage) -> Result<(), FeedbackError> {
     // operator-chosen numbers would qualify — with a chain that reconciles
     // exactly. Promotion already refuses an empty objective map; this is the
     // half that decides what ships.
-    if policy.objective_maxima.is_empty()
-        || policy.objective_maxima.len() > MAX_POLICY_OBJECTIVES
+    if policy.objectives.is_empty()
+        || policy.objectives.len() > MAX_POLICY_OBJECTIVES
         || !nonnegative(policy.maximum_loss_confidence_upper)
         || !nonnegative(policy.maximum_p95_loss)
         || !policy.maximum_mean_control_effort.is_finite()
@@ -157,11 +171,8 @@ fn verify_qualification(stage: &SearchStage) -> Result<(), FeedbackError> {
     {
         return Err(invalid("the final qualification policy is not valid"));
     }
-    for (name, maximum) in &policy.objective_maxima {
+    for name in &policy.objectives {
         verify_name(name, "qualification objective")?;
-        if !nonnegative(*maximum) {
-            return Err(invalid("a qualification objective limit is not valid"));
-        }
     }
     Ok(())
 }

@@ -278,6 +278,7 @@ impl ScenarioRuntime for FakeBackend {
     fn capabilities(&self) -> &[MissionCapability] {
         &[
             MissionCapability::SimulatorTime,
+            MissionCapability::ContactState,
             MissionCapability::OperatorVelocityControl,
             MissionCapability::DirectAttitudeThrustControl,
         ]

@@ -223,7 +223,7 @@ fn a_qualification_policy_that_names_no_objective_limit_is_refused() {
         "the fixture's own stage is valid to begin with"
     );
 
-    stage.qualification.objective_maxima.clear();
+    stage.qualification.objectives.clear();
     assert!(
         super::super::stage::verify(&stage).is_err(),
         "an empty qualification bar is not a bar"
@@ -231,6 +231,37 @@ fn a_qualification_policy_that_names_no_objective_limit_is_refused() {
 
     // The promotion half already refused this; the two are now symmetric.
     let mut promotion = sealed.journal.stage.clone();
-    promotion.promotion.objective_regression_upper_95.clear();
+    promotion.promotion.objectives.clear();
     assert!(super::super::stage::verify(&promotion).is_err());
+}
+
+/// The independent verifier restates the crash-gate floor.
+///
+/// A campaign published with the crash gate dropped or moved would reconcile
+/// perfectly against its own chain: every digest matches and nothing is found
+/// over limit. What it would not have is the gate that makes a measurement
+/// mean anything.
+#[test]
+fn a_stage_that_moves_or_drops_the_crash_gate_is_refused() {
+    let sealed = fixture::fixture();
+    let stage = sealed.journal.stage.clone();
+    assert!(
+        super::super::stage::verify(&stage).is_ok(),
+        "the fixture's own stage is valid to begin with"
+    );
+
+    let mut omitted = stage.clone();
+    omitted.required_hard_gates = vec!["finite".to_owned()];
+    assert!(super::super::stage::verify(&omitted).is_err());
+
+    let mut renamed = stage.clone();
+    renamed.required_hard_gates = vec!["crash".to_owned(), "finite".to_owned()];
+    assert!(super::super::stage::verify(&renamed).is_err());
+
+    let mut reordered = stage;
+    reordered.required_hard_gates = vec![
+        "finite".to_owned(),
+        flight_tune::MANDATORY_CRASH_GATE_ID.to_owned(),
+    ];
+    assert!(super::super::stage::verify(&reordered).is_err());
 }

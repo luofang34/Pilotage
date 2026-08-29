@@ -3,7 +3,12 @@ use serde::{Deserialize, Serialize};
 use crate::{SearchStage, TuneError};
 
 /// The supported neutral campaign configuration schema.
-pub const CAMPAIGN_CONFIG_SCHEMA_VERSION: u16 = 1;
+///
+/// The document embeds a complete search stage, so a changed stage shape is a
+/// changed configuration shape. An unbumped version would let two different
+/// shapes claim one schema, and a document written against the older one would
+/// fail to decode with no version to explain why.
+pub const CAMPAIGN_CONFIG_SCHEMA_VERSION: u16 = 2;
 
 /// A simulator-neutral tuning campaign document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +87,10 @@ mod tests {
         document.validate().expect("validate neutral campaign");
     }
 
+    fn limits() -> BTreeMap<String, f64> {
+        BTreeMap::from([("response".to_owned(), 1.0)])
+    }
+
     fn stage() -> SearchStage {
         SearchStage {
             execution_retry: crate::ExecutionRetryPolicy::none(),
@@ -94,7 +103,10 @@ mod tests {
                 },
             )]),
             fixed_parameters: BTreeMap::new(),
-            required_hard_gates: vec!["envelope".to_owned()],
+            required_hard_gates: vec![
+                crate::MANDATORY_CRASH_GATE_ID.to_owned(),
+                "envelope".to_owned(),
+            ],
             training_scenarios: vec![scenario("training", 1)],
             training_suites: vec![crate::TrainingSuite {
                 schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
@@ -119,14 +131,18 @@ mod tests {
                 minimum_loss_improvement: 0.0,
                 minimum_relative_loss_improvement: 0.0,
                 maximum_control_effort_increase: 0.0,
-                objective_regression_upper_95: BTreeMap::from([("response".to_owned(), 1.0)]),
+                objectives: std::collections::BTreeSet::from(["response".to_owned()]),
             },
             qualification: QualificationPolicy {
                 maximum_loss_confidence_upper: 1.0,
                 maximum_p95_loss: 1.0,
                 maximum_mean_control_effort: 1.0,
-                objective_maxima: BTreeMap::from([("response".to_owned(), 1.0)]),
+                objectives: std::collections::BTreeSet::from(["response".to_owned()]),
             },
+            response_targets: crate::model::response_target::fixture::covering(&[
+                (&[scenario("promotion", 2)], &limits()),
+                (&[scenario("final", 3)], &limits()),
+            ]),
         }
     }
 

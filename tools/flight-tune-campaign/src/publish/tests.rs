@@ -80,6 +80,7 @@ fn a_qualified_journal_publishes_verified_readback() {
         &rig_stage.promotion,
         &rig_stage.qualification,
         &rig_stage.execution_retry,
+        &rig_stage.response_targets,
     )
     .expect("bind the rig's policy");
     let qualified = VerifiedCampaignEvidence::load_content_addressed_blocking(&receipt.object_path)

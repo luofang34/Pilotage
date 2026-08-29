@@ -88,6 +88,11 @@ pub(super) fn fixture() -> CampaignEvidence {
     )
 }
 
+#[path = "fixture/targets.rs"]
+mod targets;
+
+use targets::response_targets;
+
 fn stage() -> SearchStage {
     SearchStage {
         execution_retry: flight_tune::ExecutionRetryPolicy::none(),
@@ -100,7 +105,10 @@ fn stage() -> SearchStage {
             },
         )]),
         fixed_parameters: BTreeMap::new(),
-        required_hard_gates: vec!["crash".to_owned(), "finite".to_owned()],
+        required_hard_gates: vec![
+            flight_tune::MANDATORY_CRASH_GATE_ID.to_owned(),
+            "finite".to_owned(),
+        ],
         training_scenarios: vec![scenario("training-calm", 11)],
         training_suites: vec![flight_tune::TrainingSuite {
             schema_version: flight_tune::TRAINING_SUITE_SCHEMA_VERSION,
@@ -128,14 +136,15 @@ fn stage() -> SearchStage {
             minimum_loss_improvement: 0.10,
             minimum_relative_loss_improvement: 0.05,
             maximum_control_effort_increase: 0.10,
-            objective_regression_upper_95: BTreeMap::from([("tracking".to_owned(), 0.05)]),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
         qualification: QualificationPolicy {
             maximum_loss_confidence_upper: 1.0,
             maximum_p95_loss: 1.0,
             maximum_mean_control_effort: 1.0,
-            objective_maxima: BTreeMap::from([("tracking".to_owned(), 1.0)]),
+            objectives: std::collections::BTreeSet::from(["tracking".to_owned()]),
         },
+        response_targets: response_targets(0.05, 1.0),
     }
 }
 

@@ -221,6 +221,18 @@ fn project_action(action: &PhaseAction) -> Result<MissionAction, ScenarioRuntime
     Ok(MissionAction::Trial(action))
 }
 
+/// Projects one contract value into its mirror in the other crate.
+///
+/// The two crates hold the same shapes under the same field names, so a
+/// canonical round trip is lossless and a shape that stopped mirroring stops
+/// decoding.
+pub(super) fn transcode_contract<S: Serialize + ?Sized, T: DeserializeOwned>(
+    name: &'static str,
+    source: &S,
+) -> Result<T, ScenarioRuntimeError> {
+    transcode(source).map_err(|error| projection(format!("cannot project a {name}: {error}")))
+}
+
 fn transcode<S: Serialize + ?Sized, T: DeserializeOwned>(
     source: &S,
 ) -> Result<T, ScenarioRuntimeError> {

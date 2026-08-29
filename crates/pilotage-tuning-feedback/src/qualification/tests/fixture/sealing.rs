@@ -13,7 +13,7 @@ use super::super::super::statistics;
 
 const EVALUATION_DOMAIN: &[u8] = b"pilotage.flight-tune.authenticated-evaluation.v1\0";
 const PROOF_DOMAIN: &[u8] = b"pilotage.flight-tune.authenticated-evaluation-proof.v1\0";
-const POLICY_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-policy.v1\0";
+const POLICY_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-policy.v2\0";
 const COMPARISON_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-comparison.v1\0";
 const DECISION_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-decision.v1\0";
 const SELECTION_DOMAIN: &[u8] = b"pilotage.flight-tune.promotion-selection.v1\0";
@@ -68,7 +68,9 @@ pub(super) fn promotion_closure(
     let comparison = promotion_comparison(stage, baseline, frozen);
     let promoted = comparison.loss_passed
         && comparison.control_effort_passed
-        && comparison.objectives.values().all(|result| result.passed);
+        && comparison.scenarios.values().all(|scenario| {
+            scenario.authority_passed && scenario.objectives.values().all(|result| result.passed)
+        });
     let mut closure = PromotionClosure {
         schema_version: flight_tune::PROMOTION_CLOSURE_SCHEMA_VERSION,
         policy_digest: digest::domain("promotion policy", POLICY_DOMAIN, &stage.promotion)
@@ -126,11 +128,12 @@ fn promotion_comparison(
                 - left.objectives.get("tracking").expect("baseline objective")
         }))
         .expect("objective statistics");
-    let maximum_objective = *stage
-        .promotion
-        .objective_regression_upper_95
-        .get("tracking")
-        .expect("objective limit");
+    let mission = &stage.promotion_scenarios[0].revision_id;
+    let maximum_objective = stage
+        .response_targets
+        .target(mission, "tracking")
+        .expect("objective limit")
+        .limit;
     let required = stage
         .promotion
         .minimum_loss_improvement
@@ -143,12 +146,20 @@ fn promotion_comparison(
         control_effort,
         control_effort_passed: control_effort.mean
             <= stage.promotion.maximum_control_effort_increase,
-        objectives: BTreeMap::from([(
-            "tracking".to_owned(),
-            PromotionObjectiveResult {
-                statistics: objective,
-                maximum_upper_95: maximum_objective,
-                passed: objective.upper_95 <= maximum_objective,
+        scenarios: BTreeMap::from([(
+            mission.clone(),
+            flight_tune::PromotionScenarioResults {
+                mission_content_digest: stage.promotion_scenarios[0].content_digest,
+                authority_band: None,
+                authority_passed: true,
+                objectives: BTreeMap::from([(
+                    "tracking".to_owned(),
+                    PromotionObjectiveResult {
+                        statistics: objective,
+                        maximum_upper_95: maximum_objective,
+                        passed: objective.upper_95 <= maximum_objective,
+                    },
+                )]),
             },
         )]),
     }

@@ -18,6 +18,15 @@ pub(super) fn admit_campaign_mission<B: CampaignBackend>(
         .mission_document_blocking(context.scenario)
         .map_err(|source| runtime_adapter_error(backend, "resolve mission document", source))?;
     context.scenario.verify_document(&document)?;
+    // The table states the family, channel, and envelope its limits are
+    // written for. This is the one point where that claim meets the document
+    // the run will actually fly, so a row that names another stimulus is
+    // refused before the runtime is prepared.
+    crate::model::verify_document(
+        &journal.stage().response_targets,
+        &context.scenario.revision_id,
+        &document,
+    )?;
     CampaignMissionRuntime::attest_capabilities(&document, backend.scenario_runtime())
         .map_err(|source| mission_error(backend, "admit mission capabilities", source))?;
     let duration_ns = context.scenario.run_duration_ns();

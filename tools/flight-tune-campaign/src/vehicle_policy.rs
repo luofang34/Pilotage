@@ -1,10 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use flight_tune::{
-    ExecutionRetryPolicy, PROMOTION_POLICY_SCHEMA_VERSION, PromotionPolicy, PromotionSeedPolicy,
-    QualificationPolicy,
+    AdapterError, ExecutionRetryPolicy, PROMOTION_POLICY_SCHEMA_VERSION, PromotionPolicy,
+    PromotionSeedPolicy, QualificationPolicy, ResponseTargetTable, TargetAuthorityBand,
 };
 use pilotage_tuning_feedback::{FeedbackError, RequiredPolicy};
+
+use crate::bench::{BenchVehicle, bench_physical_target, bench_response_targets};
 
 /// The objectives an Alia 250 candidate has to clear, as
 /// `(metric, promotion regression limit, final absolute maximum)`.
@@ -78,6 +80,20 @@ const X500_OBJECTIVE_LIMITS: [(&str, f64, f64); 18] = [
     ("response.settling_time_s", 0.2, 2.0),
 ];
 
+/// The share of the requested physical target an operator input must keep.
+///
+/// A candidate cannot improve a normalized response metric by asking the
+/// vehicle for less: a larger expo lowers the physical target for the same
+/// stick, so the vehicle reaches it sooner and overshoots it less, and every
+/// normalized measurement reads that as a better command law. This fraction is
+/// the authority the operator keeps, and it is checked against the target the
+/// candidate resolved on the run rather than the one the scenario requested.
+///
+/// The value admits the whole shaped neighborhood the search may reach and
+/// refuses the corner of the allowlist where the curve gives most of the stick
+/// away.
+const MINIMUM_OPERATOR_AUTHORITY: f64 = 0.86;
+
 /// Returns the default Alia 250 paired promotion policy.
 #[must_use]
 pub fn alia250_promotion_policy() -> PromotionPolicy {
@@ -88,6 +104,51 @@ pub fn alia250_promotion_policy() -> PromotionPolicy {
 #[must_use]
 pub fn alia250_qualification_policy() -> QualificationPolicy {
     qualification_policy(&ALIA250_OBJECTIVE_LIMITS, 4.0, 4.0, 0.75)
+}
+
+/// Returns the exact scoped response limits for an Alia 250 bench campaign.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when a scenario identity or the table is not
+/// valid.
+pub fn alia250_response_targets() -> Result<ResponseTargetTable, AdapterError> {
+    response_targets(BenchVehicle::alia250(), &ALIA250_OBJECTIVE_LIMITS)
+}
+
+/// Returns the exact scoped response limits for an x500 bench campaign.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when a scenario identity or the table is not
+/// valid.
+pub fn x500_response_targets() -> Result<ResponseTargetTable, AdapterError> {
+    response_targets(BenchVehicle::x500(), &X500_OBJECTIVE_LIMITS)
+}
+
+/// One scoped table over a vehicle's own scenarios and limits.
+fn response_targets(
+    model: BenchVehicle,
+    limits: &[(&str, f64, f64)],
+) -> Result<ResponseTargetTable, AdapterError> {
+    let promotion = limits
+        .iter()
+        .map(|(name, regression, _)| (*name, *regression))
+        .collect::<Vec<_>>();
+    let qualification = limits
+        .iter()
+        .map(|(name, _, maximum)| (*name, *maximum))
+        .collect::<Vec<_>>();
+    let target = bench_physical_target(model);
+    bench_response_targets(
+        model,
+        &promotion,
+        &qualification,
+        TargetAuthorityBand {
+            minimum: target * MINIMUM_OPERATOR_AUTHORITY,
+            maximum: target,
+        },
+    )
 }
 
 /// Returns the bar an Alia 250 campaign must have run against.
@@ -105,6 +166,9 @@ pub fn alia250_required_policy() -> Result<RequiredPolicy, FeedbackError> {
         &alia250_promotion_policy(),
         &alia250_qualification_policy(),
         &execution_retry_policy(),
+        &alia250_response_targets().map_err(|error| FeedbackError::Invalid {
+            detail: error.to_string(),
+        })?,
     )
 }
 
@@ -130,6 +194,9 @@ pub fn x500_required_policy() -> Result<RequiredPolicy, FeedbackError> {
         &x500_promotion_policy(),
         &x500_qualification_policy(),
         &execution_retry_policy(),
+        &x500_response_targets().map_err(|error| FeedbackError::Invalid {
+            detail: error.to_string(),
+        })?,
     )
 }
 
@@ -142,7 +209,11 @@ fn execution_retry_policy() -> ExecutionRetryPolicy {
     ExecutionRetryPolicy::none()
 }
 
-/// One paired promotion policy over a vehicle's objective limits.
+/// One paired promotion policy over a vehicle's declared objectives.
+///
+/// The policy names the objectives; the scoped table states each limit. A
+/// single number here would bound every scenario the same way, which is what
+/// lets a limit written for one physical response decide another.
 fn promotion_policy(limits: &[(&str, f64, f64)]) -> PromotionPolicy {
     PromotionPolicy {
         schema_version: PROMOTION_POLICY_SCHEMA_VERSION,
@@ -150,14 +221,15 @@ fn promotion_policy(limits: &[(&str, f64, f64)]) -> PromotionPolicy {
         minimum_loss_improvement: 0.0,
         minimum_relative_loss_improvement: 0.2,
         maximum_control_effort_increase: 0.05,
-        objective_regression_upper_95: limits
-            .iter()
-            .map(|(name, regression, _)| ((*name).to_owned(), *regression))
-            .collect(),
+        objectives: objective_names(limits),
     }
 }
 
-/// One final qualification policy over a vehicle's objective limits.
+/// One final qualification policy over a vehicle's declared objectives.
+///
+/// The three scalar ceilings bound the campaign-wide loss distribution rather
+/// than any one response, so they stay here. Every per-objective maximum is a
+/// scoped row.
 fn qualification_policy(
     limits: &[(&str, f64, f64)],
     maximum_loss_confidence_upper: f64,
@@ -168,11 +240,15 @@ fn qualification_policy(
         maximum_loss_confidence_upper,
         maximum_p95_loss,
         maximum_mean_control_effort,
-        objective_maxima: limits
-            .iter()
-            .map(|(name, _, maximum)| ((*name).to_owned(), *maximum))
-            .collect::<BTreeMap<_, _>>(),
+        objectives: objective_names(limits),
     }
+}
+
+fn objective_names(limits: &[(&str, f64, f64)]) -> BTreeSet<String> {
+    limits
+        .iter()
+        .map(|(name, _, _)| (*name).to_owned())
+        .collect()
 }
 
 #[cfg(test)]

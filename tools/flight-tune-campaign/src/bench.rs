@@ -282,7 +282,7 @@ impl CampaignBackend for BenchBackend {
         &self,
         mission: &MissionReference,
     ) -> Result<MissionDocument, AdapterError> {
-        bench_stored_mission(mission)
+        bench_stored_mission(mission, self.vehicle_model)
     }
 
     fn project_scenario_frame(
@@ -375,11 +375,19 @@ impl CampaignBackend for BenchBackend {
                 (channel::POSITION_M.to_owned(), run.position),
                 (channel::VELOCITY_MPS.to_owned(), run.velocity),
                 (channel::ACCELERATION_MPS2.to_owned(), acceleration),
+                (channel::PHYSICAL_DEMAND.to_owned(), demanded_mps),
                 (channel::EFFORT.to_owned(), f64::from(shaped.abs())),
                 (
                     channel::SATURATED.to_owned(),
                     f64::from(u8::from(shaped.abs() >= 0.999)),
                 ),
+                // The bench plant is a scalar velocity with no ground under
+                // it, so nothing it flies can hit anything. It reports both
+                // signals anyway: the crash gate refuses an absent value, and
+                // a backend that cannot answer the question is not a backend
+                // whose runs can be scored.
+                (channel::CRASHED.to_owned(), 0.0),
+                (channel::GROUND_CONTACT.to_owned(), 0.0),
                 (channel::PHASE.to_owned(), phase),
             ]),
         };
@@ -404,7 +412,11 @@ impl ScenarioRuntime for BenchBackend {
     }
 
     fn capabilities(&self) -> &[MissionCapability] {
-        &[MissionCapability::SimulatorTime]
+        &[
+            MissionCapability::SimulatorTime,
+            MissionCapability::ContactState,
+            MissionCapability::OperatorVelocityControl,
+        ]
     }
 
     fn prepare_blocking(
@@ -449,8 +461,8 @@ fn bench_scenario_frame(sample: &TelemetrySample) -> ScenarioFrame {
         simulator_time_ns: sample.elapsed_ms.saturating_mul(1_000_000),
         trial_time_ns: sample.elapsed_ms.saturating_mul(1_000_000),
         lifecycle: None,
-        ground_contact: Some(false),
-        crashed: Some(false),
+        ground_contact: Some(value(channel::GROUND_CONTACT) != 0.0),
+        crashed: Some(value(channel::CRASHED) != 0.0),
         link_valid: Some(true),
         estimator_valid: Some(true),
         truth: KinematicTruth {
@@ -466,7 +478,7 @@ fn bench_scenario_frame(sample: &TelemetrySample) -> ScenarioFrame {
 }
 
 pub(super) fn bench_action_port_identity() -> Result<ArtifactIdentity, AdapterError> {
-    ArtifactIdentity::from_text("bench-action-port", "bench-action-port-v2").map_err(to_adapter)
+    ArtifactIdentity::from_text("bench-action-port", "bench-action-port-v3").map_err(to_adapter)
 }
 
 /// Reads an engine error as an adapter one.
@@ -479,8 +491,9 @@ mod qualifying;
 
 pub use adapter::BenchVehicleAdapter;
 pub use qualifying::{
-    BenchGates, BenchVehicleFactory, bench_scenario, bench_stage, bench_stored_mission,
-    warm_start_parameters,
+    BENCH_FINAL_TRIAL_ID, BENCH_PROMOTION_TRIAL_ID, BenchGates, BenchVehicleFactory,
+    bench_mission_revision_id, bench_physical_target, bench_response_targets, bench_scenario,
+    bench_stage, bench_stored_mission, warm_start_parameters,
 };
 
 #[cfg(test)]
