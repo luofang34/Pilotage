@@ -21,8 +21,9 @@ pub use capability::{BackendCapabilities, BackendCapability, HoverEstimatorMode}
 pub use condition::{
     ActuatorCondition, AppliedWind, CommandHoldAction, CommandHoldIntervalIdentity,
     CommandLossPolicy, ConditionSet, ControllerInitializationCondition, DelayJitter, GustEvent,
-    HorizontalWind, HoverThrustForceInitialization, SensorAxis, SensorCondition, SensorNoiseLane,
-    SensorNoiseReference, SensorReferenceLane, TimingCondition, TurbulenceModel, WindCondition,
+    HorizontalWind, HoverThrustExpectation, HoverThrustForceInitialization, PlantCondition,
+    SensorAxis, SensorCondition, SensorNoiseLane, SensorNoiseReference, SensorReferenceLane,
+    TimingCondition, TurbulenceModel, WindCondition,
 };
 pub use digest::Digest;
 pub use error::{CodecError, ValidationError};

@@ -56,3 +56,27 @@ fn a_boolean_declaration_cannot_stand_for_a_sensor_request() {
     json["sensor"] = serde_json::json!({"kind": "bounded_noise"});
     assert!(ConditionSet::from_json(&serde_json::to_vec(&json).expect("lane-free JSON")).is_err());
 }
+
+#[test]
+fn a_condition_document_without_a_plant_block_is_refused() {
+    let mut json = serde_json::to_value(condition(42)).expect("condition value");
+    assert!(
+        json.as_object_mut()
+            .expect("condition object")
+            .remove("plant")
+            .is_some()
+    );
+
+    assert!(ConditionSet::from_json(&serde_json::to_vec(&json).expect("plant-free JSON")).is_err());
+}
+
+#[test]
+fn the_plant_block_is_the_last_canonical_field() {
+    let bytes = condition(42)
+        .to_canonical_json()
+        .expect("canonical condition");
+    let text = String::from_utf8(bytes).expect("canonical text");
+
+    assert!(text.find("\"plant\":") > text.find("\"controller_initialization\":"));
+    assert!(text.ends_with("\"hover_thrust_expectation\":{\"kind\":\"measured_weight_ratio\"}}}"));
+}

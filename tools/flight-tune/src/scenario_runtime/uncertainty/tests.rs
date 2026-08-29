@@ -3,8 +3,9 @@
 use pilotage_mission_core::{MissionCapability, MissionDirective, ReceiptResult};
 use pilotage_trial::{
     ActuatorCondition, CONDITION_SET_SCHEMA_VERSION, CommandLossPolicy,
-    ControllerInitializationCondition, HorizontalWind, HoverThrustForceInitialization, SensorAxis,
-    SensorCondition, SensorNoiseLane, TimingCondition, TurbulenceModel, WindCondition,
+    ControllerInitializationCondition, HorizontalWind, HoverThrustForceInitialization,
+    PlantCondition, SensorAxis, SensorCondition, SensorNoiseLane, TimingCondition, TurbulenceModel,
+    WindCondition,
 };
 
 use super::*;
@@ -112,6 +113,7 @@ fn nominal_condition() -> ConditionSet {
         sensor: SensorCondition::nominal(),
         actuator: ActuatorCondition::nominal(),
         controller_initialization: ControllerInitializationCondition::nominal(),
+        plant: PlantCondition::nominal(),
     }
 }
 

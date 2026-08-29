@@ -253,6 +253,12 @@ const SENSOR_NOISE_CONDITION: &str = r#"{
     },
     "controller_initialization": {
         "hover_thrust_force": {"kind": "scale_baseline", "scale_basis_points": 10000}
+    },
+    "plant": {
+        "payload_mass_delta_kg": 0.0,
+        "longitudinal_cg_offset_m": 0.0,
+        "lateral_cg_offset_m": 0.0,
+        "hover_thrust_expectation": {"kind": "measured_weight_ratio"}
     }
 }"#;
 

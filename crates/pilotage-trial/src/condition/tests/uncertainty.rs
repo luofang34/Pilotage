@@ -237,6 +237,9 @@ fn a_nominal_condition_derives_no_perturbation_stream() {
     );
 }
 
+/// The golden document carries every schema-4 block, the plant block
+/// included, so this digest is the identity of a complete condition at the
+/// current schema. A block added, removed, or reordered moves it.
 #[test]
 fn condition_v4_canonical_bytes_and_digest_match_the_golden_file() {
     let fixture = include_bytes!("../../../fixtures/condition-v4.golden.json");
@@ -249,12 +252,16 @@ fn condition_v4_canonical_bytes_and_digest_match_the_golden_file() {
             .canonical_digest()
             .expect("canonical digest")
             .to_string(),
-        "04762820cb60dff104ef9ec7ca0ff3e4c917846fb38325c0fe436c3e894a69bb"
+        "6ad7bee8a76cd3272544ca6e4d8b383023dd4ba1fb3e4438994f1d81db521453"
     );
     assert_eq!(value.schema_version, CONDITION_SET_SCHEMA_VERSION);
     assert_eq!(value.required_capabilities().len(), 4);
 }
 
+/// The hold schedule is seeded by the canonical condition digest, so this
+/// position is a second, independent statement of that digest: a schedule
+/// that still lands here proves the document reaching the derivation is the
+/// document the fixture holds.
 #[test]
 fn the_golden_condition_holds_the_golden_command_hold_schedule() {
     let fixture = include_bytes!("../../../fixtures/condition-v4.golden.json");
@@ -268,5 +275,5 @@ fn the_golden_condition_holds_the_golden_command_hold_schedule() {
         .filter_map(|(index, hold)| hold.then_some(index))
         .collect::<Vec<_>>();
 
-    assert_eq!(held, vec![18]);
+    assert_eq!(held, vec![37]);
 }
