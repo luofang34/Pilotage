@@ -126,7 +126,7 @@ fn a_replaced_training_baseline_keeps_one_attempt_index() {
     assert!(tuner.journal().entries().iter().any(|entry| matches!(
         entry.event,
         JournalEvent::AttemptPrepared {
-            role: flight_tune::AttemptRole::TrainingChallenger { attempt_index: 0 },
+            role: flight_tune::AttemptRole::TrainingChallenger { attempt_index: 0, suite_index: 0 },
             ..
         }
     )));

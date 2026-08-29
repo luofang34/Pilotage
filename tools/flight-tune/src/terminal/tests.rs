@@ -38,7 +38,7 @@ pub(super) fn run_context() -> RunExecutionContext {
     RunExecutionContext::new(
         fixed_digest(1),
         7,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         fixed_digest(3),
         None,
         ScenarioSet::Training,

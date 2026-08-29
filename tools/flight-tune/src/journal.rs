@@ -35,9 +35,10 @@ use crate::{
     Candidate, CandidateLineage, Digest, RuntimeIdentities, SearchStage, TrainingObservation,
     TuneError,
 };
+pub(crate) use replay::training_better;
 use replay::{JournalState, replay};
 
-const JOURNAL_SCHEMA_VERSION: u32 = 6;
+const JOURNAL_SCHEMA_VERSION: u32 = 7;
 
 /// The immutable identity of one tuning session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -384,6 +385,7 @@ impl Journal {
             return Err(TuneError::JournalSessionMismatch);
         }
         let state = replay(&entries, &entry_digests, &stage)?;
+        transition::audit_recorded_bindings(&storage, &entries, &stage)?;
         let journal = Self {
             storage,
             stage,

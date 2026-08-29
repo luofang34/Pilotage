@@ -10,6 +10,18 @@ use crate::{CampaignEvidence, digest};
 
 use super::attempts::training_attempts;
 
+/// The one group and suite the golden stage declares.
+fn group_binding(stage: &SearchStage) -> flight_tune::SearchGroupBinding {
+    flight_tune::SearchGroupBinding {
+        group_id: "golden-group".to_owned(),
+        suite_id: "golden-suite".to_owned(),
+        suite_index: 0,
+        suite_digest: stage.training_suites[0]
+            .digest()
+            .expect("the golden suite digest"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sealed_campaign(
     stage: SearchStage,
@@ -65,6 +77,7 @@ fn campaign_authority(
         attempt_index: 0,
         reason: "fixture challenger".to_owned(),
         candidate: frozen_candidate,
+        group: group_binding(stage),
         receipt: transition.0,
     });
     chain.append_attempt(&challenger, false, Some(true), Some(transition.1));
@@ -98,6 +111,10 @@ fn campaign_authority(
             )
             .expect("derive the fixture attempt projection"),
             journal_chain: chain.records,
+            candidates: vec![
+                super::tuning_candidate(0.0),
+                super::tuning_candidate(0.5),
+            ],
             baseline_candidate: session.initial_candidate_digest,
             frozen_candidate,
             final_candidate: Some(frozen_candidate),
@@ -189,7 +206,7 @@ impl JournalChain {
     fn push(&mut self, event: JournalEvent) -> AuthenticatedJournalRecord {
         let sequence = u64::try_from(self.records.len()).expect("journal sequence");
         let entry = JournalEntry {
-            schema_version: 6,
+            schema_version: 7,
             sequence,
             previous: self.records.last().map(|record| record.entry_digest),
             session: self.session.clone(),
@@ -308,7 +325,7 @@ fn terminal_events(
 
 fn unlinked_record(session: &SessionIdentity, event: JournalEvent) -> AuthenticatedJournalRecord {
     let entry = JournalEntry {
-        schema_version: 6,
+        schema_version: 7,
         sequence: 0,
         previous: None,
         session: session.clone(),

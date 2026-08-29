@@ -13,7 +13,12 @@ use crate::{
     ArtifactIdentity, AttemptRole, Candidate, CandidateEvaluation, CandidateLineage,
     CandidateTransitionReceipt, CandidateTransitionRequest, ConfidenceInterval, Digest,
     MissionReference, ParameterBounds, PromotionPolicy, QualificationPolicy, RunExecutionContext,
-    RuntimeIdentities, ScoreAggregate, SearchStage, SessionIdentity, TuneError,
+    RuntimeIdentities, ScoreAggregate, SearchGroupBinding, SearchStage, SessionIdentity, TuneError,
+};
+
+const CHALLENGER: AttemptRole = AttemptRole::TrainingChallenger {
+    attempt_index: 0,
+    suite_index: 0,
 };
 
 #[test]
@@ -28,6 +33,7 @@ fn replay_keeps_the_exact_authorized_target_and_reference() {
         0,
         "increase gain",
         fixture.target_digest,
+        &binding(&fixture.stage),
         &receipt,
         &fixture.stage,
         &fixture.session,
@@ -43,7 +49,7 @@ fn replay_keeps_the_exact_authorized_target_and_reference() {
     assert_eq!(authorized.reference, reference);
     validate_attempt(
         &state,
-        AttemptRole::TrainingChallenger { attempt_index: 0 },
+        CHALLENGER,
         fixture.target_digest,
         Some(&reference),
     )
@@ -61,6 +67,7 @@ fn replay_rejects_a_self_consistent_forged_policy_and_context() {
         0,
         "increase gain",
         fixture.target_digest,
+        &binding(&fixture.stage),
         &forged,
         &fixture.stage,
         &fixture.session,
@@ -78,7 +85,7 @@ fn replay_rejects_a_challenger_without_one_matching_authorization() {
 
     let error = validate_attempt(
         &state,
-        AttemptRole::TrainingChallenger { attempt_index: 0 },
+        CHALLENGER,
         fixture.target_digest,
         None,
     )
@@ -88,9 +95,9 @@ fn replay_rejects_a_challenger_without_one_matching_authorization() {
 }
 
 #[test]
-fn challenger_role_requires_a_passed_baseline_and_incumbent() {
+fn challenger_role_requires_a_passed_baseline_on_its_own_suite() {
     let fixture = fixture();
-    let role = AttemptRole::TrainingChallenger { attempt_index: 0 };
+    let role = CHALLENGER;
     let mut state = searching_state(fixture.source_digest);
     assert!(super::super::attempt::role_allowed(
         &state,
@@ -99,7 +106,8 @@ fn challenger_role_requires_a_passed_baseline_and_incumbent() {
         fixture.source_digest,
     ));
 
-    state.training_incumbent_evaluation = None;
+    // A baseline that answers another candidate cannot answer this one.
+    state.suite_baselines[0].candidate = fixture.target_digest;
     assert!(!super::super::attempt::role_allowed(
         &state,
         role,
@@ -107,10 +115,20 @@ fn challenger_role_requires_a_passed_baseline_and_incumbent() {
         fixture.source_digest,
     ));
 
-    state.training_incumbent_evaluation = Some(passed_evaluation());
-    state.training_baseline = Some(CandidateEvaluation::Quarantined {
+    // A baseline that did not complete states no comparable result.
+    state.suite_baselines[0].candidate = fixture.source_digest;
+    state.suite_baselines[0].evaluation = CandidateEvaluation::Quarantined {
         reason: "unsafe baseline".to_owned(),
-    });
+    };
+    assert!(!super::super::attempt::role_allowed(
+        &state,
+        role,
+        fixture.target_digest,
+        fixture.source_digest,
+    ));
+
+    // A suite the incumbent has never run cannot answer a challenger either.
+    state.suite_baselines.clear();
     assert!(!super::super::attempt::role_allowed(
         &state,
         role,
@@ -125,7 +143,7 @@ fn replay_rejects_a_coherently_forged_run_transition_reference() {
     let exact_receipt = receipt(&fixture, fixture.policy, fixture.planning);
     let exact_reference = exact_receipt.reference();
     let forged_reference = receipt(&fixture, digest(91), digest(92)).reference();
-    let role = AttemptRole::TrainingChallenger { attempt_index: 0 };
+    let role = CHALLENGER;
     let mut state = searching_state(fixture.source_digest);
     state.pending = Some(PendingAttempt {
         retry_index: 0,
@@ -216,10 +234,11 @@ fn fixture() -> Fixture {
         fixed_seed: 41,
         runtimes: runtimes(policy),
     };
-    let plan = AttemptRole::TrainingChallenger { attempt_index: 0 }
+    let plan = CHALLENGER
         .plan_digest(&stage, target_digest, session.fixed_seed)
         .expect("plan digest");
-    let planning = planning_context_digest(stage_digest, plan).expect("planning context");
+    let group = binding(&stage);
+    let planning = planning_context_digest(stage_digest, plan, &group).expect("planning context");
     Fixture {
         source,
         source_digest,
@@ -251,9 +270,25 @@ fn receipt(fixture: &Fixture, policy: Digest, planning: Digest) -> CandidateTran
 fn searching_state(source: Digest) -> crate::journal::replay::JournalState {
     let mut state = initial_state(source);
     let evaluation = passed_evaluation();
-    state.training_baseline = Some(evaluation.clone());
+    state.suite_baselines.push(crate::journal::replay::SuiteBaseline {
+        candidate: source,
+        suite_index: 0,
+        evaluation: evaluation.clone(),
+    });
     state.training_incumbent_evaluation = Some(evaluation);
     state
+}
+
+/// The binding the transition stage's one group and suite state.
+fn binding(stage: &SearchStage) -> SearchGroupBinding {
+    SearchGroupBinding {
+        group_id: "transition-group".to_owned(),
+        suite_id: "transition-suite".to_owned(),
+        suite_index: 0,
+        suite_digest: stage.training_suites[0]
+            .digest()
+            .expect("the suite digest"),
+    }
 }
 
 fn passed_evaluation() -> CandidateEvaluation {
@@ -298,6 +333,20 @@ fn stage() -> SearchStage {
         fixed_parameters: BTreeMap::new(),
         required_hard_gates: vec!["envelope".to_owned()],
         training_scenarios: vec![scenario.clone()],
+        training_suites: vec![crate::TrainingSuite {
+            schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
+            id: "transition-suite".to_owned(),
+            primary_scenarios: vec![scenario.clone()],
+            guard_scenarios: Vec::new(),
+            guard_regression_limits: BTreeMap::new(),
+            repetitions: 2,
+        }],
+        search_groups: vec![crate::SearchGroup {
+            id: "transition-group".to_owned(),
+            kind: crate::SearchGroupKind::Controller,
+            parameters: std::collections::BTreeSet::from(["gain".to_owned()]),
+            suite_id: "transition-suite".to_owned(),
+        }],
         promotion_scenarios: vec![scenario.clone()],
         final_qualification_scenarios: vec![scenario],
         repetitions: 1,

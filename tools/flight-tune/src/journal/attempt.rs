@@ -60,6 +60,32 @@ impl Journal {
         Ok((trial_id, candidate_digest))
     }
 
+    /// Calculates the training decision that this attempt must record.
+    ///
+    /// A challenger reads only the incumbent baseline for its own suite.
+    /// Journal replay derives the same decision again, so a decision that this
+    /// calculation does not reproduce cannot enter the chain.
+    pub(crate) fn training_selection(
+        &self,
+        role: AttemptRole,
+        evaluation: &CandidateEvaluation,
+    ) -> Result<Option<bool>, TuneError> {
+        match role {
+            AttemptRole::TrainingBaseline { .. } => Ok(Some(evaluation.aggregate().is_some())),
+            AttemptRole::TrainingChallenger { suite_index, .. } => {
+                Ok(Some(super::training_better(
+                    self.stage.training_suite(suite_index)?,
+                    self.state
+                        .suite_baseline(self.state.training_incumbent, suite_index),
+                    evaluation,
+                )))
+            }
+            AttemptRole::PromotionBaseline
+            | AttemptRole::PromotionFrozen
+            | AttemptRole::FinalQualification => Ok(None),
+        }
+    }
+
     pub(crate) fn complete_attempt(
         &mut self,
         trial_id: u64,

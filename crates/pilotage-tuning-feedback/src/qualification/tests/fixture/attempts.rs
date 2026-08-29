@@ -28,7 +28,7 @@ pub(super) fn training_attempts(
         session,
         session_digest,
         0,
-        AttemptRole::TrainingBaseline,
+        AttemptRole::TrainingBaseline { suite_index: 0 },
         session.initial_candidate_digest,
         Point {
             loss: 1.25,
@@ -44,7 +44,7 @@ pub(super) fn training_attempts(
         session,
         session_digest,
         1,
-        AttemptRole::TrainingChallenger { attempt_index: 0 },
+        AttemptRole::TrainingChallenger { attempt_index: 0, suite_index: 0 },
         frozen_candidate,
         Point {
             loss: 0.90,

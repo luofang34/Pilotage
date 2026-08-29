@@ -7,6 +7,7 @@ mod fixture;
 #[allow(dead_code)]
 mod producer_rig;
 mod retry_attacks;
+mod suite_attacks;
 
 use flight_tune::{CandidateEvaluation, FinalQualificationOutcome};
 
@@ -110,8 +111,10 @@ fn journal_producer_snapshot_qualifies_independently() {
 
 /// The pinned identity is re-recorded whenever the evidence schema changes.
 ///
-/// It moved when the run execution context gained a retry index and the
-/// campaign evidence authority gained its attempt projection: every run
+/// It moved when each search group gained its own frozen training suite: the
+/// attempt role names the suite it runs, the run plan covers the suite
+/// declaration, the transition records the derived group, and the authority
+/// carries the candidates a verifier derives that group from. Every run
 /// intent, every receipt, and the whole chain take new identities, which is
 /// the point of the schema change rather than a side effect of it.
 #[test]
@@ -122,7 +125,7 @@ fn canonical_source_digest_is_fixed() {
         .expect("verify evidence");
     assert_eq!(
         verified.source_digest().to_string(),
-        "45b235f3516250cafd2fc30c1874a449999165fe1b15ce2268728e8c74c5e59b"
+        "d0c083e328cf82e417aa47999e422a3b4f7fdef3fb4ae15cd142b6f92edcda41"
     );
 }
 

@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AttemptRole, AuthenticatedEvaluationProof, Digest, FinalQualificationOutcome, JournalEntry,
-    JournalEvent, MissionReference, PromotionClosure, PromotionDecision, RunExecutionContext,
-    ScenarioSet, SearchStage, TuneError,
+    JournalEvent, PromotionClosure, PromotionDecision, RunExecutionContext, SearchStage,
+    TuneError,
 };
 
 use super::{JOURNAL_SCHEMA_VERSION, Journal, storage};
@@ -17,7 +17,7 @@ pub use authority::{
 };
 
 /// The supported journal evidence snapshot schema.
-pub const JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION: u16 = 3;
+pub const JOURNAL_EVIDENCE_SNAPSHOT_SCHEMA_VERSION: u16 = 4;
 
 /// One authenticated current journal head.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,21 +148,12 @@ impl JournalEvidenceSnapshot {
     ) -> Result<(), TuneError> {
         let session = &self.head.entry.session;
         let set = proof.role.scenario_set();
-        let scenarios = scenarios(&self.stage, set);
-        let repetitions = self.stage.repetitions as usize;
-        let expected_count = scenarios
-            .len()
-            .checked_mul(repetitions)
-            .ok_or_else(|| invalid("an evidence run plan count overflowed"))?;
-        if proof.terminal_receipts.len() > expected_count {
+        let plan = crate::model::AttemptRunPlan::new(&self.stage, proof.role)?;
+        if proof.terminal_receipts.len() > plan.run_count() {
             return Err(invalid("an evidence proof exceeds its run plan"));
         }
         for (index, receipt) in proof.terminal_receipts.iter().enumerate() {
-            let scenario = scenarios
-                .get(index / repetitions)
-                .ok_or_else(|| invalid("an evidence receipt exceeds its run plan"))?;
-            let repetition = u32::try_from(index % repetitions)
-                .map_err(|_| invalid("an evidence repetition exceeds u32"))?;
+            let (scenario, repetition) = plan.run_at(index)?;
             let expected = RunExecutionContext::new(
                 session_digest,
                 proof.trial_id,
@@ -368,10 +359,3 @@ fn invalid(detail: impl Into<String>) -> TuneError {
     }
 }
 
-fn scenarios(stage: &SearchStage, set: ScenarioSet) -> &[MissionReference] {
-    match set {
-        ScenarioSet::Training => &stage.training_scenarios,
-        ScenarioSet::Promotion => &stage.promotion_scenarios,
-        ScenarioSet::FinalQualification => &stage.final_qualification_scenarios,
-    }
-}

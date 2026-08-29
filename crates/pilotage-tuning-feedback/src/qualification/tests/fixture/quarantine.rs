@@ -27,7 +27,7 @@ pub(in crate::qualification::tests) fn quarantined_proof(
         session.fixed_seed,
         session_digest,
         0,
-    );
+    ).expect("the expected run plan");
     let run = run(
         &expected[0],
         Point {

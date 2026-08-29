@@ -18,7 +18,7 @@ pub(super) fn freeze(
     if state.phase != CampaignPhase::Searching
         || state.pending.is_some()
         || state
-            .training_baseline
+            .training_incumbent_evaluation
             .as_ref()
             .and_then(CandidateEvaluation::aggregate)
             .is_none()

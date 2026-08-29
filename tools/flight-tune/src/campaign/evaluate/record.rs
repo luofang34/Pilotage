@@ -7,7 +7,6 @@ use crate::{
 };
 
 use super::cleanup::{cleanup_status, finish_cleanup};
-use super::contract::training_selection;
 
 pub(super) enum RunProgress {
     Continue,
@@ -172,7 +171,7 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
-    let selected = training_selection(journal, role, &evaluation);
+    let selected = journal.training_selection(role, &evaluation)?;
     journal.complete_attempt(trial_id, evaluation, selected)?;
     finish_cleanup(journal, trial_id, backend, gates, metric, cancel_evaluators)
 }

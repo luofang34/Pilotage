@@ -16,7 +16,7 @@ use crate::{FeedbackError, digest, error::invalid};
 const PROJECTION_SCHEMA_VERSION: u16 = 1;
 
 /// The domain the core binds one run execution context under.
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v4\0";
 
 /// The domain the core binds one quarantine reason under.
 const QUARANTINE_REASON_DOMAIN: &[u8] = b"pilotage.flight-tune.attempt-quarantine-reason.v1\0";

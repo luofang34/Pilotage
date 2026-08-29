@@ -9,17 +9,19 @@ use crate::{
 };
 
 use super::validate_failure;
+use crate::model::AttemptRunPlan;
 
 #[test]
 fn no_sample_failure_requires_the_exact_empty_stream_position() {
     let stage = stage();
+    let plan = training_plan(&stage);
     let scenario = &stage.training_scenarios[0];
     let valid = failure(scenario, 0, 0);
     validate_failure(
         &valid,
         0,
         ScenarioSet::Training,
-        &stage.training_scenarios,
+        &plan,
         &stage,
         91,
     )
@@ -31,7 +33,7 @@ fn no_sample_failure_requires_the_exact_empty_stream_position() {
                 &forged,
                 0,
                 ScenarioSet::Training,
-                &stage.training_scenarios,
+                &plan,
                 &stage,
                 91,
             )
@@ -46,12 +48,20 @@ fn no_sample_failure_requires_the_exact_empty_stream_position() {
             &failure(scenario, 0, 1),
             0,
             ScenarioSet::Training,
-            &declared_core_stage.training_scenarios,
+            &training_plan(&declared_core_stage),
             &declared_core_stage,
             91,
         )
         .is_err()
     );
+}
+
+fn training_plan(stage: &SearchStage) -> AttemptRunPlan {
+    AttemptRunPlan::new(
+        stage,
+        crate::AttemptRole::TrainingBaseline { suite_index: 0 },
+    )
+    .expect("a training run plan")
 }
 
 fn failure(scenario: &MissionReference, sample_sequence: u64, elapsed_ms: u64) -> HardGateFailure {
@@ -90,6 +100,20 @@ fn stage() -> SearchStage {
         fixed_parameters: BTreeMap::new(),
         required_hard_gates: vec!["envelope".to_owned()],
         training_scenarios: vec![scenario.clone()],
+        training_suites: vec![crate::TrainingSuite {
+            schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
+            id: "plan-suite".to_owned(),
+            primary_scenarios: vec![scenario.clone()],
+            guard_scenarios: Vec::new(),
+            guard_regression_limits: BTreeMap::new(),
+            repetitions: 2,
+        }],
+        search_groups: vec![crate::SearchGroup {
+            id: "plan-group".to_owned(),
+            kind: crate::SearchGroupKind::Controller,
+            parameters: std::collections::BTreeSet::from(["gain".to_owned()]),
+            suite_id: "plan-suite".to_owned(),
+        }],
         promotion_scenarios: vec![scenario.clone()],
         final_qualification_scenarios: vec![scenario],
         repetitions: 1,

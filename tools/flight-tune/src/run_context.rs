@@ -6,9 +6,9 @@ use crate::{
 };
 
 /// The supported run execution context schema.
-pub const RUN_EXECUTION_CONTEXT_SCHEMA_VERSION: u16 = 3;
+pub const RUN_EXECUTION_CONTEXT_SCHEMA_VERSION: u16 = 4;
 
-const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
+const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v4\0";
 
 /// The immutable identity of one simulator run.
 ///
@@ -16,6 +16,9 @@ const RUN_CONTEXT_DOMAIN: &[u8] = b"flight-tune:run-execution-context:v3\0";
 /// repetition, so two executions of one experimental condition differ in
 /// nothing except the retry index. Without that field a replacement execution
 /// would carry the identity of the execution it replaced.
+///
+/// A training role carries its frozen suite position, so the role binds the
+/// suite identity into every run of that attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunExecutionContext {
@@ -84,7 +87,7 @@ impl RunExecutionContext {
             AttemptRole::TrainingChallenger { .. } => self
                 .transition_authorization
                 .is_some_and(|reference| reference.is_valid_for_target(self.candidate_digest)),
-            AttemptRole::TrainingBaseline
+            AttemptRole::TrainingBaseline { .. }
             | AttemptRole::PromotionBaseline
             | AttemptRole::PromotionFrozen
             | AttemptRole::FinalQualification => self.transition_authorization.is_none(),

@@ -9,9 +9,10 @@ use super::campaign::retry::{self, VerifiedAttempts};
 use super::plan;
 
 mod ancestry;
+mod candidates;
 mod journal_replay;
 
-const AUTHORITY_SCHEMA_VERSION: u16 = 3;
+const AUTHORITY_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Clone, Copy)]
 pub(super) struct AttemptAuthority {
@@ -46,10 +47,15 @@ pub(super) fn verify(
         &snapshot.authority.attempts,
         snapshot.stage.execution_retry.execution_retry_limit,
     )?;
+    let verified_candidates = candidates::verify(
+        &snapshot.authority.journal_chain,
+        &snapshot.authority.candidates,
+    )?;
     let replayed = journal_replay::verify(
         &snapshot.authority.journal_chain,
         &snapshot.stage,
         &snapshot.head.entry.session,
+        &verified_candidates,
     )?;
     verify_order(
         records.frozen,

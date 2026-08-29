@@ -7,7 +7,6 @@ use crate::{
 };
 
 use super::cleanup::finish_cleanup;
-use super::contract::scenarios;
 use super::record::{RunProgress, completed_scenario_run, record_committed_terminal};
 use super::terminal::recover_current_run_blocking;
 
@@ -128,8 +127,7 @@ where
     let snapshot = journal
         .pending_attempt_snapshot()
         .ok_or_else(|| invalid_pending("the pending attempt snapshot is missing"))?;
-    let expected_runs =
-        scenarios(stage, snapshot.role.scenario_set()).len() * stage.repetitions as usize;
+    let expected_runs = crate::model::AttemptRunPlan::new(stage, snapshot.role)?.run_count();
     let cursor = resume_committed_prefix(
         journal,
         snapshot.trial_id,

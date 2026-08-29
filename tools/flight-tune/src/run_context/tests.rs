@@ -19,7 +19,7 @@ fn transition_identity_changes_the_run_intent() {
 #[test]
 fn a_non_challenger_cannot_carry_a_transition() {
     let mut value = context(transition(2));
-    value.role = AttemptRole::TrainingBaseline;
+    value.role = AttemptRole::TrainingBaseline { suite_index: 0 };
 
     assert!(value.validate().is_err());
 }
@@ -40,7 +40,7 @@ fn context(reference: CandidateTransitionReference) -> RunExecutionContext {
     RunExecutionContext::new(
         digest(1),
         4,
-        AttemptRole::TrainingChallenger { attempt_index: 0 },
+        AttemptRole::TrainingChallenger { attempt_index: 0, suite_index: 0 },
         reference.target_candidate_digest(),
         Some(reference),
         ScenarioSet::Training,

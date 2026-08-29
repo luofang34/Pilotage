@@ -102,6 +102,20 @@ fn stage() -> SearchStage {
         fixed_parameters: BTreeMap::new(),
         required_hard_gates: vec!["crash".to_owned(), "finite".to_owned()],
         training_scenarios: vec![scenario("training-calm", 11)],
+        training_suites: vec![flight_tune::TrainingSuite {
+            schema_version: flight_tune::TRAINING_SUITE_SCHEMA_VERSION,
+            id: "golden-suite".to_owned(),
+            primary_scenarios: vec![scenario("training-calm", 11)],
+            guard_scenarios: Vec::new(),
+            guard_regression_limits: BTreeMap::new(),
+            repetitions: 3,
+        }],
+        search_groups: vec![flight_tune::SearchGroup {
+            id: "golden-group".to_owned(),
+            kind: flight_tune::SearchGroupKind::Controller,
+            parameters: std::collections::BTreeSet::from(["rate".to_owned()]),
+            suite_id: "golden-suite".to_owned(),
+        }],
         promotion_scenarios: vec![scenario("promotion-calm", 12)],
         final_qualification_scenarios: vec![
             scenario("final-calm", 13),
@@ -192,11 +206,11 @@ fn proof_with_objectives(
         session.fixed_seed,
         session_digest,
         0,
-    );
+    ).expect("the expected run plan");
     let runs = expected
         .iter()
         .enumerate()
-        .map(|(index, expected)| run(expected, point, missing_objective_at == Some(index)))
+        .map(|(index, item)| run(item, point, missing_objective_at == Some(index)))
         .collect::<Vec<_>>();
     let receipts = expected
         .iter()
@@ -281,7 +295,7 @@ pub(super) fn proof_with_hard_gates(
         session.fixed_seed,
         session_digest,
         0,
-    );
+    ).expect("the expected run plan");
     let CandidateEvaluation::Passed { runs, .. } = &mut proof.evaluation else {
         panic!("fixture evaluation must pass");
     };
@@ -408,7 +422,7 @@ fn fixed_digest(value: u8) -> Digest {
     Digest::from_bytes([value; 32])
 }
 
-fn tuning_candidate(rate: f64) -> Candidate {
+pub(super) fn tuning_candidate(rate: f64) -> Candidate {
     Candidate::new(
         CandidateLineage {
             schema: "pilotage.test.candidate.v1".to_owned(),

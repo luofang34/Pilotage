@@ -50,7 +50,7 @@ impl ReplayFixture {
         let candidate = fixed_digest(3);
         let session = test_session(&stage, candidate);
         let mut state = initial_state(candidate);
-        let role = AttemptRole::TrainingBaseline;
+        let role = AttemptRole::TrainingBaseline { suite_index: 0 };
         let plan_digest = role
             .plan_digest(&stage, candidate, session.fixed_seed)
             .expect("create attempt plan");
@@ -102,7 +102,7 @@ impl ReplayFixture {
             crate::journal::storage::document_digest("session identity", &self.session)
                 .expect("digest session"),
             0,
-            AttemptRole::TrainingBaseline,
+            AttemptRole::TrainingBaseline { suite_index: 0 },
             self.session.initial_candidate_digest,
             None,
             ScenarioSet::Training,
@@ -422,6 +422,20 @@ fn test_stage() -> SearchStage {
         fixed_parameters: BTreeMap::new(),
         required_hard_gates: vec!["crash".to_owned()],
         training_scenarios: vec![scenario("training", 1)],
+        training_suites: vec![crate::TrainingSuite {
+            schema_version: crate::TRAINING_SUITE_SCHEMA_VERSION,
+            id: "terminal-suite".to_owned(),
+            primary_scenarios: vec![scenario("training", 1)],
+            guard_scenarios: Vec::new(),
+            guard_regression_limits: BTreeMap::new(),
+            repetitions: 2,
+        }],
+        search_groups: vec![crate::SearchGroup {
+            id: "terminal-group".to_owned(),
+            kind: crate::SearchGroupKind::Controller,
+            parameters: std::collections::BTreeSet::from(["gain".to_owned()]),
+            suite_id: "terminal-suite".to_owned(),
+        }],
         promotion_scenarios: vec![scenario("promotion", 2)],
         final_qualification_scenarios: vec![scenario("qualification", 3)],
         repetitions: 2,

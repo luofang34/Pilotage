@@ -7,8 +7,8 @@ use super::{authority, authority::VerifiedAuthority};
 
 pub(super) mod retry;
 
-const JOURNAL_SCHEMA_VERSION: u32 = 6;
-const SNAPSHOT_SCHEMA_VERSION: u16 = 3;
+const JOURNAL_SCHEMA_VERSION: u32 = 7;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 4;
 
 pub(super) struct CampaignIdentity {
     pub(super) session_digest: Digest,

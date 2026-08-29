@@ -8,6 +8,7 @@ use crate::{
 use super::{AuthenticatedJournalHead, JOURNAL_SCHEMA_VERSION, Journal, invalid, storage};
 
 mod ancestry;
+mod candidates;
 mod projection;
 
 pub use projection::{
@@ -16,7 +17,7 @@ pub use projection::{
 };
 
 /// The supported campaign evidence authority schema.
-pub const CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION: u16 = 3;
+pub const CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION: u16 = 4;
 
 /// One historical journal record with its canonical identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +54,12 @@ pub struct CampaignEvidenceAuthority {
     pub journal_chain: Vec<AuthenticatedJournalRecord>,
     /// The complete ordered attempt, quarantine, and retry relation.
     pub attempts: AttemptProjection,
+    /// Every candidate the chain names, in first-appearance order.
+    ///
+    /// An independent verifier derives the search group of each challenger
+    /// from the parameters that differ between two candidates. The chain
+    /// carries digests, so the candidates travel with it.
+    pub candidates: Vec<crate::Candidate>,
     /// The initial baseline candidate identity.
     pub baseline_candidate: Digest,
     /// The candidate fixed by the freeze event.
@@ -88,6 +95,7 @@ impl CampaignEvidenceAuthority {
             stage.execution_retry.execution_retry_limit,
         )?;
         self.validate_records(head)?;
+        candidates::validate(&self.journal_chain, &self.candidates, stage)?;
         self.validate_candidates(head, closure)?;
         self.validate_attempts(stage, head, baseline, frozen, final_proof)
     }
@@ -221,10 +229,12 @@ pub(super) fn from_journal(journal: &Journal) -> Result<CampaignEvidenceAuthorit
         &journal_chain,
         journal.stage.execution_retry.execution_retry_limit,
     )?;
+    let candidates = candidates::from_journal(journal)?;
     Ok(CampaignEvidenceAuthority {
         schema_version: CAMPAIGN_EVIDENCE_AUTHORITY_SCHEMA_VERSION,
         journal_chain,
         attempts,
+        candidates,
         baseline_candidate: journal
             .entries
             .first()

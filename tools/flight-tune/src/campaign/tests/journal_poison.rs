@@ -90,7 +90,7 @@ fn an_ambiguous_cleanup_poison_skips_candidate_reconciliation() {
         JournalEvent::CleanupRecorded { .. }
     ));
     assert!(reopened.state().pending.is_none());
-    assert!(reopened.state().training_baseline.is_some());
+    assert!(!reopened.state().suite_baselines.is_empty());
 }
 
 #[test]

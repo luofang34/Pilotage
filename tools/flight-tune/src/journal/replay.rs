@@ -16,6 +16,7 @@ pub(crate) mod transition;
 
 use super::retry::AuthorizedRetry;
 use super::transition::AuthorizedTrainingTransition;
+pub(crate) use attempt::training_better;
 pub(super) use run::{PreparedRun, PreparedRunTerminalState};
 
 #[derive(Debug, Clone)]
@@ -65,12 +66,24 @@ pub(crate) struct PendingOutcome {
     pub(crate) proof: Option<AuthenticatedEvaluationProof>,
 }
 
+/// One comparable incumbent evaluation on one exact training suite.
+///
+/// The record binds the candidate and the suite together. A challenger reads
+/// the record for its own incumbent and its own suite, so a result from
+/// another candidate or another suite can never answer it.
+#[derive(Debug, Clone)]
+pub(crate) struct SuiteBaseline {
+    pub(crate) candidate: Digest,
+    pub(crate) suite_index: u16,
+    pub(crate) evaluation: CandidateEvaluation,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct JournalState {
     pub(crate) phase: CampaignPhase,
     pub(crate) training_incumbent: Digest,
     pub(crate) training_incumbent_evaluation: Option<CandidateEvaluation>,
-    pub(crate) training_baseline: Option<CandidateEvaluation>,
+    pub(crate) suite_baselines: Vec<SuiteBaseline>,
     pub(crate) training_attempt_count: u64,
     pub(crate) training_history: Vec<TrainingObservation>,
     pub(crate) next_trial_id: u64,
@@ -90,6 +103,26 @@ pub(crate) struct JournalState {
 }
 
 impl JournalState {
+    /// Returns the exact incumbent baseline for one candidate and suite.
+    pub(crate) fn suite_baseline(
+        &self,
+        candidate: Digest,
+        suite_index: u16,
+    ) -> Option<&CandidateEvaluation> {
+        self.suite_baselines
+            .iter()
+            .find(|baseline| baseline.candidate == candidate && baseline.suite_index == suite_index)
+            .map(|baseline| &baseline.evaluation)
+    }
+
+    /// Reports whether one candidate has a comparable baseline on one suite.
+    pub(crate) fn has_passed_suite_baseline(&self, candidate: Digest, suite_index: u16) -> bool {
+        matches!(
+            self.suite_baseline(candidate, suite_index),
+            Some(CandidateEvaluation::Passed { .. })
+        )
+    }
+
     pub(crate) fn settlement_candidate(&self, initial: Digest) -> Digest {
         if self
             .promotion_decision
@@ -135,7 +168,7 @@ impl JournalState {
             .ok_or_else(|| invalid("the attempt is not pending or already has an outcome"))?;
         if matches!(
             pending.role,
-            AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. }
+            AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. }
         ) {
             return Ok(None);
         }
@@ -188,7 +221,7 @@ fn initial_state(candidate: Digest) -> JournalState {
         phase: CampaignPhase::Searching,
         training_incumbent: candidate,
         training_incumbent_evaluation: None,
-        training_baseline: None,
+        suite_baselines: Vec::new(),
         training_attempt_count: 0,
         training_history: Vec::new(),
         next_trial_id: 0,
@@ -252,6 +285,7 @@ fn apply_event(
             plan_digest,
             transition,
         } => attempt::prepare(
+
             state,
             *trial_id,
             *role,

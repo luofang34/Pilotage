@@ -2,9 +2,9 @@ use crate::journal::replay::{JournalState, invalid};
 use crate::journal::{JournalEvent, SessionIdentity};
 use crate::model::derive_seed;
 use crate::{
-    Digest, MissionReference, RunBindingReceipt, RunExecutionContext, RunTerminalClass,
-    RunTerminalCompletion, RunTerminalDisposition, RunTerminalIntent, RunTerminalPlan,
-    RunTerminalReceipt, RunTerminalReport, ScenarioSet, SearchStage, TuneError,
+    Digest, RunBindingReceipt, RunExecutionContext, RunTerminalClass, RunTerminalCompletion,
+    RunTerminalDisposition, RunTerminalIntent, RunTerminalPlan, RunTerminalReceipt,
+    RunTerminalReport, SearchStage, TuneError,
 };
 
 #[derive(Debug, Clone)]
@@ -127,7 +127,9 @@ pub(super) fn prepare(
         ));
     }
     let session_digest = super::super::storage::document_digest("session identity", session)?;
-    let expected_scenario = expected_scenario(stage, pending.role.scenario_set(), run_index)?;
+    let plan = crate::model::AttemptRunPlan::new(stage, pending.role)?;
+    let index = usize::try_from(run_index).map_err(|_| invalid("prepared run index overflow"))?;
+    let expected_scenario = plan.run_at(index)?;
     let expected_seed = derive_seed(
         session.fixed_seed,
         pending.role.scenario_set(),
@@ -161,23 +163,3 @@ pub(super) fn prepare(
     Ok(())
 }
 
-fn expected_scenario(
-    stage: &SearchStage,
-    set: ScenarioSet,
-    run_index: u64,
-) -> Result<(&MissionReference, u32), TuneError> {
-    let repetitions = u64::from(stage.repetitions);
-    let scenario_index = usize::try_from(run_index / repetitions)
-        .map_err(|_| invalid("prepared run scenario index overflow"))?;
-    let repetition = u32::try_from(run_index % repetitions)
-        .map_err(|_| invalid("prepared run repetition overflow"))?;
-    let scenarios = match set {
-        ScenarioSet::Training => &stage.training_scenarios,
-        ScenarioSet::Promotion => &stage.promotion_scenarios,
-        ScenarioSet::FinalQualification => &stage.final_qualification_scenarios,
-    };
-    scenarios
-        .get(scenario_index)
-        .map(|scenario| (scenario, repetition))
-        .ok_or_else(|| invalid("prepared run exceeds the attempt plan"))
-}

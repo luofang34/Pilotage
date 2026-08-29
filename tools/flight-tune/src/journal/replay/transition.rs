@@ -2,7 +2,8 @@ use crate::journal::replay::{JournalState, invalid};
 use crate::journal::transition::AuthorizedTrainingTransition;
 use crate::journal::{AttemptRole, CampaignPhase, JournalEvent, SessionIdentity};
 use crate::{
-    CandidateTransitionReceipt, CandidateTransitionReference, Digest, SearchStage, TuneError,
+    CandidateTransitionReceipt, CandidateTransitionReference, Digest, SearchGroupBinding,
+    SearchStage, TuneError,
 };
 
 #[cfg(test)]
@@ -19,6 +20,7 @@ pub(super) fn authorize_event(
         attempt_index,
         reason,
         candidate,
+        group,
         receipt,
     } = event
     else {
@@ -29,23 +31,52 @@ pub(super) fn authorize_event(
         *attempt_index,
         reason,
         *candidate,
+        group,
         receipt,
         stage,
         session,
     )
 }
 
+/// Checks that one recorded binding states a group the frozen stage declares.
+///
+/// The check is complete for the stage: the group exists, it names the stated
+/// suite, and the suite content identity is the recomputed one. The parameters
+/// that the challenger changed are checked against the stored candidates when
+/// the journal opens, because the chain carries digests and not parameters.
+fn validate_group_binding(
+    stage: &SearchStage,
+    group: &SearchGroupBinding,
+) -> Result<(), TuneError> {
+    let declared = stage
+        .search_groups
+        .iter()
+        .find(|candidate| candidate.id == group.group_id)
+        .ok_or_else(|| invalid("a transition names a group the stage does not declare"))?;
+    let suite = stage.training_suite(group.suite_index)?;
+    if declared.suite_id != group.suite_id
+        || suite.id != group.suite_id
+        || suite.digest()? != group.suite_digest
+    {
+        return Err(invalid("a transition changed its derived training suite"));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn authorize(
     state: &mut JournalState,
     attempt_index: u64,
     reason: &str,
     candidate: Digest,
+    group: &SearchGroupBinding,
     receipt: &CandidateTransitionReceipt,
     stage: &SearchStage,
     session: &SessionIdentity,
 ) -> Result<(), TuneError> {
+    validate_group_binding(stage, group)?;
     if state.phase != CampaignPhase::Searching
-        || !super::attempt::has_passed_training_baseline_and_incumbent(state)
+        || !state.has_passed_suite_baseline(state.training_incumbent, group.suite_index)
         || state.pending.is_some()
         || state.authorized_transition.is_some()
         || attempt_index != state.training_attempt_count
@@ -63,10 +94,13 @@ pub(super) fn authorize(
         ));
     }
     let session_digest = super::super::storage::document_digest("session identity", session)?;
-    let role = AttemptRole::TrainingChallenger { attempt_index };
+    let role = AttemptRole::TrainingChallenger {
+        attempt_index,
+        suite_index: group.suite_index,
+    };
     let plan_digest = role.plan_digest(stage, candidate, session.fixed_seed)?;
     let expected_planning_context =
-        crate::adapter::planning_context_digest(session.stage_digest, plan_digest)?;
+        crate::adapter::planning_context_digest(session.stage_digest, plan_digest, group)?;
     let reference = receipt.reference();
     reference
         .validate_for_runtime(
@@ -95,6 +129,7 @@ pub(super) fn authorize(
     state.authorized_transition = Some(AuthorizedTrainingTransition {
         attempt_index,
         candidate,
+        group: group.clone(),
         reference,
     });
     Ok(())
@@ -107,13 +142,17 @@ pub(super) fn validate_attempt(
     reference: Option<&CandidateTransitionReference>,
 ) -> Result<(), TuneError> {
     match role {
-        AttemptRole::TrainingChallenger { attempt_index } => {
+        AttemptRole::TrainingChallenger {
+            attempt_index,
+            suite_index,
+        } => {
             let authorized = state
                 .authorized_transition
                 .as_ref()
                 .ok_or_else(|| invalid("a training challenger has no transition authorization"))?;
             if authorized.attempt_index != attempt_index
                 || authorized.candidate != candidate
+                || authorized.group.suite_index != suite_index
                 || Some(&authorized.reference) != reference
             {
                 return Err(invalid(
@@ -121,7 +160,7 @@ pub(super) fn validate_attempt(
                 ));
             }
         }
-        AttemptRole::TrainingBaseline
+        AttemptRole::TrainingBaseline { .. }
         | AttemptRole::PromotionBaseline
         | AttemptRole::PromotionFrozen
         | AttemptRole::FinalQualification => {

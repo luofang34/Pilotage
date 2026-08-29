@@ -21,7 +21,12 @@ const FAKE_RECEIPT_TIMEOUT_NS: u64 = 100_000_000;
 const CHANGED_RETRY_LIMIT: u16 = 1;
 
 /// The trial names that the fake backend stores as mission documents.
-pub const FAKE_MISSION_IDS: [&str; 3] = ["training-calm", "promotion-gust", "final-crosswind"];
+pub const FAKE_MISSION_IDS: [&str; 4] = [
+    "training-calm",
+    "promotion-gust",
+    "final-crosswind",
+    "training-response",
+];
 
 /// Resolves the stored fake mission that one reference names.
 ///
@@ -133,9 +138,10 @@ pub use backend::FakeBackend;
 pub use cleanup_fault::FakeCleanupFault;
 #[allow(unused_imports)]
 pub use scoring::{
-    EnvelopeGates, ObservedViews, QuadraticMetric, SequenceStrategy, assert_receipt_error,
-    candidate, stage, stage_with_changed_training_mission, stage_with_execution_retry_limit,
-    stage_with_stimulus_family,
+    EnvelopeGates, ObservedViews, ParameterSequenceStrategy, QuadraticMetric, SequenceStrategy,
+    assert_receipt_error, candidate, stage, stage_with_changed_suite,
+    stage_with_changed_training_mission, stage_with_execution_retry_limit,
+    stage_with_stimulus_family, two_group_candidate, two_group_stage,
 };
 #[allow(unused_imports)]
 pub use terminal_head_poison::TerminalExternalAction;

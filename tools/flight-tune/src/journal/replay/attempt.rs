@@ -6,9 +6,14 @@ use crate::{
 
 use super::super::retry::{AuthorizedRetry, quarantine_reason_digest};
 use super::{
-    JournalState, PendingAttempt, PendingOutcome, PendingRetryDecision, invalid, plan, terminal,
-    transition,
+    JournalState, PendingAttempt, PendingOutcome, PendingRetryDecision, SuiteBaseline, invalid,
+    plan, terminal, transition,
 };
+
+#[path = "attempt/selection.rs"]
+mod selection;
+
+pub(crate) use selection::training_better;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare(
@@ -163,14 +168,17 @@ pub(super) fn role_allowed(
     initial: Digest,
 ) -> bool {
     match role {
-        AttemptRole::TrainingBaseline => {
+        AttemptRole::TrainingBaseline { suite_index } => {
             state.phase == CampaignPhase::Searching
-                && state.training_baseline.is_none()
-                && candidate == initial
+                && candidate == state.training_incumbent
+                && state.suite_baseline(candidate, suite_index).is_none()
         }
-        AttemptRole::TrainingChallenger { attempt_index } => {
+        AttemptRole::TrainingChallenger {
+            attempt_index,
+            suite_index,
+        } => {
             state.phase == CampaignPhase::Searching
-                && has_passed_training_baseline_and_incumbent(state)
+                && state.has_passed_suite_baseline(state.training_incumbent, suite_index)
                 && attempt_index == state.training_attempt_count
         }
         AttemptRole::PromotionBaseline => {
@@ -192,16 +200,6 @@ pub(super) fn role_allowed(
                     .is_ok_and(|authorized| authorized == candidate)
         }
     }
-}
-
-pub(super) fn has_passed_training_baseline_and_incumbent(state: &JournalState) -> bool {
-    matches!(
-        &state.training_baseline,
-        Some(CandidateEvaluation::Passed { .. })
-    ) && matches!(
-        &state.training_incumbent_evaluation,
-        Some(CandidateEvaluation::Passed { .. })
-    )
 }
 
 pub(super) fn complete(
@@ -226,7 +224,7 @@ pub(super) fn complete(
         .ok_or_else(|| invalid("the attempt lost its run preparation"))?;
     terminal::validate_completed_attempt(pending, evaluation)?;
     validate_proof(pending, evaluation, proof)?;
-    validate_training_selection(state, role, evaluation, selected)?;
+    validate_training_selection(state, role, evaluation, selected, stage)?;
     let pending = pending_without_outcome(state, trial_id)?;
     pending.outcome = Some(PendingOutcome {
         evaluation: evaluation.clone(),
@@ -241,11 +239,13 @@ fn validate_training_selection(
     role: AttemptRole,
     evaluation: &CandidateEvaluation,
     selected: Option<bool>,
+    stage: &SearchStage,
 ) -> Result<(), TuneError> {
     let expected = match role {
-        AttemptRole::TrainingBaseline => Some(evaluation.aggregate().is_some()),
-        AttemptRole::TrainingChallenger { .. } => Some(training_better(
-            state.training_incumbent_evaluation.as_ref(),
+        AttemptRole::TrainingBaseline { .. } => Some(evaluation.aggregate().is_some()),
+        AttemptRole::TrainingChallenger { suite_index, .. } => Some(selection::training_better(
+            stage.training_suite(suite_index)?,
+            state.suite_baseline(state.training_incumbent, suite_index),
             evaluation,
         )),
         AttemptRole::PromotionBaseline
@@ -256,18 +256,6 @@ fn validate_training_selection(
         return Err(invalid("a training incumbent decision is not reproducible"));
     }
     Ok(())
-}
-
-fn training_better(
-    incumbent: Option<&CandidateEvaluation>,
-    challenger: &CandidateEvaluation,
-) -> bool {
-    let Some(challenger_score) = challenger.aggregate() else {
-        return false;
-    };
-    incumbent
-        .and_then(CandidateEvaluation::aggregate)
-        .is_none_or(|incumbent_score| challenger_score.mean_loss < incumbent_score.mean_loss)
 }
 
 pub(super) fn quarantine(
@@ -288,7 +276,9 @@ pub(super) fn quarantine(
     validate_proof(pending, &evaluation, proof)?;
     let pending = pending_without_outcome(state, trial_id)?;
     let selected = match pending.role {
-        AttemptRole::TrainingBaseline | AttemptRole::TrainingChallenger { .. } => Some(false),
+        AttemptRole::TrainingBaseline { .. } | AttemptRole::TrainingChallenger { .. } => {
+            Some(false)
+        }
         _ => None,
     };
     pending.outcome = Some(PendingOutcome {
@@ -348,10 +338,13 @@ fn finalize(state: &mut JournalState, pending: PendingAttempt) -> Result<(), Tun
         .outcome
         .ok_or_else(|| invalid("a clean attempt has no outcome"))?;
     match pending.role {
-        AttemptRole::TrainingBaseline => finalize_baseline(state, outcome),
-        AttemptRole::TrainingChallenger { attempt_index } => {
-            finalize_training(state, pending.candidate, attempt_index, outcome)
+        AttemptRole::TrainingBaseline { suite_index } => {
+            finalize_baseline(state, pending.candidate, suite_index, outcome)
         }
+        AttemptRole::TrainingChallenger {
+            attempt_index,
+            suite_index,
+        } => finalize_training(state, pending.candidate, attempt_index, suite_index, outcome),
         AttemptRole::PromotionBaseline => {
             state.promotion_baseline = Some(outcome.evaluation);
             state.promotion_baseline_proof = outcome.proof;
@@ -370,11 +363,29 @@ fn finalize(state: &mut JournalState, pending: PendingAttempt) -> Result<(), Tun
     }
 }
 
-fn finalize_baseline(state: &mut JournalState, outcome: PendingOutcome) -> Result<(), TuneError> {
+/// Records one comparable incumbent baseline for one exact suite.
+///
+/// The record replaces any earlier record for the same candidate and suite, so
+/// the journal keeps one current baseline for each exact identity. A passing
+/// baseline also states that the current incumbent is safe, which is what the
+/// freeze decision reads.
+fn finalize_baseline(
+    state: &mut JournalState,
+    candidate: Digest,
+    suite_index: u16,
+    outcome: PendingOutcome,
+) -> Result<(), TuneError> {
     if outcome.selected == Some(true) {
         state.training_incumbent_evaluation = Some(outcome.evaluation.clone());
     }
-    state.training_baseline = Some(outcome.evaluation);
+    state
+        .suite_baselines
+        .retain(|baseline| baseline.candidate != candidate || baseline.suite_index != suite_index);
+    state.suite_baselines.push(SuiteBaseline {
+        candidate,
+        suite_index,
+        evaluation: outcome.evaluation,
+    });
     Ok(())
 }
 
@@ -382,6 +393,7 @@ fn finalize_training(
     state: &mut JournalState,
     candidate: Digest,
     attempt_index: u64,
+    suite_index: u16,
     outcome: PendingOutcome,
 ) -> Result<(), TuneError> {
     if attempt_index != state.training_attempt_count {
@@ -390,6 +402,7 @@ fn finalize_training(
     let selected = outcome.selected == Some(true);
     let observation = TrainingObservation {
         attempt_index,
+        suite_index,
         candidate_digest: candidate,
         selected_as_incumbent: selected,
         hard_gate_failed: matches!(

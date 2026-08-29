@@ -178,7 +178,10 @@ fn challenger_intent() -> RunTerminalIntent {
     let context = RunExecutionContext::new(
         fixed_digest(1),
         7,
-        AttemptRole::TrainingChallenger { attempt_index: 0 },
+        AttemptRole::TrainingChallenger {
+            attempt_index: 0,
+            suite_index: 0,
+        },
         fixed_digest(3),
         Some(transition),
         ScenarioSet::Training,
