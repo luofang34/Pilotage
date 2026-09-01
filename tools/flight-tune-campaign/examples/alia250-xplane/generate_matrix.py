@@ -207,7 +207,25 @@ def controller_initialization(values: dict) -> dict:
     }
 
 
+def plant(values: dict) -> dict:
+    """The simulated aircraft one cell flies.
+
+    This matrix varies the disturbance and the controller, never the airframe,
+    so every cell declares the baseline mass and center of gravity and accepts
+    the hover ratio the simulator reports. The block is still written because
+    the executor requires it, and an artifact that omitted it would not load.
+    """
+    return {
+        "payload_mass_delta_kg": values.get("payload_mass_delta_kg", 0.0),
+        "longitudinal_cg_offset_m": values.get("longitudinal_cg_offset_m", 0.0),
+        "lateral_cg_offset_m": values.get("lateral_cg_offset_m", 0.0),
+        "hover_thrust_expectation": {"kind": "measured_weight_ratio"},
+    }
+
+
 def condition_set(partition: str, name: str, stimulus: str, values: dict, seed: int) -> dict:
+    # The field order here is the canonical encoding order, so it must match
+    # the declaration order of the condition contract exactly.
     return {
         "schema_version": CONDITION_SCHEMA_VERSION,
         # One artifact carries one identity. Two cells that applied the same
@@ -222,6 +240,7 @@ def condition_set(partition: str, name: str, stimulus: str, values: dict, seed: 
         "sensor": sensor(values),
         "actuator": actuator(values),
         "controller_initialization": controller_initialization(values),
+        "plant": plant(values),
     }
 
 

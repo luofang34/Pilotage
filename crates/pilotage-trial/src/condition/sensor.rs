@@ -2,6 +2,10 @@
 //!
 //! A sensor request acts on the flight-controller sensor input. It must not
 //! change the simulator truth stream that supplies score evidence.
+//!
+//! A request declares its amplitude in the unit of its own field name, and
+//! the bound below holds that same declared unit. The conversion to the
+//! flight-controller lane unit belongs to the derivation, not to validation.
 
 use serde::{Deserialize, Serialize};
 
@@ -165,25 +169,25 @@ impl SensorNoiseLane {
     #[must_use]
     pub const fn reference_lane(self) -> SensorReferenceLane {
         match self {
-            Self::Accelerometer { axis, .. } => SensorReferenceLane::Accelerometer(axis),
-            Self::Gyroscope { axis, .. } => SensorReferenceLane::Gyroscope(axis),
-            Self::Magnetometer { axis, .. } => SensorReferenceLane::Magnetometer(axis),
+            Self::Accelerometer { axis, .. } => match axis {
+                SensorAxis::X => SensorReferenceLane::AccelerometerX,
+                SensorAxis::Y => SensorReferenceLane::AccelerometerY,
+                SensorAxis::Z => SensorReferenceLane::AccelerometerZ,
+            },
+            Self::Gyroscope { axis, .. } => match axis {
+                SensorAxis::X => SensorReferenceLane::GyroscopeX,
+                SensorAxis::Y => SensorReferenceLane::GyroscopeY,
+                SensorAxis::Z => SensorReferenceLane::GyroscopeZ,
+            },
+            Self::Magnetometer { axis, .. } => match axis {
+                SensorAxis::X => SensorReferenceLane::MagnetometerX,
+                SensorAxis::Y => SensorReferenceLane::MagnetometerY,
+                SensorAxis::Z => SensorReferenceLane::MagnetometerZ,
+            },
             Self::AbsolutePressure { .. } => SensorReferenceLane::AbsolutePressure,
             Self::DifferentialPressure { .. } => SensorReferenceLane::DifferentialPressure,
             Self::PressureAltitude { .. } => SensorReferenceLane::PressureAltitude,
         }
-    }
-
-    /// Returns the requested physical peak amplitude in the lane unit.
-    #[must_use]
-    pub const fn peak_amplitude(self) -> f64 {
-        self.bounds().1
-    }
-
-    /// Returns the number of samples between deterministic updates.
-    #[must_use]
-    pub const fn update_interval_samples(self) -> u32 {
-        self.bounds().3
     }
 
     fn validate(self, index: usize) -> Result<(), ValidationError> {

@@ -3,6 +3,9 @@
 use super::*;
 use crate::{BackendCapability, HoverEstimatorMode};
 
+#[path = "tests/cross_repository.rs"]
+mod cross_repository;
+
 #[path = "tests/strict_json.rs"]
 mod strict_json;
 
@@ -37,6 +40,7 @@ fn condition(seed: u64) -> ConditionSet {
         sensor: SensorCondition::nominal(),
         actuator: ActuatorCondition::nominal(),
         controller_initialization: ControllerInitializationCondition::nominal(),
+        plant: PlantCondition::nominal(),
     }
 }
 
@@ -293,6 +297,10 @@ fn invalid_zero_jitter_values_are_total() {
     assert!(value.source_delay_ns_for_run(7, 250_000_000).is_err());
 }
 
+/// The wind and delay timeline resolves from the artifact seed and the run
+/// seed alone, never from the canonical digest, so the values below are
+/// independent of the document shape. The digest assertion is the separate
+/// statement that the shape itself has not moved.
 #[test]
 fn fixed_condition_timeline_matches_the_golden_values_after_reset() {
     let value = ConditionSet {
@@ -325,6 +333,7 @@ fn fixed_condition_timeline_matches_the_golden_values_after_reset() {
         sensor: SensorCondition::nominal(),
         actuator: ActuatorCondition::nominal(),
         controller_initialization: ControllerInitializationCondition::nominal(),
+        plant: PlantCondition::nominal(),
     };
     let expected = [
         (0, 2.0, 4_246_789),
@@ -344,7 +353,7 @@ fn fixed_condition_timeline_matches_the_golden_values_after_reset() {
             .canonical_digest()
             .expect("golden condition")
             .to_string(),
-        "3b7493b39b2075327ebe650e480e1bbe7d76d4fed6839f38af2bdb5268cf4069"
+        "917c8595c20abbd666c5a39fb386aea2dd3bd609c152432c63b3d51ce2e2e9c0"
     );
 
     let first: Vec<_> = expected

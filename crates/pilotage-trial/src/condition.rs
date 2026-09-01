@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 mod actuator;
 mod controller_initialization;
+mod plant;
 mod sensor;
 mod timing;
 mod wind;
@@ -19,6 +20,7 @@ pub use actuator::{
 pub use controller_initialization::{
     ControllerInitializationCondition, HoverThrustForceInitialization,
 };
+pub use plant::{HoverThrustExpectation, PlantCondition};
 pub use sensor::{
     SensorAxis, SensorCondition, SensorNoiseLane, SensorNoiseReference, SensorReferenceLane,
 };
@@ -53,6 +55,8 @@ pub struct ConditionSet {
     pub actuator: ActuatorCondition,
     /// Controller values that change before controller construction.
     pub controller_initialization: ControllerInitializationCondition,
+    /// Simulator plant variation.
+    pub plant: PlantCondition,
 }
 
 impl ConditionSet {
@@ -84,7 +88,8 @@ impl ConditionSet {
         self.timing.validate()?;
         self.sensor.validate()?;
         self.actuator.validate()?;
-        self.controller_initialization.validate()
+        self.controller_initialization.validate()?;
+        self.plant.validate()
     }
 
     /// Returns the exact capabilities that this condition set needs.

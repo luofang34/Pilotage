@@ -128,30 +128,83 @@ fn a_scalar_lane_refuses_an_axis_and_a_vector_lane_needs_one() {
 }
 
 #[test]
-fn every_lane_tag_is_separate_and_a_scalar_tag_has_no_axis() {
+fn every_lane_holds_its_own_one_byte_tag_in_flight_controller_order() {
     let lanes = [
-        SensorReferenceLane::Accelerometer(SensorAxis::X),
-        SensorReferenceLane::Accelerometer(SensorAxis::Y),
-        SensorReferenceLane::Accelerometer(SensorAxis::Z),
-        SensorReferenceLane::Gyroscope(SensorAxis::X),
-        SensorReferenceLane::Gyroscope(SensorAxis::Y),
-        SensorReferenceLane::Gyroscope(SensorAxis::Z),
-        SensorReferenceLane::Magnetometer(SensorAxis::X),
-        SensorReferenceLane::Magnetometer(SensorAxis::Y),
-        SensorReferenceLane::Magnetometer(SensorAxis::Z),
+        SensorReferenceLane::AccelerometerX,
+        SensorReferenceLane::AccelerometerY,
+        SensorReferenceLane::AccelerometerZ,
+        SensorReferenceLane::GyroscopeX,
+        SensorReferenceLane::GyroscopeY,
+        SensorReferenceLane::GyroscopeZ,
+        SensorReferenceLane::MagnetometerX,
+        SensorReferenceLane::MagnetometerY,
+        SensorReferenceLane::MagnetometerZ,
         SensorReferenceLane::AbsolutePressure,
         SensorReferenceLane::DifferentialPressure,
         SensorReferenceLane::PressureAltitude,
     ];
     let tags = lanes
         .iter()
-        .map(|lane| lane.tag())
-        .collect::<std::collections::BTreeSet<_>>();
+        .map(|lane| *lane as u8)
+        .collect::<std::collections::BTreeSet<u8>>();
 
     assert_eq!(tags.len(), lanes.len());
-    assert_eq!(SensorReferenceLane::AbsolutePressure.tag()[1], 0);
-    assert_eq!(SensorReferenceLane::DifferentialPressure.tag()[1], 0);
-    assert_eq!(SensorReferenceLane::PressureAltitude.tag()[1], 0);
+    assert_eq!(tags, (0..12).collect::<std::collections::BTreeSet<u8>>());
+    for (expected, lane) in lanes.iter().enumerate() {
+        assert_eq!(*lane as usize, expected);
+        assert_eq!(lane.index(), expected);
+        assert_eq!(lane.presence_bit(), 1_u16 << expected);
+    }
+}
+
+#[test]
+fn each_declared_lane_resolves_to_its_flight_controller_lane() {
+    assert_eq!(
+        accelerometer(SensorAxis::Y, 0.5, 1).reference_lane(),
+        SensorReferenceLane::AccelerometerY
+    );
+    assert_eq!(
+        SensorNoiseLane::Gyroscope {
+            axis: SensorAxis::Z,
+            peak_amplitude_rad_s: 0.1,
+            update_interval_samples: 1,
+        }
+        .reference_lane(),
+        SensorReferenceLane::GyroscopeZ
+    );
+    assert_eq!(
+        SensorNoiseLane::Magnetometer {
+            axis: SensorAxis::X,
+            peak_amplitude_gauss: 0.1,
+            update_interval_samples: 1,
+        }
+        .reference_lane(),
+        SensorReferenceLane::MagnetometerX
+    );
+    assert_eq!(
+        SensorNoiseLane::AbsolutePressure {
+            peak_amplitude_hpa: 1.0,
+            update_interval_samples: 1,
+        }
+        .reference_lane(),
+        SensorReferenceLane::AbsolutePressure
+    );
+    assert_eq!(
+        SensorNoiseLane::DifferentialPressure {
+            peak_amplitude_hpa: 1.0,
+            update_interval_samples: 1,
+        }
+        .reference_lane(),
+        SensorReferenceLane::DifferentialPressure
+    );
+    assert_eq!(
+        SensorNoiseLane::PressureAltitude {
+            peak_amplitude_m: 1.0,
+            update_interval_samples: 1,
+        }
+        .reference_lane(),
+        SensorReferenceLane::PressureAltitude
+    );
 }
 
 #[test]
@@ -163,17 +216,14 @@ fn a_lane_holds_its_offset_for_a_complete_update_interval() {
 
     for window in offsets.chunks(4) {
         for reference in window {
-            assert_eq!(reference.update_index(), window[0].update_index());
-            assert!((reference.offset() - window[0].offset()).abs() < f64::EPSILON);
+            assert_eq!(reference.update_bucket(), window[0].update_bucket());
+            assert_eq!(reference.offset().to_bits(), window[0].offset().to_bits());
         }
     }
-    assert_ne!(offsets[0].update_index(), offsets[4].update_index());
-    assert!((offsets[0].offset() - offsets[4].offset()).abs() > f64::EPSILON);
+    assert_ne!(offsets[0].update_bucket(), offsets[4].update_bucket());
+    assert_ne!(offsets[0].offset().to_bits(), offsets[4].offset().to_bits());
     for reference in &offsets {
-        assert_eq!(
-            reference.lane(),
-            SensorReferenceLane::Accelerometer(SensorAxis::Z)
-        );
+        assert_eq!(reference.lane(), SensorReferenceLane::AccelerometerZ);
         assert!(reference.offset().abs() <= 0.5);
     }
 }
@@ -189,7 +239,7 @@ fn the_same_seed_produces_the_same_sensor_offsets() {
         SensorNoiseReference::new(CONDITION, 11, 9, accelerometer(SensorAxis::Y, 0.25, 2));
 
     assert_eq!(first, repeated);
-    assert_ne!(first.offset(), other_run.offset());
-    assert_ne!(first.offset(), other_condition.offset());
-    assert_ne!(first.offset(), other_lane.offset());
+    assert_ne!(first.offset().to_bits(), other_run.offset().to_bits());
+    assert_ne!(first.offset().to_bits(), other_condition.offset().to_bits());
+    assert_ne!(first.offset().to_bits(), other_lane.offset().to_bits());
 }
