@@ -16,6 +16,7 @@ use std::time::Duration;
 use flight_tune::{
     Digest, ExecutedLaunchIdentity, ExecutedStream, ExecutedUncertaintyReceipt, derivation,
 };
+use sha2::{Digest as ShaDigest, Sha256};
 
 use super::error::AviateConditionError;
 use super::launch::ConditionLaunch;
@@ -121,6 +122,7 @@ fn verify_samples(
     let mut verified = ExecutedStream::open(declaration)
         .map_err(|source| AviateConditionError::Relation { source })?;
     let estimator_disabled = handshake.hover_estimator_mode != TuningHoverEstimatorMode::Online;
+    let kernel_config_hash = require_kernel_hash(&handshake.kernel_config_hash)?;
     loop {
         let observation = match frame::read::<TuningControlObservation>(stream) {
             Ok(observation) => observation,
@@ -135,6 +137,7 @@ fn verify_samples(
             &observation,
             launch.identity().trace_schema_version,
             estimator_disabled,
+            kernel_config_hash,
         )?;
         verified
             .accept(&sample)
@@ -180,6 +183,7 @@ fn require_handshake(
     }
     require_hover(handshake, launch)?;
     require_artifact_path(handshake, launch)?;
+    require_manifest(handshake, launch)?;
     let capabilities = handshake
         .condition_required_capabilities
         .as_ref()
@@ -261,6 +265,66 @@ const fn capability(value: TuningPerturbationCapability) -> flight_tune::Backend
             flight_tune::BackendCapability::SensorPerturbation
         }
     }
+}
+
+/// Reads the resolved kernel identity the executor states.
+///
+/// The identity travels as text in the handshake and as a fixed-width value
+/// in every sample. Reading it once here lets a sample that names another
+/// kernel be refused rather than counted.
+fn require_kernel_hash(stated: &str) -> Result<u64, AviateConditionError> {
+    if stated.len() != 16 || stated.bytes().any(|value| !is_lower_hex(value)) {
+        return Err(AviateConditionError::identity(
+            "the executor kernel identity is not one lowercase value",
+        ));
+    }
+    u64::from_str_radix(stated, 16)
+        .map_err(|_| AviateConditionError::identity("the executor kernel identity is not readable"))
+}
+
+/// Requires the executor to have hashed the manifest this launch can read.
+///
+/// The manifest carries the same five condition values a second time. It is
+/// written before the executor opens this path, so reading it here binds
+/// every acknowledgement to a document that was on disk rather than to a
+/// value the launcher only echoes back.
+fn require_manifest(
+    handshake: &TuningHandshake,
+    launch: &ConditionLaunch,
+) -> Result<(), AviateConditionError> {
+    let path = launch.manifest_path();
+    let bytes = std::fs::read(path).map_err(|source| AviateConditionError::Artifact {
+        operation: "read the executor run manifest",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let stated = Digest::from_bytes(Sha256::digest(&bytes).into());
+    if stated.to_string() != handshake.run_manifest_digest {
+        return Err(AviateConditionError::identity(
+            "the executor hashed another run manifest than the one it wrote",
+        ));
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let identity = launch.identity();
+    for line in [
+        format!(
+            "condition_artifact_sha256 = \"{}\"",
+            identity.artifact_digest
+        ),
+        format!("condition_digest = \"{}\"", identity.condition_digest),
+        format!("condition_run_seed = {}", identity.run_seed),
+    ] {
+        if !text.contains(&line) {
+            return Err(AviateConditionError::identity(
+                "the executor run manifest does not name this condition",
+            ));
+        }
+    }
+    Ok(())
+}
+
+const fn is_lower_hex(value: u8) -> bool {
+    value.is_ascii_digit() || matches!(value, b'a'..=b'f')
 }
 
 /// Reads one 64-character lowercase identity the executor states.

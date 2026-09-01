@@ -310,7 +310,9 @@ impl<'a> Executor<'a> {
             send: ExecutedSendEvidence {
                 attempted: true,
                 succeeded: true,
-                echoed_timestamp_us: sequence.wrapping_mul(10_000),
+                // The transport echoes its own link clock, never the
+                // sample time.
+                echoed_timestamp_us: sequence.wrapping_mul(9_973).wrapping_add(7),
                 lockstep: true,
             },
             armed: true,

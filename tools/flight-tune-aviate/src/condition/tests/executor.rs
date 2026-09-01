@@ -6,7 +6,8 @@
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 
-use flight_tune::{ExecutedUncertaintyDeclaration, derivation};
+use flight_tune::{Digest, ExecutedUncertaintyDeclaration, derivation};
+use sha2::{Digest as ShaDigest, Sha256};
 
 use super::super::frame;
 use super::super::protocol::{
@@ -19,7 +20,6 @@ use super::super::protocol::{
 pub(super) const BASELINE_FORCE_BITS: u32 = 0x3f00_0000;
 pub(super) const KERNEL_HASH: u64 = 0x0102_0304_0506_0708;
 pub(super) const LANE_COUNT: u8 = 4;
-const MANIFEST_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const KERNEL_HASH_TEXT: &str = "0102030405060708";
 
 /// What one executor states other than the truth.
@@ -43,12 +43,18 @@ pub(super) enum Fault {
     ShortRun,
     /// The executor states another hover force part way through.
     MovedHoverForce,
+    /// The executor hashed a run manifest other than the one it wrote.
+    ChangedManifest,
+    /// The executor names another kernel in one sample than in its handshake.
+    ChangedSampleKernel,
 }
 
 /// One executor run over the trace path.
 pub(super) struct Executor {
     declaration: ExecutedUncertaintyDeclaration,
     artifact_path: PathBuf,
+    manifest_path: PathBuf,
+    manifest_digest: String,
     samples: u64,
     fault: Fault,
     last_accepted: Option<[u32; 16]>,
@@ -62,12 +68,15 @@ impl Executor {
     pub(super) fn new(
         declaration: &ExecutedUncertaintyDeclaration,
         artifact_path: PathBuf,
+        manifest_path: PathBuf,
         samples: u64,
         fault: Fault,
     ) -> Self {
         Self {
             declaration: declaration.clone(),
             artifact_path,
+            manifest_path,
+            manifest_digest: String::new(),
             samples,
             fault,
             last_accepted: None,
@@ -80,6 +89,7 @@ impl Executor {
 
     /// Connects, states the run, and answers every sample it is asked for.
     pub(super) fn run_blocking(mut self, endpoint: SocketAddr) -> Result<(), String> {
+        self.write_manifest()?;
         let mut stream = TcpStream::connect(endpoint).map_err(|error| error.to_string())?;
         frame::write(&mut stream, &self.handshake()).map_err(|error| error.to_string())?;
         let ready: TuningReady = frame::read(&mut stream).map_err(|error| error.to_string())?;
@@ -100,6 +110,31 @@ impl Executor {
                 return Err("the launcher answered another sample".to_owned());
             }
         }
+        Ok(())
+    }
+
+    /// Writes the run manifest the launcher reads back, then states its
+    /// identity in the handshake.
+    fn write_manifest(&mut self) -> Result<(), String> {
+        let identity = &self.declaration;
+        let text = format!(
+            "schema_version = 3\n\
+             application_id = \"pilotage-executed-uncertainty-fake\"\n\
+             condition_artifact_path = \"{}\"\n\
+             condition_artifact_sha256 = \"{}\"\n\
+             condition_digest = \"{}\"\n\
+             condition_run_seed = {}\n",
+            self.artifact_path.to_string_lossy(),
+            identity.artifact_digest,
+            identity.condition_digest,
+            identity.run_seed,
+        );
+        std::fs::write(&self.manifest_path, &text).map_err(|error| error.to_string())?;
+        self.manifest_digest = if self.fault == Fault::ChangedManifest {
+            "2".repeat(64)
+        } else {
+            Digest::from_bytes(Sha256::digest(text.as_bytes()).into()).to_string()
+        };
         Ok(())
     }
 
@@ -125,7 +160,7 @@ impl Executor {
         TuningHandshake {
             frame_type: TuningFrameType::AviateTuningHandshake,
             schema_version: super::super::TUNING_TRACE_SCHEMA_VERSION,
-            run_manifest_digest: MANIFEST_DIGEST.to_owned(),
+            run_manifest_digest: self.manifest_digest.clone(),
             kernel_config_hash: KERNEL_HASH_TEXT.to_owned(),
             condition_artifact_path: Some(self.artifact_path.to_string_lossy().into_owned()),
             condition_artifact_sha256: Some(identity.artifact_digest.to_string()),
@@ -167,7 +202,9 @@ impl Executor {
             send: TuningSendEvidence {
                 reply_attempted: true,
                 reply_succeeded: true,
-                echoed_timestamp_us: index.wrapping_mul(10_000),
+                // The transport echoes what its own link clock last saw, so
+                // this value is never the sample time.
+                echoed_timestamp_us: index.wrapping_mul(9_973).wrapping_add(7),
                 lockstep: true,
             },
             armed: true,
@@ -180,6 +217,11 @@ impl Executor {
         } else {
             BASELINE_FORCE_BITS
         };
+        let kernel_config_hash = if self.fault == Fault::ChangedSampleKernel && index >= 5 {
+            KERNEL_HASH.wrapping_add(1)
+        } else {
+            KERNEL_HASH
+        };
         TuningHoverInitialization {
             baseline_force_bits: baseline,
             effective_force_bits: derivation::scaled_hover_force(
@@ -187,7 +229,7 @@ impl Executor {
                 self.declaration.hover_scale_basis_points,
             ),
             scale_basis_points: self.declaration.hover_scale_basis_points,
-            kernel_config_hash: KERNEL_HASH,
+            kernel_config_hash,
         }
     }
 

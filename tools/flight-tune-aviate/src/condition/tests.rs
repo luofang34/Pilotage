@@ -194,6 +194,22 @@ fn a_hover_force_that_moves_inside_one_run_ends_the_run() {
 }
 
 #[test]
+fn an_executor_that_hashed_another_run_manifest_cannot_arm() {
+    assert!(matches!(
+        flown("changed-manifest", 21, Fault::ChangedManifest),
+        Err(AviateConditionError::Identity { .. })
+    ));
+}
+
+#[test]
+fn a_sample_that_names_another_kernel_ends_the_run() {
+    assert!(matches!(
+        flown("changed-kernel", 21, Fault::ChangedSampleKernel),
+        Err(AviateConditionError::Identity { .. })
+    ));
+}
+
+#[test]
 fn an_executor_that_stops_inside_a_decision_interval_is_not_sealed() {
     assert!(matches!(
         flown("short-run", 21, Fault::ShortRun),
@@ -221,6 +237,7 @@ fn flown(
     let executor = Executor::new(
         launch.declaration(),
         launch.artifact_path().to_path_buf(),
+        launch.manifest_path().to_path_buf(),
         samples,
         fault,
     );

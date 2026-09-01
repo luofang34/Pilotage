@@ -22,12 +22,13 @@ use super::protocol::{
 /// # Errors
 ///
 /// Returns [`AviateConditionError`] when the frame is not an observation,
-/// when it speaks another protocol version, or when it reports its own
-/// trace failure.
+/// when it speaks another protocol version, when it reports its own trace
+/// failure, or when it names a kernel other than the handshake one.
 pub fn sample(
     observation: &TuningControlObservation,
     schema_version: u16,
     estimator_disabled: bool,
+    kernel_config_hash: u64,
 ) -> Result<ExecutedSample, AviateConditionError> {
     if observation.frame_type != TuningFrameType::AviateControlObservation {
         return Err(AviateConditionError::protocol(
@@ -42,6 +43,11 @@ pub fn sample(
     if observation.constraint_flags.tuning_trace_failure {
         return Err(AviateConditionError::protocol(
             "an observation reports its own trace failure",
+        ));
+    }
+    if observation.hover_initialization.kernel_config_hash != kernel_config_hash {
+        return Err(AviateConditionError::identity(
+            "a sample names another kernel than the one the handshake stated",
         ));
     }
     Ok(ExecutedSample {

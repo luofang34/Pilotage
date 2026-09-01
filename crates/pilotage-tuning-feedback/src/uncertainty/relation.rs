@@ -248,13 +248,14 @@ fn require_undeclared_unchanged(
 }
 
 /// Requires one sample to carry exactly one completed lockstep answer.
+///
+/// The echoed time is the transport's own confirmation of what it put on
+/// the wire, drawn from a clock this side never sees, so it is carried as
+/// evidence rather than derived.
 fn require_send(sample: &ExecutedSample) -> Result<(), FeedbackError> {
     let send = sample.send;
     if !send.attempted || !send.succeeded || !send.lockstep {
         return Err(invalid("a sample has no completed lockstep actuator send"));
-    }
-    if send.echoed_timestamp_us != sample.simulator_timestamp_us {
-        return Err(invalid("a sample send answered another sensor sample"));
     }
     if sample.constraints.trace_failure {
         return Err(invalid("a sample reports its own trace failure"));

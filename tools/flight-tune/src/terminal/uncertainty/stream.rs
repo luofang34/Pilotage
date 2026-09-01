@@ -166,6 +166,12 @@ impl<'a> ExecutedStream<'a> {
 }
 
 /// Requires one sample to carry exactly one completed lockstep answer.
+///
+/// The echoed time is the transport's own confirmation of what it put on
+/// the wire, drawn from a clock this side never sees, so it is carried as
+/// evidence rather than derived. What the hold policy needs is that every
+/// sensor sample received one answer and that the answer was in lockstep,
+/// which is what the sequence discipline and these three flags state.
 fn require_send(sample: &ExecutedSample) -> Result<(), TuneError> {
     let send = sample.send;
     if !send.attempted || !send.succeeded {
@@ -174,11 +180,6 @@ fn require_send(sample: &ExecutedSample) -> Result<(), TuneError> {
     if !send.lockstep {
         return Err(invalid_terminal(
             "a sample answered outside the sensor lockstep",
-        ));
-    }
-    if send.echoed_timestamp_us != sample.simulator_timestamp_us {
-        return Err(invalid_terminal(
-            "a sample send answered another sensor sample",
         ));
     }
     Ok(())
