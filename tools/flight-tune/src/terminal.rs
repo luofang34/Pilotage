@@ -8,6 +8,7 @@ mod intent;
 mod plan;
 mod receipt;
 mod report;
+pub(crate) mod uncertainty;
 
 pub use binding::{RUN_BINDING_RECEIPT_SCHEMA_VERSION, RunBindingReceipt};
 pub use class::{
