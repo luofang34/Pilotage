@@ -153,8 +153,8 @@ fn the_sensor_sample_identity_covers_its_own_preimage() {
     let mut hasher = Sha256::new();
     hasher.update(b"aviate-effective-sensor-v1");
     hasher.update(presence_mask.to_le_bytes());
-    for lane in 0..EXECUTED_SENSOR_LANE_COUNT {
-        hasher.update(values[lane].unwrap_or(0_u32).to_le_bytes());
+    for value in &values {
+        hasher.update(value.unwrap_or(0_u32).to_le_bytes());
     }
     let expected: [u8; 32] = hasher.finalize().into();
 

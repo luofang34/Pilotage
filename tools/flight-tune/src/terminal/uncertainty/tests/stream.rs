@@ -290,7 +290,7 @@ impl<'a> Executor<'a> {
     fn next(&mut self) -> ExecutedSample {
         let sequence = self.sequence;
         self.sequence = self.sequence.wrapping_add(1);
-        let sample = ExecutedSample {
+        ExecutedSample {
             sequence,
             global_sample_sequence: sequence,
             simulator_timestamp_us: sequence.wrapping_mul(10_000),
@@ -314,8 +314,7 @@ impl<'a> Executor<'a> {
                 lockstep: true,
             },
             armed: true,
-        };
-        sample
+        }
     }
 
     fn sensor(&self, sequence: u64) -> ExecutedSensorApplication {
