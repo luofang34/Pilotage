@@ -70,16 +70,7 @@ impl DriverProcess {
     }
 
     pub(crate) fn read_attestation(&mut self) -> SupervisionAttestation {
-        let timeout = super::EVENT_TIMEOUT
-            .saturating_mul(5)
-            .saturating_add(std::time::Duration::from_secs(5));
-        let bytes = match self.attestation.recv_timeout(timeout) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                self.stop_after_report_failure();
-                panic!("driver report channel failed: {error}");
-            }
-        };
+        let bytes = self.recv_report_or_exit();
         self.ready_reader
             .take()
             .expect("driver evidence reader is present")
@@ -88,6 +79,38 @@ impl DriverProcess {
         match serde_json::from_slice(&bytes).expect("decode driver supervision report") {
             DriverReport::Ready(attestation) => *attestation,
             DriverReport::Failed { detail } => self.reap_reported_failure(&detail),
+        }
+    }
+
+    // Polls the report channel in short slices instead of one long wait,
+    // so a driver that exits before it reports is caught by its process
+    // exit rather than by the wall-clock ceiling below. A driver that
+    // never opens the ready FIFO leaves its reader thread blocked in
+    // `File::open` forever, so the channel itself never disconnects on
+    // its own; watching the child directly is the only way to surface
+    // that failure before the ceiling expires.
+    fn recv_report_or_exit(&mut self) -> Vec<u8> {
+        const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+        let ceiling = super::EVENT_TIMEOUT
+            .saturating_mul(5)
+            .saturating_add(std::time::Duration::from_secs(5));
+        let deadline = std::time::Instant::now() + ceiling;
+        loop {
+            match self.attestation.recv_timeout(POLL_INTERVAL) {
+                Ok(bytes) => return bytes,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    self.stop_after_report_failure();
+                    panic!("driver report channel closed without a report");
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if let Some(status) = self.child.try_wait().expect("inspect supervision driver") {
+                panic!("supervision driver exited before reporting readiness: {status}");
+            }
+            if std::time::Instant::now() >= deadline {
+                self.stop_after_report_failure();
+                panic!("driver report channel failed: timed out waiting on channel");
+            }
         }
     }
 

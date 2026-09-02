@@ -22,13 +22,30 @@ pub(super) use evidence_fixtures::{
     add_unlinked_temporary, digest_bytes, replace_file_bytes,
 };
 
-// A deadline, not a pace: healthy fixtures finish in well under a
-// second, and only a genuinely hung run waits this long. The suite
-// spawns supervisor and target processes from parallel test threads,
-// and on a loaded two-core CI runner a fixture's owner readiness can
-// take tens of seconds of wall time — a tight deadline there reads as
-// a supervision defect when it is only scheduling.
-const EVENT_TIMEOUT: Duration = Duration::from_secs(60);
+// The supervisor's own startup and cleanup work is bounded by this
+// duration (`make_request` hands it to production as `startup_timeout`
+// and `cleanup_timeout`). Healthy fixtures finish in well under a
+// second; only a genuinely hung run consumes the full budget.
+const SUPERVISOR_TIMEOUT: Duration = Duration::from_secs(60);
+
+// A FIFO open, a FIFO EOF, or a channel message is the external sign
+// that a supervisor-bounded operation finished. Its deadline must
+// exceed `SUPERVISOR_TIMEOUT` by a real margin, not equal it: the two
+// clocks start at nearly the same moment, so a guard equal to the
+// supervisor's own budget can expire moments before the supervisor
+// produces the event, on a machine slow enough that the supervisor
+// needs most of its budget to finish. Owner shutdown can also run two
+// `cleanup_timeout`-bounded waits back to back (group quiescence, then
+// group removal) before it closes the observed channel, so the guard
+// covers two full budgets, not one. The margin absorbs scheduling
+// slack without weakening the guard against a supervisor that is
+// genuinely hung — a hung supervisor parks forever and never produces
+// the event, so it still trips this deadline, only later.
+const EVENT_MARGIN: Duration = Duration::from_secs(30);
+const EVENT_TIMEOUT: Duration = SUPERVISOR_TIMEOUT
+    .saturating_mul(2)
+    .saturating_add(EVENT_MARGIN);
+
 const CLOSED_GATE_TIMEOUT: Duration = Duration::from_millis(250);
 const TARGET_FIFO_ENV: &str = "PILOTAGE_TARGET_FIFO";
 pub(super) const TARGET_ESCAPE_GROUP_ENV: &str = "PILOTAGE_TARGET_ESCAPE_GROUP";
@@ -353,8 +370,8 @@ fn make_request(
         runtime_root: parts.runtime_root.clone(),
         artifact_root: parts.artifact_root.clone(),
         run_intent_digest: digest_bytes(format!("integration-{}", parts.name).as_bytes()),
-        startup_timeout: EVENT_TIMEOUT,
-        cleanup_timeout: EVENT_TIMEOUT,
+        startup_timeout: SUPERVISOR_TIMEOUT,
+        cleanup_timeout: SUPERVISOR_TIMEOUT,
     }
 }
 
