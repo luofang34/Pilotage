@@ -60,8 +60,12 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
+    // No entry is appended while a run streams, so the checks inside this loop
+    // prove authority alone. The complete catalog audit costs the journal
+    // length and holds at the run's admission and terminal instead, which keeps
+    // a long journal from pricing every sample of every later run.
     loop {
-        if let Err(error) = journal.ensure_usable() {
+        if let Err(error) = journal.ensure_authority() {
             return StreamOutcome::failed(error);
         }
         match backend.sample_blocking(timeout) {
@@ -206,7 +210,7 @@ fn advance_mission<B: CampaignBackend>(
             wall_time_ns,
             &mut || {
                 journal
-                    .ensure_usable()
+                    .ensure_authority()
                     .map_err(|source| crate::ScenarioRuntimeError::Authority { source })
             },
         )
@@ -366,14 +370,14 @@ where
     G: GateEvaluator,
     M: MetricEvaluator,
 {
-    journal.ensure_usable()?;
+    journal.ensure_authority()?;
     let outcomes = gates
         .evaluate(sample)
         .map_err(|source| evaluator_error(gates.identity(), "evaluate hard gates", source))?;
     if let Some(failure) = validate_gate_outcomes(&stage.required_hard_gates, &outcomes)? {
         return Ok(Some(failure));
     }
-    journal.ensure_usable()?;
+    journal.ensure_authority()?;
     metric
         .observe(sample)
         .map_err(|source| evaluator_error(metric.identity(), "observe metric", source))?;
