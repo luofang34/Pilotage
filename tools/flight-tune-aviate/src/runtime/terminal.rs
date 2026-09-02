@@ -1,16 +1,18 @@
 //! Sealing one run, and saying plainly when it cannot be sealed.
 //!
-//! A sealed run states four things together: which run intent it flew,
+//! A sealed run states five things together: which run intent it flew,
 //! which runtime implementation flew it, what the run's direct evidence
-//! was, and how it ended. Binding them in one document is what stops a
-//! reader pairing evidence from one runtime identity with a result from
-//! another.
+//! was, what uncertainty it executed, and how it ended. Binding them in one
+//! document is what stops a reader pairing evidence from one runtime
+//! identity with a result from another.
 //!
 //! A run whose durable direct ledger has a prepared command with no result
 //! is not sealed at all. It is quarantined, because nobody can say whether
 //! the vehicle was commanded.
 
-use flight_tune::{ArtifactIdentity, Digest, ScenarioStopContext, ScenarioStopReason};
+use flight_tune::{
+    ArtifactIdentity, Digest, ExecutedUncertaintyReceipt, ScenarioStopContext, ScenarioStopReason,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -18,9 +20,9 @@ use super::AviateRuntimeError;
 use super::direct::DirectRunEvidence;
 
 /// The supported Aviate run seal schema.
-pub const RUN_SEAL_SCHEMA_VERSION: u16 = 1;
+pub const RUN_SEAL_SCHEMA_VERSION: u16 = 2;
 
-const RUN_SEAL_DOMAIN: &[u8] = b"pilotage-aviate-run-seal-v1\0";
+const RUN_SEAL_DOMAIN: &[u8] = b"pilotage-aviate-run-seal-v2\0";
 
 /// How one Aviate run ended, as the vehicle port saw it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -67,6 +69,11 @@ pub struct AviateRunSeal {
     pub accepted_frames: u64,
     /// The identity of this run's direct evidence, when the run had any.
     pub direct_evidence_digest: Option<Digest>,
+    /// The identity of the uncertainty this run executed, when it flew any.
+    ///
+    /// A nominal run states none. A non-nominal run that states none never
+    /// proved that the controller received what the condition requested.
+    pub executed_uncertainty_digest: Option<Digest>,
 }
 
 impl AviateRunSeal {
@@ -119,6 +126,8 @@ pub struct RunClosure {
     pub accepted_frames: u64,
     /// The direct evidence the run collected, when it commanded directly.
     pub direct_evidence: Option<DirectRunEvidence>,
+    /// The verified uncertainty receipt, when the run flew a condition.
+    pub executed_uncertainty: Option<ExecutedUncertaintyReceipt>,
 }
 
 /// Seals one stopped run.
@@ -138,6 +147,18 @@ pub fn seal(
         }
         None => None,
     };
+    let executed_uncertainty_digest = match &closure.executed_uncertainty {
+        Some(receipt) => {
+            receipt
+                .validate()
+                .map_err(|source| AviateRuntimeError::UnboundUncertaintyReceipt { source })?;
+            if receipt.launch.run_intent_digest != closure.run_intent_digest {
+                return Err(AviateRuntimeError::UnboundRunSeal);
+            }
+            Some(receipt.digest())
+        }
+        None => None,
+    };
     let seal = AviateRunSeal {
         schema_version: RUN_SEAL_SCHEMA_VERSION,
         run_intent_digest: closure.run_intent_digest,
@@ -146,6 +167,7 @@ pub fn seal(
         last_source_sequence: context.last_source_sequence,
         accepted_frames: closure.accepted_frames,
         direct_evidence_digest,
+        executed_uncertainty_digest,
     };
     seal.require_bound(closure.run_intent_digest, &closure.runtime_identity)?;
     Ok(seal)

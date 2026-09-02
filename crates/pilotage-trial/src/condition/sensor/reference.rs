@@ -121,6 +121,19 @@ impl SensorNoiseReference {
     }
 }
 
+impl SensorNoiseLane {
+    /// Returns the lane, the executor-unit peak amplitude, and the interval.
+    ///
+    /// A caller that states what one run declared needs the amplitude in the
+    /// unit the executor applies, not the unit the artifact writes. The
+    /// conversion has one implementation, so a stated declaration and an
+    /// applied offset cannot disagree about which unit they mean.
+    #[must_use]
+    pub fn reference_values(self) -> (SensorReferenceLane, f32, u32) {
+        request_values(self)
+    }
+}
+
 /// Resolves one lane request into its derivation inputs.
 ///
 /// The amplitude leaves this function in the flight-controller lane unit. A

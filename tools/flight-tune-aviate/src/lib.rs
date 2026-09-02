@@ -20,6 +20,7 @@
 
 mod action_port;
 mod artifact;
+pub mod condition;
 pub mod direct_transport;
 mod document;
 mod error;
@@ -36,6 +37,9 @@ mod vehicle;
 pub use action_port::{
     AviateActionDriver, AviateActionPortError, AviateVehicleAction, AviateVehicleActionPort,
     AviateVehicleDirective, aviate_action_port_identity,
+};
+pub use condition::{
+    AviateConditionError, ConditionLaunch, ConditionTracePath, TUNING_TRACE_SCHEMA_VERSION,
 };
 pub use document::{
     ProcessIdentity, ProcessStartIdentity, TargetAttestation, TargetProcessContract,
