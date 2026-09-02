@@ -30,15 +30,16 @@ pub use adapter::{
     CandidateTransitionReceipt, CandidateTransitionReference, CandidateTransitionRequest,
     EvaluatorError, RunPreparationReceipt, RunTerminalAdapter, RunTerminalCapabilities,
     SampleEvent, ScenarioStartReceipt, SessionChallenge, SimulatorCapability,
-    SimulatorSessionReceipt, SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
-    TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
+    SimulatorSessionAcquisition, SimulatorSessionReceipt, SimulatorVehicleAdapter,
+    SimulatorVehicleFactory, TelemetrySample, TransitionBindingReceipt, VehicleBinding,
+    VehicleBindingAcquisition, VehicleBindingReceipt, VehicleBindingRollback, conformance,
 };
 pub use campaign::{StopReason, Tuner, TuningSummary};
 pub use campaign_config::{
     CAMPAIGN_CONFIG_SCHEMA_VERSION, CampaignAdapterDocuments, CampaignConfig,
 };
 pub use contract_api::*;
-pub use error::TuneError;
+pub use error::{OpenRollbackOperation, OpenRollbackReport, TuneError};
 pub use flight_quality::{
     CanonicalTelemetryKey, EVALUATOR_IMPLEMENTATION_SCHEMA_VERSION, FlightQualityGate,
     FlightQualityGateConfig, FlightQualityGateEvaluator, FlightQualityMetricConfig,

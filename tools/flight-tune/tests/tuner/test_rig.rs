@@ -169,13 +169,46 @@ pub use scoring::{
 pub use terminal_head_poison::TerminalExternalAction;
 #[allow(unused_imports)]
 pub use terminal_state::{FakeTerminalReadbackFault, FakeTerminalSealFault, FakeTerminalState};
-pub use vehicle::{FakeFactory, FakeVehicle};
+#[allow(unused_imports)]
+pub use vehicle::{FakeFactory, FakeVehicle, FakeVehicleRollback};
 pub use vehicle_state::FakeVehicleState;
+
+/// The outer runtime lease an operator holds across every open attempt.
+///
+/// The lease stands for the ownership proof that lives above the open
+/// transaction. A cleanup that reached past its own acquisition would
+/// release it, and the next open would then have no runtime to talk to.
+#[derive(Debug, Default)]
+pub struct FakeRuntimeLease {
+    pub acquisitions: usize,
+    pub held: bool,
+}
+
+impl FakeRuntimeLease {
+    pub fn acquired() -> Self {
+        Self {
+            acquisitions: 1,
+            held: true,
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct FakeState {
     pub vehicle: FakeVehicleState,
     pub terminal: FakeTerminalState,
+    /// Every acquisition and release of the open path, in order.
+    pub open_order: Vec<String>,
+    /// Whether the simulator holds a session the backend has to close.
+    pub session_open: bool,
+    /// Every session close the backend has answered.
+    pub session_close_count: usize,
+    /// The session close at this one-based count fails.
+    pub fail_session_close_on: Option<usize>,
+    /// The session receipt names another airframe.
+    pub bad_session_receipt: bool,
+    /// The operator-owned runtime lease, when a test arms one.
+    pub runtime_lease: Option<FakeRuntimeLease>,
     pub open_session_count: usize,
     pub prepare_count: usize,
     pub start_count: usize,

@@ -5,7 +5,8 @@ use pilotage_trial::Digest;
 
 use super::{
     AdapterError, CandidateTransitionReceipt, CandidateTransitionRequest, SessionChallenge,
-    SimulatorCapability, SimulatorSessionReceipt, VehicleBinding,
+    SimulatorCapability, SimulatorSessionAcquisition, SimulatorSessionReceipt, VehicleBinding,
+    VehicleBindingRollback,
 };
 use crate::{
     ArtifactIdentity, Candidate, MissionDocument, MissionReference, RunExecutionContext,
@@ -109,6 +110,21 @@ pub trait CampaignBackend {
         challenge: &SessionChallenge,
     ) -> Result<SimulatorSessionReceipt, AdapterError>;
 
+    /// Idempotently closes the simulator session this acquisition names.
+    ///
+    /// Success means no session for this acquisition remains, so an open
+    /// that never completed leaves nothing to inherit. The target is one
+    /// tuning session, not the runtime an operator owns and keeps.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AdapterError`] when the acquisition names another tuning
+    /// session, simulator, or airframe, or when absence is not provable.
+    fn close_session_blocking(
+        &mut self,
+        acquisition: &SimulatorSessionAcquisition,
+    ) -> Result<(), AdapterError>;
+
     /// Prepares one exact durable run intent.
     fn prepare_blocking(
         &mut self,
@@ -192,8 +208,19 @@ pub trait SimulatorVehicleFactory {
     /// The bound adapter type.
     type Adapter: SimulatorVehicleAdapter;
 
+    /// The owner that releases a binding this factory can have created.
+    type Rollback: VehicleBindingRollback;
+
     /// Returns the exact vehicle implementation identity.
     fn vehicle_identity(&self) -> &ArtifactIdentity;
+
+    /// Returns the rollback owner for a binding this factory can create.
+    ///
+    /// The bind operation consumes the factory, so a bind that fails part
+    /// way through has no factory left to clean up after it. The owner is
+    /// taken before the bind starts, which is the only point at which both
+    /// still exist.
+    fn rollback_handle(&self) -> Self::Rollback;
 
     /// Returns the exact vehicle action-port identity for scenario execution.
     fn scenario_action_port_identity(&self) -> &ArtifactIdentity {

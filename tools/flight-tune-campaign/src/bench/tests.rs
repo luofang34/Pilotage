@@ -1,8 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
+mod open_rollback;
+
 use std::path::PathBuf;
 
-use flight_tune::{BoundedCoordinateSearch, CandidateLineage, FinalQualificationOutcome, Tuner};
+use flight_tune::{
+    BoundedCoordinateSearch, Candidate, CandidateLineage, FinalQualificationOutcome, Tuner,
+};
 use pilotage_control_feel::FeelMode;
 
 use super::*;

@@ -7,7 +7,8 @@ use flight_tune::{
     MissionDirective, MissionDocument, MissionReference, ReceiptResult, RunExecutionContext,
     RunPreparationReceipt, SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRuntime,
     ScenarioRuntimeError, ScenarioStartReceipt, ScenarioStopContext, SessionChallenge,
-    SimulatorCapability, SimulatorSessionReceipt, TelemetrySample, scenario_runtime_identity,
+    SimulatorCapability, SimulatorSessionAcquisition, SimulatorSessionReceipt, TelemetrySample,
+    scenario_runtime_identity,
 };
 use serde::Deserialize;
 
@@ -46,6 +47,15 @@ impl FakeBackend {
             scenario_runtime_identity(&backend.action_port_identity)
                 .expect("scenario runtime identity");
         backend
+    }
+
+    /// Names the session acquisition this backend answers for.
+    pub fn session_acquisition(&self, session_digest: Digest) -> SimulatorSessionAcquisition {
+        SimulatorSessionAcquisition::new(
+            session_digest,
+            self.simulator.digest,
+            self.airframe.digest,
+        )
     }
 }
 
@@ -114,12 +124,53 @@ impl CampaignBackend for FakeBackend {
         let mut state = self.state.0.borrow_mut();
         state.open_session_count = state.open_session_count.wrapping_add(1);
         state.lifecycle.push("open_session".to_owned());
+        state.open_order.push("open_session".to_owned());
+        // A backend cannot talk to a runtime the operator has not leased,
+        // so a cleanup that released the lease shows up as the next open
+        // having nothing to open a session against.
+        if state
+            .runtime_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.held)
+        {
+            return Err(AdapterError::new("no operator runtime lease is held"));
+        }
+        state.session_open = true;
+        let bad_receipt = state.bad_session_receipt;
         drop(state);
         Ok(SimulatorSessionReceipt {
             session_digest: challenge.session_digest(),
             simulator_digest: self.simulator.digest,
-            airframe_digest: self.airframe.digest,
+            airframe_digest: if bad_receipt {
+                Digest::from_bytes([73; 32])
+            } else {
+                self.airframe.digest
+            },
         })
+    }
+
+    fn close_session_blocking(
+        &mut self,
+        acquisition: &SimulatorSessionAcquisition,
+    ) -> Result<(), AdapterError> {
+        if acquisition.simulator_digest() != self.simulator.digest
+            || acquisition.airframe_digest() != self.airframe.digest
+            || acquisition.session_digest().is_zero()
+        {
+            return Err(AdapterError::new(
+                "the acquisition names another simulator session",
+            ));
+        }
+        let mut state = self.state.0.borrow_mut();
+        state.open_order.push("close_session".to_owned());
+        state.session_close_count = state.session_close_count.wrapping_add(1);
+        if state.fail_session_close_on == Some(state.session_close_count) {
+            return Err(AdapterError::new(
+                "the simulator did not acknowledge the session close",
+            ));
+        }
+        state.session_open = false;
+        Ok(())
     }
 
     fn prepare_blocking(

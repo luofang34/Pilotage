@@ -10,6 +10,8 @@ mod final_objectives;
 mod journal_storage;
 #[path = "tuner/no_samples.rs"]
 mod no_samples;
+#[path = "tuner/open_transaction.rs"]
+mod open_transaction;
 #[path = "tuner/orphan_baseline.rs"]
 mod orphan_baseline;
 #[path = "tuner/promotion_chain_tamper.rs"]
