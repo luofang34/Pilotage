@@ -182,6 +182,13 @@ pub enum AviateRuntimeError {
     /// A run seal does not bind one exact run and runtime.
     #[error("the Aviate run seal does not bind its run and runtime")]
     UnboundRunSeal,
+    /// An executed uncertainty receipt does not answer for its own content.
+    #[error("the executed uncertainty receipt is refused: {source}")]
+    UnboundUncertaintyReceipt {
+        /// The contract failure.
+        #[source]
+        source: flight_tune::TuneError,
+    },
     /// A direct ledger document is larger than its limit.
     #[error("the Aviate direct ledger document is {bytes} bytes")]
     LedgerDocumentSize {
@@ -237,6 +244,7 @@ pub struct AviateScenarioDriver<D> {
     run: Option<PreparedRun>,
     started: bool,
     seal: Option<AviateRunSeal>,
+    executed_uncertainty: Option<flight_tune::ExecutedUncertaintyReceipt>,
 }
 
 impl<D: DirectControl> AviateScenarioDriver<D> {
@@ -264,6 +272,7 @@ impl<D: DirectControl> AviateScenarioDriver<D> {
             run: None,
             started: false,
             seal: None,
+            executed_uncertainty: None,
         })
     }
 
@@ -277,6 +286,21 @@ impl<D: DirectControl> AviateScenarioDriver<D> {
     #[must_use]
     pub const fn seal(&self) -> Option<&AviateRunSeal> {
         self.seal.as_ref()
+    }
+
+    /// Binds the verified uncertainty this run executed.
+    ///
+    /// The receipt is bound before the run stops, so a seal cannot be
+    /// written for a non-nominal run whose trace path was never verified.
+    pub fn bind_executed_uncertainty(
+        &mut self,
+        receipt: flight_tune::ExecutedUncertaintyReceipt,
+    ) -> Result<(), AviateRuntimeError> {
+        receipt
+            .validate()
+            .map_err(|source| AviateRuntimeError::UnboundUncertaintyReceipt { source })?;
+        self.executed_uncertainty = Some(receipt);
+        Ok(())
     }
 
     /// The admitted run, when one exists.
@@ -433,6 +457,7 @@ impl<D: DirectControl> AviateActionDriver for AviateScenarioDriver<D> {
             runtime_identity: run.runtime_identity().clone(),
             accepted_frames: self.clock.accepted(),
             direct_evidence: self.direct.seal(run.runtime_identity())?,
+            executed_uncertainty: self.executed_uncertainty.clone(),
         };
         self.seal = Some(terminal::seal(&closure, context)?);
         self.direct.revoke();

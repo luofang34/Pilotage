@@ -4,6 +4,16 @@
 //! trial contracts. Re-exporting them here gives every host one name for each
 //! contract type and one crate to depend on.
 
+pub use crate::terminal::uncertainty::derivation;
+pub use crate::terminal::uncertainty::{
+    DeclaredCommandHold, DeclaredSensorLane, EXECUTED_ACTUATOR_LANE_COUNT,
+    EXECUTED_SENSOR_LANE_COUNT, EXECUTED_UNCERTAINTY_SCHEMA_VERSION, ExecutedActuatorApplication,
+    ExecutedActuatorCounts, ExecutedBypassCounts, ExecutedBypassReason, ExecutedConstraintFlags,
+    ExecutedEligibility, ExecutedHoverInitialization, ExecutedLaunchIdentity, ExecutedSample,
+    ExecutedSendEvidence, ExecutedSensorApplication, ExecutedSensorLaneCounts, ExecutedStream,
+    ExecutedStreamSummary, ExecutedUncertaintyDeclaration, ExecutedUncertaintyLedger,
+    ExecutedUncertaintyReceipt, NOMINAL_BASIS_POINTS, executed_run_seed, lane_tag,
+};
 pub use pilotage_mission_core::{
     ArtifactIdentity as MissionArtifactIdentity, ControlChannel, ControlFamily, ControlValueField,
     Digest as MissionDigest, DirectiveContext, ExecutionTarget, FlightAction,
@@ -13,6 +23,6 @@ pub use pilotage_mission_core::{
     StimulusMapping, TrialAction, VehicleLifecycleState, Waveform,
 };
 pub use pilotage_trial::{
-    BackendCapability, CONDITION_SET_SCHEMA_VERSION, ConditionSet, Digest, HoverEstimatorMode,
-    Scenario as TrialScenario,
+    BackendCapability, CONDITION_SET_SCHEMA_VERSION, CodecError, ConditionSet, Digest,
+    HoverEstimatorMode, Scenario as TrialScenario, ValidationError,
 };

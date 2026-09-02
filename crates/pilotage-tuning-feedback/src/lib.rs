@@ -13,6 +13,7 @@ mod evidence;
 mod policy;
 mod qualification;
 mod storage;
+mod uncertainty;
 
 pub use error::FeedbackError;
 pub use evidence::{
@@ -20,3 +21,4 @@ pub use evidence::{
     VerifiedQualifiedEvidence,
 };
 pub use policy::RequiredPolicy;
+pub use uncertainty::{VerifiedExecutedUncertainty, verify_executed_uncertainty};
