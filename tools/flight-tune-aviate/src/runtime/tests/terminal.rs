@@ -20,6 +20,7 @@ fn closure(direct_evidence: Option<DirectRunEvidence>) -> RunClosure {
         runtime_identity: identity("pilotage-aviate-test-runtime", 6),
         accepted_frames: 42,
         direct_evidence,
+        executed_uncertainty: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn a_sealed_run_binds_its_run_intent_and_runtime() {
     assert_eq!(sealed.accepted_frames, 42);
     assert_eq!(sealed.last_source_sequence, Some(41));
     assert_eq!(sealed.direct_evidence_digest, None);
+    assert_eq!(sealed.executed_uncertainty_digest, None);
     sealed
         .require_bound(
             Digest::from_bytes([9; 32]),
