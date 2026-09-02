@@ -14,6 +14,7 @@ cp "$root_dir/scripts/check-scenario-matrix-corpus.sh" "$fixture/scripts/"
 cp "$root_dir/crates/pilotage-trial/src/limits.rs" "$fixture/crates/pilotage-trial/src/"
 corpus="$fixture/tools/flight-tune-campaign/examples/alia250-xplane"
 cp "$root_dir/tools/flight-tune-campaign/examples/alia250-xplane/generate_matrix.py" "$corpus/"
+cp "$root_dir/tools/flight-tune-campaign/examples/alia250-xplane/alia250.vehicle.json" "$corpus/"
 python3 "$corpus/generate_matrix.py" --out "$corpus" >/dev/null
 
 # A corpus the generator just wrote is accepted.
