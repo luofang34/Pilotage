@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Alia 250 scenario matrix from its canonical inputs.
+"""Generate a vehicle's scenario matrix from its canonical inputs.
 
 The corpus this writes is the authority for what a campaign executes, and it
 is generated rather than maintained: a hand-edited artifact is one nobody
@@ -9,6 +9,14 @@ carries its exact executable value.
 Every file is canonical compact JSON with no trailing newline, because the
 condition identity is the SHA-256 of the exact artifact bytes. A pretty-printed
 artifact would decode to the same values and hash to a different identity.
+
+The vehicle table (`--vehicle-table`, defaulting to the file this generator
+was invoked beside) states the vehicle identity, the matrix identity, and the
+stimuli with their envelope identities and endpoints. The uncertainty factors
+below are the campaign's method, not the vehicle's physics, so they stay
+here rather than in the table: a new vehicle reuses the same disturbance set
+by construction, and a vehicle that needs a different one is a method
+change, not a table edit.
 
 SIM / NOT FOR FLIGHT.
 """
@@ -20,49 +28,87 @@ import hashlib
 import json
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 SCENARIO_SCHEMA_VERSION = 3
 CONDITION_SCHEMA_VERSION = 4
 BASIS_POINTS_NOMINAL = 10000
 
-DEGREE = 0.017453292519943295
-
 # The three isolated partitions. A candidate fitted to a training disturbance
 # meets a different one on the run that decides what ships, so each partition
 # carries its own seed stream and its own artifact identities.
 PARTITIONS = ("training", "promotion", "final")
 
-# The stimulus each cell commands. The envelope states what the normalized
-# range is worth in physical units; the normalized value states how much of it
-# this trial asks for.
-STIMULI = (
-    # Direct attitude steps. The envelope spans plus and minus twenty degrees,
-    # so a quarter of it is the five degree step and all of it is the twenty.
-    ("roll-step-5deg", "direct_attitude_thrust", "roll", "alia.direct.roll", 20.0 * DEGREE, 0.25),
-    ("roll-step-10deg", "direct_attitude_thrust", "roll", "alia.direct.roll", 20.0 * DEGREE, 0.5),
-    ("roll-step-20deg", "direct_attitude_thrust", "roll", "alia.direct.roll", 20.0 * DEGREE, 1.0),
-    ("pitch-step-5deg", "direct_attitude_thrust", "pitch", "alia.direct.pitch", 20.0 * DEGREE, 0.25),
-    ("pitch-step-10deg", "direct_attitude_thrust", "pitch", "alia.direct.pitch", 20.0 * DEGREE, 0.5),
-    ("pitch-step-20deg", "direct_attitude_thrust", "pitch", "alia.direct.pitch", 20.0 * DEGREE, 1.0),
-    ("yaw-step-10deg", "direct_attitude_thrust", "yaw", "alia.direct.yaw", 20.0 * DEGREE, 0.5),
-    # Return to trim. The reversal leaves the step and comes back, which is
-    # what the opposite return peak and the final body-rate measure.
-    ("roll-return-zero", "direct_attitude_thrust", "roll", "alia.direct.roll", 20.0 * DEGREE, 0.5),
-    ("pitch-return-zero", "direct_attitude_thrust", "pitch", "alia.direct.pitch", 20.0 * DEGREE, 0.5),
-    # Direct collective force, normalized against the identified hover force.
-    ("collective-step-up", "direct_attitude_thrust", "vertical", "alia.direct.collective", 0.3, 0.5),
-    ("collective-step-down", "direct_attitude_thrust", "vertical", "alia.direct.collective", 0.3, -0.5),
-    # Operator command families.
-    ("operator-roll-velocity", "operator_velocity", "roll", "alia.operator.horizontal", 5.0, 0.85),
-    ("operator-pitch-velocity", "operator_velocity", "pitch", "alia.operator.horizontal", 5.0, 0.85),
-    ("operator-vertical-velocity", "operator_velocity", "vertical", "alia.operator.vertical", 3.0, 0.85),
-    ("operator-yaw-rate", "operator_velocity", "yaw", "alia.operator.yaw", 1.5, 0.85),
-)
 
-# One representative of each control family carries every uncertainty factor,
-# so no factor is covered on one family only.
-FAMILY_REPRESENTATIVES = ("roll-step-10deg", "operator-roll-velocity")
+@dataclass(frozen=True)
+class VehicleTable:
+    """One vehicle's stimuli, read from its table file.
+
+    The stimulus tuples keep the shape the rest of this module already
+    expects: `(id, family, channel, envelope_id, endpoint, value)`.
+    """
+
+    vehicle_id: str
+    matrix_id: str
+    family_representatives: tuple[str, ...]
+    stimuli: tuple[tuple[str, str, str, str, float, float], ...]
+
+
+def default_vehicle_table_path() -> Path:
+    """Finds the one vehicle table beside this generator.
+
+    A copy of this script in a new example directory needs no edit: the
+    default follows whichever directory the script runs from, by finding the
+    single `*.vehicle.json` file there, rather than naming one vehicle.
+    """
+    here = Path(__file__).resolve().parent
+    candidates = sorted(here.glob("*.vehicle.json"))
+    if len(candidates) != 1:
+        raise SystemExit(
+            f"{here}: expected exactly one *.vehicle.json vehicle table, "
+            f"found {len(candidates)}; pass --vehicle-table explicitly"
+        )
+    return candidates[0]
+
+
+STIMULUS_FIELDS = ("id", "family", "channel", "envelope_id", "positive_endpoint", "normalized_value")
+
+
+def load_vehicle_table(path: Path) -> VehicleTable:
+    """Reads and validates one vehicle table file.
+
+    Raises ``ValueError`` when a required field is absent, at the top level or
+    inside one stimulus entry, so a malformed table fails at load time, before
+    anything is generated, rather than partway through.
+    """
+    document = json.loads(path.read_text(encoding="utf-8"))
+    required = ("vehicle_id", "matrix_id", "family_representatives", "stimuli")
+    missing = [field for field in required if field not in document]
+    if missing:
+        raise ValueError(f"{path}: missing field(s) {', '.join(missing)}")
+    stimuli = []
+    for index, entry in enumerate(document["stimuli"]):
+        missing = [field for field in STIMULUS_FIELDS if field not in entry]
+        if missing:
+            raise ValueError(f"{path}: stimulus {index} missing field(s) {', '.join(missing)}")
+        stimuli.append(
+            (
+                entry["id"],
+                entry["family"],
+                entry["channel"],
+                entry["envelope_id"],
+                float(entry["positive_endpoint"]),
+                float(entry["normalized_value"]),
+            )
+        )
+    return VehicleTable(
+        vehicle_id=document["vehicle_id"],
+        matrix_id=document["matrix_id"],
+        family_representatives=tuple(document["family_representatives"]),
+        stimuli=tuple(stimuli),
+    )
+
 
 # The calm condition every stimulus flies, and the uncertainty factors the
 # representatives fly. Each entry names the exact executable value the
@@ -102,12 +148,10 @@ PHASE_RELEASE_NS = 7000000000
 COMPLETION_NS = 10000000000
 PHASE_CEILING_NS = 12000000000
 
-# The domain that separates one partition's seed stream from another.
-PARTITION_SEED_DOMAIN = {
-    "training": "pilotage.alia250.matrix.training",
-    "promotion": "pilotage.alia250.matrix.promotion",
-    "final": "pilotage.alia250.matrix.final",
-}
+
+def partition_seed_domain(vehicle_id: str, partition: str) -> str:
+    """The domain that separates one partition's seed stream from another."""
+    return f"pilotage.{vehicle_id}.matrix.{partition}"
 
 
 def canonical(document: object) -> bytes:
@@ -119,13 +163,14 @@ def digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def run_seed(partition: str, stimulus: str, condition: str) -> int:
+def run_seed(vehicle_id: str, partition: str, stimulus: str, condition: str) -> int:
     """The deterministic seed one cell runs under.
 
     The partition domain separates the three streams, so no training seed can
     reappear on the run that decides what ships.
     """
-    material = f"{PARTITION_SEED_DOMAIN[partition]}\0{stimulus}\0{condition}".encode("utf-8")
+    domain = partition_seed_domain(vehicle_id, partition)
+    material = f"{domain}\0{stimulus}\0{condition}".encode("utf-8")
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "little")
 
 
@@ -223,7 +268,9 @@ def plant(values: dict) -> dict:
     }
 
 
-def condition_set(partition: str, name: str, stimulus: str, values: dict, seed: int) -> dict:
+def condition_set(
+    vehicle_id: str, partition: str, name: str, stimulus: str, values: dict, seed: int
+) -> dict:
     # The field order here is the canonical encoding order, so it must match
     # the declaration order of the condition contract exactly.
     return {
@@ -232,7 +279,7 @@ def condition_set(partition: str, name: str, stimulus: str, values: dict, seed: 
         # named condition to different stimuli hold different seeds, so an
         # identity that named only the condition would be two artifacts under
         # one name.
-        "id": f"alia250.{partition}.{name}.{stimulus}",
+        "id": f"{vehicle_id}.{partition}.{name}.{stimulus}",
         "revision": 1,
         "seed": seed,
         "wind": wind(values),
@@ -277,6 +324,7 @@ def waveform(stimulus: str, value: float) -> dict:
 
 
 def scenario(
+    vehicle_id: str,
     partition: str,
     stimulus: tuple,
     condition_name: str,
@@ -292,7 +340,7 @@ def scenario(
     mapping = "candidate_bound_curve" if family == "operator_velocity" else "affine_exact"
     return {
         "schema_version": SCENARIO_SCHEMA_VERSION,
-        "id": f"alia250.{partition}.{name}.{condition_name}",
+        "id": f"{vehicle_id}.{partition}.{name}.{condition_name}",
         "revision": 1,
         "phases": [
             {
@@ -367,7 +415,7 @@ def scenario(
     }
 
 
-def cells() -> list[tuple[str, tuple, str]]:
+def cells(vehicle: VehicleTable) -> list[tuple[str, tuple, str]]:
     """Every cell the matrix declares, in one stable order.
 
     Each stimulus flies calm in every partition, and each uncertainty factor
@@ -378,29 +426,30 @@ def cells() -> list[tuple[str, tuple, str]]:
     """
     declared = []
     for partition in PARTITIONS:
-        for stimulus in STIMULI:
+        for stimulus in vehicle.stimuli:
             declared.append((partition, stimulus, CALM))
         for condition in UNCERTAINTY:
-            for name in FAMILY_REPRESENTATIVES:
-                stimulus = next(entry for entry in STIMULI if entry[0] == name)
+            for name in vehicle.family_representatives:
+                stimulus = next(entry for entry in vehicle.stimuli if entry[0] == name)
                 declared.append((partition, stimulus, condition))
     return declared
 
 
-def generate() -> dict[str, bytes]:
+def generate(vehicle: VehicleTable) -> dict[str, bytes]:
     """The complete corpus, as a path-to-bytes map."""
     files: dict[str, bytes] = {}
     conditions = dict(CONDITIONS)
-    for partition, stimulus, condition_name in cells():
+    for partition, stimulus, condition_name in cells(vehicle):
         name = stimulus[0]
-        seed = run_seed(partition, name, condition_name)
+        seed = run_seed(vehicle.vehicle_id, partition, name, condition_name)
         condition = condition_set(
-            partition, condition_name, name, conditions[condition_name], seed
+            vehicle.vehicle_id, partition, condition_name, name, conditions[condition_name], seed
         )
         condition_bytes = canonical(condition)
         condition_path = f"conditions/{partition}.{condition_name}.{name}.json"
         files[condition_path] = condition_bytes
         document = scenario(
+            vehicle.vehicle_id,
             partition,
             stimulus,
             condition_name,
@@ -411,7 +460,7 @@ def generate() -> dict[str, bytes]:
     return files
 
 
-def manifest(files: dict[str, bytes]) -> bytes:
+def manifest(vehicle: VehicleTable, files: dict[str, bytes]) -> bytes:
     """The corpus index a checker reads before it opens one artifact."""
     entries = [
         {"path": path, "digest": digest(payload)} for path, payload in sorted(files.items())
@@ -419,19 +468,19 @@ def manifest(files: dict[str, bytes]) -> bytes:
     return canonical(
         {
             "schema_version": 1,
-            "matrix_id": "alia250-xplane",
+            "matrix_id": vehicle.matrix_id,
             "partitions": list(PARTITIONS),
-            "stimuli": [entry[0] for entry in STIMULI],
+            "stimuli": [entry[0] for entry in vehicle.stimuli],
             "conditions": [name for name, _ in CONDITIONS],
-            "family_representatives": list(FAMILY_REPRESENTATIVES),
-            "cell_count": len(cells()),
+            "family_representatives": list(vehicle.family_representatives),
+            "cell_count": len(cells(vehicle)),
             "document_count": len(files),
             "files": entries,
         }
     )
 
 
-def write(root: Path, files: dict[str, bytes]) -> None:
+def write(vehicle: VehicleTable, root: Path, files: dict[str, bytes]) -> None:
     for directory in ("conditions", "scenarios"):
         target = root / directory
         if target.exists():
@@ -439,10 +488,10 @@ def write(root: Path, files: dict[str, bytes]) -> None:
         target.mkdir(parents=True)
     for path, payload in files.items():
         (root / path).write_bytes(payload)
-    (root / "manifest.json").write_bytes(manifest(files))
+    (root / "manifest.json").write_bytes(manifest(vehicle, files))
 
 
-def check(root: Path, files: dict[str, bytes]) -> int:
+def check(vehicle: VehicleTable, root: Path, files: dict[str, bytes]) -> int:
     """Compare the checked-in corpus with what this generator produces."""
     failures = []
     for path, payload in sorted(files.items()):
@@ -456,7 +505,7 @@ def check(root: Path, files: dict[str, bytes]) -> int:
             relative = f"{directory}/{target.name}"
             if relative not in files:
                 failures.append(f"orphan {relative}")
-    expected_manifest = manifest(files)
+    expected_manifest = manifest(vehicle, files)
     manifest_path = root / "manifest.json"
     if not manifest_path.is_file() or manifest_path.read_bytes() != expected_manifest:
         failures.append("changed manifest.json")
@@ -482,11 +531,20 @@ def main() -> int:
         default=Path(__file__).resolve().parent,
         help="the directory the corpus is written to or checked against",
     )
+    parser.add_argument(
+        "--vehicle-table",
+        type=Path,
+        default=None,
+        help="the vehicle table this generator reads its stimuli from "
+        "(default: the one *.vehicle.json file beside this script)",
+    )
     arguments = parser.parse_args()
-    files = generate()
+    table_path = arguments.vehicle_table or default_vehicle_table_path()
+    vehicle = load_vehicle_table(table_path)
+    files = generate(vehicle)
     if arguments.check:
-        return check(arguments.out, files)
-    write(arguments.out, files)
+        return check(vehicle, arguments.out, files)
+    write(vehicle, arguments.out, files)
     print(f"generate_matrix: wrote {len(files)} artifacts and one manifest")
     return 0
 

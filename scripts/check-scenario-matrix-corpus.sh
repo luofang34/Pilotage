@@ -46,7 +46,8 @@ trap 'rm -rf "$scratch"' EXIT
 python3 "$generator" --out "$scratch" >/dev/null
 
 if ! diff -ru "$scratch" "$corpus" \
-    --exclude='generate_matrix.py' --exclude='README.md' --exclude='*.template.json'; then
+    --exclude='generate_matrix.py' --exclude='README.md' --exclude='*.template.json' \
+    --exclude='*.vehicle.json' --exclude='__pycache__'; then
     echo "FORBIDDEN: the checked-in scenario corpus is not the generator output" >&2
     echo "Run generate_matrix.py and commit what it writes." >&2
     exit 1

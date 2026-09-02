@@ -1,0 +1,130 @@
+{
+  "vehicle_id": "alia250",
+  "matrix_id": "alia250-xplane",
+  "family_representatives": [
+    "roll-step-10deg",
+    "operator-roll-velocity"
+  ],
+  "stimuli": [
+    {
+      "id": "roll-step-5deg",
+      "family": "direct_attitude_thrust",
+      "channel": "roll",
+      "envelope_id": "alia.direct.roll",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.25
+    },
+    {
+      "id": "roll-step-10deg",
+      "family": "direct_attitude_thrust",
+      "channel": "roll",
+      "envelope_id": "alia.direct.roll",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.5
+    },
+    {
+      "id": "roll-step-20deg",
+      "family": "direct_attitude_thrust",
+      "channel": "roll",
+      "envelope_id": "alia.direct.roll",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 1.0
+    },
+    {
+      "id": "pitch-step-5deg",
+      "family": "direct_attitude_thrust",
+      "channel": "pitch",
+      "envelope_id": "alia.direct.pitch",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.25
+    },
+    {
+      "id": "pitch-step-10deg",
+      "family": "direct_attitude_thrust",
+      "channel": "pitch",
+      "envelope_id": "alia.direct.pitch",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.5
+    },
+    {
+      "id": "pitch-step-20deg",
+      "family": "direct_attitude_thrust",
+      "channel": "pitch",
+      "envelope_id": "alia.direct.pitch",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 1.0
+    },
+    {
+      "id": "yaw-step-10deg",
+      "family": "direct_attitude_thrust",
+      "channel": "yaw",
+      "envelope_id": "alia.direct.yaw",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.5
+    },
+    {
+      "id": "roll-return-zero",
+      "family": "direct_attitude_thrust",
+      "channel": "roll",
+      "envelope_id": "alia.direct.roll",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.5
+    },
+    {
+      "id": "pitch-return-zero",
+      "family": "direct_attitude_thrust",
+      "channel": "pitch",
+      "envelope_id": "alia.direct.pitch",
+      "positive_endpoint": 0.3490658503988659,
+      "normalized_value": 0.5
+    },
+    {
+      "id": "collective-step-up",
+      "family": "direct_attitude_thrust",
+      "channel": "vertical",
+      "envelope_id": "alia.direct.collective",
+      "positive_endpoint": 0.3,
+      "normalized_value": 0.5
+    },
+    {
+      "id": "collective-step-down",
+      "family": "direct_attitude_thrust",
+      "channel": "vertical",
+      "envelope_id": "alia.direct.collective",
+      "positive_endpoint": 0.3,
+      "normalized_value": -0.5
+    },
+    {
+      "id": "operator-roll-velocity",
+      "family": "operator_velocity",
+      "channel": "roll",
+      "envelope_id": "alia.operator.horizontal",
+      "positive_endpoint": 5.0,
+      "normalized_value": 0.85
+    },
+    {
+      "id": "operator-pitch-velocity",
+      "family": "operator_velocity",
+      "channel": "pitch",
+      "envelope_id": "alia.operator.horizontal",
+      "positive_endpoint": 5.0,
+      "normalized_value": 0.85
+    },
+    {
+      "id": "operator-vertical-velocity",
+      "family": "operator_velocity",
+      "channel": "vertical",
+      "envelope_id": "alia.operator.vertical",
+      "positive_endpoint": 3.0,
+      "normalized_value": 0.85
+    },
+    {
+      "id": "operator-yaw-rate",
+      "family": "operator_velocity",
+      "channel": "yaw",
+      "envelope_id": "alia.operator.yaw",
+      "positive_endpoint": 1.5,
+      "normalized_value": 0.85
+    }
+  ]
+}
