@@ -37,6 +37,54 @@ fn an_ancestor_entry_change_poison_stops_the_next_action() {
     assert_snapshot(&tuner, &directory, &state, &proposals, &expected);
 }
 
+/// States the interval the catalog audit holds at.
+///
+/// The audit runs at each action boundary, not at each telemetry sample, so a
+/// change made while a sample is in flight does not stop that sample. One
+/// sample drives two authorized actions, the observation and the directive it
+/// emits, and both take place. The run then refuses to finish and the journal
+/// is poisoned, so the changed bytes reach no result and no later action.
+///
+/// The error variant says which check refused. A sample-time refusal reaches
+/// the caller as `TuneError::Adapter`, because the authority hook reports
+/// through the scenario runtime; the terminal audit reports the storage
+/// failure itself. The contrast is
+/// `tests/tuner/scenario_authority.rs::authority_change_during_sampling_precedes_vehicle_action`,
+/// where a moved head does stop the sample, because authority is checked at
+/// every sample and costs the same at every journal length.
+#[test]
+fn an_ancestor_entry_change_while_sampling_stops_the_run_at_its_terminal() {
+    let directory = TestDirectory::new("sampled-ancestor-entry");
+    let state = FakeHandle::new();
+    let (mut tuner, proposals) = open_tuner(&directory, state.clone(), Vec::new());
+    let started = serde_json::to_vec(&tuner.journal().entries()[0]).expect("encode started entry");
+    let digest = crate::identity::digest_bytes(&started);
+    state.0.borrow_mut().change_object_on_sample = Some(
+        directory
+            .path()
+            .join("entries")
+            .join(format!("{digest}.json")),
+    );
+
+    let error = tuner
+        .run_training_attempts_blocking(0)
+        .expect_err("reject changed ancestor");
+
+    let acted = {
+        let state = state.0.borrow();
+        (
+            state.scenario_action_observe_count,
+            state.scenario_action_stop_count,
+            state.scenario_action_cleanup_count,
+        )
+    };
+    assert_eq!(acted, (2, 1, 1));
+    assert_digest_mismatch(error);
+    let poisoned = EvidenceSnapshot::new(&tuner, &directory, &state, &proposals);
+    assert_poisoned(tuner.freeze_candidate());
+    assert_snapshot(&tuner, &directory, &state, &proposals, &poisoned);
+}
+
 #[test]
 fn a_missing_stage_poison_stops_the_next_action() {
     let directory = TestDirectory::new("missing-stage");

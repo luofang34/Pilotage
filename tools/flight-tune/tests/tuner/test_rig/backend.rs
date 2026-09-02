@@ -228,9 +228,13 @@ impl CampaignBackend for FakeBackend {
         state.lifecycle.push("sample".to_owned());
         let values = BTreeMap::from([("gain".to_owned(), state.vehicle.gain)]);
         let head_change = state.change_head_on_sample.take();
+        let object_change = state.change_object_on_sample.take();
         drop(state);
         if let Some(root) = head_change {
             change_head_digest(&root);
+        }
+        if let Some(object) = object_change {
+            change_object_bytes(&object);
         }
         Ok(SampleEvent::Sample(TelemetrySample {
             sequence,
@@ -394,4 +398,10 @@ fn change_head_digest(root: &Path) {
         b'0'
     };
     std::fs::write(head, bytes).expect("change journal head");
+}
+
+fn change_object_bytes(path: &Path) {
+    let mut bytes = std::fs::read(path).expect("read journal object");
+    bytes.push(b' ');
+    std::fs::write(path, bytes).expect("change journal object");
 }
