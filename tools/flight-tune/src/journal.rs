@@ -1,6 +1,7 @@
 //! Content-addressed tuning journal and campaign state.
 
 mod attempt;
+mod authority;
 mod closure;
 mod event;
 mod evidence;
@@ -26,7 +27,7 @@ pub use evidence::{
 pub use proof::{AUTHENTICATED_EVALUATION_PROOF_SCHEMA_VERSION, AuthenticatedEvaluationProof};
 pub use retry::quarantine_reason_digest;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
@@ -210,69 +211,12 @@ impl Journal {
 
     pub(crate) fn read_candidate(&self, digest: Digest) -> Result<Candidate, TuneError> {
         self.ensure_usable()?;
-        storage::read_candidate(&self.storage, digest).inspect_err(|_| {
-            self.poisoned.store(true, Ordering::Release);
-        })
+        storage::read_candidate(&self.storage, digest).inspect_err(|_| self.poison())
     }
 
     /// Returns the frozen stage this journal was opened against.
     pub(crate) const fn stage(&self) -> &SearchStage {
         &self.stage
-    }
-
-    pub(crate) fn ensure_usable(&self) -> Result<(), TuneError> {
-        if self.poisoned.load(Ordering::Acquire) {
-            return Err(TuneError::JournalPoisoned);
-        }
-        storage::verify_live_snapshot(
-            &self.storage,
-            &self.writer,
-            &self.stage,
-            &self.entries,
-            &self.entry_digests,
-        )
-        .inspect_err(|_| {
-            self.poisoned.store(true, Ordering::Release);
-        })
-    }
-
-    pub(crate) fn poison(&self) {
-        self.poisoned.store(true, Ordering::Release);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn ensure_usable_with_final_hook_for_test(
-        &self,
-        before_final_writer_validation: impl FnOnce(),
-    ) -> Result<(), TuneError> {
-        if self.poisoned.load(Ordering::Acquire) {
-            return Err(TuneError::JournalPoisoned);
-        }
-        storage::verify_live_snapshot_with_final_hook_for_test(
-            &self.storage,
-            &self.writer,
-            &self.stage,
-            &self.entries,
-            &self.entry_digests,
-            before_final_writer_validation,
-        )
-        .inspect_err(|_| {
-            self.poisoned.store(true, Ordering::Release);
-        })
-    }
-
-    fn record_storage_result<T>(&self, result: Result<T, TuneError>) -> Result<T, TuneError> {
-        result.inspect_err(|error| {
-            if error.poisons_journal() {
-                self.poisoned.store(true, Ordering::Release);
-            }
-        })
-    }
-
-    fn record_append_result<T>(&self, result: Result<T, TuneError>) -> Result<T, TuneError> {
-        result.inspect_err(|_| {
-            self.poisoned.store(true, Ordering::Release);
-        })
     }
 
     pub(crate) fn state(&self) -> &JournalState {

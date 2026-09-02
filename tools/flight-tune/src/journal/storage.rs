@@ -126,13 +126,15 @@ pub(super) fn verify_live_snapshot_with_final_hook_for_test(
     )
 }
 
-fn verify_live_snapshot_with_hook(
+/// Verifies that this process still holds authority over the exact live head.
+///
+/// The check reads the layout marker, the four directory handles, the writer
+/// lease, and the head pointer. It reads no chain entry, no search stage, and
+/// no candidate, so its cost is the same at every journal length.
+pub(super) fn verify_live_authority(
     storage: &JournalStorage,
     writer: &WriterLock,
-    stage: &SearchStage,
-    entries: &[JournalEntry],
     entry_digests: &[Digest],
-    before_final_writer_validation: impl FnOnce(),
 ) -> Result<(), TuneError> {
     layout::verify_authorized(&storage.root)?;
     layout::verify_handles(
@@ -142,14 +144,28 @@ fn verify_live_snapshot_with_hook(
         &storage.entries,
     )?;
     writer.validate(&storage.root).map_err(storage_error)?;
-    let expected_head = entry_digests
+    verify_head_exact(storage, live_head(entry_digests)?)
+}
+
+fn live_head(entry_digests: &[Digest]) -> Result<Digest, TuneError> {
+    entry_digests
         .last()
         .copied()
-        .ok_or_else(|| invalid_journal("the live journal has no head"))?;
-    verify_head_exact(storage, expected_head)?;
+        .ok_or_else(|| invalid_journal("the live journal has no head"))
+}
+
+fn verify_live_snapshot_with_hook(
+    storage: &JournalStorage,
+    writer: &WriterLock,
+    stage: &SearchStage,
+    entries: &[JournalEntry],
+    entry_digests: &[Digest],
+    before_final_writer_validation: impl FnOnce(),
+) -> Result<(), TuneError> {
+    verify_live_authority(storage, writer, entry_digests)?;
     verify_entry_chain(storage, entries, entry_digests)?;
     verify_stage_and_candidates(storage, stage, entries)?;
-    verify_head_exact(storage, expected_head)?;
+    verify_head_exact(storage, live_head(entry_digests)?)?;
     layout::verify_authorized(&storage.root)?;
     layout::verify_handles(
         &storage.marker,

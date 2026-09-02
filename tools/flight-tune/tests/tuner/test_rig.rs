@@ -210,6 +210,8 @@ pub struct FakeState {
     pub change_head_on_prepare: Option<PathBuf>,
     pub change_head_on_action_prepare: Option<PathBuf>,
     pub change_head_on_sample: Option<PathBuf>,
+    /// The durable journal object whose bytes change while a sample is made.
+    pub change_object_on_sample: Option<PathBuf>,
     pub bad_scenario_readback: bool,
     pub bad_mission_content: bool,
     pub bad_mission_revision: bool,
