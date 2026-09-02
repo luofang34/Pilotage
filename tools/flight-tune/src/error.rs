@@ -2,6 +2,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+mod open_rollback;
+
+pub use open_rollback::{OpenRollbackOperation, OpenRollbackReport};
+
 use crate::{AdapterError, Digest, EvaluatorError};
 
 /// An error from tuner validation, execution, or storage.
@@ -85,6 +89,26 @@ pub enum TuneError {
         /// The terminal sequence error.
         #[source]
         terminal: Box<TuneError>,
+    },
+    /// An open transaction failed and its reverse cleanup did not complete.
+    ///
+    /// The primary failure is the reason the open stopped. The report
+    /// states every cleanup operation that ran after it, so a vehicle
+    /// rollback failure cannot hide a simulator-session rollback failure.
+    #[error("open transaction failed: {primary}; reverse cleanup did not complete: {rollback}")]
+    OpenAndRollbackFailed {
+        /// The failure that stopped the open.
+        primary: Box<TuneError>,
+        /// Every cleanup operation, in the order it ran.
+        #[source]
+        rollback: OpenRollbackReport,
+    },
+    /// A prior open left a resource that this open cannot prove absent.
+    #[error("a prior open transaction is not reconciled: {report}")]
+    OpenNotReconciled {
+        /// Every reconciliation operation, in the order it ran.
+        #[source]
+        report: OpenRollbackReport,
     },
     /// A gate or metric evaluator operation failed.
     #[error("{implementation} failed during {operation}: {source}")]

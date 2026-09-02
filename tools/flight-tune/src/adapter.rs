@@ -5,13 +5,19 @@ use pilotage_trial::Digest;
 
 use crate::ArtifactIdentity;
 
+pub mod conformance;
+
 mod lifecycle;
+mod rollback;
 mod terminal;
 mod transition;
 
 pub use lifecycle::{
     CampaignBackend, CandidateReceipt, RunPreparationReceipt, SampleEvent, ScenarioStartReceipt,
     SimulatorVehicleAdapter, SimulatorVehicleFactory, TelemetrySample,
+};
+pub use rollback::{
+    SimulatorSessionAcquisition, VehicleBindingAcquisition, VehicleBindingRollback,
 };
 pub use terminal::{RunTerminalAdapter, RunTerminalCapabilities};
 pub(crate) use transition::planning_context_digest;
@@ -75,6 +81,18 @@ pub struct SessionChallenge {
 }
 
 impl SessionChallenge {
+    /// Mints a session challenge for a downstream test.
+    ///
+    /// The harness mints the real one from the journal session identity. A
+    /// crate that has to drive a backend's session lifecycle in isolation
+    /// enables the `test-support` feature; a release build does not
+    /// compile this function at all.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub const fn for_test(session_digest: Digest) -> Self {
+        Self::new(session_digest)
+    }
+
     pub(crate) const fn new(session_digest: Digest) -> Self {
         Self { session_digest }
     }

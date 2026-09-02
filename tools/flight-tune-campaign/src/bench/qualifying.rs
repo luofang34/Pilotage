@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use flight_tune::{
     AdapterError, ArtifactIdentity, Digest, EvaluatorError, GateEvaluator, GateOutcome,
     MissionReference, SimulatorCapability, SimulatorVehicleFactory, TelemetrySample,
-    TransitionBindingReceipt, VehicleBinding, VehicleBindingReceipt,
+    TransitionBindingReceipt, VehicleBinding, VehicleBindingAcquisition, VehicleBindingReceipt,
+    VehicleBindingRollback,
 };
 
 use super::parameter;
@@ -56,11 +57,61 @@ impl BenchVehicleFactory {
     }
 }
 
+/// Releases or contains one exact bench vehicle binding.
+///
+/// The bench vehicle is one settled command law over shared state.
+/// Releasing the binding drops that law, so an open that failed after the
+/// bind leaves no candidate active for the next open to inherit.
+#[derive(Debug)]
+pub struct BenchVehicleBindingRollback {
+    handle: BenchHandle,
+    vehicle_digest: Digest,
+    scenario_runtime_digest: Digest,
+}
+
+impl VehicleBindingRollback for BenchVehicleBindingRollback {
+    fn release_binding_blocking(
+        &mut self,
+        acquisition: &VehicleBindingAcquisition,
+    ) -> Result<(), AdapterError> {
+        if acquisition.session_digest().is_zero() {
+            return Err(AdapterError::new(
+                "the vehicle acquisition names no tuning session",
+            ));
+        }
+        if acquisition.vehicle_digest() != self.vehicle_digest
+            || acquisition.scenario_runtime_digest() != self.scenario_runtime_digest
+        {
+            return Err(AdapterError::new(
+                "the vehicle acquisition names another bench vehicle binding",
+            ));
+        }
+        let mut settled = self.handle.0.borrow_mut();
+        settled.response = None;
+        settled.digest = None;
+        Ok(())
+    }
+}
+
 impl SimulatorVehicleFactory for BenchVehicleFactory {
     type Adapter = BenchVehicleAdapter;
+    type Rollback = BenchVehicleBindingRollback;
 
     fn vehicle_identity(&self) -> &ArtifactIdentity {
         &self.identity
+    }
+
+    fn rollback_handle(&self) -> Self::Rollback {
+        BenchVehicleBindingRollback {
+            handle: self.handle.clone(),
+            vehicle_digest: self.identity.digest,
+            // A factory whose action port has no valid identity cannot
+            // bind, so no acquisition can match this zero digest.
+            scenario_runtime_digest: flight_tune::scenario_runtime_identity(
+                &self.action_port_identity,
+            )
+            .map_or_else(|_| Digest::from_bytes([0; 32]), |identity| identity.digest),
+        }
     }
 
     fn scenario_action_port_identity(&self) -> &ArtifactIdentity {

@@ -17,5 +17,8 @@ pilotage-tuning-feedback = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# The bench open-rollback tests drive a session lifecycle directly, which
+# needs the harness-minted challenge that `test-support` exposes.
+flight-tune = { workspace = true, features = ["test-support"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

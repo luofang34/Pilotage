@@ -17,7 +17,8 @@ use flight_tune::{
     AdapterError, ArtifactIdentity, Candidate, CandidateReceipt, CandidateTransitionReceipt,
     CandidateTransitionRequest, Digest, RunExecutionContext, SimulatorCapability,
     SimulatorVehicleAdapter, SimulatorVehicleFactory, TransitionBindingReceipt, TuneError,
-    VehicleBinding, VehicleBindingReceipt, scenario_runtime_identity,
+    VehicleBinding, VehicleBindingAcquisition, VehicleBindingReceipt, VehicleBindingRollback,
+    scenario_runtime_identity,
 };
 use pilotage_control_feel::{FeelDigest, ValidatedFlightFeelProfile};
 use sha2::{Digest as _, Sha256};
@@ -269,13 +270,64 @@ impl<M: CandidateFeelMapping, C: AviateFeelController> AviateVehicleFactory<M, C
     }
 }
 
+/// Releases or contains one exact Aviate vehicle binding.
+///
+/// The Aviate bind maps identities and moves values: it computes the
+/// action-port digest, mints the transition receipt, and hands the
+/// controller to an adapter. None of those reach the controller, which is
+/// written only by candidate activation, and activation needs the binding
+/// the failed open never handed over. So a bind that fails at any step
+/// leaves nothing outside the value it did not return.
+///
+/// Release states that fact for one exact acquisition. It refuses an
+/// acquisition that names another vehicle or another action port, because
+/// a binding this factory did not create is not this factory's to release.
+#[derive(Debug, Clone)]
+pub struct AviateVehicleBindingRollback {
+    vehicle_digest: Digest,
+    scenario_runtime_digest: Digest,
+}
+
+impl VehicleBindingRollback for AviateVehicleBindingRollback {
+    fn release_binding_blocking(
+        &mut self,
+        acquisition: &VehicleBindingAcquisition,
+    ) -> Result<(), AdapterError> {
+        if acquisition.session_digest().is_zero() {
+            return Err(AdapterError::new(
+                "the vehicle acquisition names no tuning session",
+            ));
+        }
+        if acquisition.vehicle_digest() != self.vehicle_digest
+            || acquisition.scenario_runtime_digest() != self.scenario_runtime_digest
+        {
+            return Err(AdapterError::new(
+                "the vehicle acquisition names another Aviate vehicle binding",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl<M: CandidateFeelMapping, C: AviateFeelController> SimulatorVehicleFactory
     for AviateVehicleFactory<M, C>
 {
     type Adapter = AviateVehicleAdapter<M, C>;
+    type Rollback = AviateVehicleBindingRollback;
 
     fn vehicle_identity(&self) -> &ArtifactIdentity {
         &self.vehicle
+    }
+
+    fn rollback_handle(&self) -> Self::Rollback {
+        AviateVehicleBindingRollback {
+            vehicle_digest: self.vehicle.digest,
+            // A factory whose action port has no valid identity cannot bind
+            // at all, so an acquisition can never match this zero digest.
+            scenario_runtime_digest: self
+                .scenario_runtime_digest()
+                .unwrap_or_else(|_| Digest::from_bytes([0; 32])),
+        }
     }
 
     fn scenario_action_port_identity(&self) -> &ArtifactIdentity {

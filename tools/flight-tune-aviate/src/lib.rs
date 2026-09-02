@@ -60,8 +60,8 @@ pub use transition_authorization::{
     TransitionValidator, validator_identity,
 };
 pub use vehicle::{
-    AviateFeelController, AviateVehicleAdapter, AviateVehicleFactory, CandidateFeelMapping,
-    VEHICLE_ID, bind_run_intent, require_run_intent, vehicle_identity,
+    AviateFeelController, AviateVehicleAdapter, AviateVehicleBindingRollback, AviateVehicleFactory,
+    CandidateFeelMapping, VEHICLE_ID, bind_run_intent, require_run_intent, vehicle_identity,
 };
 
 /// Runs the process-supervisor helper protocol.

@@ -13,9 +13,9 @@ mod vehicle_policy;
 
 pub use bench::{
     BENCH_FINAL_TRIAL_ID, BENCH_PROMOTION_TRIAL_ID, BenchBackend, BenchGates, BenchHandle,
-    BenchVehicle, BenchVehicleAdapter, BenchVehicleFactory, bench_mission_revision_id,
-    bench_physical_target, bench_response_targets, bench_scenario, bench_stage, parameter,
-    warm_start_parameters,
+    BenchVehicle, BenchVehicleAdapter, BenchVehicleBindingRollback, BenchVehicleFactory,
+    bench_mission_revision_id, bench_physical_target, bench_response_targets, bench_scenario,
+    bench_stage, parameter, warm_start_parameters,
 };
 pub use error::CampaignError;
 pub use publish::publish_journal_evidence_blocking;

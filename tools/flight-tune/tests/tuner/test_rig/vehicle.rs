@@ -2,7 +2,7 @@ use flight_tune::{
     AdapterError, ArtifactIdentity, Candidate, CandidateReceipt, CandidateTransitionReceipt,
     CandidateTransitionRequest, Digest, RunExecutionContext, SimulatorCapability,
     SimulatorVehicleAdapter, SimulatorVehicleFactory, TransitionBindingReceipt, VehicleBinding,
-    VehicleBindingReceipt,
+    VehicleBindingAcquisition, VehicleBindingReceipt, VehicleBindingRollback,
 };
 
 use super::{FakeHandle, identity};
@@ -163,13 +163,64 @@ impl FakeFactory {
         factory.adjacency_policy_digest = digest_text(content);
         factory
     }
+
+    /// Names the binding acquisition this factory answers for.
+    pub fn binding_acquisition(&self, session_digest: Digest) -> VehicleBindingAcquisition {
+        VehicleBindingAcquisition::new(
+            session_digest,
+            self.identity.digest,
+            runtime_digest(&self.action_port_identity),
+        )
+    }
+}
+
+/// Releases or contains one exact fake vehicle binding.
+pub struct FakeVehicleRollback {
+    state: FakeHandle,
+    vehicle_digest: Digest,
+    scenario_runtime_digest: Digest,
+}
+
+impl VehicleBindingRollback for FakeVehicleRollback {
+    fn release_binding_blocking(
+        &mut self,
+        acquisition: &VehicleBindingAcquisition,
+    ) -> Result<(), AdapterError> {
+        if acquisition.session_digest().is_zero()
+            || acquisition.vehicle_digest() != self.vehicle_digest
+            || acquisition.scenario_runtime_digest() != self.scenario_runtime_digest
+        {
+            return Err(AdapterError::new(
+                "the acquisition names another vehicle binding",
+            ));
+        }
+        let mut state = self.state.0.borrow_mut();
+        state.open_order.push("release_binding".to_owned());
+        state.vehicle.release_count = state.vehicle.release_count.wrapping_add(1);
+        if state.vehicle.fail_release_on == Some(state.vehicle.release_count) {
+            return Err(AdapterError::new(
+                "the vehicle did not acknowledge the binding release",
+            ));
+        }
+        state.vehicle.bound = false;
+        Ok(())
+    }
 }
 
 impl SimulatorVehicleFactory for FakeFactory {
     type Adapter = FakeVehicle;
+    type Rollback = FakeVehicleRollback;
 
     fn vehicle_identity(&self) -> &ArtifactIdentity {
         &self.identity
+    }
+
+    fn rollback_handle(&self) -> Self::Rollback {
+        FakeVehicleRollback {
+            state: self.state.clone(),
+            vehicle_digest: self.identity.digest,
+            scenario_runtime_digest: runtime_digest(&self.action_port_identity),
+        }
     }
 
     fn scenario_action_port_identity(&self) -> &ArtifactIdentity {
@@ -190,7 +241,18 @@ impl SimulatorVehicleFactory for FakeFactory {
     ) -> Result<VehicleBinding<Self::Adapter>, AdapterError> {
         let mut state = self.state.0.borrow_mut();
         state.vehicle.bind_count = state.vehicle.bind_count.wrapping_add(1);
+        state.open_order.push("bind".to_owned());
+        // The binding exists from here on, whether or not the rest of the
+        // bind completes, so a failure below is a partial bind.
+        state.vehicle.bound = true;
+        let fail_bind = state.vehicle.fail_bind;
+        let bad_receipt = state.vehicle.bad_binding_receipt;
         drop(state);
+        if fail_bind {
+            return Err(AdapterError::new(
+                "the vehicle stopped part way through the binding",
+            ));
+        }
         if !self.allow_binding {
             return Err(AdapterError::new(
                 "hardware-like adapter has no simulator session binding",
@@ -206,15 +268,21 @@ impl SimulatorVehicleFactory for FakeFactory {
             VehicleBindingReceipt {
                 session_digest: capability.session_digest(),
                 vehicle_digest: self.identity.digest,
-                scenario_runtime_digest: flight_tune::scenario_runtime_identity(
-                    &self.action_port_identity,
-                )
-                .map_err(|error| AdapterError::new(error.to_string()))?
-                .digest,
+                scenario_runtime_digest: if bad_receipt {
+                    Digest::from_bytes([61; 32])
+                } else {
+                    runtime_digest(&self.action_port_identity)
+                },
             },
             transition,
         )
     }
+}
+
+fn runtime_digest(action_port: &ArtifactIdentity) -> Digest {
+    flight_tune::scenario_runtime_identity(action_port)
+        .expect("scenario runtime identity")
+        .digest
 }
 
 fn candidate_gain(candidate: &Candidate) -> Result<f64, AdapterError> {

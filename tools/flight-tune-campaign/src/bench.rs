@@ -29,14 +29,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use flight_tune::{
-    AdapterError, ArtifactIdentity, CampaignBackend, Candidate, Digest, KinematicTruth,
-    MissionCapability, MissionDirective, MissionDocument, MissionReference, ReceiptResult,
-    RunExecutionContext, RunPreparationReceipt, SampleEvent, ScenarioFrame,
-    ScenarioObservationReceipt, ScenarioRuntime, ScenarioRuntimeError, ScenarioStartReceipt,
-    ScenarioStopContext, SessionChallenge, SimulatorCapability, SimulatorSessionReceipt,
-    TelemetrySample, scenario_runtime_identity,
+    AdapterError, ArtifactIdentity, CampaignBackend, Digest, KinematicTruth, MissionCapability,
+    MissionDirective, MissionDocument, MissionReference, ReceiptResult, RunExecutionContext,
+    RunPreparationReceipt, SampleEvent, ScenarioFrame, ScenarioObservationReceipt, ScenarioRuntime,
+    ScenarioRuntimeError, ScenarioStartReceipt, ScenarioStopContext, SessionChallenge,
+    SimulatorCapability, SimulatorSessionAcquisition, SimulatorSessionReceipt, TelemetrySample,
+    scenario_runtime_identity,
 };
-use pilotage_control_feel::{AxisCurve, AxisDemandShaper, AxisDynamics, AxisResponse, NeutralBand};
+use pilotage_control_feel::{AxisDemandShaper, AxisResponse};
 
 use crate::scoring::channel;
 
@@ -125,59 +125,6 @@ struct Settled {
 #[derive(Debug, Clone, Default)]
 pub struct BenchHandle(Rc<RefCell<Settled>>);
 
-/// Reads one candidate's parameters as an axis response.
-///
-/// # Errors
-///
-/// Returns [`AdapterError`] when a parameter is absent or not finite.
-fn response_from(candidate: &Candidate) -> Result<AxisResponse, AdapterError> {
-    let read = |name: &str| -> Result<f64, AdapterError> {
-        candidate
-            .parameters()
-            .get(name)
-            .copied()
-            .filter(|value| value.is_finite())
-            .ok_or_else(|| AdapterError::new(format!("the candidate states no {name}")))
-    };
-    let apply_accel = read(parameter::APPLY_ACCEL)?;
-    let apply_jerk = read(parameter::APPLY_JERK)?;
-    let release_factor = read(parameter::RELEASE_FACTOR)?;
-    let enter = read(parameter::NEUTRAL_ENTER)?;
-    let center_expo = read(parameter::CENTER_EXPO)? as f32;
-    Ok(AxisResponse {
-        curve: AxisCurve {
-            deadzone: read(parameter::DEADZONE)? as f32,
-            center_expo,
-            // The profile validator refuses an outer expo above the
-            // center one; folding the search there keeps every sealed
-            // winner a law a real profile will load. The outer blend
-            // begins where the shipped law's does, so the trial's firm
-            // input exercises it.
-            outer_expo: (read(parameter::OUTER_EXPO)? as f32).min(center_expo),
-            outer_start: 0.7,
-        },
-        neutral: NeutralBand {
-            active_enter: enter as f32,
-            // Leaving is harder than staying, or an input on the edge chatters.
-            // The search sets the entry and the exit follows it, so no
-            // candidate can propose a band with no hysteresis in it.
-            active_exit: (enter * 0.65) as f32,
-            dwell_ms: read(parameter::NEUTRAL_DWELL_MS)?.max(0.0) as u32,
-        },
-        dynamics: AxisDynamics {
-            apply_accel: apply_accel as f32,
-            apply_jerk: apply_jerk as f32,
-            // Letting go is never slower than asking, whatever the search
-            // proposes: a release that lagged the apply would take longer to
-            // stop commanding than to start.
-            release_accel: (apply_accel * release_factor.max(1.0)) as f32,
-            release_jerk: (apply_jerk * release_factor.max(1.0)) as f32,
-            reversal_accel: apply_accel as f32,
-            reversal_jerk: apply_jerk as f32,
-        },
-    })
-}
-
 /// The simulator half: it flies the trial and reports the channels.
 #[derive(Debug)]
 pub struct BenchBackend {
@@ -186,6 +133,7 @@ pub struct BenchBackend {
     simulator: ArtifactIdentity,
     airframe: ArtifactIdentity,
     scenario_runtime: ArtifactIdentity,
+    session: Option<Digest>,
     run: Option<Run>,
 }
 
@@ -222,6 +170,7 @@ impl BenchBackend {
             airframe: build(airframe_id, airframe_digest)?,
             scenario_runtime: scenario_runtime_identity(&bench_action_port_identity()?)
                 .map_err(to_adapter)?,
+            session: None,
             run: None,
         })
     }
@@ -296,11 +245,39 @@ impl CampaignBackend for BenchBackend {
         &mut self,
         challenge: &SessionChallenge,
     ) -> Result<SimulatorSessionReceipt, AdapterError> {
+        self.session = Some(challenge.session_digest());
         Ok(SimulatorSessionReceipt {
             session_digest: challenge.session_digest(),
             simulator_digest: self.simulator.digest,
             airframe_digest: self.airframe.digest,
         })
+    }
+
+    fn close_session_blocking(
+        &mut self,
+        acquisition: &SimulatorSessionAcquisition,
+    ) -> Result<(), AdapterError> {
+        if acquisition.simulator_digest() != self.simulator.digest
+            || acquisition.airframe_digest() != self.airframe.digest
+        {
+            return Err(AdapterError::new(
+                "the acquisition names another bench simulator or airframe",
+            ));
+        }
+        if self
+            .session
+            .is_some_and(|digest| digest != acquisition.session_digest())
+        {
+            return Err(AdapterError::new(
+                "the acquisition names another bench tuning session",
+            ));
+        }
+        // The bench plant is one process and one struct. Dropping the
+        // session and the run is the whole of its cleanup, and repeating
+        // it on a backend that holds neither is the same success.
+        self.session = None;
+        self.run = None;
+        Ok(())
     }
 
     fn prepare_blocking(
@@ -488,13 +465,16 @@ pub(super) fn to_adapter(error: flight_tune::TuneError) -> AdapterError {
 
 mod adapter;
 mod qualifying;
+mod response;
 
 pub use adapter::BenchVehicleAdapter;
+
 pub use qualifying::{
-    BENCH_FINAL_TRIAL_ID, BENCH_PROMOTION_TRIAL_ID, BenchGates, BenchVehicleFactory,
-    bench_mission_revision_id, bench_physical_target, bench_response_targets, bench_scenario,
-    bench_stage, bench_stored_mission, warm_start_parameters,
+    BENCH_FINAL_TRIAL_ID, BENCH_PROMOTION_TRIAL_ID, BenchGates, BenchVehicleBindingRollback,
+    BenchVehicleFactory, bench_mission_revision_id, bench_physical_target, bench_response_targets,
+    bench_scenario, bench_stage, bench_stored_mission, warm_start_parameters,
 };
+use response::response_from;
 
 #[cfg(test)]
 mod tests;
