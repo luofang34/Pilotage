@@ -75,7 +75,7 @@ impl ResourceSet {
         Ok(Self { entries })
     }
 
-    /// Read a bound file or an archive tile. Missing tiles return `None`.
+    /// Read a bound file or decoded archive tile. Missing tiles return `None`.
     pub async fn fetch(&self, uri: &str) -> Result<Option<Vec<u8>>, ResourceError> {
         if !valid_uri(uri) {
             return Err(ResourceError::Uri {
@@ -205,11 +205,40 @@ async fn read_mbtiles(
 ) -> Result<Option<Vec<u8>>, ResourceError> {
     let worker_path = path.clone();
     tokio::task::spawn_blocking(move || {
-        MbTiles::open_blocking(&worker_path)?.tile_blocking(zoom, x, y)
+        let bytes = MbTiles::open_blocking(&worker_path)?.tile_blocking(zoom, x, y)?;
+        bytes
+            .map(|bytes| decode_mbtiles(bytes, &worker_path, [u32::from(zoom), x, y]))
+            .transpose()
     })
     .await
     .map_err(|source| ResourceError::Worker { path, source })?
-    .map_err(Into::into)
+}
+
+fn decode_mbtiles(
+    bytes: Vec<u8>,
+    path: &std::path::Path,
+    coordinate: [u32; 3],
+) -> Result<Vec<u8>, ResourceError> {
+    if !bytes.starts_with(&[0x1f, 0x8b]) {
+        return Ok(bytes);
+    }
+    let decoder = flate2::read::GzDecoder::new(bytes.as_slice());
+    let mut limited = std::io::Read::take(decoder, MAX_RESOURCE_BYTES + 1);
+    let mut decoded = Vec::new();
+    std::io::Read::read_to_end(&mut limited, &mut decoded).map_err(|source| {
+        ResourceError::Compression {
+            path: path.to_path_buf(),
+            coordinate,
+            source,
+        }
+    })?;
+    if decoded.len() as u64 > MAX_RESOURCE_BYTES {
+        return Err(ResourceError::Size {
+            path: path.to_path_buf(),
+            limit: MAX_RESOURCE_BYTES,
+        });
+    }
+    Ok(decoded)
 }
 
 #[cfg(test)]

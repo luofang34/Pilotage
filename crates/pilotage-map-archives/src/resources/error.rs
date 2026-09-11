@@ -32,6 +32,17 @@ pub enum ResourceError {
     /// An archive read failed.
     #[error(transparent)]
     Archive(#[from] crate::ArchiveError),
+    /// A compressed MBTiles payload could not be decoded.
+    #[error("cannot decompress tile {coordinate:?} at {path}")]
+    Compression {
+        /// Archive path.
+        path: PathBuf,
+        /// XYZ coordinate in zoom, column and row order.
+        coordinate: [u32; 3],
+        /// Decoder error.
+        #[source]
+        source: std::io::Error,
+    },
     /// A file read failed.
     #[error("cannot read local map resource at {path}")]
     Io {

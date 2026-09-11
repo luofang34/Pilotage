@@ -13,6 +13,58 @@ fn binding(uri: &str, path: std::path::PathBuf, format: ResourceFormat) -> Resou
 }
 
 #[tokio::test]
+async fn compressed_vector_tiles_decode_and_reject_corruption() {
+    use std::io::Write;
+    let directory = tempfile::tempdir().expect("directory");
+    let path = directory.path().join("vector.mbtiles");
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder
+        .write_all(b"vector protobuf bytes")
+        .expect("compress");
+    let compressed = encoder.finish().expect("gzip");
+    let connection = rusqlite::Connection::open(&path).expect("database");
+    connection.execute_batch("CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB);").expect("schema");
+    connection
+        .execute("INSERT INTO tiles VALUES (1, 0, 1, ?1)", [&compressed])
+        .expect("valid tile");
+    connection
+        .execute(
+            "INSERT INTO tiles VALUES (1, 1, 1, ?1)",
+            [&compressed[..compressed.len() - 4]],
+        )
+        .expect("truncated tile");
+    drop(connection);
+    let set = ResourceSet::new(vec![binding(
+        "pilotage://base",
+        path,
+        ResourceFormat::Mbtiles,
+    )])
+    .expect("resources");
+    assert_eq!(
+        set.fetch("pilotage://base/1/0/0").await.expect("decode"),
+        Some(b"vector protobuf bytes".to_vec())
+    );
+    assert!(matches!(
+        set.fetch("pilotage://base/1/1/0").await,
+        Err(ResourceError::Compression { .. })
+    ));
+}
+
+#[test]
+fn compressed_tiles_cannot_expand_past_the_resource_limit() {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder
+        .write_all(&vec![0; super::MAX_RESOURCE_BYTES as usize + 1])
+        .expect("compress");
+    let bytes = encoder.finish().expect("gzip");
+    assert!(matches!(
+        super::decode_mbtiles(bytes, std::path::Path::new("archive.mbtiles"), [0, 0, 0]),
+        Err(ResourceError::Size { .. })
+    ));
+}
+
+#[tokio::test]
 async fn bound_sprite_files_load_without_exposing_other_files() {
     let directory = tempfile::tempdir().expect("directory");
     let image = directory.path().join("point-sprites.png");
