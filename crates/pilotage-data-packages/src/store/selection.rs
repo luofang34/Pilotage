@@ -7,7 +7,7 @@ use crate::{Channel, PackageError, PackageId, Product, Release, error::invalid};
 use super::PackageStore;
 
 /// A named selection retained by an application, flight, or replay.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Selection {
     /// Owner name, such as `active-map` or a flight record ID.
     pub name: String,
@@ -31,6 +31,24 @@ pub struct SelectionPolicy {
 }
 
 impl PackageStore {
+    /// List the map, flight, and replay selections retained by the store.
+    pub fn selections_cached_blocking(&self) -> Result<Vec<Selection>, PackageError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT name FROM selections ORDER BY name")
+            .map_err(|source| self.database_error(source))?;
+        let names = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|source| self.database_error(source))?;
+        let mut result = Vec::new();
+        for name in names {
+            let name = name.map_err(|source| self.database_error(source))?;
+            if let Some(selection) = self.selection_cached_blocking(&name)? {
+                result.push(selection);
+            }
+        }
+        Ok(result)
+    }
     /// Verify and select a complete dependency set in one database transaction.
     pub fn select_blocking(
         &mut self,

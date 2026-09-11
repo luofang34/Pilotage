@@ -7,6 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{PackageError, PackageId, Release, error::file_error};
 
+mod catalogs;
 mod download;
 mod installation;
 mod selection;
@@ -15,7 +16,7 @@ pub use download::{Download, InstallPlan};
 pub use selection::{Selection, SelectionPolicy};
 
 /// An installed release and its verified resource directory.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct InstalledRelease {
     /// Immutable release manifest.
     pub release: Release,
@@ -76,7 +77,12 @@ impl PackageStore {
                  PRIMARY KEY(release_id, required_id));
              CREATE TABLE IF NOT EXISTS selections (
                  name TEXT PRIMARY KEY, root_id TEXT NOT NULL REFERENCES releases(id),
-                 pinned INTEGER NOT NULL);",
+                 pinned INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS catalogs (
+                 publisher TEXT PRIMARY KEY, envelope TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS published_releases (
+                 publisher TEXT NOT NULL, id TEXT NOT NULL, manifest TEXT NOT NULL,
+                 PRIMARY KEY(publisher, id));",
             )
             .map_err(|source| store.database_error(source))?;
         Ok(store)
