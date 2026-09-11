@@ -2349,6 +2349,7 @@ name = "pilotage-map-archives"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "flate2",
  "pmtiles",
  "rusqlite",
  "serde",

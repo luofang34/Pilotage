@@ -10,6 +10,13 @@ These pipelines use paper dimensions, symbol paths, and collision regions.
 The globe symbol pipeline remains available for ordinary map styles.
 The native host limits vector storage by bytes.
 
+The Apple map uses one renderer for all installed profiles.
+Each profile has a declared display group in the style metadata.
+A profile change selects that group and keeps the map camera.
+Common layers and live display values remain available in each profile.
+The native host projects live display positions with the same map camera.
+The camera uses north-up orientation at world scale.
+
 The native host reads `pilotage:resources` from the style metadata.
 This field contains `ResourceBinding` records from `pilotage-map-archives`.
 Each record binds a `pilotage://` URI to one installed file.

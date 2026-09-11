@@ -94,6 +94,188 @@
 +    map.render_source_frames(processed, Vec::new(), 2)?;
 +    Ok(())
 +}
+--- a/apple/visionos/maplibre_visionos.h
++++ b/apple/visionos/maplibre_visionos.h
+@@ -39,6 +39,12 @@
+ } MaplibreVisionOSEye;
+ 
+ const char *maplibre_visionos_version(void);
++bool maplibre_visionos_set_layer_visible(MaplibreVisionOSMap *map, const char *identifier, bool visible);
++
++// Input: count latitude, longitude and elevation triples. Output: count screen pixel pairs.
++// The input and output buffers must not overlap. Hidden positions produce NaN pairs.
++bool maplibre_visionos_project_locations(const MaplibreVisionOSMap *map,
++    const double *coordinates, size_t count, double *screen);
+ 
+ MaplibreVisionOSMap *maplibre_visionos_create(const char *style_json, uint32_t width,
+                                               uint32_t height, const char *cache_dir);
+@@ -69,6 +75,11 @@
+ // texture need no wait.
+ const void *maplibre_visionos_command_queue(const MaplibreVisionOSMap *map);
+ 
++// Draw a chart with the ordinary map camera. The returned texture belongs to the map.
++const void *maplibre_visionos_render_chart(MaplibreVisionOSMap *map, double latitude,
++    double longitude, double zoom, double bearing, double pitch, double timestamp_seconds);
++bool maplibre_visionos_set_map_mode(MaplibreVisionOSMap *map, const char *mode);
++
+ // Terrain elevation in metres at a location from the loaded DEM tiles; NaN when unknown.
+ float maplibre_visionos_terrain_elevation(const MaplibreVisionOSMap *map, double latitude,
+                                           double longitude);
+--- /dev/null
++++ b/apple/visionos/src/api/chart/tests.rs
+@@ -0,0 +1,54 @@
++use super::*;
++
++#[test]
++fn chart_frame_draws_with_the_requested_map_camera() {
++    let mut map = create(r##"{"version":8,"sources":{},"layers":[{"id":"paper","type":"background","paint":{"background-color":"#ffffff"}}]}"##, 160, 120, None).expect("create chart map");
++    let pointer = &mut map as *mut MaplibreVisionOSMap;
++    // SAFETY: the stack owns the map for both calls.
++    let texture =
++        unsafe { maplibre_visionos_render_chart(pointer, 40.5, -76.5, 8.6, 15.0, 0.0, 1.0) };
++    assert!(!texture.is_null());
++    let view = map.map.view_state();
++    assert!(!view.has_external_view());
++    assert!((view.zoom().value() - 8.6).abs() < 1e-10);
++    assert!((view.camera().get_bearing().0.to_degrees() - 15.0).abs() < 1e-8);
++    // SAFETY: the same owned map remains live. Invalid input must preserve its valid camera.
++    assert!(
++        unsafe { maplibre_visionos_render_chart(pointer, f64::NAN, 0.0, 5.0, 0.0, 0.0, 2.0) }
++            .is_null()
++    );
++    assert!((map.map.view_state().zoom().value() - 8.6).abs() < 1e-10);
++}
++
++#[test]
++fn profile_switch_retains_the_camera_and_projects_live_positions() {
++    let mut map = create(r##"{"version":8,"projection":{"type":"globe"},"sources":{},"metadata":{"maplibre:display-groups":["terrain","ifr_low","ifr_high"],"maplibre:active-display-group":"terrain"},"layers":[{"id":"paper","type":"background"}]}"##, 160, 120, None).expect("create globe map");
++    map.map.set_view(
++        LatLon::new(40.5, -76.5),
++        maplibre::coords::Zoom::new(2.0),
++        Deg(0.0),
++        Deg(0.0),
++    );
++    let pointer = &mut map as *mut MaplibreVisionOSMap;
++    for group in [c"ifr_low", c"ifr_high", c"terrain"] {
++        // SAFETY: the local map and static string outlive this call.
++        assert!(unsafe { maplibre_visionos_set_map_mode(pointer, group.as_ptr()) });
++        assert_eq!(map.map.view_state().zoom().value(), 2.0);
++        let mut screen = [0.0; 6];
++        let coordinates = [40.5, -76.5, 0.0, -40.5, 103.5, 0.0, f64::NAN, 0.0, 0.0];
++        // SAFETY: the arrays have three input triples and three output pairs.
++        assert!(unsafe {
++            crate::maplibre_visionos_project_locations(
++                pointer,
++                coordinates.as_ptr(),
++                3,
++                screen.as_mut_ptr(),
++            )
++        });
++        assert!((screen[0] - 80.0).abs() < 1e-8);
++        assert!((screen[1] - 60.0).abs() < 1e-8);
++        assert!(screen[2..].iter().all(|v| v.is_nan()));
++    }
++    // SAFETY: the handle remains valid and the string is static.
++    assert!(!unsafe { maplibre_visionos_set_map_mode(pointer, c"globe".as_ptr()) });
++}
+--- /dev/null
++++ b/apple/visionos/src/api/chart.rs
+@@ -0,0 +1,95 @@
++//! Render a chart with the map camera and its screen-space label placement.
++use super::*;
++
++/// Select a declared map mode without replacing the renderer or its camera.
++///
++/// # Safety
++/// The map must be live and exclusively accessed. The mode must be a valid C string.
++#[no_mangle]
++pub unsafe extern "C" fn maplibre_visionos_set_map_mode(
++    map: *mut MaplibreVisionOSMap,
++    mode: *const c_char,
++) -> bool {
++    // SAFETY: the caller supplies the live map and string described above.
++    match (unsafe { map.as_mut() }, unsafe { c_str(mode) }) {
++        (Some(map), Some(mode)) => map.map.select_display_group(mode),
++        _ => false,
++    }
++}
++
++/// Draw one chart frame. Return the map-owned Metal texture, or null on failure.
++///
++/// # Safety
++/// The map must be live and exclusively accessed by the render thread.
++#[no_mangle]
++pub unsafe extern "C" fn maplibre_visionos_render_chart(
++    map: *mut MaplibreVisionOSMap,
++    latitude: f64,
++    longitude: f64,
++    zoom: f64,
++    bearing: f64,
++    pitch: f64,
++    timestamp_seconds: f64,
++) -> *const c_void {
++    // SAFETY: the caller supplies exclusive access to a live map.
++    let Some(handle) = (unsafe { map.as_mut() }) else {
++        return ptr::null();
++    };
++    if ![latitude, longitude, zoom, bearing, pitch, timestamp_seconds]
++        .iter()
++        .all(|v| v.is_finite())
++        || !(-85.0..=85.0).contains(&latitude)
++        || !(-180.0..=180.0).contains(&longitude)
++        || !(0.0..=24.0).contains(&zoom)
++        || !(0.0..=80.0).contains(&pitch)
++    {
++        tracing::error!("chart camera is outside its supported range");
++        return ptr::null();
++    }
++    let Ok(timestamp) = Duration::try_from_secs_f64(timestamp_seconds) else {
++        return ptr::null();
++    };
++    handle.map.set_view(
++        LatLon::new(latitude, longitude),
++        maplibre::coords::Zoom::new(zoom),
++        Deg(bearing),
++        Deg(pitch),
++    );
++    handle.map.frame_input_mut().timestamp = timestamp;
++    let _runtime = handle.runtime.enter();
++    if let Err(error) = handle.map.run_frame() {
++        tracing::error!(%error, "chart frame failed");
++        return ptr::null();
++    }
++    handle.frames = handle.frames.wrapping_add(1);
++    handle.map.device().poll(wgpu::Maintain::Poll);
++    let Some(texture) = handle.map.head_texture() else {
++        return ptr::null();
++    };
++    // SAFETY: the renderer uses Metal. The map retains the texture during the host copy.
++    unsafe {
++        texture.as_hal::<wgpu_hal::api::Metal, _, _>(|texture| {
++            texture.map_or(ptr::null(), |texture| texture.raw_handle().as_ptr().cast())
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests;
++
++/// Set visibility for one declared map layer.
++///
++/// # Safety
++/// The caller supplies a live map with exclusive access and a valid C string.
++#[no_mangle]
++pub unsafe extern "C" fn maplibre_visionos_set_layer_visible(
++    map: *mut MaplibreVisionOSMap,
++    identifier: *const c_char,
++    visible: bool,
++) -> bool {
++    // SAFETY: the caller supplies the map and string described above.
++    match (unsafe { map.as_mut() }, unsafe { c_str(identifier) }) {
++        (Some(map), Some(identifier)) => map.map.set_layer_visible(identifier, visible),
++        _ => false,
++    }
++}
 --- /dev/null
 +++ b/apple/visionos/src/api/settings/tests.rs
 @@ -0,0 +1,8 @@
@@ -140,8 +322,9 @@
 +mod tests;
 --- a/apple/visionos/src/api.rs
 +++ b/apple/visionos/src/api.rs
-@@ -1,6 +1,8 @@
+@@ -1,6 +1,9 @@
  //! C map lifecycle and host-facing data structures.
++mod chart;
  mod diagnostics;
  mod frame;
 +mod settings;
@@ -149,7 +332,15 @@
  use std::{
      alloc::{GlobalAlloc, Layout, System},
      ffi::{c_char, c_void, CStr},
-@@ -17,12 +19,11 @@
+@@ -13,16 +16,19 @@
+ };
+ 
+ use cgmath::{Deg, Matrix4};
++pub use chart::{
++    maplibre_visionos_render_chart, maplibre_visionos_set_layer_visible,
++    maplibre_visionos_set_map_mode,
++};
+ use diagnostics::init_logging;
  pub use frame::maplibre_visionos_render_frame;
  use maplibre::{
      coords::LatLon,
@@ -163,7 +354,7 @@
          view_state::ExternalAnchor,
          xr::{EyeTarget, ScenePlacement, XrEye, XrFrame},
          RenderPlugin,
-@@ -180,15 +181,23 @@
+@@ -180,15 +186,23 @@
          .build()
          .map_err(|error| format!("runtime: {error}"))?;
      let settings = renderer_settings();
@@ -189,7 +380,15 @@
      let has_terrain = style.terrain.is_some();
      let mut plugins: Vec<Box<dyn Plugin<_>>> = vec![
          Box::new(RenderPlugin),
-@@ -343,28 +352,3 @@
+@@ -210,6 +224,7 @@
+         >::default()));
+     }
+     let map = {
++        plugins.push(Box::new(crate::display_groups::DisplayGroupsPlugin));
+         let _runtime = runtime.enter();
+         let mut map = HeadlessMap::new(style, renderer, kernel, plugins)
+             .map_err(|error| format!("map: {error:?}"))?;
+@@ -343,28 +358,3 @@
          v(15),
      )
  }
@@ -267,16 +466,80 @@
 +        })
 +    }
 +}
+--- /dev/null
++++ b/apple/visionos/src/display_groups.rs
+@@ -0,0 +1,19 @@
++//! Keep the renderer and camera when the host selects another map display group.
++use maplibre::{environment::Environment, plugin::Plugin};
++
++pub(crate) struct DisplayGroupsPlugin;
++
++impl<E: Environment> Plugin<E> for DisplayGroupsPlugin {
++    fn build(
++        &self,
++        schedule: &mut maplibre::schedule::Schedule,
++        _kernel: std::rc::Rc<maplibre::kernel::Kernel<E>>,
++        _world: &mut maplibre::tcs::world::World,
++        _graph: &mut maplibre::render::graph::RenderGraph,
++    ) {
++        schedule.add_system_to_stage(
++            maplibre::render::RenderStageLabel::PhaseSort,
++            maplibre::style::display_groups::filter_draws,
++        );
++    }
++}
 --- a/apple/visionos/src/lib.rs
 +++ b/apple/visionos/src/lib.rs
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,10 @@
  #![allow(unsafe_code)]
  
  mod api;
 +mod aviation;
++mod display_groups;
++mod overlay;
  mod selection;
  pub use api::*;
++pub use overlay::maplibre_visionos_project_locations;
  pub use selection::{maplibre_visionos_query_symbols, maplibre_visionos_set_opaque_environment};
+--- /dev/null
++++ b/apple/visionos/src/overlay.rs
+@@ -0,0 +1,36 @@
++//! Project live display geometry with the map camera.
++use crate::MaplibreVisionOSMap;
++
++/// Project `count` latitude, longitude and elevation triples into screen pixel pairs.
++/// Hidden or invalid positions produce NaN pairs. Return false for an invalid call.
++///
++/// # Safety
++/// The map must be live and exclusively accessed. The input must contain `count * 3`
++/// readable doubles. The output must contain `count * 2` writable doubles. The buffers
++/// must not overlap each other or the map.
++#[no_mangle]
++pub unsafe extern "C" fn maplibre_visionos_project_locations(
++    map: *const MaplibreVisionOSMap,
++    coordinates: *const f64,
++    count: usize,
++    screen: *mut f64,
++) -> bool {
++    // SAFETY: the caller supplies the map described above.
++    let Some(handle) = (unsafe { map.as_ref() }) else {
++        return false;
++    };
++    if count == 0 {
++        return true;
++    }
++    if count > 1_000_000 || coordinates.is_null() || screen.is_null() {
++        return false;
++    }
++    // SAFETY: the caller supplies disjoint buffers with the stated lengths.
++    let (coordinates, screen) = unsafe {
++        (
++            std::slice::from_raw_parts(coordinates, count * 3),
++            std::slice::from_raw_parts_mut(screen, count * 2),
++        )
++    };
++    handle.map.project_locations(coordinates, screen)
++}
 --- a/maplibre/Cargo.toml
 +++ b/maplibre/Cargo.toml
 @@ -74,7 +74,7 @@
@@ -304,6 +567,113 @@
  }
  
  pub trait OffscreenKernel: Send + Sync + 'static {
+--- /dev/null
++++ b/maplibre/src/headless/map/display.rs
+@@ -0,0 +1,94 @@
++//! Change the map camera or display group while retaining render resources.
++use super::*;
++
++impl HeadlessMap {
++    /// Set the ordinary map camera and end external-eye input.
++    pub fn set_view(
++        &mut self,
++        center: LatLon,
++        zoom: Zoom,
++        bearing: cgmath::Deg<f64>,
++        pitch: cgmath::Deg<f64>,
++    ) {
++        let view = &mut self.map_context.view_state;
++        view.clear_external_view();
++        view.update_zoom(zoom);
++        let position = WorldCoords::from_lat_lon(center, zoom);
++        let camera = view.camera_mut();
++        camera.move_to(cgmath::Point2::new(position.x, position.y));
++        camera.set_bearing(bearing);
++        camera.set_pitch(pitch);
++        camera.set_roll(cgmath::Deg(0.0));
++        self.frame_input_mut().view = crate::render::frame_input::ViewSource::MapView;
++    }
++
++    /// Select a declared group without changing the view or resource lifetime.
++    pub fn select_display_group(&mut self, group: &str) -> bool {
++        self.map_context.style.select_display_group(group)
++    }
++
++    /// Change a declared layer while retaining its decoded data.
++    pub fn set_layer_visible(&mut self, identifier: &str, visible: bool) -> bool {
++        use crate::style::layer::LayerVisibility;
++        let Some(layer) = self
++            .map_context
++            .style
++            .layers
++            .iter_mut()
++            .find(|layer| layer.id == identifier)
++        else {
++            return false;
++        };
++        layer.visibility = if visible {
++            LayerVisibility::Visible
++        } else {
++            LayerVisibility::None
++        };
++        true
++    }
++
++    /// Project latitude, longitude and elevation triples into screen pixel pairs.
++    /// Hidden and invalid coordinates produce non-finite pairs.
++    pub fn project_locations(&self, coordinates: &[f64], screen: &mut [f64]) -> bool {
++        use crate::projection::globe::lat_lon_to_unit_sphere;
++        use crate::render::projection::globe_camera_for_view;
++        let view = self.view_state();
++        let Ok(globe) = globe_camera_for_view(view) else {
++            return false;
++        };
++        let transition = self
++            .map_context
++            .style
++            .projection
++            .as_ref()
++            .map_or(0.0, |spec| {
++                f64::from(spec.projection_type.globe_transition(view.zoom().value()))
++            });
++        let mercator_matrix = view.gpu_view_projection().0;
++        for (coordinate, output) in coordinates.chunks_exact(3).zip(screen.chunks_exact_mut(2)) {
++            output.fill(f64::NAN);
++            if !coordinate.iter().all(|v| v.is_finite())
++                || !(-85.0..=85.0).contains(&coordinate[0])
++                || !(-180.0..=180.0).contains(&coordinate[1])
++            {
++                continue;
++            }
++            let location = LatLon::new(coordinate[0], coordinate[1]);
++            if transition > 0.99 && globe.is_location_occluded(location) {
++                continue;
++            }
++            let world = WorldCoords::from_lat_lon(location, view.zoom());
++            let mercator =
++                mercator_matrix * cgmath::Vector4::new(world.x, world.y, coordinate[2], 1.0);
++            let sphere = lat_lon_to_unit_sphere(location)
++                * (1.0 + coordinate[2] / view.body().radius_meters);
++            let globe_clip = globe.wgpu_view_projection() * sphere.extend(1.0);
++            let clip = mercator * (1.0 - transition) + globe_clip * transition;
++            if clip.w > 0.0 {
++                output[0] = (clip.x / clip.w + 1.0) * view.width() * 0.5;
++                output[1] = (1.0 - clip.y / clip.w) * view.height() * 0.5;
++            }
++        }
++        true
++    }
++}
+--- a/maplibre/src/headless/map.rs
++++ b/maplibre/src/headless/map.rs
+@@ -35,6 +35,7 @@
+     },
+ };
+ 
++mod display;
+ mod processed;
+ mod xr;
+ 
 --- a/maplibre/src/headless/mod.rs
 +++ b/maplibre/src/headless/mod.rs
 @@ -78,9 +78,21 @@
@@ -337,6 +707,148 @@
              },
          ))
          .with_scheduler(TokioScheduler::new())
+--- a/maplibre/src/hillshade/render_commands.rs
++++ b/maplibre/src/hillshade/render_commands.rs
+@@ -2,7 +2,7 @@
+ 
+ use crate::{
+     hillshade::resources::HillshadeResources,
+-    raster::render_commands::{DrawRasterTile, SetRasterViewBindGroup},
++    raster::{render_commands::DrawRasterTile, resource::RasterResources},
+     render::{
+         eventually::{Eventually, Eventually::Initialized},
+         projection::ProjectionGpuResources,
+@@ -57,10 +57,30 @@
+     }
+ }
+ 
++/// Bind the DEM texture without requiring raster paint uniforms.
++pub struct SetDemTexture;
++impl RenderCommand<LayerItem> for SetDemTexture {
++    fn render<'w>(
++        world: &'w World,
++        item: &LayerItem,
++        pass: &mut TrackedRenderPass<'w>,
++    ) -> RenderCommandResult {
++        let Some(Initialized(resources)) = world.resources.get::<Eventually<RasterResources>>()
++        else {
++            return RenderCommandResult::Failure;
++        };
++        let Some(texture) = resources.get_bound_texture(&item.tile.coords) else {
++            return RenderCommandResult::Failure;
++        };
++        pass.set_bind_group(1, texture, &[]);
++        RenderCommandResult::Success
++    }
++}
++
+ /// Draws one DEM tile shape with the layer's shading.
+ pub type DrawDemTiles = (
+     SetDemPipeline,
+-    SetRasterViewBindGroup<0>,
++    SetDemTexture,
+     SetDemLayerBindGroup,
+     DrawRasterTile,
+ );
+--- /dev/null
++++ b/maplibre/src/hillshade/tests.rs
+@@ -0,0 +1,85 @@
++#![allow(clippy::expect_used, clippy::panic)]
++use crate::{
++    headless::{
++        create_headless_renderer,
++        map::{HeadlessMap, ProcessedLayers},
++    },
++    raster::{AvailableRasterLayerData, DefaultRasterTransferables, RasterPlugin},
++    render::RenderPlugin,
++    style::Style,
++};
++
++#[tokio::test]
++async fn dem_shading_draws_without_raster_paint_uniforms() {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "projection":{"type":"globe"}, "zoom":1, "center":[0,0],
++        "sources":{"dem":{"type":"raster-dem","encoding":"terrarium","tiles":["unused/{z}/{x}/{y}"]}},
++        "layers":[
++            {"id":"base","type":"background","paint":{"background-color":"#000000"}},
++            {"id":"relief","type":"color-relief","source":"dem","paint":{
++                "color-relief-color":["interpolate",["linear"],["elevation"],0,"#ff0000",1000,"#ff0000"]
++            }}
++        ]
++    })).expect("style");
++    let (kernel, renderer) = create_headless_renderer(256, 256, None).await.expect("GPU");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(crate::background::BackgroundPlugin),
++            Box::new(RasterPlugin::<DefaultRasterTransferables>::default()),
++            Box::new(super::HillshadePlugin),
++        ],
++    )
++    .expect("map");
++    map.render_source_frames(
++        ProcessedLayers::default(),
++        vec![AvailableRasterLayerData {
++            coords: crate::coords::WorldTileCoords::default(),
++            source_layer: "dem".into(),
++            image: image::RgbaImage::from_pixel(256, 256, image::Rgba([128, 100, 0, 255])),
++        }],
++        2,
++    )
++    .expect("draw");
++    let pixel = center_pixel_blocking(&map);
++    assert!(
++        pixel[0] > 240 && pixel[1] < 10 && pixel[2] < 10,
++        "DEM relief must be red: {pixel:?}"
++    );
++}
++
++fn center_pixel_blocking(map: &HeadlessMap) -> Vec<u8> {
++    let texture = map.head_texture().expect("texture");
++    let device = map.device();
++    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
++        label: Some("DEM pixel check"),
++        size: 256 * 256 * 4,
++        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
++        mapped_at_creation: false,
++    });
++    let mut encoder = device.create_command_encoder(&Default::default());
++    encoder.copy_texture_to_buffer(
++        texture.as_image_copy(),
++        wgpu::ImageCopyBuffer {
++            buffer: &buffer,
++            layout: wgpu::ImageDataLayout {
++                offset: 0,
++                bytes_per_row: Some(1024),
++                rows_per_image: None,
++            },
++        },
++        texture.size(),
++    );
++    map.queue().submit([encoder.finish()]);
++    buffer
++        .slice(..)
++        .map_async(wgpu::MapMode::Read, |result| result.expect("mapped"));
++    device.poll(wgpu::Maintain::Wait);
++    let offset = (128 * 256 + 128) * 4;
++    let pixel = buffer.slice(..).get_mapped_range()[offset..offset + 4].to_vec();
++    buffer.unmap();
++    pixel
++}
+--- a/maplibre/src/hillshade.rs
++++ b/maplibre/src/hillshade.rs
+@@ -22,6 +22,8 @@
+ pub mod render_commands;
+ mod resource_system;
+ pub mod resources;
++#[cfg(test)]
++mod tests;
+ 
+ pub use resources::{DemLayerKind, HillshadeResources};
+ 
 --- a/maplibre/src/io/apc/tests.rs
 +++ b/maplibre/src/io/apc/tests.rs
 @@ -22,6 +22,7 @@
@@ -364,6 +876,64 @@
  }
  
  /// Gives access to the HTTP client which can be of multiple types,
+--- a/maplibre/src/io/tile_sources/tests.rs
++++ b/maplibre/src/io/tile_sources/tests.rs
+@@ -2,7 +2,7 @@
+ 
+ use super::{
+     clamp_to_max_zoom, covering_zoom, missing_tile_fallback, source_layer_groups, source_max_zoom,
+-    source_tiles_for, TileKind,
++    source_min_zoom, source_tiles_for, TileKind,
+ };
+ use crate::{
+     coords::{WorldTileCoords, ZoomLevel},
+@@ -155,6 +155,23 @@
+ }
+ 
+ #[test]
++fn detail_minimum_does_not_hide_the_world_base() {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8,
++        "sources": {
++            "base":{"type":"vector","minzoom":0,"tiles":["base/{z}/{x}/{y}"]},
++            "detail":{"type":"vector","minzoom":5,"tiles":["detail/{z}/{x}/{y}"]}
++        },
++        "layers":[
++            {"id":"land","type":"fill","source":"base"},
++            {"id":"chart","type":"line","source":"detail"}
++        ]
++    }))
++    .expect("valid source ranges");
++    assert_eq!(source_min_zoom(&style, TileKind::Vector), Some(0));
++}
++
++#[test]
+ fn clamping_walks_to_the_ancestor_at_max_zoom() {
+     assert_eq!(
+         clamp_to_max_zoom(coords(37, 21, 6), Some(3)),
+--- a/maplibre/src/io/tile_sources.rs
++++ b/maplibre/src/io/tile_sources.rs
+@@ -210,17 +210,15 @@
+ /// Largest number of zoom levels source tiles may sit away from their view tile.
+ const MAX_ZOOM_DELTA: i32 = 2;
+ 
+-/// Returns the most restrictive minimum zoom among the tile sources used by the style.
+-///
+-/// Tiles below it are not requested at all: a source shows nothing there, as in GL JS.
++/// Returns the first zoom at which any tile source can supply data.
+ pub fn source_min_zoom(style: &Style, kind: TileKind) -> Option<u8> {
+     style
+         .layers
+         .iter()
+         .filter(|layer| kind.accepts_layer(layer))
+         .filter_map(|layer| style.sources.get(layer.source.as_ref()?))
+-        .filter_map(|source| kind.min_zoom_of(source))
+-        .max()
++        .map(|source| kind.min_zoom_of(source).unwrap_or(0))
++        .min()
+ }
+ 
+ /// Replaces coordinates above the source maximum zoom with their ancestor at that zoom.
 --- a/maplibre/src/legacy/layout/symbol_feature.rs
 +++ b/maplibre/src/legacy/layout/symbol_feature.rs
 @@ -21,6 +21,8 @@
@@ -893,6 +1463,206 @@
 +    raster_resources.synchronize_paints(device, style);
      Ok(())
  }
+--- /dev/null
++++ b/maplibre/src/render/main_pass/tests.rs
+@@ -0,0 +1,197 @@
++#![allow(clippy::expect_used, clippy::panic)]
++
++use crate::{
++    context::MapContext,
++    coords::ViewRegion,
++    headless::{create_headless_renderer, HeadlessPlugin},
++    render::{
++        eventually::Eventually,
++        tile_view_pattern::{ViewTileSources, WgpuTileViewPattern},
++        RenderPlugin, RenderStageLabel,
++    },
++    tcs::system::SystemResult,
++    vector::{DefaultVectorTransferables, VectorPlugin},
++};
++use crate::{
++    coords::WorldTileCoords,
++    headless::map::{process_tile_layers, HeadlessMap},
++    kernel::Kernel,
++    plugin::Plugin,
++    schedule::Schedule,
++    style::Style,
++    tcs::world::World,
++};
++use geozero::mvt::{tile, Message, Tile};
++use std::rc::Rc;
++
++struct ForcedCovering;
++impl Plugin<crate::headless::environment::HeadlessEnvironment> for ForcedCovering {
++    fn build(
++        &self,
++        schedule: &mut Schedule,
++        _kernel: Rc<Kernel<crate::headless::environment::HeadlessEnvironment>>,
++        _world: &mut World,
++        _graph: &mut crate::render::graph::RenderGraph,
++    ) {
++        schedule.add_system_to_stage(RenderStageLabel::Queue, overlapping_covering);
++        schedule.add_system_to_stage(
++            RenderStageLabel::Queue,
++            crate::render::systems::upload_system::upload_system,
++        );
++    }
++}
++
++#[derive(Default)]
++struct ReverseCovering(bool);
++
++fn overlapping_covering(context: &mut MapContext) -> SystemResult {
++    let reverse = context.world.resources.get_or_init_mut::<ReverseCovering>();
++    reverse.0 = !reverse.0;
++    let mut tiles = vec![
++        WorldTileCoords::default(),
++        WorldTileCoords {
++            x: 1,
++            y: 1,
++            z: 2.into(),
++        },
++    ];
++    if reverse.0 {
++        tiles.reverse();
++    }
++    let region = ViewRegion::from_tiles(tiles, 2.into(), 2);
++    let Eventually::Initialized(pattern) = context
++        .world
++        .resources
++        .get::<Eventually<WgpuTileViewPattern>>()
++        .expect("pattern")
++    else {
++        return Ok(());
++    };
++    let shapes = pattern.generate_pattern(
++        &region,
++        &ViewTileSources::default(),
++        &[],
++        context.view_state.zoom(),
++        &context.world,
++    );
++    let Eventually::Initialized(pattern) = context
++        .world
++        .resources
++        .get_mut::<Eventually<WgpuTileViewPattern>>()
++        .expect("pattern")
++    else {
++        return Ok(());
++    };
++    pattern.update_pattern(shapes);
++    Ok(())
++}
++
++fn tile_bytes(color: &str) -> Vec<u8> {
++    Tile {
++        layers: vec![tile::Layer {
++            version: 2,
++            name: "land".into(),
++            extent: Some(4096),
++            keys: vec!["color".into()],
++            values: vec![tile::Value {
++                string_value: Some(color.into()),
++                ..Default::default()
++            }],
++            features: vec![tile::Feature {
++                tags: vec![0, 0],
++                r#type: Some(tile::GeomType::Polygon as i32),
++                geometry: vec![9, 0, 0, 26, 8192, 0, 0, 8192, 8191, 0, 15],
++                ..Default::default()
++            }],
++            ..Default::default()
++        }],
++    }
++    .encode_to_vec()
++}
++
++#[tokio::test]
++async fn stationary_globe_keeps_fine_tiles_visible_when_covering_order_changes() {
++    let style: Style = serde_json::from_value(serde_json::json!({
++        "version":8, "center":[-76.5,40.5], "zoom":2.66, "projection":{"type":"globe"},
++        "sources":{"base":{"type":"vector","tiles":["unused/{z}/{x}/{y}"]}},
++        "layers":[{"id":"land","type":"fill","source":"base","source-layer":"land","paint":{"fill-color":["get","color"]}}]
++    })).expect("style");
++    let mut layers = process_tile_layers(
++        &tile_bytes("#ff0000"),
++        &style.layers[0],
++        WorldTileCoords::default(),
++        crate::projection::ProjectionType::Globe,
++    )
++    .expect("parent");
++    layers.vector.extend(
++        process_tile_layers(
++            &tile_bytes("#00ff00"),
++            &style.layers[0],
++            WorldTileCoords {
++                x: 1,
++                y: 1,
++                z: 2.into(),
++            },
++            crate::projection::ProjectionType::Globe,
++        )
++        .expect("child")
++        .vector,
++    );
++    let (kernel, renderer) = create_headless_renderer(256, 256, None)
++        .await
++        .expect("renderer");
++    let mut map = HeadlessMap::new(
++        style,
++        renderer,
++        kernel,
++        vec![
++            Box::new(RenderPlugin),
++            Box::new(ForcedCovering),
++            Box::new(VectorPlugin::<DefaultVectorTransferables>::default()),
++            Box::new(HeadlessPlugin::new(false)),
++        ],
++    )
++    .expect("map");
++    map.render_source_frames(layers, Vec::new(), 2)
++        .expect("load");
++    for _ in 0..6 {
++        map.run_frame().expect("frame");
++        let pixel = center_pixel_blocking(&map);
++        assert!(
++            pixel[1] > 240 && pixel[0] < 10,
++            "the fine green tile must remain visible: {pixel:?}"
++        );
++    }
++}
++
++fn center_pixel_blocking(map: &HeadlessMap) -> Vec<u8> {
++    let texture = map.head_texture().expect("texture");
++    let buffer = map.device().create_buffer(&wgpu::BufferDescriptor {
++        label: Some("stationary map pixel"),
++        size: 256 * 256 * 4,
++        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
++        mapped_at_creation: false,
++    });
++    let mut encoder = map.device().create_command_encoder(&Default::default());
++    encoder.copy_texture_to_buffer(
++        texture.as_image_copy(),
++        wgpu::ImageCopyBuffer {
++            buffer: &buffer,
++            layout: wgpu::ImageDataLayout {
++                offset: 0,
++                bytes_per_row: Some(1024),
++                rows_per_image: None,
++            },
++        },
++        texture.size(),
++    );
++    map.queue().submit([encoder.finish()]);
++    buffer
++        .slice(..)
++        .map_async(wgpu::MapMode::Read, |result| result.expect("mapped"));
++    map.device().poll(wgpu::Maintain::Wait);
++    let offset = (128 * 256 + 128) * 4;
++    let pixel = buffer.slice(..).get_mapped_range()[offset..offset + 4].to_vec();
++    buffer.unmap();
++    pixel
++}
 --- a/maplibre/src/render/main_pass.rs
 +++ b/maplibre/src/render/main_pass.rs
 @@ -107,13 +107,6 @@
@@ -950,6 +1720,13 @@
      }
  }
  
+@@ -161,3 +180,6 @@
+         Ok(())
+     }
+ }
++
++#[cfg(test)]
++mod tests;
 --- a/maplibre/src/render/projection/covering.rs
 +++ b/maplibre/src/render/projection/covering.rs
 @@ -49,6 +49,19 @@
@@ -1014,6 +1791,26 @@
          if glyph {
              descriptor
                  .layout
+--- a/maplibre/src/render/render_phase/mod.rs
++++ b/maplibre/src/render/render_phase/mod.rs
+@@ -124,10 +124,15 @@
+ }
+ 
+ impl PhaseItem for TileMaskItem {
+-    type SortKey = u32;
++    type SortKey = (
++        u32,
++        crate::coords::ZoomLevel,
++        crate::coords::WorldTileCoords,
++    );
+ 
+     fn sort_key(&self) -> Self::SortKey {
+-        u32::from(!self.generate_borders)
++        let coords = self.source_shape.coords();
++        (u32::from(!self.generate_borders), coords.z, coords)
+     }
+ 
+     fn draw_function(&self) -> &dyn Draw<TileMaskItem> {
 --- a/maplibre/src/render/settings.rs
 +++ b/maplibre/src/render/settings.rs
 @@ -128,7 +128,7 @@
@@ -1738,6 +2535,32 @@
 +
 +mod chart_symbol;
 +pub use chart_symbol::ChartSymbolShader;
+--- a/maplibre/src/render/systems/sort_phase_system.rs
++++ b/maplibre/src/render/systems/sort_phase_system.rs
+@@ -1,17 +1,21 @@
+ use crate::{
+     context::MapContext,
+-    render::render_phase::{LayerItem, RenderPhase},
++    render::render_phase::{LayerItem, RenderPhase, TileMaskItem},
+     tcs::system::SystemResult,
+ };
+ 
+ /// This system sorts all [`RenderPhases`](RenderPhase) for the [`PhaseItem`] type.
+ pub fn sort_phase_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
+-    // We are only sorting layers and not masks
+     world
+         .resources
+         .get_mut::<RenderPhase<LayerItem>>()
+         .unwrap()
+         .sort();
+ 
++    // Fine tile masks must replace overlapping parent masks in every frame.
++    if let Some(masks) = world.resources.get_mut::<RenderPhase<TileMaskItem>>() {
++        masks.sort();
++    }
++
+     Ok(())
+ }
 --- a/maplibre/src/sdf/assets/load.rs
 +++ b/maplibre/src/sdf/assets/load.rs
 @@ -20,6 +20,9 @@
@@ -3186,7 +4009,7 @@
 +mod tests;
 --- /dev/null
 +++ b/maplibre/src/sdf/chart/collision_system.rs
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,160 @@
 +//! Resolve visible source-tile symbols using the same geometry as the GPU.
 +
 +use crate::{
@@ -3257,6 +4080,7 @@
 +        let styles: HashMap<_, _> = style
 +            .layers
 +            .iter()
++            .filter(|layer| style.layer_in_active_group(layer))
 +            .map(|layer| (layer.id.as_str(), layer))
 +            .collect();
 +        let mut layers = Vec::new();
@@ -6403,6 +7227,97 @@
 +        .get("maplibre:collision")
 +        .and_then(|value| serde_json::from_value(value.clone()).ok())
 +}
+--- /dev/null
++++ b/maplibre/src/style/display_groups.rs
+@@ -0,0 +1,88 @@
++//! Select a display group without discarding decoded tiles or GPU allocations.
++use super::{layer::StyleLayer, Style};
++
++impl Style {
++    /// Whether a layer belongs to the selected group or is common to all groups.
++    pub fn layer_in_active_group(&self, layer: &StyleLayer) -> bool {
++        if layer.is_hidden() {
++            return false;
++        }
++        let group = layer
++            .metadata
++            .as_ref()
++            .and_then(|metadata| metadata.get("maplibre:display-group"));
++        match (
++            group.and_then(serde_json::Value::as_str),
++            self.metadata
++                .get("maplibre:active-display-group")
++                .and_then(serde_json::Value::as_str),
++        ) {
++            (Some(group), Some(active)) => group == active,
++            _ => true,
++        }
++    }
++
++    /// Select a declared display group. Unknown groups preserve the current selection.
++    pub fn select_display_group(&mut self, group: &str) -> bool {
++        let valid = self
++            .metadata
++            .get("maplibre:display-groups")
++            .and_then(serde_json::Value::as_array)
++            .is_some_and(|groups| groups.iter().any(|value| value.as_str() == Some(group)));
++        if valid {
++            self.metadata
++                .insert("maplibre:active-display-group".into(), group.into());
++        }
++        valid
++    }
++}
++
++/// Discard draw requests for inactive groups after all pipelines finish their queues.
++pub fn filter_draws(context: &mut crate::context::MapContext) -> crate::tcs::system::SystemResult {
++    use crate::render::render_phase::{LayerItem, RenderPhase, TranslucentItem};
++    let inactive: std::collections::HashSet<_> = context
++        .style
++        .layers
++        .iter()
++        .filter(|layer| !context.style.layer_in_active_group(layer))
++        .map(|layer| layer.id.as_str())
++        .collect();
++    if let Some(phase) = context.world.resources.get_mut::<RenderPhase<LayerItem>>() {
++        phase.retain(|item| !inactive.contains(item.style_layer.as_str()));
++    }
++    if let Some(phase) = context
++        .world
++        .resources
++        .get_mut::<RenderPhase<TranslucentItem>>()
++    {
++        phase.retain(|item| !inactive.contains(item.style_layer.as_str()));
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn groups_keep_shared_layers_and_reject_unknown_selections() {
++        let mut style: Style = serde_json::from_value(serde_json::json!({
++            "version": 8, "sources": {},
++            "metadata": {"maplibre:display-groups":["low","high"], "maplibre:active-display-group":"low"},
++            "layers": [
++                {"id":"base","type":"background"},
++                {"id":"low","type":"background","metadata":{"maplibre:display-group":"low"}},
++                {"id":"high","type":"background","metadata":{"maplibre:display-group":"high"}}
++            ]
++        })).expect("valid style");
++        assert!(style.layer_in_active_group(&style.layers[0]));
++        assert!(style.layer_in_active_group(&style.layers[1]));
++        assert!(!style.layer_in_active_group(&style.layers[2]));
++        assert!(style.select_display_group("high"));
++        assert!(style.layer_in_active_group(&style.layers[0]));
++        assert!(!style.layer_in_active_group(&style.layers[1]));
++        assert!(style.layer_in_active_group(&style.layers[2]));
++        assert!(!style.select_display_group("absent"));
++        assert!(style.layer_in_active_group(&style.layers[2]));
++    }
++}
 --- a/maplibre/src/style/layer/paint.rs
 +++ b/maplibre/src/style/layer/paint.rs
 @@ -145,6 +145,13 @@
@@ -6419,6 +7334,32 @@
      /// Text of each symbol: a `{token}` template, a literal, or an expression; `None` draws
      /// no text.
      #[serde(rename = "text-field")]
+--- a/maplibre/src/style/layer/tests.rs
++++ b/maplibre/src/style/layer/tests.rs
+@@ -146,6 +146,23 @@
+         }
+         other => panic!("expected Symbol paint, got {:?}", other),
+     }
++}
++
++#[test]
++fn chart_text_retains_white_foreground_and_halo_paint() {
++    let layer: StyleLayer = serde_json::from_value(serde_json::json!({
++        "id":"route-label", "type":"symbol", "source":"chart", "source-layer":"routes",
++        "layout":{"text-field":"V12", "text-font":["Futura Medium"]},
++        "paint":{"text-color":"#ffffff", "text-halo-color":"#008000", "text-halo-width":2, "text-opacity":0.5}
++    })).expect("chart label");
++    let Some(LayerPaint::Symbol(symbol)) = layer.paint else {
++        panic!("symbol paint")
++    };
++    let (foreground, halo, width, opacity) = symbol.text_style.paint(8.0);
++    assert_eq!(foreground, [1.0; 4]);
++    assert_eq!(halo, [0.0, 128.0 / 255.0, 0.0, 1.0]);
++    assert_eq!(width, 2.0);
++    assert_eq!(opacity, 0.5);
+ }
+ 
+ /// The text a symbol paint produces for a feature named `Berlin` and abbreviated `BER`.
 --- a/maplibre/src/style/layer.rs
 +++ b/maplibre/src/style/layer.rs
 @@ -128,7 +128,7 @@
@@ -7496,7 +8437,7 @@
 +}
 --- /dev/null
 +++ b/maplibre/src/style/text.rs
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,182 @@
 +//! Authored text placement and paint carried with symbol layers.
 +
 +use crate::style::{expression::FeatureProperties, layer::StyleProperty};
@@ -7602,6 +8543,10 @@
 +        self.rotate = layout.rotate.or(self.rotate.take());
 +        self.rotation_alignment = layout.rotation_alignment.or(self.rotation_alignment.take());
 +        self.pitch_alignment = layout.pitch_alignment.or(self.pitch_alignment.take());
++        self.color = layout.color.or(self.color.take());
++        self.halo_color = layout.halo_color.or(self.halo_color.take());
++        self.halo_width = layout.halo_width.or(self.halo_width.take());
++        self.opacity = layout.opacity.or(self.opacity.take());
 +        Ok(())
 +    }
 +
@@ -7731,11 +8676,12 @@
 +}
 --- a/maplibre/src/style.rs
 +++ b/maplibre/src/style.rs
-@@ -25,17 +25,22 @@
+@@ -25,17 +25,23 @@
  use serde::{Deserialize, Serialize};
  
  pub mod circle;
 +pub(crate) mod collision;
++pub mod display_groups;
  pub mod expression;
  pub mod filter;
  pub mod hillshade;
@@ -7754,7 +8700,7 @@
  
  use crate::{
      projection::ProjectionSpecification,
-@@ -51,6 +56,8 @@
+@@ -51,6 +57,8 @@
  /// Stores the style for a multi-layered map.
  #[derive(Serialize, Deserialize, Debug, Clone)]
  pub struct Style {
@@ -7763,7 +8709,7 @@
      pub version: u16,
      #[serde(default)]
      pub name: Option<String>,
-@@ -104,6 +111,7 @@
+@@ -104,6 +112,7 @@
          // ----------------------
  
          Style {
@@ -7771,7 +8717,7 @@
              version: 8,
              glyphs: None,
              sprite: None,
-@@ -459,3 +467,19 @@
+@@ -459,3 +468,19 @@
  }
  
  mod layer_order;

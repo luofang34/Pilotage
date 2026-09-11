@@ -4,7 +4,7 @@
   "producer_renderer_revision": "73ee3c8832f08ea0a9636f5af59d7e1e96820589",
   "patch": {
     "path": "chart-renderer.patch",
-    "sha256": "88dea7d036717d4f59d507f06e924178a4f4179994da3479c5f80f5b228dfd71"
+    "sha256": "dc97388c3fbee5c880c8c6d8d693fb230d448d1a202fc7ef43460d68865ec27f"
   },
   "files": [
     {
@@ -16,6 +16,21 @@
       "path": "apple/visionos/examples/chart_snapshot.rs",
       "before_sha256": null,
       "after_sha256": "6f159a68e255b1c8e998a74c7f3cc026630f627d9589580045baff3d0634143d"
+    },
+    {
+      "path": "apple/visionos/maplibre_visionos.h",
+      "before_sha256": "1a1e9a1c834748d26d76fc83e5e58901657fd61f0d58889ab5c7edc465c75bfb",
+      "after_sha256": "02c7c4f35581c4ce33238fa2df1622067b4723179baf7cce35ef8c873ed04446"
+    },
+    {
+      "path": "apple/visionos/src/api/chart/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "c1aa49b4e417da1c8e1da90179a671992a4c5830a862002a506497f5cfbb822e"
+    },
+    {
+      "path": "apple/visionos/src/api/chart.rs",
+      "before_sha256": null,
+      "after_sha256": "5926a5cba38c2c51e0b29ef3d3e2fc3db2afe803ac180e683e2ddd24e1bd45e8"
     },
     {
       "path": "apple/visionos/src/api/settings/tests.rs",
@@ -30,7 +45,7 @@
     {
       "path": "apple/visionos/src/api.rs",
       "before_sha256": "cf475e458a6308e045dff40062f723e78f0bc7804c30b0a30b3dea46f7ee792f",
-      "after_sha256": "38f6927390a9772e33328ab99260aa0f5c7450bfd4979aeb6f3e79dbec2fe8ed"
+      "after_sha256": "610fa02bad129b0bd53f2c54633d837900a752807a7c8c53f470e8bdd729529a"
     },
     {
       "path": "apple/visionos/src/aviation.rs",
@@ -38,9 +53,19 @@
       "after_sha256": "bf1e520bb67958ed5e95a4fbf1a112a4692b2c70d48be8b497b3b816f9ffc696"
     },
     {
+      "path": "apple/visionos/src/display_groups.rs",
+      "before_sha256": null,
+      "after_sha256": "d044f49e580a8a4f9548f61a5098f480a404e56ec66dc74f13c645ae2f3c345e"
+    },
+    {
       "path": "apple/visionos/src/lib.rs",
       "before_sha256": "8adc5f10514f5319a150e84b0558d2e1c702352110c1d72e8d452ecd5526053a",
-      "after_sha256": "bb88b77c814d097834fb4255fee7e3fba49042006a78f2d03ebd9fa0f2acb9a4"
+      "after_sha256": "555376422639105eef490316af33f2009eaf99fc27e0794b1abcb6735cef5dcc"
+    },
+    {
+      "path": "apple/visionos/src/overlay.rs",
+      "before_sha256": null,
+      "after_sha256": "3c4c9187aded14ab45eac05b381fad8dc1b9dc280b5035783d919a6af5bb16e5"
     },
     {
       "path": "maplibre/Cargo.toml",
@@ -53,9 +78,34 @@
       "after_sha256": "5c41968ce52baff02a46757980956789dd7fafbf16bc4200f9a1cfae0b4b838a"
     },
     {
+      "path": "maplibre/src/headless/map/display.rs",
+      "before_sha256": null,
+      "after_sha256": "e85fb2791570e7de0e27bbd6e601993fc706bb323a08de2433268e23780ea370"
+    },
+    {
+      "path": "maplibre/src/headless/map.rs",
+      "before_sha256": "854f7f2be01a1304f8fbaa70b419766a0fe16f8a90e87365274f19eed6ac0f20",
+      "after_sha256": "4584799bb9aca0b2732203e796568984364f946d697f0151f5f8f4bcb2079051"
+    },
+    {
       "path": "maplibre/src/headless/mod.rs",
       "before_sha256": "445cc07bde7628f0e75759942c326cf89afb0983b1bd9346f252e64dc329c0b3",
       "after_sha256": "1bf896822bca3b2eb97f2a0ee04fb70ae4c43e08a05e1562e4c8d2db327eb96d"
+    },
+    {
+      "path": "maplibre/src/hillshade/render_commands.rs",
+      "before_sha256": "f1316d01485fff3e90450d30a65f2d9fef7b6132e27f0db93bd03d822009933f",
+      "after_sha256": "a3a91ad261486a589844946dd3bce01e2e5667571ccbbc979edd430ea80148e8"
+    },
+    {
+      "path": "maplibre/src/hillshade/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "20e19948479a1631b12feaaa5129e4e84d81d84005f8b81e49614c89d33f4421"
+    },
+    {
+      "path": "maplibre/src/hillshade.rs",
+      "before_sha256": "dc6f1962c17f14fa96a01e190c32128e9ca4ff339fda0a30d546cb245c3ec318",
+      "after_sha256": "d68ade4b8f1dc2fcd0fe09ec024471c1a898113089e4a88f972241714564b762"
     },
     {
       "path": "maplibre/src/io/apc/tests.rs",
@@ -66,6 +116,16 @@
       "path": "maplibre/src/io/source_client.rs",
       "before_sha256": "a4744d20a453ab39ad24542112999faa89d605ee1d3520454385bdae9ac3ff54",
       "after_sha256": "f24d9fa025b9a05bc410443d4106fbd65d33e7a93396c8897712a86ab821f15a"
+    },
+    {
+      "path": "maplibre/src/io/tile_sources/tests.rs",
+      "before_sha256": "1356d3d38be38610ec300952cd900bc0311580d8898fd1e45bf7f572308fd5ac",
+      "after_sha256": "20df2cdc41c25e4581adc6a750e9b701a45d13407177fe5ad44ec5204435db4e"
+    },
+    {
+      "path": "maplibre/src/io/tile_sources.rs",
+      "before_sha256": "2e9f9a673fe8826a5e4b74fb10f7e56fde147932f6d6473aaf78d077155bdd6b",
+      "after_sha256": "341211ac6affc8f9036b08279931efe573e1ad5a0650efee8814582cf9517000"
     },
     {
       "path": "maplibre/src/legacy/layout/symbol_feature.rs",
@@ -123,9 +183,14 @@
       "after_sha256": "d9474303e9d817f8933cfb6257c4ab23f8386c26119551020ab8dfdaddd6e55e"
     },
     {
+      "path": "maplibre/src/render/main_pass/tests.rs",
+      "before_sha256": null,
+      "after_sha256": "d9f1cf12e6d816507b65c1a73e27e357c552c78ce4b49c3e260b936b44c01b42"
+    },
+    {
       "path": "maplibre/src/render/main_pass.rs",
       "before_sha256": "0ee900ca3658dd9f9b1d771d5ca3b51da89a707e255a9df0a93bc810e3e94047",
-      "after_sha256": "53bb094aedf6dbee115473f8d72f52554a2d2a460a7b44865b6252bf9c7738e2"
+      "after_sha256": "546b22fd228d70bd2960957eb6a654d2de97f698ff52d880b32ab86f31e4b95c"
     },
     {
       "path": "maplibre/src/render/projection/covering.rs",
@@ -136,6 +201,11 @@
       "path": "maplibre/src/render/projection/tests.rs",
       "before_sha256": "3378fa6b4c54704fcbd0228e58b59f0a51db4a0c0b3ae6fa05a2a5427c56444c",
       "after_sha256": "b6725e02c8406acd4ea794dcfbd9429b1e64f5c0757dff33bd3229f1e92f7579"
+    },
+    {
+      "path": "maplibre/src/render/render_phase/mod.rs",
+      "before_sha256": "52dbe147f9b855ba4d66bdd19689039814178bf7b9d68ff1fed5f8ca393a8937",
+      "after_sha256": "0a687726e57377ba6899668ded4f7732d68abf2ea5e2e869c1c904ef202507c6"
     },
     {
       "path": "maplibre/src/render/settings.rs",
@@ -186,6 +256,11 @@
       "path": "maplibre/src/render/shaders.rs",
       "before_sha256": "4824bc4e79a05e68f0e67dddfb7811fbad1953aa5f5809b58b8af6b331eb6d02",
       "after_sha256": "32c559a41bf082c9e0f878a574cd96e60360c661e4257e6e37e097431bc7c9f9"
+    },
+    {
+      "path": "maplibre/src/render/systems/sort_phase_system.rs",
+      "before_sha256": "45def4e7d57c804cff4e6620fc1ceab8ecbe38d249aec1db826f50ef32115883",
+      "after_sha256": "13fe8f9dc4e1f1249a77fdc9055f12b0b9758261b31a3150ada20ff1a9a7a9d7"
     },
     {
       "path": "maplibre/src/sdf/assets/load.rs",
@@ -260,7 +335,7 @@
     {
       "path": "maplibre/src/sdf/chart/collision_system.rs",
       "before_sha256": null,
-      "after_sha256": "90338faa4b212edd369381bf41ee9ea66af712db32eac544b85dcf1a8c9e2088"
+      "after_sha256": "9b7240dff5b6c8e21cbec262378bc6d8a096872c46c4106e7815bbe74c8b552e"
     },
     {
       "path": "maplibre/src/sdf/chart/font_atlas/tests.rs",
@@ -413,9 +488,19 @@
       "after_sha256": "441ba98df3d404f4bec9b87f9f659f2d44975aee847c5bcdb9e5d194bfff7160"
     },
     {
+      "path": "maplibre/src/style/display_groups.rs",
+      "before_sha256": null,
+      "after_sha256": "76e189d4aed1f720f36b1f29a57638b81a97052cc3b0befe6f8f8c1f3007f6cd"
+    },
+    {
       "path": "maplibre/src/style/layer/paint.rs",
       "before_sha256": "e324ab9d4643a643f8b25caadd2c7a118764580d4ea19a8d6c830020e778493a",
       "after_sha256": "9de014fe2d48cf084baf5f68b1a2e8c3571db09864fb29c62b3cd991db9e5e43"
+    },
+    {
+      "path": "maplibre/src/style/layer/tests.rs",
+      "before_sha256": "a7b6cc75bf4b935d4ea9d03b6cc47a2818ccda6ceff33f55f400e81b25ff5f8a",
+      "after_sha256": "127bf4fe657583dcd8dab981719ebc611a8a56c1c31525049b4b9ee557fe67aa"
     },
     {
       "path": "maplibre/src/style/layer.rs",
@@ -475,7 +560,7 @@
     {
       "path": "maplibre/src/style/text.rs",
       "before_sha256": null,
-      "after_sha256": "5cd4848bec63217bb431888a2e4cf798b1e5939a1c683db78db0a101d0215dad"
+      "after_sha256": "990029d5332342ddab8ff17eca9e002702a320bb46e339f57eea1bd71e65bc82"
     },
     {
       "path": "maplibre/src/style/zigzag.rs",
@@ -485,7 +570,7 @@
     {
       "path": "maplibre/src/style.rs",
       "before_sha256": "b38e8941206458346440dca33c544e43c79c2c7339f307a244fc839f87175bbc",
-      "after_sha256": "908786196734e75f38f8c1950f7162d79ab186336d0b22d0263eeb1a4077887d"
+      "after_sha256": "713d299c8dee8c47e5c4bc334a1e14cf1d339e11522fe980f36a17f3c44f70f6"
     },
     {
       "path": "maplibre/src/tcs/resources.rs",
@@ -613,6 +698,6 @@
   ],
   "lock": {
     "path": "Cargo.lock",
-    "sha256": "21b0d5ef8eb72dbe86544351f93f1914fb512ed08ee29c150f0236c5905ef9d0"
+    "sha256": "863bdfd0ac927523755821e18c0c2ec490d2b632546899a52c739f50dd8ca728"
   }
 }
