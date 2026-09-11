@@ -6,6 +6,12 @@ client_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 : "${AERO_LINK_HOST_BUNDLE_IDENTIFIER:=org.luofang.pilotage}"
 : "${AERO_LINK_DRIVER_BUNDLE_IDENTIFIER:=${AERO_LINK_HOST_BUNDLE_IDENTIFIER}.aerolink-driver}"
 
+example_root="$client_root/.build/AviationDataExamples"
+mkdir -p "$example_root"
+if [ ! -f "$example_root/index.json" ]; then
+    printf '[]\n' > "$example_root/index.json"
+fi
+
 # The base map is built from artifacts rather than repository files, so a fresh checkout
 # has no map until these run. The style requires both archives and refuses to resolve
 # without either, so a missing one is a blank screen and not a degraded map. Each exits at

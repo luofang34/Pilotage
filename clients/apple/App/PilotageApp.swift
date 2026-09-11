@@ -24,6 +24,14 @@ struct PilotageApp: App {
 /// shipped application has no reason to offer one. It exists so a window at an awkward
 /// size can be photographed and measured without somebody holding the tablet.
 enum LaunchRequest {
+    static var openData: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-OpenData")
+        #else
+        false
+        #endif
+    }
+
     static var openMapModes: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-OpenMapModes")

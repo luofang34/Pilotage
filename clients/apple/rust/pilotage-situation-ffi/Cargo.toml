@@ -27,6 +27,9 @@ name = "pilotage-situation-uniffi-bindgen"
 path = "src/bin/uniffi_bindgen.rs"
 
 [dependencies]
+pilotage-data-delivery = { path = "../../../../crates/pilotage-data-delivery" }
+pilotage-data-packages = { path = "../../../../crates/pilotage-data-packages" }
+serde = { version = "1", features = ["derive"] }
 aero-link = { path = "../../.build/aero-link", features = ["std"] }
 airmass-aero-link = { path = ".build/airmass/crates/airmass-aero-link", features = ["std"] }
 airmass-core = { path = ".build/airmass/crates/airmass-core", features = ["std"] }
@@ -44,6 +47,7 @@ surveillance-aero-link = { path = ".build/surveillance/crates/surveillance-aero-
 surveillance-core = { path = ".build/surveillance/crates/surveillance-core", features = ["std"] }
 surveillance-geojson = { path = ".build/surveillance/crates/surveillance-geojson" }
 thiserror = "2.0"
+tracing = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 uniffi = { version = "0.32", features = ["cli"] }
 wtransport = { version = "0.7.1", features = ["dangerous-configuration", "quinn"] }

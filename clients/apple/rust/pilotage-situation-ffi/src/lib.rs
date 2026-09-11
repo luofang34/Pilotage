@@ -5,6 +5,9 @@
 
 // UniFFI derive output uses a dynamic error.
 #[allow(clippy::disallowed_types)]
+mod data;
+// UniFFI derive output uses a dynamic error.
+#[allow(clippy::disallowed_types)]
 mod error;
 // UniFFI derive output uses a dynamic error.
 #[allow(clippy::disallowed_types)]
@@ -15,6 +18,10 @@ mod reception;
 mod records;
 mod session;
 
+pub use data::{
+    AviationDataSession, DataDownloadObserver, DataError, DataSelectionRequest,
+    DataTransferProgress,
+};
 pub use error::FfiError;
 pub use link::{
     LinkCatalog, LinkConfig, LinkControlFeelIdentity, LinkControlFeelMode, LinkEvent,

@@ -20,12 +20,20 @@ struct ReceptionSummary {
 struct SituationMenuView: View {
     @ObservedObject var model: SituationClientModel
     @ObservedObject var hostLink: HostLinkModel
+    @ObservedObject var aviationData: AviationDataModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
                 receptionSection
+                Section {
+                    NavigationLink {
+                        AviationDataView(model: aviationData)
+                    } label: {
+                        Label("Data", systemImage: "externaldrive")
+                    }
+                }
                 flightsSection
                 if let message = model.errorMessage {
                     Section("Problems") {

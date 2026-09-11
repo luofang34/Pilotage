@@ -7,8 +7,10 @@ struct SituationContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var model = SituationClientModel()
+    @StateObject private var aviationData = AviationDataModel()
     @StateObject private var hostLink = HostLinkModel()
     @State private var menuPresented = false
+    @State private var dataPresented = LaunchRequest.openData
     /// Which regions show is the platform's own affordance: the split
     /// view's column state, never a custom toggle (ADR-0038).
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
@@ -50,6 +52,7 @@ struct SituationContentView: View {
                 .toolbar(.hidden, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
+        .task { await aviationData.start() }
         .background(.black)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -275,7 +278,17 @@ struct SituationContentView: View {
             .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $menuPresented) {
-            SituationMenuView(model: model, hostLink: hostLink)
+            SituationMenuView(model: model, hostLink: hostLink, aviationData: aviationData)
+        }
+        .sheet(isPresented: $dataPresented) {
+            NavigationStack {
+                AviationDataView(model: aviationData)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { dataPresented = false }
+                        }
+                    }
+            }
         }
         .sheet(
             isPresented: Binding(

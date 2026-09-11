@@ -34,6 +34,8 @@ targets:
       - path: Resources
         excludes:
           - Fonts
+      - path: .build/AviationDataExamples
+        type: folder
       # A folder reference, so the fontstack directory survives into the bundle. Flattened
       # the way other resources are, the renderer asks for a path that is not there.
       - path: Resources/Fonts

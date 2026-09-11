@@ -2,6 +2,10 @@
 # Build the Rust slices, Swift bindings, and XCFramework.
 set -eu
 
+ios_deployment_target="${IPHONEOS_DEPLOYMENT_TARGET:-26.0}"
+unset IPHONEOS_DEPLOYMENT_TARGET
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
+
 client_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 ffi_root="$client_root/rust/pilotage-situation-ffi"
 package_root="$client_root/Packages/PilotageCore"
@@ -12,7 +16,13 @@ for target in $targets; do
     if ! rustup target list --installed | grep -q "^$target$"; then
         rustup target add "$target"
     fi
-    cargo build --release --target "$target"
+    case "$target" in
+        *-apple-ios*)
+            IPHONEOS_DEPLOYMENT_TARGET="$ios_deployment_target" \
+                cargo build --release --lib --target "$target"
+            ;;
+        *) cargo build --release --lib --target "$target" ;;
+    esac
 done
 
 cargo build --release
